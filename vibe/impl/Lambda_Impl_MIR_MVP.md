@@ -292,6 +292,21 @@ into `mir_container_access.hpp`; both emitters now call them.
   element magnitude. Every partial sum and merge must fit int53. Other inputs
   execute the original checked loop; no result or iteration is omitted
   (**S4.1.2**, **D5.4.4**).
+  The 2026-11-09 regression fix also admits a local boxed `int | error`
+  accumulator with an `int` receiving contract. Deferred admission had changed
+  these bindings to Item storage, so the native-only eligibility check disabled
+  the reduction. An exact boxed-zero guard now selects native temporary sums
+  and boxes the finite result on success; nonzero seeds, retained errors and
+  shared homes keep ordinary assignment behavior (**S7.7.2v2**, **S7.7.4v2**, **S4.1.2**).
+  The existing array fixture covers successful and failed accumulator admission,
+  including zero trips; the MIR gate retains the four-step assertion.
+  The split debug host passes the reduction and adjacent MIR checks and the
+  ownership fixtures in normal, forced and seeded poisoned-GC modes. The
+  154 MVP/production benchmark golden checks retain one MVP quicksort rejection
+  (`lambda_type_check_lazy` in a closed numeric region); a current-source control
+  with only this fix reverted reproduces it. The aggregate Lambda gate stops
+  before execution because `test_wpt_html_parser_gtest` has no build target.
+  Evidence: `temp/mvp-array-reduction/`.
 
 The focused gate now has **13 groups**, covering all six benchmark goldens,
 forced-GC benchmark execution, reduction MIR, and the new

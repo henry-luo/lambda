@@ -2300,7 +2300,9 @@ bool mvp_array_sum_plan(LambdaMvpModule* m, AstLoopControlNode* loop, MvpArraySu
     MvpBinding* sum = mvp_binding(m, assignment->target_entry);
     AstNode* add_node = ast_unwrap_primary_to_leaf(assignment->value);
     AstNode* step_node = ast_unwrap_primary_to_leaf(increment->value);
-    if (!sum || sum == counter || sum == bound || sum->rep != VALUE_REP_INT_LANE ||
+    if (!sum || sum == counter || sum == bound ||
+            (sum->rep != VALUE_REP_INT_LANE &&
+                (sum->rep != VALUE_REP_ITEM || sum->admission_contract != &TYPE_INT)) ||
             increment->target_entry != counter->entry || !add_node || !step_node ||
             add_node->node_type != AST_NODE_BINARY || step_node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* add = (AstBinaryNode*)add_node;
