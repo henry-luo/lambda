@@ -740,6 +740,10 @@ typedef enum SysFunc {
     SYSFUNC_HASH,                 // hash(value, algorithm) - SHA-256/384/512 digest as binary
     SYSPROC_UUID,                 // uuid() - a random version 4 UUID
     SYSFUNC_URL_ENCODE,           // url_encode(text) - RFC 3986 percent-encoding
+    SYSPROC_IO_SQLITE_DATABASE,
+    SYSPROC_IO_SQLITE_EXISTING,
+    SYSPROC_IO_SQLITE_EXECUTE,
+    SYSPROC_IO_SQLITE_QUERY,
     SYSPROC_IO_LOOPBACK_LISTEN,   // lambda.io.loopback listen() - a listener on 127.0.0.1
     SYSPROC_IO_LOOPBACK_ACCEPT,   // lambda.io.loopback accept(listener, seconds, page) - one browser request
     SYSPROC_IO_WEBSOCKET_OPEN,    // lambda.io.websocket: task-owned WS/WSS transport
@@ -755,6 +759,9 @@ typedef enum SysFunc {
     SYSFUNC_RNG_UNIFORM,         // math.rng_uniform(keys, counters) - row-major draws
     SYSFUNC_TRANSFORM_BUFFER,    // math.transform_buffer(matrix, positions, normals)
     SYSFUNC_POLYGON_DISTANCES,   // math.polygon_distances(points, outline)
+    SYSPROC_IO_SQLITE_CREATE,   // lambda.io.sqlite create(path) - create-only target
+    SYSPROC_IO_SQLITE_CLONE,    // lambda.io.sqlite clone(source, path) - snapshot target
+    SYSPROC_IO_SQLITE_PREIMAGE, // lambda.io.sqlite preimage(tx, path) - pre-write backup
 } SysFunc;
 
 typedef struct Type {
@@ -2822,6 +2829,8 @@ extern "C" {
     // these getters use the runtime number side stack
     Item array_get(Array *array, int64_t index);
     Item array_num_get(ArrayNum *array, int64_t index);
+    Item array_num_get_borrowed(ArrayNum* array, int64_t index);
+    Item array_num_snapshot(ArrayNum* array);
     Item array_int_get(ArrayNum *array, int64_t index);
     Item array_int64_get(ArrayNum* array, int64_t index);
     Item array_float_get(ArrayNum* array, int64_t index);
@@ -3635,6 +3644,15 @@ extern "C" {
     Item pn_io_websocket_listen2(Item port, Item options);
     Item pn_io_websocket_accept1(Item listener);
     Item pn_io_websocket_accept2(Item listener, Item timeout_ms);
+    Item pn_io_sqlite_database(Item path);
+    Item pn_io_sqlite_existing(Item path);
+    Item pn_io_sqlite_create(Item path);
+    Item pn_io_sqlite_clone(Item source, Item path);
+    Item pn_io_sqlite_preimage(Item handle, Item path);
+    Item pn_io_sqlite_execute2(Item path, Item sql);
+    Item pn_io_sqlite_execute3(Item path, Item sql, Item params);
+    Item pn_io_sqlite_query2(Item path, Item sql);
+    Item pn_io_sqlite_query3(Item path, Item sql, Item params);
     Item pn_io_loopback_listen(void);
     Item pn_io_loopback_accept(Item listener, Item seconds, Item page);
 
@@ -3736,6 +3754,8 @@ extern "C" {
     Item lambda_array_scalar_snapshot(Item value, void* scratch, int64_t scratch_bytes);
     bool cow_profile_sites_enabled(void);
     Item cow_path_set_raw(Item owner, Item key, Item value);
+    Item cow_path_index(Item owner, Item key);
+    Item cow_path_set_keys(Item owner, Item value, const Item* keys, int count, bool inplace);
     int64_t cow_path_set_packed_index(Item owner, int64_t count, Item key0, Item key1,
         Item key2, Item value);
     Item cow_path_set(Item owner, Item path, Item value);
@@ -3743,6 +3763,8 @@ extern "C" {
     Item cow_path_set_inplace(Item owner, Item path, Item value);
     // CW25: detach root..leaf and return the leaf, for a `var` path borrow.
     Item cow_path_borrow(Item owner, Item path);
+    Item cow_path_borrow_home(Item owner, Item path);
+    Item cow_path_borrow_home_keys(Item owner, const Item* keys, int64_t count);
     // CW25: bounded descriptor form for compiler-known member/int paths.
     Item cow_path_borrow_fixed(Item owner, int64_t count,
         Item key0, Item key1, Item key2);

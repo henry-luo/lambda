@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 60.0.1 (2026-11-03)
+**Spec version:** 60.1.0 (2026-11-03)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1122,6 +1122,14 @@ that carries them.
   writes need no copy; the leaf's own share bit still decides whether they
   detach. Same root and annotation conditions as D4.4.4v2; tier-shared static
   decision. [CW35]
+
+- **D4.4.7*** A place passed to a `var` parameter uses a caller-owned,
+  precisely rooted Item home and evaluated path keys. The callee publishes
+  its final value through that home; the caller reinstalls it through the
+  original path, including on an error result. No address into a movable
+  data buffer crosses the call (D4.3.1, D4.4.4v4). Scalar and container
+  places follow the same protocol; native adapters preserve the declared
+  lane and S9.1.3v3's invariance and exclusivity. [CW33v2; USER 2026-11-03]
 
 ### D4.5 The Radiant seam
 

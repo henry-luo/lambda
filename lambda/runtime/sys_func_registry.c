@@ -303,6 +303,11 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #else
 #define PROFILE_SEARCH_IO_FPTR(fn) FPTR(fn)
 #endif
+#if defined(LAMBDA_NO_FILE_IO) || defined(LAMBDA_IME_RESOURCE_IO) || defined(LAMBDA_NO_TASKS)
+#define PROFILE_SQLITE_FPTR(fn) NULL
+#else
+#define PROFILE_SQLITE_FPTR(fn) FPTR(fn)
+#endif
 #ifdef LAMBDA_NO_NETWORK
 #define PROFILE_NETWORK_FPTR(fn) NULL
 #else
@@ -1375,6 +1380,26 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_secret_set", PROFILE_SECRET_FPTR(pn_io_secret_set), NULL, NULL, false, 0, true},
     {SYSPROC_IO_SECRET_DELETE, "io_secret_delete", 2, &TYPE_BOOL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_secret_delete", PROFILE_SECRET_FPTR(pn_io_secret_delete), NULL, NULL, false, 0, true},
+
+    // One-statement SQLite calls autocommit outside an open transaction (S12.4.4v4).
+    {SYSPROC_IO_SQLITE_DATABASE, "io_sqlite_database", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_database", PROFILE_SQLITE_FPTR(pn_io_sqlite_database), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_SQLITE_EXISTING, "io_sqlite_existing", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_existing", PROFILE_SQLITE_FPTR(pn_io_sqlite_existing), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_SQLITE_CREATE, "io_sqlite_create", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_create", PROFILE_SQLITE_FPTR(pn_io_sqlite_create), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_SQLITE_CLONE, "io_sqlite_clone", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_clone", PROFILE_SQLITE_FPTR(pn_io_sqlite_clone), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_SQLITE_PREIMAGE, "io_sqlite_preimage", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_preimage", PROFILE_SQLITE_FPTR(pn_io_sqlite_preimage), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_SQLITE_EXECUTE, "io_sqlite_execute", 2, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_execute2", PROFILE_SQLITE_FPTR(pn_io_sqlite_execute2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_SQLITE_EXECUTE, "io_sqlite_execute", 3, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_execute3", PROFILE_SQLITE_FPTR(pn_io_sqlite_execute3), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_SQLITE_QUERY, "io_sqlite_query", 2, &TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_query2", PROFILE_SQLITE_FPTR(pn_io_sqlite_query2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_SQLITE_QUERY, "io_sqlite_query", 3, &TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_query3", PROFILE_SQLITE_FPTR(pn_io_sqlite_query3), NULL, NULL, false, 0, true},
 
     // lambda.io.loopback (D7.2.4v4): one browser request on 127.0.0.1, reached
     // only through `import loopback: lambda.io.loopback`; accept parks the task
@@ -2584,6 +2609,9 @@ JitImport jit_runtime_imports[] = {
     {"cow_place_leaf", FPTR(cow_place_leaf)},
     {"cow_place_leaf_fixed", FPTR(cow_place_leaf_fixed)},
     {"cow_path_borrow_keys", FPTR(cow_path_borrow_keys)},
+    {"cow_path_borrow_home_keys", FPTR(cow_path_borrow_home_keys)},
+    {"cow_path_index", FPTR(cow_path_index)},
+    {"cow_path_set_keys", FPTR(cow_path_set_keys)},
     {"cow_place_leaf_keys", FPTR(cow_place_leaf_keys)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"lambda_array_int_push_inferred_cow", FPTR(lambda_array_int_push_inferred_cow)},

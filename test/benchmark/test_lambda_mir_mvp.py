@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Run the MVP's admission, ownership, error and emission checks."""
 import os
+import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
+import lambda_mir_mvp
 from lambda_mir_mvp import GC_CASES, CASES, ROOT
+from benchmark_provenance import sha256_file
 from run_c2mir_benchmarks import C2M, ensure_c2m, strip_timing
 
 
@@ -137,7 +142,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         source.write_text(body + '''pn main() {
     var a: float[] = [1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0]
     let snapshot: float[] = a
-    four1(a, 8)
+    four1(a, 8)^
     var expected: float[] = [10.0, 0.0, -2.0, -2.0, -2.0, 0.0, -2.0, 2.0]
     var ok: bool = true
     for i in 0 to 7 { if (abs(a[i] - expected[i]) <= 0.000000001) { } else { ok = false } }
@@ -168,6 +173,97 @@ class LambdaMirMvpTests(unittest.TestCase):
         native = lazy[:lazy.index("\tcall\tfn_index")]
         self.assertRegex(native, r"\tb(?:eq|ne)\t[^\n]+, 1\n")
         self.assertNotRegex(native, r"\teq\t[^\n]+, 1\n")
+
+    def test_propagation_outcomes(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_propagation.ls"
+        for mode in ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+                     {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
+                      "LAMBDA_GC_POISON_FREED": "1"}):
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "plus_one")
+        self.assertIn("i64, i64, p:runtime", body)
+        self.assertNotIn("\tcall\tint2it_lane", body)
+        self.assertNotIn("\tcall\tint2it_lane", self.function_mir(source, "fused"))
+        native = self.function_mir(source, "float_update").split("\tcall\tfn_index", 1)[0]
+        self.assertIn("\tdmul\t", native)
+        self.assertNotIn("lambda_type_check", native)
+
+    def test_failed_engine_remains_unqualified(self):
+        executable = Path(self.scratch.name) / "failed.exe"
+        executable.write_text("#!/bin/sh\nexit 17\n")
+        executable.chmod(0o755)
+        report = Path(self.scratch.name) / "failed.json"
+        manifest = Path(self.scratch.name) / "source.json"
+        identity = {"fixture": "archived identity"}
+        manifest.write_text(json.dumps({"binary_sha256": sha256_file(executable), "compiler_identity": identity}))
+        command = [sys.executable, str(ROOT / "test/benchmark/lambda_mir_mvp.py"),
+            "--release", "--exe", str(executable), "--record-failures", "--case", "r7rs/fib",
+            "--runs", "3", "--warmups", "1", "--output", str(report), "--source-manifest", str(manifest)]
+        result = subprocess.run(command,
+            cwd=ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        data = json.loads(report.read_text())
+        self.assertEqual(data["compiler_identity"], identity)
+        self.assertIn("observed_checkout_identity", data)
+        row = data["cases"][0]
+        self.assertEqual(set(row["engine_failures"]), {"mvp", "production"})
+        self.assertIn("exit 17", row["engine_failures"]["production"]["error"])
+        self.assertIsNone(row["median_ms"]["mvp"])
+        self.assertIsNone(row["performance_gates"]["faster_than_full_mir"])
+        self.assertIsNone(row["performance_gates"]["within_c2mir_allowance"])
+        self.assertEqual(len(row["samples_ms"]["c2mir"]), 3)
+        self.assertTrue(all(order == ["c2mir"] for order in row["execution_order"]))
+        manifest.write_text(json.dumps({"binary_sha256": "0" * 64, "compiler_identity": identity}))
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("source manifest does not identify", result.stderr)
+
+    def test_recursive_constructor_gc(self):
+        original = (ROOT / "test/benchmark/larceny/gcbench2.ls").read_text()
+        source = Path(self.scratch.name) / "recursive_constructor.ls"
+        source.write_text(original[:original.index("pn main()")] + '''pn main() {
+    let retained = make_tree(5)
+    let temporary = make_tree(4)
+    print([check_tree(retained), check_tree(temporary)]); print("\\n")
+}
+''')
+        source.with_suffix(".txt").write_text("[63, 31]\n")
+        for mode in ({"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+                     {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
+                      "LAMBDA_GC_POISON_FREED": "1"}):
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+
+    def test_interrupted_round_is_retried(self):
+        report = Path(self.scratch.name) / "interrupted.json"
+        expected = (ROOT / "test/benchmark/r7rs/fib2.txt").read_text().strip()
+        state = {"calls": 0, "busy": False}
+
+        def invoke(command, env):
+            state["calls"] += 1
+            # the first measured round overlaps a build after one observation.
+            elapsed = 999 if state["calls"] == 4 else 1
+            state["busy"] = elapsed == 999
+            return expected + f"\n__TIMING__:{elapsed}\n"
+
+        def competitors(group):
+            busy = state["busy"]
+            state["busy"] = False
+            return [{"pid": 123, "program": "make"}] if busy else []
+
+        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe),
+            "--pause-for-jobs", "--case", "r7rs/fib", "--runs", "3", "--warmups", "1",
+            "--output", str(report)]
+        with mock.patch.object(sys, "argv", command), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
+                mock.patch.object(lambda_mir_mvp, "competing_benchmark_jobs", competitors), \
+                mock.patch.object(lambda_mir_mvp.time, "sleep"), mock.patch("builtins.print"):
+            lambda_mir_mvp.main()
+        row = json.loads(report.read_text())["cases"][0]
+        self.assertEqual(len(row["execution_order"]), 3)
+        self.assertEqual(len(row["discarded_rounds"]), 1)
+        self.assertIn(999, row["discarded_rounds"][0]["samples_ms"].values())
+        self.assertTrue(all(values == [1, 1, 1] for values in row["samples_ms"].values()))
 
     def test_static_scalar_fallback(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_scalar_fallback.ls"

@@ -122,6 +122,10 @@ make clean-all          # Clean all build artifacts
 
 **Build architecture**: `build_lambda_config.json` → `utils/generate_premake.py` → Premake5 Lua → Makefiles
 
+**Task checkpoints:** for substantial tasks, maintain and resume from the
+checkpoint in the task's `vibe/impl/` plan, or `temp/<task>/checkpoint.md` for
+investigations without a plan. Follow [Doc Convention §5.1](doc/Doc_Convention.md#51-working-notes-and-task-checkpoints).
+
 ### Testing
 ```bash
 make build-test               # Build all test executables

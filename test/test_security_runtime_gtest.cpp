@@ -762,6 +762,9 @@ TEST_P(SecurityRuntimeTest, UnsupportedSearchNetworkAndAccountServicesFailBefore
         "secret.set(\"lambda-safety-denied\", \"unused\", \"never-stored\")",
         "secret.delete(\"lambda-safety-denied\", \"unused\")",
         "loop.listen()", "loop.accept(null, 1, null)",
+        "sqlite.execute(\"@ROOT@/denied.db\", \"CREATE TABLE t(n INTEGER)\")",
+        "sqlite.query(\"@ROOT@/denied.db\", \"SELECT 1\")",
+        "sqlite.preimage(null, \"@ROOT@/denied.db\")",
         "mail.open(\"imap://127.0.0.1:1\", null)",
         "mail.send(\"smtp://127.0.0.1:1\", null, \"never-sent\")",
         "mail.command(null, \"NOOP\")",
@@ -769,9 +772,37 @@ TEST_P(SecurityRuntimeTest, UnsupportedSearchNetworkAndAccountServicesFailBefore
         "mail.command(null, \"NOOP\", [], null)", "mail.idle(null, 1)"
     };
     expect_denied_calls(calls, sizeof(calls) / sizeof(calls[0]), "service",
-        "import secret: lambda.io.secret\nimport loop: lambda.io.loopback\nimport mail: lambda.io.mail\n");
+        "import secret: lambda.io.secret\nimport loop: lambda.io.loopback\nimport mail: lambda.io.mail\nimport sqlite: lambda.io.sqlite\n");
+    char* denied_database = file_path_join(directory, "denied.db");
+    EXPECT_FALSE(file_exists(denied_database)); mem_free(denied_database);
     EXPECT_EQ(capture.writes, 0U); EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
     EXPECT_EQ(atomic_load32(&capture.metadata_reads), 0); EXPECT_EQ(atomic_load32(&capture.enumerations), 0);
+}
+
+TEST_P(SecurityRuntimeTest, ScopedSqliteDeniesBeforeOpeningOrCreatingTheFile) {
+    run("import sqlite: lambda.io.sqlite\n"
+        "pn main() { let target = sqlite.database(\"@ROOT@/denied-scoped.db\")^; "
+        "open tx = target { sqlite.query(tx, \"SELECT 1\")^ }; return null }\n");
+    expect_failed(last_run);
+    char* path = file_path_join(directory, "denied-scoped.db");
+    ASSERT_NE(path, nullptr);
+    EXPECT_FALSE(file_exists(path));
+    run("import sqlite: lambda.io.sqlite\n"
+        "pn main() { let target = sqlite.existing(\"@ROOT@/denied-scoped.db\")^; "
+        "open tx = target { sqlite.query(tx, \"SELECT 1\")^ }; return null }\n");
+    expect_failed(last_run);
+    EXPECT_FALSE(file_exists(path));
+    run("import sqlite: lambda.io.sqlite\n"
+        "pn main() { let target = sqlite.create(\"@ROOT@/denied-scoped.db\")^; "
+        "open tx = target { sqlite.execute(tx, \"CREATE TABLE t(n INTEGER)\")^ }; return null }\n");
+    expect_failed(last_run);
+    EXPECT_FALSE(file_exists(path));
+    run("import sqlite: lambda.io.sqlite\n"
+        "pn main() { let target = sqlite.clone(\"@ROOT@/missing-source.db\", \"@ROOT@/denied-scoped.db\")^; "
+        "open tx = target { sqlite.query(tx, \"SELECT 1\")^ }; return null }\n");
+    expect_failed(last_run);
+    EXPECT_FALSE(file_exists(path));
+    mem_free(path);
 }
 
 TEST_P(SecurityRuntimeTest, DatabaseHostHookDeniesBeforeOpeningOrCreatingTheFile) {

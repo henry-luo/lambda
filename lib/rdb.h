@@ -61,6 +61,8 @@ typedef struct RdbConn {
  * @return connection handle, or NULL on failure
  */
 RdbConn* rdb_open(Pool* pool, const char* uri, const char* type, bool readonly);
+/* SQLite writable open without SQLITE_OPEN_CREATE, through the same host registry. */
+RdbConn* rdb_open_sqlite_existing(Pool* pool, const char* path);
 
 /** Close a database connection; finalizes any statements still live. */
 void rdb_close(RdbConn* conn);
@@ -195,9 +197,16 @@ typedef struct RdbRegistryHooks {
     void (*remove)(void* owner, uint32_t rid);
 } RdbRegistryHooks;
 void rdb_set_registry_hooks(const RdbRegistryHooks* hooks);
+// Resolve and authorize a concrete target without opening it.
+bool rdb_target_authorized(const char* uri, const char* type);
 
 /** The registry's close callback: closes the native connection exactly once. */
 void rdb_conn_life_close(RdbConnLife* life);
+
+/** Pin a live connection during a synchronous native callback; release after
+ *  finalizing its statements. These calls do not provide thread synchronization. */
+RdbConnLife* rdb_conn_life_hold(RdbConn* conn);
+void rdb_conn_life_release(RdbConnLife* life);
 
 /* ══════════════════════════════════════════════════════════════════════
  * Backend registration entry points

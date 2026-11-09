@@ -3219,8 +3219,8 @@ Item fn_slice2(Item vec, Item start_item) {
 // The view's shape side-table holds a reference to the base, keeping it alive
 // across GC; compaction rebases the view's data pointer when it moves the
 // base's buffer (gc_rebind_array_num_gc_view). The view is created with
-// is_mutable_view set, so procedural writes go through to the base; confining
-// write-through to var-parameter borrows (S9.2.2) is still open.
+// is_mutable_view set over a private source snapshot: an ordinary view value
+// cannot write through to the argument from which it was constructed (S9.2.2v2).
 // ============================================================================
 Item fn_subview(Item vec, Item start_item, Item end_item) {
     GUARD_ERROR3(vec, start_item, end_item);
@@ -3262,8 +3262,13 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
     // Root the source before allocating: its header is stable, but its data and
     // shape fields may be compacted at either construction safepoint.
     RootFrame roots(2);
-    Rooted<ArrayNum*> rooted_base(roots, base);
+    // S9.2.2v2: a public view owns a snapshot of its source's value.
+    Item snapshot = array_num_snapshot(base);
+    if (get_type_id(snapshot) != LMD_TYPE_ARRAY_NUM) return snapshot;
+    Rooted<ArrayNum*> rooted_base(roots, snapshot.array_num);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
+    base = rooted_base.get();
+    stride = 1;  // the private source snapshot is C-contiguous.
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return ItemError;
     rooted_view.set(view);
@@ -3272,7 +3277,7 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
     view->set_elem_type(etype);
     view->is_ndim = 1;
     view->is_view = 1;
-    view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
+    view->is_mutable_view = 1;  // writes reach only the private snapshot backing.
     view->length = view_len;
     view->capacity = view_len;
 
@@ -3365,8 +3370,12 @@ Item fn_reshape(Item vec, Item shape_item) {
 
     // allocate the view header
     RootFrame roots(2);
-    Rooted<ArrayNum*> rooted_base(roots, base);
+    // S9.2.2v2: a public view owns a snapshot of its source's value.
+    Item snapshot = array_num_snapshot(base);
+    if (get_type_id(snapshot) != LMD_TYPE_ARRAY_NUM) return snapshot;
+    Rooted<ArrayNum*> rooted_base(roots, snapshot.array_num);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
+    base = rooted_base.get();
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return ItemError;
     rooted_view.set(view);
@@ -3375,7 +3384,7 @@ Item fn_reshape(Item vec, Item shape_item) {
     view->set_elem_type(etype);
     view->is_ndim = 1;
     view->is_view = 1;
-    view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
+    view->is_mutable_view = 1;  // writes reach only the private snapshot backing.
     view->length = base->length;
     view->capacity = base->length;
 
@@ -3513,8 +3522,12 @@ Item fn_transpose(Item vec) {
         return ItemError;
     }
     RootFrame roots(2);
-    Rooted<ArrayNum*> rooted_base(roots, base);
+    // S9.2.2v2: a public view owns a snapshot of its source's value.
+    Item snapshot = array_num_snapshot(base);
+    if (get_type_id(snapshot) != LMD_TYPE_ARRAY_NUM) return snapshot;
+    Rooted<ArrayNum*> rooted_base(roots, snapshot.array_num);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
+    base = rooted_base.get();
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return ItemError;
     rooted_view.set(view);
@@ -3523,7 +3536,7 @@ Item fn_transpose(Item vec) {
     view->set_elem_type(base->get_elem_type());
     view->is_ndim = 1;
     view->is_view = 1;
-    view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
+    view->is_mutable_view = 1;  // writes reach only the private snapshot backing.
     view->length = base->length;
     view->capacity = base->length;
 
@@ -3593,8 +3606,12 @@ Item fn_ravel(Item vec) {
     }
     // contiguous → a 1-D view with a shape side-table (carries base ref for GC)
     RootFrame roots(2);
-    Rooted<ArrayNum*> rooted_base(roots, base);
+    // S9.2.2v2: a public view owns a snapshot of its source's value.
+    Item snapshot = array_num_snapshot(base);
+    if (get_type_id(snapshot) != LMD_TYPE_ARRAY_NUM) return snapshot;
+    Rooted<ArrayNum*> rooted_base(roots, snapshot.array_num);
     Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
+    base = rooted_base.get();
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return ItemError;
     rooted_view.set(view);
@@ -3603,7 +3620,7 @@ Item fn_ravel(Item vec) {
     view->set_elem_type(base->get_elem_type());
     view->is_ndim = 1;
     view->is_view = 1;
-    view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
+    view->is_mutable_view = 1;  // writes reach only the private snapshot backing.
     view->length = base->length;
     view->capacity = base->length;
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);

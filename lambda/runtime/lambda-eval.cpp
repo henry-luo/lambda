@@ -11119,50 +11119,17 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
 
 static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ctx) {
     if (!src) return ItemNull;
-    if (src->is_view) {
-        // Numeric views are explicit aliases; cloning them during var binding
-        // breaks the write-through contract for mutable subviews.
-        return {.array_num = src};
-    }
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots(2);
-    Rooted<ArrayNum*> rooted_src(roots, src);
-    Rooted<ArrayNum*> rooted_dst(roots, (ArrayNum*)NULL);
-    ArrayNumElemType elem_type = src->get_elem_type();
-    ArrayNum* dst = array_num_new(elem_type, src->length);
-    if (!dst) return ItemNull;
-    rooted_dst.set(dst);
-    src = rooted_src.get();
-    clone_mutable_container_flags((Container*)dst, (Container*)src);
-    dst->type_id = LMD_TYPE_ARRAY_NUM;
-    dst->set_elem_type(elem_type);
-    dst->is_view = 0;
-    dst->is_mutable_view = 0;
-    dst->rep_cert = src->rep_cert;
-    mutable_clone_register(clone_ctx, src, {.array_num = rooted_dst.get()});
-
-    int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
-    if (src->data && dst->data && elem_size > 0 && src->length > 0) {
-        memcpy(dst->data, src->data, (size_t)src->length * (size_t)elem_size);
-    }
-    if (src->is_ndim && !src->is_view && src->extra) {
-        ArrayNumShape* shape = (ArrayNumShape*)src->extra;
-        size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)shape->ndim * sizeof(int64_t);
-        ArrayNumShape* dst_shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
-        if (dst_shape) {
-            // Shape allocation can compact both the source descriptor and the
-            // destination data buffer; reload both through their exact owners.
-            src = rooted_src.get();
-            dst = rooted_dst.get();
-            shape = (ArrayNumShape*)src->extra;
-            memcpy(dst_shape, shape, shape_bytes);
-            dst_shape->base = NULL;
-            dst->extra = (int64_t)dst_shape;
-            dst->is_ndim = 1;
-        }
-    }
-    return {.array_num = rooted_dst.get()};
+    RootFrame roots(1);
+    Rooted<ArrayNum*> source(roots, src);
+    Item copy = array_num_snapshot(src);
+    if (get_type_id(copy) != LMD_TYPE_ARRAY_NUM) return copy;
+    clone_mutable_container_flags(copy.container, source.get());
+    copy.array_num->is_view = 0;
+    copy.array_num->is_mutable_view = 0;
+    mutable_clone_register(clone_ctx, source.get(), copy);
+    return copy;
 }
 
 static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
@@ -11804,17 +11771,6 @@ Item cow_mark_shared(Item value) {
 // handle detaches at cow_prepare_write and neither observer sees the other's
 // update. Binding only marks the header; a later write owns any allocation.
 Item cow_bind_var(Item value) {
-    if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* an = value.array_num;
-        // CW32v2: mutable views keep their write-through contract (open/todo
-        // by designer ruling 2026-08-29) -- marking one would make its first
-        // write detach and stop reaching the base. The old eager clone also
-        // returned views unclonied, so behavior is unchanged for them.
-        if (an && an->is_view) return value;
-        // plain ArrayNum joins the uniform mark: O(1) bind, one memcpy detach
-        // at the first COW-aware write. This retires the last Stage-1
-        // eager-clone exception.
-    }
     return cow_mark_shared(value);
 }
 
@@ -13897,6 +13853,16 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
     return ItemError;
 }
 
+// row values snapshot; only a path writer may use the internal write-through row.
+Item cow_path_index(Item owner, Item key) {
+    int64_t index;
+    if (get_type_id(owner) == LMD_TYPE_ARRAY_NUM &&
+            lambda_item_to_int64_exact(key, &index)) {
+        return array_num_get_borrowed(owner.array_num, index);
+    }
+    return fn_index(owner, key);
+}
+
 // CW25 / S9.2.2: a `var` argument that names a PLACE (`f(var m.rows[i])`) must
 // borrow that place, and "creating a mutable borrow over shared storage
 // un-shares first". Both tiers already detach the borrowed ROOT before the
@@ -13915,7 +13881,7 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
 // holds no container ends the walk and is returned as the value the mutator
 // would have read, so the mutator reports its own error exactly as before.
 static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
-        const Item* fixed_keys, bool value_leaf = false) {
+        const Item* fixed_keys, bool value_leaf = false, bool home_leaf = false) {
     bool dynamic_path = get_type_id(path) != LMD_TYPE_NULL;
     if (dynamic_path && (get_type_id(path) != LMD_TYPE_ARRAY || !path.array ||
             path.array->length <= 0)) {
@@ -13947,13 +13913,18 @@ static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
         if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) {
             return value_leaf ? ItemNull : ItemError;
         }
-        rooted_child.set(fn_index(rooted_current.get(), rooted_key.get()));
+        rooted_child.set(cow_path_index(rooted_current.get(), rooted_key.get()));
         if (!cow_item_is_container(rooted_child.get())) {
             if (value_leaf) return rooted_child.get();
-            // A borrow of a scalar slot has no storage to write through; the
-            // caller must reject it rather than hand the callee a value copy.
+            // scalar leaves travel through the caller's rooted Item home too.
+            if (i + 1 == count) return rooted_child.get();
             log_error("cow path borrow encountered a non-container link");
             return ItemError;
+        }
+        // the place and its transported home are two owners until publication.
+        // isolate the home so a plain argument retaining an ancestor stays a snapshot.
+        if (home_leaf && i + 1 == count) {
+            return cow_prepare_write(cow_mark_shared(rooted_child.get()));
         }
         Item pre_detach = rooted_child.get();
         rooted_child.set(cow_prepare_write(rooted_child.get()));
@@ -13964,6 +13935,14 @@ static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
         rooted_current.set(rooted_child.get());
     }
     return rooted_current.get();
+}
+
+Item cow_path_borrow_home(Item owner, Item path) {
+    return cow_path_borrow_impl(owner, path, 0, NULL, false, true);
+}
+
+Item cow_path_borrow_home_keys(Item owner, const Item* keys, int64_t count) {
+    return cow_path_borrow_impl(owner, ItemNull, count, keys, false, true);
 }
 
 Item cow_path_borrow(Item owner, Item path) {
@@ -14160,7 +14139,7 @@ static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
             return rooted_replacement.get();
         }
 
-        rooted_child.set(fn_index(rooted_current.get(), rooted_key.get()));
+        rooted_child.set(cow_path_index(rooted_current.get(), rooted_key.get()));
         if (!cow_item_is_container(rooted_child.get()) &&
                 get_type_id(rooted_child.get()) != LMD_TYPE_ARRAY_NUM) {
             log_error("cow path mutation encountered a non-container child");

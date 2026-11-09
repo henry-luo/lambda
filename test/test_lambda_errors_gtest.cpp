@@ -1857,13 +1857,6 @@ TEST_F(NegativeScriptTest, RegexOpenCountNamesTheOpenSpelling) {
         "write `T{n+}` for a run of n or more");
 }
 
-// CW31/S9.2.4 exclusivity face 4: overlapping mutable views of one base
-// conflict through their shared view base at whole-base granularity.
-TEST_F(NegativeScriptTest, VarViewOverlapSharedBaseIsRejected) {
-    ExpectErrorMessage("test/lambda/negative/semantic/var_view_overlap.ls",
-        "overlaps another `var` parameter through their shared view base");
-}
-
 // Exclusivity face 3: a `var` place argument rooted at another `var`
 // argument's base is a path-prefix overlap, rejected at whole-base
 // granularity.

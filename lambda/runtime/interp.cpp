@@ -578,6 +578,8 @@ public:
         }
         frame_.slots[frame_.signal_index] = ITEM_NULL;   // zero before publish
         frame_.signal = EvalSignal::NORMAL;
+        frame_.open_depth = 0;
+        frame_.return_admitted = false;
         frame_.skip_binding = NULL;
         frame_.caller = st->top;
         st->top = &frame_;
@@ -1397,6 +1399,17 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
     return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
 }
 
+// The same return admission serves ordinary function exit and open-block exit.
+static Item interp_admit_return(InterpFrame* f, Item value) {
+    Function* callable = f->callable_slot ? (Function*)(uintptr_t)*f->callable_slot : NULL;
+    TypeFunc* signature = callable ? (TypeFunc*)callable->fn_type : NULL;
+    if (!signature || !signature->has_explicit_return_contract || !signature->return_contract)
+        return value;
+    static const LambdaBoundary return_label = {"function return", NULL, NULL, NULL, 0};
+    return interp_coerce_declared_binding(f, value, signature->return_contract, &return_label,
+        f->fn && f->fn->analysis ? f->fn->analysis->frame_plan.return_boundary : NULL);
+}
+
 static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         AstNamedNode* parameter, const LambdaBoundary* boundary) {
     if (!parameter) return value;
@@ -2086,7 +2099,7 @@ static Item interp_call_js_export(Function* function, const uint64_t* words,
 // its ordinary path); *leaf is ItemError on a failed detach. `value_leaf`
 // serves builtin mutators (cow_place_leaf).
 static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
-        bool value_leaf) {
+        bool value_leaf, Item* saved_path = NULL, NameEntry** saved_root = NULL) {
     AstCowPath place = {};
     if (!ast_collect_cow_path(&place, arg) || place.count == 0 || !place.root ||
             place.root->node_type != AST_NODE_IDENT) {
@@ -2122,9 +2135,12 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
         if (!keys) return false;
         array_push_verbatim(keys, key_slot.get());
     }
+    if (saved_path) *saved_path = path_slot.get();
+    if (saved_root) *saved_root = root_entry;
     // a builtin mutator's place hands a non-container link back as its value
     *leaf = value_leaf ? cow_place_leaf(root_slot.get(), path_slot.get())
-                       : cow_path_borrow(root_slot.get(), path_slot.get());
+                       : saved_path ? cow_path_borrow_home(root_slot.get(), path_slot.get())
+                                    : cow_path_borrow(root_slot.get(), path_slot.get());
     return true;
 }
 
@@ -2182,7 +2198,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         log_error("interp: call arity %d exceeds the Core Lambda limit", argc);
         return ItemError;
     }
-    if (node->interp_self_tail_call && f->fn && f->plan) {
+    if (node->interp_self_tail_call && f->fn && f->plan && !f->open_depth) {
         // Every argument is evaluated *before* any parameter is rebound: an
         // argument may read a parameter (`loop(n - 1, acc + n)`), and writing
         // the slots as we go would feed the new n into acc.
@@ -2596,19 +2612,29 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         (uint32_t)(dispatch_argc > 0 ? dispatch_argc : 1), !has_named_args);
     if (!arg_roots.valid()) return ItemError;
     uint64_t* words = arg_roots.words();
+    NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    uint64_t* borrow_homes[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    bool has_borrows = ast_type_func_has_var_parameter(direct_signature);
+    if (has_borrows && !ast_direct_call_var_parameter_entries(node,
+            direct_signature, borrowed, borrow_args)) {
+        log_error("interp: unsupported direct `var` argument layout");
+        return ItemError;
+    }
     int i = 0;
     if (has_named_args) {
         AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
         ast_resolve_call_args(node->argument, direct_fn, source_argc, resolved_args);
         for (i = 0; i < dispatch_argc; i++) {
-            words[i] = resolved_args[i] ? eval_expr(f, resolved_args[i]).item :
+            words[i] = borrow_args[i] && !borrowed[i] ? ITEM_NULL :
+                resolved_args[i] ? eval_expr(f, resolved_args[i]).item :
                 ITEM_MISSING_ARGUMENT;
             if (interp_frame_pending(f)) return ItemNull;
         }
     } else {
         if (injected) words[i++] = injected->item;
         for (AstNode* a = node->argument; a; a = a->next, i++) {
-            words[i] = eval_expr(f, a).item;
+            words[i] = borrow_args[i] && !borrowed[i] ? ITEM_NULL : eval_expr(f, a).item;
         }
     }
 
@@ -2639,15 +2665,25 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         }
         return interp_call_js_export(fn, words, dispatch_argc);
     }
-    if (ast_type_func_has_var_parameter(direct_signature)) {
-        NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        uint64_t* borrow_homes[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed,
-                borrow_args)) {
-            log_error("interp: unsupported direct `var` argument layout");
-            return ItemError;
-        }
+    if (has_borrows) {
+        RootSpan place_values((size_t)dispatch_argc);
+        RootSpan place_paths((size_t)dispatch_argc);
+        NameEntry* place_roots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        if (!place_values.valid() || !place_paths.valid()) return ItemError;
+        // homes and evaluated keys belong to the caller, never movable field buffers.
+        auto publish_places = [&](Item result) {
+            Scratch result_root(f);
+            result_root.set(result);
+            for (int index = 0; index < dispatch_argc; index++) {
+                if (!place_roots[index]) continue;
+                Item root = interp_read_binding(f, place_roots[index]);
+                Item updated = cow_path_set(root, place_paths.items()[index],
+                    place_values.items()[index]);
+                if (item_is_error(updated)) return updated;
+                interp_write_binding(f, place_roots[index], updated);
+            }
+            return result_root.get();
+        };
         for (int index = 0; index < dispatch_argc; index++) {
             NameEntry* entry = borrowed[index];
             // CW25 / S9.2.2: `f(var m.rows[i])` borrows a PLACE. Detach the
@@ -2657,10 +2693,13 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             // MIR argument-loop hook so the tiers cannot diverge.
             if (!entry && borrow_args[index]) {
                 Item leaf = ItemNull;
-                if (!interp_borrow_place_leaf(f, borrow_args[index], &leaf, false)) continue;
+                if (!interp_borrow_place_leaf(f, borrow_args[index], &leaf, false,
+                        &place_paths.items()[index], &place_roots[index])) continue;
                 if (interp_frame_pending(f)) return ItemNull;
                 if (item_is_error(leaf)) return leaf;
                 words[index] = leaf.item;
+                place_values.items()[index] = leaf;
+                borrow_homes[index] = &place_values.words()[index];
                 continue;
             }
             if (!entry) continue;
@@ -2735,14 +2774,14 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                 transport->mir_var_homes[index] = NULL;
             }
             if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
-            return interp_check_contract_return(f, node, result);
+            return interp_check_contract_return(f, node, publish_places(result));
         }
         Item result = interp_call_with_borrowed(fn, (const Item*)(void*)words,
             dispatch_argc, f, borrowed, borrow_homes);
         // LR12-11 (S9.1.2): the result may be (part of) an argument the caller
         // still holds; both observers must detach before a write
         if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
-        return interp_check_contract_return(f, node, result);
+        return interp_check_contract_return(f, node, publish_places(result));
     }
     // Every callee — interpreted or native — reaches its body through the
     // single dynamic dispatch point (AI7). Routing interpreted calls through it
@@ -6366,18 +6405,41 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Scratch target_slot(f);
         target_slot.set(target);
         Item opened = fn_open_begin(target_slot.get());
-        if (item_is_error(opened)) return opened;
+        if (item_is_error(opened)) {
+            // An open statement has no value position to carry acquisition failure.
+            interp_signal(f, EvalSignal::RETURNED, opened);
+            return opened;
+        }
         Scratch opened_slot(f);
         opened_slot.set(opened);
         NameEntry* alias_entry = ast_open_alias_entry(open_node);
         if (alias_entry) interp_write_binding(f, alias_entry, opened_slot.get());
-        Item body = eval_expr(f, open_node->body);
-        // PTH66v2: the block commits at its end, and ALWAYS rolls back when it
-        // exits by an unhandled runtime error.
-        bool unwinding = item_is_error(body) || interp_frame_pending(f);
+        f->open_depth++;
+        RootFrame roots(1);
+        Rooted<Item> body(roots, eval_expr(f, open_node->body));
+        f->open_depth--;
+        if (f->signal == EvalSignal::RETURNED && !item_is_error(interp_signal_payload(f))) {
+            // A rejected function return is an error exit of this transaction.
+            Item checked = interp_admit_return(f, interp_signal_payload(f));
+            interp_signal(f, EvalSignal::RETURNED, checked);
+            f->return_admitted = true;
+        }
+        // The block owns cleanup: successful nonlocal control transfers commit
+        // while a returned error or failed binding rolls back (S12.4.4v3).
+        bool unwinding = item_is_error(body.get()) || f->signal == EvalSignal::ERROR_SKIP ||
+            (f->signal == EvalSignal::RETURNED && item_is_error(interp_signal_payload(f)));
         Item closed = fn_open_end(unwinding ? BOOL_TRUE : BOOL_FALSE);
-        if (unwinding) return body;
-        return item_is_error(closed) ? closed : ItemNull;
+        if (unwinding) {
+            if (!interp_frame_pending(f) && item_is_error(body.get()))
+                interp_signal(f, EvalSignal::RETURNED, body.get());
+            return body.get();
+        }
+        if (item_is_error(closed)) {
+            // A failed commit replaces a pending successful control transfer.
+            interp_signal(f, EvalSignal::RETURNED, closed);
+            return closed;
+        }
+        return ItemNull;
     }
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
@@ -7476,19 +7538,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 frame->signal == EvalSignal::ERROR_SKIP) {
             result = interp_signal_payload(frame);
         }
-        if (signature && signature->has_explicit_return_contract &&
-                signature->return_contract) {
-            // The MIR return firewall checks a dynamic body at every declared
-            // return site. T0 must perform the same check before the callee
-            // frame closes, otherwise `fn f() int { any_value() }` leaks its
-            // runtime value to the caller without the required E201 (S7.7.2).
-            static const LambdaBoundary return_label =
-                {"function return", NULL, NULL, NULL, 0};
-            Item checked = interp_coerce_declared_binding(frame, result,
-                signature->return_contract, &return_label,
-                frame->fn->analysis->frame_plan.return_boundary);
-            result = checked;
-        }
+        // A transaction exit may already have admitted the returned value.
+        if (!frame->return_admitted) result = interp_admit_return(frame, result);
         if (borrowed) {
             // a transported home (satellite caller) has no caller frame but
             // still needs its final value captured for the write-back below

@@ -214,6 +214,7 @@ typedef struct {
     uint32_t struct_size;
     bool     readonly;
     int64_t  connect_timeout_ms;    /* 0 = backend default */
+    bool     sqlite_no_create;      /* SQLite: require an existing database */
 } RdbOpenOptions;
 
 /* ══════════════════════════════════════════════════════════════════════

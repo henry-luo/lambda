@@ -8,29 +8,30 @@ write-back (**S9.1.3v2, D5.3, D8.4.1v2**). Coverage now extends to **48 rows**:
 the original 28 plus 20 additional recursion, record, allocation, text and
 numerical workloads. Runtime types and data layouts remain unchanged.
 
-The latest release pass makes Triangl **4.35× faster** (433.45 → 99.61 ms),
-beating Full MIR at 124.25 ms. Pidigits improves about **5%**, with its Full
-MIR confidence bound still spanning parity. Runtime types, layouts and precise
-ownership remain shared (**D2.4.3, D5.3, D8.2.6v2**).
+The current-source pass restores deferred outcomes and typed constructor
+destinations, then keeps proved float outcomes in separate native registers
+(**S7.7.2v2/S7.7.4v2, D2.4.3, D5.3, D8.2.6v2**). Spectralnorm improves
+**7.4905 → 0.2625 ms**, faster than Full MIR at 2.9155 ms and C2MIR at
+0.360107 ms. AWFY Nbody improves **76.5265 → 1.7445 ms**. Runtime data models
+and ownership remain shared.
 
-The primary 100-sample campaign qualifies **40/48 against Full MIR and 25/48
-against both targets**. The original 28 retain **28/28 Full MIR** qualifications
-and **19/28 combined** qualifications, including the matched Sumfp batch.
-The 20 additions qualify **12/20 Full and 6/20 combined**. The sole primary
-regression flag, Levenshtein, does not reproduce in a separate 200-sample
-confirmation, which also passes both targets. Its primary miss remains in
-the count above. GCbench loses a marginal Full MIR qualification despite
-unchanged starting/final MIR and no paired regression. The preceding campaign's
-40/48 and 27/48 result is retained as history. **The performance milestone
-remains open.**
+The final 30-sample primary qualifies **40/48 against Full MIR and 19/48 against
+both targets**, versus **37/48 and 17/48** for the paired phase-one MVP control
+on these same workloads. The original 28 have **27 Full wins and 14 combined
+wins**, with no regression flags, including matched batched Sumfp. Full MIR's
+FFT/Fasta crashes and wrong Navier–Stokes checksum leave three comparisons
+unqualified. A Binarytrees regression flag and near-target Nbody rows receive
+independent confirmations; primary observations remain intact.
 
-All **49 focused groups** and the required **8,647/8,647 baseline cases** pass.
-Immutable indirect keys reuse their proof for ownership and native reads;
-Boolean predicates retain selected-arm ordering; decimal consumers reuse
-successful domain facts and rooted inlining (**S3.4–S3.5, S4.4–S4.5,
-S7.1.1v3, S7.9.3, S9.1.2–S9.1.3v2**). These are matched execution-window
-timings, excluding startup and compilation, using one-sided 95% paired
-confidence gates. See the [complete measurements and independent confirmation](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-immutable-indirect-keys-and-decimal-consumers).
+The required baseline passes **8,714/8,714**. All 48 MVP benchmark goldens and
+selected forced-GC checks pass. The broader experimental gate retains **58
+failing subtests across 17 of 53 groups**, including deferred fixture migrations,
+changed expectations, missing emission optimizations and a Full MIR fault.
+Timings use matched execution windows, excluding startup and compilation, with
+one-sided 95% confidence gates. The historical 40/25 campaign predates shared
+semantic/source migrations and cannot supply current counts.
+**The performance milestone remains open.** See the
+[current-source measurements](impl/Lambda_Impl_MIR_MVP.md#2026-11-03-current-source-outcomes-and-constructor-admission).
 
 **Destination:** `lambda/runtime/mvp/`
 

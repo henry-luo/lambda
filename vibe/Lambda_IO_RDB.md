@@ -2475,3 +2475,39 @@ full-auth request (`0x04`) is answered with the password only when the mode is
 - ~~§13 (first draft, 2026-10-02) RDB10: ADBC as a fourth driver with an
   optional `fetch_batch`.~~ Superseded the same day. The column-batch API
   stands on its own (RDB7), and ADBC moves to §9 Phase 5 (future).
+
+## 14. Scoped SQLite SQL transactions (RDB14v2)
+
+**Ruling:** S12.4.4v2; user decisions 2026-11-03. **Status:** ruled, not
+implemented. Scope: a SQLite transaction accessed from a Lambda procedure;
+this is not a ruling for every RDB backend. The resource lifetime remains
+governed by S12.4.1v3–S12.4.3.
+
+An `open` block scopes a SQLite transaction using parameterized SQL. A SQL read sees preceding
+SQL writes in its own transaction, following SQLite transaction visibility.
+A clean successful scope commits at exit. An error exit or cancellation rolls
+back. A failed SQL statement makes its scope rollback-only even when the
+program handles that statement error; the scope rolls back and raises at exit.
+This is separate from the document update write set, whose
+next version remains write-only before commit (PTH61). The two are not
+silently treated as one transaction.
+
+The user chose the existing `open` block form over a transaction callback and
+confirmed the error on rollback-only exit. It does not ratify the acquisition
+expression, SQL operation names, nesting, cross-document atomicity, the result
+type mapping, retry policy, or a security bypass. Those remain open; see
+[`Lambda_Impl_RDB_Write.md`](impl/Lambda_Impl_RDB_Write.md) for the
+implementation checkpoint and acceptance cases. Existing read-only `input()`
+remains eager and call-scoped (S12.4.1v3); the existing host registry owns
+connection lifecycle (JA16.1–JA16.4). Confined app database authorization
+remains subject to D7.5.2.
+
+The earlier RDB14 left the block form and rollback-only exit outcome undecided;
+RDB14v2 resolves both without changing the other transaction decisions.
+
+The host now has experimental SQLite transaction primitives in
+`lib/rdb_sqlite.c` and `lib/rdb_sqlite_tx.h`: one-statement parameterized
+execution, rollback-only tracking and synchronous callback lifetime protection.
+They are not exposed to Lambda and do not implement cross-thread cancellation
+or the `open`-block cleanup required by S12.4.4v2. They do not change the
+confined-app authorization boundary.

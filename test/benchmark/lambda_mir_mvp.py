@@ -11,6 +11,7 @@ import platform
 import random
 import statistics
 import subprocess
+import time
 
 from benchmark_provenance import command_output, hashed_file_corpus, sha256_file
 from run_c2mir_benchmarks import C2M, TIMER_MAIN, build_command, ensure_c2m, parse_timing, strip_timing
@@ -82,6 +83,37 @@ def invoke(command, env):
     return result.stdout
 
 
+def competing_benchmark_jobs(group=None):
+    """Exclude our process group; builds and active test executables disturb timings."""
+    listing = subprocess.run(["ps", "-axo", "pid,pgid,pcpu,args"],
+                             capture_output=True, text=True, check=True)
+    jobs = []
+    for line in listing.stdout.splitlines()[1:]:
+        parts = line.strip().split(None, 3)
+        if len(parts) != 4:
+            continue
+        pid, pgid, cpu, command = parts
+        if int(pgid) == group or int(pid) == os.getpid():
+            continue
+        program = Path(command.split()[0]).name
+        build = program in ("make", "gmake", "clang", "clang++", "gcc", "g++", "ld")
+        suite = any(name in command for name in ("test/test_run.js", "test/interp/tier_sweep.py",
+                                                "test/benchmark/test_lambda_mir_mvp.py"))
+        desktop = (" view " in command or " serve " in command) and float(cpu) < 20.0
+        active = program.endswith(".exe") and float(cpu) >= 5.0 and not desktop
+        if build or suite or active:
+            jobs.append({"pid": int(pid), "cpu": float(cpu), "program": program})
+    return jobs
+
+
+def wait_for_benchmark_idle():
+    quiet = 0
+    while quiet < 2:
+        quiet = 0 if competing_benchmark_jobs(os.getpgrp()) else quiet + 1
+        if quiet < 2:
+            time.sleep(1)
+
+
 def sumfp_batch_sources(source, c_source, count):
     """Retain both original kernels; consume every result in the same timed batch."""
     scratch = ROOT / "temp/lambda_mir_mvp" / f"sumfp_batch_{count}"
@@ -127,6 +159,8 @@ def main():
     parser.add_argument("--exe", type=Path, default=ROOT / "lambda.exe")
     parser.add_argument("--control", type=Path, help="archived production release; defaults to --exe in production mode")
     parser.add_argument("--previous-mvp", type=Path, help="optional prior MVP release for an interleaved before/after comparison")
+    parser.add_argument("--source-manifest", type=Path,
+                        help="archived candidate binary SHA and compiler_identity; verify before using its source identity")
     parser.add_argument("--legacy-timer", action="store_true", help="use the historical C adapter that also times output")
     parser.add_argument("--runs", type=int, default=15)
     parser.add_argument("--c2mir-allowance-percent", type=float, default=20.0,
@@ -142,6 +176,10 @@ def main():
                         help="supplemental matched Sumfp batch for sub-resolution single-run timings")
     parser.add_argument("--output", type=Path, default=ROOT / "temp/lambda_mir_mvp/results.json")
     parser.add_argument("--release", action="store_true", required=True, help="confirm both Lambda binaries were built in release mode")
+    parser.add_argument("--record-failures", action="store_true",
+                        help="retain failed engines as unqualified rows, continue other engines, and exit nonzero")
+    parser.add_argument("--pause-for-jobs", action="store_true",
+                        help="wait for competing builds/tests and retry interrupted paired rounds")
     args = parser.parse_args()
     if args.runs < 3 or args.warmups < 1:
         parser.error("use at least three measured runs and one warmup")
@@ -159,6 +197,12 @@ def main():
     binaries = {"mvp": executable, "production": control, "c2mir": C2M}
     if args.previous_mvp:
         binaries["previous_mvp"] = args.previous_mvp.resolve()
+    identity = compiler_identity()
+    archived_identity = None
+    if args.source_manifest:
+        archived_identity = json.loads(args.source_manifest.read_text())
+        if archived_identity["binary_sha256"] != sha256_file(executable):
+            parser.error("source manifest does not identify the candidate executable")
     base = os.environ.copy()
     for key in tuple(base):
         if key.startswith(("LAMBDA_", "MIR_")):
@@ -172,7 +216,7 @@ def main():
         "working_tree": command_output(["git", "status", "--short"]),
         "release_confirmed": args.release,
         "c2mir_allowance_percent": args.c2mir_allowance_percent,
-        "compiler_identity": compiler_identity(),
+        "compiler_identity": archived_identity["compiler_identity"] if archived_identity else identity,
         "executables": {name: {"path": str(path), "sha256": sha256_file(path)}
                         for name, path in binaries.items()},
         "timer_sha256": sha256_file(TIMER_MAIN),
@@ -186,7 +230,12 @@ def main():
         "timer_scope": "historical C main including validation/output" if args.legacy_timer else
                        "matched per-row execution boundaries; compilation excluded; see each row for timed output",
         "runs": args.runs, "warmups": args.warmups, "cases": [],
+        "pause_for_jobs": args.pause_for_jobs,
     }
+    if archived_identity:
+        report["observed_checkout_identity"] = identity
+        report["candidate_source_manifest"] = {
+            "path": str(args.source_manifest.resolve()), "sha256": sha256_file(args.source_manifest)}
     rng = random.Random(1101)
     cases = subsets[args.subset]
     if args.case:
@@ -209,23 +258,51 @@ def main():
         if args.previous_mvp:
             commands["previous_mvp"] = [str(binaries["previous_mvp"]), "run", str(run_source), "--no-log"]
         samples = {engine: [] for engine in commands}
+        failures = {}
         orders = []
-        for iteration in range(-args.warmups, args.runs):
-            order = list(commands)
+        discarded = []
+        iteration = -args.warmups
+        needs_idle = args.pause_for_jobs
+        while iteration < args.runs:
+            if needs_idle:
+                wait_for_benchmark_idle()
+                needs_idle = False
+            order = [engine for engine in commands if engine not in failures]
             rng.shuffle(order)
-            if iteration >= 0:
-                orders.append(order)
+            round_samples = {}
+            busy = []
             for engine in order:
                 env = {**base, "LAMBDA_MIR_COMPILER": "mvp" if engine in ("mvp", "previous_mvp") else "production"}
-                stdout = invoke(commands[engine], env)
-                if strip_timing(stdout) != expected:
-                    raise RuntimeError(f"{suite}/{name} {engine}: output differs from {source.with_suffix('.txt')}: {stdout!r}")
-                elapsed = parse_timing(stdout)
-                if elapsed is None or elapsed < 0 or not math.isfinite(elapsed):
-                    raise RuntimeError(f"{suite}/{name} {engine}: invalid timer {elapsed}")
-                if iteration >= 0:
+                try:
+                    stdout = invoke(commands[engine], env)
+                    if strip_timing(stdout) != expected:
+                        raise RuntimeError(f"output differs from {source.with_suffix('.txt')}: {stdout!r}")
+                    elapsed = parse_timing(stdout)
+                    if elapsed is None or elapsed < 0 or not math.isfinite(elapsed):
+                        raise RuntimeError(f"invalid timer {elapsed}")
+                except (RuntimeError, subprocess.TimeoutExpired) as error:
+                    detail = f"{suite}/{name} {engine}: {error}"
+                    if not args.record_failures:
+                        raise RuntimeError(detail) from error
+                    failures[engine] = {"iteration": iteration, "error": detail}
+                    continue
+                round_samples[engine] = elapsed
+                busy = competing_benchmark_jobs(os.getpgrp()) if args.pause_for_jobs else []
+                if busy:
+                    break
+            if busy:
+                # discard the whole pair, never just the slower observation.
+                discarded.append({"iteration": iteration, "execution_order": order,
+                                  "samples_ms": round_samples, "competing_jobs": busy})
+                needs_idle = True
+                continue
+            if iteration >= 0:
+                orders.append(order)
+                for engine, elapsed in round_samples.items():
                     samples[engine].append(elapsed)
-        medians = {engine: statistics.median(values) for engine, values in samples.items()}
+            iteration += 1
+        medians = {engine: statistics.median(values) if engine not in failures else None
+                   for engine, values in samples.items()}
         row = {"name": f"{suite}/{name}", "lambda_sha256": sha256_file(source),
                "timer_scope": "C main including final reporting; Lambda uses its script clock pair" if args.legacy_timer else
                    "setup and workload with intermediate output; final long-lived tree check/output excluded" if name == "gcbench" else
@@ -235,10 +312,10 @@ def main():
                    "workload including setup; final reporting excluded",
                "c_sha256": sha256_file(c_source), "golden_sha256": sha256_file(source.with_suffix('.txt')),
                "commands": commands, "samples_ms": samples, "median_ms": medians,
-               "execution_order": orders,
-               "mvp_over_c2mir": medians["mvp"] / medians["c2mir"] if medians["c2mir"] else None,
-               "mvp_over_production": medians["mvp"] / medians["production"] if medians["production"] else None,
-               "timer_resolution_limited": {engine: any(value == 0 for value in values)
+               "execution_order": orders, "engine_failures": failures, "discarded_rounds": discarded,
+               "mvp_over_c2mir": medians["mvp"] / medians["c2mir"] if medians["mvp"] is not None and medians["c2mir"] else None,
+               "mvp_over_production": medians["mvp"] / medians["production"] if medians["mvp"] is not None and medians["production"] else None,
+               "timer_resolution_limited": {engine: not values or any(value == 0 for value in values)
                                             for engine, values in samples.items()}}
         row["uncertainty"] = {}
         if batch:
@@ -253,9 +330,10 @@ def main():
             # Keep it in the raw samples, but require longer timing before qualification.
             limited = row["timer_resolution_limited"]
             row["uncertainty"][f"mvp_over_{engine}"] = (
-                None if limited[engine] or limited["mvp"] else paired_ratio_bootstrap(pairs, 10000, 1101))
+                None if engine in failures or "mvp" in failures or limited[engine] or limited["mvp"] else
+                paired_ratio_bootstrap(pairs, 10000, 1101))
         if args.previous_mvp:
-            row["mvp_over_previous"] = medians["mvp"] / medians["previous_mvp"] if medians["previous_mvp"] else None
+            row["mvp_over_previous"] = medians["mvp"] / medians["previous_mvp"] if medians["mvp"] is not None and medians["previous_mvp"] else None
             previous = row["uncertainty"]["mvp_over_previous_mvp"]
             row["previous_mvp_comparison"] = {
                 "statistically_faster": previous["upper_bound"] < 1.0 if previous else None,
@@ -272,17 +350,21 @@ def main():
         args.output.write_text(json.dumps(report, indent=2) + "\n")
         ratio = row["mvp_over_c2mir"]
         ratio_text = f"{ratio:.2f}x" if ratio is not None else "unresolved"
-        print(f"{row['name']}: MVP={medians['mvp']:.3f}ms, production={medians['production']:.3f}ms, "
-              f"C2MIR={medians['c2mir']:.3f}ms, ratio={ratio_text}", flush=True)
+        timings = ", ".join(f"{engine}={elapsed:.3f}ms" if elapsed is not None else f"{engine}=FAILED"
+                            for engine, elapsed in medians.items())
+        print(f"{row['name']}: {timings}, ratio={ratio_text}", flush=True)
     for engine in binaries:
         if engine != "mvp":
-            resolved = all(not row["timer_resolution_limited"]["mvp"] and
+            resolved = all("mvp" not in row["engine_failures"] and engine not in row["engine_failures"] and
+                           not row["timer_resolution_limited"]["mvp"] and
                            not row["timer_resolution_limited"][engine] for row in report["cases"])
             report[f"geomean_mvp_over_{engine}"] = statistics.geometric_mean(
                 row["median_ms"]["mvp"] / row["median_ms"][engine] for row in report["cases"]) if resolved else None
     report["qualification"] = f"{args.subset} subset; coverage and per-row performance qualification are separate" + (
         "; historical timer scopes differ" if args.legacy_timer else "; matched workload boundaries, paired bootstrap per row")
     args.output.write_text(json.dumps(report, indent=2) + "\n")
+    if any(row["engine_failures"] for row in report["cases"]):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

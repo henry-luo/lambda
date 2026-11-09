@@ -42,7 +42,7 @@
 4
 6
 '=== row view properties ==='
-true
+false
 [4]
 1
 78

@@ -87,6 +87,13 @@ typedef struct LambdaTaskObserver {
     struct LambdaTaskObserver* next;
 } LambdaTaskObserver;
 
+struct LambdaTaskAttachment {
+    const void* key;
+    void* data;
+    LambdaTaskAttachmentReleaseFn release;
+    LambdaTaskAttachment* next;
+};
+
 // A blocking job on the libuv thread pool while its task parks: io.exec, and
 // io.fetch (AR-E3v2). The worker thread sees only `data` and this record;
 // progress reaches Lambda on the task's own stack, between parks, through
@@ -188,6 +195,7 @@ struct LambdaTask {
     // 'document'})`), an opaque token from the document probe; null otherwise
     void* owner_document;
     LambdaTaskObserver* observers;
+    LambdaTaskAttachment* attachments;
     LambdaTask* next_all;
     QueueNode run_link;
 };
@@ -305,6 +313,47 @@ static void task_release_handle_root(LambdaTask* task) {
     if (task && task->handle_rooted) {
         heap_unregister_gc_root(&task->handle.item);
         task->handle_rooted = false;
+    }
+}
+
+extern "C" void* lambda_task_attachment_find(LambdaTask* task, const void* key) {
+    for (LambdaTaskAttachment* item = task ? task->attachments : NULL; item; item = item->next)
+        if (item->key == key) return item->data;
+    return NULL;
+}
+
+extern "C" bool lambda_task_attachment_install(LambdaTask* task, const void* key,
+        void* data, LambdaTaskAttachmentReleaseFn release) {
+    if (!task || !key || !data || !release || lambda_task_attachment_find(task, key)) return false;
+    LambdaTaskAttachment* item = (LambdaTaskAttachment*)mem_calloc(1, sizeof(LambdaTaskAttachment), MEM_CAT_EVAL);
+    if (!item) return false;
+    item->key = key; item->data = data; item->release = release;
+    item->next = task->attachments; task->attachments = item;
+    return true;
+}
+
+extern "C" void* lambda_task_attachment_take(LambdaTask* task, const void* key) {
+    if (!task || !key) return NULL;
+    LambdaTaskAttachment** link = &task->attachments;
+    while (*link) {
+        LambdaTaskAttachment* item = *link;
+        if (item->key == key) {
+            void* data = item->data;
+            *link = item->next;
+            mem_free(item);
+            return data;
+        }
+        link = &item->next;
+    }
+    return NULL;
+}
+
+static void task_release_attachments(LambdaTask* task) {
+    while (task && task->attachments) {
+        LambdaTaskAttachment* item = task->attachments;
+        task->attachments = item->next;
+        item->release(item->data);
+        mem_free(item);
     }
 }
 
@@ -714,6 +763,9 @@ static bool scheduler_poll_teardown(EvalContext* owner, uv_run_mode mode) {
 
 extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
     if (!scheduler) return;
+    // A queued wake can fire while joining workers; it must not resume a task
+    // whose activation and native resources are being dismantled.
+    scheduler->draining = true;
     EvalContext* teardown_owner = context;
     if (attached_scheduler == scheduler) {
         attached_scheduler = NULL;
@@ -788,6 +840,8 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
             }
             mem_free(job);
         }
+        // An attachment may own an offload pin; its worker was joined above.
+        task_release_attachments(task);
         mem_free(task->mailbox.items);
         mem_free(task);
         task = next;
@@ -1191,12 +1245,15 @@ extern "C" void lambda_task_resume_external(LambdaTask* task, Item result) {
 
 extern "C" void lambda_task_complete(LambdaTask* task, Item result) {
     if (!task || task->state == LAMBDA_TASK_DONE) return;
-    RootFrame roots(1);
+    RootFrame roots(2);
     Rooted<Item> handle(roots, task->handle);
+    Rooted<Item> completion(roots, result);
     task_timer_close(task);
+    // Release forgotten scoped resources before waiters observe completion.
+    task_release_attachments(task);
     // Completion is published after the task frame can unwind, so retain any
     // wide scalar in the task-owned companion word before waking observers.
-    owned_item_slot_store(&task->result, 1, 0, result);
+    owned_item_slot_store(&task->result, 1, 0, completion.get());
     task->completion_sequence = ++task->scheduler->event_sequence;
     // K20e is a sequencing invariant: completion is published only after the
     // sender's final successful enqueue has acquired an earlier event number.

@@ -1,0 +1,20 @@
+[7, 8, true, true]
+[false, false, "tail"]
+[true, true, "tail"]
+[true, 11]
+["ok!", true]
+42
+[8, true, true, 23]
+[0.25, false]
+true
+[true, true, 24, true]
+[false, "tail"]
+[true, "tail"]
+[false, "tail"]
+[true, "tail"]
+true
+[2, 2, 7]
+true
+[1.5, 1.5]
+[3.5, 3.5, 1.5]
+true

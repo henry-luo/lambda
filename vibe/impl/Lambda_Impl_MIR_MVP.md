@@ -3,22 +3,80 @@
 2026-11-01. Implements and tunes
 [the MIR MVP proposal](../Lambda_Design_MIR_MVP.md), following the
 [JS MVP-Lmd approach](../jube/JS_MVP_Lmd.md). **Experimental; performance
-qualification remains open.** Updated 2026-11-03: **48 benchmark rows** are
-covered. All **49 focused groups** and **8,647/8,647 baseline cases** pass.
-The latest pass makes Triangl **4.35× faster**, beating Full MIR, and improves
-Pidigits by about **5%**. Primary release qualification is **40/48 against
-Full MIR and 25/48 against both targets**. All original 28 retain their Full
-MIR qualifications. The sole primary regression flag, Levenshtein, does not
-reproduce in a separate 200-sample confirmation, which passes both targets.
-The primary count retains that miss; the confirmation is reported separately.
-The requested milestone remains unfinished. See the
-[latest tuning measurements and remaining gaps](#2026-11-03-immutable-indirect-keys-and-decimal-consumers);
-earlier campaigns below are history.
+qualification remains open.** Updated 2026-11-03: the current-source compiler
+covers **48 benchmark rows** after adapting to normalized error outcomes and
+explicit propagation. All 48 MVP benchmark goldens and selected forced-GC checks
+pass. The broader focused suite still has deferred fixture migrations and
+changed expectations; its historical 49/49 result does not apply to this tree.
+The previous **40/48 Full MIR, 25/48 combined** campaign below is historical:
+shared semantics and benchmark sources changed afterward. A fresh release
+campaign is in progress; see the checkpoint and the latest section.
 
 Authority: **D1.4v4, D1.6, D2.4.1–D2.4.3, D5.2–D5.3,
 D8.2.4v2–D8.2.6v2, D8.4.1v2–D8.4.2v2**; numeric semantics
 **S4.1, S4.4–S4.5**, declared contracts **S11.4.1v5**, and error
 containment **S3.5, S7.7.2–S7.7.3**. No formal ruling changes.
+
+
+## Current checkpoint
+
+- **Updated:** 2026-11-03; guarded-float candidate under validation.
+- **Goal:** tune 48 rows, prioritizing Full MIR misses; preserve original-28 performance.
+- **Checkout:** `/Users/henryluo/Projects/lambda`, `master`, current HEAD `6b68618a2`.
+- Historical 40 Full / 25 combined results predate shared error/source migrations;
+  do not carry those counts into this campaign. No formal ruling changes by this task.
+- Authority: S7.6.3v3, S7.7.2v2/S7.7.4v2, S7.7.3, S7.8.1, S7.9.3,
+  S11.4.2v3/S11.4.10, D2.4.3, D5.2.1v5/D5.3, D8.4.2v2.
+- Current-source scripts require carets and normalized fallible returns; starting
+  MVP rejected them. Adaptation and measurements are under `tune48e/` in temp.
+- Implemented private outcome bindings, deferred admission, propagation,
+  unfiltered recovery, base membership and raw-builtin argument error checks.
+- Return ABI uses normalized successful domains plus error companions. Invalid
+  arguments reject before callee entry. An interpreter discrepancy is in the new fixture.
+- Single-use adjacent validation/discharge fuses; intervening effects prevent it.
+- Compact scalar/error domains skip COW/number homes; float/unknown domains retain ownership.
+- Constructors use declared admission destinations, restoring typed recursive maps.
+- Closed storage graphs may retain private clean constructor domains. All write,
+  alias, forwarding and escape checks remain; shared AST facts are unchanged.
+- Whole noncollecting guarded bodies may refine admitted outcome locals only
+  after proving every initializer/write. Allocating variants restore ordinary domains.
+- Native nullable returns keep direct admission; builtin carets retain producer proofs.
+- **Phase one:** `temp/lambda_mir_mvp/tune48e/final-release.exe`, `final-source.json`,
+  `final_sources/`; source SHA `6ee4d247e6d38c78f77899dd8357a155b8e4cbeb02b241e2f46d119c5892ade7`.
+- Its adapted control is `tune48e/adapted-release.exe` with the source manifest/snapshot.
+- Phase-one campaign stopped intentionally after 17 complete 100-sample rows:
+  `tune48e/phase1-primary-partial.json`; do not present it as a complete 48-row campaign.
+- Qualified phase-one medians: Storage 0.308 vs Full 0.3675 ms; Deriv 8.4545 vs
+  Full 9.9585 ms; GCbench 73.540 vs Full 202.770 and C2MIR 68.091 ms.
+- GCbench's C2MIR upper bound is 1.09555. Puzzle improves but misses both targets.
+- The sweep exposed Spectralnorm at 7.368 ms vs Full 2.856 ms: float outcomes
+  blocked the guarded body because their generic binding registers were I64.
+- **Current candidate:** `temp/lambda_mir_mvp/tune48f/final-release.exe`,
+  `final-source.json`, `float_sources/`; the manifest identifies 38 source files.
+- Guarded float outcomes now receive separate D registers after the complete
+  proof succeeds. Restoring saved bindings preserves the checked Item sibling.
+- `tune48f/float-screen-spectralnorm.json` (15 samples): MVP 0.278, previous
+  7.494, Full 2.814, C2MIR 0.340 ms; both targets pass. Treat this as a screen.
+- `tune48f/float-correctness.log`: all 48 goldens, array forced-GC group,
+  outcome fixture in 3 modes and recursive-constructor GC group pass.
+- Float fixture covers unique native mutation, snapshot/COW fallback and empty-array error.
+- `tune48f/focused-final.log`: 53 groups, 36 pass; 58 failing subtests in 17 groups.
+  Deferred fixture/emission gaps remain; the new float/outcome/GC probes pass.
+- 11 legacy MVP fixture migrations were previously deferred by USER; assertions remain intact.
+- Full MIR FFT crashes reproducibly; MVP passes. Preserve the unqualified comparison.
+- Runner `--record-failures` retains failed engines and exits nonzero; partial
+  samples cannot qualify. `--source-manifest` verifies the archived executable.
+- `--pause-for-jobs` retains clean rounds, retries whole interrupted pairs and
+  records discarded observations/PIDs. Scheduler/provenance probes pass.
+- Concurrent frontend work replaced the shared executable during the phase-one
+  baseline. Input 2112/2112 passed; all 494 affected script, 3 stdlib and 921 math
+  cases pass against the pinned release in isolated rechecks (`tune48e/validation.json`).
+- Clean final baseline (`tune48f/baseline.log`) passes 8714/8714.
+- **Next:** finish `qualification.log`: 30 samples per row
+  against phase one/current Full MIR, plus matched Sumfp; confirm regression flags separately.
+- Source SHA `c301686ddc63e57041e9062163a488f7663aa2a60ff933b645250b6b572bb5de`
+  matches the current checkout; the shared frontend commit caused no source drift.
+- No commit requested; leave unrelated frontend/spec/instruction/ledger work intact.
 
 ## Implementation
 
@@ -148,7 +206,8 @@ builds reject the request. Changing the selector within an existing `Runtime`
 is unsupported. Unsupported programs receive a diagnostic before execution;
 there is no fallback to production compilation.
 
-The initial surface admits:
+The initial implementation surface was the following; later additions below
+supersede its limits and boundary behavior:
 
 - Top-level, fixed-arity `fn`/`pn` definitions and direct recursion, with scalar
   `int`, `float`, `bool`, `string`, `null`, boxed `any`, and rank-one
@@ -172,6 +231,12 @@ mixed/nested array literals, path borrows, records, imports, closures, indirect 
 arguments, exports and suspension are outside this slice. All indexed bodies,
 including uncalled definitions, undergo admission. General REPL, embedding and
 AUTO-tier integration remain later work.
+
+The current outcome addition admits deferred local validation, explicit `^`,
+native/error return pairs, base-type `is`, and ordinary unfiltered `^ { … }` /
+`or^ { … }` recovery (**S7.6.1v9, S7.6.3v3, S7.6.8, S7.7.2v2/S7.7.4v2**).
+Filtered handlers and use of the caught-error pseudo-variable remain outside
+this addition; unsupported forms still reject before execution.
 
 ## Verification
 
@@ -3260,3 +3325,151 @@ Use `--subset original` for the original rows; separately add
 `--subset original --case kostya/levenshtein --runs 200` for the independent
 confirmation. The baseline leaves the shared `lambda.exe` in debug mode;
 all performance results use the archived release binaries.
+
+
+## 2026-11-03: current-source outcomes and constructor admission
+
+The previous qualification predates shared error-contract and source migrations.
+Reusing its counts would compare different programs. This pass first restores
+current-source coverage, then measures the resulting compiler against a frozen,
+minimally adapted MVP control and Full MIR in the same archived executable.
+C2MIR remains the independent C-port reference; the removed Lambda C-text backend
+is not involved (**D1.6**).
+
+**Root causes and implementation.** A normalized fallible return has a successful
+native contract and an error alternative (**S11.4.2v3, D5.2.1v5**). MVP now plans
+both from `TypeFunc::return_contract`; ordinary error values never enter a native
+success slot (**D2.4.3**). Deferred initialization and whole-variable reassignment
+store their admitted value or validation error and continue (**S7.7.2v2,
+S7.7.4v2**). Explicit propagation selects the return path, after `var` write-back
+and with ordinary enclosing-return validation (**S7.6.3v3, S11.4.10**). Parameter
+failure still rejects the original argument before callee entry (**S7.7.3**).
+Raw-return builtin helpers classify error arguments before entering their C ABI
+(**S7.9.3**). Unfiltered handlers evaluate their operand once and preserve a clean
+result or the selected recovery result (**S7.6.1v9, S7.6.8**).
+
+Widening a binding to `T | error` had also erased its constructor destination.
+Recursive maps then used generic construction followed by repeated deep
+validation. Construction now uses the original declared admission target;
+storage and consumers retain the outcome type. Typed fills with a caret
+specialize only when the element is proved compatible and the destination is
+uncounted: a constructor failure propagates, while later destination validation
+still becomes a stored outcome (**S7.7.2v2, S11.4.10**).
+
+The compiler retains successful-domain facts independently of the error Item.
+Compact scalar outcomes avoid COW and scalar-home copies; unknown and wide
+scalar domains keep their existing ownership (**D5.3**). Adjacent single-use
+validation/discharge declarations fuse without an intermediate boxed result;
+additional consumers or intervening effects prevent that proof. Native nullable
+returns admit their success lane directly, keeping full outcome validation on
+Item paths. Closed noncollecting bodies may refine int/bool outcome locals only
+when every initializer and write passes the guarded proof; allocating variants
+restore the boxed domains. Builtin carets retain existing numeric producer facts
+so they can participate in that proof (**D8.2.6v2**).
+
+**Validation and qualification.** See the checkpoint for active artifacts. The
+new `mir_mvp_propagation` golden covers deferred outcomes, native/error return
+pairs, argument admission, write-back ordering, snapshots, empty arrays, and
+constructor-versus-destination failures in three GC modes. Existing assertions
+remain intact. The broad MVP gate still exposes legacy fixture migrations,
+changed hidden-exit expectations and emission gaps; these are not benchmark
+correctness passes. The benchmark runner's optional `--record-failures` retains
+failed-engine diagnostics and partial samples, leaves their comparison gates
+unqualified, continues unaffected engines, and exits nonzero. A regression probe
+verifies that a failed engine cannot count as a performance win.
+
+
+The scheduling controls address concurrent work without selecting timings by
+value. `--pause-for-jobs` waits for active builds/test suites, checks between
+engine observations, retains completed rounds, and retries a whole interrupted
+round. Each discarded round records its attempted order, observed timings and
+competing PIDs. A deterministic probe injects an interrupted 999 ms observation
+and verifies that every retained engine still has exactly the requested sample
+count and that the interrupted pair is absent. Failed engines remain failed;
+scheduling never converts a crash into a win. `--source-manifest` verifies the
+candidate executable SHA before using its archived compiler identity, and records
+the observed moving checkout separately. This was necessary after concurrent
+frontend work changed `build_ast.cpp` and replaced `lambda.exe` during validation.
+
+The required baseline's input stage passes **2,112/2,112**. Its later Lambda stage
+was contaminated by that executable replacement. All **494** affected script
+cases, **3** standard-library cases and **921** math-corpus cases pass in isolated
+reruns against the pinned release; the original failing output is preserved.
+The final focused aggregate runs **53 groups**: **36 pass**, with **58 failing
+subtests across 17 groups**. These include the previously deferred fixture
+migrations, changed hidden-exit/string-error expectations, missing emission
+optimizations and Full MIR's nonzero FFT crash. The 48 MVP benchmark goldens,
+new outcome tests, recursive-constructor GC probe and scheduler/provenance probes
+pass. Neither historical focused counts nor an uncontended all-green aggregate
+are claimed for this tree.
+
+
+**Guarded float outcomes.** Phase-one qualification exposed a large remaining
+loss in typed numeric kernels. A deferred `float` binding occupied an Item/I64
+register, so the existing guarded-body proof could not retain its successful
+native domain. The compiler now hypothesizes the float success domain, requires
+the complete noncollecting initializer/write proof, and allocates a separate D
+register only after that proof succeeds. Restoring the saved bindings preserves
+the checked Item sibling. Allocating variants retain their ordinary domains;
+no raw float enters a boxed root slot (**D2.4.3, D5.3, D8.2.6v2**).
+
+The new fixture exercises a unique writable float array, an aliased snapshot that
+selects COW fallback, and an empty-array validation error, in three GC modes.
+Spectralnorm's primary release median falls from **7.4905 to 0.2625 ms**, beating
+Full MIR's **2.9155 ms** and C2MIR's **0.360107 ms**. AWFY Nbody falls from
+**76.5265 to 1.7445 ms**; its primary C2MIR upper bound **1.20831** narrowly misses
+the 1.20 gate despite a qualifying median. Jetstream Nbody also improves sharply
+but misses that confidence gate. Independent confirmations are reported separately.
+
+The clean required baseline passes **8,714/8,714** (6,602 Lambda + 2,112 input).
+The final 53-group MVP gate retains **58 failing subtests in 17 groups**; the
+new correctness/GC/provenance/scheduling groups pass. This supersedes the earlier
+contaminated baseline run, while preserving its evidence under `tune48e/`.
+
+
+**Final primary release campaign (30 paired samples per valid engine).** The
+candidate and current Full MIR use the same archived release; the regression
+control is the frozen phase-one MVP. All 48 Lambda/C workloads retain their
+source/golden hashes. Matched 10,000-call Sumfp resolves its single-run clock
+limit. Source identity is `c301686ddc63e57041e9062163a488f7663aa2a60ff933b645250b6b572bb5de`;
+binary SHA is `1749a4a8ed18a59905e960772e2d056fe76098c364991de51523b507a30a8c7d`.
+The source snapshot matches HEAD `6b68618a2` plus the MVP changes; the frontend
+commit completed after archival without changing that fingerprint.
+
+| Set | Phase-one Full wins | Final Full wins | Phase-one both targets | Final both targets |
+|---|---:|---:|---:|---:|
+| Original 28 | 25 | 27 | 12 | 14 |
+| Additional 20 | 12 | 13 | 5 | 5 |
+| All 48 | 37 | 40 | 17 | 19 |
+
+These counts use the same current-workload paired observations and one-sided
+95% ratio bounds: Full MIR <1.0, C2MIR ≤1.20. They are not comparisons with the
+historical 40/25 campaign. Three Full MIR rows are unqualified: FFT and Fasta
+crash; Navier–Stokes returns checksum 12 instead of 77. All MVP and prior-MVP
+rows match their goldens. Invalid Full MIR observations never count as wins.
+
+| Benchmark | Previous MVP ms | MVP ms | Full MIR ms | C2MIR ms |
+|---|---:|---:|---:|---:|
+| Spectralnorm | 7.4905 | 0.2625 | 2.9155 | 0.360107 |
+| AWFY Nbody | 76.5265 | 1.7445 | 91.9015 | 1.487549 |
+| Jetstream Nbody | 77.386 | 1.6925 | 93.5225 | 1.440430 |
+| Storage | 0.3085 | 0.3115 | 0.3580 | 0.086548 |
+| Deriv | 8.5600 | 8.7185 | 10.1530 | 2.572388 |
+| GCbench | 74.3425 | 74.7345 | 201.2575 | 68.114502 |
+
+The constructor/storage gains precede the last float-only change: phase-one
+Storage was 0.308 ms against its adapted control's 0.713 ms; Deriv was 8.4545
+against 92.524 ms; GCbench was 73.540 against 1190.020 ms. That campaign contains
+17 complete 100-sample rows and remains explicitly partial. The final primary
+uses all 48 rows, comparing the float change against that phase-one candidate.
+
+No primary regression flag occurs among the original 28, including batched
+Sumfp. The sole flag is additional-row Binarytrees: 2.487 vs 2.371 ms (about
+4.9%); it still meets both targets. Independent 200-sample Binarytrees and
+100-sample Nbody confirmations preserve the primary observations separately.
+
+Five rows miss the Full MIR confidence gate: Puzzle, Pidigits, Permute, Base64
+and Raytrace3D. Permute's median is faster but its upper bound crosses parity.
+The C2MIR milestone remains open: 29 rows miss its primary allowance gate.
+The remaining work includes these measured gaps and the legacy focused-suite
+migration/emission failures; no all-target completion is claimed.

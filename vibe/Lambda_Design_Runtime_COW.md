@@ -1,6 +1,6 @@
 # Lambda Design: Copy-on-Write for Mutable Value Semantics
 
-- **Status:** rev 10, 2026-09-17 (CW37 ratified — handles carry four facts, synthesized handles, §11.14 + Appendix D; CW34–CW36 §11.11–§11.13; CW33 the `var`-param address ABI, §11.10). **Stage 1 is LANDED** (`vibe/impl/Lambda_Impl_Tune_COW (done).md`;
+- **Status:** rev 11, 2026-11-03 (CW37 ratified — handles carry four facts, synthesized handles, §11.14 + Appendix D; CW34–CW36 §11.11–§11.13; CW33 the `var`-param address ABI, §11.10). **Stage 1 is LANDED** (`vibe/impl/Lambda_Impl_Tune_COW (done).md`;
   formal-spec conformance: "COW Stage 1 landed" — `let`-finality real for
   Array/Map/Object/Element/VMap). The main body now carries only the **latest
   design**; the rev-1–7 decision narrative, the pre-Stage-1 motivating
@@ -39,7 +39,7 @@
 | Exclusivity faces | §11.3, **CW31** | Faces 1+3 **landed** (`E211`, whole-base). Face 2 unreachable behind `E229` (callee-side design recorded). Face 4 **implemented 2026-08-29** (worktree `nm-impl-work`, pending merge): `NameEntry::view_base` + effective-root compare; fixture `var_view_overlap.ls` |
 | View-state `var` rule | S9.2.4v2, §11.4 | Not implemented (teaching error pending) |
 | View-borrow confinement | CW16.3, §11.7 | Not started |
-| ArrayNum COW | CW15–CW16, **CW32v2** (§11.8) | **IMPLEMENTED 2026-08-29** (worktree `nm-impl-work`): mark-only binds, guarded lane stores on marked roots (byte-test at offset 4 → cold detach + republish), `array_num_set_cow_idx`/`index_assign_cow` wrappers, T0 mask fix. Fixture `cow_arraynum_alias.ls`. Mutable views OPEN/TODO by designer ruling |
+| ArrayNum COW | CW15–CW16, **CW32v2** (§11.8) | **IMPLEMENTED 2026-08-29** (worktree `nm-impl-work`): mark-only binds, guarded lane stores on marked roots (byte-test at offset 4 → cold detach + republish), `array_num_set_cow_idx`/`index_assign_cow` wrappers, T0 mask fix. Fixture `cow_arraynum_alias.ls`. View values snapshot; mutable aliases confined to internal place borrows (S9.2.2v2) |
 | JS↔Lambda ownership boundary | CW17, §9.3 | **Deferred by designer (2026-08-28)** |
 | Move-out binds | **CW35** (§11.12) | **RATIFIED + IMPLEMENTED 2026-09-14**: `rmw_moves_out` in `build_ast`, shares CW34's runtime spine test; fixture `proc/cow_move_out_bind.ls` |
 | Read-modify-write handle borrows | **CW34** (§11.11) | **RATIFIED + IMPLEMENTED 2026-09-06; v2 (sibling members, early returns) 2026-09-14**: tier-shared static shape (`build_ast`), runtime spine test `cow_bind_rmw_handle`; fixture `proc/cow_rmw_borrow.ls`, emission fixture `cw34_rmw_borrow` |
@@ -651,15 +651,14 @@ check, not to the bit itself.
 5. **Read views**: mark base and view shared at creation — CW16.2 snapshot
    semantics falls out (whichever side mutates first detaches; the other
    keeps the old bytes).
-6. **Mutable (write-through) views — OPEN/TODO by designer ruling
-   2026-08-29.** They retain their current first-class write-through
-   behavior and are *not* marked shared — a mark would make the view's
-   first write detach and silently stop reaching the base, breaking the
-   construct's purpose. A mutable view is a borrow, not a share; its
-   discipline (un-share-at-borrow CW16.4 + confinement CW16.3 +
-   `cow_bind_var` keeps the eager clone for view *aliases*) lands with the
-   view-borrow work, tracked in B.1. Until then mutable-view aliasing is
-   accepted Stage-2 residue, unchanged from today.
+6. **View values snapshot (CW32v3, USER 2026-11-03; S9.2.2v2).**
+   Ordinary leading-axis rows and the `subview`, `reshape`, `transpose` and
+   `ravel` results are values. They preserve the source value even if either
+   side later writes, and all alias/capture/insertion/parameter/return
+   boundaries preserve that snapshot. Materializing owned numeric storage
+   is permitted; an internal path borrow may retain a write-through view
+   while its unique owner and evaluated path are precisely rooted. Such a
+   view cannot escape as an ordinary value. This lifts the Stage-2 deferral.
 7. **Equality**: representation invariance is **verified fixed** (CW16.1
    note above); the obligation is a pinned conformance fixture, since
    detaches flip representations behind programs' backs.
@@ -848,7 +847,7 @@ binding's declared-representation home**:
 |---|---|---|
 | untyped / `any` | tagged Item | `Item*` |
 | typed container (invariant, S9.2.1) | raw untagged `Container*` | `Container**` |
-| typed scalar (if admitted) | the native lane word | lane address |
+| typed scalar | the native lane word | lane address |
 
 The callee reads `*slot` for the current value; when COW must detach, it
 builds the replacement and stores it through the slot — the caller's binding
@@ -909,10 +908,16 @@ collapses to a slot-address compare in the callee prologue.
    is one (`JIT_VALUE_RAW_GC_POINTER` class exists for raw pointers); the
    caller reloads its register from the home after the call — one load per
    `var` arg, cheaper than today's pre-detach *call*.
-2. **CW25 place arguments** (`f(var m.rows[i])`): the leaf address is
-   `&parent->items[i]` — stable under the non-moving GC and face-3
-   exclusivity — but the call-site spine detach stays: the address must point
-   into the unique spine.
+2. **CW25 place arguments (CW33v2; D4.4.7, USER 2026-11-03).**
+   Member/index arguments, including scalar places, use a caller-owned
+   precisely rooted Item home. Evaluate each path key once and retain the
+   rooted keys until the call ends. Prepare the root and spine before the
+   borrow; transport the leaf home's address through the existing ABI.
+   Reinstall the published leaf through the path after the call, including
+   an error result, so detach/rebinding and partial writes reach the caller.
+   Never transport `&parent->items[i]` or a packed field pointer: data buffers
+   move under D4.3.1 and fields need declared-lane encoding. Both tiers share
+   this protocol and preserve S9.1.3v3 exclusivity and invariance.
 3. **Wide scalars** stored through a slot must be rehomed off the callee's
    number stack first (`lambda_item_heap_rehome`) — the subtlety
    `borrowed_scratch` handles today, reduced to a single site.
@@ -1544,11 +1549,11 @@ bounds-check elimination as a new item not yet in any ledger.
 
 | Item | Source | Pick-up trigger / state |
 |---|---|---|
-| **ArrayNum COW and view policy** — native packed-copy strategy, representation-invariant equality, read-view snapshots, mutable-view borrows | §9.1–§9.2; §11.8 (CW32v2) | CW32v2 ratified 2026-08-29 (shared-bit at operation entry); equality verified fixed; **mutable-view borrows stay OPEN/TODO (designer ruling 2026-08-29)** — current write-through behavior retained until CW16.3/16.4 land |
+| **ArrayNum COW and view policy** — native packed-copy strategy, representation-invariant equality, read-view snapshots, mutable-view borrows | §9.1–§9.2; §11.8 (CW32v2) | CW32v2 ratified 2026-08-29 (shared-bit at operation entry); equality verified fixed; **deferral lifted 2026-11-03** — ordinary view results snapshot under S9.2.2v2 |
 | **JS↔Lambda ownership boundaries** — mutable-buffer ingress/egress, `SharedArrayBuffer`, explicit read-only sharing | §9.3; §11.8 | **DEFERRED by designer 2026-08-28**; Stage-1 JS suites are regression-only |
 | Exclusivity checks — four call-site faces + the `var`-args-only check | C4.4 #1; §11.3 (CW31) | Faces 1+3 **landed** (`E211`, whole-base). Face 2 unreachable (`E229`); callee-side design recorded. Face 4 live hole; v1 = subview-base resolution |
 | View-state `var` passed as `var` arg (the non-local overlap) | §11.4 | Module-level half **CLOSED** — vacuous by design (S9.1.7/E224). View-state half: forbid with a teaching error (S9.2.4v2) |
-| View-borrow **confinement** (mutable views become non-escaping, `var`-position-only) | CW16.3; §11.7 | Stage 2; until then mutable views retain current behavior |
+| View-borrow **confinement** (mutable views become non-escaping, `var`-position-only) | CW16.3; §11.7 | Deferral lifted under S9.2.2v2; internal place borrows only |
 | Snapshot iteration over a mutated `var` container (S9.2.3) | §11.6 (CW30) | Ruled but **violated both tiers**; compile-gated design recorded 2026-08-29; record as C4.2d when implemented |
 | **Plain-param snapshots (S9.1.3)** — callee-prologue share-mark on mutated plain container params; retire `is_proc_param` | §11.9 (CW29) | **UNCONDITIONAL since 2026-08-29**; flipped together with S9.3.1 and the escape hatch was retired. Dissolves NM-O8; supplies NM-O2's idiom |
 | Exclusivity granularity endpoint (splitters vs static ranges vs dynamic checks) | §11.3 ladder; §12.2 | decide on real image-toolkit code during Stage 2 |
@@ -1770,3 +1775,27 @@ handle instead of per access.
 | write through `h`; read through any spelling; write to a sibling path that is not a prefix | keep | keep |
 | a call that receives none of root, prefix or `h` | keep | keep (S9.1.7: nothing else can reach `P`) |
 | error exit | n/a | partial writes stay visible, as for a `var` parameter |
+
+## Superseded mutable-view and place-home rulings — 2026-11-03
+
+The user approved S9.1.3v3, S9.2.2v2 and D4.4.7, replacing the following
+CW32v2/CW33 wording.
+
+<details><summary>Historical deferral and interior-pointer mechanism</summary>
+
+6. **Mutable (write-through) views — OPEN/TODO by designer ruling
+   2026-08-29.** They retain their current first-class write-through
+   behavior and are *not* marked shared — a mark would make the view's
+   first write detach and silently stop reaching the base, breaking the
+   construct's purpose. A mutable view is a borrow, not a share; its
+   discipline (un-share-at-borrow CW16.4 + confinement CW16.3 +
+   `cow_bind_var` keeps the eager clone for view *aliases*) lands with the
+   view-borrow work, tracked in B.1. Until then mutable-view aliasing is
+   accepted Stage-2 residue, unchanged from today.
+
+2. **CW25 place arguments** (`f(var m.rows[i])`): the leaf address is
+   `&parent->items[i]` — stable under the non-moving GC and face-3
+   exclusivity — but the call-site spine detach stays: the address must point
+   into the unique spine.
+
+</details>

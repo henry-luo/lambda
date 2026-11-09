@@ -9,11 +9,15 @@
  */
 
 #include "rdb.h"
+#include "rdb_sqlite_tx.h"
+#include "memtrack.h"
 #include "sqlite/sqlite3.h"
 #include "log.h"
 #include "strbuf.h"
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
+#include <math.h>
 #include <stdio.h>
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -23,28 +27,37 @@
 static const RdbDialect sqlite_dialect = { RDB_PLACEHOLDER_QNUM, '"' };
 
 /** a SQLite database is a file, or memory for ":memory:" and "" */
-static void sqlite_target(const char* uri, RdbTarget* out) {
+static bool sqlite_target(const char* uri, RdbTarget* out) {
     memset(out, 0, sizeof(*out));
     if (!uri[0] || strcmp(uri, ":memory:") == 0) {
         out->kind = RDB_PEER_MEMORY;
-        return;
+        return true;
     }
+    // The registry must authorize the exact path SQLite opens. SQLite URI
+    // handling can be enabled globally even without SQLITE_OPEN_URI.
+    size_t length = strlen(uri);
+    if (strncmp(uri, "file:", 5) == 0 || length >= sizeof(out->path)) return false;
     out->kind = RDB_PEER_FILE;
-    snprintf(out->path, sizeof(out->path), "%s", uri);
+    memcpy(out->path, uri, length + 1);
+    return true;
 }
 
 static int sqlite_resolve_targets(const char* uri, RdbTarget* out, int cap, int* out_count) {
     if (!uri || cap < 1) return RDB_ERROR;
-    sqlite_target(uri, &out[0]);
+    if (!sqlite_target(uri, &out[0])) return RDB_ERROR;
     *out_count = 1;
     return RDB_OK;
 }
 
 static int sqlite_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
                        const RdbOpenOptions* opts, void** out_conn) {
+    RdbTarget peer;
+    if (!uri || !sqlite_target(uri, &peer)) return RDB_ERROR;
+    bool no_create = opts->struct_size >= offsetof(RdbOpenOptions, sqlite_no_create) + sizeof(opts->sqlite_no_create)
+        && opts->sqlite_no_create;
     int flags = opts->readonly
         ? SQLITE_OPEN_READONLY
-        : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
+        : (SQLITE_OPEN_READWRITE | (no_create ? 0 : SQLITE_OPEN_CREATE));
     sqlite3* db = NULL;
     int rc = sqlite3_open_v2(uri, &db, flags, NULL);
     if (rc != SQLITE_OK) {
@@ -55,7 +68,7 @@ static int sqlite_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
     // JA16.1: the host owns the connection from here on
     RdbConnInfo info;
     memset(&info, 0, sizeof(info));
-    sqlite_target(uri, &info.peer);
+    info.peer = peer;
     info.socket_fd = -1;
     snprintf(info.server_version, sizeof(info.server_version), "%s", sqlite3_libversion());
     if (host->conn_register(open_ctx, db, &info) != RDB_OK) {
@@ -676,4 +689,481 @@ static const RdbDriver sqlite_driver = {
 
 void rdb_sqlite_register(void) {
     rdb_register_driver(&sqlite_driver);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * Scoped host transaction primitives (S12.4.4v2)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+struct RdbSqliteTxn {
+    RdbConn* conn;
+    bool rollback_only;
+    bool busy;
+    bool preimage_available;
+    bool statement_alter;
+    bool stepping_alter;
+};
+
+/* SQL cannot change the connection's transaction or reach another database. */
+static int sqlite_tx_authorize(void* user, int action, const char* arg1,
+                               const char* arg2, const char* db, const char* source) {
+    RdbSqliteTxn* tx = (RdbSqliteTxn*)user;
+    (void)db; (void)source;
+    if (action == SQLITE_ALTER_TABLE && tx) tx->statement_alter = true;
+    // SQLite checks existing rows while stepping an ALTER on a STRICT table.
+    if (action == SQLITE_PRAGMA && tx && tx->stepping_alter && arg1 && arg2 &&
+            sqlite3_stricmp(arg1, "quick_check") == 0) return SQLITE_OK;
+    if (action == SQLITE_ATTACH || action == SQLITE_DETACH || action == SQLITE_TRANSACTION ||
+        action == SQLITE_SAVEPOINT || action == SQLITE_PRAGMA || action == SQLITE_CREATE_VTABLE ||
+        action == SQLITE_DROP_VTABLE) return SQLITE_DENY;
+    if (action == SQLITE_FUNCTION && arg2 && sqlite3_stricmp(arg2, "load_extension") == 0)
+        return SQLITE_DENY;
+    return SQLITE_OK;
+}
+
+static RdbSqliteTxn* sqlite_tx_wrap(Pool* pool, RdbConn* conn) {
+    sqlite3* db = (sqlite3*)conn->handle;
+    int enabled = 0;
+    if (sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_FKEY, 1, &enabled) != SQLITE_OK ||
+        !enabled || sqlite3_exec(db, "BEGIN", NULL, NULL, NULL) != SQLITE_OK) {
+        rdb_close(conn);
+        return NULL;
+    }
+    RdbSqliteTxn* tx = (RdbSqliteTxn*)pool_calloc(pool, sizeof(RdbSqliteTxn));
+    if (!tx) {
+        rdb_close(conn);
+        return NULL;
+    }
+    tx->conn = conn;
+    if (sqlite3_set_authorizer(db, sqlite_tx_authorize, tx) != SQLITE_OK) {
+        rdb_close(conn);
+        return NULL;
+    }
+    return tx;
+}
+
+static RdbSqliteTxn* sqlite_tx_begin(Pool* pool, const char* path, bool existing) {
+    if (!pool || !path || !path[0]) return NULL;
+    // URI interpretation can be enabled globally; an existing-file open must
+    // not silently turn a URI into a transient in-memory database.
+    if (existing && (strcmp(path, ":memory:") == 0 || strncmp(path, "file:", 5) == 0)) return NULL;
+    rdb_sqlite_register();
+    RdbConn* conn = existing ? rdb_open_sqlite_existing(pool, path) : rdb_open(pool, path, "sqlite", false);
+    return conn ? sqlite_tx_wrap(pool, conn) : NULL;
+}
+
+RdbSqliteTxn* rdb_sqlite_tx_begin(Pool* pool, const char* path) {
+    return sqlite_tx_begin(pool, path, false);
+}
+
+RdbSqliteTxn* rdb_sqlite_tx_begin_existing(Pool* pool, const char* path) {
+    return sqlite_tx_begin(pool, path, true);
+}
+
+/* An explicit byte length preserves embedded NULs and distinguishes empty blobs. */
+static int sqlite_tx_bind(sqlite3_stmt* stmt, int index, const RdbValue* value) {
+    if (value->is_null || value->type == RDB_TYPE_NULL) return sqlite3_bind_null(stmt, index);
+    switch (value->type) {
+    case RDB_TYPE_INT: return sqlite3_bind_int64(stmt, index, value->int_val);
+    case RDB_TYPE_BOOL: return sqlite3_bind_int(stmt, index, value->bool_val ? 1 : 0);
+    case RDB_TYPE_FLOAT:
+        return isfinite(value->float_val) ? sqlite3_bind_double(stmt, index, value->float_val) : SQLITE_MISMATCH;
+    case RDB_TYPE_STRING:
+        if (value->str_len < 0 || (!value->str_val && value->str_len)) return SQLITE_MISMATCH;
+        return sqlite3_bind_text64(stmt, index, value->str_val ? value->str_val : "",
+                                   (sqlite3_uint64)value->str_len, SQLITE_TRANSIENT, SQLITE_UTF8);
+    case RDB_TYPE_BLOB:
+        if (value->str_len < 0 || (!value->str_val && value->str_len)) return SQLITE_MISMATCH;
+        if (!value->str_len) return sqlite3_bind_zeroblob(stmt, index, 0);
+        return sqlite3_bind_blob64(stmt, index, value->str_val, (sqlite3_uint64)value->str_len, SQLITE_TRANSIENT);
+    default: return SQLITE_MISMATCH;
+    }
+}
+
+struct RdbSqliteWork {
+    RdbSqliteTxn* tx;
+    RdbConnLife* pin;
+    sqlite3* db;
+    int result;
+    bool executed;
+};
+
+RdbSqliteWork* rdb_sqlite_tx_work_begin(RdbSqliteTxn* tx) {
+    if (!tx || !tx->conn || rdb_ping(tx->conn) != RDB_OK) return NULL;
+    if (tx->busy) { tx->rollback_only = true; return NULL; }
+    RdbConnLife* pin = rdb_conn_life_hold(tx->conn);
+    if (!pin) { tx->rollback_only = true; return NULL; }
+    RdbSqliteWork* work = (RdbSqliteWork*)mem_calloc(1, sizeof(RdbSqliteWork), MEM_CAT_EVAL);
+    if (!work) { tx->rollback_only = true; rdb_conn_life_release(pin); return NULL; }
+    tx->busy = true;
+    work->tx = tx;
+    work->pin = pin;
+    work->db = (sqlite3*)tx->conn->handle;
+    work->result = RDB_ERROR;
+    return work;
+}
+
+static int sqlite_tx_progress(void* data) {
+    const int* cancelled = (const int*)data;
+    return __atomic_load_n(cancelled, __ATOMIC_ACQUIRE) != 0;
+}
+
+struct RdbSqliteClone {
+    Pool* pool;
+    RdbConn* source;
+    RdbConn* destination;
+    RdbConnLife* source_pin;
+    RdbConnLife* destination_pin;
+    sqlite3* source_db;
+    sqlite3* destination_db;
+    size_t limit;
+    bool ran;
+    bool ok;
+};
+
+void rdb_sqlite_clone_discard(RdbSqliteClone* clone) {
+    if (!clone) return;
+    if (clone->source) rdb_close(clone->source);
+    if (clone->destination) rdb_close(clone->destination);
+    if (clone->source_pin) rdb_conn_life_release(clone->source_pin);
+    if (clone->destination_pin) rdb_conn_life_release(clone->destination_pin);
+    mem_free(clone);
+}
+
+RdbSqliteClone* rdb_sqlite_clone_prepare(Pool* pool, const char* source, size_t limit) {
+    if (!pool || !source || !*source || !limit || !strcmp(source, ":memory:")) return NULL;
+    rdb_sqlite_register();
+    RdbSqliteClone* clone = (RdbSqliteClone*)mem_calloc(1, sizeof(RdbSqliteClone), MEM_CAT_EVAL);
+    if (!clone) return NULL;
+    clone->pool = pool;
+    clone->limit = limit;
+    clone->source = rdb_open(pool, source, "sqlite", true);
+    clone->source_pin = clone->source ? rdb_conn_life_hold(clone->source) : NULL;
+    clone->destination = clone->source_pin ? rdb_open(pool, ":memory:", "sqlite", false) : NULL;
+    clone->destination_pin = clone->destination ? rdb_conn_life_hold(clone->destination) : NULL;
+    if (!clone->source_pin || !clone->destination_pin || rdb_ping(clone->source) != RDB_OK ||
+            rdb_ping(clone->destination) != RDB_OK) {
+        rdb_sqlite_clone_discard(clone);
+        return NULL;
+    }
+    clone->source_db = (sqlite3*)clone->source->handle;
+    clone->destination_db = (sqlite3*)clone->destination->handle;
+    return clone;
+}
+
+static bool sqlite_clone_scalar(sqlite3* db, const char* sql, sqlite3_int64* out) {
+    sqlite3_stmt* stmt = NULL;
+    bool ok = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK &&
+        sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) == SQLITE_INTEGER;
+    if (ok) *out = sqlite3_column_int64(stmt, 0);
+    if (stmt && sqlite3_finalize(stmt) != SQLITE_OK) ok = false;
+    return ok;
+}
+
+static bool sqlite_clone_integrity(sqlite3* db) {
+    sqlite3_stmt* stmt = NULL;
+    bool ok = sqlite3_prepare_v2(db, "PRAGMA integrity_check", -1, &stmt, NULL) == SQLITE_OK &&
+        sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) == SQLITE_TEXT;
+    const unsigned char* text = ok ? sqlite3_column_text(stmt, 0) : NULL;
+    ok = ok && text && !strcmp((const char*)text, "ok") && sqlite3_step(stmt) == SQLITE_DONE;
+    if (stmt && sqlite3_finalize(stmt) != SQLITE_OK) ok = false;
+    if (!ok) return false;
+    stmt = NULL;
+    ok = sqlite3_prepare_v2(db, "PRAGMA foreign_key_check", -1, &stmt, NULL) == SQLITE_OK &&
+        sqlite3_step(stmt) == SQLITE_DONE;
+    if (stmt && sqlite3_finalize(stmt) != SQLITE_OK) ok = false;
+    return ok;
+}
+
+void rdb_sqlite_clone_run(RdbSqliteClone* clone, const int* cancelled) {
+    if (!clone || clone->ran) return;
+    clone->ran = true;
+    sqlite3* source = clone->source_db;
+    sqlite3* destination = clone->destination_db;
+    if (cancelled) {
+        sqlite3_progress_handler(source, 1000, sqlite_tx_progress, (void*)cancelled);
+        sqlite3_progress_handler(destination, 1000, sqlite_tx_progress, (void*)cancelled);
+    }
+    bool ok = (!cancelled || !__atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) &&
+        sqlite3_exec(source, "BEGIN", NULL, NULL, NULL) == SQLITE_OK;
+    sqlite3_int64 schema_count = 0, pages = 0, page_size = 0;
+    // A schema read pins the source snapshot before sizing and copying it.
+    if (ok) ok = sqlite_clone_scalar(source, "SELECT COUNT(*) FROM sqlite_schema", &schema_count) &&
+        sqlite_clone_scalar(source, "PRAGMA page_count", &pages) &&
+        sqlite_clone_scalar(source, "PRAGMA page_size", &page_size) &&
+        pages > 0 && page_size > 0 && (uint64_t)pages <= clone->limit / (uint64_t)page_size;
+    sqlite3_backup* backup = ok ? sqlite3_backup_init(destination, "main", source, "main") : NULL;
+    if (ok && !backup) ok = false;
+    if (backup) {
+        int status = SQLITE_OK;
+        while (status == SQLITE_OK && (!cancelled || !__atomic_load_n(cancelled, __ATOMIC_ACQUIRE)))
+            status = sqlite3_backup_step(backup, 64);
+        int finished = sqlite3_backup_finish(backup);
+        ok = status == SQLITE_DONE && finished == SQLITE_OK &&
+            (!cancelled || !__atomic_load_n(cancelled, __ATOMIC_ACQUIRE));
+    }
+    if (sqlite3_exec(source, "ROLLBACK", NULL, NULL, NULL) != SQLITE_OK) ok = false;
+    if (ok) ok = sqlite_clone_integrity(destination);
+    if (cancelled) {
+        sqlite3_progress_handler(source, 0, NULL, NULL);
+        sqlite3_progress_handler(destination, 0, NULL, NULL);
+        if (__atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) ok = false;
+    }
+    clone->ok = ok;
+}
+
+RdbSqliteTxn* rdb_sqlite_clone_finish(RdbSqliteClone* clone) {
+    if (!clone || !clone->ran || !clone->ok || rdb_ping(clone->source) != RDB_OK ||
+            rdb_ping(clone->destination) != RDB_OK) {
+        rdb_sqlite_clone_discard(clone);
+        return NULL;
+    }
+    rdb_close(clone->source);
+    clone->source = NULL;
+    rdb_conn_life_release(clone->source_pin);
+    clone->source_pin = NULL;
+    if (rdb_ping(clone->destination) != RDB_OK) {
+        rdb_sqlite_clone_discard(clone);
+        return NULL;
+    }
+    RdbSqliteTxn* tx = sqlite_tx_wrap(clone->pool, clone->destination);
+    if (tx) tx->preimage_available = true;
+    clone->destination = NULL; // wrapping owns the connection on success and failure
+    rdb_conn_life_release(clone->destination_pin);
+    clone->destination_pin = NULL;
+    mem_free(clone);
+    return tx;
+}
+
+static int sqlite_tx_execute_core(RdbSqliteWork* work, const char* sql, size_t sql_len,
+        const RdbValue* params, int param_count, RdbSqliteRowFn row_fn, void* user,
+        const int* cancelled, bool check_live) {
+    RdbSqliteTxn* tx = work->tx;
+    sqlite3* db = work->db;
+    if (!sql || !sql_len || sql_len > INT_MAX || memchr(sql, '\0', sql_len) ||
+            param_count < 0 || (param_count && !params)) return RDB_ERROR;
+    if (cancelled) {
+        if (__atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) return RDB_ERROR;
+        sqlite3_progress_handler(db, 1000, sqlite_tx_progress, (void*)cancelled);
+    }
+    sqlite3_stmt* stmt = NULL;
+    sqlite3_stmt* extra = NULL;
+    const char* tail = NULL;
+    RdbValue* values = NULL;
+    const char** names = NULL;
+    tx->statement_alter = false;
+    int rc = sqlite3_prepare_v3(db, sql, (int)sql_len, 0, &stmt, &tail);
+    if (rc != SQLITE_OK || !stmt || !tail) goto fail;
+    /* Preparing the tail catches a second statement without executing either. */
+    rc = sqlite3_prepare_v3(db, tail, (int)(sql + sql_len - tail), 0, &extra, NULL);
+    if (rc != SQLITE_OK || extra) goto fail;
+    // A pre-migration backup must precede every statement that can write.
+    if (!sqlite3_stmt_readonly(stmt)) tx->preimage_available = false;
+    if (sqlite3_bind_parameter_count(stmt) != param_count) goto fail;
+    for (int i = 0; i < param_count; i++) {
+        if (sqlite_tx_bind(stmt, i + 1, &params[i]) != SQLITE_OK) goto fail;
+    }
+    int count = sqlite3_column_count(stmt);
+    if (count && row_fn) {
+        values = (RdbValue*)mem_calloc((size_t)count, sizeof(RdbValue), MEM_CAT_EVAL);
+        names = (const char**)mem_calloc((size_t)count, sizeof(const char*), MEM_CAT_EVAL);
+        if (!values || !names) goto fail;
+        for (int i = 0; i < count; i++) {
+            names[i] = sqlite3_column_name(stmt, i);
+            if (!names[i]) goto fail;
+        }
+    }
+    tx->stepping_alter = tx->statement_alter;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        // SQLite can expose result metadata for DDL that returns no rows.
+        if (!row_fn) goto fail;
+        for (int i = 0; i < count; i++) {
+            values[i] = sqlite_column_value(stmt, i);
+            if (values[i].type == RDB_TYPE_STRING && !values[i].str_val) goto fail;
+            if (sqlite3_column_type(stmt, i) == SQLITE_BLOB) {
+                values[i].type = RDB_TYPE_BLOB;
+                values[i].is_null = false;
+                values[i].str_val = (const char*)sqlite3_column_blob(stmt, i);
+                values[i].str_len = sqlite3_column_bytes(stmt, i);
+            }
+            if (values[i].type == RDB_TYPE_FLOAT && !isfinite(values[i].float_val)) goto fail;
+        }
+        if (!row_fn(user, count, names, values) ||
+                (check_live && rdb_ping(tx->conn) != RDB_OK)) goto fail;
+    }
+    tx->stepping_alter = false;
+    if (rc != SQLITE_DONE) goto fail;
+    rc = sqlite3_finalize(stmt);
+    stmt = NULL;
+    if (rc != SQLITE_OK) goto fail;
+    mem_free(values);
+    mem_free(names);
+    if (cancelled) sqlite3_progress_handler(db, 0, NULL, NULL);
+    return RDB_OK;
+fail:
+    tx->stepping_alter = false;
+    if (extra) sqlite3_finalize(extra);
+    if (stmt) sqlite3_finalize(stmt);
+    mem_free(values);
+    mem_free(names);
+    if (cancelled) sqlite3_progress_handler(db, 0, NULL, NULL);
+    return RDB_ERROR;
+}
+
+int rdb_sqlite_tx_work_execute(RdbSqliteWork* work, const char* sql, size_t sql_len,
+        const RdbValue* params, int param_count, RdbSqliteRowFn row_fn, void* user,
+        const int* cancelled) {
+    if (!work || work->executed) return RDB_ERROR;
+    work->executed = true;
+    // Multiple workers/connections require a mutex-enabled SQLite build.
+    if (!sqlite3_threadsafe()) return RDB_ERROR;
+    work->result = sqlite_tx_execute_core(work, sql, sql_len, params, param_count,
+        row_fn, user, cancelled, false);
+    return work->result;
+}
+
+int rdb_sqlite_tx_work_end(RdbSqliteWork* work) {
+    if (!work) return RDB_ERROR;
+    RdbSqliteTxn* tx = work->tx;
+    int result = work->result;
+    if (!work->executed || rdb_ping(tx->conn) != RDB_OK) result = RDB_ERROR;
+    if (result != RDB_OK) tx->rollback_only = true;
+    tx->busy = false;
+    rdb_conn_life_release(work->pin);
+    mem_free(work);
+    return result;
+}
+
+int rdb_sqlite_tx_execute(RdbSqliteTxn* tx, const char* sql, size_t sql_len,
+                          const RdbValue* params, int param_count,
+                          RdbSqliteRowFn row_fn, void* user) {
+    RdbSqliteWork* work = rdb_sqlite_tx_work_begin(tx);
+    if (!work) return RDB_ERROR;
+    work->executed = true;
+    work->result = sqlite_tx_execute_core(work, sql, sql_len, params, param_count,
+        row_fn, user, NULL, true);
+    return rdb_sqlite_tx_work_end(work);
+}
+
+void rdb_sqlite_tx_mark_failed(RdbSqliteTxn* tx) {
+    if (tx) tx->rollback_only = true;
+}
+
+bool rdb_sqlite_tx_live(RdbSqliteTxn* tx) {
+    return tx && tx->conn && rdb_ping(tx->conn) == RDB_OK;
+}
+
+static unsigned char* sqlite_tx_serialize(sqlite3* db, size_t limit, size_t* output_size) {
+    sqlite3_int64 size = 0;
+    // NOCOPY reports the required size even if no contiguous image exists.
+    (void)sqlite3_serialize(db, "main", &size, SQLITE_SERIALIZE_NOCOPY);
+    if (size <= 0 || (uint64_t)size > limit) return NULL;
+    sqlite3_int64 copied = 0;
+    unsigned char* bytes = sqlite3_serialize(db, "main", &copied, 0);
+    if (!bytes || copied != size) { sqlite3_free(bytes); return NULL; }
+    *output_size = (size_t)copied;
+    return bytes;
+}
+
+int rdb_sqlite_tx_preimage(RdbSqliteTxn* tx, size_t limit, RdbSqliteSnapshotFn publish, void* user) {
+    if (!tx) return RDB_ERROR;
+    if (!tx->conn || tx->busy || tx->rollback_only || !tx->preimage_available || !limit || !publish ||
+            rdb_ping(tx->conn) != RDB_OK) {
+        tx->rollback_only = true;
+        return RDB_ERROR;
+    }
+    tx->preimage_available = false;
+    RdbConnLife* hold = rdb_conn_life_hold(tx->conn);
+    if (!hold) { tx->rollback_only = true; return RDB_ERROR; }
+    // Prevent a host publication callback from reentering this transaction.
+    tx->busy = true;
+    sqlite3* db = (sqlite3*)tx->conn->handle;
+    size_t size = 0;
+    // SQLite serialization uses an internal pragma; restore the guard before callbacks.
+    int rc = sqlite3_set_authorizer(db, NULL, NULL);
+    unsigned char* bytes = rc == SQLITE_OK ? sqlite_tx_serialize(db, limit, &size) : NULL;
+    rc = sqlite3_set_authorizer(db, sqlite_tx_authorize, tx);
+    if (rc != SQLITE_OK) {
+        // Never leave an unguarded connection usable after a failed restore.
+        sqlite3_free(bytes);
+        tx->rollback_only = true;
+        tx->busy = false;
+        rdb_close(tx->conn);
+        rdb_conn_life_release(hold);
+        return RDB_ERROR;
+    }
+    int result = bytes && rc == SQLITE_OK ? publish(user, bytes, size) : RDB_ERROR;
+    sqlite3_free(bytes);
+    if (rdb_ping(tx->conn) != RDB_OK || tx->rollback_only) result = result >= RDB_OK ? 1 : RDB_ERROR;
+    tx->busy = false;
+    rdb_conn_life_release(hold);
+    if (result != RDB_OK) tx->rollback_only = true;
+    return result;
+}
+
+static int sqlite_tx_finish(RdbSqliteTxn* tx, bool unwinding, size_t limit,
+                            RdbSqliteSnapshotFn publish, void* user) {
+    if (!tx || !tx->conn || tx->busy) return RDB_ERROR;
+    if (rdb_ping(tx->conn) != RDB_OK) {
+        // Registry teardown may have already closed the driver handle.
+        rdb_close(tx->conn);
+        tx->conn = NULL;
+        return RDB_ERROR;
+    }
+    // Publication can invoke host authorization, including registry teardown.
+    RdbConnLife* hold = publish ? rdb_conn_life_hold(tx->conn) : NULL;
+    if (publish && !hold) {
+        rdb_close(tx->conn);
+        tx->conn = NULL;
+        return RDB_ERROR;
+    }
+    sqlite3* db = (sqlite3*)tx->conn->handle;
+    bool rollback = unwinding || tx->rollback_only;
+    if (publish && tx->conn->info.peer.kind != RDB_PEER_MEMORY) rollback = true;
+    /* Remove the SQL authorizer only for the host's own final transaction command. */
+    int rc = sqlite3_set_authorizer(db, NULL, NULL);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, rollback ? "ROLLBACK" : "COMMIT", NULL, NULL, NULL);
+    if (rc != SQLITE_OK && !rollback) sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+    int published = RDB_OK;
+    if (rc == SQLITE_OK && !rollback && publish) {
+        size_t size = 0;
+        unsigned char* bytes = sqlite_tx_serialize(db, limit, &size);
+        published = bytes ? publish(user, bytes, size) : RDB_ERROR;
+        sqlite3_free(bytes);
+    }
+    if (hold && rdb_ping(tx->conn) != RDB_OK)
+        published = !rollback && rc == SQLITE_OK && published >= RDB_OK ? 1 : RDB_ERROR;
+    rdb_close(tx->conn);
+    tx->conn = NULL;
+    if (hold) rdb_conn_life_release(hold);
+    if (rc != SQLITE_OK || (tx->rollback_only && !unwinding) ||
+            (rollback && !unwinding && !tx->rollback_only)) return RDB_ERROR;
+    return published;
+}
+
+int rdb_sqlite_tx_finish(RdbSqliteTxn* tx, bool unwinding) {
+    return sqlite_tx_finish(tx, unwinding, 0, NULL, NULL);
+}
+
+int rdb_sqlite_tx_finish_snapshot(RdbSqliteTxn* tx, bool unwinding, size_t limit,
+                                   RdbSqliteSnapshotFn publish, void* user) {
+    if (!publish || !limit) { (void)sqlite_tx_finish(tx, true, 0, NULL, NULL); return RDB_ERROR; }
+    return sqlite_tx_finish(tx, unwinding, limit, publish, user);
+}
+
+int rdb_sqlite_execute_once(const char* path, const char* sql, size_t sql_len,
+                            const RdbValue* params, int param_count,
+                            RdbSqliteRowFn row_fn, void* user) {
+    /* Each autocommit has a bounded lifetime, including failed opens. */
+    Pool* pool = pool_create();
+    if (!pool) return RDB_ERROR;
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, path);
+    if (!tx) {
+        pool_destroy(pool);
+        return RDB_ERROR;
+    }
+    int result = rdb_sqlite_tx_execute(tx, sql, sql_len, params, param_count, row_fn, user);
+    int finish = rdb_sqlite_tx_finish(tx, result != RDB_OK);
+    pool_destroy(pool);
+    return result == RDB_OK && finish == RDB_OK ? RDB_OK : RDB_ERROR;
 }

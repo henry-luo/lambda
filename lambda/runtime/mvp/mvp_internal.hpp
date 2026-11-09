@@ -9,6 +9,7 @@ struct MvpFunction {
     const char* name;
     MIR_item_t target;
     FnVariantAnalysis abi;
+    Type* declared_result;
     Type* result_contract;
     AstFunctionId id;
     uint32_t inline_cost;
@@ -29,6 +30,7 @@ struct MvpIntRange {
 };
 struct MvpBinding {
     NameEntry* entry;
+    Type* admission_contract;
     Type* contract;
     ValueRep rep;
     MIR_reg_t reg;

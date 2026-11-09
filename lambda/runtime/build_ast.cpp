@@ -2374,34 +2374,6 @@ static AstIdentNode* compound_root_ident(AstNode* node) {
     return ast_compound_root_ident(node);
 }
 
-// CW31/S9.2.4 face 4: `var v = subview(base, ...)` makes `v` a mutable view
-// whose writes reach `base`'s storage. Record the ULTIMATE base binding on the
-// view's own entry so the call-site exclusivity check can conflict two `var`
-// arguments that share a base -- the same whole-base granularity as face 3.
-// Chasing view_base here keeps view-of-view chains one hop at check time.
-static void lambda_ast_note_view_binding(AstDeclaratorNode* named) {
-    if (!named || !named->entry || !named->init) return;
-    AstNode* init = ast_unwrap_primary(named->init);
-    if (!init || init->node_type != AST_NODE_CALL_EXPR) return;
-    AstCallNode* call = (AstCallNode*)init;
-    AstNode* callee = ast_unwrap_primary(call->function);
-    // subview resolves to a sys-func node, not a user ident
-    const char* fname = NULL;
-    size_t fname_len = 0;
-    if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
-        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
-        if (info && info->name) { fname = info->name; fname_len = strlen(info->name); }
-    } else if (callee && callee->node_type == AST_NODE_IDENT) {
-        String* n = ((AstIdentNode*)callee)->name;
-        if (n) { fname = n->chars; fname_len = n->len; }
-    }
-    if (!fname || fname_len != 7 || strncmp(fname, "subview", 7) != 0) return;
-    AstIdentNode* base = ast_compound_root_ident(call->argument);
-    if (!base || !base->entry) return;
-    named->entry->view_base = base->entry->view_base
-        ? base->entry->view_base : base->entry;
-}
-
 // S8.2.4v3: a subscript key names one position when it is a number -- or a
 // nullable one, since a null key reads as absent (S7.1.1v3) -- and then reads
 // a single element; any other key may select a collection.
@@ -3602,6 +3574,7 @@ static const struct { const char* path; const char* module; } io_leaf_modules[] 
     {"lambda.io.mail", "io_mail"},
     {"lambda.io.secret", "io_secret"},
     {"lambda.io.loopback", "io_loopback"},
+    {"lambda.io.sqlite", "io_sqlite"},
     {"lambda.io.websocket", "io_websocket"},
 };
 
@@ -18743,7 +18716,6 @@ static void resolve_var_binding(Transpiler* tp, AstDeclaratorNode* named) {
     entry->is_mutable = true;
     named->entry = entry;
     lambda_ast_mark_place_copy(named);  // CW24
-    lambda_ast_note_view_binding(named);  // CW31 face 4
 }
 
 static void resolve_var_stam(Transpiler* tp, AstLetNode* var) {

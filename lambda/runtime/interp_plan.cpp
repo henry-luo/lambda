@@ -1257,6 +1257,13 @@ static uint32_t plan_need(AstNode* node) {
         return 0;
     case AST_NODE_PRIMARY:
         return plan_need(((AstPrimaryNode*)node)->expr);
+    case AST_NODE_OPEN_STAM: {
+        // The opened target and alias remain rooted while the body evaluates.
+        AstOpenNode* open_node = (AstOpenNode*)node;
+        uint32_t target = plan_need(open_node->target);
+        uint32_t body = 2 + plan_need(open_node->body);
+        return target > body ? target : body;
+    }
     case AST_NODE_UNARY:
         // The operand is published before the helper call, so one slot is live
         // at the call itself.

@@ -14,6 +14,12 @@
 // roots rather than stack-frame ones.
 #include "heap_api.h"
 #include "context_capsule.h"
+#ifndef LAMBDA_NO_TASKS
+#include "concurrency.h"
+#endif
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
+#include "io_sqlite.hpp"
+#endif
 
 // D5.4.2-D5.4.4: transactions and retained edits belong to one evaluator.
 // A peer's entry/teardown must never observe or clear this owner's pending work.
@@ -21,6 +27,9 @@ struct WriteSetState {
     EvalContext* owner;
     ArrayList* edits; // WriteEdit*, in program order
     bool transaction_open;
+#ifndef LAMBDA_NO_TASKS
+    LambdaTask* task;
+#endif
     Document* confinement;
 };
 static const uint32_t write_set_owner = 0x57524954; // WRIT
@@ -39,6 +48,9 @@ static void write_set_release_heap(void* data) {
     WriteSetState* state = (WriteSetState*)data;
     write_set_clear_state(state);
     state->transaction_open = false; state->confinement = NULL;
+#ifndef LAMBDA_NO_TASKS
+    state->task = NULL;
+#endif
 }
 
 static void write_set_destroy(void* data) {
@@ -66,6 +78,16 @@ bool write_set_transaction_open(void) {
     return state && state->transaction_open;
 }
 
+bool write_set_transaction_open_here(void) {
+    WriteSetState* state = write_set_state(false);
+    if (!state || !state->transaction_open) return false;
+#ifndef LAMBDA_NO_TASKS
+    return state->task == lambda_task_running();
+#else
+    return true;
+#endif
+}
+
 bool write_set_begin_transaction(void) {
     WriteSetState* state = write_set_state(true);
     if (!state) {
@@ -73,6 +95,9 @@ bool write_set_begin_transaction(void) {
         return false;
     }
     state->transaction_open = true;
+#ifndef LAMBDA_NO_TASKS
+    state->task = lambda_task_running();
+#endif
     return true;
 }
 
@@ -89,6 +114,12 @@ Document* write_set_confinement(void) {
 static void write_set_clear(void) { write_set_clear_state(write_set_state(false)); }
 
 bool write_set_record(const WriteEdit* edit) {
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
+    if (io_sqlite_scope_open_here()) {
+        set_runtime_error(ERR_INVALID_OPERATION, "document updates cannot join a SQLite transaction");
+        return false;
+    }
+#endif
     if (!edit || !edit->doc) {
         set_runtime_error(ERR_TYPE_MISMATCH,
             "CRUD target has no location; only a document node can be written");
@@ -598,7 +629,13 @@ bool write_set_end_transaction(bool unwinding) {
     if (unwinding) write_set_rollback();
     else ok = write_set_commit();
     WriteSetState* state = write_set_state(false);
-    if (state) { state->transaction_open = false; state->confinement = NULL; }
+    if (state) {
+        state->transaction_open = false;
+        state->confinement = NULL;
+#ifndef LAMBDA_NO_TASKS
+        state->task = NULL;
+#endif
+    }
     return ok;
 }
 
@@ -754,6 +791,12 @@ extern "C" Item fn_put_into(Item value, Item container) {
 // every statement has already committed, so reaching one there is a mistake the
 // programmer should hear about.
 extern "C" Item fn_commit(void) {
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
+    if (io_sqlite_scope_open_here()) {
+        set_runtime_error(ERR_INVALID_OPERATION, "explicit commit is not supported in a SQLite open block");
+        return ItemError;
+    }
+#endif
     if (!write_set_transaction_open()) {
         set_runtime_error(ERR_SEMANTIC_ERROR,
             "'commit' with no transaction open; outside 'open' every CRUD "
@@ -765,6 +808,12 @@ extern "C" Item fn_commit(void) {
 }
 
 extern "C" Item fn_rollback(void) {
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
+    if (io_sqlite_scope_open_here()) {
+        set_runtime_error(ERR_INVALID_OPERATION, "explicit rollback is not supported in a SQLite open block");
+        return ItemError;
+    }
+#endif
     if (!write_set_transaction_open()) {
         set_runtime_error(ERR_SEMANTIC_ERROR,
             "'rollback' with no transaction open; outside 'open' every CRUD "
@@ -788,6 +837,19 @@ extern "C" Item fn_rollback(void) {
 // block binds the FORCED target.
 
 extern "C" Item fn_open_begin(Item target) {
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
+    if (io_sqlite_is_target(target)) {
+        if (write_set_transaction_open_here() || io_sqlite_scope_open_here()) {
+            set_runtime_error(ERR_INVALID_OPERATION, "nested open transactions are not supported");
+            return ItemError;
+        }
+        return io_sqlite_open(target);
+    }
+    if (io_sqlite_scope_open_here()) {
+        set_runtime_error(ERR_INVALID_OPERATION, "nested open transactions are not supported");
+        return ItemError;
+    }
+#endif
     // PTH-O15: nesting is deferred, so an inner `open` is an error rather than
     // a silently flattened savepoint.
     if (write_set_transaction_open()) {
@@ -814,6 +876,9 @@ extern "C" Item fn_open_begin(Item target) {
 }
 
 extern "C" Item fn_open_end(Bool unwinding) {
+#if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
+    if (io_sqlite_scope_open_here()) return io_sqlite_close(unwinding);
+#endif
     // PTH66v2: commit at the end, and ALWAYS roll back when the block exits by
     // an unhandled runtime error.
     return write_set_end_transaction(unwinding == BOOL_TRUE) ? ItemNull : ItemError;

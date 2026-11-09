@@ -1,23 +1,19 @@
-// Mutable ArrayNum views — procedural write-through to the base (Typed Array 4, Scope 3).
-// Inside a pn function, writing through a view (subview, leading-axis row) mutates
-// the aliased base in place — no full copy.  Pure fn code cannot issue these writes
-// (index assignment is a procedural-only statement), so the functional core stays
-// value-semantic by construction.
+// S9.2.2v2: ordinary view bindings snapshot; a place argument writes through.
 
-pn test_subview_write_through() {
+pn test_subview_snapshot() {
     var arr = [10, 20, 30, 40, 50]
-    var v = subview(arr, 1, 4)   // aliases [20, 30, 40]
-    v[0] = 999                   // writes through to arr[1]
-    print(v[0]); print(" "); print(arr[1]); print("\n")   // 999 999
-    v[2] = 777                   // writes through to arr[3]
-    print(arr[3]); print("\n")   // 777
+    var v = subview(arr, 1, 4)   // snapshots [20, 30, 40]
+    v[0] = 999                   // changes only the snapshot
+    print(v[0]); print(" "); print(arr[1]); print("\n")   // 999 20
+    v[2] = 777                   // changes only the snapshot
+    print(arr[3]); print("\n")   // 40
 }
 
-pn test_float_view_write_through() {
+pn test_float_view_snapshot() {
     var arr = [1.5, 2.5, 3.5, 4.5, 5.5]
     var v = subview(arr, 0, 3)
     v[1] = 99.9
-    print(arr[1]); print("\n")   // 99.9
+    print(arr[1]); print("\n")   // 2.5
 }
 
 // S9.2.2: a write-through view is a BORROW, never a value -- legal only in
@@ -36,14 +32,14 @@ pn test_leading_axis_row_write() {
 
 pn test_compact_view_write() {
     var img = [10u8, 20u8, 30u8, 40u8, 50u8]
-    var crop = subview(img, 1, 4)   // aliases [20, 30, 40]
-    crop[1] = 200                   // -> img[2]
-    print(img[2]); print("\n")      // 200
+    var crop = subview(img, 1, 4)   // snapshots [20, 30, 40]
+    crop[1] = 200                   // changes only the snapshot
+    print(img[2]); print("\n")      // 30
 }
 
 pn main() {
-    test_subview_write_through()
-    test_float_view_write_through()
+    test_subview_snapshot()
+    test_float_view_snapshot()
     test_leading_axis_row_write()^
     test_compact_view_write()
 }
