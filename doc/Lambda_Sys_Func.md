@@ -2547,6 +2547,14 @@ limited to 4096 pixels per dimension and 4,194,304 pixels, and reject an existin
 WebGL context. No borrowed array pointer survives the call (**D5.5.2**).
 The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 
+`dom.set_canvas_pixels_rect(canvas,pixels,[x0,y0,x1,y1])^` writes an `(h, w, 4)`
+ubyte array into the existing bitmap at that rectangle, whose width and height
+must be the array's, and leaves every other pixel as it was. It does not resize
+the bitmap, and it rejects a rectangle outside it. When the canvas is drawn
+without a transform or a filter, only the area the rectangle covers is repainted;
+otherwise the canvas repaints as after a whole upload. Painting uses it to present
+only the pixels a stroke changed.
+
 `radiant.image_job(owner, request)^` also accepts `channel:"thumbnail"` for
 asynchronous file decoding. Import `radiant`, then submit
 `{action:"start", channel:"thumbnail", path:"photo.jpg", width:76, height:68}`.

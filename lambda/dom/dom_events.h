@@ -161,11 +161,28 @@ Item js_create_native_mouse_event(const char* type,
 void js_event_set_timestamp(Item event, double timestamp_ms);
 void dom_event_set_movement(Item event, double movement_x, double movement_y);
 
+/** PE6 (Radiant_Design_Paint_Engine.md): the W3C pen axes of a native PointerEvent. */
+typedef struct DomPointerAxes {
+    double pressure, tangential_pressure;
+    double tilt_x, tilt_y, twist;   // degrees; W3C rounds them to integers
+} DomPointerAxes;
+
+/** A null `axes` gives a mouse's values: pressure 0.5 while a button is down, else 0. */
 Item js_create_native_pointer_event(const char* type,
     double client_x, double client_y,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
-    const char* pointer_type, int pointer_id, bool is_primary);
+    const char* pointer_type, int pointer_id, bool is_primary,
+    const DomPointerAxes* axes);
+
+/** PE6: one sample a native pointer event coalesces, `age` seconds before the event. */
+typedef struct DomPointerSample {
+    float x, y, pressure, tilt_x, tilt_y, twist;
+    double age;
+} DomPointerSample;
+
+/** Attach the samples a native pointer event coalesces, oldest first, for dom.pointer_samples. */
+void dom_event_set_pointer_samples(Item event, const DomPointerSample* samples, int count);
 
 // Native touch events carry a one-contact snapshot for host-driven gestures.
 // `is_active` selects whether the contact remains in touches/targetTouches.

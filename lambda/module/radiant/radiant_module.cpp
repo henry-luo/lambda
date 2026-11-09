@@ -26,6 +26,7 @@
 #include "radiant_input_value.hpp"
 #include "script_runner_host.hpp"
 #include "radiant_image_job.hpp"
+#include "radiant_paint_adapter.hpp"
 #include "radiant/tagged.hpp"
 #include "radiant/layout.hpp"
 #include "radiant/render.hpp"
@@ -3661,25 +3662,35 @@ RADIANT_C_API Item fn_radiant_capture_pointer(Item node_item) {
     return (Item){.item = b2it(drag_transition(state, DRAG_TRANSITION_SET_STATE, &args) ? 1 : 0)};
 }
 
-RADIANT_C_API Item fn_radiant_set_canvas_pixels(Item node_item, Item pixels_item) {
-    RootFrame roots(2);
-    Rooted<Item> node(roots, node_item);
-    Rooted<Item> pixels(roots, pixels_item);
-    DomElement* element = (DomElement*)radiant_dom_unwrap_node(node.get());
-    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    if (!element || element->tag() != MARKUP_NAME_CANVAS ||
-        get_type_id(pixels.get()) != LMD_TYPE_ARRAY_NUM) {
+// The canvas element and (H, W, 4) ubyte array of an upload; the array is borrowed for the
+// call only (D5.5.2), so the caller copies before returning.
+static ArrayNum* radiant_canvas_upload_args(Item node_item, Item pixels_item, DomElement** element,
+                                            int64_t* shape, int64_t* strides) {
+    *element = (DomElement*)radiant_dom_unwrap_node(node_item);
+    if (!*element || (*element)->tag() != MARKUP_NAME_CANVAS ||
+        get_type_id(pixels_item) != LMD_TYPE_ARRAY_NUM) {
         log_error("CANVAS_UPLOAD: expected a canvas and RGBA numeric array");
-        return ItemError;
+        return nullptr;
     }
-    ArrayNum* array = pixels.get().array_num;
+    ArrayNum* array = pixels_item.array_num;
     if (array->get_elem_type() != ELEM_UINT8 ||
         array_num_get_shape_strides(array, shape, strides) != 3 ||
         shape[2] != 4 || shape[0] <= 0 || shape[1] <= 0 ||
         shape[0] > UINT32_MAX || shape[1] > UINT32_MAX) {
         log_error("CANVAS_UPLOAD: rejected RGBA8 shape, context, or allocation");
-        return ItemError;
+        return nullptr;
     }
+    return array;
+}
+
+RADIANT_C_API Item fn_radiant_set_canvas_pixels(Item node_item, Item pixels_item) {
+    RootFrame roots(2);
+    Rooted<Item> node(roots, node_item);
+    Rooted<Item> pixels(roots, pixels_item);
+    DomElement* element = nullptr;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    ArrayNum* array = radiant_canvas_upload_args(node.get(), pixels.get(), &element, shape, strides);
+    if (!array) return ItemError;
     const char* keys[]={"width","height"};
     bool resized=false;
     for (unsigned axis=0;axis<2;axis++) {
@@ -3695,6 +3706,32 @@ RADIANT_C_API Item fn_radiant_set_canvas_pixels(Item node_item, Item pixels_item
     }
     // same-size uploads change only bitmap resources; attribute reconciliation would reflow the page.
     if (resized) dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE,element,element->parent);
+    return (Item){.item = b2it(1)};
+}
+
+// dom.set_canvas_pixels_rect(canvas, pixels, [x0, y0, x1, y1]) writes an (H, W, 4) ubyte array
+// into the existing bitmap at the rectangle, whose size must be the array's; the other pixels
+// stay and only the written area repaints when the canvas is placed simply (PE7).
+RADIANT_C_API Item fn_radiant_set_canvas_pixels_rect(Item node_item, Item pixels_item, Item rect_item) {
+    RootFrame roots(3);
+    Rooted<Item> node(roots, node_item);
+    Rooted<Item> pixels(roots, pixels_item);
+    Rooted<Item> rect_value(roots, rect_item);
+    DomElement* element = nullptr;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    ArrayNum* array = radiant_canvas_upload_args(node.get(), pixels.get(), &element, shape, strides);
+    if (!array) return ItemError;
+    PaintRect rect = {};
+    if (!radiant_paint_rect_read(ItemReader(rect_value.get().to_const()), &rect) || rect.x0 < 0 || rect.y0 < 0 ||
+        (int64_t)rect.x1 - rect.x0 != shape[1] || (int64_t)rect.y1 - rect.y0 != shape[0]) {
+        log_error("CANVAS_UPLOAD: rect must be [x0, y0, x1, y1] matching the array's width and height");
+        return ItemError;
+    }
+    if (!radiant_canvas_write_pixels(element, (const uint8_t*)array->data, (uint32_t)shape[1],
+            (uint32_t)shape[0], strides, (uint32_t)rect.x0, (uint32_t)rect.y0)) {
+        log_error("CANVAS_UPLOAD: rect lies outside the bitmap, or the canvas has a WebGL context");
+        return ItemError;
+    }
     return (Item){.item = b2it(1)};
 }
 
@@ -5421,6 +5458,19 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_math_metrics(Item style, Item codepoints, Item faces)", (fn_ptr)fn_radiant_math_metrics},
     {"image_metrics", "fn(data: binary) -> map|null", (fn_ptr)fn_radiant_image_metrics, JUBE_FN_NONE,
      "Item fn_radiant_image_metrics(Item data)", (fn_ptr)fn_radiant_image_metrics},
+    // Lambda_Pkg_Paint PT15: pure paint kernels over tiled typed-array layers
+    {"paint_dabs", "fn(layer: map, dabs: any, options: map|null) -> map", (fn_ptr)fn_radiant_paint_dabs, JUBE_FN_NONE,
+     "Item fn_radiant_paint_dabs(Item layer, Item dabs, Item options)", (fn_ptr)fn_radiant_paint_dabs},
+    {"paint_wash", "fn(source: map, coverage: map, options: map) -> map", (fn_ptr)fn_radiant_paint_wash, JUBE_FN_NONE,
+     "Item fn_radiant_paint_wash(Item source, Item coverage, Item options)", (fn_ptr)fn_radiant_paint_wash},
+    {"paint_import", "fn(layer: map, pixels: any, options: map|null) -> map", (fn_ptr)fn_radiant_paint_import, JUBE_FN_NONE,
+     "Item fn_radiant_paint_import(Item layer, Item pixels, Item options)", (fn_ptr)fn_radiant_paint_import},
+    {"paint_present", "fn(layer: map, options: map|null) -> any", (fn_ptr)fn_radiant_paint_present, JUBE_FN_NONE,
+     "Item fn_radiant_paint_present(Item layer, Item options)", (fn_ptr)fn_radiant_paint_present},
+    {"paint_sample", "fn(layer: map, x: float, y: float, radius: float) -> array", (fn_ptr)fn_radiant_paint_sample, JUBE_FN_NONE,
+     "Item fn_radiant_paint_sample(Item layer, Item x, Item y, Item radius)", (fn_ptr)fn_radiant_paint_sample},
+    {"paint_capabilities", "fn() -> map", (fn_ptr)fn_radiant_paint_capabilities, JUBE_FN_NONE,
+     "Item fn_radiant_paint_capabilities(void)", (fn_ptr)fn_radiant_paint_capabilities},
     {"graphemes", "fn(text: string) -> array|null", (fn_ptr)fn_radiant_graphemes, JUBE_FN_NONE,
      "Item fn_radiant_graphemes(Item text)", (fn_ptr)fn_radiant_graphemes},
     {"measure_html", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_html, JUBE_FN_NONE,
@@ -6115,6 +6165,7 @@ RADIANT_PROVIDE_ENGINE_1(hover_index, fn_radiant_hover_index)
 RADIANT_PROVIDE_ENGINE_1(option_count, fn_radiant_option_count)
 RADIANT_PROVIDE_ENGINE_1(capture_pointer, fn_radiant_capture_pointer)
 RADIANT_PROVIDE_ENGINE_2(set_canvas_pixels, fn_radiant_set_canvas_pixels)
+RADIANT_PROVIDE_ENGINE_3(set_canvas_pixels_rect, fn_radiant_set_canvas_pixels_rect)
 RADIANT_PROVIDE_ENGINE_2(audio_open, fn_radiant_audio_open)
 RADIANT_PROVIDE_ENGINE_2(audio_capture, fn_radiant_audio_capture)
 RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)

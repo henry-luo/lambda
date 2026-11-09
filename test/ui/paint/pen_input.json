@@ -1,0 +1,39 @@
+{
+ "name": "Pen input: W3C pen fields and coalesced samples on pointer events (PE6, PT10)",
+ "html": "test/demo/paint/tests/_pen_input.ls",
+ "viewport": {
+  "width": 320,
+  "height": 200
+ },
+ "event_interval_ms": 0,
+ "input_turn_ms": 0,
+ "events": [
+  {"type": "mouse_move", "x": 50, "y": 50},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-move", "equals": "mouse|0|0|0|0|0|0|0|1|1"},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-samples", "equals": "0:0:0:0:0||at-event"},
+
+  {"type": "mouse_down", "x": 60, "y": 60, "pointerType": "pen", "pressure": 0.4, "tiltX": 30, "tiltY": -20, "twist": 45, "tangentialPressure": 0.25},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-down", "equals": "pen|40|30|-20|45|25|0|1|2|1"},
+
+  {"type": "mouse_move", "x": 60, "y": 60, "pointerType": "pen", "tangentialPressure": 0.25,
+   "samples": [[0, 0, 0.5, 10, 5, 90, 0], [4, 1, 0.6, 12, 6, 100, 4], [8, 2, 0.7, 14, 7, 110, 8], [12, 3, 0.8, 16, 8, 120, 12]]},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-move", "equals": "pen|80|16|8|120|25|0|1|2|4"},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-samples", "equals": "0:50:10:5:90,4:60:12:6:100,8:70:14:7:110,12:80:16:8:120|4,4,4|at-event"},
+
+  {"type": "mouse_up", "x": 72, "y": 63, "pointerType": "pen"},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-up", "equals": "pen|0|0|0|0|0|0|0|2|1"},
+
+  {"type": "mouse_down", "x": 100, "y": 80, "pointerType": "eraser", "pressure": 0.6},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-down", "equals": "pen|60|0|0|0|0|5|32|2|1"},
+  {"type": "mouse_up", "x": 100, "y": 80, "pointerType": "eraser"},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-up", "equals": "pen|0|0|0|0|0|5|0|2|1"},
+
+  {"type": "mouse_down", "x": 120, "y": 90},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-down", "equals": "mouse|50|0|0|0|0|0|1|1|1"},
+  {"type": "mouse_up", "x": 120, "y": 90},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-up", "equals": "mouse|0|0|0|0|0|0|0|1|1"},
+
+  {"type": "key_press", "key": "a"},
+  {"type": "assert_attribute", "target": {"selector": "#fixture"}, "attribute": "data-key-rows", "equals": "0"}
+ ]
+}
