@@ -32313,14 +32313,7 @@ static MIR_reg_t mir_emit_inline_call(MirTranspiler* mt, AstCallNode* call,
 // unconstrained parameters here; other calls retain their normal firewalls.
 static bool mir_output_call_eligible(MirTranspiler* mt, AstCallNode* call, AstFuncNode** target) {
     AstFuncNode* fn = mir_direct_local_function(mt, call);
-    if (mt->output_inline_depth >= 8 ||
-            !ast_output_function(fn) || fn->captures) return false;
-    int count = 0;
-    for (AstNode* arg = call->argument; arg; arg = arg->next, count++) {
-        if (arg->node_type == AST_NODE_NAMED_ARG || ast_is_omitted_argument(arg)) return false;
-    }
-    if (count != ((TypeFunc*)fn->type)->param_count || count > LAMBDA_MAX_FUNCTION_ARGS) return false;
-    for (int i = 0; i < count; i++) if (mir_param_is_declared(fn, i)) return false;
+    if (!ast_output_call(call, fn, mt->output_inline_depth)) return false;
     *target = fn;
     return true;
 }

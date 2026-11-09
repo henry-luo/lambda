@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-05
 
-**Status:** Paused at the user's wrap-up request. P36–P43 close selected producer, admission, procedure and scene failures. PDF/EPS, watercolor and native residuals remain open. Focused units only; no final correctness or performance closure claimed.
+**Status:** Active, resumed 2026-11-09. Reproduce and repair the remaining correctness failures on the split build, then qualify parity. PDF/EPS, watercolor and native residuals remain open; no full compatibility or performance closure claimed.
 
 **Starting tree:** `71296a16a9622f764229720ed2c321330efcd278`, branch `master`.
 
@@ -17,6 +17,16 @@ This continues the [MVP design](../Lambda_Design_MIR_MVP.md) and
 object layouts, type system, scheduler and precise GC remain shared.
 
 ## Current checkpoint
+
+- **Resumed:** 2026-11-09 at the user's request, master `b7cfa3cdd`. Unrelated user deletions of retired issue documents are present and outside this task.
+- **Scope:** finish confirmed MVP correctness gaps across the existing Full/T0 language surface, retaining formal semantic oracles and the shared runtime (**D8.3.1–D8.3.3**, **S7.6.3v3**, **S7.7.2v2–S7.7.6v2**).
+- **Current evidence:** the split debug host builds. Prior focused fixes restore array reduction and Error-arm return admission; all 77 typed benchmark goldens pass under each compiler (`temp/mvp-quicksort/final-tests.log`). These are correctness results, not release timing qualification.
+- **Milestones:** reproduce the six late source cases; fix PDF/handler and EPS/container causes with permanent paired/GC cases; investigate watercolor and native/harness residuals; reconcile aggregate test-target migration and run current parity gates.
+- **Verification budget:** focused paired checks for each root fix, then broad correctness gates at milestones. Performance timing only with release builds after correctness stabilizes. No repeated aggregate runs while the known missing input-test target persists.
+- **Open qualification:** `make test-lambda-baseline` currently stops because `test_wpt_html_parser_gtest` has no generated build target. Old broad counts below remain historical; do not present them as current failures.
+- **Next:** replay PDF streaming, EPS fonts/text/machine/raster, pnpoly and watercolor with the current split executable; store results under `temp/mvp-parity-resume/` and identify shared causes before editing.
+
+### Previous checkpoint (2026-11-06)
 
 - **Updated:** 2026-11-06. Goal paused at the user's wrap-up request: finish the known language gaps, then
   qualify Lambda/GTests and benchmark performance. HEAD `a9b813686`, `master`;

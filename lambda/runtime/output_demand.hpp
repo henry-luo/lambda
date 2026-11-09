@@ -25,3 +25,15 @@ inline bool ast_output_function(const AstFuncNode* node) {
     }
     return true;
 }
+
+// declared parameters keep their normal admission/materialization boundary (S2.6.6v3).
+inline bool ast_output_call(const AstCallNode* call, const AstFuncNode* function, unsigned depth) {
+    if (!call || depth >= 8 || !ast_output_function(function) || function->captures || call->pipe_inject) return false;
+    int count = 0;
+    for (AstNode* arg = call->argument; arg; arg = arg->next, count++)
+        if (arg->node_type == AST_NODE_NAMED_ARG || ast_is_omitted_argument(arg)) return false;
+    if (count > LAMBDA_MAX_FUNCTION_ARGS || count != ((TypeFunc*)function->type)->param_count) return false;
+    for (AstNamedNode* param = function->param; param; param = (AstNamedNode*)param->next)
+        if (lambda_type_param(param->type)->has_explicit_contract) return false;
+    return true;
+}
