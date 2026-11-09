@@ -4,6 +4,20 @@
 
 ## Current checkpoint
 
+### Owner-local unit baseline targets
+
+- **Goal:** provide input and Radiant unit baselines in their owning projects,
+  and remove the input-baseline target from Lambda (D9.1.1v4, D9.1.3v2).
+- **Implementation:** owner baseline names invoke their existing complete native
+  runners; Lambda's full gate invokes the input owner directly. The old Lambda
+  input runner and build selection are removed. Restrict the download catch-all
+  to download commands so the removed target cannot silently succeed.
+- **Verification:** input baseline ran 5,209 cases: 5,206 passed, one
+  skipped, and the existing graph LOC budget and external-parent tests failed.
+  Radiant baseline ran 807 cases: 762 passed, 45 skipped and none failed.
+  Lambda baseline build passed; the removed target now reports no rule, while
+  the download filename catch-all remains available.
+
 ### Baseline ownership selection
 
 - **Goal:** exclude sibling-owned tests from Lambda's Lambda and Radiant
