@@ -2,6 +2,12 @@
 
 #include "transpiler.hpp"
 
+// inferred layouts can contain unaligned nine-byte TypedItems. Each access
+// validates its own descriptor and extent after guarding the receiver (D3.4.1).
+static inline bool mir_shape_layout_is_addressable(TypeMap* shape) {
+    return shape && shape->shape && shape->length > 0;
+}
+
 // the registry supplies optimization candidates only. Callers own its lifetime
 // and must still guard the receiver's physical layout (D7.4.1).
 static inline Type* mir_unique_shape_for_field(ArrayList* types, const char* name,

@@ -201,6 +201,16 @@ class LambdaMirMvpTests(unittest.TestCase):
                  "latex/test_latex_citeproc_data", "mathml_format")
         self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
 
+    def test_guarded_record_reads(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_guarded_record_reads.ls"
+        self.check_gc_fixtures((source,
+            ROOT / "test/lambda/proc/inferred_shape_guarded_read.ls",
+            ROOT / "test/lambda/proc/guarded_store_null_slot_retag.ls"))
+        for name in ("read_value", "read_after", "read_tail", "read_flag"):
+            body = self.function_mir(source, name)
+            self.assertIn("\tcall\tmap_shape_field_to_item", body)
+            self.assertIn("\tcall\tfn_member_by_id", body)
+
     def test_counted_admission_and_callable_pipe(self):
         # D4.3.3/S10.1.7v2: resizing invalidates counts; nested ~ is not free.
         cases = (("array_count_resized_binding", "error[E201]", "maximum allowed is 3"),
@@ -1325,7 +1335,8 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_scalar_record_witness(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_record_witness.ls", "bump")
         native = body[:body.index("\tcall\tlambda_map_set_checked")]
-        self.assertEqual(native.count("u8:1("), 1)
+        # the shared COW predicate now combines flags and owner state in one word.
+        self.assertEqual(len(re.findall(r"\tand\t[^\n]+, 4294979584\n", native)), 1)
         self.assertIn("\tadd\t", native)
 
     def test_erased_float_comparison(self):

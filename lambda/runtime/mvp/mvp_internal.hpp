@@ -99,6 +99,7 @@ struct MvpFunction {
     Type* declared_result;
     Type* result_contract;
     Type* scalar_result_fallback;
+    TypeMap* result_shape_candidate;
     Type** captured_type_references;
     NameEntry** captured_type_entries;
     uint16_t captured_type_count;
@@ -179,6 +180,7 @@ struct MvpBinding {
     Type* admission_contract;
     Type* producer_success_contract;
     Type* contract;
+    TypeMap* shape_candidate;
     ValueRep rep;
     MIR_reg_t reg;
     int scalar_home;
@@ -423,7 +425,7 @@ TypeArray* mvp_private_array_domain(LambdaMvpModule* module, Type* element);
 TypeMap* mvp_record_contract(Type* contract, bool scalar_only);
 Type* mvp_contextual_contract(LambdaMvpModule* module, AstNode* node);
 TypeMap* mvp_contextual_map_contract(LambdaMvpModule* module, AstNode* node);
-TypeMap* mvp_member_candidate(LambdaMvpModule* module, NameRef name);
+TypeMap* mvp_member_candidate(LambdaMvpModule* module, AstNode* object, NameRef name);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler, Type* operand);

@@ -5014,7 +5014,7 @@ static MirValue member_read(MvpCompiler* c, AstFieldNode* node) {
     ShapeEntry* field = mvp_member_field(c->module, node, &shape, true);
     bool speculative = !field;
     if (speculative && name) {
-        shape = mvp_member_candidate(c->module, name);
+        shape = mvp_member_candidate(c->module, node->object, name);
         if (shape) field = find_shape_read_field_by_name(shape, name->chars, name->len);
     }
     Type* contract = mvp_value_contract(c->module, node);
@@ -5028,26 +5028,38 @@ static MirValue member_read(MvpCompiler* c, AstFieldNode* node) {
          storage->value_domain == LMD_TYPE_RANGE);
     // raw machine-integer/TypedItem fields need their descriptor decoder;
     // their first word is not the boxed Item selected by mvp_rep (D2.4.2).
-    bool direct = field && shape && shape->is_trusted_contract &&
-        field_has_direct_lane(field) && shape_entry_storage_fits_data(field, shape->byte_size);
+    bool descriptor_read = field && shape && !shape->is_trusted_contract &&
+        !typemap_fixed_slot_prefix_count(shape);
+    bool direct = field && shape && (descriptor_read ||
+        (shape->is_trusted_contract && field_has_direct_lane(field))) &&
+        shape_entry_storage_fits_data(field, shape->byte_size);
     if (direct) {
         owner = convert(c, owner, VALUE_REP_ITEM);
         // the enforced receiver contract already proves map-or-null; retain
         // null/layout guards without repeating tagged-kind classification.
         MIR_reg_t pointer = owner.reg;
-        if (!speculative && binding && (binding->record_readable || binding->record_writable))
+        if (!descriptor_read && !speculative && binding && (binding->record_readable || binding->record_writable))
             branch(c, MIR_BEQ, slow,
                 reg(c, binding->record_readable ? binding->record_readable : binding->record_writable), imm(c, 0));
         else pointer = em_guard_map_shape(&c->em, owner.reg, constant(c, (intptr_t)shape), slow,
-            lambda_type_nonnull_map_contract(owner.semantic_contract) != NULL, true);
-        MIR_type_t lane = native_field_storage_type(storage);
+            lambda_type_nonnull_map_contract(owner.semantic_contract) != NULL, shape->is_trusted_contract);
         MIR_reg_t data = em_load_at(&c->em, pointer, LAMBDA_GC_OFF_MAP_DATA, MIR_T_P, "member_data");
-        Type* field_contract = type_field_unwrap_simple_decl(field->type);
-        // packed container slots use raw pointers even when the array contract
-        // itself has Item transport. Decode the descriptor, not the type AST.
-        MirValue member = value(c, em_load_at(&c->em, data, field->byte_offset, lane, "member_lane"),
-            container_slot ? (TypeId)storage->value_domain : field_contract->type_id,
-            container_slot ? VALUE_REP_RAW_GC_POINTER : mvp_rep(field_contract), field_contract, node);
+        MirValue member;
+        if (descriptor_read) {
+            // inferred null/bool fields may retag without replacing the shape;
+            // decode its live descriptor, including packed TypedItems (D2.6.2).
+            MIR_reg_t item = em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
+                MIR_T_P, reg(c, data), MIR_T_P, imm(c, (intptr_t)field), true);
+            member = value(c, item, contract->type_id, VALUE_REP_ITEM, contract, node);
+        } else {
+            Type* field_contract = type_field_unwrap_simple_decl(field->type);
+            // packed container slots use raw pointers even when the array contract
+            // itself has Item transport. Decode the descriptor, not the type AST.
+            member = value(c, em_load_at(&c->em, data, field->byte_offset,
+                native_field_storage_type(storage), "member_lane"),
+                container_slot ? (TypeId)storage->value_domain : field_contract->type_id,
+                container_slot ? VALUE_REP_RAW_GC_POINTER : mvp_rep(field_contract), field_contract, node);
+        }
         member = convert(c, member, rep);
         move(c, joined, reg(c, member.reg), member.mir_type); jump(c, done);
     }
@@ -5055,7 +5067,7 @@ static MirValue member_read(MvpCompiler* c, AstFieldNode* node) {
     owner = convert(c, owner, VALUE_REP_ITEM);
     // typed loads normally bypass this arm. Resolve its spelling only on a
     // miss, avoiding module/key-table work in every hot function prologue.
-    bool cold_typed = direct && !speculative;
+    bool cold_typed = direct && !speculative && !descriptor_read;
     // quoted member names are values, not AstIdentNode storage.
     MIR_reg_t key_value = !name ? convert(c, expression(c, node->field), VALUE_REP_ITEM).reg : cold_typed
         ? convert(c, value(c, em_load_const(&c->em, em_add_const(&c->em, name), MIR_T_P),

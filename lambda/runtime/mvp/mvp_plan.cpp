@@ -689,14 +689,109 @@ static bool mvp_literal_map_arm_matches(TypeMap* arm, void* data) {
 static Type* mvp_addressable_shape(Type* type, bool trusted) {
     TypeMap* shape = (TypeMap*)lambda_type_nonnull_map_contract(type);
     return shape && shape != &TYPE_MAP && shape != &TYPE_OBJECT && shape->is_trusted_contract == trusted &&
-        ast_map_contract_storage_valid(shape) && !typemap_fixed_slot_prefix_count(shape) ? shape : NULL;
+        (trusted ? ast_map_contract_storage_valid(shape) : mir_shape_layout_is_addressable(shape)) &&
+        !typemap_fixed_slot_prefix_count(shape) ? shape : NULL;
 }
 
-TypeMap* mvp_member_candidate(LambdaMvpModule* m, NameRef name) {
+static TypeMap* mvp_shape_candidate(LambdaMvpModule* m, AstNode* node, int depth);
+
+static void* mvp_shape_direct_candidate(void* owner, AstNode* node) {
+    // a receiving record contract selects the constructed layout; the
+    // literal's earlier inferred descriptor is then a permanent guard miss.
+    if (node->node_type == AST_NODE_MAP)
+        if (TypeMap* shape = mvp_contextual_map_contract((LambdaMvpModule*)owner, node)) return shape;
+    if (Type* shape = mvp_addressable_shape(node->type, false)) return shape;
+    MvpBinding* binding = mvp_local_binding((LambdaMvpModule*)owner, node);
+    return binding ? binding->shape_candidate : NULL;
+}
+
+static void* mvp_shape_binding_candidate(void* owner, AstNode* definition) {
+    if (definition->node_type != AST_NODE_PARAM) return NULL;
+    MvpBinding* binding = mvp_binding((LambdaMvpModule*)owner, ((AstNamedNode*)definition)->entry);
+    return binding ? binding->shape_candidate : NULL;
+}
+
+static void* mvp_shape_call_candidate(void* owner, AstCallNode* call) {
+    AstFuncNode* target = ast_direct_call_function(call);
+    MvpFunction* callee = target ? mvp_function((LambdaMvpModule*)owner, target) : NULL;
+    return callee ? callee->result_shape_candidate : NULL;
+}
+
+static void* mvp_shape_nested_candidate(void* owner, AstNode* node, int depth) {
+    LambdaMvpModule* m = (LambdaMvpModule*)owner;
+    if (node->node_type == AST_NODE_INDEX_EXPR)
+        return mvp_shape_candidate(m, ((AstFieldNode*)node)->object, depth - 1);
+    if (node->node_type == AST_NODE_ARRAY)
+        for (AstNode* child = ((AstArrayNode*)node)->item; child; child = child->next)
+            if (TypeMap* shape = mvp_shape_candidate(m, child, depth - 1)) return shape;
+    return NULL;
+}
+
+static TypeMap* mvp_shape_candidate(LambdaMvpModule* m, AstNode* node, int depth) {
+    MirShapeCandidateProfile profile = {m, mvp_shape_direct_candidate,
+        mvp_shape_binding_candidate, mvp_shape_call_candidate, mvp_shape_nested_candidate};
+    return (TypeMap*)mir_shape_candidate(profile, node, depth);
+}
+
+static bool mvp_note_shape_candidate(LambdaMvpModule* m, TypeMap** target, AstNode* source) {
+    if (*target) return false;
+    *target = mvp_shape_candidate(m, source, 8);
+    return *target != NULL;
+}
+
+static void plan_shape_candidates(LambdaMvpModule* m) {
+    // first construction evidence wins, including through recursive edges.
+    // These compile-time hints never alter contracts or prove a load (D7.4.1).
+    AstIndex* index = &m->tp->ast_index;
+    bool changed;
+    do {
+        changed = false;
+        for (uint32_t i = 0; i < m->function_count; i++) {
+            MvpFunction* function = &m->functions[i];
+            if (!function->ast) continue;
+            changed |= mvp_note_shape_candidate(m, &function->result_shape_candidate,
+                mvp_function_result_expression(function));
+        }
+        for (AstNodeId id = 0; id < index->count; id++) {
+            AstNode* node = index->nodes[id];
+            MvpBinding* binding = NULL;
+            AstNode* source = NULL;
+            if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+                AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+                binding = mvp_binding(m, declaration->entry); source = declaration->init;
+            } else if (node->node_type == AST_NODE_ASSIGN_STAM) {
+                AstAssignStamNode* assignment = (AstAssignStamNode*)node;
+                binding = mvp_binding(m, assignment->target_entry); source = assignment->value;
+            } else if (node->node_type == AST_NODE_RETURN_STAM) {
+                AstFunctionId owner = mvp_node_owner(m, id);
+                if (owner < m->function_count)
+                    changed |= mvp_note_shape_candidate(m, &m->functions[owner].result_shape_candidate,
+                        ((AstReturnNode*)node)->value);
+            } else if (node->node_type == AST_NODE_CALL_EXPR) {
+                AstCallNode* call = (AstCallNode*)node;
+                AstFuncNode* callee = ast_direct_call_function(call);
+                int position = 0;
+                for (AstNamedNode* param = callee ? callee->param : NULL; param;
+                        param = (AstNamedNode*)param->next, position++) {
+                    MvpBinding* argument = mvp_binding(m, param->entry);
+                    if (argument) changed |= mvp_note_shape_candidate(m, &argument->shape_candidate,
+                        mvp_call_argument(call, position));
+                }
+            }
+            if (binding) changed |= mvp_note_shape_candidate(m, &binding->shape_candidate, source);
+        }
+    } while (changed);
+}
+
+TypeMap* mvp_member_candidate(LambdaMvpModule* m, AstNode* object, NameRef name) {
+    TypeMap* source = mvp_shape_candidate(m, object, 8);
+    if (source && find_shape_read_field_by_name(source, name->chars, name->len)) return source;
     // MVP compiles whole units; asynchronous satellite snapshots use Full's
     // separate path and do not traverse this owning compiler's registry.
-    return (TypeMap*)mir_unique_shape_for_field(m->tp->type_list, name->chars, name->len,
+    Type* shape = mir_unique_shape_for_field(m->tp->type_list, name->chars, name->len,
         true, mvp_addressable_shape);
+    return (TypeMap*)(shape ? shape : mir_unique_shape_for_field(m->tp->type_list,
+        name->chars, name->len, false, mvp_addressable_shape));
 }
 
 TypeMap* mvp_contextual_map_contract(LambdaMvpModule* m, AstNode* literal) {
@@ -3550,6 +3645,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             if (reenters && !f->abi.effects.may_reenter) { f->abi.effects.may_reenter = true; changed = true; }
         }
     } while (changed);
+    plan_shape_candidates(m);
     for (AstNodeId i = 0; i < index->count; i++) {
         AstNodeType kind = index->nodes[i]->node_type;
         if (kind == AST_NODE_ASSIGN_STAM || kind == AST_NODE_INDEX_ASSIGN_STAM || kind == AST_NODE_MEMBER_ASSIGN_STAM) {

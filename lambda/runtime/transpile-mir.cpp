@@ -26580,22 +26580,6 @@ static bool mir_guarded_field_storage_admits(TypeId storage_type) {
         storage_type == LMD_TYPE_STRING || mir_is_container_field_type(storage_type);
 }
 
-// The LAYOUT half of has_fixed_shape, without its `struct_name` requirement.
-// That name check is how a DECLARED contract is recognized, and it is right for
-// every caller that needs a contract; the shape-guarded read needs only that
-// the packed slots are addressable, which an inferred literal shape satisfies
-// just as well [D3.4.1].
-static bool mir_shape_layout_is_addressable(TypeMap* map_type) {
-    // Only the packed layout has to exist here. Whole-shape 8-alignment -- what
-    // has_fixed_shape demands -- is the wrong bar for an inferred literal: an
-    // untyped field is a 9-byte TypedItem, so `{val: n, next: f(n)}` puts its
-    // second field at offset 9 and every such shape would be refused outright.
-    // Addressability is a property of the field being READ, and the access site
-    // checks its own offset and storage class; a misaligned or ANY-carrying
-    // NEIGHBOUR cannot move the slot this site loads.
-    return map_type && map_type->shape && map_type->length > 0;
-}
-
 // Emit direct field READ from a packed map/object data struct.
 // Map/Object layout: [TypeId(1) flags(1) pad(6)] [void* type @8] [void* data @16] [int data_cap @24]
 // data points to packed struct where each field is 8-byte aligned.
