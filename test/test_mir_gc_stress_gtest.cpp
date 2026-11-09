@@ -61,6 +61,8 @@ static const char* kExtraJsScripts[] = {
 static const char* kExtraLambdaScripts[] = {
     // parse converts independent symbol options into allocating string homes.
     "test/lambda/parse_option_roots.ls",
+    // string and symbol equality roots its left text while the right one allocates.
+    "test/lambda/string_eq_gc_roots.ls",
     // native physics builders retain frame/event owners across scalar allocations.
     "test/lambda/physics/freefall.ls",
     "test/lambda/physics/contacts.ls",

@@ -17355,8 +17355,14 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
                 // Both sources have a string success, but the Item carrier
                 // may hold null or a defect. Their original equality owns
                 // that non-string case (S5.1.1–S5.1.2, S7.1.1v3).
-                MIR_reg_t items[2] = {transpile_box_item(mt, bi->left),
-                    transpile_box_item(mt, bi->right)};
+                // D6.3.3: the right operand may collect, so the left one is
+                // rooted across it (a fresh left string was otherwise freed and
+                // its memory reused by the right, making unequal texts equal).
+                MIR_reg_t items[2];
+                items[0] = transpile_box_item(mt, bi->left);
+                int left_root = create_gc_root_slot(mt, items[0]);
+                items[1] = transpile_box_item(mt, bi->right);
+                items[0] = load_gc_root_slot(mt, left_root, "string_join_eq_left");
                 MIR_reg_t result = new_reg(mt, "string_join_eq", MIR_T_I64);
                 MIR_label_t cold = new_label(mt);
                 MIR_label_t done = new_label(mt);
@@ -17404,8 +17410,11 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
             TypeId text_type = both_string ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL;
             MIR_reg_t left = emit_text_pointer_lane(mt,
                 transpile_expr_value(mt, bi->left), text_type);
+            // D6.3.3: root the left text while the right operand may collect.
+            int left_root = create_pointer_gc_root_slot(mt, left);
             MIR_reg_t right = emit_text_pointer_lane(mt,
                 transpile_expr_value(mt, bi->right), text_type);
+            left = load_gc_root_slot(mt, left_root, "text_eq_left");
             return publish(mir_emit_text_pointer_compare(mt, left, right,
                 text_type, bi->op), VALUE_REP_I64);
         }
