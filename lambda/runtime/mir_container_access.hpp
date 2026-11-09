@@ -209,14 +209,15 @@ static inline void em_array_cert_word_guard(MirEmitter* em, MIR_reg_t cert,
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 #endif
+static inline MIR_reg_t em_array_rep_cert(MirEmitter* em, MIR_reg_t array) {
+    return em_load_at(em, array, offsetof(List, rep_cert), MIR_T_I64, "array_cert");
+}
+
 static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
         Type* contract, MIR_label_t l_bail, bool primitive_admission = false) {
     LambdaArrayContractInfo info = {};
     if (!lambda_array_contract_info(contract, &info)) return;
-    MIR_reg_t cert = em_new_reg(em, "array_cert", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, cert),
-        MIR_new_mem_op(em->ctx, MIR_T_I64, offsetof(List, rep_cert),
-            arr_ptr, 0, 1)));
+    MIR_reg_t cert = em_array_rep_cert(em, arr_ptr);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, l_bail),
         MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
 
@@ -296,7 +297,7 @@ static inline void em_open_string_append(MirEmitter* em, MIR_reg_t owner,
         MIR_new_reg_op(em->ctx, state), MIR_new_int_op(em->ctx, CONTAINER_STATE_VIRTUAL_LIST)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, cold),
         MIR_new_reg_op(em->ctx, state)));
-    MIR_reg_t cert = em_load_at(em, array, offsetof(List, rep_cert), MIR_T_I64, "string_push_cert");
+    MIR_reg_t cert = em_array_rep_cert(em, array);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, cold),
         MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
     MIR_reg_t extra = em_load_at(em, array, LAMBDA_GC_OFF_LIST_EXTRA, MIR_T_I64, "string_push_extra");

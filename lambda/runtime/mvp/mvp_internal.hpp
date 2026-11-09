@@ -115,6 +115,7 @@ struct MvpFunction {
     bool no_value_result;
     bool owns_open_scopes;
     bool guarded_array_entry;
+    bool body_may_gc;  // excludes conservative admission at the parameter boundary
 };
 
 static inline bool mvp_edit_model_place(MvpFunction* function, AstNode* object) {

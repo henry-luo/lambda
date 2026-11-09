@@ -266,6 +266,40 @@ class LambdaMirMvpTests(unittest.TestCase):
         # ordinary snapshot flags remain; a known string has no Array view descriptor.
         self.assertNotRegex(text, r"\tmov\t[^\n]+, u8:2\(")
 
+    def test_nested_primitive_stores(self):
+        # LR07-54: Full also loses the Error from rejected nested indexed stores.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_nested_primitive_stores.ls", mode)
+
+    def test_primitive_readers_and_singleton_joins(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_primitive_readers.ls"
+        self.check_gc_fixtures((source, ROOT / "test/lambda/mvp/mir_mvp_singleton_joins.ls"))
+        for name in ("float_at", "int_at", "bool_at"):
+            body = self.function_mir(source, name)
+            self.assertIn("lambda_array_primitive_index", body)
+            self.assertNotIn("\tcall\tfn_index", body)
+            self.assertNotIn("lambda_stack_is_exhausted", body)
+            self.assertIn("\tbstart\t", body)
+        body = self.function_mir(source, "literal_fields")
+        self.assertNotIn("slot_image", body)
+        self.assertEqual(len(re.findall(r"\tmov\t[^\n]+, p:32\(", body)), 3)
+
+    def test_projection_call_snapshots(self):
+        # LR07-56: archived Full observes the later argument's write through the plain argument.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_projection_call_snapshots.ls", mode)
+
+    def test_sized_conversion_results(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_sized_conversion_results.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "random_value")
+        self.assertTrue(body.splitlines()[0].startswith("\td, i64,"))
+        body = self.function_mir(source, "float_record")
+        self.assertIn("lambda_set_field_f64", body)
+        self.assertNotIn("slot_image", body)
+
     def test_counted_admission_and_callable_pipe(self):
         # D4.3.3/S10.1.7v2: resizing invalidates counts; nested ~ is not free.
         cases = (("array_count_resized_binding", "error[E201]", "maximum allowed is 3"),
@@ -1084,7 +1118,8 @@ class LambdaMirMvpTests(unittest.TestCase):
             with self.subTest(source=source.name, function=function):
                 body = self.function_mir(source, function)
                 self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
-                self.assertIn("fn_index", body)  # short/negative extents keep the checked sibling
+                # collecting bodies keep fn_index; rootless bodies use the lane sibling.
+                self.assertRegex(body, r"\tcall\t(?:fn_index|lambda_array_primitive_index)")
 
     def test_fallible_inline_and_bool_count(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_consumers.ls"
@@ -1346,6 +1381,10 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_native_constructor_lanes(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_constructor_boundary.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "native_fields")
+        self.assertNotIn("set_field_value", body)
+        self.assertRegex(body, r"\tdmov\td:\d*\(%")
         for name in ("freshly", "float_values", "bool_values"):
             body = self.function_mir(source, name)
             native = body[:body.index("\tcall\tlambda_fill_primitive_bits")]

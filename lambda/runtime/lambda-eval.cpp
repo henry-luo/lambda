@@ -891,6 +891,25 @@ static Item join_consume_cert_array_fallback(Item left, Item right,
 // numeric RHS; copy into the final owner directly (S9.1.2, S10.6.1).
 Item fn_join_fresh_array_item(Item left, Item element) {
     TypeId element_type = get_type_id(element);
+    if (get_type_id(left) == LMD_TYPE_ARRAY_NUM && !left.array_num->rep_cert &&
+            array_num_rank(left.array_num) == 1 && left.array_num->length < INT64_MAX) {
+        ArrayNumElemType lane;
+        Type* contract = lambda_canonical_type_for_id(element_type);
+        if (lambda_array_num_elem_type_for_contract(contract, &lane) &&
+                lane == left.array_num->get_elem_type()) {
+            // a same-lane singleton has the literal's packed representation;
+            // retain source owners while allocating the final array (D6.3).
+            RootFrame roots(3);
+            Rooted<ArrayNum*> source(roots, left.array_num);
+            Rooted<Item> member(roots, element);
+            int64_t length = source.get()->length;
+            Rooted<ArrayNum*> result(roots, array_num_new(lane, length + 1));
+            if (!result.get()) return ItemError;
+            if (!array_num_copy_same_type_bytes(result.get(), 0, source.get(), 0, length) ||
+                    !array_num_store_admitted(result.get(), length, member.get())) return ItemError;
+            return {.array_num = result.get()};
+        }
+    }
     if (get_type_id(left) != LMD_TYPE_ARRAY || item_is_list(left) ||
             element.item == ITEM_NULL_SPREADABLE || item_is_list(element) ||
             element_type == LMD_TYPE_ARRAY_NUM || element_type == LMD_TYPE_ERROR) {

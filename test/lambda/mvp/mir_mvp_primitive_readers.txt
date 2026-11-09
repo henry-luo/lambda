@@ -1,0 +1,7 @@
+[true, true, true]
+[null, null, null]
+[5, null, null]
+[true, false, null]
+null
+[1.5, 3.5, null]
+[[9, 2, 3], [1, 2, 3], true, [true, false]]

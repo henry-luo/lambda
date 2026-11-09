@@ -6,6 +6,7 @@
 #include "../mir_cow_analysis.hpp"
 #include "../mir_shape_candidates.hpp"
 #include "../lambda-number.hpp"
+#include "../lambda-number-types.hpp"
 #include "../re2_wrapper.hpp"
 #include "lib/host_paths.h"
 
@@ -1229,6 +1230,15 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
             return call->propagate ? &TYPE_INT :
                 lambda_type_union_normalized(m->tp->pool, &TYPE_INT, &TYPE_ERROR);
         if (mvp_native_math(info, arg)) return &TYPE_FLOAT;
+        bool u32_cast = (info->fn == SYSFUNC_FLOAT || info->fn == SYSFUNC_INT) &&
+            lambda_numeric_kind_from_type(successful_arg) == LAMBDA_NUM_U32;
+        if (u32_cast) {
+            // match the emitted u32 converter's scalar success without losing
+            // an incoming Error before the call boundary (S7.7.3, D4.3.1).
+            Type* converted = info->success_type;
+            return lambda_type_accepts_error(arg_contract)
+                ? lambda_type_union_normalized(m->tp->pool, converted, &TYPE_ERROR) : converted;
+        }
         if ((info->fn == SYSFUNC_FLOAT || info->fn == SYSFUNC_INT) &&
                 (arg == LMD_TYPE_FLOAT || arg == LMD_TYPE_INT))
             return info->fn == SYSFUNC_FLOAT ? &TYPE_FLOAT : &TYPE_INT;
@@ -3796,7 +3806,11 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             if (node->node_type == AST_NODE_INDEX_EXPR) {
                 // a primitive integer-key read returns its member or absence;
                 // only a consuming typed boundary can reject absence (S7.1.1v3).
-                collects = true;
+                AstFieldNode* read = (AstFieldNode*)node;
+                Type* owner = mvp_value_contract(m, read->object);
+                Type* key = mvp_value_contract(m, read->field);
+                collects = read->field->next || !mvp_array_element(owner) ||
+                    lambda_type_accepts_error(owner) || mvp_rep(key) != VALUE_REP_INT_LANE;
                 fails = mvp_value_contract(m, node)->type_id == LMD_TYPE_ANY;
             }
             if (node->node_type == AST_NODE_FOR_EXPR) {
@@ -3918,6 +3932,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             // independent return admission (for example, a record literal).
             fails |= implicit_fails;
             collects |= fails || implicit_collects;
+            if (node->node_type != AST_NODE_PARAM && collects) f->body_may_gc = true;
             if (collects && !f->abi.effects.may_gc) { f->abi.effects.may_gc = true; changed = true; }
             if (fails && !f->abi.effects.may_return_error) { f->abi.effects.may_return_error = true; changed = true; }
             if (reenters && !f->abi.effects.may_reenter) { f->abi.effects.may_reenter = true; changed = true; }

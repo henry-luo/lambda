@@ -1701,6 +1701,8 @@ extern Item lambda_active_module_name_item(uint32_t module_name_index,
 extern Item lambda_name_id_to_item(NameId name_id);
 extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
 extern Item fn_member_by_id(Item item, NameId name_id);
+extern uint64_t lambda_array_primitive_index(Item owner, int64_t index, int64_t elem_type);
+extern void lambda_set_field_f64(struct ShapeEntry* field, void* slot, double number);
 extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
 // Property-kernel declarations live in C++ headers with the exact ABI typedefs;
@@ -1817,6 +1819,14 @@ JitImport jit_runtime_imports[] = {
     {"array_int64_fill", FPTR(array_int64_fill)},
     {"array_float_fill", FPTR(array_float_fill)},
     {"array_get", FPTR(array_get)},
+    // rank-one admitted primitive lanes, bounds and live view resolution only.
+    {"lambda_array_primitive_index", FPTR(lambda_array_primitive_index),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"array_int_get", FPTR(array_int_get)},
     {"array_int64_get", FPTR(array_int64_get)},
     {"array_float_get", FPTR(array_float_get)},
@@ -1898,6 +1908,12 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_set_field_f64", FPTR(lambda_set_field_f64),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"map_shape_field_to_item", FPTR(map_shape_field_to_item),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
@@ -4057,8 +4073,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #else
     static const char* audited[] = {
         "memset", "memcpy", "fmod",
-        "set_field_value", "map_shape_field_to_item",
-        "lambda_stack_is_exhausted",
+        "set_field_value", "lambda_set_field_f64", "map_shape_field_to_item",
+        "lambda_stack_is_exhausted", "lambda_array_primitive_index",
 #if defined(__APPLE__) || defined(__linux__)
         "sigsetjmp",
 #else
