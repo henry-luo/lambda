@@ -18,7 +18,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from split_paths import resolve_split_paths, sibling_roots, use_input_scripts
+from split_paths import resolve_split_paths, sibling_roots, thorvg_openmp_archives, use_input_scripts
 use_input_scripts()
 from build_config import load_build_config, resolve_source_sets
 
@@ -2911,6 +2911,13 @@ class PremakeGenerator:
                 '        "build/lib",',
             ])
 
+        # Premake's gmake backend expects archive basenames in links, so put
+        # the owner-specific profile directories on the linker search path.
+        input_root, radiant_root = sibling_roots()
+        for directory in (input_root / 'build/lib/%{cfg.buildcfg}',
+                          radiant_root / 'build/lib/%{cfg.buildcfg}',
+                          Path('build/lib/%{cfg.platform}/%{cfg.buildcfg}')):
+            self.premake_content.append(f'        "{directory}",')
         self.premake_content.extend([
             '    }',
             '    '
@@ -2945,8 +2952,8 @@ class PremakeGenerator:
         def add_internal_project_link(project_name: str) -> None:
             if project_name in internal_project_links:
                 return
-            if not self.use_linux_config:
-                self.premake_content.append(f'        "{self._sibling_archive(project_name) or project_name}",')
+            if not self.use_linux_config and not self._sibling_archive(project_name):
+                self.premake_content.append(f'        "{project_name}",')
             internal_project_links.append(project_name)
 
         def internal_project_artifact(project_name: str) -> str:
@@ -3086,6 +3093,17 @@ class PremakeGenerator:
             '    '
         ])
 
+        # Premake treats archive paths in links as library names; raw paths
+        # select the owner-built files and become linker prerequisites instead.
+        if not self.use_linux_config:
+            owner_archives = [self._sibling_archive(name) for name in internal_project_links]
+            owner_archives = [archive for archive in owner_archives if archive]
+            if owner_archives:
+                self.premake_content.append('    linkoptions {')
+                for archive in owner_archives:
+                    self.premake_content.append(f'        "{archive}",')
+                self.premake_content.extend(['    }', '    '])
+
         # Add external library linkoptions for test-specific libraries
         if libraries:
             external_static_libs = []
@@ -3112,6 +3130,9 @@ class PremakeGenerator:
                             late_static_libs.append((lib_name, lib_path))
                         else:
                             external_static_libs.append(lib_path)
+
+            if self.use_macos_config and any(Path(path).name == 'libthorvg.a' for path in external_static_libs):
+                external_static_libs.extend(thorvg_openmp_archives())
 
             # Linux's GNU linker scans static archives once from left to right.
             # Keep external providers in the final LIBS sequence after Lambda's

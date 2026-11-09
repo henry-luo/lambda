@@ -68,14 +68,15 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
 # Derive native build projects from the same suite selection used for execution.
-RADIANT_BUILD_SELECTION ?= --radiant-baseline
+RADIANT_BUILD_SELECTION ?= --radiant-baseline --lambda-owned
 RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline $(RADIANT_BUILD_SELECTION) --list-build-targets) test_wpt_input_events_gtest
 # Native runners can use release code for whole-gate performance measurements.
 RADIANT_TEST_CONFIG ?= debug_native
 PDF_TEST_CONFIG ?= debug_native
 # Derive builds from the execution selection so newly added suites cannot run
 # stale binaries. The concurrency and Node preliminary suites stay excluded.
-LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --list-build-targets)
+LAMBDA_BASELINE_SELECTION = --target=lambda --category=baseline --lambda-owned --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest
+LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --list-build-targets)
 # test-input-baseline invokes these native binaries directly, so keep their
 # build separate from the full test aggregate and reusable by both targets.
 INPUT_BASELINE_TEST_PROJECTS := \
@@ -1624,7 +1625,7 @@ interp-bench:
 	@python3 test/interp/repl_bench.py
 
 test-lambda-baseline: TEST_BUILD_QUIET := 1
-test-lambda-baseline: build-lambda-baseline test-input-baseline test-gtest-result-counts
+test-lambda-baseline: build-lambda-baseline test-gtest-result-counts
 	@echo "Clearing HTTP cache for clean test runs..."
 	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
@@ -1632,14 +1633,14 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline test-gtest-resul
 	@$(PYTHON) test/sqlite_commit_sync_test.py
 	@echo "Running LAMBDA baseline test suite..."
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
-	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --parallel
 
 # Preserve explicit T0/AUTO parity arms; ordinary script cases exercise MVP/JIT.
 .PHONY: test-lambda-mvp
 test-lambda-mvp: TEST_BUILD_QUIET := 1
 test-lambda-mvp: build-lambda-baseline
 	@echo "Running Lambda baseline GTests with MVP selected for JIT arms..."
-	@LAMBDA_TEST_MIR_COMPILER=mvp LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel $(ARGS)
+	@LAMBDA_TEST_MIR_COMPILER=mvp LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --parallel $(ARGS)
 
 # Independent RFC 6455 peers, including TLS and malformed input.
 .PHONY: test-websocket
@@ -1653,7 +1654,7 @@ test-chat-clients: build
 	$(PYTHON) test/demo/chat/test_media.py
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
-test-lambda-full: test-lambda-baseline
+test-lambda-full: test-lambda-baseline test-input-baseline
 	@echo "Running WebSocket interoperability gate..."
 	@$(PYTHON) test/websocket/test_websocket.py
 	@node test/websocket/test_browser_websocket.cjs
@@ -1661,8 +1662,9 @@ test-lambda-full: test-lambda-baseline
 	@./test/test_lambda_concurrency_gtest.exe
 	@echo "Running extended Lambda runtime gate..."
 	@./test/test_lambda_extended_gtest.exe
-	@echo "Running Lambda DOM-node gate..."
-	@./test/test_lambda_domnode_gtest.exe
+	@echo "Running sibling-owned tests retained by the full Lambda gate..."
+	@$(MAKE) -C build/premake config=debug_native test_zip_gtest test_lambda_domnode_gtest test_css_dom_integration test_css_dom_crud -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@node test/test_run.js --target=lambda --category=baseline --include-test=test_zip_gtest,test_lambda_domnode_gtest,test_css_dom_integration,test_css_dom_crud --parallel
 	@echo "Running Lambda validator-input gate..."
 	@./test/test_validator_input_gtest.exe
 	@echo "Running semantics-model verification gate..."
@@ -2190,7 +2192,7 @@ test-svg-smil: build
 # All Radiant checks use the shared runner's JSON artifacts and final report.
 # Native and script pools share a worker budget; artifact-sharing checks remain exclusive.
 run-radiant-baseline:
-	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline --radiant-baseline $(ARGS)
+	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(RADIANT_BUILD_SELECTION) $(ARGS)
 
 run-radiant-full:
 	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(ARGS)
@@ -3255,7 +3257,7 @@ build-input-baseline: build-lambda-data
 # debug and release share lambda.exe; remove it before a release host rebuild
 # so make cannot mistake an ASan debug binary for an up-to-date release host.
 # CryptoKey lazily loads node-crypto; stale DSOs otherwise hide current host behavior.
-build-lambda-baseline: build-input-baseline build-node-core build-node-fs build-node-crypto
+build-lambda-baseline: build-lambda-data build-node-core build-node-fs build-node-crypto
 	@echo "Building the Lambda baseline runtime and native test executables..."
 	@if [ -f .lambda_release_build ]; then \
 		$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=lambda.exe; \

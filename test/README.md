@@ -5,6 +5,12 @@ Written for coding agents; build and Make details live in [`doc/dev/Make_Guide.m
 
 Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 
+## Test ownership
+
+Input parsers, formatters and shared-library unit tests live in `../lambda-input/test`; native layout, rendering, media and host-interface tests live in `../radiant/test` (D9.1.1v4, D9.1.3v2). Lambda keeps runtime, scripting, DOM adapters and integration tests here. Existing Lambda aggregate entries resolve the owner-local sources through `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` and continue to write their executables under this checkout's `test/` directory.
+
+Run `make -C ../lambda-input test-native` and `make -C ../radiant test-native` for the native owner suites. The input target prepares its pinned YAML corpus and uses the sibling `lambda-test` Markdown corpus; Radiant uses that checkout's layout and media corpora. Public-network input tests are a separate `test-network-online` target. Lambda's `test-lambda-baseline` and `test-radiant-baseline` select Lambda-owned sources and integration scripts; they do not run sibling-owned unit tests. The independent `test-input-baseline` and full aggregate targets remain available.
+
 ## Ground rules
 
 - Run everything from the repo root. Harnesses use repo-relative paths (`./lambda.exe`, `test/...`).
@@ -39,7 +45,7 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 | EPUB reader: `lmd/package/doc/ebook*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='*ebook*'`; `./test/test_ui_automation_gtest.exe --suite baseline --test 'ebook_*,doc_viewer_epub_preview,iframe_navigation_delegate,browser_focus_caret,browser_inline_focus'`; `python3 test/epub_reader_check.py --report temp/epub-state.json` |
 | Diff review: `lmd/package/doc/diff*`, byte grammar and process capture | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='*grammar_*:*diff_*'`; `./test/test_ui_automation_gtest.exe --test 'diff_*'`; `./test/test_lambda_concurrency_gtest.exe` |
 | Native geographic maps: `radiant/geomap*`, `lmd/package/map*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `make test-map` (frames, indexed picking, native pointer/control input), `make test-map-export`, `make test-map-reference` (first `npm ci --prefix test/map`); fixtures and pinned expression corpus in `test/map/`, functional goldens in `test/lambda/map/` |
-| Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make test-input-baseline` (5 corpora, also run by test-lambda-baseline) + `make test-input` (68-binary input suite) | `./test/test_input_model_gtest.exe`; `./test/test_input_blob_url_gtest.exe`; `./test/test_input_dom_native_gtest.exe`; `./test/test_markdown_gtest.exe --baseline`; `./test/test_input_roundtrip_gtest.exe --gtest_filter='JsonTests.*'`; `./test/test_html_gtest.exe` |
+| Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make -C ../lambda-input test-native`; `make test-input-baseline` for the five parser corpora | `../lambda-input/build/test/test_input_model_gtest`; `../lambda-input/build/test/test_input_roundtrip_gtest --gtest_filter='JsonTests.*'`; `../lambda-input/build/test/markup/test_markdown_gtest --baseline` |
 | Script source writers: `lmd/package/doc/misc*` | `make test-input` + `make test-lambda-baseline` | `python3 test/script_format_roundtrip.py --report temp/script-format-roundtrip.json` (`--format` / `--route` select cases); `./test/test_lambda_gtest.exe --gtest_filter='*doc_misc_roundtrip*'`. EML/VCF/ICS pass; prose readback currently fails. Details: [`Script_Formats_Support.md`](../doc/Script_Formats_Support.md#verification) |
 | CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
 | Radiant layout / render / events: `radiant/` | **`make test-radiant-baseline`** (the `radiant` suite's baseline native and script checks) | `make layout test=baseline_301_simple_margin`; `make layout suite=<dir>`; `./test/test_ui_automation_gtest.exe --suite baseline --test <id>`; `make test-render test=<name>` |
