@@ -1,6 +1,6 @@
 # Lambda Documentation Convention
 
-**Version:** 1.5.0 (2026-11-06)
+**Version:** 1.6.0 (2026-11-09)
 
 **Status:** normative for how Lambda documentation is organized, written, and
 kept honest. Codifies the conventions previously scattered across CLAUDE.md
@@ -15,7 +15,7 @@ rule 17, the formal specs' own headers, and working practice.
 | **Root ADRs** | `doc/Lambda_Formal_Semantics.md`, `doc/Lambda_Formal_Design.md` | Final rulings only — the single sources of truth | **Normative — wins over everything** |
 | **Working design docs** | `vibe/*.md` | Secondary ADRs: history, alternatives, reasonings, detailed design | **Normative where no formal ruling covers the point** |
 | **Impl plans & progress** | `vibe/impl/*.md` | Full implementation plans, phases, progress, status; issue-fix records | Informative (history) |
-| **Issue ledger** | `vibe/Lambda_Issue_Ledger.md` | The one central issue ledger for Lambda | Working record, not normative |
+| **Issue ledger** | `vibe/Lambda_Issue_Ledger.md`; sibling project ledgers | Owner-specific issue records | Working records, not normative |
 | **Reference grammar** | `lambda/tree-sitter-lambda/grammar.js` | Pseudo design doc: the whole surface language at one glance | **Third in the authority chain** — below vibe (it misses some corner cases) |
 | **Developer guides** | `doc/dev/*.md` | How to build, test, lint and write code in this repo | Informative — never authority |
 | **User-facing docs** | `doc/*.md` (everything else), `doc/tutorial/` | Formal user-facing language and tool documentation, and the tutorial | Descriptive of the rulings |
@@ -199,10 +199,15 @@ the locations above.
 
 ## 6. The issue ledger (`vibe/Lambda_Issue_Ledger.md`)
 
-- **The only issue ledger.** Add new issues here, never to a new sibling file
-  or an archived one. Retired sibling ledgers live in `vibe/impl/` with the
-  `(retired)` suffix; each keeps its detail while its live residue is indexed
-  in the central ledger.
+- **Lambda ownership.** Add Lambda core issues to this ledger, not to a new
+  Lambda sibling ledger or an archive. Retired Lambda ledgers live in
+  `vibe/impl/` with the `(retired)` suffix; their live residue is indexed here.
+  `lambda-input` and Radiant are separate owners under D9.1.1v4 and D9.1.3v2:
+  record their new issues in [Lib and Input Issue Ledger](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md)
+  and [Radiant Issue Ledger](../../radiant/vibe/Radiant_Issue_Ledger.md),
+  respectively. Lambda's older Radiant ledger links moved native issues to
+  their owner and retains mixed, Lambda-owned, input-owned and resolved
+  records; historical claims still require review.
 - **Verification discipline**: entries are periodically re-checked against a
   named commit and marked **OPEN** (reproduced, `file:line` anchors
   re-resolved), **PARTIAL** (residue stated), or **RESOLVED** (moved to the
@@ -230,9 +235,10 @@ add a detailed-design document under `doc/dev`.
   the content and bump the date; there is no per-change sync duty.
 - **Cite `file:line` + exact symbol names**, never quoted code — line numbers
   drift; the symbol name is what the reader confirms against.
-- **Issues go in a ledger, never in a document's own "known issues" section.**
-  Besides the central ledger (§6), `vibe/jube/JS_Issue_Ledger.md` and
-  `vibe/radiant/Radiant_Issue_Ledger.md` hold the LambdaJS and Radiant issues.
+- **Issues go in the owning project's ledger, never in a document's own
+  "known issues" section.** LambdaJS issues remain in
+  `vibe/jube/JS_Issue_Ledger.md`; input and Radiant issues go in their
+  owner-local ledgers (§6).
 
 ## 8. User-facing docs (`doc/*.md`)
 

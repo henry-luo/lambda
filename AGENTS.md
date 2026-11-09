@@ -3,11 +3,25 @@
 > This file is the single source of agent instructions. `CLAUDE.md` imports it
 > and `.github/copilot-instructions.md` points to it — edit only this file.
 
-Path ownership: references to `lib/` in these instructions mean the sibling
-`../lambda-input/lib/`; references to `radiant/` mean
+Path ownership: references to `lib/` and `lambda/input/` in these instructions
+refer to sources in `../lambda-input/`; `radiant/` refers to sources in
 `../radiant/radiant/`. These are header include prefixes and logical source
-names, not directories in the Lambda checkout. The remaining `lambda/input`
-path is a migration link to input (D9.1.1v4, D9.1.3v2).
+names, not source directories in the Lambda checkout (D9.1.1v4, D9.1.3v2).
+
+### Working across project boundaries
+
+When working on Lambda, do not directly modify source files owned by
+`lambda-input` or Radiant, including their implementation, headers, tests,
+and build scripts. If you find an issue in either project, record it in the
+owning project's ledger: [Lib and Input Issue Ledger](../lambda-input/vibe/Lib_Input_Issue_Ledger.md)
+or [Radiant Issue Ledger](../radiant/vibe/Radiant_Issue_Ledger.md). Include the
+observed behavior, reproduction, relevant evidence and whether the issue blocks
+the Lambda task; mark an unconfirmed cause as such.
+
+If the issue blocks the Lambda work, stop the affected work after recording
+the issue and tell the user what is blocked. Do not work around the issue or
+modify the sibling project's source to continue. Otherwise, continue Lambda
+work that does not depend on the issue. Ledger edits are allowed for reporting.
 
 ## CRITICAL Rules for AI Agents
 
@@ -141,7 +155,7 @@ make test-radiant-baseline    # Full Radiant baseline suite; run at major milest
 
 **Test map**: [`test/README.md`](test/README.md) — which gate covers which source area, every harness with its fixture dirs and golden convention, and single-test commands. Every `.ls` in a golden-driven test directory needs its golden; name helper, module and playground scripts `_*` or `mod_*`.
 
-**Radiant workflow (required reading)**: read [`radiant/README.md`](../radiant/radiant/README.md) before Radiant development. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation; run aggregate baseline gates at major milestones or at the end of a work session, and use focused tests for incremental changes. Batch related fixes before expensive qualification, keep unrelated debt in the backlog, and record completion by behavior rather than growing test counts. Documentation-only changes need document checks, not engine builds or regression suites.
+**Radiant integration workflow:** read [Radiant's README](../radiant/README.md) when working on its Lambda integration. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation; run aggregate baseline gates at major milestones or at the end of a work session. Record Radiant-owned issues in its ledger and follow the project-boundary rule above. Documentation-only changes need document checks, not engine builds or regression suites.
 
 **Broad HTML/CSS priorities**: finish the highest-impact features used by common pages before less important features or detailed conformance residue. Rank work by user impact, usage frequency, dependency value and effort. Define a useful core milestone for each feature, finish it, and move on with remaining limitations recorded honestly as partial support. Keep rare combinations, exhaustive reflection and minor isolated fidelity differences in the long-tail backlog unless they block the selected milestone or expose a serious shared defect. Do not let an effectively unbounded standards tail prevent delivery of the important features.
 

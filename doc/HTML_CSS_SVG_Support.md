@@ -773,7 +773,7 @@ Preview/export options require `--paged`. FO and `.rpd` loaders feed the common 
 
 ## 18. Known Limitations
 
-The gaps most likely to change how a real page looks, with the section that has the detail. The [Radiant issue ledger](../vibe/radiant/Radiant_Issue_Ledger.md) has the engine-level detail.
+The gaps most likely to change how a real page looks, with the section that has the detail. The [Radiant project issue ledger](../../radiant/vibe/Radiant_Issue_Ledger.md) records engine issues, including the moved native backlog; the [historical Lambda-hosted ledger](../vibe/radiant/Radiant_Issue_Ledger.md) retains mixed and resolved records.
 
 **Text**
 
