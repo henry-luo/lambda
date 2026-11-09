@@ -548,7 +548,7 @@ help:
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
 	@echo "  clean-grammar - Remove generated Lambda CST grammar files"
-	@echo "  clean-all     - Remove all build directories and tree-sitter libraries"
+	@echo "  clean-all     - Remove build directories, libraries, and lambda.exe"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
 	@echo ""
@@ -1510,6 +1510,7 @@ generate-grammar-typescript: $(TS_PARSER_C)
 
 clean-all: clean-premake clean-test
 	@echo "Removing all build directories..."
+	@rm -f $(LAMBDA_EXE)
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(BUILD_DEBUG_DIR)
 	@rm -rf $(BUILD_RELEASE_DIR)
@@ -1998,6 +1999,7 @@ test-map: RADIANT_BUILD_SELECTION =
 test-map: build-radiant-baseline
 	@./test/test_radiant_svg_hit_gtest.exe
 	@./test/test_map_gtest.exe
+	@./test/test_ui_automation_gtest.exe --suite baseline --test 'geomap_*_events'
 	@$(MAKE) -C build/premake config=debug_native test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*map_*'
 

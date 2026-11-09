@@ -44,7 +44,7 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 | Lambda packages: `lmd/package/**/*.ls` | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*scene3d_*'` (also `physics_`, `chart_`, `latex_`, `math_`, `mermaid_`, `graphviz_`, `structurizr_`, `slide_`, `editor_`, `edit_`); `make test-math-corpus` |
 | EPUB reader: `lmd/package/doc/ebook*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='*ebook*'`; `./test/test_ui_automation_gtest.exe --suite baseline --test 'ebook_*,doc_viewer_epub_preview,iframe_navigation_delegate,browser_focus_caret,browser_inline_focus'`; `python3 test/epub_reader_check.py --report temp/epub-state.json` |
 | Diff review: `lmd/package/doc/diff*`, byte grammar and process capture | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='*grammar_*:*diff_*'`; `./test/test_ui_automation_gtest.exe --test 'diff_*'`; `./test/test_lambda_concurrency_gtest.exe` |
-| Native geographic maps: `radiant/geomap*`, `lmd/package/map*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `make test-map` (frames, indexed picking, native pointer/control input), `make test-map-export`, `make test-map-reference` (first `npm ci --prefix test/map`); fixtures and pinned expression corpus in `test/map/`, functional goldens in `test/lambda/map/` |
+| Native geographic maps: `radiant/geomap*`, `lmd/package/map*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `make test-map` (native frames and picking, plus `lambda.exe` event replays for pointer, control and keyboard input), `make test-map-export`, `make test-map-reference` (first `npm ci --prefix test/map`); fixtures and pinned expression corpus in `test/map/`, functional goldens in `test/lambda/map/` |
 | Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make -C ../lambda-input test-input-baseline` | `../lambda-input/build/test/test_input_model_gtest`; `../lambda-input/build/test/test_input_roundtrip_gtest --gtest_filter='JsonTests.*'`; `../lambda-input/build/test/markup/test_markdown_gtest --baseline` |
 | Script source writers: `lmd/package/doc/misc*` | `make test-input` + `make test-lambda-baseline` | `python3 test/script_format_roundtrip.py --report temp/script-format-roundtrip.json` (`--format` / `--route` select cases); `./test/test_lambda_gtest.exe --gtest_filter='*doc_misc_roundtrip*'`. EML/VCF/ICS pass; prose readback currently fails. Details: [`Script_Formats_Support.md`](../doc/Script_Formats_Support.md#verification) |
 | CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
@@ -61,6 +61,12 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 | MCP client/server: `lambda/io/mcp*`, `lambda/serve/mcp_server*`, `lambda/runtime/mcp_module.cpp` | `make test-mcp` (real stdio and loopback HTTP; needs socket permission) + `make test-lambda-baseline` for runtime changes | `python3 test/mcp/test_mcp.py ClientTests`; transport contract and current scope: [mcp/README.md](mcp/README.md) |
 | Jube / Node modules: `lambda/jube/`, `lambda/module/node_*` | **`make test-lambda-baseline`** (builds node-core/node-fs) + `make node-regression-gate` | `make node-baseline`; `make test-jube-module-integrity`; `make check-host-exports` |
 | Release-only checks (perf, JIT timing) | n/a | `make release` first (rule 10). Never run it in a worktree. |
+
+The `geomap_*_events.json` fixtures replace the in-process map input cases:
+selection and callbacks, controls and keyboard, drag suppression, pointer and
+wheel input, and double-density coordinates. `dom_regexp_unicode_email.json`
+checks the document-realm matcher through the same host. Both run in the
+Radiant UI baseline; `make test-map` also runs the map replays (D9.1.1v4).
 
 Procart surface changes use `./test/test_lambda_gtest.exe --gtest_filter='ProcartSurfaceTests.*'`
 for package fixtures and the saved study on interp/AUTO/JIT. Native replay is

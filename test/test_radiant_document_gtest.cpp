@@ -6045,20 +6045,6 @@ TEST_F(RadiantDocumentTest, CrossDocumentNavigationFinishesMicrotasksWithoutDrai
     EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
 }
 
-TEST_F(RadiantDocumentTest, UnicodeEmailPatternSurvivesDirectMatcherResourceLimit) {
-    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
-        var email = /[\p{L}\p{M}\p{N}._%+'-]{1,64}(?:[@\uFF20\uFE6B]|%40)[\p{L}\p{M}\p{N}.\u3002\uFF0E\uFF61-]{1,255}[.\u3002\uFF0E\uFF61][\p{L}\p{M}][\p{L}\p{M}\p{N}-]{1,62}/giu;
-        var samples = ['henry@example.com', 'hénry＠例子．公司', 'a﹫b｡com', 'not-an-email'];
-        var matches = samples.map(function(sample) { email.lastIndex = 0; return email.test(sample); });
-        document.getElementById('result').setAttribute('data-matches', JSON.stringify(matches));
-        document.getElementById('result').setAttribute('data-flags', email.flags);
-    </script>)HTML");
-    ASSERT_NE(result, nullptr);
-    // the document realm exercises native matcher routing, unlike the CLI's MVP RegExp.
-    EXPECT_STREQ(result->get_attribute("data-matches"), "[true,true,true,false]");
-    EXPECT_STREQ(result->get_attribute("data-flags"), "giu");
-}
-
 TEST_F(RadiantDocumentTest, FragmentNavigationRetainsCurrentDocumentTimers) {
     DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
         setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);

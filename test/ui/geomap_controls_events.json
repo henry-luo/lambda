@@ -1,0 +1,24 @@
+{
+  "name": "Map controls, keyboard and selection",
+  "html": "test/map/selection.ls",
+  "viewport": {"width": 360, "height": 260},
+  "event_interval_ms": 0,
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#viewport"}, "attribute": "aria-label", "equals": "Interactive map"},
+    {"type": "click", "target": {"selector": "[data-map-action='zoom-in']"}},
+    {"type": "assert_attribute", "target": {"selector": "#selection"}, "attribute": "data-zoom", "equals": "2"},
+    {"type": "click", "target": {"selector": "[data-map-action='zoom-out']"}},
+    {"type": "assert_attribute", "target": {"selector": "#selection"}, "attribute": "data-zoom", "equals": "1"},
+    {"type": "click", "target": {"selector": "[data-map-action='fit']"}},
+    {"type": "assert_script", "js": "Number(document.querySelector('#selection').getAttribute('data-zoom')) > 1"},
+    {"type": "click", "target": {"selector": "[data-map-action='reset']"}},
+    {"type": "assert_attribute", "target": {"selector": "#selection"}, "attribute": "data-zoom", "equals": "1"},
+    {"type": "click", "target": {"selector": "#viewport"}},
+    {"type": "assert_attribute", "target": {"selector": "#viewport"}, "attribute": "data-map-selection", "equals": "[\n  42\n]"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_attribute", "target": {"selector": "#viewport"}, "attribute": "data-map-selection", "equals": "[]"},
+    {"type": "key_press", "key": "="},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_attribute", "target": {"selector": "#selection"}, "attribute": "data-zoom", "equals": "1"}
+  ]
+}

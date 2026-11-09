@@ -1406,7 +1406,6 @@ class PremakeGenerator:
             'lambda-data-cpp': (input_root, 'liblambda-input.a'),
             'lambda-lib-cpp': (input_root, 'liblambda-lib.a'),
             'radiant-cpp': (radiant_root, 'libradiant.a'),
-            'radiant-properties': (radiant_root, 'libradiant-properties.a'),
         }
         provider = providers.get(project_name)
         if provider:

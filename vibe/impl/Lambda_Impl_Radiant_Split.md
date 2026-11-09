@@ -4,6 +4,30 @@
 
 ## Current checkpoint
 
+### Merge Radiant property archive
+
+- **Goal:** compile the Radiant view-property providers into `libradiant.a`,
+  removing the second owner archive while retaining native isolation and Lambda
+  integration coverage (D9.1.1v4, D9.1.3v2).
+- **Acceptance:** each provider occurs once in the Radiant archive; both owner
+  and Lambda builds and relevant isolated links consume it without a separate
+  property archive. Preserve test coverage and script ownership.
+- **Verification:** debug owner archive has each property object once; the
+  force-loaded native closure passed and Radiant native baseline passed 762,
+  skipped 45. All 19 affected Lambda test projects linked; 17 suites passed
+  in the sandbox and audio/video passed 83/83 with media-service access.
+  Custom-layout and state-store isolation checks passed after adapting their
+  staged property builds and dependency paths. The release owner build and
+  force-loaded native closure also passed; each release/debug archive has
+  exactly one member per property source, with no separate property archive.
+  Generator and input-isolation unit checks passed.
+- **Lambda host blocker:** the current committed MVP work declares
+  `expression`, `statements` and `direct_call` with an additional output
+  destination parameter but defines the old signatures (`mvp_mir.cpp`); the
+  debug host rebuild fails on ambiguous calls before linking. The active MVP
+  implementation is outside this archive change and was left intact. No host
+  build or aggregate result is claimed after this change.
+
 ### Owner-local unit baseline targets
 
 - **Goal:** provide input and Radiant unit baselines in their owning projects,
