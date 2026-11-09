@@ -294,6 +294,8 @@ struct MvpCompiler {
     ArrayList* shared_bindings;
     MvpInline* inlining;
     MvpErrorTarget* condition_failure;
+    MvpErrorTarget* output_failure;
+    unsigned output_inline_depth;
     AstNode* consuming_array_join;
     MIR_reg_t current_error;
     MIR_reg_t current_item;
