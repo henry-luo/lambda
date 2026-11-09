@@ -1019,9 +1019,9 @@ class PremakeGenerator:
             vlog("DEBUG: AddressSanitizer disabled")
 
         # Release configuration with size optimizations
-        # Use -flto=thin (ThinLTO) on macOS/Clang and Linux/Clang, -flto on Linux/GCC
+        # Clang names full LTO explicitly; GCC uses its standard LTO mode.
         linux_uses_clang = self.use_linux_config and base_compiler == 'clang'
-        lto_flag = '"-flto=thin"' if (self.use_macos_config or linux_uses_clang) else '"-flto"'
+        lto_flag = '"-flto=full"' if (self.use_macos_config or linux_uses_clang) else '"-flto"'
 
         def add_release_link_options(strip_locals=True):
             # strip_locals=False is for release_profile: stripping local symbols
@@ -1035,9 +1035,9 @@ class PremakeGenerator:
             ]
             if self.use_macos_config:
                 self.premake_content.extend([
-                    '        -- macOS: strip dead code and symbols with ThinLTO',
+                    '        -- macOS: strip dead code and symbols with full LTO',
                     '        linkoptions {',
-                    '            "-flto=thin",',
+                    f'            {lto_flag},',
                     '            "-Wl,-dead_strip",',
                     '            -- no -export_dynamic: the host exports only its D9.4.6',
                     '            -- allowlist, so every other global stays dead-strippable',
@@ -1051,14 +1051,14 @@ class PremakeGenerator:
                 ])
             elif self.use_linux_config:
                 if base_compiler == 'clang':
-                    # check if lld is available for ThinLTO
+                    # use LLD when available for Clang LTO
                     import shutil
                     has_lld = shutil.which('lld') is not None or shutil.which('ld.lld') is not None
                     if has_lld:
                         self.premake_content.extend([
-                            '        -- Linux/Clang: strip dead code and symbols with ThinLTO + LLD',
+                            '        -- Linux/Clang: strip dead code and symbols with full LTO + LLD',
                             '        linkoptions {',
-                            '            "-flto=thin",',
+                            f'            {lto_flag},',
                             '            "-fuse-ld=lld",',
                             '            "-Wl,--gc-sections",',
                         ] + strip_all_option + [
@@ -1068,7 +1068,7 @@ class PremakeGenerator:
                         self.premake_content.extend([
                             '        -- Linux/Clang: strip dead code and symbols (lld not available, using default linker)',
                             '        linkoptions {',
-                            '            "-flto",',
+                            f'            {lto_flag},',
                             '            "-Wl,--gc-sections",',
                         ] + strip_all_option + [
                             '        }',

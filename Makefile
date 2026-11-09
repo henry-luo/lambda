@@ -3086,13 +3086,28 @@ SPLIT_PROFILE ?= debug
 SPLIT_OUTPUT ?= lambda-static.exe
 SPLIT_INPUT_ROOT = $(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))
 SPLIT_RADIANT_ROOT = $(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))
+# Match the host's release LTO mode for the separately built first-party archives.
+# Their build signatures include these flags, so changing profile rebuilds objects.
+SPLIT_LINUX_LTO_FLAG = $(shell $(PYTHON) -c 'import json; c=json.load(open("$(DEFAULT_CONFIG)")); name=c.get("platforms",{}).get("linux",{}).get("compiler",c.get("compiler","clang")); print("-flto" if "gcc" in name or "g++" in name else "-flto=full")')
+SPLIT_LTO_FLAG = $(if $(filter Darwin,$(OS)),-flto=full,$(if $(filter Linux,$(OS)),$(SPLIT_LINUX_LTO_FLAG),-flto))
+SPLIT_RELEASE_FLAGS = -O3 $(if $(filter release_profile,$(SPLIT_PROFILE)),-g -fno-omit-frame-pointer) $(SPLIT_LTO_FLAG) -ffunction-sections -fdata-sections
+SPLIT_ARCHIVE_OPTIONS = $(if $(filter release release_profile,$(SPLIT_PROFILE)),CC="$(CC)" CXX="$(CXX)" AR="$(AR)" CFLAGS="$(SPLIT_RELEASE_FLAGS)" CXXFLAGS="$(SPLIT_RELEASE_FLAGS) -Wno-return-type-c-linkage")
 .PHONY: build-lambda-split
 build-lambda-split: $(MIR_LIB)
 	LAMBDA_INPUT_ROOT="$(SPLIT_INPUT_ROOT)" RADIANT_ROOT="$(SPLIT_RADIANT_ROOT)" $(PYTHON) utils/check_split_roots.py
 	$(MAKE) generate-premake
 	cd build/premake && $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" -j$(JOBS)
-	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" -j$(JOBS)
+	@case "$(SPLIT_PROFILE)" in release|release_profile) \
+		stamp="build/.split-$(SPLIT_PROFILE)-lto"; \
+		if [ ! -f "$$stamp" ] || [ "$$(cat "$$stamp")" != "$(SPLIT_LTO_FLAG)" ]; then \
+			for project in lambda-rt-cpp lambda-radiant-adapter-cpp lambda-exe node-core; do \
+				rm -rf "build/obj/$$project/native/$(SPLIT_PROFILE)"; \
+			done; \
+			printf '%s\n' "$(SPLIT_LTO_FLAG)" > "$$stamp"; \
+		fi ;; \
+	esac
+	$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" $(SPLIT_ARCHIVE_OPTIONS) -j$(JOBS)
+	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" $(SPLIT_ARCHIVE_OPTIONS) -j$(JOBS)
 	$(call run_make_with_error_summary,split-runtime,$(SPLIT_PROFILE)_native,-f lambda-rt-cpp.make LDDEPS=,all)
 	$(call run_make_with_error_summary,split-adapters,$(SPLIT_PROFILE)_native,-f lambda-radiant-adapter-cpp.make LDDEPS=,all)
 	$(call run_make_with_error_summary,split-node-core,$(SPLIT_PROFILE)_native,-f node-core.make,all)
