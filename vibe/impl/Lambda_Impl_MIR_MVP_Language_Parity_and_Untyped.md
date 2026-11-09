@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-05
 
-**Status:** Active, resumed 2026-11-09. Reproduce and repair the remaining correctness failures on the split build, then qualify parity. PDF/EPS, watercolor and native residuals remain open; no full compatibility or performance closure claimed.
+**Status:** Active, resumed 2026-11-09. P44–P50 close the five PDF/EPS failures and the native husk/GC fixture failures. Current work tunes untyped release execution while preserving typed performance (§10.91). Watercolor's normal timeout and final language qualification remain open. No full compatibility or performance closure claimed.
 
 **Starting tree:** `71296a16a9622f764229720ed2c321330efcd278`, branch `master`.
 
@@ -18,13 +18,17 @@ object layouts, type system, scheduler and precise GC remain shared.
 
 ## Current checkpoint
 
-- **Resumed:** 2026-11-09 at the user's request, master `b7cfa3cdd`. Unrelated user deletions of retired issue documents are present and outside this task.
-- **Scope:** finish confirmed MVP correctness gaps across the existing Full/T0 language surface, retaining formal semantic oracles and the shared runtime (**D8.3.1–D8.3.3**, **S7.6.3v3**, **S7.7.2v2–S7.7.6v2**).
+- **Resumed:** 2026-11-09 at the user's request, master `14f48f209`; merge complete, initially clean tree.
+- **Scope:** the latest request prioritizes untyped MVP performance against Full MIR on all 77 benchmarks, with no typed MVP regression. Preserve the existing correctness changes, formal semantic oracles and shared runtime (**D4.3.1**, **D8.3.1–D8.3.3**).
 - **Current evidence:** the split debug host builds. Prior focused fixes restore array reduction and Error-arm return admission; all 77 typed benchmark goldens pass under each compiler (`temp/mvp-quicksort/final-tests.log`). These are correctness results, not release timing qualification.
 - **Milestones:** reproduce the six late source cases; fix PDF/handler and EPS/container causes with permanent paired/GC cases; investigate watercolor and native/harness residuals; reconcile aggregate test-target migration and run current parity gates.
-- **Verification budget:** focused paired checks for each root fix, then broad correctness gates at milestones. Performance timing only with release builds after correctness stabilizes. No repeated aggregate runs while the known missing input-test target persists.
+- **Verification budget:** focused unit checks only until all known missing features are implemented, per the user. No Lambda baseline or intermediate full verification. Performance timing only with release builds after correctness stabilizes.
 - **Open qualification:** `make test-lambda-baseline` currently stops because `test_wpt_html_parser_gtest` has no generated build target. Old broad counts below remain historical; do not present them as current failures.
-- **Next:** replay PDF streaming, EPS fonts/text/machine/raster, pnpoly and watercolor with the current split executable; store results under `temp/mvp-parity-resume/` and identify shared causes before editing.
+- **P44–P47:** PDF output demand/handler rollback, boxed native range bounds and stale var-argument transport are repaired (§10.88). All five original PDF/EPS source cases pass paired normal/forced/seeded GC checks. Three permanent MVP regressions pass 9/9 GC checks and fail on the frozen pre-fix control. Full retains a newly exposed projected-borrow mismatch; its oracle remains unchanged.
+- **P48–P50:** dead native wrappers receive consistent ordinal handling, and their fixture now owns precise roots, compares JS Set completion and understands receiver-specific binding variants. Seven native units pass 21/21 across GC modes. A failure-only replay passes 35/37; its two macOS fork failures pass 2/2 with GTest's fresh-process death-test mode (§10.89).
+- **Watercolor:** the unchanged script matches its golden on MVP with a 300-second diagnostic budget. Its ordinary timeout still fails; debug runs establish correctness only. No release timing or threshold waiver is claimed (§10.90).
+- **Release tuning:** artifacts are under `temp/mvp_untyped_tuning_20261109/`. P8's complete release screen passes all 77 untyped goldens: 35/77 faster Full medians (starting 30/77), geometric MVP/Full ratio 0.88121 (starting 1.07515). All 77 typed goldens pass, with overall candidate/starting-MVP ratio 0.99847. P9 repairs the single confirmed typed regression and is the current private release; only its affected workloads are remeasured (§10.91).
+- **Next:** tune the remaining 42 slower rows from P8's full untyped screen, prioritizing record-heavy workloads, recursive search and mixed scalar transport. Final P9 checks cover the modular-store priority repair; P8 remains the latest complete 77-case timing campaign. No every-row performance target is closed. Retain deferred language qualification and the owner-ledger defects. Root executables remain untouched; no Lambda/Radiant baseline, C2MIR or intermediate full language verification ran.
 
 ### Previous checkpoint (2026-11-06)
 
@@ -3987,3 +3991,227 @@ unreported chunks, then classify remaining Python assertions. Full correctness
 and performance qualification remain deferred until known gaps are closed.
 The user requested wrap-up at this checkpoint; no baseline or new full
 verification was started, and no commit was requested.
+
+### 10.88 P44–P47: explicit output demand, range lanes and live borrows
+
+The resumed tree contained output-demand declarations without matching MVP
+implementations. MVP now threads the evaluated PDF destination through pure
+local result calls, sequence/control-flow paths and streamable queries, using
+the existing call, scope and iteration machinery. Ordinary bound values,
+explicit arrays, declared-parameter firewalls, captures and imported calls
+retain their value boundaries. Each output expression owns a checked status
+exit. A destination-aware handler checkpoints its operand and rewinds partial
+bytes before emitting recovery (S2.6.6v3/D8.2.6). Ordinary inlined value calls
+clear the caller's output exit, so their propagation stays in their activation.
+
+The EPS bind failure reduced to a counted loop with a boxed
+`len(body) - 1` bound. The integer proof selected native range lowering, but
+emission compared the Item word directly against integer lanes. Bounds now
+retain incoming Errors, convert to their native lanes before guards and carry
+a failed range check as the loop outcome (D2.3.5/S8.3.1v3). EPS machine/raster
+then pass. Fonts/text still lost heap objects: in `push_operand(m,
+lookup_font(m, key)^)`, the later actual replaced `m` after the outer var
+argument had read its old owner. The shared write audit now triggers a reread
+of the live root or previously evaluated projected place before publishing its
+call home. Plain arguments keep their snapshots (S9.1.3v3); place keys are not
+evaluated again. This closes fonts/text without editing the EPS package.
+
+Private split debug executable `p47-output-and-borrows.exe`, SHA256
+`87f7527353096f9a7715c9223b99bb4fe21753077b67bd54261bcc086a363099`,
+qualifies correctness only. All five original PDF/EPS cases pass paired normal
+and GC checks. The three new fixtures are `mir_mvp_output_recovery`,
+`mir_mvp_boxed_range_bounds` and `mir_mvp_live_borrow_arguments`; their `.txt`
+files retain the semantic results. Each fails on frozen P43 and passes on P47
+(`p47-regression-controls.json`). All nine MVP regression/GC checks pass
+(`p47-gc-final-mvp-unit.log`). The indexed-region, borrowed-coordinate and file
+output unit groups pass (`p47-demand-and-region-units.log`). Initial new-fixture
+syntax/contract mistakes were corrected in the fixture sources, not engine
+rules; failed reports remain under the task directory.
+
+Full passes the live root case but loses the nested place replacement:
+`record(parent.child, extend(parent.child)^)` produces `[30]` where `[30, 20]`
+is required. MVP preserves the replacement and the saved `[30]` snapshot.
+All three Full GC controls expose this same difference
+(`p47-live-borrow-final-unit.json`, `p47-borrow-regression-units.log`). No golden
+or test was weakened to accept it. This is a Full-only follow-up, not an MVP
+failure or a qualified paired all-case pass.
+
+### 10.89 P48–P50: native husks, precise test roots and residual isolation
+
+Ordinal get/set checked prototype placement before the dead-wrapper rule.
+By-name operations handled the dead wrapper first. The ordinal path now
+matches that ordering and never touches the discarded payload (D9.5.4).
+The existing parity fixture had three independent defects: its wrappers/keys
+were unrooted across allocations (D6.3.3); it compared Lambda Set's value with
+ordinal JS Set's Boolean completion; and it assumed unique names per ordinal,
+although the interface compiler deliberately emits receiver-specific binding
+variants. It now roots four live values, compares the JS Set surface, and
+checks every variant's name round trip and guarded operations. No member or
+operation is skipped. The failed assertion had bypassed runtime cleanup,
+causing later realm/cache failures in that process.
+
+Private native executable `p50-concurrency-units.exe`, SHA256
+`bb4f6b14d23ecd6e7e73009613fa148d4db139ec32e60b507f70d503aa574153`,
+passes seven focused units in normal, forced and seeded GC (**21/21**):
+husk parity, realm identity, fresh-runtime MIR cache, and the four MVP retained
+view/callback/edit/event cases (`p50-native-unit-results.json`). A failure-only
+replay of 37 P35 cases passes **35/37** (`p50-native-residual-units.json`).
+Both remaining document tests abort in Apple's Objective-C post-fork guard,
+before their semantic assertions. They pass **2/2** with
+`--gtest_death_test_style=threadsafe`, which starts fresh child processes
+(`p50-document-fresh-process-units.json`). No Objective-C guard was disabled,
+and the default-style failures remain recorded.
+
+Native build verification first encountered stale generated link names, then
+the relocated executable's node-core rpath. Regenerating through the current
+Premake generator fixes the former; pointing `DYLD_LIBRARY_PATH` at the real
+checkout module supports the private executable's new location. Neither is a
+runtime workaround or a sibling-source change. The original failures and the
+subsequent loaded reports are retained. No aggregate native gate ran.
+
+### 10.90 Watercolor correctness and remaining qualification
+
+A small sheet/stamp/step probe passes on both compilers
+(`p47-watercolor-step.json`). The original watercolor script still exceeds the
+45-second focused diagnostic timeout on the debug MVP host
+(`p47-watercolor-focused.json`). A stage-marked diagnostic progresses through
+all ten sections and matches the expected physical results. A subsequent run
+of the unchanged source completes and matches its golden with a 300-second
+diagnostic limit (`p47-watercolor-completion-unit.json`). This establishes
+output correctness, not the ordinary harness timeout or release performance.
+Do not increase the checked-in timeout or call this benchmark qualified.
+
+Next work remains release-build timeout investigation, the Full-only projected
+borrow discrepancy, historical unreported chunks and the remaining Python
+semantic/emission assertion classification. Full correctness, the Lambda
+baseline and paired typed/untyped performance remain deferred under the user's
+verification policy. The task's exact source/binary hashes are recorded in
+`temp/mvp-parity-resume/p50-checkpoint-provenance.json`. Changes remain
+uncommitted; no commit was requested in this continuation.
+
+### 10.91 Untyped release tuning (2026-11-09)
+
+The user requested faster untyped execution across the registered 77 cases,
+with no regression in typed MVP. This performance task preserves P44–P50 and
+does not restart the deferred language/baseline campaign. Measurements use
+the scripts' reported workload times, excluding process startup and compilation;
+all outputs must match their existing goldens. No workload, timer or benchmark
+golden was changed. Competing builds/tests cause whole paired rounds to be
+discarded and retried.
+
+The split release build produces private executables, leaving root executables
+unchanged. The frozen starting release SHA256 is
+`e45cec36fef54f4ebb1d2833fbde9d99dbc79f4c8b6be926630025f5cfb5ad70`.
+Its source identity, starting dirty diff, untracked fixtures and sibling
+revision/status records are archived under
+`temp/mvp_untyped_tuning_20261109/`. The benchmark fingerprint now resolves
+split-owned source paths through `utils/split_paths.py` (**D9.1.1v4**).
+The initial 3-pair screen passes all 77 untyped goldens, with 30/77 faster
+Full medians and geometric MVP/Full ratio 1.07515. This is screening evidence,
+not an every-row performance qualification.
+
+The shared changes address five causes:
+
+- Boxed array iterations can now enter existing closed numeric regions after
+  exact physical int/float/bool storage, extent and COW guards. The region proof
+  still rejects replacement, retaining/reentrant calls and collecting stores.
+  Unknown map-member setters are rejected explicitly: their effects had no
+  proof in this array region. Guard misses execute the original body before
+  any source effect (**D4.3.1**, **D5.4.4**, **S9.1.2**).
+- Native range selection uses current producer domains. Range counter lane
+  hypotheses widen with the existing call/write fixed point, so an untyped
+  bound inferred to remain integer avoids generic iterator dispatch; conflicting
+  callers and later replacement preserve generic iteration. Boxed successful
+  endpoints still convert through their actual lanes (**D2.3.5**,
+  **S8.3.1v3**).
+- Dynamic scalar operators try exact float carriers after the existing int
+  path, reusing shared numeric emission. Null, Error, mixed numeric carriers
+  and other types keep shared boxed helpers (**S4.3**, **S7.9.3**).
+- Confined recursive mutable int/bool parameters can retain a private array
+  observation and the existing scalar snapshot. Every incoming value and
+  indexed write must preserve its exact element domain; widening discards
+  the private lane and snapshot. This adds no inferred admission or store
+  contract (**D4.3.1**, **S9.1.2**, **S12.2.1v3**).
+- Erased Boolean arrays cache their physical witness beside int/float ones.
+  Guarded branch demand reads a byte directly; absence is falsy and every
+  other carrier uses ordinary truth/error handling. Shared-home reentry and
+  new inline activations invalidate the witness (**S3.1v2**, **S7.1.1v3**).
+
+Permanent fixtures are `mir_mvp_erased_iterations`, `mir_mvp_untyped_ranges`
+and `mir_mvp_untyped_snapshots`; `mir_mvp_scalar_fallback` adds erased float
+arithmetic. Each has an expected result. Focused checks exercise ordinary,
+forced and seeded GC, nullable/alternate storage, COW snapshots, short arrays,
+map writes, inference widening and recursive transport. Eleven focused methods
+pass all MVP checks. Three paired Full-only subtests fail on the recursive
+string replacement, also reproduced with the frozen starting Full engine;
+the correct golden remains, and **LR07-53** records the defect. The temporary
+proof tracing was removed before measured candidates were built.
+
+P7 completes 77/77 untyped goldens, with 36/77 faster Full medians and
+geometric MVP/Full ratio 0.88188. P8 refines float-guard operands to a non-null
+domain before native comparison emission; the scalar fixture exercises a
+nullable float against an erased operand. P8 is the current release (SHA256
+`145aa48df4a1bc3af7fd1f3df3128c2e137b85c09ad0d40fd961177c4db84dab`).
+Its focused unit summary records no MVP failures and the three known Full-only
+LR07-53 subtests. P8's complete five-pair typed screen passes all 77 goldens
+and has geometric candidate/starting-MVP ratio 0.99847 over 76 nonzero timer
+rows; canonical Sumfp reports zero for both. Four rows are selected for longer
+confirmation: Queens, Brainfuck, Splay and SHA-1. The complete current untyped
+screen has finished; its final figures are recorded below. Reports and source/binary manifests are under the
+task artifact directory.
+The P2 hotspot comparison already established N-body at 6.001 ms versus Full
+10.498 ms and prior MVP 111.797 ms, and FFT at 0.247 / 0.249 / 1.889 ms,
+using five interleaved measured triples. Later candidates supersede those
+numbers for final qualification; slow families and per-row typed regressions
+remain open until the current reports and confirmation runs are reviewed.
+
+The remaining optimization directions are shared producer/transport causes,
+not workload substitutions: close recursive array/result domains without losing
+absence/error semantics, hoist stable erased-array checks across whole counted
+loops, and extend physical record-candidate access using the existing shared
+shape/descriptor helpers. Record speculation must retain an exact live layout
+guard and boxed semantic domain (**D7.4.1**, **D2.6.2**, **D4.3.1**). These are
+next steps; this batch does not implement or qualify them.
+
+P8's final untyped campaign passes all 77 goldens: **35/77** faster Full
+medians, **42/77** slower, geometric MVP/Full ratio **0.88121**. The frozen
+starting engine was 30/77 faster and ratio 1.07515. This is approximately an
+18% improvement in normalized MVP time. Current Full comparisons include
+N-body 5.490/9.737 ms, Kostya primes 5.005/11.764 ms and Larceny primes
+4.892/11.410 ms. FFT is near parity at 0.230/0.236 ms. These complete-screen
+values use three measured pairs; they do not establish every-row qualification.
+`p8-summary.json` retains every slower row and both engines' failures (none).
+
+The five-pair typed screen's 0.99847 geometric ratio is essentially unchanged.
+Four 15-pair confirmations clear Queens, Splay and SHA-1, but confirm typed
+Brainfuck at 1.03441 times the starting MVP. MIR comparison shows a new general
+float/int array alternative ahead of the existing fused modular store. P9
+extracts the existing modular-store planner and gives a sole matching store
+its original native path; no benchmark name or source workaround is used.
+The modular fixture now checks conditional erased stores, floating misses and
+GC snapshots, and rejects a preceding `fmod`/slow-int alternative in MIR.
+This preserves saturation, bounds and COW rules (**S4.1.2**, **S9.1.2**).
+
+P9 release SHA256:
+`761ee4f35fd6053d131fe3fa06bb5153692d9edb785814540bdad6b4df1d3423`.
+Fifteen paired typed runs against the starting MVP give Brainfuck ratio
+**0.98251** and Fasta **0.98187**, neither statistically slower. Fasta is the
+other benchmark matching the changed modular-store pattern; the broad P8
+screen is not relabeled as a P9 full rerun. P9's three focused methods and the
+paired three-GC-mode modular fixture pass. Affected untyped Brainfuck/Fasta
+comparisons are retained separately in `p9-untyped-*.json`.
+
+No confirmed typed slowdown remains in these checks. The every-untyped-row
+Full-MIR target remains open. No Lambda/Radiant baseline, C2MIR run or final
+full-language gate was run in this tuning batch. Changes are uncommitted.
+
+Final scope checks retain the individual engine identities. P9's five-pair
+untyped Brainfuck comparison is 246.520 ms versus frozen Full 247.907 ms and
+P8 MVP 259.275 ms; its ratio bound still crosses parity with Full. Untyped
+Fasta is 0.854 / 0.774 / 0.798 ms; the apparent increase versus P8 is not
+statistically significant in this small screen, and Fasta remains slower Full.
+These rows are not silently substituted into the homogeneous P8 full-screen
+count. `final-summary.json` records the P8/P9 distinction and the remaining
+42 slower P8 rows. All compiler source and executable hashes were rechecked
+after measurements. Sibling source trees and root executables are unchanged;
+no benchmark campaign remains running.
