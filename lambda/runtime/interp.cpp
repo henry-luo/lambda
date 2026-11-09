@@ -232,7 +232,7 @@ static void interp_satellite_compile_job(void* opaque) {
 
     InterpSatelliteImage* image = NULL;
     const AstFuncNode* target = job->continuation ? job->continuation : job->def;
-    bool compiled = !retired_before_compile && job->runtime && compile_ast_function_satellite_snapshot(
+    bool compiled = !retired_before_compile && job->runtime && lambda_mvp_compile_function_snapshot(
         job->runtime, job->script, target, job->sequence,
         interp_satellite_compile_cancelled, &queue->cancel_requested, &image);
     pthread_mutex_lock(&queue->mutex);
@@ -774,7 +774,7 @@ static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destinat
 // list producer sitting here is in an item position (S2.5.5v2): it finishes
 // with the marker the sequence and content appends skip, so an empty one
 // contributes nothing while a bound empty list is the null value. Mirrors
-// mir_box_sequence_item so the tiers agree.
+// MVP sequence boxing so the tiers agree.
 static Item interp_eval_sequence_item(InterpFrame* f, AstNode* item) {
     AstNode* saved = f->st->list_item_producer;
     f->st->list_item_producer = ast_is_list_producer(item) ? ast_unwrap_primary(item) : NULL;
@@ -1795,7 +1795,7 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     case OPERATOR_IS:        return (Item){.item = b2it(fn_is(left, right))};
     case OPERATOR_REF_EQ:    return fn_ref_eq_value(left, right);
     case OPERATOR_SUBTYPE:   return (Item){.item = b2it(fn_subtype(left, right))};
-    // `expr is nan` lowers to a one-operand fn_is_nan call (transpile-mir.cpp);
+    // `expr is nan` uses the same one-operand helper in T0 and MVP;
     // the parsed `nan` on the right is a marker, not a compared value.
     case OPERATOR_IS_NAN:    return (Item){.item = b2it(fn_is_nan(left))};
     case OPERATOR_IN:        return (Item){.item = b2it(fn_in(left, right))};
@@ -2525,7 +2525,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             words[i] = eval_expr(f, a).item;
         }
         // `map()` / `map([k, v, …])` carry no boxed entry point: lowering emits
-        // vmap_new / vmap_from_array directly (transpile-mir.cpp), so the walker
+        // vmap_new / vmap_from_array directly in MVP, so the walker
         // calls the same two helpers rather than going through the dispatch.
         if (sinfo && sinfo->fn == SYSFUNC_VMAP_NEW) {
             return argc == 0 ? vmap_new() : vmap_from_array((Item){.item = words[0]});
@@ -2540,7 +2540,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         }
         // floor/ceil/round/trunc/abs preserve their argument's lane: the boxed
         // helper always yields float, while lowering unboxes that result by the
-        // *call node's* static type (POST_PROCESS_UNBOX, transpile-mir.cpp), so
+        // *call node's* static type in MVP, so
         // `trunc(n:int)` stays an int. Re-narrowing on the same static type
         // reproduces the choice without duplicating type inference.
         if (sinfo && sinfo->native_c_name && sinfo->native_func_ptr &&
@@ -2677,9 +2677,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
     AstIdentNode* imported_ident = callee && callee->node_type == AST_NODE_IDENT
         ? (AstIdentNode*)callee : NULL;
     bool cross_lang_js_call = imported_ident && imported_ident->entry &&
-        imported_ident->entry->import && imported_ident->entry->import->is_cross_lang &&
-        imported_ident->entry->import->script &&
-        imported_ident->entry->import->script->profile == &js_profile;
+        lambda_import_is_js(imported_ident->entry->import);
     if (cross_lang_js_call) {
         if (injected || has_named_args) {
             log_error("interp: JavaScript imports require positional arguments");
@@ -2999,7 +2997,7 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
 }
 
 // Fills an N-D literal's leaves in row-major order, mirroring
-// mir_emit_ndim_leaves.
+// MVP N-D leaf emission.
 static void interp_fill_ndim(InterpFrame* f, AstNode* node, Scratch& arr, int* flat) {
     node = ast_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_ARRAY) return;
@@ -4127,8 +4125,8 @@ static bool interp_join_make_key(InterpFrame* f, AstLoopNode* loop,
 }
 
 // Collect a join source once, including its source index/key stream. The row
-// binding is live while its new-side key is evaluated, so a key expression can
-// use the current source exactly as MIR's mir_join_collect_source does.
+// binding is live while its new-side key is evaluated, so both T0 and MVP
+// key expressions can use the current source.
 static bool interp_join_collect_source(ForCtx* fc, AstLoopNode* loop,
         bool collect_keys, Scratch& rows_slot, Scratch& row_keys_slot,
         Scratch& indices_slot) {
@@ -5860,12 +5858,11 @@ static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, Ast
     if (path.count == 0 && array_element &&
             array_element->type_id != LMD_TYPE_ANY) {
         // SI3v2: the two tiers must word one diagnostic identically, or a
-        // golden pins whichever tier happened to run. MIR Direct says
-        // "element" here (transpile-mir.cpp), so T0 matches it.
+        // golden pins whichever tier happened to run. T0 and MVP share
+        // the "element" boundary label.
         const char* boundary = "typed array element assignment";
-        // SI3v2 again, on the write side: MIR Direct selects the in-place
-        // setter for `var` roots
-        // (emit_typed_array_store_fallback / writes_through_caller). T0 read
+        // SI3v2 again, on the write side: MVP selects the in-place
+        // setter for caller-owned roots. T0 previously read
         // only is_var_param, so a plain `pn` parameter's typed write was
         // validated on a DETACHED candidate and republished to the callee's
         // own slot -- visible inside the procedure, lost to the caller.
@@ -8332,19 +8329,9 @@ void lambda_function_publish_boxed_entry(Function* fn, const AstFuncNode* def,
     } else {
         lambda_function_mark_lambda_boxed_function(fn);
     }
-    FnVariantAnalysis* public_variant = def->analysis
-        ? fn_analysis_variant(def->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
-    uint32_t public_shape = LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
-    if (lambda_mvp_selected()) {
-        public_shape = LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION;
-    } else if (public_variant) {
-        public_shape = public_variant->result.shape == RETURN_SHAPE_ITEM
-            ? LAMBDA_MIR_PUBLIC_RETURN_ITEM
-            : public_variant->result.shape == RETURN_SHAPE_ITEM_SCALAR
-                ? LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION
-                : LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
-    }
-    lambda_function_mark_mir_public_return_shape(fn, public_shape);
+    // MVP's public entry returns Item plus the caller-owned scalar companion.
+    lambda_function_mark_mir_public_return_shape(fn,
+        LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION);
 }
 
 // This is an intentionally opt-in experiment. The normal AUTO policy remains
@@ -8513,7 +8500,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
     tp.preserve_ast_index = true;
     tp.compile_against_interp_slab = true;
     tp.whole_script_poc = true;
-    compile_script_as_mir_direct(&tp, script, script->reference,
+    lambda_mvp_compile_script(&tp, script, script->reference,
         NULL, NULL, NULL, NULL, NULL, NULL);
     if (!script->jit_context || !script->main_func) {
         if (script->jit_context) {

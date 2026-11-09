@@ -86,8 +86,12 @@ make check-host-exports    # host exports and module imports agree with the list
 Supported builds use only the MIR Direct path:
 
 ```text
-Lambda AST -> transpile-mir.cpp -> MIR API -> native code
+Lambda AST -> MVP planner/lowering -> MIR API -> native code
 ```
+
+MVP is the sole Lambda MIR compiler; both eager compilation and T0 promotion
+use its driver under `lambda/runtime/mvp/` (**D1.6, D8.3.1–D8.3.4**). The former
+Full MIR emitter is removed.
 
 The retired C2MIR implementation (`transpile.cpp` and `transpile-call.cpp`) has
 been removed from the Lambda source tree. The host and CLI use MIR Direct;

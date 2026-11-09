@@ -1494,7 +1494,7 @@ static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
         ? runtime->import_base_dir : path;
     // the two emitters own different code images even for identical source;
     // never satisfy an MVP request with a cached Full image (D8.5.1).
-    request.backend = lambda_mvp_selected() ? "mir-direct-mvp" : "mir-direct";
+    request.backend = "mir-direct-mvp";
     // MIR artifacts built by explicit JIT do not carry AUTO's unsupported-AST
     // decision. Keep those code images separate under the existing MIR key.
     LambdaTier tier = lambda_tier_selected();
@@ -1644,7 +1644,7 @@ static bool interp_force_jit_script(Script* script, Runtime* runtime,bool preser
         tp.interp_supported = script->interp_supported = false;
         tp.interp_planned = script->interp_planned = false;
     }
-    compile_script_as_mir_direct(&tp, script, script->reference, NULL, NULL,
+    lambda_mvp_compile_script(&tp, script, script->reference, NULL, NULL,
         NULL, NULL, NULL, NULL);
     if (!script->jit_context) {
         if (retained) {
@@ -1776,7 +1776,7 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
     // the adopted transpiler must not carry a template's T0 flags onto MIR code
     transpiler.interp_supported = false;
     transpiler.interp_planned = false;
-    compile_script_as_mir_direct(&transpiler, script, script->reference,
+    lambda_mvp_compile_script(&transpiler, script, script->reference,
         NULL, NULL, NULL, NULL, NULL, NULL);
     if (script->jit_context) (void)lambda_cache_promote_ast_shell_mir(runtime, script);
     return script->jit_context != NULL;
@@ -2061,7 +2061,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         uint64_t mir_function_count = 0;
         uint64_t mir_instruction_count = 0;
         lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_MIR);
-        compile_script_as_mir_direct(tp, script, script_path,
+        lambda_mvp_compile_script(tp, script, script_path,
                                       profiling || compiler_timing ? &mir_jit_init_ms : NULL,
                                       profiling || compiler_timing ? &mir_transpile_ms : NULL,
                                       profiling || compiler_timing ? &mir_gen_ms : NULL,
@@ -2137,14 +2137,18 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (!runtime || !script_path) return NULL;
     const SecurityIOClient* io = eval_context_security_io(runtime->eval_context);
 
-    // select before cache lookup or tier planning; an MVP request must never silently run another compiler.
+    // reject retired compiler requests before cache lookup, including strict T0.
     const char* mir_compiler = getenv("LAMBDA_MIR_COMPILER");
     const char* compiler_error = NULL;
-    if (mir_compiler && *mir_compiler && strcmp(mir_compiler, "production") && strcmp(mir_compiler, "mvp"))
-        compiler_error = "LAMBDA_MIR_COMPILER must be production or mvp";
+    if (mir_compiler && *mir_compiler) {
+        if (!strcmp(mir_compiler, "production"))
+            compiler_error = "Full MIR is retired; use MVP (unset LAMBDA_MIR_COMPILER)";
+        else if (strcmp(mir_compiler, "mvp"))
+            compiler_error = "LAMBDA_MIR_COMPILER accepts only mvp; MVP is the sole MIR compiler";
 #ifdef LAMBDA_NO_MIR
-    if (lambda_mvp_selected()) compiler_error = "Lambda MIR MVP is unavailable in a no-MIR build";
+        else compiler_error = "Lambda MIR MVP is unavailable in a no-MIR build";
 #endif
+    }
     if (compiler_error) {
         LambdaError* error = err_create(ERR_NOT_IMPLEMENTED, compiler_error, NULL);
         if (error) { err_print(error); err_free(error); }

@@ -18,10 +18,11 @@ struct LambdaTestNativeCompiler {
 
     explicit LambdaTestNativeCompiler(LambdaTier tier) : LambdaTestNativeCompiler() { select(tier); }
 
-    // explicit overrides are for tests of isolation between the two compilers.
+    // exercise unset/empty and the retained MVP compatibility spelling.
     void select_compiler(const char* compiler) {
-        ASSERT_TRUE(compiler && (!strcmp(compiler, "mvp") || !strcmp(compiler, "production")));
-        ASSERT_TRUE(shell_setenv("LAMBDA_MIR_COMPILER", compiler));
+        ASSERT_TRUE(!compiler || !*compiler || !strcmp(compiler, "mvp"));
+        ASSERT_TRUE(compiler ? shell_setenv("LAMBDA_MIR_COMPILER", compiler)
+            : shell_unsetenv("LAMBDA_MIR_COMPILER"));
         restore_compiler = true;
     }
 
@@ -39,7 +40,7 @@ struct LambdaTestNativeCompiler {
 
     // a requested runtime denial must not pass because MVP rejected the AST.
     void expect_mvp_admitted(const Script* script) const {
-        if (lambda_tier_selected() != LAMBDA_TIER_JIT || !lambda_mvp_selected()) return;
+        if (lambda_tier_selected() != LAMBDA_TIER_JIT) return;
         EXPECT_NE(script, nullptr) << "MVP did not load the requested runtime test";
         if (!script) return;
         EXPECT_NE(script->main_func, nullptr) << "MVP did not compile the requested runtime test";

@@ -287,7 +287,7 @@ static inline void mir_append_emit_label(MIR_context_t ctx,
 // MirEmitter — bundled emit state shared by both transpilers (Lambda + JS).
 // Holds the immutable MIR context handle plus the per-function emit cursor
 // (current function item/reg-alloc target, register + label counters) and the
-// import cache. Lambda MirTranspiler and MVP LmdCompiler embed one and route
+// import cache. Lambda MVP and LambdaJS LmdCompiler embed one and route
 // their primitive emit helpers (new_reg / emit_insn / emit_label / calls)
 // through the em_* functions below, so the primitives exist once instead of
 // once per transpiler (Unified-AST plan Phase 0, P0.1).
@@ -5582,7 +5582,7 @@ static inline MIR_reg_t em_print_arguments(MirEmitter* em, AstNode* arguments,
             MIR_T_I64, MIR_new_reg_op(em->ctx, item.reg), true);
     }
     // retain MVP's existing single-call provider outcome; the variadic
-    // protocol and Full's existing path complete with null.
+    // protocol completes with null.
     if (preserve_single_outcome && (receiver ? !arguments : arguments && !arguments->next)) return printed;
     MIR_reg_t absent = em_new_reg(em, "print_null", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,

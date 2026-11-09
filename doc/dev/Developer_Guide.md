@@ -1,6 +1,8 @@
 # Lambda Script — Developer Guide
 
 > **Last verified against tree:** 2026-08-23 *(initial stamp from git history)*
+> MVP compiler sections updated against sources on 2026-11-10; full-host
+> execution verification is blocked by [RI-004](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-004).
 
 This guide is for developers working on the **Lambda and Radiant C++ runtime engine** itself — building the compiler, modifying the parser, extending the JIT backend, and developing the layout engine.
 
@@ -377,7 +379,7 @@ the generated Lambda CST is built only for `lambda-cst` verification.
    implemented in `lambda/runtime/parser/lambda_parser.c` and semantic AST
    changes in `lambda/runtime/build_ast.cpp`.
 
-4. **Update the transpiler** — add MIR generation in `lambda/transpile-mir.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
+4. **Update the transpiler** — add MIR generation in `lambda/runtime/mvp/mvp_mir.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
 
 5. **Build and test**:
    ```bash
@@ -439,13 +441,13 @@ Lambda AST  ──→  transpile.cpp  ──→  C source code string
 #### Supported: Direct MIR (AST → MIR IR → machine code)
 
 ```
-Lambda AST  ──→  transpile-mir.cpp  ──→  MIR instructions (MIR_MOV, MIR_ADD, MIR_CALL, ...)
+Lambda AST  ──→  MVP planner/lowering  ──→  MIR instructions (MIR_MOV, MIR_ADD, MIR_CALL, ...)
                                                     │
                                                     ▼
                                            MIR generator  ──→  machine code
 ```
 
-- `lambda/transpile-mir.cpp` emits MIR IR instructions directly via the MIR C API.
+- `lambda/runtime/mvp/mvp_mir.cpp` emits MIR IR instructions directly via the MIR C API.
 - No intermediate C code is involved — instructions like `MIR_MOV`, `MIR_ADD`, `MIR_CALL` are built directly.
 
 The vendored MIR dependency still contains its upstream C2MIR frontend, but
@@ -455,62 +457,50 @@ Lambda no longer feeds generated Lambda C into it.
 
 | File | Role |
 |------|------|
-| `lambda/transpile-mir.cpp` | Emits MIR IR directly from Lambda AST (direct path) |
-| `lambda/mir.c` | MIR context, runtime import registry, linking, and code generation |
-| `lambda/lambda.h` | C API header — function signatures callable from JIT code |
-| `include/mir.h` | MIR library API (upstream, v0.2) |
-| `build_temp/mir/` | MIR library source (built into `libmir.a`) |
+| `lambda/runtime/mvp/mvp_driver.cpp` | Eager/satellite compilation, linking, module layout and image lifetime |
+| `lambda/runtime/mvp/mvp_plan.cpp` | Admission, binding, effect and representation planning |
+| `lambda/runtime/mvp/mvp_mir.cpp` | Lowers planned Lambda operations into MIR |
+| `lambda/runtime/mir_emitter_shared.hpp` | Shared MIR emission, roots, calls and ABI helpers |
+| `lambda/runtime/mir.c` | MIR contexts, import resolution and native generation |
+| `lambda/runtime/sys_func_registry.c` | Runtime helper addresses and audited import effects |
+| `lambda/lambda.h` | C ABI callable from interpreted and generated code |
+| `lambda/mir/` | Vendored MIR dependency; do not edit in place |
 
-### Runtime Function Registry (`mir.c`)
+### Runtime Helper Registry
 
-The `func_list[]` table in `mir.c` maps ~150+ function names to function pointers, making them available to JIT-compiled code. Categories include:
+`sys_func_registry.c` publishes helper addresses and their GC, reentry and
+result contracts; `mir.c` resolves those imports. T0 and MVP use the same C-ABI
+runtime helpers (**D7.4.1**). To add a helper, implement it in its owning runtime
+module, declare its C ABI, register its address and precise effects, then call
+it through the existing emitter helpers. A collecting call must keep live
+values in precise roots (**D6.3**).
 
-- **Collection constructors**: `new_array`, `new_list`, `new_map`, `new_element`
-- **Arithmetic/math**: `op_add`, `op_sub`, `op_mul`, `op_div`, `op_mod`, `op_pow`, `math_sin`, `math_cos`, etc.
-- **String operations**: `str_concat`, `str_len`, `str_slice`, `str_find`, etc.
-- **Type operations**: `get_type_id`, `to_int`, `to_float`, `to_string`, `to_decimal`
-- **Pipe support**: `pipe_map_len`, `pipe_map_val`, `pipe_map_key`
-- **Error handling**: `raise_error`, `get_error`
+### MVP Compiler Architecture
 
-When adding new runtime functions:
+`mvp_driver.cpp` runs indexed compiler passes: constant materialization/folding,
+planning, lowering, finalization and linking (**D8.2.5**). The planner owns
+per-function binding, representation and return plans; lowering consumes those
+plans through `MirEmitter`. `const_materialize.cpp` holds compiler-neutral
+static collection construction. Full MIR's emitter and `MirTranspiler` are
+retired.
 
-1. **Implement** the function in C (in an appropriate source file).
-2. **Declare** it in `lambda/lambda.h` so MIR-compiled code can reference it.
-3. **Register** it in `func_list[]` in `lambda/mir.c`:
-   ```c
-   {"my_new_func", (void*)my_new_func},
-   ```
-4. **Call** from transpiled code — emit a `MIR_CALL` instruction in `transpile-mir.cpp`.
-
-### MIR Transpiler Architecture (`transpile-mir.cpp`)
-
-The `MirTranspiler` struct manages the direct MIR emission context:
-
-- **MIR context/module/function**: Manages IR construction lifecycle
-- **Import cache**: HashMap of `MirImportEntry` (proto + import pairs) — avoids duplicate imports
-- **Variable scope stack**: 64 levels deep for nested scopes
-- **Loop label stack**: 32 levels for nested loop break/continue
-- **Register counter**: Sequential allocation of MIR virtual registers
-- **Pipe context registers**: `pipe_item_reg`, `pipe_index_reg` for pipe expression evaluation
-- **TCO support**: `tco_func`, `tco_label` for tail-call optimization
-- **Closure support**: `current_closure`, `env_reg` for captured variable environments
+The interpreter starts cold definitions in T0 under AUTO and requests private
+MVP satellite images for eligible hot definitions. Publication links property
+keys and entries only at evaluator safe points; pools and native code remain
+owned until the last caller retires (**D8.3.1–D8.3.5**).
 
 ### Type Mapping
 
-Lambda types map to MIR types as follows:
-
-| Lambda Type | MIR Type | Width |
-|------------|----------|-------|
-| `float` | `MIR_T_D` | 64-bit double |
-| All others (int, string, list, map, ...) | `MIR_T_I64` | 64-bit integer (tagged pointers) |
-
-This reflects Lambda's tagged-pointer data model where most values are 64-bit `Item` values carrying both type and data information.
+The shared `Item` representation remains the public boxed value contract.
+MVP may use native integer or double lanes and raw pointers internally when its
+plans prove the corresponding ABI and lifetime rules. Public boxed entries
+use an Item and a caller-owned scalar companion (**D2.1.1, D6.2.1, D7.4.2**).
 
 ### Running MIR-specific Tests
 
 ```bash
 make test-mir                    # Run MIR JIT test suite
-./lambda.exe script.ls           # Run a script with JIT (default mode)
+./lambda.exe --tier=jit script.ls  # Compile eagerly with MVP; AUTO is the default tier
 ```
 
 ### Debugging JIT Code
@@ -820,7 +810,7 @@ Renamed 2026-10-03. Current binaries no longer read the old names.
 | Variable | Values (default) | Old name |
 |----------|------------------|----------|
 | `LAMBDA_EXEC_BACKEND` | `interp` \| `auto` \| `jit` (`auto`) | `LAMBDA_TIER` |
-| `LAMBDA_MIR_COMPILER` | `mvp` (default) \| `production`; applies to eager JIT and AUTO promotion (D8.3.1–D8.3.4) | — |
+| `LAMBDA_MIR_COMPILER` | unset/empty or `mvp`; MVP is the sole compiler for JIT and AUTO promotion. `production` is rejected: Full MIR is retired (D8.3.1–D8.3.4). | — |
 | `LAMBDA_FUNC_JIT_THRESHOLD` | calls before promotion (5) | `LAMBDA_JIT_THRESHOLD` |
 | `LAMBDA_LOOP_JIT_THRESHOLD` | loop back-edges before handoff (10000) | `LAMBDA_JIT_BACKEDGE` |
 | `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`; unset/empty also AUTO, D8.4.2) | `JS_EXECUTION_BACKEND` |

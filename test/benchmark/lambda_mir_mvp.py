@@ -81,7 +81,7 @@ def compiler_identity():
         "lambda/io/mark_builder.hpp", "lambda/io/mark_builder.cpp",
         "lambda/runtime/ast-core.cpp", "lambda/runtime/ast-core.hpp", "lambda/runtime/ast.hpp",
         "lambda/runtime/interp.cpp", "lambda/runtime/interp_plan.cpp", "lambda/runtime/build_ast.cpp",
-        "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
+        "lambda/runtime/const_materialize.cpp", "lambda/runtime/mir_emitter_shared.hpp",
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_cow_analysis.hpp",
         "lambda/runtime/mir_shape_candidates.hpp",
         "lambda/runtime/mir_bitwise.hpp",
@@ -187,7 +187,7 @@ def sumfp_batch_sources(source, c_source, count, variant="typed"):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, default=ROOT / "lambda.exe")
-    parser.add_argument("--control", type=Path, help="archived production release; defaults to --exe in production mode")
+    parser.add_argument("--control", type=Path, help="archived Full MIR release (required unless --regression-only)")
     parser.add_argument("--previous-mvp", type=Path, help="optional prior MVP release for an interleaved before/after comparison")
     parser.add_argument("--c2mir-exe", type=Path, help="archived C2MIR driver; defaults to the shared native driver")
     parser.add_argument("--source-manifest", type=Path,
@@ -226,6 +226,8 @@ def main():
         parser.error("use at least three measured runs and one warmup")
     if args.regression_only and not args.previous_mvp:
         parser.error("--regression-only requires --previous-mvp")
+    if not args.regression_only and not args.control:
+        parser.error("Full MIR is retired; comparisons require an archived --control executable")
     if not math.isfinite(args.c2mir_allowance_percent) or args.c2mir_allowance_percent < 0:
         parser.error("C2MIR allowance must be a finite nonnegative percentage")
     if args.sumfp_batch < 1 or args.sumfp_batch > 100000:

@@ -2,7 +2,7 @@
 
 #include <mir.h>
 
-// both emitters publish the same immutable image and module-state ABI.
+// MVP eager and satellite images share the immutable module-state ABI.
 struct MirModuleNames {
     const char* module;
     const char* consts_bss;

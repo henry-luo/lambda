@@ -216,7 +216,7 @@ struct InterpState {
     bool         mode_rejected;
     // S2.5.5v2 void versus null: the list producer (for / `(…)` / block) that
     // sits directly in an item position and so finishes with the skip marker;
-    // consumed once at the producer's entry (mirrors MirTranspiler).
+    // consumed once at the producer's entry (shared with MVP list lowering).
     AstNode*     list_item_producer;
 };
 

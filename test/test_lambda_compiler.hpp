@@ -20,8 +20,8 @@ struct LambdaTestCompilerEnv {
             ADD_FAILURE() << "invalid Lambda test tier: " << tier;
             valid = false; return;
         }
-        if (selected && *selected && strcmp(selected, "production") && strcmp(selected, "mvp")) {
-            ADD_FAILURE() << "LAMBDA_TEST_MIR_COMPILER must be production or mvp";
+        if (selected && *selected && strcmp(selected, "mvp")) {
+            ADD_FAILURE() << "LAMBDA_TEST_MIR_COMPILER accepts only mvp; Full MIR is retired";
             valid = false; return;
         }
         unsigned count = 0;

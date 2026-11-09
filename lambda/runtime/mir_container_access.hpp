@@ -204,7 +204,7 @@ static inline void em_array_cert_word_guard(MirEmitter* em, MIR_reg_t cert,
         MIR_new_int_op(em->ctx, (int64_t)expected)));
 }
 
-// the inherited list prefix is shared by ArrayNum; Full asserts this offset.
+// the inherited list prefix is shared by ArrayNum (lambda-data.hpp).
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
@@ -576,7 +576,7 @@ static inline MIR_reg_t em_finalize_query_stream(MirEmitter* em, MIR_reg_t outpu
 }
 
 // admitted nullable strings compare exact UTF-8 bytes, including embedded NUL.
-// Promoted from Full's literal comparator; no character decoding is needed (S5.1).
+// literal string comparison needs no character decoding (S5.1).
 static inline MIR_reg_t em_string_literal_pointer_eq(MirEmitter* em, MIR_reg_t subject,
         MIR_reg_t literal, String* bytes, MIR_reg_t result = 0) {
     if (!result) {
