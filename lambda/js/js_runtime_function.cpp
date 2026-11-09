@@ -5,8 +5,8 @@
 #include "js_exec_profile.h"
 #include "js_ast.hpp"
 #include "js_interp.hpp"
-#include "../../lib/mem_grow.hpp"
-#include "../../lib/memtrack.h"
+#include "lib/mem_grow.hpp"
+#include "lib/memtrack.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/side_stack.h"
 

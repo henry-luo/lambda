@@ -1,5 +1,5 @@
-#include "../radiant/render.hpp"
-#include "../radiant/event.hpp"
+#include "radiant/render.hpp"
+#include "radiant/event.hpp"
 #include <string.h>
 
 // this standalone recorder target has no private retained publisher.

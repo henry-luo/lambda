@@ -39,12 +39,12 @@
 #include "../lambda/input/pdf_decompress.h"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"
-#include "../lib/log.h"
-#include "../lib/url.h"
-#include "../lib/strbuf.h"
-#include "../lib/base64.h"
-#include "../lib/image.h"
-#include "../lib/file.h"
+#include "lib/log.h"
+#include "lib/url.h"
+#include "lib/strbuf.h"
+#include "lib/base64.h"
+#include "lib/image.h"
+#include "lib/file.h"
 
 
 /* ══════════════════════════════════════════════════════════════════════

@@ -5,14 +5,14 @@
 #include "lambda-error.h"
 #include "lambda-number-runtime.hpp"
 #include "heap_api.h"
-#include "../../lib/arraylist.hpp"
-#include "../../lib/escape.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hex.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/utf.h"
-#include "../../lib/log.h"
+#include "lib/arraylist.hpp"
+#include "lib/escape.h"
+#include "lib/hashmap.h"
+#include "lib/hex.h"
+#include "lib/memtrack.h"
+#include "lib/strbuf.h"
+#include "lib/utf.h"
+#include "lib/log.h"
 #include <float.h>
 
 struct PDFBuilder : MarkOutputBuilder {

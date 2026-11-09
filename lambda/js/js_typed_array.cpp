@@ -16,14 +16,14 @@
 #include "../runtime/heap_api.h"
 #include "../runtime/activation.h"
 #include "../core/lambda-decimal.hpp"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
+#include "lib/log.h"
+#include "lib/str.h"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
 #include <limits.h>
 #include <uv.h>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 #include <cmath>
 
 extern double js_get_number(Item value);

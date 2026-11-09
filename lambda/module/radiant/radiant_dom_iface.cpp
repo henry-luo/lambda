@@ -11,7 +11,7 @@
 #include "radiant_dom_bridge.hpp"
 #include "../../jube/jube.h"
 #include "../../input/css/css_declaration_attributes.h"
-#include "../../../lib/log.h"
+#include "lib/log.h"
 
 extern const JubeHostAPI* radiant_host_api;
 extern "C" const void* radiant_dom_range_host_type(void);

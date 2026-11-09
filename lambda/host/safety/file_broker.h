@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../io/security_io.h"
-#include "../../../lib/file.h"
+#include "lib/file.h"
 
 #ifdef __cplusplus
 extern "C" {

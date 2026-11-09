@@ -38,13 +38,13 @@
 #include "../../input/input.hpp"
 #include "../../core/lambda-decimal.hpp"
 #include "../../mir/mir-gen.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/utf.h"
-#include "../../../lib/time_util.h"
-#include "../../../lib/math_utils.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/atomic.h"
-#include "../../../lib/hashmap_typed.hpp"
+#include "lib/mem.h"
+#include "lib/utf.h"
+#include "lib/time_util.h"
+#include "lib/math_utils.h"
+#include "lib/strbuf.h"
+#include "lib/atomic.h"
+#include "lib/hashmap_typed.hpp"
 #include <math.h>
 
 enum LmdKind { K_UNDEFINED = 1, K_NULL = 2, K_BOOL = 4, K_NUMBER = 8,

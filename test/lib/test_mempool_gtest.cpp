@@ -18,9 +18,9 @@
  * - Real-world usage patterns
  */
 
-#include "../../lib/mempool.h"
-#include "../../lib/mem_vm.h"
-#include "../../lib/log.h"
+#include "lib/mempool.h"
+#include "lib/mem_vm.h"
+#include "lib/log.h"
 #include <gtest/gtest.h>
 #include <cstdio>
 #include <cstdlib>

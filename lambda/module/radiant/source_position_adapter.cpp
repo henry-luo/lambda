@@ -1,8 +1,8 @@
 #include "source_position_adapter.hpp"
-#include "../../../radiant/source_position_host.hpp"
+#include "radiant/source_position_host.hpp"
 #include "../../runtime/render_map.h"
-#include "../../../lib/hashmap_typed.hpp"
-#include "../../../lib/memtrack.h"
+#include "lib/hashmap_typed.hpp"
+#include "lib/memtrack.h"
 #include <string.h>
 
 // ---------------------------------------------------------------------------

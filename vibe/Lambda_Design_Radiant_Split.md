@@ -3,14 +3,14 @@
 **Status:** architecture ratified on 2026-11-05; implementation in progress.
 **Date:** 2026-11-05.
 **Scope:** extract the shared input/data foundation into `lambda-input`, extract the native Radiant engine into a sibling project, and keep language execution and integration in Lambda.
-**Authority:** [D9.1.1v3, D9.1.2v2–D9.1.4v2, D9.2.1v2 and D9.5.6v2](../doc/Lambda_Formal_Design.md) ratify the new boundaries. The implementation plan tracks remaining conformance; the current build does not yet satisfy them.
+**Authority:** [D9.1.1v4, D9.1.2v2–D9.1.4v2, D9.2.1v2 and D9.5.6v2](../doc/Lambda_Formal_Design.md) ratify the new boundaries. The implementation plan tracks remaining conformance; the current build does not yet satisfy them.
 **Related record:** [Lambda Static Module Split](Lambda_Design_Static_Modules.md). This extends that build-boundary work; it does not introduce a competing ruling-ID series.
 
 ### Specification linkage
 
 | Rulings | Relationship to this proposal |
 |---|---|
-| D9.1.1v3, D9.2.1v2, D9.5.6v2 | Replace the Radiant-over-runtime direction and embedding contract; keep script writers in Lambda. |
+| D9.1.1v4, D9.2.1v2, D9.5.6v2 | Replace the Radiant-over-runtime direction and embedding contract; keep event handling and script writers in Lambda. |
 | D9.1.2v2, D11.1.2 | Preserve centralized resource acquisition and policy; relocate the standalone portion into `lambda-input`. |
 | D9.1.3v2–D9.1.4v2 | Preserve provider ownership, checked boundaries, and the Mark reader/builder/editor layering. |
 | D2.1.1, D5.1.1–D5.1.3 | Preserve the shared value representation and separation of Input-owned data from runtime GC. |
@@ -23,8 +23,10 @@
 Create three sibling projects with distinct responsibilities:
 
 1. **`lambda-input`:** the shared native foundation, including the current `lib/` modules, input parsers, formatters, Mark construction, and the runtime-independent data model they require.
-2. **Radiant:** all native engine code for layout, rendering, presentation, interaction, and platform integration. It builds a static library using `lambda-input`, independently of Lambda.
-3. **Lambda:** the language runtimes, compiler/JIT, GC, scripting adapters, DOM language integration, packages, and executable that integrates the two libraries.
+2. **Radiant:** the native engine for layout, rendering, presentation, platform event capture, and the state store. It builds a static library using `lambda-input`, independently of Lambda.
+3. **Lambda:** the language runtimes, compiler/JIT, GC, end-to-end event handling, scripting adapters, DOM language integration, packages, and executable that integrates the two libraries.
+
+**Event ownership decision, 2026-11-09 (D9.1.1v4).** Lambda owns event dispatch, default actions, and editing and navigation behavior. Radiant passes native events through a host interface and exposes hit testing, layout, rendering, and state-store APIs for Lambda to use. This replaces the earlier division that put native dispatch order and default actions in Radiant. A native client without an event controller can use those native services; it does not acquire a separate full event controller.
 
 Native Radiant tests that require no scripting move with the engine. **DOM tests and end-to-end script integration tests remain in Lambda**, including DOM tests written in C++ that do not execute a script. Radiant-specific `doc/` and `vibe/` material moves with its subsystem. Mixed documents are divided by responsibility.
 
@@ -94,7 +96,8 @@ Directory names under each project are provisional. Dependency locations are con
 | `lambda/core/mark_reader.*`, `lambda/io/mark_builder.*`, `lambda/io/mark_editor.*` | `lambda-input` | Preserve reader/data versus Input-owned construction/editing responsibilities (D9.1.4v2). |
 | Shared `Item`, scalar/container layouts, names, shapes, Input ownership, and pure data helpers currently spread through `lambda/core/` and aggregate headers | `lambda-input` | Extract the shared definitions; retain runtime execution and GC operations in Lambda. |
 | Input resource acquisition, byte caches, image/archive IO, and reusable policy interfaces in `lambda/io/` and `lambda/network/` | `lambda-input` | Move by provider responsibility, not by copying these directories wholesale. |
-| `radiant/` layout, paint, native Scene3D, native GPU services, events, controls, media, windowing, and platform code | Radiant | Include required Objective-C/Objective-C++ sources and assets. Separate script/runtime operations first. |
+| Native layout, paint, Scene3D, GPU services, state store, media, windowing, platform event capture, and hit testing | Radiant | Include required Objective-C/Objective-C++ sources and assets. Expose native services through host interfaces. |
+| Event dispatch, default actions, editing and navigation behavior, and script event integration | Lambda | Use Radiant's event host and native state-store APIs. Keep GC roots in Lambda. |
 | Native rendering/geometry providers currently placed in `lambda/dom/` or `lambda/module/radiant/` | Radiant, where required by the engine | Move the provider and its native declarations together; keep language wrapping in Lambda. |
 | `lambda/runtime/`, `lambda/js/`, `lambda/ts/`, compiler/JIT, GC, validator execution, Jube host, and script packages | Lambda | Consume shared data and engine APIs without importing their private source trees. |
 | DOM web-platform behavior and language adapters in `lambda/dom/`; Jube/script exports in `lambda/module/radiant/` | Lambda | Separate native engine services they currently contain or call; do not move language-facing behavior merely because it is C++. |
@@ -137,7 +140,7 @@ Use a narrow, explicit host service interface for optional integration. Start fr
 | Service | Radiant responsibility | Lambda adapter responsibility |
 |---|---|---|
 | Page scripts and script-produced documents | Report admitted source/work requests and consume native document results | Select the language, initialize the runtime, evaluate scripts/packages, and publish owned results |
-| Events | Native hit testing, dispatch order, controls, invalidation, and native default actions | Deliver script listeners and return cancellation/default-prevention results |
+| Events | Capture native input, provide hit testing and state-store APIs, and publish events to the registered host | Own end-to-end dispatch, control and editing behavior, default actions, cancellation, and state-store use |
 | Frames and asynchronous work | Native animation/media clocks, frame scheduling, and redraw requests | Pump the script scheduler, microtasks, timers, and runtime callbacks at defined checkpoints |
 | Custom layout and reactive templates | Invoke an optional host operation using native document/data contracts | Execute package functions and translate owned results back to the engine |
 | Resource loading | Request resources through the input service and consume completion data | Supply host policy and any runtime scheduling bridge |
@@ -146,7 +149,7 @@ Use a narrow, explicit host service interface for optional integration. Start fr
 
 Contracts specify version/size negotiation, callback context ownership, thread affinity, reentrancy, cancellation, and teardown order. Unsupported capabilities return an explicit result. Do not provide fake runtime symbols or successful no-op evaluators.
 
-A native-only client can load ordinary HTML/CSS/assets, lay out and render, run native controls and animations, and use native Scene3D without Lambda. If it is asked to execute a script or load a document requiring a Lambda package, it reports that execution is unavailable. In the full Lambda application, the registered adapter preserves current integrated behavior.
+A native-only client can load ordinary HTML/CSS/assets, lay out and render, use native state-store APIs and animations, and use native Scene3D without Lambda. Event handling requires a registered controller. If it is asked to execute a script or load a document requiring a Lambda package, it reports that execution is unavailable. In the full Lambda application, the registered adapter preserves current integrated behavior.
 
 Declarative content may itself be parsed from a data file, but evaluating a `.ls` procedure, running a JS harness, or invoking a package layout is scripting. File extension alone is not the capability boundary.
 
@@ -246,7 +249,7 @@ The user approved the new direction during proposal preparation and authorized i
 
 | Ruling | Proposed revision |
 |---|---|
-| D9.1.1v3 | Standalone `lambda-input` owns native formatters; Lambda owns script-based writers. Radiant depends on input, and Lambda integrates both. Keep static linking, explicit host services, and the prohibition on fake GC allocation fallbacks. |
+| D9.1.1v4 | Standalone `lambda-input` owns native formatters; Lambda owns script-based writers. Radiant depends on input, and Lambda integrates both. Keep static linking, explicit host services, and the prohibition on fake GC allocation fallbacks. |
 | D9.1.2v2 | Assign standalone input/resource services to `lambda-input`; retain runtime scheduling and execution artifacts in Lambda and rendering artifacts in Radiant. |
 | D9.1.3v2 | Enforce provider ownership and strict closure at the new project boundaries. Replace obsolete Class-F exceptions with explicit adapter ownership, not a broader undefined-symbol allowance. |
 | D9.1.4v2 | Place Mark APIs in the input project while retaining their internal data-versus-Input-owner distinction. |
@@ -323,8 +326,12 @@ The following table records the pre-extraction evidence checked on 2026-11-05. I
 | `utils/check_module_boundary.py` retains a Class-F runtime-to-Radiant import baseline | The old accepted direction/exceptions do not prove the new standalone contracts | Classify remaining imports, move adapter calls, and enforce the new forbidden edges |
 | Native-looking test sources import runtime/JS/DOM interfaces | Moving whole executables can carry the runtime back into Radiant | Split suites by behavior and verify the actual link/runtime closure |
 
-The transitional module-boundary check distinguishes the old runtime Class-F ratchet from the approved Lambda DOM adapter dependency on Radiant (D9.1.1v3, D9.1.3v2). A newly classified adapter call must have exactly one Radiant archive provider; its callers must be Lambda DOM sources or the Jube registry exposing a native DOM catalog entry. Other callers, unlisted registry exports and missing or duplicate providers fail. This check does not establish independent Radiant linkage.
+The transitional module-boundary check distinguishes the old runtime Class-F ratchet from the approved Lambda DOM adapter dependency on Radiant (D9.1.1v4, D9.1.3v2). A newly classified adapter call must have exactly one Radiant archive provider; its callers must be Lambda DOM sources or the Jube registry exposing a native DOM catalog entry. Other callers, unlisted registry exports and missing or duplicate providers fail. This check does not establish independent Radiant linkage.
 
-On 2026-11-06 sibling `lambda-input` and `radiant` projects own the moved source trees and native target manifests. A macOS split build links Lambda's static executable to archives built in the siblings; temporary source links, Lambda runtime dependencies in Radiant, and the existing vendor setup remain. Input archive dependency records exclude Lambda runtime sources and headers, and the complete input archives link into a native client. Radiant builds its native archives and a focused host-test subset directly, but its complete archive does not yet have standalone runtime closure. The detailed checkpoint and exact validation scope are in [`impl/Lambda_Impl_Radiant_Split.md`](impl/Lambda_Impl_Radiant_Split.md) (D6.3.3, D9.1.1v3, D9.1.3v2, D10.2.1).
+As of 2026-11-06, sibling `lambda-input` and `radiant` projects owned the moved source trees and native target manifests. A macOS split build links Lambda's static executable to archives built in the siblings; temporary source links, Lambda runtime dependencies in Radiant, and the existing vendor setup remain. Input archive dependency records exclude Lambda runtime sources and headers, and the complete input archives link into a native client. Radiant builds its native archives and a focused host-test subset directly, but its complete archive does not yet have standalone runtime closure. The detailed checkpoint and exact validation scope are in [`impl/Lambda_Impl_Radiant_Split.md`](impl/Lambda_Impl_Radiant_Split.md) (D6.3.3, D9.1.1v4, D9.1.3v2, D10.2.1).
 
 The controlling rule is provider ownership (D9.1.3v2). A changed include path, opaque cast, runtime stub, or permissive linker option does not resolve a misplaced provider.
+
+On 2026-11-09, Radiant removed its whole-directory input migration links. Native sources resolve `lib/` and `lambda/` header prefixes through the configured input root, and the native archive links without Lambda runtime or DOM code. A build guard rejects directory links and input source files in a header facade. The remaining vendor artifacts still require separate packaging (D9.1.1v4, D9.1.3v2).
+
+Lambda no longer has top-level `lib` or `radiant` source links. Its build resolves those logical paths from the selected sibling roots; input has no remaining source-tree symlinks into Lambda. The normal build still compiles sibling sources, while the split build links sibling archives. Vendor provisioning and cross-platform archive integration remain open (D9.1.1v4, D9.1.3v2).

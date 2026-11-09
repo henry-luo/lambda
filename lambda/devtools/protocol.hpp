@@ -2,7 +2,7 @@
 
 #include "../io/mark_builder.hpp"
 #include "../core/mark_reader.hpp"
-#include "../../lib/strbuf.h"
+#include "lib/strbuf.h"
 
 // requests and replies own their Mark data until the encoded frame is copied.
 struct DevtoolsExchange {

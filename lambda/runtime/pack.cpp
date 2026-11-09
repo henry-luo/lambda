@@ -1,8 +1,8 @@
 #include "transpiler.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 #include <stdlib.h>
-#include "../../lib/memtrack.h"
-#include "../../lib/mem_grow.h"
+#include "lib/memtrack.h"
+#include "lib/mem_grow.h"
 #include <string.h>
 
 #if defined(__APPLE__) || defined(__linux__)

@@ -15,7 +15,7 @@
 #pragma once
 
 #include <stdbool.h>
-#include "../../lib/mempool.h"
+#include "lib/mempool.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include "../lambda/host/safety/file_broker.h"
-#include "../lib/file_utils.h"
-#include "../lib/log.h"
-#include "../lib/digest.h"
+#include "lib/file_utils.h"
+#include "lib/log.h"
+#include "lib/digest.h"
 #include <errno.h>
 #include <string.h>
 #ifndef _WIN32

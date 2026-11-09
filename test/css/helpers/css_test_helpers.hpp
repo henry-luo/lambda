@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include "../../../lambda/input/css/css_parser.hpp"
 #include "../../../lambda/input/css/css_engine.hpp"
-#include "../../../lib/mempool.h"
+#include "lib/mempool.h"
 #include <string>
 #include <vector>
 

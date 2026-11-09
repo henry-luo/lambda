@@ -20,13 +20,13 @@
 #include "../runtime/transpiler.hpp"
 #include "../runtime/concurrency.h"
 #include "../runtime/concurrency_js.h"
-#include "../../lib/log.h"
-#include "../../lib/uv_loop.h"
-#include "../../lib/arraylist.h"
+#include "lib/log.h"
+#include "lib/uv_loop.h"
+#include "lib/arraylist.h"
 
 #include <cstring>
 #include <cmath>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 #include <cstdio>
 
 extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);

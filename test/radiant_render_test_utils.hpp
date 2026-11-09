@@ -1,7 +1,7 @@
 #pragma once
 #include <gtest/gtest.h>
-#include "../radiant/view.hpp"
-#include "../radiant/render.hpp"
+#include "radiant/view.hpp"
+#include "radiant/render.hpp"
 
 struct TestRadiantPaintGlyph { uint32_t codepoint; float x, y; };
 

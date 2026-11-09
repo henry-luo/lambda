@@ -10,14 +10,14 @@
 #include <stdio.h>
 #include <cstring>
 
-#include "../radiant/render.hpp"
-#include "../radiant/view.hpp"
+#include "radiant/render.hpp"
+#include "radiant/view.hpp"
 
 extern "C" {
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
-#include "../lib/image.h"
-#include "../lib/memtrack.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
+#include "lib/image.h"
+#include "lib/memtrack.h"
 }
 
 // Stubs for unresolved symbols in standalone test builds

@@ -4,13 +4,37 @@
 #include "heap_api.h"
 #include "side_stack.h"
 #include "gc/gc_heap.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/log.h"
-#include "../../lib/arraylist.h"
+#include "lib/memtrack.h"
+#include "lib/log.h"
+#include "lib/arraylist.h"
 #include <string.h>
 
 // The runtime layer owns the active evaluator for runners and fixtures.
 __thread EvalContext* context = nullptr;
+
+// A runtime read must outlive the owner of the original scalar payload.
+static Item runtime_scalar_storage_read(Item item, bool js_number) {
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64: {
+        int64_t value = item.get_int64();
+        if (js_number && value >= INT53_MIN && value <= INT53_MAX) {
+            return (Item){.item = i2it(value)};
+        }
+        return box_int64_value(value);
+    }
+    case LMD_TYPE_UINT64: {
+        uint64_t value = item.get_uint64();
+        if (js_number && value <= (uint64_t)INT53_MAX) {
+            return (Item){.item = i2it((int64_t)value)};
+        }
+        return box_uint64_value(value);
+    }
+    case LMD_TYPE_FLOAT:
+        return push_d(item.get_double());
+    default:
+        return item;
+    }
+}
 
 extern "C" LambdaGcScopeCheckpoint lambda_gc_scope_checkpoint_capture(void) {
     LambdaGcScopeCheckpoint checkpoint = {};
@@ -168,6 +192,7 @@ bool eval_context_init(EvalContext* owner) {
                   (void*)owner);
         return false;
     }
+    scalar_storage_bind_host(runtime_scalar_storage_read);
     return true;
 }
 
@@ -181,6 +206,7 @@ bool eval_context_shutdown(EvalContext* owner) {
                   (void*)context, (void*)owner);
         return false;
     }
+    scalar_storage_bind_host(nullptr);
     context = NULL;
     return true;
 }

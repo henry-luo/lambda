@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 #include "test_native_provider.hpp"
 
-#include "../radiant/layout.hpp"
-#include "../radiant/render.hpp"
-#include "../lib/arraylist.h"
-#include "../lib/arena.h"
-#include "../lib/mempool.h"
+#include "radiant/layout.hpp"
+#include "radiant/render.hpp"
+#include "lib/arraylist.h"
+#include "lib/arena.h"
+#include "lib/mempool.h"
 #include <string.h>
 
 static void* g_layout_pass_test_resource = nullptr;

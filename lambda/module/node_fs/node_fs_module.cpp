@@ -1,7 +1,7 @@
 // node_fs_module.cpp -- callback fs slice owned by the node-fs Jube module.
 #include "../../jube/jube.h"
 #include "../../jube/jube_registry.h"
-#include "../../../lib/str.h"
+#include "lib/str.h"
 
 #include <cerrno>
 #include <climits>

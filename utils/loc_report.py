@@ -22,8 +22,11 @@ import os
 import re
 import sys
 from collections import OrderedDict
+from functools import partial
+from split_paths import project_source_path, sibling_roots
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+source_path = partial(project_source_path, root=REPO_ROOT, roots=sibling_roots())
 
 SOURCE_EXTS = ('.c', '.h', '.cc', '.cpp', '.hpp', '.cxx', '.hh', '.inc', '.m', '.mm')
 
@@ -260,6 +263,17 @@ def walk_sources(root):
                 yield os.path.relpath(full, root)
 
 
+def project_sources():
+    yield from walk_sources(REPO_ROOT)
+    for prefix in ('lib', 'radiant', 'lambda/input'):
+        path = source_path(prefix)
+        # Lambda's input migration link is not traversed by the normal walk.
+        if prefix == 'lambda/input' and not os.path.islink(path):
+            continue
+        for rel in walk_sources(path):
+            yield os.path.join(prefix, rel)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -275,7 +289,7 @@ def main():
     # normalize sub-dir filters to clean repo-relative prefixes
     prefixes = [os.path.normpath(p).lstrip('./') for p in args.paths]
     for p in prefixes:
-        if not os.path.isdir(os.path.join(REPO_ROOT, p)):
+        if not os.path.isdir(source_path(p)):
             ap.error(f'not a directory in repo: {p}')
 
     def selected(rel):
@@ -287,7 +301,7 @@ def main():
     tree = OrderedDict()
     others = []
 
-    for rel in walk_sources(REPO_ROOT):
+    for rel in project_sources():
         if not selected(rel):
             continue
         hit = classify(rel)
@@ -299,7 +313,7 @@ def main():
             top = rel.split('/', 1)[0]
             hit = (top, 'other', 'other')
         top, module, sub = hit
-        eff, raw = count_effective_lines(os.path.join(REPO_ROOT, rel))
+        eff, raw = count_effective_lines(source_path(rel))
         bucket = tree.setdefault(top, OrderedDict()).setdefault(module, OrderedDict())
         entry = bucket.setdefault(sub, [0, 0, 0])
         entry[0] += 1

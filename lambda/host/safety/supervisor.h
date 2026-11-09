@@ -1,7 +1,7 @@
 #pragma once
 #include "admission.h"
 #include "../../io/security_channel.h"
-#include "../../../lib/confined_process.h"
+#include "lib/confined_process.h"
 
 typedef struct SecuritySupervisorConfig {
     SecurityAdmissionConfig admission;

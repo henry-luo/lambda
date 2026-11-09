@@ -2,10 +2,10 @@
 #include "../lambda/serve/server.hpp"
 #include "../lambda/serve/serve_utils.hpp"
 #include "../lambda/serve/body_parser.hpp"
-#include "../lib/file.h"
-#include "../lib/strbuf.h"
-#include "../lib/shell.h"
-#include "../lib/log.h"
+#include "lib/file.h"
+#include "lib/strbuf.h"
+#include "lib/shell.h"
+#include "lib/log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

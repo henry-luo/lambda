@@ -1,9 +1,9 @@
 #include "file_broker.h"
-#include "../../../lib/arraylist.h"
-#include "../../../lib/digest.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/path_str.h"
-#include "../../../lib/utf.h"
+#include "lib/arraylist.h"
+#include "lib/digest.h"
+#include "lib/mem.h"
+#include "lib/path_str.h"
+#include "lib/utf.h"
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>

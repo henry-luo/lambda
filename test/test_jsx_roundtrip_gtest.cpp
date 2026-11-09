@@ -4,9 +4,9 @@
 #include <string.h>
 #include "../lambda/input/input.hpp"
 #include "../lambda/format/format.h"
-#include "../lib/string.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
+#include "lib/string.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
 
 extern "C" {
     Input* input_from_source(const char* source, Url* url, String* type, String* flavor);

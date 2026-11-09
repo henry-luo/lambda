@@ -4,7 +4,7 @@
 #include <cctype>
 
 extern "C" {
-#include "../../lib/uuid.h"
+#include "lib/uuid.h"
 }
 
 TEST(UuidTest, FormatShape) {

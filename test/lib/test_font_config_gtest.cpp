@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
-#include "../../lib/font/font_config.h"
-#include "../../lib/mempool.h"
-#include "../../lib/arena.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/font/font.h"
+#include "lib/font/font_config.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/font/font.h"
 
 class FontConfigTest : public ::testing::Test {
 protected:

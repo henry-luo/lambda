@@ -4,13 +4,13 @@
 #include "../../runtime/image_process.hpp"
 #include "../../core/mark_reader.hpp"
 #include "../../input/css/dom_element.hpp"
-#include "../../../lib/image_process.h"
-#include "../../../lib/image.h"
-#include "../../../lib/file.h"
-#include "../../../lib/thread_pool.h"
-#include "../../../lib/time_util.h"
-#include "../../../lib/mem.h"
-#include "../../../radiant/view.hpp"
+#include "lib/image_process.h"
+#include "lib/image.h"
+#include "lib/file.h"
+#include "lib/thread_pool.h"
+#include "lib/time_util.h"
+#include "lib/mem.h"
+#include "radiant/view.hpp"
 #include <math.h>
 #include <pthread.h>
 

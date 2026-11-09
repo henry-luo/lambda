@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include "../lambda/validator/validator.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lib/mempool.h"
+#include "lib/mempool.h"
 #include <cstring>
 
 class ValidationOptionsTest : public ::testing::Test {

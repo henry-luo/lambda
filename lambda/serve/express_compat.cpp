@@ -4,9 +4,9 @@
 
 #include "express_compat.hpp"
 #include "body_parser.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 
 // ── body parser middleware ──
 

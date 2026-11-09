@@ -1,8 +1,8 @@
 #include "test_wiki_script_helper.hpp"
 #include "../lambda/format/format.h"
-#include "../lib/log.h"
-#include "../lib/mempool.h"
-#include "../lib/test_utils.h"
+#include "lib/log.h"
+#include "lib/mempool.h"
+#include "lib/test_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 

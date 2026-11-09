@@ -7,11 +7,11 @@
 #include "node_url.hpp"
 #include "node_core_common.hpp"
 #include "../../jube/jube_registry.h"
-#include "../../../lib/url.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/hex.h"
-#include "../../../lib/log.h"
-#include "../../../lib/arraylist.h"
+#include "lib/url.h"
+#include "lib/mem.h"
+#include "lib/hex.h"
+#include "lib/log.h"
+#include "lib/arraylist.h"
 
 #include <cstring>
 #include <cstdlib>

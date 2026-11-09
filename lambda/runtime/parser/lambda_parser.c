@@ -1,5 +1,5 @@
 #include "lambda_rd_parser.h"
-#include "../../../lib/hash.h"
+#include "lib/hash.h"
 #include <stdlib.h>
 #include <string.h>
 enum {

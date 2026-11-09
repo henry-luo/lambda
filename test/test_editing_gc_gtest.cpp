@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lib/shell.h"
+#include "lib/shell.h"
 #include <string.h>
 
 struct EditingGcCase {

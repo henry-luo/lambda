@@ -1,7 +1,7 @@
 // test/lib/test_math_utils_gtest.cpp - tests for lib/math_utils
 #include <gtest/gtest.h>
 #include <cmath>
-#include "../../lib/math_utils.h"
+#include "lib/math_utils.h"
 
 TEST(MathUtilsTest, ClampInt) {
     EXPECT_EQ(lib_math::clamp(5, 0, 10), 5);

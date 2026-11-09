@@ -4,7 +4,7 @@
 #include <vector>
 
 extern "C" {
-#include "../../lib/sort.h"
+#include "lib/sort.h"
 }
 
 namespace {

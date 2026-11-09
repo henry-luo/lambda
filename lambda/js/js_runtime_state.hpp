@@ -1,5 +1,5 @@
 #pragma once
-#include "../../lib/lambda_api.h"
+#include "lib/lambda_api.h"
 
 // js_runtime_state.hpp - shared JS runtime state surface.
 //
@@ -15,9 +15,9 @@
 #include "../runtime/async.h"
 #include "../runtime/root_vector.h"
 #include "../runtime/lambda-root-frame.hpp"
-#include "../../lib/hashmap.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/line_framer.h"
+#include "lib/hashmap.h"
+#include "lib/arraylist.h"
+#include "lib/line_framer.h"
 
 // dynamic JS source follows the bound evaluator without changing the hot TLS read.
 static inline Runtime* js_current_runtime(void) {

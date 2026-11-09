@@ -4,9 +4,9 @@
 #include <stdlib.h>
 
 #include "../lambda/core/data.hpp"
-#include "../radiant/event.hpp"
-#include "../radiant/render.hpp"
-#include "../radiant/view.hpp"
+#include "radiant/event.hpp"
+#include "radiant/render.hpp"
+#include "radiant/view.hpp"
 
 UiContext ui_context{};
 
@@ -14,11 +14,11 @@ UiContext ui_context{};
 DisplayValue resolve_display_value(void*) { abort(); }
 void view_tree_release_retired_subtree(ViewTree*, DomNode*) { abort(); }
 
-void radiant_sync_pseudo_state(View*, uint32_t, bool) {
+void radiant_event_host_sync_pseudo_state(View*, uint32_t, bool) {
     // this standalone target has no cascade; native UI fixtures check popup restyling.
 }
 
-void radiant_sync_focus_style(View*, uint32_t) {
+void radiant_event_host_sync_focus_style(View*, uint32_t) {
     // this standalone target has no cascade; native UI fixtures check focus restyling.
 }
 
@@ -36,11 +36,6 @@ extern "C" bool dom_option_selectedness(void* dom_elem) {
     return option->has_attribute("selected");
 }
 
-bool is_view_focusable(View* view) {
-    (void)view;
-    return false;
-}
-
 // focus eligibility is stubbed here; this target owns no CSSOM cascade.
 CssomCascadeQueryScope::CssomCascadeQueryScope() : previous(nullptr), refreshed(nullptr) {}
 CssomCascadeQueryScope::~CssomCascadeQueryScope() = default;
@@ -49,6 +44,10 @@ bool is_view_programmatically_focusable(View* view) {
     // StateStore tests need the DOM focus contract without linking the event
     // dispatcher; synthetic element fixtures model programmatic focus targets.
     return view && view->is_element();
+}
+
+bool radiant_event_host_focusable(View* view, bool programmatic) {
+    return programmatic && is_view_programmatically_focusable(view);
 }
 
 void view_pool_release_detached_subtree(DomNode* root) {

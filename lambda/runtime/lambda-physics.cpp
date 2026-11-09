@@ -3,7 +3,7 @@
 #include "value_builder.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
-#include "../../lib/physics/physics_math.h"
+#include "lib/physics/physics_math.h"
 
 static Item physics_error(const char* message) {return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,message,NULL));}
 static Item physics_string(const char* value) {return Item{.item=s2it(heap_create_name(value))};}

@@ -5,9 +5,9 @@
 #include "../lambda/network/cookie_jar.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/radiant_state_store.h"
-#include "../lib/file.h"
-#include "../lib/mem.h"
-#include "../lib/sqlite/sqlite3.h"
+#include "lib/file.h"
+#include "lib/mem.h"
+#include "lib/sqlite/sqlite3.h"
 
 #include <string.h>
 #include <time.h>

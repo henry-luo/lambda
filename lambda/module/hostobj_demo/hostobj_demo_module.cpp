@@ -8,8 +8,8 @@
 
 #include "../../lambda.hpp"
 #include "../../jube/jube_registry.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/log.h"
+#include "lib/mem.h"
+#include "lib/log.h"
 #include <string.h>
 
 typedef struct HostObjDemoNative {

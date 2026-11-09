@@ -5,9 +5,9 @@
 
 #include "rest.hpp"
 #include "server.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 #include <cstring>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 
 // ============================================================================
 // Endpoint Registry

@@ -2,8 +2,8 @@
 // See context_capsule.h for the contract.
 #include "../lambda-data.hpp"
 #include "context_capsule.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/log.h"
 #include <string.h>
 
 static bool context_capsule_id_valid(EvalContext* owner, ContextCapsuleId id) {

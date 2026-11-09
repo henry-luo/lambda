@@ -11,20 +11,20 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include "../lib/strbuf.h"
-#include "../radiant/tagged.hpp"
-#include "../lib/uv_loop.h"
-#include "../lib/memtrack.h"
+#include "lib/strbuf.h"
+#include "radiant/tagged.hpp"
+#include "lib/uv_loop.h"
+#include "lib/memtrack.h"
 
-#include "../radiant/view.hpp"
-#include "../radiant/layout.hpp"
-#include "../radiant/event.hpp"
-#include "../radiant/render.hpp"
-#include "../radiant/radiant.hpp"
-#include "../radiant/window_host.hpp"
-#include "../radiant/render_css3d.hpp"
-#include "../radiant/resource_loaders.h"
-#include "../radiant/network_integration.h"
+#include "radiant/view.hpp"
+#include "radiant/layout.hpp"
+#include "radiant/event.hpp"
+#include "radiant/render.hpp"
+#include "radiant/radiant.hpp"
+#include "radiant/window_host.hpp"
+#include "radiant/render_css3d.hpp"
+#include "radiant/resource_loaders.h"
+#include "radiant/network_integration.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/css/css_engine.hpp"
@@ -35,8 +35,8 @@
 #include "../lambda/input/css/selector_matcher.hpp"
 
 extern "C" {
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
 }
 
 #include "../lambda/runtime/transpiler.hpp"

@@ -5,9 +5,9 @@
 
 #include "../lambda/input/input.hpp"
 #include "../lambda/core/mark_reader.hpp"
-#include "../lib/file.h"
-#include "../lib/mempool.h"
-#include "../lib/string.h"
+#include "lib/file.h"
+#include "lib/mempool.h"
+#include "lib/string.h"
 
 static const char* MERMAID_CORPUS_DIR = "test/lambda/graph/mermaid";
 static const char* MERMAID_MANIFEST = "test/lambda/graph/mermaid/manifest.mark";

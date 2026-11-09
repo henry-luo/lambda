@@ -2,12 +2,12 @@
 #include "../input/input.hpp"
 #include "../input/input-parsers.h"
 #include "../format/format.h"
-#include "../../lib/mem.h"
-#include "../../lib/mem_context.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/utf.h"
-#include "../../lib/uv_loop.h"
-#include "../../lib/arraylist.h"
+#include "lib/mem.h"
+#include "lib/mem_context.h"
+#include "lib/mem_factory.h"
+#include "lib/utf.h"
+#include "lib/uv_loop.h"
+#include "lib/arraylist.h"
 #include <string.h>
 #include <math.h>
 

@@ -1,13 +1,13 @@
 #include "module_ast_prebuild.hpp"
 #include "compiler_worker_stack.h"
 
-#include "../../lib/file.h"
-#include "../../lib/hashmap_typed.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/shell.h"
-#include "../../lib/thread_pool.h"
-#include "../../lib/path_str.h"
+#include "lib/file.h"
+#include "lib/hashmap_typed.hpp"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/shell.h"
+#include "lib/thread_pool.h"
+#include "lib/path_str.h"
 
 #include <pthread.h>
 #include <stdio.h>

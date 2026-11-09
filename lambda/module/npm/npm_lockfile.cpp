@@ -1,14 +1,14 @@
 // npm_lockfile.cpp — Read/write lambda-node.lock (JSON format)
 
 #include "npm_lockfile.h"
-#include "../../../lib/file.h"
-#include "../../../lib/log.h"
-#include "../../../lib/mem_grow.hpp"
-#include "../../../lib/memtrack.h"
-#include "../../../lib/mempool.h"
-#include "../../../lib/mem_factory.h"
-#include "../../../lib/escape.h"
-#include "../../../lib/stringbuf.h"
+#include "lib/file.h"
+#include "lib/log.h"
+#include "lib/mem_grow.hpp"
+#include "lib/memtrack.h"
+#include "lib/mempool.h"
+#include "lib/mem_factory.h"
+#include "lib/escape.h"
+#include "lib/stringbuf.h"
 #include "../../lambda-data.hpp"
 #include "../../core/mark_reader.hpp"
 // forward-declare JSON parser to avoid transitive input.hpp linkage issues

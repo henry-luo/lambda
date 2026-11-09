@@ -204,7 +204,7 @@ TREE_SITTER_RUBY_LIB = lambda/tree-sitter-ruby/libtree-sitter-ruby.a
 # RE2 is built by the JSON-owned Premake target; these identify its vendored
 # source for patch verification. Like MIR, the patches under
 # patches/re2-*.patch are ALREADY APPLIED to the vendored source.
-RE2_SRC_DIR = lib/re2
+RE2_SRC_DIR = $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input)/lib/re2
 RE2_UPSTREAM_COMMIT = 3a8436ac436124a57a4e22d5c8713a2d42b381d7
 
 # MIR JIT library. The source is vendored in-tree at lambda/mir (see
@@ -712,6 +712,7 @@ env-debug:
 
 # Main build target (incremental)
 build: $(MIR_LIB)
+	@$(PYTHON) utils/check_split_roots.py
 	@# Debug and release share lambda.exe; a release marker requires a debug relink.
 	@if [ -f .lambda_release_build ]; then rm -f lambda.exe .lambda_release_build; fi
 ifeq ($(IS_MSYS2),yes)
@@ -3339,6 +3340,7 @@ build-lambda-split: $(MIR_LIB)
 .PHONY: test-split-fetch
 test-split-fetch: build-lambda-split
 	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" $(PYTHON) test/test_fetch_lifetime.py ./lambda-static.exe
+	$(PYTHON) test/test_split_host_snapshot.py ./lambda-static.exe
 
 # Build only the native binaries invoked by test-input-baseline. Keeping this
 # separate prevents that prerequisite from pulling the all-tests target back

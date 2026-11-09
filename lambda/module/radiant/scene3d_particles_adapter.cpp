@@ -1,7 +1,7 @@
 #include "scene3d_particles_adapter.hpp"
-#include "../../../radiant/scene3d/scene3d_particles_internal.hpp"
-#include "../../../radiant/scene3d/scene3d_physics.hpp"
-#include "../../../radiant/event.hpp"
+#include "radiant/scene3d/scene3d_particles_internal.hpp"
+#include "radiant/scene3d/scene3d_physics.hpp"
+#include "radiant/event.hpp"
 #include "../../core/mark_reader.hpp"
 #include "../../input/css/dom_element.hpp"
 #include "../../input/css/dom_lifecycle.hpp"
@@ -9,7 +9,7 @@
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/lambda-navigation.hpp"
 #include "../../runtime/value_builder.hpp"
-#include "../../../lib/mem.h"
+#include "lib/mem.h"
 #include <float.h>
 
 static void particle_snapshot_header(Scene3dParticles *state, const Scene3dRuntimeStats &clock,

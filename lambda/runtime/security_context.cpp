@@ -3,12 +3,12 @@
 #include "context_capsule.h"
 #include "heap_api.h"
 #include "lambda-error.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/url.h"
-#include "../../lib/path_str.h"
+#include "lib/hashmap.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/strbuf.h"
+#include "lib/memtrack.h"
+#include "lib/url.h"
+#include "lib/path_str.h"
 #include <string.h>
 
 extern __thread EvalContext* context;

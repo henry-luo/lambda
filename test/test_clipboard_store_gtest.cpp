@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "../radiant/event.hpp"
-#include "../lib/memtrack.h"
+#include "radiant/event.hpp"
+#include "lib/memtrack.h"
 
 TEST(ClipboardStoreOwnership, DestroyReleasesContentsAndAllowsReinitialization) {
     ClipboardStore store = {};

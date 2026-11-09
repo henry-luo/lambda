@@ -11,7 +11,7 @@
 #endif
 
 extern "C" {
-#include "../../lib/thread_pool.h"
+#include "lib/thread_pool.h"
 }
 
 namespace {

@@ -6,11 +6,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../lib/file.h"
-#include "../lib/mem.h"
+#include "lib/file.h"
+#include "lib/mem.h"
 
 extern "C" {
-#include "../lib/shell.h"
+#include "lib/shell.h"
 }
 
 #ifdef _WIN32

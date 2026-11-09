@@ -4,7 +4,7 @@
 #include "parser/js_parser.h"
 #include "../runtime/transpiler.hpp"
 #include "../input/input-script-cache.h"
-#include "../../lib/strbuf.h"
+#include "lib/strbuf.h"
 
 #ifdef __cplusplus
 extern "C" {

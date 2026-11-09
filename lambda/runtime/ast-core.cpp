@@ -6,9 +6,9 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include "../../lib/mempool.h"
-#include "../../lib/log.h"
-#include "../../lib/hashmap_typed.hpp"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/hashmap_typed.hpp"
 
 extern "C" bool ast_cow_path_segment_equal(AstNode* a, bool a_member,
         AstNode* b, bool b_member) {

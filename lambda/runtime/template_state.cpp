@@ -4,9 +4,9 @@
 #include "template_state.h"
 #include "render_map.h"
 #include "runtime-state.h"
-#include "../../lib/log.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_typed.hpp"
+#include "lib/log.h"
+#include "lib/hashmap.h"
+#include "lib/hashmap_typed.hpp"
 #include <string.h>
 #include <stdio.h>
 

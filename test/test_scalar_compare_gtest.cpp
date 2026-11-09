@@ -34,7 +34,7 @@
 #include <sys/stat.h>
 
 extern "C" {
-#include "../lib/shell.h"
+#include "lib/shell.h"
 }
 
 #ifdef _WIN32

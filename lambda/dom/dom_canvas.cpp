@@ -25,11 +25,11 @@
 #include "../input/css/css_style.hpp"
 #include "../core/well_known_markup_names.h"
 #include "dom_observers.h"
-#include "../../lib/font/font.h"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/str.h"
-#include "../../lib/strbuf.h"
+#include "lib/font/font.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
 
 #include <string.h>
 #include <stdlib.h>

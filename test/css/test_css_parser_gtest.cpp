@@ -6,7 +6,7 @@
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/css_formatter.hpp"
 #include "../../lambda/input/css/css_paged_media.hpp"
-#include "../../lib/mempool.h"
+#include "lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
 protected:

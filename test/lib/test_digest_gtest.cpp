@@ -2,9 +2,9 @@
 #include <cstring>
 
 extern "C" {
-#include "../../lib/digest.h"
-#include "../../lib/hex.h"
-#include "../../lib/log.h"
+#include "lib/digest.h"
+#include "lib/hex.h"
+#include "lib/log.h"
 }
 
 class DigestTest : public ::testing::Test {

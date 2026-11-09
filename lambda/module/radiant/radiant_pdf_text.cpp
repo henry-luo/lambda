@@ -3,8 +3,8 @@
 #include "radiant_image_job.hpp"
 #include "../../core/collection_storage.h"
 #include "../../runtime/heap_api.h"
-#include "../../../lib/font/font_export.h"
-#include "../../../lib/utf.h"
+#include "lib/font/font_export.h"
+#include "lib/utf.h"
 
 extern "C" Item vmap_new();
 

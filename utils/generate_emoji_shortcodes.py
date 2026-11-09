@@ -3,8 +3,8 @@
 
 import argparse
 import json
-from pathlib import Path
 import re
+from split_paths import sibling_roots
 
 
 def generate(root):
@@ -40,7 +40,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="verify generated data is current")
     args = parser.parse_args()
-    root = Path(__file__).resolve().parent.parent
+    root = sibling_roots()[0]
     output = root / "lib/emoji_shortcodes_table.inc"
     generated = generate(root)
     if args.check:

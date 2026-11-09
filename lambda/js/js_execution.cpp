@@ -1,5 +1,5 @@
 #include "js_execution_internal.hpp"
-#include "../../lib/host_paths.h"
+#include "lib/host_paths.h"
 #include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "js_source_module.hpp"
@@ -14,13 +14,13 @@
 #include "../runtime/lambda-error.h"
 #include "../runtime/recovery_frame.h"
 #include "../runtime/mir_dump.h"
-#include "../../lib/base64.h"
-#include "../../lib/file.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/path_str.h"
-#include "../../lib/str.h"
-#include "../../lib/url.h"
-#include "../../lib/mime-detect.h"
+#include "lib/base64.h"
+#include "lib/file.h"
+#include "lib/mem_factory.h"
+#include "lib/path_str.h"
+#include "lib/str.h"
+#include "lib/url.h"
+#include "lib/mime-detect.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -36,7 +36,7 @@
 #include <unistd.h>
 #endif
 #include "js_runtime_internal.hpp"
-#include "../../lib/time_util.h"
+#include "lib/time_util.h"
 
 #ifndef LAMBDA_NO_MIR
 // Global MIR error handler override for batch mode.

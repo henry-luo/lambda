@@ -12,8 +12,8 @@
 #include "router.hpp"
 #include "serve_utils.hpp"
 #include <string.h>
-#include "../../lib/mem.h"
-#include "../../lib/str.h"
+#include "lib/mem.h"
+#include "lib/str.h"
 
 // ============================================================================
 // Internal helpers

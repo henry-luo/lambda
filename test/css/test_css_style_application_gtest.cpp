@@ -10,7 +10,7 @@
 #include "../../lambda/input/css/css_formatter.hpp"
 
 extern "C" {
-#include "../../lib/mempool.h"
+#include "lib/mempool.h"
 }
 
 /**

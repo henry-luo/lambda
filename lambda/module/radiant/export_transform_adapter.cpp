@@ -1,11 +1,11 @@
 #include "export_transform_adapter.hpp"
-#include "../../../radiant/render.hpp"
-#include "../../../radiant/radiant.hpp"
+#include "radiant/render.hpp"
+#include "radiant/radiant.hpp"
 #include "../../runtime/transpiler.hpp"
 #include "../../input/css/dom_lifecycle.hpp"
-#include "../../../lib/mem_factory.h"
-#include "../../../lib/url.h"
-#include "../../../lib/log.h"
+#include "lib/mem_factory.h"
+#include "lib/url.h"
+#include "lib/log.h"
 #include <stdio.h>
 #include <string.h>
 

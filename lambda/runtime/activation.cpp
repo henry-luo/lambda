@@ -7,10 +7,10 @@
 #include "lambda-stack.h"
 #include "template_state.h"
 #include "gc/gc_heap.h"
-#include "../../lib/fiber.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/sanitizer.h"
+#include "lib/fiber.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/sanitizer.h"
 
 #include <pthread.h>
 #include <string.h>

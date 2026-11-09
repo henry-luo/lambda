@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "../../lib/arena.h"
-#include "../../lib/mempool.h"
+#include "lib/arena.h"
+#include "lib/mempool.h"
 #include "../../lambda/lambda-data.hpp"  // For container types and functions
 #include <string.h>
 

@@ -18,7 +18,7 @@
 // this unity-style test must pull that translation unit in as well.
 #include "../lambda/js/js_regex_generated_properties.cpp"
 #include "../lambda/js/js_bt_regex.cpp"
-#include "../lib/strbuf.h"
+#include "lib/strbuf.h"
 
 namespace {
 

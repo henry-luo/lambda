@@ -51,7 +51,7 @@
 extern "C" const void* radiant_dom_range_host_type(void);
 extern "C" const void* radiant_dom_selection_host_type(void);
 #include "../runtime/lambda-root-frame.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 #include <cstring>
 
 JS_FORWARD_STATIC_ITEM(_coll_illegal_constructor, (void), js_throw_type_error, ("Illegal constructor"))

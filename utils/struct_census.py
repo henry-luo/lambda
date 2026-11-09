@@ -33,6 +33,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+from functools import partial
+from split_paths import project_source_path, sibling_roots
+INPUT_ROOT, RADIANT_ROOT = sibling_roots()
+source_path = partial(project_source_path, root=ROOT, roots=(INPUT_ROOT, RADIANT_ROOT))
 DEFAULT_CONFIG = ROOT / "utils" / "struct_census.config.json"
 STATE_VERSION = 1
 
@@ -107,11 +111,13 @@ def is_excluded(rel: str, cfg: dict) -> bool:
 
 def owned(path: str, cfg: dict) -> str | None:
     """Repo-relative path if this file is ours to audit, else None."""
-    try:
-        rel = os.path.relpath(path, ROOT)
-    except ValueError:
-        return None
-    if rel.startswith(".."):
+    absolute = Path(os.path.abspath(path))
+    rel = None
+    for root in (INPUT_ROOT, RADIANT_ROOT, ROOT):
+        if absolute.is_relative_to(root):
+            rel = absolute.relative_to(root).as_posix()
+            break
+    if rel is None:
         return None
     if not any(rel == d or rel.startswith(d + "/") for d in cfg["source_dirs"]):
         return None
@@ -138,8 +144,10 @@ def discover_tus(cfg: dict) -> list[str]:
     exts = tuple(cfg["tu_extensions"])
     out = []
     for src in cfg["source_dirs"]:
-        for dirpath, dirnames, filenames in os.walk(ROOT / src):
-            rel_dir = os.path.relpath(dirpath, ROOT)
+        # The remaining input migration link is a source root, not a leaf file.
+        for dirpath, dirnames, filenames in os.walk(source_path(src), followlinks=True):
+            suffix = os.path.relpath(dirpath, source_path(src))
+            rel_dir = src if suffix == '.' else os.path.join(src, suffix)
             # prune excluded subtrees so we never walk into sqlite/tree-sitter
             dirnames[:] = [
                 d for d in dirnames
@@ -148,7 +156,7 @@ def discover_tus(cfg: dict) -> list[str]:
             for fn in filenames:
                 if not fn.endswith(exts):
                     continue
-                rel = os.path.relpath(os.path.join(dirpath, fn), ROOT)
+                rel = os.path.join(rel_dir, fn)
                 if not is_excluded(rel, cfg):
                     out.append(rel)
     return sorted(out)
@@ -158,7 +166,7 @@ def discover_tus(cfg: dict) -> list[str]:
 
 def stat_token(rel: str) -> str:
     try:
-        st = os.stat(rel)
+        st = source_path(rel).stat()
         return f"{rel}:{st.st_size}:{st.st_mtime_ns}"
     except OSError:
         return f"{rel}:missing"
@@ -202,7 +210,8 @@ def tu_args(rel: str, cfg: dict) -> list[str]:
     else:
         args = ["-x", "c++", f"-std={c['cxx_std']}"]
     args += [f"-D{d}" for d in c.get("defines", [])]
-    args += [f"-I{i}" for i in c["include_dirs"]]
+    args += [f"-I{source_path(i)}" for i in c["include_dirs"]]
+    args += [f"-I{INPUT_ROOT}", f"-I{RADIANT_ROOT}"]
     if _RESOURCE_DIR:
         args += ["-resource-dir", _RESOURCE_DIR]
     sdk = os.environ.get("SDKROOT")
@@ -218,7 +227,7 @@ def scan(rel: str) -> dict:
     index = ci.Index.create()
     try:
         tu = index.parse(
-            rel, args=tu_args(rel, CFG),
+            str(source_path(rel)), args=tu_args(rel, CFG),
             options=ci.TranslationUnit.PARSE_SKIP_FUNCTION_BODIES
                     | ci.TranslationUnit.PARSE_INCOMPLETE,
         )

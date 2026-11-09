@@ -14,12 +14,12 @@
 #include "../../lambda-data.hpp"
 #include "../../runtime/transpiler.hpp"
 #include "../../jube/jube_registry.h"
-#include "../../../lib/log.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/hex.h"
-#include "../../../lib/base64.h"
-#include "../../../lib/str.h"
-#include "../../../lib/utf.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/hex.h"
+#include "lib/base64.h"
+#include "lib/str.h"
+#include "lib/utf.h"
 
 #include <cstring>
 #include <cstdlib>

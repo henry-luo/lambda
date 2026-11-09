@@ -1,5 +1,5 @@
 #pragma once
-#include "../../../lib/endian.h"
+#include "lib/endian.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>

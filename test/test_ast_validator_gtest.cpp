@@ -14,9 +14,9 @@
 #include <stddef.h>
 
 extern "C" {
-#include "../lib/log.h"
+#include "lib/log.h"
 }
-#include "../lib/test_utils.h"
+#include "lib/test_utils.h"
 #include "test_validator_patterns.hpp"
 
 // Include validator headers for ValidationResult and run_validation
@@ -25,9 +25,9 @@ extern "C" {
 #include "../lambda/input/input.hpp"
 // keep the TSNode test stub tied to the public API; validator headers no longer expose it transitively.
 #include "../lambda/tree-sitter/lib/include/tree_sitter/api.h"
-#include "../lib/mempool.h"
-#include "../lib/arraylist.h"
-#include "../lib/stringbuf.h"
+#include "lib/mempool.h"
+#include "lib/arraylist.h"
+#include "lib/stringbuf.h"
 
 // Forward declaration for path segment creation
 PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, Pool* pool);

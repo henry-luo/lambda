@@ -4,8 +4,8 @@
 #include "../input/input-script-cache.h"
 #include "../runtime/module_ast_prebuild.hpp"
 #include "../runtime/transpiler.hpp"
-#include "../../lib/file.h"
-#include "../../lib/mem.h"
+#include "lib/file.h"
+#include "lib/mem.h"
 
 #include <limits.h>
 #include <string.h>

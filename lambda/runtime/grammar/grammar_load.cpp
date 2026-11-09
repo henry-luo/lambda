@@ -14,11 +14,11 @@
 #include "../parse_type_pattern.hpp"
 #include "../re2_wrapper.hpp"
 #include "../lambda-error.h"
-#include "../../../lib/log.h"
-#include "../../../lib/str.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/escape.h"
-#include "../../../lib/arraylist.h"
+#include "lib/log.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
+#include "lib/escape.h"
+#include "lib/arraylist.h"
 
 #include <string.h>
 

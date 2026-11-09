@@ -1,5 +1,5 @@
 #include "worker.h"
-#include "../../../lib/file.h"
+#include "lib/file.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdlib.h>

@@ -28,7 +28,7 @@
 #include <unordered_set>
 
 extern "C" {
-#include "../lib/log.h"
+#include "lib/log.h"
 }
 
 // Helper function to check if a file exists

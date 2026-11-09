@@ -3,7 +3,7 @@
 #include <cstring>
 
 extern "C" {
-#include "../../lib/endian.h"
+#include "lib/endian.h"
 }
 
 TEST(EndianTest, ReadBigEndian) {

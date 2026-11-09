@@ -1,7 +1,7 @@
-#include "../../../radiant/animation_mixer.hpp"
-#include "../../../radiant/scene3d/scene3d.hpp"
-#include "../../../radiant/scene3d/scene3d_animation.hpp"
-#include "../../../radiant/event.hpp"
+#include "radiant/animation_mixer.hpp"
+#include "radiant/scene3d/scene3d.hpp"
+#include "radiant/scene3d/scene3d_animation.hpp"
+#include "radiant/event.hpp"
 #include "../../dom/dom.h"
 #include "../../dom/realm/dom_realm.h"
 #include "../../input/css/dom_element.hpp"
@@ -12,8 +12,8 @@
 #include "../../runtime/root_vector.h"
 #include "../../jube/jube_registry.h"
 #include "radiant_dom_bridge.hpp"
-#include "../../../lib/mem.h"
-#include "../../../lib/str.h"
+#include "lib/mem.h"
+#include "lib/str.h"
 #include <math.h>
 #include <string.h>
 

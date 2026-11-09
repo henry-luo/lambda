@@ -1,5 +1,5 @@
 #include "document_host.hpp"
-#include "../../lib/provider.hpp"
+#include "lib/provider.hpp"
 
 static const LambdaDocumentHostOps* document_host_operations = nullptr;
 

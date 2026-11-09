@@ -1,16 +1,16 @@
 #include "scene3d_animation_adapter.hpp"
 #include "scene3d_physics_adapter.hpp"
-#include "../../../radiant/scene3d/scene3d_animation_internal.hpp"
-#include "../../../radiant/scene3d/scene3d.hpp"
-#include "../../../radiant/scene3d/scene3d_physics.hpp"
-#include "../../../radiant/scene3d/scene3d_source.hpp"
-#include "../../../radiant/event.hpp"
-#include "../../../radiant/radiant.hpp"
+#include "radiant/scene3d/scene3d_animation_internal.hpp"
+#include "radiant/scene3d/scene3d.hpp"
+#include "radiant/scene3d/scene3d_physics.hpp"
+#include "radiant/scene3d/scene3d_source.hpp"
+#include "radiant/event.hpp"
+#include "radiant/radiant.hpp"
 #include "../../core/mark_reader.hpp"
 #include "../../runtime/lambda-number-runtime.hpp"
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/value_builder.hpp"
-#include "../../../lib/mem.h"
+#include "lib/mem.h"
 #include <math.h>
 #include <string.h>
 

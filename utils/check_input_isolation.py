@@ -11,8 +11,8 @@ import subprocess
 import sys
 import tempfile
 
-from check_input_archive_headers import (ARCHIVES, FORBIDDEN, ROOT, check_archive,
-                                         check_archive_ownership, input_dependencies)
+from check_input_archive_headers import (ARCHIVES, FORBIDDEN, INPUT_ROOT, RADIANT_ROOT, ROOT, check_archive,
+                                         check_archive_ownership, dependency_file, input_dependencies)
 from check_radiant_archive_ownership import makefile_objects
 
 TEST_TARGETS = ("test_input_dom_native_gtest", "test_input_blob_url_gtest", "test_input_model_gtest", "test_input_roundtrip_gtest",
@@ -39,12 +39,35 @@ BASELINE_MODE_TARGETS = {"test_wpt_html_parser_gtest", "test_markdown_gtest"}
 
 
 def stage_file(stage: Path, relative: Path) -> None:
-    source = ROOT / relative
+    source = dependency_file(relative)
     if not source.is_file():
         raise FileNotFoundError(source)
-    destination = stage / relative
+    if relative.parts[0] == 'lib':
+        destination = stage.parent / 'lambda-input' / relative
+    elif relative.parts[0] == 'radiant':
+        destination = stage.parent / 'radiant' / relative
+    else:
+        destination = stage / relative
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
+    # Input-owned Lambda headers must also resolve from the input include root.
+    if relative.parts[0] == 'lambda' and source.resolve().is_relative_to(INPUT_ROOT):
+        sibling = stage.parent / 'lambda-input' / relative
+        sibling.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, sibling)
+
+
+def stage_makefile(stage: Path, target: str) -> None:
+    relative = Path('build/premake') / (target + '.make')
+    stage_file(stage, relative)
+    destination = stage / relative
+    text = destination.read_text()
+    for original, staged in ((INPUT_ROOT, stage.parent / 'lambda-input'),
+                             (RADIANT_ROOT, stage.parent / 'radiant')):
+        text = text.replace(str(original), str(staged))
+        text = text.replace(os.path.relpath(original, ROOT / 'build/premake'),
+                            os.path.relpath(staged, stage / 'build/premake'))
+    destination.write_text(text)
 
 
 def run_logged(command: list[str], cwd: Path, log: Path, environment: dict[str, str]) -> None:
@@ -92,7 +115,8 @@ def main() -> int:
         return 1
     temp = ROOT / "temp"
     temp.mkdir(exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix="input-isolation-", dir=temp))
+    stage = Path(tempfile.mkdtemp(prefix="input-isolation-", dir=temp)) / 'Lambda'
+    stage.mkdir()
     try:
         dependencies = set()
         for target in targets:
@@ -114,7 +138,7 @@ def main() -> int:
         for relative in sorted(dependencies):
             stage_file(stage, relative)
         for target in targets:
-            stage_file(stage, Path("build/premake") / (target + ".make"))
+            stage_makefile(stage, target)
         for fixture in FIXTURES:
             destination = stage / fixture
             destination.parent.mkdir(parents=True, exist_ok=True)

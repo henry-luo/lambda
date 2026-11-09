@@ -1,3 +1,4 @@
+#include "loader_runtime_adapter.hpp"
 /**
  * Script Runner for Radiant Layout Engine
  *
@@ -12,10 +13,10 @@
  *   HTML parse → Element* tree → DomElement* tree → CSS cascade
  *   → execute_document_scripts() → optional post-script recascade → layout
  */
-#include "../../../lib/memtrack.h"
+#include "lib/memtrack.h"
 
-#include "../../../radiant/radiant.hpp"
-#include "../../../radiant/network_integration.h"
+#include "radiant/radiant.hpp"
+#include "radiant/network_integration.h"
 #include "script_timeout.hpp"
 #include "script_runner_host.hpp"
 #include <assert.h>
@@ -44,18 +45,18 @@
 #include "../../input/input.hpp"
 #include "../../input/input-parsers.h"
 #include "../../io/mark_builder.hpp"
-#include "../../../lib/log.h"
-#include "../../../lib/mem_factory.h"
-#include "../../../radiant/layout.hpp"  // MAX_LAYOUT_DEPTH — shared DOM-recursion depth cap
-#include "../../../lib/arraylist.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/str.h"
-#include "../../../lib/url.h"
-#include "../../../lib/file.h"
-#include "../../../lib/hashmap.h"
-#include "../../../lib/hashmap_typed.hpp"
-#include "../../../radiant/tagged.hpp"
-#include "../../../lib/time_util.h"
+#include "lib/log.h"
+#include "lib/mem_factory.h"
+#include "radiant/layout.hpp"  // MAX_LAYOUT_DEPTH — shared DOM-recursion depth cap
+#include "lib/arraylist.h"
+#include "lib/strbuf.h"
+#include "lib/str.h"
+#include "lib/url.h"
+#include "lib/file.h"
+#include "lib/hashmap.h"
+#include "lib/hashmap_typed.hpp"
+#include "radiant/tagged.hpp"
+#include "lib/time_util.h"
 #include "../../js/js_event_loop.h"
 #include "../../network/network_resource_manager.h"
 
@@ -324,7 +325,6 @@ static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
 static bool s_static_headless_snapshot = false;
 
-extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 extern "C" void script_runner_set_retain_js_state(bool retain) {
     s_retain_js_state = retain;

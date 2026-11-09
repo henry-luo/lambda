@@ -1,8 +1,8 @@
 {
   "config_imports": [
     "build_deps_config.json",
-    "../lambda-input/build_targets.json",
-    "../radiant/build_targets.json"
+    {"path": "../lambda-input/build_targets.json", "root_env": "LAMBDA_INPUT_ROOT", "root_path": "build_targets.json"},
+    {"path": "../radiant/build_targets.json", "root_env": "RADIANT_ROOT", "root_path": "build_targets.json"}
   ],
   "name": "lambda",
   "description": "Lambda: A modern functional scripting language for data processing and editing",
@@ -82,6 +82,7 @@
     "lib/physics"
   ],
   "source_files": [
+    "test/test_utils_runtime.cpp",
     "lib/sqlite/sqlite3.c",
     "lambda/module/node_core/node_events.cpp",
     "lambda/module/node_core/node_trace_events.cpp",
@@ -111,9 +112,10 @@
   ],
   "sqlite_version": "3.45.3",
   "exclude_source_files": [
-    "lambda/runtime/lambda-decimal-runtime.cpp",
     "radiant/webview_child_mac_static.cpp",
     "radiant/webview_layer_mac_static.cpp",
+    "radiant/rdt_video_mac_static.cpp",
+    "radiant/rdt_speech_mac_static.cpp",
     "radiant/rdt_vector_cg.mm",
     "lambda/format/format_latex_html_v2.cpp",
     "lambda/input/input-adoc.cpp",
@@ -722,7 +724,6 @@
       ],
       "libraries": [
         "lambda-rt",
-        "node-core",
         "lambda-radiant-adapter",
         "radiant",
         "radiant-properties",
@@ -1175,7 +1176,6 @@
         "lambda/core/js_well_known_names.c"
       ],
       "exclude_source_files": [
-        "lambda/runtime/lambda-decimal-runtime.cpp",
         "lambda/runtime/http_module.cpp",
         "lambda/runtime/concurrency_js.cpp",
         "lambda/format/format_latex_html_v2.cpp",
@@ -1269,7 +1269,7 @@
         "lib/line_framer.c",
         "lib/test_utils.c",
         "lib/test_utils_pool.c",
-        "lib/test_utils_runtime.cpp",
+        "test/test_utils_runtime.cpp",
         "lambda/runtime/mcp_module.cpp",
         "lambda/runtime/pdf_builder.cpp",
         "lambda/runtime/rdb_host.cpp",
@@ -2375,6 +2375,7 @@
         "lambda/runtime/interp.cpp",
         "lambda/runtime/interp_plan.cpp",
         "lambda/runtime/lambda-data-runtime.cpp",
+        "lambda/runtime/lambda-decimal-runtime.cpp",
         "lambda/runtime/lambda-error.cpp",
         "lambda/runtime/lambda-eval-num.cpp",
         "lambda/runtime/lambda-eval.cpp",

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../../radiant/input_value.hpp"
+#include "radiant/input_value.hpp"
 #include "../../lambda-data.hpp"
 
 struct DomDocument;

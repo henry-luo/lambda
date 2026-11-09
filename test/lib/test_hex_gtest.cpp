@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 
-#include "../../lib/hex.h"
+#include "lib/hex.h"
 
 TEST(HexTest, EncodeNibble) {
     EXPECT_EQ(hex_encode_nibble(0), '0');

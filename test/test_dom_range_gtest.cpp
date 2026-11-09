@@ -12,15 +12,15 @@
 #include <gtest/gtest.h>
 
 extern "C" {
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
-#include "../lib/log.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
+#include "lib/log.h"
 }
-#include "../lib/test_utils.h"
+#include "lib/test_utils.h"
 
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
-#include "../radiant/event.hpp"
+#include "radiant/event.hpp"
 
 #include <cstring>
 #include <new>
@@ -1100,7 +1100,7 @@ TEST_F(DomRangeTest, SelectionModifyRejectsUnknown) {
 // (Resolver only depends on `view.hpp`; we set up TextRect + view types
 // directly on our synthetic nodes.)
 // ============================================================================
-#include "../radiant/view.hpp"
+#include "radiant/view.hpp"
 
 class DomResolverTest : public DomRangeTest {
 protected:

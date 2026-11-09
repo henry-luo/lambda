@@ -6,9 +6,9 @@
 #include "npm_lockfile.h"
 #include "npm_package_json.h"
 #include "npm_tarball.h"
-#include "../../../lib/file.h"
-#include "../../../lib/log.h"
-#include "../../../lib/memtrack.h"
+#include "lib/file.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 
 #include <string.h>
 #include <stdio.h>

@@ -1,3 +1,5 @@
+#include "radiant_runtime_init.hpp"
+#include "event_adapter.hpp"
 #include "../../jube/jube_registry.h"
 #include "../../input/css/dom_element.hpp"
 #include "../../io/input-allocation-context.h"
@@ -13,36 +15,41 @@
 #include "../../js/js_event_loop.h"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
-#include "../../../radiant/gl_core.hpp"
+#include "radiant/gl_core.hpp"
 #include "../../dom/dom_style.h"
 #include "../../dom/dom_host_engine.h"
 #include "../../dom/dom.h"
 #include "../../dom/dom_collection_types.h"
 #include "../../dom/dom_event_host.h"
+#include "../../dom/dom_engine.h"
 #include "../../dom/dom_observers.h"
 #include "radiant_input_value.hpp"
 #include "script_runner_host.hpp"
 #include "radiant_image_job.hpp"
-#include "../../../radiant/tagged.hpp"
-#include "../../../radiant/layout.hpp"
-#include "../../../radiant/render.hpp"
-#include "../../../radiant/svg_animation.hpp"
-#include "../../../radiant/geomap.hpp"
-#include "../../../radiant/geomap_style.hpp"
-#include "../../../lib/color.h"
-#include "../../../radiant/event.hpp"
-#include "../../../radiant/clipboard.hpp"
-#include "../../../radiant/radiant.hpp"
-#include "../../../radiant/audio.hpp"
-#include "../../../radiant/audio_capture.hpp"
-#include "../../../radiant/document_clock.hpp"
-#include "../../../radiant/scroll_observer.hpp"
-#include "../../../radiant/scroll_request.hpp"
-#include "../../../radiant/layout_host.hpp"
-#include "../../../radiant/pdf_export_host.hpp"
-#include "../../../radiant/export_runtime_host.hpp"
+#include "radiant/tagged.hpp"
+#include "radiant/layout.hpp"
+#include "radiant/render.hpp"
+#include "radiant/svg_animation.hpp"
+#include "radiant/geomap.hpp"
+#include "radiant/geomap_style.hpp"
+#include "lib/color.h"
+#include "radiant/event.hpp"
+#include "radiant/event_host.hpp"
+#include "radiant/event_navigation_host.hpp"
+#include "radiant/event_reconcile_host.hpp"
+#include "radiant/event_sim_controller_host.hpp"
+#include "radiant/clipboard.hpp"
+#include "radiant/radiant.hpp"
+#include "radiant/audio.hpp"
+#include "radiant/audio_capture.hpp"
+#include "radiant/document_clock.hpp"
+#include "radiant/scroll_observer.hpp"
+#include "radiant/scroll_request.hpp"
+#include "radiant/layout_host.hpp"
+#include "radiant/pdf_export_host.hpp"
+#include "radiant/export_runtime_host.hpp"
 #include "pdf_export_adapter.hpp"
-#include "../../../radiant/speech_event_host.hpp"
+#include "radiant/speech_event_host.hpp"
 #include "speech_event_adapter.hpp"
 #include "scene3d_control_adapter.hpp"
 #include "source_position_adapter.hpp"
@@ -52,34 +59,34 @@
 #include "script_loop_adapter.hpp"
 #include "loader_runtime_adapter.hpp"
 #include "reactive_render_adapter.hpp"
-#include "../../../radiant/dom_mutation_prepare.hpp"
-#include "../../../radiant/scene3d/scene3d_physics_event_host.hpp"
+#include "radiant/dom_mutation_prepare.hpp"
+#include "radiant/scene3d/scene3d_physics_event_host.hpp"
 #include "scene3d_physics_event_adapter.hpp"
-#include "../../../radiant/scene3d/scene3d_navigation_event_host.hpp"
+#include "radiant/scene3d/scene3d_navigation_event_host.hpp"
 #include "scene3d_navigation_adapter.hpp"
 #include "export_transform_adapter.hpp"
-#include "../../../radiant/event_sim_script_host.hpp"
+#include "radiant/event_sim_script_host.hpp"
 #include "event_sim_script_adapter.hpp"
-#include "../../../radiant/resource_observer.hpp"
+#include "radiant/resource_observer.hpp"
 #include "../../runtime/value_builder.hpp"
 #include "../../runtime/lambda-number-runtime.hpp"
-#include "../../../radiant/speech.hpp"
-#include "../../../radiant/scene3d/scene3d.hpp"
-#include "../../../radiant/rdt_video.h"
-#include "../../../lib/log.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/mem_context.h"
-#include "../../../lib/mem_factory.h"
-#include "../../../lib/mempool.h"
-#include "../../../lib/math_utils.h"
-#include "../../../lib/str.h"
-#include "../../../lib/byte_builder.h"
-#include "../../../lib/font/font_math.h"
-#include "../../../lib/image.h"
-#include "../../../lib/endian.h"
+#include "radiant/speech.hpp"
+#include "radiant/scene3d/scene3d.hpp"
+#include "radiant/rdt_video.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/mem_context.h"
+#include "lib/mem_factory.h"
+#include "lib/mempool.h"
+#include "lib/math_utils.h"
+#include "lib/str.h"
+#include "lib/byte_builder.h"
+#include "lib/font/font_math.h"
+#include "lib/image.h"
+#include "lib/endian.h"
 #include "../../runtime/side_stack.h"
 #include "../../runtime/gc/gc_heap.h"
-#include "../../../lib/url.h"
+#include "lib/url.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <math.h>
@@ -5876,8 +5883,59 @@ static const RadiantResourceObserverOps lambda_radiant_resource_observer_ops = {
     dom_queue_image_completion,
 };
 
+static bool lambda_radiant_focusable(DomNode* view, bool programmatic) {
+    return programmatic ? is_view_programmatically_focusable(view) : is_view_focusable(view);
+}
+
+static bool lambda_radiant_allow_frame_reflow() {
+    return !context || context->execution_depth == 0;
+}
+
+static const RadiantEventHostOps lambda_radiant_event_host_ops = {
+    handle_event, lambda_radiant_focusable, radiant_sync_pseudo_state, radiant_sync_focus_style,
+    lambda_event_dispatch_composition, radiant_editing_focused_caret_rect,
+    radiant_run_behavior_init, radiant_run_autofocus, radiant_dispatch_window_event,
+    radiant_dispatch_lambda_body_load, radiant_queue_content_visibility_event,
+    radiant_dispatch_css_event, radiant_dispatch_svg_time_event,
+    radiant_dispatch_scene_animation_event, radiant_dispatch_scene_state_event,
+    lambda_radiant_allow_frame_reflow, dom_engine_frame_tick, radiant_document_has_pending_frames,
+    radiant_focus_element, radiant_collect_stranded_dom, radiant_editing_animation_active,
+    radiant_editing_animation_tick, radiant_set_input_capabilities,
+};
+
+static const RadiantEventNavigationHostOps lambda_radiant_event_navigation_host_ops = {
+    radiant_commit_navigation_requests, radiant_poll_async_document_loads,
+    radiant_drain_async_document_loads, radiant_async_document_loads_pending,
+    radiant_commit_async_document_loads, radiant_cancel_async_document_loads,
+    radiant_execute_location_navigation, radiant_schedule_async_iframe_load,
+};
+
+static void lambda_radiant_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* new_root) {
+    // Rebind event-owned references in the same order as the native rebuild used.
+    radiant_frame_requests_follow_rebuild(document, old_root, new_root);
+    radiant_pointer_capture_follow_rebuild(document, old_root, new_root);
+    radiant_focus_events_follow_rebuild(document, old_root, new_root);
+    radiant_navigation_requests_follow_rebuild(document, old_root, new_root);
+}
+
+static const RadiantEventReconcileHostOps lambda_radiant_event_reconcile_host_ops = {
+    radiant_apply_load_mutation_cascade, radiant_prepare_dom_mutation_layout,
+    radiant_reconcile_pending_templates, radiant_reconcile_dom_mutations,
+    radiant_notify_template_attribute, radiant_queue_template_render_events,
+    lambda_radiant_follow_rebuild,
+};
+
+static const RadiantEventSimControllerHostOps lambda_radiant_event_sim_controller_ops = {
+    radiant_dispatch_event_sim_pointer, radiant_dispatch_event_sim_touch,
+    radiant_dispatch_event_sim_select_change, radiant_dispatch_editing_text_drag_drop,
+};
+
 bool radiant_register_dom_engine_providers() {
-    if (!lambda_document_host_register(&radiant_document_host_operations) ||
+    if (!radiant_event_host_register(&lambda_radiant_event_host_ops) ||
+        !radiant_event_navigation_host_register(&lambda_radiant_event_navigation_host_ops) ||
+        !radiant_event_reconcile_host_register(&lambda_radiant_event_reconcile_host_ops) ||
+        !radiant_event_sim_controller_host_register(&lambda_radiant_event_sim_controller_ops) ||
+        !lambda_document_host_register(&radiant_document_host_operations) ||
         !radiant_document_clock_register(&lambda_radiant_document_clock_ops) ||
         !radiant_scroll_observer_register(&lambda_radiant_scroll_observer_ops) ||
         !radiant_layout_host_register(&lambda_radiant_layout_host_ops) ||
@@ -5905,6 +5963,8 @@ bool radiant_register_dom_engine_providers() {
         log_error("[DOM_ENGINE_INIT] registration rejected a conflicting native provider");
         return false;
     }
+    // Installing Lambda after a native UI must still attach the event hooks.
+    if (!radiant_register_event_hooks()) return false;
     return true;
 }
 

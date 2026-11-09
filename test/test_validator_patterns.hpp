@@ -3,7 +3,7 @@
 // Hand-built validator patterns shared by the validator GTests.
 
 #include "../lambda/lambda-data.hpp"
-#include "../lib/mempool.h"
+#include "lib/mempool.h"
 
 // A declared content pattern of `count` `any` slots, which admits exactly
 // `count` children of any kind (S11.1.6v3). Hand-built element types use it

@@ -9,7 +9,7 @@
 
 #include "tls_handler.hpp"
 #include "serve_utils.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>

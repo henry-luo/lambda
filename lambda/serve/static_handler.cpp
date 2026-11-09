@@ -10,7 +10,7 @@
 #include "static_handler.hpp"
 #include "serve_utils.hpp"
 #include "mime.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 #include <string.h>
 #include <stdio.h>

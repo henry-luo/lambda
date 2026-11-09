@@ -6,7 +6,7 @@
  */
 
 #include "dom_cssom.h"
-#include "../../radiant/stylesheet_sync.hpp"
+#include "radiant/stylesheet_sync.hpp"
 #include "dom_style.h"
 #include "dom_collection_types.h"
 #include "dom_core.h"
@@ -27,15 +27,15 @@
 #include "../lambda.hpp"
 #include "../jube/jube_interface.h"
 #include "../jube/jube_registry.h"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
-#include "../../lib/strview.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/mempool.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/arraylist.hpp"
+#include "lib/log.h"
+#include "lib/str.h"
+#include "lib/strview.h"
+#include "lib/strbuf.h"
+#include "lib/mem_factory.h"
+#include "lib/mempool.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/arraylist.h"
+#include "lib/arraylist.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_lifecycle.hpp"
@@ -49,7 +49,7 @@
 
 #include <cstring>
 #include <ctype.h>
-#include "../../lib/mem_grow.hpp"
+#include "lib/mem_grow.hpp"
 
 extern String* heap_create_name(const char* name, size_t len);
 extern "C" Item vmap_new(void);

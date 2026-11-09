@@ -12,6 +12,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from split_paths import logical_project_path, sibling_roots
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ SOURCE_ROOTS = (
     JS_ROOT,
     ROOT / "lambda" / "jube",
     ROOT / "lambda" / "module" / "radiant",
-    ROOT / "radiant",
+    sibling_roots()[1] / "radiant",
 )
 SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp", ".def"}
 
@@ -332,11 +333,11 @@ def collect() -> dict[str, object]:
         }
         file_counts = {name: value for name, value in file_counts.items() if value}
         if file_counts:
-            by_file[str(path.relative_to(ROOT))] = file_counts
+            by_file[str(logical_project_path(path, ROOT))] = file_counts
 
     return {
         "schema": 1,
-        "roots": [str(path.relative_to(ROOT)) for path in SOURCE_ROOTS],
+        "roots": [str(logical_project_path(path, ROOT)) for path in SOURCE_ROOTS],
         "counts": dict(sorted(counts.items())),
         "ratchet_max": dict(sorted(RATCHET_MAX.items())),
         "by_file": dict(sorted(by_file.items())),

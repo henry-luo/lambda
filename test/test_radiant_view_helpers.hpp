@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../lib/shell.h"
+#include "lib/shell.h"
 
 // sustained replays include many redraws before shutdown, even on a virtual clock.
 constexpr int RADIANT_VIEW_REPLAY_TIMEOUT_MS = 180000;

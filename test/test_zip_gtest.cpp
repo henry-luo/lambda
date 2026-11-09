@@ -3,10 +3,10 @@
 #include "../lambda/io/fs_node.hpp"
 #include "../lambda/core/print.h"
 #include "../lambda/input/input.hpp"
-#include "../lib/file.h"
-#include "../lib/endian.h"
-#include "../lib/memtrack.h"
-#include "../lib/log.h"
+#include "lib/file.h"
+#include "lib/endian.h"
+#include "lib/memtrack.h"
+#include "lib/log.h"
 
 class ZipTest : public ::testing::Test {
 protected:

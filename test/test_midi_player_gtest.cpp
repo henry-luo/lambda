@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "../radiant/midi_player.hpp"
-#include "../radiant/audio_bus.hpp"
-#include "../radiant/audio_reverb.hpp"
-#include "../lib/mem.h"
+#include "radiant/midi_player.hpp"
+#include "radiant/audio_bus.hpp"
+#include "radiant/audio_reverb.hpp"
+#include "lib/mem.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

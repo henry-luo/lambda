@@ -10,11 +10,11 @@
  */
 #include "gc_heap.h"
 #include "../../js/js_interp_env.h"
-#include "../../../lib/log.h"
-#include "../../../lib/memtrack.h"
-#include "../../../lib/mem_grow.h"
-#include "../../../lib/mem_factory.h"
-#include "../../../lib/hashmap.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/mem_grow.h"
+#include "lib/mem_factory.h"
+#include "lib/hashmap.h"
 #include "../../lambda.h"
 #include <stdlib.h>
 #include <string.h>

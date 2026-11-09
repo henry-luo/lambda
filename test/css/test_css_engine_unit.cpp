@@ -13,7 +13,7 @@
 
 #include <gtest/gtest.h>
 #include "helpers/css_test_helpers.hpp"
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 #include <string.h>
 
 extern "C" {

@@ -14,11 +14,11 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/arraylist.h"
-#include "../lib/stringbuf.h"
-#include "../lib/test_utils.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/arraylist.h"
+#include "lib/stringbuf.h"
+#include "lib/test_utils.h"
 #include "test_validator_patterns.hpp"
 
 // Test fixture for validator features

@@ -4,8 +4,8 @@
 #include "../js/js_runtime.h"
 #include "../js/js_typed_array.h"
 #include "../lambda-data.hpp"
-#include "../../lib/digest.h"
-#include "../../lib/log.h"
+#include "lib/digest.h"
+#include "lib/log.h"
 
 #include <cstring>
 

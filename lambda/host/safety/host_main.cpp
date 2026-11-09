@@ -1,9 +1,9 @@
 #include "supervisor.h"
 #include "update_command.h"
 #include "storage_command.h"
-#include "../../../lib/hex.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/path_str.h"
+#include "lib/hex.h"
+#include "lib/mem.h"
+#include "lib/path_str.h"
 #include <errno.h>
 #include <stdio.h>
 #include <time.h>

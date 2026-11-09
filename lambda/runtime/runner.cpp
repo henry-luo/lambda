@@ -13,13 +13,13 @@
 #endif
 #include "transpiler.hpp"
 #include "mvp/mvp.hpp"
-#include "../../lib/host_paths.h"
+#include "lib/host_paths.h"
 #include "doc_context.hpp"
 #include "write_set.hpp"
 #include "ast_build.hpp"
 #include "module_ast_prebuild.hpp"
-#include "../../lib/hashmap_typed.hpp"
-#include "../../lib/thread_pool.h"
+#include "lib/hashmap_typed.hpp"
+#include "lib/thread_pool.h"
 #include "../io/mark_builder.hpp"
 #ifndef LAMBDA_NO_LATEX
 #include "../input/input-tex.hpp"
@@ -47,19 +47,19 @@
 #include "interp.hpp"
 #include "runtime-state.h"
 #include "../input/input.hpp"
-#include "../../lib/file.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/shell.h"
+#include "lib/file.h"
+#include "lib/mem_factory.h"
+#include "lib/memtrack.h"
+#include "lib/file_utils.h"
+#include "lib/shell.h"
 #ifndef LAMBDA_NO_TASKS
-#include "../../lib/uv_loop.h"
+#include "lib/uv_loop.h"
 #endif
 #include "../dom/dom.h"
 #include "context_capsule.h"
 #include "document_host.hpp"
 #include "security_context.h"
-#include "../../lib/path_str.h"
+#include "lib/path_str.h"
 
 extern "C" Item js_get_key_default(Item object, Item key);
 #ifndef LAMBDA_MIR_CACHE_DEFAULT
@@ -3104,7 +3104,7 @@ void runner_init(Runtime *runtime, Runner* runner) {
 
 // runtime_get_eval_context lives in runtime-state.cpp with the ownership seam (SCU14).
 
-#include "../../lib/url.h"
+#include "lib/url.h"
 #include "../validator/validator.hpp"
 #include "lambda-stack.h"
 

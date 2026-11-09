@@ -6,8 +6,8 @@
 #include <gtest/gtest.h>
 #include "../lambda/validator/validator.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lib/mempool.h"
-#include "../lib/strbuf.h"
+#include "lib/mempool.h"
+#include "lib/strbuf.h"
 #include <cstring>
 
 class EnhancedErrorsTest : public ::testing::Test {

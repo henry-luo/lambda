@@ -4,7 +4,7 @@
 
 #include "../lambda-data.hpp"
 #include "lambda-error.h"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 #define HTTP_UNAVAIL_MSG "io.http module is not available in this build"
 

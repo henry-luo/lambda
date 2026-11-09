@@ -2,9 +2,9 @@
 // Implementation of the shared MIR artifact contract. See mir_dump.h.
 
 #include "mir_dump.h"
-#include "../../lib/log.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/str.h"
+#include "lib/log.h"
+#include "lib/file_utils.h"
+#include "lib/str.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -3,9 +3,9 @@
 #include "../../runtime/interp.hpp"
 #include "../../runtime/security_context.h"
 #include "../../io/security_channel.h"
-#include "../../../lib/log.h"
-#include "../../../lib/confined_process.h"
-#include "../../../lib/process_sandbox.h"
+#include "lib/log.h"
+#include "lib/confined_process.h"
+#include "lib/process_sandbox.h"
 #include <unistd.h>
 
 static int worker_run(int broker_fd, uint64_t session, const char* entry, const char* working_directory, bool preconfined) {

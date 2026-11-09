@@ -17,8 +17,8 @@
 #include <string.h>
 
 extern "C" {
-#include "../lib/shell.h"
-#include "../lib/time_util.h"
+#include "lib/shell.h"
+#include "lib/time_util.h"
 }
 
 #ifdef _WIN32

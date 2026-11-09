@@ -26,10 +26,10 @@
 #endif
 
 extern "C" {
-#include "../lib/rdb.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/sqlite/sqlite3.h"
+#include "lib/rdb.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/sqlite/sqlite3.h"
 }
 
 #include "../lambda/input/rdb_query.h"

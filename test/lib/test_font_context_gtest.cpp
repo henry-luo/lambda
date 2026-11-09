@@ -2,16 +2,16 @@
 
 #include <cstring>
 
-#include "../../lib/font/font_internal.h"
-#include "../../lib/font/font_glyf.h"
-#include "../../lib/font/font_tables.h"
-#include "../../lib/font/font_gsub.h"
-#include "../../lib/font/font_math.h"
-#include "../../lib/font/font_export.h"
-#include "../../lib/endian.h"
-#include "../../lib/arena.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/utf.h"
+#include "lib/font/font_internal.h"
+#include "lib/font/font_glyf.h"
+#include "lib/font/font_tables.h"
+#include "lib/font/font_gsub.h"
+#include "lib/font/font_math.h"
+#include "lib/font/font_export.h"
+#include "lib/endian.h"
+#include "lib/arena.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/utf.h"
 
 class FontVerticalTablesTest : public ::testing::Test {
 protected:

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "../radiant/radiant.hpp"
+#include "radiant/radiant.hpp"
 #include "../lambda/input/css/dom_element.hpp"
-#include "../lib/mem.h"
+#include "lib/mem.h"
 
 static UiContext* g_session_test_uicon = nullptr;
 static int g_session_test_live_documents = 0;

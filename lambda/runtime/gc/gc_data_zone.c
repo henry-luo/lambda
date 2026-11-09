@@ -6,9 +6,9 @@
  */
 #include "gc_data_zone.h"
 #define MEMTRACK_NO_LOCATION_MACROS
-#include "../../../lib/memtrack.h"
-#include "../../../lib/log.h"
-#include "../../../lib/math_checked.hpp"
+#include "lib/memtrack.h"
+#include "lib/log.h"
+#include "lib/math_checked.hpp"
 #include <stdlib.h>
 #include <string.h>
 

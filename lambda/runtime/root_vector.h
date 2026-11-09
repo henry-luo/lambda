@@ -17,7 +17,7 @@
 // Never interleave POD metadata in a block (JSCU13): keep it in a parallel
 // ordinary array.
 
-#include "../../lib/arraylist.h"
+#include "lib/arraylist.h"
 #include "../lambda.h"
 
 #ifdef __cplusplus

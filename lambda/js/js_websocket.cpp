@@ -19,13 +19,13 @@
 #include "js_object_meta.h"
 #include "js_property_attrs.h"
 #include "../core/name_pool.hpp"
-#include "../../radiant/radiant.hpp"
+#include "radiant/radiant.hpp"
 #include "js_class.h"
 #include "js_typed_array.h"
 #include "js_response.h"
-#include "../../lib/mem.h"
-#include "../../lib/url.h"
-#include "../../lib/utf.h"
+#include "lib/mem.h"
+#include "lib/url.h"
+#include "lib/utf.h"
 #include <string.h>
 
 extern __thread EvalContext* context;

@@ -10,9 +10,9 @@
 #include "../module/radiant/radiant_history.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../runtime/transpiler.hpp"
-#include "../../lib/arraylist.h"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
+#include "lib/arraylist.h"
+#include "lib/log.h"
+#include "lib/mem.h"
 #include <math.h>
 #include <string.h>
 

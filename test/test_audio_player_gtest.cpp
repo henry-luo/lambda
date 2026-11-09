@@ -1,17 +1,17 @@
 #include <gtest/gtest.h>
-#include "../radiant/rdt_audio.h"
-#include "../radiant/audio_bus.hpp"
-#include "../radiant/audio_cues.hpp"
-#include "../radiant/audio_stream.hpp"
-#include "../radiant/audio_capture_pcm.hpp"
-#include "../lib/str.h"
-#include "../lib/mem.h"
-#include "../lib/file.h"
+#include "radiant/rdt_audio.h"
+#include "radiant/audio_bus.hpp"
+#include "radiant/audio_cues.hpp"
+#include "radiant/audio_stream.hpp"
+#include "radiant/audio_capture_pcm.hpp"
+#include "lib/str.h"
+#include "lib/mem.h"
+#include "lib/file.h"
 #include "test_audio_fixture.hpp"
 #include <math.h>
 #include <pthread.h>
 #include <sched.h>
-#include "../lib/time_util.h"
+#include "lib/time_util.h"
 
 class NativeAudioStream : public ::testing::Test {
 protected:

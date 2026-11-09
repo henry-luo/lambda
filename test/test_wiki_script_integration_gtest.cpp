@@ -4,8 +4,8 @@
 #include "test_wiki_script_helper.hpp"
 #include "test_markup_emitter_fixture.hpp"
 #include "../lambda/input/input.hpp"
-#include "../lib/log.h"
-#include "../lib/url.h"
+#include "lib/log.h"
+#include "lib/url.h"
 #include <stdlib.h>
 #include <string.h>
 

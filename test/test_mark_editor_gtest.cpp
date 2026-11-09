@@ -4,9 +4,9 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/format/format.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/test_utils.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/test_utils.h"
 
 // Test fixture for MarkEditor tests
 class MarkEditorTest : public ::testing::Test {

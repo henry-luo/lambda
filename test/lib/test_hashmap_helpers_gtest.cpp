@@ -3,9 +3,9 @@
 #include <cstring>
 
 extern "C" {
-#include "../../lib/hashmap_helpers.h"
+#include "lib/hashmap_helpers.h"
 }
-#include "../../lib/hashmap_typed.hpp"
+#include "lib/hashmap_typed.hpp"
 
 namespace {
 

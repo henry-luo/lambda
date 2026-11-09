@@ -1,17 +1,18 @@
+#include "../lambda/module/radiant/radiant_runtime_init.hpp"
 #include "radiant_render_test_utils.hpp"
 #include "../lambda/io/image_io.h"
 #include <gtest/gtest.h>
 
-#include "../radiant/render.hpp"
-#include "../lib/image_process.h"
+#include "radiant/render.hpp"
+#include "lib/image_process.h"
 #include "../lambda/dom/dom_observers.h"
 #include "../lambda/dom/dom_cssom.h"
-#include "../lib/memtrack.h"
+#include "lib/memtrack.h"
 #include <string.h>
 #include <math.h>
 #include <thorvg_capi.h>
-#include "../radiant/rdt_path_internal.hpp"
-#include "../radiant/render_metrics.hpp"
+#include "radiant/rdt_path_internal.hpp"
+#include "radiant/render_metrics.hpp"
 
 TEST(SvgTransformTest, IndividualPropertiesComposeBeforeCssAndAttributeLists) {
     Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
@@ -343,14 +344,14 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
     EXPECT_FALSE(rdt_path_get_rect_bound(path, nullptr, &bounds));
     rdt_path_free(path);
 }
-#include "../radiant/render_glyph_run_raster_lower.hpp"
-#include "../radiant/event.hpp"
-#include "../radiant/svg_animation.hpp"
-#include "../radiant/radiant.hpp"
-#include "../lib/font/font_internal.h"
-#include "../lib/font/font_tables.h"
-#include "../lib/endian.h"
-#include "../lib/str.h"
+#include "radiant/render_glyph_run_raster_lower.hpp"
+#include "radiant/event.hpp"
+#include "radiant/svg_animation.hpp"
+#include "radiant/radiant.hpp"
+#include "lib/font/font_internal.h"
+#include "lib/font/font_tables.h"
+#include "lib/endian.h"
+#include "lib/str.h"
 
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
@@ -363,10 +364,10 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/enhanced_file_cache.h"
 
-#include "../lib/image.h"
-#include "../lib/file.h"
-#include "../lib/memtrack.h"
-#include "../radiant/tagged.hpp"
+#include "lib/image.h"
+#include "lib/file.h"
+#include "lib/memtrack.h"
+#include "radiant/tagged.hpp"
 
 TEST(RadiantProviderInit, NativeEmbeddingRegistrationIsIdempotent) {
     ASSERT_TRUE(radiant_register_dom_engine_providers());

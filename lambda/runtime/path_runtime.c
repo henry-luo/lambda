@@ -9,10 +9,10 @@
 #include "lambda-error.h"
 #include "security_context.h"
 #include "sysinfo.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/shell.h"
+#include "lib/strbuf.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/shell.h"
 #include <errno.h>
 #include <string.h>
 
@@ -38,11 +38,11 @@ static bool path_needs_runtime_enumeration(Path* path) {
 }
 
 
-#include "../../lib/file.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/url.h"
-#include "../../lib/mem.h"
+#include "lib/file.h"
+#include "lib/file_utils.h"
+#include "lib/arraylist.h"
+#include "lib/url.h"
+#include "lib/mem.h"
 
 /**
  * Check if the leaf segment of a path is a wildcard (* or **).

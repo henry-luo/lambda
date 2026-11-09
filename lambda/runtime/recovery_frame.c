@@ -2,8 +2,8 @@
 
 #include <string.h>
 
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 
 extern void* eval_context_tls_runtime(void);
 

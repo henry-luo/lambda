@@ -1,7 +1,8 @@
+#include "loader_runtime_adapter.hpp"
 #include "script_loop_adapter.hpp"
-#include "../../../radiant/script_loop_host.hpp"
-#include "../../../radiant/event.hpp"
-#include "../../../radiant/radiant.hpp"
+#include "radiant/script_loop_host.hpp"
+#include "radiant/event.hpp"
+#include "radiant/radiant.hpp"
 #include "../../input/css/dom_element.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/transpiler.hpp"
@@ -14,7 +15,6 @@
 
 extern __thread Context* input_context;
 extern __thread EvalContext* context;
-extern "C" bool radiant_eval_context_switch(EvalContext* target);
 extern "C" void js_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
 

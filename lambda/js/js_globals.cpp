@@ -47,15 +47,15 @@
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
 #include "../module/radiant/radiant_dom_bridge.hpp"
-#include "../../lib/base64.h"
-#include "../../lib/arraylist.hpp"
-#include "../../lib/escape.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/log.h"
-#include "../../lib/mem_grow.hpp"
-#include "../../lib/str.h"
-#include "../../lib/time_util.h"
-#include "../../lib/utf.h"
+#include "lib/base64.h"
+#include "lib/arraylist.hpp"
+#include "lib/escape.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/log.h"
+#include "lib/mem_grow.hpp"
+#include "lib/str.h"
+#include "lib/time_util.h"
+#include "lib/utf.h"
 #include <assert.h>
 #include <limits.h>
 #include "../dom/dom.h"
@@ -412,12 +412,12 @@ bool js_host_object_own_property_descriptor(Item object, Item key, Item* out) {
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
 #include "../format/format.h"
-#include "../../lib/lambda_alloca.h"
-#include "../../lib/url.h"
-#include "../../lib/hex.h"
-#include "../../lib/file.h"
-#include "../../lib/mem.h"
-#include "../../lib/uv_loop.h"
+#include "lib/lambda_alloca.h"
+#include "lib/url.h"
+#include "lib/hex.h"
+#include "lib/file.h"
+#include "lib/mem.h"
+#include "lib/uv_loop.h"
 #include <cstring>
 #include <cstdio>
 #include <cmath>
@@ -16986,7 +16986,7 @@ extern "C" void js_intrinsic_note_prototype_mutation(Item object) {
 // v12: Symbol API
 // =============================================================================
 
-#include "../../lib/hashmap.h"
+#include "lib/hashmap.h"
 
 #define js_symbol_registry (js_runtime_state.operations.symbol_registry)
 #define js_symbol_name_index (js_runtime_state.operations.symbol_name_index)

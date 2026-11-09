@@ -2,8 +2,7 @@
 import .static_arch_scan
 import .path_utils
 
-let compatibility_forwarders = ["lib/item_tagged.hpp", "lib/lambda_typed.hpp",
-                                "lib/side_stack.h"]
+let compatibility_forwarders = ["lib/lambda_typed.hpp"]
 let public_headers = [
     {path: "lambda/lambda.h", owner: "runtime-candidate"},
     {path: "lambda/lambda.hpp", owner: "mixed-active-core-io-rt"},

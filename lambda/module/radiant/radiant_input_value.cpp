@@ -2,8 +2,8 @@
 #include "radiant_dom_bridge.hpp"
 #include "../../runtime/root_vector.h"
 #include "../../input/css/dom_element.hpp"
-#include "../../../lib/arraylist.h"
-#include "../../../lib/mem.h"
+#include "lib/arraylist.h"
+#include "lib/mem.h"
 
 typedef struct RadiantInputFileEntry {
     DomElement* element;

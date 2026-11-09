@@ -4,9 +4,9 @@
 #include "npm_registry.h"
 #include "npm_lockfile.h"
 #include "semver.h"
-#include "../../../lib/log.h"
-#include "../../../lib/mem_grow.hpp"
-#include "../../../lib/memtrack.h"
+#include "lib/log.h"
+#include "lib/mem_grow.hpp"
+#include "lib/memtrack.h"
 
 #include <string.h>
 #include <stdio.h>

@@ -1,4 +1,4 @@
-#include "../../../radiant/scene3d/scene3d.hpp"
+#include "radiant/scene3d/scene3d.hpp"
 #include "../../core/mark_reader.hpp"
 #include "../../core/physics_scene.hpp"
 #include "../../runtime/lambda-error.h"

@@ -20,11 +20,12 @@ import sys
 from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
+from split_paths import logical_project_path, sibling_roots
 
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / "lambda" / "runtime" / "sys_func_registry.c"
-SOURCE_ROOTS = (ROOT / "lambda", ROOT / "lib")
+SOURCE_ROOTS = (ROOT / "lambda", sibling_roots()[0] / "lib")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 SKIP_SOURCE_PARTS = {
     "node_modules", "package", "re2", "sqlite", "tree-sitter", "tree-sitter-bash",
@@ -459,7 +460,7 @@ def is_forbidden(name: str) -> bool:
 
 
 def relative(path: Path) -> str:
-    return str(path.relative_to(ROOT))
+    return str(logical_project_path(path, ROOT))
 
 
 def main() -> int:

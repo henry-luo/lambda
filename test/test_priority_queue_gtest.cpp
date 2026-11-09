@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lib/priority_queue.h"
+#include "lib/priority_queue.h"
 #include <stdint.h>
 
 // ============================================================================

@@ -22,8 +22,8 @@
 
 #include "../lambda-data.hpp"
 #include <stddef.h>
-#include "../../lib/layout_boxes.h"
-#include "../../lib/dom_image.h"
+#include "lib/layout_boxes.h"
+#include "lib/dom_image.h"
 
 struct DomDocument;
 struct DomElement;

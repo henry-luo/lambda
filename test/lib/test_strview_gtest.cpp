@@ -3,10 +3,10 @@
 #include <cstdint>
 
 extern "C" {
-#include "../../lib/strview.h"
-#include "../../lib/log.h"
-#include "../../lib/mempool.h"
-#include "../../lib/memtrack.h"
+#include "lib/strview.h"
+#include "lib/log.h"
+#include "lib/mempool.h"
+#include "lib/memtrack.h"
 }
 
 class StrViewTest : public ::testing::Test {

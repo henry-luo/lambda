@@ -20,15 +20,15 @@
 #include "../../runtime/gc/gc_heap.h"
 #include "../../runtime/render_map.h"
 #include "../../runtime/transpiler.hpp"
-#include "../../../radiant/view.hpp"
-#include "../../../radiant/radiant.hpp"
-#include "../../../radiant/render.hpp"
-#include "../../../radiant/event.hpp"
-#include "../../../lib/log.h"
-#include "../../../lib/hashmap_helpers.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/str.h"
-#include "../../../lib/strbuf.h"
+#include "radiant/view.hpp"
+#include "radiant/radiant.hpp"
+#include "radiant/render.hpp"
+#include "radiant/event.hpp"
+#include "lib/log.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/mem.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
 
 extern "C" void dom_engine_animation_frame_prepare(void* document,double timestamp_ms) {
     auto* doc=(DomDocument*)document;
@@ -38,7 +38,7 @@ extern "C" void dom_engine_animation_frame_prepare(void* document,double timesta
     animation_scheduler_anchor_host_time(scheduler,timestamp_ms/1000.0);
     animation_scheduler_tick(scheduler,timestamp_ms/1000.0,nullptr,false,nullptr,true);
 }
-#include "../../../lib/url.h"
+#include "lib/url.h"
 #include <assert.h>
 #include <ctype.h>
 #include <math.h>

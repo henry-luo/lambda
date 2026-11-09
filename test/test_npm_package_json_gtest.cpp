@@ -9,9 +9,9 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include "../lambda/module/npm/npm_package_json.h"
-#include "../lib/log.h"
-#include "../lib/mem.h"
-#include "../lib/mem_context.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/mem_context.h"
 
 static uint32_t live_allocator_count() {
     MemSnapshot* snap = mem_snapshot_capture(NULL);

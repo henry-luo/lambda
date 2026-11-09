@@ -32,15 +32,15 @@
 #include "template_registry.h"
 #include "template_state.h"
 #include "edit_bridge.h"
-#include "../../lib/log.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/atomic.h"
+#include "lib/log.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/memtrack.h"
+#include "lib/mem_factory.h"
+#include "lib/atomic.h"
 #ifndef LAMBDA_NO_MIR
-#include "../../lib/thread_pool.h"
+#include "lib/thread_pool.h"
 #endif
-#include "../../lib/url.h"
+#include "lib/url.h"
 #include <stdlib.h>
 #include <pthread.h>
 

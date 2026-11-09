@@ -10,11 +10,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../lib/fts/fts.h"
-#include "../../lib/fts/fts_internal.hpp"
-#include "../../lib/file.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/str.h"
+#include "lib/fts/fts.h"
+#include "lib/fts/fts_internal.hpp"
+#include "lib/file.h"
+#include "lib/file_utils.h"
+#include "lib/str.h"
 
 namespace {
 

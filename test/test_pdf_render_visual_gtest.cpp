@@ -45,15 +45,15 @@
  */
 
 #include <gtest/gtest.h>
-#include "../lib/file.h"
-#include "../lib/mem.h"
-#include "../lib/ownership.hpp"
-#include "../lib/arraylist.hpp"
-#include "../lib/hashmap_helpers.h"
+#include "lib/file.h"
+#include "lib/mem.h"
+#include "lib/ownership.hpp"
+#include "lib/arraylist.hpp"
+#include "lib/hashmap_helpers.h"
 static bool write_png_rgba(const char* path, const unsigned char* pixels, int width, int height);
 #include "pdf_reference_rasterizer.hpp"
 #include "radiant_flow_test_utils.hpp"
-#include "../lib/windows_compat.h"
+#include "lib/windows_compat.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -88,9 +88,9 @@ static bool write_png_rgba(const char* path, const unsigned char* pixels, int wi
 #include <png.h>
 
 extern "C" {
-#include "../lib/image.h"
-#include "../lib/str.h"
-#include "../lib/strbuf.h"
+#include "lib/image.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
 }
 
 #define PDF_DIR "test/pdf"

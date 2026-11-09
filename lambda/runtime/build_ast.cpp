@@ -11,19 +11,19 @@
 #include "binary_schema.hpp"
 #include "security_context.h"
 #include "interp.hpp"  // interp_visit_children: the complete Lambda child traversal
-#include "../../lib/time_util.h"
+#include "lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
 #include "../jube/jube_registry.h"
 #endif
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/datetime.h"
-#include "../../lib/escape.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/mem_factory.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/datetime.h"
+#include "lib/escape.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/mem_factory.h"
 #ifndef LAMBDA_NO_TASKS
-#include "../../lib/uv_loop.h"
+#include "lib/uv_loop.h"
 #endif
 #include <errno.h>
 #include <stdlib.h>
@@ -43,12 +43,12 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 }
 
 
-#include "../../lib/str.h"
-#include "../../lib/string.h"
-#include "../../lib/strview.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/file.h"
-#include "../../lib/recursion_guard.hpp"
+#include "lib/str.h"
+#include "lib/string.h"
+#include "lib/strview.h"
+#include "lib/arraylist.h"
+#include "lib/file.h"
+#include "lib/recursion_guard.hpp"
 #include <errno.h>
 #include <stdlib.h>
 

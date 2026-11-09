@@ -1,4 +1,4 @@
-#include "../../lib/utf.h"
+#include "lib/utf.h"
 
 #include "transpiler.hpp"
 #include "type_contract.hpp"
@@ -8,14 +8,14 @@
 #include "gc/gc_object_zone.h"
 #include "context_capsule.h"
 #include "root_vector.h"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
-#include "../../lib/string.h"
-#include "../../lib/arraylist.hpp"
-#include "../../lib/math_checked.hpp"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/hash.h"
-#include "../../lib/byte_storage.h"
+#include "lib/log.h"
+#include "lib/str.h"
+#include "lib/string.h"
+#include "lib/arraylist.hpp"
+#include "lib/math_checked.hpp"
+#include "lib/hashmap_helpers.h"
+#include "lib/hash.h"
+#include "lib/byte_storage.h"
 #include "../input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
 #include "../input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
 #include "../jube/jube_interface.h"

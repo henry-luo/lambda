@@ -4,8 +4,8 @@
 #include "../jube/jube_interface.h"
 #include "../input/input.hpp"
 
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
+#include "lib/log.h"
+#include "lib/mem.h"
 
 #include <cstring>
 

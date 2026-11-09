@@ -11,18 +11,18 @@
 #include "../lambda/input/html5/html5_tokenizer.h"
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/format/format.h"
-#include "../lib/mime-detect.h"
-#include "../lib/arena.h"
-#include "../lib/strbuf.h"
+#include "lib/mime-detect.h"
+#include "lib/arena.h"
+#include "lib/strbuf.h"
 
 extern "C" {
-    #include "../lib/mempool.h"
-    #include "../lib/stringbuf.h"
-    #include "../lib/strview.h"
-    #include "../lib/arraylist.h"
-    #include "../lib/log.h"
+    #include "lib/mempool.h"
+    #include "lib/stringbuf.h"
+    #include "lib/strview.h"
+    #include "lib/arraylist.h"
+    #include "lib/log.h"
 }
-#include "../lib/test_utils.h"
+#include "lib/test_utils.h"
 
 // Helper to create Lambda String
 String* create_lambda_string(const char* text) {

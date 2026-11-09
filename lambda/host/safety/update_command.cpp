@@ -1,8 +1,8 @@
 #include "update_command.h"
-#include "../../../lib/confined_process.h"
-#include "../../../lib/escape.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/strbuf.h"
+#include "lib/confined_process.h"
+#include "lib/escape.h"
+#include "lib/mem.h"
+#include "lib/strbuf.h"
 #include <errno.h>
 #include <stdio.h>
 

@@ -1,16 +1,17 @@
+#include "loader_runtime_adapter.hpp"
 // The Lambda writer borrows a committed edition and owns its capability lifetime (D6.4.1).
 #include "pdf_export_adapter.hpp"
 #include "radiant_pdf_source.hpp"
-#include "../../../radiant/render.hpp"
-#include "../../../radiant/layout.hpp"
-#include "../../../radiant/event.hpp"
-#include "../../../radiant/view_tree_model.hpp"
+#include "radiant/render.hpp"
+#include "radiant/layout.hpp"
+#include "radiant/event.hpp"
+#include "radiant/view_tree_model.hpp"
 #include "../../runtime/transpiler.hpp"
 #include "../../runtime/interp.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../io/mark_output_builder.hpp"
-#include "../../../lib/file.h"
-#include "../../../lib/log.h"
+#include "lib/file.h"
+#include "lib/log.h"
 
 extern "C" Item vmap_new();
 

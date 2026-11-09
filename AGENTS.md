@@ -3,6 +3,12 @@
 > This file is the single source of agent instructions. `CLAUDE.md` imports it
 > and `.github/copilot-instructions.md` points to it — edit only this file.
 
+Path ownership: references to `lib/` in these instructions mean the sibling
+`../lambda-input/lib/`; references to `radiant/` mean
+`../radiant/radiant/`. These are header include prefixes and logical source
+names, not directories in the Lambda checkout. The remaining `lambda/input`
+path is a migration link to input (D9.1.1v4, D9.1.3v2).
+
 ## CRITICAL Rules for AI Agents
 
 These rules MUST be followed. Violations are considered errors.
@@ -135,7 +141,7 @@ make test-radiant-baseline    # Full Radiant baseline suite; run at major milest
 
 **Test map**: [`test/README.md`](test/README.md) — which gate covers which source area, every harness with its fixture dirs and golden convention, and single-test commands. Every `.ls` in a golden-driven test directory needs its golden; name helper, module and playground scripts `_*` or `mod_*`.
 
-**Radiant workflow (required reading)**: read [`radiant/README.md`](radiant/README.md) before Radiant development. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation; run aggregate baseline gates at major milestones or at the end of a work session, and use focused tests for incremental changes. Batch related fixes before expensive qualification, keep unrelated debt in the backlog, and record completion by behavior rather than growing test counts. Documentation-only changes need document checks, not engine builds or regression suites.
+**Radiant workflow (required reading)**: read [`radiant/README.md`](../radiant/radiant/README.md) before Radiant development. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation; run aggregate baseline gates at major milestones or at the end of a work session, and use focused tests for incremental changes. Batch related fixes before expensive qualification, keep unrelated debt in the backlog, and record completion by behavior rather than growing test counts. Documentation-only changes need document checks, not engine builds or regression suites.
 
 **Broad HTML/CSS priorities**: finish the highest-impact features used by common pages before less important features or detailed conformance residue. Rank work by user impact, usage frequency, dependency value and effort. Define a useful core milestone for each feature, finish it, and move on with remaining limitations recorded honestly as partial support. Keep rare combinations, exhaustive reflection and minor isolated fidelity differences in the long-tail backlog unless they block the selected milestone or expose a serious shared defect. Do not let an effectively unbounded standards tail prevent delivery of the important features.
 

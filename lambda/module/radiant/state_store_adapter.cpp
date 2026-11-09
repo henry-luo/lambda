@@ -1,6 +1,6 @@
 #include "state_store_adapter.hpp"
-#include "../../../radiant/state_store_host.hpp"
-#include "../../../radiant/event.hpp"
+#include "radiant/state_store_host.hpp"
+#include "radiant/event.hpp"
 #include "../../input/css/dom_lifecycle.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/transpiler.hpp"

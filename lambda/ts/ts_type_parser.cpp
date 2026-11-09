@@ -2,11 +2,11 @@
 
 #include "ts_type_parser.hpp"
 #include "../js/js_c_ast_helpers.hpp"
-#include "../../lib/mempool.h"
-#include "../../lib/string.h"
-#include "../../lib/str.h"
-#include "../../lib/hashmap_typed.hpp"
-#include "../../lib/log.h"
+#include "lib/mempool.h"
+#include "lib/string.h"
+#include "lib/str.h"
+#include "lib/hashmap_typed.hpp"
+#include "lib/log.h"
 
 #include <cctype>
 #include <cstring>

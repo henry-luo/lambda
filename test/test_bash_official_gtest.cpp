@@ -14,7 +14,7 @@
 //==============================================================================
 
 #include <gtest/gtest.h>
-#include "../lib/test_utils.h"
+#include "lib/test_utils.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

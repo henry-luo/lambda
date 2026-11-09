@@ -3,17 +3,17 @@
 #include "js_function.hpp"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/mempool.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_typed.hpp"
+#include "lib/log.h"
+#include "lib/mem_factory.h"
+#include "lib/strbuf.h"
+#include "lib/mempool.h"
+#include "lib/hashmap.h"
+#include "lib/hashmap_typed.hpp"
 #include "../input/input-script-cache.h"
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 
 static void js_script_destroy_extension(Script* base_script);
 

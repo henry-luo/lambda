@@ -20,12 +20,12 @@
 #include "../lambda/runtime/lambda-number-runtime.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/core/name_pool.hpp"
-#include "../lib/hashmap.h"
-#include "../lib/memtrack.h"
+#include "lib/hashmap.h"
+#include "lib/memtrack.h"
 
 extern "C" {
 #include "../lambda/runtime/gc/gc_heap.h"
-#include "../lib/shell.h"
+#include "lib/shell.h"
 }
 
 namespace {

@@ -6,9 +6,11 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+from split_paths import sibling_roots
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_DIR = ROOT / "build" / "premake"
+INPUT_ROOT, RADIANT_ROOT = sibling_roots()
 FORBIDDEN = (("lambda", "runtime"), ("lambda", "js"), ("lambda", "dom"),
              ("lambda", "module"), ("radiant",))
 ARCHIVES = (
@@ -24,13 +26,27 @@ def input_dependencies(depfile: Path):
     if not separator:
         raise ValueError(f"invalid dependency rule: {depfile}")
     for token in shlex.split(prerequisites):
-        if not token.startswith("..") and not token.startswith(str(ROOT)):
+        if not token.startswith("..") and not Path(token).is_absolute():
             continue
         source = Path(os.path.normpath(BUILD_DIR / token))
-        try:
-            yield source.relative_to(ROOT)
-        except ValueError:
-            continue
+        for project, prefix in ((INPUT_ROOT, Path()),
+                                (RADIANT_ROOT / 'radiant', Path('radiant')),
+                                (ROOT, Path())):
+            try:
+                yield prefix / source.relative_to(project)
+                break
+            except ValueError:
+                continue
+
+
+def dependency_file(relative: Path) -> Path:
+    """Locate a logical dependency in its owning sibling or Lambda."""
+    if relative.parts[0] == 'lib':
+        return INPUT_ROOT / relative
+    if relative.parts[0] == 'radiant':
+        return RADIANT_ROOT / relative
+    local = ROOT / relative
+    return local if local.exists() else INPUT_ROOT / relative
 
 
 def archive_members(archive: Path) -> list[str]:
@@ -68,7 +84,7 @@ def check_archive(archive: Path, object_dir: Path) -> bool:
         for rel in dependencies:
             if any(rel.parts[:len(prefix)] == prefix for prefix in FORBIDDEN):
                 errors.append(f"{name}: forbidden dependency {rel}")
-            file = ROOT / rel
+            file = dependency_file(rel)
             if not file.is_file() or file.stat().st_mtime_ns > obj.stat().st_mtime_ns:
                 errors.append(f"{name}: missing or newer dependency {rel}")
     if errors:

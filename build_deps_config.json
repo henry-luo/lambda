@@ -1,6 +1,8 @@
 {
   "description": "Lambda-owned source builds for native dependencies; imported by build_lambda_config.json",
-  "config_imports": ["../lambda-input/build_native_deps_config.json"],
+  "config_imports": [
+    {"path": "../lambda-input/build_native_deps_config.json", "root_env": "LAMBDA_INPUT_ROOT", "root_path": "build_native_deps_config.json"}
+  ],
   "dependency_builds": {
     "utf8proc": {
       "source_dir": "build_temp/utf8proc",
@@ -557,8 +559,8 @@
           ],
           "includes": [
             "${root}/build_temp/image-config/include",
-            "${root}/lib/image/libpng",
-            "${root}/lib/image/libjpeg-turbo/src",
+            "${input_root}/lib/image/libpng",
+            "${input_root}/lib/image/libjpeg-turbo/src",
             "${build}/include",
             "${source}/inc",
             "${source}/src/bindings/capi",

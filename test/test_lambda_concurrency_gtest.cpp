@@ -43,19 +43,19 @@
 #include "../lambda/dom/dom.h"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/validator/validator.hpp"
-#include "../lib/mem_factory.h"
-#include "../lib/memtrack.h"
-#include "../lib/mempool.h"
-#include "../lib/file.h"
-#include "../lib/rdb_sqlite_tx.h"
-#include "../lib/uv_loop.h"
-#include "../lib/url.h"
-#include "../lib/str.h"
-#include "../lib/strbuf.h"
-#include "../radiant/view.hpp"
-#include "../radiant/radiant.hpp"
-#include "../radiant/render.hpp"
-#include "../radiant/window_host.hpp"
+#include "lib/mem_factory.h"
+#include "lib/memtrack.h"
+#include "lib/mempool.h"
+#include "lib/file.h"
+#include "lib/rdb_sqlite_tx.h"
+#include "lib/uv_loop.h"
+#include "lib/url.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
+#include "radiant/view.hpp"
+#include "radiant/radiant.hpp"
+#include "radiant/render.hpp"
+#include "radiant/window_host.hpp"
 
 extern __thread EvalContext* context;
 extern UiContext ui_context;
@@ -3471,8 +3471,45 @@ TEST_F(LambdaConcurrencyRuntime, OwnedSlotsPreserveWideIntegersWithoutGcScalarCe
     Item owned_u = owned_item_slot_read(slots, 2, 1, false);
     EXPECT_EQ(owned_i.get_int64(), INT64_MAX);
     EXPECT_EQ(owned_u.get_uint64(), UINT64_MAX);
+    // Escaped reads must survive their owning slot being overwritten.
+    owned_item_slot_store(slots, 2, 0, (Item){.item = i2it(1)});
+    owned_item_slot_store(slots, 2, 1, (Item){.item = i2it(2)});
+    slots[2].item = 0;
+    slots[3].item = 0;
+    EXPECT_EQ(owned_i.get_int64(), INT64_MAX);
+    EXPECT_EQ(owned_u.get_uint64(), UINT64_MAX);
     gc_unregister_root(concurrency_test_gc, &slots[0].item);
     gc_unregister_root(concurrency_test_gc, &slots[1].item);
+}
+
+TEST_F(LambdaConcurrencyRuntime, OwnedSlotsRehomeTinyFloatsAndPreserveJsNumbers) {
+    int64_t number = 42;
+    double tiny = 5e-324;
+    Item slots[4] = {};
+    owned_item_slot_store(slots, 2, 0, (Item){.item = l2it(&number)});
+    owned_item_slot_store(slots, 2, 1, lambda_float_ptr_to_item(&tiny));
+
+    Item lambda_number = owned_item_slot_read(slots, 2, 0, false);
+    Item js_number = js_owned_item_slot_read(slots, 2, 0, false);
+    Item saved_float = owned_item_slot_read(slots, 2, 1, false);
+    EXPECT_EQ(get_type_id(lambda_number), LMD_TYPE_INT64);
+    EXPECT_EQ(js_number.item, i2it(42));
+    slots[2].item = 0;
+    slots[3].item = 0;
+    EXPECT_EQ(lambda_number.get_int64(), 42);
+    EXPECT_EQ(saved_float.get_double(), tiny);
+}
+
+TEST_F(LambdaConcurrencyRuntime, ScalarReadHostTracksEvaluatorBinding) {
+    int64_t value = INT64_MAX;
+    Item borrowed = {.item = l2it(&value)};
+    Item owned = scalar_storage_read(borrowed, false);
+    EXPECT_NE(owned.item, borrowed.item);
+    ASSERT_TRUE(eval_context_shutdown(&eval));
+    Item native_read = scalar_storage_read(borrowed, false);
+    EXPECT_EQ(native_read.item, borrowed.item);
+    ASSERT_TRUE(eval_context_init(&eval));
+    EXPECT_NE(scalar_storage_read(borrowed, false).item, borrowed.item);
 }
 
 TEST_F(LambdaConcurrencyRuntime, GcRejectsEveryScalarObjectAllocationRoute) {

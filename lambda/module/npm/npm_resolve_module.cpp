@@ -2,10 +2,10 @@
 
 #include "npm_resolve_module.h"
 #include "npm_package_json.h"
-#include "../../../lib/file.h"
-#include "../../../lib/log.h"
-#include "../../../lib/memtrack.h"
-#include "../../../lib/str.h"
+#include "lib/file.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/str.h"
 
 #include <string.h>
 #include <stdio.h>

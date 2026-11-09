@@ -9,14 +9,14 @@
  * using the same zero-overhead wrapper pattern as DOM nodes.
  */
 #pragma once
-#include "../../lib/lambda_api.h"
+#include "lib/lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include "../lambda.h"
-#include "../../lib/byte_storage.h"
+#include "lib/byte_storage.h"
 
 typedef enum JsTypedArrayType {
     JS_TYPED_INT8,

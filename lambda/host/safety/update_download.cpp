@@ -1,8 +1,8 @@
 #include "update_download.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/time_util.h"
-#include "../../../lib/https_url.h"
-#include "../../../lib/url.h"
+#include "lib/mem.h"
+#include "lib/time_util.h"
+#include "lib/https_url.h"
+#include "lib/url.h"
 
 struct UpdatePullContext { SecurityUpdateJob* job; SecurityUpdateResult policy; };
 static bool update_pull_check(void* context) {

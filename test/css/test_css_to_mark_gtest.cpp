@@ -16,8 +16,8 @@
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/format/format.h"
 #include "../../lambda/lambda-data.hpp"
-#include "../../lib/mempool.h"
-#include "../../lib/arraylist.h"
+#include "lib/mempool.h"
+#include "lib/arraylist.h"
 
 // Forward declarations for CSS parsing and formatting
 extern "C" {

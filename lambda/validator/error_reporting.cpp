@@ -7,10 +7,10 @@
 
 #include "validator.hpp"
 #include "../lambda-data.hpp"
-#include "../../lib/stringbuf.h"
-#include "../../lib/escape.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/strview.h"
+#include "lib/stringbuf.h"
+#include "lib/escape.h"
+#include "lib/arraylist.h"
+#include "lib/strview.h"
 #include <string.h>
 #include <assert.h>
 

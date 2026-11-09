@@ -29,16 +29,16 @@
 #include "../lambda/core/data.hpp"
 #include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/core/mark_reader.hpp"
-#include "../lib/arena.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
+#include "lib/arena.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
 
 // Forward-declare the RDB input functions (C++ linkage, matching input-parsers.h)
 Input* input_rdb_from_path(const char* pathname, const char* type);
 const char* rdb_detect_format(const char* pathname, const char* type);
 
 extern "C" {
-#include "../lib/sqlite/sqlite3.h"
+#include "lib/sqlite/sqlite3.h"
 }
 
 /* ══════════════════════════════════════════════════════════════════════

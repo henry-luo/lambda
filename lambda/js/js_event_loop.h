@@ -9,7 +9,7 @@
  * - Main drain via uv_run() for post-script execution
  */
 #pragma once
-#include "../../lib/lambda_api.h"
+#include "lib/lambda_api.h"
 
 #ifdef __cplusplus
 extern "C" {

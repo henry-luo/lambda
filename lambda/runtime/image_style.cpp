@@ -1,6 +1,6 @@
 #include "image_raster.hpp"
 #include "../core/mark_reader.hpp"
-#include "../../lib/image_process.h"
+#include "lib/image_process.h"
 #include <math.h>
 
 // style extents are explicit local filter regions, shared by rendering and editor bounds.

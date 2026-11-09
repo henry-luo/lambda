@@ -4,6 +4,9 @@
 
 This guide is for developers working on the **Lambda and Radiant C++ runtime engine** itself — building the compiler, modifying the parser, extending the JIT backend, and developing the layout engine.
 
+Source references using the logical prefixes `lib/` and `radiant/` refer to
+the sibling `../lambda-input/lib/` and `../radiant/radiant/` directories.
+
 It is **not** a guide for writing Lambda Script programs. For the Lambda language reference and scripting documentation, see the [Language Reference](../Lambda_Reference.md) and other docs under `doc/`.
 
 ---
@@ -82,7 +85,7 @@ These libraries and tools are required on every platform.
 | **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX reference grammar for `lambda-cst` only |
 | **tree-sitter-typescript** | Built from `lambda/tree-sitter-typescript/` | TypeScript reference grammar for `lambda-cst` only |
 | **MIR** | Built from `lambda/mir/` with its Makefile | JIT compiler backend (Medium Internal Representation) |
-| **RE2** | Vendored at `lib/re2/`, built by the JSON-owned Premake `re2` target into `build/lib/<platform>/<configuration>/libre2.a` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
+| **RE2** | Vendored at `../lambda-input/lib/re2/`, built by the JSON-owned Premake `re2` target into `build/lib/<platform>/<configuration>/libre2.a` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
 | **utf8proc** | Built from `build_temp/utf8proc/` | Unicode text processing and normalization |
 | **mpdecimal** | System package or built from source | Multi-precision decimal arithmetic |
 | **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |
@@ -93,7 +96,7 @@ These libraries and tools are required on every platform.
 | **bzip2** | System package | bzip2-compressed tar input |
 | **liblzma (xz)** | System package | Native 7z LZMA/LZMA2 and xz-compressed tar input |
 | **zstd** | System package | Zstandard-compressed tar input |
-| **libarchive** | Selected sources in `lib/zip/`, provenance in `lib/zip/VENDOR.md` | Memory-only 7z/tar/RAR/RAR5 input; bounded embedding under **D11.1.2** |
+| **libarchive** | Selected sources in `../lambda-input/lib/zip/`, provenance in its `VENDOR.md` | Memory-only 7z/tar/RAR/RAR5 input; bounded embedding under **D11.1.2** |
 
 #### Radiant Engine Libraries
 
@@ -700,6 +703,13 @@ Radiant supports multiple render targets:
 
 Build, test and checkout behaviour that is easy to misread as a regression. Several agents usually share one clone, its main checkout and its git worktrees.
 
+The Lambda checkout expects sibling `../lambda-input` and `../radiant` projects;
+`LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` select their locations for generated
+build paths. Lambda has no top-level `lib` or `radiant` directory. The normal
+build currently compiles sibling sources; `make build-lambda-split` links the
+macOS sibling archives. The remaining `lambda/input` migration link must point
+to the selected input checkout (D9.1.1v4, D9.1.3v2).
+
 ### 7.1 Test Data
 
 External corpora live in the sibling repo `../lambda-test` (`js262`, `layout`, `markdown`, `pdf`, `render`, …) and in the git-ignored `ref/`. Wire them up once per clone:
@@ -727,7 +737,7 @@ ln -s "$MAIN/test/js262"   test/js262     # likewise test/layout, test/render, t
 ```
 
 - `test/layout` holds the fonts used by the UI-automation preflight. Without the link, the UI runner fails before it runs anything.
-- RE2 is built directly from `lib/re2/` into each checkout's `build/lib/<platform>/<configuration>/libre2.a`; its objects and archives are not shared through `build_temp/` (GRP15).
+- RE2 is built from `../lambda-input/lib/re2/` into each checkout's `build/lib/<platform>/<configuration>/libre2.a`; its objects and archives are not shared through `build_temp/` (GRP15).
 - The links show as `??`, because `build_*/`, `mac-deps/`, `node_modules/` and `ref/` only match directories. Stage files by name, and never `git add -A`.
 - Tracked links (`test/markdown`, `test/jquery-ui`, `test/media`) point to `../../lambda-test/*`, which does not resolve under `.claude/worktrees/<name>/`. Fixtures that use them fail in a worktree. Run those fixtures from the main checkout.
 - Worktree paths contain `.claude/`, so a dot appears in every absolute path. Before calling a failure pre-existing, run the base binary **from its own checkout's cwd**.
@@ -748,7 +758,7 @@ git branch -d <branch>
 
 ### 7.3 Build Gotchas
 
-- **Sibling extraction:** this checkout currently needs `../lambda-input` and `../radiant`; migration links preserve the old source paths while the projects are separated (D9.1.1v3). On macOS, `make build-lambda-split` builds their debug archives and links `lambda-static.exe` against them. It still builds transitional Lambda-side prerequisites and uses the existing vendor dependencies; it is not a standalone-project qualification. `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` may select other locations only when the migration links resolve to those same projects.
+- **Sibling extraction:** this checkout currently needs `../lambda-input` and `../radiant`; Lambda's migration links preserve its old source paths (D9.1.1v4). Radiant resolves input headers through `INPUT_ROOT` and does not link whole input source directories. On macOS, `make build-lambda-split` builds the sibling debug archives and links `lambda-static.exe` against them. It still uses Lambda-side vendor dependencies; it is not an independently packaged release. `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` may select other locations only when Lambda's migration links resolve to those same projects.
   The initial matching sibling revisions are [`lambda-input`](https://github.com/henry-luo/lambda-input) `b6e596bf277accf6bb9fe066b8d0b5b8290a3c1f` and [`radiant`](https://github.com/henry-luo/radiant) `0acd63121b1e125e570d7212c33e562e5074bf8f`. These are recorded for checkout reproducibility; the transitional build does not enforce them.
 - **macOS `/usr/bin/make` is GNU Make 3.81.** It compares mtimes in whole seconds, so `sleep 2` between before/after steps. It has no `&:` grouped targets, so the tree-sitter-lambda generate rule becomes three independent targets. `make -j generate-grammar` can run `tree-sitter generate` concurrently; run it without `-j`.
 - **Same-second source swaps.** A `cp` that lands in the same second as the last build leaves the old object linked. Delete `build/obj/<project>/native/<debug|release>/<file>.o` and rebuild. Then confirm which binary you have, with `cmp` or a probe whose output differs between the two versions.

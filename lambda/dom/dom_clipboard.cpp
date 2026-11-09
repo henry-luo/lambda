@@ -38,11 +38,11 @@
 #include "../lambda-data.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/base64.h"
-#include "../../lib/url.h"
-#include "../../radiant/event.hpp"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/base64.h"
+#include "lib/url.h"
+#include "radiant/event.hpp"
 #include <string.h>
 #include <stdlib.h>
 

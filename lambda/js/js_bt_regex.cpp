@@ -9,11 +9,11 @@
  */
 #include <climits>
 #include "js_bt_regex.h"
-#include "../../lib/log.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/str.h"
-#include "../../lib/utf.h"
+#include "lib/log.h"
+#include "lib/arraylist.h"
+#include "lib/memtrack.h"
+#include "lib/str.h"
+#include "lib/utf.h"
 #include "../core/codepoint_interval.h"
 #include "js_regex_generated_properties.h"
 #include "js_regex_wrapper.h"   // JsRegexScratch (LR09-30)

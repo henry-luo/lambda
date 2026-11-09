@@ -34,12 +34,12 @@
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_lifecycle.hpp"
-#include "../../lib/arraylist.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "lib/arraylist.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 
-#include "../../radiant/event.hpp"
-#include "../../radiant/view.hpp"
+#include "radiant/event.hpp"
+#include "radiant/view.hpp"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>

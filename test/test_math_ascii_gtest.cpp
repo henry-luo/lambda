@@ -10,12 +10,12 @@
 #include <regex>
 #include <vector>
 
-#include "../lib/arraylist.h"
-#include "../lib/strbuf.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
+#include "lib/arraylist.h"
+#include "lib/strbuf.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
 extern "C" {
-    #include "../lib/url.h"
+    #include "lib/url.h"
     #include <mpdecimal.h>
 }
 #define LAMBDA_STATIC

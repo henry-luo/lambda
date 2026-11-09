@@ -3,8 +3,8 @@
 #include "js_class.h"
 #include "js_runtime.h"
 #include "js_typed_array.h"
-#include "../../lib/file.h"
-#include "../../lib/str.h"
+#include "lib/file.h"
+#include "lib/str.h"
 
 #include <cerrno>
 #include <climits>

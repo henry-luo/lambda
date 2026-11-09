@@ -1,9 +1,9 @@
 #include "storage_command.h"
 #include "private_storage.h"
-#include "../../../lib/confined_process.h"
-#include "../../../lib/hex.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/str.h"
+#include "lib/confined_process.h"
+#include "lib/hex.h"
+#include "lib/strbuf.h"
+#include "lib/str.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>

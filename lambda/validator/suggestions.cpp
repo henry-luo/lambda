@@ -6,9 +6,9 @@
 
 #include "validator.hpp"
 #include "../lambda-data.hpp"
-#include "../../lib/arraylist.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/string.h"
+#include "lib/arraylist.h"
+#include "lib/memtrack.h"
+#include "lib/string.h"
 #include <string.h>
 #include <stdlib.h>
 #include <algorithm>

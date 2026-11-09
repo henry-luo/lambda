@@ -1,12 +1,12 @@
-#include "../../../radiant/devtools_adapter.hpp"
+#include "radiant/devtools_adapter.hpp"
 #include "../../devtools/protocol.hpp"
 #include "../../dom/dom_cssom.h"
 #include "../../input/css/dom_lifecycle.hpp"
-#include "../../../lib/mem.h"
-#include "../../../lib/file.h"
-#include "../../../radiant/render.hpp"
-#include "../../../radiant/event.hpp"
-#include "../../../radiant/radiant.hpp"
+#include "lib/mem.h"
+#include "lib/file.h"
+#include "radiant/render.hpp"
+#include "radiant/event.hpp"
+#include "radiant/radiant.hpp"
 
 struct DevtoolsDocument : DomDocumentResourceData {
     RadiantDevtools* inspector;

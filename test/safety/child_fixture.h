@@ -1,6 +1,6 @@
 #pragma once
 #ifndef _WIN32
-#include "../../lib/time_util.h"
+#include "lib/time_util.h"
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>

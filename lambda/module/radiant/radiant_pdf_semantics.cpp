@@ -1,10 +1,10 @@
 #include "radiant_pdf_semantics.hpp"
 #include "radiant_image_job.hpp"
 #include "../../runtime/heap_api.h"
-#include "../../../radiant/radiant.hpp"
-#include "../../../radiant/page_document.hpp"
-#include "../../../radiant/view_tree_model.hpp"
-#include "../../../lib/str.h"
+#include "radiant/radiant.hpp"
+#include "radiant/page_document.hpp"
+#include "radiant/view_tree_model.hpp"
+#include "lib/str.h"
 #include <math.h>
 
 extern "C" Item vmap_new();

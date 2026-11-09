@@ -8,10 +8,10 @@
  */
 
 #include "swagger_ui.hpp"
-#include "../../lib/log.h"
-#include "../../lib/strbuf.h"
+#include "lib/log.h"
+#include "lib/strbuf.h"
 #include <cstring>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 
 // ============================================================================
 // Swagger UI HTML Template

@@ -3,7 +3,7 @@
 #include <chrono>
 #include <thread>
 
-#include "../../lib/time_util.h"
+#include "lib/time_util.h"
 
 TEST(TimeUtilTest, MonotonicAdvancesAcrossSleep) {
     uint64_t t0 = time_now_ms();

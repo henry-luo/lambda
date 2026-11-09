@@ -25,13 +25,13 @@
 #include "../runtime/module_registry.h"
 #include "../runtime/runtime-state.h"
 #include "../runtime/side_stack.h"
-#include "../../lib/lambda_alloca.h"
-#include "../../lib/log.h"
-#include "../../lib/file.h"
-#include "../../lib/mempool.h"
-#include "../../lib/memtrack.h"
-#include "../../radiant/tagged.hpp"
-#include "../../lib/url.h"
+#include "lib/lambda_alloca.h"
+#include "lib/log.h"
+#include "lib/file.h"
+#include "lib/mempool.h"
+#include "lib/memtrack.h"
+#include "radiant/tagged.hpp"
+#include "lib/url.h"
 
 // every walker entry installs MVP operations; native ABI callbacks restore the
 // caller's profile without selecting a separate interpreter (D8.4.4).

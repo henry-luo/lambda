@@ -1,9 +1,9 @@
 // semver.cpp — Semantic versioning parser and range matcher (npm-compatible)
 
 #include "semver.h"
-#include "../../../lib/log.h"
-#include "../../../lib/memtrack.h"
-#include "../../../lib/str.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/str.h"
 
 #include <ctype.h>
 #include <stdio.h>

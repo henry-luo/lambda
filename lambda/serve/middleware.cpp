@@ -10,7 +10,7 @@
 #include "middleware.hpp"
 #include "serve_utils.hpp"
 #include "mime.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 #include <string.h>
 #include <time.h>

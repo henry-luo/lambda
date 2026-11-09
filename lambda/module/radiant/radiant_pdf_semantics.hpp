@@ -1,6 +1,6 @@
 #pragma once
 #include "radiant_pdf_graphic.hpp"
-#include "../../../radiant/layout_paged.hpp"
+#include "radiant/layout_paged.hpp"
 
 Item radiant_pdf_metadata(DomDocument*);
 Item radiant_pdf_page_properties(const ViewPageBox*);

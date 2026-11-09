@@ -8,7 +8,7 @@
 #include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "js_function.hpp"
-#include "../../lib/str.h"
+#include "lib/str.h"
 
 // ============================================================================
 // Source scanning shared by the dynamic-source early errors

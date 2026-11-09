@@ -7,10 +7,10 @@
 #include "heap_api.h"
 #include "template_registry.h"
 #include "transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_typed.hpp"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/hashmap.h"
+#include "lib/hashmap_typed.hpp"
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>

@@ -8,10 +8,10 @@
 
 #include "io_file_search.hpp"
 #include "concurrency.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/secret_store.h"
-#include "../../lib/strbuf.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/secret_store.h"
+#include "lib/strbuf.h"
 
 #include <string.h>
 

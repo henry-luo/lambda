@@ -8,8 +8,8 @@
 #pragma once
 
 #include "../lambda-data.hpp"
-#include "../../lib/arraylist.h"
-#include "../../lib/strbuf.h"
+#include "lib/arraylist.h"
+#include "lib/strbuf.h"
 
 // domain contributions combine across every part, including alternatives.
 enum PatternDomain {

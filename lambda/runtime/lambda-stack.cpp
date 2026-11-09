@@ -14,8 +14,8 @@
 #include "lambda-stack.h"
 #include "lambda-error.h"
 #include "recovery_frame.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

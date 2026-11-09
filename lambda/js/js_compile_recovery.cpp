@@ -1,5 +1,5 @@
 #include "js_execution_internal.hpp"
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 
 JsCompileRecoveryState* js_compile_recovery_state_ensure(void) {
     if (!js_active_runtime_state) return NULL;

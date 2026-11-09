@@ -8,7 +8,7 @@
 #include "../mir_function_value.hpp"
 #include "../../io/mark_builder.hpp"
 #include "../../io/mark_output_builder.hpp"
-#include "../../../lib/math_checked.hpp"
+#include "lib/math_checked.hpp"
 
 static MIR_op_t reg(MvpCompiler* c, MIR_reg_t r) { return MIR_new_reg_op(c->em.ctx, r); }
 static MIR_op_t imm(MvpCompiler* c, int64_t n) { return MIR_new_int_op(c->em.ctx, n); }

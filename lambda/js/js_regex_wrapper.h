@@ -2,8 +2,8 @@
 #pragma once
 
 #include <stdbool.h>
-#include "../../lib/mem.h"
-#include "../../lib/log.h"
+#include "lib/mem.h"
+#include "lib/log.h"
 
 // LR09-30: there is no ceiling on capture groups. ECMAScript sets none and V8
 // allows 32,767; the former `JS_REGEX_MAX_GROUPS 256` silently truncated, so a

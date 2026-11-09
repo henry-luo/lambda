@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include "test_radiant_view_helpers.hpp"
-#include "../lib/file.h"
-#include "../lib/strbuf.h"
-#include "../lib/mem.h"
+#include "lib/file.h"
+#include "lib/strbuf.h"
+#include "lib/mem.h"
 #include <cstdio>
 #include <cstring>
 

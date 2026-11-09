@@ -5,9 +5,9 @@
 #include "../lambda/runtime/heap_api.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/core/binary.h"
-#include "../lib/shell.h"
-#include "../lib/file.h"
-#include "../lib/str.h"
+#include "lib/shell.h"
+#include "lib/file.h"
+#include "lib/str.h"
 
 namespace {
 

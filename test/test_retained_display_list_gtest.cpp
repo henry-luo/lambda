@@ -3,11 +3,11 @@
 #include <float.h>
 #include <math.h>
 
-#include "../radiant/render.hpp"
-#include "../radiant/render_metrics.hpp"
+#include "radiant/render.hpp"
+#include "radiant/render_metrics.hpp"
 #include "radiant_render_test_utils.hpp"
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
 
 // Tests link only the surface registry, not the full image teardown; their
 // surfaces own no pixels, so releasing the slot and the struct is complete.

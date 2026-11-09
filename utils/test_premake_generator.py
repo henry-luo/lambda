@@ -254,8 +254,9 @@ def expect_re2_source_build(module) -> None:
         library = generator.external_libraries['re2']
         target = next(t for t in generator.config['targets'] if t['name'] == library['build_target'])
         sources = target['source_files']
-        vendored_sources = {path.relative_to(ROOT).as_posix()
-                            for path in (ROOT / 'lib/re2').rglob('*.cc')}
+        input_root = module.sibling_roots()[0]
+        vendored_sources = {Path(os.path.relpath(path, ROOT)).as_posix()
+                            for path in (input_root / 'lib/re2').rglob('*.cc')}
         if set(sources) != vendored_sources or len(sources) != len(set(sources)):
             fail(f'{platform_name} RE2 target omits or duplicates vendored library sources')
         generator._generate_complex_library(target)
@@ -289,7 +290,9 @@ def expect_image_source_build(module) -> None:
                for f in sources):
             fail('image source target includes unused WebP animation or standalone tool providers')
         # animated GIF output uses both the encoder and its compression hash table.
-        if not {'lib/image/giflib/egif_lib.c', 'lib/image/giflib/gif_hash.c'} <= set(sources):
+        gif_sources = {Path(os.path.relpath(module.sibling_roots()[0] / path, ROOT)).as_posix()
+                       for path in ('lib/image/giflib/egif_lib.c', 'lib/image/giflib/gif_hash.c')}
+        if not gif_sources <= set(sources):
             fail(f'{architecture} image target omits required GIF encoding providers')
         if not all((ROOT / f).is_file() for f in sources):
             fail(f'{architecture} image target has missing sources')
@@ -374,6 +377,13 @@ def expect_safety_early_profiles(module) -> None:
         fail('minimal safety bootstrap acquired framework or C++ startup dependencies')
 
 
+def expect_cli_sibling_roots(module) -> None:
+    generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'mac', variant='cli')
+    includes = {(ROOT / path).resolve() for path in generator.config['includes']}
+    if not set(module.sibling_roots()).issubset(includes):
+        fail('CLI include overlay lost a sibling project root')
+
+
 def expect_static_module_archive_profiles() -> None:
     spec = importlib.util.spec_from_file_location(
         "static_module_patcher", ROOT / "utils" / "patch_static_module_makefile.py")
@@ -455,6 +465,65 @@ def expect_static_module_archive_profiles() -> None:
 def expect_radiant_property_ownership(module) -> None:
     generator = linux_validation_generator(module)
     targets = {target['name']: target for target in generator.config['targets']}
+    checker_path = ROOT.parent / 'radiant/scripts/check_input_facade.py'
+    spec = importlib.util.spec_from_file_location('radiant_input_facade', checker_path)
+    if spec is None or spec.loader is None:
+        fail('could not load the Radiant input facade check')
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    violations = checker.check_facade(ROOT.parent / 'radiant')
+    if violations:
+        fail('Radiant input facade: ' + '; '.join(violations))
+    (ROOT / 'temp').mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=ROOT / 'temp') as work:
+        probe = Path(work)
+        facade = probe / 'lib'
+        facade.mkdir()
+        (facade / 'allowed.hpp').write_text('#pragma once\n')
+        header = probe / 'input_header.hpp'
+        header.write_text('#pragma once\n')
+        try:
+            (facade / 'linked.hpp').symlink_to(header)
+        except OSError:
+            pass  # creating file symlinks can require privileges on Windows
+        else:
+            hidden_source = probe / 'input_source.cpp'
+            hidden_source.write_text('')
+            disguised = facade / 'disguised.hpp'
+            disguised.symlink_to(hidden_source)
+            if not checker.check_facade(probe):
+                fail('Radiant input facade accepted a header link to a C++ source')
+            disguised.unlink()
+        if checker.check_facade(probe):
+            fail('Radiant input facade rejected a header')
+        source = facade / 'forbidden.cpp'
+        source.write_text('')
+        if not checker.check_facade(probe):
+            fail('Radiant input facade accepted a C++ source')
+        source.unlink()
+        try:
+            (facade / 'directory_link').symlink_to(probe, target_is_directory=True)
+        except OSError:
+            pass  # creating directory symlinks can require privileges on Windows
+        else:
+            if not checker.check_facade(probe):
+                fail('Radiant input facade accepted a directory link')
+            (facade / 'directory_link').unlink()
+        native = probe / 'radiant'
+        native.mkdir()
+        (native / 'probe.cpp').write_text('#include "lib/implementation.cpp"\n')
+        if not checker.check_facade(probe):
+            fail('Radiant input facade accepted an input C++ source include')
+    if 'lambda-rt' in targets['radiant'].get('libraries', []):
+        fail('Radiant must not depend on the Lambda runtime archive')
+    for name in ('event.cpp', 'editing_controller.cpp', 'editing_intent.cpp'):
+        if not (ROOT / 'lambda/module/radiant' / name).is_file() or \
+                (ROOT.parent / 'radiant/radiant' / name).exists():
+            fail(f'event controller source has the wrong owner: {name}')
+    for name in ('dom', 'js', 'module', 'runtime', 'mir', 'lambda-data.hpp'):
+        path = ROOT.parent / 'radiant/lambda' / name
+        if path.exists() or path.is_symlink():
+            fail(f'Radiant has a reverse Lambda source link: {name}')
     providers = set(targets['radiant-properties']['source_files'])
     if not providers or providers.intersection(targets['lambda-data']['source_files']):
         fail('input archive owns a Radiant property provider')
@@ -463,6 +532,7 @@ def expect_radiant_property_ownership(module) -> None:
             'radiant-properties' not in targets['lambda-exe']['libraries']:
         fail('Radiant duplicates or omits its property-provider archive')
     adapter = targets['lambda-radiant-adapter']
+    radiant_prefix = Path(os.path.relpath(module.sibling_roots()[1] / 'radiant', ROOT)).as_posix() + '/'
     if any(pattern.startswith('lambda/module/radiant/') for pattern in
            targets['radiant'].get('source_patterns', [])) or \
             'lambda/module/radiant/*.cpp' not in adapter.get('source_patterns', []) or \
@@ -476,12 +546,45 @@ def expect_radiant_property_ownership(module) -> None:
             if 'radiant' in dependencies and 'lambda-radiant-adapter' not in dependencies:
                 fail(f"{test.get('binary', test.get('name'))} omits the Lambda Radiant adapter")
             if native_independent and ('radiant' in dependencies or not any(
-                    path.startswith('radiant/') for path in native_sources)):
+                    path.startswith(radiant_prefix) for path in native_sources)):
                 fail(f"{test.get('binary', test.get('name'))} has an invalid independent-native declaration")
             if ('radiant' in dependencies or (not native_independent and any(
-                    path.startswith('radiant/') for path in native_sources))) \
+                    path.startswith(radiant_prefix) for path in native_sources))) \
                     and 'radiant-properties' not in dependencies:
                 fail(f"{test.get('binary', test.get('name'))} omits the Radiant property provider")
+
+
+def expect_radiant_media_platform_selection(module) -> None:
+    wrappers = {'radiant/rdt_video_mac_static.cpp', 'radiant/rdt_speech_mac_static.cpp'}
+    stubs = {'radiant/rdt_video_stub.cpp', 'radiant/rdt_speech_stub.cpp'}
+    input_script = ROOT / '../lambda-input/scripts/build_sources.py'
+    radiant_root = ROOT / '../radiant'
+    for system, output in [('macos', 'mac'), ('linux', 'linux'), ('windows', 'windows')]:
+        kwargs = {'target_architecture': 'arm64' if system == 'macos' else 'x86_64'}
+        if system == 'linux':
+            kwargs.update(linux_multiarch_triplet=TEST_MULTIARCH_TRIPLET, linux_pkg_config_includes=[])
+        generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), output, **kwargs)
+        target = next(t for t in generator.config['targets'] if t['name'] == 'radiant')
+        excluded = set(target.get('exclude_patterns', []))
+        objcxx = set(target.get('objcxx_source_files', []))
+        sources = set(subprocess.check_output(
+            [sys.executable, str(input_script), 'radiant', str(radiant_root), '--system', system,
+             '--architecture', kwargs['target_architecture']],
+            text=True).split())
+        mapped_wrappers = set(module.resolve_split_paths({'source_files': list(wrappers)})['source_files'])
+        mapped_stubs = set(module.resolve_split_paths({'source_files': list(stubs)})['source_files'])
+        if system == 'macos':
+            if not mapped_stubs.issubset(excluded) or not mapped_wrappers.issubset(objcxx) or \
+                    not wrappers.issubset(sources) or stubs.intersection(sources):
+                fail('macOS Radiant must select both AVFoundation providers')
+            generator.premake_content = []
+            generator.generate_main_program()
+            main_sources = '\n'.join(generator.premake_content)
+            if any(f'"{source}",' in main_sources for source in mapped_wrappers):
+                fail('the regular Lambda target also compiled a static media wrapper')
+        elif not mapped_wrappers.issubset(excluded) or not stubs.issubset(sources) or \
+                wrappers.intersection(sources) or objcxx:
+            fail(f'{system} Radiant must select the native media stubs without Objective-C++')
 
 
 def main() -> int:
@@ -494,12 +597,14 @@ def main() -> int:
     expect_image_source_build(module)
     expect_macos_ime_profile(module)
     expect_safety_early_profiles(module)
+    expect_cli_sibling_roots(module)
     expect_profile_isolated_archives(module)
     expect_static_runtime_providers(module, "macos")
     expect_static_runtime_providers(module, "linux")
     expect_archive_link_deps(module)
     expect_static_module_archive_profiles()
     expect_radiant_property_ownership(module)
+    expect_radiant_media_platform_selection(module)
     expect_module_only_libraries(module)
     expect_host_export_list(module)
     print("PREMAKE_GENERATOR_SELFTEST: passed")

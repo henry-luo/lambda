@@ -1,12 +1,12 @@
 #include "js_c_ast_helpers.hpp"
-#include "../../lib/string.h"
+#include "lib/string.h"
 #include "../ts/ts_ast.hpp"
-#include "../../lib/mempool.h"
-#include "../../lib/mem.h"
-#include "../../lib/log.h"
-#include "../../lib/escape.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/utf.h"
+#include "lib/mempool.h"
+#include "lib/mem.h"
+#include "lib/log.h"
+#include "lib/escape.h"
+#include "lib/strbuf.h"
+#include "lib/utf.h"
 
 #include <cstring>
 #include <cstdlib>

@@ -5,14 +5,14 @@
 
 #include <gtest/gtest.h>
 #include "../lambda/lambda-data.hpp"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/shell.h"
-#include "../lib/mem.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/shell.h"
+#include "lib/mem.h"
 #include <cstring>
 
 extern "C" {
-#include "../lib/strbuf.h"
+#include "lib/strbuf.h"
 }
 
 // External path API (defined in path.c)

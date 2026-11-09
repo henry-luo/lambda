@@ -2,10 +2,10 @@
 #include <cstring>
 
 extern "C" {
-#include "../../lib/stringbuf.h"
-#include "../../lib/escape.h"
-#include "../../lib/mempool.h"
-#include "../../lib/log.h"
+#include "lib/stringbuf.h"
+#include "lib/escape.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
 }
 
 class StringBufTest : public ::testing::Test {

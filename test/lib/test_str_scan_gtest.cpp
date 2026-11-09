@@ -16,7 +16,7 @@
 #include <cstring>
 
 extern "C" {
-#include "../../lib/str.h"
+#include "lib/str.h"
 }
 
 /* ================================================================== *

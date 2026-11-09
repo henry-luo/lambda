@@ -1,4 +1,4 @@
-#include "../../lib/process_sandbox.h"
+#include "lib/process_sandbox.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <dlfcn.h>

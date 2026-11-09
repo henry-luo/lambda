@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <unordered_set>
-#include "../../lib/hash.h"
+#include "lib/hash.h"
 
 TEST(HashTest, Djb2DeterministicAndMatchesCstrVariant) {
     const char* s = "Hello, World!";

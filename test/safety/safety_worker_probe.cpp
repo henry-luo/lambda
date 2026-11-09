@@ -1,6 +1,6 @@
 #include "../../lambda/host/safety/worker.h"
-#include "../../lib/process_sandbox.h"
-#include "../../lib/file.h"
+#include "lib/process_sandbox.h"
+#include "lib/file.h"
 #include "async_fixture.h"
 #include "constructor_fixture.h"
 #include <sys/socket.h>

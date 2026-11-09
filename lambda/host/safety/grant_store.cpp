@@ -1,9 +1,9 @@
 #include "grant_store.h"
 #include "state_store.h"
-#include "../../../lib/file.h"
-#include "../../../lib/digest.h"
-#include "../../../lib/hex.h"
-#include "../../../lib/mem.h"
+#include "lib/file.h"
+#include "lib/digest.h"
+#include "lib/hex.h"
+#include "lib/mem.h"
 #include <errno.h>
 #include <pthread.h>
 #ifndef _WIN32

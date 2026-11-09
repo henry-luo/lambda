@@ -11,6 +11,7 @@ from pathlib import Path
 import json
 import re
 import sys
+from split_paths import logical_project_path, project_source_path as owned_path
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,9 +21,7 @@ BUILD_CONFIG = ROOT / "build_lambda_config.json"
 # declarations live in their owning Lambda module. They are not lib providers
 # and therefore do not represent a lib-to-Lambda dependency.
 COMPATIBILITY_FORWARDERS = {
-    "lib/item_tagged.hpp",
     "lib/lambda_typed.hpp",
-    "lib/side_stack.h",
 }
 
 PUBLIC_HEADERS = {
@@ -68,7 +67,11 @@ RUNTIME_NATIVE_IO = {
 
 
 def source(path: str) -> str:
-    return (ROOT / path).read_text(encoding="utf-8")
+    return owned_path(path).read_text(encoding="utf-8")
+
+
+def logical_path(path: Path) -> str:
+    return logical_project_path(path, ROOT).as_posix()
 
 
 def line_number(text: str, offset: int) -> int:
@@ -84,7 +87,7 @@ def matches(pattern: re.Pattern, path: str) -> list[dict]:
 
 
 def paths_under(directory: str) -> list[Path]:
-    root = ROOT / directory
+    root = owned_path(directory)
     return sorted(path for path in root.rglob("*")
                   if path.suffix in {".c", ".cc", ".cpp", ".h", ".hpp"})
 
@@ -92,7 +95,7 @@ def paths_under(directory: str) -> list[Path]:
 def include_inventory() -> dict:
     lib_to_lambda = []
     for path in paths_under("lib"):
-        relative = path.relative_to(ROOT).as_posix()
+        relative = logical_path(path)
         # These files are already classified rt for P1b, not lib violations.
         if (relative.startswith("lib/gc/") or relative == "lib/side_stack.c" or
                 relative in COMPATIBILITY_FORWARDERS):
@@ -112,7 +115,7 @@ def include_inventory() -> dict:
             text = path.read_text(encoding="utf-8")
             for match in RADIANT_INCLUDE.finditer(text):
                 upper_to_radiant.append({
-                    "path": path.relative_to(ROOT).as_posix(),
+                    "path": logical_path(path),
                     "line": line_number(text, match.start()),
                     "token": match.group(0).strip(),
                     "resolution": "P3/P4 move, split, or lower-owned hook",
@@ -172,7 +175,7 @@ def boundary_failure_baseline() -> dict:
     for directory in ("lambda", "radiant"):
         for path in paths_under(directory):
             text = path.read_text(encoding="utf-8")
-            relative = path.relative_to(ROOT).as_posix()
+            relative = logical_path(path)
             for match in UPWARD_EXTERN.finditer(text):
                 upward_externs.append({
                     "path": relative,

@@ -18,11 +18,11 @@
 
 #include "../lambda/input/input.hpp"
 extern "C" {
-#include "../lib/mempool.h"
-#include "../lib/url.h"
-#include "../lib/log.h"
+#include "lib/mempool.h"
+#include "lib/url.h"
+#include "lib/log.h"
 }
-#include "../lib/test_utils.h"
+#include "lib/test_utils.h"
 
 /**
  * HTML to CSS End-to-End Integration Test Suite

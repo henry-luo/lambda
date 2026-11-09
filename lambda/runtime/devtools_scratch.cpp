@@ -5,9 +5,9 @@
 #include "root_vector.h"
 #include "lambda-root-frame.hpp"
 #include "heap_api.h"
-#include "../../lib/mem.h"
-#include "../../lib/uv_loop.h"
-#include "../../lib/str.h"
+#include "lib/mem.h"
+#include "lib/uv_loop.h"
+#include "lib/str.h"
 #include <string.h>
 
 static constexpr int64_t SCRATCH_PAGE = 256;

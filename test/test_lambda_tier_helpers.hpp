@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <cstring>
-#include "../lib/shell.h"
+#include "lib/shell.h"
 
 // D8.3.1: an unsupported pinned script fails before execution, never in MIR.
 inline void expect_interp_rejection(const char* executable, const char* script,

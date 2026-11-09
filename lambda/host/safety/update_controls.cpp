@@ -2,12 +2,12 @@
 #include "state_store.h"
 #include "state_wire.h"
 #include "update_records.h"
-#include "../../../lib/digest.h"
-#include "../../../lib/endian.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/time_util.h"
-#include "../../../lib/url.h"
-#include "../../../lib/https_url.h"
+#include "lib/digest.h"
+#include "lib/endian.h"
+#include "lib/mem.h"
+#include "lib/time_util.h"
+#include "lib/url.h"
+#include "lib/https_url.h"
 #include <pthread.h>
 
 struct UpdateRow { SecurityUpdatePackageInfo info; uint64_t nonce; };

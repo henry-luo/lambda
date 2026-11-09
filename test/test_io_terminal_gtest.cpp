@@ -12,7 +12,7 @@
 #include "../lambda/runtime/template_host.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/jube/jube_interface.h"
-#include "../lib/memtrack.h"
+#include "lib/memtrack.h"
 #include <string.h>
 
 typedef struct TerminalEmitCapture {

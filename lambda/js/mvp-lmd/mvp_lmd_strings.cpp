@@ -3,8 +3,8 @@
 #include "../js_runtime.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
-#include "../../../lib/utf.h"
-#include "../../../lib/str.h"
+#include "lib/utf.h"
+#include "lib/str.h"
 #include <math.h>
 
 static int64_t string_bound(double value, int64_t length, bool relative) {

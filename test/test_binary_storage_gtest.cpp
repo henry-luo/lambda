@@ -4,7 +4,7 @@
 
 #include "../lambda/lambda.hpp"
 #include "../lambda/core/binary.h"
-#include "../lib/log.h"
+#include "lib/log.h"
 
 extern "C" {
 #include "../lambda/runtime/gc/gc_heap.h"

@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../lambda-data.hpp"
-#include "../../lib/hashmap.h"
-#include "../../lib/mempool.h"
+#include "lib/hashmap.h"
+#include "lib/mempool.h"
 #include "gc/gc_heap.h"
 
 // shared native collection storage; front ends own key policy and dispatch.

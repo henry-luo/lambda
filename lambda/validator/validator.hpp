@@ -8,8 +8,8 @@
 #pragma once
 
 #include <ctime>
-#include "../../lib/mempool.h"
-#include "../../lib/hashmap.h"
+#include "lib/mempool.h"
+#include "lib/hashmap.h"
 #include "../runtime/transpiler.hpp"
 
 // Forward declarations

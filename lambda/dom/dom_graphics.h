@@ -3,8 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "dom_provider.hpp"
-#include "../../lib/webgl.h"
-#include "../../lib/canvas.h"
+#include "lib/webgl.h"
+#include "lib/canvas.h"
 
 struct StrBuf;
 

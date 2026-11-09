@@ -4,8 +4,8 @@
 #include "../lambda/input/input-postscript.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/pdf_decompress.h"
-#include "../lib/strbuf.h"
-#include "../lib/base64.h"
+#include "lib/strbuf.h"
+#include "lib/base64.h"
 #include <png.h>
 
 static Input* eps_parse(const char* bytes, size_t length) {

@@ -53,8 +53,8 @@
     #define MIR_CHECK_GETPID() getpid()
 #endif
 
-#include "../lib/shell.h"
-#include "../lib/arraylist.h"
+#include "lib/shell.h"
+#include "lib/arraylist.h"
 
 namespace mir_check {
 

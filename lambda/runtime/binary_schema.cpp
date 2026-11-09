@@ -3,8 +3,8 @@
 #include "lambda-error.h"
 #include "gc/gc_heap.h"
 #include "parser/lambda_rd_parser.h"
-#include "../../lib/mem.h"
-#include "../../lib/log.h"
+#include "lib/mem.h"
+#include "lib/log.h"
 
 struct BinarySchemaOwner {
     size_t references;

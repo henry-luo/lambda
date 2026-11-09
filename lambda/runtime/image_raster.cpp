@@ -7,7 +7,7 @@
 #include "gc/gc_heap.h"
 #include "../jube/jube_registry.h"
 #include "../core/mark_reader.hpp"
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 #include <math.h>
 
 struct RasterValue {

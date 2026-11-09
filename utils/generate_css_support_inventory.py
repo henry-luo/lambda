@@ -8,13 +8,15 @@ import json
 from pathlib import Path
 import re
 import sys
+from split_paths import sibling_roots
 
 
 ROOT = Path(__file__).resolve().parent.parent
+RADIANT_ROOT = sibling_roots()[1] / 'radiant'
 OUTPUT = ROOT / "test/css/support_inventory.tsv"
 REGISTRY = "lambda/input/css/css_properties.cpp"
 MAPPING = "lambda/input/css/well_known_css_property_mapping.h"
-ACCESSORS = "radiant/css_prop_table.cpp"
+ACCESSORS = RADIANT_ROOT / "css_prop_table.cpp"
 QUALIFICATION = ROOT / "test/css/support_qualification.json"
 
 
@@ -30,7 +32,7 @@ def qualification_records():
             raise ValueError("qualification needs bounded scope and evidence")
         for reference in family["evidence"]:
             path, _, case = reference.partition("#")
-            source = ROOT / path
+            source = RADIANT_ROOT / path.removeprefix('radiant/') if path.startswith('radiant/') else ROOT / path
             if not source.is_file() or (case and case not in source.read_text()):
                 raise ValueError(f"missing qualification evidence: {reference}")
         for name in family["properties"]:
@@ -45,7 +47,9 @@ def references(paths, pattern):
     for path in sorted(paths):
         for number, line in enumerate(path.read_text().splitlines(), 1):
             for code in re.findall(pattern, line):
-                found.setdefault(code, []).append(f"{path.relative_to(ROOT)}:{number}")
+                relative = (Path('radiant') / path.relative_to(RADIANT_ROOT)
+                            if path.is_relative_to(RADIANT_ROOT) else path.relative_to(ROOT))
+                found.setdefault(code, []).append(f"{relative}:{number}")
     return found
 
 
@@ -54,7 +58,7 @@ def inventory():
     source = (ROOT / REGISTRY).read_text()
     definitions = source.split("static CssProperty property_definitions[] = {", 1)[1].split("\n};", 1)[0]
     names = dict(re.findall(r"X\((CSS_PROPERTY_\w+), (MARKUP_NAME_\w+)\)", (ROOT / MAPPING).read_text()))
-    accessor_source = (ROOT / ACCESSORS).read_text().split("static const CssPropAccessor CSS_PROP_ROWS[] = {", 1)[1].split("\n};", 1)[0]
+    accessor_source = ACCESSORS.read_text().split("static const CssPropAccessor CSS_PROP_ROWS[] = {", 1)[1].split("\n};", 1)[0]
     accessors = {}
     # accessor rows may wrap, and optional item storage has a direct/derived form.
     for macro, code, arguments in re.findall(
@@ -63,9 +67,9 @@ def inventory():
         if code in accessors:
             raise ValueError(f"duplicate computed accessor: {code}")
         accessors[code] = (macro, " ".join(arguments.lstrip(", ").split()))
-    resolver = references([ROOT / "radiant/resolve_css_style.cpp"], r"case (CSS_PROPERTY_\w+):")
+    resolver = references([RADIANT_ROOT / "resolve_css_style.cpp"], r"case (CSS_PROPERTY_\w+):")
     consumers = references(
-        [path for path in (ROOT / "radiant").glob("*.cpp")
+        [path for path in RADIANT_ROOT.glob("*.cpp")
          if path.name.startswith(("layout_", "render_", "paint_", "css_animation", "animation_"))],
         r"\b(CSS_PROPERTY_\w+)\b")
     tests = references(list((ROOT / "test").glob("test_*gtest.cpp")) + list((ROOT / "test/css").glob("*.cpp")),

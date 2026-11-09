@@ -1,14 +1,14 @@
 #include "editing_dom_adapter.hpp"
 #include "radiant_host_api.hpp"
-#include "../../../radiant/editing_dom_internal.hpp"
-#include "../../../radiant/editing_dom_host.hpp"
-#include "../../../radiant/event.hpp"
-#include "../../../radiant/view.hpp"
+#include "radiant/editing_dom_internal.hpp"
+#include "radiant/editing_dom_host.hpp"
+#include "radiant/event.hpp"
+#include "radiant/view.hpp"
 #include "../../input/css/dom_element.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../dom/dom.h"
 #include "../../dom/dom_observers.h"
-#include "../../../lib/mem.h"
+#include "lib/mem.h"
 
 static bool editing_insert_child(DomElement* parent, DomNode* child, DomNode* reference) {
     RootFrame roots(2);

@@ -10,14 +10,14 @@
 #include "../lambda.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../network/radiant_state_store.h"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/str.h"
-#include "../../lib/strbuf.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
 
 #ifndef LAMBDA_HEADLESS
-#include "../../radiant/radiant.hpp"
-#include "../../radiant/rdt_video.h"
+#include "radiant/radiant.hpp"
+#include "radiant/rdt_video.h"
 #endif
 
 #include <string.h>

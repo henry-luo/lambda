@@ -11,8 +11,8 @@
 #include <gtest/gtest.h>
 
 // font module internals — decompression + format detection
-#include "../../lib/font/font_internal.h"
-#include "../../lib/memtrack.h"
+#include "lib/font/font_internal.h"
+#include "lib/memtrack.h"
 
 #include <stdio.h>
 #include <stdlib.h>

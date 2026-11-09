@@ -1,6 +1,6 @@
 #pragma once
 #include "../lambda-data.hpp"
-#include "../../lib/raster.h"
+#include "lib/raster.h"
 
 const RasterBuffer* lambda_raster_buffer(Item value);
 bool lambda_raster_compare_samples(Item a,Item b,Item key,bool* equal);

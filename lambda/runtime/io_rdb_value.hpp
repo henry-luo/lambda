@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../lambda-data.hpp"
-#include "../../lib/rdb_abi.h"
-#include "../../lib/rdb_spool.h"
+#include "lib/rdb_abi.h"
+#include "lib/rdb_spool.h"
 
 // Copy one native cell into destination-owned Lambda array storage.
 bool io_rdb_append_value(Array* destination, const RdbValue* value);

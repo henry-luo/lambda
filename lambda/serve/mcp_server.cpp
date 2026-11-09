@@ -1,8 +1,8 @@
 #include "mcp_server.hpp"
 #include "serve_utils.hpp"
 #include "../io/mcp_tools.hpp"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
+#include "lib/log.h"
+#include "lib/str.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>

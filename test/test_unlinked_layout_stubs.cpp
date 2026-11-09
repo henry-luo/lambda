@@ -1,8 +1,8 @@
 // isolated DOM/box/retained-list targets have no native editing or layout host.
-#include "../radiant/event.hpp"
-#include "../radiant/layout.hpp"
-#include "../radiant/input_value.hpp"
-#include "../lib/log.h"
+#include "radiant/event.hpp"
+#include "radiant/layout.hpp"
+#include "radiant/input_value.hpp"
+#include "lib/log.h"
 #include <stdlib.h>
 
 [[noreturn]] static void unexpected_host_query(const char* name) {

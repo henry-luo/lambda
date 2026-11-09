@@ -2,9 +2,9 @@
 #include "../core/mark_reader.hpp"
 #include "../input/input.hpp"
 #include "../jube/jube_registry.h"
-#include "../../lib/file.h"
-#include "../../lib/url.h"
-#include "../../lib/mem.h"
+#include "lib/file.h"
+#include "lib/url.h"
+#include "lib/mem.h"
 #include <limits.h>
 
 static bool jm_path_has_known_js_ext(const char* path) {

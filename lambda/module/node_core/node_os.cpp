@@ -7,8 +7,8 @@
 #include "node_os.hpp"
 #include "../../jube/jube_registry.h"
 #include "node_core_common.hpp"
-#include "../../../lib/shell.h"
-#include "../../../lib/str.h"
+#include "lib/shell.h"
+#include "lib/str.h"
 
 #include <cstring>
 #include <cstdlib>

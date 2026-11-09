@@ -1,7 +1,7 @@
 #include "supervisor.h"
 #include "../../io/security_channel.h"
-#include "../../../lib/hex.h"
-#include "../../../lib/mem.h"
+#include "lib/hex.h"
+#include "lib/mem.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>

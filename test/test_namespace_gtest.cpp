@@ -19,13 +19,13 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/core/name_pool.hpp"
 #include "../lambda/core/print.h"
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
-#include "../lib/log.h"
-#include "../lib/hashmap_helpers.h"
-#include "../lib/strbuf.h"
-#include "../lib/url.h"
-#include "../lib/test_utils.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
+#include "lib/log.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/strbuf.h"
+#include "lib/url.h"
+#include "lib/test_utils.h"
 #include <cstring>
 #include <cstdlib>
 

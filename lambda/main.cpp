@@ -1,5 +1,5 @@
 #include "input/input.hpp"
-#include "../lib/host_paths.h"
+#include "lib/host_paths.h"
 #include "input/input-postscript.hpp"
 #include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
@@ -7,21 +7,21 @@
 #include "format/format.h"
 #include "io/script_format.hpp"
 #include "format/format-markup.h"
-#include "../lib/mime-detect.h"
-#include "../lib/mempool.h"
-#include "../lib/mem_context.h"
-#include "../lib/mem_factory.h"
-#include "../lib/memtrack.h"
-#include "../lib/byte_builder.h"
+#include "lib/mime-detect.h"
+#include "lib/mempool.h"
+#include "lib/mem_context.h"
+#include "lib/mem_factory.h"
+#include "lib/memtrack.h"
+#include "lib/byte_builder.h"
 #ifndef LAMBDA_NO_JUBE
 #include "jube/jube_interface.h"
 #include "jube/jube_registry.h"
 #endif
-#include "../lib/strbuf.h"  // For string buffer
-#include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
-#include "../lib/arena.h"   // For arena allocator
-#include "../lib/file.h"    // For file_exists, file_delete, file_getcwd
-#include "../lib/shell.h"   // For shell_getenv
+#include "lib/strbuf.h"  // For string buffer
+#include "lib/str.h"     // For str_to_int64_default, str_to_double_default
+#include "lib/arena.h"   // For arena allocator
+#include "lib/file.h"    // For file_exists, file_delete, file_getcwd
+#include "lib/shell.h"   // For shell_getenv
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
 #include <cstdio>
@@ -38,7 +38,7 @@
 #include <mach/mach.h>
 #endif
 #endif
-#include "../lib/log.h"  // Add logging support
+#include "lib/log.h"  // Add logging support
 #include "runtime/side_stack.h"
 #include "validator/validator.hpp"  // For ValidationResult
 #include "runtime/transpiler.hpp"
@@ -62,15 +62,16 @@
 #include "runtime/sysinfo.h"
 
 #ifndef LAMBDA_HEADLESS
-#include "../radiant/radiant.hpp"
-#include "../radiant/window_host.hpp"
-#include "../radiant/devtools_adapter.hpp"
+#include "module/radiant/radiant_runtime_init.hpp"
+#include "radiant/radiant.hpp"
+#include "radiant/window_host.hpp"
+#include "radiant/devtools_adapter.hpp"
 #endif
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
 #ifndef LAMBDA_NO_JS
-#include "../radiant/view.hpp"
+#include "radiant/view.hpp"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // JS result and exception-lane helpers
 #include "dom/dom.h"               // JS DOM document/session bridge
@@ -80,8 +81,8 @@
 #include "js/js_runtime_state.hpp"
 #include "js/mvp-lmd/mvp_lmd.h"
 #endif // LAMBDA_NO_JS
-#include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
-#include "../lib/time_util.h"
+#include "lib/uv_loop.h"          // JS worker cleanup for libuv loop
+#include "lib/time_util.h"
 #ifdef LAMBDA_BASH
 #include "module/bash/bash_transpiler.hpp"  // Bash transpiler
 #include "module/bash/bash_runtime.h"       // bash_exit_code()
@@ -1099,9 +1100,9 @@ static char* read_stdin_source(size_t* out_len) {
 
 // External function declarations
 extern "C" {
-    #include "../lib/url.h"
+    #include "lib/url.h"
     // String utility functions from lib/string.h
-    #include "../lib/string.h"
+    #include "lib/string.h"
     // create_string function is declared in lib/string.h
     void js_process_emit_exit(int code);
     int js_process_current_exit_code(void);
@@ -2697,6 +2698,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
     log_init("");  // Initialize with parsed config or defaults
 
     if (no_log) log_disable_all();
+
+#ifndef LAMBDA_HEADLESS
+    // Native UI creation does not implicitly install Lambda's script adapters.
+    if (!radiant_register_dom_engine_providers()) return lambda_main_finish(1);
+#endif
 
     // Check for --mem-dump[=PATH] flag early; dump the memory context as JSON
     // at process exit and log a leak report. Strip it from argv.

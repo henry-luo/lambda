@@ -35,7 +35,8 @@ SOURCE_EXTS = (".c", ".cpp", ".mm")
 HEADER_EXTS = (".h", ".hpp")
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+    lambda_root = Path(__file__).resolve().parents[4]
+    return Path(os.environ.get('RADIANT_ROOT', lambda_root.parent / 'radiant')).resolve()
 
 
 def git_status_paths(root: Path) -> dict[str, str]:

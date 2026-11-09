@@ -6,7 +6,7 @@
 
 #include "transpiler.hpp"
 #include "ast_build.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 #include <string.h>
 
 extern Type TYPE_ANY, TYPE_INT;

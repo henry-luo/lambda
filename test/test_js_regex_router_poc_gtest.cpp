@@ -7,9 +7,9 @@
 #include "../lambda/js/js_regex_router_scanner.h"
 
 extern "C" {
-#include "../lib/file.h"
-#include "../lib/shell.h"
-#include "../lib/strbuf.h"
+#include "lib/file.h"
+#include "lib/shell.h"
+#include "lib/strbuf.h"
 }
 
 namespace {

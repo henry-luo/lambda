@@ -1,7 +1,7 @@
 #pragma once
 #ifndef _WIN32
-#include "../../lib/atomic.h"
-#include "../../lib/time_util.h"
+#include "lib/atomic.h"
+#include "lib/time_util.h"
 #include <errno.h>
 #include <pthread.h>
 

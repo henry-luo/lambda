@@ -2,11 +2,11 @@
 """Generate UAX #50 properties from Unicode VerticalOrientation.txt."""
 
 import hashlib
-from pathlib import Path
+from split_paths import sibling_roots
 import re
 from unicode_generator import codepoint_range, run_generator
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = sibling_roots()[0]
 VALUES = {"R": 0, "U": 1, "Tu": 2, "Tr": 3}
 
 

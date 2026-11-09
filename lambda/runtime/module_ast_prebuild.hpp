@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../../lib/arraylist.h"
+#include "lib/arraylist.h"
 #include "../io/security_io.h"
 
 // The module prebuild registry is deliberately language-neutral. A profile

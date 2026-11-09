@@ -54,8 +54,8 @@
 #endif
 
 extern "C" {
-#include "../lib/shell.h"
-#include "../lib/file.h"
+#include "lib/shell.h"
+#include "lib/file.h"
 }
 
 namespace {
@@ -470,7 +470,14 @@ TEST(LambdaOptStrings, LiteralSplitKernelAvoidsBytewiseComparisons) {
     // The case-sensitive scan is lib's str_find, the one candidate-scan kernel
     // shared with contains/index_of and LambdaJS (string tuning P2).
     EXPECT_NE(kernel.find("str_find(chars + from"), std::string::npos);
-    char* lib_text = read_text_file("lib/str.c");
+    // The search implementation is owned by the input sibling project.
+    const char* input_root = getenv("LAMBDA_INPUT_ROOT");
+    if (!input_root || !input_root[0]) input_root = "../lambda-input";
+    char input_path[4096];
+    int path_length = snprintf(input_path, sizeof(input_path), "%s/lib/str.c", input_root);
+    ASSERT_GE(path_length, 0);
+    ASSERT_LT((size_t)path_length, sizeof(input_path));
+    char* lib_text = read_text_file(input_path);
     ASSERT_NE(lib_text, nullptr);
     if (!lib_text) return;
     std::string lib_source(lib_text);
@@ -494,7 +501,10 @@ TEST(LambdaOptStrings, LiteralSplitKernelAvoidsBytewiseComparisons) {
     EXPECT_NE(needle_kernel.find("memchr(p, needle->rare"), std::string::npos);
     EXPECT_NE(needle_kernel.find("str_needle_equal_at(needle, start)"), std::string::npos);
     EXPECT_NE(needle_kernel.find("return str_needle_find_pair(needle, s, s_len)"), std::string::npos);
-    char* simd_text = read_text_file("lib/str_simd.c");
+    path_length = snprintf(input_path, sizeof(input_path), "%s/lib/str_simd.c", input_root);
+    ASSERT_GE(path_length, 0);
+    ASSERT_LT((size_t)path_length, sizeof(input_path));
+    char* simd_text = read_text_file(input_path);
     ASSERT_NE(simd_text, nullptr);
     if (!simd_text) return;
     std::string simd_source(simd_text);

@@ -17,10 +17,10 @@
 #include "js_transpiler.hpp"
 #include "js_runtime.h"
 #include "js_regexp_compile.h"
-#include "../../lib/log.h"
-#include "../../lib/utf.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/strbuf.h"
+#include "lib/log.h"
+#include "lib/utf.h"
+#include "lib/arraylist.h"
+#include "lib/strbuf.h"
 #include <cstring>
 #include <cstdio>
 

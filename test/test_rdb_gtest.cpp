@@ -29,14 +29,14 @@
 #endif
 
 extern "C" {
-#include "../lib/rdb.h"
-#include "../lib/rdb_spool.h"
-#include "../lib/file.h"
-#include "../lib/rdb_sqlite_tx.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/str.h"
-#include "../lib/sqlite/sqlite3.h"
+#include "lib/rdb.h"
+#include "lib/rdb_spool.h"
+#include "lib/file.h"
+#include "lib/rdb_sqlite_tx.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/str.h"
+#include "lib/sqlite/sqlite3.h"
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -2651,7 +2651,7 @@ TEST_F(RdbSpoolTest, QuotaAndInvalidBatchesLeaveThePrefixReadable) {
     rdb_spool_close(spool);
 }
 
-#include "../lib/rdb_tunnel.h"
+#include "lib/rdb_tunnel.h"
 #include <pthread.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -2936,7 +2936,7 @@ TEST(RdbTunnel, RejectsFileTargets) {
  *     well-known public root
  * ══════════════════════════════════════════════════════════════════════ */
 
-#include "../lib/trust_store.h"
+#include "lib/trust_store.h"
 #include <mbedtls/x509_crt.h>
 
 TEST(TrustStore, LoadsPlatformRoots) {

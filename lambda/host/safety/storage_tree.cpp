@@ -1,5 +1,5 @@
 #include "storage_tree.h"
-#include "../../../lib/mem.h"
+#include "lib/mem.h"
 #include <errno.h>
 #include <string.h>
 

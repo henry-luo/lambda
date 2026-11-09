@@ -5,7 +5,7 @@
 // in their respective frontends (D7.5.1, JR7.1).
 #include "../lambda.hpp"
 #include "root_vector.h"
-#include "../../lib/arraylist.h"
+#include "lib/arraylist.h"
 
 #ifdef __cplusplus
 extern "C" {

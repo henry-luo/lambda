@@ -3,8 +3,8 @@
 #include <cinttypes>
 #include <random>
 #include <set>
-#include "../../lib/avl_tree.h"
-#include "../../lib/mempool.h"
+#include "lib/avl_tree.h"
+#include "lib/mempool.h"
 
 // Test fixture for AVL tree performance tests
 class AvlTreePerfTest : public ::testing::Test {

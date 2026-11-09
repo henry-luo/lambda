@@ -1,8 +1,8 @@
 #include "js_transpiler.hpp"
 #include "js_c_ast_helpers.hpp"
 #include "../ts/ts_ast.hpp"
-#include "../../lib/mempool.h"
-#include "../../lib/arraylist.h"
+#include "lib/mempool.h"
+#include "lib/arraylist.h"
 
 // The direct parser reduces children before their enclosing function or block
 // exists. This pass reconstructs the binding graph from the retained AST so

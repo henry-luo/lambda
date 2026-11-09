@@ -19,15 +19,15 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/io/mark_builder.hpp"
-#include "../lib/html_entities.h"
-#include "../lib/emoji_shortcodes.h"
+#include "lib/html_entities.h"
+#include "lib/emoji_shortcodes.h"
 #include "../lambda/input/input-utils.h"
-#include "../lib/log.h"
-#include "../lib/url.h"
-#include "../lib/arena.h"
-#include "../lib/font/font_colr.h"
-#include "../lib/font/font_tables.h"
-#include "../lib/font/font_internal.h"
+#include "lib/log.h"
+#include "lib/url.h"
+#include "lib/arena.h"
+#include "lib/font/font_colr.h"
+#include "lib/font/font_tables.h"
+#include "lib/font/font_internal.h"
 
 // Forward declarations
 extern "C" {

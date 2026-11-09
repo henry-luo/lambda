@@ -3,10 +3,10 @@
 #include "../ts/ts_ast.hpp"
 #include "../ts/ts_type_parser.hpp"
 
-#include "../../lib/mempool.h"
-#include "../../lib/mem.h"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
+#include "lib/mempool.h"
+#include "lib/mem.h"
+#include "lib/log.h"
+#include "lib/str.h"
 #include <stdlib.h>
 #include <string.h>
 

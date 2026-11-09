@@ -3,10 +3,10 @@
 #include "update_metadata.h"
 #include "update_wire.h"
 #include "update_process.h"
-#include "../../../lib/https_url.h"
-#include "../../../lib/digest.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/time_util.h"
+#include "lib/https_url.h"
+#include "lib/digest.h"
+#include "lib/mem.h"
+#include "lib/time_util.h"
 #include <errno.h>
 
 struct SecurityVerifiedUpdate {

@@ -1,6 +1,6 @@
 #pragma once
 #include "../../runtime/binary_schema.hpp"
-#include "../../../radiant/render.hpp"
+#include "radiant/render.hpp"
 
 // Host-only capability: Lambda cannot inspect or manufacture its session pointer.
 struct RadiantPdfSource {

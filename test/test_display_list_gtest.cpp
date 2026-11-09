@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
-#include "../radiant/render.hpp"
-#include "../radiant/render_metrics.hpp"
+#include "radiant/render.hpp"
+#include "radiant/render_metrics.hpp"
 #include "../lambda/input/css/css_parser.hpp"
-#include "../lib/mem.h"
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
+#include "lib/mem.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
 #include <string.h>
 
 // Tests link only the surface registry, not the full image teardown; their

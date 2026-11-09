@@ -6,9 +6,9 @@
 #include "js_object_meta.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../core/name_pool.hpp"
-#include "../../lib/utf.h"
-#include "../../lib/str.h"
-#include "../../lib/mem.h"
+#include "lib/utf.h"
+#include "lib/str.h"
+#include "lib/mem.h"
 #include <cstring>
 
 enum HeaderOperation {

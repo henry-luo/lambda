@@ -2,9 +2,9 @@
 #include <stdint.h>
 #include <limits.h>
 
-#include "../../lib/math_checked.hpp"
-#include "../../lib/checked_alloc.hpp"
-#include "../../lib/ownership.hpp"   // NonNull + arena helpers
+#include "lib/math_checked.hpp"
+#include "lib/checked_alloc.hpp"
+#include "lib/ownership.hpp"   // NonNull + arena helpers
 
 // ---- checked_math --------------------------------------------------------
 

@@ -49,11 +49,11 @@ static inline char* realpath(const char* path, char* resolved) {
 #endif
 
 extern "C" {
-#include "../../lib/file.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/log.h"
-#include "../../lib/path_str.h"
+#include "lib/file.h"
+#include "lib/file_utils.h"
+#include "lib/arraylist.h"
+#include "lib/log.h"
+#include "lib/path_str.h"
 }
 
 #ifndef _WIN32

@@ -6,10 +6,10 @@
 #include "lambda-root-frame.hpp"
 #include "ast.hpp"
 #include "../core/mark_reader.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mempool.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/hash.h"
+#include "lib/log.h"
+#include "lib/mempool.h"
+#include "lib/memtrack.h"
+#include "lib/hash.h"
 #include <stdlib.h>
 #include <string.h>
 

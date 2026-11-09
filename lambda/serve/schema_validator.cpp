@@ -7,11 +7,11 @@
  */
 
 #include "schema_validator.hpp"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
-#include "../../lib/strbuf.h"
+#include "lib/log.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
 #include <cstring>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <cctype>

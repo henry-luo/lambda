@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 from build_config import load_build_config
+from split_paths import resolve_split_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -113,7 +114,7 @@ def main():
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error('--jobs must be positive')
-    config = load_build_config(ROOT / 'build_lambda_config.json')
+    config = resolve_split_paths(load_build_config(ROOT / 'build_lambda_config.json'))
     profile = config['platforms']['lambda-wasm']
     compiler = compiler_path()
     if not compiler.is_file():

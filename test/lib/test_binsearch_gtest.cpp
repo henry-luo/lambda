@@ -1,7 +1,7 @@
 // test/lib/test_binsearch_gtest.cpp - tests for lib/binsearch
 #include <gtest/gtest.h>
 #include <cstring>
-#include "../../lib/binsearch.h"
+#include "lib/binsearch.h"
 
 namespace {
 

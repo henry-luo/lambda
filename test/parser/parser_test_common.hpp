@@ -18,8 +18,8 @@
 #include <cstdlib>
 #include "../../lambda/lambda-data.hpp"
 #include "../../lambda/input/input.hpp"
-#include "../../lib/log.h"
-#include "../../lib/url.h"
+#include "lib/log.h"
+#include "lib/url.h"
 
 extern "C" {
     Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor);

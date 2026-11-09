@@ -1,6 +1,6 @@
 #include "update_process.h"
 #include "update_records.h"
-#include "../../../lib/time_util.h"
+#include "lib/time_util.h"
 #include <errno.h>
 #include <pthread.h>
 #include <string.h>

@@ -1,6 +1,6 @@
 #pragma once
 #include "update_download.h"
-#include "../../../lib/confined_process.h"
+#include "lib/confined_process.h"
 
 typedef struct SecurityVerifiedUpdate SecurityVerifiedUpdate;
 struct SecurityVerifiedUpdateView {

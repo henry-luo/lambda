@@ -4,10 +4,10 @@
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
 #include "../io/mark_output_builder.hpp"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/math_utils.h"
-#include "../../lib/str.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/math_utils.h"
+#include "lib/str.h"
 #include "../js/js_typed_array.h"
 #include <stdarg.h>
 #include <time.h>

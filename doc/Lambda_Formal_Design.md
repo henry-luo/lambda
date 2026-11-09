@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 64.0.0 (2026-11-05)
+**Spec version:** 65.0.0 (2026-11-09)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1393,9 +1393,11 @@ loosely.
 
 ### D9.1 Build layering
 
-- **D9.1.1v3* — Input, Radiant and Lambda have separate owners.**
+- **D9.1.1v4* — Input, Radiant and Lambda have separate owners.**
   `lambda-input` owns shared libraries, data, parsers, native formatters and Mark APIs.
   Lambda owns script-based writers and their execution (D9.3.4).
+  Radiant owns native event collection, layout, rendering and the state store.
+  Lambda owns event handling and uses Radiant services through host interfaces.
   Radiant depends on `lambda-input`, not on the Lambda runtime. Lambda
   integrates the runtime and Radiant. Input and Radiant ship as static
   libraries. Dynamic libraries remain for Jube modules. Optional host

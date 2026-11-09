@@ -1,6 +1,6 @@
 #include "native_collection.hpp"
 #include "../lambda.h"
-#include "../../lib/hashmap_helpers.h"
+#include "lib/hashmap_helpers.h"
 #include <string.h>
 
 struct NativeCollectionEntry {

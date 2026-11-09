@@ -11,13 +11,13 @@
 #include "re2_wrapper.hpp"
 #include "../js/js_runtime_state.hpp"
 #include "lambda/runtime/gc/gc_heap.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/queue.h"
-#include "../../lib/uv_loop.h"
-#include "../../lib/shell.h"
-#include "../../lib/time_util.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/strbuf.h"
+#include "lib/queue.h"
+#include "lib/uv_loop.h"
+#include "lib/shell.h"
+#include "lib/time_util.h"
 
 #include <assert.h>
 #include <fcntl.h>
@@ -212,11 +212,6 @@ struct LambdaDocumentRetirementGuard {
     LambdaDocumentRetirementGuard* next;
 };
 
-struct LambdaDocumentLifetimeGuard {
-    void* document;
-    LambdaDocumentLifetimeGuard* next;
-};
-
 struct LambdaScheduler {
     EvalContext* owner;
     LambdaTask* all_tasks;
@@ -252,7 +247,6 @@ static LambdaScheduler* attached_scheduler;
 // when none is (a script, the REPL); S13.3.1v2's `owner: 'document'` needs one.
 static void* (*document_probe)(void);
 // Document hosts and their schedulers retire on the same owner thread.
-static thread_local LambdaDocumentLifetimeGuard* document_lifetime_guards;
 static uint64_t scheduler_serial_next = 1;
 static LambdaPromiseIsFn promise_is;
 static LambdaPromiseWaitFn promise_wait;
@@ -1470,43 +1464,6 @@ extern "C" void lambda_set_document_probe(void* (*probe)(void)) {
     document_probe = probe;
 }
 
-static bool document_lifetime_retiring(void* document) {
-    for (LambdaDocumentLifetimeGuard* guard = document_lifetime_guards; guard; guard = guard->next)
-        if (guard->document == document) return true;
-    return false;
-}
-
-extern "C" bool lambda_document_lifetime_guard_active(void* document) {
-    return document && document_lifetime_retiring(document);
-}
-
-extern "C" LambdaDocumentLifetimeGuard* lambda_document_lifetime_guard_begin(void* document) {
-    if (!document || document_lifetime_retiring(document)) return NULL;
-    LambdaDocumentLifetimeGuard* guard = (LambdaDocumentLifetimeGuard*)mem_calloc(
-        1, sizeof(LambdaDocumentLifetimeGuard), MEM_CAT_EVAL);
-    if (!guard) return NULL;
-    guard->document = document;
-    guard->next = document_lifetime_guards;
-    document_lifetime_guards = guard;
-    return guard;
-}
-
-extern "C" bool lambda_document_lifetime_guard_is_current(LambdaDocumentLifetimeGuard* guard) {
-    for (LambdaDocumentLifetimeGuard* entry = document_lifetime_guards; entry; entry = entry->next)
-        if (entry == guard) return true;
-    return false;
-}
-
-extern "C" bool lambda_document_lifetime_guard_end(LambdaDocumentLifetimeGuard* guard) {
-    for (LambdaDocumentLifetimeGuard** link = &document_lifetime_guards; *link; link = &(*link)->next) {
-        if (*link != guard) continue;
-        *link = guard->next;
-        mem_free(guard);
-        return true;
-    }
-    return false;
-}
-
 static bool document_tasks_marked_retiring(LambdaScheduler* scheduler, void* document) {
     for (LambdaTask* task = scheduler ? scheduler->all_tasks : NULL; task; task = task->next_all) {
         if (task->owner_document == document && task->document_retiring) return true;
@@ -1530,7 +1487,7 @@ static bool document_tasks_retiring(LambdaScheduler* scheduler, void* document) 
 extern "C" bool lambda_document_retirement_guard_begin(LambdaScheduler* scheduler, void* document) {
     // A guard acquired during runtime shutdown would outlive its scheduler.
     if (!scheduler || scheduler->owner != context || !document || scheduler->document_shutdown ||
-            document_lifetime_retiring(document)) return false;
+            lambda_document_lifetime_guard_active(document)) return false;
     if (document_has_retirement_guard(scheduler, document)) return true;
     LambdaDocumentRetirementGuard* guard = (LambdaDocumentRetirementGuard*)mem_calloc(
         1, sizeof(LambdaDocumentRetirementGuard), MEM_CAT_EVAL);
@@ -1573,7 +1530,7 @@ extern "C" Item lambda_task_start_document(Item function, List* args) {
             "start: owner 'document' needs a running document (a view's handler or template)");
     }
     LambdaScheduler* scheduler = context ? context->scheduler : NULL;
-    if (document_lifetime_retiring(document) || (scheduler && scheduler->document_shutdown) ||
+    if (lambda_document_lifetime_guard_active(document) || (scheduler && scheduler->document_shutdown) ||
             document_tasks_retiring(scheduler, document)) {
         LambdaTask* parent = lambda_current_task();
         if (!(parent && parent->owner_document == document &&
@@ -1645,7 +1602,7 @@ static bool scheduler_join_document_work(LambdaScheduler* scheduler, void* docum
 
 extern "C" LambdaDocumentJoinProgress lambda_document_tasks_progress(LambdaScheduler* scheduler,
         void* document, LambdaDocumentLifetimeGuard* guard) {
-    if (!lambda_document_lifetime_guard_is_current(guard) || guard->document != document ||
+    if (!lambda_document_lifetime_guard_owns(guard, document) ||
             !scheduler || !context || scheduler->owner != context || scheduler->document_joining ||
             scheduler->draining || scheduler->current || activation_current() || context->execution_depth ||
             lambda_uv_is_running())
@@ -1734,7 +1691,7 @@ extern "C" int lambda_document_tasks_release(void* document) {
     LambdaScheduler* scheduler = context ? context->scheduler : NULL;
     if (!scheduler || !document) return 0;
     // Only the coordinating host may drive a document with a lifetime guard.
-    if (document_lifetime_retiring(document)) return -1;
+    if (lambda_document_lifetime_guard_active(document)) return -1;
     // A stalled join must keep the document attached for the host's retry.
     return document_tasks_join(scheduler, document);
 }

@@ -6,7 +6,7 @@
  */
 
 #include "../lambda.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 // ============================================================================
 // Stubbed io.http functions (API migration pending)

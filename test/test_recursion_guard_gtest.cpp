@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "../lib/recursion_guard.hpp"
+#include "lib/recursion_guard.hpp"
 
 namespace {
 

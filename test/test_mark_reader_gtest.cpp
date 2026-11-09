@@ -3,8 +3,8 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
 #include <cmath>
 #include <string>
 #include <set>

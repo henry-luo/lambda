@@ -4,7 +4,7 @@
 #include "../../lambda/input/css/css_value_parser.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
 #include "../../lambda/input/css/css_style.hpp"
-#include "../../lib/mempool.h"
+#include "lib/mempool.h"
 
 // Test fixture for CSS integration tests
 class CssIntegrationTest : public ::testing::Test {

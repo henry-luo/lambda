@@ -26,8 +26,8 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
-#include "../../../lib/mem_context.h"
-#include "../../../lib/mem_vm.h"
+#include "lib/mem_context.h"
+#include "lib/mem_vm.h"
 #include "gc_object_zone.h"
 #include "gc_data_zone.h"
 

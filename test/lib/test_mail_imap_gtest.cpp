@@ -7,8 +7,8 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "../../lib/mail_imap.h"
-#include "../../lib/strbuf.h"
+#include "lib/mail_imap.h"
+#include "lib/strbuf.h"
 
 namespace {
 

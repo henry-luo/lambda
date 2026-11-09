@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 #include "../lambda/input/input.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lib/url.h"
-#include "../lib/string.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/test_utils.h"
-#include "../lib/file.h"
-#include "../lib/shell.h"
+#include "lib/url.h"
+#include "lib/string.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/test_utils.h"
+#include "lib/file.h"
+#include "lib/shell.h"
 #include <unistd.h>
 #include <cstring>
 

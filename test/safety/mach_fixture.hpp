@@ -1,5 +1,5 @@
 #pragma once
-#include "../../lib/process_sandbox.h"
+#include "lib/process_sandbox.h"
 #include <mach/mach.h>
 #include <mach/exception_types.h>
 #include <mach/mach_vm.h>

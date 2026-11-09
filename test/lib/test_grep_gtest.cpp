@@ -14,13 +14,13 @@
 #include <unistd.h>
 #endif
 
-#include "../../lib/grep/grep.h"
-#include "../../lib/grep/grep_internal.hpp"
-#include "../../lib/str.h"
-#include "../../lib/file.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/log.h"
-#include "../../lib/atomic.h"
+#include "lib/grep/grep.h"
+#include "lib/grep/grep_internal.hpp"
+#include "lib/str.h"
+#include "lib/file.h"
+#include "lib/file_utils.h"
+#include "lib/log.h"
+#include "lib/atomic.h"
 
 namespace {
 

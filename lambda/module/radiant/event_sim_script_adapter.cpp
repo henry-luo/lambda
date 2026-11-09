@@ -1,7 +1,8 @@
+#include "loader_runtime_adapter.hpp"
 #include "event_sim_script_adapter.hpp"
-#include "../../../radiant/event_sim_render.hpp"
-#include "../../../radiant/event.hpp"
-#include "../../../radiant/radiant.hpp"
+#include "radiant/event_sim_render.hpp"
+#include "radiant/event.hpp"
+#include "radiant/radiant.hpp"
 #include "../../input/css/dom_lifecycle.hpp"
 #include "../../dom/dom.h"
 #include "../../dom/realm/dom_realm.h"
@@ -12,7 +13,7 @@
 #include "../../js/js_runtime.h"
 #include "../../js/js_runtime_state.hpp"
 #include "../../js/js_event_loop.h"
-#include "../../../lib/time_util.h"
+#include "lib/time_util.h"
 #include <math.h>
 
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* document);

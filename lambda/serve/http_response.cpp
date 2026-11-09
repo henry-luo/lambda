@@ -7,7 +7,7 @@
 #include "serve_utils.hpp"
 #include "mime.hpp"
 #include <string.h>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <ctype.h>

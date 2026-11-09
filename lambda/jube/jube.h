@@ -2,7 +2,7 @@
 
 #include "../lambda-data.hpp"
 #include "../runtime/side_stack.h"
-#include "../../lib/rdb_abi.h"
+#include "lib/rdb_abi.h"
 #include <stdint.h>
 #include <stddef.h>
 

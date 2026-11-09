@@ -1,5 +1,5 @@
 #pragma once
-#include "../../../lib/lambda_api.h"
+#include "lib/lambda_api.h"
 
 #include "../../jube/jube.h"
 

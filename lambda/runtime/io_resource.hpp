@@ -1,6 +1,6 @@
 #pragma once
 #include "transpiler.hpp"
-#include "../../lib/file.h"
+#include "lib/file.h"
 
 // Common immutable VMap carrier for task-owned native IO resources. The task
 // owns native cleanup; the carrier never releases or traces native state.

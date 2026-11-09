@@ -6,9 +6,9 @@
 #include "transpiler.hpp"
 #include "sys_func_registry.h"
 #include "lambda-error.h"
-#include "../../lib/grep/grep.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/strbuf.h"
+#include "lib/grep/grep.h"
+#include "lib/arraylist.h"
+#include "lib/strbuf.h"
 
 // An error value for an io search function, logged; `fmt` is printf-style.
 Item io_fs_error(LambdaErrorCode code, const char* fmt, ...);

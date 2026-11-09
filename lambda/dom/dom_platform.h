@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../lambda.h"
-#include "../../lib/language_preferences.h"
+#include "lib/language_preferences.h"
 #include <stddef.h>
 
 #ifdef __cplusplus

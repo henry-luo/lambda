@@ -6,7 +6,7 @@
 
 #include "../lambda-data.hpp"
 #include "transpiler.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 // without Radiant there is no SVG rasterizer to resolve images; keep the SVG as-is
 extern "C" Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item) {

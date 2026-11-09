@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 #include <string.h>
 
-#include "../../lib/ownership.hpp"
-#include "../../lib/mem_kind.hpp"
-#include "../../lib/arraylist.hpp"
-#include "../../radiant/tagged.hpp"
-#include "../../radiant/radiant.hpp"
+#include "lib/ownership.hpp"
+#include "lib/mem_kind.hpp"
+#include "lib/arraylist.hpp"
+#include "radiant/tagged.hpp"
+#include "radiant/radiant.hpp"
 
 namespace {
 
@@ -346,10 +346,10 @@ TEST(MemoryKinds, ArrayListTakesStorageFromANodePool) {
 // Slot table, typed pool, always-on checks, saturating conversion
 // ---------------------------------------------------------------------------
 
-#include "../../lib/slot_table.hpp"
-#include "../../lib/typed_pool.hpp"
-#include "../../lib/check.h"
-#include "../../lib/math_utils.h"
+#include "lib/slot_table.hpp"
+#include "lib/typed_pool.hpp"
+#include "lib/check.h"
+#include "lib/math_utils.h"
 
 TEST(SlotTable, LookupFollowsTargetUntilRelease) {
     Pool* pool = pool_create();

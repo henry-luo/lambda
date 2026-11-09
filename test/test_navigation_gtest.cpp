@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lib/navigation.h"
+#include "lib/navigation.h"
 #include <math.h>
 #include <float.h>
 
@@ -100,8 +100,8 @@ TEST_F(NavigationTest, AlreadyReachedAndBlockedEndpointsNeedNoSearchBudget) {
     q.goal=2;q.filter=1;find(q);EXPECT_EQ(path.status,NAVIGATION_UNREACHABLE);EXPECT_EQ(path.count,0u);EXPECT_EQ(path.expanded,0u);
 }
 
-#include "../lib/arraylist.hpp"
-#include "../lib/math_utils.h"
+#include "lib/arraylist.hpp"
+#include "lib/math_utils.h"
 
 static NavigationMeshQuery world_query(NavigationVec start,NavigationVec goal) {
     return {start,goal,{0,0,UINT32_MAX,NAVIGATION_MAX_NODES,NAVIGATION_MAX_EDGES,true,false},1000,2*NAVIGATION_MAX_NODES,16*NAVIGATION_MAX_EDGES};

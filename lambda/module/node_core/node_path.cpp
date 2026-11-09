@@ -7,10 +7,10 @@
 #include "node_path.hpp"
 #include "../../jube/jube_registry.h"
 #include "node_core_common.hpp"
-#include "../../../lib/file.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/path_str.h"
-#include "../../../lib/str.h"
+#include "lib/file.h"
+#include "lib/mem.h"
+#include "lib/path_str.h"
+#include "lib/str.h"
 
 #include <cstring>
 #include <cstdio>

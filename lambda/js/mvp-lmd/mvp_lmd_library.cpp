@@ -16,10 +16,10 @@
 #include "../../input/input-parsers.h"
 #include "../../core/lambda-decimal.hpp"
 #include "../../core/js_well_known_names.h"
-#include "../../../lib/datetime.h"
-#include "../../../lib/escape.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/utf.h"
+#include "lib/datetime.h"
+#include "lib/escape.h"
+#include "lib/strbuf.h"
+#include "lib/utf.h"
 #include <math.h>
 
 struct JsonAncestor { Item value; const JsonAncestor* parent; };

@@ -12,8 +12,8 @@
 #include "../runtime/transpiler.hpp"
 #include "../jube/jube_interface.h"
 #include "../input/css/dom_element.hpp"
-#include "../../lib/mem.h"
-#include "../../lib/url.h"
+#include "lib/mem.h"
+#include "lib/url.h"
 
 extern __thread EvalContext* context;
 extern "C" Item vmap_new(void);

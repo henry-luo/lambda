@@ -21,9 +21,9 @@
 // Include validator headers
 #include "../lambda/validator/validator.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/test_utils.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/test_utils.h"
 
 // Forward declarations for input functions
 extern "C" {

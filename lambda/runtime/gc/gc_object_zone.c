@@ -7,8 +7,8 @@
 #include "gc_object_zone.h"
 #include "gc_heap.h"   // for full gc_header_t definition and GC_FLAG_FREED
 #define MEMTRACK_NO_LOCATION_MACROS
-#include "../../../lib/memtrack.h"
-#include "../../../lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/log.h"
 #include <stdlib.h>
 #include <string.h>
 

@@ -3,9 +3,9 @@
 #include "lambda-number-runtime.hpp"
 #include "lambda-root-frame.hpp"
 #include "../validator/validator.hpp"
-#include "../../lib/arraylist.hpp"
-#include "../../lib/hash.h"
-#include "../../lib/hashmap_helpers.h"
+#include "lib/arraylist.hpp"
+#include "lib/hash.h"
+#include "lib/hashmap_helpers.h"
 #include <mpdecimal.h>
 #include <stdio.h>
 

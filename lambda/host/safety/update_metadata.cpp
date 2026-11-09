@@ -1,9 +1,9 @@
 #include "update_metadata.h"
 #include "update_records.h"
 #include "state_wire.h"
-#include "../../../lib/digest.h"
-#include "../../../lib/https_url.h"
-#include "../../../lib/mem.h"
+#include "lib/digest.h"
+#include "lib/https_url.h"
+#include "lib/mem.h"
 #include <errno.h>
 
 static const uint8_t metadata_magic[8] = {'L','M','T','U','F','C','0','1'};

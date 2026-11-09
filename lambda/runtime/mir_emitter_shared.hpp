@@ -9,14 +9,14 @@
 #include "../core/name_pool.hpp"
 #include "sys_func_registry.h"
 #include "mir_dump.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_typed.hpp"
-#include "../../lib/strbuf.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/mem_grow.hpp"
-#include "../../lib/lambda_alloca.h"
+#include "lib/arraylist.h"
+#include "lib/hashmap.h"
+#include "lib/hashmap_typed.hpp"
+#include "lib/strbuf.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/mem_grow.hpp"
+#include "lib/lambda_alloca.h"
 
 typedef void (*MirResultCheck)(void* owner, MIR_reg_t result);
 

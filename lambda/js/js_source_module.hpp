@@ -2,7 +2,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/module_registry.h"
 #include "../io/resource_policy.h"
-#include "../../lib/arraylist.h"
+#include "lib/arraylist.h"
 
 struct JsScript;
 struct JsSourceModuleRecord;

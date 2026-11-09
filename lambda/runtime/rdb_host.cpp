@@ -6,8 +6,8 @@
 #ifndef LAMBDA_NO_JUBE
 #include "../jube/jube_registry.h"
 #endif
-#include "../../lib/log.h"
-#include "../../lib/rdb.h"
+#include "lib/log.h"
+#include "lib/rdb.h"
 
 static void rdb_host_close_row(void* user) {
     rdb_conn_life_close((RdbConnLife*)user);

@@ -24,9 +24,9 @@ extern "C" const char* __lsan_default_options() { return "exitcode=0"; }
 #include "helpers/css_test_helpers.hpp"
 
 extern "C" {
-#include "../../lib/mempool.h"
-#include "../../lib/string.h"
-#include "../../lib/url.h"
+#include "lib/mempool.h"
+#include "lib/string.h"
+#include "lib/url.h"
 }
 
 // Forward declaration for helper function

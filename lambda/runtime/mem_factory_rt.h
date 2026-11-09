@@ -19,9 +19,9 @@
  * Passing ctx = NULL uses the process-global root context.
  */
 
-#include "../../lib/mem_context.h"
-#include "../../lib/mempool.h"
-#include "../../lib/arena.h"
+#include "lib/mem_context.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
 #include "lambda/runtime/gc/gc_heap.h"
 
 // ---- GC heap ----

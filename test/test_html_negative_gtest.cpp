@@ -7,10 +7,10 @@
 #include "../lambda/input/input.hpp"
 
 extern "C" {
-    #include "../lib/mempool.h"
-    #include "../lib/stringbuf.h"
-    #include "../lib/strview.h"
-    #include "../lib/log.h"
+    #include "lib/mempool.h"
+    #include "lib/stringbuf.h"
+    #include "lib/strview.h"
+    #include "lib/log.h"
 }
 
 // NOTE: These tests were written for the old Lexbor-based HTML parser which would

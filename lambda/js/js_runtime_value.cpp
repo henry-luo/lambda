@@ -2,7 +2,7 @@
 #include "js_exec_profile.h"
 #include "js_object_meta.h"
 #include "../core/lambda-decimal.hpp"
-#include "../../lib/str.h"
+#include "lib/str.h"
 
 
 extern "C" void* jube_host_identity(Item item);

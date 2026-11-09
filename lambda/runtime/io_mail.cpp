@@ -18,14 +18,14 @@
 #include "re2_wrapper.hpp"
 #include "transpiler.hpp"
 #include "../network/curl_trust.h"
-#include "../../lib/file.h"
-#include "../../lib/curl_runtime.h"
-#include "../../lib/log.h"
-#include "../../lib/mail_imap.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/time_util.h"
-#include "../../lib/uv_loop.h"
+#include "lib/file.h"
+#include "lib/curl_runtime.h"
+#include "lib/log.h"
+#include "lib/mail_imap.h"
+#include "lib/memtrack.h"
+#include "lib/strbuf.h"
+#include "lib/time_util.h"
+#include "lib/uv_loop.h"
 
 #include <curl/curl.h>
 #include <ctype.h>

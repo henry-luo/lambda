@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../radiant/view.hpp"
-#include "../lib/strbuf.h"
+#include "radiant/view.hpp"
+#include "lib/strbuf.h"
 #include <string.h>
 
 struct RadiantTestInlineBoundaryRecipe {

@@ -105,7 +105,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix='sqlite-fullsync-', dir=root / 'temp') as directory:
         folder = Path(directory).resolve()
         library = folder / 'interpose.dylib'
-        subprocess.run(['cc', '-Wno-deprecated-declarations', '-dynamiclib', '-o', str(library),
+        input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', root.parent / 'lambda-input'))
+        subprocess.run(['cc', '-I', str(input_root), '-Wno-deprecated-declarations', '-dynamiclib', '-o', str(library),
                         'test/sqlite_fullsync_interpose.c'],
                        check=True, cwd=root)
         source = folder / 'source.db'

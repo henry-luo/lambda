@@ -2,12 +2,12 @@
 """Generate strong bidi classes from Unicode's DerivedBidiClass.txt."""
 
 import hashlib
-from pathlib import Path
+from split_paths import sibling_roots
 import re
 from unicode_generator import codepoint_range as bounds, run_generator
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = sibling_roots()[0]
 CLASS = {"L": 1, "Left_To_Right": 1, "R": 2, "Right_To_Left": 2,
          "AL": 2, "Arabic_Letter": 2}
 

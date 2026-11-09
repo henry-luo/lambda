@@ -10,7 +10,7 @@
 #include "../js_function.hpp"
 #include "../js_builtin_catalog.hpp"
 #include "../../input/input.hpp"
-#include "../../../lib/mem.h"
+#include "lib/mem.h"
 #include <math.h>
 
 Item mvp_lmd_function_realm(Item function, MvpLmdProgram** program) {

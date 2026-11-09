@@ -10,8 +10,8 @@
 #include <gtest/gtest.h>
 #include <cmath>
 
-#include "../radiant/view.hpp"
-#include "../radiant/input_batch.hpp"
+#include "radiant/view.hpp"
+#include "radiant/input_batch.hpp"
 
 // Stub for dirty_mark_rect (defined in state_store.cpp, not linked in this test)
 void dirty_mark_rect(DirtyTracker*, float, float, float, float) {}

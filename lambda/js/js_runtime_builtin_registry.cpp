@@ -3,7 +3,7 @@
  */
 #include "js_runtime_internal.hpp"
 #include "mvp-lmd/mvp_lmd_runtime.h"
-#include "../../lib/hash.h"
+#include "lib/hash.h"
 
 // =============================================================================
 // Built-in registry

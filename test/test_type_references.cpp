@@ -5,9 +5,9 @@
 #include "../lambda/validator/validator.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/lambda.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/hashmap.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/hashmap.h"
 
 class TypeReferenceTest : public ::testing::Test {
 protected:

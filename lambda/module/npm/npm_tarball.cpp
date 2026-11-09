@@ -1,10 +1,10 @@
 // npm_tarball.cpp — Extract .tgz (gzipped tar) archives for npm packages
 
 #include "npm_tarball.h"
-#include "../../../lib/byte_builder.h"
-#include "../../../lib/file.h"
-#include "../../../lib/log.h"
-#include "../../../lib/memtrack.h"
+#include "lib/byte_builder.h"
+#include "lib/file.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 
 #include <limits.h>
 #include <zlib.h>

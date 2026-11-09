@@ -5,8 +5,8 @@
 #include "lambda-error.h"
 #include "lambda-root-frame.hpp"
 #include "../js/js_runtime.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 
 #include <string.h>
 

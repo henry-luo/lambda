@@ -10,7 +10,7 @@
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/module/radiant/radiant_host_api.hpp"
 #include "../lambda/module/radiant/pdf_view_schema_version.hpp"
-#include "../lib/arraylist.h"
+#include "lib/arraylist.h"
 
 namespace {
 

@@ -8,10 +8,10 @@
 
 #include "io_file_search.hpp"
 #include "sys_crypto.hpp"
-#include "../../lib/log.h"
-#include "../../lib/uuid.h"
-#include "../../lib/digest.h"
-#include "../../lib/signature.h"
+#include "lib/log.h"
+#include "lib/uuid.h"
+#include "lib/digest.h"
+#include "lib/signature.h"
 
 #include <mbedtls/md.h>
 #include <string.h>

@@ -24,7 +24,7 @@
 #include "dom_ops.h"
 #include "../js/js_runtime.h"
 #include "../jube/jube_registry.h"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 #include "dom_core.h"
 

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "../lib/file.h"
-#include "../lib/shell.h"
-#include "../lib/mem.h"
-#include "../lib/hashmap.h"
-#include "../lib/lru_cache.h"
-#include "../lib/image.h"
+#include "lib/file.h"
+#include "lib/shell.h"
+#include "lib/mem.h"
+#include "lib/hashmap.h"
+#include "lib/lru_cache.h"
+#include "lib/image.h"
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>

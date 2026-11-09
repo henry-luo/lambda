@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "../lib/file.h"
-#include "../lib/windows_compat.h"
-#include "../lib/strbuf.h"
+#include "lib/file.h"
+#include "lib/windows_compat.h"
+#include "lib/strbuf.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/module_registry.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
@@ -18,7 +18,7 @@
 #include "../lambda/js/js_object_meta.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/io/mark_builder.hpp"
-#include "../lib/mem_factory.h"
+#include "lib/mem_factory.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_internal.hpp"
 #include "../lambda/js/js_runtime_state.hpp"
@@ -29,8 +29,8 @@
 #include "../lambda/dom/dom_events.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/mir/mir.h"
-#include "../lib/mem.h"
-#include "../lib/uv_loop.h"
+#include "lib/mem.h"
+#include "lib/uv_loop.h"
 
 #include <pthread.h>
 #include <sched.h>

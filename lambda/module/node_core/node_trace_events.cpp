@@ -1,11 +1,11 @@
 #include "node_trace_events.hpp"
 #include "../../jube/jube_registry.h"
 #include "../../jube/jube_interface.h"
-#include "../../../lib/log.h"
-#include "../../../lib/escape.h"
-#include "../../../lib/str.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/time_util.h"
+#include "lib/log.h"
+#include "lib/escape.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
+#include "lib/time_util.h"
 
 #include <cstring>
 #include <stdio.h>

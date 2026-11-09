@@ -4,12 +4,12 @@
 #include <unistd.h>
 #include <time.h>
 
-#include "../lib/file.h"
+#include "lib/file.h"
 #include "../lambda/input/input-script-cache.h"
 #include "../lambda/runtime/module_ast_prebuild.hpp"
-#include "../lib/mem.h"
-#include "../lib/shell.h"
-#include "../lib/atomic.h"
+#include "lib/mem.h"
+#include "lib/shell.h"
+#include "lib/atomic.h"
 #include <errno.h>
 
 static int g_cache_test_destroyed_artifacts = 0;

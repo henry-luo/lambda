@@ -8,9 +8,9 @@
 #include "../../runtime/heap_api.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../input/input.hpp"
-#include "../../../lib/host_paths.h"
-#include "../../../lib/log.h"
-#include "../../../lib/memtrack.h"
+#include "lib/host_paths.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>

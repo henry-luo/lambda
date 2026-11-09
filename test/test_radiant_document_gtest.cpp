@@ -1,30 +1,32 @@
+#include "../lambda/module/radiant/loader_runtime_adapter.hpp"
+#include "../lambda/module/radiant/radiant_runtime_init.hpp"
 // in-process Radiant document, layout, controls, media and frame integration checks.
 #include <gtest/gtest.h>
-#include "../radiant/radiant.hpp"
-#include "../radiant/layout.hpp"
-#include "../radiant/dom_mutation_prepare.hpp"
-#include "../radiant/dom_mutation_state.hpp"
-#include "../radiant/dom_mutation_record.hpp"
-#include "../radiant/dom_backed_tree.hpp"
-#include "../radiant/scroll_geometry.hpp"
-#include "../radiant/scroll_request.hpp"
-#include "../radiant/layout_ruby.hpp"
-#include "../radiant/layout_text_context.hpp"
-#include "../radiant/hyphenation.hpp"
-#include "../radiant/render.hpp"
-#include "../radiant/audio.hpp"
-#include "../radiant/audio_capture.hpp"
-#include "../radiant/audio_cue_owner.hpp"
-#include "../radiant/audio_render.hpp"
-#include "../radiant/document_clock.hpp"
+#include "radiant/radiant.hpp"
+#include "radiant/layout.hpp"
+#include "radiant/dom_mutation_prepare.hpp"
+#include "radiant/dom_mutation_state.hpp"
+#include "radiant/dom_mutation_record.hpp"
+#include "radiant/dom_backed_tree.hpp"
+#include "radiant/scroll_geometry.hpp"
+#include "radiant/scroll_request.hpp"
+#include "radiant/layout_ruby.hpp"
+#include "radiant/layout_text_context.hpp"
+#include "radiant/hyphenation.hpp"
+#include "radiant/render.hpp"
+#include "radiant/audio.hpp"
+#include "radiant/audio_capture.hpp"
+#include "radiant/audio_cue_owner.hpp"
+#include "radiant/audio_render.hpp"
+#include "radiant/document_clock.hpp"
 #include "test_audio_fixture.hpp"
 #include <uv.h>
-#include "../radiant/speech.hpp"
-#include "../radiant/event.hpp"
-#include "../radiant/event_sim.hpp"
-#include "../radiant/network_integration.h"
-#include "../radiant/resource_loaders.h"
-#include "../radiant/css_resolved_style.hpp"
+#include "radiant/speech.hpp"
+#include "radiant/event.hpp"
+#include "radiant/event_sim.hpp"
+#include "radiant/network_integration.h"
+#include "radiant/resource_loaders.h"
+#include "radiant/css_resolved_style.hpp"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
@@ -38,15 +40,15 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/value_builder.hpp"
-#include "../radiant/tagged.hpp"
+#include "radiant/tagged.hpp"
 #include "radiant_render_test_utils.hpp"
 #include "radiant_flow_test_utils.hpp"
-#include "../lib/str.h"
-#include "../lib/font/font.h"
-#include "../lib/font/font_internal.h"
-#include "../lib/font/font_tables.h"
-#include "../lib/hash.h"
-#include "../lib/file.h"
+#include "lib/str.h"
+#include "lib/font/font.h"
+#include "lib/font/font_internal.h"
+#include "lib/font/font_tables.h"
+#include "lib/hash.h"
+#include "lib/file.h"
 
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
 #include <OpenGL/gl.h>
@@ -733,7 +735,10 @@ class RadiantDocumentTest : public ::testing::Test {
 protected:
     UiContext ui{};
     DomDocument* document = nullptr;
-    void SetUp() override { ASSERT_EQ(ui_context_init(&ui, true, 1), 0); }
+    void SetUp() override {
+        ASSERT_TRUE(radiant_register_dom_engine_providers());
+        ASSERT_EQ(ui_context_init(&ui, true, 1), 0);
+    }
     void TearDown() override {
         ui.document = nullptr;
         if (document) free_document(document);

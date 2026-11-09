@@ -3,8 +3,8 @@
 #include "js_transpiler.hpp"
 #include "js_execution_internal.hpp"
 #include "../ts/ts_ast.hpp"
-#include "../../lib/file.h"
-#include "../../lib/mem.h"
+#include "lib/file.h"
+#include "lib/mem.h"
 #include <stdio.h>
 #include <string.h>
 

@@ -14,7 +14,7 @@ premake_status=${PIPESTATUS[0]}
 if [ "$premake_status" -eq 0 ]; then
     for argument in "$@"; do
         case "${argument##*/}" in
-            premake5.mac.lua|premake5.lin.lua|premake5.win.lua|--file=premake5.mac.lua|--file=premake5.lin.lua|--file=premake5.win.lua)
+            premake5.mac.lua|premake5.lin.lua|premake5.win.lua|premake5.cli.*.lua|--file=premake5.mac.lua|--file=premake5.lin.lua|--file=premake5.win.lua|--file=premake5.cli.*.lua)
                 tool_directory=$(cd "$(dirname "$0")" && pwd)
                 PYTHONDONTWRITEBYTECODE=1 python3 "$tool_directory/check_radiant_archive_ownership.py" --prepare || exit $?
                 break

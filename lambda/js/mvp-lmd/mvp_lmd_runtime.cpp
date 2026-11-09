@@ -7,10 +7,10 @@
 #include "../../runtime/lambda-error.h"
 #include "../../core/lambda-decimal.hpp"
 #include "../../runtime/ast-core.hpp"
-#include "../../../lib/utf.h"
-#include "../../../lib/str.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/mem.h"
+#include "lib/utf.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
+#include "lib/mem.h"
 
 extern "C" int64_t mvp_lmd_truthy(Item value) {
     TypeId type = get_type_id(value);

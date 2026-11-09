@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from build_config import load_build_config, resolve_source_sets
 from build_dependencies import CompilerProbe, expand, generate_premake, projects_for, render_template
@@ -41,6 +42,22 @@ class DependencyBuildTest(unittest.TestCase):
         leaf.write_text(json.dumps({'config_imports': ['main.json']}))
         with self.assertRaisesRegex(ValueError, 'cyclic'):
             load_build_config(main)
+
+    def test_import_can_select_a_sibling_root(self):
+        default = self.work / 'default'
+        selected = self.work / 'selected'
+        default.mkdir()
+        selected.mkdir()
+        (default / 'targets.json').write_text(json.dumps({'targets': [{'name': 'default'}]}))
+        (selected / 'targets.json').write_text(json.dumps({'targets': [{'name': 'selected'}]}))
+        main = self.work / 'main.json'
+        main.write_text(json.dumps({'config_imports': [{'path': 'default/targets.json',
+            'root_env': 'LAMBDA_TEST_IMPORT_ROOT', 'root_path': 'targets.json'}]}))
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('LAMBDA_TEST_IMPORT_ROOT', None)
+            self.assertEqual(load_build_config(main)['targets'][0]['name'], 'default')
+            os.environ['LAMBDA_TEST_IMPORT_ROOT'] = 'selected'
+            self.assertEqual(load_build_config(main)['targets'][0]['name'], 'selected')
 
     def test_templates_disable_optional_features_and_require_metadata(self):
         template = '#cmakedefine HAVE_MISSING @MISSING@\n#cmakedefine01 HAVE_PRESENT\n#define VERSION "@VERSION@"\n'

@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from build_config import load_build_config, resolve_source_sets
+from split_paths import resolve_split_paths, sibling_roots
 
 # Verbosity: progress/DEBUG output is silenced by default so build invocations
 # stay quiet; pass --verbose (-V) to restore it. Real errors and warnings always
@@ -59,7 +60,8 @@ class PremakeGenerator:
                  target_architecture: Optional[str] = None, config_data: Optional[Dict[str, Any]] = None):
         """Linux toolchain facts default to probing the host gcc/pkg-config;
         passing them in lets a non-Linux host generate the Linux config for validation."""
-        self.config = copy.deepcopy(config_data) if config_data is not None else load_build_config(config_path)
+        raw_config = copy.deepcopy(config_data) if config_data is not None else load_build_config(config_path)
+        self.config = resolve_split_paths(raw_config)
         # Generated contracts must exist before any project consumes their headers.
         for generator in self.config.get('code_generators', []):
             subprocess.run([sys.executable, generator['script'], *generator.get('args', [])], check=True)
@@ -127,6 +129,8 @@ class PremakeGenerator:
         # Apply variant overlay (e.g., 'cli' for headless build) before parsing libraries
         if self.variant:
             self._apply_variant_overlay(self.variant)
+            # A profile may replace the include list, so retain sibling roots.
+            self.config = resolve_split_paths(self.config)
 
         self._expand_node_module_targets()
         self._expand_validation_source_targets()
@@ -2242,7 +2246,7 @@ class PremakeGenerator:
         all_includes.extend(consolidated_includes)
 
         # Add default lib/mem-pool/include for meta-libraries
-        all_includes.append("lib/mem-pool/include")
+        all_includes.append(str(sibling_roots()[0] / "lib/mem-pool/include"))
 
         # Add external library include paths for meta-library dependencies
         inline_libs = ['strbuf', 'strview', 'mem-pool', 'datetime', 'string', 'url']
@@ -2775,7 +2779,7 @@ class PremakeGenerator:
         all_includes.extend(consolidated_includes)
 
         # Add default mem-pool include for tests
-        all_includes.append("lib/mem-pool/include")
+        all_includes.append(str(sibling_roots()[0] / "lib/mem-pool/include"))
 
         # Add external library include paths from parsed definitions
         for lib_name, lib_info in self.external_libraries.items():
@@ -3777,7 +3781,7 @@ class PremakeGenerator:
         # Add default main program includes
         all_includes.extend([
             ".",
-            "lib/mem-pool/include",
+            str(sibling_roots()[0] / "lib/mem-pool/include"),
         ])
         # Add external library include paths (excluding dev_libraries)
         dev_lib_names = {lib.get('name', '') if isinstance(lib, dict) else lib
@@ -4136,7 +4140,7 @@ class PremakeGenerator:
                 self.premake_content.extend([
                     f'    -- Memtrack poison enforcement for {pdir}/',
                     f'    filter "files:{pdir}/**"',
-                    '        buildoptions { "-include lib/mem.h", "-DMEMTRACK_POISON_RAW_ALLOC" }',
+                    f'        buildoptions {{ "-include {sibling_roots()[0] / "lib/mem.h"}", "-DMEMTRACK_POISON_RAW_ALLOC" }}',
                     '    ',
                 ])
             # Exempt specific files (e.g., WASM build, tree-sitter bindings)

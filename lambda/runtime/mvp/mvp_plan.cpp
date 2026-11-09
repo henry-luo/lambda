@@ -6,7 +6,7 @@
 #include "../mir_cow_analysis.hpp"
 #include "../mir_shape_candidates.hpp"
 #include "../re2_wrapper.hpp"
-#include "../../../lib/host_paths.h"
+#include "lib/host_paths.h"
 
 bool mvp_reject(LambdaMvpModule* m, AstNode* node, const char* reason) {
     if (m->failed) return false;

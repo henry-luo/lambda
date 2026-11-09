@@ -8,9 +8,9 @@
 #include "test_lambda_helpers.hpp"
 #include "test_lambda_tier_helpers.hpp"
 #include "test_ast_tune_capture.hpp"
-#include "../lib/shell.h"
-#include "../lib/strbuf.h"
-#include "../lib/thread_pool.h"
+#include "lib/shell.h"
+#include "lib/strbuf.h"
+#include "lib/thread_pool.h"
 #include <string.h>
 
 //==============================================================================

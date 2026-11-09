@@ -18,7 +18,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include "../input/input.hpp"
 #include "../runtime/heap_api.h"
 #include "../core/name_pool.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 #include <string.h>
 #include <stdio.h>
 

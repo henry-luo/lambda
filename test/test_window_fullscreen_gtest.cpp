@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "../radiant/radiant.hpp"
-#include "../radiant/event.hpp"
+#include "radiant/radiant.hpp"
+#include "radiant/event.hpp"
 
 struct FullscreenPlatform {
     RadiantWindowPlacement current = {{40, 60, 800, 600}, false, false};

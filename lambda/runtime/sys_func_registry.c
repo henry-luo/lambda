@@ -42,7 +42,7 @@ extern Type TYPE_ARRAY;
 // Runtime-only declarations (not needed for dylib / AST metadata builds)
 // ============================================================================
 #ifndef LAMBDA_IO_STATIC_VALUES
-#include "../../lib/stringbuf.h"
+#include "lib/stringbuf.h"
 #include "../core/lambda-path.h"
 
 // aliased function declarations (actual names differ from JIT import names)

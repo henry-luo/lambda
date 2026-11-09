@@ -1,6 +1,6 @@
 #pragma once
-#include "../../../lib/file.h"
-#include "../../../lib/arraylist.h"
+#include "lib/file.h"
+#include "lib/arraylist.h"
 
 struct SecurityStorageEntry { FileRevision revision; char name[256]; };
 ArrayList* security_storage_entries(FileAnchor* directory, uint32_t limit);

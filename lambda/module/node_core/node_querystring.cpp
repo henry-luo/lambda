@@ -6,10 +6,10 @@
  */
 #include "node_querystring.hpp"
 #include "../../jube/jube_registry.h"
-#include "../../../lib/url.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/mem_grow.hpp"
-#include "../../../lib/hex.h"
+#include "lib/url.h"
+#include "lib/mem.h"
+#include "lib/mem_grow.hpp"
+#include "lib/hex.h"
 
 #include <cstring>
 #include <math.h>

@@ -10,10 +10,10 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
-#include "../lib/arraylist.h"
-#include "../lib/strbuf.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
+#include "lib/arraylist.h"
+#include "lib/strbuf.h"
 
 // test fixture for format validation tests
 class FormatValidationTest : public ::testing::Test {

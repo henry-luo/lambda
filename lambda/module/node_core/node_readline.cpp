@@ -3,8 +3,8 @@
 #include "node_core_common.hpp"
 #include "node_events.hpp"
 #include "../../jube/jube_registry.h"
-#include "../../../lib/memtrack.h"
-#include "../../../lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/log.h"
 
 #include <cstring>
 

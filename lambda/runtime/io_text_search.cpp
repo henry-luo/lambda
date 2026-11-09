@@ -10,12 +10,12 @@
 
 #include "io_file_search.hpp"
 #include "re2_wrapper.hpp"
-#include "../../lib/fts/fts.h"
-#include "../../lib/arraylist.h"
-#include "../../lib/file.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/str.h"
+#include "lib/fts/fts.h"
+#include "lib/arraylist.h"
+#include "lib/file.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/str.h"
 
 #include <stdlib.h>
 #include <string.h>

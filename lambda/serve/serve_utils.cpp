@@ -6,11 +6,11 @@
  */
 
 #include "serve_utils.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/file.h"
-#include "../../lib/str.h"
-#include "../../lib/url.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/file.h"
+#include "lib/str.h"
+#include "lib/url.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>

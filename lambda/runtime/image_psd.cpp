@@ -1,7 +1,7 @@
 #include "image_raster.hpp"
 #include "value_builder.hpp"
 #include "lambda-number-runtime.hpp"
-#include "../../lib/image_psd.h"
+#include "lib/image_psd.h"
 #include <math.h>
 
 struct PsdOwner {

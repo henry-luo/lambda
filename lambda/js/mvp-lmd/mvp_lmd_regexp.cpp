@@ -14,9 +14,9 @@
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/context_capsule.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/utf.h"
-#include "../../../lib/mem.h"
+#include "lib/strbuf.h"
+#include "lib/utf.h"
+#include "lib/mem.h"
 #include <math.h>
 
 struct MvpLmdRegExp : Map {

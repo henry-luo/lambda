@@ -8,9 +8,9 @@
 #include "js_object_meta.h"
 #include "js_typed_array.h"
 #include "../core/name_pool.hpp"
-#include "../../lib/ownership.hpp"
-#include "../../lib/utf.h"
-#include "../../lib/str.h"
+#include "lib/ownership.hpp"
+#include "lib/utf.h"
+#include "lib/str.h"
 #include <cstring>
 
 extern "C" Item js_blob_new(Item parts, Item options);

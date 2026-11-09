@@ -13,8 +13,9 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HEADER_PATH = os.path.join(ROOT, "radiant", "event.hpp")
-SOURCE_PATH = os.path.join(ROOT, "radiant", "state_schema.cpp")
+RADIANT_ROOT = os.environ.get("RADIANT_ROOT") or os.path.join(os.path.dirname(ROOT), "radiant")
+HEADER_PATH = os.path.join(RADIANT_ROOT, "radiant", "event.hpp")
+SOURCE_PATH = os.path.join(RADIANT_ROOT, "radiant", "state_schema.cpp")
 
 
 COMPLETE_FAMILIES = {

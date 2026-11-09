@@ -13,13 +13,13 @@
 #include "../lambda-stack.h"
 #include "../transpiler.hpp"
 #include "../../io/mark_builder.hpp"
-#include "../../../lib/arena.h"
-#include "../../../lib/arraylist.h"
-#include "../../../lib/hashmap.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/str.h"
-#include "../../../lib/escape.h"
-#include "../../../lib/log.h"
+#include "lib/arena.h"
+#include "lib/arraylist.h"
+#include "lib/hashmap.h"
+#include "lib/strbuf.h"
+#include "lib/str.h"
+#include "lib/escape.h"
+#include "lib/log.h"
 
 #include <string.h>
 

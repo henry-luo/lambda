@@ -3,10 +3,10 @@
 #include "../../runtime/root_vector.h"
 #include "../../runtime/heap_api.h"
 #include "../../input/css/dom_element.hpp"
-#include "../../../lib/arraylist.h"
-#include "../../../lib/log.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/url.h"
+#include "lib/arraylist.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/url.h"
 #include <string.h>
 
 typedef struct RadiantHistoryEntry {

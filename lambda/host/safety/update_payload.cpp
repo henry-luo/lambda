@@ -1,7 +1,7 @@
 #include "update_payload.h"
 #include "state_wire.h"
-#include "../../../lib/https_url.h"
-#include "../../../lib/mem.h"
+#include "lib/https_url.h"
+#include "lib/mem.h"
 #include <errno.h>
 
 static bool payload_entry_valid(const SecurityUpdateMetadata* entry, uint32_t index) {

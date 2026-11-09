@@ -6,10 +6,10 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"  // for ArrayReader
 #include "../lambda/core/lambda-path.h"
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
-#include "../lib/log.h"
-#include "../lib/test_utils.h"
+#include "lib/mempool.h"
+#include "lib/arena.h"
+#include "lib/log.h"
+#include "lib/test_utils.h"
 #include <cstring>
 
 void parse_mark(Input* input, const char* mark_string);

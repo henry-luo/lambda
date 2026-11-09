@@ -1,6 +1,6 @@
 
-#include "../lib/strbuf.h"
-#include "../lib/memtrack.h"
+#include "lib/strbuf.h"
+#include "lib/memtrack.h"
 #include "runtime/lambda-error.h"
 #include <string.h>
 #ifndef _WIN32
@@ -21,8 +21,8 @@
 #include <signal.h>  // for signal handling
 #include <setjmp.h>  // for setjmp/longjmp
 
-#include "../lib/terminal_device.h"
-#include "../lib/file.h"
+#include "lib/terminal_device.h"
+#include "lib/file.h"
 #include "runtime/terminal_host.h"
 #include "runtime/interp.hpp"
 #include <ctype.h>

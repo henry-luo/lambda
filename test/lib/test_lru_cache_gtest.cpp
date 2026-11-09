@@ -7,7 +7,7 @@
 #include <vector>
 
 extern "C" {
-#include "../../lib/lru_cache.h"
+#include "lib/lru_cache.h"
 }
 
 namespace {

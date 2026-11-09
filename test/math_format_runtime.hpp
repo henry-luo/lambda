@@ -4,7 +4,7 @@
 #include "../lambda/lambda.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/lambda-root-frame.hpp"
-#include "../lib/stringbuf.h"
+#include "lib/stringbuf.h"
 
 extern "C" Item fn_format2(Item item, Item type);
 

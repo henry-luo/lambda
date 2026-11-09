@@ -2,6 +2,7 @@
 
 #include "../lambda.h"
 #include "activation.h"
+#include "lib/document_lifetime_guard.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -14,7 +15,6 @@ extern "C" {
 typedef struct LambdaScheduler LambdaScheduler;
 typedef struct LambdaTask LambdaTask;
 typedef struct LambdaTaskScope LambdaTaskScope;
-typedef struct LambdaDocumentLifetimeGuard LambdaDocumentLifetimeGuard;
 typedef void (*LambdaTaskCompletionFn)(LambdaTask* task, Item result, void* data);
 typedef void (*LambdaTaskObserverDestroyFn)(void* data);
 typedef void (*LambdaTaskAttachmentReleaseFn)(void* data);
@@ -107,10 +107,6 @@ Item lambda_task_start_document(Item function, List* args);
 void lambda_set_document_probe(void* (*probe)(void));
 // Owner-thread admission spans every scheduler used by this document. The
 // host retains the guard until native destruction, including across retries.
-LambdaDocumentLifetimeGuard* lambda_document_lifetime_guard_begin(void* document);
-bool lambda_document_lifetime_guard_active(void* document);
-bool lambda_document_lifetime_guard_is_current(LambdaDocumentLifetimeGuard* guard);
-bool lambda_document_lifetime_guard_end(LambdaDocumentLifetimeGuard* guard);
 typedef enum LambdaDocumentJoinProgress {
     LAMBDA_DOCUMENT_JOIN_ERROR = -1,
     LAMBDA_DOCUMENT_JOIN_DONE = 0,

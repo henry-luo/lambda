@@ -1,7 +1,7 @@
 #pragma once
 #include "update_wire.h"
 #include "update_controls.h"
-#include "../../../lib/confined_process.h"
+#include "lib/confined_process.h"
 
 struct SecurityUpdateProcessReport {
     ConfinedProcessResult process;

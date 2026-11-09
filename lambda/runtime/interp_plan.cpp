@@ -15,7 +15,7 @@
 #include "re2_wrapper.hpp"
 #include "safety_analyzer.hpp"
 #include "type_contract.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 // ---------------------------------------------------------------------------
 // Complete Lambda child traversal

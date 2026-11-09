@@ -1,5 +1,5 @@
 #pragma once
-#include "../../lib/endian.h"
+#include "lib/endian.h"
 #include <string.h>
 
 static inline void safety_channel_header(uint8_t* bytes, uint64_t session,

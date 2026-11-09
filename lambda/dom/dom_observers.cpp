@@ -10,10 +10,10 @@
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_lifecycle.hpp"
-#include "../../radiant/view.hpp"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
-#include "../../lib/mem_grow.hpp"
+#include "radiant/view.hpp"
+#include "lib/log.h"
+#include "lib/str.h"
+#include "lib/mem_grow.hpp"
 
 #include <math.h>
 #include <stdlib.h>

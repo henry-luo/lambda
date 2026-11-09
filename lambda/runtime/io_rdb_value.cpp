@@ -2,9 +2,9 @@
 #include "io_rdb_value.hpp"
 #include "io_file_search.hpp"
 #include "lambda-number-runtime.hpp"
-#include "../../lib/arraylist.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/utf.h"
+#include "lib/arraylist.h"
+#include "lib/memtrack.h"
+#include "lib/utf.h"
 #include <limits.h>
 #include <math.h>
 #include <string.h>

@@ -7,9 +7,9 @@
 #include "concurrency.h"
 #include "lambda-number-runtime.hpp"
 #include "write_set.hpp"
-#include "../../lib/rdb.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/utf.h"
+#include "lib/rdb.h"
+#include "lib/memtrack.h"
+#include "lib/utf.h"
 #include <limits.h>
 #include <string.h>
 #include <uv.h>

@@ -21,15 +21,15 @@
 #include "../lambda-data.hpp"
 #include "../runtime/async.h"
 #include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/atomic.h"
-#include "../../lib/str.h"
-#include "../../lib/url.h"
-#include "../../lib/uv_loop.h"
-#include "../../lib/byte_builder.h"
-#include "../../lib/curl_runtime.h"
-#include "../../lib/utf.h"
-#include "../../lib/mime-detect.h"
+#include "lib/log.h"
+#include "lib/atomic.h"
+#include "lib/str.h"
+#include "lib/url.h"
+#include "lib/uv_loop.h"
+#include "lib/byte_builder.h"
+#include "lib/curl_runtime.h"
+#include "lib/utf.h"
+#include "lib/mime-detect.h"
 
 #include <curl/curl.h>
 #include "../network/curl_trust.h"
@@ -37,8 +37,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <sys/stat.h>
-#include "../../lib/mem.h"
-#include "../../radiant/radiant.hpp"
+#include "lib/mem.h"
+#include "radiant/radiant.hpp"
 
 // --document is parsed before its EvalContext exists. This is bootstrap input
 // only: the first context copies it into its fetch capsule and clears it.

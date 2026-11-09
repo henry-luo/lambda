@@ -1,8 +1,8 @@
 #include "side_stack.h"
 
 #include "../lambda.h"
-#include "../../lib/fiber.h"
-#include "../../lib/log.h"
+#include "lib/fiber.h"
+#include "lib/log.h"
 #include <stdlib.h>
 
 // The runtime-state header is C++-only; this C helper only needs its TLS

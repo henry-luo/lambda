@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include "../lib/shell.h"
+#include "lib/shell.h"
 
 // select MVP only for JIT arms; explicit T0/AUTO arms keep their actual tier.
 struct LambdaTestCompilerEnv {

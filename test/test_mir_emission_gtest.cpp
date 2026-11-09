@@ -14,7 +14,7 @@
 #include "test_mir_check_helpers.hpp"
 #include "../lambda/mir/mir.h"
 #include "../lambda/mir/mir-gen.h"
-#include "../lib/file.h"
+#include "lib/file.h"
 
 static const char* kLambdaMirDir = "test/mir/lambda";
 

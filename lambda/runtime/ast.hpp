@@ -8,7 +8,7 @@ extern "C" {
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../../lib/mempool.h"
+#include "lib/mempool.h"
 
 #ifdef __cplusplus
 }

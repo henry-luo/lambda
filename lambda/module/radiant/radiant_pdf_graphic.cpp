@@ -5,10 +5,10 @@
 #include "../../core/collection_storage.h"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/lambda-error.h"
-#include "../../../lib/math_checked.hpp"
-#include "../../../lib/mem.h"
-#include "../../../lib/arraylist.hpp"
-#include "../../../radiant/radiant.hpp"
+#include "lib/math_checked.hpp"
+#include "lib/mem.h"
+#include "lib/arraylist.hpp"
+#include "radiant/radiant.hpp"
 
 extern "C" Item vmap_new();
 

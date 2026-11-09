@@ -9,10 +9,10 @@
 
 #include "worker_pool.hpp"
 #include "serve_utils.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 #include <string.h>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 #ifdef _WIN32
 #include <windows.h>
 static inline int setenv(const char* name, const char* value, int overwrite) {

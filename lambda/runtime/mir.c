@@ -1,15 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <uv.h>
-#include "../../lib/memtrack.h"
-#include "../../lib/host_paths.h"
-#include "../../lib/mem_grow.h"
+#include "lib/memtrack.h"
+#include "lib/host_paths.h"
+#include "lib/mem_grow.h"
 #include <string.h>
 #include <stdarg.h>  // for va_list
 #include <math.h>
-#include "../../lib/log.h"
-#include "../../lib/hashmap.h"    // for O(1) import resolution
-#include "../../lib/hashmap_helpers.h"
+#include "lib/log.h"
+#include "lib/hashmap.h"    // for O(1) import resolution
+#include "lib/hashmap_helpers.h"
 #include "mir.h"
 #include "mir-gen.h"
 #include "../lambda.h"

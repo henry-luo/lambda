@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "../../lambda/input/css/css_tokenizer.hpp"
-#include "../../lib/mempool.h"
+#include "lib/mempool.h"
 
 // Test fixture class for CSS frameworks tests
 class CssFrameworksTest : public ::testing::Test {

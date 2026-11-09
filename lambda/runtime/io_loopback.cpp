@@ -15,11 +15,11 @@
 #include "concurrency.h"
 #include "lambda-number-runtime.hpp"
 #include "re2_wrapper.hpp"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/time_util.h"
-#include "../../lib/url.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/strbuf.h"
+#include "lib/time_util.h"
+#include "lib/url.h"
 
 #include <string.h>
 

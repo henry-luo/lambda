@@ -7,8 +7,8 @@
 // field `<label child…>`. Every scalar is a string, a number or a bare
 // boolean, and no two strings sit side by side in one element, since content
 // merges adjacent strings (S2.6.4).
-#include "../../lib/memtrack.h"
-#include "../../lib/mem_factory.h"
+#include "lib/memtrack.h"
+#include "lib/mem_factory.h"
 #include "emit_ast_dump.h"
 #include "transpiler.hpp"
 #include "ast_build.hpp"          // lambda_rd_reduce_ast: the production C parser
@@ -16,8 +16,8 @@
 #include "../input/input.hpp"
 #include "../input/input-script-cache.h"
 #include "../core/lambda-decimal.hpp"
-#include "../../lib/file.h"
-#include "../../lib/log.h"
+#include "lib/file.h"
+#include "lib/log.h"
 
 struct EmitDirectParseState {
     char* source;

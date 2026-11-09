@@ -25,7 +25,7 @@
 #endif
 
 extern "C" {
-#include "../lib/shell.h"
+#include "lib/shell.h"
 }
 
 #include "../lambda/js/js_exec_profile.h"

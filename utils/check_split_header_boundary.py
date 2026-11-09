@@ -7,12 +7,13 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+from split_paths import resolve_split_paths, sibling_roots
 
 
 ROOT = Path(__file__).resolve().parent.parent
-INPUT_ROOT = ROOT.parent / "lambda-input"
-RADIANT_ROOT = ROOT.parent / "radiant"
+INPUT_ROOT, RADIANT_ROOT = sibling_roots()
 INPUT_HEADERS = (
+    "lib/document_lifetime_guard.h",
     "lib/dom_image.h",
     "lib/language_preferences.h",
     "lambda/input/input.hpp",
@@ -36,6 +37,12 @@ RADIANT_HEADERS = (
     "radiant/layout.hpp",
     "radiant/render.hpp",
     "radiant/event.hpp",
+    "radiant/event_host.hpp",
+    "radiant/event_hit_test.hpp",
+    "radiant/event_frame.hpp",
+    "radiant/event_navigation_host.hpp",
+    "radiant/event_reconcile_host.hpp",
+    "radiant/event_sim_controller_host.hpp",
     "radiant/editing_dom_internal.hpp",
     "radiant/editing_dom_host.hpp",
     "radiant/script_loop_host.hpp",
@@ -83,8 +90,10 @@ RADIANT_HEADERS = (
     "radiant/scene3d/scene3d_physics_event_host.hpp",
     "radiant/scene3d/scene3d_physics.hpp",
 )
-RADIANT_SOURCES = ("radiant/cmd_layout.cpp", "radiant/stylesheet_sync.cpp", "radiant/reactive_render_host.cpp", "radiant/loader_runtime_host.cpp", "radiant/form_controls.cpp", "radiant/window.cpp", "radiant/script_loop_host.cpp", "radiant/select_options.cpp", "radiant/dom_backed_tree.cpp", "radiant/layout_table_mutation.cpp", "radiant/css_inheritance.cpp", "radiant/css_mutation_queries.cpp", "radiant/editing_dom_waist.cpp", "radiant/dom_mutation_record.cpp", "radiant/dom_mutation_state.cpp", "radiant/dom_mutation_prepare.cpp", "radiant/editing_dom_host.cpp", "radiant/state_store.cpp", "radiant/scene3d/scene3d_navigation.cpp", "radiant/scene3d/scene3d_navigation_event_host.cpp", "radiant/scene3d/scene3d_physics.cpp", "radiant/scene3d/scene3d_particles.cpp", "radiant/scene3d/scene3d_audio.cpp", "radiant/scene3d/scene3d_animation.cpp", "radiant/svg_animation.cpp", "radiant/css_animation.cpp", "radiant/render_svg_inline.cpp", "radiant/state_store_host.cpp", "radiant/devtools_host.cpp", "radiant/event_sim.cpp", "radiant/input_value.cpp", "radiant/input_state.cpp", "radiant/layout.cpp", "radiant/layout_block.cpp", "radiant/layout_custom.cpp", "radiant/layout_mathml.cpp", "radiant/layout_form.cpp", "radiant/layout_host.cpp", "radiant/package_layout_host.cpp", "radiant/pdf_export_host.cpp", "radiant/render_pdf.cpp", "radiant/speech_event_host.cpp", "radiant/scene3d/scene3d_physics_event_host.cpp", "radiant/export_runtime_host.cpp", "radiant/event_sim_script_host.cpp", "radiant/event_sim_render.cpp", "radiant/render_output.cpp", "radiant/speech.cpp", "radiant/speech_markup.cpp", "radiant/resource_observer.cpp", "radiant/dom_image.cpp", "radiant/svg_hit.cpp", "radiant/svg_geometry_context.cpp", "radiant/render_svg.cpp", "radiant/geomap.cpp", "radiant/render_path_geometry.cpp", "radiant/svg_length_axis.cpp", "radiant/scroll_observer.cpp", "radiant/scroll_geometry.cpp", "radiant/scroll_request.cpp", "radiant/source_path.cpp", "radiant/source_path_value.cpp", "radiant/source_position_host.cpp", "radiant/source_pos_bridge.cpp", "radiant/scroller.cpp", "radiant/surface.cpp", "radiant/rdt_vector_tvg.cpp", "radiant/render_raster_walk.cpp", "radiant/document_clock.cpp", "radiant/gl_core.cpp", "radiant/canvas_2d.cpp", "radiant/layout_box.cpp", "radiant/css_prop_table.cpp", "radiant/page_document.cpp", "radiant/resolve_htm_style.cpp", "radiant/resolve_css_style.cpp", "radiant/css_resolved_style.cpp",
+RADIANT_SOURCES = ("radiant/svg_hit_geometry.cpp", "radiant/event_sim_controller_host.cpp", "radiant/event_frame.cpp", "radiant/event_reconcile_host.cpp", "radiant/event_hit_test.cpp", "radiant/event_navigation_host.cpp", "radiant/event_host.cpp", "radiant/event_native.cpp", "radiant/ui_context.cpp", "radiant/cmd_layout.cpp", "radiant/stylesheet_sync.cpp", "radiant/reactive_render_host.cpp", "radiant/loader_runtime_host.cpp", "radiant/form_controls.cpp", "radiant/window.cpp", "radiant/script_loop_host.cpp", "radiant/select_options.cpp", "radiant/dom_backed_tree.cpp", "radiant/layout_table_mutation.cpp", "radiant/css_inheritance.cpp", "radiant/css_mutation_queries.cpp", "radiant/editing_dom_waist.cpp", "radiant/dom_mutation_record.cpp", "radiant/dom_mutation_state.cpp", "radiant/dom_mutation_prepare.cpp", "radiant/editing_dom_host.cpp", "radiant/state_store.cpp", "radiant/scene3d/scene3d_navigation.cpp", "radiant/scene3d/scene3d_navigation_event_host.cpp", "radiant/scene3d/scene3d_physics.cpp", "radiant/scene3d/scene3d_particles.cpp", "radiant/scene3d/scene3d_audio.cpp", "radiant/scene3d/scene3d_animation.cpp", "radiant/svg_animation.cpp", "radiant/css_animation.cpp", "radiant/render_svg_inline.cpp", "radiant/state_store_host.cpp", "radiant/devtools_host.cpp", "radiant/event_sim.cpp", "radiant/input_value.cpp", "radiant/input_state.cpp", "radiant/layout.cpp", "radiant/layout_block.cpp", "radiant/layout_custom.cpp", "radiant/layout_mathml.cpp", "radiant/layout_form.cpp", "radiant/layout_host.cpp", "radiant/package_layout_host.cpp", "radiant/pdf_export_host.cpp", "radiant/render_pdf.cpp", "radiant/speech_event_host.cpp", "radiant/scene3d/scene3d_physics_event_host.cpp", "radiant/export_runtime_host.cpp", "radiant/event_sim_script_host.cpp", "radiant/event_sim_render.cpp", "radiant/render_output.cpp", "radiant/speech.cpp", "radiant/speech_markup.cpp", "radiant/resource_observer.cpp", "radiant/dom_image.cpp", "radiant/svg_hit.cpp", "radiant/svg_geometry_context.cpp", "radiant/render_svg.cpp", "radiant/geomap.cpp", "radiant/render_path_geometry.cpp", "radiant/svg_length_axis.cpp", "radiant/scroll_observer.cpp", "radiant/scroll_geometry.cpp", "radiant/scroll_request.cpp", "radiant/source_path.cpp", "radiant/source_path_value.cpp", "radiant/source_position_host.cpp", "radiant/source_pos_bridge.cpp", "radiant/scroller.cpp", "radiant/surface.cpp", "radiant/rdt_vector_tvg.cpp", "radiant/render_raster_walk.cpp", "radiant/document_clock.cpp", "radiant/gl_core.cpp", "radiant/canvas_2d.cpp", "radiant/layout_box.cpp", "radiant/css_prop_table.cpp", "radiant/page_document.cpp", "radiant/resolve_htm_style.cpp", "radiant/resolve_css_style.cpp", "radiant/css_resolved_style.cpp",
                    "radiant/view_tree_css.cpp", "radiant/view_pool.cpp", "radiant/scene3d/scene3d.cpp", "radiant/scene3d/scene3d_runtime.cpp")
+if sys.platform == 'darwin':
+    RADIANT_SOURCES += ('radiant/rdt_vector_cg.mm',)
 INPUT_SOURCES = ("lambda/core/lambda-data.cpp", "lambda/core/lambda-decimal.cpp",
                  "lambda/core/name_pool.cpp", "lambda/core/print.cpp", "lambda/core/utf_string.cpp",
                  "lambda/core/shape_builder.cpp", "lambda/io/collection_io.cpp", "lambda/io/target.cpp",
@@ -103,7 +112,7 @@ RUNTIME_AREAS = (("lambda", "runtime"), ("lambda", "js"),
 
 def check_headers(name: str, headers: tuple[str, ...], forbidden: tuple[tuple[str, ...], ...],
                   defines: tuple[str, ...] = ()) -> bool:
-    config = json.loads((ROOT / "build_lambda_config.json").read_text())
+    config = resolve_split_paths(json.loads((ROOT / "build_lambda_config.json").read_text()))
     compiler = shlex.split(os.environ.get("CXX", "c++"))
     flags = shlex.split(os.environ.get("CPPFLAGS", ""))
     include_paths = list(config["includes"])
@@ -146,11 +155,13 @@ def main() -> int:
     input_ok = check_headers("input", INPUT_HEADERS, RUNTIME_AREAS + (("radiant",),))
     data_ok = check_headers("input-data-sources", INPUT_SOURCES, RUNTIME_AREAS + (("radiant",),),
                             ("LAMBDA_IO_STATIC_VALUES",))
+    decimal_ok = check_headers("input-decimal-source", ("lambda/core/lambda-decimal.cpp",),
+                               RUNTIME_AREAS + (("radiant",),))
     tests_ok = check_headers("input-test-sources", INPUT_TEST_SOURCES,
                              RUNTIME_AREAS + (("radiant",),))
     radiant_ok = check_headers("radiant", RADIANT_HEADERS, RUNTIME_AREAS)
     radiant_sources_ok = check_headers("radiant-native-sources", RADIANT_SOURCES, RUNTIME_AREAS)
-    return 0 if input_ok and data_ok and tests_ok and radiant_ok and radiant_sources_ok else 1
+    return 0 if input_ok and data_ok and decimal_ok and tests_ok and radiant_ok and radiant_sources_ok else 1
 
 
 if __name__ == "__main__":

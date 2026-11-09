@@ -1,4 +1,1238 @@
-// Runtime decimal results own GC-backed Decimal headers. The static data
-// archive compiles only representation, formatting, and arena constructors.
-#define LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
-#include "../core/lambda-decimal.cpp"
+// Runtime decimal results own GC-backed Decimal headers.
+// Input owns representation, formatting, and arena constructors.
+#include "../core/lambda-decimal.hpp"
+#include "../lambda-data.hpp"
+#include "heap_api.h"
+#include "runtime-state.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
+#include "lib/arraylist.h"
+#include <mpdecimal.h>
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// ─────────────────────────────────────────────────────────────────────
+// Forward Declarations
+// ─────────────────────────────────────────────────────────────────────
+
+Item decimal_push_result(mpd_t* mpd_val, bool is_unlimited);
+
+// ─────────────────────────────────────────────────────────────────────
+// Item Creation (higher-level API)
+// ─────────────────────────────────────────────────────────────────────
+
+static mpd_context_t* decimal_current_fixed_context() {
+    // Native decimal helpers use the thread owner; only generated MIR
+    // functions carry EvalContext as a hidden ABI argument.
+    EvalContext* owner = (EvalContext*)eval_context_tls_runtime();
+    return owner && owner->decimal_ctx ? owner->decimal_ctx : decimal_fixed_context();
+}
+
+Item decimal_from_int64(int64_t val) {
+    mpd_context_t* dec_ctx = decimal_current_fixed_context();
+    mpd_t* dec_val = mpd_new(dec_ctx);
+    if (!dec_val) return ItemError;
+
+    mpd_set_ssize(dec_val, val, dec_ctx);
+    return decimal_push_result(dec_val, false);  // fixed precision
+}
+
+Item decimal_from_uint64(uint64_t val) {
+    mpd_context_t* dec_ctx = decimal_current_fixed_context();
+    mpd_t* dec_val = mpd_new(dec_ctx);
+    if (!dec_val) return ItemError;
+
+    mpd_set_u64(dec_val, val, dec_ctx);
+    return decimal_push_result(dec_val, false);  // fixed precision
+}
+
+Item decimal_from_double(double val) {
+    mpd_context_t* dec_ctx = decimal_current_fixed_context();
+    mpd_t* dec_val = mpd_new(dec_ctx);
+    if (!dec_val) return ItemError;
+
+    char str_buf[64];
+    lambda_double_to_shortest(val, str_buf, sizeof(str_buf));
+
+    uint32_t status = 0;
+    mpd_qset_string(dec_val, str_buf, dec_ctx, &status);
+    if (status != 0) {
+        mpd_del(dec_val);
+        return ItemError;
+    }
+
+    return decimal_push_result(dec_val, false);  // fixed precision
+}
+
+Item decimal_from_string(const char* str) {
+    if (!str) return ItemError;
+
+    // decimal conversion preserves the source coefficient; the tier is an
+    // implementation detail selected after exact parsing.
+    mpd_t* dec_val = decimal_parse_str_exact(str);
+    if (!dec_val) return ItemError;
+    return decimal_push_result(dec_val,
+        dec_val->digits > DECIMAL_FIXED_PRECISION);
+}
+// ─────────────────────────────────────────────────────────────────────
+// Memory Management
+// ─────────────────────────────────────────────────────────────────────
+
+// Heap-backed decimal and BigInt results are runtime-only. Standalone input
+// paths use the explicit arena constructors above; they must not silently
+// convert a missing runtime provider into a null-producing weak fallback.
+
+Decimal* decimal_create(mpd_t* mpd_val) {
+    if (!mpd_val) return NULL;
+
+    Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
+    if (!decimal) {
+        mpd_del(mpd_val);
+        return NULL;
+    }
+
+    if (!decimal_take_mpd(decimal, DECIMAL_FIXED, mpd_val)) return NULL;
+    return decimal;
+}
+
+void decimal_retain(Decimal* dec) {
+    // no-op: ref counting removed, GC handles lifetime
+}
+
+void decimal_release(Decimal* dec) {
+    // no-op: the GC external-payload bridge owns Decimal lifetime.
+}
+
+void decimal_payload_release(Decimal* decimal) {
+    if (!decimal_has_payload(decimal)) return;
+    mpd_del(&decimal->dec_val);
+    memset(&decimal->dec_val, 0, sizeof(decimal->dec_val));
+    decimal->storage_kind = DECIMAL_FIXED;
+}
+
+void decimal_constants_release(ArrayList* constants) {
+    if (!constants) return;
+    for (int i = 0; i < constants->length; i++) {
+        Decimal* decimal = (Decimal*)constants->data[i];
+        decimal_payload_release(decimal);
+    }
+    arraylist_free(constants);
+}
+// ─────────────────────────────────────────────────────────────────────
+// Helper: Push decimal result
+// ─────────────────────────────────────────────────────────────────────
+
+// Helper: Push decimal result
+// ─────────────────────────────────────────────────────────────────────
+
+Item decimal_push_result(mpd_t* mpd_val, bool is_unlimited) {
+    if (!mpd_val) return ItemError;
+
+    Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
+    if (!decimal) {
+        mpd_del(mpd_val);
+        return ItemError;
+    }
+
+    if (!decimal_take_mpd(decimal,
+            is_unlimited ? DECIMAL_EXTENDED : DECIMAL_FIXED, mpd_val)) return ItemError;
+
+    Item result;
+    result.item = c2it(decimal);
+    return result;
+}
+
+static Item decimal_push_bigint_result(mpd_t* mpd_val) {
+    if (!mpd_val) return ItemError;
+
+    Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
+    if (!decimal) {
+        mpd_del(mpd_val);
+        return ItemError;
+    }
+
+    if (!decimal_take_mpd(decimal, DECIMAL_BIGINT, mpd_val)) return ItemError;
+
+    Item result;
+    result.item = c2it(decimal);
+    return result;
+}
+
+static bool decimal_item_is_bigint(Item item) {
+    if (get_type_id(item) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = item.get_decimal();
+    return dec && dec->storage_kind == DECIMAL_BIGINT;
+}
+
+static bool decimal_binary_result_is_bigint(Item a, Item b) {
+    return decimal_item_is_bigint(a) && decimal_item_is_bigint(b);
+}
+
+static void decimal_exact_context(mpd_context_t* context) {
+    mpd_maxcontext(context);
+    context->traps = 0;
+    context->status = 0;
+    context->newtrap = 0;
+}
+
+static bool decimal_result_needs_extended_tier(const mpd_t* value) {
+    return value && !mpd_isspecial(value) &&
+        value->digits > DECIMAL_FIXED_PRECISION;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Arithmetic Operations
+// ─────────────────────────────────────────────────────────────────────
+
+typedef void (*DecimalMpdBinaryOp)(mpd_t* result, const mpd_t* left,
+        const mpd_t* right, mpd_context_t* context);
+
+// Helper: determine if result should be unlimited based on operands
+static bool should_be_unlimited(Item a, Item b) {
+    // Check if either operand requires the extended decimal context.
+    if (a._type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec_a = a.get_decimal();
+        if (dec_a && dec_a->storage_kind != DECIMAL_FIXED) return true;
+    }
+    if (b._type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec_b = b.get_decimal();
+        if (dec_b && dec_b->storage_kind != DECIMAL_FIXED) return true;
+    }
+    return false;
+}
+
+// Helper: get appropriate context based on operand types
+static mpd_context_t* get_decimal_context(Item a, Item b) {
+    return should_be_unlimited(a, b) ? decimal_unlimited_context() : decimal_fixed_context();
+}
+
+// Helper: cleanup temporary decimal if it was created (not the original)
+static void cleanup_temp(mpd_t* dec, bool was_decimal) {
+    if (!was_decimal && dec) {
+        mpd_del(dec);
+    }
+}
+
+static Item decimal_binary_arithmetic(Item a, Item b, DecimalMpdBinaryOp operation,
+        const char* name) {
+    bool is_unlimited = should_be_unlimited(a, b);
+    mpd_context_t dec_ctx;
+    decimal_exact_context(&dec_ctx);
+
+    bool a_is_dec = decimal_is_any(a);
+    bool b_is_dec = decimal_is_any(b);
+
+    mpd_t* a_dec = a_is_dec ? decimal_mpd(a.get_decimal()) : decimal_item_to_mpd(a, &dec_ctx);
+    mpd_t* b_dec = b_is_dec ? decimal_mpd(b.get_decimal()) : decimal_item_to_mpd(b, &dec_ctx);
+
+    if (!a_dec || !b_dec) {
+        if (!a_is_dec) cleanup_temp(a_dec, false);
+        if (!b_is_dec) cleanup_temp(b_dec, false);
+        log_error("decimal_%s: conversion failed", name);
+        return ItemError;
+    }
+
+    mpd_t* result = mpd_new(&dec_ctx);
+    if (!result) {
+        if (!a_is_dec) cleanup_temp(a_dec, false);
+        if (!b_is_dec) cleanup_temp(b_dec, false);
+        return ItemError;
+    }
+
+    operation(result, a_dec, b_dec, &dec_ctx);
+
+    if (!a_is_dec) cleanup_temp(a_dec, false);
+    if (!b_is_dec) cleanup_temp(b_dec, false);
+
+    if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
+    return decimal_push_result(result, is_unlimited ||
+        decimal_result_needs_extended_tier(result));
+}
+
+Item decimal_add(Item a, Item b) {
+    return decimal_binary_arithmetic(a, b, mpd_add, "add");
+}
+
+Item decimal_sub(Item a, Item b) {
+    return decimal_binary_arithmetic(a, b, mpd_sub, "sub");
+}
+
+Item decimal_mul(Item a, Item b) {
+    return decimal_binary_arithmetic(a, b, mpd_mul, "mul");
+}
+
+typedef enum DecimalDivisionOp {
+    DECIMAL_DIVIDE,
+    DECIMAL_INTEGER_DIVIDE,
+    DECIMAL_REMAINDER,
+} DecimalDivisionOp;
+
+static Item decimal_zero_division_result(mpd_t* numerator, mpd_t* divisor,
+        mpd_context_t* ctx, bool is_unlimited) {
+    if (!numerator || !divisor || !ctx) return ItemError;
+
+    const char* spelling = "NaN";
+    if (!mpd_iszero(numerator)) {
+        bool negative = mpd_isnegative(numerator) != mpd_isnegative(divisor);
+        spelling = negative ? "-Infinity" : "Infinity";
+    }
+    mpd_t* result = decimal_parse_str(spelling, ctx);
+    if (!result) return ItemError;
+    return decimal_push_result(result, is_unlimited);
+}
+
+static bool decimal_prepare_operands(Item a, Item b, const char* operation,
+        mpd_context_t** ctx_out, bool* a_is_dec_out, bool* b_is_dec_out,
+        mpd_t** a_out, mpd_t** b_out) {
+    mpd_context_t* dec_ctx = get_decimal_context(a, b);
+    bool a_is_dec = decimal_is_any(a);
+    bool b_is_dec = decimal_is_any(b);
+    mpd_t* a_dec = a_is_dec ? decimal_mpd(a.get_decimal()) : decimal_item_to_mpd(a, dec_ctx);
+    mpd_t* b_dec = b_is_dec ? decimal_mpd(b.get_decimal()) : decimal_item_to_mpd(b, dec_ctx);
+    if (!a_dec || !b_dec) {
+        if (!a_is_dec) cleanup_temp(a_dec, false);
+        if (!b_is_dec) cleanup_temp(b_dec, false);
+        log_error("%s: conversion failed", operation);
+        return false;
+    }
+    *ctx_out = dec_ctx;
+    *a_is_dec_out = a_is_dec;
+    *b_is_dec_out = b_is_dec;
+    *a_out = a_dec;
+    *b_out = b_dec;
+    return true;
+}
+
+static Item decimal_division_apply(Item a, Item b, DecimalDivisionOp op) {
+    bool is_unlimited = should_be_unlimited(a, b);
+    mpd_context_t* dec_ctx;
+    bool a_is_dec;
+    bool b_is_dec;
+    mpd_t* a_dec;
+    mpd_t* b_dec;
+    if (!decimal_prepare_operands(a, b, "decimal division", &dec_ctx,
+            &a_is_dec, &b_is_dec, &a_dec, &b_dec)) return ItemError;
+
+    // C14c keeps computed zero divisors in the decimal domain. mpdecimal's
+    // remainder operation would otherwise produce NaN for every nonzero lane,
+    // while Lambda requires the same signed inf/nan result as true division.
+    if (mpd_iszero(b_dec)) {
+        Item result = decimal_zero_division_result(a_dec, b_dec, dec_ctx, is_unlimited);
+        if (!a_is_dec) cleanup_temp(a_dec, false);
+        if (!b_is_dec) cleanup_temp(b_dec, false);
+        return result;
+    }
+
+    mpd_t* result = mpd_new(dec_ctx);
+    if (!result) {
+        if (!a_is_dec) cleanup_temp(a_dec, false);
+        if (!b_is_dec) cleanup_temp(b_dec, false);
+        return ItemError;
+    }
+
+    switch (op) {
+    case DECIMAL_DIVIDE:
+        mpd_div(result, a_dec, b_dec, dec_ctx);
+        break;
+    case DECIMAL_INTEGER_DIVIDE:
+        mpd_divint(result, a_dec, b_dec, dec_ctx);
+        break;
+    case DECIMAL_REMAINDER:
+        mpd_rem(result, a_dec, b_dec, dec_ctx);
+        break;
+    }
+
+    if (!a_is_dec) cleanup_temp(a_dec, false);
+    if (!b_is_dec) cleanup_temp(b_dec, false);
+
+    // C14c makes `div` and `%` number-domain operations. Even when both inputs
+    // are bigint carriers, their truncating/remainder result must remain a
+    // decimal Item so the observable result agrees with `/` domain selection.
+    return decimal_push_result(result, is_unlimited);
+}
+
+Item decimal_div(Item a, Item b) {
+    return decimal_division_apply(a, b, DECIMAL_DIVIDE);
+}
+
+Item decimal_idiv(Item a, Item b) {
+    return decimal_division_apply(a, b, DECIMAL_INTEGER_DIVIDE);
+}
+
+Item decimal_mod(Item a, Item b) {
+    return decimal_division_apply(a, b, DECIMAL_REMAINDER);
+}
+
+Item decimal_pow(Item a, Item b) {
+    bool is_unlimited = should_be_unlimited(a, b);
+    mpd_context_t* dec_ctx;
+    bool a_is_dec;
+    bool b_is_dec;
+    mpd_t* a_dec;
+    mpd_t* b_dec;
+    if (!decimal_prepare_operands(a, b, "decimal_pow", &dec_ctx,
+            &a_is_dec, &b_is_dec, &a_dec, &b_dec)) return ItemError;
+
+    mpd_t* result = mpd_new(dec_ctx);
+    if (!result) {
+        if (!a_is_dec) cleanup_temp(a_dec, false);
+        if (!b_is_dec) cleanup_temp(b_dec, false);
+        return ItemError;
+    }
+
+    mpd_pow(result, a_dec, b_dec, dec_ctx);
+
+    if (!a_is_dec) cleanup_temp(a_dec, false);
+    if (!b_is_dec) cleanup_temp(b_dec, false);
+
+    return decimal_push_result(result, is_unlimited);
+}
+
+static Item decimal_unary_transform(Item a, bool absolute, const char* operation) {
+    bool is_unlimited = decimal_is_unlimited(a);
+    mpd_context_t dec_ctx;
+    decimal_exact_context(&dec_ctx);
+
+    bool a_is_dec = decimal_is_any(a);
+    mpd_t* a_dec = a_is_dec ? decimal_mpd(a.get_decimal()) : decimal_item_to_mpd(a, &dec_ctx);
+
+    if (!a_dec) {
+        log_error("%s: conversion failed", operation);
+        return ItemError;
+    }
+
+    mpd_t* result = mpd_new(&dec_ctx);
+    if (!result) {
+        if (!a_is_dec) mpd_del(a_dec);
+        return ItemError;
+    }
+
+    if (absolute) mpd_abs(result, a_dec, &dec_ctx);
+    else mpd_minus(result, a_dec, &dec_ctx);
+
+    if (!a_is_dec) mpd_del(a_dec);
+
+    // unary integer transforms preserve the language-level integer type.
+    if (decimal_item_is_bigint(a)) return decimal_push_bigint_result(result);
+    return decimal_push_result(result, is_unlimited ||
+        decimal_result_needs_extended_tier(result));
+}
+
+Item decimal_neg(Item a) {
+    return decimal_unary_transform(a, false, "decimal_neg");
+}
+
+Item decimal_abs(Item a) {
+    return decimal_unary_transform(a, true, "decimal_abs");
+}
+// ─────────────────────────────────────────────────────────────────────
+// Rounding Operations (floor, ceil, round, trunc)
+// ─────────────────────────────────────────────────────────────────────
+
+typedef void (*DecimalMpdUnaryOp)(mpd_t* result, const mpd_t* value,
+        mpd_context_t* context);
+
+static Item decimal_unary_rounding(Item a, DecimalMpdUnaryOp operation) {
+    if (!decimal_is_any(a)) return ItemError;
+    bool is_unlimited = decimal_is_unlimited(a);
+    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
+
+    Decimal* dec_ptr = a.get_decimal();
+    if (!decimal_has_payload(dec_ptr)) return ItemError;
+
+    mpd_t* result = mpd_new(dec_ctx);
+    if (!result) return ItemError;
+
+    operation(result, decimal_mpd(dec_ptr), dec_ctx);
+    return decimal_push_result(result, is_unlimited);
+}
+
+Item decimal_floor(Item a) {
+    return decimal_unary_rounding(a, mpd_floor);
+}
+
+Item decimal_ceil(Item a) {
+    return decimal_unary_rounding(a, mpd_ceil);
+}
+
+Item decimal_round(Item a) {
+    if (!decimal_is_any(a)) return ItemError;
+    bool is_unlimited = decimal_is_unlimited(a);
+    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
+
+    Decimal* dec_ptr = a.get_decimal();
+    if (!decimal_has_payload(dec_ptr)) return ItemError;
+
+    // round to nearest integer using quantize with exponent 0
+    mpd_t* one = mpd_new(dec_ctx);
+    if (!one) return ItemError;
+    mpd_set_string(one, "1", dec_ctx);
+
+    mpd_t* result = mpd_new(dec_ctx);
+    if (!result) { mpd_del(one); return ItemError; }
+
+    mpd_quantize(result, decimal_mpd(dec_ptr), one, dec_ctx);
+    mpd_del(one);
+
+    if (mpd_isnan(result)) {
+        mpd_del(result);
+        return ItemError;
+    }
+    return decimal_push_result(result, is_unlimited);
+}
+
+Item decimal_trunc(Item a) {
+    return decimal_unary_rounding(a, mpd_trunc);
+}
+// ═════════════════════════════════════════════════════════════════════
+// BigInt Support — JS BigInt backed by libmpdec integer arithmetic
+// ═════════════════════════════════════════════════════════════════════
+
+// BigInt context: high precision for arbitrary-precision integers.
+// Separate from decimal's unlimited context to allow independent tuning.
+static mpd_context_t g_bigint_ctx;
+static bool g_bigint_ctx_initialized = false;
+
+static mpd_context_t* bigint_context() {
+    if (!g_bigint_ctx_initialized) {
+        mpd_maxcontext(&g_bigint_ctx);
+        g_bigint_ctx.prec = 2000;  // ~2000-digit integers
+        g_bigint_ctx_initialized = true;
+    }
+    return &g_bigint_ctx;
+}
+
+static mpd_context_t bigint_precision_context(mpd_ssize_t need) {
+    mpd_context_t ctx = *bigint_context();
+    // BigInt arithmetic is exact; wide asUintN/asIntN intermediates must not
+    // be rounded by the default 2000-digit context before narrowing.
+    if (need > ctx.prec) ctx.prec = need < 100000 ? need : 100000;
+    return ctx;
+}
+
+static mpd_context_t bigint_sized_context(mpd_t* a, mpd_t* b, mpd_ssize_t extra_digits) {
+    mpd_ssize_t need = extra_digits;
+    if (a && a->digits > need) need = a->digits;
+    if (b && b->digits > need) need = b->digits;
+    need += extra_digits;
+    return bigint_precision_context(need);
+}
+
+static mpd_context_t bigint_shift_context(mpd_t* value, mpd_ssize_t shift) {
+    mpd_ssize_t need = value ? value->digits + 8 : 8;
+    if (shift > 0) {
+        // a left shift by N bits needs about N*log10(2) decimal digits.
+        need += (shift * 31) / 100 + 16;
+    }
+    return bigint_precision_context(need);
+}
+
+// helper: allocate Decimal struct on GC heap with DECIMAL tag, wrap mpd_t*
+static Item bigint_push_result(mpd_t* mpd_val) {
+    if (!mpd_val) return ItemError;
+    Decimal* dec = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
+    if (!dec) { mpd_del(mpd_val); return ItemError; }
+    if (!decimal_take_mpd(dec, DECIMAL_BIGINT, mpd_val)) return ItemError;
+    // encode as tagged pointer with LMD_TYPE_DECIMAL tag
+    uint64_t enc = ((uint64_t)LMD_TYPE_DECIMAL << 56) | ((uint64_t)dec & 0x00FFFFFFFFFFFFFF);
+    return (Item){.item = enc};
+}
+
+// helper: extract mpd_t* from BigInt Item
+mpd_t* bigint_get_mpd(Item bi) {
+    Decimal* dec = (Decimal*)(bi.item & 0x00FFFFFFFFFFFFFF);
+    if (!dec) return NULL;
+    return decimal_mpd(dec);
+}
+
+// ─── Creation ────────────────────────────────────────────────────────
+
+Item bigint_from_int64(int64_t val) {
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemError;
+    mpd_set_ssize(dec_val, (mpd_ssize_t)val, ctx);
+    return bigint_push_result(dec_val);
+}
+
+Item bigint_from_uint64(uint64_t val) {
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemError;
+    // Preserve the full unsigned domain; a signed cast would corrupt values
+    // above INT64_MAX before the integer carrier ever sees them.
+    mpd_set_u64(dec_val, val, ctx);
+    return bigint_push_result(dec_val);
+}
+
+Item bigint_from_double(double val) {
+    // must be an exact integer
+    if (val != val) return ItemError;  // NaN
+    // integer zero has no sign; formatting binary64 -0 must not retain mpdecimal's sign bit.
+    if (val == 0) return bigint_from_int64(0);
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemError;
+    // a finite binary64 integer may need 309 decimal digits plus sign and NUL.
+    char str_buf[DBL_MAX_10_EXP + 4];
+    snprintf(str_buf, sizeof(str_buf), "%.0f", val);
+    uint32_t status = 0;
+    mpd_qset_string(dec_val, str_buf, ctx, &status);
+    if (status != 0) { mpd_del(dec_val); return ItemError; }
+    // truncate to integer
+    mpd_t* truncated = mpd_new(ctx);
+    if (!truncated) { mpd_del(dec_val); return ItemError; }
+    mpd_trunc(truncated, dec_val, ctx);
+    mpd_del(dec_val);
+    return bigint_push_result(truncated);
+}
+
+Item bigint_from_string(const char* str, int len) {
+    if (!str) return ItemError;
+    // skip leading/trailing whitespace
+    while (len > 0 && (str[0] == ' ' || str[0] == '\t' || str[0] == '\n' || str[0] == '\r')) { str++; len--; }
+    while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\n' || str[len-1] == '\r')) { len--; }
+    // empty string (or whitespace-only) → 0n
+    if (len == 0) return bigint_from_int64(0);
+    if (len > 100000) return ItemError;
+    // BigInt string construction must not inherit the default 2000-digit cap;
+    // hex input expands to more decimal digits than source characters.
+    mpd_context_t parse_ctx = bigint_precision_context((mpd_ssize_t)len * 2 + 8);
+    mpd_context_t* ctx = &parse_ctx;
+
+    // handle hex, octal, binary prefixes
+    char* buf = mem_dup_n(str, len, MEM_CAT_STRING);
+    if (!buf) return ItemError;
+
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) {
+        mem_free(buf);
+        return ItemError;
+    }
+
+    if (len > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
+        // hex: parse manually since mpd doesn't support hex
+        // use strtoull for up-to-64-bit, fall back to digit-by-digit for larger
+        const char* hex = buf + 2;
+        int hex_len = len - 2;
+        // strtoull accepts signs and whitespace, which are not radix digits.
+        for (int i = 0; i < hex_len; i++) {
+            char c = hex[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                mpd_del(dec_val); mem_free(buf); return ItemError;
+            }
+        }
+        // each hex digit is 4 bits; if > 16 digits, won't fit in uint64
+        if (hex_len <= 16) {
+            char* endptr;
+            unsigned long long uval = strtoull(hex, &endptr, 16);
+            if (*endptr != '\0') { mpd_del(dec_val); mem_free(buf); return ItemError; }
+            mpd_set_u64(dec_val, uval, ctx);
+        } else {
+            // digit-by-digit: result = result * 16 + digit
+            mpd_set_u32(dec_val, 0, ctx);
+            mpd_t* sixteen = mpd_new(ctx);
+            mpd_t* digit = mpd_new(ctx);
+            mpd_t* temp = mpd_new(ctx);
+            if (!sixteen || !digit || !temp) {
+                if (sixteen) mpd_del(sixteen);
+                if (digit) mpd_del(digit);
+                if (temp) mpd_del(temp);
+                mpd_del(dec_val);
+                mem_free(buf);
+                return ItemError;
+            }
+            mpd_set_u32(sixteen, 16, ctx);
+            for (int i = 0; i < hex_len; i++) {
+                char c = hex[i];
+                uint32_t d;
+                if (c >= '0' && c <= '9') d = c - '0';
+                else if (c >= 'a' && c <= 'f') d = 10 + c - 'a';
+                else if (c >= 'A' && c <= 'F') d = 10 + c - 'A';
+                else { mpd_del(sixteen); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); mem_free(buf); return ItemError; }
+                mpd_mul(temp, dec_val, sixteen, ctx);
+                mpd_set_u32(digit, d, ctx);
+                mpd_add(dec_val, temp, digit, ctx);
+            }
+            mpd_del(sixteen); mpd_del(digit); mpd_del(temp);
+        }
+    } else if (len > 2 && buf[0] == '0' && (buf[1] == 'o' || buf[1] == 'O')) {
+        const char* oct = buf + 2;
+        int oct_len = len - 2;
+        mpd_set_u32(dec_val, 0, ctx);
+        mpd_t* eight = mpd_new(ctx);
+        mpd_t* digit = mpd_new(ctx);
+        mpd_t* temp = mpd_new(ctx);
+        if (!eight || !digit || !temp) {
+            if (eight) mpd_del(eight);
+            if (digit) mpd_del(digit);
+            if (temp) mpd_del(temp);
+            mpd_del(dec_val);
+            mem_free(buf);
+            return ItemError;
+        }
+        mpd_set_u32(eight, 8, ctx);
+        for (int i = 0; i < oct_len; i++) {
+            char c = oct[i];
+            if (c < '0' || c > '7') { mpd_del(eight); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); mem_free(buf); return ItemError; }
+            mpd_mul(temp, dec_val, eight, ctx);
+            mpd_set_u32(digit, (uint32_t)(c - '0'), ctx);
+            mpd_add(dec_val, temp, digit, ctx);
+        }
+        mpd_del(eight); mpd_del(digit); mpd_del(temp);
+    } else if (len > 2 && buf[0] == '0' && (buf[1] == 'b' || buf[1] == 'B')) {
+        const char* bin = buf + 2;
+        int bin_len = len - 2;
+        mpd_set_u32(dec_val, 0, ctx);
+        mpd_t* two = mpd_new(ctx);
+        mpd_t* digit = mpd_new(ctx);
+        mpd_t* temp = mpd_new(ctx);
+        if (!two || !digit || !temp) {
+            if (two) mpd_del(two);
+            if (digit) mpd_del(digit);
+            if (temp) mpd_del(temp);
+            mpd_del(dec_val);
+            mem_free(buf);
+            return ItemError;
+        }
+        mpd_set_u32(two, 2, ctx);
+        for (int i = 0; i < bin_len; i++) {
+            char c = bin[i];
+            if (c != '0' && c != '1') { mpd_del(two); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); mem_free(buf); return ItemError; }
+            mpd_mul(temp, dec_val, two, ctx);
+            mpd_set_u32(digit, (uint32_t)(c - '0'), ctx);
+            mpd_add(dec_val, temp, digit, ctx);
+        }
+        mpd_del(two); mpd_del(digit); mpd_del(temp);
+    } else {
+        // decimal string — ES spec: only digits allowed (with optional leading +/-)
+        // reject decimal points, exponents, Infinity, NaN
+        int start = 0;
+        if (buf[0] == '+' || buf[0] == '-') start = 1;
+        if (start >= len) { mpd_del(dec_val); mem_free(buf); return ItemError; }
+        for (int i = start; i < len; i++) {
+            if (buf[i] < '0' || buf[i] > '9') { mpd_del(dec_val); mem_free(buf); return ItemError; }
+        }
+        uint32_t status = 0;
+        mpd_qset_string(dec_val, buf, ctx, &status);
+        if (status != 0) { mpd_del(dec_val); mem_free(buf); return ItemError; }
+    }
+
+    mem_free(buf);
+    return bigint_push_result(dec_val);
+}
+
+// ─── Extraction ──────────────────────────────────────────────────────
+
+int64_t bigint_to_int64(Item bi) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return 0;
+    // Use quiet version to avoid SIGFPE trap when value exceeds int64 range
+    uint32_t status = 0;
+    mpd_ssize_t result = mpd_qget_ssize(m, &status);
+    if (status & MPD_Invalid_operation) {
+        // value doesn't fit in int64; return clamped
+        return mpd_isnegative(m) ? INT64_MIN : INT64_MAX;
+    }
+    return (int64_t)result;
+}
+
+bool bigint_to_int64_exact(Item bi, int64_t* out_value) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return false;
+    uint32_t status = 0;
+    mpd_ssize_t result = mpd_qget_ssize(m, &status);
+    // The ordinary extractor intentionally clamps overflow. Node offset APIs
+    // must distinguish an exact endpoint from an out-of-range BigInt.
+    if (status & MPD_Invalid_operation) return false;
+    if (out_value) *out_value = (int64_t)result;
+    return true;
+}
+
+double bigint_to_double(Item bi) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return 0.0;
+    char* str = mpd_to_sci(m, 1);
+    if (!str) return 0.0;
+    double result = strtod(str, NULL);
+    mpd_free(str);
+    return result;
+}
+
+bool bigint_is_zero(Item bi) {
+    mpd_t* m = bigint_get_mpd(bi);
+    return m && mpd_iszero(m);
+}
+
+bool bigint_is_negative(Item bi) {
+    mpd_t* m = bigint_get_mpd(bi);
+    return m && mpd_isnegative(m);
+}
+
+int bigint_cmp(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return 0;
+    return mpd_cmp(ma, mb, bigint_context());
+}
+
+int bigint_cmp_double(Item bi, double d) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return 0;
+    if (isnan(d)) return 0;
+    if (d == INFINITY) return -1;
+    if (d == -INFINITY) return 1;
+    // convert double to mpd for comparison
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* d_mpd = mpd_new(ctx);
+    if (!d_mpd) return 0;
+    char str_buf[1200];
+    snprintf(str_buf, sizeof(str_buf), "%.1074g", d);
+    uint32_t status = 0;
+    mpd_qset_string(d_mpd, str_buf, ctx, &status);
+    if (status != 0) { mpd_del(d_mpd); return 0; }
+    int result = mpd_cmp(m, d_mpd, ctx);
+    mpd_del(d_mpd);
+    return result;
+}
+
+// ─── Arithmetic ──────────────────────────────────────────────────────
+
+Item bigint_add(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    mpd_context_t ctx = bigint_sized_context(ma, mb, 2);
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) return ItemError;
+    mpd_add(r, ma, mb, &ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_sub(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    mpd_context_t ctx = bigint_sized_context(ma, mb, 2);
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) return ItemError;
+    mpd_sub(r, ma, mb, &ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_mul(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    mpd_context_t ctx = bigint_precision_context(ma->digits + mb->digits + 2);
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) return ItemError;
+    mpd_mul(r, ma, mb, &ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_div(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    if (mpd_iszero(mb)) return ItemError;  // caller should throw RangeError
+    mpd_context_t ctx = bigint_sized_context(ma, mb, 2);
+    // integer division: truncate toward zero
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) return ItemError;
+    mpd_t* rem = mpd_new(&ctx);
+    if (!rem) { mpd_del(r); return ItemError; }
+    mpd_divmod(r, rem, ma, mb, &ctx);
+    mpd_del(rem);
+    return bigint_push_result(r);
+}
+
+Item bigint_mod(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    if (mpd_iszero(mb)) return ItemError;
+    mpd_context_t ctx = bigint_sized_context(ma, mb, 2);
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) return ItemError;
+    mpd_rem(r, ma, mb, &ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_pow(Item base, Item exp) {
+    mpd_t* mb = bigint_get_mpd(base);
+    mpd_t* me = bigint_get_mpd(exp);
+    if (!mb || !me) return ItemError;
+    if (mpd_isnegative(me)) return ItemError;  // caller should throw RangeError
+    // 0^0 = 1 (ES spec)
+    if (mpd_iszero(me)) return bigint_from_int64(1);
+    if (mpd_iszero(mb)) return bigint_from_int64(0);
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* one = mpd_new(ctx);
+    if (!one) return ItemError;
+    mpd_set_u32(one, 1, ctx);
+    bool base_is_one = mpd_cmp(mb, one, ctx) == 0;
+    mpd_del(one);
+    if (base_is_one) return bigint_from_int64(1);
+    // dynamically increase precision for large exponents
+    mpd_context_t pow_ctx = *ctx;
+    // exponent magnitude is arbitrary BigInt; only use a host-sized estimate when it fits.
+    uint32_t exp_status = 0;
+    mpd_ssize_t exp_val = mpd_qget_ssize(me, &exp_status);
+    if ((exp_status & MPD_Invalid_operation) == 0 && exp_val > 0) {
+        // estimate result digits: base_digits * exp
+        mpd_ssize_t base_digits = mb->digits;
+        mpd_ssize_t est = base_digits * exp_val + 10;
+        if (est > pow_ctx.prec) pow_ctx.prec = est < 100000 ? est : 100000;
+    }
+    mpd_t* r = mpd_new(&pow_ctx);
+    if (!r) return ItemError;
+    mpd_pow(r, mb, me, &pow_ctx);
+    if (mpd_isnan(r) || mpd_isinfinite(r)) { mpd_del(r); return ItemError; }
+    return bigint_push_result(r);
+}
+
+Item bigint_neg(Item a) {
+    mpd_t* m = bigint_get_mpd(a);
+    if (!m) return ItemError;
+    mpd_context_t ctx = bigint_sized_context(m, NULL, 1);
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) return ItemError;
+    mpd_minus(r, m, &ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_inc(Item a) {
+    mpd_t* m = bigint_get_mpd(a);
+    if (!m) return ItemError;
+    // increment/decrement can add a carry digit, so size the exact context first.
+    mpd_context_t ctx = bigint_sized_context(m, NULL, 2);
+    mpd_t* one = mpd_new(&ctx);
+    if (!one) return ItemError;
+    mpd_set_u32(one, 1, &ctx);
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) { mpd_del(one); return ItemError; }
+    mpd_add(r, m, one, &ctx);
+    mpd_del(one);
+    return bigint_push_result(r);
+}
+
+Item bigint_dec(Item a) {
+    mpd_t* m = bigint_get_mpd(a);
+    if (!m) return ItemError;
+    // increment/decrement can add a carry digit, so size the exact context first.
+    mpd_context_t ctx = bigint_sized_context(m, NULL, 2);
+    mpd_t* one = mpd_new(&ctx);
+    if (!one) return ItemError;
+    mpd_set_u32(one, 1, &ctx);
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) { mpd_del(one); return ItemError; }
+    mpd_sub(r, m, one, &ctx);
+    mpd_del(one);
+    return bigint_push_result(r);
+}
+
+// ─── Bitwise ─────────────────────────────────────────────────────────
+
+// Arbitrary-precision BigInt bitwise operation following the ES spec:
+//   BitwiseOp(op, x, y)
+//   1. result = 0, shift = 0
+//   2. Repeat until (x == 0 || x == -1) && (y == 0 || y == -1):
+//      a. xDigit = x mod 2, yDigit = y mod 2
+//      b. result += 2^shift * op(xDigit, yDigit)
+//      c. shift++, x = (x - xDigit) / 2, y = (y - yDigit) / 2
+//   3. If op(x mod 2, y mod 2) != 0, result -= 2^shift (sign extension)
+// op: 0=AND, 1=OR, 2=XOR
+static Item bigint_bitwise_op(Item a, Item b, int op) {
+    mpd_t* x = bigint_get_mpd(a);
+    mpd_t* y = bigint_get_mpd(b);
+    if (!x || !y) return ItemError;
+
+    mpd_context_t ctx_storage = bigint_sized_context(x, y, 16);
+    mpd_context_t* ctx = &ctx_storage;
+
+    // working copies
+    mpd_t* xw = mpd_new(ctx);
+    mpd_t* yw = mpd_new(ctx);
+    mpd_t* result = mpd_new(ctx);
+    mpd_t* shift_val = mpd_new(ctx);
+    mpd_t* two = mpd_new(ctx);
+    mpd_t* neg_one = mpd_new(ctx);
+    mpd_t* xdigit = mpd_new(ctx);
+    mpd_t* ydigit = mpd_new(ctx);
+    if (!xw || !yw || !result || !shift_val || !two || !neg_one || !xdigit || !ydigit) {
+        if (xw) mpd_del(xw); if (yw) mpd_del(yw);
+        if (result) mpd_del(result); if (shift_val) mpd_del(shift_val);
+        if (two) mpd_del(two); if (neg_one) mpd_del(neg_one);
+        if (xdigit) mpd_del(xdigit); if (ydigit) mpd_del(ydigit);
+        return ItemError;
+    }
+
+    mpd_copy(xw, x, ctx);
+    mpd_copy(yw, y, ctx);
+    mpd_set_i32(result, 0, ctx);
+    mpd_set_i32(shift_val, 1, ctx);
+    mpd_set_i32(two, 2, ctx);
+    mpd_set_ssize(neg_one, -1, ctx);
+
+    // loop until both x and y are 0 or -1
+    while (!((mpd_iszero(xw) || mpd_cmp(xw, neg_one, ctx) == 0) &&
+             (mpd_iszero(yw) || mpd_cmp(yw, neg_one, ctx) == 0))) {
+        // xDigit = x mod 2 (mathematical modulo: always 0 or 1)
+        mpd_rem(xdigit, xw, two, ctx);
+        if (mpd_isnegative(xdigit) && !mpd_iszero(xdigit))
+            mpd_add(xdigit, xdigit, two, ctx);
+        // yDigit = y mod 2
+        mpd_rem(ydigit, yw, two, ctx);
+        if (mpd_isnegative(ydigit) && !mpd_iszero(ydigit))
+            mpd_add(ydigit, ydigit, two, ctx);
+
+        int xd = mpd_iszero(xdigit) ? 0 : 1;
+        int yd = mpd_iszero(ydigit) ? 0 : 1;
+        int bit;
+        switch (op) {
+            case 0: bit = xd & yd; break;
+            case 1: bit = xd | yd; break;
+            case 2: bit = xd ^ yd; break;
+            default: bit = 0;
+        }
+        if (bit) mpd_add(result, result, shift_val, ctx);
+
+        mpd_mul(shift_val, shift_val, two, ctx);
+        // x = (x - xDigit) / 2
+        mpd_sub(xw, xw, xdigit, ctx);
+        mpd_divint(xw, xw, two, ctx);
+        // y = (y - yDigit) / 2
+        mpd_sub(yw, yw, ydigit, ctx);
+        mpd_divint(yw, yw, two, ctx);
+    }
+
+    // sign extension
+    int xmod2 = mpd_iszero(xw) ? 0 : 1;
+    int ymod2 = mpd_iszero(yw) ? 0 : 1;
+    int sign_bit;
+    switch (op) {
+        case 0: sign_bit = xmod2 & ymod2; break;
+        case 1: sign_bit = xmod2 | ymod2; break;
+        case 2: sign_bit = xmod2 ^ ymod2; break;
+        default: sign_bit = 0;
+    }
+    if (sign_bit) mpd_sub(result, result, shift_val, ctx);
+
+    mpd_del(xw); mpd_del(yw); mpd_del(shift_val);
+    mpd_del(two); mpd_del(neg_one);
+    mpd_del(xdigit); mpd_del(ydigit);
+    return bigint_push_result(result);
+}
+
+Item bigint_bitwise_and(Item a, Item b) {
+    return bigint_bitwise_op(a, b, 0);
+}
+
+Item bigint_bitwise_or(Item a, Item b) {
+    return bigint_bitwise_op(a, b, 1);
+}
+
+Item bigint_bitwise_xor(Item a, Item b) {
+    return bigint_bitwise_op(a, b, 2);
+}
+
+Item bigint_bitwise_not(Item a) {
+    // ~x = -(x + 1) for BigInt (two's complement identity)
+    mpd_t* m = bigint_get_mpd(a);
+    if (!m) return ItemError;
+    mpd_context_t ctx = bigint_sized_context(m, NULL, 2);
+    mpd_t* one = mpd_new(&ctx);
+    if (!one) return ItemError;
+    mpd_set_i32(one, 1, &ctx);
+    mpd_t* r = mpd_new(&ctx);
+    if (!r) { mpd_del(one); return ItemError; }
+    mpd_add(r, m, one, &ctx);
+    mpd_minus(r, r, &ctx);
+    mpd_del(one);
+    return bigint_push_result(r);
+}
+
+Item bigint_left_shift(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    // shift amount must fit in a reasonable range
+    uint32_t status = 0;
+    mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
+    if (status & MPD_Invalid_operation) return ItemError;
+    if (shift < 0) return bigint_right_shift(a, bigint_neg(b));
+    if (shift > 100000) return ItemError;
+    // exact BigInt shifts need enough decimal precision for the generated power of two.
+    mpd_context_t ctx_storage = bigint_shift_context(ma, shift);
+    mpd_context_t* ctx = &ctx_storage;
+    // x << y = x * 2^y
+    mpd_t* two = mpd_new(ctx);
+    mpd_t* shift_mpd = mpd_new(ctx);
+    mpd_t* power = mpd_new(ctx);
+    mpd_t* result = mpd_new(ctx);
+    if (!two || !shift_mpd || !power || !result) {
+        if (two) mpd_del(two); if (shift_mpd) mpd_del(shift_mpd);
+        if (power) mpd_del(power); if (result) mpd_del(result);
+        return ItemError;
+    }
+    mpd_set_i32(two, 2, ctx);
+    mpd_set_ssize(shift_mpd, shift, ctx);
+    mpd_pow(power, two, shift_mpd, ctx);
+    mpd_mul(result, ma, power, ctx);
+    mpd_del(two); mpd_del(shift_mpd); mpd_del(power);
+    return bigint_push_result(result);
+}
+
+Item bigint_right_shift(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    uint32_t status = 0;
+    mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
+    if (status & MPD_Invalid_operation) return ItemError;
+    if (shift < 0) return bigint_left_shift(a, bigint_neg(b));
+    if (shift > 100000) return ItemError;
+    // exact BigInt shifts need enough decimal precision for the generated power of two.
+    mpd_context_t ctx_storage = bigint_shift_context(ma, shift);
+    mpd_context_t* ctx = &ctx_storage;
+    // x >> y = floor(x / 2^y)
+    mpd_t* two = mpd_new(ctx);
+    mpd_t* shift_mpd = mpd_new(ctx);
+    mpd_t* power = mpd_new(ctx);
+    mpd_t* result = mpd_new(ctx);
+    mpd_t* rem = mpd_new(ctx);
+    if (!two || !shift_mpd || !power || !result || !rem) {
+        if (two) mpd_del(two); if (shift_mpd) mpd_del(shift_mpd);
+        if (power) mpd_del(power); if (result) mpd_del(result);
+        if (rem) mpd_del(rem);
+        return ItemError;
+    }
+    mpd_set_i32(two, 2, ctx);
+    mpd_set_ssize(shift_mpd, shift, ctx);
+    mpd_pow(power, two, shift_mpd, ctx);
+    mpd_divint(result, ma, power, ctx);
+    // floor division: if negative and remainder != 0, subtract 1
+    mpd_rem(rem, ma, power, ctx);
+    if (mpd_isnegative(ma) && !mpd_iszero(rem)) {
+        mpd_t* one = mpd_new(ctx);
+        mpd_set_i32(one, 1, ctx);
+        mpd_sub(result, result, one, ctx);
+        mpd_del(one);
+    }
+    mpd_del(two); mpd_del(shift_mpd); mpd_del(power); mpd_del(rem);
+    return bigint_push_result(result);
+}
+
+// ─── String Conversion ───────────────────────────────────────────────
+
+// returns mem_alloc'd string - caller must mem_free()
+char* bigint_to_cstring_radix(Item bi, int radix) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return NULL;
+
+    if (radix == 10) {
+        // fast path: use mpd_to_sci
+        char* str = mpd_to_sci(m, 1);
+        if (!str) return NULL;
+        char* e = strchr(str, 'E');
+        if (!e) e = strchr(str, 'e');
+        if (!e) {
+            // strip trailing ".0" or decimal point artifacts
+            char* dot = strchr(str, '.');
+            if (dot) *dot = '\0';
+            char* owned = mem_strdup(str, MEM_CAT_STRING);
+            mpd_free(str);
+            return owned;
+        }
+        // Scientific notation is not a valid BigInt string form; fall through to
+        // exact digit extraction instead of narrowing through a host integer.
+        mpd_free(str);
+    }
+
+    // Radix conversion must not pass through int64; JS BigInt strings are
+    // arbitrary precision and asUintN(64, -1n) depends on the full 64 bits.
+    mpd_context_t conv_ctx = *bigint_context();
+    // BigInt radix conversion repeatedly divides the whole value; the default
+    // BigInt context is too small for wide asUintN/asIntN results and can trap.
+    if (m->digits + 16 > conv_ctx.prec) conv_ctx.prec = m->digits + 16;
+    mpd_t* n = mpd_new(&conv_ctx);
+    mpd_t* base = mpd_new(&conv_ctx);
+    mpd_t* q = mpd_new(&conv_ctx);
+    mpd_t* rem = mpd_new(&conv_ctx);
+    if (!n || !base || !q || !rem) {
+        if (n) mpd_del(n);
+        if (base) mpd_del(base);
+        if (q) mpd_del(q);
+        if (rem) mpd_del(rem);
+        return NULL;
+    }
+
+    bool negative = mpd_isnegative(m);
+    uint32_t status = 0;
+    mpd_qabs(n, m, &conv_ctx, &status);
+    mpd_qset_ssize(base, (mpd_ssize_t)radix, &conv_ctx, &status);
+    if (status & MPD_Errors) {
+        mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+        return NULL;
+    }
+
+    int cap = (int)(m->digits * 4 + 4);
+    if (cap < 32) cap = 32;
+    char* rev = (char*)mem_alloc(cap, MEM_CAT_STRING);
+    if (!rev) {
+        mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+        return NULL;
+    }
+
+    int len = 0;
+    if (mpd_iszero(n)) {
+        rev[len++] = '0';
+    } else {
+        while (!mpd_iszero(n)) {
+            status = 0;
+            mpd_qdivmod(q, rem, n, base, &conv_ctx, &status);
+            int digit = (int)mpd_qget_ssize(rem, &status);
+            if (status & MPD_Errors) {
+                mem_free(rev);
+                mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+                return NULL;
+            }
+            if (len + 2 >= cap) {
+                int new_cap = cap * 2;
+                char* grown = (char*)mem_alloc(new_cap, MEM_CAT_STRING);
+                if (!grown) {
+                    mem_free(rev);
+                    mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+                    return NULL;
+                }
+                memcpy(grown, rev, len);
+                mem_free(rev);
+                rev = grown;
+                cap = new_cap;
+            }
+            rev[len++] = digit < 10 ? (char)('0' + digit) : (char)('a' + digit - 10);
+            mpd_copy(n, q, &conv_ctx);
+        }
+    }
+    if (negative) rev[len++] = '-';
+
+    char* out = (char*)mem_alloc(len + 1, MEM_CAT_STRING);
+    if (!out) {
+        mem_free(rev);
+        mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+        return NULL;
+    }
+    for (int i = 0; i < len; i++) {
+        out[i] = rev[len - 1 - i];
+    }
+    out[len] = '\0';
+    mem_free(rev);
+    mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
+    return out;
+}

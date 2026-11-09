@@ -7,8 +7,8 @@
 #include "radiant_event_hook.h"
 #include "lambda-root-frame.hpp"
 #include "heap_api.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 #include <string.h>
 
 struct TerminalSession {

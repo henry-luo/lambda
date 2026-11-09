@@ -1,6 +1,6 @@
 #pragma once
 #include "update_payload.h"
-#include "../../../lib/ipc_stream.h"
+#include "lib/ipc_stream.h"
 
 enum UpdateWireKind { UPDATE_WIRE_INIT = 1, UPDATE_WIRE_FETCH, UPDATE_WIRE_CHECKPOINT,
     UPDATE_WIRE_DONE, UPDATE_WIRE_RESPONSE, UPDATE_WIRE_ERROR, UPDATE_WIRE_READY,

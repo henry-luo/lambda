@@ -2,9 +2,9 @@
 // The shared Lambda value/Mark paths retain DOM seams; fail closed if reached.
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_lifecycle.hpp"
-#include "../../lib/log.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/str.h"
+#include "lib/log.h"
+#include "lib/hashmap.h"
+#include "lib/str.h"
 
 #ifdef LAMBDA_MACOS_IME
 

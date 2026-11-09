@@ -6,7 +6,7 @@
 #include "../io/mark_output_builder.hpp"
 #include "heap_api.h"
 #include "render_map.h"
-#include "../../lib/log.h"
+#include "lib/log.h"
 #include <limits.h>
 
 extern __thread EvalContext* context;

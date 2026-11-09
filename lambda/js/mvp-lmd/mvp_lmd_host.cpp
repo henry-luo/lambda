@@ -11,8 +11,8 @@
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/lambda-error.h"
 #include "../../input/input.hpp"
-#include "../../../lib/mem.h"
-#include "../../../lib/utf.h"
+#include "lib/mem.h"
+#include "lib/utf.h"
 #include <math.h>
 
 // host bindings are explicitly supplied by the embedder, outside the core globals allowlist.

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../core/data.hpp"
-#include "../../../lib/physics/physics.h"
+#include "lib/physics/physics.h"
 
 struct DomElement;
 struct Scene3dPhysics;

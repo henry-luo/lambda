@@ -4,7 +4,7 @@
 #include <thread>
 #include <vector>
 
-#include "../../lib/atomic.h"
+#include "lib/atomic.h"
 
 TEST(AtomicTest, Int32LoadStore) {
     atomic_int32 a = {0};

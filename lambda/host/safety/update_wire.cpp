@@ -1,6 +1,6 @@
 #include "update_wire.h"
 #include "state_wire.h"
-#include "../../../lib/mem.h"
+#include "lib/mem.h"
 #include <errno.h>
 
 static const uint8_t update_wire_magic[8] = {'L','M','T','U','F','I','P','1'};

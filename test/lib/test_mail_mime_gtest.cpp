@@ -7,8 +7,8 @@
 #include <string.h>
 #include <vector>
 
-#include "../../lib/mail_mime.h"
-#include "../../lib/strbuf.h"
+#include "lib/mail_mime.h"
+#include "lib/strbuf.h"
 
 namespace {
 

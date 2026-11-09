@@ -4,7 +4,7 @@
 #include "lambda-number-runtime.hpp"
 #include "../core/mark_reader.hpp"
 #include "value_builder.hpp"
-#include "../../lib/image_process.h"
+#include "lib/image_process.h"
 #include <math.h>
 
 // native kernels operate on owned tiles; the adapter roots only the input values (D6.3.3).

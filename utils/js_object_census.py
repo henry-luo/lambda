@@ -13,6 +13,7 @@ import argparse
 import json
 import re
 from pathlib import Path
+from split_paths import logical_project_path, sibling_roots
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ SCOPES = (
     ROOT / "lambda" / "js",
     ROOT / "lambda" / "runtime",
     ROOT / "modules",
-    ROOT / "radiant",
+    sibling_roots()[1] / "radiant",
     ROOT / "test",
 )
 
@@ -59,7 +60,7 @@ def is_comment(line: str) -> bool:
 
 def map_kind_disposition(path: Path, line: str) -> tuple[str, str]:
     """Classify one physical map-kind source row by its owning subsystem."""
-    rel = str(path.relative_to(ROOT))
+    rel = str(logical_project_path(path, ROOT))
     code = line.split("//", 1)[0]
     if "MAP_KIND_ARRAY" in code or "map_kind_is_array_props" in code:
         return "physical_array_companion", "array companion allocation/shape/GC"
@@ -114,7 +115,7 @@ def census() -> dict:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        rel = str(path.relative_to(ROOT))
+        rel = str(logical_project_path(path, ROOT))
         for name, pattern in FORBIDDEN_PATTERNS.items():
             count = len(re.findall(pattern, text))
             if count:

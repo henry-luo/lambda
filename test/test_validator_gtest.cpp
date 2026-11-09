@@ -21,7 +21,7 @@
 
 // Include validator headers for ValidationResult and run_validation
 #include "../lambda/validator/validator.hpp"
-#include "../lib/log.h"
+#include "lib/log.h"
 
 // External validation functions - implemented in validator/ast_validate.cpp
 extern "C" ValidationResult* exec_validation(int argc, char* argv[]);

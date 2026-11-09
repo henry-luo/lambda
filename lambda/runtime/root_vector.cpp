@@ -1,12 +1,12 @@
 // root_vector.cpp - growable, address-stable, precisely rooted Item vector.
 // See root_vector.h for the contract (D6.1.1, D6.4.2; JSCU12).
-#include "../../lib/arraylist.h"
+#include "lib/arraylist.h"
 #include "../lambda-data.hpp"   // full Item definition; lambda.h only forward-declares it in C++
 #include "root_vector.h"
 #include "heap_api.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/mem_grow.hpp"
-#include "../../lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/mem_grow.hpp"
+#include "lib/log.h"
 #include <string.h>
 
 extern "C" Context* eval_context_tls_runtime(void);

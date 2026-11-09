@@ -3,9 +3,9 @@
 #include <cstdlib>
 
 extern "C" {
-#include "../../lib/base64.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "lib/base64.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 }
 
 class Base64Test : public ::testing::Test {

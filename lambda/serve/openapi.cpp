@@ -5,11 +5,11 @@
 
 #include "openapi.hpp"
 #include "swagger_ui.hpp"
-#include "../../lib/log.h"
-#include "../../lib/escape.h"
-#include "../../lib/strbuf.h"
+#include "lib/log.h"
+#include "lib/escape.h"
+#include "lib/strbuf.h"
 #include <cstring>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 
 // ============================================================================
 // Context Lifecycle

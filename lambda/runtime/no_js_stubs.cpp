@@ -8,7 +8,7 @@
 // "not mine", and entry points that would need a realm log and fail.
 
 #include "../lambda-data.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 #ifdef LAMBDA_NO_JS
 

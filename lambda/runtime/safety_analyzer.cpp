@@ -1,6 +1,6 @@
 #include "safety_analyzer.hpp"
 #include "ast.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 // ==============================================================================
 // Tail Call Optimization Analysis

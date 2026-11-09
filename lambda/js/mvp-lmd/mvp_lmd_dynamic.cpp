@@ -21,8 +21,8 @@
 #include "../../runtime/runtime-state.h"
 #include "../../input/input.hpp"
 #include "../../core/lambda-decimal.hpp"
-#include "../../../lib/mem.h"
-#include "../../../lib/arraylist.h"
+#include "lib/mem.h"
+#include "lib/arraylist.h"
 #include <limits.h>
 
 struct MvpLmdDynamic {

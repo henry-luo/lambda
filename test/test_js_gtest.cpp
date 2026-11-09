@@ -16,7 +16,7 @@
 #include "test_ast_tune_capture.hpp"
 
 extern "C" {
-#include "../lib/shell.h"
+#include "lib/shell.h"
 }
 
 #ifdef _WIN32

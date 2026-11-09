@@ -1,5 +1,5 @@
 #include "io_resource.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 Item io_resource_get(void* data, Item key) { (void)data; (void)key; return ItemNull; }
 void io_resource_set(void* data, Item key, Item value) {

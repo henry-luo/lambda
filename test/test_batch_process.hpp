@@ -2,9 +2,9 @@
 #define TEST_BATCH_PROCESS_HPP
 
 #include "test_process.h"
-#include "../lib/shell.h"
-#include "../lib/str.h"
-#include "../lib/strbuf.h"
+#include "lib/shell.h"
+#include "lib/str.h"
+#include "lib/strbuf.h"
 #include <errno.h>
 #include <limits.h>
 

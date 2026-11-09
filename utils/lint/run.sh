@@ -26,7 +26,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SGCONFIG="$ROOT/sgconfig.yml"
 RULES_DIR="$ROOT/utils/lint/rules"
 REPORT_DIR="$ROOT/test_output/lint"
-SCAN_ROOTS=(lambda radiant lib test)
+INPUT_ROOT="$(cd "${LAMBDA_INPUT_ROOT:-$ROOT/../lambda-input}" && pwd)"
+RADIANT_ROOT="$(cd "${RADIANT_ROOT:-$ROOT/../radiant}" && pwd)"
+SCAN_ROOTS=(lambda test "$INPUT_ROOT/lib" "$RADIANT_ROOT/radiant")
 
 # Structural checks: "<id>:<command>". Each runs after the pattern pass and
 # counts as failed iff the command exits non-zero.
@@ -111,15 +113,35 @@ fi
 # ---------- ast-grep scan (pattern rules) ----------
 RAW=""
 if (( ! STRUCTURAL_ONLY )); then
-  # Native project sources are reached through the extraction links.
+  # Scan from each owner so rule file globs retain their project-relative paths.
   sg_args=(scan -c "$SGCONFIG" --follow --include-metadata --json=stream)
   # imported codec/archive sources keep upstream conventions; scan Lambda's adapters normally.
   sg_args+=(--globs '!lib/image/lib*/**' --globs '!lib/image/giflib/**')
   sg_args+=(--globs '!lib/zip/**')
   [[ -n "$RULE_FILTER" ]] && sg_args+=(--filter "$RULE_FILTER")
-  sg_args+=("${SCAN_ROOTS[@]}")
   # ast-grep exits non-zero when it finds diagnostics; that's expected.
-  RAW=$(cd "$ROOT" && ast-grep "${sg_args[@]}" 2>/dev/null || true)
+  RAW=$(cd "$ROOT" && ast-grep "${sg_args[@]}" lambda test 2>/dev/null || true)
+  # Config-based file globs are anchored at Lambda's sgconfig directory.
+  # Inline the same rules so sibling globs are evaluated from their owners.
+  sibling_rules=""
+  for rule in "$RULES_DIR"/c-cpp/*.yml; do
+    rid=$(awk -F': *' '/^id:/{print $2; exit}' "$rule")
+    [[ -n "$RULE_FILTER" && ! "$rid" =~ $RULE_FILTER ]] && continue
+    [[ -n "$sibling_rules" ]] && sibling_rules+=$'\n---\n'
+    sibling_rules+=$(cat "$rule")
+  done
+  if [[ -n "$sibling_rules" ]]; then
+    sibling_args=(scan --inline-rules "$sibling_rules" --follow --include-metadata --json=stream
+      --globs '!lib/image/lib*/**' --globs '!lib/image/giflib/**' --globs '!lib/zip/**')
+    for owner in "$INPUT_ROOT:lib" "$RADIANT_ROOT:radiant"; do
+      owner_root=${owner%:*}; owner_path=${owner##*:}
+      owner_raw=$(cd "$owner_root" && ast-grep "${sibling_args[@]}" "$owner_path" 2>/dev/null || true)
+      if [[ -n "$owner_raw" ]]; then
+        owner_raw=$(printf '%s\n' "$owner_raw" | jq -c --arg root "$owner_root/" '.file = ($root + .file)')
+        RAW=$([[ -n "$RAW" ]] && printf '%s\n%s\n' "$RAW" "$owner_raw" || printf '%s\n' "$owner_raw")
+      fi
+    done
+  fi
   # Tag every ast-grep record with backend so reports can group/filter.
   [[ -n "$RAW" ]] && RAW=$(printf '%s\n' "$RAW" | jq -c '. + {backend: "ast-grep"}')
 fi

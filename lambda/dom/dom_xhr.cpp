@@ -23,13 +23,13 @@
 #include "../lambda.hpp"
 #include "../input/input.hpp"
 #include "../network/cookie_jar.h"
-#include "../../radiant/radiant.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/mem_grow.hpp"
-#include "../../lib/str.h"
-#include "../../lib/url.h"
-#include "../../lib/file.h"
+#include "radiant/radiant.hpp"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/mem_grow.hpp"
+#include "lib/str.h"
+#include "lib/url.h"
+#include "lib/file.h"
 
 #include <cstring>
 #include <cstdlib>

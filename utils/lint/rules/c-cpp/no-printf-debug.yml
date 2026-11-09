@@ -69,6 +69,6 @@ ignores:
   - "lib/hashmap.c"                        # all printfs are inside HASHMAP_TEST gate
   - "lib/avl_tree.c"                       # printfs all in avl_tree_print debug helper
   - "lib/test_utils_pool.c"                # test fixture setup
-  - "lib/test_utils_runtime.cpp"           # test fixture setup
+  - "test/test_utils_runtime.cpp"          # test fixture setup
   # Lambda's own AST dumper.
   - "lambda/runtime/emit_ast_dump.cpp"

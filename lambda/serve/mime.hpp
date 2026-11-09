@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../lib/mime-detect.h"
+#include "lib/mime-detect.h"
 
 // Serve keeps its API while sharing the lib detector and pattern database.
 MimeDetector* mime_detector_create(void);

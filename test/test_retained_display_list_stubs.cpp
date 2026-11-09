@@ -1,4 +1,4 @@
-#include "../radiant/render.hpp"
+#include "radiant/render.hpp"
 
 size_t rdt_path_storage_bytes(const RdtPath*) { return 0; } // stub paths own no geometry buffers
 

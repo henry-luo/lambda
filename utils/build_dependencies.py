@@ -18,6 +18,7 @@ import sys
 from build_config import load_build_config, resolve_source_sets
 from generate_image_config import write_changed
 from generate_premake import PremakeGenerator
+from split_paths import sibling_roots
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / 'build_deps_config.json'
@@ -257,7 +258,8 @@ def main():
     build = ROOT / 'temp' / 'dependency-build' / (system + '-' + architecture) / args.dependency
     build.mkdir(parents=True, exist_ok=True)
     prefix = (args.prefix or build / 'install').resolve()
-    variables = {'root': str(ROOT), 'source': str(source), 'build': str(build), 'prefix': str(prefix),
+    variables = {'root': str(ROOT), 'input_root': str(sibling_roots()[0]),
+                 'source': str(source), 'build': str(build), 'prefix': str(prefix),
                  'system': system, 'architecture': architecture,
                  'system_name': {'macos': 'Darwin', 'linux': 'Linux', 'windows': 'Windows'}[system]}
     recipe = copy.deepcopy(original)

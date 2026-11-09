@@ -1,6 +1,6 @@
 #include "compiler_timing.hpp"
 
-#include "../../lib/time_util.h"
+#include "lib/time_util.h"
 #include <string.h>
 
 extern "C" void compiler_pass_manager_init(CompilerPassManager* manager,

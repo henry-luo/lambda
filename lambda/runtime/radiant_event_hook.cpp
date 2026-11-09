@@ -1,5 +1,5 @@
 #include "radiant_event_hook.h"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 static LambdaRadiantEmitFn g_emit_fn = nullptr;
 static __thread LambdaEmitScope* g_scoped_emit = nullptr;

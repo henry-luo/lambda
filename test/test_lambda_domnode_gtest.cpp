@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
 extern "C" {
-#include "../lib/mempool.h"
-#include "../lib/string.h"
-#include "../lib/url.h"
-#include "../lib/log.h"
+#include "lib/mempool.h"
+#include "lib/string.h"
+#include "lib/url.h"
+#include "lib/log.h"
 }
 
 #include "../lambda/input/input.hpp"

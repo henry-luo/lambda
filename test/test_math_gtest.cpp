@@ -9,12 +9,12 @@
 #include <string>
 #include <regex>
 #include <vector>
-#include "../lib/arraylist.h"
-#include "../lib/strbuf.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
+#include "lib/arraylist.h"
+#include "lib/strbuf.h"
+#include "lib/mempool.h"
+#include "lib/log.h"
 extern "C" {
-    #include "../lib/url.h"  // Use new URL parser
+    #include "lib/url.h"  // Use new URL parser
     #include <mpdecimal.h>
 }
 #define LAMBDA_STATIC

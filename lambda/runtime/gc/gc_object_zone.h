@@ -25,7 +25,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
-#include "../../../lib/mem_vm.h"
+#include "lib/mem_vm.h"
 
 // Forward declaration — full definition in gc_heap.h
 typedef struct gc_header gc_header_t;

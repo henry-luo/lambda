@@ -6,10 +6,10 @@
 #include "re2_wrapper.hpp"
 #include "lambda-error.h"
 #include "binary_schema.hpp"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
-#include "../../lib/strview.h"
-#include "../../lib/escape.h"
+#include "lib/log.h"
+#include "lib/str.h"
+#include "lib/strview.h"
+#include "lib/escape.h"
 
 #include <string.h>
 #include <stdlib.h>

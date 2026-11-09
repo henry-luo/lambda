@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 #include "../lambda/host/safety/update_stage.h"
 #include "../lambda/host/safety/update_wire.h"
-#include "../lib/digest.h"
-#include "../lib/hex.h"
-#include "../lib/mem.h"
-#include "../lib/time_util.h"
+#include "lib/digest.h"
+#include "lib/hex.h"
+#include "lib/mem.h"
+#include "lib/time_util.h"
 #include "safety/update_fixture.h"
 #include <errno.h>
 #include <pthread.h>

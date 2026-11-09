@@ -19,8 +19,8 @@
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
-#include "../radiant/rdt_video.h"
-#include "../radiant/audio_bus.hpp"
+#include "radiant/rdt_video.h"
+#include "radiant/audio_bus.hpp"
 #include "test_audio_fixture.hpp"
 
 // ============================================================================

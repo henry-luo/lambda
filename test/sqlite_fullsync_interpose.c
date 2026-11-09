@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-#include "../lib/file.h"
+#include "lib/file.h"
 
 static int target_with_suffix(const char* path, const char* target, const char* suffix) {
     size_t length = strlen(target);

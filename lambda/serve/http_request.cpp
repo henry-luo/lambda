@@ -6,8 +6,8 @@
 #include "http_request.hpp"
 #include "serve_utils.hpp"
 #include <string.h>
-#include "../../lib/mem.h"
-#include "../../lib/url.h"
+#include "lib/mem.h"
+#include "lib/url.h"
 #include <ctype.h>
 
 // ============================================================================

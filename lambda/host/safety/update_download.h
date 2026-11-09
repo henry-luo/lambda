@@ -1,6 +1,6 @@
 #pragma once
 #include "update_controls.h"
-#include "../../../lib/https_pull.h"
+#include "lib/https_pull.h"
 #ifdef __cplusplus
 extern "C" {
 #endif

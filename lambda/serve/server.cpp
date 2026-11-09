@@ -18,12 +18,12 @@
 #include "serve_utils.hpp"
 #include "body_parser.hpp"
 #include "mime.hpp"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
-#include "../../lib/uv_loop.h"
+#include "lib/log.h"
+#include "lib/str.h"
+#include "lib/uv_loop.h"
 
 #include <string.h>
-#include "../../lib/mem.h"
+#include "lib/mem.h"
 
 // ============================================================================
 // Forward declarations for libuv callbacks

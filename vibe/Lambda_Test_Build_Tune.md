@@ -29,7 +29,7 @@ Split into three files instead of one, so tests that don't need the Lambda runti
 
 - **[lib/test_utils.h](../lib/test_utils.h)** — public API: temp dir/file, process spawn, file I/O, string normalization, `tu_setup_pool`, `tu_setup_runtime`.
 - **[lib/test_utils.c](../lib/test_utils.c)** — pure-C implementation of the C helpers and `tu_setup_pool` (no Lambda runtime deps).
-- **[lib/test_utils_runtime.cpp](../lib/test_utils_runtime.cpp)** — `tu_setup_runtime` + Heap/EvalContext fixture, isolated to its own TU so only tests that need the full runtime pay the include cost.
+- **[test/test_utils_runtime.cpp](../test/test_utils_runtime.cpp)** — `tu_setup_runtime` + Heap/EvalContext fixture, isolated in Lambda so only tests that need the full runtime pay the include cost (D9.1.1v3).
 
 Tests opt in via `additional_sources` in `build_lambda_config.json`: just `lib/test_utils.c` for the lightweight case, or both files for full-runtime tests.
 

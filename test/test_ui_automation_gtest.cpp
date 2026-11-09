@@ -44,12 +44,12 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/core/mark_reader.hpp"
-#include "../lib/mempool.h"
-#include "../lib/memtrack.h"
+#include "lib/mempool.h"
+#include "lib/memtrack.h"
 
 extern "C" {
-#include "../lib/shell.h"
-#include "../lib/file.h"
+#include "lib/shell.h"
+#include "lib/file.h"
 }
 
 #ifdef _WIN32

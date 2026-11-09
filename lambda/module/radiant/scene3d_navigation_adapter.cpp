@@ -1,10 +1,10 @@
 #include "scene3d_navigation_adapter.hpp"
 #include "scene3d_physics_adapter.hpp"
-#include "../../../radiant/scene3d/scene3d_navigation_internal.hpp"
-#include "../../../radiant/scene3d/scene3d_physics.hpp"
-#include "../../../radiant/scene3d/scene3d_source.hpp"
-#include "../../../radiant/event.hpp"
-#include "../../../radiant/radiant.hpp"
+#include "radiant/scene3d/scene3d_navigation_internal.hpp"
+#include "radiant/scene3d/scene3d_physics.hpp"
+#include "radiant/scene3d/scene3d_source.hpp"
+#include "radiant/event.hpp"
+#include "radiant/radiant.hpp"
 #include "../../input/css/dom_element.hpp"
 #include "../../input/css/dom_lifecycle.hpp"
 #include "../../dom/dom_events.h"
@@ -14,9 +14,9 @@
 #include "../../runtime/lambda-navigation.hpp"
 #include "../../runtime/lambda-number-runtime.hpp"
 #include "../../runtime/value_builder.hpp"
-#include "../../../lib/mem.h"
-#include "../../../lib/physics/physics_math.h"
-#include "../../../lib/thread_pool.h"
+#include "lib/mem.h"
+#include "lib/physics/physics_math.h"
+#include "lib/thread_pool.h"
 #include <float.h>
 #include <math.h>
 

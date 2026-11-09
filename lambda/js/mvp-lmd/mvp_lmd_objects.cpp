@@ -13,9 +13,9 @@
 #include "../../runtime/runtime-state.h"
 #include "../../input/input.hpp"
 #include "../../core/lambda-decimal.hpp"
-#include "../../../lib/hashmap.h"
-#include "../../../lib/utf.h"
-#include "../../../lib/mem.h"
+#include "lib/hashmap.h"
+#include "lib/utf.h"
+#include "lib/mem.h"
 #include <math.h>
 
 struct MapBucket { uint64_t hash; int64_t slot; };

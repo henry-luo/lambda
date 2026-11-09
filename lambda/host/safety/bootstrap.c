@@ -1,5 +1,5 @@
-#include "../../../lib/confined_process.h"
-#include "../../../lib/process_sandbox.h"
+#include "lib/confined_process.h"
+#include "lib/process_sandbox.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdlib.h>

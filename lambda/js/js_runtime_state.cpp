@@ -16,7 +16,7 @@
 #include "../dom/dom_cssom.h"
 #include "../dom/dom_observers.h"
 #include "../dom/dom_platform.h"
-#include "../../lib/mem_grow.hpp"
+#include "lib/mem_grow.hpp"
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 

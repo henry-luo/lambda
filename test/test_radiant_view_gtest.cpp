@@ -5,20 +5,20 @@
 #include <cstring>
 #include <cstddef>
 #include <errno.h>
-#include "../lib/log.h"
-#include "../lib/ownership.hpp"
-#include "../lib/str.h"
+#include "lib/log.h"
+#include "lib/ownership.hpp"
+#include "lib/str.h"
 
 #include "../lambda/module/radiant/script_timeout.hpp"
 #include "test_radiant_view_helpers.hpp"
 
 extern "C" {
-#include "../lib/shell.h"
-#include "../lib/file.h"
-#include "../lib/strbuf.h"
-#include "../lib/thread_pool.h"
-#include "../lib/time_util.h"
-#include "../lib/mem.h"
+#include "lib/shell.h"
+#include "lib/file.h"
+#include "lib/strbuf.h"
+#include "lib/thread_pool.h"
+#include "lib/time_util.h"
+#include "lib/mem.h"
 }
 
 #ifdef _WIN32

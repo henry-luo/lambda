@@ -12,12 +12,12 @@
 #include "../runtime/runtime-state.h"
 #include "../runtime/transpiler.hpp"
 #include "../runtime/lambda-root-frame.hpp"
-#include "../../lib/mem.h"
-#include "../../lib/ownership.hpp"
-#include "../../lib/utf.h"
-#include "../../lib/str.h"
-#include "../../lib/url.h"
-#include "../../lib/file.h"
+#include "lib/mem.h"
+#include "lib/ownership.hpp"
+#include "lib/utf.h"
+#include "lib/str.h"
+#include "lib/url.h"
+#include "lib/file.h"
 #include <string.h>
 #include <stdlib.h>
 

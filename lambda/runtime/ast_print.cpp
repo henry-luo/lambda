@@ -1,7 +1,7 @@
 #include "ast.hpp"
 #include "../core/print.h"
 #include "../core/lambda-decimal.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 #include <inttypes.h>
 
 #if !defined(LAMBDA_PRINT_VALUE_ONLY) && !defined(LAMBDA_NO_CONSOLE_DUMP)

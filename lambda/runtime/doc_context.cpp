@@ -6,11 +6,11 @@
 #include "../lambda-data.hpp"
 #include "heap_api.h"
 #include "context_capsule.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/memtrack.h"
+#include "lib/hashmap.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/memtrack.h"
 
 #include <string.h>
 

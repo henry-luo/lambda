@@ -1,10 +1,10 @@
 #include "node_process.hpp"
 #include "../../jube/jube_registry.h"
 
-#include "../../../lib/file.h"
-#include "../../../lib/log.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/str.h"
+#include "lib/file.h"
+#include "lib/log.h"
+#include "lib/mem.h"
+#include "lib/str.h"
 
 #include <cstring>
 #include <stdio.h>

@@ -1,5 +1,5 @@
 #include "reactive_render_adapter.hpp"
-#include "../../../radiant/reactive_render_host.hpp"
+#include "radiant/reactive_render_host.hpp"
 #include "../../runtime/render_map.h"
 #include "../../dom/dom_observers.h"
 

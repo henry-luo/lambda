@@ -12,14 +12,14 @@
 #include "heap_api.h"
 #include "../input/input.hpp"
 #endif
-#include "../../lib/re2_glue.hpp"
-#include "../../lib/log.h"
-#include "../../lib/escape.h"
-#include "../../lib/str.h"
-#include "../../lib/string.h"
-#include "../../lib/mempool.h"
-#include "../../lib/mem_grow.h"
-#include "../../lib/sort.h"
+#include "lib/re2_glue.hpp"
+#include "lib/log.h"
+#include "lib/escape.h"
+#include "lib/str.h"
+#include "lib/string.h"
+#include "lib/mempool.h"
+#include "lib/mem_grow.h"
+#include "lib/sort.h"
 
 #include <re2/re2.h>
 #include <stdint.h>

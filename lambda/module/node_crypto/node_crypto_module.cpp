@@ -21,17 +21,17 @@
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include "../../runtime/transpiler.hpp"
-#include "../../../lib/log.h"
+#include "lib/log.h"
 #include <cstring>
-#include "../../../lib/mem.h"
-#include "../../../lib/mem_grow.hpp"
-#include "../../../lib/str.h"
-#include "../../../lib/hex.h"
-#include "../../../lib/base64.h"
-#include "../../../lib/uuid.h"
-#include "../../../lib/digest.h"
-#include "../../../lib/ownership.hpp"
-#include "../../../lib/utf.h"
+#include "lib/mem.h"
+#include "lib/mem_grow.hpp"
+#include "lib/str.h"
+#include "lib/hex.h"
+#include "lib/base64.h"
+#include "lib/uuid.h"
+#include "lib/digest.h"
+#include "lib/ownership.hpp"
+#include "lib/utf.h"
 #include "../../jube/jube.h"
 #include <mbedtls/bignum.h>
 #include <mbedtls/ecp.h>

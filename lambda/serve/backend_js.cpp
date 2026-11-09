@@ -12,7 +12,7 @@
 
 #include "language_backend.hpp"
 #include "serve_utils.hpp"
-#include "../../lib/log.h"
+#include "lib/log.h"
 
 #include "../lambda.h"
 

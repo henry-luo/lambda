@@ -4,10 +4,10 @@
 #include "security_context.h"
 #include "lambda-number-runtime.hpp"
 #include "../core/lambda-path.h"
-#include "../../lib/str.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/file.h"
+#include "lib/str.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/file.h"
 
 #include <stdarg.h>
 #include <stdio.h>

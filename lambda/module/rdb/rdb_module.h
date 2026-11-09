@@ -3,7 +3,7 @@
 // carries small local helpers instead of linking host lib code.
 #pragma once
 
-#include "../../../lib/rdb_abi.h"
+#include "lib/rdb_abi.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

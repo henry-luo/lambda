@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 
 extern "C" {
-#include "../../lib/arraylist.h"
+#include "lib/arraylist.h"
 }
 
 namespace {

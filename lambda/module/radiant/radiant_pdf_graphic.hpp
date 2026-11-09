@@ -1,6 +1,6 @@
 #pragma once
 #include "../../lambda-data.hpp"
-#include "../../../radiant/render.hpp"
+#include "radiant/render.hpp"
 
 // bounded native resource helpers; no PDF syntax or paint command ABI escapes.
 Item radiant_pdf_error(const char* message);

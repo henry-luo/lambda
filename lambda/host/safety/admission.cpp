@@ -1,9 +1,9 @@
 #include "admission.h"
 #include "private_storage.h"
-#include "../../../lib/arraylist.h"
-#include "../../../lib/digest.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/path_str.h"
+#include "lib/arraylist.h"
+#include "lib/digest.h"
+#include "lib/mem.h"
+#include "lib/path_str.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>

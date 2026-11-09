@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../lib/byte_storage.h"
-#include "../../lib/byte_builder.h"
-#include "../../lib/line_framer.h"
+#include "lib/byte_storage.h"
+#include "lib/byte_builder.h"
+#include "lib/line_framer.h"
 
 typedef struct ReleaseProbe {
     int calls;

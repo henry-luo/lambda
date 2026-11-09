@@ -9,7 +9,7 @@
 #include "../../lambda/core/well_known_markup_names.h"
 
 extern "C" {
-#include "../../lib/mempool.h"
+#include "lib/mempool.h"
 }
 
 /**

@@ -1,11 +1,11 @@
 // npm_package_json.cpp — Parse and query package.json files
 
 #include "npm_package_json.h"
-#include "../../../lib/file.h"
-#include "../../../lib/log.h"
-#include "../../../lib/memtrack.h"
-#include "../../../lib/mempool.h"
-#include "../../../lib/mem_factory.h"
+#include "lib/file.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/mempool.h"
+#include "lib/mem_factory.h"
 #include "../../lambda-data.hpp"
 #include "../../core/mark_reader.hpp"
 // forward-declare JSON parser to avoid transitive input.hpp linkage issues

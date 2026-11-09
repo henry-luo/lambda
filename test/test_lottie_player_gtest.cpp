@@ -10,12 +10,12 @@
 #include <cstring>
 #include <thorvg_capi.h>
 
-#include "../radiant/render.hpp"
-#include "../radiant/view.hpp"
+#include "radiant/render.hpp"
+#include "radiant/view.hpp"
 
 extern "C" {
-#include "../lib/mempool.h"
-#include "../lib/file.h"
+#include "lib/mempool.h"
+#include "lib/file.h"
 }
 
 // Stubs for unresolved symbols in standalone test builds

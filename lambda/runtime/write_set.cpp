@@ -6,8 +6,8 @@
 
 #include "transpiler.hpp"
 #include "../lambda.hpp"
-#include "../../lib/arraylist.h"
-#include "../../lib/log.h"
+#include "lib/arraylist.h"
+#include "lib/log.h"
 #include "lambda-number-runtime.hpp"
 #include "lambda-root-frame.hpp"
 // The write set outlives its statements, so its recorded values are registered

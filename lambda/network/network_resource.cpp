@@ -1,0 +1,1 @@
+../../../lambda-input/lambda/network/network_resource.cpp

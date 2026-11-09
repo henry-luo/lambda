@@ -5,8 +5,8 @@
 #include "heap_api.h"
 #include "../input/input.hpp"
 #include "../js/js_runtime_state.hpp"
-#include "../../lib/memtrack.h"
-#include "../../lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/log.h"
 
 extern __thread EvalContext* context;
 extern __thread Context* input_context;

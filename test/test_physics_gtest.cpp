@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "../lib/physics/physics.h"
-#include "../lib/physics/physics_math.h"
-#include "../lib/physics/physics_geometry.h"
-#include "../lib/arraylist.hpp"
+#include "lib/physics/physics.h"
+#include "lib/physics/physics_math.h"
+#include "lib/physics/physics_geometry.h"
+#include "lib/arraylist.hpp"
 
 struct PhysicsTest : testing::Test {
     PhysicsBodyDesc bodies[4]={};PhysicsColliderDesc colliders[4]={};PhysicsDesc desc={};

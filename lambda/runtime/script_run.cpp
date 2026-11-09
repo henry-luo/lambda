@@ -12,10 +12,10 @@
 #include "concurrency.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/url.h"
-#include "../../lib/arraylist.h"
+#include "lib/log.h"
+#include "lib/mem_factory.h"
+#include "lib/url.h"
+#include "lib/arraylist.h"
 #include <string.h>
 
 #ifndef _WIN32

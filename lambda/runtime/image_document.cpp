@@ -3,8 +3,8 @@
 #include "heap_api.h"
 #include "lambda-number-runtime.hpp"
 #include "../core/mark_reader.hpp"
-#include "../../lib/image.h"
-#include "../../lib/mem.h"
+#include "lib/image.h"
+#include "lib/mem.h"
 
 struct ImageDecodeOwner {
     uint8_t* bytes = nullptr;

@@ -1,6 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #include <gtest/gtest.h>
-#include "../radiant/clipboard_mac.hpp"
+#include "radiant/clipboard_mac.hpp"
 #include <string.h>
 
 // isolated platform representations avoid touching the user's general pasteboard.

@@ -218,8 +218,10 @@ pn validate(enums, rules, bindings) {
 }
 
 pn main() {
-    let header = input("radiant/event.hpp", "text")^
-    let source = input("radiant/state_schema.cpp", "text")^
+    let configured_root = sys.proc.self.env.RADIANT_ROOT#
+    let radiant_root = if (type(configured_root) == string and configured_root != "") configured_root else "../radiant"
+    let header = input(radiant_root ++ "/radiant/event.hpp", "text")^
+    let source = input(radiant_root ++ "/radiant/state_schema.cpp", "text")^
     let enums = parse_enums(header)
     let arrays = parse_to_state_arrays(source)
     let rules = parse_rules(source, arrays)^

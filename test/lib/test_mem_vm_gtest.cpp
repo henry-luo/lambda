@@ -1,5 +1,5 @@
-#include "../../lib/mem_vm.h"
-#include "../../lib/memtrack.h"
+#include "lib/mem_vm.h"
+#include "lib/memtrack.h"
 
 #include <gtest/gtest.h>
 

@@ -1,13 +1,13 @@
 #include "js_exec_profile.h"
-#include "../../lib/host_paths.h"
+#include "lib/host_paths.h"
 #include "../lambda-data.hpp"
-#include "../../lib/file.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/strbuf.h"
+#include "lib/file.h"
+#include "lib/file_utils.h"
+#include "lib/hashmap.h"
+#include "lib/hashmap_helpers.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
+#include "lib/strbuf.h"
 
 #include <stdio.h>
 #include <stdlib.h>

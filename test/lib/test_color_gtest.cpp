@@ -3,7 +3,7 @@
 #include <cstring>
 
 extern "C" {
-#include "../../lib/color.h"
+#include "lib/color.h"
 }
 
 struct RGBA { uint8_t r, g, b, a; };
