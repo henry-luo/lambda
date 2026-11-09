@@ -1,1 +1,0 @@
-../../lambda-input/test/test_format_markup_gtest.cpp

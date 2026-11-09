@@ -1,7 +1,7 @@
 #include "radiant/event.hpp"
 
 #include "radiant/view.hpp"
-#include "../../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "radiant/tagged.hpp"
 
 #include <string.h>

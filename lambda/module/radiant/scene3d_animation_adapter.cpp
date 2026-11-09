@@ -6,7 +6,7 @@
 #include "radiant/scene3d/scene3d_source.hpp"
 #include "radiant/event.hpp"
 #include "radiant/radiant.hpp"
-#include "../../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "../../runtime/lambda-number-runtime.hpp"
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/value_builder.hpp"

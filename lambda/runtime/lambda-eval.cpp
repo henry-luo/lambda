@@ -1,13 +1,13 @@
 #include "lib/utf.h"
 #include "lib/host_paths.h"
-#include "../io/mark_output_builder.hpp"
-#include "../format/format.h"
+#include "lambda/io/mark_output_builder.hpp"
+#include "lambda/format/format.h"
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "heap_api.h"
 #include "lambda/runtime/gc/gc_heap.h"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "recovery_frame.h"
 #include "type_contract.hpp"
@@ -23,18 +23,18 @@
 #include <limits.h>
 #include "lib/log.h"
 #include "lib/hashmap_helpers.h"
-#include "../core/print.h"
+#include "lambda/core/print.h"
 #include "lib/mem_factory.h"
 #include "lib/memtrack.h"
 #include "lib/url.h"
 #include "lib/math_checked.hpp"
 #include "lib/file.h"
 #include "lib/str.h"
-#include "../core/utf_string.h"
+#include "lambda/core/utf_string.h"
 #include "re2_wrapper.hpp"
 #include "grammar/grammar.hpp"
 #include "native_collection.hpp"
-#include "../input/markup/markup_highlight.hpp"
+#include "lambda/input/markup/markup_highlight.hpp"
 #include <utf8proc.h>
 #include <mpdecimal.h>  // needed for inline decimal operations
 
@@ -57,12 +57,12 @@
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 #endif
 #include "../validator/validator.hpp"
-#include "../input/input.hpp"
-#include "../io/script_format.hpp"
-#include "../io/fs_node.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/io/script_format.hpp"
+#include "lambda/io/fs_node.hpp"
 #include "io_file_search.hpp"
-#include "../input/html5/html5_parser.h"
-#include "../io/target.h"
+#include "lambda/input/html5/html5_parser.h"
+#include "lambda/io/target.h"
 #include "../jube/jube_interface.h"
 
 extern __thread EvalContext* context;

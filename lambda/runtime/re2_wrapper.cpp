@@ -10,7 +10,7 @@
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "../lambda.hpp"
 #include "heap_api.h"
-#include "../input/input.hpp"
+#include "lambda/input/input.hpp"
 #endif
 #include "lib/re2_glue.hpp"
 #include "lib/log.h"

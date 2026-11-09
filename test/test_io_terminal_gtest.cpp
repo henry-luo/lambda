@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../lambda/lambda.hpp"
-#include "../lambda/input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "../lambda/runtime/template_registry.h"
 #include "../lambda/runtime/template_state.h"
 #include "../lambda/runtime/transpiler.hpp"

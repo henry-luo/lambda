@@ -39,12 +39,12 @@
 #include "../../runtime/side_stack.h"
 #include "../../runtime/render_map.h"
 #include "../../runtime/template_state.h"
-#include "../../input/css/dom_element.hpp"
-#include "../../input/css/dom_node.hpp"
-#include "../../core/mark_reader.hpp"
-#include "../../input/input.hpp"
-#include "../../input/input-parsers.h"
-#include "../../io/mark_builder.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/dom_node.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/input/input-parsers.h"
+#include "lambda/io/mark_builder.hpp"
 #include "lib/log.h"
 #include "lib/mem_factory.h"
 #include "radiant/layout.hpp"  // MAX_LAYOUT_DEPTH — shared DOM-recursion depth cap
@@ -58,7 +58,7 @@
 #include "radiant/tagged.hpp"
 #include "lib/time_util.h"
 #include "../../js/js_event_loop.h"
-#include "../../network/network_resource_manager.h"
+#include "lambda/network/network_resource_manager.h"
 
 #include <cstring>
 #include <cstdlib>

@@ -146,7 +146,7 @@ def header_inventory() -> list[dict]:
 def io_inventory() -> list[dict]:
     entries = []
     for path, classification in RUNTIME_NATIVE_IO.items():
-        if not (ROOT / path).exists():
+        if not owned_path(path).exists():
             continue
         entries.append({
             "path": path,

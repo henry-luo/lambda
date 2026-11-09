@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#include "../core/lambda-error-data.h"
+#include "lambda/core/lambda-error-data.h"
 
 // C14 system faults use non-allocating records until a recovery frame can
 // deliver them to a pn boundary or execution handler. They are intentionally

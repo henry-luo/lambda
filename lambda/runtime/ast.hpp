@@ -16,7 +16,7 @@ extern "C" {
 
 #include "../lambda-data.hpp"
 #include "ast-core.hpp"
-#include "../core/print.h"
+#include "lambda/core/print.h"
 #include "sys_func_registry.h"
 #include "compiler_timing.hpp"
 #include "type_contract.hpp"

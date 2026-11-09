@@ -18,8 +18,8 @@ extern "C" {
 }
 #include "lib/test_utils.h"
 
-#include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
 #include "radiant/event.hpp"
 
 #include <cstring>

@@ -15,7 +15,7 @@
 #include "lib/mem_grow.h"
 #include "lib/mem_factory.h"
 #include "lib/hashmap.h"
-#include "../../lambda.h"
+#include "lambda/lambda.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>

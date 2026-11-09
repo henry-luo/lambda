@@ -1,1 +1,0 @@
-../../radiant/test/test_radiant_resource_observer_gtest.cpp

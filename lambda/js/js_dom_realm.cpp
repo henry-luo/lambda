@@ -39,10 +39,10 @@
 #include "js_property_attrs.h"
 #include "mvp-lmd/mvp_lmd_runtime.h"
 #include "../dom/dom_ops.h"
-#include "../input/css/css_style.hpp"
+#include "lambda/input/css/css_style.hpp"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
-#include "../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
 
@@ -1270,7 +1270,7 @@ extern "C" void dom_install_collection_globals(void) {
 #define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
     js_dom_install_interface(global, #name); \
     _link_iface_proto(global, #name, "CSSStyleDeclaration");
-#include "../input/css/css_declaration_interfaces.def"
+#include "lambda/input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
     static const struct { const char* name; int value; } css_rule_constants[] = {
         {"STYLE_RULE", 1}, {"CHARSET_RULE", 2}, {"IMPORT_RULE", 3}, {"MEDIA_RULE", 4},
@@ -1291,12 +1291,12 @@ extern "C" void dom_install_collection_globals(void) {
 #define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
     _publish_interface_records(#host, sizeof(#host) - 1);
 #define CSS_RULE_INTERFACE_ALIAS(...)
-#include "../input/css/css_rule_interfaces.def"
+#include "lambda/input/css/css_rule_interfaces.def"
 #undef CSS_RULE_INTERFACE_ALIAS
 #undef CSS_RULE_INTERFACE
 #define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
     _publish_interface_records(#host, sizeof(#host) - 1);
-#include "../input/css/css_declaration_interfaces.def"
+#include "lambda/input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
     // cold prototype inspection must see the same declared getters as live wrappers.
     js_dom_install_interface(global, "RadioNodeList");

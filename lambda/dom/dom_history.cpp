@@ -8,7 +8,7 @@
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
 #include "../module/radiant/radiant_history.hpp"
-#include "../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "../runtime/transpiler.hpp"
 #include "lib/arraylist.h"
 #include "lib/log.h"

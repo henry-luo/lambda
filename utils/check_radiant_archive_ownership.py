@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 from check_stale_object_dependencies import main as retire_stale_objects
+from split_paths import sibling_roots
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -64,8 +65,8 @@ def main() -> int:
         expected = {source.stem + ".o" for source in sources}
         if not sources or len(sources) != len(expected):
             raise RuntimeError("adapter source list is empty or contains colliding object names")
-        native = members(ROOT / "build/lib/libradiant-cpp.a")
-        actual = members(ROOT / "build/lib/liblambda-radiant-adapter-cpp.a")
+        native = members(sibling_roots()[1] / "build/lib/debug/libradiant.a")
+        actual = members(ROOT / "build/lib/native/debug/liblambda-radiant-adapter-cpp.a")
         if actual != expected:
             raise RuntimeError(f"adapter archive members differ: missing={sorted(expected - actual)}, "
                                f"extra={sorted(actual - expected)}")

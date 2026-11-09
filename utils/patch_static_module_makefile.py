@@ -2,9 +2,13 @@
 """Append exact static archives after Lambda's generated executable libraries."""
 
 import os
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
+from split_paths import resolve_split_paths, use_input_scripts
+use_input_scripts()
 from build_config import load_build_config
 
 
@@ -29,77 +33,37 @@ def configured_archive_path(archive, root):
     return archive if os.path.isabs(archive) else os.path.join(root, archive)
 
 
-def sibling_native_archives(root):
-    input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root).parent / 'lambda-input')).resolve()
-    archives = {name: input_root / 'build/lib/native/debug' / name for name in
-                ('libre2.a', 'liblambda-archive-readers.a', 'liblambda-image-codecs.a')}
-    archives['libcurl.a'] = input_root / 'build/deps/curl/lib/libcurl.a'
-    return archives
-
-
-def select_sibling_native_archives(archives, root):
-    sibling_native = sibling_native_archives(root)
-    # The late link line is shared by every profile; select sibling native
-    # providers only for the debug split build.
-    return [f'$(if $(filter debug_native,$(config)),{sibling_native[Path(path).name]},{path})'
-            if Path(path).name in sibling_native else path for path in archives]
-
-
-def use_sibling_archives(content, root, curl_archive):
-    """Select sibling-built debug archives for the static executable link."""
-    make_dir = Path(root) / 'build' / 'premake'
+def use_sibling_archives(content, root):
+    """Replace every generated provider reference in both link and prerequisites."""
     input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root).parent / 'lambda-input')).resolve()
     radiant_root = Path(os.environ.get('RADIANT_ROOT', Path(root).parent / 'radiant')).resolve()
-    archives = {
-        '../lib/liblambda-data-cpp.a': input_root / 'build/lib/liblambda-input.a',
-        '../lib/native/debug/liblambda-lib-cpp.a': input_root / 'build/lib/liblambda-lib.a',
-        '../lib/libradiant-cpp.a': radiant_root / 'build/lib/libradiant.a',
-        '../lib/libradiant-properties.a': radiant_root / 'build/lib/libradiant-properties.a',
+    profiles = ('debug', 'debug_asan', 'release', 'release_profile', 'coverage')
+    providers = {
+        '../lib/liblambda-data-cpp.a': input_root / 'build/lib/$(notdir $(OBJDIR))/liblambda-input.a',
+        '../lib/libradiant-cpp.a': radiant_root / 'build/lib/$(notdir $(OBJDIR))/libradiant.a',
+        '../lib/libradiant-properties.a': radiant_root / 'build/lib/$(notdir $(OBJDIR))/libradiant-properties.a',
     }
-    begin = 'ifeq ($(config),debug_native)'
-    if content.count(begin) != 1:
-        raise RuntimeError('cannot find the unique debug static link configuration')
-    before, debug = content.split(begin, 1)
-    debug, after = debug.split('else ifeq', 1)
-    for original, archive in archives.items():
-        if not archive.is_file():
-            raise RuntimeError(f'missing sibling archive: {archive}')
-        replacement = os.path.relpath(archive, make_dir)
-        if any(character.isspace() for character in replacement):
-            raise RuntimeError(f'sibling archive path contains whitespace: {archive}')
-        # Both LIBS and LDDEPS must reference the same provider.
-        if debug.count(original) != 2:
-            raise RuntimeError(f'unexpected number of debug archive references: {original}')
-        debug = debug.replace(original, replacement)
-    for name, archive in sibling_native_archives(root).items():
-        if not archive.is_file():
-            raise RuntimeError(f'missing sibling archive: {archive}')
-        replacement = os.path.relpath(archive, make_dir)
-        if any(character.isspace() for character in replacement):
-            raise RuntimeError(f'sibling archive path contains whitespace: {archive}')
-        original = ('../../' + curl_archive if name == 'libcurl.a' else
-                    f'../../build/lib/native/debug/{name}')
-        # Premake records each static dependency both as a prerequisite and
-        # as a force-loaded linker input.
-        if debug.count(original) != 2:
-            raise RuntimeError(f'unexpected number of debug archive references: {original}')
-        debug = debug.replace(original, replacement)
-    return before + begin + debug + 'else ifeq' + after
+    for profile in profiles:
+        providers[f'../lib/native/{profile}/liblambda-lib-cpp.a'] = input_root / f'build/lib/{profile}/liblambda-lib.a'
+    for original, archive in providers.items():
+        if original not in content:
+            raise RuntimeError(f'missing generated provider reference: {original}')
+        content = content.replace(original, str(archive))
+    return content
 
 
 def main():
-    if sys.platform != 'darwin':
-        return 0
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # Imported sibling manifests also own transitive static dependencies.
-    config = load_build_config(os.path.join(root, 'build_lambda_config.json'))
+    config = resolve_split_paths(load_build_config(os.path.join(root, 'build_lambda_config.json')))
     targets = {target['name']: target for target in config.get('targets', []) if 'name' in target}
     executable = targets.get('lambda-exe')
     if not executable:
         return 0
 
     external = {library['name']: library for library in config.get('libraries', []) if 'name' in library}
-    for library in config.get('platforms', {}).get('macos', {}).get('libraries', []):
+    platform_name = 'macos' if sys.platform == 'darwin' else ('windows' if os.environ.get('MSYSTEM') else 'linux')
+    for library in config.get('platforms', {}).get(platform_name, {}).get('libraries', []):
         if 'name' in library:
             external[library['name']] = library
 
@@ -112,7 +76,7 @@ def main():
         if name in visited_targets:
             return
         visited_targets.add(name)
-        for dependency in platform_libraries(target, True):
+        for dependency in platform_libraries(target, platform_name == 'macos'):
             library = external.get(dependency)
             if library:
                 if dependency in visited_external or library.get('link') != 'static':
@@ -131,10 +95,30 @@ def main():
     with open(makefile_path, encoding='utf-8') as source:
         content = source.read()
     if sys.argv[1:] == ['--sibling-archives']:
-        content = use_sibling_archives(content, root, external['curl']['lib'])
-        archives = select_sibling_native_archives(archives, root)
+        content = use_sibling_archives(content, root)
     elif sys.argv[1:]:
         raise RuntimeError('usage: patch_static_module_makefile.py [--sibling-archives]')
+    # Apple ld needs the dependency closure repeated after the first-party archives.
+    if platform_name != 'macos':
+        with open(makefile_path, 'w', encoding='utf-8') as output:
+            output.write(content)
+        return 0
+    # ThorVG enables OpenMP when Meson finds it; its installed pkg-config
+    # metadata records the matching runtime needed by a static host.
+    input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root).parent / 'lambda-input')).resolve()
+    env = dict(os.environ)
+    pkg_dir = str(input_root / 'build/deps/thorvg/lib/pkgconfig')
+    env['PKG_CONFIG_PATH'] = pkg_dir + os.pathsep + env.get('PKG_CONFIG_PATH', '')
+    flags = shlex.split(subprocess.check_output(
+        ['pkg-config', '--libs', '--static', 'thorvg'], env=env, text=True))
+    for flag in flags:
+        if flag.endswith('/libomp.dylib'):
+            omp_archive = Path(flag).with_suffix('.a')
+            if not omp_archive.is_file():
+                raise RuntimeError(f'ThorVG enabled OpenMP but its static runtime is missing: {omp_archive}')
+            archives.append(str(omp_archive))
+        elif flag in ('-lomp', '-lgomp'):
+            archives.append(flag)
     marker = '$(ALL_LDFLAGS) $(LIBS)'
     replacement = '$(ALL_LDFLAGS) $(LIBS) $(LAMBDA_STATIC_LATE_ARCHIVES)'
     if marker not in content:

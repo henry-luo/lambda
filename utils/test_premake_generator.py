@@ -67,8 +67,8 @@ def expect_static_runtime_providers(module, platform_name: str) -> None:
         generated = generate_validation_host(module, platform_name, dependencies)
         if '"node-core",' in generated:
             fail(f"{platform_name} static runtime host linked a replaceable Node module")
-        for provider in ('lambda-rt-cpp', 'radiant-cpp'):
-            if f'"{provider}",' not in generated:
+        for provider in ('lambda-rt-cpp', 'radiant'):
+            if f'lib{provider}.a' not in generated:
                 fail(f"{platform_name} runtime host omitted static provider {provider}")
         if option not in generated:
             fail(f"{platform_name} runtime test host omitted the D9.4.6 export allowlist")
@@ -176,7 +176,11 @@ def expect_profile_isolated_archives(module) -> None:
     for name in ('archive-readers', 'image-codecs', 're2'):
         library = generator.external_libraries[name]
         target = next(t for t in generator.config['targets'] if t['name'] == library['build_target'])
-        providers.append((name, target, library['lib']))
+        if '%{cfg.buildcfg}' not in library['lib']:
+            fail(f'{name} archive has no profile isolation')
+        # Build the synthetic provider only in the test directory.
+        target = dict(target, target_dir='build/lib/native/%{cfg.buildcfg}')
+        providers.append((name, target, f"build/lib/native/%{{cfg.buildcfg}}/lib{target['name']}.a"))
     utility = next(t for t in generator.config['targets'] if t['name'] == 'lambda-lib')
     utility_archive = generator._internal_static_archive('lambda-lib-cpp')
     emitted = generate_validation_host(module, 'linux', ['lambda-lib'])
@@ -186,8 +190,9 @@ def expect_profile_isolated_archives(module) -> None:
     emitted = '\n'.join(generator.premake_content)
     if emitted.count('targetdir "' + utility['target_dir'] + '"') != 2:
         fail('the utility implementation and wrapper do not share profile isolation')
-    providers.append(('lambda-lib', dict(utility, name='lambda-lib-cpp'),
-                      utility_archive.removeprefix('../../')))
+    providers.append(('lambda-lib', dict(utility, name='lambda-lib-cpp',
+                      target_dir='build/lib/native/%{cfg.buildcfg}'),
+                      'build/lib/native/%{cfg.buildcfg}/liblambda-lib-cpp.a'))
     for name, target, archive_path in providers:
         with tempfile.TemporaryDirectory(dir=ROOT / 'temp') as directory:
             work = Path(directory)
@@ -406,60 +411,30 @@ def expect_static_module_archive_profiles() -> None:
             if actual != expected:
                 fail(f"static-module archive profile {profile}: {actual} != {expected}")
 
-        # The split executable must replace both link inputs and prerequisites,
-        # without changing release profiles that use different archive builds.
+        # Both linker inputs and prerequisites must select each owner's profile.
         sandbox = Path(directory)
         root = sandbox / 'Lambda'
-        archives = ('lambda-input/build/lib/liblambda-input.a',
-                    'lambda-input/build/lib/liblambda-lib.a',
-                    'radiant/build/lib/libradiant.a',
-                    'radiant/build/lib/libradiant-properties.a')
-        native_archives = tuple(f'lambda-input/build/lib/native/debug/{name}' for name in
-                                ('libre2.a', 'liblambda-archive-readers.a', 'liblambda-image-codecs.a'))
-        curl_archive = 'lambda-input/build/deps/curl/lib/libcurl.a'
-        for archive in archives + native_archives + (curl_archive,):
-            path = sandbox / archive
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.touch()
-        old = ('../lib/liblambda-data-cpp.a ../lib/native/debug/liblambda-lib-cpp.a '
-               '../lib/libradiant-cpp.a ../lib/libradiant-properties.a')
-        old_native = ' '.join(f'../../build/lib/native/debug/{Path(name).name}' for name in native_archives)
-        old_native += ' ../../mac-deps/curl-8.10.1/lib/libcurl.a'
-        debug = f'LIBS += {old}\nLDDEPS += {old}\nLDDEPS += {old_native}\nALL_LDFLAGS += {old_native}\n'
-        release = f'LIBS += {old}\n'
-        source = f'ifeq ($(config),debug_native)\n{debug}else ifeq ($(config),release_native)\n{release}endif\n'
+        profiles = ('debug', 'debug_asan', 'release', 'release_profile', 'coverage')
+        common = ('../lib/liblambda-data-cpp.a ../lib/libradiant-cpp.a '
+                  '../lib/libradiant-properties.a')
+        source = ''.join(f'ifeq ($(config),{profile}_native)\n'
+                         f'LIBS += {common} ../lib/native/{profile}/liblambda-lib-cpp.a\n'
+                         f'LDDEPS += {common} ../lib/native/{profile}/liblambda-lib-cpp.a\nendif\n'
+                         for profile in profiles)
         previous = {key: os.environ.pop(key, None) for key in ('LAMBDA_INPUT_ROOT', 'RADIANT_ROOT')}
         try:
-            result = module.use_sibling_archives(source, str(root), 'mac-deps/curl-8.10.1/lib/libcurl.a')
-            original = str(root / 'build/lib/native/release/libre2.a')
-            choice = module.select_sibling_native_archives([original], str(root))[0]
-            original_curl = str(root / 'mac-deps/curl-8.10.1/lib/libcurl.a')
-            curl_choice = module.select_sibling_native_archives([original_curl], str(root))[0]
+            result = module.use_sibling_archives(source, str(root))
         finally:
             for key, value in previous.items():
                 if value is not None:
                     os.environ[key] = value
-        selected = result.split('else ifeq', 1)[0]
-        if any(selected.count(Path(archive).name) != 2 for archive in archives) or \
-                any(selected.count(Path(archive).name) != 2 for archive in native_archives + (curl_archive,)) or \
-                any(token in selected for token in old.split()) or \
-                any(token in selected for token in old_native.split()) or \
-                not result.endswith(f'{release}endif\n'):
-            fail('split link does not consistently use sibling debug archives')
-        makefile.write_text(f'ARCHIVE = {choice}\nall:\n\t@echo $(ARCHIVE)\n')
-        for profile, expected in [('debug_native', str(sandbox / native_archives[0])),
-                                  ('release_native', original)]:
-            actual = subprocess.check_output(['make', '-s', '-f', str(makefile), f'config={profile}'],
-                                             text=True).strip()
-            if actual != expected:
-                fail(f'split native archive profile {profile}: {actual} != {expected}')
-        makefile.write_text(f'ARCHIVE = {curl_choice}\nall:\n\t@echo $(ARCHIVE)\n')
-        for profile, expected in [('debug_native', str(sandbox / curl_archive)),
-                                  ('release_native', original_curl)]:
-            actual = subprocess.check_output(['make', '-s', '-f', str(makefile), f'config={profile}'],
-                                             text=True).strip()
-            if actual != expected:
-                fail(f'split curl archive profile {profile}: {actual} != {expected}')
+        if any(token in result for token in common.split()):
+            fail('split link retained generated sibling source archives')
+        for profile in profiles:
+            if result.count(f'lambda-input/build/lib/{profile}/liblambda-lib.a') != 2:
+                fail(f'split link lost {profile} input archive')
+        if result.count('$(notdir $(OBJDIR))/liblambda-input.a') != len(profiles) * 2:
+            fail('split link lost profile-specific input archive')
 
 
 def expect_radiant_property_ownership(module) -> None:

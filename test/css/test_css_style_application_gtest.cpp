@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
 #include "../../lambda/lambda.hpp"
-#include "../../lambda/input/input.hpp"
-#include "../../lambda/input/css/dom_element.hpp"
-#include "../../lambda/input/css/selector_matcher.hpp"
-#include "../../lambda/input/css/css_parser.hpp"
-#include "../../lambda/input/css/css_style.hpp"
-#include "../../lambda/input/css/css_style_node.hpp"
-#include "../../lambda/input/css/css_formatter.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/selector_matcher.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_style.hpp"
+#include "lambda/input/css/css_style_node.hpp"
+#include "lambda/input/css/css_formatter.hpp"
 
 extern "C" {
 #include "lib/mempool.h"

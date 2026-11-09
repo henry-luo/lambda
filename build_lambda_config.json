@@ -1,8 +1,16 @@
 {
   "config_imports": [
     "build_deps_config.json",
-    {"path": "../lambda-input/build_targets.json", "root_env": "LAMBDA_INPUT_ROOT", "root_path": "build_targets.json"},
-    {"path": "../radiant/build_targets.json", "root_env": "RADIANT_ROOT", "root_path": "build_targets.json"}
+    {
+      "path": "../lambda-input/build_targets.json",
+      "root_env": "LAMBDA_INPUT_ROOT",
+      "root_path": "build_targets.json"
+    },
+    {
+      "path": "../radiant/build_targets.json",
+      "root_env": "RADIANT_ROOT",
+      "root_path": "build_targets.json"
+    }
   ],
   "name": "lambda",
   "description": "Lambda: A modern functional scripting language for data processing and editing",
@@ -33,7 +41,7 @@
       ]
     },
     {
-      "script": "utils/generate_image_config.py",
+      "script": "${input_root}/scripts/generate_image_config.py",
       "args": [
         "build_lambda_config.json"
       ]
@@ -136,15 +144,15 @@
     "lambda/mir",
     "lib/re2",
     "lib/font/woff2/include",
-    "mac-deps/thorvg/src/bindings/capi"
+    "${input_root}/build/deps/thorvg/include"
   ],
   "libraries": [
     {
       "name": "curl",
       "version": "8.10.1",
       "description": "libcurl HTTP client library (built with mbedTLS)",
-      "include": "mac-deps/curl-8.10.1/include",
-      "lib": "mac-deps/curl-8.10.1/lib/libcurl.a",
+      "include": "${input_root}/build/deps/curl/include",
+      "lib": "${input_root}/build/deps/curl/lib/libcurl.a",
       "link": "static"
     },
     {
@@ -171,8 +179,8 @@
     {
       "name": "utf8proc",
       "version": "2.10.0",
-      "include": "build_temp/utf8proc",
-      "lib": "build_temp/utf8proc/build/libutf8proc.a",
+      "include": "${input_root}/build/deps/utf8proc/include",
+      "lib": "${input_root}/build/deps/utf8proc/lib/libutf8proc.a",
       "link": "static"
     },
     {
@@ -226,21 +234,21 @@
       "name": "brotlidec",
       "version": "1.2.0",
       "description": "Brotli decompression (WOFF2 dependency, built from source)",
-      "lib": "mac-deps/brotli/out/libbrotlidec.a",
+      "lib": "${input_root}/build/deps/brotli/lib/libbrotlidec.a",
       "link": "static"
     },
     {
       "name": "brotlicommon",
       "version": "1.2.0",
       "description": "Brotli common (WOFF2 dependency, built from source)",
-      "lib": "mac-deps/brotli/out/libbrotlicommon.a",
+      "lib": "${input_root}/build/deps/brotli/lib/libbrotlicommon.a",
       "link": "static"
     },
     {
       "name": "ThorVG",
       "description": "ThorVG vector graphics library (built from source)",
-      "include": "mac-deps/thorvg/inc",
-      "lib": "mac-deps/thorvg/build-mac/src/libthorvg.a",
+      "include": "${input_root}/build/deps/thorvg/include",
+      "lib": "${input_root}/build/deps/thorvg/lib/libthorvg.a",
       "link": "static",
       "version": "v1.0-pre34"
     },
@@ -290,7 +298,7 @@
       "version": "2023-03-01",
       "description": "RE2 regular expression library for string pattern matching",
       "include": "lib/re2",
-      "lib": "build/lib/%{cfg.platform}/%{cfg.buildcfg}/libre2.a",
+      "lib": "${input_root}/build/lib/native/%{cfg.buildcfg}/libre2.a",
       "link": "static",
       "build_target": "re2"
     },
@@ -331,12 +339,12 @@
     {
       "name": "image-codecs",
       "description": "Image I/O codecs built by the Lambda source target",
-      "lib": "build/lib/%{cfg.platform}/%{cfg.buildcfg}/liblambda-image-codecs.a",
-      "include": "build_temp/image-config/include",
+      "lib": "${input_root}/build/lib/native/%{cfg.buildcfg}/liblambda-image-codecs.a",
+      "include": "${input_root}/build_temp/image-config/include",
       "link": "static",
       "build_target": "lambda-image-codecs",
       "includes": [
-        "build_temp/image-config/include",
+        "${input_root}/build_temp/image-config/include",
         "lib/image/libpng",
         "lib/image/libjpeg-turbo/src",
         "lib/image/libwebp/src",
@@ -363,7 +371,7 @@
     {
       "name": "archive-readers",
       "description": "Pinned native archive reader source closure",
-      "lib": "build/lib/%{cfg.platform}/%{cfg.buildcfg}/liblambda-archive-readers.a",
+      "lib": "${input_root}/build/lib/native/%{cfg.buildcfg}/liblambda-archive-readers.a",
       "include": "lib/zip",
       "link": "static",
       "build_target": "lambda-archive-readers"
@@ -611,7 +619,8 @@
       "defines": [
         "UTF8PROC_STATIC"
       ],
-      "link": "static"
+      "link": "static",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}"
     },
     {
       "name": "lambda-boundary-core",
@@ -825,7 +834,8 @@
         "lambda-data",
         "lambda-lib"
       ],
-      "link": "static"
+      "link": "static",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}"
     },
     {
       "name": "lambda-safety-host",
@@ -1189,7 +1199,7 @@
         ".",
         "lambda/mir",
         "lib/re2",
-        "mac-deps/thorvg/src/bindings/capi"
+        "${input_root}/build/deps/thorvg/include"
       ],
       "exclude_libraries": [
         "glfw"
@@ -1442,8 +1452,8 @@
         {
           "name": "curl",
           "description": "libcurl HTTP client library (minimal build with Schannel)",
-          "include": "win-native-deps/include",
-          "lib": "win-native-deps/lib/libcurl.a",
+          "include": "${input_root}/build/deps/curl/include",
+          "lib": "${input_root}/build/deps/curl/lib/libcurl.a",
           "link": "static"
         },
         {
@@ -1454,8 +1464,8 @@
         },
         {
           "name": "utf8proc",
-          "include": "win-native-deps/include",
-          "lib": "win-native-deps/lib/libutf8proc.a",
+          "include": "${input_root}/build/deps/utf8proc/include",
+          "lib": "${input_root}/build/deps/utf8proc/lib/libutf8proc.a",
           "link": "static"
         },
         {
@@ -1681,8 +1691,8 @@
         },
         {
           "name": "ThorVG",
-          "include": "win-native-deps/include",
-          "lib": "win-native-deps/lib/libthorvg.a",
+          "include": "${input_root}/build/deps/thorvg/include",
+          "lib": "${input_root}/build/deps/thorvg/lib/libthorvg.a",
           "link": "static",
           "version": "v1.0-pre34"
         },
@@ -1706,14 +1716,16 @@
         {
           "name": "brotlidec",
           "description": "Brotli decompression (WOFF2 dependency)",
-          "lib": "/clang64/lib/libbrotlidec.a",
-          "link": "static"
+          "lib": "${input_root}/build/deps/brotli/lib/libbrotlidec.a",
+          "link": "static",
+          "include": "${input_root}/build/deps/brotli/include"
         },
         {
           "name": "brotlicommon",
           "description": "Brotli common (WOFF2 dependency)",
-          "lib": "/clang64/lib/libbrotlicommon.a",
-          "link": "static"
+          "lib": "${input_root}/build/deps/brotli/lib/libbrotlicommon.a",
+          "link": "static",
+          "include": "${input_root}/build/deps/brotli/include"
         },
         {
           "name": "bzip2",
@@ -1862,9 +1874,9 @@
       "libraries": [
         {
           "name": "curl",
-          "include": "/usr/include",
-          "lib": "-lcurl",
-          "link": "dynamic"
+          "include": "${input_root}/build/deps/curl/include",
+          "lib": "${input_root}/build/deps/curl/lib/libcurl.a",
+          "link": "static"
         },
         {
           "name": "fribidi",
@@ -1888,8 +1900,8 @@
         },
         {
           "name": "utf8proc",
-          "include": "/usr/include",
-          "lib": "/usr/lib/${multiarch}/libutf8proc.a",
+          "include": "${input_root}/build/deps/utf8proc/include",
+          "lib": "${input_root}/build/deps/utf8proc/lib/libutf8proc.a",
           "link": "static"
         },
         {
@@ -1938,8 +1950,8 @@
         },
         {
           "name": "ThorVG",
-          "include": "/usr/local/include",
-          "lib": "mac-deps/thorvg/build-linux/src/libthorvg.a",
+          "include": "${input_root}/build/deps/thorvg/include",
+          "lib": "${input_root}/build/deps/thorvg/lib/libthorvg.a",
           "link": "static",
           "version": "v1.0-pre34"
         },
@@ -1959,14 +1971,16 @@
         {
           "name": "brotlidec",
           "description": "Brotli decompression (WOFF2 dependency)",
-          "lib": "/usr/lib/${multiarch}/libbrotlidec.a",
-          "link": "static"
+          "lib": "${input_root}/build/deps/brotli/lib/libbrotlidec.a",
+          "link": "static",
+          "include": "${input_root}/build/deps/brotli/include"
         },
         {
           "name": "brotlicommon",
           "description": "Brotli common (WOFF2 dependency)",
-          "lib": "/usr/lib/${multiarch}/libbrotlicommon.a",
-          "link": "static"
+          "lib": "${input_root}/build/deps/brotli/lib/libbrotlicommon.a",
+          "link": "static",
+          "include": "${input_root}/build/deps/brotli/include"
         },
         {
           "name": "GL",
@@ -3822,8 +3836,14 @@
             "name": "Native Editing DOM Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/editing_dom_host.cpp", "radiant/script_loop_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/editing_dom_host.cpp",
+              "radiant/script_loop_host.cpp"
+            ],
             "binary": "test_radiant_editing_dom_host_gtest.exe"
           },
           {
@@ -3831,17 +3851,29 @@
             "name": "Native Scene3D Navigation Event Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/scene3d/scene3d_navigation_event_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/scene3d/scene3d_navigation_event_host.cpp"
+            ],
             "binary": "test_scene3d_navigation_event_host_gtest.exe"
           },
           {
             "source": "test_radiant_state_store_host_gtest.cpp",
             "name": "Native StateStore Host Tests",
             "radiant_native_sources_independent": true,
-            "dependencies": ["lambda-lib"],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/state_store_host.cpp"],
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/state_store_host.cpp"
+            ],
             "binary": "test_radiant_state_store_host_gtest.exe"
           },
           {
@@ -3849,8 +3881,13 @@
             "name": "Native DevTools Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/devtools_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/devtools_host.cpp"
+            ],
             "binary": "test_radiant_devtools_host_gtest.exe"
           },
           {
@@ -3884,18 +3921,38 @@
             "source": "test_radiant_source_path_gtest.cpp",
             "name": "Native Source Path Tests",
             "radiant_native_sources_independent": true,
-            "dependencies": ["lambda-data", "lambda-lib"],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/source_path.cpp", "radiant/source_path_value.cpp", "radiant/source_position_host.cpp"],
+            "dependencies": [
+              "lambda-data",
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/source_path.cpp",
+              "radiant/source_path_value.cpp",
+              "radiant/source_position_host.cpp"
+            ],
             "binary": "test_radiant_source_path_gtest.exe"
           },
           {
             "source": "test_radiant_svg_hit_gtest.cpp",
             "name": "Native SVG Hit Geometry Tests",
             "radiant_native_sources_independent": true,
-            "dependencies": ["lambda-data", "lambda-lib"],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/svg_hit.cpp", "radiant/rdt_path.cpp", "radiant/render_path_geometry.cpp"],
+            "dependencies": [
+              "lambda-data",
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/svg_hit.cpp",
+              "radiant/rdt_path.cpp",
+              "radiant/render_path_geometry.cpp"
+            ],
             "binary": "test_radiant_svg_hit_gtest.exe"
           },
           {
@@ -3903,8 +3960,13 @@
             "name": "Native SVG Length Axis Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/svg_length_axis.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/svg_length_axis.cpp"
+            ],
             "binary": "test_radiant_svg_length_gtest.exe"
           },
           {
@@ -3912,8 +3974,13 @@
             "name": "Native Resource Observer Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/resource_observer.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/resource_observer.cpp"
+            ],
             "binary": "test_radiant_resource_observer_gtest.exe"
           },
           {
@@ -3921,8 +3988,13 @@
             "name": "Native Event Simulation Script Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/event_sim_script_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/event_sim_script_host.cpp"
+            ],
             "binary": "test_radiant_event_sim_script_host_gtest.exe"
           },
           {
@@ -3930,8 +4002,13 @@
             "name": "Native Export Runtime Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/export_runtime_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/export_runtime_host.cpp"
+            ],
             "binary": "test_radiant_export_runtime_host_gtest.exe"
           },
           {
@@ -3939,8 +4016,13 @@
             "name": "Native Speech Event Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/speech_event_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/speech_event_host.cpp"
+            ],
             "binary": "test_radiant_speech_event_host_gtest.exe"
           },
           {
@@ -3948,8 +4030,13 @@
             "name": "Native Scene3D Physics Event Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/scene3d/scene3d_physics_event_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/scene3d/scene3d_physics_event_host.cpp"
+            ],
             "binary": "test_scene3d_physics_event_host_gtest.exe"
           },
           {
@@ -3957,8 +4044,13 @@
             "name": "Native PDF Export Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/pdf_export_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/pdf_export_host.cpp"
+            ],
             "binary": "test_radiant_pdf_export_host_gtest.exe"
           },
           {
@@ -3966,8 +4058,13 @@
             "name": "Native Layout Host Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/layout_host.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/layout_host.cpp"
+            ],
             "binary": "test_radiant_layout_host_gtest.exe"
           },
           {
@@ -3975,24 +4072,52 @@
             "name": "Native Scroll Observer Tests",
             "radiant_native_sources_independent": true,
             "dependencies": [],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/scroll_observer.cpp"],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/scroll_observer.cpp"
+            ],
             "binary": "test_radiant_scroll_observer_gtest.exe"
           },
           {
             "source": "test_radiant_no_script_host_gtest.cpp",
             "name": "Native Loader Without Script Host Tests",
-            "dependencies": ["lambda-rt", "node-core", "lambda-radiant-adapter", "radiant", "radiant-properties"],
-            "libraries": ["gtest", "gtest_main"],
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
             "binary": "test_radiant_no_script_host_gtest.exe"
           },
           {
             "source": "test_radiant_input_value_gtest.cpp",
             "name": "Native Input Value Tests",
             "radiant_native_sources_independent": true,
-            "dependencies": ["lambda-data", "lambda-lib"],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["radiant/input_value.cpp", "radiant/input_state.cpp", "radiant/select_options.cpp", "radiant/form_controls.cpp", "radiant/loader_runtime_host.cpp", "radiant/reactive_render_host.cpp", "radiant/stylesheet_sync.cpp"],
+            "dependencies": [
+              "lambda-data",
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/input_value.cpp",
+              "radiant/input_state.cpp",
+              "radiant/select_options.cpp",
+              "radiant/form_controls.cpp",
+              "radiant/loader_runtime_host.cpp",
+              "radiant/reactive_render_host.cpp",
+              "radiant/stylesheet_sync.cpp"
+            ],
             "binary": "test_radiant_input_value_gtest.exe"
           },
           {
@@ -4885,9 +5010,16 @@
           {
             "source": "test_input_math_gtest.cpp",
             "name": "Native Math Input Tests",
-            "dependencies": ["lambda-data"],
-            "libraries": ["gtest", "gtest_main"],
-            "additional_sources": ["test/test_input_test_helpers.cpp"],
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "test/test_input_test_helpers.cpp"
+            ],
             "binary": "test_input_math_gtest.exe"
           },
           {
@@ -5098,15 +5230,25 @@
           {
             "source": "test_input_dom_native_gtest.cpp",
             "name": "Native Input Document Tests",
-            "dependencies": ["lambda-data"],
-            "libraries": ["gtest", "gtest_main"],
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
             "binary": "test_input_dom_native_gtest.exe"
           },
           {
             "source": "test_input_blob_url_gtest.cpp",
             "name": "Input Blob URL Tests",
-            "dependencies": ["lambda-data"],
-            "libraries": ["gtest", "gtest_main"],
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
             "binary": "test_input_blob_url_gtest.exe"
           },
           {
@@ -5898,8 +6040,13 @@
           {
             "source": "test_editing_gc_gtest.cpp",
             "name": "Editing History GC Integration Tests",
-            "dependencies": ["lambda-lib"],
-            "libraries": ["gtest", "gtest_main"],
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
             "binary": "test_editing_gc_gtest.exe"
           },
           {

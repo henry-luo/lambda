@@ -2,7 +2,7 @@
 #include "radiant_pdf_text.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "radiant_image_job.hpp"
-#include "../../core/collection_storage.h"
+#include "lambda/core/collection_storage.h"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/lambda-error.h"
 #include "lib/math_checked.hpp"

@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../lambda/input/input.hpp"
-#include "../lambda/format/format.h"
+#include "lambda/input/input.hpp"
+#include "lambda/format/format.h"
 #include "lib/string.h"
 #include "lib/mempool.h"
 #include "lib/log.h"

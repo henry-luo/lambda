@@ -18,8 +18,9 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from split_paths import resolve_split_paths, sibling_roots, use_input_scripts
+use_input_scripts()
 from build_config import load_build_config, resolve_source_sets
-from split_paths import resolve_split_paths, sibling_roots
 
 # Verbosity: progress/DEBUG output is silenced by default so build invocations
 # stay quiet; pass --verbose (-V) to restore it. Real errors and warnings always
@@ -64,7 +65,8 @@ class PremakeGenerator:
         self.config = resolve_split_paths(raw_config)
         # Generated contracts must exist before any project consumes their headers.
         for generator in self.config.get('code_generators', []):
-            subprocess.run([sys.executable, generator['script'], *generator.get('args', [])], check=True)
+            script = generator['script'].replace('${input_root}', str(sibling_roots()[0]))
+            subprocess.run([sys.executable, script, *generator.get('args', [])], check=True)
         configurable_defines = self.config.get('configurable_defines', {})
         if configurable_defines:
             resolved_defines = self.config.setdefault('defines', [])
@@ -1397,8 +1399,27 @@ class PremakeGenerator:
         resolved.update(override)
         return resolved
 
+    def _sibling_archive(self, project_name: str) -> str | None:
+        """Return an owner-built archive for a concrete provider project."""
+        input_root, radiant_root = sibling_roots()
+        providers = {
+            'lambda-data-cpp': (input_root, 'liblambda-input.a'),
+            'lambda-lib-cpp': (input_root, 'liblambda-lib.a'),
+            'radiant-cpp': (radiant_root, 'libradiant.a'),
+            'radiant-properties': (radiant_root, 'libradiant-properties.a'),
+        }
+        provider = providers.get(project_name)
+        if provider:
+            return str(provider[0] / 'build/lib/%{cfg.buildcfg}' / provider[1])
+        if project_name in ('lambda-rt-cpp', 'lambda-radiant-adapter-cpp'):
+            return str(Path(__file__).resolve().parent.parent / f'build/lib/%{{cfg.platform}}/%{{cfg.buildcfg}}/lib{project_name}.a')
+        return None
+
     def _internal_static_archive(self, project_name: str) -> str:
         """Resolve configured archive directories for explicit linker groups too."""
+        sibling = self._sibling_archive(project_name)
+        if sibling:
+            return sibling
         target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
         target = next((target for target in self.config.get('targets', [])
                        if target.get('name') == target_name), {})
@@ -1454,7 +1475,7 @@ class PremakeGenerator:
         providers = []
         for name in libraries:
             provider = self.external_libraries.get(name, {}).get('build_target')
-            if provider and provider not in providers:
+            if provider and provider not in ('re2', 'lambda-archive-readers', 'lambda-image-codecs') and provider not in providers:
                 providers.append(provider)
         if providers:
             self.premake_content.append(
@@ -2078,6 +2099,10 @@ class PremakeGenerator:
                 '    }',
                 '    '
             ])
+
+        # The archive-linked host exposes the same Jube ABI as the main host.
+        if project_name == 'lambda-exe':
+            self.premake_content.extend(self._host_export_link_options())
 
         # Add platform-specific defines
         platform_defines = []
@@ -2704,13 +2729,13 @@ class PremakeGenerator:
                 additional_files = test.get('additional_files', [])
 
                 # Determine correct file path - use relative paths from project root
-                if source.startswith("test/"):
+                if source.startswith(("test/", "../")) or os.path.isabs(source):
                     test_file_path = source
                 else:
                     test_file_path = f"test/{source}"
 
                 # Ensure path exists before adding to project
-                actual_path = source if source.startswith("test/") else f"test/{source}"
+                actual_path = source if source.startswith(("test/", "../")) or os.path.isabs(source) else f"test/{source}"
                 full_path = os.path.join(os.getcwd(), actual_path)
                 if not os.path.exists(full_path):
                     elog(f"Warning: Test file not found: {actual_path}")
@@ -2921,7 +2946,7 @@ class PremakeGenerator:
             if project_name in internal_project_links:
                 return
             if not self.use_linux_config:
-                self.premake_content.append(f'        "{project_name}",')
+                self.premake_content.append(f'        "{self._sibling_archive(project_name) or project_name}",')
             internal_project_links.append(project_name)
 
         def internal_project_artifact(project_name: str) -> str:
@@ -3235,7 +3260,8 @@ class PremakeGenerator:
                 '    dependson {',
             ])
             for project_name in internal_project_links:
-                self.premake_content.append(f'        "{project_name}",')
+                if not self._sibling_archive(project_name):
+                    self.premake_content.append(f'        "{project_name}",')
             self.premake_content.extend([
                 '    }',
                 '    '

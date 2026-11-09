@@ -33,12 +33,12 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "../lambda/input/input.hpp"
-#include "../lambda/input/input-parsers.h"
-#include "../lambda/input/input-pdf-type1.hpp"
-#include "../lambda/input/pdf_decompress.h"
-#include "../lambda/io/mark_builder.hpp"
-#include "../lambda/core/mark_reader.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/input/input-parsers.h"
+#include "lambda/input/input-pdf-type1.hpp"
+#include "lambda/input/pdf_decompress.h"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "lib/log.h"
 #include "lib/url.h"
 #include "lib/strbuf.h"

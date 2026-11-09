@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
-#include "../../lambda/input/css/css_tokenizer.hpp"
-#include "../../lambda/input/css/css_value_parser.hpp"
-#include "../../lambda/input/css/css_parser.hpp"
-#include "../../lambda/input/css/css_engine.hpp"
-#include "../../lambda/input/css/dom_element.hpp"
-#include "../../lambda/input/css/css_formatter.hpp"
-#include "../../lambda/input/css/css_paged_media.hpp"
+#include "lambda/input/css/css_tokenizer.hpp"
+#include "lambda/input/css/css_value_parser.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_engine.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/css_formatter.hpp"
+#include "lambda/input/css/css_paged_media.hpp"
 #include "lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {

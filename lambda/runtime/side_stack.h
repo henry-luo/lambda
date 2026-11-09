@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 #ifdef __cplusplus
 extern "C" {

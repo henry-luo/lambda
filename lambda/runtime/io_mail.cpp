@@ -17,7 +17,7 @@
 #include "lambda-number-runtime.hpp"
 #include "re2_wrapper.hpp"
 #include "transpiler.hpp"
-#include "../network/curl_trust.h"
+#include "lambda/network/curl_trust.h"
 #include "lib/file.h"
 #include "lib/curl_runtime.h"
 #include "lib/log.h"

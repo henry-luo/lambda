@@ -13,7 +13,7 @@
 #include "js_headers.h"
 #include "js_response.h"
 #include "js_typed_array.h"
-#include "../core/js_well_known_names.h"
+#include "lambda/core/js_well_known_names.h"
 #include "../dom/dom_events.h"
 #include "../dom/dom_xhr.h"
 #include "js_error_codes.h"
@@ -38,10 +38,10 @@
 #include "../dom/dom_observers.h"
 #include "js_test262_fast_paths.h"
 #include "../lambda-data.hpp"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "../lambda.hpp"
-#include "../input/input-parsers.h"
-#include "../core/name_pool.hpp"
+#include "lambda/input/input-parsers.h"
+#include "lambda/core/name_pool.hpp"
 #include "../runtime/heap_api.h"
 #include "../runtime/transpiler.hpp"
 #include "../jube/jube_registry.h"
@@ -411,7 +411,7 @@ bool js_host_object_own_property_descriptor(Item object, Item key, Item* out) {
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
-#include "../format/format.h"
+#include "lambda/format/format.h"
 #include "lib/lambda_alloca.h"
 #include "lib/url.h"
 #include "lib/hex.h"

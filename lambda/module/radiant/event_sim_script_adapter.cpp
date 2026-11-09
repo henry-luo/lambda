@@ -3,7 +3,7 @@
 #include "radiant/event_sim_render.hpp"
 #include "radiant/event.hpp"
 #include "radiant/radiant.hpp"
-#include "../../input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
 #include "../../dom/dom.h"
 #include "../../dom/realm/dom_realm.h"
 #include "../../runtime/lambda-root-frame.hpp"

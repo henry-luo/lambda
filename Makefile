@@ -569,7 +569,7 @@ help:
 	@echo "  build-input-baseline - Build only native input baseline test executables"
 	@echo "  build-lambda-baseline - Build Lambda baseline runtime and input test executables"
 	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
-	@echo "  build-lambda-split - Link debug lambda-static.exe against the sibling archives (macOS)"
+	@echo "  build-lambda-split - Link Lambda against sibling archives"
 	@echo "  test-split-fetch   - Test split CLI HTTPS fetch and resource cleanup (macOS)"
 	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
 	@echo "  build-jube-test - Build the lambda-jube compatibility link and test executables"
@@ -711,31 +711,9 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: $(MIR_LIB)
-	@$(PYTHON) utils/check_split_roots.py
-	@# Debug and release share lambda.exe; a release marker requires a debug relink.
-	@if [ -f .lambda_release_build ]; then rm -f lambda.exe .lambda_release_build; fi
-ifeq ($(IS_MSYS2),yes)
-	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
-	PATH="/clang64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	$(call windows_dll_check)
-	@echo "✅ Build completed successfully!"
-else
-	@echo "Building $(PROJECT_NAME) using Premake build system..."
-	$(call toolchain_verify)
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	@$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	# Ensure explicit compiler variables are passed to Premake build
-	@echo "Using CC=$(CC) CXX=$(CXX)"
-	$(call run_make_with_error_summary,lambda)
-endif
+build:
+	@$(MAKE) build-lambda-split SPLIT_PROFILE=debug SPLIT_OUTPUT=lambda.exe
+	@rm -f .lambda_release_build
 
 print-vars:
 	@echo "Unicode support: Always enabled (utf8proc)"
@@ -762,22 +740,7 @@ test-js-parser-diff:
 
 
 # Debug build
-debug: $(MIR_LIB)
-	@rm -f .lambda_release_build 2>/dev/null || true
-	@# debug and release share lambda.exe; force the debug-profile relink when
-	@# a newer non-profile host would otherwise satisfy the target timestamp.
-	@rm -f lambda.exe
-	@echo "Building debug version using Premake build system..."
-	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
-	$(call toolchain_verify)
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable (debug) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
-	@echo "Debug build completed. Executable: lambda.exe"
-	$(call windows_dll_check)
+debug: build
 
 # Release build (optimized with size reduction)
 # Optimizations applied:
@@ -798,62 +761,18 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: $(MIR_LIB)
-	@# debug and release share lambda.exe; force the release relink when a
-	@# newer debug-profile host would otherwise satisfy the target timestamp.
-	@rm -f lambda.exe
-	@echo "Building release version using Premake build system..."
-	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
-	$(call toolchain_verify)
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable (release) with $(JOBS) parallel jobs..."
-	$(call run_make_with_error_summary,lambda,release_native)
-ifeq ($(OS),Darwin)
-	@echo "Stripping debug symbols (macOS)..."
-	@strip -x lambda_release.exe 2>/dev/null || strip -x lambda.exe 2>/dev/null || true
-else
-	@echo "Stripping debug symbols..."
-	@strip lambda_release.exe 2>/dev/null || strip lambda.exe 2>/dev/null || true
-endif
-	@echo "Release build completed."
-	@ls -lh lambda_release.exe 2>/dev/null || ls -lh lambda.exe 2>/dev/null || true
+build-release-compile:
+	@$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=lambda.exe
 	@$(PYTHON) utils/check_host_exports.py --host lambda.exe
 	@touch .lambda_release_build
 	$(call windows_dll_check)
 
-build-release-profile: $(MIR_LIB)
-	@echo "Building release_profile version using Premake build system..."
-	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
-	$(call toolchain_verify)
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable (release_profile) with $(JOBS) parallel jobs..."
-	$(call run_make_with_error_summary,lambda,release_profile_native)
-	@echo "Release profile build completed."
-	@ls -lh lambda-profile.exe 2>/dev/null || true
+build-release-profile:
+	@$(MAKE) build-lambda-split SPLIT_PROFILE=release_profile SPLIT_OUTPUT=lambda-profile.exe
 	@$(PYTHON) utils/check_host_exports.py --host lambda-profile.exe
-	$(call windows_dll_check,lambda-profile.exe)
 
-# Explicit AddressSanitizer debug build. The output is separate from the normal
-# lambda.exe host so switching sanitizer coverage does not replace the fast host.
-build-debug-asan: $(MIR_LIB)
-	@echo "Building debug_asan version using Premake build system..."
-	@echo "Optimizations: -Og with symbols, frame pointers, AddressSanitizer"
-	$(call toolchain_verify)
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable (debug_asan) with $(JOBS) parallel jobs..."
-	$(call run_make_with_error_summary,lambda,debug_asan_native)
-	@echo "Debug ASan build completed. Executable: lambda-debug-asan.exe"
-	@ls -lh lambda-debug-asan.exe 2>/dev/null || true
-	$(call windows_dll_check,lambda-debug-asan.exe)
+build-debug-asan:
+	@$(MAKE) build-lambda-split SPLIT_PROFILE=debug_asan SPLIT_OUTPUT=lambda-debug-asan.exe
 
 # Runtime-only CLI build (no Radiant, JavaScript/DOM, Jube or HTTP server)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
@@ -3250,14 +3169,10 @@ clean-premake:
 	@echo "Premake5 artifacts cleaned."
 
 build-lambda-data:
-	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building the lambda-data static archive..."; fi
-	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Generating Premake configuration..."; fi
+	$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE=debug -j$(JOBS)
 	@mkdir -p build/premake
 	@$(MAKE) --no-print-directory TEST_BUILD_QUIET=$(TEST_BUILD_QUIET) generate-premake
-	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Generating makefiles..."; fi
-	@out=$$(cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-	$(call run_make_with_error_summary,lambda-data,debug_native,,lambda-data-cpp)
-	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "✅ lambda-data static archive built successfully!"; fi
+	@cd build/premake && $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 
 .PHONY: test-input-isolation-check check-input-archive-headers check-input-isolation check-radiant-input-value-isolation check-radiant-svg-hit-isolation check-radiant-package-layout-isolation check-radiant-source-path-isolation check-radiant-state-store-isolation
 test-input-isolation-check:
@@ -3290,52 +3205,33 @@ check-radiant-package-layout-isolation: build-lambda-data test-input-isolation-c
 	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_layout_custom_gtest)
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-package-layout
 
-build-lambda-rt: build-lambda-data
-	@echo "Building the lambda-rt static archive..."
-	@mkdir -p build/premake
-	$(MAKE) generate-premake
-	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	$(call run_make_with_error_summary,lambda-rt,debug_native,,lambda-rt-cpp)
-	@echo "✅ lambda-rt static archive built successfully!"
+build-lambda-rt:
+	$(MAKE) build-lambda-split SPLIT_PROFILE=debug
 
-build-radiant: build-lambda-rt
-	@echo "Building the radiant static archive..."
-	@mkdir -p build/premake
-	$(MAKE) generate-premake
-	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	$(call run_make_with_error_summary,radiant,debug_native,,radiant-cpp)
-	@echo "✅ radiant static archive built successfully!"
+build-radiant:
+	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE=debug -j$(JOBS)
 
-build-lambda-static: build-radiant
-	@echo "Linking the static-module Lambda executable..."
-	@mkdir -p build/premake
-	$(MAKE) generate-premake
-	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	$(PYTHON) utils/patch_static_module_makefile.py
-	$(call run_make_with_error_summary,lambda-exe,debug_native,,lambda-exe)
-	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_radiant_archive_ownership.py
-	@echo "✅ static-module Lambda executable built successfully!"
+build-lambda-static:
+	$(MAKE) build-lambda-split SPLIT_PROFILE=debug
 
-# Build the split providers directly; the general build remains transitional.
+# Every normal host links separately built sibling providers.
+SPLIT_PROFILE ?= debug
+SPLIT_OUTPUT ?= lambda-static.exe
+SPLIT_INPUT_ROOT = $(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))
+SPLIT_RADIANT_ROOT = $(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))
 .PHONY: build-lambda-split
 build-lambda-split: $(MIR_LIB)
-	@test "$$(uname -s)" = Darwin || { echo "Sibling archive integration currently supports macOS only"; exit 1; }
-	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" RADIANT_ROOT="$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" $(PYTHON) utils/check_split_roots.py
+	LAMBDA_INPUT_ROOT="$(SPLIT_INPUT_ROOT)" RADIANT_ROOT="$(SPLIT_RADIANT_ROOT)" $(PYTHON) utils/check_split_roots.py
 	$(MAKE) generate-premake
-	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	@echo "Building the sibling input and Radiant archives..."
-	$(MAKE) -C "$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" curl-deps
-	$(MAKE) -C "$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" INPUT_DEPS_ROOT="$(CURDIR)" CURL_PREFIX="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))/build/deps/curl" -j$(JOBS)
-	$(MAKE) -C "$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" INPUT_DEPS_ROOT="$(CURDIR)" -j$(JOBS) native-deps
-	$(MAKE) -C "$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" DEPS_ROOT="$(CURDIR)" -j$(JOBS)
-	@# Static archive creation does not link its declared library dependencies.
-	$(call run_make_with_error_summary,split-runtime,debug_native,-f lambda-rt-cpp.make LDDEPS=,all)
-	$(call run_make_with_error_summary,split-adapters,debug_native,-f lambda-radiant-adapter-cpp.make LDDEPS=,all)
-	$(call run_make_with_error_summary,split-node-core,debug_native,-f node-core.make,all)
+	cd build/premake && $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" -j$(JOBS)
+	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" -j$(JOBS)
+	$(call run_make_with_error_summary,split-runtime,$(SPLIT_PROFILE)_native,-f lambda-rt-cpp.make LDDEPS=,all)
+	$(call run_make_with_error_summary,split-adapters,$(SPLIT_PROFILE)_native,-f lambda-radiant-adapter-cpp.make LDDEPS=,all)
+	$(call run_make_with_error_summary,split-node-core,$(SPLIT_PROFILE)_native,-f node-core.make,all)
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-core
-	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" RADIANT_ROOT="$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" $(PYTHON) utils/patch_static_module_makefile.py --sibling-archives
-	$(call run_make_with_error_summary,lambda-exe-split,debug_native,-f lambda-exe.make -B,all)
-	@echo "✅ Lambda static executable linked against sibling input and Radiant archives"
+	LAMBDA_INPUT_ROOT="$(SPLIT_INPUT_ROOT)" RADIANT_ROOT="$(SPLIT_RADIANT_ROOT)" $(PYTHON) utils/patch_static_module_makefile.py --sibling-archives
+	$(call run_make_with_error_summary,lambda-exe-split,$(SPLIT_PROFILE)_native,-f lambda-exe.make -B TARGET=../../$(SPLIT_OUTPUT),all)
 
 .PHONY: test-split-fetch
 test-split-fetch: build-lambda-split
@@ -3362,13 +3258,9 @@ build-input-baseline: build-lambda-data
 build-lambda-baseline: build-input-baseline build-node-core build-node-fs build-node-crypto
 	@echo "Building the Lambda baseline runtime and native test executables..."
 	@if [ -f .lambda_release_build ]; then \
-		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
-		rm -f lambda.exe; \
-		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)"; \
+		$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=lambda.exe; \
 	else \
-		echo "Rebuilding lambda.exe in debug mode (incremental)..."; \
-		rm -f lambda.exe; \
-		$(MAKE) -C build/premake config=debug_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)"; \
+		$(MAKE) build-lambda-split SPLIT_PROFILE=debug SPLIT_OUTPUT=lambda.exe; \
 	fi
 	$(call run_make_with_error_summary,lambda-baseline,debug_native,,$(LAMBDA_BASELINE_TEST_PROJECTS))
 
@@ -3385,58 +3277,29 @@ check-module-boundary:
 # the generated all target includes rdb-drivers, whose pinned client libraries
 # must be prepared before the aggregate build.
 build-test: build-lambda-data build-windows-host-import build-rdb-drivers test-premake-generator
-	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building tests using Premake5..."; fi
-	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building configurations..."; fi
-	@mkdir -p build/premake
-	@# Drop a backup left behind by an interrupted earlier run. The restore step
-	@# below keys on this file merely existing, so a stale one silently replaces
-	@# a freshly built lambda.exe with an older binary -- which surfaces much
-	@# later as "unknown option" for a flag that is in fact implemented. Clearing
-	@# it here makes "the backup exists" mean "this invocation created it".
-	@rm -f .lambda_build_backup.exe
-	@$(MAKE) --no-print-directory TEST_BUILD_QUIET=$(TEST_BUILD_QUIET) generate-premake
-	@out=$$(cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-# If last build was release, rebuild lambda.exe incrementally in release mode.
-# debug and release share lambda.exe; force a relink before copying the host.
 	@if [ -f .lambda_release_build ]; then \
-		echo "Rebuilding lambda.exe in release mode (incremental) — log: temp/build_tests_lambda.log"; \
-		rm -f lambda.exe; \
-		mkdir -p temp; \
-		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" > temp/build_tests_lambda.log 2>&1 || { echo "❌ release lambda rebuild failed (see temp/build_tests_lambda.log):"; tail -20 temp/build_tests_lambda.log; exit 1; }; \
-		cp -p lambda.exe .lambda_build_backup.exe; \
+		$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=lambda.exe; \
+	else \
+		$(MAKE) build-lambda-split SPLIT_PROFILE=debug SPLIT_OUTPUT=lambda.exe; \
 	fi
-	@echo "Building all test executables (debug mode, $(TEST_JOBS) jobs)..."
-	$(call run_make_with_error_summary,tests,debug_native,,all)
-	@# The debug "all" target also rebuilds hosted modules; refresh every
-	@# manifest before restoring the release host. Otherwise a rebuilt Node DSO
-	@# retains its previous digest and all module-backed JS tests fail at load.
+	$(MAKE) build-lambda-split SPLIT_PROFILE=debug SPLIT_OUTPUT=lambda-static.exe
+	@# Select test projects explicitly: the generated all target also contains
+	@# legacy source-provider projects and the old monolithic host.
+	@projects=$$(awk '/^test_[^ :]+:/ { sub(/:$$/, "", $$1); print $$1 }' build/premake/Makefile); \
+		$(MAKE) -C build/premake config=debug_native $$projects -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@for module_dir in modules/node-core modules/node-fs; do \
 		$(PYTHON) utils/update_jube_manifest_integrity.py $$module_dir || exit 1; \
 	done
-	@# Restore release lambda.exe over the debug one
-	@if [ -f .lambda_build_backup.exe ]; then \
-		echo "Restoring release lambda.exe..."; \
-		mv .lambda_build_backup.exe lambda.exe; \
-	fi
 
 # Radiant baseline needs lambda plus its focused native runners; building every test
 # project made unrelated suites dominate this gate after a clean build.
 build-radiant-baseline:
-	@echo "Building the Radiant baseline runtime and native test runners..."
-	@mkdir -p build/premake
-	$(MAKE) generate-premake
-	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	@echo "Building lambda-data static archive with $(TEST_JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=$(RADIANT_TEST_CONFIG) lambda-data-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@if [ -f .lambda_release_build ]; then \
-		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
-		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
+		$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=lambda.exe; \
 	else \
-		echo "Rebuilding lambda.exe in debug mode (incremental)..."; \
-		rm -f lambda.exe; \
-		$(MAKE) -C build/premake config=debug_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
+		$(MAKE) build-lambda-split SPLIT_PROFILE=debug SPLIT_OUTPUT=lambda.exe; \
 	fi
-	@echo "Building Radiant baseline test executables ($(RADIANT_TEST_CONFIG), $(TEST_JOBS) jobs)..."
+	$(MAKE) build-lambda-split SPLIT_PROFILE=$(patsubst %_native,%,$(RADIANT_TEST_CONFIG)) SPLIT_OUTPUT=lambda-static.exe
 	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=$(RADIANT_TEST_CONFIG) $(RADIANT_BASELINE_TEST_PROJECTS) -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 
 # Capture browser layout references using Puppeteer

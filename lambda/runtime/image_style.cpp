@@ -1,5 +1,5 @@
 #include "image_raster.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "lib/image_process.h"
 #include <math.h>
 

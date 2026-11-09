@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "../lambda/input/input.hpp"
-#include "../lambda/network/http_client.h"
+#include "lambda/input/input.hpp"
+#include "lambda/network/http_client.h"
 #include "lib/url.h"
 #include "lib/string.h"
 #include "lib/mempool.h"

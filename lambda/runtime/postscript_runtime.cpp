@@ -1,5 +1,5 @@
-#include "../input/input-postscript.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/input/input-postscript.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "eval_context.hpp"
 
 extern "C" Item fn_ps_scan(Item source, Item offset, Item options) {

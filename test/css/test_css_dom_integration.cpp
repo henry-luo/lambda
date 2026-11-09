@@ -11,16 +11,16 @@
 extern "C" const char* __lsan_default_options() { return "exitcode=0"; }
 #endif
 
-#include "../../lambda/input/css/dom_element.hpp"
-#include "../../lambda/input/css/dom_lifecycle.hpp"
-#include "../../lambda/input/css/selector_matcher.hpp"
-#include "../../lambda/input/css/css_style.hpp"
-#include "../../lambda/input/css/css_style_node.hpp"
-#include "../../lambda/input/css/css_parser.hpp"
-#include "../../lambda/input/css/css_engine.hpp"
-#include "../../lambda/io/mark_builder.hpp"
-#include "../../lambda/core/well_known_markup_names.h"
-#include "../../lambda/input/input.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/selector_matcher.hpp"
+#include "lambda/input/css/css_style.hpp"
+#include "lambda/input/css/css_style_node.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_engine.hpp"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/core/well_known_markup_names.h"
+#include "lambda/input/input.hpp"
 #include "helpers/css_test_helpers.hpp"
 
 extern "C" {

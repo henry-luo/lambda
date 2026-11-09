@@ -3,12 +3,12 @@
 
 #include <gtest/gtest.h>
 
-#include "../lambda/network/curl_multi_backend.h"
-#include "../lambda/network/cookie_jar.h"
-#include "../lambda/network/enhanced_file_cache.h"
-#include "../lambda/network/network_resource_manager.h"
-#include "../lambda/network/network_scheduler.h"
-#include "../lambda/input/css/dom_element.hpp"
+#include "lambda/network/curl_multi_backend.h"
+#include "lambda/network/cookie_jar.h"
+#include "lambda/network/enhanced_file_cache.h"
+#include "lambda/network/network_resource_manager.h"
+#include "lambda/network/network_scheduler.h"
+#include "lambda/input/css/dom_element.hpp"
 #include "lib/file.h"
 #include "lib/mem.h"
 #include "lib/url.h"

@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <ctype.h>
-#include "../lambda/lambda.h"
+#include "lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"  // This includes the Input struct definition
 #include "lib/arraylist.h"
 #include "lib/strbuf.h"

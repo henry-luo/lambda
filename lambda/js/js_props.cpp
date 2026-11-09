@@ -10,7 +10,7 @@
 #include "js_state_guards.h"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
-#include "../core/name_pool.hpp"
+#include "lambda/core/name_pool.hpp"
 #include "../runtime/lambda-root-frame.hpp"
 #include <math.h>
 
@@ -28,7 +28,7 @@ extern "C" NameId js_symbol_name_id(Item sym);
 // constants we need here. Keep these in lockstep with js_runtime.cpp:188 and
 // the Item value layout — these are stable ABI.
 #ifndef JS_DELETED_SENTINEL_VAL
-#  include "../lambda.h"
+#  include "lambda/lambda.h"
 #endif
 
 JS_FORWARD_STATIC_EXPRESSION(bool, js_props_is_deleted_sentinel, (Item v),

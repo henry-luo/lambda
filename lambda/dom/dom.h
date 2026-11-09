@@ -12,7 +12,7 @@
  */
 #pragma once
 
-#include "../input/css/dom_xml_serializer.h"
+#include "lambda/input/css/dom_xml_serializer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,7 +28,7 @@ void dom_svg_invalidate_presentation(void* node);
 
 
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 // =============================================================================
 // DOM Context Management

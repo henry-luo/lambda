@@ -1,6 +1,6 @@
 #include "lib/confined_process.h"
 #include "lib/process_sandbox.h"
-#include "../../lambda/io/security_channel.h"
+#include "lambda/io/security_channel.h"
 #include "lib/mem.h"
 #include "lib/hex.h"
 #include "lib/time_util.h"

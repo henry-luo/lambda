@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lambda/io/security_channel.h"
+#include "lambda/io/security_channel.h"
 #include "../lambda/host/safety/file_broker.h"
 #include "lib/endian.h"
 #include "lib/file_utils.h"

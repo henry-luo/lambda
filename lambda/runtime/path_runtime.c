@@ -1,10 +1,10 @@
 // Runtime filesystem path providers. Address representation stays in core;
 // file metadata, listing and content acquisition use the neutral I/O client.
 #include <stdbool.h>
-#include "../lambda.h"
-#include "../core/lambda-path.h"
-#include "../io/security_io.h"
-#include "../io/target.h"
+#include "lambda/lambda.h"
+#include "lambda/core/lambda-path.h"
+#include "lambda/io/security_io.h"
+#include "lambda/io/target.h"
 #include "side_stack.h"
 #include "lambda-error.h"
 #include "security_context.h"

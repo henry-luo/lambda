@@ -9,7 +9,7 @@
 #include "dom_host_engine.h"
 #include "dom_collection_types.h"
 #include "dom_event_host.h"
-#include "../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "lib/provider.hpp"
 
 // Native providers belong to the lower runtime; native module registration

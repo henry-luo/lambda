@@ -32,7 +32,7 @@ extern "C" {
 #include "lib/sqlite/sqlite3.h"
 }
 
-#include "../lambda/input/rdb_query.h"
+#include "lambda/input/rdb_query.h"
 
 /* ══════════════════════════════════════════════════════════════════════
  * Helpers

@@ -9,7 +9,7 @@
 #include "../../runtime/transpiler.hpp"
 #include "../../runtime/interp.hpp"
 #include "../../runtime/runtime-state.h"
-#include "../../io/mark_output_builder.hpp"
+#include "lambda/io/mark_output_builder.hpp"
 #include "lib/file.h"
 #include "lib/log.h"
 

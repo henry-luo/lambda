@@ -1,1 +1,0 @@
-../../lambda-input/scripts/build_config.py

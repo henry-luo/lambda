@@ -2,7 +2,7 @@
 #include "js_source_module.hpp"
 #include "../runtime/activation.h"
 #include "js_execution_internal.hpp"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "../jube/jube_registry.h"
 
 #include <limits.h>

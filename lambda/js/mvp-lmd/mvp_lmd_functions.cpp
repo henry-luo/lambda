@@ -4,12 +4,12 @@
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/side_stack.h"
 #include "../../runtime/heap_api.h"
-#include "../../core/js_well_known_names.h"
+#include "lambda/core/js_well_known_names.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
 #include "../js_function.hpp"
 #include "../js_builtin_catalog.hpp"
-#include "../../input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "lib/mem.h"
 #include <math.h>
 

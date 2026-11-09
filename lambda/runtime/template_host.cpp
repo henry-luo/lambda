@@ -3,7 +3,7 @@
 #include "transpiler.hpp"
 #include "runtime-state.h"
 #include "heap_api.h"
-#include "../input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "../js/js_runtime_state.hpp"
 #include "lib/memtrack.h"
 #include "lib/log.h"

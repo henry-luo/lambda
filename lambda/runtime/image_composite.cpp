@@ -2,7 +2,7 @@
 #include "image_process.hpp"
 #include "transpiler.hpp"
 #include "lambda-number-runtime.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include <math.h>
 
 bool lambda_image_tag(Item item, const char* tag) {

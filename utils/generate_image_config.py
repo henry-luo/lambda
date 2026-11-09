@@ -1,1 +1,0 @@
-../../lambda-input/scripts/generate_image_config.py

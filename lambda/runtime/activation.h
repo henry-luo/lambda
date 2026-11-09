@@ -14,7 +14,7 @@
 // Lambda task); a weak one is traced only through its owner's trace hook
 // (`activation_trace`), so an unreachable owner lets it be collected.
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "lambda-error.h"
 
 #ifdef __cplusplus

@@ -6,8 +6,8 @@
 #include "../mir_container_access.hpp"
 #include "../mir_path.hpp"
 #include "../mir_function_value.hpp"
-#include "../../io/mark_builder.hpp"
-#include "../../io/mark_output_builder.hpp"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/io/mark_output_builder.hpp"
 #include "lib/math_checked.hpp"
 
 static MIR_op_t reg(MvpCompiler* c, MIR_reg_t r) { return MIR_new_reg_op(c->em.ctx, r); }

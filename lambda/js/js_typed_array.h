@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "lib/byte_storage.h"
 
 typedef enum JsTypedArrayType {

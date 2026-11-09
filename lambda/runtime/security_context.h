@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
-#include "../io/security_io.h"
+#include "lambda/io/security_io.h"
 
 typedef struct EvalContext EvalContext;
 typedef struct Path Path;

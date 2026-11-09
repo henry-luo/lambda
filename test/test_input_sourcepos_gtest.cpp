@@ -14,13 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../lambda/core/data.hpp"
-#include "../lambda/input/input.hpp"
-#include "../lambda/input/markup/markup_highlight.hpp"
-#include "../lambda/input/markup/markup_parser.hpp"
-#include "../lambda/input/html5/html5_parser.h"
-#include "../lambda/io/input-allocation-context.h"
-#include "../lambda/core/mark_reader.hpp"
+#include "lambda/core/data.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/input/markup/markup_highlight.hpp"
+#include "lambda/input/markup/markup_parser.hpp"
+#include "lambda/input/html5/html5_parser.h"
+#include "lambda/io/input-allocation-context.h"
+#include "lambda/core/mark_reader.hpp"
 #include "lib/arraylist.h"
 #include "lib/arraylist.hpp"
 #include "lib/file.h"

@@ -2,8 +2,8 @@
 
 #include <stdint.h>
 #include "source_span.h"
-#include "../core/operator.h"
-#include "../lambda.h"
+#include "lambda/core/operator.h"
+#include "lambda/lambda.h"
 #include "value_rep.h"
 
 typedef struct NamePool NamePool;

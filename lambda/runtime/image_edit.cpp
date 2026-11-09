@@ -2,7 +2,7 @@
 #include "heap_api.h"
 #include "lambda-error.h"
 #include "lambda-number-runtime.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "value_builder.hpp"
 #include "lib/image_process.h"
 #include <math.h>

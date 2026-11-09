@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 struct JsEventLoopState;
 

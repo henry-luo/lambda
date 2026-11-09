@@ -5,8 +5,8 @@
 //   Phase 2: Top-down re-transform of dirty entries only
 #pragma once
 
-#include "../lambda.h"
-#include "../core/render_bridge.hpp"
+#include "lambda/lambda.h"
+#include "lambda/core/render_bridge.hpp"
 #include <stdbool.h>
 
 #ifdef __cplusplus

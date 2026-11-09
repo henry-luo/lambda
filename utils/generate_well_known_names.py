@@ -6,6 +6,7 @@ import re
 import sys
 
 from well_known_names_data import CSS_PROPERTY_SPELLINGS, MARKUP_ENTRY_SYMBOLS, POOLS
+from split_paths import sibling_roots
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -153,13 +154,13 @@ def render_lookup_header():
 
 def outputs():
     for pool, (label, entries) in POOLS.items():
-        base = ROOT / "lambda/core"
+        base = sibling_roots()[0] / "lambda/core"
         stem = "js_well_known_names" if label == "js" else "well_known_%s_names" % label
         yield base / (stem + ".h"), render_header(pool, label, entries)
         yield base / (stem + ".c"), render_source(pool, label, entries)
-    yield ROOT / "lambda/input/css/well_known_css_property_mapping.h", render_css_property_mapping_header()
-    yield ROOT / "lambda/input/css/css_declaration_attributes.h", render_css_declaration_attributes()
-    yield ROOT / "lambda/core/well_known_name_lookup.h", render_lookup_header()
+    yield sibling_roots()[0] / "lambda/input/css/well_known_css_property_mapping.h", render_css_property_mapping_header()
+    yield sibling_roots()[0] / "lambda/input/css/css_declaration_attributes.h", render_css_declaration_attributes()
+    yield sibling_roots()[0] / "lambda/core/well_known_name_lookup.h", render_lookup_header()
 
 def entry_parts(entry):
     if len(entry) == 2:

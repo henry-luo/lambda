@@ -1,1 +1,0 @@
-../../radiant/test/test_scene3d_navigation_event_host_gtest.cpp

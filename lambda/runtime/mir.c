@@ -12,7 +12,7 @@
 #include "lib/hashmap_helpers.h"
 #include "mir.h"
 #include "mir-gen.h"
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "lambda-error.h"
 #include "runtime-state.h"
 #include "sys_func_registry.h"

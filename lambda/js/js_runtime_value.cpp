@@ -1,7 +1,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
 #include "js_object_meta.h"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lib/str.h"
 
 

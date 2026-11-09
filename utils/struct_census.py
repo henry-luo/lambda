@@ -143,10 +143,14 @@ def module_of(rel: str, cfg: dict) -> str:
 def discover_tus(cfg: dict) -> list[str]:
     exts = tuple(cfg["tu_extensions"])
     out = []
-    for src in cfg["source_dirs"]:
-        # The remaining input migration link is a source root, not a leaf file.
-        for dirpath, dirnames, filenames in os.walk(source_path(src), followlinks=True):
-            suffix = os.path.relpath(dirpath, source_path(src))
+    roots = list(cfg["source_dirs"])
+    if "lambda" in roots:
+        roots.extend("lambda/" + name for name in ("core", "io", "network", "format", "input"))
+    for src in roots:
+        # The input core and Lambda core coexist at the same logical prefix.
+        physical = INPUT_ROOT / src if src.startswith("lambda/") and src in ("lambda/core", "lambda/io", "lambda/network", "lambda/format", "lambda/input") else source_path(src)
+        for dirpath, dirnames, filenames in os.walk(physical, followlinks=True):
+            suffix = os.path.relpath(dirpath, physical)
             rel_dir = src if suffix == '.' else os.path.join(src, suffix)
             # prune excluded subtrees so we never walk into sqlite/tree-sitter
             dirnames[:] = [

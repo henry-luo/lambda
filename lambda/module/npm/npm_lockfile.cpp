@@ -10,7 +10,7 @@
 #include "lib/escape.h"
 #include "lib/stringbuf.h"
 #include "../../lambda-data.hpp"
-#include "../../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 // forward-declare JSON parser to avoid transitive input.hpp linkage issues
 class Input;
 Item parse_json_to_item(Input* input, const char* json_string);

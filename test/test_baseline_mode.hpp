@@ -1,1 +1,0 @@
-../../lambda-input/test/test_baseline_mode.hpp

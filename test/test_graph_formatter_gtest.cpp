@@ -4,9 +4,9 @@
 #include <string.h>
 #include <stdbool.h>
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/input/input.hpp"
-#include "../lambda/input/input-graph.h"
-#include "../lambda/format/format.h"
+#include "lambda/input/input.hpp"
+#include "lambda/input/input-graph.h"
+#include "lambda/format/format.h"
 #include "lib/arraylist.h"
 #include "lib/mempool.h"
 #include "lib/url.h"

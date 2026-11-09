@@ -5,7 +5,7 @@
 #include "edit_bridge.h"
 #include "lambda-root-frame.hpp"
 #include "ast.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "lib/log.h"
 #include "lib/mempool.h"
 #include "lib/memtrack.h"

@@ -18,8 +18,8 @@
 #include "../lambda/runtime/type_contract.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/lambda-number-runtime.hpp"
-#include "../lambda/input/input.hpp"
-#include "../lambda/core/name_pool.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/core/name_pool.hpp"
 #include "lib/hashmap.h"
 #include "lib/memtrack.h"
 

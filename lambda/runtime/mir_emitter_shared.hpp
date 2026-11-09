@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../lambda-data.hpp"
-#include "../core/name_pool.hpp"
+#include "lambda/core/name_pool.hpp"
 #include "sys_func_registry.h"
 #include "mir_dump.h"
 #include "lib/arraylist.h"

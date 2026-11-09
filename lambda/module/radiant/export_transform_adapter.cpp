@@ -2,7 +2,7 @@
 #include "radiant/render.hpp"
 #include "radiant/radiant.hpp"
 #include "../../runtime/transpiler.hpp"
-#include "../../input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
 #include "lib/mem_factory.h"
 #include "lib/url.h"
 #include "lib/log.h"

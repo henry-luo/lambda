@@ -1,7 +1,7 @@
 #include "js_interp.hpp"
 #include "js_execution_internal.hpp"
 #include "js_transpiler.hpp"
-#include "../input/input-script-cache.h"
+#include "lambda/input/input-script-cache.h"
 #include "../runtime/module_ast_prebuild.hpp"
 #include "../runtime/transpiler.hpp"
 #include "lib/file.h"

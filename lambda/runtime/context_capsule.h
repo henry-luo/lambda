@@ -15,7 +15,7 @@
 // runs for realm-lifetime capsules when the heap is replaced, `destroy` when
 // the context goes away. Adding a subsystem never edits an unrelated list.
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 #ifdef __cplusplus
 extern "C" {

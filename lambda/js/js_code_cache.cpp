@@ -2,7 +2,7 @@
 #include "js_execution_internal.hpp"
 #include "mvp-lmd/mvp_lmd.h"
 #include "../jube/jube_interface.h"
-#include "../input/input.hpp"
+#include "lambda/input/input.hpp"
 
 #include "lib/log.h"
 #include "lib/mem.h"

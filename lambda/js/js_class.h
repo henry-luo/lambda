@@ -4,7 +4,7 @@
 
 #include <string.h>
 #include <assert.h>
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "../lambda-data.hpp"
 #include "../runtime/lambda-error.h"
 

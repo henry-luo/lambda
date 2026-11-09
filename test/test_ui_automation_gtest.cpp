@@ -41,9 +41,9 @@
 #include <chrono>
 #include <pthread.h>
 
-#include "../lambda/input/input.hpp"
-#include "../lambda/input/input-parsers.h"
-#include "../lambda/core/mark_reader.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/input/input-parsers.h"
+#include "lambda/core/mark_reader.hpp"
 #include "lib/mempool.h"
 #include "lib/memtrack.h"
 

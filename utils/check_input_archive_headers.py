@@ -9,13 +9,13 @@ import sys
 from split_paths import sibling_roots
 
 ROOT = Path(__file__).resolve().parent.parent
-BUILD_DIR = ROOT / "build" / "premake"
+BUILD_DIR = sibling_roots()[0]
 INPUT_ROOT, RADIANT_ROOT = sibling_roots()
 FORBIDDEN = (("lambda", "runtime"), ("lambda", "js"), ("lambda", "dom"),
              ("lambda", "module"), ("radiant",))
 ARCHIVES = (
-    (ROOT / "build/lib/liblambda-data-cpp.a", ROOT / "build/obj/lambda-data-cpp/native/debug"),
-    (ROOT / "build/lib/native/debug/liblambda-lib-cpp.a", ROOT / "build/obj/lambda-lib-cpp/native/debug"),
+    (INPUT_ROOT / "build/lib/debug/liblambda-input.a", INPUT_ROOT / "build/obj/data/debug"),
+    (INPUT_ROOT / "build/lib/debug/liblambda-lib.a", INPUT_ROOT / "build/obj/lib/debug"),
 )
 
 
@@ -26,8 +26,6 @@ def input_dependencies(depfile: Path):
     if not separator:
         raise ValueError(f"invalid dependency rule: {depfile}")
     for token in shlex.split(prerequisites):
-        if not token.startswith("..") and not Path(token).is_absolute():
-            continue
         source = Path(os.path.normpath(BUILD_DIR / token))
         for project, prefix in ((INPUT_ROOT, Path()),
                                 (RADIANT_ROOT / 'radiant', Path('radiant')),
@@ -68,8 +66,9 @@ def check_archive(archive: Path, object_dir: Path) -> bool:
         return False
     errors = []
     for name in objects:
-        obj = object_dir / name
-        depfile = object_dir / (Path(name).stem + ".d")
+        candidates = list(object_dir.rglob(name))
+        obj = candidates[0] if len(candidates) == 1 else object_dir / name
+        depfile = obj.with_name(obj.name + ".d")
         if not obj.is_file() or not depfile.is_file():
             errors.append(f"{name}: object or compiler dependency file missing")
             continue
@@ -100,7 +99,10 @@ def check_archive_ownership() -> bool:
     try:
         for archive, object_dir in ARCHIVES:
             for member in archive_members(archive):
-                depfile = object_dir / (Path(member).stem + ".d")
+                candidates = list(object_dir.rglob(member))
+                if len(candidates) != 1:
+                    raise ValueError(f"cannot locate unique object: {member}")
+                depfile = candidates[0].with_name(candidates[0].name + ".d")
                 source = next(input_dependencies(depfile))
                 previous = owners.setdefault(source, archive.name)
                 if previous != archive.name:

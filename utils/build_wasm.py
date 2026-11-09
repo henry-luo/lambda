@@ -12,8 +12,9 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from split_paths import resolve_split_paths, use_input_scripts
+use_input_scripts()
 from build_config import load_build_config
-from split_paths import resolve_split_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]

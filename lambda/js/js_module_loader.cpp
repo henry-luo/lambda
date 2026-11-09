@@ -1,6 +1,6 @@
 #include "js_execution_internal.hpp"
-#include "../core/mark_reader.hpp"
-#include "../input/input.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/input/input.hpp"
 #include "../jube/jube_registry.h"
 #include "lib/file.h"
 #include "lib/url.h"

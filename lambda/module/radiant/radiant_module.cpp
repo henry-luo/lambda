@@ -1,9 +1,9 @@
 #include "radiant_runtime_init.hpp"
 #include "event_adapter.hpp"
 #include "../../jube/jube_registry.h"
-#include "../../input/css/dom_element.hpp"
-#include "../../io/input-allocation-context.h"
-#include "../../core/mark_reader.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/io/input-allocation-context.h"
+#include "lambda/core/mark_reader.hpp"
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/interp.hpp"
 #include "../../runtime/transpiler.hpp"
@@ -5202,12 +5202,12 @@ static const JubeTypeDef radiant_types[] = {
 #define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
     {#host, JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
 #define CSS_RULE_INTERFACE_ALIAS(...)
-#include "../../input/css/css_rule_interfaces.def"
+#include "lambda/input/css/css_rule_interfaces.def"
 #undef CSS_RULE_INTERFACE_ALIAS
 #undef CSS_RULE_INTERFACE
 #define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
     {#host, RADIANT_READONLY_INDEXED | JUBE_TYPE_NATIVE_NAMED | JUBE_TYPE_JS_EXACT_NAMES, NULL, NULL},
-#include "../../input/css/css_declaration_interfaces.def"
+#include "lambda/input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
     {"validity_state", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"broadcast_channel", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_broadcast_destroy},

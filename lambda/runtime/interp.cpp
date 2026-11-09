@@ -8,7 +8,7 @@
 // `items[]`/`data` pointer may ever be cached across an allocating call.
 
 #include "interp.hpp"
-#include "../io/mark_output_builder.hpp"
+#include "lambda/io/mark_output_builder.hpp"
 #include "output_demand.hpp"
 #include <signal.h>
 #include "compiler_worker_stack.h"

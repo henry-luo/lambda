@@ -30,26 +30,26 @@
 #include "lib/str.h"
 #include "lib/url.h"
 // str.h included via view.hpp
-#include "../../input/css/dom_element.hpp"
-#include "../../input/css/dom_lifecycle.hpp"
-#include "../../input/css/style_epoch.hpp"
-#include "../../input/css/selector_matcher.hpp"
-#include "../../input/css/css_parser.hpp"
-#include "../../input/css/css_engine.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/style_epoch.hpp"
+#include "lambda/input/css/selector_matcher.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_engine.hpp"
 #include "../../runtime/template_registry.h"
 #include "../../runtime/interp.hpp"
 #include "../../runtime/render_map.h"
 #include "../../runtime/edit_bridge.h"
-#include "../../lambda.h"         // Context (input_context)
+#include "lambda/lambda.h"         // Context (input_context)
 #include "../../lambda-data.hpp"  // EvalContext
 #include "../../runtime/transpiler.hpp"
 #include "../../runtime/value_builder.hpp"
-#include "../../core/mark_reader.hpp"
-#include "../../input/input.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/input/input.hpp"
 #include "radiant_dom_bridge.hpp"   // Runtime (heap and name_pool)
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/gc/gc_heap.h"
-#include "../../io/mark_builder.hpp" // MarkBuilder for event object construction
+#include "lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../../dom/dom.h"      // dom_set_document for HTML event handlers
 #include "radiant/form_controls.hpp"
 #include "radiant/stylesheet_sync.hpp"

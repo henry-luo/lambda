@@ -2,7 +2,7 @@
 #include "../lambda/host/safety/admission.h"
 #include "../lambda/host/safety/private_storage.h"
 #include "../lambda/host/safety/state_store.h"
-#include "../lambda/io/security_channel.h"
+#include "lambda/io/security_channel.h"
 #include "lib/file_utils.h"
 #include "lib/digest.h"
 #include "lib/hex.h"

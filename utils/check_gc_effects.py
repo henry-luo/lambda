@@ -25,7 +25,9 @@ from split_paths import logical_project_path, sibling_roots
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / "lambda" / "runtime" / "sys_func_registry.c"
-SOURCE_ROOTS = (ROOT / "lambda", sibling_roots()[0] / "lib")
+SOURCE_ROOTS = (ROOT / "lambda", sibling_roots()[0] / "lib",
+                *(sibling_roots()[0] / "lambda" / part
+                  for part in ("core", "io", "network", "format", "input")))
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 SKIP_SOURCE_PARTS = {
     "node_modules", "package", "re2", "sqlite", "tree-sitter", "tree-sitter-bash",

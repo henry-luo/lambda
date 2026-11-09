@@ -3,7 +3,7 @@
 #ifdef __cplusplus
 #include "../lambda-data.hpp"
 #else
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #endif
 
 #ifdef __cplusplus

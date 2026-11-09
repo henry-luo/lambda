@@ -1,1 +1,0 @@
-../../../lambda-input/lambda/io/snapshot_identity.hpp

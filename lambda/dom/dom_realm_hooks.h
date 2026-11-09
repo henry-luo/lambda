@@ -12,7 +12,7 @@
  * out with them.
  */
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 /** `new DocumentFragment()` — a detached fragment on the current document. */
 extern "C" Item dom_document_fragment_ctor(void);

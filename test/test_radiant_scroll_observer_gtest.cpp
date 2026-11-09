@@ -1,1 +1,0 @@
-../../radiant/test/test_radiant_scroll_observer_gtest.cpp

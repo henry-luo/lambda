@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 from pathlib import Path
+from split_paths import project_source_path
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -60,7 +61,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("--output", type=Path,
-                        default=ROOT / "lambda/input/css/css_language_data.h")
+                        default=project_source_path("lambda/input/css/css_language_data.h"))
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     generated = generate(args.source.read_text(encoding="utf-8"))

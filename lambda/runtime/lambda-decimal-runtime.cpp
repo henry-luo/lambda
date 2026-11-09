@@ -1,6 +1,6 @@
 // Runtime decimal results own GC-backed Decimal headers.
 // Input owns representation, formatting, and arena constructors.
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "../lambda-data.hpp"
 #include "heap_api.h"
 #include "runtime-state.h"

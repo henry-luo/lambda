@@ -11,14 +11,14 @@
  */
 
 #include <gtest/gtest.h>
-#include "../lambda/io/mark_builder.hpp"
-#include "../lambda/io/mark_editor.hpp"
-#include "../lambda/core/mark_reader.hpp"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/io/mark_editor.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/lambda.hpp"
-#include "../lambda/input/input.hpp"
-#include "../lambda/core/name_pool.hpp"
-#include "../lambda/core/print.h"
+#include "lambda/input/input.hpp"
+#include "lambda/core/name_pool.hpp"
+#include "lambda/core/print.h"
 #include "lib/mempool.h"
 #include "lib/arena.h"
 #include "lib/log.h"

@@ -1,8 +1,8 @@
 #include "validator_internal.hpp"
-#include "../core/mark_reader.hpp"  // MarkReader API for type-safe traversal
+#include "lambda/core/mark_reader.hpp"  // MarkReader API for type-safe traversal
 #include "../runtime/re2_wrapper.hpp"  // for pattern_full_match
 #include "../runtime/binary_schema.hpp"
-#include "../core/lambda-decimal.hpp"  // for decimal literal comparison
+#include "lambda/core/lambda-decimal.hpp"  // for decimal literal comparison
 
 static bool validator_is_map_kind(ConstItem item) {
     // D9.5.5: virtual storage still inhabits the generic map kind.

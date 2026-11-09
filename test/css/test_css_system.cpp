@@ -4,9 +4,9 @@
 #include <chrono>
 #include <cinttypes>
 
-#include "../../lambda/input/css/css_style.hpp"
-#include "../../lambda/input/css/css_style_node.hpp"
-#include "../../lambda/core/well_known_markup_names.h"
+#include "lambda/input/css/css_style.hpp"
+#include "lambda/input/css/css_style_node.hpp"
+#include "lambda/core/well_known_markup_names.h"
 
 extern "C" {
 #include "lib/mempool.h"

@@ -12,8 +12,8 @@
 
 #include "sysinfo.h"
 #include "../lambda-data.hpp"
-#include "../input/input.hpp"
-#include "../io/mark_builder.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/io/mark_builder.hpp"
 #include "context_capsule.h"
 #include "transpiler.hpp"
 #include "lib/log.h"

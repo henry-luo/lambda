@@ -5,7 +5,7 @@
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
-#include "../../input/input.hpp"
+#include "lambda/input/input.hpp"
 
 static Item proxy_trap(Item handler, const char* name) {
     RootFrame roots(2);

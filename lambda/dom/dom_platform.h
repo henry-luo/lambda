@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "lib/language_preferences.h"
 #include <stddef.h>
 

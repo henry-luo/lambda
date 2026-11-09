@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
-#include "../lambda/input/input.hpp"
-#include "../lambda/input/input-parsers.h"
-#include "../lambda/input/input-postscript.hpp"
-#include "../lambda/core/mark_reader.hpp"
-#include "../lambda/input/pdf_decompress.h"
+#include "lambda/input/input.hpp"
+#include "lambda/input/input-parsers.h"
+#include "lambda/input/input-postscript.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/input/pdf_decompress.h"
 #include "lib/strbuf.h"
 #include "lib/base64.h"
 #include <png.h>

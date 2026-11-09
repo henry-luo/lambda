@@ -1,1 +1,0 @@
-../../radiant/test/test_radiant_no_script_host_gtest.cpp

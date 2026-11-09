@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../lambda/input/input.hpp"
-#include "../lambda/format/format.h"
+#include "lambda/input/input.hpp"
+#include "lambda/format/format.h"
 #include "lib/log.h"
 
 class MdxRoundtripTest : public ::testing::Test {

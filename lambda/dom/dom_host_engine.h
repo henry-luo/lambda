@@ -1,9 +1,9 @@
 #pragma once
 
 #include "dom_provider.hpp"
-#include "../input/css/dom_svg_context.h"
+#include "lambda/input/css/dom_svg_context.h"
 #include "../lambda-data.hpp"
-#include "../input/css/css_style.hpp"
+#include "lambda/input/css/css_style.hpp"
 #include <math.h>
 
 struct DomElement;

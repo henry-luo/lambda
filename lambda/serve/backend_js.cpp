@@ -14,7 +14,7 @@
 #include "serve_utils.hpp"
 #include "lib/log.h"
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 #include <string.h>
 #include <sys/stat.h>

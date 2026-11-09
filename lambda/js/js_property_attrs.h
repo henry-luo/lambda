@@ -19,7 +19,7 @@
  */
 #pragma once
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "../lambda-data.hpp"
 
 #ifdef __cplusplus

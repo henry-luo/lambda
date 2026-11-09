@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../io/security_policy.h"
+#include "lambda/io/security_policy.h"
 #include "lib/file.h"
 #include <stddef.h>
 

@@ -1,4 +1,4 @@
-#include "../io/mark_output_builder.hpp"
+#include "lambda/io/mark_output_builder.hpp"
 #include "native_collection.hpp"
 #include "heap_api.h"  // owner header: its LAMBDA_RT_API markers must reach these definitions
 #include "transpiler.hpp"
@@ -17,13 +17,13 @@
 #include "../js/js_runtime.h"
 #include "../js/js_typed_array.h"
 #include "../js/js_typed_array_carrier.hpp"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include "side_stack.h"
 #include "activation.h"
 #include "sysinfo.h"
 #include "template_state.h"
-#include "../core/binary.h"
+#include "lambda/core/binary.h"
 #include <math.h>
 #include <errno.h>
 #include <stdlib.h>

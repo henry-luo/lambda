@@ -17,7 +17,7 @@
 #include "../core/codepoint_interval.h"
 #include "js_regex_generated_properties.h"
 #include "js_regex_wrapper.h"   // JsRegexScratch (LR09-30)
-#include "../core/utf_string.h"
+#include "lambda/core/utf_string.h"
 #include <utf8proc.h>
 #include <stdlib.h>
 #include <string.h>

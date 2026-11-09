@@ -12,7 +12,7 @@
 #include "../re2_wrapper.hpp"
 #include "../lambda-stack.h"
 #include "../transpiler.hpp"
-#include "../../io/mark_builder.hpp"
+#include "lambda/io/mark_builder.hpp"
 #include "lib/arena.h"
 #include "lib/arraylist.h"
 #include "lib/hashmap.h"

@@ -265,11 +265,8 @@ def walk_sources(root):
 
 def project_sources():
     yield from walk_sources(REPO_ROOT)
-    for prefix in ('lib', 'radiant', 'lambda/input'):
-        path = source_path(prefix)
-        # Lambda's input migration link is not traversed by the normal walk.
-        if prefix == 'lambda/input' and not os.path.islink(path):
-            continue
+    for prefix in ('lib', 'radiant', 'lambda/input', 'lambda/io', 'lambda/network', 'lambda/format', 'lambda/core'):
+        path = sibling_roots()[0] / prefix if prefix == "lambda/core" else source_path(prefix)
         for rel in walk_sources(path):
             yield os.path.join(prefix, rel)
 

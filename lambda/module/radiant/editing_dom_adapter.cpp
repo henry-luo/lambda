@@ -4,7 +4,7 @@
 #include "radiant/editing_dom_host.hpp"
 #include "radiant/event.hpp"
 #include "radiant/view.hpp"
-#include "../../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../dom/dom.h"
 #include "../../dom/dom_observers.h"

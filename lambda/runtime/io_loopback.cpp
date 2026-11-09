@@ -23,7 +23,7 @@
 
 #include <string.h>
 
-#include "../network/socket_utils.h"
+#include "lambda/network/socket_utils.h"
 
 extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root(uint64_t* slot);

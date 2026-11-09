@@ -9,8 +9,8 @@
 #include "../module/node_core/node_runtime_state.hpp"
 #include "../module/node_core/node_trace_events.hpp"
 #undef js_input
-#include "../input/input.hpp"
-#include "../input/input-script-cache.h"
+#include "lambda/input/input.hpp"
+#include "lambda/input/input-script-cache.h"
 #include "../runtime/lambda-error.h"
 #include "../runtime/recovery_frame.h"
 #include "../runtime/mir_dump.h"

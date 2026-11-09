@@ -18,7 +18,7 @@
 // ordinary array.
 
 #include "lib/arraylist.h"
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-#include "../lambda/input/input.hpp"
+#include "lambda/input/input.hpp"
 
 extern "C" {
     #include "lib/mempool.h"

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../core/data.hpp"
+#include "lambda/core/data.hpp"
 
 struct Scene3dParticles;
 Item scene3d_particles_trail_read(Scene3dParticles* state, Item request);

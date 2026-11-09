@@ -11,9 +11,9 @@
 #include "dom.h"
 #include "dom_xhr.h"
 #include "realm/dom_realm.h"
-#include "../input/css/dom_element.hpp"
-#include "../network/cookie_jar.h"
-#include "../network/http_client.h"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/network/cookie_jar.h"
+#include "lambda/network/http_client.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_event_loop.h"
 #include "../js/js_typed_array.h"
@@ -32,7 +32,7 @@
 #include "lib/mime-detect.h"
 
 #include <curl/curl.h>
-#include "../network/curl_trust.h"
+#include "lambda/network/curl_trust.h"
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>

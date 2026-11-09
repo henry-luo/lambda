@@ -1,1 +1,0 @@
-../../../lambda-input/lambda/core/collection_storage.cpp

@@ -9,7 +9,7 @@
 #include "lib/mempool.h"
 #include "lib/hashmap.h"
 #include "lib/hashmap_typed.hpp"
-#include "../input/input-script-cache.h"
+#include "lambda/input/input-script-cache.h"
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>

@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "lambda-error.h"
 #include "side_stack.h"
 

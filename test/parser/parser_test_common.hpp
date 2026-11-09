@@ -17,7 +17,7 @@
 #include <cstring>
 #include <cstdlib>
 #include "../../lambda/lambda-data.hpp"
-#include "../../lambda/input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "lib/log.h"
 #include "lib/url.h"
 

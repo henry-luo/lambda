@@ -3,7 +3,7 @@
 #include "test_input_test_helpers.hpp"
 #include "test_wiki_script_helper.hpp"
 #include "test_markup_emitter_fixture.hpp"
-#include "../lambda/input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "lib/log.h"
 #include "lib/url.h"
 #include <stdlib.h>

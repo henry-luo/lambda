@@ -7,7 +7,7 @@
 #include "../../runtime/interp.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/lambda-root-frame.hpp"
-#include "../../input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "lib/host_paths.h"
 #include "lib/log.h"
 #include "lib/memtrack.h"

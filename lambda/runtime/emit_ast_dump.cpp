@@ -13,9 +13,9 @@
 #include "transpiler.hpp"
 #include "ast_build.hpp"          // lambda_rd_reduce_ast: the production C parser
 #include "type_contract.hpp"
-#include "../input/input.hpp"
-#include "../input/input-script-cache.h"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/input/input-script-cache.h"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lib/file.h"
 #include "lib/log.h"
 

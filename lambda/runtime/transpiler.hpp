@@ -3,8 +3,8 @@
 #include "lib/document_transform.h"
 
 #include "lib/log.h"
-#include "../io/input-allocation-context.h"
-#include "../io/resource_policy.h"
+#include "lambda/io/input-allocation-context.h"
+#include "lambda/io/resource_policy.h"
 
 #include "../lambda-data.hpp"
 

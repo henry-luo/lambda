@@ -7,7 +7,7 @@
 #include "js_class.h"
 #include "js_object_meta.h"
 #include "js_typed_array.h"
-#include "../core/name_pool.hpp"
+#include "lambda/core/name_pool.hpp"
 #include "lib/ownership.hpp"
 #include "lib/utf.h"
 #include "lib/str.h"

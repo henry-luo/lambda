@@ -14,7 +14,7 @@
  * mechanism or is a two-line delegation to it.
  */
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "dom_broadcast_channel.h"
 
 struct DomDocument;

@@ -4,6 +4,35 @@
 
 ## Current checkpoint
 
+### Complete source and normal-build ownership split
+
+- **Goal:** remove input-owned source and header links from Lambda; each normal
+  build compiles only its own sources and consumes lower-layer archives
+  (D9.1.1v4, D9.1.3v2, D9.4.6).
+- **Acceptance:** Lambda has no input-owned files or source links, Radiant does
+  not require Lambda artifacts, and normal Lambda, input, and Radiant builds
+  use the owning projects' archives across their supported profiles. Preserve
+  script and event ownership, existing profiles, and all test coverage.
+- **Execution order:** finish source placement, manifests, build graph, profile
+  handling, and migration tooling together. Audit the complete result before
+  running builds or tests, as requested. Then qualify native boundaries, normal
+  and split profiles, Lambda/Radiant aggregates, and Test262.
+- **In progress:** removed Lambda's input-owned source links and relocated its
+  archived network stub to input; redirected owner-relative includes and
+  generator paths. Added profile-specific input and Radiant archive builds and
+  changed the normal Lambda host entry points to use those archives.
+- **Build verification (macOS arm64, 2026-11-09):** normal debug and release
+  builds succeeded for input and Radiant and the Lambda host linked against
+  their profile-specific archives. The release host export check passed (284
+  names). Fixed remaining input-header include paths, the split host export
+  allowlist, and ThorVG's detected OpenMP archive dependency during the builds.
+  No tests were run. Some installed Homebrew archives report a newer macOS
+  deployment version than the host's 15.7 target.
+- **Still outstanding:** legacy test/isolation and specialized build graphs,
+  platform dependency closure beyond this macOS host, and behavioral and
+  aggregate regression verification. Do not treat the full split as complete.
+
+
 ### Lambda project without top-level source links
 
 - **Goal:** remove Lambda's top-level `lib` and `radiant` directory links and
@@ -84,10 +113,9 @@
   and runs decimal fixtures; the native whole-archive client still passes.
 - **Aggregate checks:** Lambda remains at 9,291 passed, one known MVP helper
   mismatch and 25 skipped out of 9,317 cases. On the sibling-linked debug
-  executable Test262 passed 40,258 in the batch, with three slow cases passing
-  on retry, zero regressions and 2,652 skips (`decimal-owned-test262.log`).
-  Radiant aggregate qualification with the split executable selected for UI
-  and view tests is in progress.
+  executable before the Jube-link correction Test262 passed 40,258 in the
+  batch, with three slow cases passing on retry, zero regressions and 2,652
+  skips (`decimal-owned-test262.log`).
 
 ### Split host startup and Jube loading
 
@@ -96,9 +124,15 @@
   via `@loader_path`. The regular host loads this Jube module on demand.
 - Removed the unnecessary direct link. The split host now starts from a pinned
   copy and successfully loads `node-core` for a `string_decoder` script. The
-  split integration target includes this regression check; the full Radiant
-  aggregate is being rerun with the corrected host. Test262 must also be
-  repeated against this final binary (D9.1.1v4, D9.4.6).
+  split integration target includes this regression check. The full Radiant
+  aggregate passes with 7,975 passed, 303 partial and 21 skipped; UI and view
+  tests use the corrected split executable (`late-node-core-radiant-baseline.log`).
+  Test262 on that binary passed 40,257 in the batch, with four slow cases
+  passing on retry, zero regressions and 2,652 skips
+  (`late-node-core-test262.log`, `late-node-core-test262-provenance.txt`)
+  (D9.1.1v4, D9.4.6).
+- Forced and poisoned GC replay of `dom_iframe_retire` passes all five
+  assertions using that same split executable (`late-node-core-iframe-gc.log`).
 
 ### Radiant input headers without directory links
 

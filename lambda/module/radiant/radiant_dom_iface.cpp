@@ -10,7 +10,7 @@
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "../../jube/jube.h"
-#include "../../input/css/css_declaration_attributes.h"
+#include "lambda/input/css/css_declaration_attributes.h"
 #include "lib/log.h"
 
 extern const JubeHostAPI* radiant_host_api;
@@ -112,7 +112,7 @@ const char radiant_dom_interface_decl[] =
 #define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
     "type " #host " : " #host_base " { " CSS_RULE_SHAPE_##shape " }\n"
 #define CSS_RULE_INTERFACE_ALIAS(...)
-#include "../../input/css/css_rule_interfaces.def"
+#include "lambda/input/css/css_rule_interfaces.def"
 #undef CSS_RULE_INTERFACE_ALIAS
 #undef CSS_RULE_INTERFACE
 #undef CSS_RULE_SHAPE_empty
@@ -270,7 +270,7 @@ const char radiant_dom_interface_decl[] =
 #define CSS_DECLARATION_FIELD(field) "    '" #field "': string,\n"
 #define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
     "type " #host " : rule_style_decl {\n" metadata##_FIELDS(CSS_DECLARATION_FIELD) "}\n"
-#include "../../input/css/css_declaration_interfaces.def"
+#include "lambda/input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
 #undef CSS_DECLARATION_FIELD
     "type inline_style : css_style_properties {}\n"
@@ -886,7 +886,7 @@ static const JubeMemberBind radiant_rule_decl_members[] = {
     static const JubeMemberBind host##_members[] = { \
         metadata##_ATTRIBUTES(CSS_DECLARATION_ATTRIBUTE) \
     };
-#include "../../input/css/css_declaration_interfaces.def"
+#include "lambda/input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
 #undef CSS_DECLARATION_ATTRIBUTE
 #undef CSSOM_METHOD
@@ -1788,7 +1788,7 @@ static Item radiant_rule_declaration_prototype(void) {
     static Item host##_prototype(void) { \
         return dom_realm_constructor_prototype(#name); \
     }
-#include "../../input/css/css_declaration_interfaces.def"
+#include "lambda/input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
 
 static int radiant_element_style_prototype(Item, Item* out) {
@@ -1965,7 +1965,7 @@ static Item css_condition_prototype(void) {
         return radiant_host_api->dom_catalog->rule_type_prototype(#name); \
     }
 #define CSS_RULE_INTERFACE_ALIAS(...)
-#include "../../input/css/css_rule_interfaces.def"
+#include "lambda/input/css/css_rule_interfaces.def"
 #undef CSS_RULE_INTERFACE_ALIAS
 #undef CSS_RULE_INTERFACE
 
@@ -2038,7 +2038,7 @@ extern const JubeTypeBinding radiant_dom_type_bindings[] = {
      (int32_t)(sizeof(host##_members) / sizeof(host##_members[0])), \
      rd_named_get, rd_named_set, rd_indexed_get, NULL, host##_prototype, rd_named_has, \
      rd_indexed_length, NULL, NULL, NULL, NULL, NULL},
-#include "../../input/css/css_declaration_interfaces.def"
+#include "lambda/input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
     {"event", NULL, radiant_event_members,
      (int32_t)(sizeof(radiant_event_members) / sizeof(radiant_event_members[0])),
@@ -2191,7 +2191,7 @@ extern const JubeTypeBinding radiant_dom_type_bindings[] = {
 #define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
     CSS_RULE_BIND(#host, CSS_RULE_MEMBERS_##shape, host##_prototype)
 #define CSS_RULE_INTERFACE_ALIAS(...)
-#include "../../input/css/css_rule_interfaces.def"
+#include "lambda/input/css/css_rule_interfaces.def"
 #undef CSS_RULE_INTERFACE_ALIAS
 #undef CSS_RULE_INTERFACE
 #undef CSS_RULE_BIND

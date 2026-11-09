@@ -1,6 +1,6 @@
 #include "radiant/scene3d/scene3d.hpp"
-#include "../../core/mark_reader.hpp"
-#include "../../core/physics_scene.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/core/physics_scene.hpp"
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/lambda-number-runtime.hpp"
 #include "../../runtime/value_builder.hpp"

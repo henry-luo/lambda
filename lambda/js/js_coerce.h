@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 // ES §7.1.1 hint values. Integer-encoded so the symbol passed to
 // @@toPrimitive can be derived without re-allocating per call.

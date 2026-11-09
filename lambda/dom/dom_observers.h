@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../lambda.h"
-#include "../input/css/dom_element.hpp"
+#include "lambda/lambda.h"
+#include "lambda/input/css/dom_element.hpp"
 
 #ifdef __cplusplus
 extern "C" {

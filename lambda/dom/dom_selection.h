@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 // D7.2.2: direct Document callable targets for the selection operations.
 Item dom_create_range(void);

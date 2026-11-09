@@ -15,7 +15,7 @@
 #include "../runtime/transpiler.hpp"
 #include "../runtime/ast_build.hpp"
 #include "validator.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "../runtime/lambda-error.h"
 
 ArrayList* arraylist_new(size_t initial_capacity);

@@ -41,7 +41,7 @@
 // LAMBDA_RETURN_CONVENTION_REVISION: the harness and lambda.exe are built from
 // one tree with one set of flags, so this compile-time constant is exactly the
 // convention the binary under test emits.
-#include "../lambda/lambda.h"
+#include "lambda/lambda.h"
 
 #ifdef _WIN32
     #include <windows.h>

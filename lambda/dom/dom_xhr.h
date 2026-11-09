@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 // Constructor — called by transpiler for `new XMLHttpRequest()`
 Item js_xhr_new(void);

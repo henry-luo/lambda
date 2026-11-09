@@ -5,7 +5,7 @@
 #include <time.h>
 
 #include "lib/file.h"
-#include "../lambda/input/input-script-cache.h"
+#include "lambda/input/input-script-cache.h"
 #include "../lambda/runtime/module_ast_prebuild.hpp"
 #include "lib/mem.h"
 #include "lib/shell.h"

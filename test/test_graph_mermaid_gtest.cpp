@@ -3,8 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "../lambda/input/input.hpp"
-#include "../lambda/core/mark_reader.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "lib/file.h"
 #include "lib/mempool.h"
 #include "lib/string.h"

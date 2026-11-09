@@ -1,5 +1,5 @@
 #include "../lambda-data.hpp"
-#include "../io/pdf_content_stream.h"
+#include "lambda/io/pdf_content_stream.h"
 
 extern __thread EvalContext* context;
 

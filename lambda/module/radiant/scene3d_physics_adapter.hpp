@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../core/data.hpp"
+#include "lambda/core/data.hpp"
 #include "lib/physics/physics.h"
 
 struct DomElement;

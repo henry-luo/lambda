@@ -1,7 +1,7 @@
 #include "radiant/devtools_adapter.hpp"
 #include "../../devtools/protocol.hpp"
 #include "../../dom/dom_cssom.h"
-#include "../../input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
 #include "lib/mem.h"
 #include "lib/file.h"
 #include "radiant/render.hpp"

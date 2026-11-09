@@ -10,7 +10,7 @@
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/lambda-error.h"
-#include "../../input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "lib/mem.h"
 #include "lib/utf.h"
 #include <math.h>

@@ -1,4 +1,4 @@
-#include "../io/image_io.h"
+#include "lambda/io/image_io.h"
 // lambda-vector.cpp - Vectorized numeric operations for Lambda
 // Implements element-wise arithmetic between scalars, arrays, lists, and ranges
 
@@ -15,7 +15,7 @@
 #include "lib/image.h"
 #include "lib/image_process.h"
 #include <float.h>
-#include "../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include <cmath>
 #include <cstring>
 #include <climits>

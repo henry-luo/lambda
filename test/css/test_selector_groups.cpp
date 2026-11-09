@@ -10,9 +10,9 @@
 #include "helpers/css_test_helpers.hpp"
 
 extern "C" {
-#include "../../lambda/input/css/css_engine.hpp"
-#include "../../lambda/input/css/css_parser.hpp"
-#include "../../lambda/input/css/css_style.hpp"
+#include "lambda/input/css/css_engine.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_style.hpp"
 }
 
 using namespace CssTestHelpers;

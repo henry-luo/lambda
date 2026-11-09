@@ -1,7 +1,7 @@
 #pragma once
 #include "file_broker.h"
 #include "grant_store.h"
-#include "../../io/security_channel.h"
+#include "lambda/io/security_channel.h"
 
 #ifdef __cplusplus
 extern "C" {

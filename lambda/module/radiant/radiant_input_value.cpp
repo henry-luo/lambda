@@ -1,7 +1,7 @@
 #include "radiant_input_value.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "../../runtime/root_vector.h"
-#include "../../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "lib/arraylist.h"
 #include "lib/mem.h"
 

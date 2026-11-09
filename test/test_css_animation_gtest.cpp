@@ -25,14 +25,14 @@
 #include "radiant/render_css3d.hpp"
 #include "radiant/resource_loaders.h"
 #include "radiant/network_integration.h"
-#include "../lambda/input/input.hpp"
-#include "../lambda/io/mark_builder.hpp"
-#include "../lambda/input/css/css_engine.hpp"
-#include "../lambda/input/css/css_parser.hpp"
-#include "../lambda/input/css/dom_node.hpp"
-#include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/input/css/dom_lifecycle.hpp"
-#include "../lambda/input/css/selector_matcher.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/input/css/css_engine.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/dom_node.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/selector_matcher.hpp"
 
 extern "C" {
 #include "lib/mempool.h"
@@ -53,8 +53,8 @@ extern "C" {
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/runtime/template_registry.h"
-#include "../lambda/network/network_thread_pool.h"
-#include "../lambda/network/enhanced_file_cache.h"
+#include "lambda/network/network_thread_pool.h"
+#include "lambda/network/enhanced_file_cache.h"
 
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc);
 extern UiContext ui_context;

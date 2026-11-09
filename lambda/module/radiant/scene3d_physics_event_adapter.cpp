@@ -1,6 +1,6 @@
 #include "scene3d_physics_event_adapter.hpp"
 #include "radiant/event.hpp"
-#include "../../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "../../dom/dom_events.h"
 #include "../../dom/realm/dom_realm.h"
 #include "../../js/js_runtime.h"

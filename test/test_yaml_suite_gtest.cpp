@@ -1,1 +1,0 @@
-../../lambda-input/test/test_yaml_suite_gtest.cpp

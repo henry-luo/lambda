@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/data.hpp"
+#include "lambda/core/data.hpp"
 #include "context_capsule.h"
 
 typedef struct Heap Heap;

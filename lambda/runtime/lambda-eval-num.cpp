@@ -1,9 +1,9 @@
 
 #include "transpiler.hpp"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
-#include "../io/mark_output_builder.hpp"
+#include "lambda/io/mark_output_builder.hpp"
 #include "lib/log.h"
 #include "lib/memtrack.h"
 #include "lib/math_utils.h"

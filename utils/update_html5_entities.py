@@ -5,8 +5,9 @@ Replaces the old entity table and linear search with binary search.
 """
 
 import re
+from split_paths import project_source_path
 
-TOKENIZER_PATH = "lambda/input/html5/html5_tokenizer.cpp"
+TOKENIZER_PATH = project_source_path("lambda/input/html5/html5_tokenizer.cpp")
 ENTITIES_PATH = "temp/html5_entities.inc"
 
 def read_file(path):

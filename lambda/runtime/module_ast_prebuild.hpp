@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "lib/arraylist.h"
-#include "../io/security_io.h"
+#include "lambda/io/security_io.h"
 
 // The module prebuild registry is deliberately language-neutral. A profile
 // owns syntax discovery, resolution, and the isolated AST build; the registry

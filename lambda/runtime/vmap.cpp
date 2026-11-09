@@ -3,7 +3,7 @@
 // Uses lib/hashmap.h (Robin Hood open-addressed hash table) as the backing store.
 
 #include "../lambda.hpp"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
 #include "lib/memtrack.h"

@@ -15,13 +15,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include "../lambda/lambda.h"
+#include "lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/core/mark_reader.hpp"
-#include "../lambda/io/mark_builder.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/io/mark_builder.hpp"
 #include "lib/html_entities.h"
 #include "lib/emoji_shortcodes.h"
-#include "../lambda/input/input-utils.h"
+#include "lambda/input/input-utils.h"
 #include "lib/log.h"
 #include "lib/url.h"
 #include "lib/arena.h"

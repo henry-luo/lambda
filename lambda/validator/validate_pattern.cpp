@@ -8,7 +8,7 @@
  */
 
 #include "validator_internal.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 
 // ==================== Forward Declarations ====================
 

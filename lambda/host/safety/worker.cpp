@@ -2,7 +2,7 @@
 #include "../../runtime/transpiler.hpp"
 #include "../../runtime/interp.hpp"
 #include "../../runtime/security_context.h"
-#include "../../io/security_channel.h"
+#include "lambda/io/security_channel.h"
 #include "lib/log.h"
 #include "lib/confined_process.h"
 #include "lib/process_sandbox.h"

@@ -1,1 +1,0 @@
-../../../lambda-input/lambda/core/operator.h

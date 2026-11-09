@@ -1,6 +1,6 @@
 #pragma once
 #include "server.hpp"
-#include "../io/mcp.hpp"
+#include "lambda/io/mcp.hpp"
 
 // the registry and its callbacks must outlive the mounted server.
 int server_mount_mcp(Server* server, const char* path, const McpServer* registry);

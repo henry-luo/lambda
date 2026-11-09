@@ -11,8 +11,8 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
-#include "../core/name_identity.h"
+#include "lambda/lambda.h"
+#include "lambda/core/name_identity.h"
 #include <string.h>
 
 typedef struct Runtime Runtime;

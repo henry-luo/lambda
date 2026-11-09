@@ -1,5 +1,5 @@
 #include "image_raster.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "lib/font/font.h"
 #include "lib/arena.h"
 #include "lib/utf.h"

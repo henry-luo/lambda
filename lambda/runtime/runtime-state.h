@@ -1,7 +1,7 @@
 #pragma once
 #include "lib/lambda_api.h"
 
-#include "../core/name_identity.h"
+#include "lambda/core/name_identity.h"
 
 #include <stdint.h>
 

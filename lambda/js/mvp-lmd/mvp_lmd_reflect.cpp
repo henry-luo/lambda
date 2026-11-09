@@ -1,11 +1,11 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_ast.hpp"
 #include "../js_props.h"
-#include "../../core/js_well_known_names.h"
+#include "lambda/core/js_well_known_names.h"
 #include "../js_runtime.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
-#include "../../input/input.hpp"
+#include "lambda/input/input.hpp"
 #include <math.h>
 
 bool mvp_lmd_is_callable(Item value) {

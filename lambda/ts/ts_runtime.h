@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 // runtime type reporting
 Item ts_type_info(Item value);

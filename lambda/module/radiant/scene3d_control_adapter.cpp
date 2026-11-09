@@ -10,8 +10,8 @@
 #include "radiant/scene3d/scene3d_physics.hpp"
 #include "radiant/scene3d/scene3d_animation.hpp"
 #include "radiant/scene3d/scene3d_audio.hpp"
-#include "../../core/mark_reader.hpp"
-#include "../../core/physics_scene.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/core/physics_scene.hpp"
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include <math.h>

@@ -3,7 +3,7 @@
 #include "radiant/script_loop_host.hpp"
 #include "radiant/event.hpp"
 #include "radiant/radiant.hpp"
-#include "../../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/transpiler.hpp"
 #include "../../runtime/concurrency.h"

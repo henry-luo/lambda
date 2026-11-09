@@ -3,8 +3,8 @@
 // edit handlers. Manages a global MarkEditor instance per edit session.
 #include "../lambda-data.hpp"
 #include "edit_bridge.h"
-#include "../io/mark_editor.hpp"
-#include "../core/mark_reader.hpp"
+#include "lambda/io/mark_editor.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "lib/log.h"
 #include "lib/memtrack.h"
 #include <string.h>

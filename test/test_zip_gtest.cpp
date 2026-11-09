@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "../lambda/io/zip_archive.hpp"
-#include "../lambda/io/fs_node.hpp"
-#include "../lambda/core/print.h"
-#include "../lambda/input/input.hpp"
+#include "lambda/io/zip_archive.hpp"
+#include "lambda/io/fs_node.hpp"
+#include "lambda/core/print.h"
+#include "lambda/input/input.hpp"
 #include "lib/file.h"
 #include "lib/endian.h"
 #include "lib/memtrack.h"

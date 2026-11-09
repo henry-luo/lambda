@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/physics_scene.hpp"
+#include "lambda/core/physics_scene.hpp"
 Item physics_state_value(const PhysicsScene& scene,const PhysicsState& state,Item selection,Item ragdolls=ItemNull);
 Item physics_events_value(const PhysicsScene& scene,const PhysicsState& state);
 Item physics_event_value(const PhysicsScene& scene,const PhysicsEvent& event);

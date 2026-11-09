@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../core/data.hpp"
+#include "lambda/core/data.hpp"
 
 struct Scene3dAnimationState;
 struct Scene3dPhysics;

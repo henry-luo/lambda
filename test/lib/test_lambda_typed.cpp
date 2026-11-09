@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "../../lambda/core/lambda_typed.hpp"
+#include "lambda/core/lambda_typed.hpp"
 #include "../../lambda/js/js_props.h"
 
 namespace {

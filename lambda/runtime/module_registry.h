@@ -7,7 +7,7 @@
 #include "../lambda.hpp"
 #include "ast-core.hpp"
 #else
-#include "../lambda.h"
+#include "lambda/lambda.h"
 typedef struct LangProfile LangProfile;
 #endif
 

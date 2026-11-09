@@ -36,16 +36,16 @@
 #include "lib/hashmap_helpers.h"
 #include "lib/arraylist.h"
 #include "lib/arraylist.hpp"
-#include "../input/css/dom_element.hpp"
-#include "../input/css/dom_node.hpp"
-#include "../input/css/dom_lifecycle.hpp"
-#include "../input/css/style_epoch.hpp"
-#include "../input/css/css_engine.hpp"
-#include "../input/css/css_parser.hpp"
-#include "../input/css/css_style.hpp"
-#include "../input/css/css_formatter.hpp"
-#include "../input/css/css_paged_media.hpp"
-#include "../input/css/css_declaration_attributes.h"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/dom_node.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/style_epoch.hpp"
+#include "lambda/input/css/css_engine.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_style.hpp"
+#include "lambda/input/css/css_formatter.hpp"
+#include "lambda/input/css/css_paged_media.hpp"
+#include "lambda/input/css/css_declaration_attributes.h"
 
 #include <cstring>
 #include <ctype.h>
@@ -663,7 +663,7 @@ static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
     const char* host_name = "css_style_properties";
 #define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
     if (parent->type == kind) host_name = #host;
-#include "../input/css/css_declaration_interfaces.def"
+#include "lambda/input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
     const void* brand = jube_iface_type_by_name(host_name, strlen(host_name));
     if (!brand) return ItemNull;

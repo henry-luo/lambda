@@ -5,7 +5,7 @@
 #include "../lambda/dom/dom_collection_types.h"
 #include "../lambda/dom/dom_event_host.h"
 #include "../lambda/dom/dom_core.h"
-#include "../lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "../lambda/runtime/document_host.hpp"
 #include <pthread.h>
 #include <stddef.h>

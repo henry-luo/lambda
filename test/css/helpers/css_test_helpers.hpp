@@ -2,8 +2,8 @@
 #define CSS_TEST_HELPERS_HPP
 
 #include <gtest/gtest.h>
-#include "../../../lambda/input/css/css_parser.hpp"
-#include "../../../lambda/input/css/css_engine.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_engine.hpp"
 #include "lib/mempool.h"
 #include <string>
 #include <vector>

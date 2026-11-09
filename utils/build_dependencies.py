@@ -15,10 +15,11 @@ import shutil
 import subprocess
 import sys
 
+from split_paths import sibling_roots, use_input_scripts
+use_input_scripts()
 from build_config import load_build_config, resolve_source_sets
 from generate_image_config import write_changed
 from generate_premake import PremakeGenerator
-from split_paths import sibling_roots
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / 'build_deps_config.json'

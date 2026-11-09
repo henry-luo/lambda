@@ -1,5 +1,5 @@
 #include "transpiler.hpp"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-error.h"
 #include "type_contract.hpp"

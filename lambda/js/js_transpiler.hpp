@@ -3,7 +3,7 @@
 #include "js_ast.hpp"
 #include "parser/js_parser.h"
 #include "../runtime/transpiler.hpp"
-#include "../input/input-script-cache.h"
+#include "lambda/input/input-script-cache.h"
 #include "lib/strbuf.h"
 
 #ifdef __cplusplus

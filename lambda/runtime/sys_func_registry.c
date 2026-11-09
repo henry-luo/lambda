@@ -43,7 +43,7 @@ extern Type TYPE_ARRAY;
 // ============================================================================
 #ifndef LAMBDA_IO_STATIC_VALUES
 #include "lib/stringbuf.h"
-#include "../core/lambda-path.h"
+#include "lambda/core/lambda-path.h"
 
 // aliased function declarations (actual names differ from JIT import names)
 extern Symbol* fn_symbol(Item item);     // JIT name: fn_symbol1

@@ -2,7 +2,7 @@
 #include "radiant_dom_bridge.hpp"
 #include "../../runtime/root_vector.h"
 #include "../../runtime/heap_api.h"
-#include "../../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "lib/arraylist.h"
 #include "lib/log.h"
 #include "lib/mem.h"

@@ -1,7 +1,7 @@
-#include "../io/fs_node.hpp"
+#include "lambda/io/fs_node.hpp"
 #include "io_file_search.hpp"
 #include "io_resource.hpp"
-#include "../io/mark_output_builder.hpp"
+#include "lambda/io/mark_output_builder.hpp"
 #include "transpiler.hpp"
 #include "lib/log.h"
 #include "lib/memtrack.h"
@@ -10,9 +10,9 @@
 #include "lib/shell.h"
 #include "lib/str.h"
 #include "lib/time_util.h"
-#include "../core/utf_string.h"
-#include "../format/format.h"
-#include "../io/script_format.hpp"
+#include "lambda/core/utf_string.h"
+#include "lambda/format/format.h"
+#include "lambda/io/script_format.hpp"
 #include "radiant_event_hook.h"
 #include "security_context.h"
 
@@ -24,7 +24,7 @@
 #include <process.h>
 #endif
 #include <string.h>  // for strlen
-#include "../input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "concurrency.h"
 #include "re2_wrapper.hpp"
 #include "lib/mime-detect.h"

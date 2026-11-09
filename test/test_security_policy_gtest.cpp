@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <limits.h>
-#include "../lambda/io/security_policy.h"
+#include "lambda/io/security_policy.h"
 
 class SecurityPolicyTest : public ::testing::Test {
 protected:

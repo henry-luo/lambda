@@ -1,9 +1,9 @@
 // Test file for MarkEditor - CRUD operations on Lambda documents
 #include <gtest/gtest.h>
-#include "../lambda/io/mark_editor.hpp"
-#include "../lambda/core/mark_reader.hpp"
-#include "../lambda/input/input.hpp"
-#include "../lambda/format/format.h"
+#include "lambda/io/mark_editor.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/format/format.h"
 #include "lib/mempool.h"
 #include "lib/log.h"
 #include "lib/test_utils.h"
@@ -1486,7 +1486,7 @@ int main(int argc, char **argv) {
 // where D2.4.2 gives them different widths. The projections are checked
 // against the corresponding record.
 // ============================================================================
-#include "../lambda/core/shape_builder.hpp"
+#include "lambda/core/shape_builder.hpp"
 
 static Type* mk_unary(Pool* pool, Type* operand, Operator op,
         int min_count, int max_count) {

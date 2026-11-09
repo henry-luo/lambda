@@ -22,7 +22,7 @@
 #include "../js/js_class.h"
 #include "../js/js_builtin_catalog.hpp"
 #include "../js/js_function.hpp"
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
@@ -36,9 +36,9 @@
 #include "lib/str.h"
 #include "lib/strbuf.h"
 #include "lib/url.h"
-#include "../input/css/dom_node.hpp"
-#include "../input/css/dom_element.hpp"
-#include "../input/css/dom_lifecycle.hpp"
+#include "lambda/input/css/dom_node.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/dom_lifecycle.hpp"
 #include "radiant/form_controls.hpp"
 
 #include <cstring>

@@ -11,7 +11,7 @@
 #include "js_event_loop.h"
 #include "../dom/dom.h"
 #include "../dom/dom_engine.h"
-#include "../input/css/dom_element.hpp"
+#include "lambda/input/css/dom_element.hpp"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_interp.hpp"

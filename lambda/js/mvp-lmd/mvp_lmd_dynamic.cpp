@@ -19,8 +19,8 @@
 #include "../../runtime/side_stack.h"
 #include "../../runtime/transpiler.hpp"
 #include "../../runtime/runtime-state.h"
-#include "../../input/input.hpp"
-#include "../../core/lambda-decimal.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lib/mem.h"
 #include "lib/arraylist.h"
 #include <limits.h>

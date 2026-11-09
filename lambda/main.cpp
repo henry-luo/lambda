@@ -1,12 +1,12 @@
-#include "input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "lib/host_paths.h"
-#include "input/input-postscript.hpp"
-#include "core/mark_reader.hpp"
-#include "io/zip_archive.hpp"
-#include "io/fs_node.hpp"
-#include "format/format.h"
-#include "io/script_format.hpp"
-#include "format/format-markup.h"
+#include "lambda/input/input-postscript.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/io/zip_archive.hpp"
+#include "lambda/io/fs_node.hpp"
+#include "lambda/format/format.h"
+#include "lambda/io/script_format.hpp"
+#include "lambda/format/format-markup.h"
 #include "lib/mime-detect.h"
 #include "lib/mempool.h"
 #include "lib/mem_context.h"
@@ -67,9 +67,9 @@
 #include "radiant/window_host.hpp"
 #include "radiant/devtools_adapter.hpp"
 #endif
-#include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
-#include "input/css/css_style.hpp"   // css_property_system_init
-#include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
+#include "lambda/input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
+#include "lambda/input/css/css_style.hpp"   // css_property_system_init
+#include "lambda/input/css/css_engine.hpp"  // CssEngine for CSS extraction
 #ifndef LAMBDA_NO_JS
 #include "radiant/view.hpp"
 #include "js/js_event_loop.h"        // v14: event loop drain
@@ -92,9 +92,9 @@
 #endif
 
 // Network module includes
-#include "network/network_downloader.h"
-#include "network/network_resource_manager.h"
-#include "network/network_thread_pool.h"
+#include "lambda/network/network_downloader.h"
+#include "lambda/network/network_resource_manager.h"
+#include "lambda/network/network_thread_pool.h"
 
 extern __thread EvalContext* context;
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source,

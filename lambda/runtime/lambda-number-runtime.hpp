@@ -3,7 +3,7 @@
 
 #include "lambda-number.hpp"
 #include "../lambda-data.hpp"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include <math.h>
 
 static inline LambdaNumericKind lambda_numeric_kind_from_item_type(

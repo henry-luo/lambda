@@ -3,8 +3,8 @@
 #include "../lambda-wasm.h"
 #include "interp.hpp"
 #include "lambda-root-frame.hpp"
-#include "../core/print.h"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/print.h"
+#include "lambda/core/lambda-decimal.hpp"
 
 // each WASM module instance owns one evaluator and one persistent REPL.
 static Runtime wasm_runtime = {};

@@ -1,6 +1,6 @@
 #include "ast.hpp"
-#include "../core/print.h"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/print.h"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lib/log.h"
 #include <inttypes.h>
 

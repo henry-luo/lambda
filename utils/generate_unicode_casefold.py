@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 import re
 from unicode_generator import run_generator
+from split_paths import project_source_path
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,7 +57,7 @@ def generate(source):
 
 
 def main():
-    run_generator(generate, __doc__, ROOT / "lambda/core/utf_simple_casefold.inc", "UNICODE_CASEFOLD",
+    run_generator(generate, __doc__, project_source_path("lambda/core/utf_simple_casefold.inc"), "UNICODE_CASEFOLD",
                   "Unicode simple-fold data differs; regenerate the include")
 
 

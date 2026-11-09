@@ -1,1 +1,0 @@
-../../../lambda-input/lambda/core/utf_simple_casefold.inc

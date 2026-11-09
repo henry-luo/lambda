@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from split_paths import use_input_scripts
+use_input_scripts()
 from build_config import load_build_config, resolve_source_sets
 from build_dependencies import CompilerProbe, expand, generate_premake, projects_for, render_template
 

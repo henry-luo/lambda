@@ -2,7 +2,7 @@
 
 #include "transpiler.hpp"
 #include "type_contract.hpp"
-#include "../core/lambda-decimal.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "heap_api.h"
 #include "gc/gc_object_zone.h"
@@ -16,13 +16,13 @@
 #include "lib/hashmap_helpers.h"
 #include "lib/hash.h"
 #include "lib/byte_storage.h"
-#include "../input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
-#include "../input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
+#include "lambda/input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
+#include "lambda/input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
 #include "../jube/jube_interface.h"
 #include <math.h>
-#include "../io/mark_output_builder.hpp"
-#include "../io/input-allocation-context.h"
-#include "../input/input.hpp"
+#include "lambda/io/mark_output_builder.hpp"
+#include "lambda/io/input-allocation-context.h"
+#include "lambda/input/input.hpp"
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
 

@@ -2,10 +2,10 @@
 // Unit tests for Radiant network support components
 
 #include <gtest/gtest.h>
-#include "../lambda/network/enhanced_file_cache.h"
-#include "../lambda/network/network_thread_pool.h"
-#include "../lambda/network/network_resource_manager.h"
-#include "../lambda/network/network_downloader.h"
+#include "lambda/network/enhanced_file_cache.h"
+#include "lambda/network/network_thread_pool.h"
+#include "lambda/network/network_resource_manager.h"
+#include "lambda/network/network_downloader.h"
 #include <unistd.h>
 #include <pthread.h>
 

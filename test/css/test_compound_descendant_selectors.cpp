@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 #include "helpers/css_test_helpers.hpp"
-#include "../../lambda/input/css/dom_element.hpp"
-#include "../../lambda/input/css/selector_matcher.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/selector_matcher.hpp"
 
 extern "C" {
-#include "../../lambda/input/css/css_engine.hpp"
-#include "../../lambda/input/css/css_parser.hpp"
-#include "../../lambda/input/css/css_style.hpp"
+#include "lambda/input/css/css_engine.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_style.hpp"
 }
 
 using namespace CssTestHelpers;

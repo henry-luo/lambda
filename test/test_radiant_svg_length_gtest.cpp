@@ -1,1 +1,0 @@
-../../radiant/test/test_radiant_svg_length_gtest.cpp

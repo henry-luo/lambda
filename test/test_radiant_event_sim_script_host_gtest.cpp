@@ -1,1 +1,0 @@
-../../radiant/test/test_radiant_event_sim_script_host_gtest.cpp

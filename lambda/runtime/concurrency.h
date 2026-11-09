@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "activation.h"
 #include "lib/document_lifetime_guard.h"
 #include <stdbool.h>

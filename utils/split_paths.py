@@ -1,6 +1,7 @@
 """Resolve source and header paths owned by the sibling projects."""
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -9,7 +10,7 @@ PATH_FIELDS = frozenset({
     'extra_source_files', 'remove_source_files', 'sources', 'source_patterns',
     'exclude_patterns', 'exclude_source_files', 'extra_exclude_source_files',
     'exclude_source_globs', 'additional_source_files', 'additional_sources',
-    'additional_files', 'objcxx_source_files', 'files', 'includes',
+    'additional_files', 'objcxx_source_files', 'files', 'includes', 'source',
     'include', 'info_plist', 'memtrack_poison_dirs',
 })
 
@@ -18,6 +19,12 @@ def sibling_roots():
     root = Path(__file__).resolve().parent.parent
     return (Path(os.environ.get('LAMBDA_INPUT_ROOT', root.parent / 'lambda-input')).resolve(),
             Path(os.environ.get('RADIANT_ROOT', root.parent / 'radiant')).resolve())
+
+
+def use_input_scripts():
+    scripts = str(sibling_roots()[0] / 'scripts')
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
 
 
 def logical_project_path(path, root):
@@ -38,6 +45,26 @@ def project_source_path(relative, root=None, roots=None):
         return input_root / path
     if path.parts and path.parts[0] == 'radiant':
         return radiant_root / path
+    if len(path.parts) >= 2 and path.parts[0] == 'lambda':
+        if path.parts[1] in ('input', 'io', 'network', 'format'):
+            return input_root / path
+        if path.parts[1] == 'core' or path == Path('lambda/lambda.h'):
+            local = root / path
+            candidate = input_root / path
+            if local.is_symlink() or (not local.exists() and candidate.exists()) or \
+                    ('*' in path.name and candidate.parent.is_dir()):
+                return candidate
+    if path.parts and path.parts[0] == 'test':
+        local = root / path
+        if local.is_symlink():
+            target = local.resolve()
+            if target.is_relative_to(input_root) or target.is_relative_to(radiant_root):
+                return target
+        if not local.exists():
+            for owner in (input_root, radiant_root):
+                candidate = owner / path
+                if candidate.exists():
+                    return candidate
     return root / path
 
 
@@ -51,17 +78,20 @@ def resolve_split_paths(config):
             return {key: visit(item, key) for key, item in value.items()}
         if isinstance(value, list):
             return [visit(item, field) for item in value]
+        if isinstance(value, str):
+            value = value.replace('${input_root}', str(input_root)).replace('${radiant_root}', str(radiant_root))
         if isinstance(value, str) and field in PATH_FIELDS:
-            owner = value.partition('/')[0]
-            if owner in ('lib', 'radiant'):
-                path = project_source_path(value, root, (input_root, radiant_root))
+            if field == 'source' and not value.startswith('test/'):
+                return value
+            path = project_source_path(value, root, (input_root, radiant_root))
+            if not path.is_relative_to(root):
                 return Path(os.path.relpath(path, root)).as_posix()
         return value
 
     result = visit(config)
     # Canonical includes resolve against the owning project, including overrides.
     includes = result.setdefault('includes', [])
-    for directory in (input_root, radiant_root):
+    for directory in (input_root, radiant_root, input_root / 'test', radiant_root / 'test'):
         path = Path(os.path.relpath(directory, root)).as_posix()
         if path not in includes:
             includes.append(path)

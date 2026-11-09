@@ -4,12 +4,12 @@
  */
 
 #include <gtest/gtest.h>
-#include "../lambda/core/name_pool.hpp"
-#include "../lambda/io/mark_builder.hpp"
-#include "../lambda/input/input.hpp"
-#include "../lambda/core/well_known_markup_names.h"
-#include "../lambda/core/well_known_lambda_names.h"
-#include "../lambda/core/js_well_known_names.h"
+#include "lambda/core/name_pool.hpp"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/core/well_known_markup_names.h"
+#include "lambda/core/well_known_lambda_names.h"
+#include "lambda/core/js_well_known_names.h"
 #include "lib/mempool.h"
 #include "lib/log.h"
 #include "lib/test_utils.h"

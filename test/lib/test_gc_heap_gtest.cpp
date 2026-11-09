@@ -22,8 +22,8 @@
 #include <stdlib.h>
 
 #include "../../lambda/lambda-data.hpp"
-#include "../../lambda/input/input.hpp"
-#include "../../lambda/core/lambda-decimal.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/core/lambda-decimal.hpp"
 #include "../../lambda/runtime/heap_api.h"
 #include "../../lambda/runtime/lambda-root-frame.hpp"
 #include "../../lambda/runtime/transpiler.hpp"
@@ -32,7 +32,7 @@
 #include "../../lambda/runtime/runtime-state.h"
 
 extern "C" {
-#include "../../lambda/lambda.h"
+#include "lambda/lambda.h"
 #include "../../lambda/runtime/gc/gc_heap.h"
 #include "../../lambda/runtime/gc/gc_object_zone.h"
 #include "../../lambda/runtime/gc/gc_data_zone.h"

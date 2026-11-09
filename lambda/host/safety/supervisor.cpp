@@ -1,5 +1,5 @@
 #include "supervisor.h"
-#include "../../io/security_channel.h"
+#include "lambda/io/security_channel.h"
 #include "lib/hex.h"
 #include "lib/mem.h"
 #include <errno.h>

@@ -5,7 +5,7 @@
 // and adaptation; this header only expands a checked Item argument count into
 // the matching fixed C++ function-pointer prototype.
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 template <int... indices>
 struct LambdaHostedItemIndexSequence {};

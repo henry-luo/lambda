@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 // Publish the WebIDL method on HTMLCanvasElement after its prototype exists.
 extern "C" void dom_canvas_install_html_interface(Item html_canvas_prototype);

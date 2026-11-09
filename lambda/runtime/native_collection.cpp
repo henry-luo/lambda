@@ -1,5 +1,5 @@
 #include "native_collection.hpp"
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #include "lib/hashmap_helpers.h"
 #include <string.h>
 

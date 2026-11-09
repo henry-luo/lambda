@@ -1,6 +1,6 @@
 #include "mvp_internal.hpp"
 #include "../interp.hpp"
-#include "../../io/mark_output_builder.hpp"
+#include "lambda/io/mark_output_builder.hpp"
 #include "../type_contract.hpp"
 #include "../mir_loop_analysis.hpp"
 #include "../mir_cow_analysis.hpp"

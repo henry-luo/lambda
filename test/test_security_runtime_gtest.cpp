@@ -8,10 +8,10 @@
 #include "../lambda/runtime/interp.hpp"
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
-#include "../lambda/input/input.hpp"
-#include "../lambda/input/input-tex.hpp"
-#include "../lambda/io/fs_node.hpp"
-#include "../lambda/core/mark_reader.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/input/input-tex.hpp"
+#include "lambda/io/fs_node.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "../lambda/host/safety/file_broker.h"
 #include "lib/file_utils.h"
 #include "lib/log.h"
@@ -19,7 +19,7 @@
 #include "lib/atomic.h"
 #include "lib/rdb.h"
 #include "../lambda/runtime/module_registry.h"
-#include "../lambda/input/input-script-cache.h"
+#include "lambda/input/input-script-cache.h"
 #include <string.h>
 #include <time.h>
 #ifndef _WIN32

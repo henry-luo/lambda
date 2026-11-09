@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import re
 import sys
-from split_paths import sibling_roots
+from split_paths import project_source_path, sibling_roots
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,7 +32,7 @@ def qualification_records():
             raise ValueError("qualification needs bounded scope and evidence")
         for reference in family["evidence"]:
             path, _, case = reference.partition("#")
-            source = RADIANT_ROOT / path.removeprefix('radiant/') if path.startswith('radiant/') else ROOT / path
+            source = RADIANT_ROOT / path.removeprefix('radiant/') if path.startswith('radiant/') else project_source_path(path)
             if not source.is_file() or (case and case not in source.read_text()):
                 raise ValueError(f"missing qualification evidence: {reference}")
         for name in family["properties"]:
@@ -55,9 +55,9 @@ def references(paths, pattern):
 
 def inventory():
     qualifications = qualification_records()
-    source = (ROOT / REGISTRY).read_text()
+    source = project_source_path(REGISTRY).read_text()
     definitions = source.split("static CssProperty property_definitions[] = {", 1)[1].split("\n};", 1)[0]
-    names = dict(re.findall(r"X\((CSS_PROPERTY_\w+), (MARKUP_NAME_\w+)\)", (ROOT / MAPPING).read_text()))
+    names = dict(re.findall(r"X\((CSS_PROPERTY_\w+), (MARKUP_NAME_\w+)\)", project_source_path(MAPPING).read_text()))
     accessor_source = ACCESSORS.read_text().split("static const CssPropAccessor CSS_PROP_ROWS[] = {", 1)[1].split("\n};", 1)[0]
     accessors = {}
     # accessor rows may wrap, and optional item storage has a direct/derived form.

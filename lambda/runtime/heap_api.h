@@ -4,7 +4,7 @@
 // Active runtime heap/root API. These entry points can collect or relocate
 // data-zone storage, so only lambda-rt provides them; pool/arena users must
 // select their non-collecting construction paths explicitly.
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 // Keep C++ linkage to match the active runtime API.
 LAMBDA_RT_API void* heap_alloc(int size, TypeId type_id);

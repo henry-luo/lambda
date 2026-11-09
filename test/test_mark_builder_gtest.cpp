@@ -4,11 +4,11 @@
  */
 
 #include <gtest/gtest.h>
-#include "../lambda/io/mark_builder.hpp"
-#include "../lambda/core/mark_reader.hpp"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/core/mark_reader.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/input/input.hpp"
-#include "../lambda/input/css/dom_node.hpp"
+#include "lambda/input/input.hpp"
+#include "lambda/input/css/dom_node.hpp"
 #include "lib/mempool.h"
 #include "lib/mem_context.h"
 #include "lib/mem_factory.h"

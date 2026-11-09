@@ -15,9 +15,9 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include "mvp-lmd/mvp_lmd_runtime.h"
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
-#include "../input/input.hpp"
+#include "lambda/input/input.hpp"
 #include "../runtime/heap_api.h"
-#include "../core/name_pool.hpp"
+#include "lambda/core/name_pool.hpp"
 #include "lib/log.h"
 #include <string.h>
 #include <stdio.h>

@@ -18,6 +18,7 @@ import shutil
 import subprocess
 from collections import Counter, defaultdict, deque
 from pathlib import Path
+from split_paths import logical_project_path, project_source_path, sibling_roots
 
 ROOT = Path(__file__).resolve().parents[1]
 JS = ROOT / 'lambda/js'
@@ -53,20 +54,20 @@ rule:
         - { kind: field_identifier, pattern: $NAME }
 '''
     command = ['ast-grep', 'scan', '--inline-rules', rule, '--json=stream']
-    result = subprocess.run(command + paths, cwd=ROOT, capture_output=True, text=True, check=True)
+    result = subprocess.run(command + [str(project_source_path(path)) for path in paths], cwd=ROOT, capture_output=True, text=True, check=True)
     normalized = {(f, n.lstrip('~').split('<')[0]) for f, n in known}
     missing = []
     for line in result.stdout.splitlines():
         row = json.loads(line)
         name = row['metaVariables']['single']['NAME']['text']
-        filename = row['file']
+        filename = str(logical_project_path(Path(row['file']).resolve(), ROOT))
         if ((filename, name) in normalized or name.isupper() or
                 Path(filename).name in MIXED_SOURCES or
                 re.search(r'=\s*(?:delete|default)\s*;\s*$', row['text'])):
             continue
         start = row['range']['start']['line'] + 1
         guards = []
-        for source_line in (ROOT / filename).read_text().splitlines()[:start - 1]:
+        for source_line in project_source_path(filename).read_text().splitlines()[:start - 1]:
             directive = re.match(r'\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)', source_line)
             if not directive:
                 continue
@@ -97,8 +98,10 @@ VISITOR = c.CFUNCTYPE(c.c_uint, Cursor, Cursor, c.c_void_p)
 def clang_configuration():
     compiler = Path(subprocess.check_output(['xcrun', '--find', 'clang'], text=True).strip())
     sdk = subprocess.check_output(['xcrun', '--show-sdk-path'], text=True).strip()
+    input_root, radiant_root = sibling_roots()
     args = ['-x', 'c++', '-std=c++17', '-DNDEBUG', '-DUTF8PROC_STATIC', '-Wno-c++11-narrowing',
-        '-I' + str(ROOT), '-I' + str(ROOT / 'lambda/mir'), '-I' + str(ROOT / 'lib/re2')]
+        '-I' + str(ROOT), '-I' + str(ROOT / 'lambda/mir'), '-I' + str(input_root),
+        '-I' + str(input_root / 'lib/re2'), '-I' + str(radiant_root)]
     if shutil.which('brew'):
         prefix = subprocess.check_output(['brew', '--prefix'], text=True).strip()
         args.append('-I' + str(Path(prefix) / 'include'))
@@ -178,7 +181,7 @@ def parse(path):
             start, end = location(span_start(span)), location(span_end(span))
             declarations.append({'usr': string(get_usr(cursor)),
                 'name': string(get_spelling(cursor)),
-                'file': str(Path(filename).resolve().relative_to(ROOT)),
+                'file': str(logical_project_path(Path(filename).resolve(), ROOT)),
                 'start': start[1], 'end': end[1],
                 'begin_offset': start[2], 'end_offset': end[2]})
             return 1
@@ -215,7 +218,7 @@ def parse(path):
         span = get_span(cursor)
         start, end = location(span_start(span)), location(span_end(span))
         records.append({'usr': string(get_usr(cursor)), 'name': string(get_spelling(cursor)),
-            'file': str(Path(filename).resolve().relative_to(ROOT)), 'kind': kind,
+            'file': str(logical_project_path(Path(filename).resolve(), ROOT)), 'kind': kind,
             'start': start[1], 'end': end[1], 'begin_offset': start[2], 'end_offset': end[2],
             'linkage': get_linkage(cursor), 'storage': get_storage(cursor),
             'cursor_kind': cursor.kind, 'reference_names': reference_names,
@@ -225,7 +228,7 @@ def parse(path):
             'references': sorted(references)})
         return 1
     visit(get_root(tu), top, None)
-    result = {'file': str(path.relative_to(ROOT)), 'diagnostics': diagnostics,
+    result = {'file': str(logical_project_path(path, ROOT)), 'diagnostics': diagnostics,
               'records': records, 'declarations': declarations}
     dispose_tu(tu)
     dispose_index(index)
@@ -242,16 +245,16 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     sources = sorted(p for p in JS.glob('*.cpp') if p.name not in NON_HELPERS)
     sources += sorted(p for p in (JS / 'mvp-lmd').glob('*.cpp') if p.name not in NON_HELPERS)
-    shared_catalog = ROOT / 'lambda/core/js_well_known_names.c'
+    shared_catalog = project_source_path('lambda/core/js_well_known_names.c')
     sources += [shared_catalog]
     sources += [JS / 'js_interp.cpp', JS / 'mvp-lmd/mvp_lmd_mir.cpp']
     digest = hashlib.sha256()
     digest.update(json.dumps(clang_configuration()).encode())
     for path in sorted(p for p in JS.rglob('*') if p.suffix in SOURCE_SUFFIXES):
-        digest.update(str(path.relative_to(ROOT)).encode())
+        digest.update(str(logical_project_path(path, ROOT)).encode())
         digest.update(path.read_bytes())
     for path in (shared_catalog, shared_catalog.with_suffix('.h')):
-        digest.update(str(path.relative_to(ROOT)).encode())
+        digest.update(str(logical_project_path(path, ROOT)).encode())
         digest.update(path.read_bytes())
     fingerprint = digest.hexdigest()
     cache = out / 'parsed.json'
@@ -291,7 +294,7 @@ def main():
         and node['name'] == 'imports']
     for node in import_inventories:
         node['references'] = []
-    source_set = {p.relative_to(ROOT).as_posix() for p in sources}
+    source_set = {logical_project_path(p, ROOT).as_posix() for p in sources}
     production, tests = defaultdict(set), defaultdict(set)
     for path in (JS / 'mvp-lmd/mvp_lmd_mir.cpp', JS / 'js_interp.cpp'):
         source = path.read_text()
@@ -299,13 +302,13 @@ def main():
             if not literal[0].startswith('"'):
                 continue
             byte_offset = len(source[:literal.start()].encode())
-            if any(table['file'] == str(path.relative_to(ROOT)) and
+            if any(table['file'] == str(logical_project_path(path, ROOT)) and
                     table['begin_offset'] <= byte_offset < table['end_offset']
                     for table in import_inventories):
                 continue
             for name in words(literal[0]) & by_name.keys():
                 for usr in by_name[name]:
-                    production[usr].add(str(path.relative_to(ROOT)) + ' (string operand)')
+                    production[usr].add(str(logical_project_path(path, ROOT)) + ' (string operand)')
     paths = subprocess.check_output(['rg', '--files', 'lambda', 'radiant', 'lib', 'test'],
                                     cwd=ROOT, text=True).splitlines()
     for filename in paths:

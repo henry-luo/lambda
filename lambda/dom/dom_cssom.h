@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "lambda/lambda.h"
 
 // =============================================================================
 // CSSOM Type Checking

@@ -1,6 +1,6 @@
 #include "../lambda/module/radiant/radiant_runtime_init.hpp"
 #include "radiant_render_test_utils.hpp"
-#include "../lambda/io/image_io.h"
+#include "lambda/io/image_io.h"
 #include <gtest/gtest.h>
 
 #include "radiant/render.hpp"
@@ -353,16 +353,16 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "lib/endian.h"
 #include "lib/str.h"
 
-#include "../lambda/input/css/css_engine.hpp"
-#include "../lambda/input/css/css_formatter.hpp"
-#include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/input/css/selector_matcher.hpp"
+#include "lambda/input/css/css_engine.hpp"
+#include "lambda/input/css/css_formatter.hpp"
+#include "lambda/input/css/dom_element.hpp"
+#include "lambda/input/css/selector_matcher.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_engine.h"
 #include "../lambda/dom/dom_host_engine.h"
-#include "../lambda/io/mark_builder.hpp"
-#include "../lambda/network/network_resource_manager.h"
-#include "../lambda/network/enhanced_file_cache.h"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/network/network_resource_manager.h"
+#include "lambda/network/enhanced_file_cache.h"
 
 #include "lib/image.h"
 #include "lib/file.h"

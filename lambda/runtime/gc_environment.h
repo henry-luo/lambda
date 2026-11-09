@@ -8,7 +8,7 @@
 #ifdef __cplusplus
 #include "../lambda.hpp"
 #else
-#include "../lambda.h"
+#include "lambda/lambda.h"
 #endif
 
 typedef enum GcEnvironmentLayoutKind {

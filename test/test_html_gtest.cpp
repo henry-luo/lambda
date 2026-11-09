@@ -4,13 +4,13 @@
 #include <string.h>
 #include <stdbool.h>
 
-#include "../lambda/input/input.hpp"
-#include "../lambda/io/mark_builder.hpp"
-#include "../lambda/core/mark_reader.hpp"
-#include "../lambda/input/html5/html5_parser.h"
-#include "../lambda/input/html5/html5_tokenizer.h"
-#include "../lambda/input/input-parsers.h"
-#include "../lambda/format/format.h"
+#include "lambda/input/input.hpp"
+#include "lambda/io/mark_builder.hpp"
+#include "lambda/core/mark_reader.hpp"
+#include "lambda/input/html5/html5_parser.h"
+#include "lambda/input/html5/html5_tokenizer.h"
+#include "lambda/input/input-parsers.h"
+#include "lambda/format/format.h"
 #include "lib/mime-detect.h"
 #include "lib/arena.h"
 #include "lib/strbuf.h"

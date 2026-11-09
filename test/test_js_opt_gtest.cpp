@@ -29,7 +29,7 @@ extern "C" {
 }
 
 #include "../lambda/js/js_exec_profile.h"
-#include "../lambda/lambda.h"
+#include "lambda/lambda.h"
 #include "test_mir_check_helpers.hpp"
 
 namespace {
