@@ -1,0 +1,26 @@
+{
+  "name": "PhantomInlineCursorsFollowTheirColumnFragments",
+  "html": "test/html/layout_multicol_phantom_static.html",
+  "viewport": {"width": 1200, "height": 1200},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#center-a"}, "x": 160.0, "y": 20.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#right-a"}, "x": 210.0, "y": 80.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#left-a"}, "x": 110.0, "y": 140.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#unequal-a"}, "x": 160.0, "y": 200.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#before-a"}, "x": 50.0, "y": 280.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#spanners-first-a"}, "x": 160.0, "y": 360.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#spanners-last-a"}, "x": 160.0, "y": 420.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fixed-a"}, "x": 160.0, "y": 480.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#relative-a"}, "x": 50.0, "y": 540.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#margins-a"}, "x": 163.0, "y": 634.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#explicit-x-a"}, "x": 7.0, "y": 690.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#explicit-y-a"}, "x": 160.0, "y": 737.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#boundary-a"}, "x": 50.0, "y": 810.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#float-a"}, "x": 20.0, "y": 850.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#ordinary-first-a"}, "x": 160.0, "y": 960.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#ordinary-last-a"}, "x": 160.0, "y": 980.0, "width": 10, "height": 10, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#center"}, "x": 0.0, "y": 0.0, "width": 320.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#spanners"}, "x": 0.0, "y": 340.0, "width": 320.0, "height": 80.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#ordinary"}, "x": 0.0, "y": 940.0, "width": 320.0, "height": 40.0, "tolerance": 1e-05}
+  ]
+}

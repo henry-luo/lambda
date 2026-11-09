@@ -1,0 +1,6 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+  setTimeout(function() { document.getElementById('result').setAttribute('data-timer', 'yes'); }, 0);
+  location.replace(location.href.split('#')[0] + '#result');
+</script>

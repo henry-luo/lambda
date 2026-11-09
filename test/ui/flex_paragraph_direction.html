@@ -1,0 +1,10 @@
+<!doctype html>
+<style>
+  @font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf') }
+  body { margin: 0; display: flex }
+  .box { position: relative; width: 80px; height: 120px; font: 20px/1 Ahem }
+  .anchor { position: absolute }
+</style>
+<div class="box">1 2 34<span id="first" class="anchor">X</span></div>
+<div class="box" style="direction:rtl">1 2 34<span id="middle" class="anchor">X</span></div>
+<div class="box">1 2 34<span id="result" class="anchor">X</span></div>

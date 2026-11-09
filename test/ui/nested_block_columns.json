@@ -1,0 +1,15 @@
+{
+  "name": "NestedBlockColumnsConsumeOuterCapacityOncePerSet",
+  "html": "test/html/layout_nested_block_column_slots.html",
+  "viewport": {"width": 1200, "height": 600},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#half-inner"}, "x": 0.0, "y": 0.0, "width": 400.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#half-flow"}, "x": 0.0, "y": 0.0, "width": 350.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#half-prefix"}, "x": 0.0, "y": 0.0, "width": 200.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#half-absolute"}, "x": 150.0, "y": 0.0, "width": 180.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#full-inner"}, "x": 0.0, "y": 120.0, "width": 250.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#full-flow"}, "x": 0.0, "y": 120.0, "width": 250.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#short-inner"}, "x": 0.0, "y": 265.0, "width": 100.0, "height": 75.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#short-flow"}, "x": 0.0, "y": 265.0, "width": 100.0, "height": 75.0, "tolerance": 1e-05}
+  ]
+}

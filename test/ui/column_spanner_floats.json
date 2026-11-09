@@ -1,0 +1,26 @@
+{
+  "name": "SpannersCloseThePrecedingColumnFloatContext",
+  "html": "test/html/layout_single_column_spanner_floats.html",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#left"}, "x": 0, "y": 0.0, "width": 100, "height": 90.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#right"}, "x": 0, "y": 110.0, "width": 100, "height": 110.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#parallel"}, "x": 0, "y": 240.0, "width": 100, "height": 110.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#margins"}, "x": 0, "y": 370.0, "width": 100, "height": 109.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#later"}, "x": 0, "y": 499.0, "width": 100, "height": 110.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#none"}, "x": 0, "y": 629.0, "width": 100, "height": 50.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#left-span"}, "x": 0, "y": 60.0, "width": 100, "height": 10.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#left-tail"}, "x": 0, "y": 70.0, "width": 100, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#right-span"}, "x": 0, "y": 190.0, "width": 100, "height": 10.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#right-tail"}, "x": 0, "y": 200.0, "width": 100, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#parallel-span"}, "x": 0, "y": 320.0, "width": 100, "height": 10.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#parallel-tail"}, "x": 0, "y": 330.0, "width": 100, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#margins-span"}, "x": 0, "y": 445.0, "width": 100, "height": 10.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#margins-tail"}, "x": 0, "y": 459.0, "width": 100, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#later-span"}, "x": 0, "y": 559.0, "width": 100, "height": 10.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#later-tail"}, "x": 0, "y": 569.0, "width": 100, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#none-span"}, "x": 0, "y": 649.0, "width": 100, "height": 10.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#none-tail"}, "x": 0, "y": 659.0, "width": 100, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#later-float"}, "x": 0, "y": 569, "width": 30, "height": 40, "tolerance": 1e-05}
+  ]
+}

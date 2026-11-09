@@ -1,0 +1,11 @@
+{
+  "name": "AnonymousTableRolesOverrideMissingHTMLTagIdentity",
+  "html": "test/html/layout_anonymous_table_intrinsic.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#cell"}, "width": 20.0, "height": 60.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#row"}, "width": 20.0, "height": 60.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#inline"}, "width": 60.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#wrapper"}, "width": 20.0, "height": 60.0, "tolerance": 1e-05}
+  ]
+}

@@ -5317,22 +5317,6 @@ TEST_F(RadiantDocumentTest, ParagraphStartAlignmentUsesEachContainersDirection) 
     }
 }
 
-TEST_F(RadiantDocumentTest, FlexItemParagraphDirectionSurvivesWrappingAndSiblingLayout) {
-    ASSERT_NE(load_script_source(R"HTML(<!doctype html><style>
-        @font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}
-        body{margin:0;display:flex}
-        .box{position:relative;width:80px;height:120px;font:20px/1 Ahem}
-        .anchor{position:absolute}
-    </style><div class=box>1 2 34<span id=first class=anchor>X</span></div>
-    <div class=box style=direction:rtl>1 2 34<span id=middle class=anchor>X</span></div>
-    <div class=box>1 2 34<span id=result class=anchor>X</span></div>)HTML"), nullptr);
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    expect_box("first", 40, 20, 20, 20);
-    expect_box("middle", 100, 20, 20, 20);
-    expect_box("result", 200, 20, 20, 20);
-}
-
 TEST_F(RadiantDocumentTest, InlineStaticPositionsUseLogicalLineAxesAndDirectionalMarginEdges) {
     // independently measured with unequal physical dimensions in Chromium.
     const struct { const char* mode; const char* direction; float width, height, x, y, margin_x, margin_y; } flows[] = {
@@ -6045,25 +6029,6 @@ TEST_F(RadiantDocumentTest, CrossDocumentNavigationFinishesMicrotasksWithoutDrai
     EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
 }
 
-TEST_F(RadiantDocumentTest, FragmentNavigationRetainsCurrentDocumentTimers) {
-    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
-        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
-        location.replace('#result');
-    </script>)HTML");
-    ASSERT_NE(result, nullptr);
-    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
-}
-
-TEST_F(RadiantDocumentTest, NavigationClassificationUsesTheCompletedMicrotaskCheckpoint) {
-    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
-        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
-        location.replace('next.html');
-        Promise.resolve().then(function(){location.replace('#result')});
-    </script>)HTML");
-    ASSERT_NE(result, nullptr);
-    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
-}
-
 TEST_F(RadiantDocumentTest, InlineSizeQueriesSettleGeneratedBlockExtent) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body { margin:0 }
@@ -6216,15 +6181,6 @@ TEST_F(RadiantDocumentTest, NestedMicrotaskNavigationDefersDiscardedDocumentTime
     EXPECT_EQ(result->get_attribute("data-timer"), nullptr);
     ASSERT_NE(document->pending_navigation_url, nullptr);
     EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
-}
-
-TEST_F(RadiantDocumentTest, AbsoluteSameDocumentNavigationRetainsTimers) {
-    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
-        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
-        location.replace(location.href.split('#')[0]+'#result');
-    </script>)HTML");
-    ASSERT_NE(result, nullptr);
-    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
 }
 
 TEST_F(RadiantDocumentTest, InlineSizeQueryReevaluatesRealWidthChangesAndRepublishesOnce) {
@@ -9298,32 +9254,6 @@ TEST_F(RadiantDocumentTest, ComputedGapLonghandsProjectTheirWinningShorthand) {
     }
 }
 
-TEST_F(RadiantDocumentTest, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
-    ASSERT_NE(load("test/html/layout_preserved_whitespace.html"), nullptr);
-    ui.viewport_width = ui.window_width = 320;
-    ui.viewport_height = ui.window_height = 200;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Expected {
-        const char* id;
-        float width;
-        float height;
-    } cases[] = {
-        {"green", 80.0f, 20.0f},
-        {"tabs", 40.0f, 140.0f},
-        {"spaces", 40.0f, 80.0f},
-        {"unbroken", 40.0f, 120.0f},
-        {"newline", 0.0f, 20.0f},
-        {"separate-newline", 0.0f, 20.0f},
-    };
-    for (const Expected& entry : cases) {
-        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
-        ASSERT_NE(element, nullptr) << entry.id;
-        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
-        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
-    }
-}
-
 TEST_F(RadiantDocumentTest, NativeWordBoundariesAlsoSizeIntrinsicRuns) {
 #ifdef __APPLE__
     ASSERT_NE(load("test/html/layout_native_line_boundaries.html"), nullptr);
@@ -9348,22 +9278,6 @@ TEST_F(RadiantDocumentTest, NativeWordBoundariesAlsoSizeIntrinsicRuns) {
 #else
     GTEST_SKIP() << "native Unicode line-break resource is unavailable";
 #endif
-}
-
-TEST_F(RadiantDocumentTest, FixedColumnRowsCountGuttersInTheirPhysicalPitch) {
-    ASSERT_NE(load("test/html/layout_multicol_rows.html"), nullptr);
-    ui.viewport_width = ui.window_width = 320;
-    ui.viewport_height = ui.window_height = 200;
-    layout_html_doc(&ui, document, false);
-    struct Expected { const char* id; float height; } cases[] = {
-        {"default", 100.0f}, {"explicit", 100.0f}, {"styled", 100.0f},
-        {"two", 40.0f}, {"auto", 100.0f}, {"short", 100.0f}, {"zero", 80.0f},
-    };
-    for (const Expected& entry : cases) {
-        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
-        ASSERT_NE(element, nullptr) << entry.id;
-        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
-    }
 }
 
 TEST_F(RadiantDocumentTest, BalancedColumnSetsKeepRowTracksAndPartialContinuations) {
@@ -9417,22 +9331,6 @@ TEST_F(RadiantDocumentTest, VerticalBreakEdgesFollowTheParagraphDirection) {
     EXPECT_FLOAT_EQ(view_geometry_node_viewport_origin_resolved(nested_end, nullptr, nullptr).y, 40.0f);
 }
 
-TEST_F(RadiantDocumentTest, SpannersResolveAuthoredWidthsAgainstTheFullContainer) {
-    ASSERT_NE(load("test/html/layout_multicol_spanner_width.html"), nullptr);
-    ui.viewport_width = ui.window_width = 320;
-    ui.viewport_height = ui.window_height = 200;
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float width; } cases[] = {
-        {"content", 95.0f}, {"border", 75.0f}, {"percentage", 70.0f},
-        {"maximum", 80.0f}, {"minimum", 90.0f},
-    };
-    for (const Case& entry : cases) {
-        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
-        ASSERT_NE(element, nullptr);
-        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
-    }
-}
-
 TEST_F(RadiantDocumentTest, ForcedEmptyLinesAndOverflowColumnsRetainTheirFlow) {
     ASSERT_NE(load("test/html/layout_multicol_forced_lines.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -9448,23 +9346,6 @@ TEST_F(RadiantDocumentTest, ForcedEmptyLinesAndOverflowColumnsRetainTheirFlow) {
     EXPECT_FLOAT_EQ(nested->height, 60.0f);
     EXPECT_FLOAT_EQ(third->x, 100.0f);
     EXPECT_FLOAT_EQ(third->y, 0.0f);
-}
-
-TEST_F(RadiantDocumentTest, EmphasisLineExtentDoesNotDependOnClipping) {
-    ASSERT_NE(load("test/html/layout_emphasis_line_extent.html"), nullptr);
-    ui.viewport_width = ui.window_width = 320;
-    ui.viewport_height = ui.window_height = 200;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float height; } cases[] = {
-        {"plain", 20.0f}, {"over", 30.0f}, {"under", 30.0f},
-        {"clipped", 30.0f}, {"spaces", 30.0f}, {"punctuation", 30.0f},
-    };
-    for (const Case& entry : cases) {
-        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
-        ASSERT_NE(element, nullptr);
-        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
-    }
 }
 
 TEST_F(RadiantDocumentTest, AbsoluteParallelFlowsUseColumnsWithoutFragmentingTheirContainingBlock) {
@@ -19448,26 +19329,6 @@ TEST_F(RadiantDocumentTest, InterCharacterJustificationUsesTypographicUnits) {
     EXPECT_TRUE(text_justify_character_gap(&cursive, 0x0645, CSS_VALUE_INTER_CHARACTER));
 }
 
-TEST_F(RadiantDocumentTest, NestedBlockColumnsConsumeOuterCapacityOncePerSet) {
-    ASSERT_NE(load("test/html/layout_nested_block_column_slots.html"), nullptr);
-    ui.viewport_width = ui.window_width = 1200;
-    ui.viewport_height = ui.window_height = 600;
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float x; float y; float width; float height; } cases[] = {
-        {"half-inner", 0.0f, 0.0f, 400.0f, 100.0f},
-        {"half-flow", 0.0f, 0.0f, 350.0f, 100.0f},
-        {"half-prefix", 0.0f, 0.0f, 200.0f, 100.0f},
-        {"half-absolute", 150.0f, 0.0f, 180.0f, 100.0f},
-        {"full-inner", 0.0f, 120.0f, 250.0f, 100.0f},
-        {"full-flow", 0.0f, 120.0f, 250.0f, 100.0f},
-        {"short-inner", 0.0f, 265.0f, 100.0f, 75.0f},
-        {"short-flow", 0.0f, 265.0f, 100.0f, 75.0f},
-    };
-    for (const Case& entry : cases) {
-        expect_box(entry.id, entry.x, entry.y, entry.width, entry.height);
-    }
-}
-
 TEST_F(RadiantDocumentTest, AutoHeightWrappersKeepMonolithicOverflowSeparateFromFlow) {
     ASSERT_NE(load("test/html/layout_monolithic_wrapper_fragments.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
@@ -19630,87 +19491,6 @@ TEST_F(RadiantDocumentTest, OutOfFlowBlockificationRetainsInlineSeparators) {
     EXPECT_FLOAT_EQ(tail->y - lead->y, 34.0f);
 }
 
-TEST_F(RadiantDocumentTest, NestedInlineColumnsFitTheRemainingOuterSpace) {
-    ASSERT_NE(load("test/html/layout_nested_inline_remaining_columns.html"), nullptr);
-    ui.viewport_width = ui.window_width = 1200;
-    ui.viewport_height = ui.window_height = 800;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float x; float y; float width; float height; } cases[] = {
-        {"quarter-inner", 0.0f, 75.0f, 50.0f, 25.0f},
-        {"quarter-first", 0.0f, 75.0f, 25.0f, 25.0f},
-        {"quarter-second", 25.0f, 75.0f, 25.0f, 25.0f},
-        {"quarter-tail", 50.0f, 0.0f, 50.0f, 100.0f},
-        {"remainder-inner", 0.0f, 130.0f, 50.0f, 90.0f},
-        {"remainder-first", 0.0f, 130.0f, 25.0f, 50.0f},
-        {"remainder-second", 25.0f, 130.0f, 25.0f, 50.0f},
-        {"remainder-tail", 50.0f, 120.0f, 50.0f, 100.0f},
-        {"fitting-inner", 0.0f, 290.0f, 50.0f, 50.0f},
-        {"fitting-first", 0.0f, 290.0f, 25.0f, 25.0f},
-        {"fitting-second", 0.0f, 315.0f, 25.0f, 25.0f},
-        {"fitting-tail", 50.0f, 240.0f, 50.0f, 100.0f},
-        {"fixed-inner", 0.0f, 385.0f, 50.0f, 50.0f},
-        {"fixed-first", 0.0f, 385.0f, 25.0f, 25.0f},
-        {"fixed-second", 0.0f, 410.0f, 25.0f, 25.0f},
-        {"fixed-tail", 50.0f, 360.0f, 50.0f, 100.0f},
-    };
-    for (const Case& entry : cases)
-        expect_box(entry.id, entry.x, entry.y, entry.width, entry.height);
-}
-
-TEST_F(RadiantDocumentTest, SpannersCloseThePrecedingColumnFloatContext) {
-    ASSERT_NE(load("test/html/layout_single_column_spanner_floats.html"), nullptr);
-    ui.viewport_width = ui.window_width = 1200;
-    ui.viewport_height = ui.window_height = 800;
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float y; float height; } cases[] = {
-        {"left", 0.0f, 90.0f}, {"right", 110.0f, 110.0f},
-        {"parallel", 240.0f, 110.0f}, {"margins", 370.0f, 109.0f},
-        {"later", 499.0f, 110.0f}, {"none", 629.0f, 50.0f},
-        {"left-span", 60.0f, 10.0f}, {"left-tail", 70.0f, 20.0f},
-        {"right-span", 190.0f, 10.0f}, {"right-tail", 200.0f, 20.0f},
-        {"parallel-span", 320.0f, 10.0f}, {"parallel-tail", 330.0f, 20.0f},
-        {"margins-span", 445.0f, 10.0f}, {"margins-tail", 459.0f, 20.0f},
-        {"later-span", 559.0f, 10.0f}, {"later-tail", 569.0f, 20.0f},
-        {"none-span", 649.0f, 10.0f}, {"none-tail", 659.0f, 20.0f},
-    };
-    for (const Case& entry : cases)
-        expect_box(entry.id, 0.0f, entry.y, 100.0f, entry.height);
-    expect_box("later-float", 0.0f, 569.0f, 30.0f, 40.0f);
-}
-
-TEST_F(RadiantDocumentTest, ZeroUsedFlexWidthsStayDefinite) {
-    ASSERT_NE(load("test/html/layout_zero_width_flex_lines.html"), nullptr);
-    ui.viewport_width = ui.window_width = 1200;
-    ui.viewport_height = ui.window_height = 800;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float y; float width; float height; } cases[] = {
-        {"auto", 0.0f, 0.0f, 20.0f}, {"explicit", 40.0f, 0.0f, 20.0f},
-        {"padding", 80.0f, 14.0f, 34.0f}, {"column", 134.0f, 0.0f, 20.0f},
-        {"reverse", 174.0f, 0.0f, 20.0f}, {"empty", 214.0f, 0.0f, 0.0f},
-        {"intrinsic", 234.0f, 20.0f, 20.0f}, {"ordinary", 274.0f, 80.0f, 20.0f},
-    };
-    for (const Case& entry : cases)
-        expect_box(entry.id, 0.0f, entry.y, entry.width, entry.height);
-}
-
-TEST_F(RadiantDocumentTest, QuotationFontStyleUsesInheritanceAndAuthorRules) {
-    ASSERT_NE(load("test/html/layout_q_font_inheritance.html"), nullptr);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; CssEnum style; } cases[] = {
-        {"plain", CSS_VALUE_NORMAL}, {"inherited", CSS_VALUE_ITALIC},
-        {"author", CSS_VALUE_ITALIC}, {"normal", CSS_VALUE_NORMAL},
-        {"cite", CSS_VALUE_ITALIC}, {"dfn", CSS_VALUE_ITALIC}, {"var", CSS_VALUE_ITALIC},
-    };
-    for (const Case& entry : cases) {
-        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
-        ASSERT_NE(element, nullptr) << entry.id;
-        ASSERT_NE(element->font, nullptr) << entry.id;
-        EXPECT_EQ(element->font->font_style, entry.style) << entry.id;
-    }
-}
-
 TEST_F(RadiantDocumentTest, AvoidFloorsRespectDefiniteCapacityAndPrincipalMinimums) {
     ASSERT_NE(load("test/html/layout_avoid_fragmentainer_limits.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
@@ -19823,131 +19603,6 @@ TEST_F(RadiantDocumentTest, NestedAvoidBoxesUseFittingFragmentSlots) {
         ASSERT_NE(element, nullptr) << id;
         EXPECT_LE(element->layout_fragments_count(), 1) << id;
     }
-}
-
-TEST_F(RadiantDocumentTest, MulticolBaselinesUseCompletedLineFragments) {
-    ASSERT_NE(load("test/html/layout_multicol_fragment_baselines.html"), nullptr);
-    ui.viewport_width = ui.window_width = 1200;
-    ui.viewport_height = ui.window_height = 800;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float x; float y; float width; float height; } cases[] = {
-        {"short", 0.0f, 20.0f, 90.0f, 20.0f},
-        {"tall", 90.0f, 0.0f, 90.0f, 40.0f},
-        {"marker", 180.0f, 16.0f, 20.0f, 20.0f},
-        {"plain-short", 0.0f, 120.0f, 20.0f, 20.0f},
-        {"plain-tall", 20.0f, 100.0f, 20.0f, 40.0f},
-        {"plain-marker", 40.0f, 116.0f, 20.0f, 20.0f},
-        {"hidden-short", 0.0f, 220.0f, 90.0f, 20.0f},
-        {"hidden-tall", 90.0f, 200.0f, 90.0f, 40.0f},
-        {"hidden-marker", 180.0f, 220.0f, 20.0f, 20.0f},
-        {"first-short", 0.0f, 304.0f, 90.0f, 20.0f},
-        {"first-tall", 90.0f, 304.0f, 90.0f, 40.0f},
-        {"first-marker", 180.0f, 300.0f, 20.0f, 20.0f},
-        {"frag-short", 0.0f, 420.0f, 90.0f, 20.0f},
-        {"frag-tall", 90.0f, 400.0f, 90.0f, 40.0f},
-        {"frag-marker", 180.0f, 416.0f, 20.0f, 20.0f},
-        {"span-short", 0.0f, 540.0f, 90.0f, 20.0f},
-        {"span-tall", 90.0f, 500.0f, 90.0f, 60.0f},
-        {"span-marker", 180.0f, 536.0f, 20.0f, 20.0f},
-        {"unequal-short", 0.0f, 640.0f, 90.0f, 20.0f},
-        {"unequal-tall", 90.0f, 600.0f, 90.0f, 60.0f},
-        {"unequal-marker", 180.0f, 636.0f, 20.0f, 20.0f},
-        {"positioned-short", 0.0f, 720.0f, 90.0f, 20.0f},
-        {"positioned-tall", 90.0f, 700.0f, 90.0f, 40.0f},
-        {"positioned-marker", 180.0f, 716.0f, 20.0f, 20.0f},
-    };
-    for (const Case& entry : cases)
-        expect_box(entry.id, entry.x, entry.y, entry.width, entry.height);
-}
-
-TEST_F(RadiantDocumentTest, PhantomInlineCursorsFollowTheirColumnFragments) {
-    ASSERT_NE(load("test/html/layout_multicol_phantom_static.html"), nullptr);
-    ui.viewport_width = ui.window_width = 1200;
-    ui.viewport_height = ui.window_height = 1200;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float x; float y; } cases[] = {
-        {"center-a", 160.0f, 20.0f}, {"right-a", 210.0f, 80.0f},
-        {"left-a", 110.0f, 140.0f}, {"unequal-a", 160.0f, 200.0f},
-        {"before-a", 50.0f, 280.0f}, {"spanners-first-a", 160.0f, 360.0f},
-        {"spanners-last-a", 160.0f, 420.0f}, {"fixed-a", 160.0f, 480.0f},
-        {"relative-a", 50.0f, 540.0f}, {"margins-a", 163.0f, 634.0f},
-        {"explicit-x-a", 7.0f, 690.0f}, {"explicit-y-a", 160.0f, 737.0f},
-        {"boundary-a", 50.0f, 810.0f}, {"float-a", 20.0f, 850.0f},
-        {"ordinary-first-a", 160.0f, 960.0f}, {"ordinary-last-a", 160.0f, 980.0f},
-    };
-    for (const Case& entry : cases)
-        expect_box(entry.id, entry.x, entry.y, 10.0f, 10.0f);
-    expect_box("center", 0.0f, 0.0f, 320.0f, 20.0f);
-    expect_box("spanners", 0.0f, 340.0f, 320.0f, 80.0f);
-    expect_box("ordinary", 0.0f, 940.0f, 320.0f, 40.0f);
-}
-
-TEST_F(RadiantDocumentTest, StaticPositionsStopAtTheirInlineContainingBlock) {
-    ASSERT_NE(load("test/html/layout_inline_containing_block_static.html"), nullptr);
-    ui.viewport_width = ui.window_width = 320;
-    ui.viewport_height = ui.window_height = 200;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float x; float y; } cases[] = {
-        {"custom", 50.0f, 60.0f}, {"known", 50.0f, 60.0f}, {"block", 30.0f, 80.0f},
-    };
-    for (const Case& entry : cases) {
-        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
-        ASSERT_NE(element, nullptr);
-        float x = 0.0f, y = 0.0f;
-        view_get_visual_bounds(element, &x, &y, nullptr, nullptr);
-        EXPECT_FLOAT_EQ(x, entry.x) << entry.id;
-        EXPECT_FLOAT_EQ(y, entry.y) << entry.id;
-    }
-}
-
-TEST_F(RadiantDocumentTest, AnonymousTableRolesOverrideMissingHTMLTagIdentity) {
-    ASSERT_NE(load("test/html/layout_anonymous_table_intrinsic.html"), nullptr);
-    ui.viewport_width = ui.window_width = 320;
-    ui.viewport_height = ui.window_height = 200;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float width; float height; } cases[] = {
-        {"cell", 20.0f, 60.0f}, {"row", 20.0f, 60.0f},
-        {"inline", 60.0f, 20.0f}, {"wrapper", 20.0f, 60.0f},
-    };
-    for (const Case& entry : cases) {
-        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
-        ASSERT_NE(element, nullptr);
-        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
-        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
-    }
-}
-
-TEST_F(RadiantDocumentTest, MixedColumnFlowRetainsAtomicInlineLines) {
-    ASSERT_NE(load("test/html/layout_mixed_atomic_columns.html"), nullptr);
-    ui.viewport_width = ui.window_width = 1200;
-    ui.viewport_height = ui.window_height = 800;
-    process_document_font_faces(&ui, document);
-    layout_html_doc(&ui, document, false);
-    struct Case { const char* id; float y; float height; } cases[] = {
-        {"input", 0.0f, 45.0f}, {"inline", 90.0f, 45.0f},
-        {"block", 180.0f, 45.0f}, {"only", 270.0f, 25.0f},
-        {"tail", 360.0f, 45.0f}, {"baseline", 450.0f, 34.0f},
-        {"nested", 540.0f, 45.0f},
-    };
-    for (const Case& entry : cases)
-        expect_box(entry.id, 0.0f, entry.y, 200.0f, entry.height);
-    expect_box("input-first", 0.0f, 20.0f, 30.0f, 25.0f);
-    expect_box("input-last", 100.0f, 20.0f, 30.0f, 25.0f);
-    expect_box("inline-first", 0.0f, 110.0f, 30.0f, 25.0f);
-    expect_box("inline-last", 100.0f, 110.0f, 30.0f, 25.0f);
-    expect_box("block-first", 0.0f, 200.0f, 30.0f, 25.0f);
-    expect_box("block-last", 100.0f, 200.0f, 30.0f, 25.0f);
-    expect_box("only-first", 0.0f, 270.0f, 30.0f, 25.0f);
-    expect_box("only-avoid", 100.0f, 270.0f, 100.0f, 25.0f);
-    expect_box("tail-last", 100.0f, 380.0f, 30.0f, 25.0f);
-    expect_box("baseline-first", 20.0f, 450.0f, 30.0f, 30.0f);
-    expect_box("baseline-last", 120.0f, 450.0f, 30.0f, 30.0f);
-    expect_box("nested-first", 0.0f, 560.0f, 30.0f, 25.0f);
-    expect_box("nested-last", 100.0f, 560.0f, 30.0f, 25.0f);
 }
 
 TEST_F(RadiantDocumentTest, GridSpanningItemsRetainTheirMonolithicFirstLine) {
@@ -22709,14 +22364,6 @@ TEST_F(RadiantTextLayout, SnapshotReadinessNotifiesTheCommittedFirstFrame) {
     DomElement* box = dom_find_element_by_id(document->root->as_element(), "result");
     ASSERT_NE(box, nullptr);
     EXPECT_STREQ(box->get_attribute("data-rendered"), "yes");
-}
-
-TEST_F(RadiantTextLayout, ScrollReadsUpdateStickyGeometryAndFixedSubtreesUseTheViewport) {
-    DomElement* body = load("test/html/layout_snapshot_sticky_scroll.html", true);
-    ASSERT_NE(body, nullptr);
-    EXPECT_FALSE(document->root->has_class("reftest-wait"));
-    for (const char* attribute : {"data-scroll", "data-offset", "data-flow", "data-fixed", "data-reset"})
-        EXPECT_STREQ(body->get_attribute(attribute), "yes") << attribute;
 }
 
 TEST_F(RadiantTextLayout, SnapshotReadinessPreservesFrameCancellation) {

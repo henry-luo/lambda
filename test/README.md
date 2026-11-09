@@ -65,7 +65,9 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 The `geomap_*_events.json` fixtures replace the in-process map input cases:
 selection and callbacks, controls and keyboard, drag suppression, pointer and
 wheel input, and double-density coordinates. `dom_regexp_unicode_email.json`
-checks the document-realm matcher through the same host. Both run in the
+checks the document-realm matcher through the same host. Fragment-navigation
+timer and microtask replays, sticky-scroll readback, flex paragraph direction,
+and column-layout geometry also run through the host. These fixtures run in the
 Radiant UI baseline; `make test-map` also runs the map replays (D9.1.1v4).
 
 Procart surface changes use `./test/test_lambda_gtest.exe --gtest_filter='ProcartSurfaceTests.*'`
