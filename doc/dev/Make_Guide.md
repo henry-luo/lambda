@@ -14,7 +14,7 @@ Run `make help` for a quick summary, or see below for full details.
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `build`         | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain (Clang on all platforms; CLANG64 on Windows/MSYS2 to avoid Universal CRT). Builds normal Tree-sitter input libraries, RE2, and embed headers. The Lambda, JavaScript, and TypeScript reference grammars are built only by `lambda-cst`. |
 | `debug`         | Debug build with AddressSanitizer enabled.                                                                                                                                           |
-| `release`       | Optimized release build. Runs `clean-all` first, then compiles with LTO, dead code elimination, symbol visibility control, and strips debug symbols. Output: `lambda_release.exe`.   |
+| `release`       | Optimized release build. Runs `clean-all` first, then compiles with LTO, dead code elimination, symbol visibility control, and strips debug symbols. Output: `lambda.exe`.   |
 | `rebuild`       | Force complete rebuild (`clean-all` + `build`).                                                                                                                                      |
 | `lambda`        | Alias for `build`.                                                                                                                                                                   |
 | `all`           | Alias for `lambda`.                                                                                                                                                                  |
@@ -27,6 +27,12 @@ Run `make help` for a quick summary, or see below for full details.
 | Variable | Description |
 |----------|-------------|
 | `JOBS=N` | Number of parallel compilation jobs (default: all CPU cores). |
+
+The split release build (D9.1.1v4) passes its LTO flags and compiler to the first-party
+`lambda-input` and Radiant archive builds. It uses full LTO on macOS and Linux
+with the configured Clang toolchain, as does the release profiling build.
+Third-party libraries may use native objects. Sibling builds invoked directly
+retain their own default flags.
 
 ### Examples
 
