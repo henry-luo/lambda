@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-05
 
-**Status:** Active, resumed 2026-11-09. P44–P50 close the five PDF/EPS failures and the native husk/GC fixture failures. Current work tunes untyped release execution while preserving typed performance (§10.91–10.94). Watercolor's normal timeout and final language qualification remain open. No full compatibility or performance closure claimed.
+**Status:** Active, resumed 2026-11-09. P44–P50 close the five PDF/EPS failures and the native husk/GC fixture failures. Current work tunes untyped release execution while preserving typed performance (§10.91–10.96). Watercolor's normal timeout and final language qualification remain open. No full compatibility or performance closure claimed.
 
 **Starting tree:** `71296a16a9622f764229720ed2c321330efcd278`, branch `master`.
 
@@ -21,20 +21,25 @@ object layouts, type system, scheduler and precise GC remain shared.
 - **Resumed:** 2026-11-09 at the user's request, master `14f48f209`; merge complete, initially clean tree.
 - **Latest continuation:** master `1540d9228`. After the user updated Radiant to `558eb3e`, the original private release build/link succeeds. [RI-003](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-003) is resolved: both property providers occur exactly once in `libradiant.a`, required symbols are defined, and typed/untyped Fibonacci goldens pass under both compilers (4/4). MVP record-read tuning resumes below (§10.92); the owner boundary is unchanged (**D9.1.1v4 / D9.1.3v2**).
 - **Scope:** the latest request prioritizes untyped MVP performance against Full MIR on all 77 benchmarks, with no typed MVP regression. Preserve the existing correctness changes, formal semantic oracles and shared runtime (**D4.3.1**, **D8.3.1–D8.3.3**).
-- **Current evidence:** P26 passes 11 focused unit methods and all 77 typed/untyped benchmark goldens, with complete private-release timing receipts and source/binary/corpus identity checks. This qualifies the measured benchmark corpus, not the deferred full language/GTest gate.
+- **Current evidence:** P36 passes 14 focused unit methods and all 77 typed/untyped benchmark goldens. Its complete private-release untyped campaign has 48 faster / 29 slower Full medians, versus 47 faster for P26 in the same run; geometric MVP/Full 0.67503 and MVP/P26 0.93323. Typed MVP/P26 is 1.00349 over 76 nonzero rows, with no reproduced slowdown after 17 focused 15-pair checks and independent 30-pair Array1/Sieve checks. All source/binary/corpus/runner identity checks pass. This qualifies the measured benchmark corpus, not the deferred full language/GTest gate.
 - **Milestones:** reproduce the six late source cases; fix PDF/handler and EPS/container causes with permanent paired/GC cases; investigate watercolor and native/harness residuals; reconcile aggregate test-target migration and run current parity gates.
-- **Verification budget:** focused unit checks only until all known missing features are implemented, per the user. No Lambda baseline or intermediate full verification. Performance timing only with release builds after correctness stabilizes.
+- **Verification budget (latest user instruction):** validation is deferred until at least **11** previously slower benchmarks cross below Full MIR, superseding the earlier six-case gate. Focused release performance probes retain their existing golden sanity checks so incorrect results cannot count as wins. No unit suites, aggregate typed/untyped campaign, Lambda/Radiant baseline or full-language gate before that threshold.
 - **Open qualification:** `make test-lambda-baseline` currently stops because `test_wpt_html_parser_gtest` has no generated build target. Old broad counts below remain historical; do not present them as current failures.
 - **P44–P47:** PDF output demand/handler rollback, boxed native range bounds and stale var-argument transport are repaired (§10.88). All five original PDF/EPS source cases pass paired normal/forced/seeded GC checks. Three permanent MVP regressions pass 9/9 GC checks and fail on the frozen pre-fix control. Full retains a newly exposed projected-borrow mismatch; its oracle remains unchanged.
 - **P48–P50:** dead native wrappers receive consistent ordinal handling, and their fixture now owns precise roots, compares JS Set completion and understands receiver-specific binding variants. Seven native units pass 21/21 across GC modes. A failure-only replay passes 35/37; its two macOS fork failures pass 2/2 with GTest's fresh-process death-test mode (§10.89).
 - **Watercolor:** the unchanged script matches its golden on MVP with a 300-second diagnostic budget. Its ordinary timeout still fails; debug runs establish correctness only. No release timing or threshold waiver is claimed (§10.90).
 - **Release tuning:** artifacts are under `temp/mvp_untyped_tuning_20261109/`. P8's complete release screen passes all 77 untyped goldens: 35/77 faster Full medians (starting 30/77), geometric MVP/Full ratio 0.88121 (starting 1.07515). All 77 typed goldens pass, with overall candidate/starting-MVP ratio 0.99847. P9 repairs the single confirmed typed regression and is the current private release; only its affected workloads are remeasured (§10.91).
-- **Next:** tune the 29 slower rows in P26's complete untyped campaign, prioritizing recursive search/snapshots, integer loops and remaining record transport. P26 supersedes P22 as the current homogeneous untyped timing screen. No every-row target is closed. Retain deferred language qualification and owner-ledger defects. Root executables remain untouched; no Lambda/Radiant baseline, C2MIR or full language verification ran.
-- **Current build gate:** cleared. P26 is the current private release under `temp/mvp_untyped_tuning_p13/`, frozen by `p26-manifest.json`. P12 is the frozen Full/prior-MVP control under `temp/mvp_untyped_tuning_next/`; its `p12-summary.json` retains the preceding 42 slower rows, typed follow-ups and verified identities. RI-003 receipts and owner identities remain there.
+- **Next:** tune the 29 slower rows in P36's complete untyped campaign, prioritizing recursive record transport, remaining array/search kernels and text pipelines. §10.95 records every slower row; `temp/mvp_untyped_tuning_p27/p36-summary.json` retains raw screen classification and follow-ups. No every-row target is closed. Retain deferred language qualification and owner-ledger defects. Root executables remain untouched; no Lambda/Radiant baseline, C2MIR or full language verification ran.
+- **Current build gate:** cleared. P36 is the current private release under `temp/mvp_untyped_tuning_p27/`, frozen by `p36-manifest.json`. P26 under `temp/mvp_untyped_tuning_p13/` supplies frozen Full/prior-MVP controls. Starting HEAD is `84f18b39b`; no commit was requested. RI-003 remains resolved; no sibling-owned change was made.
 - **P10–P12:** guarded inferred-record reads and compile-time binding/call/return candidates are implemented (**D4.3.1 / D7.4.1 / D2.6.2**). Frozen P12 SHA256 `b1e56d966cbe104fb27484f761608456ca49e7eebb3ed39fea2337ff5582771d`. All 77 untyped goldens pass; geometric candidate/prior-MVP ratio 0.95626 and MVP/Full ratio 0.84347, with 35 faster / 42 slower Full medians. Focused units have no MVP failures; Full retains the known three LR07-53 subtests. All 77 typed goldens also pass, with geometric candidate/prior-MVP ratio 0.99844 over 76 nonzero rows and no confirmed slowdown after 15-pair follow-ups (§10.92), under `temp/mvp_untyped_tuning_next/`.
 
 - **P13–P22:** clean starting master `d3582e267`, frozen P12 Full/prior-MVP control. Scalar body versions guard constructor predictions, retain the original ABI/effects and widen all local writes (**D7.4.1 / D4.3.1 / D6.3**). Open implicit record writes use ordinary COW; inferred integer reads/writes guard live descriptors. Boxed array witnesses reuse the shared physical-storage guard, after numeric alternatives. P21 excludes member/index writes from scalar narrowing; P22 clears the boxed witness when captured homes reload. Eleven final focused unit methods pass, including both compilers and normal/forced/seeded GC cases. Frozen P22 SHA256 `ec19808d13a2915d322dd5741edf9c24609ce6aef71fc9f4425fcebb2ec9a833`. All 77 untyped goldens pass: 47 faster / 30 slower Full medians (prior MVP 35 faster in the same campaign), geometric MVP/Full ratio 0.72208 and MVP/prior ratio 0.85538. All 77 typed goldens also pass; follow-ups identify the Splay regression addressed in P26 under `temp/mvp_untyped_tuning_p13/`. Interrupted P18/P20/P21 screens are partial diagnostic evidence, not final campaigns; no every-row closure is claimed.
 - **P23–P26 complete slice:** diagnostics identify a literal-shape hint carried past declared return admission. P26 honors concrete declared map results before constructor hints (**D4.2.5 / D7.4.1 / D4.3.1**); generic `map`/`object` results retain ordinary prediction. Eleven focused unit methods pass, including the typed-result COW/MIR regression case. Frozen P26 SHA256 `39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`. All 77 untyped goldens pass: 48 faster / 29 slower Full medians, versus 37 faster for prior MVP in the same paired campaign; geometric MVP/Full 0.71611 and MVP/prior 0.84814. All 77 typed goldens pass, geometric MVP/prior 0.99861 over 76 nonzero rows, with no reproduced slowdown after 15 focused 15-pair checks and an independent 30-pair Primes check. All provenance checks pass in `temp/mvp_untyped_tuning_p13/p26-summary.json`. The every-row Full target remains open.
+- **P27–P36 complete tuning slice:** resumed from clean `84f18b39b`; starting compiler sources match frozen P26. Artifacts: `temp/mvp_untyped_tuning_p27/`. P36 preserves audited inferred-array seeds, queries immutable initializer/closed-call intervals before range publication, guards boxed integer/Error locals through the finite numeric-loop proof, and supports integer candidates in guarded scalar bodies (**D4.3.1 / D6.3 / D7.4.1 / D8.2.5**). A numeric consumer can predict a version when opaque callers supply no scalar hint; exact entry guards retain other domains. Native loop carriers use independent registers and publish once on exit or before checked resumption; entry misses publish nothing, and loop-local declarations are excluded from entry narrowing. Inferred arrays retain ordinary constructors. Boxed array/Error owners reuse the shared physical guards for native iterations and strided loops. P33's partial screen exposed the lost Primes store version; P35 repairs it (2.648 ms versus P26 MVP 5.068 ms and Full 11.996 ms). Puzzle and Collatz gains remain. Fourteen focused unit methods pass on frozen P36 (SHA256 `c417537683b6ec9d768d1133fddefc1678098f49bbd072bae6f846f6040511e6`); both complete screens pass all 77 goldens. Seven untyped and 17 typed 15-pair follow-ups have no statistical slowdown flags. Independent typed 30-pair Array1/Sieve checks also have none; their emitted MIR matches P26 after address normalization. Two new fixture/golden pairs and the guarded-scalar fixture cover snapshots/open writes, finite-loop entry/resumption/exit, opaque integer/float/null/invalid/wide inputs and native boxed-array stores. Unconditional bitwise-int inference was discarded before qualification because boxed poison retains existing Error behavior. Full's nonrecursive open-var replacement mismatch is reproduced on P26 and recorded under LR07-53; its oracle is unchanged. No baseline/full-language gate ran.
+
+- **Active goal continuation:** retain the uncommitted P36 slice on HEAD `84f18b39b`; frozen P36 is the prior-MVP control and P26 supplies Full. Artifacts: `temp/mvp_untyped_tuning_goal/`. Validation began only after P46 confirmed **12 crossings** (`p46-validation-unlock.json`). Last aggregate-qualified private release is **P50**, SHA256 `b6ae963fe5db8f4eb76038e0726dc77e49c8d1e642eceb3457f091939dd2628d`. Its complete untyped screen passes all 77 goldens: **61 faster / 16 slower Full medians**, geometric MVP/Full **0.60937**, MVP/P36 **0.89681**. All nine source/binary/corpus/runner/release checks pass in `p50-summary.json`. P50 passes six focused unit methods after P47's 17; both new fixture/golden pairs pass paired normal/forced/seeded GC. P48 supplies the complete 77-case typed screen (geometric MVP/P36 **0.99010**), with all flags cleared by focused follow-ups; the corrected P50 Deriv (30 pairs), Richards wrappers and Raytrace3D (15 each) have no statistical slowdown. The aggregate typed screen is P48, not P50; P50 qualifies changed inlining paths with focused follow-ups. No jobs remain running. Next: tune the 16 remaining rows together, preserving typed performance and the 11-crossing validation cadence. Shared next-root candidates are recorded at the end of §10.96. No baseline, sibling edit or commit ran; the goal remains active.
+
+- **P51 onward active batch:** validation waited for **11 confirmed crossings on frozen P81**. Last complete P81 untyped screen: 77/77 goldens, **72/77** faster Full medians (68 bootstrap wins), geometric MVP/Full 0.5332. Complete typed screen: 77/77 goldens; its FFT/Brainfuck regression flags are fixed and resolved by **retained P82** focused repeats (31 pairs). Sumfp remains below timer resolution. Current focused Full misses: Pnpoly, Mbrot, Splay, JetStream DeltaBlue; Nqueens/Paraffins have 31-pair wins. Small untyped CD/Parse Integers prior-MVP regressions remain. P83 Boolean-branch experiment is discarded; compiler sources again match P82 SHA/manifest. Focused semantic/GC/MIR checks pass, and Full defects LR07-54/LR07-55 are recorded with unchanged MVP goldens. **No jobs running; work stopped at the user’s wrap-up request (2026-11-10).** No P82 aggregate, baseline or commit is claimed. §10.98 and `temp/mvp_untyped_tuning_goal/p82-summary.json` hold the resume state.
 
 ### Previous checkpoint (2026-11-06)
 
@@ -4488,3 +4493,736 @@ three new unit fixture/golden pairs were added. No Lambda/Radiant baseline,
 C2MIR or full-language verification ran. The **29 remaining slower untyped
 rows still fail the requested every-row Full MIR target**; overall speed and
 typed preservation do not close that target.
+
+### 10.95 P27–P36: boxed finite loops and inferred array consumers
+
+This continuation starts from clean `84f18b39b`. Its compiler-source corpus
+matches frozen P26, which supplies both Full MIR and prior-MVP controls.
+Artifacts are under `temp/mvp_untyped_tuning_p27/`.
+
+The planner now preserves audited primitive-array seeds through scalar
+producer seeding. Immutable integer initializers and closed incoming arguments
+can supply demand-only intervals before final range publication. These queries
+use the existing incoming-call helper, bounded recursion and shared AST
+identities; they publish no second type/fact table (**D8.2.5**).
+
+The finite numeric-loop proof accepts guarded, unannotated boxed integer/Error
+locals. The new native registers have independent root classifications
+(**D6.3 / D2.3.5**). Entry guards run before effects. Normal completion and
+radius misses publish finite values once; a miss resumes the original checked
+loop at its current state. An entry miss skips publication entirely. Locals
+declared inside the loop cannot supply initialized entry values. Four source
+iterations retain their original tests, breaks and statement order
+(**D4.3.1 / D7.4.1 / S7.7.2v2**).
+
+Guarded scalar bodies now accept integer construction hints and integer
+consumer predictions. Exact Item guards precede all body effects, while float,
+null, invalid and wide alternatives retain the original body and ABI. The
+new opaque-input case tests predictions without a constructor hint. No
+unconditional bitwise-int inference is retained: existing boxed poison/Error
+behavior remains in the checked helper path (**S4.1.2 / D4.3.1**).
+
+P33's partial performance screen exposed a Primes regression: a private
+`bool[] | Error` observation blocked the native store version used for erased
+owners. P35/P36 use the same physical owner/lane/COW guards for boxed array
+outcomes, sharing owner guards between iteration and strided-loop emitters.
+Inferred owners also retain ordinary constructors, avoiding certificate
+maintenance on raw writes. Private observations add no receiving schema
+(**D4.3.1 / S12.2.1v3**). P33 is superseded diagnostic evidence, not a complete
+qualification run.
+
+Frozen P36 SHA256 is
+`c417537683b6ec9d768d1133fddefc1678098f49bbd072bae6f846f6040511e6`.
+Fourteen focused unit methods pass, including normal/forced/seeded GC and two
+new fixture/golden pairs. They cover entry misses, radius resumption, normal
+completion, early breaks, snapshots, open writes, opaque scalar domains and
+native stores into boxed array outcomes. The array fixture also reproduces
+Full's pre-existing nonrecursive var-owner replacement mismatch on P26;
+LR07-53 records the evidence. Its correct golden remains unchanged, and that
+fixture's complete oracle is checked on MVP.
+
+The complete untyped screen passes all 77 goldens for candidate MVP, frozen
+P26 Full and prior P26 MVP. Candidate medians beat Full on **48/77** rows,
+versus **47/77** for prior MVP in the same paired campaign. The geometric
+MVP/Full ratio is **0.67503** (prior MVP/Full **0.72332**); MVP/prior is
+**0.93323**, a 6.7% reduction in geometric mean execution time. Three measured
+rounds follow one warmup; every raw sample and golden/source hash is retained.
+These are script-reported execution times, excluding startup and JIT, with
+the runner's per-case workload boundaries unchanged.
+
+| Untyped gain | P36 MVP ms | Full MIR ms | P26 MVP ms |
+|---|---:|---:|---:|
+| kostya/collatz | 149.342 | 268.644 | 565.195 |
+| larceny/puzzle | 3.605 | 4.243 | 13.538 |
+| kostya/primes | 2.559 | 11.816 | 5.215 |
+| larceny/primes | 2.545 | 11.876 | 5.099 |
+| text/fast_diff | 73.007 | 190.458 | 90.425 |
+
+The complete typed regression screen passes all 77 goldens for candidate and
+prior MVP. Five pairs follow one warmup. The geometric MVP/prior ratio is
+**1.00349** over 76 nonzero rows. Seventeen 15-pair, three-warmup follow-ups
+cover every statistical flag or median increase above 2%, plus matched
+100,000-kernel Sumfp batching for its zero-resolution screen. None confirms a
+slowdown. Independent 30-pair Array1/Sieve checks likewise have no statistical
+slowdown flag; both also emit identical MIR after process-address
+normalization. Seven equivalent untyped follow-ups have no slowdown flags.
+Original screen flags remain in the receipts; follow-up classification does
+not rewrite the homogeneous campaign's medians.
+
+All eight provenance/release checks pass in `p36-summary.json`: executable
+hashes, current and measured compiler sources, archived manifest identity,
+benchmark/golden corpus, runner sources and the release marker. The unit log
+is `p36-focused-units.log`; complete campaign receipts are
+`p36-untyped-all.json` and `p36-typed-all.json`. No Lambda/Radiant baseline,
+C2MIR or full-language gate ran in this continuation.
+
+The every-row Full target remains **open**. These 29 rows have slower Full
+medians in the complete screen; small differences remain timing estimates,
+not a claim of statistical separation:
+
+| Remaining untyped row | MVP ms | Full MIR ms | MVP/Full |
+|---|---:|---:|---:|
+| jetstream/deltablue | 63.254 | 28.362 | 2.230 |
+| larceny/paraffins | 0.365 | 0.207 | 1.763 |
+| larceny/gcbench | 158.180 | 98.081 | 1.613 |
+| awfy/queens | 0.275 | 0.183 | 1.503 |
+| text/jq_bf | 206.475 | 141.195 | 1.462 |
+| awfy/list | 0.339 | 0.237 | 1.430 |
+| beng/binarytrees | 5.828 | 4.114 | 1.417 |
+| awfy/sieve | 0.034 | 0.025 | 1.360 |
+| r7rs/nqueens | 1.066 | 0.788 | 1.353 |
+| text/three_way_merge | 2232.640 | 1813.130 | 1.231 |
+| text/prettier_ast | 801.032 | 652.734 | 1.227 |
+| awfy/towers | 0.618 | 0.512 | 1.207 |
+| awfy/deltablue | 89.773 | 75.072 | 1.196 |
+| text/log_pipeline | 4366.460 | 3695.570 | 1.182 |
+| text/jq_tree | 1654.810 | 1490.040 | 1.111 |
+| jetstream/splay | 232.472 | 210.564 | 1.104 |
+| jetstream/richards | 317.292 | 288.343 | 1.100 |
+| beng/pidigits | 0.336 | 0.306 | 1.098 |
+| awfy/richards | 323.719 | 295.411 | 1.096 |
+| r7rs/mbrot | 0.646 | 0.592 | 1.091 |
+| beng/fasta | 0.883 | 0.813 | 1.086 |
+| text/microdiff | 32.986 | 30.672 | 1.075 |
+| larceny/deriv | 16.861 | 16.019 | 1.053 |
+| larceny/pnpoly | 1.946 | 1.852 | 1.051 |
+| kostya/base64 | 134.883 | 128.966 | 1.046 |
+| text/jq_records | 310.969 | 302.337 | 1.029 |
+| kostya/levenshtein | 28.219 | 27.695 | 1.019 |
+| kostya/brainfuck | 258.814 | 256.835 | 1.008 |
+| awfy/havlak | 4966.950 | 4953.930 | 1.003 |
+
+## 10.96 Batched untyped performance goal (2026-11-09, in progress)
+
+The user explicitly starts a goal to remove every untyped slowdown, preserving
+typed MVP performance. The later instruction defers validation until **more than
+ten** previously slower cases become faster than Full. Focused release timing
+probes retain the runner's existing golden sanity checks; no unit suite,
+aggregate campaign or baseline runs before that gate. Count gains on one frozen
+candidate, rather than accumulating wins from superseded binaries. Starting HEAD
+is `84f18b39b` with the uncommitted P36 slice retained. Full uses frozen P26;
+previous MVP uses frozen P36. All new receipts live under
+`temp/mvp_untyped_tuning_goal/`.
+
+Shared compiler changes address observed overhead without changing contracts or
+data layouts:
+
+- Immutable activation-owned scalar homes can serve repeated reads; mutable,
+  captured, borrowed and repeated loop declarations keep separate snapshots
+  (**D6.2.2–D6.2.3 / D6.3 / S12.2.1v3**).
+- Implicit `any \ error` admission checks the Error tag directly and preserves
+  its payload and existing failure destination (**S11.4.3 / S7.7.3**).
+- Small boxed-result functions can inline with a defined result on every error
+  exit. Larger collecting open/map mutators retain calls; broad expansion had
+  regressed Splay in P42 (**D6.2.2 / D7.4.1**).
+- Inferred record reads guard the live descriptor and may try two additional
+  static layouts with the same keys. Packed `any` slots directly decode null
+  and ordinary container pointers; scalar and raw-container reification retain
+  the canonical decoder. The existing unaligned-load primitive is shared with
+  Full, rather than duplicated (**D4.3.1 / D2.6.2 / D7.4.1**).
+- Static map allocations already own their data buffer. Ordered literal fields
+  use the audited NO_GC descriptor setters, removing the unnecessary collecting
+  varargs fill call (**D6.3**).
+- MVP shares Full's literal string equality primitive, preserving Error identity
+  and cross-family results (**S5.1.1v2**). Erased bool/float array stores use live
+  physical-lane and writable-COW guards, preserving ordinary widening fallback
+  (**D4.3.1 / S9.1.2**).
+- Present one-character ASCII slices reuse the initialized runtime character
+  table. Negative/clamped/empty, Unicode, absent and alternate-receiver cases
+  retain `fn_slice3` (**S7.1.2**).
+
+P44 crosses GCbench and List below Full; P45 crosses Prettier and Log Pipeline.
+P46 freezes these changes plus primitive stores and character slices, with
+SHA256 `a5e9c19d1d8e9047710425abbf1dfa359c55c886ebaa1756cc55e43797ca706e`.
+Fifteen focused five-pair timing probes and 15-pair Queens/Nqueens follow-ups
+confirm twelve bootstrap-gate crossings: List, Queens, Binarytrees, Nqueens,
+Deriv, GCbench, Levenshtein, Jq BF, Jq Records, Microdiff, Prettier and Log Pipeline.
+`p46-validation-unlock.json` records the common executable identity and exact
+receipts. Validation then finds the P41 boxed inlining expansion reusing a
+recursive caller's guarded parameter lanes, although the new activation enters
+through the original ABI. P47 retains that call and its own entry guards
+(**D7.4.1 / D4.3.1**). `slug-unit-bisect.json` locates the regression; no package
+source or oracle changes. Two fixture defects (reserved `last` parameter and
+an emission assertion on a discarded register prefix) were also corrected.
+
+P47 freezes SHA256
+`383f171fdab5a6db17c49eb8f5801f4d0a25a453474a5b16b2a8eadca92754fe`.
+All 17 focused unit methods pass (`p47-focused-units.log`), including both new
+`mir_mvp_open_storage_kernels` and `mir_mvp_erased_primitive_stores` fixture/golden
+pairs under both compilers and normal/forced/seeded GC. Its complete untyped
+screen passes all 77 goldens: **62 faster / 15 slower Full medians**, geometric
+MVP/Full **0.60956** and MVP/P36 **0.89282**. The typed screen finds Raytrace3D
+at 11.710 ms versus P36 6.018 ms. Only this task's process group 69558 was
+stopped; the typed screen is partial and does not qualify P47. Archived-binary
+bisection locates the large regression at P41/P42 boxed inlining
+(`typed-raytrace-bisect.json`). Diagnostic profile/MIR collection follows.
+P46 timings do not qualify P47, and the every-row goal remains open. No baseline
+ran.
+
+P48 retains ordinary array-producing calls unless an existing dense kernel
+plan supplies the guards. Their optimized entry versions use
+`lambda_fill_primitive_bits`; generic expansion had instead emitted
+`array_plain`/`array_push` plus validators. Diagnostic MIR grows from 34,301
+lines on P36 to 46,072 on P47, with many more root reloads; those profiled
+execution times are not performance evidence. P48 passes five focused unit
+methods, including a new caller check on the existing `shifted` fixture.
+Frozen SHA256 is
+`890fd9ede60635144e4f944834d2624346e27b86fa03a87ec43d633a1c266c13`.
+The 15-pair typed Raytrace3D follow-up is 5.976 / P36 5.958 ms, with no
+statistical slowdown; its complete typed campaign is running. P47 untyped
+measurements remain historical until the corrected candidate is measured.
+
+P48's complete typed screen passes all 77 goldens (five pairs). Its geometric
+MVP/P36 ratio is 0.99010 over 76 nonzero rows. Nine flagged rows receive
+15-pair follow-ups; matched 100,000-kernel Sumfp batching covers the zero-clock
+row. Three flags remain: Deriv and both Richards wrappers. The queued untyped
+rerun is correctly withheld. Richards profile counts locate an unintended
+change to previously inlined native scalar-result mutators: the new open/map
+mutator rule adds 533,550 `tcb_is_held_or_waiting` calls per workload and many
+other entries. P49/P50 restrict that rule to the newly enabled boxed-value
+family, preserving existing scalar, void and discard paths. Deriv has identical
+normalized MIR and runtime counters to P36; an independent timing check is
+pending rather than an unsupported source change.
+
+
+P50 freezes SHA256
+`b6ae963fe5db8f4eb76038e0726dc77e49c8d1e642eceb3457f091939dd2628d`.
+Six focused unit methods pass. All four targeted typed follow-ups clear:
+Deriv's independent 30-pair check is 5.3125 / P36 5.3385 ms; the 15-pair
+AWFY/JetStream Richards checks are 85.426 / 85.130 and 86.294 / 86.377 ms;
+Raytrace3D is 5.944 / 5.945 ms. None has a statistical slowdown. The P50
+complete untyped comparison is running; P48 supplies the last complete typed
+screen, with the P50 follow-ups qualifying its corrected inlining paths.
+No further aggregate typed campaign or baseline has run.
+
+
+P50's corrected complete untyped screen passes all 77 benchmark goldens for
+all three measured engines. Three paired rounds follow one warmup. It has
+**61 faster / 16 slower Full medians**; 58 rows pass the stricter bootstrap
+Full gate. The geometric MVP/Full ratio is **0.60937** and MVP/P36 is
+**0.89681** (10.3% less execution time). All nine binary/source/corpus/runner/
+release identity checks pass in `p50-summary.json`. No source benchmark or
+benchmark golden changed in this continuation. P47's 62-row median count is
+superseded: GCbench and Brainfuck now sit about 0.1% above Full, while Jq Tree
+crosses below. These near-boundary median changes are not statistical proof
+of a compiler slowdown.
+
+| Remaining untyped row | P50 MVP ms | Full ms | MVP/Full |
+|---|---:|---:|---:|
+| jetstream/deltablue | 62.915 | 28.254 | 2.22676 |
+| larceny/paraffins | 0.283 | 0.215 | 1.31628 |
+| awfy/sieve | 0.033 | 0.026 | 1.26923 |
+| beng/fasta | 0.885 | 0.765 | 1.15686 |
+| r7rs/mbrot | 0.637 | 0.566 | 1.12544 |
+| text/three_way_merge | 2018.810 | 1827.430 | 1.10473 |
+| larceny/pnpoly | 1.917 | 1.815 | 1.05620 |
+| awfy/richards | 293.855 | 280.118 | 1.04904 |
+| awfy/deltablue | 76.462 | 73.277 | 1.04347 |
+| jetstream/richards | 297.025 | 285.484 | 1.04043 |
+| awfy/towers | 0.522 | 0.502 | 1.03984 |
+| kostya/base64 | 134.046 | 128.959 | 1.03945 |
+| beng/pidigits | 0.307 | 0.302 | 1.01656 |
+| jetstream/splay | 210.361 | 207.508 | 1.01375 |
+| larceny/gcbench | 97.630 | 97.490 | 1.00144 |
+| kostya/brainfuck | 252.903 | 252.625 | 1.00110 |
+
+The all-row goal remains active. No next unit suite or aggregate comparison
+is planned until the next batch clears the requested eleven-case threshold;
+focused release timing retains the existing golden sanity checks. Potential
+shared roots for the next implementation batch (not implemented or measured):
+
+- `inline_call` retains staged argument registers but discards their admitted
+  scalar producer facts. Investigate per-activation facts for unchanged plain
+  parameters; retain receiving contracts and guard/ABI separation
+  (**D4.3.1 / D7.4.1 / D6.3**). This may help small numeric/decimal helpers.
+- `strided_array_loop` never supplies the primitive erased-owner predictions
+  already used by `array_iteration`, and requires two accesses. Investigate
+  guarded whole-loop versions for single-store primitive strides, amortizing
+  live COW checks (**D4.3.3 / S9.1.2**).
+- `scalar_place_store` already performs a guarded noncollecting typed spine
+  walk. Extend that shared shape using separately guarded inferred layouts;
+  preserve tag checks for boxed children, every ancestor's COW permission and
+  the generic setter's fallback. Do not turn a construction candidate into a
+  receiving contract (**D4.3.1 / D2.6.2 / S9.2.2 / D6.3**).
+- Generic ordered map fields still use descriptor-dispatch `set_field_value`
+  even for fixed `any`/TypedItem slots. Investigate exposing/reusing the
+  existing `typeditem_store_item` kernel through a Lambda-owned audited C ABI;
+  do not copy it or edit its sibling owner (**D2.6.2 / D6.3 / D9.1.1v4**).
+
+
+## 10.97 P51 onward: second deferred-validation performance batch
+
+The latest user instruction requires **more than ten** newly faster cases before
+validation. P50's 16 slower rows form this batch's target set; frozen P50 is
+the previous-MVP control and P26 still supplies Full. Focused release timing
+probes keep golden sanity checks. Unit suites, aggregate campaigns and typed
+regression qualification remain deferred until at least 11 crossings. A few
+lower medians alone do not establish the gate.
+
+P51 replaces eight byte-wise loads for packed 64-bit values with a byte-address
+register and an offset-zero load on the supported unaligned-word hosts. Strict
+targets retain the byte reconstruction. This changes no storage or decoding
+rule (**D2.6.2**). GCbench measures 82.239/Full 96.644/P50 93.950 ms and has
+a bootstrap Full win. Other six-record probes do not cross.
+
+P52 retains nonnullable scalar facts already proved for unchanged actuals when
+inlining an open parameter. Opaque inline actuals can select the same guarded
+scalar entry body as an ordinary call. Receiving contracts and original ABI
+effects remain separate (**D4.3.1 / D7.4.1 / D6.3**). P53 extends the existing
+affine stride version to erased primitive owners, including single-access
+stores; all three lanes reuse the iteration planner and owner/COW guards.
+Sieve improves from P50 0.033 to 0.026 ms, against Full 0.025; Brainfuck
+measures 248.236/253.243 ms without a bootstrap Full win. Neither counts.
+P54 applies the finite-radius integer proof inside an exact scalar entry
+version. It retains the original error/GC ABI and ordinary checked body.
+Paraffins improves to 0.259/Full 0.209/P50 0.273 ms without crossing.
+
+A text extraction initially matched a forward declaration and changed earlier
+functions. The failed build was never executed. Recovery exactly matches the
+frozen P52 source SHA256, after which the stride extraction was reapplied only
+to its definition. `p52-recovered-mvp_mir.cpp` and the failed edit/build artifacts
+are retained under `temp/mvp_untyped_tuning_goal/`.
+
+P55 extends the existing scalar-place walk to inferred nested paths. Observed
+shapes stay separate from receiving contracts. Each ancestor must match its
+live layout/descriptor and be writable under ordinary COW; every miss retains
+the canonical setter (**S9.1.2 / S9.2.2 / D7.4.1**). Unknown array children keep
+their Item tags before a subsequent map guard (**D2.6.2**). Shared field-domain
+planning serves both reads and stores; no second path walker was added. P56
+adds exact bool/float inputs to that scalar shape, retaining retag fallback.
+
+| P55 focused case | MVP ms | Full ms | P50 ms | Bootstrap Full win |
+| --- | ---: | ---: | ---: | --- |
+| AWFY DeltaBlue | 43.112 | 73.620 | 76.108 | yes |
+| AWFY Richards | 264.368 | 280.487 | 292.129 | yes |
+| JetStream Richards | 264.274 | 279.845 | 289.760 | yes |
+| JetStream DeltaBlue | 61.800 | 28.464 | 61.043 | no |
+| JetStream Splay | 209.772 | 205.419 | 208.357 | no |
+
+All focus receipts retain benchmark golden checks; these are not aggregate
+qualification. `mir_mvp_inferred_record_paths.ls/.txt` is added to the existing
+paired GC unit, but remains unrun per the validation gate. P57 tested scalar
+entry versions in mutators, without useful gains and with a Mbrot slowdown
+(0.739/P50 0.661 ms). That change was discarded. Ordinary entry emission
+consumes var homes after scalar versions, so adding mutator versions in future
+also requires integrating their entry publication protocol. Root executables
+are untouched; no baseline, sibling edit or commit ran. The goal is active.
+
+
+P58–P66 retain decimal producer domains for arithmetic (**S4.4 / S4.5**),
+use the existing scalar-domain helper for local seeds, and preserve admitted
+success information when the implicit boundary discharges Error
+(**S11.4.3 / S7.7.3**). P60's Pidigits probe failed compilation because that
+filter erased the decimal proof before an unbox. P61 repairs the root cause;
+failed P60 timings are excluded. P66 canonicalizes decimal literal observations
+before entry versions so a tag guard never claims a literal value refinement
+(**D4.3.1 / D7.4.1**). The original decimal ABI, allocation and errors remain.
+
+Erased finite integer keys can use the existing guarded physical Array reader.
+Exact bool equality uses its own value family and retains Error precedence;
+erased string equality guards both tags before the shared content comparator
+(**S5.1.1v2**). Integer, float and string alternatives share one input-guard
+shape. Full retains its existing lowering and ordinary boxed fallbacks.
+
+P62 admits immutable string arrays to the existing literal/closed-call domain
+proof. Numeric-array assumptions remain in `mvp_array_element`; pointer slots
+use the existing reader. P63 adds a registry relation for a known string
+separator: it rejects the numeric section-count split overload, so normal
+results contain String parts even for an erased source. Both `split` arities
+retain Error; numeric-count calls retain their old relation (**S17.1.1 / S8.2 /
+D4.3.1**). P64 preserves an unmodified local's string-element domain across
+plain callees' COW snapshots (**S9.1.2**). This closes Three-way Merge's gap.
+The affine store loop may also guard the enclosing interval endpoint when it
+stays inside the existing arithmetic proof, avoiding an endpoint division.
+
+P65 reuses the shared AST's completed projection live-range/escape proof.
+`mir_place_copy_snapshot_required` is shared with Full; unknown ranges retain
+a snapshot. MVP skips only the initializer's redundant capture when the
+projection dies before the source write (**D5.4.5 / S9.1.2**). The COW diagnostic
+for JetStream DeltaBlue changes Array copies from 86,936,320 to 78,309,280
+bytes; Full uses 23,958,080. The remaining difference is unresolved, not evidence
+that further snapshots may be removed.
+
+P65 independently reconfirms the seven candidate crossings on **one frozen
+release**, five pairs plus one warmup, using P26 Full and P50 prior MVP:
+
+| P65 focused crossing | MVP ms | Full ms | P50 ms |
+| --- | ---: | ---: | ---: |
+| AWFY DeltaBlue | 30.795 | 71.160 | 74.275 |
+| AWFY Richards | 217.630 | 278.433 | 286.985 |
+| JetStream Richards | 221.249 | 277.742 | 289.779 |
+| GCbench | 84.583 | 96.927 | 89.023 |
+| Fasta | 0.423 | 0.778 | 0.854 |
+| Three-way Merge | 1510.830 | 1787.200 | 2002.700 |
+| Base64 | 125.825 | 129.016 | 135.018 |
+
+All seven have bootstrap Full win flags and benchmark golden sanity checks.
+`p65-validation-gate.json` records **7/11**, `unlocked: false`. No aggregate
+77-case count or typed qualification is inferred from this subset. The subsequent P66 Pidigits follow-up has a decisive win (15 pairs/3 warmups):
+0.286/Full 0.299/P50 0.304 ms. Its receipt is
+`p66-untyped-long-beng-pidigits.json`; this is an eighth distinct crossing,
+not an 11-case gate or an aggregate qualification. Sieve, Paraffins, Pnpoly, Mbrot,
+Towers, Brainfuck, Splay and JetStream DeltaBlue remain tuning targets.
+
+New/extended deferred unit cases cover exact/wide scalar-version resumption,
+decimal/null/Error outcomes, inferred record-path retags/COW, invalid tagged
+children, dead/live/escaped projection observers, non-dividing primitive
+strides, string/bool cross-family equality and both split overloads. No fixture
+or oracle has been weakened and **none of these new checks has run yet**.
+P50 remains the last aggregate-qualified release; P48's complete typed screen
+plus P50 changed-path follow-ups remain the latest typed evidence.
+
+Next shared roots:
+
+- `tail_call` rejects Item results and same-owner mutable borrows. Towers still
+  enters 5,460 `move_disks` frames and 8,191 `pop_disk_from` frames; the release
+  diagnostic MIR/profile is under `p65-diagnostic-awfy-towers.*`. A bounded
+  self-tail loop could preserve the same precise frame and original var homes,
+  but must prove plain actual domains, return admission and all entry facts.
+  No such relaxation has been implemented.
+- The existing dense function entry can prove typed array kernels, while open
+  var-array parameters remain erased. Explore physical primitive candidates
+  inside that existing proof/guard path, retaining its checked sibling and
+  once-consumed var homes. Do not add a scalar-style mutator body before those
+  homes are consumed. This may help Sieve and remaining array kernels.
+- Investigate the remaining DeltaBlue COW-copy difference using source lifetime
+  and shared AST facts. Do not remove captures merely to match Full counters.
+- Preserve original ABI/effects in finite arithmetic versions. Paraffins still
+  misses; its called arithmetic needs a proof that actually reaches the hot
+  loop, rather than more speculative body duplication.
+
+The goal remains active. Only focused release timing/profiling was run after
+P50; unit suites and all aggregate validation remain behind the 11-win gate.
+
+P66 is frozen by `p66-manifest.json`, SHA256
+`2997ec565b4541c3ad226f0110e3c8bf8d2bbd748a4c2f520dffe9998a59865a`.
+Its only compiler delta after the P65 repeat is canonical decimal literal
+observations. Eight distinct targets have focused Full wins across P65/P66;
+the gate still requires 11 on one final candidate. No processes remain
+running. Continue from these artifacts; do not rerun the old aggregate
+qualification or units before the user's threshold is met.
+
+
+## 10.98 P67 onward: erased array entries and integer leaves
+
+The user requires **more than ten** former slower rows to cross Full before
+validation. This overrides the original goal tool's stale six-win wording.
+Focused release probes retain their benchmark output oracles; no unit suite,
+typed/aggregate campaign, Lambda baseline or Radiant baseline has run after
+P50. No overall 77-case qualification is inferred from these probes.
+
+P67 allows bounded self-tail loops with an open Item result and unchanged
+mutable borrows. Every borrowed actual must name the original formal home;
+plain actuals must preserve their native admission domains. Task scopes,
+captures, methods, binders, projected snapshots and shared homes retain the
+real-call path. This preserves original precise owners and Error publication
+(**D5.4.6 / D6.3 / S7.6.3v3**).
+
+P68 observes primitive constructor element candidates for erased parameters.
+It reuses the existing whole-function dense proof, physical tag/lane/extent
+and COW guards; Item ABI and receiving contracts are unchanged. Failed proofs
+restore the original bindings. P70 preserves these new opaque array-loop
+entries instead of expanding their generic siblings. P69 directly classifies
+boxed true/false before the existing general truth helper; other families,
+including Error, keep their original behavior (**D4.3.1 / D7.4.1 / S3.1v2**).
+
+P71 extended that inlining policy to pre-existing privately inferred array
+contracts. P72's Pnpoly receipt showed a statistically slower result against
+P50 (2.084/Full 1.806/P50 1.862 ms). **That extension is discarded in P73**:
+only newly opaque guarded entries affect the policy. P73 Pnpoly recovers to
+1.847/Full 1.798/P50 1.908 ms; it remains slower than Full.
+
+P72 lets cached physical array readers guard an erased finite integer key
+before using the existing lane. Invalid or effectful keys keep `fn_index`.
+This preserves total indexed-read semantics (**S7.1.1v3**). P73 focused results,
+five pairs and one warmup, reconfirm the two additional crossings:
+
+| P73 focused case | MVP ms | Full ms | P50 ms | Full bootstrap win |
+| --- | ---: | ---: | ---: | --- |
+| Sieve | 0.012 | 0.025 | 0.033 | yes |
+| Towers | 0.421 | 0.484 | 0.507 | yes |
+| Pnpoly | 1.847 | 1.798 | 1.908 | no |
+
+Together with P65's seven and P66's Pidigits, these are **ten distinct focused
+crossings across frozen releases**, with validation still deferred. The
+pending `mir_mvp_open_array_entries` and `mir_mvp_borrowed_tail` fixtures cover
+wrong carriers, exact/noninteger/Error keys, shared owners, borrowed error
+write-back and changed-owner recursion; **neither fixture has run yet**.
+
+P74 factors the existing integer leaf syntax proof and queries call-site
+integer success domains without changing receiving contracts or real-call
+errors (**D4.3.1 / D7.4.1 / S7.7.3**). Closed array bodies can reserve pure
+integer expansions in their existing reversible effect plan. P74 Paraffins
+still misses: 0.260/Full 0.201/P50 0.275 ms. Its release diagnostic records
+720 real `ms2` calls from `count_ccp`; no hot indexed-read helper calls remain.
+P75 applies the same bounded leaf/effect plan to guarded primitive iterations.
+All leaf expansions reserve their aggregate cost before raw owner witnesses
+are exposed; the emitted region retains its noncollecting-call audit. P75's
+focused Paraffins probe is in progress. Integer/floating/null/Error/infinity
+fixture cases are prepared, but deliberately unrun until the gate opens.
+
+Artifacts: `temp/mvp_untyped_tuning_goal/p67` through `p75` manifests,
+release executables, focus receipts and P74 Paraffins diagnostic MIR/profile.
+The shared root executable remains untouched; no sibling source edit or
+commit occurred. The goal remains active.
+
+
+P76–P79 are diagnostic releases, excluded from timing evidence. Their temporary
+compiler logs found that scalar leaf proof alone cannot close Paraffins' loop:
+its accumulator is an external Item, and the larger inner body exceeds the old
+256-node iteration budget. P80 extends the existing guarded float-outcome path
+to initialized, unaliased local integer seeds. Each selected scalar has an
+exact physical entry guard; the closed body must prove every write, and the
+ordinary Item home receives the result afterward. Shared, captured, borrowed,
+module and state homes are excluded (**D4.3.1 / D6.3 / S12.2.1v3**). The bounded
+iteration size is now 512, matching the existing whole-function kernel budget;
+total leaf expansion reservation stays 256. No source algorithm is changed.
+
+P81 canonicalizes literal scalar seeds using `mvp_inferred_scalar_contract`;
+without this, a literal integer's refined Type pointer misses the canonical
+integer candidate and the accumulator stays boxed. This is a producer-domain
+fact, never a literal receiving constraint (**D4.3.1 / D7.4.1**). Temporary
+logs are removed. The five-pair Paraffins probe has medians 0.198/Full 0.211/
+P50 0.282 ms but no bootstrap win. The **31-pair/3-warmup** repeat confirms
+0.192/Full 0.210/P50 0.286 ms, with bootstrap wins against both controls
+(`p81-untyped-long-larceny-paraffins.json`). This is the eleventh distinct
+focused crossing across versions. The other ten are being reconfirmed on
+frozen P81 before any unit, typed or aggregate validation. No validation gate
+is yet claimed from mixed-candidate receipts.
+
+
+The final P81 gate follow-ups confirm Fasta 0.424/Full 0.803/P50 0.873 ms and
+Pidigits 0.294/Full 0.310/P50 0.313 ms (31 pairs, three warmups). The other
+eight P81 five-pair gate receipts and the longer Paraffins receipt all have
+bootstrap Full wins. `p81-validation-gate.json` verifies the eleven receipts
+identify the same candidate SHA and records `unlocked: true`. The earlier
+inconclusive samples remain on disk. Eleven focused unit methods, including
+normal/forced/seeded-GC fixtures and MIR assertions, are now running; no unit
+or aggregate result has yet been claimed. The broader goal remains active.
+
+
+P81 deferred units: nine of the original eleven methods pass; two new
+fixtures initially fail both frontends because of reserved names (`state`,
+`number`) and explicit Error-admitting owner parameters on discarded nested
+writes (**S11.4.3 / S7.1.3v3**). The fixture names and implicit untyped
+parameters are corrected without changing either golden. After correction,
+MVP passes all normal/forced/seeded-GC cases. Paired checks reveal two existing
+Full defects, independently reproduced on frozen P26: invalid projected
+string writes and different-owner recursive borrow publication. They are
+recorded as **LR07-54 / LR07-55** in the Lambda ledger, with original failure
+receipts retained. Existing paired fixtures remain paired; the two additional
+MVP fixtures have explicit MVP-only unit methods, as for LR07-53, and retain
+their unchanged semantic goldens. No Full correctness pass is claimed for
+those cases. The four corrected methods pass (`p81-corrected-focused-units.log`),
+alongside the nine passing methods in `p81-focused-units.log`.
+
+The first P81 aggregate untyped screen is running: all 77 registered cases,
+five pairs and one warmup against P26 Full and P50 prior MVP. The binary and
+benchmark corpus remain frozen. No benchmark source, benchmark golden or
+compiler source changed after the eleven-win gate.
+
+
+P81 aggregate untyped result (`p81-untyped-all.json`): **77/77** golden
+outputs match in all three engines; no engine failures. Five pairs and one
+warmup yield **72/77** lower MVP medians against frozen P26 Full, **68**
+bootstrap Full wins, and geometric MVP/Full ratio **0.5331865**. P50's last
+aggregate screen had 61/77 median wins. The five remaining slower medians are:
+
+| Untyped case | P81 ms | Full ms | P50 ms |
+| --- | ---: | ---: | ---: |
+| Nqueens | 0.753 | 0.746 | 0.762 |
+| Pnpoly | 1.878 | 1.798 | 1.873 |
+| Mbrot | 0.654 | 0.574 | 0.676 |
+| Splay | 213.108 | 209.256 | 212.929 |
+| JetStream DeltaBlue | 56.377 | 28.667 | 63.021 |
+
+Three small prior-MVP regression flags need follow-up: untyped Matmul
+4.021/P50 3.947 ms, AWFY CD 310.022/302.604 ms, and Julia Parse Integers
+50.531/49.386 ms. They still beat Full; do not erase these flags from the
+aggregate receipt or infer regression-free qualification. Brainfuck crosses
+Full in this screen as well (248.768/256.028/P50 251.962 ms). JQ Tree is
+1488.620/Full 1488.700 ms, an unresolved near tie rather than a robust win.
+The geometric ratio summarizes the measured corpus; it is not a claim that
+every case meets the goal. Timings exclude compilation.
+
+The P81 complete typed regression screen is running against P50, five pairs
+and one warmup. No typed performance qualification is yet claimed. The goal
+remains active with the five slower rows, the near tie and regression flags
+recorded for further tuning. No baseline or commit ran.
+
+
+P81 complete typed screen (`p81-typed-all.json`): **77/77** candidate/prior
+MVP goldens match, no engine failures. Geometric MVP/P50 is **0.9930285**
+over 76 nonzero timer rows. Typed Sumfp measures 0.000 ms in both engines and
+requires the existing batched supplement. Two regression flags survive the
+31-pair/3-warmup confirmation: FFT 0.037/P50 0.034 ms and Brainfuck
+204.810/199.751 ms. **Typed regression-free qualification is not claimed.**
+The full aggregate and both confirmation receipts remain unchanged.
+
+P82 fixes the two demonstrated roots. Normalized MIR for FFT differs only in
+three removed endpoint instructions: the enclosing counter endpoint combined
+with a shifted key exceeds the owner even though the actual last visited key
+fits. The whole-loop guard then always misses. Keep the exact last counter
+for affine offset keys, retaining the cheap enclosing endpoint for direct
+counters and invariant keys (**S7.1.1v3 / D4.3.3**). Brainfuck's admitted String
+owner cannot pass a physical Array guard. The expanded boxed-key reader must
+not emit this impossible alternative; it caused extra checks and root reloads
+before the unchanged canonical string reader on every iteration. Keep the
+boxed-key Array fast path for open/union/array owner families, preserving all
+other canonical indexed reads (**D4.3.1 / S7.1.1v3 / D6.3**).
+
+P82's focused witness method passes normal/forced/seeded-GC goldens under
+both compilers plus MIR assertions. New cases cover shifted strided stores
+with unique/shared owners and a known string with erased keys; exact endpoint
+arithmetic remains in the former and dead Array-descriptor checks are absent
+from the latter. The first MIR assertion was too broad and rejected legitimate
+snapshot flag stores; it is corrected to identify Array view descriptor loads
+without removing snapshot coverage. Its failed receipt remains archived.
+P82 longer typed FFT/Brainfuck repeats are running. Compiler sources match
+`p82-manifest.json`; no aggregate P82 qualification is inferred from P81.
+
+
+P82 resolves both confirmed typed flags in **31 pairs / three warmups**:
+FFT 0.034/P50 0.034 ms, Brainfuck 196.461/P50 196.861 ms; neither has a
+statistical regression flag. Receipts: `p82-typed-confirm-r7rs-fft.json` and
+`p82-typed-confirm-kostya-brainfuck.json`. The narrowed String probe and exact
+shifted endpoint are the only compiler deltas after P81's aggregate screens.
+The matched typed Sumfp batch (100 repetitions) is running to resolve the
+zero-duration row; focused untyped affected-path/flag follow-ups remain.
+No complete P82 typed/untyped campaign has run, and the five Full misses from
+P81 are still open until further tuning and measurement.
+
+
+The typed Sumfp matched batch of 100 remains below timer resolution in both
+releases: both medians are 0.000 ms, with occasional 0.001 ms observations
+(`p82-typed-sumfp-batch100.json`). Its output matches under both engines.
+Keep this row **timer-resolution-limited**; do not invent a speed ratio or
+add artificial work to obtain one. All 77 typed golden outputs passed P81's
+screen, its two measurable regression flags are resolved by P82 focused
+repeats, and the unresolved Sumfp precision limit is explicit. P82's three
+untyped prior-MVP flag follow-ups are now running, 31 pairs/three warmups.
+
+
+P82's 31-pair untyped flag follow-ups clear Matmul (3.974/P50 3.962 ms,
+no statistical slowdown), while CD (300.299/P50 298.606 ms) and Parse Integers
+(49.950/P50 48.576 ms) retain small regression flags. Both still beat Full
+(474.624 and 52.818 ms respectively). These flags remain open; do not claim
+that all untyped rows are regression-free. Focused post-fix measurements of
+the affected array/string paths and the five Full misses are now running.
+No complete P82 aggregate has been rerun.
+
+
+P82 focused post-fix checks retain Full wins for Fasta (0.400/0.678 ms),
+Base64 (122.081/127.667), Sieve (0.012/0.025), Towers (0.405/0.492),
+untyped FFT (0.198/0.222) and Brainfuck (240.101/258.490), with unchanged
+benchmark goldens. Paraffins has lower medians (0.184/Full 0.206) but its
+five-pair bootstrap comparison is inconclusive. The five previous misses
+measure Nqueens 0.716/Full 0.755, Pnpoly 1.833/1.879, Mbrot 0.637/0.574,
+Splay 207.089/203.647, and JetStream DeltaBlue 54.337/27.682 ms. The first
+two now have lower medians but no bootstrap win; do not silently replace the
+77-case P81 result or claim those misses resolved. Longer Nqueens/Pnpoly/
+Paraffins repeats are running. All focused artifacts use frozen P82.
+
+
+P82 longer follow-ups confirm Nqueens below Full (0.740/Full 0.758/P50
+0.742 ms) and reconfirm Paraffins (0.189/0.205/0.282), both with bootstrap
+Full wins. Pnpoly remains slower (1.852/Full 1.814/P50 1.908), despite the
+lower-median five-pair probe; keep both receipts. Four focused Full misses
+remain: Pnpoly, Mbrot, Splay and JetStream DeltaBlue. `p82-summary.json`
+records the complete P81 campaigns separately from P82 focused evidence;
+`batch2-checkpoint.json` records the current work. P82 SHA256 is
+`3b58c779f0fdf7eae93e11f1704ef9ef946088057f30431f9364516a9df6dd7e`.
+
+Fresh release diagnostic MIR/profiles for those four and CD/Parse Integers
+are under `p82-diagnostic-untyped-*` and `p26-full-diagnostic-untyped-*`.
+Mbrot's `count` already takes five native doubles in **both** compilers; a
+lack of scalar ABI inference across the matrix var borrow is ruled out.
+Do not retry the discarded P57 mutator version on that assumption. Pnpoly
+enters 100,000 real activations in both compilers. MVP's checked sibling
+leaves four root slots and uses the shared audited stack helper; Full's
+native variant carries `_array_witness` and uses BSTART. Do not simply
+switch root-bearing functions to BSTART: shared `em_insert_native_stack_guard`
+explicitly records the earlier root-bearing hot-body regression (JC23).
+Investigate precise typed-array fallback/effect/owner proofs instead.
+
+P83 is an **unqualified Boolean branch experiment**, with P82 frozen as its
+prior-MVP control. `boolean_branch_body` uses MIR BT/BF directly on the
+already-computed truth register, retaining the prior Error edge (**S3.1v2 /
+S7.9.3**). Mbrot's native float predicate uses `DGT; BEQ ..., 0`, whereas
+Full uses `DGT; BF`; this is a general frontend lowering difference to test,
+not yet a demonstrated performance cause. Four focused semantic/MIR methods
+pass on P83. One older emission assertion also fails P82: it forbids Boolean
+Item boxing anywhere before the first fn_index, including valid cold Array
+member alternatives added earlier. The corrected assertion requires the
+floating predicate register to feed its branch directly, retaining the
+intended optimization check and all semantic/GC goldens. Original failures
+are kept. P83 versus P82 focused timing on all four Full misses plus the two
+small prior regressions is running. Keep the experiment only on evidence.
+
+
+P83's six five-pair comparisons establish **no bootstrap improvement** over
+P82; none of the four Full misses crosses Full. The Boolean branch delta is
+discarded. Source identity is again exactly P82's archived compiler identity;
+the P82 executable hash also matches. Keep the P83 receipts as a rejected
+experiment, not as a speed qualification. Four final predicate/error methods
+pass on P82 with the corrected emission assertion
+(`p82-final-focused-units.log`). No source or golden algorithm is weakened.
+
+Current checkpoint (local 2026-11-10): **P82 retained**, SHA256
+`3b58c779f0fdf7eae93e11f1704ef9ef946088057f30431f9364516a9df6dd7e`.
+No build, test or profiling jobs remain running. The 11-crossing gate opened
+on P81 before any validation. P81 remains the last complete 77-case screen:
+72 faster Full medians / 68 bootstrap wins, all untyped goldens passing;
+all typed goldens pass too. P82 focused repeats resolve typed FFT/Brainfuck
+regressions; Sumfp stays below timer resolution in both binaries. The latest
+focused Full misses are **Pnpoly, Mbrot, Splay and JetStream DeltaBlue**;
+Nqueens and Paraffins have 31-pair Full wins. Small prior-MVP untyped CD and
+Parse Integers regressions remain. Do not manufacture a combined P82 77-case
+count. Structured receipts/state are in `p82-summary.json` and
+`batch2-checkpoint.json` under `temp/mvp_untyped_tuning_goal/`.
+
+Continue on the remaining shared roots without repeating aggregate validation
+merely to rediscover these rows. The fresh six-case MVP/Full diagnostic
+profiles and MIR are ready for analysis. Compare precise typed-array slow
+reader effects/frame requirements for Pnpoly, arithmetic/loop lowering in
+Mbrot (both already have native double inputs), and Splay/DeltaBlue object
+construction plus COW lifetimes. The shared BSTART heuristic has a documented
+root-bearing regression; never replace its probe without a sound owner/frame
+proof and evidence. P65's remaining DeltaBlue Array-copy difference is still
+unresolved; do not drop snapshots to match Full counters. Reuse existing
+helpers and retain P50's typed inlining policies. Build the runtime target
+before linking the next private release, because the rejected P83 was the
+last compiled archive. No root executable replacement, sibling edit,
+baseline suite or commit ran. The goal is active and incomplete.
+
+
+Wrap-up, 2026-11-10: work stopped at the user's request. The interrupted
+continuation performed read-only inspection and made no further compiler
+change. Process inspection confirms no tuning build, test or profiling job
+remains. Retained compiler sources and binary still match P82's manifest.
+No additional tests, aggregate campaigns or baselines ran during wrap-up.
+Changes remain uncommitted. The goal tool returns no active goal at wrap-up;
+the performance objective is **incomplete**, with the four Full misses and
+two prior-MVP flags above retained in the checkpoint. Resume from P82 and
+the existing profiles; do not use the rejected P83 archive as the retained
+candidate.

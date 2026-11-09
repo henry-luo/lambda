@@ -25,6 +25,13 @@ fn mixed(value: any, change: bool) any {
     return result
 }
 fn choose(flag) { return if (flag) "yes" else "no" }
+fn integer_summary(x: any, y: any) any {
+    var sum = x + y
+    return sum * x
+}
+fn integer_consumer(value: any) any { return (value + 1) * value }
+fn multiset3(value: any) any { return value * (value + 1) * (value + 2) div 6 }
+fn decimal_formula(left: any, right: any) any { return (left - right) * (left + right) }
 fn string_size(value) { return len(value) }
 pn effect(value: any) any { print("visit\n"); return value + 1.0 }
 pn invalid_store(value: any) any { value.field = 3; return value }
@@ -47,4 +54,18 @@ pn main() {
     let invalid = invalid_store(suspicious[0][0])
     let invalid_copy = invalid_local(suspicious[0][0])
     print([invalid is error, invalid_copy is error]); print("\n")
+    print([integer_summary(3, 4), integer_summary(2.0, 3),
+        integer_summary(null, 3), integer_summary("bad", 1) is error,
+        integer_summary(9007199254740991, 1) == (9007199254740991 + 1) * 9007199254740991]); print("\n")
+    let opaque = parse("[5, 2.0, null, \"bad\"]", 'json')^
+    print([integer_consumer(opaque[0]), integer_consumer(opaque[1]),
+        integer_consumer(opaque[2]), integer_consumer(opaque[3]) is error]); print("\n")
+    // S4.4.3/D7.4.1: a finite version must rejoin checked wide arithmetic.
+    print([multiset3(5) == 35, multiset3(5.0) == 35.0,
+        multiset3(null) == null, multiset3("bad") is error,
+        multiset3(9007199254740991) ==
+            9007199254740991 * (9007199254740991 + 1) * (9007199254740991 + 2) div 6]); print("\n")
+    // S4.4/S4.5: decimal producer facts retain null and Error outcomes.
+    print([decimal_formula(5n, 2n) == 21n, decimal_formula(9n, 2n) == 77n, decimal_formula(5, 2) == 21,
+        decimal_formula(null, 2n) == null, decimal_formula("bad", 2n) is error]); print("\n")
 }

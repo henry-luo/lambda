@@ -122,13 +122,19 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index);
 // true for a defined name, and for any name of an unregistered function
 bool sys_func_option_known(SysFunc fn, const char* name, size_t length);
 
-// share the text-split relation between AST typing and guarded MIR candidates;
-// an open source never proves a string element or a pointer-slot carrier.
-static inline TypeId sysfunc_text_split_element_type(const SysFuncInfo* info,
-        TypeId source) {
+// a text separator excludes ArrayNum's numeric section-count overload.
+// Success then contains only String parts, even with an erased receiver.
+static inline TypeId sysfunc_text_split_element_type_for_args(const SysFuncInfo* info,
+        TypeId source, TypeId separator) {
     return info && info->result_kind == SYS_RESULT_TEXT_SPLIT &&
         (source == LMD_TYPE_STRING || source == LMD_TYPE_SYMBOL ||
-         source == LMD_TYPE_NULL) ? LMD_TYPE_STRING : LMD_TYPE_ANY;
+         source == LMD_TYPE_NULL || separator == LMD_TYPE_STRING) ? LMD_TYPE_STRING : LMD_TYPE_ANY;
+}
+
+// source-only callers retain the conservative result of the open overload.
+static inline TypeId sysfunc_text_split_element_type(const SysFuncInfo* info,
+        TypeId source) {
+    return sysfunc_text_split_element_type_for_args(info, source, LMD_TYPE_ANY);
 }
 
 // Variadic rows currently use the universal Item ABI. A fixed row's descriptor
