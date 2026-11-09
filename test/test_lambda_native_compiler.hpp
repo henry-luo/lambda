@@ -2,6 +2,7 @@
 
 #include "test_lambda_compiler.hpp"
 #include "../lambda/runtime/interp.hpp"
+#include "../lambda/runtime/mvp/mvp.hpp"
 
 // native fixtures share the CLI compiler policy, including explicit T0/AUTO
 // controls. Restore both selectors even when a fatal assertion exits a test.
@@ -38,8 +39,7 @@ struct LambdaTestNativeCompiler {
 
     // a requested runtime denial must not pass because MVP rejected the AST.
     void expect_mvp_admitted(const Script* script) const {
-        const char* selected = getenv("LAMBDA_MIR_COMPILER");
-        if (lambda_tier_selected() != LAMBDA_TIER_JIT || !selected || strcmp(selected, "mvp")) return;
+        if (lambda_tier_selected() != LAMBDA_TIER_JIT || !lambda_mvp_selected()) return;
         EXPECT_NE(script, nullptr) << "MVP did not load the requested runtime test";
         if (!script) return;
         EXPECT_NE(script->main_func, nullptr) << "MVP did not compile the requested runtime test";

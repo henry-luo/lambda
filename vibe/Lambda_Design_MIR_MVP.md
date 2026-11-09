@@ -503,12 +503,14 @@ Keep files cohesive; this is not a requirement to create empty modules. Common
 code stays common, and a third similar lowering case requires extracting the
 shared operation rather than adding another copy.
 
-The initial execution hook can use a development-only selector such as
-`LAMBDA_MIR_COMPILER=production|mvp` under explicit `LAMBDA_EXEC_BACKEND=jit`.
-This selects a compiler implementation within MIR, not a new tier. Default
-execution retains the production compiler. Reject an incompatible selector
-combination explicitly; MVP never silently falls back. Set the selector before
-process startup; switching it within an existing `Runtime` is unsupported.
+MVP is the default MIR compiler when `LAMBDA_MIR_COMPILER` is unset or empty.
+`LAMBDA_MIR_COMPILER=production` selects Full MIR for comparison; `mvp` selects
+MVP explicitly. Compiler selection is independent of `LAMBDA_EXEC_BACKEND`:
+`jit` compiles eagerly, `auto` starts in T0 and promotes through MVP, and
+`interp` stays in T0 (**D8.3.1–D8.3.4**). Invalid compiler values fail before
+execution. No-MIR builds remain interpreter-only and reject an explicit MVP
+request. Set the selector before process startup; switching it within an
+existing `Runtime` is unsupported.
 
 Use the ordinary script/source owner and `Runtime`/`EvalContext` to create,
 execute, and destroy the MIR artifact. Extract a narrow reusable lifecycle hook

@@ -933,8 +933,7 @@ TEST(LambdaCompilerSelectionTests, MvpLanePreservesExplicitInterpreterAndAuto) {
         LambdaTestCompilerEnv environment(tier);
         ASSERT_TRUE(environment.valid);
         EXPECT_STREQ(environment.entries[0].value, tier ? tier : "jit");
-        EXPECT_STREQ(environment.entries[1].value,
-            !tier || strcmp(tier, "jit") == 0 ? "mvp" : "production");
+        EXPECT_STREQ(environment.entries[1].value, "mvp");
         test_lambda_script_against_file("test/benchmark/r7rs/fib2.ls",
             "test/benchmark/r7rs/fib2.txt", true, tier);
     }

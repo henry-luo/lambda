@@ -18,7 +18,9 @@ object layouts, type system, scheduler and precise GC remain shared.
 
 ## Current checkpoint
 
-- **Stopped at the user's wrap-up request, 2026-11-10. Work paused; no jobs running.** Retained **P101**, SHA256 `d51a190813cd9847482d88d7c7e60655e5aed35eb03de6e741a57611bc99cb7f`; current compiler sources match its manifest. Ten focused methods pass, plus a final paired/GC constructor check with the added recursive/mixed-kind cases. P101 Splay: **208.439/Full 207.540/P82 212.163 ms**, 31 pairs; still **0.43% slower than Full**. DeltaBlue, Pnpoly and Mbrot have P92 31-pair Full wins. P99's three focused typed repeats have no slowdown flags; P101 has no complete typed qualification. Last complete campaigns remain P81 untyped / P92 typed. P102 is discarded. Rebuild the runtime archive before linking: it was last built with P102. Next: close Splay, then current 77-case untyped/typed milestone screens. Details: §10.99 / `temp/mvp_untyped_tuning_goal/batch3-checkpoint.json`. No baseline, shared executable replacement, sibling edit or commit.
+- **Default-compiler integration complete, 2026-11-10:** MVP is the default for eager MIR and AUTO/interpreter promotion; Full remains explicit `production`. Both root executables are rebuilt in release. Final validation passes **13 focused Python methods and 9 selected Lambda GTests**. No baseline or benchmark sweep ran. Changes are uncommitted; no jobs remain running. Identity and receipts: §10.100 / `temp/mvp_default_switch/final-summary.json`. Prior P101 performance receipts below remain historical, not measurements of this integration.
+
+- **Previous performance checkpoint, before default integration (2026-11-10).** Retained **P101**, SHA256 `d51a190813cd9847482d88d7c7e60655e5aed35eb03de6e741a57611bc99cb7f`; compiler sources matched its manifest at that checkpoint. Ten focused methods passed, plus a final paired/GC constructor check with the added recursive/mixed-kind cases. P101 Splay: **208.439/Full 207.540/P82 212.163 ms**, 31 pairs; still **0.43% slower than Full**. DeltaBlue, Pnpoly and Mbrot have P92 31-pair Full wins. P99's three focused typed repeats have no slowdown flags; P101 has no complete typed qualification. Last complete campaigns remain P81 untyped / P92 typed. P102 is discarded. Rebuild the runtime archive before linking: it was last built with P102. Next: close Splay, then current 77-case untyped/typed milestone screens. Details: §10.99 / `temp/mvp_untyped_tuning_goal/batch3-checkpoint.json`. No baseline, shared executable replacement, sibling edit or commit.
 
 - **Resumed 2026-11-10:** new user-requested goal on clean HEAD `8aca6eeb7` (P82 tuning committed in `cc2c40dbe`). Retained compiler identity still matches P82. Continue all remaining untyped misses together and preserve typed performance. The frozen P81 eleven-crossing gate remains satisfied; avoid another aggregate campaign until the next implementation milestone. P84 investigates loss of the coarse Map carrier across private calls whose normal record results have different layouts (**D4.3.1 / D7.4.1 / D6.3**). No root executable replacement or baseline is planned.
 
@@ -5469,3 +5471,63 @@ No jobs remain running. Work is paused at the user's wrap-up request; no active 
 The every-untyped-row Full target and current complete typed no-regression
 qualification remain open. No complete P101/P102 aggregate, Lambda/Radiant
 baseline, shared executable replacement, sibling edit or commit is claimed.
+
+
+### 10.100 MVP is the default Lambda MIR compiler
+
+The user requested the compiler switch on 2026-11-10. Unset or empty
+`LAMBDA_MIR_COMPILER` selects MVP. Explicit `production` retains Full MIR for
+comparison. Compiler selection is independent of `interp`/`auto`/`jit`; AUTO
+starts in T0 and promotes through the selected compiler. Strict `interp`
+never compiles code. This implements the existing tier policy, with no new
+semantic ruling (**D8.3.1–D8.3.4 / D8.5.1**). No-MIR builds keep their
+interpreter default and reject an explicit unavailable MVP request.
+
+Interpreter satellite compilation previously bypassed the eager selector. It
+now dispatches to MVP or Full before lowering. Both use the existing snapshot
+pools, code-generation lock, linker, cancellation, Script-owned image lifetime
+and evaluator safe-point publication. Common module names/artifacts move to
+`mir_module.hpp`; no Full lowering is called from the MVP adapter. The MVP
+index uses the existing complete Lambda traversal so copied for clauses and
+other language-specific edges remain indexed (**D8.2.4 / D8.3.4**).
+
+Private continuation parameter/iterator sites retain their original binding
+identities through `MvpBinding::declaration`. The retained AST and T0 slots
+are not retagged. Public satellite entries use checked boxed parameters and
+the MVP public return protocol. External callees, imports and globals resolve
+through the resident T0 slab. Statically known out-of-image calls reuse MVP's
+argument admission and precise borrow/write-back planning, then invoke the
+existing `fn_call_borrowed_into` dispatcher. Variadic actuals are unpacked from
+the already evaluated rest array, without evaluating source arguments again
+(**D7.4.1 / S9.1.3v3 / D6.3**).
+
+Property keys read each image's suffix base, assigned at publication. MVP's
+compiler-only constants remain in the image's owned snapshot list and BSS;
+they do not extend the running T0 constant table. Type-registry growth still
+fails closed. Cached imports retain their logical owner/slot identities
+(**D8.3.5 / D8.5.1 / D6.3**).
+
+Focused handoff checks exposed a T0 planner undercount: projected `var`
+preparation runs while the callee and its frame-owned argument span remain
+rooted. `plan_need` now includes that span rather than only the old callee
+root. The for-loop continuation also starts at its retained walk position
+instead of replaying the prefix (**D6.3 / D8.3.2**). Existing semantic goldens
+are unchanged. The recent merge's stale output-demand forward declarations
+in MVP are aligned with their existing definitions so current HEAD builds.
+
+Validation receipts are under `temp/mvp_default_switch/`. The private release
+build succeeds. Twelve focused methods pass in `focused-units-9.log`,
+including selector/tier dispatch, actual native promotion, property-key/var
+transport/float GC cases, handoff, recursion, constructors, N-D values and
+snapshots. Eighteen external-call GC subcases pass in
+`external-call-units.log`. Separate whole-script, asynchronous publication
+and strict-T0 projected-borrow probes match unchanged goldens with no runtime
+errors (`lifecycle-probes.json`). Final qualification passes **13 focused Python methods** against the rebuilt
+root `lambda.exe` (`final-focused-units.log`) and **9 selected Lambda GTests**
+(`focused-gtests-2.log`). The first GTest attempt used the old root executable
+because the split makefile defaults to `lambda-static.exe`; explicitly linking
+`TARGET=../../lambda.exe` resolves the selector launch failure. Both root
+executables now include the switch. `final-summary.json` records release
+configuration, binary hashes, changed runtime source hashes and HEAD
+`751e08b3b` plus this uncommitted integration. No jobs remain running.
+No Lambda/Radiant baseline, benchmark sweep, sibling edit or commit is used.

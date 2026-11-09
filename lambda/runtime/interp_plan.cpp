@@ -1370,7 +1370,9 @@ static uint32_t plan_need(AstNode* node) {
                             uint32_t key = plan_need(place.segment[seg]);
                             if (key > keys) keys = key;
                         }
-                        uint32_t borrow = 1 + 3 + keys;
+                        // projected preparation runs while the callee and
+                        // frame-owned argument span are still rooted (D6.3).
+                        uint32_t borrow = 1 + argument_slots + 3 + keys;
                         if (borrow > best) best = borrow;
                     }
                 }

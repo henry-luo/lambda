@@ -820,6 +820,7 @@ Renamed 2026-10-03. Current binaries no longer read the old names.
 | Variable | Values (default) | Old name |
 |----------|------------------|----------|
 | `LAMBDA_EXEC_BACKEND` | `interp` \| `auto` \| `jit` (`auto`) | `LAMBDA_TIER` |
+| `LAMBDA_MIR_COMPILER` | `mvp` (default) \| `production`; applies to eager JIT and AUTO promotion (D8.3.1–D8.3.4) | — |
 | `LAMBDA_FUNC_JIT_THRESHOLD` | calls before promotion (5) | `LAMBDA_JIT_THRESHOLD` |
 | `LAMBDA_LOOP_JIT_THRESHOLD` | loop back-edges before handoff (10000) | `LAMBDA_JIT_BACKEDGE` |
 | `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`; unset/empty also AUTO, D8.4.2) | `JS_EXECUTION_BACKEND` |

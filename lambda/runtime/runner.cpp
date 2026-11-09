@@ -2142,8 +2142,6 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     const char* compiler_error = NULL;
     if (mir_compiler && *mir_compiler && strcmp(mir_compiler, "production") && strcmp(mir_compiler, "mvp"))
         compiler_error = "LAMBDA_MIR_COMPILER must be production or mvp";
-    if (lambda_mvp_selected() && lambda_tier_selected() != LAMBDA_TIER_JIT)
-        compiler_error = "Lambda MIR MVP requires LAMBDA_EXEC_BACKEND=jit explicitly";
 #ifdef LAMBDA_NO_MIR
     if (lambda_mvp_selected()) compiler_error = "Lambda MIR MVP is unavailable in a no-MIR build";
 #endif

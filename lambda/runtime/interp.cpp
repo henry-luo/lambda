@@ -8,6 +8,7 @@
 // `items[]`/`data` pointer may ever be cached across an allocating call.
 
 #include "interp.hpp"
+#include "mvp/mvp.hpp"
 #include "lambda/io/mark_output_builder.hpp"
 #include "output_demand.hpp"
 #include <signal.h>
@@ -8334,7 +8335,9 @@ void lambda_function_publish_boxed_entry(Function* fn, const AstFuncNode* def,
     FnVariantAnalysis* public_variant = def->analysis
         ? fn_analysis_variant(def->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
     uint32_t public_shape = LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
-    if (public_variant) {
+    if (lambda_mvp_selected()) {
+        public_shape = LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION;
+    } else if (public_variant) {
         public_shape = public_variant->result.shape == RETURN_SHAPE_ITEM
             ? LAMBDA_MIR_PUBLIC_RETURN_ITEM
             : public_variant->result.shape == RETURN_SHAPE_ITEM_SCALAR

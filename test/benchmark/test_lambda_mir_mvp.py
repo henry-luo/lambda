@@ -46,6 +46,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         env.update(LAMBDA_EXEC_BACKEND="jit", LAMBDA_MIR_COMPILER="mvp")
         env.pop("JS_MIR_INTERP", None)
         env.update(overrides or {})
+        env = {key: val for key, val in env.items() if val is not None}
         command = [str(self.exe), "run", str(source)]
         if not logging:
             command.append("--no-log")
@@ -1284,14 +1285,84 @@ class LambdaMirMvpTests(unittest.TestCase):
                 source.with_suffix(".txt").write_text(expected + "\n")
                 self.check_golden(source)
 
-    def test_selector_is_explicit(self):
+    def test_default_compiler_preserves_tiers(self):
         source = ROOT / "test/benchmark/r7rs/fib2.ls"
-        for options in ({"LAMBDA_EXEC_BACKEND": "auto"}, {"LAMBDA_EXEC_BACKEND": "interp"},
-                        {"LAMBDA_MIR_COMPILER": "unknown"}):
-            with self.subTest(options=options):
-                result = self.run_script(source, options)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn("fib: PASS", result.stdout)
+        for compiler in (None, "", "mvp", "production"):
+            for tier in (None, "jit", "auto", "interp"):
+                with self.subTest(compiler=compiler, tier=tier):
+                    dump = Path(self.scratch.name) / f"selector-{compiler}-{tier}.mir"
+                    result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler,
+                        "LAMBDA_EXEC_BACKEND": tier, "LAMBDA_MIR_DUMP_PATH": str(dump),
+                        "LAMBDA_SATELLITE_SYNC": "1", "LAMBDA_FUNC_JIT_THRESHOLD": "1",
+                        "LAMBDA_DISABLE_MIR_CACHE": "1", "LAMBDA_RSS_REPORT": "1"}, logging=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), "fib: PASS")
+                    self.assertNotIn("[ERR!]", result.stderr)
+                    if tier == "interp":
+                        self.assertFalse(dump.exists())
+                    else:
+                        body = dump.read_text()
+                        self.assertEqual(bool(re.search(r"^(?:lambda_mvp|mvp_lambda_sat_\d+):\tmodule", body, re.M)),
+                            compiler != "production")
+        result = self.run_script(source, {"LAMBDA_MIR_COMPILER": "unknown"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("LAMBDA_MIR_COMPILER must be production or mvp", result.stderr)
+
+    def test_mvp_interpreter_promotion(self):
+        source = ROOT / "test/benchmark/r7rs/fib2.ls"
+        nodes = {}
+        for tier in ("interp", "auto"):
+            result = self.run_script(source, {"LAMBDA_EXEC_BACKEND": tier,
+                "LAMBDA_MIR_COMPILER": None, "LAMBDA_SATELLITE_SYNC": "1",
+                "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_RSS_REPORT": "1"})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("[ERR!]", result.stderr)
+            nodes[tier] = int(re.search(r"nodes=(\d+)", result.stderr)[1])
+        # verify that the published native entry actually replaces AST work.
+        self.assertLess(nodes["auto"], nodes["interp"])
+
+    def test_mvp_satellite_gc(self):
+        sources = ("satellite_property_key_relocation", "proc/interp_satellite_cluster",
+                   "transpile_float_fmt_satellite")
+        for name in sources:
+            for stress in GC_MODES:
+                with self.subTest(fixture=name, stress=stress):
+                    source = ROOT / "test/lambda" / (name + ".ls")
+                    result = self.run_script(source, {**stress, "LAMBDA_MIR_COMPILER": None,
+                        "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                        "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_LOOP_JIT_THRESHOLD": "2"})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                    self.assertNotIn("[ERR!]", result.stderr)
+
+    def test_mvp_loop_handoff(self):
+        for name in ("fn_local_loop_handoff", "proc/interp_loop_handoff", "proc/for_loop_handoff"):
+            with self.subTest(fixture=name):
+                source = ROOT / "test/lambda" / (name + ".ls")
+                dump = Path(self.scratch.name) / (source.stem + "-handoff.mir")
+                result = self.run_script(source, {"LAMBDA_MIR_COMPILER": None,
+                    "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                    "LAMBDA_FUNC_JIT_THRESHOLD": "1000000", "LAMBDA_LOOP_JIT_THRESHOLD": "2",
+                    "LAMBDA_MIR_DUMP_PATH": str(dump)}, logging=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                self.assertNotIn("[ERR!]", result.stderr)
+                self.assertRegex(dump.read_text(), r"mvp_lambda_sat_\d+:\tmodule")
+
+    def test_mvp_external_call_arguments(self):
+        names = ("interp_variadic", "interp_variadic_promoted", "interp_named_args",
+                 "default_callback_frame", "mvp/mir_mvp_variadic_modules",
+                 "mvp/mir_mvp_variadic_recursion")
+        for name in names:
+            for stress in GC_MODES:
+                with self.subTest(fixture=name, stress=stress):
+                    source = ROOT / "test/lambda" / (name + ".ls")
+                    result = self.run_script(source, {**stress, "LAMBDA_MIR_COMPILER": None,
+                        "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                        "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_LOOP_JIT_THRESHOLD": "2"})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                    self.assertNotIn("[ERR!]", result.stderr)
 
     def test_native_recursive_mir(self):
         body = self.function_mir(ROOT / "test/benchmark/r7rs/fib2.ls", "fib")

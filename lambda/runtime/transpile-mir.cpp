@@ -48116,26 +48116,6 @@ static void prepass_define_function_node(MirTranspiler* mt, AstNode* node) {
 // AST root transpilation
 // ============================================================================
 
-typedef struct MirModuleNames {
-    const char* module;
-    const char* consts_bss;
-    const char* layout_bss;
-    const char* type_list_bss;
-    const char* property_specs_bss;
-} MirModuleNames;
-
-typedef struct MirModuleArtifacts {
-    MIR_item_t consts_bss;
-    MIR_item_t layout_bss;
-    MIR_item_t type_list_bss;
-    MIR_item_t property_specs_bss;
-} MirModuleArtifacts;
-
-static const MirModuleNames MIR_DEFAULT_MODULE_NAMES = {
-    "lambda_script", "_mod_consts_ptr", "_mod_layout",
-    "_mod_type_list_ptr", "_mod_property_specs",
-};
-
 // A compilation unit keeps the lowering state alive across the explicit plan,
 // lower, and finalization passes (D8.2.5) without changing direct callers.
 typedef struct MirModuleBuild {
@@ -48881,6 +48861,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     MirModuleArtifacts artifacts = {};
     ArrayList* property_keys = NULL;
     MirModuleBuild build = {};
+    Transpiler mvp_tp = {};
     InterpSatelliteImage* image = NULL;
     void* entry = NULL;
 #ifndef NDEBUG
@@ -48893,6 +48874,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     double image_ms = 0.0;
 #endif
     LambdaModuleLayout* layout = NULL;
+    ArrayList* image_consts = NULL;
     if (snapshot) {
         // Worker images never extend the Script's compiler-owned pools. A
         // rejected fallback allocation leaves the hot function in T0.
@@ -49012,16 +48994,27 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
 #endif
     lowering_target = snapshot ? compiled_target : (AstFuncNode*)fn;
     lowering_members = snapshot ? compiled_members : members;
-    transpile_mir_ast_begin(&build, satellite_context, &satellite_root, script->source,
-        compile_type_list, compile_const_list, compile_pool, compile_name_pool,
-        &names, &property_keys, &artifacts, script, script, lowering_target,
-        lowering_members, member_count, snapshot, false, &script->ast_index);
-    build.mt.runtime = runtime;
-    transpile_mir_ast_lower(&build);
+    if (lambda_mvp_selected()) {
+        memcpy(&mvp_tp, script, sizeof(Script));
+        mvp_tp.ast_index = {};
+        mvp_tp.ast_root = (AstNode*)&satellite_root;
+        mvp_tp.pool = compile_pool; mvp_tp.name_pool = compile_name_pool;
+        mvp_tp.const_list = compile_const_list; mvp_tp.type_list = compile_type_list;
+        mvp_tp.script_owner = script; mvp_tp.runtime = runtime;
+        mvp_tp.compile_against_interp_slab = true;
+        if (!lambda_mvp_compile_satellite(&mvp_tp, satellite_context,
+                &names, &artifacts, &property_keys)) goto fail;
+    } else {
+        transpile_mir_ast_begin(&build, satellite_context, &satellite_root, script->source,
+            compile_type_list, compile_const_list, compile_pool, compile_name_pool,
+            &names, &property_keys, &artifacts, script, script, lowering_target,
+            lowering_members, member_count, snapshot, false, &script->ast_index);
+        build.mt.runtime = runtime;
+        transpile_mir_ast_lower(&build);
+        if (!transpile_mir_ast_finalize(&build, &property_keys, &artifacts)) goto fail;
+    }
     mem_free(copies);
     copies = NULL;
-    if (!transpile_mir_ast_finalize(&build, &property_keys, &artifacts))
-        goto fail;
     if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     // Follow the same mode branch the module compiler uses so a satellite
     // matches the interface its context actually carries.
@@ -49049,10 +49042,10 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         fn->name ? fn->name->chars : "<anonymous>", member_count, image_ms);
 #endif
 
-    // Snapshot lowering may allocate fallback constants only in its private
-    // list. Such an image would address slots the live module cannot see, so
-    // fail closed instead of merging worker-owned values into Script state.
-    if (snapshot && compile_const_list->length != source_const_count) {
+    // Full addresses its fallback constants through the live module table.
+    // MVP instead retains an image-local constant table below; neither emitter
+    // may publish private type-registry growth into the running Script.
+    if (snapshot && !lambda_mvp_selected() && compile_const_list->length != source_const_count) {
         log_debug("interp-tier: snapshot rejected function='%s' reason=const-growth",
             fn->name ? fn->name->chars : "<anonymous>");
         goto fail;
@@ -49062,8 +49055,10 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
             fn->name ? fn->name->chars : "<anonymous>");
         goto fail;
     }
-    *(void**)artifacts.consts_bss->addr = script->const_list
-        ? script->const_list->data : NULL;
+    // MVP addresses constants through its image BSS. Compiler-only boundary
+    // names stay in this image's retained snapshot, never in the live T0 slab.
+    image_consts = snapshot && lambda_mvp_selected() ? compile_const_list : script->const_list;
+    *(void**)artifacts.consts_bss->addr = image_consts ? image_consts->data : NULL;
     *(void**)artifacts.type_list_bss->addr = script->type_list;
     layout = (LambdaModuleLayout*)artifacts.layout_bss->addr;
     memset(layout, 0, sizeof(*layout));
