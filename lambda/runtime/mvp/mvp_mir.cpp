@@ -651,6 +651,10 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
         return value(c, checked, LMD_TYPE_ANY, VALUE_REP_ITEM, contract, (AstNode*)v.provenance_node);
     }
     if (lambda_type_accepts_error(contract)) {
+        // an admitted Error needs no normal-arm conversion or validator (S11.4.2v3).
+        if (mvp_boundary_proven(v.semantic_contract, &TYPE_ERROR) &&
+                mvp_boundary_proven(v.semantic_contract, contract))
+            return convert(c, v, VALUE_REP_ITEM);
         Type* normal = lambda_type_normal_admission_contract(c->module->tp->pool, contract);
         if (normal && normal != contract) {
             MIR_label_t done = NULL;
