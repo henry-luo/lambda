@@ -211,6 +211,38 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertIn("\tcall\tmap_shape_field_to_item", body)
             self.assertIn("\tcall\tfn_member_by_id", body)
 
+    def test_guarded_scalar_bodies(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_guarded_scalar_bodies.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "float_summary")
+        self.assertIn("\tdsub\t", body)
+        self.assertIn("\tcall\tfn_sub", body)
+        body = self.function_mir(source, "text_summary")
+        self.assertIn("\tcall\tfn_len_s", body)
+        self.assertIn("\tcall\tfn_len_checked", body)
+        body = self.function_mir(source, "choose")
+        self.assertNotIn("\tcall\tis_truthy", body)
+        body = self.function_mir(source, "invalid_store")
+        self.assertEqual(body.count("\tcall\tindex_assign_cow") + body.count("\tcall\tmap_set_cow_resolved"), 1)
+
+    def test_open_record_stores(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_open_record_stores.ls"
+        self.check_gc_fixtures((source, ROOT / "test/lambda/mvp/mir_mvp_open_write_contracts.ls"))
+        body = self.function_mir(source, "bump")
+        self.assertIn("\tcall\tmap_set_cow_resolved", body)
+        self.assertNotIn("\tcall\tlambda_map_set_checked", body)
+        body = self.function_mir(source, "named_copy")
+        self.assertNotIn("\tcall\tmap_set_cow_resolved", body)
+
+    def test_boxed_array_witness(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_boxed_array_witness.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "peek")
+        self.assertEqual(body.count("\tcall\tfn_len_checked"), 1)
+        self.assertIn("\tcall\tfn_index", body)
+        native_length = body[:body.index("\tcall\tfn_len_checked")]
+        self.assertRegex(native_length, r"\tor\t[^\n]+, 360287970189639680\n")
+
     def test_counted_admission_and_callable_pipe(self):
         # D4.3.3/S10.1.7v2: resizing invalidates counts; nested ~ is not free.
         cases = (("array_count_resized_binding", "error[E201]", "maximum allowed is 3"),

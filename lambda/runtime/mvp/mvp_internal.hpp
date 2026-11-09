@@ -84,6 +84,8 @@ static inline AstFuncNode* mvp_function_value_reference(const AstIndex* index, A
     return (AstFuncNode*)definition;
 }
 
+enum MvpCandidateKind { MVP_CANDIDATE_RECORD, MVP_CANDIDATE_SCALAR, MVP_CANDIDATE_COUNT };
+
 struct MvpFunction {
     AstFuncNode* ast;
     AstViewNode* view;
@@ -99,7 +101,7 @@ struct MvpFunction {
     Type* declared_result;
     Type* result_contract;
     Type* scalar_result_fallback;
-    TypeMap* result_shape_candidate;
+    Type* result_candidates[MVP_CANDIDATE_COUNT];
     Type** captured_type_references;
     NameEntry** captured_type_entries;
     uint16_t captured_type_count;
@@ -180,7 +182,7 @@ struct MvpBinding {
     Type* admission_contract;
     Type* producer_success_contract;
     Type* contract;
-    TypeMap* shape_candidate;
+    Type* candidates[MVP_CANDIDATE_COUNT];
     ValueRep rep;
     MIR_reg_t reg;
     int scalar_home;
@@ -193,6 +195,7 @@ struct MvpBinding {
     MIR_reg_t array_native;
     MIR_reg_t array_float_native;
     MIR_reg_t array_bool_native;
+    MIR_reg_t array_boxed;
     MIR_reg_t record_writable;
     MIR_reg_t record_readable;
     MIR_reg_t array_writable;
@@ -426,6 +429,8 @@ TypeMap* mvp_record_contract(Type* contract, bool scalar_only);
 Type* mvp_contextual_contract(LambdaMvpModule* module, AstNode* node);
 TypeMap* mvp_contextual_map_contract(LambdaMvpModule* module, AstNode* node);
 TypeMap* mvp_member_candidate(LambdaMvpModule* module, AstNode* object, NameRef name);
+Type* mvp_guarded_parameter_candidate(LambdaMvpModule* module, MvpBinding* binding);
+void mvp_refine_guarded_locals(LambdaMvpModule* module, MvpFunction* function);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler, Type* operand);

@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-05
 
-**Status:** Active, resumed 2026-11-09. P44–P50 close the five PDF/EPS failures and the native husk/GC fixture failures. Current work tunes untyped release execution while preserving typed performance (§10.91–10.92). Watercolor's normal timeout and final language qualification remain open. No full compatibility or performance closure claimed.
+**Status:** Active, resumed 2026-11-09. P44–P50 close the five PDF/EPS failures and the native husk/GC fixture failures. Current work tunes untyped release execution while preserving typed performance (§10.91–10.94). Watercolor's normal timeout and final language qualification remain open. No full compatibility or performance closure claimed.
 
 **Starting tree:** `71296a16a9622f764229720ed2c321330efcd278`, branch `master`.
 
@@ -21,7 +21,7 @@ object layouts, type system, scheduler and precise GC remain shared.
 - **Resumed:** 2026-11-09 at the user's request, master `14f48f209`; merge complete, initially clean tree.
 - **Latest continuation:** master `1540d9228`. After the user updated Radiant to `558eb3e`, the original private release build/link succeeds. [RI-003](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-003) is resolved: both property providers occur exactly once in `libradiant.a`, required symbols are defined, and typed/untyped Fibonacci goldens pass under both compilers (4/4). MVP record-read tuning resumes below (§10.92); the owner boundary is unchanged (**D9.1.1v4 / D9.1.3v2**).
 - **Scope:** the latest request prioritizes untyped MVP performance against Full MIR on all 77 benchmarks, with no typed MVP regression. Preserve the existing correctness changes, formal semantic oracles and shared runtime (**D4.3.1**, **D8.3.1–D8.3.3**).
-- **Current evidence:** the split debug host builds. Prior focused fixes restore array reduction and Error-arm return admission; all 77 typed benchmark goldens pass under each compiler (`temp/mvp-quicksort/final-tests.log`). These are correctness results, not release timing qualification.
+- **Current evidence:** P26 passes 11 focused unit methods and all 77 typed/untyped benchmark goldens, with complete private-release timing receipts and source/binary/corpus identity checks. This qualifies the measured benchmark corpus, not the deferred full language/GTest gate.
 - **Milestones:** reproduce the six late source cases; fix PDF/handler and EPS/container causes with permanent paired/GC cases; investigate watercolor and native/harness residuals; reconcile aggregate test-target migration and run current parity gates.
 - **Verification budget:** focused unit checks only until all known missing features are implemented, per the user. No Lambda baseline or intermediate full verification. Performance timing only with release builds after correctness stabilizes.
 - **Open qualification:** `make test-lambda-baseline` currently stops because `test_wpt_html_parser_gtest` has no generated build target. Old broad counts below remain historical; do not present them as current failures.
@@ -29,9 +29,12 @@ object layouts, type system, scheduler and precise GC remain shared.
 - **P48–P50:** dead native wrappers receive consistent ordinal handling, and their fixture now owns precise roots, compares JS Set completion and understands receiver-specific binding variants. Seven native units pass 21/21 across GC modes. A failure-only replay passes 35/37; its two macOS fork failures pass 2/2 with GTest's fresh-process death-test mode (§10.89).
 - **Watercolor:** the unchanged script matches its golden on MVP with a 300-second diagnostic budget. Its ordinary timeout still fails; debug runs establish correctness only. No release timing or threshold waiver is claimed (§10.90).
 - **Release tuning:** artifacts are under `temp/mvp_untyped_tuning_20261109/`. P8's complete release screen passes all 77 untyped goldens: 35/77 faster Full medians (starting 30/77), geometric MVP/Full ratio 0.88121 (starting 1.07515). All 77 typed goldens pass, with overall candidate/starting-MVP ratio 0.99847. P9 repairs the single confirmed typed regression and is the current private release; only its affected workloads are remeasured (§10.91).
-- **Next:** tune the 42 slower rows in P12's complete untyped campaign, prioritizing remaining record transport, recursive search and mixed scalar domains. P12 supersedes P8 as the current homogeneous timing screen; the faster/slower count is unchanged while geometric execution time improves. No every-row target is closed. Retain deferred language qualification and owner-ledger defects. Root executables remain untouched; no Lambda/Radiant baseline, C2MIR or full language verification ran.
-- **Current build gate:** cleared. `temp/mvp_untyped_tuning_next/starting-release.exe` is the frozen current-source release (SHA256 `cda6b0f4985ac9e440494d8b86badbbbe2c7d386e86e6483e1e45b7a4fb14363`), with source identity in `starting-release-manifest.json`. P12 is the measured candidate; `p12-summary.json` retains all 42 slower rows, typed follow-ups and verified source/binary/corpus identities. RI-003 receipts and owner identities are in the same directory.
+- **Next:** tune the 29 slower rows in P26's complete untyped campaign, prioritizing recursive search/snapshots, integer loops and remaining record transport. P26 supersedes P22 as the current homogeneous untyped timing screen. No every-row target is closed. Retain deferred language qualification and owner-ledger defects. Root executables remain untouched; no Lambda/Radiant baseline, C2MIR or full language verification ran.
+- **Current build gate:** cleared. P26 is the current private release under `temp/mvp_untyped_tuning_p13/`, frozen by `p26-manifest.json`. P12 is the frozen Full/prior-MVP control under `temp/mvp_untyped_tuning_next/`; its `p12-summary.json` retains the preceding 42 slower rows, typed follow-ups and verified identities. RI-003 receipts and owner identities remain there.
 - **P10–P12:** guarded inferred-record reads and compile-time binding/call/return candidates are implemented (**D4.3.1 / D7.4.1 / D2.6.2**). Frozen P12 SHA256 `b1e56d966cbe104fb27484f761608456ca49e7eebb3ed39fea2337ff5582771d`. All 77 untyped goldens pass; geometric candidate/prior-MVP ratio 0.95626 and MVP/Full ratio 0.84347, with 35 faster / 42 slower Full medians. Focused units have no MVP failures; Full retains the known three LR07-53 subtests. All 77 typed goldens also pass, with geometric candidate/prior-MVP ratio 0.99844 over 76 nonzero rows and no confirmed slowdown after 15-pair follow-ups (§10.92), under `temp/mvp_untyped_tuning_next/`.
+
+- **P13–P22:** clean starting master `d3582e267`, frozen P12 Full/prior-MVP control. Scalar body versions guard constructor predictions, retain the original ABI/effects and widen all local writes (**D7.4.1 / D4.3.1 / D6.3**). Open implicit record writes use ordinary COW; inferred integer reads/writes guard live descriptors. Boxed array witnesses reuse the shared physical-storage guard, after numeric alternatives. P21 excludes member/index writes from scalar narrowing; P22 clears the boxed witness when captured homes reload. Eleven final focused unit methods pass, including both compilers and normal/forced/seeded GC cases. Frozen P22 SHA256 `ec19808d13a2915d322dd5741edf9c24609ce6aef71fc9f4425fcebb2ec9a833`. All 77 untyped goldens pass: 47 faster / 30 slower Full medians (prior MVP 35 faster in the same campaign), geometric MVP/Full ratio 0.72208 and MVP/prior ratio 0.85538. All 77 typed goldens also pass; follow-ups identify the Splay regression addressed in P26 under `temp/mvp_untyped_tuning_p13/`. Interrupted P18/P20/P21 screens are partial diagnostic evidence, not final campaigns; no every-row closure is claimed.
+- **P23–P26 complete slice:** diagnostics identify a literal-shape hint carried past declared return admission. P26 honors concrete declared map results before constructor hints (**D4.2.5 / D7.4.1 / D4.3.1**); generic `map`/`object` results retain ordinary prediction. Eleven focused unit methods pass, including the typed-result COW/MIR regression case. Frozen P26 SHA256 `39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`. All 77 untyped goldens pass: 48 faster / 29 slower Full medians, versus 37 faster for prior MVP in the same paired campaign; geometric MVP/Full 0.71611 and MVP/prior 0.84814. All 77 typed goldens pass, geometric MVP/prior 0.99861 over 76 nonzero rows, with no reproduced slowdown after 15 focused 15-pair checks and an independent 30-pair Primes check. All provenance checks pass in `temp/mvp_untyped_tuning_p13/p26-summary.json`. The every-row Full target remains open.
 
 ### Previous checkpoint (2026-11-06)
 
@@ -4304,3 +4307,184 @@ the assertion also passes on the frozen control. The selected unit campaign
 retains only the three known Full LR07-53 subtest failures. Benchmark algorithms,
 sources, goldens and the timing harness are unchanged. No campaign
 remains running; changes are uncommitted.
+
+
+## 10.93 Guarded scalar bodies and open-container transport (2026-11-09)
+
+Starting tree: clean master `d3582e267`. The P12 source manifest matches all
+measured runtime sources except the merged test-target build configuration.
+P12 remains the frozen Full MIR and prior-MVP control; `starting-identity.json`
+records the difference. Artifacts are under `temp/mvp_untyped_tuning_p13/`.
+
+P13–P15 generalize the existing construction-candidate traversal to scalar
+predictions. Terminal primary nodes are literal evidence, not empty wrappers;
+array-index depth distinguishes a selected element from its array owner.
+Private closed calls can keep exact string/Boolean domains as well as numeric
+lanes. Erased parameters can select a guarded body: all exact physical type
+checks precede body effects; a miss enters the original body once. The native
+alternative retains the original callable ABI/effects and widens every local
+initializer/assignment. Each changed representation gets an independent MIR
+register and precise root class, including Item-to-pointer changes that share
+the same machine register width (**D7.4.1 / D4.3.1 / D6.3**).
+
+P15's focused five-pair untyped screen passes all seven workload goldens. Ray
+improves from 2.721 to 0.598 ms versus Full 0.677 ms; Fast Diff from 488.669 to
+88.230 ms versus Full 169.715 ms. Levenshtein is 26.938 versus Full 27.013 ms;
+that small margin still needs a complete campaign and longer confirmation.
+These are selected results, not an every-row qualification.
+
+P16 fixes open record writes: the implicit no-Error parameter admission is an
+entry filter, not a record field contract. Routing it through transactional
+map admission cloned a map on each update. Open writes now use ordinary COW
+and the existing resolved-field setter, which checks the prepared owner's
+layout and retains canonical retag/capture semantics (**S9.1.3 / S12.2.1v3 /
+D4.3.1**). The permanent fixture covers snapshots, ordinary updates, layout
+changes and Error data. P16's eight-case focused screen reduces Permute time
+by 51%, Storage/Towers by 33%, Richards by 28% and Splay by 25%; several still
+remain slower than Full.
+
+P17–P18 add an inferred integer-field store only after exact shape, COW,
+live descriptor/flags and finite-value guards. Retags and shared owners retain
+the canonical setter (**D2.6.2 / D4.3.1**). Boxed arrays can reuse an entry's
+physical storage witness for reads and length without receiving an element
+contract. The guard excludes views, N-D, native pointer lanes, JS storage and
+virtual lists; the existing shared physical-array guard now supplies both
+read and witness sites (**D2.3.4 / D4.3.3 / S7.1.1v3**). Cached lengths follow
+the existing witness refresh/invalidation paths.
+
+P19 places the boxed read after numeric alternatives: putting it first had
+added a branch to every ArrayNum iteration. Its focused screen restores
+numeric performance and measures Permute 0.135 versus Full 0.264 ms, Storage
+0.312 versus 0.394 ms, and Hashmap 63.601 versus 65.349 ms. P20 uses the same
+live-descriptor guard for inferred integer reads, preserving nullable/poison
+transport rather than asserting a field contract. P21 excludes parameters
+and locals with indexed/member writes from speculative scalar narrowing;
+their generic setters must continue to receive tagged Items, including invalid
+string/scalar writes that yield Error (**D4.3.1 / D2.6.2**).
+
+P22 also clears the boxed witness alongside numeric/record witnesses when a
+captured home reloads after a collecting/reentrant call. The boxed-array
+fixture covers parent-fn rebinding of a precisely rooted home shared with a
+confined pn, within **S9.1.4v2 / D6.3** permissions.
+
+P22 passes 11 focused unit methods, including three new fixture/golden pairs
+under both compilers and normal/forced/seeded GC. The private release has
+SHA256 `ec19808d13a2915d322dd5741edf9c24609ce6aef71fc9f4425fcebb2ec9a833`;
+`p22-manifest.json` freezes its compiler identity. The P18/P20/P21 corpus
+screens were interrupted for the branch-order, scalar-write and captured-home
+corrections; their status files explicitly mark them incomplete. Final
+homogeneous P22 comparisons use reported execution time, excluding startup
+and JIT compilation. Benchmark algorithms, sources, goldens and the timing
+harness are unchanged. No Lambda/Radiant baseline, C2MIR or full-language gate
+is part of this batch.
+
+The complete untyped screen uses three interleaved measured rounds and one
+warmup per engine. All 77 goldens pass under candidate MVP, frozen Full MIR
+and frozen prior MVP. Candidate medians beat Full on **47/77**, with **30/77
+slower** and no ties. The prior MVP beats Full on 35/77 in the same campaign.
+The geometric candidate/Full ratio is **0.72208** (prior/Full **0.84417**);
+candidate/prior is **0.85538**, or 14.5% less execution time. These are median
+screen results; narrow per-case margins are not confidence-qualified wins.
+
+| Untyped case | P22 MVP ms | Full MIR ms | Prior MVP ms |
+|---|---:|---:|---:|
+| Fast Diff | 90.662 | 178.775 | 512.991 |
+| Text Search | 6339.890 | 7808.630 | 11814.200 |
+| AWFY JSON | 4.761 | 5.337 | 11.105 |
+| K-Nucleotide | 0.738 | 0.817 | 1.818 |
+| Collision Detection | 425.054 | 490.566 | 515.920 |
+| Hashmap | 62.669 | 67.063 | 77.340 |
+
+The typed screen uses five pairs and one warmup. All 77 goldens pass; the
+geometric candidate/prior ratio is **1.00382** over 76 nonzero rows. Its four
+initial statistical slowdown flags and every median over 1.02 receive
+15-pair, three-warmup checks; Sumfp receives a separate matched batch because
+its canonical timer is below resolution. All 16 checks pass their goldens.
+The original four flags do not repeat; K-Nucleotide and Splay produce new
+flags. K-Nucleotide does not repeat independently (0.98947; same-binary
+control 1.00702), while Splay repeats at 1.02654. P22 does not close typed
+performance qualification; its Splay follow-up drives the next correction.
+The every-row Full target remains open, especially Puzzle (3.262× Full),
+JetStream DeltaBlue (2.214×), Collatz (2.091×), Paraffins (1.753×), GCbench
+(1.606×) and the remaining recursive/record/text cases. Final machine-readable
+results, every remaining slower row and provenance checks belong in
+`temp/mvp_untyped_tuning_p13/p22-summary.json`.
+
+## 10.94 Candidate layouts across declared returns (2026-11-09)
+
+Splay's writable inferred `node` intentionally has an open write domain
+(**S12.2.1v3 / D4.3.1**). Its candidate came from a map literal inside a
+function whose declared result is `SplayNode`. Return admission can replace
+that literal's layout with a prepared declared layout (**D4.2.5**). The old
+candidate thus predicted the pre-admission shape. P22 added six resolved
+setter calls to typed `splay_insert` on that prediction. The existing canonical
+setter handles prepared layouts; the resolved helper requires exact shape
+identity to reuse the supplied field.
+
+P23/P24 tests of candidate trust and binding contract did not remove those
+calls: the hint was untrusted and the writable local's contract was erased.
+The diagnostic image confirms both facts. These diagnostic images are not
+final performance evidence, and all temporary logging has been removed.
+
+P25/P26 fix prediction at the producing boundary. For a local initialized by
+a direct call with a concrete declared map result, use the addressable
+declared shape or decline the hint; do not search the producer's literal or
+fall back to an unrelated globally unique shape. Generic `map`/`object`
+results do not prescribe a concrete layout and retain ordinary prediction.
+Resolved writes remain for untrusted construction shapes; declared prefixes
+keep their existing canonical fallback (**D7.4.1 / D4.3.1**).
+
+Typed Splay's emitted MIR now matches P12 after address normalization, with
+the six original generic setter calls. The permanent `named_copy` case
+checks the typed producer, snapshot detachment, retained values under forced
+GC, and absence of the inappropriate resolved setter. P25's first 15-pair
+Splay check reduces the reproduced slowdown to a still-flagged 1.00718;
+identical MIR alone does not qualify performance.
+
+P26 passes 11 focused unit methods and freezes SHA256
+`39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7` in
+`p26-manifest.json`. Its 15-pair Splay check is 515.946 versus prior 513.619 ms
+(ratio 1.00453; two-sided 95% bounds 0.99840–1.01095, no statistical slowdown).
+Final qualification runs that Splay check, all 77
+typed rows (five pairs), all 77 untyped rows (three rounds with Full/prior
+controls), then 15-pair checks of flagged/>2% typed rows. Splay and
+K-Nucleotide are included even if the new screen does not flag them; Sumfp
+uses a matched batch. The final source is assessed from these receipts, not
+P22's complete screen or the interrupted P18/P20/P21 diagnostics.
+
+The final P26 untyped campaign passes all 77 goldens for candidate MVP, frozen
+Full MIR and prior MVP. Candidate medians beat Full on **48/77**, with **29/77
+slower** and no ties. Prior MVP beats Full on **37/77 in this same campaign**;
+the earlier P22 campaign's 35/77 control count is a separate timing sample.
+The geometric candidate/Full ratio is **0.71611**, prior/Full **0.84433**, and
+candidate/prior **0.84814**: 28.4% less execution time than Full overall and
+15.2% less than prior MVP. Thirty-one rows are statistically faster than prior
+MVP. Median counts include narrow margins and are not every-row confidence
+qualification.
+
+| Final untyped case | P26 MVP ms | Full MIR ms | Prior MVP ms |
+|---|---:|---:|---:|
+| Ray | 0.655 | 0.700 | 2.957 |
+| Permute | 0.116 | 0.273 | 0.749 |
+| Storage | 0.344 | 0.434 | 0.679 |
+| Fast Diff | 90.162 | 172.892 | 505.712 |
+| Text Search | 6219.220 | 7788.940 | 11682.100 |
+
+All 77 typed goldens also pass. The geometric candidate/prior ratio is
+**0.99861** over 76 nonzero canonical rows; Sumfp remains below canonical timer
+resolution and has a separate matched batch. The four initial statistical
+flags (Fibfp, Triangl, Splay and Crypto SHA1) do not repeat in their 15-pair
+checks. All 15 focused follow-ups pass their goldens. Their only new flag is
+Primes at 1.02125. An independent **30-pair** check is 0.844 versus prior
+0.8475 ms (ratio **0.99587**, two-sided 95% bounds 0.96644–1.01422, no slowdown
+flag); its normalized MIR also matches P12. No typed slowdown reproduces.
+All original screen/follow-up flags remain in the receipts.
+
+`p26-summary.json` records every remaining slower row, all follow-ups and the
+independent recheck. Candidate/control SHA256, current compiler-source
+identity and all measured benchmark/golden hashes match. `git diff --check`
+passes. No benchmark algorithm, source, golden or timing harness changed;
+three new unit fixture/golden pairs were added. No Lambda/Radiant baseline,
+C2MIR or full-language verification ran. The **29 remaining slower untyped
+rows still fail the requested every-row Full MIR target**; overall speed and
+typed preservation do not close that target.

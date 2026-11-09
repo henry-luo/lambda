@@ -77,7 +77,9 @@ struct MirShapeCandidateProfile {
 static inline void* mir_shape_candidate(const MirShapeCandidateProfile& profile,
         AstNode* expression, int depth) {
     if (!expression || depth <= 0) return NULL;
-    AstNode* node = ast_unwrap_primary(expression);
+    // terminal primary nodes are scalar construction evidence, rather than
+    // empty parentheses; record-only profiles simply decline those leaves.
+    AstNode* node = ast_unwrap_primary_to_leaf(expression);
     if (!node) return NULL;
     if (void* direct = profile.direct(profile.owner, node)) return direct;
     if (profile.nested) {
