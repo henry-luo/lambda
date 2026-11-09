@@ -321,8 +321,8 @@ static inline void em_open_string_append(MirEmitter* em, MIR_reg_t owner,
 
 // physical Array words exclude shaped, JS and virtual storage. Pointer lanes
 // may opt in to raw words; generic Item readers must reject those lanes.
-static inline MIR_reg_t em_physical_array_index(MirEmitter* em, MIR_reg_t owner,
-        MIR_reg_t index, MIR_label_t miss, MIR_label_t absent, bool pointer_lane) {
+static inline MIR_reg_t em_physical_array_owner(MirEmitter* em, MIR_reg_t owner,
+        MIR_label_t miss, bool pointer_lane = false) {
     MIR_reg_t pointer = em_guard_container(em, owner, LMD_TYPE_ARRAY, miss);
     MIR_reg_t flags = em_load_at(em, pointer, LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS, MIR_T_U8, "pointer_array_flags");
     MIR_reg_t shaped = em_new_reg(em, "pointer_array_shaped", MIR_T_I64);
@@ -348,6 +348,12 @@ static inline MIR_reg_t em_physical_array_index(MirEmitter* em, MIR_reg_t owner,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, miss),
         MIR_new_reg_op(em->ctx, state)));
     if (physical) em_emit_label(em, physical);
+    return pointer;
+}
+
+static inline MIR_reg_t em_physical_array_index(MirEmitter* em, MIR_reg_t owner,
+        MIR_reg_t index, MIR_label_t miss, MIR_label_t absent, bool pointer_lane) {
+    MIR_reg_t pointer = em_physical_array_owner(em, owner, miss, pointer_lane);
     em_array_num_bounds_check(em, pointer, index, absent);
     return em_load_at(em, em_array_element_address(em, pointer, index, sizeof(Item)),
         0, MIR_T_I64, "pointer_array_item");
