@@ -43,6 +43,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 27. [scene3d — Native 3D scenes](#27-scene3d--native-3d-scenes)
 28. [color — Pure color utilities](#28-color--pure-color-utilities)
 29. [pptx — PowerPoint import](#29-pptx--powerpoint-import)
+30. [paint — Painting with brushes](#30-paint--painting-with-brushes)
 
 ---
 
@@ -4819,3 +4820,88 @@ Slides **Open** imports PPTX in a cancellable process, displays warnings in yell
 retains the earlier deck after failures, and saves the editable copy as `.slides`.
 See [the profile and acceptance cases](../vibe/Lambda_Pkg_Pptx.md) and
 [fixture provenance](../test/input/pptx/README.md).
+
+## 30. paint — Painting with brushes
+
+`lambda.paint` paints with brushes on tiled typed-array layers. A Radiant-native engine
+renders the per-pixel work, so painting is available in `lambda.exe` and
+`lambda-headless` but not in `lambda-cli` (**D9.2.2**). It provides layers, round and
+libmypaint-model brushes, MyPaint brush import, smudge and blend modes, strokes with
+continuations, and presentation. Design:
+[Lambda_Pkg_Paint.md](../vibe/Lambda_Pkg_Paint.md). Progress:
+[implementation record](../vibe/impl/Lambda_Impl_Paint.md).
+
+```lambda
+import paint: lambda.paint
+
+let canvas = paint.layer(640, 480)^
+let ink = paint.brush({size: 12.0, hardness: 0.7, spacing: 0.15})^
+let result = paint.stroke(canvas, ink, [0.1, 0.2, 0.6], [[40, 60, 0.3], [200, 90, 0.9], [360, 70, 0.5]])^
+let pixels = paint.present(result.layer)^          // (480, 640, 4) u8 sRGB
+```
+
+**Layers.** A layer is a map whose `tiles` hold one 64 × 64 tile per grid cell. An `rgba`
+tile is an `f32` `(64, 64, 4)` array of premultiplied colour, in linear light by default
+(`blend_space: 'srgb'` keeps encoded values). A `coverage` tile is a `(64, 64)` array of
+`f32` or `u8` samples. An untouched tile is `null`. Edits return new layers that share
+every untouched tile, so keeping an old layer value is a cheap undo snapshot.
+`from_pixels`, `import_pixels`, `present` and `pixel` move samples in and out.
+
+**Brushes and strokes.** `brush(options)` builds a brush. Kind `'round'`, the default, is a
+simple dab brush:
+
+| Option | Meaning |
+|---|---|
+| `size` | Diameter in pixels |
+| `hardness` | Core of the falloff |
+| `spacing` | Dab step as a fraction of the diameter |
+| `flow` | Per-dab gain, scaled by pen pressure |
+| `opacity` | Per-dab alpha in build-up mode, stroke alpha in wash mode |
+| `aspect`, `angle` | Ellipse ratio, and its angle in degrees |
+| `aa` | Anti-aliased rim width |
+| `profile` | `'mypaint'` or `'linear'` falloff |
+| `mode` | `'buildup'` composites every dab; `'wash'` accumulates coverage and composites once |
+| `erase` | Removes paint instead of adding it |
+| `lock_alpha` | Recolours without adding coverage |
+| `blend` | `'normal'`, `'multiply'`, `'screen'`, `'overlay'`, `'darken'`, `'lighten'` or `'add'` |
+
+Kind `'mypaint'` follows libmypaint's brush model. Its `settings` map libmypaint setting names
+to a number or to `{base, inputs}`, where each input (`pressure`, `speed1`, `random`,
+`tilt_declination`, `barrel_rotation`, and so on) maps to 2 to 64 `[x, y]` points with
+ascending `x`. Unset settings take libmypaint's defaults, so `brush({kind: 'mypaint'})` is
+libmypaint's default brush. The dynamics run in Lambda: speed and direction filters, slow
+tracking, keyed random offsets, and dabs spaced by radius and by time. They also cover colour
+shifts, smudge, eraser, lock alpha, colorize and posterize. A setting the engine does not
+render yet, such as `snap_to_pixel`, is an error. `seed` selects the keyed randomness, so
+repeating a stroke repeats its dabs.
+
+```lambda
+let pencil = paint.brush_from_myb(input("pencil.myb", 'json'))^
+let line = paint.stroke(canvas, pencil.brush, [0.2, 0.2, 0.2], samples)^
+```
+
+`brush_from_myb(data, options)` turns a parsed version 3 `.myb` file into `{brush, ignored}`.
+`ignored` names the settings the file changes but the engine does not render yet. The stroke
+colour replaces `color_h`, `color_s` and `color_v`.
+
+Points are pen samples `[x, y, pressure, tilt_x, tilt_y, twist, time]`. Only `x` and `y` are
+required. Tilt and twist are in W3C degrees, and time is in seconds; a sample without one
+follows the previous sample by 10 ms. Colours are sRGB `[r, g, b]` or `[r, g, b, a]`.
+
+`stroke_step(source, brush, colour, points, previous)` continues a stroke batch by batch.
+Round-brush dabs sit at fixed arc-length steps from the stroke's first point, and a mypaint
+brush carries its dynamics state, so a split stroke paints exactly the pixels of the whole
+stroke. Its result carries:
+
+- `layer`: the preview;
+- `coverage`: the coverage accumulated so far, in wash mode;
+- `smudge`: the smudge buckets of a smudging mypaint brush, passed back to the next batch;
+- `rect`: the pixels this batch may have changed;
+- `bounds`: the pixels the stroke so far may have changed;
+- `work`: the candidate pixels charged so far, bounded at 128 million per stroke.
+
+`dabs(brush, colour, points)` exposes the engine's dab table: 34 `f32` columns per dab.
+Unknown options are errors (**S17.8.1**).
+
+`lambda.image`'s `paint_stroke`, `paint_stroke_step` and `retouch` use this brush, with the
+linear profile, for their stroke coverage.

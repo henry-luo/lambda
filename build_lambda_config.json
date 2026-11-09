@@ -87,6 +87,7 @@
     "lambda/network",
     "radiant",
     "radiant/scene3d",
+    "radiant/paint",
     "lib/physics"
   ],
   "source_files": [
