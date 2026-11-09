@@ -260,7 +260,12 @@ Both layout baseline targets select their default categories from
 `LAYOUT_BASELINE_SUITES` can override the list for a focused run. The writing-modes
 baseline records all 1,980 fixtures (1,600 full matches and 380 partials at
 admission); partial scores remain visible and any recorded-score regression
-fails the gate. Raw conformance is still reported by `make layout`.
+fails the gate. The shared corpus's non-dynamic fixtures stay under
+`data/baseline`, which Lambda's layout inventory excludes. Lambda runs the
+script-driven, stateful and embedded-content cases from `data/baseline-js`,
+including its nested `wpt/` fixtures. This keeps script execution with Lambda
+under the project ownership split (**D9.1.1v4, D9.1.3v2**). Raw conformance is
+still reported by `make layout`.
 
 Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~240):
 
