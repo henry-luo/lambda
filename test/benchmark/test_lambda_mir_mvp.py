@@ -103,6 +103,20 @@ class LambdaMirMvpTests(unittest.TestCase):
         names = ("proc/proc_pdf_file", "pdf/pdf_file_mvp", "pdf/output_pages", "pdf/output_text")
         self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
 
+    def test_output_destination_recovery(self):
+        # S2.6.6v3: encoder failures rewind a producer before its replacement.
+        names = ("pdf/output_streaming", "mvp/mir_mvp_output_recovery")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_boxed_ranges_and_live_borrows(self):
+        names = ("mvp/mir_mvp_boxed_range_bounds", "mvp/mir_mvp_live_borrow_arguments",
+                 "proc/cow_var_borrow", "proc/tune23_map_argument_order")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_eps_object_operations(self):
+        names = ("machine", "raster", "fonts", "text")
+        self.check_gc_fixtures(ROOT / "test/lambda/eps" / f"{name}.ls" for name in names)
+
     def test_native_view_definitions(self):
         names = ("view_template", "view_state", "view_attr_pattern", "error_view_outcomes",
                  "error_event_outcomes", "edit_bridge", "ui_controls", "ui_workspace")
@@ -184,8 +198,73 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_inferred_record_fields(self):
         names = ("mvp/mir_mvp_inferred_record_fields", "mvp/mir_mvp_error_boundaries", "latex/test_latex_citeproc_errors",
-                 "latex/test_latex_citeproc_data", "mathml_format")
+                 "mvp/mir_mvp_open_storage_kernels", "latex/test_latex_citeproc_data", "mathml_format")
         self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_guarded_record_reads(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_guarded_record_reads.ls"
+        self.check_gc_fixtures((source,
+            ROOT / "test/lambda/proc/inferred_shape_guarded_read.ls",
+            ROOT / "test/lambda/proc/guarded_store_null_slot_retag.ls"))
+        for name in ("read_value", "read_after", "read_tail", "read_flag"):
+            body = self.function_mir(source, name)
+            self.assertIn("\tcall\tfn_member_by_id", body)
+            if name in ("read_value", "read_after"):
+                # packed any scalars retain the canonical decoder; fixed
+                # null/bool lanes guard retags before using their direct load.
+                self.assertIn("\tcall\tmap_shape_field_to_item", body)
+            else:
+                self.assertNotIn("\tcall\tmap_shape_field_to_item", body)
+
+    def test_guarded_scalar_bodies(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_guarded_scalar_bodies.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "float_summary")
+        self.assertIn("\tdsub\t", body)
+        self.assertIn("\tcall\tfn_sub", body)
+        body = self.function_mir(source, "text_summary")
+        self.assertIn("\tcall\tfn_len_s", body)
+        self.assertIn("\tcall\tfn_len_checked", body)
+        body = self.function_mir(source, "choose")
+        self.assertNotIn("\tcall\tis_truthy", body)
+        body = self.function_mir(source, "invalid_store")
+        self.assertEqual(body.count("\tcall\tindex_assign_cow") + body.count("\tcall\tmap_set_cow_resolved"), 1)
+        for name in ("integer_summary", "integer_consumer"):
+            body = self.function_mir(source, name)
+            native = body[:body.index("\tcall\tfn_add")]
+            self.assertIn("lambda_int_lane_mul_slow", native)
+
+    def test_open_record_stores(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_open_record_stores.ls"
+        self.check_gc_fixtures((source, ROOT / "test/lambda/mvp/mir_mvp_open_write_contracts.ls"))
+        body = self.function_mir(source, "bump")
+        self.assertIn("\tcall\tmap_set_cow_resolved", body)
+        self.assertNotIn("\tcall\tlambda_map_set_checked", body)
+        body = self.function_mir(source, "named_copy")
+        self.assertNotIn("\tcall\tmap_set_cow_resolved", body)
+
+    def test_inferred_record_paths(self):
+        # LR07-54: archived Full also accepts an invalid projected string owner.
+        source = ROOT / "test/lambda/mvp/mir_mvp_inferred_record_paths.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+
+    def test_boxed_array_witness(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_boxed_array_witness.ls"
+        self.check_gc_fixtures((source, ROOT / "test/lambda/mvp/mir_mvp_erased_primitive_stores.ls",
+            ROOT / "test/lambda/mvp/mir_mvp_open_array_entries.ls"))
+        body = self.function_mir(source, "peek")
+        self.assertEqual(body.count("\tcall\tfn_len_checked"), 1)
+        self.assertIn("\tcall\tfn_index", body)
+        native_length = body[:body.index("\tcall\tfn_len_checked")]
+        self.assertRegex(native_length, r"\tor\t[^\n]+, 360287970189639680\n")
+        offset = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_erased_primitive_stores.ls", "stride_offset")
+        self.assertIn("\tmod\t", offset[:offset.index("\tcall\tindex_assign_cow")])
+        text = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_open_array_entries.ls", "text_lookup")
+        self.assertIn("\tcall\tfn_index", text)
+        # ordinary snapshot flags remain; a known string has no Array view descriptor.
+        self.assertNotRegex(text, r"\tmov\t[^\n]+, u8:2\(")
 
     def test_counted_admission_and_callable_pipe(self):
         # D4.3.3/S10.1.7v2: resizing invalidates counts; nested ~ is not free.
@@ -904,6 +983,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_static_scalar_fallback(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_scalar_fallback.ls"
+        self.check_gc_fixtures([source])
         for name in ("decimal_sum", "decimal_remainder", "decimal_quotient", "decimal_compare", "string_compare"):
             body = self.function_mir(source, name)
             self.assertNotIn("lambda_int_lane_", body)
@@ -912,6 +992,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         dynamic = self.function_mir(source, "dynamic_sum")
         self.assertIn("\tubgt\t", dynamic)
         self.assertIn("\tcall\tfn_add", dynamic)
+        self.assertIn("\tdadd\t", dynamic)
         chain = self.function_mir(source, "decimal_chain")
         self.assertNotRegex(chain, r"\tcall\tmvp_\d+_decimal_quotient_dp")
         self.assertIn("\tcall\tlambda_decimal_binary", chain)
@@ -929,6 +1010,29 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertIn("\trsh\t", body)
             self.assertIn("fn_shr_item", body)
             self.assertNotIn("lambda_type_check", body)
+
+    def test_inferred_primitive_loops(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_inferred_primitive_loops.ls"
+        # LR07-53: Full also loses this nonrecursive var-owner replacement.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "descend")
+        self.assertIn("\tcall\tlambda_array_scalar_snapshot", body)
+        body = self.function_mir(source, "main")
+        self.assertIn("\tcall\tfn_fill", body)
+        self.assertNotIn("lambda_fill_for_contract", body)
+        body = self.function_mir(source, "clear_slots")
+        native = body[:body.index("\tcall\tindex_assign_cow")]
+        self.assertIn("\tmov\tu8:", native)
+
+    def test_boxed_integer_iterations(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_boxed_integer_iterations.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "transform")
+        native = body[:body.index("\tcall\tlambda_int_lane_mul_slow")]
+        self.assertGreaterEqual(native.count("\trsh\t"), 5)
+        self.assertIn("fn_shr_item", body)
 
     def test_nullable_comparison_mir(self):
         body = self.function_mir(ROOT / "test/benchmark/larceny/quicksort2.ls", "partition")
@@ -1038,6 +1142,10 @@ class LambdaMirMvpTests(unittest.TestCase):
         # short arrays and other layouts retain the checked construction path.
         self.assertIn("\tcall\tfn_index_", body)
         self.assertIn("\tcall\tlambda_type_check_", body)
+        caller = self.function_mir(source, "main")
+        # ordinary array-producing calls must retain the entry's native
+        # construction version, rather than expanding its generic fallback.
+        self.assertRegex(caller, r"\tcall\tmvp_\d+_shifted_dp")
         store = self.function_mir(source, "put_erased")
         self.assertIn("lambda_array_set_checked_preplanned", store)
 
@@ -1049,6 +1157,29 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("lambda_array_set_checked_item", body)
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_borrow_inline.ls", "nested")
         self.assertNotRegex(body, r"\tcall\tmvp_\d+_replace_owner_dp")
+
+    def test_erased_array_iterations(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_erased_iterations.ls"
+        for compiler in ("production", "mvp"):
+            for stress in GC_MODES:
+                with self.subTest(compiler=compiler, stress=stress):
+                    self.check_golden(source, {**stress, "LAMBDA_MIR_COMPILER": compiler})
+        body = self.function_mir(source, "scale")
+        native = body[:body.index("\tcall\tfn_index_")]
+        self.assertIn("\tdmul\t", native)
+
+    def test_untyped_native_ranges(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_untyped_ranges.ls"
+        self.check_gc_fixtures([source, ROOT / "test/lambda/mvp/mir_mvp_boxed_range_bounds.ls"])
+        body = self.function_mir(source, "total")
+        self.assertNotIn("\tcall\tfn_to_", body)
+        self.assertNotIn("\tcall\titer_val_at_", body)
+
+    def test_untyped_recursive_snapshots(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_untyped_snapshots.ls"
+        self.check_gc_fixtures([source])
+        body = self.function_mir(source, "visit")
+        self.assertIn("lambda_array_scalar_snapshot", body)
 
     def test_recursive_array_capture_effects(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_recursive_arrays.ls"
@@ -1168,6 +1299,13 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertRegex(body, r"\tcall\t(?:fn_fill|lambda_fill_for_contract)")
         self.assertIn("lambda_type_check", body)
 
+    def test_borrowed_tail(self):
+        # LR07-55: archived Full also replaces the outer owner on a changed-owner edge.
+        source = ROOT / "test/lambda/mvp/mir_mvp_borrowed_tail.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+
     def test_implicit_tail_and_split_observations(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_benchmark_expansion.ls"
         for name in ("implicit_collect", "implicit_record_rows"):
@@ -1275,7 +1413,10 @@ class LambdaMirMvpTests(unittest.TestCase):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_float_compare.ls", "find_prefix")
         native = body[:body.index("\tcall\tfn_index")]
         self.assertIn("\tdlt\t", native)
-        self.assertNotRegex(native, r"\tor\t[^\n]+, 216172782113783808\n")
+        # other carrier fallbacks can box array members; the floating
+        # predicate itself must feed its branch without Item boxing.
+        self.assertRegex(native, r"\tdlt\t(?P<predicate>%r[0-9a-f]+),[^\n]+\n\t(?:"
+            r"b(?:eq|ne)\tL[0-9]+, (?P=predicate), 0|b[tf]\tL[0-9]+, (?P=predicate))\n")
 
     def test_native_string_array_read(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_string_arrays.ls", "fetch_string")
@@ -1286,7 +1427,8 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_scalar_record_witness(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_record_witness.ls", "bump")
         native = body[:body.index("\tcall\tlambda_map_set_checked")]
-        self.assertEqual(native.count("u8:1("), 1)
+        # the shared COW predicate now combines flags and owner state in one word.
+        self.assertEqual(len(re.findall(r"\tand\t[^\n]+, 4294979584\n", native)), 1)
         self.assertIn("\tadd\t", native)
 
     def test_erased_float_comparison(self):
@@ -1300,6 +1442,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_modular_array_update(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls"
+        self.check_gc_fixtures([source])
         body = self.function_mir(source, "step")
         first = body[:body.index("\tcall\tfn_index")]
         self.assertRegex(first, r"\tand\t[^\n]+, 15\n")
@@ -1309,6 +1452,10 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertRegex(first, r"\tmul\t[^\n]+, 13\n")
         self.assertRegex(first, r"\tmod\t[^\n]+, 31\n")
         self.assertIn("\tcall\tfn_int", affine)
+        conditional = self.function_mir(source, "conditional_step")
+        native = conditional[:conditional.index("\tcall\tfn_index")]
+        self.assertNotIn("\tcall\tfmod_", native)
+        self.assertNotIn("\tcall\tlambda_int_lane_add_slow", native)
 
     def test_single_use_string_constructor(self):
         body = self.function_mir(ROOT / "test/benchmark/kostya/json_gen2.ls", "benchmark")

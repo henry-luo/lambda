@@ -10,6 +10,8 @@ pn loose_decimal(a: any, b: any) any { return decimal_quotient(a, b) }
 fn decimal_compare(a: decimal, b: decimal) any { return a < b }
 fn string_compare(a: string, b: string) any { return a == b }
 fn dynamic_sum(a: any, b: any) any { return a + b }
+fn dynamic_product(a: any, b: any) any { return a * b }
+fn nullable_relation(a: float?, b: any) any { return a < b }
 pn decimal_text() any {
     var text: string = "v"
     text = text ++ 2.5m
@@ -28,4 +30,8 @@ pn main() {
     print([decimal_chain(8m, 3m), match rejected { case error: true default: false },
         match propagated { case decimal: true default: false }]); print("\n")
     print(decimal_text()); print("\n")
+    print([dynamic_sum(2.5, 0.5), dynamic_product(2.5, 0.5),
+        dynamic_product(3, 4), dynamic_product(null, 2.0)]); print("\n")
+    print([nullable_relation(0.5, 1.0), nullable_relation(null, 1.0),
+        nullable_relation(0.5, 1)]); print("\n")
 }

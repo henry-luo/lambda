@@ -967,6 +967,70 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 
 
 
+<a id="lr07-53"></a>**LR07-53 · Full MIR loses a nonnumeric recursive array replacement · OPEN**
+
+Reproduced 2026-11-09 at `14f48f209` plus the MVP parity changes, using
+the frozen release `temp/mvp_untyped_tuning_20261109/starting-release.exe`
+(SHA256 `e45cec36fef54f4ebb1d2833fbde9d99dbc79f4c8b6be926630025f5cfb5ad70`).
+`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=production <exe> run
+test/lambda/mvp/mir_mvp_untyped_snapshots.ls --no-log` prints `[0, [99]]`
+for the recursive string replacement; **S9.1.2 / S12.2.1v3 / D4.3.1** require
+`["changed", [99]]`. MVP returns the required result. Full fails identically
+under normal, forced and seeded GC; the input array snapshot stays unchanged.
+`mir_param_scalar_snapshot` / `mir_confined_scalar_snapshot` are relevant
+source anchors; the exact Full codegen cause is not yet confirmed. This does
+not block MVP tuning or its benchmark comparisons. The permanent golden is
+unchanged to keep the Full failure visible. Evidence:
+`temp/mvp_untyped_tuning_20261109/p6-focused-units.log`; implementation context:
+[MVP tuning checkpoint](impl/Lambda_Impl_MIR_MVP_Language_Parity_and_Untyped.md#1091-untyped-release-tuning-2026-11-09).
+
+Additional reproduction, 2026-11-09 at `84f18b39b`: an inferred local
+`var values = fill(2, 0)` passed to `pn replace_owner(var values) {
+values = ["changed"] }` remains `[0, 0]` in Full MIR; MVP publishes
+`["changed"]` as required by **S9.1.3v2 / S12.2.1v3 / D4.3.1**. This case is
+nonrecursive, so the defect is broader than the original recursive example;
+whether the internal cause is identical remains unconfirmed. The permanent
+fixture/golden is `test/lambda/mvp/mir_mvp_inferred_primitive_loops.ls`.
+Frozen P26 release SHA256
+`39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`
+reproduces the difference before this continuation's changes, and P29 Full
+has the same result. Evidence: `temp/mvp_untyped_tuning_p27/` files
+`mir_mvp_inferred_primitive_loops-p26-production.log` and the corresponding
+MVP/P29 logs. The expected result remains unchanged. This does not block MVP
+tuning or benchmark comparison.
+
+<a id="lr07-54"></a>**LR07-54 · Full MIR accepts a projected string as a writable map · OPEN**
+
+Reproduced 2026-11-09 at `84f18b39b`, on both frozen P26 Full (SHA256
+`39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`)
+and current P81 Full. Run `LAMBDA_EXEC_BACKEND=jit
+LAMBDA_MIR_COMPILER=production <exe> run
+test/lambda/mvp/mir_mvp_inferred_record_paths.ls --no-log`. For
+`{children: ["0123456789abcdefg"]}`, `owner.children[0].value = 3`
+returns a normal result, so the fifth printed line is `false` instead of
+the golden's `true`. Invalid writes must return Error (**S7.1.3v3 /
+D4.3.1**). P81 Full fails under normal, forced and seeded GC; MVP passes
+all three modes. A lost Item tag in the inferred projection path is a
+suspected cause, not yet confirmed in Full. Evidence:
+`temp/mvp_untyped_tuning_goal/p81-fixture-full-control.json` and
+`p81-corrected-fixture-units-2.log`. This does not block MVP tuning. The
+MVP fixture and its Error oracle are retained unchanged; Full correctness
+is not claimed for this case.
+
+<a id="lr07-55"></a>**LR07-55 · Full MIR replaces the outer borrowed owner on a different-owner recursive edge · OPEN**
+
+The same P26/P81 Full controls reproduce this with
+`test/lambda/mvp/mir_mvp_borrowed_tail.ls`: `child_tail(tree, 2)` returns 17,
+but the unchanged `tree.child.child.value` then reads null. Full prints
+`[17, null]`; the required golden is `[17, 17]` (**D5.4.6 / S9.1.3v2 /
+S12.2.1v3**). MVP retains the outer tree under normal, forced and seeded GC;
+Full fails all three. The recursive call passes a local `child` var rather
+than the enclosing var parameter. Incorrect borrow-home forwarding or
+publication is suspected; an identical cause to LR07-53 is unconfirmed.
+Evidence and frozen P26 SHA are as in LR07-54. This does not block MVP
+tuning. The immutable golden remains the MVP acceptance oracle, and Full's
+observed failure remains recorded separately.
+
 ## 8. Memory management & GC (LR08)
 
 

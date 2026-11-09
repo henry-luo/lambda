@@ -1,0 +1,13 @@
+{
+  "name": "EmphasisLineExtentDoesNotDependOnClipping",
+  "html": "test/html/layout_emphasis_line_extent.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#plain"}, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#over"}, "height": 30.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#under"}, "height": 30.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#clipped"}, "height": 30.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#spaces"}, "height": 30.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#punctuation"}, "height": 30.0, "tolerance": 1e-05}
+  ]
+}

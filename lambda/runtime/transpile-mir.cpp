@@ -15201,43 +15201,9 @@ static MIR_reg_t emit_string_char_pair_compare(MirTranspiler* mt,
 
 static MIR_reg_t emit_literal_rhs_string_compare(MirTranspiler* mt,
         AstNode* subject, TypeString* literal, Operator op, bool item_result) {
-    MIR_reg_t result = new_reg(mt, "lit_eq", MIR_T_I64);
-    MIR_reg_t outcome = item_result ? new_reg(mt, "lit_outcome", MIR_T_I64) : 0;
-    MIR_label_t outcome_done = item_result ? new_label(mt) : 0;
-    MIR_label_t l_done = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 0)));
-
-    // S5.1.1v2: an encountered error exits before the string-tag test.
-    MIR_reg_t boxed_subject = transpile_box_item(mt, subject);
-    if (item_result) emit_jump_if_item_error(mt, boxed_subject, outcome, outcome_done);
-    MIR_reg_t subject_tag = emit_item_tag(mt, boxed_subject);
-    MIR_reg_t is_string = new_reg(mt, "lit_stag", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-        MIR_new_reg_op(mt->ctx, is_string), MIR_new_reg_op(mt->ctx, subject_tag),
-        MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_STRING)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, l_done), MIR_new_reg_op(mt->ctx, is_string)));
-
-    MIR_reg_t subject_ptr = emit_unbox_container(mt, boxed_subject);
-    MIR_reg_t literal_ptr = emit_load_const(mt, literal->const_index, MIR_T_P);
-    em_string_literal_pointer_eq(&mt->em, subject_ptr, literal_ptr, literal->string, result);
-    emit_label(mt, l_done);
-
-    if (op == OPERATOR_NE) {
-        MIR_reg_t inverted = new_reg(mt, "lit_ne", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-            MIR_new_reg_op(mt->ctx, inverted), MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, 0)));
-        result = inverted;
-    }
-    if (item_result) {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, outcome),
-            MIR_new_reg_op(mt->ctx, emit_box_bool(mt, result))));
-        emit_label(mt, outcome_done);
-        return outcome;
-    }
-    return result;
+    MIR_reg_t boxed = transpile_box_item(mt, subject);
+    MIR_reg_t text = emit_load_const(mt, literal->const_index, MIR_T_P);
+    return em_string_literal_item_compare(&mt->em, boxed, text, literal->string, op, item_result);
 }
 
 // T29-3: branch to `l_null` when an operand that may be null holds the null
@@ -23580,9 +23546,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // CW24v3 / D5.4.5: a place that may be written while the copy
                 // is alive marks too, same rule as the T0 bind path.
                 if (!cow_binding && !borrow_bound &&
-                        asn->entry && asn->entry->is_place_copy &&
-                        (asn->entry->place_copy_mutated ||
-                         asn->entry->place_copy_place_written) &&
+                        mir_place_copy_snapshot_required(asn->entry) &&
                         ast_type_needs_mutable_clone(var_tid)) {
                     // a scalar place copy (`var mi: int = stack[d]`) has
                     // nothing to snapshot; marking it only boxed the binding
@@ -26589,22 +26553,6 @@ static bool mir_guarded_field_storage_admits(TypeId storage_type) {
         storage_type == LMD_TYPE_STRING || mir_is_container_field_type(storage_type);
 }
 
-// The LAYOUT half of has_fixed_shape, without its `struct_name` requirement.
-// That name check is how a DECLARED contract is recognized, and it is right for
-// every caller that needs a contract; the shape-guarded read needs only that
-// the packed slots are addressable, which an inferred literal shape satisfies
-// just as well [D3.4.1].
-static bool mir_shape_layout_is_addressable(TypeMap* map_type) {
-    // Only the packed layout has to exist here. Whole-shape 8-alignment -- what
-    // has_fixed_shape demands -- is the wrong bar for an inferred literal: an
-    // untyped field is a 9-byte TypedItem, so `{val: n, next: f(n)}` puts its
-    // second field at offset 9 and every such shape would be refused outright.
-    // Addressability is a property of the field being READ, and the access site
-    // checks its own offset and storage class; a misaligned or ANY-carrying
-    // NEIGHBOUR cannot move the slot this site loads.
-    return map_type && map_type->shape && map_type->length > 0;
-}
-
 // Emit direct field READ from a packed map/object data struct.
 // Map/Object layout: [TypeId(1) flags(1) pad(6)] [void* type @8] [void* data @16] [int data_cap @24]
 // data points to packed struct where each field is 8-byte aligned.
@@ -26622,38 +26570,6 @@ static bool mir_shape_layout_is_addressable(TypeMap* map_type) {
 static bool mir_shape_field_required(const TypeMap* shape, const ShapeEntry* field) {
     return shape && field && field->type && shape->is_trusted_contract &&
         !lambda_type_accepts_null(field->type);
-}
-
-// MIR cannot select an unaligned word operand on every target. Reassemble the
-// packed int lane from byte loads when a preceding bool leaves it unaligned.
-static MIR_reg_t mir_load_packed_unaligned_int(MirTranspiler* mt,
-        MIR_reg_t data_ptr, int64_t offset) {
-    MIR_reg_t result = new_reg(mt, "packed_int", MIR_T_I64);
-    for (int i = 0; i < (int)sizeof(int64_t); i++) {
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-        int byte_index = i;
-#else
-        int byte_index = (int)sizeof(int64_t) - i - 1;
-#endif
-        MIR_reg_t byte = new_reg(mt, "packed_byte", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, byte),
-            MIR_new_mem_op(mt->ctx, MIR_T_U8, (int)offset + byte_index,
-                data_ptr, 0, 1)));
-        if (i == 0) {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, byte)));
-            continue;
-        }
-        MIR_reg_t shifted = new_reg(mt, "packed_shift", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH,
-            MIR_new_reg_op(mt->ctx, shifted), MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, 8)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
-            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, shifted),
-            MIR_new_reg_op(mt->ctx, byte)));
-    }
-    return result;
 }
 
 // Is `object` a non-null container at this read? A named binding with a
@@ -26788,7 +26704,7 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offset, data_ptr, 0, 1)));
         } else {
-            MIR_reg_t packed = mir_load_packed_unaligned_int(mt, data_ptr, offset);
+            MIR_reg_t packed = em_load_packed_i64(&mt->em, data_ptr, offset);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, packed)));
         }

@@ -1,0 +1,14 @@
+{
+  "name": "Scroll reads update sticky geometry and fixed subtrees",
+  "html": "test/html/layout_snapshot_sticky_scroll.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "advance_time", "ms": 100, "steps": 4},
+    {"type": "assert_script", "js": "!document.documentElement.classList.contains('reftest-wait')"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-scroll", "equals": "yes"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-offset", "equals": "yes"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-flow", "equals": "yes"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-fixed", "equals": "yes"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-reset", "equals": "yes"}
+  ]
+}

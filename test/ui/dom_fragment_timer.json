@@ -1,0 +1,7 @@
+{
+  "name": "Fragment navigation retains the current document timer",
+  "html": "test/ui/dom_fragment_timer.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-timer", "equals": "yes", "assert_timeout": 2000}
+  ]
+}

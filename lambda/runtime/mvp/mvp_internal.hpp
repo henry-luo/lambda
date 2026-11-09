@@ -84,6 +84,10 @@ static inline AstFuncNode* mvp_function_value_reference(const AstIndex* index, A
     return (AstFuncNode*)definition;
 }
 
+enum MvpCandidateKind {
+    MVP_CANDIDATE_RECORD, MVP_CANDIDATE_SCALAR, MVP_CANDIDATE_ARRAY_ELEMENT, MVP_CANDIDATE_COUNT
+};
+
 struct MvpFunction {
     AstFuncNode* ast;
     AstViewNode* view;
@@ -99,6 +103,7 @@ struct MvpFunction {
     Type* declared_result;
     Type* result_contract;
     Type* scalar_result_fallback;
+    Type* result_candidates[MVP_CANDIDATE_COUNT];
     Type** captured_type_references;
     NameEntry** captured_type_entries;
     uint16_t captured_type_count;
@@ -109,6 +114,7 @@ struct MvpFunction {
     bool boxed_entry;
     bool no_value_result;
     bool owns_open_scopes;
+    bool guarded_array_entry;
 };
 
 static inline bool mvp_edit_model_place(MvpFunction* function, AstNode* object) {
@@ -179,6 +185,7 @@ struct MvpBinding {
     Type* admission_contract;
     Type* producer_success_contract;
     Type* contract;
+    Type* candidates[MVP_CANDIDATE_COUNT];
     ValueRep rep;
     MIR_reg_t reg;
     int scalar_home;
@@ -190,6 +197,8 @@ struct MvpBinding {
     MIR_reg_t method_field_present;
     MIR_reg_t array_native;
     MIR_reg_t array_float_native;
+    MIR_reg_t array_bool_native;
+    MIR_reg_t array_boxed;
     MIR_reg_t record_writable;
     MIR_reg_t record_readable;
     MIR_reg_t array_writable;
@@ -217,6 +226,7 @@ struct MvpBinding {
     bool array_present;
     bool record_written, record_accessed;
     bool string_buffer_owned;
+    bool stable_scalar_home;
 };
 
 struct LambdaMvpModule {
@@ -240,6 +250,7 @@ struct LambdaMvpModule {
     Type* nullable_int;
     Type* nullable_bool;
     Type* nullable_float;
+    Type* text_split_result;
 };
 
 struct MvpControl {
@@ -386,7 +397,7 @@ bool mvp_proc_has_final_return(AstFuncNode* function);
 AstNode* mvp_single_statement(AstNode* node);
 AstNode* mvp_function_result_expression(MvpFunction* function);
 bool mvp_prefers_packed_tensor(LambdaMvpModule* module, AstNode* literal);
-bool mvp_native_range_source(AstNode* source);
+bool mvp_native_range_source(LambdaMvpModule* module, AstNode* source);
 Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0, bool dense_arrays = false);
 MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_same_integer_expression(LambdaMvpModule* module, AstNode* left, AstNode* right, int depth = 0);
@@ -396,6 +407,7 @@ Type* mvp_module_array_literal_element(LambdaMvpModule* module, MvpBinding* bind
 bool mvp_array_contract(Type* contract);
 bool mvp_consuming_array_join(LambdaMvpModule* m, MvpBinding* binding, AstNode* value);
 bool mvp_binary_bitwise(SysFunc fn);
+int mvp_decimal_operation(Operator op);
 bool mvp_needs_number_home(Type* contract);
 Type* mvp_scalar_success_contract(LambdaMvpModule* module, Type* contract);
 MvpBinding* mvp_null_condition(LambdaMvpModule* module, AstNode* condition,
@@ -418,10 +430,15 @@ bool mvp_parameter_borrowable(LambdaMvpModule* module, AstNamedNode* parameter, 
 bool mvp_pure_key(AstNode* node, int depth = 0, bool allow_pure_calls = false);
 bool mvp_index_key(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_parameter_storage_stable(LambdaMvpModule* module, AstNamedNode* parameter);
+TypeArray* mvp_private_array_domain(LambdaMvpModule* module, Type* element);
 TypeMap* mvp_record_contract(Type* contract, bool scalar_only);
 Type* mvp_contextual_contract(LambdaMvpModule* module, AstNode* node);
 TypeMap* mvp_contextual_map_contract(LambdaMvpModule* module, AstNode* node);
-TypeMap* mvp_member_candidate(LambdaMvpModule* module, NameRef name);
+TypeMap* mvp_member_candidate(LambdaMvpModule* module, AstNode* object, NameRef name);
+TypeMap* mvp_next_member_candidate(LambdaMvpModule* module, NameRef name,
+    TypeMap* preferred, int64_t* cursor);
+Type* mvp_guarded_parameter_candidate(LambdaMvpModule* module, MvpBinding* binding);
+void mvp_refine_guarded_locals(LambdaMvpModule* module, MvpFunction* function);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler, Type* operand);
@@ -434,7 +451,11 @@ bool mvp_array_copy_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpA
 bool mvp_array_reverse_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayReversePlan* plan);
 bool mvp_numeric_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
 bool mvp_numeric_region_advance(LambdaMvpModule* module, AstNode* region, MvpNumericLoopPlan* plan);
-bool mvp_numeric_inline_plan(LambdaMvpModule* module, MvpFunction* function, MvpNumericLoopPlan* plan);
+bool mvp_numeric_inline_plan(LambdaMvpModule* module, MvpFunction* function, MvpNumericLoopPlan* plan,
+    bool guarded_inputs = false);
+bool mvp_integer_leaf_body(LambdaMvpModule* module, MvpFunction* function, bool allow_calls);
+Type* mvp_integer_leaf_result(LambdaMvpModule* module, AstCallNode* call, int depth = 0,
+        bool dense_arrays = false);
 bool mvp_index_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpIndexLoopPlan* plan);
 bool mvp_index_function_plan(LambdaMvpModule* module, MvpFunction* function, MvpIndexLoopPlan* plan);
 bool mvp_emit_function(LambdaMvpModule* module, MvpFunction* function);

@@ -1258,6 +1258,44 @@ static inline MIR_reg_t em_load_at(MirEmitter* em, MIR_reg_t base,
     return value;
 }
 
+// MIR cannot select an unaligned word operand on every target. Packed map
+// lanes and TypedItem payloads use the same byte reconstruction (D2.6.2).
+static inline MIR_reg_t em_load_packed_i64(MirEmitter* em, MIR_reg_t base,
+        MIR_disp_t offset) {
+#if defined(__aarch64__) || defined(__x86_64__) || defined(_M_ARM64) || defined(_M_X64)
+    // these hosts allow unaligned words; a byte address avoids the backend's
+    // aligned scaled-displacement constraint without widening the read.
+    MIR_reg_t address = em_new_reg(em, "packed_address", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD,
+        MIR_new_reg_op(em->ctx, address), MIR_new_reg_op(em->ctx, base),
+        MIR_new_int_op(em->ctx, offset)));
+    return em_load_at(em, address, 0, MIR_T_I64, "packed_int");
+#else
+    MIR_reg_t result = em_new_reg(em, "packed_int", MIR_T_I64);
+    for (int i = 0; i < (int)sizeof(int64_t); i++) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        int byte_index = i;
+#else
+        int byte_index = (int)sizeof(int64_t) - i - 1;
+#endif
+        MIR_reg_t byte = em_load_at(em, base, offset + byte_index, MIR_T_U8, "packed_byte");
+        if (i == 0) {
+            em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+                MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, byte)));
+            continue;
+        }
+        MIR_reg_t shifted = em_new_reg(em, "packed_shift", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_LSH,
+            MIR_new_reg_op(em->ctx, shifted), MIR_new_reg_op(em->ctx, result),
+            MIR_new_int_op(em->ctx, 8)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+            MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, shifted),
+            MIR_new_reg_op(em->ctx, byte)));
+    }
+    return result;
+#endif
+}
+
 // physical lane decoding is shared; profiles choose coercion and result meaning.
 static inline MIR_type_t em_numeric_storage_type(ArrayNumElemType type) {
     switch (type) {

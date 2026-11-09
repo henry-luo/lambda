@@ -1,0 +1,15 @@
+{
+  "name": "ZeroUsedFlexWidthsStayDefinite",
+  "html": "test/html/layout_zero_width_flex_lines.html",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#auto"}, "x": 0, "y": 0.0, "width": 0.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#explicit"}, "x": 0, "y": 40.0, "width": 0.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#padding"}, "x": 0, "y": 80.0, "width": 14.0, "height": 34.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#column"}, "x": 0, "y": 134.0, "width": 0.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#reverse"}, "x": 0, "y": 174.0, "width": 0.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#empty"}, "x": 0, "y": 214.0, "width": 0.0, "height": 0.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#intrinsic"}, "x": 0, "y": 234.0, "width": 20.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#ordinary"}, "x": 0, "y": 274.0, "width": 80.0, "height": 20.0, "tolerance": 1e-05}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "QuotationFontStyleUsesInheritanceAndAuthorRules",
+  "html": "test/html/layout_q_font_inheritance.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "assert_style", "target": {"selector": "#plain"}, "property": "font-style", "equals": "normal"},
+    {"type": "assert_style", "target": {"selector": "#inherited"}, "property": "font-style", "equals": "italic"},
+    {"type": "assert_style", "target": {"selector": "#author"}, "property": "font-style", "equals": "italic"},
+    {"type": "assert_style", "target": {"selector": "#normal"}, "property": "font-style", "equals": "normal"},
+    {"type": "assert_style", "target": {"selector": "#cite"}, "property": "font-style", "equals": "italic"},
+    {"type": "assert_style", "target": {"selector": "#dfn"}, "property": "font-style", "equals": "italic"},
+    {"type": "assert_style", "target": {"selector": "#var"}, "property": "font-style", "equals": "italic"}
+  ]
+}

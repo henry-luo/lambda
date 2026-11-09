@@ -2266,6 +2266,12 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"item_at", FPTR(item_at)},
+    {"get_ascii_char_string", FPTR(get_ascii_char_string),
+     // the initialized character table has static storage and never allocates.
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES}},
     {"fn_string_ascii_at", FPTR(fn_string_ascii_at),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -4072,6 +4078,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_array_rep_cert_resolve",
         // Exact String-character equality reads only the already-rooted Item.
         "fn_string_char_eq_ascii", "fn_string_char_eq", "fn_string_ord_at", "fn_string_char_word",
+        "get_ascii_char_string",
         "fn_str_eq_ptr", "fn_string_freeze",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // These three read existing metadata; the element variant can allocate

@@ -17,6 +17,7 @@ from benchmark_provenance import command_output, hashed_file_corpus, sha256_file
 from run_c2mir_benchmarks import C2M, TIMER_MAIN, build_command, ensure_c2m, parse_timing, strip_timing
 from run_paired_benchmarks import paired_ratio_bootstrap
 from run_benchmarks import STANDARD_SUITES, JETSTREAM_LS, TEXT
+from utils.split_paths import project_source_path
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -65,8 +66,10 @@ def compiler_identity():
     """Identify the experiment's sources alongside the measured executable hashes."""
     paths = list((ROOT / "lambda/runtime/mvp").glob("*.hpp"))
     paths += list((ROOT / "lambda/runtime/mvp").glob("*.cpp"))
-    paths += [ROOT / path for path in (
-        "build_lambda_config.json", "lib/math_checked.hpp", "lambda/runtime/runner.cpp",
+    # source ownership moved to sibling projects; hash their real sources
+    # rather than the retired include-prefix paths (D9.1.1v4).
+    paths += [project_source_path(path, ROOT) for path in (
+        "build_lambda_config.json", "utils/split_paths.py", "lib/math_checked.hpp", "lambda/runtime/runner.cpp",
         "lambda/lambda.h", "lambda/lambda-data.hpp", "lambda/runtime/lambda-data-runtime.cpp",
         "lambda/runtime/collection_runtime.cpp", "lambda/runtime/vmap.cpp",
         "lambda/runtime/write_set.hpp", "lambda/runtime/write_set.cpp",

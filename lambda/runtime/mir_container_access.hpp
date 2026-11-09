@@ -321,8 +321,8 @@ static inline void em_open_string_append(MirEmitter* em, MIR_reg_t owner,
 
 // physical Array words exclude shaped, JS and virtual storage. Pointer lanes
 // may opt in to raw words; generic Item readers must reject those lanes.
-static inline MIR_reg_t em_physical_array_index(MirEmitter* em, MIR_reg_t owner,
-        MIR_reg_t index, MIR_label_t miss, MIR_label_t absent, bool pointer_lane) {
+static inline MIR_reg_t em_physical_array_owner(MirEmitter* em, MIR_reg_t owner,
+        MIR_label_t miss, bool pointer_lane = false) {
     MIR_reg_t pointer = em_guard_container(em, owner, LMD_TYPE_ARRAY, miss);
     MIR_reg_t flags = em_load_at(em, pointer, LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS, MIR_T_U8, "pointer_array_flags");
     MIR_reg_t shaped = em_new_reg(em, "pointer_array_shaped", MIR_T_I64);
@@ -348,6 +348,12 @@ static inline MIR_reg_t em_physical_array_index(MirEmitter* em, MIR_reg_t owner,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, miss),
         MIR_new_reg_op(em->ctx, state)));
     if (physical) em_emit_label(em, physical);
+    return pointer;
+}
+
+static inline MIR_reg_t em_physical_array_index(MirEmitter* em, MIR_reg_t owner,
+        MIR_reg_t index, MIR_label_t miss, MIR_label_t absent, bool pointer_lane) {
+    MIR_reg_t pointer = em_physical_array_owner(em, owner, miss, pointer_lane);
     em_array_num_bounds_check(em, pointer, index, absent);
     return em_load_at(em, em_array_element_address(em, pointer, index, sizeof(Item)),
         0, MIR_T_I64, "pointer_array_item");
@@ -593,6 +599,42 @@ static inline MIR_reg_t em_string_literal_pointer_eq(MirEmitter* em, MIR_reg_t s
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, result), MIR_new_int_op(em->ctx, 1)));
     em_emit_label(em, done);
     return result;
+}
+
+// a string literal cannot visit nested values. Other families compare false;
+// an encountered Error retains its complete Item payload (S5.1.1v2).
+static inline MIR_reg_t em_string_literal_item_compare(MirEmitter* em,
+        MIR_reg_t subject, MIR_reg_t literal, String* bytes, Operator op, bool item_result) {
+    MIR_reg_t result = em_new_reg(em, "literal_compare", MIR_T_I64);
+    MIR_reg_t outcome = item_result ? em_new_reg(em, "literal_outcome", MIR_T_I64) : 0;
+    MIR_label_t done = em_new_label(em), outcome_done = item_result ? em_new_label(em) : NULL;
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_int_op(em->ctx, 0)));
+    MIR_reg_t tag = em_new_reg(em, "literal_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
+        MIR_new_reg_op(em->ctx, tag), MIR_new_reg_op(em->ctx, subject), MIR_new_int_op(em->ctx, 56)));
+    if (item_result) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_reg_op(em->ctx, outcome), MIR_new_reg_op(em->ctx, subject)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ,
+            MIR_new_label_op(em->ctx, outcome_done), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, LMD_TYPE_ERROR)));
+    }
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, done),
+        MIR_new_reg_op(em->ctx, tag), MIR_new_int_op(em->ctx, LMD_TYPE_STRING)));
+    MIR_reg_t pointer = em_new_reg(em, "literal_subject", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, pointer), MIR_new_reg_op(em->ctx, subject),
+        MIR_new_uint_op(em->ctx, UINT64_C(0x00ffffffffffffff))));
+    em_string_literal_pointer_eq(em, pointer, literal, bytes, result);
+    em_emit_label(em, done);
+    if (op == OPERATOR_NE) em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, result), MIR_new_int_op(em->ctx, 0)));
+    if (!item_result) return result;
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+        MIR_new_reg_op(em->ctx, outcome), MIR_new_reg_op(em->ctx, result), MIR_new_uint_op(em->ctx, ITEM_FALSE)));
+    em_emit_label(em, outcome_done);
+    return outcome;
 }
 
 static inline MIR_reg_t em_text_pointer_compare(MirEmitter* em,

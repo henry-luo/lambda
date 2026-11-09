@@ -1,0 +1,13 @@
+[1, 1, true, null]
+[1, 0, 1, 2, 2]
+[1, 0, 1, 2, 2]
+[1, 0, 1, 2, 2]
+["changed", 3, "yes", "no", 2]
+visit
+visit
+[4, 3]
+[true, true]
+[21, 10, null, true, true]
+[30, 6, null, true]
+[true, true, true, true, true]
+[true, true, true, true, true]

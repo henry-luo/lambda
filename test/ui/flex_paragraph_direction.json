@@ -1,0 +1,10 @@
+{
+  "name": "Flex paragraphs retain direction across wrapping and sibling layout",
+  "html": "test/ui/flex_paragraph_direction.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#first"}, "x": 40, "y": 20, "width": 20, "height": 20, "tolerance": 0.00001},
+    {"type": "assert_rect", "target": {"selector": "#middle"}, "x": 100, "y": 20, "width": 20, "height": 20, "tolerance": 0.00001},
+    {"type": "assert_rect", "target": {"selector": "#result"}, "x": 200, "y": 20, "width": 20, "height": 20, "tolerance": 0.00001}
+  ]
+}

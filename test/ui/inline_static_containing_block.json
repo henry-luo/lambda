@@ -1,0 +1,10 @@
+{
+  "name": "StaticPositionsStopAtTheirInlineContainingBlock",
+  "html": "test/html/layout_inline_containing_block_static.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#custom"}, "x": 50.0, "y": 60.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#known"}, "x": 50.0, "y": 60.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#block"}, "x": 30.0, "y": 80.0, "tolerance": 1e-05}
+  ]
+}

@@ -2656,6 +2656,7 @@
   "test": {
     "output_dir": "test_output",
     "layout_baseline_suites": [
+      "baseline-js",
       "wpt-input-events",
       "form",
       "wpt-css-box",

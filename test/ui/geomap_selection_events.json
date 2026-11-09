@@ -1,0 +1,21 @@
+{
+  "name": "Map hover, threshold click, callbacks and double click",
+  "html": "test/map/selection.ls",
+  "viewport": {"width": 360, "height": 260},
+  "event_interval_ms": 0,
+  "events": [
+    {"type": "assert_pixel", "x": 128, "y": 96, "min_r": 253, "max_g": 2, "max_b": 2},
+    {"type": "mouse_move", "x": 128, "y": 96},
+    {"type": "assert_attribute", "target": {"selector": "#viewport"}, "attribute": "data-map-hover", "equals": "[\n  42\n]"},
+    {"type": "mouse_down", "x": 128, "y": 96, "button": 0},
+    {"type": "mouse_move", "x": 129, "y": 96},
+    {"type": "mouse_up", "x": 129, "y": 96, "button": 0},
+    {"type": "assert_attribute", "target": {"selector": "#viewport"}, "attribute": "data-map-selection", "equals": "[\n  42\n]"},
+    {"type": "assert_attribute", "target": {"selector": "#selection"}, "attribute": "data-selected", "equals": "[\n  42\n]"},
+    {"type": "assert_attribute", "target": {"selector": "#selection"}, "attribute": "data-snapshot", "equals": "[\n  42\n]"},
+    {"type": "assert_attribute", "target": {"selector": "#selection"}, "attribute": "data-parity", "equals": "true"},
+    {"type": "assert_pixel", "x": 128, "y": 96, "min_r": 253, "max_g": 2, "max_b": 2},
+    {"type": "dblclick", "target": {"selector": "#viewport", "offset_x": 128, "offset_y": 96}},
+    {"type": "assert_attribute", "target": {"selector": "#selection"}, "attribute": "data-zoom", "equals": "2"}
+  ]
+}

@@ -10808,8 +10808,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
 
-    // className
-    if (prop_id == JS_DOM_PROP_CLASS_NAME) {
+    // classList's PutForwards=value setter updates the class attribute without replacing its wrapper.
+    if (prop_id == JS_DOM_PROP_CLASS_NAME || prop_id == JS_DOM_PROP_CLASS_LIST) {
         const char* class_str = dom_to_attr_cstr(value);
         {
             // set_attribute owns the pooled class cache; writing class_names

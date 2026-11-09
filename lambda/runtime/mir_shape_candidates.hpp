@@ -2,6 +2,12 @@
 
 #include "transpiler.hpp"
 
+// inferred layouts can contain unaligned nine-byte TypedItems. Each access
+// validates its own descriptor and extent after guarding the receiver (D3.4.1).
+static inline bool mir_shape_layout_is_addressable(TypeMap* shape) {
+    return shape && shape->shape && shape->length > 0;
+}
+
 // the registry supplies optimization candidates only. Callers own its lifetime
 // and must still guard the receiver's physical layout (D7.4.1).
 static inline Type* mir_unique_shape_for_field(ArrayList* types, const char* name,
@@ -71,7 +77,9 @@ struct MirShapeCandidateProfile {
 static inline void* mir_shape_candidate(const MirShapeCandidateProfile& profile,
         AstNode* expression, int depth) {
     if (!expression || depth <= 0) return NULL;
-    AstNode* node = ast_unwrap_primary(expression);
+    // terminal primary nodes are scalar construction evidence, rather than
+    // empty parentheses; record-only profiles simply decline those leaves.
+    AstNode* node = ast_unwrap_primary_to_leaf(expression);
     if (!node) return NULL;
     if (void* direct = profile.direct(profile.owner, node)) return direct;
     if (profile.nested) {

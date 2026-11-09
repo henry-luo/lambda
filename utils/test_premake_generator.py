@@ -580,6 +580,31 @@ def expect_radiant_media_platform_selection(module) -> None:
             fail(f'{system} Radiant must select the native media stubs without Objective-C++')
 
 
+def expect_release_full_lto(module) -> None:
+    # Host and profiling builds must compile and link in the same LTO mode.
+    for system, compiler, flag in [('macos', 'clang', '-flto=full'),
+                                   ('linux', 'clang', '-flto=full'),
+                                   ('linux', 'gcc', '-flto'),
+                                   ('windows', 'clang', '-flto')]:
+        generator = linux_validation_generator(module)
+        generator.use_macos_config = system == 'macos'
+        generator.use_linux_config = system == 'linux'
+        generator.use_windows_config = system == 'windows'
+        generator.config.setdefault('platforms', {}).setdefault(
+            'windows' if system == 'windows' else 'linux', {})['compiler'] = compiler
+        generator.generate_workspace()
+        generated = '\n'.join(generator.premake_content)
+        debug = generated.split('filter "configurations:debug"', 1)[1].split(
+            'filter "configurations:debug_asan"', 1)[0]
+        if '-flto' in debug:
+            fail(f'{system}/{compiler} debug unexpectedly enables LTO')
+        for profile in ('release', 'release_profile'):
+            section = generated.split(f'filter "configurations:{profile}"', 1)[1].split(
+                '    filter ', 1)[0]
+            if section.count(f'"{flag}"') != 2 or '-flto=thin' in section:
+                fail(f'{system}/{compiler} {profile} must compile and link with {flag}')
+
+
 def main() -> int:
     module = load_generator_module()
     generator = linux_validation_generator(module)
@@ -599,6 +624,7 @@ def main() -> int:
     expect_static_module_archive_profiles()
     expect_radiant_property_ownership(module)
     expect_radiant_media_platform_selection(module)
+    expect_release_full_lto(module)
     expect_module_only_libraries(module)
     expect_host_export_list(module)
     print("PREMAKE_GENERATOR_SELFTEST: passed")

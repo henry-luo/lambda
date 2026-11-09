@@ -1,0 +1,7 @@
+{
+  "name": "Navigation classification uses the completed microtask checkpoint",
+  "html": "test/ui/dom_fragment_microtask.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-timer", "equals": "yes", "assert_timeout": 2000}
+  ]
+}

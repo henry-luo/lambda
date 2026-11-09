@@ -4,6 +4,13 @@
 #include "ast_build.hpp"
 
 // shared binding-identity and RHS ownership observations for both MIR emitters.
+static inline bool mir_place_copy_snapshot_required(const NameEntry* binding) {
+    // S9.1.2/D5.4.5: only a completed live-range/escape proof permits a
+    // temporary projection to remain borrowed. Unknown ranges keep COW.
+    return binding && binding->is_place_copy &&
+        (!binding->place_copy_range_decided || binding->place_copy_mutated || binding->place_copy_place_written);
+}
+
 static inline bool mir_is_direct_binding(AstNode* node, const NameEntry* binding) {
     AstNode* value = ast_unwrap_primary(node);
     return value && value->node_type == AST_NODE_IDENT &&
