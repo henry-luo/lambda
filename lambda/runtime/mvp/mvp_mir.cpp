@@ -777,7 +777,6 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
     bool optional_success = false;
     Type* success_base = lambda_type_nullable_lane_base(outcome_success, &optional_success);
     if (!proven && v.rep == VALUE_REP_ITEM && optional_success && success_base &&
-            (scalar_success || mvp_array_contract(success_base) || lambda_type_nonnull_map_contract(success_base)) &&
             mvp_admission_proven(c->module, success_base, contract)) {
         ValueRep target = boxed_outcome ? VALUE_REP_ITEM : mvp_rep(contract);
         native_admitted = label(c);
@@ -4658,6 +4657,24 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
         }
         v = mvp_function_binder_count(f) ? convert(c, v, VALUE_REP_ITEM)
             : admit_parameter_argument(c, param, v, &failure, (AstNode*)call);
+        if (borrowed[i] && borrowed[i]->array_native && !places[i].root && pure_arguments &&
+                !c->dense_arrays && c->dense_callee != f &&
+                f->abi.effects.may_gc && ast_body_may_write_entry(f->ast->body, param->entry, false) &&
+                mvp_array_element(borrowed[i]->contract) &&
+                mvp_admission_proven(c->module, borrowed[i]->contract, mvp_contract(param)) &&
+                mvp_parameter_storage_stable(c->module, param)) {
+            // detach an indexed owner once before its closed var borrow.
+            // Dense regions and forwarding-only owners keep their existing
+            // noncollecting re-borrow path and exclusivity proof.
+            MIR_label_t ready = label(c);
+            if (borrowed[i]->array_writable)
+                branch(c, MIR_BNE, ready, reg(c, borrowed[i]->array_writable), imm(c, 0));
+            prepare_place_owner(c, borrowed[i]);
+            mark(c, ready);
+            // either arm observes the binding, whose precise home now owns
+            // any detached storage; never join on a slow-arm-only register.
+            v = read_binding(c, borrowed[i], arg, false);
+        }
         v = convert(c, v, f->abi.params[i].canonical_rep);
         values[i] = v;
         types[i] = v.mir_type; ops[i] = reg(c, v.reg);
@@ -5560,7 +5577,8 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
     if (result_rep == VALUE_REP_RAW_GC_POINTER)
         result.semantic_contract = mvp_nullable_contract(c->module, result.semantic_contract);
     if (result_rep == VALUE_REP_ITEM &&
-            (info->result_kind == SYS_RESULT_TEXT_SPLIT || info->fn == SYSFUNC_FILL)) {
+            (info->result_kind == SYS_RESULT_TEXT_SPLIT || info->fn == SYSFUNC_FILL ||
+             info->result_kind == SYS_RESULT_SLICE_OF_ARGUMENT)) {
         Type* contract = mvp_value_contract(c->module, node);
         // a caret narrows the call's AST type after discharge. The producer
         // descriptor must retain Error until propagated_value emits its guard.

@@ -1126,6 +1126,35 @@ bool mvp_prefers_packed_tensor(LambdaMvpModule* m, AstNode* literal) {
     return !private_row_use(m, literal, info.rank, active, 0);
 }
 
+static Type* common_union_field_contract(LambdaMvpModule* m, Type* owner,
+        String* name, unsigned depth = 0) {
+    owner = type_field_unwrap_simple_decl(owner);
+    if (!owner || depth > 32) return NULL;
+    if (lambda_type_is_union(owner)) {
+        TypeBinary* arms = (TypeBinary*)owner;
+        Type* left = common_union_field_contract(m, arms->left, name, depth + 1);
+        Type* right = common_union_field_contract(m, arms->right, name, depth + 1);
+        // distinct spellings of the same nullable field must not become
+        // T? | T?, which loses the nullable lane query's single base.
+        if (left && right && lambda_type_repr_equal(left, right)) return left;
+        return left && right ? lambda_type_union_normalized(m->tp->pool, left, right) : NULL;
+    }
+    if (owner->type_id != LMD_TYPE_MAP || owner == &TYPE_MAP ||
+            !((TypeMap*)owner)->is_trusted_contract) return NULL;
+    ShapeEntry* field = find_shape_read_field_by_name((TypeMap*)owner, name->chars, name->len);
+    // an open arm that omits the field proves nothing about its extra values.
+    // Common required domains do not imply a shared physical layout (D4.2.5).
+    if (!field || field->is_optional) return NULL;
+    Type* domain = type_field_unwrap_simple_decl(field->type);
+    Type* normal = lambda_type_remove_error(m->tp->pool, domain);
+    bool optional = false;
+    Type* lane = lambda_type_nullable_lane_base(normal, &optional);
+    // semantic union admission preserves the source carrier. A named child
+    // map or array still needs its own layout/certificate crossing.
+    return mvp_scalar_success_contract(m, domain) || lambda_type_is_union(lane ? lane : normal)
+        ? domain : NULL;
+}
+
 // query transient scalar producer proofs; the shared AST remains the sole type graph (D8.2.5).
 Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool dense_arrays) {
     AstNode* n = ast_unwrap_primary_to_leaf(source);
@@ -1207,11 +1236,21 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
         // Unlike a mutable map, this receiver cannot change its field domain.
         if (owner && owner->type_id == LMD_TYPE_ERROR) return n->type ? n->type : &TYPE_ANY;
         ShapeEntry* field = mvp_member_field(m, (AstFieldNode*)n, NULL, true);
-        if (!field) return &TYPE_ANY;
         bool optional = false;
-        lambda_type_nullable_lane_base(lambda_type_remove_error(m->tp->pool, owner), &optional);
+        Type* receiver = lambda_type_remove_error(m->tp->pool, owner);
+        Type* lane = lambda_type_nullable_lane_base(receiver, &optional);
+        if (lane) receiver = lane;
+        Type* domain = field ? type_field_unwrap_simple_decl(field->type) : NULL;
+        if (!domain && lambda_type_is_union(receiver)) {
+            MvpBinding* binding = mvp_local_binding(m, ((AstFieldNode*)n)->object);
+            AstNode* key = ast_unwrap_primary_to_leaf(((AstFieldNode*)n)->field);
+            if (binding && key && key->node_type == AST_NODE_IDENT &&
+                    !binding_reassigned(m, binding, true) && !binding_var_borrow(m, binding))
+                domain = common_union_field_contract(m, receiver, ((AstIdentNode*)key)->name);
+        }
+        if (!domain) return &TYPE_ANY;
         Type* normal = optional || ((AstFieldNode*)n)->optional
-            ? lambda_type_nullable_normalized(m->tp->pool, field->type) : type_field_unwrap_simple_decl(field->type);
+            ? lambda_type_nullable_normalized(m->tp->pool, domain) : domain;
         // a record/error receiver still proves its field's successful domain;
         // keep the error arm rather than widening every scalar read to any.
         return lambda_type_has_proven_error(owner)
@@ -1338,6 +1377,16 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
         Type* base = lambda_type_nullable_lane_base(arg_contract, &optional);
         if (base == &TYPE_INT && sysfunc_native_math_type_preserving(info->fn, NULL)) return arg_contract;
         Type* successful_arg = lambda_type_remove_error(m->tp->pool, arg_contract);
+        if (info->result_kind == SYS_RESULT_SLICE_OF_ARGUMENT && successful_arg == &TYPE_STRING) {
+            // the registry's slice relation preserves text on success; invalid
+            // bounds remain checked; an absent offset yields null (S7.1.2).
+            Type* sliced = &TYPE_STRING;
+            for (int i = 1; i < mvp_call_argument_count(call); i++)
+                if (lambda_type_accepts_null(mvp_value_contract(m, mvp_call_argument(call, i), depth + 1, dense_arrays)))
+                    sliced = mvp_nullable_contract(m, &TYPE_STRING);
+            return call->propagate ? sliced :
+                lambda_type_union_normalized(m->tp->pool, sliced, &TYPE_ERROR);
+        }
         if (info->fn == SYSFUNC_SHR && mvp_int_range(m, n).finite) return &TYPE_INT;
         if (mvp_binary_bitwise(info->fn) && successful_arg && successful_arg->type_id == LMD_TYPE_INT &&
                 normal_domain(m,
@@ -3668,7 +3717,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         // annotation. Its private observation still widens over all writes
         // and retains Error; it must not start at absorbing `any` (S12.2.1v3).
         if (!b->inferred_array && mvp_array_contract(success) &&
-                !binding_reassigned(m, b, true) && !binding_var_borrow(m, b)) {
+                !binding_reassigned(m, b, true) && !binding_var_borrow(m, b, success)) {
             Type* previous = b->contract;
             b->contract = success;
             NameEntry* active[32];

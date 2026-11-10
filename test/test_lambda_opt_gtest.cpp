@@ -1469,7 +1469,13 @@ TEST(LambdaOptAdmission, OpenUnionMemberShapeCachesAdmissionProof) {
     // The open first arm cannot statically certify `child`, so the recursive
     // boundary remains. A compiler-built member carrier proves it once per
     // shape and the context cache reuses that proof (D4.2.5, D7.3.2-D7.3.3).
-    EXPECT_GT(run.profile.get("union_map_rep_cache_hits"), 200u);
+    const uint64_t admissions = run.profile.get("union_admit_calls");
+    const uint64_t misses = run.profile.get("union_map_rep_cache_misses");
+    // MVP skips construction checks. Each remaining valid map crossing is a
+    // cache hit or one cold miss; the malformed scalar accounts for one reject.
+    ASSERT_GT(admissions, misses + 1u);
+    EXPECT_LE(admissions, 201u);
+    EXPECT_EQ(run.profile.get("union_map_rep_cache_hits"), admissions - misses - 1u);
     EXPECT_LE(run.profile.get("union_map_rep_cache_misses"), 4u);
     EXPECT_EQ(run.profile.get("map_admit_relation_cache_hits"), 0u);
     // The malformed child must still reach the checked slow path.
