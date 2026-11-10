@@ -819,6 +819,7 @@ Renamed 2026-10-03. Current binaries no longer read the old names.
 | `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`; unset/empty also AUTO, D8.4.2) | `JS_EXECUTION_BACKEND` |
 | `JS_FUNC_JIT_THRESHOLD` | (5) | `JS_JIT_THRESHOLD` |
 | `JS_LOOP_JIT_THRESHOLD` | (10000) | `JS_JIT_BACKEDGE` |
+| `LAMBDA_JS_DRAIN_IDLE_MS` | JS idle-drain watchdog interval, 1–30000 ms (5000); finite native requests retain the 30000 ms total grace budget | — |
 
 Archived binaries in the git-ignored `test/benchmark/exe/` (see its `MANIFEST.md`) read only the old names. `run_benchmarks.py` and `run_paired_benchmarks.py` set both names.
 

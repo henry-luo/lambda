@@ -33,6 +33,7 @@
 
 #include "test_mir_check_helpers.hpp"
 #include "test_batch_process.hpp"
+#include "lib/thread_pool.h"
 
 namespace {
 
@@ -308,29 +309,62 @@ static void execute_batch(StressBatch* batch, StressMode mode) {
     shell_result_free(&process);
 }
 
+struct IsolatedStressRun {
+    StressScript* script;
+    StressMode mode;
+};
+
+static void execute_isolated(void* opaque) {
+    IsolatedStressRun* run = (IsolatedStressRun*)opaque;
+    StressScript& script = *run->script;
+    StressMode mode = run->mode;
+    ShellEnvEntry env[9];
+    configure_mode(mode, env);
+    ShellOptions options = {};
+    options.env = env;
+    options.merge_stderr = true;
+    const char* subcommand = script.language == mir_check::LANG_JS
+        ? "js" : script.procedural ? "run" : nullptr;
+    ShellResult process = mir_check::run_lambda_command(subcommand, script.path.c_str(),
+        mode == INTERP_FORCED || mode == INTERP_PARITY, true, nullptr, &options);
+    TestBatchResult& result = script.runs[mode];
+    result.complete = true;
+    result.exit_code = process.timed_out || process.cancelled || process.output_limit_exceeded
+        ? -1 : process.exit_code;
+    result.output = strbuf_new();
+    if (process.stdout_len) strbuf_append_str_n(result.output, process.stdout_buf, process.stdout_len);
+    shell_result_free(&process);
+}
+
 static const TestBatchResult& get_run(StressScript& script, StressMode mode) {
     if (script.batch) {
         if (!script.batch->ready[mode]) execute_batch(script.batch, mode);
     } else if (!script.runs[mode].output) {
-        ShellEnvEntry env[9];
-        configure_mode(mode, env);
-        ShellOptions options = {};
-        options.env = env;
-        options.merge_stderr = true;
-        const char* subcommand = script.language == mir_check::LANG_JS
-            ? "js" : script.procedural ? "run" : nullptr;
-        ShellResult process = mir_check::run_lambda_command(subcommand, script.path.c_str(),
-            mode == INTERP_FORCED || mode == INTERP_PARITY, true, nullptr, &options);
+        IsolatedStressRun run = {&script, mode};
+        execute_isolated(&run);
         g_process_count++;
-        TestBatchResult& result = script.runs[mode];
-        result.complete = true;
-        result.exit_code = process.timed_out || process.cancelled || process.output_limit_exceeded
-            ? -1 : process.exit_code;
-        result.output = strbuf_new();
-        if (process.stdout_len) strbuf_append_str_n(result.output, process.stdout_buf, process.stdout_len);
-        shell_result_free(&process);
     }
     return script.runs[mode];
+}
+
+static void prepare_pure_isolated_runs(StressScript& script) {
+    // every schedule retains its own process/compiler/heap; pure scripts have no shared writes.
+    if (script.batch || script.language != mir_check::LANG_LAMBDA || script.procedural) return;
+    IsolatedStressRun jobs[kModeCount];
+    ThreadPool* pool = tp_create((int)test_batch_worker_limit(kModeCount));
+    size_t count = 0;
+    for (size_t m = 0; m < kModeCount; m++) {
+        StressMode mode = (StressMode)m;
+        if (!mode_applies(script, mode) || script.runs[mode].output) continue;
+        jobs[count] = {&script, mode};
+        if (!pool || !tp_submit(pool, execute_isolated, &jobs[count])) {
+            if (pool) tp_wait_all(pool);
+            execute_isolated(&jobs[count]);
+        }
+        count++;
+    }
+    if (pool) tp_destroy(pool);
+    g_process_count += count;
 }
 
 class MirGcStressTest : public ::testing::TestWithParam<StressScript> {
@@ -408,6 +442,7 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
     // GTest copies parameters during discovery; cached runs belong to the
     // canonical corpus entry, which remains stable for the whole suite.
     StressScript& script = g_scripts[GetParam().index];
+    prepare_pure_isolated_runs(script);
     const TestBatchResult& reference = get_run(script, REFERENCE);
     GTEST_LOG_(INFO) << "mir-gc-stress reference completed: script=" << script.path
                     << " exit=" << reference.exit_code;

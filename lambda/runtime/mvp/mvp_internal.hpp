@@ -245,6 +245,7 @@ struct MvpBinding {
     bool string_buffer_owned;
     bool method_field_written;
     bool stable_scalar_home;
+    int8_t var_borrow_cache[2];  // zero unknown, positive borrowed, negative unborrowed
     MvpScalarAggregate* scalar_aggregate;
 };
 

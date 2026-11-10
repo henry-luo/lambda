@@ -1600,9 +1600,21 @@ typedef struct JsDrainWatchdogState {
     bool fired;
     uint64_t start_ns;
     uint64_t progress_generation;
+    uint64_t idle_timeout_ms;
 } JsDrainWatchdogState;
 
 static bool event_loop_has_pending_requests(void);
+
+static uint64_t event_loop_drain_idle_timeout_ms(void) {
+    // embedders can shorten idle shutdown without changing finite-request grace.
+    const char* value = getenv("LAMBDA_JS_DRAIN_IDLE_MS");
+    if (!value || !*value) return EVENT_LOOP_DRAIN_TIMEOUT_MS;
+    char* end = NULL;
+    unsigned long timeout = strtoul(value, &end, 10);
+    return end != value && !*end && timeout > 0 &&
+        timeout <= EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS
+        ? timeout : EVENT_LOOP_DRAIN_TIMEOUT_MS;
+}
 
 static void drain_watchdog_timer_cb(uv_timer_t* handle) {
     JsDrainWatchdogState* state = handle ? (JsDrainWatchdogState*)handle->data : NULL;
@@ -1619,9 +1631,8 @@ static void drain_watchdog_timer_cb(uv_timer_t* handle) {
         (timer_progress || event_loop_has_refed_process_handles(lambda_uv_loop()) ||
          event_loop_has_pending_requests())) {
         uint64_t remaining = (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS - elapsed_ms;
-        uint64_t next_ms = remaining < (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS
-            ? remaining
-            : (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS;
+        uint64_t next_ms = remaining < state->idle_timeout_ms
+            ? remaining : state->idle_timeout_ms;
         if (next_ms == 0) next_ms = 1;
         uv_timer_start(handle, drain_watchdog_timer_cb, next_ms, 0);
         return;
@@ -1923,11 +1934,12 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
         watchdog_state.fired = false;
         watchdog_state.start_ns = uv_hrtime();
         watchdog_state.progress_generation = timer_progress_generation;
+        watchdog_state.idle_timeout_ms = event_loop_drain_idle_timeout_ms();
         uv_timer_init(loop, &watchdog);
         watchdog.data = &watchdog_state;
         uv_unref((uv_handle_t*)&watchdog); // don't let watchdog itself keep loop alive when alone
         uv_timer_start(&watchdog, drain_watchdog_timer_cb,
-                       EVENT_LOOP_DRAIN_TIMEOUT_MS, 0);
+                       watchdog_state.idle_timeout_ms, 0);
 
         // existing page-load drains retain their interval cleanup policy; host programs opt in.
         if (!keep_intervals) stop_all_interval_timers();

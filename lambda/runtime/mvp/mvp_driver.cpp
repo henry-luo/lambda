@@ -337,8 +337,6 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
         // Snapshot lowering cannot publish pool-owned descriptors into the
         // Script registry that concurrent workers later read (D8.3.4).
         compile_type_list = snapshot_type_list;
-        satellite_context = jit_init(runtime->optimize_level);
-        context_owned = true;
     }
     if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     if (!satellite_context) {
@@ -433,9 +431,9 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
     if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     entry_name = strbuf_new_cap(96);
     write_fn_name_ex(entry_name, (AstFuncNode*)fn, NULL, "_b");
-    entry = !entry_name ? NULL
-        : (satellite_interp ? find_func(satellite_context, entry_name->str)
-                            : jit_gen_func(satellite_context, entry_name->str));
+    // linking already publishes the entry; reloading would reset every module thunk.
+    entry = entry_name ? find_func(satellite_context, entry_name->str) : NULL;
+    if (!satellite_interp) jit_log_code_addresses(satellite_context);
     if (entry_name) strbuf_free(entry_name);
     if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     if (!entry || !artifacts.consts_bss || !artifacts.consts_bss->addr ||
@@ -889,8 +887,9 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
         (selection.interface_kind == MIR_LINK_LAZY_NATIVE
             ? MIR_set_lazy_gen_interface : MIR_set_gen_interface), import_resolver);
     pass->use_mir_interp_for_script = use_interp;
-    pass->main_func = (main_func_t)(use_interp ? find_func(pass->ctx, "main")
-        : jit_gen_func(pass->ctx, "main"));
+    // the link pass owns publication; entry lookup must not load/link the module again.
+    pass->main_func = (main_func_t)find_func(pass->ctx, "main");
+    if (!use_interp) jit_log_code_addresses(pass->ctx);
     return pass->main_func != NULL;
 }
 
@@ -1194,7 +1193,7 @@ void lambda_mvp_compile_script(Transpiler* tp, Script* script, const char* scrip
         tp->jit_context = NULL;
     }
 
-    // After the final MIR_link + jit_gen_func the machine code of every
+    // After the final MIR_link the machine code of every
     // function is published and this sealed per-module ctx never links again,
     // so the MIR IR is dead weight — release it, keeping only the executable
     // code. MIR-interp scripts keep their IR: there it IS the executable.

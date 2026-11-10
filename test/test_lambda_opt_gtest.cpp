@@ -721,8 +721,8 @@ TEST(LambdaOptProfile, ExecutedCallsAreCountedOnlyWhenEnabled) {
             EXPECT_EQ(exec_profile_function(profile, "boxed", "mvp_#_main"), 1u);
             EXPECT_NE(strstr(profile, "helper\tpn_print\t26"), nullptr);
             EXPECT_EQ(exec_profile_function(profile, "frame_entry", "mvp_#_main"), 1u);
-            EXPECT_GT(exec_profile_function(profile, "root_reload", "mvp_#_main"), 0u);
-            EXPECT_LT(exec_profile_function(profile, "root_reload", "mvp_#_main"), UINT64_MAX);
+            // D5.3.1: stable Item registers require no post-collection reload event.
+            EXPECT_EQ(exec_profile_function(profile, "root_reload", "mvp_#_main"), UINT64_MAX);
             // NO_GC diagnostic markers do not create production root reloads.
             EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
             free(profile);
@@ -991,7 +991,7 @@ TEST(LambdaOptProfile, ReadOnlyLengthAvoidsGcRootTraffic) {
     EXPECT_EQ(exec_profile_count_prefix(profile, "helper\tfn_len_l"), 2u);
     EXPECT_NE(strstr(profile, "helper\tfn_len_s\t1"), nullptr);
     EXPECT_EQ(exec_profile_function(profile, "frame_entry", "mvp_#_lens"), 1u);
-    EXPECT_LE(exec_profile_function(profile, "root_reload", "mvp_#_lens"), 3u);
+    EXPECT_EQ(exec_profile_function(profile, "root_reload", "mvp_#_lens"), UINT64_MAX);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
     free(profile);
 }
@@ -1032,15 +1032,15 @@ TEST(LambdaOptProfile, FloatLiteralFillsBeforeNullableFallback) {
     free(profile);
 }
 
-// D5.4.4/D6.4.4: only the live relocating data-pointer reload executes
-// after the collecting call for a stable typed-array parameter.
+// D5.3.1/D5.4.4/D6.4.4: the data pointer refreshes after collection;
+// the stable owner register needs no lifetime-root reload.
 TEST(LambdaOptProfile, StableArrayLengthSurvivesCollectingCall) {
     char* profile = run_profiled_lambda_fixture(
         "test/mir/lambda/stable_array_length_after_gc.ls", "[9, 6, 8]",
         "temp/lambda_opt_contract/stable_array_length_after_gc.tsv");
     ASSERT_NE(profile, nullptr);
-    EXPECT_GT(exec_profile_function(profile, "root_reload", "mvp_#_stable_length"), 0u);
-    EXPECT_LT(exec_profile_function(profile, "root_reload", "mvp_#_stable_length"), UINT64_MAX);
+    EXPECT_EQ(exec_profile_function(profile, "frame_entry", "mvp_#_stable_length"), 1u);
+    EXPECT_EQ(exec_profile_function(profile, "root_reload", "mvp_#_stable_length"), UINT64_MAX);
     mir_check::run_fixture("test/mir/lambda/stable_array_length_after_gc.ls",
         "test/mir/lambda/stable_array_length_after_gc.mir-check", mir_check::LANG_LAMBDA);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);

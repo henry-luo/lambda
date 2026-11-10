@@ -32,12 +32,17 @@ typedef struct MirLinkSelection {
     unsigned int optimize_level;
 } MirLinkSelection;
 
-// oversized native bodies keep native execution without paying for O2's global passes.
+// oversized debug images favor compilation latency; optimized hosts retain O1.
 static inline unsigned int mir_native_optimize_level(
         uint64_t instruction_count, unsigned int optimize_level,
         uint64_t budget = MIR_LARGE_FUNCTION_O1_THRESHOLD) {
-    return instruction_count > budget && optimize_level > 1
-        ? 1 : optimize_level;
+#ifdef NDEBUG
+    const unsigned int bounded_level = 1;
+#else
+    const unsigned int bounded_level = 0;
+#endif
+    return instruction_count > budget && optimize_level > bounded_level
+        ? bounded_level : optimize_level;
 }
 
 // The code generator is vendored; policy selects its interface before it is

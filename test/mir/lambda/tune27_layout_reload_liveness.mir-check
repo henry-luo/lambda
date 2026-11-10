@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.4.4/D6.3.3: live array roots are spilled across the direct allocator and reloaded before fresh native buffer reads. One checked float store retains its COW miss. D8.2.6/S9.1.2: proved fresh, closed local stores omit impossible checked-store arms; snapshot and dynamic-value controls retain their observable behavior.",
+  "description": "D5.3.1/D5.4.4/D6.3.3: live array owners stay rooted across the direct allocator; native buffer addresses are read afresh afterward. One checked float store retains its COW miss. D8.2.6/S9.1.2: proved fresh, closed local stores omit impossible checked-store arms; snapshot and dynamic-value controls retain their observable behavior.",
   "checks": [
     {
       "in_func": "mvp_#_tune27_layout_reload_liveness",
@@ -14,9 +14,6 @@
         },
         {
           "pattern": "call\tmvp_{{n}}_tune27_alloc_dp"
-        },
-        {
-          "pattern": "mov\t{{r}}, i64:({{r:root}})"
         },
         {
           "pattern": "mov\t{{r}}, i64:32({{r}})"
