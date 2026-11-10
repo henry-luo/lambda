@@ -935,15 +935,6 @@ extern "C" void* lambda_module_state_for_unit(void* runtime_context,
         unit_id));
 }
 
-extern "C" void* lambda_module_const_at_state(void* module_state,
-        uint32_t index) {
-    LambdaModuleState* state = (LambdaModuleState*)module_state;
-    if (!state || !state->consts) return NULL;
-    // Satellites carry the owner's slab state directly; resolving constants
-    // through it avoids stale per-image layout metadata during batch linking
-    // (D6.2, D8.2).
-    return ((void**)state->consts)[index];
-}
 
 extern "C" Item lambda_module_var_at(void* module_state, uint32_t slot) {
     LambdaModuleState* state = (LambdaModuleState*)module_state;
@@ -1000,78 +991,10 @@ extern "C" void lambda_active_module_var_store(uint32_t slot, Item item) {
 // is never patched (DI14).
 // ---------------------------------------------------------------------------
 
-static LambdaConstPool* lambda_const_pool_at(EvalContext* owner, uint32_t unit_id) {
-    return owner && owner->const_pools && unit_id < owner->const_pool_count
-        ? owner->const_pools[unit_id] : NULL;
-}
 
-extern "C" LambdaConstPool* lambda_const_pool_acquire(uint32_t* out_unit_id) {
-    EvalContext* owner = context;
-    if (!owner || !out_unit_id) return NULL;
-    if (owner->const_pool_count == owner->const_pool_capacity) {
-        uint32_t capacity = owner->const_pool_capacity ? owner->const_pool_capacity * 2 : 8;
-        LambdaConstPool** grown = (LambdaConstPool**)mem_calloc(
-            capacity, sizeof(LambdaConstPool*), MEM_CAT_EVAL);
-        if (!grown) return NULL;
-        if (owner->const_pools) {
-            memcpy(grown, owner->const_pools,
-                (size_t)owner->const_pool_count * sizeof(LambdaConstPool*));
-            mem_free(owner->const_pools);
-        }
-        owner->const_pools = grown;
-        owner->const_pool_capacity = capacity;
-    }
-    LambdaConstPool* pool = (LambdaConstPool*)mem_calloc(1, sizeof(LambdaConstPool),
-        MEM_CAT_EVAL);
-    if (!pool) return NULL;
-    *out_unit_id = owner->const_pool_count;
-    owner->const_pools[owner->const_pool_count++] = pool;
-    return pool;
-}
 
-extern "C" int32_t lambda_const_pool_append(LambdaConstPool* pool, void* body) {
-    if (!pool || !body) return -1;
-    if (pool->count == pool->capacity) {
-        uint32_t capacity = pool->capacity ? pool->capacity * 2 : 16;
-        void** grown = (void**)mem_calloc(capacity, sizeof(void*), MEM_CAT_EVAL);
-        if (!grown) return -1;
-        if (pool->entries) {
-            memcpy(grown, pool->entries, (size_t)pool->count * sizeof(void*));
-            mem_free(pool->entries);
-        }
-        pool->entries = grown;
-        pool->capacity = capacity;
-    }
-    pool->entries[pool->count] = body;
-    return (int32_t)pool->count++;
-}
 
-extern "C" Item lambda_unit_const_at(uint32_t unit_id, uint32_t index) {
-    // The literal load emitted by both guest lowerings. Bounds-checked: a unit
-    // whose pool failed to register must fault visibly rather than cast an
-    // adjacent word to String*.
-    LambdaConstPool* pool = lambda_const_pool_at(context, unit_id);
-    if (!pool || index >= pool->count) {
-        log_error("const-pool: literal %u out of range for unit %u", index, unit_id);
-        return ItemNull;
-    }
-    return (Item){.item = s2it((String*)pool->entries[index])};
-}
 
-static void lambda_const_pool_registry_destroy(EvalContext* owner) {
-    if (!owner || !owner->const_pools) return;
-    for (uint32_t i = 0; i < owner->const_pool_count; i++) {
-        LambdaConstPool* pool = owner->const_pools[i];
-        if (!pool) continue;
-        for (uint32_t j = 0; j < pool->count; j++) mem_free(pool->entries[j]);
-        mem_free(pool->entries);
-        mem_free(pool);
-    }
-    mem_free(owner->const_pools);
-    owner->const_pools = NULL;
-    owner->const_pool_capacity = 0;
-    owner->const_pool_count = 0;
-}
 
 extern "C" void lambda_module_state_reset(void) {
     EvalContext* owner = context;
@@ -1092,10 +1015,6 @@ extern "C" void lambda_module_state_reset(void) {
 
 extern "C" void lambda_module_state_destroy(void) {
     EvalContext* owner = context;
-    // Pools outlive every module slab in this context -- generated code from a
-    // retired slab can still be reachable -- so they are released here, with
-    // the context's compiled code, not at slab release.
-    lambda_const_pool_registry_destroy(owner);
     if (!owner || !owner->module_states) return;
     lambda_module_state_release_from(0);
     mem_free(owner->module_states);

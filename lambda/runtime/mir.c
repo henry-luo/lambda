@@ -438,21 +438,6 @@ void* find_func(MIR_context_t ctx, const char *fn_name) {
     return NULL;
 }
 
-void* find_func_prefix(MIR_context_t ctx, const char *prefix) {
-    if (!ctx) return NULL;  // same T0 case as find_func above
-    size_t prefix_len = strlen(prefix);
-    for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
-        module = DLIST_NEXT (MIR_module_t, module)) {
-        MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
-        for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
-            if (mitem->item_type == MIR_func_item) {
-                if (strncmp(mitem->u.func->name, prefix, prefix_len) == 0)
-                    return mitem->addr;
-            }
-        }
-    }
-    return NULL;
-}
 
 void* find_data(MIR_context_t ctx, const char *data_name) {
     log_debug("finding data: %s, %p", data_name, ctx);
@@ -480,9 +465,6 @@ void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized) {
     MIR_finish(ctx);
 }
 
-void jit_cleanup(MIR_context_t ctx) {
-    jit_cleanup_mode(ctx, !g_mir_interp_mode);
-}
 
 static bool module_layout_bss_name(const char* name) {
     if (!name) return false;

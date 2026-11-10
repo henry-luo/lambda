@@ -219,9 +219,6 @@ AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
 // evaluated once so omitted fields inherit the source value before typed-field
 // storage coercion runs.
 AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal);
-bool has_fixed_shape(TypeMap* map_type);
-bool has_named_shape(TypeMap* map_type, bool require_stored_fields = false);
-bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
 void decimal_payload_release(Decimal* dec);
 void decimal_constants_release(struct _ArrayList* constants);
@@ -240,7 +237,6 @@ Type* unwrap_simple_type_type(Type* type);
 Type* set_type_any(Transpiler* tp, AnyReason reason);
 Type* set_lit_type_any(Transpiler* tp, AnyReason reason);
 TypeId census_any_type_id(Transpiler* tp, AnyReason reason);
-TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);
 bool ast_expr_has_widened_dependency(AstNode* node);
@@ -256,9 +252,7 @@ void jit_log_code_addresses(MIR_context_t ctx);
 size_t jit_release_generated_ir(MIR_context_t ctx);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
-void* find_func_prefix(MIR_context_t ctx, const char *prefix);
 void* find_data(MIR_context_t ctx, const char *data_name);
-void jit_cleanup(MIR_context_t ctx);
 void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized);
 void register_dynamic_import(const char *name, void *addr);
 void clear_dynamic_imports(void);

@@ -110,38 +110,8 @@ AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal) {
     return NULL;
 }
 
-// An optional-field contract cannot prove common offsets for raw field loads.
-bool has_named_shape(TypeMap* map_type, bool require_stored_fields) {
-    if (!map_type->struct_name) return false;
-    if (!map_type->shape || map_type->length == 0) return false;
-    FOR_EACH_MAP_FIELD(map_type, field) {
-        if (!field->name || (require_stored_fields && field->is_optional)) return false;
-    }
-    return true;
-}
 
-bool has_fixed_shape(TypeMap* map_type) {
-    if (!has_named_shape(map_type, true)) return false;
-    FOR_EACH_MAP_FIELD(map_type, field) {
-        if (field->byte_offset % sizeof(void*) != 0) return false;
-    }
-    return true;
-}
 
-bool is_direct_access_type(TypeId type_id) {
-    switch (type_id) {
-    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_UINT64:
-    case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
-    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
- case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
-    case LMD_TYPE_PATH:
-        return true;
-    default:
-        return false;
-    }
-}
 
 bool static_literal_item_from_type(Type* type, Item* out) {
     if (!type || !out) return false;
@@ -230,14 +200,6 @@ bool lambda_literal_contract_value(const Type* type, Item* out) {
     }
 }
 
-TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
-    Type* t = field->type;
-    if (unwrap_type_type && t && t->type_id == LMD_TYPE_TYPE) {
-        Type* inner = ((TypeType*)t)->type;
-        if (inner) return inner->type_id;
-    }
-    return t ? t->type_id : LMD_TYPE_ANY;
-}
 
 struct WidenedDependency {
     const NameEntry* entry;

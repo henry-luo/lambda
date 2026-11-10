@@ -24,9 +24,6 @@ String* fn_strcat(String* left, String* right);
 // Helper functions for decimal operations
 // push_decimal, convert_to_decimal, cleanup_temp_decimal are now centralized in lambda-decimal.cpp
 
-Item push_c(int64_t cval) {
-    return decimal_from_int64(cval);
-}
 // Use decimal_add/sub/mul/div/mod/pow from lambda-decimal.hpp instead.
 
 // decimal_is_zero is now in lambda-decimal.cpp
@@ -1984,64 +1981,25 @@ extern "C" double fn_max2_u(double a, double b) {
 
 // --- Integer operations ---
 
-// Integer absolute value
-extern "C" int64_t fn_abs_i(int64_t x) {
-    if (x == INT64_MIN) return INT64_MIN;
-    return x < 0 ? -x : x;
-}
 
 // Float absolute value (alternative to fabs)
 extern "C" double fn_abs_f(double x) {
     return fabs(x);
 }
 
-// Integer negation
-extern "C" int64_t fn_neg_i(int64_t x) {
-    return int64_from_bits(0ULL - (uint64_t)x);
-}
 
-// Float negation
-extern "C" double fn_neg_f(double x) {
-    return -x;
-}
 
 // --- Boolean operations ---
 
-// Logical not (native bool version)
-extern "C" Bool fn_not_u(Bool x) {
-    return !x;
-}
 
 // --- Comparison operations ---
 // These are already handled by native C operators in transpile_binary_expr
 // when both operands have known types, so no wrappers needed.
 
-// --- Sign function ---
-extern "C" int64_t fn_sign_i(int64_t x) {
-    if (x > 0) return 1;
-    if (x < 0) return -1;
-    return 0;
-}
 
-extern "C" int64_t fn_sign_f(double x) {
-    if (x > 0.0) return 1;
-    if (x < 0.0) return -1;
-    return 0;
-}
 
-// --- Rounding functions (int version returns identity) ---
-// floor/ceil/round of an integer is the integer itself
-extern "C" int64_t fn_floor_i(int64_t x) {
-    return x;
-}
 
-extern "C" int64_t fn_ceil_i(int64_t x) {
-    return x;
-}
 
-extern "C" int64_t fn_round_i(int64_t x) {
-    return x;
-}
 
 // ============================================================================
 // BITWISE OPERATIONS

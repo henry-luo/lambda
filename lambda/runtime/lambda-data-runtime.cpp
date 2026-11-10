@@ -195,25 +195,6 @@ Array* array() {
     return arr;
 }
 
-Array* array_fill(Array* arr, int count, ...) {
-    if (count > 0) {
-        size_t bytes;
-        if (lam::checked_mul((size_t)count, sizeof(Item), &bytes)) {
-            arr->items = (Item*)heap_data_alloc(bytes);
-        }
-        if (arr->items) {                     // skip on overflow/OOM — array stays empty
-            arr->capacity = count;
-            va_list args;
-            va_start(args, count);
-            for (int i = 0; i < count; i++) {
-                array_push(arr, va_arg(args, Item));
-            }
-            va_end(args);
-        }
-    }
-    log_item({.array = arr}, "array_filled");
-    return arr;
-}
 
 static Item container_scalar_read(Container* owner, Item item) {
     return scalar_storage_read(item, owner && owner->is_immortal);
@@ -391,20 +372,6 @@ static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64
         arr->length = length;  arr->capacity = length + extra;
     }
     return arr;
-}
-
-static bool array_num_prepare_fill(ArrayNum* arr, ArrayNumElemType elem_type,
-                                   int count, size_t elem_size) {
-    if (!arr || count <= 0) return false;
-    arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(elem_type);
-    size_t bytes;
-    if (!lam::checked_mul((size_t)count, elem_size, &bytes)) return false;
-    arr->data = heap_data_alloc_uninit(bytes);  // every lane is written by the varargs fill
-    if (!arr->data) return false;
-    arr->length = count;
-    arr->capacity = count;
-    return true;
 }
 
 ArrayNum* array_num_new_external_view(Container* base, void* data_base,
@@ -989,37 +956,8 @@ ArrayNum* array_int_new(int64_t length) {
     return array_num_new(ELEM_INT, length);
 }
 
-ArrayNum* array_int_fill(ArrayNum *arr, int count, ...) {
-    if (array_num_prepare_fill(arr, ELEM_INT, count, sizeof(int64_t))) {
-        va_list args;
-        va_start(args, count);
-        for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, int64_t);   // v5: lane storage
-        }
-        va_end(args);
-    }
-    return arr;
-}
 
-Item array_int_get(ArrayNum *array, int64_t index) {
-    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
-    // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_NUM)
-        return array_get((Array*)array, index);
-    if (index < 0 || index >= array->length) {
-        log_debug("array_int_get: index out of bounds: %lld", (long long)index);
-        return ItemNull;  // return null instead of error
-    }
-    Item item = (Item){.item = lambda_int_box_lane(array->items[index])};
-    return item;
-}
 
-// Fast path: return raw int64_t without boxing — for use when result type is known int
-// Only used for immutable arrays (let) where type widening cannot occur.
-int64_t array_int_get_raw(ArrayNum *array, int64_t index) {
-    if (!array || (uint64_t)index >= (uint64_t)array->length) return 0;
-    return array->items[index];
-}
 
 ArrayNum* array_int64() {
     return array_num_new(ELEM_INT64, 0);
@@ -1030,36 +968,8 @@ ArrayNum* array_int64_new(int64_t length) {
     return array_num_new(ELEM_INT64, length);
 }
 
-ArrayNum* array_int64_fill(ArrayNum *arr, int count, ...) {
-    if (array_num_prepare_fill(arr, ELEM_INT64, count, sizeof(int64_t))) {
-        va_list args;
-        va_start(args, count);
-        for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, int64_t);
-        }
-        va_end(args);
-    }
-    return arr;
-}
 
-Item array_int64_get(ArrayNum* array, int64_t index) {
-    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
-    // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_NUM)
-        return array_get((Array*)array, index);
-    if (index < 0 || index >= array->length) {
-        log_debug("array_int64_get: index out of bounds: %lld", (long long)index);
-        return ItemNull;
-    }
-    return box_int64_value(array->items[index]);
-}
 
-// Fast path: return raw int64_t without boxing
-// Only used for immutable arrays (let) where type widening cannot occur.
-int64_t array_int64_get_raw(ArrayNum *array, int64_t index) {
-    if (!array || (uint64_t)index >= (uint64_t)array->length) return 0;
-    return array->items[index];
-}
 
 ArrayNum* array_float() {
     return array_num_new(ELEM_FLOAT64, 0);
@@ -1071,37 +981,8 @@ ArrayNum* array_float_new(int64_t length) {
 }
 
 
-ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
-    if (array_num_prepare_fill(arr, ELEM_FLOAT64, count, sizeof(double))) {
-        va_list args;
-        va_start(args, count);
-        for (int i = 0; i < count; i++) {
-            arr->float_items[i] = va_arg(args, double);
-        }
-        va_end(args);
-    }
-    return arr;
-}
 
-Item array_float_get(ArrayNum* array, int64_t index) {
-    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
-    // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_NUM)
-        return array_get((Array*)array, index);
-    if (index < 0 || index >= array->length) {
-        log_debug("array_float_get: index out of bounds: %lld", (long long)index);
-        return ItemNull;
-    }
-    return push_d(array->float_items[index]);
-}
 
-// fast path — only used for immutable arrays where type widening cannot occur
-double array_float_get_value(ArrayNum *arr, int64_t index) {
-    if (!arr || index < 0 || index >= arr->length) {
-        return NAN;  // Return NaN for invalid access
-    }
-    return arr->float_items[index];
-}
 
 void array_float_set(ArrayNum *arr, int64_t index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
@@ -2702,21 +2583,7 @@ Map* map_alloc_for_type(TypeMap* map_type, int64_t minimum_capacity) {
     return m;
 }
 
-Map* map_with_data(int64_t type_index) {
-    ArrayList* type_list = (ArrayList*)context->type_list;
-    TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
-    return map_alloc_for_type(map_type, 0);
-}
 
-// MIR Direct module-type-list-aware wrapper: saves/restores context->type_list around
-// map_with_data so cross-module calls use this module's own type_list.
-Map* map_with_tl(int64_t type_index, void* type_list_ptr) {
-    void* saved = context->type_list;
-    context->type_list = type_list_ptr;
-    Map* r = map_with_data(type_index);
-    context->type_list = saved;
-    return r;
-}
 
 // A named map contract may be a TypeMap that is not itself the type-list entry:
 // aliases store a TypeType wrapper in that list. Pass the resolved TypeMap
@@ -3119,7 +2986,7 @@ Object* object(int64_t type_index) {
 }
 
 // Allocate object struct + data buffer in a single GC allocation.
-// Same approach as map_with_data — data placed immediately after the struct.
+// place object data immediately after its header, as map_alloc_for_type does.
 static Object* object_alloc_with_type(TypeObject* obj_type) {
     int64_t byte_size = obj_type->byte_size;
     size_t total_size = sizeof(Object) + (byte_size > 0 ? (size_t)byte_size : 0);
@@ -3157,12 +3024,6 @@ Object* object_with_tl(int64_t type_index, void* type_list_ptr) {
 }
 
 
-// S2.1.3 / D3.1.1: an object IS an element, so its content face is the object
-// itself — the same items/length/capacity an element carries. Kept as a named
-// accessor so content-face call sites read the same way for both kinds.
-List* object_content(Object* obj) {
-    return (List*)obj;
-}
 
 // Content append, mirroring element content exactly: the same list_push_spread
 // normalization (D3.3.1 — null dropped, adjacent strings merged, content lists
@@ -4234,44 +4095,5 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
 
     // incompatible type (e.g., int[] but got a string)
     log_error("ensure_typed_array: cannot coerce %s to %s[]", get_type_name(item_tid), get_type_name(element_type_id));
-    return NULL;
-}
-
-// Runtime coercion for compact sized typed arrays (u8[], i16[], f32[], etc.)
-// Converts generic Array/List or ARRAY_NUM → compact sized ARRAY_NUM.
-void* ensure_sized_array(Item item, int64_t elem_type_int) {
-    ArrayNumElemType target_et = (ArrayNumElemType)(int)elem_type_int;
-    TypeId item_tid = get_type_id(item);
-
-    // already the correct compact typed array — pass through
-    if (item_tid == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == target_et) {
-            return (void*)arr;
-        }
-        // cross-convert from different ARRAY_NUM elem_type
-        int64_t length = arr->length;
-        ArrayNum* typed = array_num_new(target_et, length);
-        for (int64_t i = 0; i < length; i++) {
-            Item val = array_num_get(arr, i);
-            array_num_set_item(typed, i, val);
-        }
-        return typed;
-    }
-
-    if (item_tid == LMD_TYPE_NULL) return NULL;
-
-    // convert generic Array/List to compact sized array
-    if (item_tid == LMD_TYPE_ARRAY) {
-        Array* arr = item.array;
-        int64_t length = arr->length;
-        ArrayNum* typed = array_num_new(target_et, length);
-        for (int64_t i = 0; i < length; i++) {
-            array_num_set_item(typed, i, array_item_read(arr, i));
-        }
-        return typed;
-    }
-
-    log_error("ensure_sized_array: cannot coerce %s to compact typed array", get_type_name(item_tid));
     return NULL;
 }

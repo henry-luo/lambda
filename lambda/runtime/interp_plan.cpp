@@ -877,7 +877,7 @@ typedef struct PlanCtx {
 
 // A binding owns its container when the initializer produces a fresh one, or
 // when it aliases a binding that already owns one -- the same forward
-// propagation the JIT performs over MirVarEntry::cow_owned. Declarations are
+// propagation the JIT performs over its binding plan. Declarations are
 // visited in source order, so the source binding is always decided first.
 static void plan_mark_cow_owned(NameEntry* entry) {
     AstNode* decl = entry ? entry->node : NULL;

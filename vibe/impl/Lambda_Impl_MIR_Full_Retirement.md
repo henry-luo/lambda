@@ -5,6 +5,34 @@
 
 ## Current checkpoint
 
+- **Second runtime audit complete, 2026-11-10.** Started clean at
+  `5f3550a38`, main checkout, `master`; this follow-up is uncommitted.
+- Removed 88 functions and 43 runtime-only JIT import rows. The inventory and
+  caller evidence are in `temp/mvp_legacy_reaudit/removed.json` and
+  `selected-before.json`; see the second-audit section below.
+- Removed the obsolete compiler scope/root-binding models, unused emitter
+  adapters, old array/scalar wrappers and dormant guest literal-pool ownership.
+  MVP/T0/LambdaJS retain their active binding plans, shared semantic helpers,
+  module constants, precise-root finalizer and scalar homes (D6.3, D7.4.1,
+  D8.2.4). No language system-function row or host export is removed (D9.4.6).
+- Sibling sources remain read-only. Nonblocking
+  [LI-007](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-007) records
+  36 stale shared-header declarations, with a prepared, unapplied owner patch.
+- The split release rebuild and final private CLI/native-test links succeed.
+  **12 GTests, 18 Python methods, 24 JS golden/GC cases and four diagnostic
+  root/memory-parity cases pass.** The recovery source gate and diff checks pass.
+- Runtime archive/private executable symbol audits find none of the retired
+  names. Language system-function rows are byte-identical. Exact source/build
+  hashes, receipts and limits: `temp/mvp_legacy_reaudit/final-summary.json`.
+- Private release: `temp/mvp_legacy_reaudit/lambda-release.exe`; shared
+  `lambda.exe` is unchanged. No baseline, Test262 sweep or performance campaign
+  ran. This is correctness qualification, not a benchmark-speed claim.
+- No jobs remain running. Lambda-owned retirement is finished; the optional
+  owner declaration cleanup remains LI-007. Older qualification below describes
+  earlier trees; the previously recorded unrelated failures were not rerun.
+
+## First helper retirement checkpoint (historical)
+
 - **Helper retirement complete, 2026-11-10.** Starting clean `fd07a893f`,
   main checkout, `master`; this follow-up is uncommitted.
 - Removed **54 functions**: 47 runtime helper entries, two compiler utilities,
@@ -152,7 +180,44 @@ not delete that interface. The follow-up
 wrappers. The later user-directed region retirement is complete with LI-006
 resolved; no region integration milestone remains planned.
 
-Thirty declarations for removed helpers remain in the input-owned
-`lambda/lambda.h`. They are recorded as nonblocking
-[LI-004](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-004); no header
-or implementation in a sibling project was edited.
+The input owner subsequently removed the thirty shared declarations recorded
+in [LI-004](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-004).
+That issue is resolved. The separate, explicitly approved region-header edit
+is recorded under LI-006.
+
+## Second runtime audit (2026-11-10)
+
+This audit starts from clean `5f3550a38`, after the first helper and region
+retirements were committed. It searches tracked first-party C/C++, headers,
+assembly, import strings, test tooling and export lists in Lambda and both
+sibling projects. Registry/address references alone are not caller evidence.
+System-function metadata, native math selection and generated import-name
+families are checked separately before deleting a candidate (D7.4.1, D9.4.6).
+
+| Removed group | Functions | Active path |
+|---|---:|---|
+| Shared emitter adapters and their private dependencies | 28 | MVP and LambdaJS own function binding plans and call the canonical shared emitter directly (D8.2.4). Semantic root liveness/coloring remains active (D6.3). |
+| AST/shape/type queries and MIR lookup/cleanup wrappers | 11 | Current plans resolve shapes and exact function names; context cleanup uses its recorded generator mode. |
+| Array fills/read adapters, map type-list adapters, object-content access and sized-array coercion | 15 | Planned stores/reads, checked admission, `map_alloc_for_type` and ordinary content handling remain shared. Includes the fill-only private allocator. |
+| Boxed-call/scalar/COW/closure adapters | 12 | Canonical dynamic calls, interpreter/MVP logical lowering and active COW site wrappers remain. |
+| Integer/boolean scalar wrappers and decimal boxing alias | 10 | Native MIR operations and the current native math catalog remain; metadata-selected `fn_pow_u` is retained. |
+| Number-frame restore and bitcast wrappers | 3 | Current frame epilogues and inline bitcasts remain (D6.2.1). |
+| Obsolete module-constant accessor and dormant guest literal pool | 6 | Current Lambda/JS constants retain their existing module/image owners. The unused pool had no producer or reader. |
+| Registry-local map-pipe adapters | 3 | MVP/T0 use canonical traversal keys and iteration helpers. |
+
+The 88-function inventory includes compiler functions and private dependencies;
+43 entries also disappear from `jit_runtime_imports`. The obsolete `VarEntry`
+scope model, `MirRootBinding` tables, module-slot callback structs, construction
+plan structs and literal-pool fields disappear with their consumers. The public
+`Item` and `Context` prefix representations do not change (D2.1.1); the private
+`EvalContext` loses only the dormant trailing pool fields. No sibling source or
+vendored code is changed.
+
+The unary imported-predicate trampoline, Radiant's assembly-aliased
+`fn_call3_into`, T0 map/object constructors, native math metadata and live COW
+profiling wrappers remain. The input-owned header's 36 obsolete declarations
+are separate owner work (LI-007); `temp/mvp_legacy_reaudit/input-header.patch` is prepared
+but is not applied. The earlier exception authorized only the region patch.
+
+Verification is recorded in the current checkpoint and task receipts under
+`temp/mvp_legacy_reaudit/`. This cleanup makes no benchmark-speed claim.

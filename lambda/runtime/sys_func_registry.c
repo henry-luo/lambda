@@ -233,23 +233,6 @@ extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 // Phase 8C: Image() constructor (defined in dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
-#ifndef LAMBDA_NO_MIR
-// helper functions for map pipe iteration in JIT; only the JIT import table
-// below references them
-static int64_t pipe_map_len(void* keys_ptr) {
-    return symbol_key_list_len(keys_ptr);
-}
-static Item pipe_map_val(Item data, void* keys_ptr, int64_t index) {
-    Symbol* key_sym = symbol_key_list_at(keys_ptr, index);
-    if (!key_sym) return ITEM_NULL;
-    return item_attr(data, key_sym->chars);
-}
-static Item pipe_map_key(void* keys_ptr, int64_t index) {
-    Symbol* key_sym = symbol_key_list_at(keys_ptr, index);
-    if (!key_sym) return ITEM_NULL;
-    return y2it(key_sym);
-}
-#endif // !LAMBDA_NO_MIR
 #endif // !LAMBDA_IO_STATIC_VALUES
 
 
@@ -1672,7 +1655,6 @@ extern void lambda_function_mark_mir_context_abi(Function* fn);
 extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
-extern void* lambda_module_const_at_state(void* module_state, uint32_t index);
 extern void* lambda_module_state_for_unit(void* runtime_context, uint32_t unit_id);
 extern Item lambda_module_var_at(void* module_state, uint32_t slot);
 extern Item lambda_active_module_var_at(uint32_t slot);
@@ -1796,10 +1778,6 @@ JitImport jit_runtime_imports[] = {
     {"array_int", FPTR(array_int)},
     {"array_int64", FPTR(array_int64)},
     {"array_float", FPTR(array_float)},
-    {"array_fill", FPTR(array_fill)},
-    {"array_int_fill", FPTR(array_int_fill)},
-    {"array_int64_fill", FPTR(array_int64_fill)},
-    {"array_float_fill", FPTR(array_float_fill)},
     {"array_get", FPTR(array_get)},
     // rank-one admitted primitive lanes, bounds and live view resolution only.
     {"lambda_array_primitive_index", FPTR(lambda_array_primitive_index),
@@ -1809,13 +1787,7 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
-    {"array_int_get", FPTR(array_int_get)},
-    {"array_int64_get", FPTR(array_int64_get)},
-    {"array_float_get", FPTR(array_float_get)},
     {"array_num_get", FPTR(array_num_get)},
-    {"array_int_get_raw", FPTR(array_int_get_raw)},
-    {"array_int64_get_raw", FPTR(array_int64_get_raw)},
-    {"array_float_get_value", FPTR(array_float_get_value)},
     {"array_spreadable", FPTR(array_spreadable)},
     {"array_plain", FPTR(array_plain)},
     {"for_window", FPTR(for_window)},
@@ -1870,8 +1842,6 @@ JitImport jit_runtime_imports[] = {
     // Map, Element, Object operations
     // ========================================================================
     {"map", FPTR(map)},
-    {"map_with_data", FPTR(map_with_data)},
-    {"map_with_tl", FPTR(map_with_tl)},
     {"map_with_type_tl", FPTR(map_with_type_tl)},
     {"map_fill", FPTR(map_fill)},
     {"map_alloc_for_type", FPTR(map_alloc_for_type),
@@ -1920,7 +1890,6 @@ JitImport jit_runtime_imports[] = {
     {"lambda_object_capture_method", FPTR(lambda_object_capture_method)},
     {"lambda_object_copy_environment", FPTR(lambda_object_copy_environment)},
     {"lambda_object_prepare_method_call", FPTR(lambda_object_prepare_method_call)},
-    {"object_content", FPTR(object_content)},
     {"object_content_fill", FPTR(object_content_fill)},
     {"object_get", FPTR(object_get)},
     {"object_type_set_method", FPTR(object_type_set_method)},
@@ -1935,7 +1904,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"v2it", FPTR(v2it)},
     // push_d only encodes an inline float or writes a number-stack home;
     // side-stack growth cannot collect GC objects (D6.2.2, D6.3.2).
     {"push_d", FPTR(push_d),
@@ -1958,15 +1926,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"lambda_restore_number_frame_top", FPTR(lambda_restore_number_frame_top),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER)}},
-    {"lambda_mir_double_bits", FPTR(lambda_mir_double_bits),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-    {"lambda_mir_bits_double", FPTR(lambda_mir_bits_double),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"box_int64_value", FPTR(box_int64_value),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -2195,12 +2154,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"lambda_module_const_at_state", FPTR(lambda_module_const_at_state),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
-      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_name_id_to_item", FPTR(lambda_name_id_to_item),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
@@ -2241,7 +2194,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
-    {"push_c", FPTR(push_c)},
     {"item_keys", FPTR(item_keys)},
     {"symbol_key_list_free", FPTR(symbol_key_list_free)},
     {"item_attr", FPTR(item_attr)},
@@ -2311,7 +2263,6 @@ JitImport jit_runtime_imports[] = {
     {"coerce_num_sized", FPTR(coerce_num_sized)},
     {"coerce_uint64", FPTR(coerce_uint64)},
     {"ensure_typed_array", FPTR(ensure_typed_array)},
-    {"ensure_sized_array", FPTR(ensure_sized_array)},
 
     // ========================================================================
     // Arithmetic and comparison operators
@@ -2388,8 +2339,6 @@ JitImport jit_runtime_imports[] = {
     JIT_NUMERIC_NO_REENTRY(fn_chr, JIT_VALUE_UNKNOWN),
     JIT_NUMERIC_NO_REENTRY(fn_ord, JIT_VALUE_UNKNOWN),
 #undef JIT_NUMERIC_NO_REENTRY
-    {"op_and", FPTR(op_and)},
-    {"op_or", FPTR(op_or)},
     {"fn_is", FPTR(fn_is)},
     {"fn_subtype", FPTR(fn_subtype)},
     {"fn_is_nan", FPTR(fn_is_nan)},
@@ -2404,10 +2353,7 @@ JitImport jit_runtime_imports[] = {
     {"pipe_end", FPTR(pipe_end)},
     {"fn_pipe_where", FPTR(fn_pipe_where)},
     {"fn_pipe_call", FPTR(fn_pipe_call)},
-    {"pipe_map_len", FPTR(pipe_map_len)},
     {"fn_seq_count", FPTR(fn_seq_count)},
-    {"pipe_map_val", FPTR(pipe_map_val)},
-    {"pipe_map_key", FPTR(pipe_map_key)},
     {"iter_len", FPTR(iter_len)},
     {"fn_len_checked", FPTR(fn_len_checked), JIT_IMPORT_STABLE_ITEM},
     {"fn_len", FPTR(fn_len)},
@@ -2420,25 +2366,15 @@ JitImport jit_runtime_imports[] = {
     {"fn_pow_u", FPTR(fn_pow_u)},
     {"fn_min2_u", FPTR(fn_min2_u), JIT_IMPORT_PURE_SCALAR},
     {"fn_max2_u", FPTR(fn_max2_u), JIT_IMPORT_PURE_SCALAR},
-    {"fn_abs_i", FPTR(fn_abs_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_abs_f", FPTR(fn_abs_f), JIT_IMPORT_PURE_SCALAR},
     {"fabs", FPTR(fabs), JIT_IMPORT_PURE_SCALAR},
     JIT_LIBM_LEAVES(JIT_LIBM_IMPORT_ROW)
-    {"fn_neg_i", FPTR(fn_neg_i), JIT_IMPORT_PURE_SCALAR},
-    {"fn_neg_f", FPTR(fn_neg_f), JIT_IMPORT_PURE_SCALAR},
-    {"fn_not_u", FPTR(fn_not_u), JIT_IMPORT_PURE_SCALAR},
-    {"fn_sign_i", FPTR(fn_sign_i), JIT_IMPORT_PURE_SCALAR},
-    {"fn_sign_f", FPTR(fn_sign_f), JIT_IMPORT_PURE_SCALAR},
 #ifndef LAMBDA_NO_JS
     {"js_math_pow_d", FPTR(js_math_pow_d), JIT_IMPORT_PURE_SCALAR},
 #endif // LAMBDA_NO_JS
-    {"fn_floor_i", FPTR(fn_floor_i), JIT_IMPORT_PURE_SCALAR},
-    {"fn_ceil_i", FPTR(fn_ceil_i), JIT_IMPORT_PURE_SCALAR},
-    {"fn_round_i", FPTR(fn_round_i), JIT_IMPORT_PURE_SCALAR},
     // collection length — type-specialized native variants
     {"fn_len_l", FPTR(fn_len_l), JIT_IMPORT_READ_ONLY_LENGTH},
     {"fn_len_s", FPTR(fn_len_s), JIT_IMPORT_READ_ONLY_LENGTH},
-    {"fn_len_e", FPTR(fn_len_e)},
 
     // ========================================================================
     // String operations (non-sys-func entries)
@@ -2460,19 +2396,16 @@ JitImport jit_runtime_imports[] = {
     {"fn_join_fresh_array_item", FPTR(fn_join_fresh_array_item)},
     // native String* variants for string functions
     {"fn_ord_str", FPTR(fn_ord_str)},
-    {"fn_ord_str_item", FPTR(fn_ord_str_item)},
 
     // ========================================================================
     // ========================================================================
     // Function creation and calls
     // ========================================================================
-    {"to_fn", FPTR(to_fn)},
     {"to_fn_n", FPTR(to_fn_n)},
     {"to_fn_named", FPTR(to_fn_named)},
     {"to_closure", FPTR(to_closure)},
     {"to_closure_named", FPTR(to_closure_named)},
     {"fn_call", FPTR(fn_call)},
-    {"fn_call0", FPTR(fn_call0)},
     {"fn_call1", FPTR(fn_call1)},
     {"fn_call2", FPTR(fn_call2)},
     {"fn_call3", FPTR(fn_call3)},
@@ -2588,10 +2521,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"cow_mark_shared_profiled", FPTR(cow_mark_shared_profiled),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"array_num_set_cow_idx", FPTR(array_num_set_cow_idx)},
     {"index_assign_cow", FPTR(index_assign_cow)},
     {"cow_capture_value", FPTR(cow_capture_value),
@@ -2612,10 +2541,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"cow_bind_var_profiled", FPTR(cow_bind_var_profiled),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"cow_bind_rmw_handle", FPTR(cow_bind_rmw_handle)},
     {"cow_bind_rmw_root", FPTR(cow_bind_rmw_root),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
@@ -2629,11 +2554,9 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"array_set_cow", FPTR(array_set_cow)},
     {"member_set_cow", FPTR(member_set_cow)},
     {"member_set_cow_profiled", FPTR(member_set_cow_profiled)},
     {"map_set_cow", FPTR(map_set_cow)},
-    {"map_set_cow_profiled", FPTR(map_set_cow_profiled)},
     {"map_set_cow_resolved", FPTR(map_set_cow_resolved),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -3174,13 +3097,6 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES,
       JIT_ARG_EFFECT(0, JIT_ARG_BORROWED)}},
-    {"lambda_unit_const_at", FPTR(lambda_unit_const_at),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
-      JIT_EXCEPTION_PRESERVES,
-      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) | JIT_ARG_EFFECT(1, JIT_ARG_BORROWED)}},
 #ifndef LAMBDA_NO_JS
     {"js_register_global_var_module_binding", FPTR(js_register_global_var_module_binding), JIT_IMPORT_VOID_PRESERVES},
     // v12: Language features
@@ -3989,12 +3905,9 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "is_truthy", "base_type",
         "push_d", "box_int64_value", "box_uint64_value",
         "int2it", "int2it_i64",
-        "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home", "lambda_item_resolve_pending",
-        "lambda_restore_number_frame_top",
         "owned_item_slot_store", "lambda_module_var_store", "lambda_module_var_at",
-        "lambda_module_state_for_unit", "lambda_module_const_at_state",
-        "lambda_module_name_id_at",
+        "lambda_module_state_for_unit", "lambda_module_name_id_at",
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         // full-contract interning uses heap-owned pool/hashmap metadata, without guest allocation
         "lambda_array_rep_cert_resolve",
@@ -4023,18 +3936,9 @@ bool jit_import_validate_no_gc_allowlist(void) {
         JIT_LIBM_LEAVES(JIT_LIBM_AUDIT_NAME)
         "fn_min2_u",
         "fn_max2_u",
-        "fn_abs_i",
         "fn_abs_f",
         "fabs",
-        "fn_neg_i",
-        "fn_neg_f",
-        "fn_not_u",
-        "fn_sign_i",
-        "fn_sign_f",
-        "fn_floor_i",
-        "fn_ceil_i",
-        "fn_round_i",
-#ifndef LAMBDA_NO_JS
+        #ifndef LAMBDA_NO_JS
         "js_math_pow_d",
         "js_double_to_int32",
 #ifdef LAMBDA_JS_EXEC_PROFILE
@@ -4048,7 +3952,6 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #endif // LAMBDA_NO_JS
         "lambda_active_module_var_store",
         "lambda_active_module_var_at",
-        "lambda_unit_const_at",
         // LR07-7 root-honesty probe. Reads one machine word, compares it
         // against the GC zone (`gc_is_managed`, a pure range query) and may
         // log; it allocates no GC object, never calls gc_collect, and never
@@ -4060,8 +3963,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_jit_root_witness",
         // COW share-mark: one header bit, returns the argument (Tune29 §19.1)
         "cow_mark_shared", "cow_capture_value", "cow_bind_var",
-        "cow_mark_shared_profiled", "cow_capture_value_profiled",
-        "cow_bind_var_profiled",
+        "cow_capture_value_profiled",
         // the constant-zero spine wrapper cannot reach fn_index or allocation.
         "cow_bind_rmw_root",
         "lambda_exec_profile_note_call",

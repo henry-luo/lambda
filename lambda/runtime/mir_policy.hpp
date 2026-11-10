@@ -63,10 +63,6 @@ static inline bool mir_large_interp_enabled(void) {
     return !flag || (strcmp(flag, "0") != 0 && strcmp(flag, "false") != 0);
 }
 
-static inline bool mir_explicit_interpreter_requested(void) {
-    const char* flag = getenv("JS_MIR_INTERP");
-    return flag && (strcmp(flag, "1") == 0 || strcmp(flag, "true") == 0);
-}
 
 static inline size_t mir_large_source_interp_threshold(void) {
     const char* value = getenv("LAMBDA_JS_LARGE_INTERP_BYTES");

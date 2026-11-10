@@ -714,23 +714,6 @@ extern "C" void* heap_calloc_js_accessor_cell(size_t size) {
     return gc_heap_calloc(context->heap->gc, size, GC_TYPE_JS_ACCESSOR);
 }
 
-extern "C" int64_t lambda_restore_number_frame_top(uint64_t* top) {
-    Context* runtime = (Context*)context;
-    if (!runtime || !top || !runtime->side_number_base ||
-            !runtime->side_number_top || top < runtime->side_number_base ||
-            top > runtime->side_number_top) {
-        // This NO_GC JIT epilogue cannot enter logging because formatting may
-        // allocate before the invalid scalar-frame invariant is terminated.
-        abort();
-    }
-#ifndef NDEBUG
-    // A returned Item must have been adopted before this watermark is restored;
-    // poison makes any missed activation-home escape fail deterministically.
-    memset(top, 0xA5, (size_t)(runtime->side_number_top - top) * sizeof(uint64_t));
-#endif
-    runtime->side_number_top = top;
-    return 0;
-}
 
 extern "C" void* heap_calloc_closure_env(size_t size) {
     if (!context || !context->heap || !context->heap->gc || size == 0) return NULL;
@@ -1170,19 +1153,7 @@ Item push_d(double dval) {
     return flt2it(dval);
 }
 
-extern "C" uint64_t lambda_mir_double_bits(double dval) {
-    AutoAssertNoGC no_gc;
-    uint64_t bits;
-    memcpy(&bits, &dval, sizeof(bits));
-    return bits;
-}
 
-extern "C" double lambda_mir_bits_double(uint64_t bits) {
-    AutoAssertNoGC no_gc;
-    double dval;
-    memcpy(&dval, &bits, sizeof(dval));
-    return dval;
-}
 
 extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
     AutoAssertNoGC no_gc;

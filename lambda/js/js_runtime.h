@@ -1764,8 +1764,6 @@ Item js_is_constructor(Item fn);
 Item js_test262_native_harness_install(void);
 Item js_262_get_agent_object(void);
 Item js_test262_build_string(Item args);
-uint64_t lambda_mir_double_bits(double dval);
-double lambda_mir_bits_double(uint64_t bits);
 // Runtime entry points shared across JS translation units.
 uint64_t js_get_heap_epoch(void);
 Item js_get_typed_array_base_proto(void);

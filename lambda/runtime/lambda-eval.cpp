@@ -356,21 +356,8 @@ Bool is_truthy(Item item) {
     }
 }
 
-Item op_and(Bool a, Bool b) {
-    return {.item = (a >= BOOL_ERROR || b >= BOOL_ERROR) ? ITEM_ERROR : (a && b) ? ITEM_TRUE : ITEM_FALSE};
-}
 
-Item op_or(Bool a, Bool b) {
-    return {.item = (a >= BOOL_ERROR || b >= BOOL_ERROR) ? ITEM_ERROR : (a || b) ? ITEM_TRUE : ITEM_FALSE};
-}
 
-// list to item
-Item v2it(List* list) {
-    if (!list) { return ItemNull; }
-    if (list->length == 0) { return ItemNull; }
-    if (list->length == 1) { return list->items[0]; }
-    return {.array = list};
-}
 
 static bool string_is_owned_buffer(String* str, gc_header_t** out_header) {
     if (out_header) *out_header = NULL;
@@ -1600,13 +1587,6 @@ Item fn_to(Item item_a, Item item_b) {
     }
 }
 
-Function* to_fn(fn_ptr ptr) {
-    Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
-    function_init_abi(fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_UNKNOWN);
-    fn->ptr = ptr;
-    fn->closure_env = NULL;
-    return fn;
-}
 
 // Create function with arity info
 Function* to_fn_n(fn_ptr ptr, int arity) {
@@ -2280,7 +2260,6 @@ Item fn_call(Function* fn, List* args) {
     return lambda_dynamic_call(fn, args, NULL, LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call");
 }
 
-Item fn_call0(Function* fn) { return fn_call(fn, NULL); }
 
 Item fn_call1(Function* fn, Item a) {
     List args = {.length = 1, .items = &a};
@@ -2307,9 +2286,6 @@ extern "C" Item lambda_concurrency_fn_call_procedure_into(Function* fn, List* ar
         LAMBDA_DYNAMIC_CALL_PROCEDURE, "lambda task launch");
 }
 
-extern "C" Function* lambda_concurrency_to_closure(fn_ptr ptr, int arity, void* env) {
-    return to_closure(ptr, arity, env);
-}
 
 // imported `that` predicates use a unary boxed entry with the current Context.
 extern "C" Item fn_call_boxed_1_into(void* fp, Item argument, uint64_t* result_home) {
@@ -8183,15 +8159,6 @@ extern "C" int64_t fn_seq_count(Item item) {
     return fn_len(item);
 }
 
-extern "C" int64_t fn_len_e(Element* elmt) {
-    if (!elmt) return 0;
-    if (elmt->type_id == LMD_TYPE_VELMT) return velmt_attr_count((Velmt*)elmt) + velmt_child_count((Velmt*)elmt);
-    // The JIT specializes `len` on a statically-element argument to this
-    // helper, so it must apply the same S8.3.1v2 rule as fn_len's element arm
-    // or the two tiers disagree — which is exactly how the nominal half of
-    // LR09-8 was originally found.
-    return map_attr_count((Map*)elmt) + elmt->length;
-}
 
 // substring system function - extracts a substring from start to end (exclusive)
 Item fn_substring(Item str_item, Item start_item, Item end_item) {
@@ -9262,9 +9229,6 @@ Item fn_ord(Item str_item) {
     return fn_nullable_int_result(fn_ord_raw(str_item));
 }
 
-Item fn_ord_str_item(String* str) {
-    return fn_nullable_int_result(fn_ord_str(str));
-}
 
 // chr(int) - return 1-char string from Unicode code point
 Item fn_chr(Item cp_item) {
@@ -11818,17 +11782,11 @@ static Item cow_profile_mark_with_caller(Item value, uintptr_t caller,
     return result;
 }
 
-Item cow_bind_var_profiled(Item value) {
-    return cow_profile_mark_with_caller(value, COW_PROFILE_CALLER(), true);
-}
 
 Item cow_capture_value_profiled(Item value) {
     return cow_profile_mark_with_caller(value, COW_PROFILE_CALLER(), false);
 }
 
-Item cow_mark_shared_profiled(Item value) {
-    return cow_profile_mark_with_caller(value, COW_PROFILE_CALLER(), false);
-}
 
 // CW34 (COW §11.11): bind a read-modify-write handle. `value` was just read
 // from `root` through `count` intermediate keys (at most two). The handle
@@ -13709,9 +13667,6 @@ Item array_num_set_cow_idx(Item owner, int64_t index, Item value) {
     return array_set_cow_impl(owner, ItemNull, index, value, false);
 }
 
-Item array_set_cow(Item owner, Item key, Item value) {
-    return array_set_cow_impl(owner, key, 0, value, true);
-}
 
 Item member_set_cow(Item owner, Item key, Item value) {
     Item replacement = cow_prepare_write(owner);
@@ -13778,10 +13733,6 @@ static Item cow_profile_set_with_caller(Item owner, Item key, Item value,
     return result;
 }
 
-Item map_set_cow_profiled(Item owner, Item key, Item value) {
-    return cow_profile_set_with_caller(owner, key, value,
-        COW_PROFILE_CALLER(), map_set_cow);
-}
 
 Item map_set_cow_resolved_profiled(Item owner, NameId key_id, Item value,
         const TypeMap* shape, ShapeEntry* field) {

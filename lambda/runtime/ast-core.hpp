@@ -302,7 +302,7 @@ struct NameEntry {
     // Whether this binding holds a freshly-produced container, so an alias of
     // it is an ownership boundary that must share the root before a later write
     // (cow_bind_var). Both tiers decide it with the same rule; the JIT keeps the
-    // equivalent on MirVarEntry::cow_owned.
+    // equivalent in its per-function binding plan.
     bool cow_owned;
     // CW24: this binding was initialized from a *place* -- a member/index read
     // rooted at a mutable binding -- so under S9.1.2 it holds a COPY. Writes
@@ -1259,7 +1259,7 @@ extern "C" bool ast_call_returns_retained_container(AstNode* node);
 // container": literals, fresh-result calls and `new` own their value, while member and
 // index reads are borrows of an existing one. The IDENT case is deliberately
 // not here -- it propagates the *source binding's* own answer, which each tier
-// resolves through its own binding table (MirVarEntry / NameEntry::cow_owned).
+// resolves through its own binding plan or NameEntry::cow_owned.
 static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
     root_expr = ast_cow_value_source(root_expr);
     if (!root_expr) return false;
