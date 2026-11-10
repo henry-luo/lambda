@@ -925,6 +925,19 @@ public:
     ScopedTestEnv& operator=(const ScopedTestEnv&) = delete;
 };
 
+TEST(LambdaTierParityTests, PromotedCallsPreserveArguments) {
+    ScopedTestEnv function_threshold("LAMBDA_FUNC_JIT_THRESHOLD", "2");
+    ScopedTestEnv synchronous("LAMBDA_SATELLITE_SYNC", "1");
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/interp_promoted_optional_args.ls",
+            "test/lambda/interp_promoted_optional_args.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/proc/interp_promoted_mutated_arguments.ls",
+            "test/lambda/proc/interp_promoted_mutated_arguments.txt", true, tier);
+    }
+}
+
 TEST(LambdaCompilerSelectionTests, MvpLanePreservesExplicitInterpreterAndAuto) {
     ScopedTestEnv compiler("LAMBDA_TEST_MIR_COMPILER", "mvp");
     ScopedTestEnv inherited_compiler("LAMBDA_MIR_COMPILER", "mvp");

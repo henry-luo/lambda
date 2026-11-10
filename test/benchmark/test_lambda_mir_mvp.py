@@ -80,6 +80,7 @@ MIR_EMISSION_METHODS = (
     'test_bounded_counter_mir',
     'test_native_success_consumers',
     'test_float_constants_precede_loop',
+    'test_pure_scalar_index_calls',
 )
 
 class LambdaMirMvpTests(unittest.TestCase):
@@ -119,13 +120,23 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(strip_timing(result.stdout), lambda_mir_mvp.lambda_golden_path(source).read_text().strip())
 
-    def function_mir(self, source, name):
+    def function_mir(self, source, name, overrides=None):
         dump = Path(self.scratch.name) / f"{source.stem}.mir"
-        result = self.run_script(source, {"LAMBDA_MIR_DUMP_PATH": str(dump)}, logging=True)
+        options = dict(overrides or {}, LAMBDA_MIR_DUMP_PATH=str(dump))
+        result = self.run_script(source, options, logging=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         match = re.search(rf"mvp_\d+_{re.escape(name)}:\tfunc(.*?)\tendfunc", dump.read_text(), re.S)
         self.assertIsNotNone(match, f"missing MIR function {name}")
         return match.group(1)
+
+    def test_pure_scalar_index_calls(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_scalar_index_calls.ls"
+        self.check_golden(source)
+        body = self.function_mir(source, "accumulate", {
+            "COW_EXEC_PROFILE": "1",
+            "COW_EXEC_PROFILE_OUT": str(Path(self.scratch.name) / "scalar-keys.tsv"),
+        })
+        self.assertNotIn("cow_capture_value", body)
 
     def test_benchmark_goldens(self):
         for suite, name in CASES:

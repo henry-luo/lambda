@@ -421,6 +421,7 @@ Type* mvp_bound_array_contract(Type* contract);
 Type* mvp_contract(AstNode* declaration);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
 bool mvp_interp_binding(LambdaMvpModule* module, NameEntry* entry, Script** owner, int* slot);
+Script* mvp_import_owner(LambdaMvpModule* module, NameEntry* entry);
 AstFunctionId mvp_node_owner(LambdaMvpModule* module, AstNodeId id);
 MvpFunction* mvp_require_function_reference(LambdaMvpModule* module, AstFuncNode* target,
     AstNode* callee, Script* owner = NULL);

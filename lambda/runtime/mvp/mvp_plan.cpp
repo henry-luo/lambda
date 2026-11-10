@@ -354,6 +354,24 @@ bool mvp_index_key(LambdaMvpModule* m, AstNode* node, int depth) {
         return mvp_index_key(m, ((AstBinaryNode*)node)->left, depth + 1) &&
             mvp_index_key(m, ((AstBinaryNode*)node)->right, depth + 1);
     if (node->node_type == AST_NODE_UNARY) return mvp_index_key(m, ((AstUnaryNode*)node)->operand, depth + 1);
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        MvpFunction* function = mvp_function(m, ast_direct_call_function(call));
+        if (!function || function->imported || function->ast->captures || function->method_owner ||
+                function->ast->is_async || function->ast->is_generator ||
+                lambda_type_func_is_proc(function->ast->type) || mvp_variadic_function(function) ||
+                mvp_function_binder_count(function) || mvp_call_argument_count(call) != function->abi.param_count)
+            return false;
+        // a capture-free pure call with plain supplied arguments cannot write
+        // the receiver; freezing it here copies the whole array per read (S1.6/S9.1.2).
+        int position = 0;
+        for (AstNamedNode* param = function->ast->param; param; param = (AstNamedNode*)param->next, position++) {
+            TypeParam* type = lambda_type_param(param->type);
+            if (!type || type->is_var_param || type->is_optional ||
+                    !mvp_index_key(m, mvp_call_argument(call, position), depth + 1)) return false;
+        }
+        return true;
+    }
     return mvp_pure_key(node);
 }
 
@@ -1493,6 +1511,14 @@ LambdaMvpModule* lambda_mvp_create(Transpiler* tp, MIR_context_t ctx) {
     LambdaMvpModule* m = (LambdaMvpModule*)mem_calloc(1, sizeof(*m), MEM_CAT_TEMP);
     if (m) { m->tp = tp; m->ctx = ctx; m->names = &MIR_DEFAULT_MODULE_NAMES; }
     return m;
+}
+
+Script* mvp_import_owner(LambdaMvpModule* m, NameEntry* entry) {
+    if (!entry) return NULL;
+    // cached import nodes retain another execution's Script identity; both
+    // symbol names and constant pools belong to the current overlay (D8.5.1).
+    return entry->import ? lambda_ast_overlay_import_script(m->tp->script_owner, entry->import)
+        : entry->import_owner;
 }
 
 bool mvp_interp_binding(LambdaMvpModule* m, NameEntry* entry, Script** owner, int* slot) {
@@ -3163,7 +3189,7 @@ MvpFunction* mvp_require_function_reference(LambdaMvpModule* m, AstFuncNode* tar
     if (resident_entry) owner = resident_owner;
     if (!owner && callee && callee->node_type == AST_NODE_IDENT) {
         NameEntry* entry = ((AstIdentNode*)callee)->entry;
-        owner = entry ? entry->import_owner ? entry->import_owner : entry->import ? entry->import->script : NULL : NULL;
+        owner = mvp_import_owner(m, entry);
     }
     if (!f && owner) {
         if (resident_entry || ((TypeFunc*)target->type)->is_public || target->is_that_predicate) {
@@ -4043,7 +4069,10 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             if (ast_constrained_type(node)) collects = reenters = true;
             if (node->node_type == AST_NODE_MAP) {
                 collects = true;
-                fails = mvp_contextual_map_contract(m, node) && mvp_value_contract(m, node) == &TYPE_ANY;
+                // computed keys/spreads use checked builders even when the
+                // successful map domain is closed (S7.9.3).
+                fails = ((AstMapNode*)node)->has_computed_key ||
+                    (mvp_contextual_map_contract(m, node) && lambda_type_accepts_error(mvp_value_contract(m, node)));
             }
             if (node->node_type == AST_NODE_MEMBER_EXPR) {
                 collects = true;
@@ -4162,7 +4191,9 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             }
             if ((node->node_type == AST_NODE_BINARY && ((AstBinaryNode*)node)->op != OPERATOR_TO) ||
                     node->node_type == AST_NODE_UNARY)
-                fails |= mvp_value_contract(m, node)->type_id == LMD_TYPE_ANY;
+                // boxed comparison unions retain Error even with a closed
+                // successful bool domain (S7.9.3, D6.3.2).
+                fails |= lambda_type_accepts_error(mvp_value_contract(m, node));
             if (node->node_type == AST_NODE_UNARY && ((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE)
                 fails |= lambda_type_accepts_error(mvp_value_contract(m, ((AstUnaryNode*)node)->operand));
             if (node->node_type == AST_NODE_UNARY) {

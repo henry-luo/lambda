@@ -3409,8 +3409,12 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         MirValue b = expression(c, n->right);
         b = convert(c, b, booleans ? VALUE_REP_I64 : VALUE_REP_ITEM);
         move(c, r, reg(c, b.reg)); mark(c, done);
-        MirValue result = value(c, r, booleans ? LMD_TYPE_BOOL : LMD_TYPE_ANY,
-            booleans ? VALUE_REP_I64 : VALUE_REP_ITEM, booleans ? logical_contract : &TYPE_ANY, n);
+        // selection preserves both complete operand domains, including their
+        // Error alternatives; a clean text join can keep its pointer carrier.
+        Type* selected = booleans ? logical_contract :
+            mvp_join_value_contracts(c->module, a.semantic_contract, b.semantic_contract);
+        MirValue result = value(c, r, selected->type_id,
+            booleans ? VALUE_REP_I64 : VALUE_REP_ITEM, selected, n);
         // either selected normal value keeps its producer domain; the Error
         // branch above still bypasses truth and preserves the original Item.
         if (!booleans) result.admitted_success_contract = normal_join_contract(c, a, b);
@@ -4772,8 +4776,16 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
         MIR_reg_t arguments = em_argument_array(&c->em, 0, provided > i ? provided : i,
             [](void* data, int index) -> MIR_reg_t {
                 PreparedArguments* p = (PreparedArguments*)data;
-                if (index < p->fixed) return p->values[index].u.reg;
                 MvpCompiler* c = p->compiler;
+                if (index < p->fixed) {
+                    MIR_op_t operand = p->values[index];
+                    if (operand.mode == MIR_OP_REG) return operand.u.reg;
+                    // omitted optionals are immediate markers, not register
+                    // IDs; preserve them through the resident-call adapter.
+                    MIR_reg_t staged = em_new_reg(&c->em, "resident_argument", MIR_T_I64);
+                    move(c, staged, operand);
+                    return staged;
+                }
                 return em_call_2(&c->em, "array_get", MIR_T_I64,
                     MIR_T_P, p->values[p->fixed], MIR_T_I64, imm(c, index - p->fixed), true);
             }, &prepared);
@@ -5576,9 +5588,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
     // on an anonymous function). Preserve it before adding a scalar tag.
     if (result_rep == VALUE_REP_RAW_GC_POINTER)
         result.semantic_contract = mvp_nullable_contract(c->module, result.semantic_contract);
-    if (result_rep == VALUE_REP_ITEM &&
-            (info->result_kind == SYS_RESULT_TEXT_SPLIT || info->fn == SYSFUNC_FILL ||
-             info->result_kind == SYS_RESULT_SLICE_OF_ARGUMENT)) {
+    if (result_rep == VALUE_REP_ITEM && info->fn != SYSPROC_PRINT) {
         Type* contract = mvp_value_contract(c->module, node);
         // a caret narrows the call's AST type after discharge. The producer
         // descriptor must retain Error until propagated_value emits its guard.
@@ -6160,6 +6170,9 @@ static MirValue inferred_field_value(MvpCompiler* c, ShapeEntry* field,
 static MirValue member_shape_value(MvpCompiler* c, AstFieldNode* node,
         MvpBinding* binding, MirValue owner, TypeMap* shape, ShapeEntry* field,
         Type* contract, bool speculative, MIR_label_t miss) {
+    // sparse nominal values compact absent slots; their declared offsets do
+    // not prove the physical layout of even a required field (D4.2.5).
+    if (shape && type_nominal_record(shape) && typemap_has_optional_fields(shape)) return {};
     const LaneStorageDesc* storage = field ? shape_entry_storage(field) : NULL;
     bool container_slot = storage && storage->kind == LANE_STORAGE_POINTER &&
         (storage->value_domain == LMD_TYPE_MAP || storage->value_domain == LMD_TYPE_ARRAY ||
@@ -6976,7 +6989,7 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
             return function_value(c, mvp_function(c->module, (AstFuncNode*)entry->node), node);
         MvpBinding* b = mvp_binding(c->module, entry);
         if (!b && entry && entry->node && !entry->is_mutable && entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-            Script* owner = entry->import_owner ? entry->import_owner : entry->import ? entry->import->script : NULL;
+            Script* owner = mvp_import_owner(c->module, entry);
             MirValue imported = owner ? pooled_constant(c, ((AstDeclaratorNode*)entry->node)->init, owner->const_list) : MirValue{};
             if (imported.reg) return imported;
             if (owner) {
@@ -9014,6 +9027,13 @@ static void receive_parameter(MvpCompiler* c, MvpBinding* binding, MIR_reg_t inp
     if (!binder_site && (dependent || c->function->boxed_entry || (parameter && parameter->is_optional)))
         incoming = admit(c, incoming, dependent ? binding->admission_contract : binding->contract,
             NULL, parameter_boundary_site(c, (AstNamedNode*)mvp_binding_node(binding)));
+    if (c->function->boxed_entry && !binding->scalar_snapshot &&
+            ast_parameter_needs_snapshot(binding->entry)) {
+        // T0/dynamic callers do not perform the native direct-call capture;
+        // a mutated plain parameter still starts as a snapshot (S9.1.2/D8.3.3).
+        incoming = convert(c, incoming, VALUE_REP_ITEM);
+        incoming.reg = capture_item(c, incoming.reg, incoming.semantic_contract);
+    }
     incoming = convert(c, incoming, binding->rep);
     // unchanged boxed parameters acquire one destination-owned cold payload;
     // their reads can reuse it without weakening container snapshot semantics.

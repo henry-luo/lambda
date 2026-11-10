@@ -988,6 +988,9 @@ void lambda_mvp_compile_script(Transpiler* tp, Script* script, const char* scrip
                                    uint64_t* out_mir_function_count,
                                    uint64_t* out_mir_instruction_count) {
     log_debug("MIR Direct: compiling module '%s'", script_path ? script_path : "<unknown>");
+    // fallback compilation also needs the receiving execution's import
+    // overlay; its temporary Transpiler does not inherit this field (D8.5.1).
+    tp->script_owner = script;
 
     EvalContext* template_context = tp && tp->runtime
         ? runtime_get_eval_context(tp->runtime) : context;
