@@ -28,6 +28,7 @@ MIR_EMISSION_METHODS = (
     'test_guarded_scalar_bodies',
     'test_open_record_stores',
     'test_boxed_array_witness',
+    'test_guarded_store_keys_and_string_ord',
     'test_primitive_readers_and_singleton_joins',
     'test_sized_conversion_results',
     'test_immutable_indirect_keys',
@@ -35,6 +36,10 @@ MIR_EMISSION_METHODS = (
     'test_snapshot_loop_lifetime',
     'test_propagation_outcomes',
     'test_string_outcome_appends',
+    'test_owned_string_append_transfers',
+    'test_unused_array_binders',
+    'test_recursive_union_constructors',
+    'test_projected_scalar_hints',
     'test_batch_record_and_decimal_paths',
     'test_static_scalar_fallback',
     'test_native_shift_mir',
@@ -338,6 +343,17 @@ class LambdaMirMvpTests(unittest.TestCase):
         for mode in GC_MODES:
             with self.subTest(mode=mode):
                 self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_nested_primitive_stores.ls", mode)
+
+    def test_guarded_store_keys_and_string_ord(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_guarded_store_keys.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "ordinal")
+        self.assertIn("\tcall\tfn_string_ord_at", body)
+        self.assertIn("\tcall\tfn_index", body)
+        self.assertIn("\tcall\tfn_ord", body)
+        self.assertIn("u8:", body[:body.index("\tcall\tfn_string_ord_at")])
 
     def test_primitive_readers_and_singleton_joins(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_primitive_readers.ls"
@@ -838,6 +854,42 @@ class LambdaMirMvpTests(unittest.TestCase):
         native = body.split("\tcall\tfn_index", 1)[0]
         self.assertIn("\tdmul\t", native)
         self.assertNotIn("lambda_type_check", native)
+
+    def test_owned_string_append_transfers(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_string_append_transfers.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "erased_append")
+        self.assertIn("\tcall\tfn_strcat", body)
+        self.assertIn("\tcall\tfn_join", body)
+
+    def test_unused_array_binders(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_unused_array_binders.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "word_at")
+        self.assertNotIn("lambda_type_check_env_status", body)
+        self.assertIn("lambda_type_check_env_status", self.function_mir(source, "observed"))
+        self.assertIn("lambda_type_check_env_status", self.function_mir(source, "repeated"))
+
+    def test_recursive_union_constructors(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_recursive_union_constructors.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        self.assertNotIn("lambda_type_check_lazy", self.function_mir(source, "build"))
+        self.assertIn("lambda_type_check_lazy", self.function_mir(source, "checked"))
+
+    def test_projected_scalar_hints(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_projected_scalar_hints.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "square")
+        self.assertIn("\tdmul\t", body)
+        self.assertIn("\tcall\tfn_mul", body)
 
     def test_string_outcome_appends(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_string_outcomes.ls"

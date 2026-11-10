@@ -25,7 +25,7 @@
 #include "../runtime/module_registry.h"
 #include "../runtime/runtime-state.h"
 #include "../runtime/side_stack.h"
-#include "lib/lambda_alloca.h"
+#include "lib/alloca.h"
 #include "lib/log.h"
 #include "lib/file.h"
 #include "lib/mempool.h"

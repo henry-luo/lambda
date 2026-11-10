@@ -412,7 +412,7 @@ bool js_host_object_own_property_descriptor(Item object, Item key, Item* out) {
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
 #include "lambda/format/format.h"
-#include "lib/lambda_alloca.h"
+#include "lib/alloca.h"
 #include "lib/url.h"
 #include "lib/hex.h"
 #include "lib/file.h"

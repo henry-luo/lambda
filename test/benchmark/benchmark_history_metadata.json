@@ -49,7 +49,8 @@
     "Result51",
     "Result52",
     "Result53",
-    "Result54"
+    "Result54",
+    "Result55"
   ],
   "omitted_sessions": [
     "Result5",
@@ -94,6 +95,11 @@
       "label": "Oct 26",
       "start": "Result51",
       "end": "Result54"
+    },
+    {
+      "label": "Nov 26",
+      "start": "Result55",
+      "end": "Result55"
     }
   ],
   "series": {
@@ -145,7 +151,8 @@
       0.93,
       1.03,
       1.02,
-      0.8
+      0.8,
+      0.77
     ],
     "Lambda typed": [
       null,
@@ -195,7 +202,8 @@
       0.58,
       0.6,
       0.58,
-      0.53
+      0.53,
+      0.45
     ],
     "LambdaJS": [
       null,
@@ -245,7 +253,8 @@
       8.6,
       9.49,
       1.63,
-      1.63
+      1.63,
+      1.64
     ],
     "QuickJS": [
       null,
@@ -295,6 +304,7 @@
       7.84,
       7.77,
       null,
+      null,
       null
     ],
     "Python": [
@@ -343,6 +353,7 @@
       null,
       5.02,
       5.46,
+      null,
       null,
       null,
       null
@@ -395,6 +406,7 @@
       0.33,
       0.33,
       null,
+      null,
       null
     ],
     "Node.js": [
@@ -441,6 +453,7 @@
       1,
       1,
       1,
+      1.0,
       1.0,
       1.0,
       1.0,
@@ -495,6 +508,7 @@
       0.21,
       0.22,
       null,
+      0.22,
       0.22
     ]
   },
@@ -504,11 +518,11 @@
     "Result3": "Overall_Result3.md timing tables (Python/Node best-time dedup); ten mismatched-workload Python cells sourced from benchmark_results_v50.json, documented in Python_Result50_Backpatch.md",
     "Result4": "Overall_Result4.md timing tables (Python/Node best-time dedup); ten mismatched-workload Python cells sourced from benchmark_results_v50.json, documented in Python_Result50_Backpatch.md",
     "Result9_to_50": "Overall_Result9.md through Overall_Result50.md (first Part 1 Overall row: JIT-pinned self-reported execution time)",
-    "Result51_to_54": "Overall_Result51.md through Overall_Result54.md, Part 1 Overall rows (JIT-pinned self-reported execution-time geomeans; engine availability varies by snapshot)"
+    "Result51_to_55": "Overall_Result51.md through Overall_Result55.md, Part 1 Overall rows (JIT-pinned self-reported execution-time geomeans; engine availability varies by snapshot)"
   },
-  "interpretation": "Single-MIR sessions without a typed/untyped split are plotted as Lambda typed. Results5-8 are partial tests and are omitted from the axis. The C2MIR series begins at Result18 because Results2-4 use Lambda scripts through the C2MIR transpiler, while Result18 onward reports native C benchmark ports. Python is reported in Results3-4 and Result50; Go is reported in Results18 and Result50. Node.js is the 1.0x reference line. Results39-40 are omitted because they were measured against Node.js v24.7.0 instead of v22.13.0 and are not comparable. Result41 onward covers 63 rows (four text rows added); Result45 omits C2MIR; Result47 omits QuickJS; Result48 restores QuickJS; Result49 omits QuickJS; Result50 includes QuickJS, Python, and Go across all 63 rows. Results51-54 include 71 rows after adding Julia microbenchmarks and jq workloads; engine availability varies by session, and absent common-engine measurements remain gaps.",
+  "interpretation": "Single-MIR sessions without a typed/untyped split are plotted as Lambda typed. Results5-8 are partial tests and are omitted from the axis. The C2MIR series begins at Result18 because Results2-4 use Lambda scripts through the C2MIR transpiler, while Result18 onward reports native C benchmark ports. Python is reported in Results3-4 and Result50; Go is reported in Results18 and Result50. Node.js is the 1.0x reference line. Results39-40 are omitted because they were measured against Node.js v24.7.0 instead of v22.13.0 and are not comparable. Result41 onward covers 63 rows (four text rows added); Result45 omits C2MIR; Result47 omits QuickJS; Result48 restores QuickJS; Result49 omits QuickJS; Result50 includes QuickJS, Python, and Go across all 63 rows. Results51-55 include 71 rows after adding Julia microbenchmarks and jq workloads; engine availability varies by session, and absent common-engine measurements remain gaps.",
   "title": "Lambda Benchmark History",
-  "description": "Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result54, omitting partial Results5 through Result8 and the Node.js v24 Results39-40 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.",
+  "description": "Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result55, omitting partial Results5 through Result8 and the Node.js v24 Results39-40 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.",
   "session_dates": {
     "Result1": "2026-02-21",
     "Result2": "2026-03-07",
@@ -557,7 +571,8 @@
     "Result51": "2026-10-06",
     "Result52": "2026-10-20",
     "Result53": "2026-10-23",
-    "Result54": "2026-10-24"
+    "Result54": "2026-10-24",
+    "Result55": "2026-11-10"
   },
   "layout": {
     "width": 1360,
@@ -757,6 +772,6 @@
     "Results39–40 are omitted: they were measured against Node.js v24.7.0 (all other sessions use v22.13.0), thus not comparable.",
     "Single-MIR sessions without a typed/untyped split are assigned to Lambda typed. QuickJS joins measured points; dotted Python/Go lines bridge missing sessions.",
     "C2MIR starts at Result18: earlier C2MIR values were Lambda scripts through the transpiler; later values are native C benchmark ports.",
-    "R3–4 Python dots include ten Result50 workload fixes; other cells retain March timings. Go R18 used 56 rows. Results51–54 include 71 rows; engine availability varies."
+    "Results51-55 include 71 rows; engine availability varies by session."
   ]
 }

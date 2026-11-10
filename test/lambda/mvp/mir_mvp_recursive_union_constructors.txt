@@ -1,0 +1,4 @@
+{ left: { leaf: 0}, right: { leaf: 0}}
+[0, 0, 40]
+{ left: { leaf: 3}, right: { leaf: 1}}
+true

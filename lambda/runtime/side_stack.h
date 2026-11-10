@@ -1,6 +1,6 @@
 #ifndef LAMBDA_SIDE_STACK_H
 #define LAMBDA_SIDE_STACK_H
-#include "lib/lambda_api.h"
+#include "lambda/core/api.h"
 
 #include <stdbool.h>
 #include <stddef.h>

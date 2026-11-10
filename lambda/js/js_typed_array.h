@@ -9,7 +9,7 @@
  * using the same zero-overhead wrapper pattern as DOM nodes.
  */
 #pragma once
-#include "lib/lambda_api.h"
+#include "lambda/core/api.h"
 
 #ifdef __cplusplus
 extern "C" {

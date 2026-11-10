@@ -113,6 +113,7 @@ struct MvpFunction {
     uint32_t inline_cost;
     bool imported;
     bool boxed_entry;
+    bool erase_unused_binders;
     bool no_value_result;
     bool owns_open_scopes;
     bool guarded_array_entry;
@@ -132,7 +133,8 @@ static inline bool mvp_variadic_function(const MvpFunction* function) {
 }
 
 static inline uint16_t mvp_function_binder_count(const MvpFunction* function) {
-    return function && function->ast ? ((TypeFunc*)function->ast->type)->binder_count : 0;
+    return function && function->ast && !function->erase_unused_binders
+        ? ((TypeFunc*)function->ast->type)->binder_count : 0;
 }
 
 static inline ShapeEntry* mvp_method_field(MvpFunction* function, NameEntry* entry) {
@@ -396,6 +398,7 @@ Type* mvp_inferred_scalar_contract(Type* contract);
 Type* mvp_join_value_contracts(LambdaMvpModule* module, Type* left, Type* right);
 Type* mvp_bound_array_contract(Type* contract);
 Type* mvp_contract(AstNode* declaration);
+Type* mvp_parameter_contract(MvpFunction* function, AstNamedNode* parameter);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
 bool mvp_interp_binding(LambdaMvpModule* module, NameEntry* entry, Script** owner, int* slot);
 AstFunctionId mvp_node_owner(LambdaMvpModule* module, AstNodeId id);
@@ -452,7 +455,16 @@ void mvp_refine_guarded_locals(LambdaMvpModule* module, MvpFunction* function);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler, Type* operand);
-AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);
+AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0,
+    bool dynamic_key = false);
+struct MvpStringAppendPlan {
+    AstDeclaratorNode* declaration;
+    AstAssignStamNode* assignment;
+    MvpBinding* temporary;
+    MvpBinding* owner;
+    bool transfer;
+};
+bool mvp_string_append_plan(LambdaMvpModule* module, AstNode* first, MvpStringAppendPlan* plan);
 bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
 MvpBinding* mvp_place_root(LambdaMvpModule* module, AstNode* node);

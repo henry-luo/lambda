@@ -37,7 +37,7 @@
 #include "../runtime/hosted-call-dispatch.hpp"
 #include "lambda/core/lambda_typed.hpp"
 #include "../runtime/gc/gc_heap.h"
-#include "lib/lambda_alloca.h"
+#include "lib/alloca.h"
 #include "lib/hash.h"
 #include "lib/hashmap_helpers.h"
 #include "lib/memtrack.h"

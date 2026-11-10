@@ -1,7 +1,7 @@
 // Tune6 object metadata and exotic-operation contract.
 #ifndef LAMBDA_JS_OBJECT_META_H
 #define LAMBDA_JS_OBJECT_META_H
-#include "lib/lambda_api.h"
+#include "lambda/core/api.h"
 
 #include "js_class.h"
 
