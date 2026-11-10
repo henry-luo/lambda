@@ -146,11 +146,15 @@ were checked with `--dry-run`; full setup and build runs need platform testing.
 `build_lambda_config.json` owns the host, runtime and test graph. Its
 `config_imports` loads `build_deps_config.json` and the sibling
 `build_targets.json` manifests. `utils/generate_premake.py`
-(`PremakeGenerator`) generates the host configuration; `utils/build_config.py`
-(`load_build_config`) merges imports and rejects cycles or duplicate targets.
+(`PremakeGenerator`) generates the host configuration; input's
+`scripts/build_config.py` (`load_build_config`) merges selected imports and
+rejects cycles or duplicate targets.
 Input and Radiant build their own static archives from their manifests, as
-required by D9.1.1v4 and D9.1.3v2. Input also prepares native dependencies
-such as RE2, image codecs and archive readers. The RDB TLS and plugin profile
+required by D9.1.1v4 and D9.1.3v2. Their `build_owner` metadata supplies link
+dependencies without generating duplicate Lambda-side provider projects.
+Input owns its image configuration and native dependencies such as RE2,
+image codecs and archive readers. Standalone CLI and other specialized
+variants still use their explicitly selected sources. The RDB TLS and plugin profile
 retains RDB8/RDB11 from `vibe/Lambda_IO_RDB.md`.
 
 ```bash

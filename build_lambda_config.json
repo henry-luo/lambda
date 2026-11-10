@@ -41,12 +41,6 @@
       ]
     },
     {
-      "script": "${input_root}/scripts/generate_image_config.py",
-      "args": [
-        "build_lambda_config.json"
-      ]
-    },
-    {
       "script": "utils/generate_update_verifier.py",
       "args": []
     }
@@ -338,7 +332,7 @@
     },
     {
       "name": "image-codecs",
-      "description": "Image I/O codecs built by the Lambda source target",
+      "description": "Input-owned image codec archive",
       "lib": "${input_root}/build/lib/native/%{cfg.buildcfg}/liblambda-image-codecs.a",
       "include": "${input_root}/build_temp/image-config/include",
       "link": "static",
@@ -370,7 +364,7 @@
     },
     {
       "name": "archive-readers",
-      "description": "Pinned native archive reader source closure",
+      "description": "Input-owned native archive reader archive",
       "lib": "${input_root}/build/lib/native/%{cfg.buildcfg}/liblambda-archive-readers.a",
       "include": "lib/zip",
       "link": "static",

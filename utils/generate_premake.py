@@ -905,6 +905,9 @@ class PremakeGenerator:
         workspace_name = self.config.get('workspace_name', 'Lambda')
         output = self.config.get('output', 'lambda.exe')
         startup_project = output.replace('.exe', '')
+        if not self.variant and any(target.get('name') == 'lambda-exe'
+                                    for target in self.config.get('targets', [])):
+            startup_project = 'lambda-exe'
 
         vlog(f"DEBUG: workspace_name={workspace_name}, output={output}, startup_project={startup_project}")
 
@@ -1345,7 +1348,7 @@ class PremakeGenerator:
 
         for lib in targets:
             # Imported provider manifests describe link closure, not local builds.
-            if lib.get('build_owner'):
+            if lib.get('build_owner') not in (None, 'lambda'):
                 continue
             only_variants = lib.get('only_variants', [])
             if only_variants and self.variant not in only_variants:

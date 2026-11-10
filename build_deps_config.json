@@ -1,10 +1,11 @@
 {
-  "description": "Lambda dependency recipes and input-owned native dependency imports",
+  "description": "Lambda dependency recipes and input-owned native target interfaces",
   "config_imports": [
     {
       "path": "../lambda-input/build_native_deps_config.json",
       "root_env": "LAMBDA_INPUT_ROOT",
-      "root_path": "build_native_deps_config.json"
+      "root_path": "build_native_deps_config.json",
+      "include_keys": ["targets"]
     }
   ],
   "dependency_builds": {

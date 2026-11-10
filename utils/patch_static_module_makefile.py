@@ -2,6 +2,7 @@
 """Append exact static archives after Lambda's generated executable libraries."""
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -64,9 +65,12 @@ def use_sibling_archives(content, root):
             for name, archive in archives.items():
                 token = '-l' + name
                 if token in tokens:
-                    line = line.replace(token, str(archive))
+                    line = re.sub(r'(?<!\S)' + re.escape(token) + r'(?!\S)',
+                                  lambda match: str(archive), line)
                     selected.append(str(archive))
                     found.add(name)
+            if selected and len(selected) != len(archives):
+                raise RuntimeError('incomplete sibling provider links in generated configuration')
         lines.append(line)
         if selected:
             lines.append('LDDEPS += ' + ' '.join(selected) + '\n')

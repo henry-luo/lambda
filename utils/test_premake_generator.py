@@ -458,6 +458,8 @@ def expect_static_module_archive_profiles() -> None:
 def expect_owner_projects_not_generated(module) -> None:
     generator = linux_validation_generator(module)
     owners = [target for target in generator.config['targets'] if target.get('build_owner')]
+    if 'image_codecs' in generator.config or 'archive_codecs' in generator.config:
+        fail('Lambda imported input-owned codec build configuration')
     expected = {'re2', 'lambda-archive-readers', 'lambda-image-codecs', 'lambda-lib', 'lambda-data', 'radiant'}
     if {target['name'] for target in owners} != expected:
         fail('sibling provider ownership metadata is incomplete')
@@ -489,7 +491,9 @@ def expect_only_variants_generate_legacy_main(module) -> None:
         generator = linux_validation_generator(module)
         generator.generate_premake_file(str(output))
         text = output.read_text()
-        if 'project "lambda"' in text or 'project "lambda-exe"' not in text:
+        if re.search(r'^project "lambda"$', text, re.M) or \
+                not re.search(r'^project "lambda-exe"$', text, re.M) or \
+                'startproject "lambda-exe"' not in text:
             fail('the default workspace must contain only the split Lambda host')
         generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'linux',
                                             variant='cli',
