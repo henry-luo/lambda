@@ -235,7 +235,7 @@ bool emit_record(IoGrepRun* run, const IoGrepRec* r, Item file, uint64_t count) 
         values[i] = vals[i]->get();
         if (get_type_id(values[i]) == LMD_TYPE_ERROR) return false;
     }
-    map.set(map_alloc_for_type(run->shape, NULL, 0));
+    map.set(map_alloc_for_type(run->shape, 0));
     if (!map.get()) return false;
     for (int i = 0; i < run->fields; i++) values[i] = vals[i]->get();
     map_fill_items(map.get(), values, run->fields);

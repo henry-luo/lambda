@@ -36,6 +36,10 @@ static MIR_reg_t constant(MvpCompiler* c, int64_t n) {
     move(c, r, imm(c, n));
     return r;
 }
+static const char* cow_import(const char* ordinary, const char* profiled) {
+    // select diagnostic attribution at compile time; ordinary MIR keeps its fast path.
+    return cow_profile_sites_enabled() ? profiled : ordinary;
+}
 static MIR_reg_t float_constant(MvpCompiler* c, double number) {
     uint64_t bits; memcpy(&bits, &number, sizeof(bits));
     for (MvpFloatConstant* p = c->float_constants; p; p = p->next)
@@ -1039,7 +1043,8 @@ static MIR_reg_t capture_item(MvpCompiler* c, MIR_reg_t item, Type* contract) {
     bool profiling = cow_profile_enabled();
     MIR_reg_t state = 0;
     em_container_cow_guard(&c->em, pointer, done, false, profiling ? NULL : &state);
-    if (profiling) em_call_1(&c->em, "cow_capture_value", MIR_T_I64, MIR_T_I64, reg(c, item), true);
+    if (profiling) em_call_1(&c->em, cow_import("cow_capture_value", "cow_capture_value_profiled"),
+        MIR_T_I64, MIR_T_I64, reg(c, item), true);
     else {
         Type* normal = lambda_type_remove_error(c->module->tp->pool, contract);
         em_container_capture(&c->em, pointer, state,
@@ -3781,7 +3786,7 @@ static MIR_reg_t prepare_place_owner(MvpCompiler* c, MvpBinding* binding) {
         move(c, prepared, reg(c, root.reg)); jump(c, done);
     }
     mark(c, slow);
-    move(c, prepared, reg(c, em_call_1(&c->em, "cow_prepare_write", MIR_T_I64,
+    move(c, prepared, reg(c, em_call_1(&c->em, cow_import("cow_prepare_write", "cow_prepare_write_profiled"), MIR_T_I64,
         MIR_T_I64, reg(c, root.reg), true)));
     publish_place(c, binding, prepared);
     mark(c, done);
@@ -4213,7 +4218,7 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
                     // place_path already evaluated the keys. A snapshot read
                     // must consume those keys once, including effectful calls.
                     original = read_place(c, &places[i], places[i].count);
-                    original = value(c, em_call_1(&c->em, "cow_capture_value", MIR_T_I64,
+                    original = value(c, em_call_1(&c->em, cow_import("cow_capture_value", "cow_capture_value_profiled"), MIR_T_I64,
                         MIR_T_I64, reg(c, original.reg), true), LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
                 }
                 original = admit(c, original, local->contract, &failure);
@@ -4536,7 +4541,7 @@ static MIR_reg_t collection_mutation_call(MvpCompiler* c, SysFunc fn, MIR_reg_t 
         return em_call_2(&c->em, cow ? "pn_push_cow" : "pn_push", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, args[0].reg), true);
     const char* helper = fn == SYSPROC_SPLICE ? (cow ? "pn_splice_cow" : "pn_splice") :
-        (cow ? "member_set_cow" : "fn_index_set");
+        (cow ? cow_import("member_set_cow", "member_set_cow_profiled") : "fn_index_set");
     return em_call_3(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, owner),
         MIR_T_I64, reg(c, args[0].reg), MIR_T_I64, reg(c, args[1].reg), true);
 }
@@ -4560,7 +4565,7 @@ static MirValue mutate_collection(MvpCompiler* c, AstCallNode* node, SysFuncInfo
     if (place.count) {
         // detach and install the spine before entering an in-place mutator;
         // every key and value is already rooted (S9.2.2).
-        MIR_reg_t detached = em_call_1(&c->em, "cow_prepare_write", MIR_T_I64,
+        MIR_reg_t detached = em_call_1(&c->em, cow_import("cow_prepare_write", "cow_prepare_write_profiled"), MIR_T_I64,
             MIR_T_I64, reg(c, owner.reg), true);
         publish_place(c, place.root, detached);
         MIR_reg_t path = em_call_0(&c->em, "array_plain", MIR_T_P, true);
@@ -5249,8 +5254,8 @@ static MirValue map_literal(MvpCompiler* c, AstMapNode* node, TypeMap* destinati
         if (ordered) prepared_field = typemap_next_field(shape, prepared_field);
         if (!native) members[n] = reg(c, staged[n].reg);
     }
-    MIR_reg_t map = em_call_3(&c->em, "map_alloc_for_type", MIR_T_P,
-        MIR_T_P, imm(c, (intptr_t)shape), MIR_T_P, imm(c, 0), MIR_T_I64, imm(c, 0), true);
+    MIR_reg_t map = em_call_2(&c->em, "map_alloc_for_type", MIR_T_P,
+        MIR_T_P, imm(c, (intptr_t)shape), MIR_T_I64, imm(c, 0), true);
     value(c, map, LMD_TYPE_MAP, VALUE_REP_RAW_GC_POINTER, shape);
     MIR_reg_t filled = map;
     if (native) {
@@ -5713,7 +5718,8 @@ static void member_write(MvpCompiler* c, AstAssignStamNode* node) {
         // Its member writes use ordinary COW, without a transactional clone.
         // named result contracts describe prepared prefixes, rather than an
         // exact anonymous construction shape for the resolved setter.
-        if (member && !candidate->is_trusted_contract) result = em_call_5(&c->em, "map_set_cow_resolved", MIR_T_I64,
+        if (member && !candidate->is_trusted_contract) result = em_call_5(&c->em,
+            cow_import("map_set_cow_resolved", "map_set_cow_resolved_profiled"), MIR_T_I64,
             MIR_T_I64, reg(c, binding->reg), MIR_T_I64, reg(c, property_key(c, key->name)),
             MIR_T_I64, reg(c, input.reg), MIR_T_P, imm(c, (intptr_t)candidate),
             MIR_T_P, imm(c, (intptr_t)member), true);
@@ -5973,7 +5979,7 @@ static void emit_query_source(MvpCompiler* c, AstLoopNode* source, MvpQueryColle
         : convert(c, expression(c, source->as), VALUE_REP_ITEM);
     // the source is one retained snapshot, including when the loop body
     // replaces a binding or mutates a nested place (S9.2.3).
-    owner = value(c, em_call_1(&c->em, "cow_capture_value", MIR_T_I64,
+    owner = value(c, em_call_1(&c->em, cow_import("cow_capture_value", "cow_capture_value_profiled"), MIR_T_I64,
         MIR_T_I64, reg(c, owner.reg), true), LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
     MIR_reg_t keys = em_call_1(&c->em, "item_keys", MIR_T_P, MIR_T_I64, reg(c, owner.reg), true);
     // key lists own precise frames, so every nonlocal exit must retire them
@@ -6316,7 +6322,8 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
                 MIR_reg_t state = module_binding_location(c, reference, &slot);
                 MIR_reg_t item = em_module_slot_item(&c->em, state, reg(c, slot), true);
                 value(c, item, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
-                return value(c, em_call_1(&c->em, "cow_capture_value", MIR_T_I64, MIR_T_I64, reg(c, item), true),
+                return value(c, em_call_1(&c->em, cow_import("cow_capture_value", "cow_capture_value_profiled"),
+                    MIR_T_I64, MIR_T_I64, reg(c, item), true),
                     LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
             }
         }

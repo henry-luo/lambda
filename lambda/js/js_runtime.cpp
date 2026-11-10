@@ -3281,7 +3281,7 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     if (data_cap < 0) return js_new_object();
     // Lambda's combined allocation publishes the shape and payload together;
     // no unrooted instance or partially initialized header spans a safepoint.
-    Map* m = map_alloc_for_type(tm, NULL, data_cap);
+    Map* m = map_alloc_for_type(tm, data_cap);
     return m ? (Item){.map = m} : js_new_object();
 }
 

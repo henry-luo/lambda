@@ -178,8 +178,6 @@ Item lambda_active_module_name_item(uint32_t module_name_index,
 // ABI parameter only between generated MIR functions.
 LAMBDA_RT_API Context* eval_context_tls_runtime(void);
 void* lambda_module_state_for_unit(void* runtime_context, uint32_t unit_id);
-void* lambda_module_const_at(const struct LambdaModuleLayout* layout,
-                             uint32_t index);
 void* lambda_module_const_at_state(void* module_state, uint32_t index);
 Item lambda_module_var_at(void* module_state, uint32_t slot);
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);

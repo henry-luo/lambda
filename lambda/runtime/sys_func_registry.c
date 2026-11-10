@@ -1653,24 +1653,8 @@ const int sys_func_def_count = SYS_FUNC_DEF_COUNT;
 
 // io.http module
 
-// Trampolines for calling _b boxed wrappers from MIR Direct
-extern Item fn_call_boxed_0_into(void* fp, uint64_t* result_home);
+// imported unary boxed constraint bridge
 extern Item fn_call_boxed_1_into(void* fp, Item a, uint64_t* result_home);
-extern Item fn_call_boxed_2_into(void* fp, Item a, Item b, uint64_t* result_home);
-extern Item fn_call_boxed_3_into(void* fp, Item a, Item b, Item c, uint64_t* result_home);
-extern Item fn_call_boxed_4_into(void* fp, Item a, Item b, Item c, Item d, uint64_t* result_home);
-extern Item fn_call_boxed_5_into(void* fp, Item a, Item b, Item c, Item d, Item e, uint64_t* result_home);
-extern Item fn_call_boxed_6_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
-extern Item fn_call_boxed_7_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
-extern Item fn_call_boxed_8_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
-extern Item fn_call_boxed_9_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, uint64_t* result_home);
-extern Item fn_call_boxed_10_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, uint64_t* result_home);
-extern Item fn_call_boxed_11_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, uint64_t* result_home);
-extern Item fn_call_boxed_12_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, uint64_t* result_home);
-extern Item fn_call_boxed_13_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, uint64_t* result_home);
-extern Item fn_call_boxed_14_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, uint64_t* result_home);
-extern Item fn_call_boxed_15_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o, uint64_t* result_home);
-extern Item fn_call_boxed_16_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o, Item p, uint64_t* result_home);
 extern Item js_call_export_0_into(Function* function, uint64_t* result_home);
 extern Item js_call_export_1_into(Function* function, Item a, uint64_t* result_home);
 extern Item js_call_export_2_into(Function* function, Item a, Item b, uint64_t* result_home);
@@ -1681,7 +1665,6 @@ extern Item js_call_export_6_into(Function* function, Item a, Item b, Item c, It
 extern Item js_call_export_7_into(Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
 extern Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
 extern Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
-extern Item fn_call0_into(Function* fn, uint64_t* result_home);
 extern Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
 extern Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
 extern Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home);
@@ -1689,7 +1672,6 @@ extern void lambda_function_mark_mir_context_abi(Function* fn);
 extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
-extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
 extern void* lambda_module_const_at_state(void* module_state, uint32_t index);
 extern void* lambda_module_state_for_unit(void* runtime_context, uint32_t unit_id);
 extern Item lambda_module_var_at(void* module_state, uint32_t slot);
@@ -1890,15 +1872,12 @@ JitImport jit_runtime_imports[] = {
     {"map", FPTR(map)},
     {"map_with_data", FPTR(map_with_data)},
     {"map_with_tl", FPTR(map_with_tl)},
-    {"map_with_region_tl", FPTR(map_with_region_tl)},
     {"map_with_type_tl", FPTR(map_with_type_tl)},
-    {"map_with_region_type_tl", FPTR(map_with_region_type_tl)},
     {"map_fill", FPTR(map_fill)},
     {"map_alloc_for_type", FPTR(map_alloc_for_type),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR)}},
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
     // These shared slot kernels only decode/store existing descriptor storage.
     {"set_field_value", FPTR(set_field_value),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
@@ -2216,12 +2195,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"lambda_module_const_at", FPTR(lambda_module_const_at),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
-      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_module_const_at_state", FPTR(lambda_module_const_at_state),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
@@ -2512,8 +2485,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"heap_calloc_class", FPTR(heap_calloc_class)},
-    {"lambda_region_begin", FPTR(lambda_region_begin)},
-    {"lambda_region_end", FPTR(lambda_region_end)},
     {"heap_gc_root_slot_new", FPTR(heap_gc_root_slot_new)},
     {"heap_data_calloc", FPTR(heap_data_calloc)},
     {"heap_create_name", FPTR(heap_create_name)},
@@ -3768,25 +3739,9 @@ JitImport jit_runtime_imports[] = {
     {"lambda_task_start_document", FPTR(lambda_task_start_document)},
 
     // ========================================================================
-    // Trampolines for calling _b boxed wrappers from MIR Direct
+    // imported unary boxed constraint bridge
     // ========================================================================
-    {"fn_call_boxed_0_into", FPTR(fn_call_boxed_0_into)},
     {"fn_call_boxed_1_into", FPTR(fn_call_boxed_1_into)},
-    {"fn_call_boxed_2_into", FPTR(fn_call_boxed_2_into)},
-    {"fn_call_boxed_3_into", FPTR(fn_call_boxed_3_into)},
-    {"fn_call_boxed_4_into", FPTR(fn_call_boxed_4_into)},
-    {"fn_call_boxed_5_into", FPTR(fn_call_boxed_5_into)},
-    {"fn_call_boxed_6_into", FPTR(fn_call_boxed_6_into)},
-    {"fn_call_boxed_7_into", FPTR(fn_call_boxed_7_into)},
-    {"fn_call_boxed_8_into", FPTR(fn_call_boxed_8_into)},
-    {"fn_call_boxed_9_into", FPTR(fn_call_boxed_9_into)},
-    {"fn_call_boxed_10_into", FPTR(fn_call_boxed_10_into)},
-    {"fn_call_boxed_11_into", FPTR(fn_call_boxed_11_into)},
-    {"fn_call_boxed_12_into", FPTR(fn_call_boxed_12_into)},
-    {"fn_call_boxed_13_into", FPTR(fn_call_boxed_13_into)},
-    {"fn_call_boxed_14_into", FPTR(fn_call_boxed_14_into)},
-    {"fn_call_boxed_15_into", FPTR(fn_call_boxed_15_into)},
-    {"fn_call_boxed_16_into", FPTR(fn_call_boxed_16_into)},
 #ifndef LAMBDA_NO_JS
     {"js_call_export_0_into", FPTR(js_call_export_0_into)},
     {"js_call_export_1_into", FPTR(js_call_export_1_into)},
@@ -4043,12 +3998,12 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         // full-contract interning uses heap-owned pool/hashmap metadata, without guest allocation
         "lambda_array_rep_cert_resolve",
-        // Exact String-character equality reads only the already-rooted Item.
+        // indexed string readers inspect the already-rooted Item without allocation.
         "fn_string_ord_at", "fn_string_char_word",
         "get_ascii_char_string",
         "fn_str_eq_ptr", "fn_string_freeze",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
-        // These two read existing metadata; the element variant can allocate
+        // these length readers use existing metadata; the element variant can allocate
         // while flattening spread attributes and remains MAY_GC.
         "fn_len_l", "fn_len_s",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.

@@ -1,8 +1,9 @@
 # Lambda Script — Developer Guide
 
 > **Last verified against tree:** 2026-08-23 *(initial stamp from git history)*
-> MVP compiler sections updated against sources on 2026-11-10; full-host
-> execution verification is blocked by [RI-004](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-004).
+> MVP compiler sections updated against sources on 2026-11-10. The release host
+> builds after RI-004; focused verification and remaining failures are recorded in
+> [the retirement checkpoint](../../vibe/impl/Lambda_Impl_MIR_Full_Retirement.md#current-checkpoint).
 
 This guide is for developers working on the **Lambda and Radiant C++ runtime engine** itself — building the compiler, modifying the parser, extending the JIT backend, and developing the layout engine.
 

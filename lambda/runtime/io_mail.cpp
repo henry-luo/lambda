@@ -924,7 +924,7 @@ static Item mail_result_map(Rooted<Item>* code, Rooted<Item>* text, Rooted<Array
     if (!ok) return ItemError;
     status.set((Item){.item = y2it(ok)});
     if (get_type_id(text->get()) != LMD_TYPE_STRING) text->set(io_fs_make_string("", 0));
-    map.set(map_alloc_for_type(runtime_result_shape(names, types, 4), NULL, 0));
+    map.set(map_alloc_for_type(runtime_result_shape(names, types, 4), 0));
     if (!map.get()) return ItemError;
     Item values[] = {status.get(), code->get(), text->get(), (Item){.array = responses->get()}};
     map_fill_items(map.get(), values, 4);

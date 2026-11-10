@@ -942,116 +942,9 @@ Item fn_join_fresh_array_item(Item left, Item element) {
     return {.array = result.get()};
 }
 
-// A proved tail accumulator owns its post-entry versions. Both sequence and
-// small-literal appends validate all source items before unsharing the left lane;
-// the latter avoids allocating a temporary Array (S9.1.2,
-// S10.6.1, D5.4.4).
-static Item join_consume_cert_array(Item left, Item right, Item second,
-        int literal_count) {
-    if (get_type_id(left) != LMD_TYPE_ARRAY || item_is_list(left) ||
-            (!literal_count && (get_type_id(right) != LMD_TYPE_ARRAY ||
-                item_is_list(right)))) {
-        return join_consume_cert_array_fallback(left, right, second, literal_count);
-    }
-    Array* la = left.array;
-    Array* ra = literal_count ? NULL : right.array;
-    ArrayRepCert* cert = la ? la->rep_cert : NULL;
-    int64_t right_length = literal_count ? literal_count : ra ? ra->length : -1;
-    if (!la || (!literal_count && !ra) || !cert || cert->rank != 1 ||
-            !cert->immediate_element || la->type || la->data ||
-            la->is_view || la->is_ndim ||
-            (!literal_count && (ra->is_view || ra->is_ndim)) ||
-            la->length < 0 || right_length < 0 ||
-            la->length > INT64_MAX - right_length ||
-            !lambda_array_rep_proves_cert(left, cert, true)) {
-        return join_consume_cert_array_fallback(left, right, second, literal_count);
-    }
-    LaneStorageDesc lane = {};
-    if (!lambda_type_array_lane_storage_desc(cert->immediate_element, &lane) ||
-            lane.kind != LANE_STORAGE_POINTER ||
-            !array_native_lane_matches_desc(la, &lane)) {
-        return join_consume_cert_array_fallback(left, right, second, literal_count);
-    }
 
-    RootFrame roots(4);
-    Rooted<Item> rooted_left(roots, left);
-    Rooted<Item> rooted_right(roots, right);
-    Rooted<Item> rooted_second(roots, second);
-    Rooted<Item> rooted_element(roots, ItemNull);
-    bool right_lane = !literal_count && ra->rep_cert == cert &&
-        lambda_array_rep_proves_cert(right, cert, true) &&
-        array_native_lane_matches_desc(ra, &lane);
-    if (!right_lane) {
-        // A bad RHS must fall back before the old accumulator is touched.
-        for (int64_t i = 0; i < right_length; i++) {
-            rooted_element.set(literal_count
-                ? (i == 0 ? rooted_right.get() : rooted_second.get())
-                : item_at(rooted_right.get(), i));
-            if ((literal_count && item_is_list(rooted_element.get())) ||
-                    !lambda_value_rep_proves_contract(rooted_element.get(),
-                    cert->immediate_element)) {
-                return join_consume_cert_array_fallback(rooted_left.get(),
-                    rooted_right.get(), rooted_second.get(), literal_count);
-            }
-        }
-    }
-    la = rooted_left.get().array;
-    ra = literal_count ? NULL : rooted_right.get().array;
-    bool aliases_left = !literal_count &&
-        (la == ra || la->items == ra->items);
-    for (int i = 0; i < literal_count && !aliases_left; i++) {
-        Item element = i == 0 ? rooted_right.get() : rooted_second.get();
-        aliases_left = get_type_id(element) == LMD_TYPE_ARRAY &&
-            (element.array == la || element.array->items == la->items);
-    }
-    if (aliases_left) cow_mark_shared(rooted_left.get());
-    rooted_left.set(cow_prepare_write(rooted_left.get()));
-    if (get_type_id(rooted_left.get()) == LMD_TYPE_ERROR) return ItemError;
-    la = rooted_left.get().array;
-    ra = literal_count ? NULL : rooted_right.get().array;
-    if (!array_reserve_append_slots(la, right_length)) {
-        return join_consume_cert_array_fallback(rooted_left.get(),
-            rooted_right.get(), rooted_second.get(), literal_count);
-    }
-    la = rooted_left.get().array;
-    ra = literal_count ? NULL : rooted_right.get().array;
-    int64_t old_length = la->length;
-    if (right_lane) {
-        if (right_length) {
-            memcpy(array_native_lane_slot(la, old_length), ra->items,
-                (size_t)right_length * array_native_lane_slot_size(la));
-        }
-    } else {
-        for (int64_t i = 0; i < right_length; i++) {
-            rooted_element.set(literal_count
-                ? (i == 0 ? rooted_right.get() : rooted_second.get())
-                : item_at(rooted_right.get(), i));
-            if (!array_native_lane_store(rooted_left.get().array,
-                    old_length + i, rooted_element.get())) {
-                return join_consume_cert_array_fallback(rooted_left.get(),
-                    rooted_right.get(), rooted_second.get(), literal_count);
-            }
-        }
-    }
-    la = rooted_left.get().array;
-    la->length = old_length + right_length;
-    if (!lambda_array_rep_proves_cert(rooted_left.get(), cert, true)) {
-        lambda_array_clear_rep_cert(rooted_left.get());
-    }
-    return rooted_left.get();
-}
 
-Item fn_join_consume_cert_array(Item left, Item right) {
-    return join_consume_cert_array(left, right, ItemNull, 0);
-}
 
-Item fn_join_consume_cert_array_item(Item left, Item element) {
-    return join_consume_cert_array(left, element, ItemNull, 1);
-}
-
-Item fn_join_consume_cert_array_pair(Item left, Item first, Item second) {
-    return join_consume_cert_array(left, first, second, 2);
-}
 
 Item fn_join(Item left, Item right) {
     GUARD_ERROR2(left, right);
@@ -1850,13 +1743,6 @@ extern "C" Item lambda_fn_colour_guard_list(Item callee, List* args, uint32_t gu
         args ? (int)args->length : 0, guard);
 }
 
-// The JIT's per-arity form (at most three arguments, no list is built).
-extern "C" Item lambda_fn_colour_guard_args(Item callee, uint32_t guard, int argc,
-        Item a, Item b, Item c) {
-    if (get_type_id(callee) != LMD_TYPE_FUNC) return ItemNull;  // dispatch reports it
-    Item args[3] = {a, b, c};
-    return lambda_fn_colour_guard(callee.function, args, argc < 3 ? argc : 3, guard);
-}
 
 // The direct-call form: the caller already resolved the callee, so each
 // guarded argument is known to fill a polymorphic slot (S12.1.4v2(3)).
@@ -2354,12 +2240,6 @@ static Item lambda_dynamic_public_non_function_error(Function* fn, const char* c
         "cannot call non-function value");
 }
 
-Item fn_call0_into(Function* fn, uint64_t* result_home) {
-    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call0");
-    if (invalid.item != ITEM_NULL) return invalid;
-    return lambda_dynamic_call(fn, NULL, result_home,
-        LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call0");
-}
 
 Item fn_call1_into(Function* fn, Item a, uint64_t* result_home) {
     Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call1");
@@ -2431,53 +2311,14 @@ extern "C" Function* lambda_concurrency_to_closure(fn_ptr ptr, int arity, void* 
     return to_closure(ptr, arity, env);
 }
 
-// Trampolines for calling _b boxed wrapper functions from MIR Direct code.
-// _b wrappers generated by mvp/mvp_mir.cpp take the Context as their first
-// parameter and return a plain Item; routing through C keeps the
-// function-pointer call ABI stable across platforms. Only the `_into` forms
-// below exist: the JIT emits `fn_call_boxed_%d_into` (mvp/mvp_mir.cpp), and
-// the retired context-less variants could not have called a `_b` wrapper
-// correctly if anything had reached them.
-extern "C" {
-Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
+// imported `that` predicates use a unary boxed entry with the current Context.
+extern "C" Item fn_call_boxed_1_into(void* fp, Item argument, uint64_t* result_home) {
     Context* runtime = (Context*)context;
     if (!runtime) return ItemError;
     (void)result_home;
     return lambda_item_resolve_pending_slot(
-        ((Item(*)(Context*))fp)(runtime));
+        ((Item(*)(Context*, Item))fp)(runtime, argument));
 }
-
-#define EXPAND_BOXED_CALL_PARAMS(...) __VA_ARGS__
-#define DEFINE_BOXED_CALL_INTO(count, params, args) \
-    Item fn_call_boxed_##count##_into(void* fp, \
-            EXPAND_BOXED_CALL_PARAMS params, uint64_t* result_home) { \
-        Context* runtime = (Context*)context; \
-        if (!runtime) return ItemError; \
-        (void)result_home; \
-        return lambda_item_resolve_pending_slot( \
-            ((Item(*)(Context*, EXPAND_BOXED_CALL_PARAMS params))fp)( \
-                runtime, EXPAND_BOXED_CALL_PARAMS args)); \
-    }
-
-DEFINE_BOXED_CALL_INTO(1, (Item a), (a))
-DEFINE_BOXED_CALL_INTO(2, (Item a, Item b), (a, b))
-DEFINE_BOXED_CALL_INTO(3, (Item a, Item b, Item c), (a, b, c))
-DEFINE_BOXED_CALL_INTO(4, (Item a, Item b, Item c, Item d), (a, b, c, d))
-DEFINE_BOXED_CALL_INTO(5, (Item a, Item b, Item c, Item d, Item e), (a, b, c, d, e))
-DEFINE_BOXED_CALL_INTO(6, (Item a, Item b, Item c, Item d, Item e, Item f), (a, b, c, d, e, f))
-DEFINE_BOXED_CALL_INTO(7, (Item a, Item b, Item c, Item d, Item e, Item f, Item g), (a, b, c, d, e, f, g))
-DEFINE_BOXED_CALL_INTO(8, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h), (a, b, c, d, e, f, g, h))
-DEFINE_BOXED_CALL_INTO(9, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i), (a, b, c, d, e, f, g, h, i))
-DEFINE_BOXED_CALL_INTO(10, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j), (a, b, c, d, e, f, g, h, i, j))
-DEFINE_BOXED_CALL_INTO(11, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k), (a, b, c, d, e, f, g, h, i, j, k))
-DEFINE_BOXED_CALL_INTO(12, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l), (a, b, c, d, e, f, g, h, i, j, k, l))
-DEFINE_BOXED_CALL_INTO(13, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m), (a, b, c, d, e, f, g, h, i, j, k, l, m))
-DEFINE_BOXED_CALL_INTO(14, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n), (a, b, c, d, e, f, g, h, i, j, k, l, m, n))
-DEFINE_BOXED_CALL_INTO(15, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o), (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o))
-DEFINE_BOXED_CALL_INTO(16, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o, Item p), (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p))
-#undef DEFINE_BOXED_CALL_INTO
-#undef EXPAND_BOXED_CALL_PARAMS
-} // extern "C"
 
 
 static bool numeric_type_subsumes(Type* actual, Type* target) {
@@ -2980,11 +2821,6 @@ Item lambda_type_check(Item value, Type* expected, const char* boundary) {
     return lambda_type_check_env(value, expected, NULL, boundary);
 }
 
-Bool lambda_type_value_is_exact(Item value, Type* expected) {
-    if (!expected || get_type_id(value) != LMD_TYPE_TYPE) return BOOL_FALSE;
-    Type* actual = runtime_boundary_unwrap_type(value.type);
-    return actual == expected ? BOOL_TRUE : BOOL_FALSE;
-}
 
 Bool lambda_value_type_is_exact(Item value, Type* expected) {
     expected = runtime_boundary_unwrap_type(expected);
@@ -4684,10 +4520,6 @@ Item fn_not_value(Item item) {
     return (Item){.item = b2it(is_truthy(item) == BOOL_FALSE)};
 }
 
-Bool fn_not(Item item) {
-    Item result = fn_not_value(item);
-    return get_type_id(result) == LMD_TYPE_ERROR ? BOOL_ERROR : result.bool_val;
-}
 
 // S3.4: callers own lazy evaluation; a selected operand is returned unchanged.
 Item fn_and(Item a_item, Item b_item) {
@@ -5551,15 +5383,6 @@ TypePattern* const_pattern(int64_t pattern_index) {
     return (TypePattern*)type;
 }
 
-// MIR Direct module-type-list-aware wrappers: save/restore context->type_list so that
-// cross-module calls use this module's own type_list.
-Type* const_type_with_tl(int64_t type_index, void* type_list_ptr) {
-    void* saved = context->type_list;
-    context->type_list = type_list_ptr;
-    Type* r = const_type(type_index);
-    context->type_list = saved;
-    return r;
-}
 TypePattern* const_pattern_with_tl(int64_t pattern_index, void* type_list_ptr) {
     void* saved = context->type_list;
     context->type_list = type_list_ptr;
@@ -6247,7 +6070,7 @@ static Item temp_document(Item name_item, Item content, bool has_content) {
     Pool* pool = context ? context->pool : NULL;
     TypeMap* empty_shape = pool
         ? (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap)) : NULL;
-    Map* empty_map = empty_shape ? map_alloc_for_type(empty_shape, NULL, 0) : NULL;
+    Map* empty_map = empty_shape ? map_alloc_for_type(empty_shape, 0) : NULL;
     if (!empty_map) {
         return runtime_error_itemf(ERR_OUT_OF_MEMORY, "temp: failed to create document");
     }
@@ -8147,7 +7970,6 @@ int64_t fn_count(Item item) {
     return 1;
 }
 
-extern "C" Item fn_virtual_content_check(Item item) { return virtual_content_error(item); }
 
 extern "C" Item fn_len_checked(Item item) {
     GUARD_ERROR1(item);
@@ -8253,16 +8075,6 @@ extern "C" int64_t fn_len_l(List* list) {
     return list->length;
 }
 
-extern "C" int64_t fn_len_a(Array* arr) {
-    if (!arr) return 0;
-    // Runtime check: static type may say Array but actual could be ArrayNum
-    // (e.g. nested literals auto-promoted to N-D). For N-D ArrayNum, return
-    // shape[0] (leading axis) to match NumPy semantics.
-    if (arr->type_id == LMD_TYPE_ARRAY_NUM) {
-        return array_num_iter_count((ArrayNum*)arr);
-    }
-    return arr->length;
-}
 
 extern "C" int64_t fn_len_s(String* str) {
     if (!str) return 0;
@@ -8549,13 +8361,6 @@ Bool fn_contains(Item str_item, Item substr_item) {
         ? BOOL_TRUE : BOOL_FALSE;
 }
 
-// starts_with native: String* in, Bool out (no Item boxing)
-Bool fn_starts_with_str(String* str, String* prefix) {
-    if (!str) return BOOL_FALSE;
-    if (!prefix || prefix->len == 0) return BOOL_TRUE;
-    if (str->len < prefix->len) return BOOL_FALSE;
-    return (memcmp(str->chars, prefix->chars, prefix->len) == 0) ? BOOL_TRUE : BOOL_FALSE;
-}
 
 // starts_with(str, prefix) - check if string starts with prefix
 Bool fn_starts_with(Item str_item, Item prefix_item) {
@@ -8584,14 +8389,6 @@ Bool fn_starts_with(Item str_item, Item prefix_item) {
     return (memcmp(str_chars, prefix_chars, prefix_len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
-// ends_with native: String* in, Bool out (no Item boxing)
-Bool fn_ends_with_str(String* str, String* suffix) {
-    if (!str) return BOOL_FALSE;
-    if (!suffix || suffix->len == 0) return BOOL_TRUE;
-    if (str->len < suffix->len) return BOOL_FALSE;
-    size_t offset = str->len - suffix->len;
-    return (memcmp(str->chars + offset, suffix->chars, suffix->len) == 0) ? BOOL_TRUE : BOOL_FALSE;
-}
 
 // ends_with(str, suffix) - check if string ends with suffix
 Bool fn_ends_with(Item str_item, Item suffix_item) {
@@ -12363,16 +12160,6 @@ Item slot_image(Item value) {
     return seq_finish_kind(cow_clone_one_level(value), false);
 }
 
-void lambda_direct_field_store_image(Item owner, int64_t byte_offset, Item list) {
-    // The raw writer had loaded the slot address before this call; the image
-    // copy may move the owner, so the address is re-read from the rooted owner.
-    RootFrame roots(1);
-    Rooted<Item> rooted_owner(roots, owner);
-    Item image = slot_image(list);
-    Map* live = rooted_owner.get().map;
-    if (!live || !live->data) return;
-    *(Container**)((char*)live->data + byte_offset) = image.container;
-}
 
 Item cow_prepare_write(Item old) {
     Container* container = cow_item_container(old);
@@ -13388,24 +13175,7 @@ Item lambda_fill_for_contract_int_lane_resolved(int64_t count, Item value,
     return lambda_fill_for_contract({.item = i2it(count)}, value, expected, boundary);
 }
 
-Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
-        const char* boundary) {
-    ArrayRepCert* cert = count >= 0 && count <= INT53_MAX
-        ? lambda_array_rep_cert_resolve(expected) : NULL;
-    return lambda_fill_for_contract_int_lane_resolved(count, value, expected, boundary, cert);
-}
 
-// Tune29 §19.1 item 2: `[]` crossing a primitive T[] boundary (`return []`
-// from `pn vec_new() int[]`, `var keys: int[] = []`) allocated a generic
-// array and then ran the admission ladder to replace it. Build the certified
-// ArrayNum directly; any other contract admits the literal as before.
-Item lambda_array_empty_for_contract(Type* expected, const char* boundary) {
-    Item admitted = ItemNull;
-    if (runtime_array_new_empty_numeric(expected, &admitted) &&
-            admitted.item != ITEM_NULL) return admitted;
-    Array* empty = array();
-    return lambda_type_check({.array = empty}, expected, boundary);
-}
 
 // A list written into a typed array splices its items there (S2.5.6), so
 // each item -- not the list -- crosses the element contract. The admitted
@@ -13567,10 +13337,6 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     return rooted_candidate.get();
 }
 
-Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
-        const char* boundary) {
-    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, false, NULL);
-}
 
 Item lambda_array_set_checked_preplanned(Item owner, Item key, Item value,
         Type* expected, Type* element, const LaneStorageDesc* lane,
@@ -13600,11 +13366,6 @@ Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Typ
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, NULL);
 }
 
-Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,
-        const char* boundary) {
-    return lambda_array_set_checked_preplanned(owner, key, value, expected,
-        NULL, NULL, boundary, true);
-}
 
 static Item lambda_array_set_nd_checked_impl(Item owner, int ndim, int64_t* indices,
         Item value, Type* expected, const char* boundary, bool publish_in_place);
@@ -13804,33 +13565,7 @@ Item lambda_array_set_nd_checked_inplace(Item owner, int ndim, int64_t* indices,
         "typed multi-dimensional array assignment", true);
 }
 
-static LaneStorageDesc lambda_array_lane_hint(Type* expected, uint8_t lane_kind,
-        uint8_t lane_nullable, uint8_t lane_byte_size) {
-    LaneStorageDesc hint = {};
-    Type* element_type = runtime_array_contract_element(expected);
-    if (!lambda_type_array_lane_storage_desc(element_type, &hint) ||
-            hint.kind != lane_kind || hint.nullable != lane_nullable ||
-            hint.byte_size != lane_byte_size) {
-        return {};
-    }
-    return hint;
-}
 
-Item lambda_array_set_checked_lane(Item owner, int64_t index, Item value, Type* expected,
-        const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
-        uint8_t lane_byte_size) {
-    LaneStorageDesc hint = lambda_array_lane_hint(expected, lane_kind, lane_nullable,
-        lane_byte_size);
-    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, false, &hint);
-}
-
-Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value,
-        Type* expected, const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
-        uint8_t lane_byte_size) {
-    LaneStorageDesc hint = lambda_array_lane_hint(expected, lane_kind, lane_nullable,
-        lane_byte_size);
-    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, &hint);
-}
 
 static Item lambda_array_push_checked_impl(Item owner, Item value, Type* expected,
         const char* boundary, bool publish_in_place) {
@@ -14176,9 +13911,6 @@ Item cow_path_borrow_home(Item owner, Item path) {
     return cow_path_borrow_impl(owner, path, 0, NULL, false, true);
 }
 
-Item cow_path_borrow_home_keys(Item owner, const Item* keys, int64_t count) {
-    return cow_path_borrow_impl(owner, ItemNull, count, keys, false, true);
-}
 
 Item cow_path_borrow(Item owner, Item path) {
     return cow_path_borrow_impl(owner, path, 0, NULL);
@@ -14247,15 +13979,7 @@ Item cow_place_leaf(Item owner, Item path) {
     return cow_path_borrow_impl(owner, path, 0, NULL, true);
 }
 
-Item cow_place_leaf_fixed(Item owner, int64_t count, Item key0, Item key1,
-        Item key2) {
-    Item keys[3] = {key0, key1, key2};
-    return cow_path_borrow_impl(owner, ItemNull, count, keys, true);
-}
 
-Item cow_place_leaf_keys(Item owner, const Item* keys, int64_t count) {
-    return cow_path_borrow_impl(owner, ItemNull, count, keys, true);
-}
 
 // NM-O8: `publish_in_place` skips the ROOT detach. A `var` parameter's root was
 // already detached by the caller before the call, and a plain `pn` parameter
@@ -14305,11 +14029,6 @@ static bool cow_packed_index_store(Item owner, int64_t count, const Item* keys,
     return true;
 }
 
-int64_t cow_path_set_packed_index(Item owner, int64_t count, Item key0, Item key1,
-        Item key2, Item value) {
-    Item keys[3] = {key0, key1, key2};
-    return count <= 3 && cow_packed_index_store(owner, count, keys, value) ? 1 : 0;
-}
 
 static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
         const Item* fixed_keys, Item value, bool publish_in_place) {

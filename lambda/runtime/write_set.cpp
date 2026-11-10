@@ -205,7 +205,7 @@ static Item new_empty_map(void) {
     Pool* pool = context ? context->pool : NULL;
     TypeMap* shape = pool
         ? (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap)) : NULL;
-    Map* result = shape ? map_alloc_for_type(shape, NULL, 0) : NULL;
+    Map* result = shape ? map_alloc_for_type(shape, 0) : NULL;
     if (!result) return ItemError;
     return (Item){.item = (uint64_t)(uintptr_t)result};
 }

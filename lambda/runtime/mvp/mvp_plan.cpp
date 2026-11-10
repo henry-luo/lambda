@@ -879,8 +879,7 @@ TypeMap* mvp_member_candidate(LambdaMvpModule* m, AstNode* object, NameRef name)
     MvpCandidateContext context = {m, MVP_CANDIDATE_RECORD, 0};
     TypeMap* source = (TypeMap*)mvp_construction_candidate(&context, object, 8);
     if (source && find_shape_read_field_by_name(source, name->chars, name->len)) return source;
-    // MVP compiles whole units; asynchronous satellite snapshots use Full's
-    // separate path and do not traverse this owning compiler's registry.
+    // whole-unit and satellite plans read only their own immutable type list.
     Type* shape = mir_unique_shape_for_field(m->tp->type_list, name->chars, name->len,
         true, mvp_addressable_shape);
     return (TypeMap*)(shape ? shape : mir_unique_shape_for_field(m->tp->type_list,
@@ -3052,8 +3051,8 @@ static bool admitted_call(LambdaMvpModule* m, AstCallNode* call, bool task_launc
     }
     if (task_launch) return true;
     if (ast_numeric_type_call_target(call)) return true;
-    // nonnumeric Type values use the same checked dynamic-call outcome as
-    // Full; only explicit numeric conversions have a separate native entry.
+    // nonnumeric Type values use the shared checked dynamic-call outcome;
+    // only explicit numeric conversions have a separate native entry.
     if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return true;
     SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
     if (!info || (info->fn != SYSPROC_PRINT && count > LAMBDA_MAX_FUNCTION_ARGS))
