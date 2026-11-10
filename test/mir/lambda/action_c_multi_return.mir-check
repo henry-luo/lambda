@@ -1,14 +1,16 @@
 {
   "schema_version": 1,
-  "description": "Action C multi-return guard: a direct pending return resolves instead of poisoning the shared pair epilogue.",
+  "description": "D7.4.2/D6.2.1: MVP inlines the identity producer, owns its scalar payload, and returns the selected value through the companion transport. The public module entry resolves the pair.",
   "checks": [
     {
       "return_convention": 3,
       "in_func": "mvp_#_pending_item",
-      "expect": ["ret\t"],
+      "expect": [
+        "ret\t"
+      ],
       "expect_any": [
-        "func\ti64, i64, p:runtime, i64:%p1",
-        "func\ti64, p:runtime, i64:%p1"
+        "func\ti64, i64, p:runtime, i64:arg0",
+        "func\ti64, p:runtime, i64:arg0"
       ],
       "forbid": [
         "lambda_item_resolve_pending"
@@ -18,7 +20,17 @@
       "return_convention": 3,
       "in_func": "mvp_#_maybe_pending",
       "expect": [
-        "lambda_item_resolve_pending"
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "ret\t"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_pending_item_dp"
+      ]
+    },
+    {
+      "in_func": "main",
+      "expect": [
+        "call\t{{p}}, lambda_item_resolve_pending,"
       ]
     }
   ]

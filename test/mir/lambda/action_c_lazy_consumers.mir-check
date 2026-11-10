@@ -1,14 +1,16 @@
 {
   "schema_version": 1,
-  "description": "Action C: the shared pending pair resolves at arithmetic, truthiness, and type-inspection consumers; the producer stays pair-only.",
+  "description": "D7.4.2/D6.2.1: MVP inlines the pending identity into its arithmetic/truth/type/comparison consumers. Owned scalar homes precede observation; the public module boundary resolves the result.",
   "checks": [
     {
       "return_convention": 3,
       "in_func": "mvp_#_pending_item",
-      "expect": ["ret\t"],
+      "expect": [
+        "ret\t"
+      ],
       "expect_any": [
-        "func\ti64, i64, p:runtime, i64:%p1",
-        "func\ti64, p:runtime, i64:%p1"
+        "func\ti64, i64, p:runtime, i64:arg0",
+        "func\ti64, p:runtime, i64:arg0"
       ],
       "forbid": [
         "lambda_item_resolve_pending"
@@ -18,28 +20,50 @@
       "return_convention": 3,
       "in_func": "mvp_#_consume_arithmetic",
       "expect": [
-        "lambda_item_resolve_pending"
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, fn_add,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_pending_item_dp"
       ]
     },
     {
       "return_convention": 3,
       "in_func": "mvp_#_consume_truth",
       "expect": [
-        "lambda_item_resolve_pending"
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, is_truthy,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_pending_item_dp"
       ]
     },
     {
       "return_convention": 3,
       "in_func": "mvp_#_consume_type",
       "expect": [
-        "lambda_item_resolve_pending"
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, fn_type,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_pending_item_dp"
       ]
     },
     {
       "return_convention": 3,
       "in_func": "mvp_#_consume_compare",
       "expect": [
-        "lambda_item_resolve_pending"
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, fn_eq_value,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_pending_item_dp"
+      ]
+    },
+    {
+      "in_func": "main",
+      "expect": [
+        "call\t{{p}}, lambda_item_resolve_pending,"
       ]
     }
   ]

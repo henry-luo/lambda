@@ -1,25 +1,24 @@
 {
   "schema_version": 1,
-  "description": "Action B: proven wide-free boxed procedural returns use one Item lane; wide and unknown returns retain the companion protocol.",
+  "description": "D7.4.2/D6.2.1: a native string return is a pointer without a scalar home; wide/unknown Item returns retain companion transport and the public caller resolves them.",
   "checks": [
     {
       "in_func": "mvp_#_boxed_stable",
       "expect": [
-        "func\ti64, p:runtime"
+        "func\tp, p:runtime",
+        "bstart\t"
       ],
       "forbid": [
-        "func\ti64, i64, p:runtime",
-        "_scalar_home",
-        "lambda_item_resolve_pending",
-        "lambda_item_adopt_scalar_home"
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, lambda_item_resolve_pending,"
       ]
     },
     {
       "return_convention": 3,
       "in_func": "mvp_#_boxed_wide",
       "expect_any": [
-        "func\ti64, i64, p:runtime, i64:%p1",
-        "func\ti64, p:runtime, i64:%p1"
+        "func\ti64, i64, p:runtime, i64:arg0",
+        "func\ti64, p:runtime, i64:arg0"
       ],
       "forbid": [
         "_scalar_home",
@@ -30,8 +29,8 @@
       "return_convention": 3,
       "in_func": "mvp_#_boxed_unknown",
       "expect_any": [
-        "func\ti64, i64, p:runtime, i64:%p1",
-        "func\ti64, p:runtime, i64:%p1"
+        "func\ti64, i64, p:runtime, i64:arg0",
+        "func\ti64, p:runtime, i64:arg0"
       ],
       "forbid": [
         "lambda_item_resolve_pending"

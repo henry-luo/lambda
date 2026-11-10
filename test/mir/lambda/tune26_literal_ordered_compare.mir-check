@@ -1,41 +1,85 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-5: int-literal ordered comparisons use the raw predicate plus one sentinel exclusion, preserving nan/null and infinity ordering.",
+  "description": "S4.1.2/S6.1.2: MVP tests nullable int operands before the native literal comparison. Only a NaN operand that could satisfy the raw predicate needs a further exclusion.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_lt_literal",
       "expect_seq": [
-        "mov\t{{r}}, 2",
-        "lt\t{{r}}, %p1, {{r}}",
-        "ne\t{{r}}, %p1, -9223372036854775808",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "mov\t{{r:literal}}, 2"
+        },
+        {
+          "pattern": "eq\t{{r}}, {{r:value}}, 72057594037927936"
+        },
+        {
+          "pattern": "\tlt\t{{r:pred}}, {{r:value}}, {{r:literal}}"
+        },
+        {
+          "pattern": "ne\t{{r:valid}}, {{r:value}}, -9223372036854775808"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:pred}}, {{r:valid}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_lt,"
       ]
     },
     {
       "in_func": "mvp_#_tune26_literal_lt",
       "expect_seq": [
-        "mov\t{{r}}, 2",
-        "lt\t{{r}}, {{r}}, %p1",
-        "ne\t{{r}}, %p1, 72057594037927936",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "mov\t{{r:literal}}, 2"
+        },
+        {
+          "pattern": "eq\t{{r}}, {{r:value}}, 72057594037927936"
+        },
+        {
+          "pattern": "\tlt\t{{r:pred}}, {{r:literal}}, {{r:value}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_lt,"
       ]
     },
     {
       "in_func": "mvp_#_tune26_gt_literal",
       "expect_seq": [
-        "mov\t{{r}}, 2",
-        "gt\t{{r}}, %p1, {{r}}",
-        "ne\t{{r}}, %p1, 72057594037927936",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "mov\t{{r:literal}}, 2"
+        },
+        {
+          "pattern": "eq\t{{r}}, {{r:value}}, 72057594037927936"
+        },
+        {
+          "pattern": "\tgt\t{{r:pred}}, {{r:value}}, {{r:literal}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_gt,"
       ]
     },
     {
       "in_func": "mvp_#_tune26_literal_gt",
       "expect_seq": [
-        "mov\t{{r}}, 2",
-        "gt\t{{r}}, {{r}}, %p1",
-        "ne\t{{r}}, %p1, -9223372036854775808",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "mov\t{{r:literal}}, 2"
+        },
+        {
+          "pattern": "eq\t{{r}}, {{r:value}}, 72057594037927936"
+        },
+        {
+          "pattern": "\tgt\t{{r:pred}}, {{r:literal}}, {{r:value}}"
+        },
+        {
+          "pattern": "ne\t{{r:valid}}, {{r:value}}, -9223372036854775808"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:pred}}, {{r:valid}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_gt,"
       ]
     }
   ]

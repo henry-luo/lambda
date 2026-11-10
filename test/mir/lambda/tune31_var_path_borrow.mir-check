@@ -1,16 +1,21 @@
 {
   "schema_version": 1,
-  "description": "Tune31 Phase III A1: a declared var record field uses the shape-checked direct borrow helper; the generic fixed descriptor remains the carrier-mismatch fallback inside that helper.",
+  "description": "D5.4.4/S9.1.3v3: typed field borrows use their descriptor after preparing the enclosing root once. The inlined update retains a checked array store and typed path store-back, without a generic path borrow.",
   "checks": [
     {
       "in_func": "mvp_#_tune31_repeat",
       "expect": [
-        "call\t{{p}}, cow_path_borrow_typed_map_field,"
+        "call\t{{p}}, cow_path_borrow_typed_map_field,",
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_map_path_set_checked_keys,"
       ],
       "forbid": [
-        "call\t{{p}}, cow_path_borrow_fixed,",
-        "call\t{{p}}, cow_prepare_write,"
-      ]
+        "call\t{{p}}, cow_path_borrow_fixed,"
+      ],
+      "count": {
+        "call\t{{p}}, cow_prepare_write,": 1,
+        "call\t{{p}}, cow_path_borrow_typed_map_field,": 1
+      }
     }
   ]
 }

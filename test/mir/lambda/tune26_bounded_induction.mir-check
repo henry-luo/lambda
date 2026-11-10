@@ -1,15 +1,23 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-3: the bounded induction sibling checks its finite entry range once, then uses raw square, comparison, and stride arithmetic. The generic sibling remains in the function for out-of-range Lambda ints.",
+  "description": "D2.3.4\u2013D2.3.5/D4.3.3: MVP bounded induction emits native square and stride arithmetic with direct loop branches and native indexed stores; checked carrier/store misses remain cold.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_bounded_sieve",
       "expect_seq": [
-        "le\t{{r}}, {{r}}, 46342",
-        "le\t{{r}}, %p1, 2147483647",
-        "mul\t{{r}}, {{r}}, {{r}}",
-        "le\t{{r}}, {{r}}, %p1",
-        "add\t{{r}}, {{r}}, {{r}}"
+        "\tmul\t",
+        "\tble\t",
+        "\tadd\t"
+      ],
+      "expect": [
+        "mov\ti64:({{r}}), {{r}}",
+        "call\t{{p}}, lambda_array_set_checked_item,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_mul,",
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, lambda_int_lane_mul_slow,",
+        "call\t{{p}}, lambda_int_lane_add_slow,"
       ]
     }
   ]

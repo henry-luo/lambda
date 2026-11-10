@@ -1,14 +1,21 @@
 {
   "schema_version": 1,
-  "description": "Tune16 C3 lowers a fixed-shape scalar record read without routing through fn_member.",
+  "description": "D4.2.5: MVP reads the packed field through its pointer-typed data slot; one checked member fallback retains the nullable/layout miss.",
   "checks": [
     {
       "in_func": "mvp_#_tune16_record_read",
-      "expect": [
-        "mov\t{{r}}, i64:({{r}})"
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:data}})"
+        }
       ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      },
       "forbid": [
-        "call\t{{p}}, fn_member,",
         "call\t{{p}}, fn_index,"
       ]
     }

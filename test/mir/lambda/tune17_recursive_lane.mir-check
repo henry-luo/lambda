@@ -9,7 +9,7 @@
       ],
       "forbid": [
         "lambda_type_check_lazy",
-        "call\tmvp_{{n}}_tune17_tak_inferred_dpb_"
+        "call\t{{p}}, fn_call_into,"
       ]
     },
     {
@@ -19,7 +19,7 @@
       ],
       "forbid": [
         "lambda_type_check_lazy",
-        "call\tmvp_{{n}}_tune17_tak_declared_dpb_"
+        "call\t{{p}}, fn_call_into,"
       ]
     }
   ]

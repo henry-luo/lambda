@@ -1,19 +1,36 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3: an uncertified native string lane takes a physical guard before a direct load; item_at remains the cold fallback.",
+  "description": "D4.3.3: the bound string-array entry validates its binder, guards the physical native pointer carrier and decodes a boxed string slot; invalid representations retain one checked index miss.",
   "checks": [
     {
       "in_func": "mvp_#_read",
       "expect_seq": [
-        "u8:(%p1)",
-        "u8:2(%p1)",
-        "{{r}}, {{r}}, 16",
-        "u8:3(%p1)",
-        "{{r}}, {{r}}, 7",
-        "u8:7(%p1)",
+        {
+          "pattern": "mov\t{{r:flags}}, u8:2({{r:owner}})"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:flags}}, 16"
+        },
+        {
+          "pattern": "mov\t{{r}}, u8:7({{r:owner}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:32({{r:owner}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r}})"
+        }
+      ],
+      "forbid": [
         "call\t{{p}}, item_at,"
       ],
-      "forbid": ["call\t{{p}}, fn_index,"]
+      "expect": [
+        "call\t{{p}}, lambda_type_check_env_status,",
+        "call\t{{p}}, fn_index,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": 1
+      }
     }
   ]
 }

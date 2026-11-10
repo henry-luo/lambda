@@ -230,17 +230,25 @@ static MirValue convert(void* owner, MirValue v, ValueRep to) {
         }
     } else if (to == VALUE_REP_F64 && v.rep == VALUE_REP_INT_LANE) {
         r = em_new_reg(&c->em, "int_as_float", MIR_T_D);
+        bool optional = nullable(v);
+        MIR_label_t absent = optional ? label(c) : NULL, joined = optional ? label(c) : NULL;
+        // preserve absence when admitting an optional integer into a float lane.
+        if (optional) branch_null(c, v, absent);
         if (mvp_int_range(c->module, (AstNode*)v.provenance_node).finite) {
             em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, r), reg(c, v.reg)));
-            return value(c, r, v.semantic_type, to, v.semantic_contract, (AstNode*)v.provenance_node);
+        } else {
+            MIR_label_t slow = label(c), done = label(c);
+            em_branch_int53_outside(&c->em, v.reg, slow);
+            em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, r), reg(c, v.reg)));
+            jump(c, done); mark(c, slow);
+            move(c, r, reg(c, em_call_1(&c->em, "lambda_int_lane_to_double_c", MIR_T_D,
+                MIR_T_I64, reg(c, v.reg), true)), MIR_T_D);
+            mark(c, done);
         }
-        MIR_label_t slow = label(c), done = label(c);
-        em_branch_int53_outside(&c->em, v.reg, slow);
-        em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_I2D, reg(c, r), reg(c, v.reg)));
-        jump(c, done); mark(c, slow);
-        move(c, r, reg(c, em_call_1(&c->em, "lambda_int_lane_to_double_c", MIR_T_D,
-            MIR_T_I64, reg(c, v.reg), true)), MIR_T_D);
-        mark(c, done);
+        if (optional) {
+            jump(c, joined); mark(c, absent);
+            move(c, r, reg(c, null_float(c)), MIR_T_D); mark(c, joined);
+        }
     } else if (to == VALUE_REP_F64 && v.rep == VALUE_REP_ITEM) {
         if (!nullable(v)) r = em_unbox_f64_item(&c->em, c, unbox_float, v.reg);
         else {
@@ -2679,7 +2687,16 @@ static MirValue numeric_binary(MvpCompiler* c, AstBinaryNode* n, MirValue a, Mir
     bool nullable_float = rep == VALUE_REP_F64 && (nullable(a) || nullable(b));
     MIR_label_t absent = label(c), done = label(c);
     // Test absence before widening an int lane: its null sentinel is not a double.
-    if (nullable_float) { branch_null(c, a, absent); branch_null(c, b, absent); }
+    if (nullable_float) {
+        MirValue* inputs[] = {&a, &b};
+        for (MirValue* input : inputs) {
+            branch_null(c, *input, absent);
+            bool optional = false;
+            Type* present = lambda_type_nullable_lane_base(input->semantic_contract, &optional);
+            // conversion consumes the present arm without repeating its null guard.
+            if (optional) input->semantic_contract = present;
+        }
+    }
     a = convert(c, a, rep); b = convert(c, b, rep);
     MirNumericOpPlan plan = {};
     if (ints && (n->op == OPERATOR_ADD || n->op == OPERATOR_SUB || n->op == OPERATOR_MUL ||
@@ -3355,9 +3372,13 @@ static bool dense_body_eligible(MvpCompiler*, MvpIndexLoopPlan*, MvpDenseCalls* 
 static bool dense_call_eligible(MvpCompiler*, AstCallNode*);
 static bool dense_call_arguments(MvpCompiler*, MvpFunction*, AstCallNode*);
 
-static bool function_has_arrays(MvpFunction* f) {
-    for (AstNamedNode* p = f ? f->ast->param : NULL; p; p = (AstNamedNode*)p->next)
-        if (mvp_array_element(mvp_contract(p))) return true;
+static bool function_has_arrays(LambdaMvpModule* m, MvpFunction* f) {
+    for (AstNamedNode* p = f ? f->ast->param : NULL; p; p = (AstNamedNode*)p->next) {
+        // guarded inferred carriers obey the same recursive extent proof as
+        // declared arrays. Imported formals have no binding in this module.
+        MvpBinding* binding = mvp_binding(m, p->entry);
+        if (mvp_array_element(binding ? binding->contract : mvp_contract(p))) return true;
+    }
     return false;
 }
 
@@ -4309,8 +4330,8 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
     // the closed body already guards unchanged owners and every access extent.
     // Self recursion reuses that proof; bounded leaf accessors expand natively.
     bool allocating_leaf = c->guarded_allocating && dense_call_arguments(c, f, call);
-    bool closed_call = c->dense_calls && c->dense_arrays && function_has_arrays(f);
-    bool scalar_closed = c->dense_calls && c->dense_arrays && !function_has_arrays(f) &&
+    bool closed_call = c->dense_calls && c->dense_arrays && function_has_arrays(c->module, f);
+    bool scalar_closed = c->dense_calls && c->dense_arrays && !function_has_arrays(c->module, f) &&
         dense_call_eligible(c, call);
     bool recursive = closed_call && f == c->function;
     bool dense_call = c->dense_callee == f || closed_call || allocating_leaf;
@@ -7439,7 +7460,7 @@ static bool dense_body_eligible(MvpCompiler* c, MvpIndexLoopPlan* indices, MvpDe
             MvpFunction* target = mvp_function(m, ast_direct_call_function(call));
             // dynamic first/limit guards must be re-proved on a self edge;
             // only fixed access extents are inherited by recursive bodies.
-            if (function_has_arrays(target))
+            if (function_has_arrays(m, target))
                 eligible = !(target == c->function && indices->array) &&
                     dense_call_eligible(c, call) && dense_add_call(calls, target);
         }
@@ -7476,7 +7497,7 @@ static bool dense_call_eligible(MvpCompiler* c, AstCallNode* call) {
 static bool dense_call_arguments(MvpCompiler* c, MvpFunction* f, AstCallNode* call) {
     LambdaMvpModule* m = c->module;
     if (!f || mvp_parameter_receiver(f)) return false;
-    if (!function_has_arrays(f) && mvp_integer_leaf_result(m, call, 0, true))
+    if (!function_has_arrays(m, f) && mvp_integer_leaf_result(m, call, 0, true))
         return f != c->function && inline_eligible(c, f, false, true);
     bool recursive = f == c->function;
     if (recursive && f->abi.effects.may_reenter) return false;

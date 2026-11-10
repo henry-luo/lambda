@@ -1,19 +1,33 @@
 {
   "schema_version": 1,
-  "description": "S7.1.1v3/D4.2.6: a dominated non-null fact admits a required string field's native pointer load, while nullable and rebound receivers retain null-preserving generic reads.",
+  "description": "D4.2.5/S7.1.1v3: a dominated nullable receiver reads the packed string pointer. Unguarded/rebound receivers retain absence and member misses; MVP uses full named-field lookup for declared contracts.",
   "checks": [
     {
       "in_func": "mvp_#_guarded",
-      "expect": ["mov\t{{r}}, i64:({{r}})"],
-      "forbid": ["call\t{{p}}, fn_member_by_id,"]
+      "expect": [
+        "mov\t{{r}}, i64:({{r}})"
+      ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      }
     },
     {
       "in_func": "mvp_#_unguarded",
-      "expect": ["call\t{{p}}, fn_member_by_id,"]
+      "expect": [
+        "call\t{{p}}, fn_member,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      }
     },
     {
       "in_func": "mvp_#_rebound",
-      "expect": ["call\t{{p}}, fn_member_by_id,"]
+      "expect": [
+        "call\t{{p}}, fn_member,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      }
     }
   ]
 }

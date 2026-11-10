@@ -1,17 +1,19 @@
 {
   "schema_version": 1,
-  "description": "D6.3.1-D6.3.2: reversing declarations retains the rootless direct-call protocol when length is NO_GC.",
+  "description": "D6.3.1\u2013D6.3.2: MVP inlines the noncollecting countdown leaf; native arithmetic and string length leave the caller rootless regardless of declaration order or module function count.",
   "checks": [
     {
       "in_func": "mvp_#_gc_order_reverse_caller",
       "expect": [
-        "call\tmvp_{{n}}_gc_order_reverse_leaf_dp",
         "call\t{{p}}, fn_len_s,",
-        "bstart\t{{r}}"
+        "bstart\t{{r}}",
+        "sub\t",
+        "add\t"
       ],
       "forbid": [
         "call\tlambda_stack_is_exhausted",
-        "call\tlambda_side_stack_ensure_for"
+        "call\tlambda_side_stack_ensure_for",
+        "call\tmvp_{{n}}_gc_order_reverse_leaf_dp"
       ]
     }
   ]

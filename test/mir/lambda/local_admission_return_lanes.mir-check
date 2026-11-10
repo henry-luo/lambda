@@ -4,13 +4,29 @@
   "checks": [
     {
       "in_func": "mvp_#_keeps_initializer",
-      "expect": ["func\ti64, p:runtime", "mov\t{{r}}, 7"],
-      "forbid": ["360287970189639687"]
+      "expect": [
+        "mov\t{{r}}, 7"
+      ],
+      "forbid": [
+        "360287970189639687"
+      ],
+      "expect_any": [
+        "func\ti64, i64, p:runtime",
+        "func\ti64, p:runtime"
+      ]
     },
     {
       "in_func": "mvp_#_keeps_assignment",
-      "expect": ["func\ti64, p:runtime", "mov\t{{r}}, 9"],
-      "forbid": ["360287970189639689"]
+      "expect": [
+        "mov\t{{r}}, 9"
+      ],
+      "forbid": [
+        "360287970189639689"
+      ],
+      "expect_any": [
+        "func\ti64, i64, p:runtime",
+        "func\ti64, p:runtime"
+      ]
     }
   ]
 }

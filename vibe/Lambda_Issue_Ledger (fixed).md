@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **277 anchored records**, preserving fixed, resolved,
+This archive contains **278 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -990,6 +990,31 @@ S2.5.8 has indexing and every sequence operation see a symbol as its code points
 **All nine issues are archived below as [LR06-R1…R9](#lr06-r1r9).** The C2MIR backend no longer exists in the tree.
 
 ## 7. MIR Direct transpiler & JIT (LR07)
+
+<a id="lr07-63"></a>**LR07-63 · MVP rejects the recursive array-witness emission fixture · RESOLVED (2026-11-10; private release unit qualification)**
+
+During the LR07-60 unit audit,
+`LAMBDA_EXEC_BACKEND=jit ./lambda.exe run
+test/mir/lambda/tune31_recursive_array_witness.ls` exits 1 with E501 at line 4:
+`Lambda MIR MVP: inlined error effect was not planned`. The emission fixture
+expects successful compilation/execution. Planner and inlining effects must
+agree before publication (D8.2.5, D6.3.2). The failing compiler diagnostic is
+confirmed on the identified installed binary; the underlying proof/plan defect
+is not diagnosed. Evidence:
+`temp/mvp_optimization_coverage/emission-results.json`. Do not treat this as an
+obsolete sidecar selector or weaken effect verification to accept it.
+
+Resolution: MVP classified recursive array parameters using only their declared
+contract. An inferred array was treated as scalar and lost its recursive extent
+proof; a checked store then appeared inside an inlined frame planned infallible.
+`function_has_arrays` now reads the current MVP binding contract, with declared
+fallback for imported formals that have no local binding. The effect verifier
+remains enforced (D6.3.2). The guarded body emits its native scaled store and
+recursive call; the checked sibling retains both COW setters. The golden `10 4`
+passes native JIT, MIR interpreter and forced/seeded poison-GC modes. Final
+release SHA256: `cb1fac1e77f2b7ac74163f3be0c0b1734446c9289148deca629a738af11ee8ef`.
+See [implementation and qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-fixture-follow-up-2026-11-10)
+and `temp/mvp_fixture_followup/record-backend-parity.json`.
 
 <a id="lr07-20"></a>**LR07-20 · JIT: an imported function's default arguments are not applied · VERIFIED RESOLVED 2026-10-29 (found 2026-09-25)**
 

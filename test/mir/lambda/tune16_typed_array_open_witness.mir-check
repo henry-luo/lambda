@@ -1,20 +1,18 @@
 {
   "schema_version": 1,
-  "description": "Tune16 C4.1 keeps an open typed-array source on the native call edge and admits it once at the caller.",
+  "description": "D4.3.3/D7.3.1: an open array is admitted before the inlined consumer. Its packed native index path and checked miss stay explicit; no boxed-call adapter is needed.",
   "checks": [
     {
       "in_func": "mvp_#_main",
       "expect": [
-        "call\tmvp_{{n}}_tune16_open_consumer_dp"
+        "call\t{{p}}, lambda_type_check_lazy,",
+        "i64:32(",
+        "lsh\t{{r}}, {{r}}, 3",
+        "call\t{{p}}, fn_index,"
       ],
       "forbid": [
-        "call\tmvp_{{n}}_tune16_open_consumer_dp#_b"
-      ]
-    },
-    {
-      "in_func": "mvp_#_main",
-      "expect": [
-        "call\t{{p}}, lambda_type_check_lazy,"
+        "call\tmvp_{{n}}_tune16_open_consumer_dp",
+        "call\t{{p}}, fn_call_into,"
       ]
     }
   ]

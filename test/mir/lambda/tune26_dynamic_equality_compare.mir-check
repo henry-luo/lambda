@@ -1,13 +1,19 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-5: dynamic non-null IntLane equality excludes nan from raw equality and includes it in inequality. T29-3: one side's nan test decides the pair -- equal lanes are both nan or neither, and a lone nan already compares unequal (S4.1.2).",
+  "description": "S4.1.2/S5.1.1v2\u2013S5.1.2v2: native integer equality combines the same left operand with its NaN exclusion; parameter registers are MVP locals rather than Full %p operands.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_eq_pair",
       "expect_seq": [
-        "eq\t{{r}}, %p1, %p2",
-        "ne\t{{r}}, %p1, -9223372036854775808",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "\teq\t{{r:pred}}, {{r:left}}, {{r:right}}"
+        },
+        {
+          "pattern": "\tne\t{{r:valid}}, {{r:left}}, -9223372036854775808"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:pred}}, {{r:valid}}"
+        }
       ],
       "count": {
         "-9223372036854775808": 1
@@ -16,9 +22,18 @@
     {
       "in_func": "mvp_#_tune26_ne_pair",
       "expect_seq": [
-        "ne\t{{r}}, %p1, %p2",
-        "eq\t{{r}}, %p1, -9223372036854775808",
-        "or\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "\tne\t{{r:pred}}, {{r:left}}, {{r:right}}"
+        },
+        {
+          "pattern": "\tne\t{{r:valid}}, {{r:left}}, -9223372036854775808"
+        },
+        {
+          "pattern": "\teq\t{{r:unordered}}, {{r:valid}}, 0"
+        },
+        {
+          "pattern": "or\t{{r}}, {{r:pred}}, {{r:unordered}}"
+        }
       ],
       "count": {
         "-9223372036854775808": 1

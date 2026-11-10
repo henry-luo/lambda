@@ -1,14 +1,26 @@
 {
   "schema_version": 1,
-  "description": "S5.1.4v2/D2.3.4: an empty string literal uses the immutable shared String and does not resolve a module constant; a nonempty literal still uses its module slab.",
+  "description": "S5.1.4v2/D2.3.4: both empty and nonempty immutable literals load from the module constant pointer without runtime module-state lookup.",
   "checks": [
     {
       "in_func": "mvp_#_empty",
-      "forbid": ["call\t{{p}}, lambda_module_state_for_unit,"]
+      "forbid": [
+        "call\t{{p}}, lambda_module_state_for_unit,"
+      ],
+      "expect": [
+        "_mod_consts_ptr",
+        "p:"
+      ]
     },
     {
       "in_func": "mvp_#_filled",
-      "expect": ["call\t{{p}}, lambda_module_state_for_unit,"]
+      "expect": [
+        "_mod_consts_ptr",
+        "p:"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_module_state_for_unit,"
+      ]
     }
   ]
 }

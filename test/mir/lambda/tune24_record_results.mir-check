@@ -1,34 +1,47 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3, D6.3.4, D7.3.1: record results. S7.7.2/S7.7.3 (2026-10-31): unannotated defect-capable record calls preserve the boxed error join; member/join fallbacks are required until an error-capable scalar-record proof exists. Raw result destinations and allocation exclusions remain checked.",
+  "description": "D4.2.5/D6.2.1: MVP uses pointer result lanes with native record slots and companion error transport. Recursive calls remain direct; the boxed entry admits dynamic fields before filling their declared offsets.",
   "checks": [
     {
       "in_func": "mvp_#_render",
       "expect": [
-        "_record_result0",
+        "p, i64, p:runtime",
         "call\tmvp_{{n}}_render_dp",
         "call\tmvp_{{n}}_result_dp",
-        "call\tfn_member_by_id"
+        "p:16("
       ],
       "forbid": [
-        "call\tmap_fill",
-        "call\theap_calloc_class"
+        "call\t{{p}}, map_fill,",
+        "call\t{{p}}, fn_call_into,"
       ]
     },
     {
       "in_func": "mvp_#_project",
       "expect": [
         "call\tmvp_{{n}}_render_dp",
-        "call\tfn_member_by_id"
+        "call\t{{p}}, fn_member,",
+        "p:16("
       ],
       "forbid": [
-        "call\tmap_fill"
+        "call\t{{p}}, map_fill,"
       ]
     },
     {
       "in_func": "mvp_#_result",
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
+      ],
       "expect": [
-        "call\tmap_fill"
+        "call\t{{p}}, map_alloc_for_type,",
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ],
+      "forbid": [
+        "call\t{{p}}, map_fill,"
       ]
     }
   ]

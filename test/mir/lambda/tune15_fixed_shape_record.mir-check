@@ -1,30 +1,48 @@
 {
   "schema_version": 1,
-  "description": "Tune15 B3 keeps a conforming fixed-shape scalar record write on the direct packed-field path.",
+  "description": "D4.2.5/S9.1.2: MVP inlines the mutator, guards native packed stores and preserves one checked COW publication per source write; the stand-alone entry has the same native integer arithmetic.",
   "checks": [
     {
       "in_func": "mvp_#_tune15_record",
-      "expect": [
-        "call\tmvp_{{n}}_tune15_record_step_dp"
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
       ],
+      "expect": [
+        "add\t",
+        "call\t{{p}}, map_alloc_for_type,"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_map_set_checked,": 1
+      },
       "forbid": [
-        "lambda_map_set_checked",
-        "lambda_map_set_checked_inplace",
-        "call\t{{p}}, fn_map_set,",
-        "call\t{{p}}, fn_member,"
+        "call\tmvp_{{n}}_tune15_record_step_dp",
+        "call\t{{p}}, fn_map_set,"
       ]
     },
     {
       "in_func": "mvp_#_tune15_record_step",
-      "expect": [
-        "mov\t{{r}}, i64:({{r}})",
-        "add\t{{r}}, {{r}}, {{r}}"
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
       ],
+      "expect": [
+        "add\t",
+        "and\t{{r}}, {{r}}, 4294979584"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_map_set_checked,": 1
+      },
       "forbid": [
-        "lambda_map_set_checked",
-        "lambda_map_set_checked_inplace",
-        "call\t{{p}}, fn_map_set,",
-        "call\t{{p}}, fn_member,"
+        "call\t{{p}}, fn_map_set,"
       ]
     }
   ]

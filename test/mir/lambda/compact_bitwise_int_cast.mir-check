@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S4.4.4/S11.4.1v3: a compact bitwise result converted by int() has an int success and a possible error from its operand. The return boundary must forward that error without rechecking the successful int on every call.",
+  "description": "S4.4.4/S11.4.1v3: exact compact tags guard native shift/OR/conversion; the boxed fallback retains a full-width Error branch before the companion return, with no redundant validator.",
   "checks": [
     {
       "in_func": "mvp_#_compact_bitwise_int_cast",
@@ -9,9 +9,19 @@
         "call\t{{p}}, fn_int,": 1
       },
       "expect_seq": [
-        { "pattern": "call\t{{p}}, fn_int," },
-        { "pattern": "eq\t{{r}}, {{r}}, 27" },
-        { "pattern": "ret\t" }
+        {
+          "pattern": "call\t{{p}}, fn_int,"
+        },
+        {
+          "pattern": "bne\tL{{n}}, {{r}}, 27"
+        },
+        {
+          "pattern": "ret\t"
+        }
+      ],
+      "expect": [
+        "lsh\t",
+        "or\t"
       ]
     }
   ]

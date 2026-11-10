@@ -1,24 +1,46 @@
 {
   "schema_version": 1,
-  "description": "S5.1.1–S5.1.2: packed finite int pairs use a guarded direct comparison, while other numeric representations keep fn_eq/fn_ne.",
+  "description": "S5.1.1v2\u2013S5.1.2v2: MVP specializes exact int Items into native integer equality and retains cross-family numeric fallback plus Error propagation.",
   "checks": [
     {
       "in_func": "mvp_#_one",
       "expect_seq": [
-        { "pattern": "and\t{{r}}, %p1, -72057594037927936" },
-        { "pattern": "bne\tL" },
-        { "pattern": "eq\t{{r}}, %p1, {{r}}" },
-        { "pattern": "call\t{{p}}, fn_eq_value," }
-      ]
+        {
+          "pattern": "ursh\t{{r:tag}}, {{r}}, 56"
+        },
+        {
+          "pattern": "eq\t{{r}}, {{r:tag}}, 5"
+        },
+        {
+          "pattern": "\teq\t{{r}}, {{r}}, {{r}}"
+        },
+        {
+          "pattern": "call\t{{p}}, fn_eq_value,"
+        }
+      ],
+      "count": {
+        "call\t{{p}}, fn_eq_value,": 1
+      }
     },
     {
       "in_func": "mvp_#_not_one",
       "expect_seq": [
-        { "pattern": "and\t{{r}}, %p1, -72057594037927936" },
-        { "pattern": "bne\tL" },
-        { "pattern": "ne\t{{r}}, %p1, {{r}}" },
-        { "pattern": "call\t{{p}}, fn_ne_value," }
-      ]
+        {
+          "pattern": "ursh\t{{r:tag}}, {{r}}, 56"
+        },
+        {
+          "pattern": "eq\t{{r}}, {{r:tag}}, 5"
+        },
+        {
+          "pattern": "\tne\t{{r}}, {{r}}, {{r}}"
+        },
+        {
+          "pattern": "call\t{{p}}, fn_ne_value,"
+        }
+      ],
+      "count": {
+        "call\t{{p}}, fn_ne_value,": 1
+      }
     }
   ]
 }

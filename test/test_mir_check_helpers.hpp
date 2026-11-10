@@ -1203,6 +1203,57 @@ inline bool line_contains(const std::string& line, const std::string& pattern,
     return false;
 }
 
+struct SequenceSearch {
+    const MirLine* lines;
+    size_t line_count;
+    const SeqExpectation* steps;
+    size_t step_count;
+    size_t* current;
+    size_t* best;
+    size_t depth = 0;
+    size_t remaining = 1000000;
+    bool exhausted = false;
+};
+
+inline bool search_sequence(SequenceSearch* search, size_t step, size_t cursor,
+        const RegisterCaptures& captures) {
+    if (step == search->step_count) return true;
+    const SeqExpectation& want = search->steps[step];
+    size_t end = want.next_line && cursor < search->line_count
+        ? cursor + 1 : search->line_count;
+    for (size_t line = cursor; line < end; line++) {
+        // ambiguous failed contracts must report failure rather than stall the gate.
+        if (!search->remaining) { search->exhausted = true; return false; }
+        search->remaining--;
+        RegisterCaptures attempt = captures;
+        if (!line_contains(search->lines[line].text, want.pattern, &attempt)) continue;
+        search->current[step] = line;
+        if (step + 1 > search->depth) {
+            search->depth = step + 1;
+            memcpy(search->best, search->current, search->depth * sizeof(size_t));
+        }
+        if (search_sequence(search, step + 1, line + 1, attempt)) return true;
+        if (search->exhausted) return false;
+    }
+    return false;
+}
+
+// captures belong to a complete sequence, not the first matching prefix. A
+// store can share a load's address prefix without satisfying its final read.
+inline bool match_sequence(const MirLine* lines, size_t line_count,
+        const SeqExpectation* steps, size_t step_count, size_t* positions,
+        size_t* matched_steps, bool* exhausted) {
+    size_t* current = (size_t*)calloc(step_count ? step_count : 1, sizeof(size_t));
+    if (!current) { *matched_steps = 0; *exhausted = true; return false; }
+    SequenceSearch search = {lines, line_count, steps, step_count, current, positions};
+    RegisterCaptures captures;
+    bool matched = search_sequence(&search, 0, 0, captures);
+    *matched_steps = search.depth;
+    *exhausted = search.exhausted;
+    free(current);
+    return matched;
+}
+
 // count emitted instructions in a slice of dump text. Instruction lines start
 // with a tab; `local` declarations, the `endfunc` terminator, item headers,
 // labels, and the emitter's stats comment are not instructions.
@@ -1379,35 +1430,28 @@ inline void run_fixture(const std::string& script_path, const std::string& sidec
             }
         }
         if (!group.expect_seq.empty()) {
-            size_t cursor = 0;
-            bool matched_all = true;
+            size_t* positions = (size_t*)calloc(group.expect_seq.size(), sizeof(size_t));
+            ASSERT_NE(positions, nullptr) << "cannot allocate MIR sequence trace";
+            size_t matched_steps = 0;
+            bool exhausted = false;
+            bool matched_all = match_sequence(lines.data(), lines.size(),
+                group.expect_seq.data(), group.expect_seq.size(), positions, &matched_steps, &exhausted);
             std::string trace;
-            RegisterCaptures seq_captures;   // {{r:name}} / {{r!name}} scope
             for (size_t step = 0; step < group.expect_seq.size(); step++) {
                 const SeqExpectation& want = group.expect_seq[step];
-                size_t found = std::string::npos;
-                if (want.next_line) {
-                    // CHECK-NEXT analogue: the very next line must match.
-                    if (cursor < lines.size() && line_contains(lines[cursor].text, want.pattern, &seq_captures)) {
-                        found = cursor;
-                    }
-                } else {
-                    for (size_t i = cursor; i < lines.size(); i++) {
-                        if (line_contains(lines[i].text, want.pattern, &seq_captures)) { found = i; break; }
-                    }
-                }
-                if (found == std::string::npos) {
-                    matched_all = false;
+                if (step >= matched_steps) {
                     trace += "  step " + std::to_string(step) + " NOT FOUND: \"" + want.pattern + "\"" +
                              (want.next_line ? " (required on the immediately next line)" : "") + "\n";
                     break;
                 }
                 trace += "  step " + std::to_string(step) + " matched line " +
-                         std::to_string(lines[found].number) + ": \"" + want.pattern + "\"\n";
-                cursor = found + 1;
+                         std::to_string(lines[positions[step]].number) + ": \"" + want.pattern + "\"\n";
             }
+            free(positions);
             EXPECT_TRUE(matched_all)
-                << "expect_seq did not match in order\n" << trace << context;
+                << "expect_seq did not match in order\n"
+                << (exhausted ? "sequence search limit reached; narrow the contract\n" : "")
+                << trace << context;
         }
     }
     // A fixture whose every group targets another convention would otherwise

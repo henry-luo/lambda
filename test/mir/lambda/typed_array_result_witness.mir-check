@@ -1,11 +1,35 @@
 {
   "schema_version": 1,
-  "description": "D2.5.2/D8.2.4: guarded float result loads retain OOB, while defect and rebound receivers keep the boxed read.",
+  "description": "D2.5.2/D8.2.4: native array-result reads retain checked misses after a return, while rebindings and Error producers keep their ordinary paths. MVP inlines the open first-value consumer without adding a redundant admission.",
   "checks": [
-    {"in_func": "mvp_#_read_probabilities", "expect": ["dmov\t{{r}}, d:("]},
-    {"in_func": "mvp_#_changed_probabilities", "expect": ["call\t{{p}}, fn_index,"]},
-    {"in_func": "mvp_#_main", "expect": ["call\t{{p}}, fn_index,"]},
-    {"in_func": "mvp_#_guarded_fill", "expect": ["call\t{{p}}, fn_fill,", "call\tmvp_{{n}}_first_value_dp"],
-     "forbid": ["call\t{{p}}, lambda_type_check_lazy,"]}
+    {
+      "in_func": "mvp_#_read_probabilities",
+      "expect": [
+        "dmov\t{{r}}, d:("
+      ]
+    },
+    {
+      "in_func": "mvp_#_changed_probabilities",
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_main",
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_guarded_fill",
+      "expect": [
+        "call\t{{p}}, fn_fill,",
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_type_check_lazy,",
+        "call\tmvp_{{n}}_first_value_dp"
+      ]
+    }
   ]
 }

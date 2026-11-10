@@ -1,15 +1,34 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-3: a finite nonnegative countdown is checked once, then its zero-origin sum uses raw comparison, addition, and subtraction; the generic sibling remains in the function.",
+  "description": "D2.3.4\u2013D2.3.5: MVP unsigned entry bounds reject negative/large countdowns, then use a four-way native accumulator and scalar tail. The checked sibling remains outside the proven region.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_descending_sum",
       "expect_seq": [
-        "ge\t{{r}}, %p1, 0",
-        "le\t{{r}}, %p1, 100000000",
-        "ge\t{{r}}, %p1, {{r}}",
-        "add\t{{r}}, {{r}}, %p1",
-        "sub\t{{r}}, %p1, {{r}}"
+        {
+          "pattern": "mov\t{{r:n}}, arg0"
+        },
+        {
+          "pattern": "ubgt\tL{{n}}, {{r:n}}, 100000000"
+        },
+        {
+          "pattern": "add\t{{r:sum}}, {{r:sum}}, {{r:n}}"
+        },
+        {
+          "pattern": "sub\t{{r:n}}, {{r:n}}, 4"
+        },
+        {
+          "pattern": "bge\tL{{n}}, {{r:n}}, 3"
+        }
+      ],
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, lambda_int_lane_add_slow,"
+      },
+      "forbid": [
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, fn_sub,",
+        "call\t{{p}}, int2it_lane,"
       ]
     }
   ]

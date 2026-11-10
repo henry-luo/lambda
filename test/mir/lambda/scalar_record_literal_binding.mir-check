@@ -7,19 +7,20 @@
       "forbid": [
         "call\theap_calloc_class",
         "call\tmap_fill",
-        "call\tfn_member"
+        "call\tfn_member",
+        "call\t{{p}}, map_alloc_for_type,"
       ]
     },
     {
       "in_func": "mvp_#_escape",
       "expect": [
-        "call\theap_calloc_class"
+        "call\t{{p}}, map_alloc_for_type,"
       ]
     },
     {
       "in_func": "mvp_#_checked",
       "expect": [
-        "call\tmap_fill"
+        "call\t{{p}}, map_alloc_for_type,"
       ]
     }
   ]

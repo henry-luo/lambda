@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
-  "description": "T19-A: rebinding a declared int from a lane-native int[] read stays on the raw lane -- the loop body computes the element address and loads it, and never boxes the lane to call lambda_type_check. Re-pinned 2026-09-13: the rebind boundary is now proven outright, so the old INT_LANE_NULL-compare-then-branch adjacency is gone (the read's bounds check subsumes it and the null arm is its own block) and no type check survives on the straight-line path at all. The group is scoped to the loop body, which is where a per-iteration boxed boundary would reappear. checked_rebind is the unproven twin and still crosses the boxed boundary.",
+  "description": "S7.7.4v2/D4.3.3: a declared integer receives a native packed load in the proven region; the unknown-source twin still uses checked admission. MVP branches directly on the loop bound.",
   "checks": [
     {
       "in_func": "mvp_#_last_element",
       "expect_seq": [
         {
-          "pattern": "\tlsh\t"
+          "pattern": "lsh\t{{r:offset}}, {{r}}, 3"
         },
         {
-          "pattern": "\tadd\t"
+          "pattern": "add\t{{r:address}}, {{r}}, {{r:offset}}"
         },
         {
-          "pattern": "mov\t{{r}}, i64:({{r}})"
+          "pattern": "mov\t{{r}}, i64:({{r:address}})"
         }
       ],
       "in_range": {
-        "from": "lt\t{{r}}, {{r}}, {{r}}",
-        "to": "jmp\tL"
+        "from": "\tlsh\t",
+        "to": "call\t{{p}}, fn_index,"
       },
       "forbid": [
         "lambda_type_check_lazy,"

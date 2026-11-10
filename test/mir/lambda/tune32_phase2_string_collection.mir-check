@@ -1,8 +1,31 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3 and D2.4.3: forwarded string candidates use checked boxed slots, preserve negative-index null and keep the complete generic carrier fallback.",
+  "description": "D4.3.3: inferred element candidates authorize guarded native reads only. MVP guards the live boxed/native descriptor, scales a decoded integer key and retains the generic index miss; string comparisons retain numeric/error fallback.",
   "checks": [
-    {"in_func": "mvp_#_tune32_phase2_word", "expect": ["mov\t{{r}}, u8:2({{r}})", "and\t{{r}}, {{r}}, 19", "lsh\t{{r}}, %p2, 3", "mov\t{{r}}, 72057594037927936", "call\t{{p}}, fn_index,"]},
-    {"in_func": "mvp_#_tune32_phase2_string_compare", "expect": ["call\t{{p}}, fn_str_eq_ptr,", "call\t{{p}}, fn_eq_value,"]}
+    {
+      "in_func": "mvp_#_tune32_phase2_word",
+      "expect": [
+        "u8:2(",
+        "lsh\t{{r}}, {{r}}, 3",
+        "mov\t{{r}}, 72057594037927936",
+        "call\t{{p}}, fn_index,"
+      ],
+      "expect_seq": [
+        "i64:32(",
+        "lsh\t{{r:offset}}, {{r}}, 3",
+        "add\t{{r:address}}, {{r}}, {{r:offset}}",
+        "mov\t{{r}}, i64:({{r:address}})"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": 1
+      }
+    },
+    {
+      "in_func": "mvp_#_tune32_phase2_string_compare",
+      "expect": [
+        "call\t{{p}}, fn_str_eq_ptr,",
+        "call\t{{p}}, fn_eq_value,"
+      ]
+    }
   ]
 }

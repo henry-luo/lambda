@@ -1,19 +1,25 @@
 {
   "schema_version": 1,
-  "description": "Procedural tail recursion becomes a counter-guarded loop, exactly as the functional form does: no self-call remains in the procedure body. D2.3.4: the native int arguments n - 1 and acc * n remain IntLane values across the backedge instead of being boxed and immediately unboxed.",
+  "description": "D7.3.2/D8.2.6: MVP emits native integer tail recursion as a loop with an entry stack guard, without Full iteration counters, self calls or Item round trips. Overflow retains one native integer slow helper.",
   "checks": [
     {
       "in_func": "mvp_#_countdown",
       "forbid": [
         "call\tmvp_{{n}}_countdown_dp",
+        "call\t{{p}}, lambda_item_to_int_lane_c,",
+        "call\t{{p}}, int2it_lane,",
         "call\t{{p}}, lambda_item_to_int_lane_c,"
       ],
       "expect": [
-        "add\t{{r}}, {{r}}, 1",
-        "ble\t"
+        "bstart\t",
+        "bgt\t",
+        "sub\t",
+        "mulo\t",
+        "bo\t",
+        "jmp\t"
       ],
       "count": {
-        "call\t{{p}}, int2it_lane,": 1
+        "call\t{{p}}, lambda_int_lane_mul_slow,": 1
       }
     }
   ]

@@ -1,11 +1,89 @@
 {
   "schema_version": 1,
-  "description": "D5.4.4, D6.3.3: rooted read handles survive a direct pure call through owner or key; a mutating call reloads the place.",
+  "description": "D5.4.4/D6.3.3: MVP inlines pure observers; each source read retains at most one checked index fallback. Allocating observers retain rooted construction, and writes/alias snapshots refresh the later field access.",
   "checks": [
-    {"in_func": "mvp_#_read_across", "expect": ["call\t_observe"], "count": {"call\t{{p}}, item_at,": 1}},
-    {"in_func": "mvp_#_key_across", "expect": ["call\tmvp_{{n}}_observe_dpkey"], "count": {"call\t{{p}}, item_at,": 1}},
-    {"in_func": "mvp_#_read_across_gc", "expect": ["call\tmvp_{{n}}_observe_dpalloc"], "count": {"call\t{{p}}, item_at,": 1}},
-    {"in_func": "mvp_#_read_after_change", "expect": ["call\t_change"], "count": {"call\t{{p}}, item_at,": 2}},
-    {"in_func": "mvp_#_read_after_alias", "expect": ["call\t_retain_box"]}
+    {
+      "in_func": "mvp_#_read_across",
+      "expect": [
+        "p:16(",
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_observe_dp"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": {
+          "max": 3
+        }
+      }
+    },
+    {
+      "in_func": "mvp_#_key_across",
+      "expect": [
+        "p:16(",
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_observe_key_dp"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": {
+          "max": 2
+        }
+      }
+    },
+    {
+      "in_func": "mvp_#_read_across_gc",
+      "expect": [
+        "p:16(",
+        "call\t{{p}}, fn_index,",
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, array_push,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_observe_alloc_dp"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": {
+          "max": 4
+        }
+      }
+    },
+    {
+      "in_func": "mvp_#_read_after_change",
+      "expect": [
+        "p:16(",
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_change_dp"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": {
+          "max": 2
+        }
+      },
+      "expect_seq": [
+        "call\t{{p}}, lambda_map_path_set_checked_keys,",
+        "p:16("
+      ]
+    },
+    {
+      "in_func": "mvp_#_read_after_alias",
+      "expect": [
+        "p:16(",
+        "call\t{{p}}, fn_index,",
+        "mov\tu8:4(",
+        "call\t{{p}}, lambda_map_path_set_checked_keys,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_retain_box_dp"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": {
+          "max": 3
+        }
+      }
+    }
   ]
 }

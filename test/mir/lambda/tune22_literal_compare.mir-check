@@ -1,18 +1,21 @@
 {
   "schema_version": 1,
-  "description": "T22-1b/c: short literal-RHS string equality emits a direct context-owned constant load and byte comparison, without either generic equality helper or a module-constant helper (S5.1.1/2, D6.4.3).",
+  "description": "S5.1.4v2/D2.3.4: short literals use direct constant-pointer lookup, exact byte length and inline character checks without equality helpers.",
   "checks": [
     {
       "in_func": "mvp_#_literal_match_tune22",
       "expect": [
-        "i64:24(",
+        "_mod_consts_ptr",
+        "u32:(",
         "u8:5(",
+        "u8:11(",
         "\tbne\tL"
       ],
       "forbid": [
         "call\t{{p}}, fn_eq,",
         "call\t{{p}}, fn_str_eq_ptr,",
-        "call\t{{p}}, lambda_module_const_at,"
+        "call\t{{p}}, lambda_module_const_at,",
+        "call\t{{p}}, fn_eq_value,"
       ]
     }
   ]

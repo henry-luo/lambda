@@ -1,15 +1,25 @@
 {
   "schema_version": 1,
-  "description": "T22-6: a left-associated all-string append chain uses the exclusive builder, while a chain containing an int retains generic join conversion (S9.1.1, D6.2.2).",
+  "description": "D2.3.5/S9.3.1: all-string append uses the four-part owner builder; a scalar suffix uses the mixed-value string kernel, which performs conversion internally, without generic join.",
   "checks": [
     {
       "in_func": "mvp_#_concat_chain_tune22",
-      "expect": ["fn_strcat4"],
-      "forbid": ["call\t{{p}}, fn_join,", "call\t{{p}}, fn_string,"]
+      "expect": [
+        "fn_strcat4"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_join,",
+        "call\t{{p}}, fn_string,"
+      ]
     },
     {
       "in_func": "mvp_#_concat_mixed_tune22",
-      "expect": ["call\t{{p}}, fn_join,"]
+      "expect": [
+        "call\t{{p}}, fn_strcat_values,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_join,"
+      ]
     }
   ]
 }

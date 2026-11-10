@@ -1,10 +1,20 @@
 {
   "schema_version": 1,
-  "description": "S4.1.2, S7.1.1v3, D3.2.2: certified int[] pair equality handles poison in the direct non-null lane and retains the generic absent-index path.",
+  "description": "S4.1.2/S5.1.1v2/D2.3.4: MVP int-array pairs compare native int lanes directly, including poison exclusion and full-width bounds; conversion to floating point is unnecessary.",
   "checks": [
     {
       "in_func": "mvp_#_main",
-      "expect": ["ubge", "lambda_int_lane_to_double_c"]
+      "expect": [
+        "ubge\t",
+        "\teq\t",
+        "\tne\t",
+        "-9223372036854775808"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_int_lane_to_double_c,",
+        "deq\t",
+        "dne\t"
+      ]
     }
   ]
 }

@@ -1,20 +1,19 @@
 {
   "schema_version": 1,
-  "description": "Bound-entry wrapper epilogue. Return convention 3 (RV12 slot transport): the wrapper is the C-reachable entry, so it takes no caller home at all — it builds the pending pair, stores lane 2 into Context::mir_companion_slot, restores the watermark, and returns a single result.",
+  "description": "D7.3.1/D6.2.1: the MVP bound closure reads its owned environment slot and preserves scalar lifetime before returning. A context-bound closure entry uses the public companion slot transport.",
   "checks": [
     {
       "in_func": "mvp_#_inner",
-      "return_convention": 3,
-      "forbid": [
-        "_scalar_home",
-        "lambda_item_adopt_scalar_home",
-        "lambda_item_heap_rehome"
-      ],
       "expect_seq": [
-        { "pattern": "ursh\t" },
-        { "pattern": "ubgt\t" },
-        { "pattern": "mov\ti64:" },
-        { "pattern": "ret\t" }
+        "call\t{{p}}, owned_item_slot_read,",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "ursh\t",
+        "ubgt\t",
+        "mov\ti64:",
+        "ret\t"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_call_into,"
       ]
     }
   ]

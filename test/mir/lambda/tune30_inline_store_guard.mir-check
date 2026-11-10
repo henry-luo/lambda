@@ -9,7 +9,7 @@
       ],
       "forbid": [
         "call\tmvp_{{n}}_tune30_bump_dp",
-        "call\tmvp_{{n}}_tune30_bump_dp#_b"
+        "call\t{{p}}, fn_call_into,"
       ]
     }
   ]

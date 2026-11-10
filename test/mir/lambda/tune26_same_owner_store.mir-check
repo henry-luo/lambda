@@ -1,26 +1,38 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-4: a local certified bool[] proves its plain unshared carrier once before same-lane stores and reads. Each guarded access keeps its dynamic bounds checks and the checked setter as the cold miss path; an alias remains observable as a COW snapshot. 2026-09-13: the checked path is now array_num_set_cow_idx (CW32v2), the raw bool load folds its element offset into the computed address instead of a u8:3 displacement, and the group is scoped to the proven region -- the guarded `while` emits a generic sibling (D2.2.2, D7.3.1) whose own raw load would otherwise be counted as a third. The two inlined u8 certificate reads are gone on purpose: CW32v2 tests the shared bit at operation entry inside array_num_set_cow_idx, so the sequence now pins what the same-lane store still guarantees -- a bounds check against the length, then the raw u8 lane store through the data pointer. 2026-09-17 (T28-7): the first pinned store is `flags[0]`, whose literal index is now proven non-negative, so its negative-index test is gone; the length test remains because `fill(n + 1, ...)` has no static length. Tune30 T30-1 (2026-09-18): the finite loop's fast arm is versioned on the dense guard (its miss enters the existing generic sibling), and the fast copy reads the bool lane without a sentinel exclusion; the scoped range therefore ends at the generic sibling's head and holds exactly the fast copy's one raw load.",
+  "description": "S9.1.2/D4.3.3: MVP native word ownership guards precede packed bool stores. The same certified lane supports byte reads; one canonical checked setter retains the cold COW boundary.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_same_owner_store",
       "expect_seq": [
-        "mov\t{{r}}, i64:40({{r}})",
-        "ge\t{{r}}, {{r}}, {{r}}",
-        "mov\t{{r}}, i64:32({{r}})",
-        "mul\t{{r}}, {{r}}, 1",
-        "mov\tu8:({{r}}), {{r}}"
+        {
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:40({{r}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:32({{r}})"
+        },
+        {
+          "pattern": "mov\tu8:({{r}}), {{r}}"
+        }
       ],
       "expect": [
-        "call\tarray_num_set_cow_idx"
+        "mov\t{{r}}, u8:({{r}})",
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
       ],
       "count": {
-        "mov\t{{r}}, u8:({{r}})": 1
-      },
-      "in_range": {
-        "from": "func\t",
-        "to": "ne\t{{r}}, {{r}}, -9223372036854775808"
+        "call\t{{p}}, lambda_array_set_checked_item,": 2
       }
+    },
+    {
+      "in_func": "mvp_#_tune26_same_owner_snapshot",
+      "expect": [
+        "mov\tu8:4(",
+        "call\t{{p}}, lambda_array_set_checked_item,"
+      ]
     }
   ]
 }

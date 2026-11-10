@@ -1,20 +1,32 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-4: a plain bool[] snapshot marks at entry and uses the compact COW setter on the first reached store, without the cloning checked-contract setter.",
+  "description": "S9.1.2\u2013S9.1.3v3/D4.3.3: MVP captures the plain argument at its caller, then guards packed writes in the callee. Checked stores retain COW and boundary failures; snapshot-only calls leave the owner unchanged.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_plain_bool_param_lazy_snapshot",
       "expect": [
-        "call\t{{p}}, cow_mark_shared,",
-        "call\t{{p}}, array_num_set_cow_idx,"
+        "and\t{{r}}, {{r}}, 4294979584",
+        "mov\tu8:(",
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
       ],
       "forbid": [
-        "call\t{{p}}, cow_prepare_write,",
-        "call\t{{p}}, lambda_array_set_checked_item,"
-      ],
-      "count": {
-        "call\t{{p}}, cow_mark_shared,": 1
-      }
+        "call\t{{p}}, cow_prepare_write,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_main",
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:flags}}, u8:4({{r:owner}})"
+        },
+        {
+          "pattern": "or\t{{r:marked}}, {{r:flags}}, 1"
+        },
+        {
+          "pattern": "mov\tu8:4({{r:owner}}), {{r:marked}}"
+        }
+      ]
     }
   ]
 }

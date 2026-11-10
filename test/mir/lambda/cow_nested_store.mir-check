@@ -1,15 +1,29 @@
 {
   "schema_version": 1,
-  "description": "Nested COW stores detach and relink through rooted registers. The old heap path-array lowering is forbidden so the cold path cannot allocate a Lambda path object.",
+  "description": "S9.1.2/D5.4.4/D6.3.3: MVP writes the guarded nested field directly and passes a precise rooted two-key span to the checked COW miss. No Lambda path array is constructed.",
   "checks": [
     {
-      "in_func": "*",
+      "in_func": "mvp_#_main",
+      "expect_seq": [
+        {
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
+        },
+        {
+          "pattern": "mov\ti64:({{r}}), {{r}}"
+        },
+        {
+          "pattern": "mov\ti64:8({{r:keys}}), {{r}}"
+        },
+        {
+          "pattern": "call\t{{p}}, cow_path_set_keys, {{r}}, {{r}}, {{r}}, {{r:keys}}, 2, 0"
+        }
+      ],
       "expect": [
-        "import\tcow_prepare_write",
-        "import\tcow_path_set_raw"
+        "call\t{{p}}, lambda_report_boundary_failure,"
       ],
       "forbid": [
-        "import\tarray_push"
+        "call\t{{p}}, array_push,",
+        "call\t{{p}}, array_push_verbatim,"
       ]
     }
   ]

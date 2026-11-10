@@ -1,15 +1,31 @@
 {
   "schema_version": 1,
-  "description": "Tune27 T27-7 / D6.3.4: post-call typed-array layout reloads are pruned by liveness once the function is complete. `b` is dead after its first reads, so no call site reloads its layout; `a` is read across the allocating loop body and keeps its reload. The golden output under forced GC is the correctness half of this fixture.",
+  "description": "D5.4.4/D6.3.3: live array roots are spilled across the direct allocator and reloaded before fresh native buffer reads. One checked float store retains its COW miss.",
   "checks": [
     {
       "in_func": "mvp_#_tune27_layout_reload_liveness",
-      "expect": [
-        "call\t_tune27_alloc"
+      "expect": [],
+      "forbid": [],
+      "expect_seq": [
+        {
+          "pattern": "mov\ti64:({{r:root}}), {{r}}"
+        },
+        {
+          "pattern": "call\tmvp_{{n}}_tune27_alloc_dp"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:root}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:32({{r}})"
+        },
+        {
+          "pattern": "dmov\t{{r}}, d:({{r}})"
+        }
       ],
-      "forbid": [
-        "call\t{{p}}, array_float_set,"
-      ]
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 1
+      }
     }
   ]
 }

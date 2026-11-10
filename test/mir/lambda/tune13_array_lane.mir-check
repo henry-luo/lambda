@@ -1,24 +1,44 @@
 {
   "schema_version": 1,
-  "description": "S7.1.3v2: typed cold stores retain the checked error boundary. Tune13 typed array stores retain native indexed arithmetic and type-preserving builtin results. 2026-09-17 (T28-7): the indices are parameters; literal indices into these fixed-length locals are proven in bounds and have neither a checked store nor an index multiply (tune28_fixed_length_index). T29-5 (2026-09-17): a non-null int value takes the compact COW store (array_num_set_cow_idx) on a statically proven int[] root, as bool and non-null float values already did; out-of-range stores still raise through fn_array_set. Typed-performance audit: abs keeps the integer lane and its poison/null sentinels directly (S7.10.5v3, D2.2.2).",
+  "description": "D4.3.3/S9.1.2: native packed writes retain canonical checked COW misses. abs stays native; min keeps its numeric-tower helper.",
   "checks": [
     {
       "in_func": "mvp_#_tune13_store",
+      "expect_seq": [
+        {
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
+        },
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "mov\ti64:({{r:addr}}), {{r}}"
+        }
+      ],
       "expect": [
-        "call\tlambda_array_set_checked_item",
-        "lsh\t{{r}}, {{r}}, 3"
-      ]
+        "call\t{{p}}, lambda_array_set_checked_item,"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 1
+      }
     },
     {
       "in_func": "mvp_#_tune13_builtin",
       "expect": [
         "neg\t",
         "call\t{{p}}, fn_min2,",
-        "call\tarray_num_set_cow_idx"
+        "mov\ti64:(",
+        "call\t{{p}}, lambda_array_set_checked_preplanned,"
       ],
       "forbid": [
         "call\t{{p}}, fn_abs,"
-      ]
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 2
+      }
     }
   ]
 }

@@ -1,22 +1,47 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3: relay keeps its public entry admission; add/size reuse the admitted Vec witness, and cold append enforces the binding contract explicitly.",
+  "description": "D4.3.3/S9.1.3v3: inlined same-contract calls avoid validation; the dynamic entry retains one admission. Push guards uniqueness/capacity, writes the native lane and publishes its new length, with a checked miss.",
   "checks": [
     {
       "in_func": "mvp_#_relay",
-      "count": {"call\t{{p}}, lambda_type_check_lazy,": 1}
+      "expect": [
+        "call\t{{p}}, lambda_array_push_checked,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
     },
     {
       "in_func": "mvp_#_dynamic_size",
-      "expect": ["call\t{{p}}, lambda_type_check_lazy,"]
+      "count": {
+        "call\t{{p}}, lambda_type_check_lazy,": 1
+      }
     },
     {
       "in_func": "mvp_#_add",
       "expect_seq": [
-        {"pattern": "mov\t{{r}}, u8:4({{r}})"},
-        {"pattern": "mov\ti64:({{r}}), %p2"},
-        {"pattern": "call\tlambda_array_push_checked"}
-      ]
+        {
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
+        },
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "mov\ti64:({{r:addr}}), {{r}}"
+        },
+        {
+          "pattern": "mov\ti64:40({{r}}), {{r}}"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_array_push_checked,"
+        }
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_push_checked,": 1
+      }
     }
   ]
 }

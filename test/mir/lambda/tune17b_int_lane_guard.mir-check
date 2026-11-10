@@ -1,16 +1,15 @@
 {
   "schema_version": 1,
-  "description": "D3.2.2-D3.2.1: raw int stores need a 64-bit null exclusion, not an int53 band guard: poison lanes are valid. A 32-bit BEQS truncates INT_LANE_NULL to zero and wrongly rejects finite zero. Preserve the cold typed setter for absent reads.",
+  "description": "D3.2.1\u2013D3.2.2/S7.1.3v2: nullable integer reads use full-width null tests before native stores. Unrelated unsigned interval guards remain valid; 32-bit sentinel comparisons are forbidden.",
   "checks": [
     {
       "in_func": "mvp_#_tune17b_swap",
       "expect": [
-        "beq\t",
-        "{{r}}, 72057594037927936"
+        "beq\tL{{n}}, {{r}}, 72057594037927936",
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ],
       "forbid": [
         "beqs\t",
-        "ubgt\t",
         "ubgts\t"
       ]
     }

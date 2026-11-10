@@ -1,48 +1,34 @@
 {
   "schema_version": 1,
-  "description": "The caller saves a number base twice: `twice`'s `int` parameter uses the v5 i64 lane, so its i64() argument remains a boxed Item until the wrapper's error boundary has accepted it. Return convention 3 (RV1 shape 2): the body carries no caller-home parameter and returns two lanes instead. Its public `_b` wrapper uses the RV12 context slot, so its direct caller must also carry no trailing home; the MT7 frame budget pins that physical ABI. The group pins the direct Item result and wrapper call, and forbids the retired sentinel boxer.",
+  "description": "D6.2.1/D7.4.2: MVP gives the boxed parameter a local home and carries its result in companion lanes. The caller inlines multiplication after the wide conversion; MT7 pins its home cost.",
   "checks": [
     {
       "in_func": "mvp_#_twice",
       "return_convention": 3,
       "expect_any": [
-        ":\tfunc\ti64, i64, p:runtime, i64:%p1",
-        ":\tfunc\ti64, p:runtime, i64:%p1"
+        ":\tfunc\ti64, i64, p:runtime, i64:arg0",
+        ":\tfunc\ti64, p:runtime, i64:arg0"
       ],
       "forbid": [
-        "_scalar_home",
-        "lambda_item_adopt_scalar_home"
+        "call\t{{p}}, box_int64_value,"
+      ],
+      "expect": [
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "mulo\t"
       ]
     },
     {
       "in_func": "main",
-      "expect_seq": [
-        {
-          "pattern": "call\tfn_int64_p"
-        },
-        {
-          "pattern": "call\tmvp_{{n}}_twice_dpb_"
-        }
+      "expect": [
+        "call\t{{p}}, fn_int64,",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "mulo\t"
       ],
       "count": {
-        "call\tfn_int64_p": 1
+        "call\t{{p}}, fn_int64,": 1
       },
-      "expect": [
-        "call\tmvp_{{n}}_twice_dpb_"
-      ],
       "forbid": [
-        "lambda_item_adopt_scalar_home",
-        "box_int64_result_or_error"
-      ]
-    },
-    {
-      "in_func": "main",
-      "return_convention": 3,
-      "expect": [
-        "call\tmvp_{{n}}_twice_dpb_"
-      ],
-      "forbid": [
-        "lambda_item_adopt_scalar_home"
+        "call\tmvp_{{n}}_twice_dp"
       ]
     }
   ]

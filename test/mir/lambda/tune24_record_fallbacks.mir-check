@@ -1,14 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3, D6.3.4, D7.3.1: unsupported record-result ABIs retain boxed returns; inferred extra fields use descriptor construction without losing either field.",
+  "description": "D4.2.5/D6.2.1: MVP returns owned record pointers rather than Full aggregate-result pseudo-locals. Exact records allocate once and fill native slots; extra fields retain descriptor fill and return admission.",
   "checks": [
     {
       "in_func": "mvp_#_extra",
-      "forbid": [
-        "_record_result0"
-      ],
       "expect": [
-        "call\t{{p}}, map_alloc_for_type,"
+        "call\t{{p}}, map_alloc_for_type,",
+        "call\t{{p}}, lambda_type_check_lazy,"
       ],
       "count": {
         "call\t{{p}}, set_field_value,": 2
@@ -16,24 +14,39 @@
     },
     {
       "in_func": "mvp_#_floating",
+      "expect": [
+        "call\t{{p}}, map_alloc_for_type,"
+      ],
       "forbid": [
-        "_record_result0"
-      ]
+        "call\t{{p}}, map_fill,"
+      ],
+      "count": {
+        "call\t{{p}}, map_alloc_for_type,": 1
+      }
     },
     {
       "in_func": "mvp_#_local",
+      "expect": [
+        "call\t{{p}}, map_alloc_for_type,"
+      ],
       "forbid": [
-        "_record_result0"
-      ]
+        "call\t{{p}}, map_fill,"
+      ],
+      "count": {
+        "call\t{{p}}, map_alloc_for_type,": 1
+      }
     },
     {
       "in_func": "mvp_#_empty_args",
       "expect": [
-        "_record_result0"
+        "call\t{{p}}, map_alloc_for_type,"
       ],
       "forbid": [
-        "call\tmap_fill"
-      ]
+        "call\t{{p}}, map_fill,"
+      ],
+      "count": {
+        "call\t{{p}}, map_alloc_for_type,": 1
+      }
     }
   ]
 }

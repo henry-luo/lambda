@@ -1,16 +1,19 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-3: the finite positive-subtraction branch proves both parameter lanes once before it emits raw integer comparison and subtraction; the generic sibling remains available for sentinel lanes. Tune27 T27-9: the int53 band test is one shared 64-bit `add v, INT53_MAX` / `ule t, 2 * INT53_MAX` pair instead of GE/LE/AND.",
+  "description": "S4.1.2/D2.3.4: MVP guards finite subtraction once, emits a native subtract/count loop, and retains checked arithmetic for invalid initial lanes.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_divide",
       "expect": [
-        "gts\t{{r}}, %p2, 0",
-        "add\t{{r}}, %p1, 9007199254740991",
-        "add\t{{r}}, %p2, 9007199254740991",
-        "ge\t{{r}}, %p1, %p2",
-        "sub\t{{r}}, %p1, %p2",
-        "add\t{{r}},"
+        "\tsub\t",
+        "\tbge\t",
+        "\tblt\t",
+        "9007199254740991",
+        "18014398509481982"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_sub,",
+        "call\t{{p}}, fn_add,"
       ]
     }
   ]

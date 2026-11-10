@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "S12.1.2v3/D2.2.2: MVP statement-bodied functions retain recursive construction, native dispatch and fused string concatenation.",
+  "description": "S12.1.2v3/D2.2.2: statement-bodied functions retain direct recursive calls, native exclusive dispatch and fused string concatenation. Prototype suffixes and branch direction are physical choices.",
   "checks": [
     {
       "in_func": "mvp_#_make_tree",
       "expect": [
         "call\t{{p}}, map_alloc_for_type,",
-        "call\tmvp_{{n}}_make_tree_dp,"
+        "call\t{{p}}, mvp_{{n}}_make_tree,"
       ],
       "forbid": [
         "call\t{{p}}, fn_call_into,"
@@ -15,7 +15,13 @@
     {
       "in_func": "mvp_#_choose",
       "expect": [
-        "bne"
+        "beq\t"
+      ],
+      "count": {
+        "\tbeq\t": 3
+      },
+      "forbid": [
+        "call\t{{p}}, fn_eq_value,"
       ]
     },
     {

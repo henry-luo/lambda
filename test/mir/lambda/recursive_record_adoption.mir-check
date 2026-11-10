@@ -1,24 +1,46 @@
 {
   "schema_version": 1,
-  "description": "Tune19 §11.5 / T20-6: a self-referential record contract (type Node = {val: int, next: Node?}) passes the adoption gate (mir_map_contract_storage_valid), so a function returning the literal under the declared contract lowers to direct allocation with inline field stores. The v33→v34 self-reference regression degraded `next` to ANY, refused the gate, and emitted map_with_tl + map_fill + a lambda_type_check per construction instead — the forbid list below is that regression's exact signature.",
+  "description": "D4.2.5: recursive declared records allocate their destination shape and fill native slots without generic fill or return validation. Two expanded recursive observations retain one checked member miss per source field.",
   "checks": [
     {
       "in_func": "mvp_#_build",
-      "expect_any": [
-        "call\t{{p}}, heap_calloc_class,",
-        "call\tmap_with_region"
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
       ],
+      "expect": [
+        "call\t{{p}}, map_alloc_for_type,"
+      ],
+      "count": {
+        "call\t{{p}}, map_alloc_for_type,": 1
+      },
       "forbid": [
-        "call\tmap_fill_",
-        "call\t{{p}}, map_with_tl,",
-        "call\tlambda_type_check_lazy"
+        "call\t{{p}}, map_fill,",
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     },
     {
       "in_func": "mvp_#_total",
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:data}})"
+        }
+      ],
       "count": {
-        "call\tfn_member_by_id": {"max": 1}
-      }
+        "call\t{{p}}, fn_member,": {
+          "max": 4
+        }
+      },
+      "expect": [
+        "call\tmvp_{{n}}_total_dp"
+      ]
     }
   ]
 }

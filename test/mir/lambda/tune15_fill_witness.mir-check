@@ -1,16 +1,28 @@
 {
   "schema_version": 1,
-  "description": "Tune15 B1.3 preserves the packed integer witness inferred from an unannotated fill(n, int) binding.",
+  "description": "D4.3.3: the admitted fill carrier has a scaled integer read behind layout/bounds guards; one checked index miss remains reachable.",
   "checks": [
     {
       "in_func": "mvp_#_tune15_fill_witness",
+      "expect_seq": [
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:addr}})"
+        }
+      ],
       "expect": [
         "call\t{{p}}, fn_fill,",
-        "lsh\t{{r}}, {{r}}, 3",
-        "mov\t{{r}}, i64:({{r}})"
+        "i64:40("
       ],
+      "count": {
+        "call\t{{p}}, fn_index,": 1
+      },
       "forbid": [
-        "call\t{{p}}, fn_index,",
         "call\t{{p}}, item_at,"
       ]
     }

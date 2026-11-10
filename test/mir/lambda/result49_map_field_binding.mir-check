@@ -1,20 +1,72 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3, S9.3.1: an admitted pointer-array binding guards its live carrier and directly constructs the named record; a dynamic value retains field admission.",
+  "description": "D4.2.5/D4.3.3/S9.3.1: admitted arrays populate declared record slots directly after their snapshot image; dynamic arrays retain one element admission. Each path allocates one record without vararg fill.",
   "checks": [
     {
       "in_func": "mvp_#_from_global",
-      "expect": ["call\t{{p}}, heap_calloc_class,", "call\t{{p}}, lambda_type_check_lazy,"],
-      "forbid": ["call\tmap_fill_vp", "call\t{{p}}, map_with_type_tl,"]
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
+      ],
+      "expect": [
+        "call\t{{p}}, map_alloc_for_type,",
+        "call\t{{p}}, slot_image,"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_type_check_lazy,": 0,
+        "call\t{{p}}, map_alloc_for_type,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, map_fill,"
+      ]
     },
     {
       "in_func": "mvp_#_from_param",
-      "expect": ["call\t{{p}}, heap_calloc_class,"],
-      "forbid": ["call\tmap_fill_vp", "call\t{{p}}, map_with_type_tl,"]
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
+      ],
+      "expect": [
+        "call\t{{p}}, map_alloc_for_type,",
+        "call\t{{p}}, slot_image,"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_type_check_lazy,": 0,
+        "call\t{{p}}, map_alloc_for_type,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, map_fill,"
+      ]
     },
     {
       "in_func": "mvp_#_from_dynamic",
-      "expect": ["call\t{{p}}, lambda_type_check_lazy,", "call\tmap_fill_vp"]
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
+      ],
+      "expect": [
+        "call\t{{p}}, map_alloc_for_type,",
+        "call\t{{p}}, slot_image,"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_type_check_lazy,": 1,
+        "call\t{{p}}, map_alloc_for_type,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, map_fill,"
+      ]
     }
   ]
 }

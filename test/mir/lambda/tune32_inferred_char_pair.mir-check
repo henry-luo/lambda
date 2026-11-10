@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D7.3.1/S7.1.1v3: MVP compares allocation-free character words after guarded byte loads; Unicode and absence retain the checked leaf.",
+  "description": "D7.3.2/S7.1.1v3: inferred string/int pairs use guarded ASCII bytes and Unicode/absence words. Open arguments now receive that guarded fast alternative as well as checked generic indexing; a borrowed text invalidated to null retains only the generic path.",
   "checks": [
     {
       "in_func": "mvp_#_tune32_same_at",
@@ -17,11 +17,15 @@
     {
       "in_func": "mvp_#_tune32_open_at",
       "expect": [
-        "call\t{{p}}, fn_index,"
+        "call\t{{p}}, fn_index,",
+        "call\t{{p}}, fn_string_char_word,",
+        "u8:5("
       ],
-      "forbid": [
-        "call\t{{p}}, fn_string_char_word,"
-      ]
+      "forbid": [],
+      "count": {
+        "call\t{{p}}, fn_index,": 2,
+        "call\t{{p}}, fn_string_char_word,": 2
+      }
     },
     {
       "in_func": "mvp_#_tune32_borrowed_text",

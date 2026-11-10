@@ -1,15 +1,29 @@
 {
   "schema_version": 1,
-  "description": "D4.2.5: an admitted nullable record reads its fixed field directly, while a dynamic record still crosses the checked boundary before its layout is trusted.",
+  "description": "D4.2.5: exact and nullable record boundaries keep native pointer-typed packed reads; reordered dynamic input still reifies through admission.",
   "checks": [
     {
       "in_func": "mvp_#_read_node",
-      "expect": ["mov\t{{r}}, i64:16({{r}})"],
-      "forbid": ["call\t{{p}}, fn_member_by_id,"]
+      "forbid": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ],
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:data}})"
+        }
+      ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      }
     },
     {
       "in_func": "main",
-      "expect": ["call\t{{p}}, lambda_type_check_lazy,"]
+      "expect": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
     }
   ]
 }

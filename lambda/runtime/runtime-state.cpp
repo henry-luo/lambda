@@ -270,6 +270,10 @@ void runtime_context_publish_owners(Runtime* runtime, EvalContext* owner) {
 
 Item runtime_publish_result(EvalContext* owner, Item result) {
     if (!owner) return result;
+    // a C-reachable MIR entry transports wide payloads in the owner's slot;
+    // discharge that transient pair before publishing a retained Item (D6.2.1).
+    if (lambda_item_is_pending(result.item))
+        result = lambda_item_resolve_pending(result, owner->mir_companion_slot);
     owner->result = result;
     if (owner->heap) owner->heap->result_root = result.item;
     return result;

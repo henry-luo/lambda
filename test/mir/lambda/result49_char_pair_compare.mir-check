@@ -1,18 +1,22 @@
 {
   "schema_version": 1,
-  "description": "D7.3.1/S7.1.1v3: MVP compares allocation-free character words after guarded byte loads; Unicode and absence retain the checked leaf.",
+  "description": "S7.1.1v3: MVP compares two inline ASCII words; each operand has its own Unicode/absence word fallback. No character String allocation or boxed equality helper is used.",
   "checks": [
     {
       "in_func": "mvp_#_same_at",
       "count": {
         "u8:4(": 2,
         "u8:5(": 2,
-        "call\t{{p}}, fn_string_char_word,": 1
+        "call\t{{p}}, fn_string_char_word,": 2
       },
       "forbid": [
         "call\t{{p}}, fn_string_ascii_at,",
         "call\t{{p}}, fn_string_ord_at,",
-        "call\t{{p}}, fn_eq,"
+        "call\t{{p}}, fn_eq,",
+        "call\t{{p}}, fn_eq_value,"
+      ],
+      "expect": [
+        "\teq\t"
       ]
     }
   ]

@@ -1,21 +1,26 @@
 {
   "schema_version": 1,
-  "description": "Tune15 B2.2 passes a proven packed typed array through the direct native call ABI with an explicit witness mask.",
+  "description": "D4.3.3/D7.3.1: MVP inlines the typed-array consumer. The declared entry computes carrier guards in registers, with scaled native integer loads and a checked index miss; no hidden Full witness parameter is passed.",
   "checks": [
     {
       "in_func": "mvp_#_main",
       "expect": [
-        "call\tmvp_{{n}}_tune15_array_consumer_dp"
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "lsh\t{{r}}, {{r}}, 3",
+        "mov\t{{r}}, i64:({{r}})"
       ],
       "forbid": [
-        "call\tmvp_{{n}}_tune15_array_consumer_dp#_b"
+        "call\tmvp_{{n}}_tune15_array_consumer_dp",
+        "call\t{{p}}, fn_call_into,"
       ]
     },
     {
       "in_func": "mvp_#_tune15_array_consumer",
       "expect": [
-        "and\t{{r}}, _array_witness, 1",
-        "call\t{{p}}, lambda_type_check_lazy,"
+        "mov\t{{r}}, u32:(",
+        "i64:32(",
+        "i64:40(",
+        "call\t{{p}}, fn_index,"
       ]
     }
   ]

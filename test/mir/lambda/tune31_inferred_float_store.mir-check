@@ -1,15 +1,32 @@
 {
   "schema_version": 1,
-  "description": "Tune31 Phase II F / D4.3.3, S7.1.3v2: an inferred float ArrayNum parameter keeps its current raw carrier for the guarded success arm. The cold COW, bounds, and lane-miss arm remains the representation-agnostic setter; successful loop iterations write the F64 lane directly.",
+  "description": "D4.3.3/S9.1.2\u2013S9.1.3v3: an inferred carrier keeps guarded native floating arithmetic/stores, with one generic checked COW store for representation-changing misses.",
   "checks": [
     {
       "in_func": "mvp_#_update_first",
-      "expect": [
-        "array_num_set_cow_idx",
-        "d:({{r}}), {{r}}"
+      "expect_seq": [
+        {
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
+        },
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "dmov\td:({{r:addr}}), {{r}}"
+        }
       ],
+      "expect": [
+        "dadd\t",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ],
+      "count": {
+        "call\t{{p}}, index_assign_cow,": 1
+      },
       "forbid": [
-        "fn_array_set"
+        "call\t{{p}}, fn_array_set,"
       ]
     }
   ]

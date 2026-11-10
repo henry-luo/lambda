@@ -1238,7 +1238,28 @@ contracts. See the checkpoint above and `temp/mvp_emission_test_update/` for
 exact reports, reviewed budget deltas, source/binary identities and the remaining
 fixture inventory. No baseline or benchmark timing campaign was run.
 
-<a id="lr07-61"></a>**LR07-61 · Native MVP wide-scalar tail-forward fixture traps · OPEN (2026-11-10)**
+Follow-up qualification (2026-11-10, base `c2f1d2426` plus the recorded working
+diff): 148 of those 197 emission failures are resolved. The final private
+release controller passes **530/579**, comprising **235/284** MIR contracts,
+**284/284** semantic goldens and 11 other checks. The goldens are now mandatory;
+12 formerly absent files are supplied. All 284 also pass under each forced and
+seeded poison-GC mode. Named-register sequence matching retries ambiguous
+prefixes without leaking bindings or relaxing adjacency. Eight shared JS
+capture controls pass. Lambda size/frame ratchets remain 18/18 with unchanged
+budgets; optimization contracts remain 46/56 with the same ten failures.
+No new whole emission fixture fails. Remaining 49 MIR contracts stay red.
+
+The nullable-scalar conversion, wide-result publication, recursive-array effect
+classification and stale nullable/nested/borrowed record proofs are fixed by
+root cause. Unannotated record mutation succeeds, snapshots remain unchanged,
+and later typed crossings reject invalid data (D3.4.5, S11.4.10). The new record
+controls fail on the preceding host and pass on the fixed host. Current release
+SHA256 is `cb1fac1e77f2b7ac74163f3be0c0b1734446c9289148deca629a738af11ee8ef`.
+See [the follow-up implementation/qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-fixture-follow-up-2026-11-10)
+and `temp/mvp_fixture_followup/record-identities.json`. The shared executable and
+sibling/vendor source remain unchanged; no baseline or timing campaign ran.
+
+<a id="lr07-61"></a>**LR07-61 · Native MVP wide-scalar tail-forward fixture traps · PARTIAL (2026-11-10)**
 
 On the exact installed debug CLI identified in LR07-60,
 `LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=mvp LAMBDA_DISABLE_MIR_CACHE=1
@@ -1253,12 +1274,16 @@ change or workaround is made. Evidence:
 ratchet JSON/logs in the same directory. The engine was not rebuilt in this audit.
 
 
-Host qualification update (2026-11-10): the rebuilt release identified in the
-migration checkpoint executes this fixture and its size probe successfully.
-The installed debug host still traps during the paired budget observation.
-The underlying debug failure remains open; ABI sidecar mismatches on release
-are a separate test-contract issue. Evidence:
-`temp/mvp_emission_test_update/budget-actuals.json` and `final-ratchet.json`.
+Qualification correction (2026-11-10): the earlier release check credited
+exit zero and a passing size probe, but its value output was malformed.
+`runtime_publish_result` retained a transient pending wide Item without resolving
+its companion. It now resolves that pair before publication (D6.2.1). The
+fixture's new golden requires `5`; native JIT, MIR interpreter and both poison-GC
+modes pass on the release identified above. The size/frame ratchet still passes.
+The unchanged installed debug executable is not evidence about this fix;
+a rebuilt debug host is not qualified here. Keep that residue explicit.
+See [implementation/receipts](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-fixture-follow-up-2026-11-10)
+and `temp/mvp_fixture_followup/record-backend-parity.json`.
 
 <a id="lr07-62"></a>**LR07-62 · Native MVP immutable-array consumer fixture segfaults · OPEN (2026-11-10)**
 
@@ -1275,18 +1300,7 @@ provenance are unconfirmed. Evidence:
 `temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and
 `opt-results.json`; no fixture, golden or assertion is altered.
 
-<a id="lr07-63"></a>**LR07-63 · MVP rejects the recursive array-witness emission fixture · OPEN (2026-11-10)**
-
-During the LR07-60 unit audit,
-`LAMBDA_EXEC_BACKEND=jit ./lambda.exe run
-test/mir/lambda/tune31_recursive_array_witness.ls` exits 1 with E501 at line 4:
-`Lambda MIR MVP: inlined error effect was not planned`. The emission fixture
-expects successful compilation/execution. Planner and inlining effects must
-agree before publication (D8.2.5, D6.3.2). The failing compiler diagnostic is
-confirmed on the identified installed binary; the underlying proof/plan defect
-is not diagnosed. Evidence:
-`temp/mvp_optimization_coverage/emission-results.json`. Do not treat this as an
-obsolete sidecar selector or weaken effect verification to accept it.
+<a id="lr07-63"></a>LR07-63 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-63>).
 
 <a id="lr07-64"></a>**LR07-64 · MVP string-tail fixture misses its copy-work contract · OPEN (2026-11-10)**
 

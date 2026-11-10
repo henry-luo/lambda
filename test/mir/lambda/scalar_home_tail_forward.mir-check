@@ -1,24 +1,36 @@
 {
   "schema_version": 1,
-  "description": "v5: the `int` parameter uses the i64 lane, so it appears as `i64:`. Return convention 3 (RV1 shape 2): the body takes no caller home at all and hands the wide payload back on a second MIR result, so the obsolete adopt cluster is replaced by the pending-pair classify (ursh/sub/ubgt) and a two-lane `ret`.",
+  "description": "D6.2.1/D7.4.2: recursive wide results retain local scalar ownership and companion classification before return. The public self-call boundary still resolves a companion; its frame is budgeted separately.",
   "checks": [
     {
       "in_func": "mvp_#_accumulate",
       "return_convention": 3,
       "expect_any": [
-        ":\tfunc\ti64, i64, p:runtime, i64:%p1, i64:%p2",
-        ":\tfunc\ti64, p:runtime, i64:%p1, i64:%p2"
+        ":\tfunc\ti64, i64, p:runtime, i64:arg0, i64:arg1",
+        ":\tfunc\ti64, p:runtime, i64:arg0, i64:arg1"
       ],
       "forbid": [
-        "_scalar_home",
-        "lambda_item_adopt_scalar_home"
+        "call\t{{p}}, fn_call_into,"
       ],
       "expect_seq": [
-        { "pattern": "ursh\t" },
-        { "pattern": "sub\t" },
-        { "pattern": "ubgt\t" },
-        { "pattern": "mov\ti64:" },
-        { "pattern": "ret\t" }
+        {
+          "pattern": "ursh\t"
+        },
+        {
+          "pattern": "sub\t"
+        },
+        {
+          "pattern": "ubgt\t"
+        },
+        {
+          "pattern": "mov\ti64:"
+        },
+        {
+          "pattern": "ret\t"
+        }
+      ],
+      "expect": [
+        "call\t{{p}}, lambda_item_adopt_scalar_home,"
       ]
     }
   ]

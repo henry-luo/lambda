@@ -9,8 +9,8 @@
       ],
       "forbid": [
         "call\t{{p}}, fn_add,",
-        "call\tmvp_{{n}}_tune15_add_dp#_b",
-        "call\tmvp_{{n}}_tune15_add_dp#"
+        "call\t{{p}}, fn_call_into,",
+        "call\tmvp_{{n}}_tune15_add_dp"
       ]
     }
   ]

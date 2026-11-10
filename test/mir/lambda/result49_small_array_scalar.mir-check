@@ -1,9 +1,27 @@
 {
   "schema_version": 1,
-  "description": "S9.1.2, D6.2, D8.2.5: fixed reads of a private short float[] stay in lanes; escaping and absent reads retain materialized arrays.",
+  "description": "D8.2.6/D6.2.1: a nonescaping exact local array should scalarize without any MVP constructor; escaping and absent-read controls retain a primitive constructor. The first group remains a missing-optimization control until MVP implements scalarization.",
   "checks": [
-    {"in_func": "mvp_#_fixed_reads", "forbid": ["call\t{{p}}, array_float_new,", "call\t{{p}}, array_num_new_uninit,"]},
-    {"in_func": "mvp_#_escape", "expect": ["call\t{{p}}, array_num_new_uninit,"]},
-    {"in_func": "mvp_#_absent_read", "expect": ["call\t{{p}}, array_num_new_uninit,"]}
+    {
+      "in_func": "mvp_#_fixed_reads",
+      "forbid": [
+        "call\t{{p}}, array_float_new,",
+        "call\t{{p}}, array_num_new_uninit,",
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "call\t{{p}}, array_num_new,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_escape",
+      "expect": [
+        "call\t{{p}}, lambda_fill_primitive_bits,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_absent_read",
+      "expect": [
+        "call\t{{p}}, lambda_fill_primitive_bits,"
+      ]
+    }
   ]
 }

@@ -1,17 +1,35 @@
 {
   "schema_version": 1,
-  "description": "D5.4.4 / D6.3.1: a direct packed-field write reloads its data zone after a collecting RHS, with the owner rooted across the call; bool stores use one byte.",
+  "description": "D5.4.4/D6.3.1: the collecting RHS is inlined with the record in a precise root. Only after allocation/reload does MVP obtain the data pointer and store the int and one-byte bool; checked COW misses remain.",
   "checks": [
     {
       "in_func": "mvp_#_update",
       "expect_seq": [
-        { "pattern": "mov\ti64:({{r}}), %p1" },
-        { "pattern": "call\tmvp_{{n}}_computed_dp" },
-        { "pattern": "mov\t{{r}}, i64:16({{r}})" },
-        { "pattern": "mov\ti64:({{r}}), {{r}}" }
+        {
+          "pattern": "mov\ti64:({{r:root}}), {{r}}"
+        },
+        {
+          "pattern": "call\t{{p}}, array_num_new,"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:root}})"
+        },
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
       ],
-      "expect": ["mov\tu8:8({{r}}), {{r}}"],
-      "forbid": ["call\tlambda_map_set_checked"]
+      "expect": [
+        "mov\tu8:8({{r}}), {{r}}"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_map_set_checked,": 2
+      },
+      "forbid": [
+        "call\tmvp_{{n}}_computed_dp"
+      ]
     }
   ]
 }

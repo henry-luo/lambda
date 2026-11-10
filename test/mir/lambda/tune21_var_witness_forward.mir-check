@@ -1,28 +1,40 @@
 {
   "schema_version": 1,
-  "description": "T21-2d / Tune31 T31-1: an inferred witness may reach a self-forwarding var raw entry, whose representation-agnostic COW setter preserves widening and boxed-wrapper fallback without promoting inference to a declared contract (D4.2.1, D4.3.3). LR07-28/D4.3.3 (2026-10-28): an inferred bool Array has no element tag to guard after unknown var stores. set_row therefore keeps fn_array_set on its boxed path, without inventing a bool[] contract; place retains the numeric taken-array witness.",
+  "description": "D4.3.3/S9.1.3v3: inferred var owners keep guarded native lanes and a representation-agnostic checked COW miss. Erased stores may widen, so they must not acquire a declared array contract.",
   "checks": [
     {
       "in_func": "mvp_#_set_row",
       "expect": [
-        "call\t{{p}}, fn_array_set,"
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, lambda_report_boundary_failure,",
+        "mov\tu8:({{r}}), {{r}}",
+        "and\t{{r}}, {{r}}, 4294979584"
       ],
       "forbid": [
-        "call\t{{p}}, lambda_array_set_checked_inplace,",
-        "call\t{{p}}, index_assign_cow,"
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_array_set_checked_inplace,"
       ]
     },
     {
       "in_func": "mvp_#_place",
       "expect": [
-        "call\t{{p}}, array_num_set_cow_idx,"
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_array_set_checked_inplace,"
       ]
     },
     {
       "in_func": "mvp_#_widen",
       "forbid": [
-        "call\t{{p}}, lambda_array_set_checked_inplace,",
-        "call\t{{p}}, index_assign_cow,"
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_array_set_checked_inplace,"
+      ],
+      "expect": [
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
       ]
     }
   ]

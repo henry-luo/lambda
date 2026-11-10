@@ -1,17 +1,36 @@
 {
   "schema_version": 1,
-  "description": "Tune31 Phase II F / S7.1.3v2: the inferred witness adds only a guarded native float success arm. Null preserves the generic setter and an out-of-range float store retains array_num_set_cow_idx for its checked miss.",
+  "description": "D4.3.3/S7.1.3v2: inferred stores retain checked representation-changing and out-of-range arms; float writes also retain a guarded native lane.",
   "checks": [
     {
       "in_func": "mvp_#_write_null",
       "expect": [
-        "fn_array_set"
-      ]
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ],
+      "count": {
+        "call\t{{p}}, index_assign_cow,": 1
+      }
     },
     {
       "in_func": "mvp_#_write_oob",
+      "expect_seq": [
+        {
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
+        },
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "dmov\td:({{r:addr}}), {{r}}"
+        }
+      ],
       "expect": [
-        "array_num_set_cow_idx"
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
       ]
     }
   ]

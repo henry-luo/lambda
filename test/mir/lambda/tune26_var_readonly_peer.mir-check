@@ -1,22 +1,34 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-2: a var float[] destination keeps its checked COW store, while a distinct readonly float[] peer receives the loop's dense extent proof and raw float load. 2026-09-13: the var destination's checked COW store is now array_num_set_cow_idx (CW32v2); it COW-prepares at operation entry and still returns ItemError, so the checked path this fixture pins is the same boundary under its current name. S9.1.3/LR12-33 (2026-10-28): src may alias dst. Its entry snapshot and the borrowed root detach invalidate the old layout proof, so the checked miss now uses lambda_array_set_checked_item; the dense peer read proof remains.",
+  "description": "S9.1.3v3/D4.3.3: MVP proves the dense peer lane, performs scaled float loads/stores behind native uniqueness guards, and retains one canonical checked setter for misses.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_var_readonly_peer",
       "expect_seq": [
-        "ge\t{{r}}, %p3, -2147483648",
-        "le\t{{r}}, %p3, 2147483647",
-        "ge\t{{r}}, {{r}}, {{r}}",
-        "bt\tL",
-        "lsh\t{{r}}, {{r}}, 3",
-        "dmov\t{{r}}, d:({{r}})"
+        {
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
+        },
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:address}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "dmov\t{{r}}, d:({{r:address}})"
+        }
       ],
       "expect": [
-        "call\tcow_mark_shared",
-        "call\tcow_prepare_write",
-        "call\tlambda_array_set_checked_item"
-      ]
+        "dmov\td:(",
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 1,
+        "and\t{{r}}, {{r}}, 4294979584": {
+          "max": 4
+        }
+      }
     }
   ]
 }

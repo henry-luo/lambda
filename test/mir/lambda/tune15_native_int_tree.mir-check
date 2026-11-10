@@ -1,18 +1,23 @@
 {
   "schema_version": 1,
-  "description": "Tune15 F1 keeps a closed integer arithmetic tree native through the float boundary.",
+  "description": "D2.3.4\u2013D2.3.5: closed integer operands prove the arithmetic tree finite, so MVP uses plain multiply, one integer-to-double conversion and native floating division.",
   "checks": [
     {
       "in_func": "mvp_#_tune15_integer_tree",
       "expect": [
-        "mulo\t{{r}}, {{r}}, {{r}}",
+        "mul\t{{r}}, {{r}}, {{r}}",
+        "i2d\t",
         "ddiv\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
         "call\t{{p}}, fn_add,",
         "call\t{{p}}, fn_mul,",
-        "call\t{{p}}, fn_div,"
-      ]
+        "call\t{{p}}, fn_div,",
+        "call\t{{p}}, lambda_int_lane_mul_slow,"
+      ],
+      "count": {
+        "\ti2d\t": 1
+      }
     }
   ]
 }

@@ -1,7 +1,18 @@
 {
   "schema_version": 1,
-  "description": "D2.2.2: unchanged integer equality runs use a bounded exclusive dispatch; rebinding and duplicate predicates preserve their original effects.",
+  "description": "D2.2.2/S9: MVP dispatches four distinct integer keys with direct equality branches; rebindings, duplicate keys and array snapshots remain semantic controls.",
   "checks": [
-    {"in_func": "mvp_#_choose", "expect": ["bne"]}
+    {
+      "in_func": "mvp_#_choose",
+      "expect": [
+        "beq\t"
+      ],
+      "count": {
+        "\tbeq\t": 4
+      },
+      "forbid": [
+        "call\t{{p}}, fn_eq_value,"
+      ]
+    }
   ]
 }

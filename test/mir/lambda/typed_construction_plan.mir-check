@@ -1,5 +1,27 @@
 {
   "schema_version": 1,
-  "description": "D4.2.5/S7.7.1: fresh recursive records use the declared layout, with staged dynamic field admission preserving later initializer effects.",
-  "checks": [{"in_func": "*", "expect": ["call\t{{p}}, map_with_type_tl,", "call\t{{p}}, lambda_type_check_lazy,"]}]
+  "description": "D4.2.5/S7.7.2v2/S9.1.2\u2013S9.1.3v3: destination record construction allocates the declared shape and fills native slots. Dynamic members retain checked admission and transactional store failures; no retired type-list constructor is used.",
+  "checks": [
+    {
+      "in_func": "mvp_#_build",
+      "expect_seq": [
+        "call\t{{p}}, map_alloc_for_type,",
+        "p:16(",
+        "mov\ti64:({{r}}), {{r}}",
+        "mov\ti64:8({{r}}), {{r}}"
+      ],
+      "forbid": [
+        "call\t{{p}}, map_fill,",
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_main",
+      "expect": [
+        "call\t{{p}}, lambda_type_check_lazy,",
+        "call\t{{p}}, lambda_map_set_checked,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ]
+    }
+  ]
 }

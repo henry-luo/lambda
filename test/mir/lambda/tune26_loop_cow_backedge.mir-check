@@ -1,11 +1,27 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-4: a plain snapshot late in a loop premarks its outer root before the earlier var call is emitted, preserving COW preparation on every backedge under S9.1.3 and S9.2.2.",
+  "description": "S9.1.2\u2013S9.1.3v3/D5.4.4: MVP inlines the var update and plain snapshot reader. The backedge retains native uniqueness guards and the snapshot share-mark; checked stores keep their failure boundary.",
   "checks": [
     {
       "in_func": "mvp_#_main",
       "expect_seq": [
-        "call\t{{p}}, cow_prepare_write,",
+        {
+          "pattern": "mov\t{{r:flags}}, u8:4({{r:owner}})"
+        },
+        {
+          "pattern": "or\t{{r:marked}}, {{r:flags}}, 1"
+        },
+        {
+          "pattern": "mov\tu8:4({{r:owner}}), {{r:marked}}"
+        }
+      ],
+      "expect": [
+        "and\t{{r}}, {{r}}, 4294979584",
+        "dmov\td:(",
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ],
+      "forbid": [
         "call\tmvp_{{n}}_tune26_loop_cow_add_dp",
         "call\tmvp_{{n}}_tune26_loop_cow_snapshot_dp"
       ]

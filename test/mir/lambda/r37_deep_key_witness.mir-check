@@ -1,15 +1,28 @@
 {
   "schema_version": 1,
-  "description": "Result37 (paraffins 2.35x, T21-2a window): the call-site typer's initializer-chain guard (was depth 4) typed `nc2 = remain - nc1` with `remain = m - nc1`, `m = n - 1` as ANY, and `half = shr(m, 1)` as ANY because shr's registry success type is `any` although its C return is a raw int64; either made the subscript a dynamic key and withheld the inferred ArrayNum witness, so the whole body indexed boxed. Both keys now type INT and `count` keeps its `_array_witness` parameter and lane reads.",
+  "description": "D4.3.3/D2.3.4: deep local key chains retain native integer arithmetic and scaled packed reads with carrier-derived layout witnesses. The checked sibling keeps at most four index misses; there is no hidden Full witness operand.",
   "checks": [
     {
       "in_func": "mvp_#_count",
-      "expect_any": [
-        "_array_witness"
-      ],
       "forbid": [
-        "call\tfn_index_p"
-      ]
+        "call\t{{p}}, fn_mul,",
+        "call\t{{p}}, fn_add,"
+      ],
+      "expect_seq": [
+        "i64:32(",
+        "lsh\t{{r:offset}}, {{r}}, 3",
+        "add\t{{r:address}}, {{r}}, {{r:offset}}",
+        "mov\t{{r}}, i64:({{r:address}})"
+      ],
+      "expect": [
+        "rsh\t",
+        "mulo\t"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": {
+          "max": 4
+        }
+      }
     }
   ]
 }

@@ -4,17 +4,34 @@
   "checks": [
     {
       "in_func": "mvp_#_fixed_result",
-      "expect": ["dadd", "dsub", "dmul"],
-      "count": {"blt": 2, "call\t{{p}}, fn_index,": 0},
-      "forbid": ["call\t{{p}}, array_float_new,", "call\t{{p}}, array_num_new_uninit,"]
+      "expect": [
+        "dadd",
+        "dsub",
+        "dmul"
+      ],
+      "count": {
+        "blt": 2,
+        "call\t{{p}}, fn_index,": 0
+      },
+      "forbid": [
+        "call\t{{p}}, array_float_new,",
+        "call\t{{p}}, array_num_new_uninit,",
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "call\t{{p}}, array_num_new,"
+      ]
     },
     {
       "in_func": "mvp_#_escaping_result",
-      "expect": ["call\t_vector_mix"]
+      "expect": [
+        "call\tmvp_{{n}}_vector_mix_dp"
+      ]
     },
     {
       "in_func": "mvp_#_rebound_result",
-      "expect": ["call\t_vector_mix", "call\t{{p}}, array_num_new_uninit,"]
+      "expect": [
+        "call\tmvp_{{n}}_vector_mix_dp",
+        "call\t{{p}}, lambda_fill_primitive_bits,"
+      ]
     }
   ]
 }

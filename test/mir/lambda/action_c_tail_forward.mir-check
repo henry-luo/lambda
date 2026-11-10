@@ -5,20 +5,22 @@
     {
       "return_convention": 3,
       "in_func": "mvp_#_forward",
-      "expect": ["ret\t"],
+      "expect": [
+        "ret\t"
+      ],
       "expect_any": [
-        "func\ti64, i64, p:runtime, i64:%p1",
-        "func\ti64, p:runtime, i64:%p1"
+        "func\ti64, i64, p:runtime, i64:arg0",
+        "func\ti64, p:runtime, i64:arg0"
       ],
       "forbid_if": {
-        "func\ti64, i64, p:runtime, i64:%p1": [
+        "func\ti64, i64, p:runtime, i64:arg0": [
           "lambda_item_resolve_pending"
         ]
       }
     },
     {
       "return_convention": 3,
-      "in_func": "mvp_#_forward",
+      "in_func": "main",
       "expect": [
         "lambda_item_resolve_pending"
       ]

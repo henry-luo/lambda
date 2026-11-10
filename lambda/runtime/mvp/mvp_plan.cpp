@@ -551,15 +551,17 @@ static bool binding_var_borrow(LambdaMvpModule* m, MvpBinding* binding,
                 return true;
             }
         }
+        // a projected var argument can invalidate the root's transitive proof.
         for (int j = 0; j < mvp_call_argument_count(call) && param; j++, param = (AstNamedNode*)param->next) {
             AstNode* arg = mvp_call_argument(call, j);
-            if (!lambda_type_param(param->type)->is_var_param || mvp_local_binding(m, arg) != binding) continue;
+            if (!lambda_type_param(param->type)->is_var_param || mvp_place_root(m, arg) != binding) continue;
             if (open_only && !mvp_open_value_contract(mvp_contract(param))) continue;
             Type* normal = preserved ? lambda_type_remove_error(m->tp->pool, mvp_contract(param)) : NULL;
             // this optional query preserves only a normal value domain across
             // invariant primitive-array borrows. Storage/escape callers omit
             // it and retain the stricter no-borrow proof (D4.3.3, S9.1.3).
-            if (preserved && !lambda_type_accepts_error(mvp_contract(param)) && mvp_array_element(preserved) &&
+            if (preserved && mvp_local_binding(m, arg) == binding &&
+                    !lambda_type_accepts_error(mvp_contract(param)) && mvp_array_element(preserved) &&
                     mvp_array_element(normal) == mvp_array_element(preserved) &&
                     lambda_array_contract_is_plain(normal) && mvp_boundary_proven(normal, preserved)) continue;
             return true;
@@ -593,8 +595,9 @@ static bool binding_reassigned(LambdaMvpModule* m, MvpBinding* binding, bool ele
     for (AstNodeId i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         if (whole && node->node_type == AST_NODE_ASSIGN_STAM && ((AstAssignStamNode*)node)->target_entry == binding->entry) return true;
+        // nested writes replace the COW spine and can revoke its record proof.
         if (elements && (node->node_type == AST_NODE_INDEX_ASSIGN_STAM || node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) &&
-                mvp_local_binding(m, ((AstAssignStamNode*)node)->object) == binding) return true;
+                mvp_place_root(m, ((AstAssignStamNode*)node)->object) == binding) return true;
     }
     return false;
 }
@@ -3402,13 +3405,16 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 b->contract = &TYPE_ANY; b->rep = VALUE_REP_ITEM;
             }
             else if (b->entry->is_mutable &&
-                    normal_domain(m, b->contract)->type_id == LMD_TYPE_MAP) {
+                    lambda_type_nonnull_map_contract(normal_domain(m, b->contract))) {
                 // reset the successful record arm too: Record | Error must not
                 // retain a physical layout proof across open field writes.
                 // Typed calls re-establish their prefix (D2.4.3, S12.2.1v3).
                 // an open var parameter can replace the owner with another kind;
                 // retain Item transport across write-back, not the initial map lane (S12.2.1v3).
-                b->contract = lambda_type_has_proven_error(b->contract) || binding_var_borrow(m, b, NULL, true)
+                // nullable records need the same reset; their union tag is
+                // not MAP and absence must retain Item transport (S11.4.10).
+                b->contract = lambda_type_has_proven_error(b->contract) || lambda_type_accepts_null(b->contract) ||
+                    binding_var_borrow(m, b, NULL, true)
                     ? &TYPE_ANY : &TYPE_MAP;
                 b->rep = mvp_rep(b->contract);
             }

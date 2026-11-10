@@ -1,19 +1,24 @@
 {
   "schema_version": 1,
-  "description": "D2.3.4-D2.3.5: a non-error native recursive result remains in its IntLane when it becomes the argument of the outer tail-call backedge.",
+  "description": "D7.3.2/D8.2.6: the non-tail inner recursion uses a direct native integer call while outer tail edges loop on staged native arguments. No Full tail-iteration counter, scalar boxing or number frame is needed.",
   "checks": [
     {
       "in_func": "mvp_#_nested_count",
       "expect": [
         "call\tmvp_{{n}}_nested_count_dp",
-        "add\t{{r}}, {{r}}, 1",
-        "ble\t"
+        "add\t",
+        "sub\t",
+        "bne\t",
+        "jmp\t"
       ],
       "forbid": [
         "call\t{{p}}, int2it_lane,",
         "call\t{{p}}, lambda_item_to_int_lane_c,",
         "call\t{{p}}, lambda_side_stack_ensure_for,"
-      ]
+      ],
+      "count": {
+        "call\tmvp_{{n}}_nested_count_dp": 1
+      }
     }
   ]
 }

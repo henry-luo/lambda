@@ -1,22 +1,53 @@
 {
   "schema_version": 1,
-  "description": "D4.2.1/D4.2.3/S7.1.3v2: a local nullable int lane checks the null sentinel before a trusted record write, while an unproven indexed value retains the checked setter.",
+  "description": "D4.2.5/S7.1.1v3: MVP stores the packed live integer lane after borrowed observations. Nullable producers retain full-width absence tests and checked map publication rather than Full in-place adapters.",
   "checks": [
     {
       "in_func": "mvp_#_advance",
-      "expect": ["mov\ti64:16({{r}}), {{r}}"],
-      "forbid": ["call\tlambda_map_set_checked_inplace_p"]
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
+      ],
+      "count": {
+        "call\t{{p}}, lambda_map_set_checked,": 2
+      },
+      "forbid": [
+        "call\tmvp_{{n}}_read_position_dp"
+      ]
     },
     {
       "in_func": "mvp_#_possibly_null",
-      "expect": ["call\t{{p}}, lambda_map_set_checked_inplace,"]
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
+      ],
+      "expect": [
+        "call\t{{p}}, lambda_map_set_checked,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ]
     },
     {
       "in_func": "mvp_#_possibly_null_local",
-      "expect": ["beq\t", "72057594037927936",
-                 "mov\ti64:({{r}}), {{r}}",
-                 "call\t{{p}}, lambda_type_check_lazy,"],
-      "forbid": ["call\tlambda_map_set_checked_inplace_p"]
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:data}}), {{r}}"
+        }
+      ],
+      "expect": [
+        "beq\tL{{n}}, {{r}}, 72057594037927936",
+        "call\t{{p}}, lambda_map_set_checked,"
+      ]
     }
   ]
 }

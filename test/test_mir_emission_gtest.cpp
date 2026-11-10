@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "test_mir_check_helpers.hpp"
+#include "test_lambda_helpers.hpp"
 #include "../lambda/mir/mir.h"
 #include "../lambda/mir/mir-gen.h"
 #include "lib/file.h"
@@ -36,6 +37,18 @@ TEST_P(LambdaMirEmissionTest, MatchesMirCheck) {
     ASSERT_TRUE(mir_check::read_file_text(fixture.sidecar_path, &unused))
         << "fixture " << fixture.script_path << " has no sidecar at " << fixture.sidecar_path;
     mir_check::run_fixture(fixture.script_path, fixture.sidecar_path, mir_check::LANG_LAMBDA);
+}
+
+TEST_P(LambdaMirEmissionTest, MatchesGolden) {
+    const auto& fixture = GetParam();
+    char golden[1024];
+    int size = snprintf(golden, sizeof(golden), "%.*s.txt",
+        (int)fixture.script_path.size() - 3, fixture.script_path.c_str());
+    ASSERT_GT(size, 0);
+    ASSERT_LT((size_t)size, sizeof(golden));
+    // MIR patterns and stress parity alone cannot reject a consistently wrong value.
+    test_lambda_script_against_file(fixture.script_path.c_str(), golden,
+        mir_check::script_is_procedural(fixture.script_path), "jit", "mvp", mir_check::executable());
 }
 
 static std::string fixture_name(const ::testing::TestParamInfo<mir_check::Fixture>& info) {
@@ -85,6 +98,36 @@ TEST(MirCheckMatcher, HelperChecksIgnorePrototypeSpellingButRequireTheCallee) {
         "call\t{{p}}, helper, {{r}}, 7"));
     EXPECT_FALSE(mir_check::line_contains("\tcall\tp2, helper, %r0, 8",
         "call\t{{p}}, helper, {{r}}, 7"));
+}
+
+TEST(MirCheckMatcher, SequencesRetryPrefixesWithoutLeakingRegisterBindings) {
+    const mir_check::MirLine lines[] = {
+        {"\tlsh\t%r1, %r0, 3", 1}, {"\tadd\t%r2, %r3, %r1", 2},
+        {"\tmov\ti64:(%r2), %r4", 3},
+        {"\tlsh\t%r5, %r0, 3", 4}, {"\tadd\t%r6, %r3, %r5", 5},
+        {"\tmov\t%r7, i64:(%r6)", 6}
+    };
+    mir_check::SeqExpectation steps[] = {
+        {"lsh\t{{r:offset}}, {{r}}, 3", false},
+        {"add\t{{r:address}}, {{r}}, {{r:offset}}", true},
+        {"mov\t{{r}}, i64:({{r:address}})", true}
+    };
+    size_t positions[3], depth = 0;
+    bool exhausted = false;
+    EXPECT_TRUE(mir_check::match_sequence(lines, 6, steps, 3, positions, &depth, &exhausted));
+    EXPECT_EQ(depth, 3u);
+    EXPECT_EQ(positions[0], 3u);
+    EXPECT_FALSE(exhausted);
+    EXPECT_FALSE(mir_check::match_sequence(lines, 3, steps, 3, positions, &depth, &exhausted));
+    const mir_check::MirLine delayed[] = {
+        {"\tlsh\t%r5, %r0, 3", 1}, {"\tadd\t%r6, %r3, %r5", 2},
+        {"L1:", 3}, {"\tmov\t%r7, i64:(%r6)", 4}
+    };
+    EXPECT_FALSE(mir_check::match_sequence(delayed, 4, steps, 3, positions, &depth, &exhausted));
+    steps[2].next_line = false;
+    EXPECT_TRUE(mir_check::match_sequence(delayed, 4, steps, 3, positions, &depth, &exhausted));
+    steps[2].pattern = "mov\t{{r}}, i64:({{r:offset}})";
+    EXPECT_FALSE(mir_check::match_sequence(lines, 6, steps, 3, positions, &depth, &exhausted));
 }
 
 TEST(MvpMirAbi, OutcomeEntriesUseThePlatformCompanionTransport) {

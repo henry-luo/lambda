@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D2.4.3/S7.1.3v2: shrinking indices use the shared inclusive dense extent guard, with checked stores on a miss and invalidation across growth. Match comparison opcodes exactly: a scalar boxing blt is not an index lt.",
+  "description": "D2.4.3/S7.1.3v2: the shrinking loop keeps its shared native access region and checked growing/invalid alternatives. Integer induction uses raw add/sub with explicit int53 slow guards rather than Full ADDO.",
   "checks": [
     {
       "in_func": "mvp_#_reverse_span",
       "expect": [
-        "addo\t{{r}}, {{r}}, 1",
+        "add\t{{r}}, {{r}}, {{r}}",
+        "sub\t",
         "call\t{{p}}, lambda_array_set_checked_item,"
       ]
     },

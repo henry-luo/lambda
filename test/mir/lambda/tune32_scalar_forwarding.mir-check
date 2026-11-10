@@ -1,7 +1,32 @@
 {
   "schema_version": 1,
-  "description": "Tune32 T32-3: closed scalar forwarding reaches the native leaf consumer while escaped non-int calls retain boxed source semantics and row snapshots (D7.3.2, S9.1.2).",
+  "description": "D7.3.2/D2.3.5: MVP inlines closed scalar forwarding and compares native lanes. Unknown operand kinds retain their checked comparison sibling.",
   "checks": [
-    {"in_func": "mvp_#_tune32_scalar_forward", "expect": ["lt\t"], "forbid": ["call\tmvp_{{n}}_tune32_scalar_pick_dpb_", "call\t{{p}}, fn_lt,"]}
+    {
+      "in_func": "mvp_#_tune32_scalar_forward",
+      "expect": [
+        "lt\t"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_call_into,",
+        "call\tmvp_{{n}}_tune32_scalar_pick_dp",
+        "call\t{{p}}, fn_lt,"
+      ],
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, fn_lt,"
+      }
+    },
+    {
+      "in_func": "mvp_#_tune32_scalar_forward",
+      "expect": [
+        "call\t{{p}}, fn_lt,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_lt,": {
+          "max": 2
+        }
+      }
+    }
   ]
 }

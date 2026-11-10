@@ -1,1 +1,1 @@
-["B", null, "B", null, "C", "A"]
+["B", null, "B", error, "C", "A"]

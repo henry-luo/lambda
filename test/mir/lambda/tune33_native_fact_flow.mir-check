@@ -1,18 +1,19 @@
 {
   "schema_version": 1,
-  "description": "D2.3/D7.3.3: admitted strings keep native length and array reads, and forwarded string results reach existing join fusion. Open/error operands retain checked len.",
+  "description": "D2.3.4/D4.3.3/D7.3.3: strings retain native len and concatenation, while each erased array read keeps one checked fallback. Native integer-success arithmetic coexists with the polymorphic cold add; identity forwarding decodes string pointers without coercing other Items.",
   "checks": [
     {
       "in_func": "mvp_#_native_rows",
       "expect": [
-        "fn_len_s"
+        "fn_len_s",
+        "i64:32("
       ],
       "forbid": [
         "call\t{{p}}, fn_len_checked,"
       ],
       "count": {
         "call\t{{p}}, fn_index,": {
-          "max": 2
+          "max": 4
         }
       }
     },
@@ -33,14 +34,23 @@
     },
     {
       "in_func": "mvp_#_guarded_step",
-      "forbid": [
-        "call\t{{p}}, fn_add,"
+      "forbid": [],
+      "count": {
+        "call\t{{p}}, fn_add,": 1
+      },
+      "expect": [
+        "add\t",
+        "ubgt\t"
       ]
     },
     {
       "in_func": "mvp_#_string_key",
       "expect": [
-        "it2s"
+        "eq\t{{r}}, {{r}}, 13",
+        "and\t{{r}}, {{r}}, 72057594037927935"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_string,"
       ]
     }
   ]

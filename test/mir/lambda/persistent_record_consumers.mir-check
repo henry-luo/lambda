@@ -1,20 +1,66 @@
 {
   "schema_version": 1,
-  "description": "D4.2.5/S11.4.10: optional record roots use admitted field offsets with a checked null fallback; returned-record guards also recognize persistent prefixes.",
+  "description": "D3.4.5/D4.2.5/S11.4.10: enforced optional record writes retain native slots and checked misses. Unannotated direct/nested/borrowed mutation revokes the producer proof; later typed writes validate again. The golden also requires local mutation success and an unchanged COW snapshot.",
   "checks": [
     {
       "in_func": "mvp_#_set_optional",
-      "expect": ["mov\ti64:({{r}}), %p2", "call\tlambda_map_set_checked_inplace_p"],
-      "forbid": ["call\tfn_map_set_p"]
+      "expect": [
+        "mov\ti64:({{r}}), {{r}}",
+        "call\t{{p}}, lambda_map_set_checked,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_map_set,"
+      ]
     },
     {
       "in_func": "mvp_#_set_link",
-      "expect": ["mov\ti64:8({{r}}), {{r}}"],
-      "forbid": ["call\tfn_map_set_p"]
+      "expect": [
+        "mov\ti64:8({{r}}), {{r}}"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_map_set,"
+      ]
     },
     {
       "in_func": "mvp_#_set_dynamic",
-      "expect": ["call\tlambda_map_set_checked_inplace_p"]
+      "expect": [
+        "call\t{{p}}, lambda_map_set_checked,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_mutate_return",
+      "expect_seq": [
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, lambda_map_set_checked,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_mutate_return",
+      "in_range": {
+        "from": "call\t{{p}}, index_assign_cow,",
+        "to": "call\t{{p}}, lambda_map_set_checked,"
+      },
+      "forbid": [
+        "p:16("
+      ]
+    },
+    {
+      "in_func": "mvp_#_mutate_nested_return",
+      "expect_seq": [
+        "call\t{{p}}, cow_path_set_keys,",
+        "call\t{{p}}, fn_member_by_id,",
+        "call\t{{p}}, lambda_map_set_checked,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_mutate_borrowed_child",
+      "expect_seq": [
+        "call\t{{p}}, cow_path_borrow_keys,",
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, cow_path_set_keys,",
+        "call\t{{p}}, fn_member_by_id,",
+        "call\t{{p}}, lambda_map_set_checked,"
+      ]
     }
   ]
 }

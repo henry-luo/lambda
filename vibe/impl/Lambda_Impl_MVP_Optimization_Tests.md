@@ -4,6 +4,10 @@
 
 ## Current checkpoint
 
+- Follow-up at `c2f1d2426`: 148 of the 197 remaining legacy fixture
+  failures are resolved. The final controller has 235/284 passing emission
+  contracts and 284/284 passing semantic goldens in all three GC modes. See the
+  follow-up section below for root fixes, coverage and current qualification.
 - User requested migration of obsolete MIR optimization tests and new MVP
   emission coverage. The preceding audit is under
   `temp/mvp_optimization_coverage/coverage-report.md` (LR07-60).
@@ -19,8 +23,9 @@
 - Scope: explicit MVP function/callee selectors; reviewed helper/path
   assertions and frame budgets; robust telemetry controls; focused Python gate
   registration; small typed/untyped fixtures covering native paths and misses.
-- Runtime failures LR07-61/62/63 and copy-work failure LR07-64 remain genuine
-  failing controls unless a root cause is fixed. They are not migration excuses.
+- The follow-up fixes LR07-61 on release and LR07-63. LR07-62 and LR07-64
+  remain failing controls; the debug face of LR07-61 still needs qualification.
+  Missing tunings are not migration excuses.
 - Build private controllers/engine as needed, preserve shared `lambda.exe` and
   run unit gates only. No Lambda/Radiant baseline or timing campaign.
 - Implemented 548 explicit MVP selectors and 93 callee/wrapper updates. Added
@@ -55,7 +60,7 @@ Focused validation covers matcher contracts, Lambda emission and optimization
 units, the new gate/report adapter, Lambda frame budgets and selected JS matcher
 regressions. Broader suites run only if an implementation change requires them.
 
-## Delivered contracts and current results
+## Initial migration contracts and qualification
 
 The shared matcher keeps explicit MVP function namespaces and exact helper
 callees; ABI prototype suffixes are not optimization facts. It now has three
@@ -104,8 +109,9 @@ fixtures pass. These totals do not establish full corpus migration: remaining
 cases include Full-specific result/parameter/register assumptions, changed
 inlining and generic-path contracts, and missed MVP tunings. The remaining
 inventory is in `remaining-emission.json`; review each contract before changing
-it. LR07-63 still fails compilation, and LR07-62 still crashes the release host.
-LR07-61 remains a debug-host failure; the rebuilt release executes that probe.
+it. At that checkpoint LR07-63 still failed compilation, and LR07-62 crashed
+the release host. The apparent release success of LR07-61 checked only exit
+status; the follow-up golden exposed malformed value output and fixes it below.
 
 The ten optimization-contract failures remain: immutable array-consumer crash;
 borrowed numeric store helper; recursive union admission work; union cache-hit
@@ -124,6 +130,84 @@ No Lambda/Radiant baseline or benchmark timing campaign ran. The private split
 release build needed two Lambda-owned include dependencies exposed by the
 concurrent header split. No sibling implementation/header/test or vendor source
 was edited.
+
+## Remaining-fixture follow-up (2026-11-10)
+
+Starting HEAD: `c2f1d2426dcd8621db195c3d2293b9eafab90cf7`. Fresh private
+release/controller qualification reproduced the 197/284 fixture failures.
+Reviewed 156 contracts across result/parameter ABI, scalar homes, COW, numeric
+lanes, arrays, record fields, strings, predicates, bounds and effect guards.
+Native positive witnesses, checked misses and cost ceilings remain explicit;
+retired Full registers, trampoline names and constructor assumptions do not.
+The unresolved inventory includes both further contract review and real
+missing scalarization, native wide/compact lanes, builders, TCO and guard
+caching. No case is skipped or marked expected-failure.
+
+Every Lambda MIR fixture now also runs against a platform-aware `.txt` golden
+in the same controller. Twelve missing goldens are supplied. This closes the
+hole where a script could exit zero with a wrong value while its MIR patterns
+passed. Output corrections follow error propagation (S5.1.1v2–S5.1.2v2,
+S7.9.2v3), contract validation (S11.4.1v5) and frozen receiver observations
+(S9.1.2–S9.1.3v3). The persistent-record typed-boundary rejection stays intact;
+an additional observation requires the preceding unannotated write to succeed
+and its old COW snapshot to remain unchanged (D3.4.5, S11.4.10).
+
+Named MIR sequences retry ambiguous prefixes with independent capture sets.
+A store prefix cannot bind the registers needed by a later real load. Strict
+adjacency still applies; bounded search fails explicitly if exhausted. A
+positive/negative matcher unit covers retry, wrong-address/store rejection and
+label adjacency. Shared JS named-capture fixtures qualify the same matcher.
+The interval fixture also invokes its unbounded controls with `INT53_MAX` so
+closed-call constant specialization cannot erase their required slow paths.
+
+Compiler/runtime root fixes:
+
+- Nullable integer-to-float conversion retains absence; already-guarded
+  numeric operands use their present contract rather than duplicating guards.
+- Runtime result publication resolves a pending wide scalar with its MIR
+  companion before retaining the Item (D6.2.1). The earlier release exit-zero
+  observation did not validate its malformed result text; the golden now does.
+- Recursive inferred-array classification reads the current parameter proof,
+  with declared-contract fallback for imported formals. It now selects the
+  recursive extent proof without suppressing unplanned checked-store errors;
+  effect verification remains enforced (D6.3.2).
+- Mutable nullable records lose inferred layout proofs just like non-nullable
+  records. Nested writes and projected `var` arguments are audited through the
+  existing COW place-root helper. A primitive-array invariant borrow can
+  preserve the root domain only when it borrows that root directly. Later
+  typed crossings validate mutated records again (D3.4.5, S11.4.10).
+
+Qualification artifacts are under `temp/mvp_fixture_followup/`; source and
+controller identities are in `record-identities.json`. Final private release
+SHA256: `cb1fac1e77f2b7ac74163f3be0c0b1734446c9289148deca629a738af11ee8ef`.
+
+| Final unit gate | Result | Receipt |
+|---|---:|---|
+| Complete emission controller | 530/579 | `record-final-emission.json` |
+| MIR emission contracts | 235/284 | same report |
+| Semantic goldens | 284/284 | same report |
+| Forced GC + poison, all goldens | 284/284 | `record-forced-goldens.json` |
+| Seeded GC + poison, all goldens | 284/284 | `record-seeded-goldens.json` |
+| Optimization contracts | 46/56 | `record-final-opt.json` |
+| Lambda emission/frame ratchets + config | 18/18 | `record-final-ratchet.json` |
+| Shared JS named-capture regressions | 8/8 | `final-js-regressions.json` |
+| MIR interpreter root-fix goldens + record T0 parity | 5/5 | `record-backend-parity.json` |
+
+All 49 remaining emission failures were already among the 197: 148 original
+failures are resolved and no previously passing whole fixture regressed. The
+ten optimization failures are unchanged. Budget objects are unchanged. The
+strengthened record MIR/golden controls both reject the preceding engine and
+pass the fixed engine (`record-negative-control.json`, `record-contracts.json`).
+The four nullable/wide/recursive/record fix goldens match under native JIT and
+the MIR interpreter; the record golden also matches T0. Imported scalar flow
+passes in the complete golden population. Remaining fixture names are recorded
+in `remaining-record-final.json`.
+
+The shared `lambda.exe` remains unchanged. No sibling/vendor source edits,
+Lambda/Radiant baseline, Python aggregate, timing campaign or commit occur in
+this follow-up. Debug and non-macOS hosts are not requalified by these release
+unit results. Full corpus migration remains incomplete until the retained
+emission and optimization failures are fixed.
 
 ## Budget review (D8.6.1)
 

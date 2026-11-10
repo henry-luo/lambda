@@ -1,24 +1,44 @@
 {
   "schema_version": 1,
-  "description": "P4 / D3.2.1 / S7.1.1v3: a byte-packed bool only restricts its own slot; aligned fields of the same named record read directly, and null receivers yield ItemNull. Nullable bool fields and misaligned float slots retain their checked access path.",
+  "description": "D4.2.5/S7.1.1v3: admitted native field lanes retain nullable receiver branches and one checked named-field fallback per read, including optional and unaligned slots.",
   "checks": [
     {
       "in_func": "mvp_#_read_flag",
-      "expect": ["mov\t{{r}}, u8:8({{r}})", "72057594037927936"],
-      "forbid": ["call\t{{p}}, fn_member_by_id,"]
+      "expect": [
+        "mov\t{{r}}, u8:8({{r}})",
+        "72057594037927936"
+      ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      }
     },
     {
       "in_func": "mvp_#_read_score",
-      "expect": ["dmov\t{{r}}, d:({{r}})", "72057594037927936"],
-      "forbid": ["call\t{{p}}, fn_member_by_id,"]
+      "expect": [
+        "dmov\t{{r}}, d:({{r}})",
+        "72057594037927936"
+      ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      }
     },
     {
       "in_func": "mvp_#_read_optional_flag",
-      "expect": ["call\t{{p}}, fn_member_by_id,"]
+      "expect": [
+        "call\t{{p}}, fn_member,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      }
     },
     {
       "in_func": "mvp_#_read_skewed_score",
-      "expect": ["call\t{{p}}, fn_member_by_id,"]
+      "expect": [
+        "call\t{{p}}, fn_member,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_member,": 1
+      }
     }
   ]
 }

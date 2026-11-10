@@ -1,29 +1,56 @@
 {
   "schema_version": 1,
-  "description": "Tune15 B1.2: proved int/float/trunc/ord operands use native conversion carriers.",
+  "description": "D2.3.5/S4.1.2: MVP converts known int/float carriers directly, uses trunc as a native libm leaf, and retains ord's checked optional Item result.",
   "checks": [
     {
       "in_func": "mvp_#_tune15_int_from_float",
-      "expect": ["call\tlambda_double_to_int_lane_c_p"],
-      "forbid": ["call\t{{p}}, fn_int,", "call\t{{p}}, fn_float,", "call\t{{p}}, fn_trunc,", "call\t{{p}}, fn_ord_str_item,"]
+      "expect": [
+        "call\tlambda_double_to_int_lane_c_p"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_int,",
+        "call\t{{p}}, fn_float,",
+        "call\t{{p}}, fn_trunc,",
+        "call\t{{p}}, fn_ord_str_item,"
+      ]
     },
     {
       "in_func": "mvp_#_tune15_float_from_int",
-      "expect": ["call\tlambda_int_lane_to_double_c_p"],
-      "forbid": ["call\t{{p}}, fn_int,", "call\t{{p}}, fn_float,", "call\t{{p}}, fn_trunc,", "call\t{{p}}, fn_ord_str_item,"]
+      "expect": [
+        "\ti2d\t"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_int,",
+        "call\t{{p}}, fn_float,",
+        "call\t{{p}}, fn_trunc,",
+        "call\t{{p}}, fn_ord_str_item,",
+        "call\t{{p}}, lambda_int_lane_to_double_c,"
+      ]
     },
     {
       "in_func": "mvp_#_tune15_trunc",
-      "expect": ["call\ttrunc_p"],
-      "forbid": ["call\t{{p}}, fn_int,", "call\t{{p}}, fn_float,", "call\t{{p}}, fn_trunc,", "call\t{{p}}, fn_ord_str_item,"]
+      "expect": [
+        "call\ttrunc_p"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_int,",
+        "call\t{{p}}, fn_float,",
+        "call\t{{p}}, fn_trunc,",
+        "call\t{{p}}, fn_ord_str_item,"
+      ]
     },
     {
       "in_func": "mvp_#_tune15_ord",
       "expect": [
-        "call\t{{p}}, fn_ord_str,",
+        "call\t{{p}}, fn_ord,",
         "bne\tL"
       ],
-      "forbid": ["call\t{{p}}, fn_int,", "call\t{{p}}, fn_float,", "call\t{{p}}, fn_trunc,", "call\t{{p}}, fn_ord_str_item,"]
+      "forbid": [
+        "call\t{{p}}, fn_int,",
+        "call\t{{p}}, fn_float,",
+        "call\t{{p}}, fn_trunc,",
+        "call\t{{p}}, fn_ord_str_item,"
+      ]
     }
   ]
 }
