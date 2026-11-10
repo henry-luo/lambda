@@ -1,5 +1,5 @@
 #pragma once
-#include "lib/lambda_api.h"
+#include "lambda/lambda.h"
 
 #include "lambda/core/name_identity.h"
 

@@ -1,6 +1,6 @@
 #ifndef LAMBDA_JS_HOST_HOOKS_H
 #define LAMBDA_JS_HOST_HOOKS_H
-#include "lib/lambda_api.h"
+#include "lambda/lambda.h"
 
 #include "../lambda-data.hpp"
 #include "../jube/jube.h"

@@ -14,7 +14,7 @@
 
 #ifndef LAMBDA_STACK_H
 #define LAMBDA_STACK_H
-#include "lib/lambda_api.h"
+#include "lambda/lambda.h"
 
 #include <stdint.h>
 #include <stdbool.h>
