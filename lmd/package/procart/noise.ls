@@ -230,7 +230,7 @@ fn base3(gen, p, x: float, y: float, z: float) float^ {
 }
 
 // octave shaping (FastNoiseLite conventions): ridged folds the signal, billow inverts the fold.
-fn fold_octave(fractal, n: float) float {
+fn fold_octave(fractal, n) {
     if (fractal == 'ridged') 1.0 - 2.0 * abs(n) else if (fractal == 'billow') 2.0 * abs(n) - 1.0 else n
 }
 
@@ -325,23 +325,47 @@ pub fn sample3(gen, x: float, y: float, z: float) float^ =>
 
 // prepare each octave's table once per row, then reduce along the octave axis.
 // sum(..., 0) preserves each point's octave order and bounds scratch to one row.
-fn octave_row(gen, p, width: int, y: float, frequency: float, amplitude: float, fractal, weighted: bool) array =>
-    [for (x in 0 to (width - 1)) (let n = base2(gen, p, float(x) * frequency, y * frequency),
-        if (weighted) amplitude * fold_octave(fractal, n) else n)]
+fn octave_row(gen, p, xs:float[], y: float, frequency: float, amplitude: float, fractal, weighted: bool) array {
+    let scaled_y=y*frequency
+    let values=[for (x in xs) base2(gen,p,x*frequency,scaled_y)];
+    // shaping broadcasts over the row without repeating fractal dispatch per point.
+    if (weighted) amplitude*fold_octave(fractal,values) else values
+}
 
-fn field_row(gen, width: int, y: float) array^ {
+fn field_row(gen, width: int, y: float, xs:float[]?=null) array^ {
     let tables = gen.tables
     let frequencies = gen.frequencies
     let amplitudes = gen.amplitudes
-    let fractal = gen.fractal;
-    if (fractal == 'none') octave_row(gen, tables[0], width, y, float(frequencies[0]), 1.0, fractal, false)
+    let fractal = gen.fractal
+    // coordinates are prepared once per row, outside every octave's point loop.
+    let coordinates=if (xs == null) [for (x in 0 to (width-1)) float(x)] else xs;
+    if (fractal == 'none') octave_row(gen, tables[0], coordinates, y, float(frequencies[0]), 1.0, fractal, false)
     else (let layers = [for (o in 0 to (gen.octaves - 1))
-        octave_row(gen, tables[o], width, y, float(frequencies[o]), float(amplitudes[o]), fractal, true)],
+        octave_row(gen, tables[o], coordinates, y, float(frequencies[o]), float(amplitudes[o]), fractal, true)],
         sum(layers, 0) / gen.total)
 }
 
-// warp and periodic blending retain the point sampler; ordinary fields batch each row (PG5).
-pub fn field(gen, width: int, height: int) array =>
-    if (gen.warp == null and gen.period == null and width > 0 and height > 0)
+// retain the point sampler's corner and octave order while sharing row coordinates and weights.
+fn periodic_row(gen, width:int, y:float) array^ {
+    let period=gen.period
+    let xs=[for (x in 0 to (width-1)) float(x)-floor(float(x)/period[0])*period[0]]
+    let wrapped_y=y-floor(y/period[1])*period[1]
+    let tx=[for (x in xs) fade(x/period[0])]
+    let ty=fade(wrapped_y/period[1])
+    let layers=[for (corner in 0 to 3,let bx=band(corner,1)!=0,let by=band(corner,2)!=0,
+        let shifted_x=xs-(if (bx) period[0] else 0.0),
+        let shifted_y=wrapped_y-(if (by) period[1] else 0.0),
+        let values=field_row(gen,width,shifted_y,shifted_x)^)
+        ((if (bx) tx else 1.0-tx)*(if (by) ty else 1.0-ty))*values];
+    sum(layers,0)
+}
+
+// warped fields retain the point sampler; ordinary and periodic fields batch each row (PG5).
+pub fn field(gen, width: int, height: int) array {
+    let period=gen.period;
+    if (gen.warp == null and period == null and width > 0 and height > 0)
         [for (y in 0 to (height - 1)) field_row(gen, width, float(y))]
+    else if (gen.warp == null and period is (number[2] | number[3]) and width>0 and height>0)
+        [for (y in 0 to (height-1)) periodic_row(gen,width,float(y))]
     else [for (y in 0 to (height - 1)) [for (x in 0 to (width - 1)) sample(gen, float(x), float(y))]]
+}

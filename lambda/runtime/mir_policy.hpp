@@ -17,7 +17,20 @@
 #define MIR_RADIANT_AST_NODE_THRESHOLD 25000U
 #define MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT 15000U
 #define MIR_LARGE_FUNCTION_O1_THRESHOLD 20000ULL
+#ifdef NDEBUG
 #define MIR_EAGER_MODULE_O1_THRESHOLD 5000ULL
+#else
+#define MIR_EAGER_MODULE_O1_THRESHOLD 1000ULL
+#endif
+
+// bound debug lowering growth before polymorphic checks become native code.
+static inline bool mir_compact_lowering(uint32_t ast_nodes) {
+#ifdef NDEBUG
+    return false;
+#else
+    return ast_nodes > 256;
+#endif
+}
 
 static inline bool mir_large_interp_enabled(void);
 

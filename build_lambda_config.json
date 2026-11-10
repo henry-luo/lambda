@@ -6195,8 +6195,8 @@
             ],
             "parallel": false,
             "case_workers": 2,
-            "case_worker_slots": 3,
-            "worker_slots": 6,
+            "case_worker_slots": 4,
+            "worker_slots": 8,
             "case_batch_size": 150,
             "icon": "\ud83d\udc11"
           },
@@ -6350,6 +6350,7 @@
               "lambda-lib"
             ],
             "binary": "test_mir_gc_stress_gtest.exe",
+            "worker_slots": 4,
             "libraries": [
               "gtest",
               "gtest_main"

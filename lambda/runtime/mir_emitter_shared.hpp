@@ -451,6 +451,7 @@ struct MirEmitter {
     // from module state; foreign hosted compilers use the same boundary when
     // their callback ABI owns a separate result home.
     bool helper_results_skip_rehome;
+    bool compact_code; // outline representation checks when lowering exceeds its debug budget
     void (*before_may_gc_call)(void* owner);
     void (*after_may_gc_call)(void* owner);
     void (*root_call_value)(void* owner, MIR_reg_t reg,
@@ -1553,6 +1554,13 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
                                                    MIR_reg_t item,
                                                    MIR_reg_t target_home) {
     if (mode == SCALAR_RETURN_NONE) return item;
+    if (em->compact_code && mode == SCALAR_RETURN_DYNAMIC && target_home) {
+        // the existing NO_GC leaf copies into the same colored destination home.
+        MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
+        MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item), MIR_new_reg_op(em->ctx, target_home)};
+        return em_bind_scalar_home_result(em, target_home, em_call_with_args(em,
+            "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true));
+    }
     // packed values pass through; only admitted wide lanes need a destination copy.
     MIR_reg_t result = em_new_reg(em, "adopt_result", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,

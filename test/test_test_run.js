@@ -209,7 +209,7 @@ function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = 
 }
 
 try {
-    for (const budget of [1, 5, 6]) check(`Lambda case workers reserve nested tier slots within ${budget} slots`, () => {
+    for (const budget of [1, 4, 5, 8]) check(`Lambda case workers reserve nested tier slots within ${budget} slots`, () => {
         fs.writeFileSync(path.join(fixture, 'test_lambda_gtest.exe'), fake, { mode: 0o755 });
         const output = path.join(fixture, `lambda-tier-budget-${budget}`);
         const trace = path.join(fixture, `lambda-tier-trace-${budget}`);
@@ -220,7 +220,7 @@ try {
         });
         assert.equal(child.status, 0, child.stdout + child.stderr);
         const rows = fs.readdirSync(trace).map(name => JSON.parse(fs.readFileSync(path.join(trace, name), 'utf8')));
-        const slots = Math.min(3, budget, Math.max(1, os.cpus().length - 1));
+        const slots = Math.min(4, budget, Math.max(1, os.cpus().length - 1));
         assert.ok(rows.length > 0);
         assert.ok(rows.every(row => row.cap === slots));
         const events = rows.flatMap(row => [{ time: row.start, delta: row.cap },

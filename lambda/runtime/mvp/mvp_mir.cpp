@@ -1,4 +1,5 @@
 #include "mvp_internal.hpp"
+#include "../mir_policy.hpp"
 #include "../lambda-number-types.hpp"
 #include "../type_contract.hpp"
 #include "../mir_loop_analysis.hpp"
@@ -159,6 +160,11 @@ static MIR_reg_t unbox_float(void* owner, MIR_reg_t r) {
             return em_call_1(&c->em, "it2d", MIR_T_D, MIR_T_I64, reg(c, item), true);
         }, r);
 }
+static MIR_reg_t unbox_float_value(MvpCompiler* c, MIR_reg_t item) {
+    return c->em.compact_code
+        ? em_call_1(&c->em, "it2d", MIR_T_D, MIR_T_I64, reg(c, item), true)
+        : em_unbox_f64_item(&c->em, c, unbox_float, item);
+}
 static bool nullable(MirValue v) {
     bool optional = false;
     lambda_type_nullable_lane_base(v.semantic_contract, &optional);
@@ -201,6 +207,10 @@ static MirValue convert(void* owner, MirValue v, ValueRep to) {
             if (mvp_int_range(c->module, (AstNode*)v.provenance_node).finite)
                 return value(c, em_box_finite_int_item(&c->em, v.reg), v.semantic_type,
                     to, v.semantic_contract, (AstNode*)v.provenance_node);
+            // compact images reuse the checked scalar leaf instead of copying its dispatch graph.
+            if (c->em.compact_code) return value(c,
+                em_call_1(&c->em, "int2it_lane", MIR_T_I64, MIR_T_I64, reg(c, v.reg), true),
+                v.semantic_type, to, v.semantic_contract, (AstNode*)v.provenance_node);
             r = em_new_reg(&c->em, "int_item", MIR_T_I64);
             MIR_label_t slow = label(c), done = label(c);
             em_branch_int53_outside(&c->em, v.reg, slow);
@@ -275,15 +285,18 @@ static MirValue convert(void* owner, MirValue v, ValueRep to) {
             move(c, r, reg(c, null_float(c)), MIR_T_D); mark(c, joined);
         }
     } else if (to == VALUE_REP_F64 && v.rep == VALUE_REP_ITEM) {
-        if (!nullable(v)) r = em_unbox_f64_item(&c->em, c, unbox_float, v.reg);
+        if (!nullable(v)) r = unbox_float_value(c, v.reg);
         else {
             MIR_label_t absent = label(c), done = label(c);
             r = em_new_reg(&c->em, "item_float", MIR_T_D);
             branch(c, MIR_BEQ, absent, reg(c, v.reg), imm(c, ITEM_NULL));
-            move(c, r, reg(c, em_unbox_f64_item(&c->em, c, unbox_float, v.reg)), MIR_T_D);
+            move(c, r, reg(c, unbox_float_value(c, v.reg)), MIR_T_D);
             jump(c, done); mark(c, absent); move(c, r, reg(c, null_float(c)), MIR_T_D); mark(c, done);
         }
     } else if (to == VALUE_REP_INT_LANE && v.rep == VALUE_REP_ITEM) {
+        if (c->em.compact_code) return value(c,
+            em_call_1(&c->em, "lambda_item_to_int_lane_c", MIR_T_I64, MIR_T_I64, reg(c, v.reg), true),
+            v.semantic_type, to, v.semantic_contract, (AstNode*)v.provenance_node);
         r = em_new_reg(&c->em, "item_int", MIR_T_I64);
         MIR_label_t slow = label(c), done = label(c);
         MIR_reg_t tag = operation(c, MIR_URSH, reg(c, v.reg), imm(c, 56));
@@ -1097,6 +1110,10 @@ static void publish_var_binding(MvpCompiler* c, MvpBinding* binding) {
 }
 
 static MIR_reg_t capture_item(MvpCompiler* c, MIR_reg_t item, Type* contract) {
+    // the shared NO_GC capture has the same idempotent COW header update.
+    if (c->em.compact_code) return em_call_1(&c->em,
+        cow_import("cow_capture_value", "cow_capture_value_profiled"),
+        MIR_T_I64, MIR_T_I64, reg(c, item), true);
     // capture only marks container headers and returns the original Item.
     // Tagged scalars need no call; wide reads acquire their homes separately.
     MIR_label_t done = label(c);
@@ -2085,6 +2102,13 @@ static MirValue array_read_values(MvpCompiler* c, AstFieldNode* node,
         return value(c, result, kind, VALUE_REP_RAW_GC_POINTER, contract, node);
     }
     Type* element = mvp_array_element(owner.semantic_contract);
+    if (!element && !pointer_lane && c->em.compact_code) {
+        // retain proved element lanes; erased reads share the ordinary checked dispatch.
+        owner = convert(c, owner, VALUE_REP_ITEM); key = convert(c, key, VALUE_REP_ITEM);
+        return value(c, em_call_2(&c->em, "fn_index", MIR_T_I64,
+            MIR_T_I64, reg(c, owner.reg), MIR_T_I64, reg(c, key.reg), true),
+            LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+    }
     if (binding && (c->dense_arrays || binding->array_present)) {
         ArrayNumElemType lane;
         lambda_array_num_elem_type_for_contract(element, &lane);
@@ -2667,6 +2691,14 @@ static MIR_reg_t truth(MvpCompiler* c, MirValue v) {
         return operation(c, MIR_EQ, reg(c, v.reg), imm(c, ITEM_TRUE));
     if (v.semantic_type != LMD_TYPE_BOOL) {
         v = convert(c, v, VALUE_REP_ITEM);
+        if (c->em.compact_code) {
+            MIR_reg_t classified = em_call_1(&c->em, "is_truthy", MIR_T_I64,
+                MIR_T_I64, reg(c, v.reg), true);
+            // C Bool's upper return bytes do not belong to the predicate result.
+            em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_UEXT8,
+                reg(c, classified), reg(c, classified)));
+            return classified;
+        }
         MIR_reg_t classified = operation(c, MIR_EQ, reg(c, v.reg), imm(c, ITEM_TRUE));
         MIR_label_t done = label(c);
         branch(c, MIR_BNE, done, reg(c, classified), imm(c, 0));
@@ -3566,7 +3598,7 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         TypeString* literal = ast_string_literal_type(n->right);
         bool literal_right = literal != NULL;
         if (!literal) literal = ast_string_literal_type(n->left);
-        if (literal && literal->string->len <= MIR_LITERAL_STRING_COMPARE_MAX_BYTES) {
+        if (!c->em.compact_code && literal && literal->string->len <= MIR_LITERAL_STRING_COMPARE_MAX_BYTES) {
             a = convert(c, a, VALUE_REP_ITEM); b = convert(c, b, VALUE_REP_ITEM);
             MIR_reg_t text = literal_right ? b.reg : a.reg;
             MirValue expected = value(c, text, LMD_TYPE_STRING, VALUE_REP_ITEM, &TYPE_STRING);
@@ -3705,7 +3737,8 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         a = convert(c, a, VALUE_REP_ITEM); b = convert(c, b, VALUE_REP_ITEM);
         MIR_reg_t result = 0;
         MIR_label_t done = NULL;
-        if ((n->op == OPERATOR_EQ || n->op == OPERATOR_NE) &&
+        // erased operands otherwise duplicate string, integer and float graphs before the same fallback.
+        if (!c->em.compact_code && (n->op == OPERATOR_EQ || n->op == OPERATOR_NE) &&
                 (left == LMD_TYPE_ANY || left == LMD_TYPE_TYPE || left == LMD_TYPE_STRING) &&
                 (right == LMD_TYPE_ANY || right == LMD_TYPE_TYPE || right == LMD_TYPE_STRING)) {
             result = em_new_reg(&c->em, "dynamic_equality", MIR_T_I64);
@@ -3721,7 +3754,7 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         }
         // known decimal/string/container carriers cannot satisfy an int tag
         // guard. Keep speculation only where both operand domains allow it.
-        if ((left == LMD_TYPE_ANY || left == LMD_TYPE_TYPE || left == LMD_TYPE_INT) &&
+        if (!c->em.compact_code && (left == LMD_TYPE_ANY || left == LMD_TYPE_TYPE || left == LMD_TYPE_INT) &&
                 (right == LMD_TYPE_ANY || right == LMD_TYPE_TYPE || right == LMD_TYPE_INT)) {
             if (!result) { result = em_new_reg(&c->em, "dynamic_numeric", MIR_T_I64); done = label(c); }
             MIR_label_t slow = label(c);
@@ -3732,7 +3765,7 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
             jump(c, done); mark(c, slow);
         }
         MirNumericOpPlan floating = {};
-        if ((left == LMD_TYPE_ANY || left == LMD_TYPE_TYPE || left == LMD_TYPE_FLOAT) &&
+        if (!c->em.compact_code && (left == LMD_TYPE_ANY || left == LMD_TYPE_TYPE || left == LMD_TYPE_FLOAT) &&
                 (right == LMD_TYPE_ANY || right == LMD_TYPE_TYPE || right == LMD_TYPE_FLOAT) &&
                 em_numeric_op_plan(n->op, &floating) &&
                 (floating.is_comparison || n->op == OPERATOR_ADD || n->op == OPERATOR_SUB ||
@@ -6321,7 +6354,8 @@ static MirValue member_read(MvpCompiler* c, AstFieldNode* node) {
     TypeMap* shape = NULL;
     ShapeEntry* field = mvp_member_field(c->module, node, &shape, true);
     bool speculative = !field;
-    if (speculative && name) {
+    // large debug images use keyed lookup rather than three guessed record layouts.
+    if (speculative && name && !c->em.compact_code) {
         shape = mvp_member_candidate(c->module, node->object, name);
         if (shape) field = find_shape_read_field_by_name(shape, name->chars, name->len);
     }
@@ -9189,6 +9223,9 @@ bool mvp_emit_function(LambdaMvpModule* m, MvpFunction* fn) {
         }
     }
     c.em.ctx = m->ctx; c.em.import_cache = m->imports; c.em.call_owner = &c;
+    // import closures compile many unused exports; entry scripts retain their local specialization budget.
+    c.em.compact_code = !m->satellite && !m->tp->is_main &&
+        mir_compact_lowering(m->tp->ast_index.count);
     c.em.label_counter = m->label_counter;
     c.em.root_call_value = root_value; c.em.convert_rep = convert; c.em.lower_value = mvp_lower_value;
     c.em.after_may_gc_call = refresh_shared_bindings;

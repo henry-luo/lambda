@@ -115,7 +115,8 @@ pub fn distances(tiles, sources, floor_tile = 0) array^ {
 // step becomes a pause, so positions come from one cumsum, not a sequential fold.
 fn fold_into(u: int, n: int) int => (let m = modulo(u, 2 * n), if (m < n) m else 2 * n - 1 - m)
 
-fn steps_of(k: u64, n: int) array => [for (i in 0 to (n - 1)) rng.below(rng.at(k, i), 4)]
+// batch the same keyed draws; floor retains below(at(k,i),4)'s exact mapping.
+fn steps_of(k: u64, n: int) array^ => [for (u in rng.units(k,n)^) int(floor(u*4.0))]
 
 pub fn walk(k: u64, options) array^ {
     let d = dims(options, "walk")^
@@ -126,7 +127,7 @@ pub fn walk(k: u64, options) array^ {
         let density: float = if (options.fill == null) 0.4 else float(options.fill)
         let n = if (options.steps == null) 20 * iw * ih else options.steps
         let origin = if (options.start == null) [iw div 2, ih div 2] else [options.start[0] - 1, options.start[1] - 1]
-        let dirs = steps_of(k, n)
+        let dirs = steps_of(k, n)^
         let xs = [origin[0], *(math.cumsum([for (s in dirs) if (s == 0) 1 else if (s == 1) -1 else 0]) + origin[0])]
         let ys = [origin[1], *(math.cumsum([for (s in dirs) if (s == 2) 1 else if (s == 3) -1 else 0]) + origin[1])]
         let visits = [for (i in 0 to n) [(fold_into(ys[i], ih) + 1) * d[0] + fold_into(xs[i], iw) + 1, i]]
@@ -256,25 +257,35 @@ fn prim(k: u64, w: int, h: int) array {
 
 // Wilson: loop-erased random walks give a uniform spanning tree. A walk folded at the
 // border pauses there, which only adds erased self-loops: every tree keeps weight (1/4)^(n-1).
-fn walk_from(k: u64, w: int, h: int, s: int, length: int) array {
-    let dirs = steps_of(k, length)
+fn walk_from(k: u64, w: int, h: int, s: int, length: int) array^ {
+    let dirs = steps_of(k, length)^
     let xs = [s % w, *math.cumsum([for (d in dirs) if (d == 0) 1 else if (d == 1) -1 else 0]) + s % w]
     let ys = [s div w, *math.cumsum([for (d in dirs) if (d == 2) 1 else if (d == 3) -1 else 0]) + s div w];
     [for (i in 0 to length) fold_into(ys[i], h) * w + fold_into(xs[i], w)]
 }
 
-// walk in doubling chunks until the tree is hit; returns the positions up to the hit.
+fn first_tree_hit(path:array,tree:array) int?^ {
+    let count=len(path)^
+    var i:int=0
+    while (i<count) {
+        if (tree[path[i]]) { return i }
+        i=i+1
+    }
+    null
+}
+
+// stop at the first hit; later positions in the same chunk cannot affect the erased walk.
 fn walk_to_tree(k: u64, w: int, h: int, tree, s: int, chunk: int, from) array^ {
-    let path = walk_from(rng.at(k, chunk), w, h, s, chunk)
-    let hits = [for (i, c in path where tree[c]) i];
-    if (len(hits) > 0) [*from, *slice(path, 0, hits[0] + 1)]
+    let path = walk_from(rng.at(k, chunk), w, h, s, chunk)^
+    let hit = first_tree_hit(path,tree)^;
+    if (hit != null) [*from, *slice(path, 0, hit + 1)]
     else walk_to_tree(k, w, h, tree, path[chunk], chunk * 2, [*from, *slice(path, 0, chunk)])
 }
 
 // loop erasure: from the start, always leave a cell the way its final_visit visit left it.
 fn erase_loops(positions) array {
-    let final_visit = map([for (pr in [for (i, c in positions) [c, i]] group by pr[0] as cell into g)
-        for (x in [string(cell), max(g |> ~[1])]) x])
+    // later writes already select the last visit; grouping and max rebuild the same map.
+    let final_visit = map([for (i,c in positions) for (x in [string(c),i]) x])
     let end = positions[len(positions) - 1];
     reduce([[[positions[0]], false], *[for (i in 1 to len(positions)) i]], (st, i) => if (st[1]) st
         else (let c = st[0][len(st[0]) - 1], if (c == end) [st[0], true] else [[*st[0], positions[final_visit[string(c)] + 1]], false]))[0]
