@@ -151,6 +151,56 @@ MvpBinding* mvp_place_root(LambdaMvpModule* m, AstNode* node) {
     return ast_collect_cow_path(&path, node) ? mvp_local_binding(m, path.root) : NULL;
 }
 
+bool mvp_sole_declaration_read(LambdaMvpModule* m, AstDeclaratorNode* declaration, AstNode* read) {
+    AstIndex* index = &m->tp->ast_index;
+    uint32_t count = 0, reads = 0;
+    const AstNodeId* uses = ast_index_binding_uses(index,
+        ast_index_find_binding_entry(index, declaration->entry), &count);
+    read = ast_unwrap_primary_to_leaf(read);
+    for (uint32_t i = 0; i < count; i++) {
+        AstNode* use = index->nodes[uses[i]];
+        if (use == declaration || use == declaration->id) continue;
+        if (use != read) return false;
+        reads++;
+    }
+    return reads == 1;
+}
+
+bool mvp_string_append_plan(LambdaMvpModule* m, AstNode* first, MvpStringAppendPlan* plan) {
+    if (!first || (first->node_type != AST_NODE_VAR_STAM && first->node_type != AST_NODE_LET_STAM)) return false;
+    AstNode* declaration = ((AstVarDeclNode*)first)->declarations;
+    AstNode* next = first->next;
+    if (!declaration || declaration->next || declaration->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+            !next) return false;
+    AstDeclaratorNode* admitted = NULL;
+    if (next->node_type == AST_NODE_LET_STAM) {
+        admitted = (AstDeclaratorNode*)((AstVarDeclNode*)next)->declarations;
+        if (!admitted || admitted->node_type != AST_NODE_VARIABLE_DECLARATOR || admitted->next ||
+                !admitted->entry || admitted->entry->admission_may_fail ||
+                admitted->declared_type != &TYPE_STRING) return false;
+        next = next->next;
+    }
+    if (!next || next->node_type != AST_NODE_ASSIGN_STAM) return false;
+    AstDeclaratorNode* d = (AstDeclaratorNode*)declaration;
+    AstAssignStamNode* assignment = (AstAssignStamNode*)next;
+    MvpBinding* temporary = mvp_binding(m, d->entry);
+    MvpBinding* owner = mvp_binding(m, assignment->target_entry);
+    if (!temporary || !owner || temporary == owner || temporary->contract != &TYPE_STRING ||
+            owner->contract != &TYPE_STRING || temporary->owner != owner->owner) return false;
+    bool transfer = !admitted && mvp_local_binding(m, assignment->value) == temporary;
+    AstNode* joined_value = transfer ? d->init : admitted ? admitted->init : assignment->value;
+    if (admitted && (mvp_local_binding(m, assignment->value) != mvp_binding(m, admitted->entry) ||
+            !mvp_sole_declaration_read(m, admitted, assignment->value) ||
+            !mvp_admission_proven(m, mvp_value_contract(m, joined_value), &TYPE_STRING))) return false;
+    AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS]; int size = 0;
+    if (!ast_collect_join_leaves(joined_value, leaves, &size) || size < 2 ||
+            mvp_local_binding(m, leaves[0]) != owner || (!transfer &&
+            (size != 2 || mvp_local_binding(m, leaves[1]) != temporary))) return false;
+    if (!mvp_sole_declaration_read(m, d, transfer ? assignment->value : leaves[1])) return false;
+    *plan = {d, assignment, temporary, owner, transfer};
+    return true;
+}
+
 static bool require_tensor(MvpBinding* binding) {
     if (!binding || binding->tensor_required) return false;
     binding->tensor_required = true;
@@ -540,13 +590,13 @@ bool mvp_proc_has_final_return(AstFuncNode* fn) {
     return node && node->node_type == AST_NODE_RETURN_STAM;
 }
 
-AstFieldNode* mvp_string_index(LambdaMvpModule* m, AstNode* node, int depth) {
+AstFieldNode* mvp_string_index(LambdaMvpModule* m, AstNode* node, int depth, bool dynamic_key) {
     node = ast_unwrap_primary_to_leaf(node);
     if (!node || depth > 32 || node->node_type != AST_NODE_INDEX_EXPR) return NULL;
     AstFieldNode* index = (AstFieldNode*)node;
     if (index->field && index->field->next) return NULL;
     return mvp_value_contract(m, index->object, depth + 1)->type_id == LMD_TYPE_STRING &&
-        mvp_value_contract(m, index->field, depth + 1)->type_id == LMD_TYPE_INT ? index : NULL;
+        (dynamic_key || mvp_value_contract(m, index->field, depth + 1)->type_id == LMD_TYPE_INT) ? index : NULL;
 }
 
 static bool binding_var_borrow_scan(LambdaMvpModule* m, MvpBinding* binding,
@@ -858,7 +908,7 @@ Type* mvp_contextual_contract(LambdaMvpModule* m, AstNode* literal) {
 }
 
 static bool mvp_literal_map_arm_matches(TypeMap* arm, void* data) {
-    return arm->is_trusted_contract && ast_map_contract_storage_valid(arm) &&
+    return arm->is_trusted_contract && ast_map_contract_storage_fits(arm) &&
         ast_map_literal_keys_follow_contract((AstMapNode*)data, arm);
 }
 
@@ -893,15 +943,19 @@ static void* mvp_construction_direct_candidate(void* owner, AstNode* node) {
             return lambda_canonical_type_for_id(type->type_id);
     }
     MvpBinding* binding = mvp_local_binding(m, node);
-    if (context->kind == MVP_CANDIDATE_SCALAR && context->projections) return NULL;
+    if (context->kind == MVP_CANDIDATE_SCALAR && context->projections)
+        // this predicts a guarded entry, including nullable/missing reads;
+        // it never establishes a source or element admission contract.
+        return context->projections == 1 && binding ? binding->candidates[MVP_CANDIDATE_ARRAY_ELEMENT] : NULL;
     return binding ? binding->candidates[context->kind] : NULL;
 }
 
 static void* mvp_construction_binding_candidate(void* owner, AstNode* definition) {
     if (definition->node_type != AST_NODE_PARAM) return NULL;
     MvpCandidateContext* context = (MvpCandidateContext*)owner;
-    if (context->kind == MVP_CANDIDATE_SCALAR && context->projections) return NULL;
     MvpBinding* binding = mvp_binding(context->module, ((AstNamedNode*)definition)->entry);
+    if (context->kind == MVP_CANDIDATE_SCALAR && context->projections)
+        return context->projections == 1 && binding ? binding->candidates[MVP_CANDIDATE_ARRAY_ELEMENT] : NULL;
     return binding ? binding->candidates[context->kind] : NULL;
 }
 
@@ -3441,6 +3495,50 @@ static bool admitted_assignment(LambdaMvpModule* m, AstAssignStamNode* assignmen
 }
 
 
+Type* mvp_parameter_contract(MvpFunction* function, AstNamedNode* parameter) {
+    Type* contract = mvp_contract(parameter);
+    return function && function->erase_unused_binders && contract && contract->kind == TYPE_KIND_BINDER
+        ? ((TypeBinder*)contract)->bound : contract;
+}
+
+static bool unused_array_binders(LambdaMvpModule* m, MvpFunction* function) {
+    TypeFunc* signature = (TypeFunc*)function->ast->type;
+    if (!signature->binder_count || signature->binder_count > LAMBDA_MAX_FUNCTION_ARGS ||
+            function->boxed_entry || signature->is_public || signature->is_variadic ||
+            function->ast->captures || function->method_owner || mvp_function_expression(function->ast) ||
+            function->ast->is_that_predicate || m->tp->compile_against_interp_slab ||
+            lambda_type_contract_has_binder(signature->return_contract, true)) return false;
+    unsigned sites[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    for (AstNamedNode* parameter = function->ast->param; parameter; parameter = (AstNamedNode*)parameter->next) {
+        TypeParam* p = lambda_type_param(parameter->type);
+        Type* contract = mvp_contract(parameter);
+        if (!p || p->is_optional || p->is_var_param || p->binder) return false;
+        if (contract && contract->kind == TYPE_KIND_BINDER) {
+            TypeBinder* binder = (TypeBinder*)contract;
+            if (binder->slot >= signature->binder_count || ++sites[binder->slot] != 1 ||
+                    !lambda_array_contract_is_plain(binder->bound) ||
+                    lambda_type_contract_has_binder(binder->bound, true) ||
+                    ast_body_may_write_entry(function->ast->body, parameter->entry, true, NULL)) return false;
+        } else if (lambda_type_contract_has_binder(contract, true)) return false;
+    }
+    for (unsigned slot = 0; slot < signature->binder_count; slot++) if (sites[slot] != 1) return false;
+    AstIndex* index = &m->tp->ast_index;
+    for (AstNodeId id = 0; id < index->count; id++) {
+        AstNode* node = index->nodes[id];
+        if (node->node_type == AST_NODE_IDENT) {
+            NameEntry* entry = ((AstIdentNode*)node)->entry;
+            if (entry && entry->is_binder && ast_scope_function(entry->scope) == function->ast) return false;
+        }
+        if (!ast_index_node_is_function(node)) continue;
+        NameScope* scope = ((AstFuncNode*)node)->vars;
+        for (AstBoundTypeUse* use = scope ? scope->bound_type_uses : NULL; use; use = use->next)
+            if (ast_scope_function(use->binder->scope) == function->ast) return false;
+    }
+    // an unobserved, single-site selection on a read-only array has only its
+    // written admission to perform. Keep that bound; omit no referenced binder.
+    return true;
+}
+
 bool lambda_mvp_plan(LambdaMvpModule* m) {
     if (!m || !m->tp->ast_index.graph_published) return false;
     AstIndex* index = &m->tp->ast_index;
@@ -3508,11 +3606,12 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             }
         }
         f->no_value_result = procedure_has_no_value_result(f->ast);
+        f->erase_unused_binders = unused_array_binders(m, f);
         // escaping definitions need checked Item admission; closed direct-only
         // definitions keep their native signature (D7.2.2/D4.3.1).
         f->boxed_entry |= (m->tp->compile_against_interp_slab && index->functions[i].parent == AST_FUNCTION_ID_INVALID) ||
             signature->is_public || mvp_function_expression(f->ast) ||
-            f->ast->is_that_predicate || f->ast->captures || f->method_owner || signature->is_variadic || signature->binder_count;
+            f->ast->is_that_predicate || f->ast->captures || f->method_owner || signature->is_variadic || mvp_function_binder_count(f);
         if (signature->binder_count > LAMBDA_MAX_FUNCTION_ARGS)
             return mvp_reject(m, f->ast, "binder slots exceed the shared call-frame limit");
         if (ast_function_capture_count(f->ast) > UINT8_MAX)
@@ -3529,8 +3628,8 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 return mvp_reject(m, f->ast, "capture requires an indexed lexical value binding");
         }
         // shared owned-slot readers carry the registry's collecting effect.
-        f->abi.effects.may_gc = f->ast->captures != NULL || f->method_owner != NULL || signature->binder_count;
-        f->abi.effects.may_reenter = f->abi.effects.may_return_error = signature->binder_count != 0;
+        f->abi.effects.may_gc = f->ast->captures != NULL || f->method_owner != NULL || mvp_function_binder_count(f);
+        f->abi.effects.may_reenter = f->abi.effects.may_return_error = mvp_function_binder_count(f) != 0;
         char name[64];
         snprintf(name, sizeof(name), "mvp_%u_%s", i, f->ast->name ? f->ast->name->chars : "fn");
         f->name = name_pool_create_name(m->tp->name_pool, name)->chars;
@@ -3547,7 +3646,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         int n = 0;
         for (AstNamedNode* param = f->ast->param; param; param = (AstNamedNode*)param->next) {
             TypeParam* p = lambda_type_param(param->type);
-            Type* contract = mvp_contract(param);
+            Type* contract = mvp_parameter_contract(f, param);
             // var transport owns an Item home independently of the local
             // lane, including float and pointer scalars (D5.4.6, D7.3.2).
             if (!admitted_contract(contract, m->tp->pool))
@@ -3614,7 +3713,11 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                     b->declaration = index->nodes[n]; break;
                 }
         }
-        b->contract = mvp_contract(b->entry ? mvp_binding_node(b) : NULL);
+        AstNode* declaration = b->entry ? mvp_binding_node(b) : NULL;
+        AstNodeId node_id = ast_index_find(index, declaration);
+        b->owner = node_id < index->count ? mvp_node_owner(m, node_id) : AST_FUNCTION_ID_INVALID;
+        b->contract = declaration && declaration->node_type == AST_NODE_PARAM && b->owner < m->function_count
+            ? mvp_parameter_contract(&m->functions[b->owner], (AstNamedNode*)declaration) : mvp_contract(declaration);
         b->admission_contract = b->contract;
         if (mvp_dynamic_type_binding(b->entry)) {
             b->contract = b->admission_contract = &TYPE_TYPE;
@@ -3625,8 +3728,6 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         b->rep = mvp_rep(b->contract);
         if (mvp_array_element(b->admission_contract) && lambda_array_contract_is_plain(b->admission_contract))
             b->array_cert = lambda_array_rep_cert_create(m->tp->pool, b->admission_contract);
-        AstNodeId node_id = ast_index_find(index, b->entry ? mvp_binding_node(b) : NULL);
-        b->owner = node_id < index->count ? mvp_node_owner(m, node_id) : AST_FUNCTION_ID_INVALID;
         if (b->entry && ast_index_node_is_function(mvp_binding_node(b))) {
             // a definition owns its body, but its snapshot value belongs to
             // the enclosing declaration activation (S9.1.4v2).
@@ -4412,6 +4513,8 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         }
     } while (changed);
     for (AstNodeId i = 0; i < index->count; i++) {
+        MvpStringAppendPlan append = {};
+        if (mvp_string_append_plan(m, index->nodes[i], &append)) append.owner->string_buffer_owned = true;
         if (index->nodes[i]->node_type == AST_NODE_CALL_EXPR) {
             AstCallNode* call = (AstCallNode*)index->nodes[i];
             MvpFunction* function = mvp_function(m, ast_direct_call_function(call));

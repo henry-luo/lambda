@@ -4,7 +4,7 @@
 
 #ifndef LAMBDA_JS_PROPS_H
 #define LAMBDA_JS_PROPS_H
-#include "lambda/lambda.h"
+#include "lambda/core/api.h"
 
 #include "../lambda-data.hpp"
 

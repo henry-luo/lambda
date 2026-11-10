@@ -1,5 +1,5 @@
 #pragma once
-#include "lambda/lambda.h"
+#include "lambda/core/api.h"
 
 // js_runtime_state.hpp - shared JS runtime state surface.
 //

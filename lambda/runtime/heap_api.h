@@ -1,4 +1,5 @@
 #pragma once
+#include "lambda/core/api.h"
 
 // Active runtime heap/root API. These entry points can collect or relocate
 // data-zone storage, so only lambda-rt provides them; pool/arena users must

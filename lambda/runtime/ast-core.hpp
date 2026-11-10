@@ -1961,6 +1961,7 @@ extern "C" {
 #endif
 bool ast_map_literal_keys_follow_contract(AstMapNode* literal, TypeMap* expected);
 bool ast_map_contract_storage_valid(TypeMap* expected);
+bool ast_map_contract_storage_fits(TypeMap* expected);
 #ifdef __cplusplus
 }
 #endif

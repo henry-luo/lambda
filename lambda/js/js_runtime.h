@@ -5,6 +5,7 @@
  * All functions use Item (uint64_t) as the primary data type.
  */
 #pragma once
+#include "lambda/core/api.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -1606,15 +1606,21 @@ extern "C" bool ast_map_literal_keys_follow_contract(AstMapNode* map_node,
     return !expected_field && !item;
 }
 
-// a destination must fit every concrete field before construction adopts it
-extern "C" bool ast_map_contract_storage_valid(TypeMap* expected) {
+// descriptor-based construction also supports dynamically tagged field slots.
+extern "C" bool ast_map_contract_storage_fits(TypeMap* expected) {
     if (!expected || !expected->shape) return false;
     FOR_EACH_MAP_FIELD(expected, field) {
         if (!field->name || !field->type) return false;
-        TypeId storage = shape_entry_storage_type_id(field);
-        if (storage == LMD_TYPE_ANY) return false;
         if (!shape_entry_storage_fits_data(field, expected->byte_size)) return false;
     }
+    return true;
+}
+
+// native consumers additionally require a concrete field carrier.
+extern "C" bool ast_map_contract_storage_valid(TypeMap* expected) {
+    if (!ast_map_contract_storage_fits(expected)) return false;
+    FOR_EACH_MAP_FIELD(expected, field)
+        if (shape_entry_storage_type_id(field) == LMD_TYPE_ANY) return false;
     return true;
 }
 
