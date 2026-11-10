@@ -1062,8 +1062,18 @@ static inline MIR_reg_t em_int_lane_abs(MirEmitter* em, MIR_reg_t operand) {
 // callers materialize fallback operands before branching; this guard never collects.
 static inline MIR_reg_t em_guard_finite_int(MirEmitter* em, MirValue input, MIR_label_t miss) {
     MIR_reg_t lane = input.reg;
-    if (input.rep != VALUE_REP_INT_LANE) {
-        assert(input.rep == VALUE_REP_ITEM);
+    if (input.rep != VALUE_REP_INT_LANE && input.rep != VALUE_REP_ITEM) {
+        // a Lambda int lives only in an int lane or an Item. Any other Lambda carrier (int64,
+        // uint64, float, or a raw pointer such as a Type*) proves another type, so it always
+        // misses, exactly as its boxed Item would fail the int tag test (D2.3.4-D2.3.5).
+        assert(input.rep == VALUE_REP_I64 || input.rep == VALUE_REP_U64 || input.rep == VALUE_REP_F64 ||
+               input.rep == VALUE_REP_RAW_GC_POINTER || input.rep == VALUE_REP_RAW_NON_GC_POINTER);
+        lane = em_new_reg(em, "int_none", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, lane), MIR_new_int_op(em->ctx, 0)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, miss)));
+        return lane;
+    }
+    if (input.rep == VALUE_REP_ITEM) {
         MIR_reg_t tag = em_new_reg(em, "int_tag", MIR_T_I64);
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
             MIR_new_reg_op(em->ctx, input.reg), MIR_new_int_op(em->ctx, 56)));

@@ -331,6 +331,7 @@ let GLYPHS = {
     photos: "M12 3l9 5-9 5-9-5z M3 12.5l9 5 9-5 M3 17l9 5 9-5",
     draw: "M4 4h6v6H4z M17 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6 M10 7h4 M14 20h7l-3.5-6z M7 10v6.5h7",
     sketch: "M4 18l5-12 5 12 5-12 M3 21h18",
+    paint: "M14.5 4.5l5 5-8 8-5-5z M6.5 12.5c-2 0-3.5 1.6-3.5 3.6 0 1.6-.6 2.8-1.5 3.4 3.4.6 7-.6 7-3.5",
     greetings: "M5 3h14v18H5z M12 16s-4-2.5-4-5.2a2 2 0 0 1 4-1.2 2 2 0 0 1 4 1.2C16 13.5 12 16 12 16z",
     dreamhome: "M3 11l9-7 9 7 M5 9.5V20h14V9.5 M10 20v-5h4v5 M9 11h2v2H9z",
     word: "M4 5l3 14 5-11 5 11 3-14",
@@ -366,7 +367,7 @@ let HUES = {hamster: ["#ddbf8e", "#aa744e"], aquarium: ["#78bda3", "#174c50"], c
     procart: ["#9cba76", "#285453"],
     tetris: ["#8b5cf6", "#3b0764"], 'marble-drop': ["#e8c27a", "#9a6a24"], superlambda: ["#bae6fd", "#38bdf8"],
     doom: ["#b91c1c", "#1f0707"], midtown: ["#fb7185", "#9f1239"], 'sentence-game': ["#fef08a", "#f59e0b", "#78350f"], 'photo-album': ["#fda4af", "#e11d48"],
-    photo: ["#6ee7b7", "#047857"], photos: ["#67e8f9", "#0e7490"], draw: ["#fdba74", "#ea580c"], sketch: ["#b3a0ed", "#65518f"],
+    photo: ["#6ee7b7", "#047857"], photos: ["#67e8f9", "#0e7490"], draw: ["#fdba74", "#ea580c"], sketch: ["#b3a0ed", "#65518f"], paint: ["#f9c784", "#c2410c"],
     greetings: ["#f9a8d4", "#db2777"], dreamhome: ["#93c5fd", "#1d4ed8"], word: ["#60a5fa", "#1e40af"], note: ["#fef9c3", "#facc15", "#854d0e"],
     sheet: ["#86cba2", "#217346"], dbench: ["#8cc5df", "#285b79"], slides: ["#fca5a5", "#b91c1c"], finder: ["#93c5fd", "#2563eb"], music: ["#fda4af", "#be123c"],
     soundflow: ["#3f4448", "#0b0b0c", "#5cb8ad"],
@@ -465,6 +466,18 @@ fn procart(t) => window("procart", t, <g
     <circle cx:175, cy:143, r:5, fill:"#b85042">;
     (text(185, 148, 12, "#263d32", "One seed. A world."))>)
 
+// a canvas mid-painting: a soft wash, a pressure-tapered ink line and a smeared stroke.
+fn paint(t) => window("paint", t, <g
+    <rect x:26, y:22, width:320, height:172, fill:"#3a3a3f">;
+    <rect x:26, y:22, width:320, height:18, fill:"#2c2c30">;
+    for (i in 0 to 5) <rect x:32 + i * 26, y:27, width:22, height:8, rx:3, fill:if (i == 1) "#0a84ff" else "#48484f">;
+    <rect x:44, y:50, width:284, height:134, fill:"#fffdf8">;
+    <path d:"M60 92Q110 62 160 90T262 88T312 80", fill:"none", stroke:"#9fc5e8", 'stroke-width':18, 'stroke-linecap':"round", opacity:0.8>;
+    <path d:"M64 132Q118 112 168 134T296 126", fill:"none", stroke:"#c0392b", 'stroke-width':9, 'stroke-linecap':"round">;
+    <path d:"M70 160Q140 146 190 160T300 152", fill:"none", stroke:"#1c1c1e", 'stroke-width':2.5, 'stroke-linecap':"round">;
+    <path d:"M205 60L218 178", fill:"none", stroke:"#e8d5d3", 'stroke-width':7, opacity:0.7>;
+    (text(56, 176, 10, "#5a5a5f", "Pressure, tilt and smudge"))>)
+
 fn chat(t) => window("chat", t, <g
     <rect x:26, y:22, width:320, height:172, fill:"#f1eee7">;
     <rect x:26, y:22, width:90, height:172, fill:"#fff">;
@@ -480,12 +493,12 @@ fn chat(t) => window("chat", t, <g
     <circle cx:303, cy:160, r:12, fill:"#148665">;
     <path d:"M299 155l9 5-9 5 2-5z", fill:"#fff">>)
 
-let LIVE = {chat: chat, procart: procart, tetris: tetris, superlambda: superlambda, doom: doom, cityscape: cityscape, 'photo-album': photo_album}
+let LIVE = {chat: chat, paint: paint, procart: procart, tetris: tetris, superlambda: superlambda, doom: doom, cityscape: cityscape, 'photo-album': photo_album}
 
 let TONE_OF = {tetris: "arcade", 'marble-drop': "amber", 'sentence-game': "amber", superlambda: "sky", doom: "clay", midtown: "slate",
     procart: "sage",
     hamster: "amber", aquarium: "sage", scene3d: "slate", cityscape: "night", 'photo-album': "rose", photo: "teal", photos: "cyan",
-    draw: "clay", sketch: "violet", word: "blue", sheet: "sage", dbench: "blue", note: "gold", slides: "rose", chart: "indigo",
+    draw: "clay", paint: "amber", sketch: "violet", word: "blue", sheet: "sage", dbench: "blue", note: "gold", slides: "rose", chart: "indigo",
     finder: "blue", chat: "sage", mail: "cyan", book: "amber", music: "violet", soundflow: "teal", archive: "slate", readability: "sage", greetings: "rose", dreamhome: "blue"}
 
 pub fn of(key) any^ => (let t = TONES[TONE_OF[key]], if (LIVE[key] != null) LIVE[key](t) else shot(key, t))

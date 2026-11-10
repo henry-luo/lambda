@@ -1,0 +1,15 @@
+{
+  "version": 3,
+  "comment": "Lambda paint demo: a blending brush that smears the paint under it. Original settings for this demo.",
+  "group": "",
+  "parent_brush_name": "",
+  "settings": {
+    "opaque": {"base_value": 0.8, "inputs": {}},
+    "opaque_multiply": {"base_value": 0.0, "inputs": {"pressure": [[0.0, 0.0], [1.0, 1.0]]}},
+    "radius_logarithmic": {"base_value": 2.4, "inputs": {}},
+    "hardness": {"base_value": 0.5, "inputs": {}},
+    "dabs_per_actual_radius": {"base_value": 3.0, "inputs": {}},
+    "smudge": {"base_value": 0.95, "inputs": {}},
+    "smudge_length": {"base_value": 0.15, "inputs": {}}
+  }
+}
