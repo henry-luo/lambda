@@ -704,7 +704,7 @@ static Item fetch_progress(void* data, bool final) {
     rate_item.set(push_d(rate));
     static const char* names[] = {"url", "received", "total", "rate"};
     static const TypeId types[] = {LMD_TYPE_STRING, LMD_TYPE_INT, LMD_TYPE_ANY, LMD_TYPE_ANY};
-    record.set(map_alloc_for_type(runtime_result_shape(names, types, 4), NULL, 0));
+    record.set(map_alloc_for_type(runtime_result_shape(names, types, 4), 0));
     if (!record.get()) return ItemNull;
     Item values[] = {url.get(), (Item){.item = i2it(received)},
         total >= 0 ? (Item){.item = i2it(total)} : ItemNull, rate_item.get()};
@@ -794,7 +794,7 @@ static Map* fetch_headers_map(char** lines, int count, const char* type_name, co
                 ? (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap)) : NULL;
         }
         if (ok && shape) {
-            result = map_alloc_for_type(shape, NULL, 0);
+            result = map_alloc_for_type(shape, 0);
             if (result && used > 0) map_fill_items(result, slots, used);
         }
     }
@@ -865,7 +865,7 @@ static Item fetch_result(FetchJob* job) {
     static const char* names[] = {"status", "ok", "url", "headers", "body", "bytes"};
     static const TypeId types[] = {LMD_TYPE_INT, LMD_TYPE_BOOL, LMD_TYPE_STRING, LMD_TYPE_MAP,
         LMD_TYPE_ANY, LMD_TYPE_INT};
-    result.set(map_alloc_for_type(runtime_result_shape(names, types, 6), NULL, 0));
+    result.set(map_alloc_for_type(runtime_result_shape(names, types, 6), 0));
     if (!result.get()) return fetch_error(ERR_OUT_OF_MEMORY, job->url, NULL);
     Item values[] = {(Item){.item = i2it((int64_t)status)}, (Item){.item = b2it(status >= 200 && status < 300)},
         url.get(), (Item){.map = headers.get()}, body.get(), (Item){.item = i2it(size)}};

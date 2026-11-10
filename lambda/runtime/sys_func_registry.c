@@ -1653,24 +1653,8 @@ const int sys_func_def_count = SYS_FUNC_DEF_COUNT;
 
 // io.http module
 
-// Trampolines for calling _b boxed wrappers from MIR Direct
-extern Item fn_call_boxed_0_into(void* fp, uint64_t* result_home);
+// imported unary boxed constraint bridge
 extern Item fn_call_boxed_1_into(void* fp, Item a, uint64_t* result_home);
-extern Item fn_call_boxed_2_into(void* fp, Item a, Item b, uint64_t* result_home);
-extern Item fn_call_boxed_3_into(void* fp, Item a, Item b, Item c, uint64_t* result_home);
-extern Item fn_call_boxed_4_into(void* fp, Item a, Item b, Item c, Item d, uint64_t* result_home);
-extern Item fn_call_boxed_5_into(void* fp, Item a, Item b, Item c, Item d, Item e, uint64_t* result_home);
-extern Item fn_call_boxed_6_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
-extern Item fn_call_boxed_7_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
-extern Item fn_call_boxed_8_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
-extern Item fn_call_boxed_9_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, uint64_t* result_home);
-extern Item fn_call_boxed_10_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, uint64_t* result_home);
-extern Item fn_call_boxed_11_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, uint64_t* result_home);
-extern Item fn_call_boxed_12_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, uint64_t* result_home);
-extern Item fn_call_boxed_13_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, uint64_t* result_home);
-extern Item fn_call_boxed_14_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, uint64_t* result_home);
-extern Item fn_call_boxed_15_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o, uint64_t* result_home);
-extern Item fn_call_boxed_16_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, Item i, Item j, Item k, Item l, Item m, Item n, Item o, Item p, uint64_t* result_home);
 extern Item js_call_export_0_into(Function* function, uint64_t* result_home);
 extern Item js_call_export_1_into(Function* function, Item a, uint64_t* result_home);
 extern Item js_call_export_2_into(Function* function, Item a, Item b, uint64_t* result_home);
@@ -1681,7 +1665,6 @@ extern Item js_call_export_6_into(Function* function, Item a, Item b, Item c, It
 extern Item js_call_export_7_into(Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
 extern Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
 extern Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
-extern Item fn_call0_into(Function* fn, uint64_t* result_home);
 extern Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
 extern Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
 extern Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home);
@@ -1689,7 +1672,6 @@ extern void lambda_function_mark_mir_context_abi(Function* fn);
 extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
-extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
 extern void* lambda_module_const_at_state(void* module_state, uint32_t index);
 extern void* lambda_module_state_for_unit(void* runtime_context, uint32_t unit_id);
 extern Item lambda_module_var_at(void* module_state, uint32_t slot);
@@ -1856,7 +1838,6 @@ JitImport jit_runtime_imports[] = {
 #endif
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
-    {"array_float_literal_with_nulls", FPTR(array_float_literal_with_nulls)},
     {"array_float_set", FPTR(array_float_set)},
     {"array_int_new", FPTR(array_int_new)},
     {"array_num_new", FPTR(array_num_new)},
@@ -1876,7 +1857,6 @@ JitImport jit_runtime_imports[] = {
     // List operations
     // ========================================================================
     {"list", FPTR(list)},
-    {"list_fill", FPTR(list_fill)},
     {"list_push", FPTR(list_push)},
     {"list_push_spread", FPTR(list_push_spread)},
     {"list_get", FPTR(list_get)},
@@ -1885,7 +1865,6 @@ JitImport jit_runtime_imports[] = {
     {"list_collapse_value", FPTR(list_collapse_value)},
     {"list_collapse_item", FPTR(list_collapse_item)},
     {"slot_image", FPTR(slot_image)},
-    {"lambda_direct_field_store_image", FPTR(lambda_direct_field_store_image)},
 
     // ========================================================================
     // Map, Element, Object operations
@@ -1893,15 +1872,12 @@ JitImport jit_runtime_imports[] = {
     {"map", FPTR(map)},
     {"map_with_data", FPTR(map_with_data)},
     {"map_with_tl", FPTR(map_with_tl)},
-    {"map_with_region_tl", FPTR(map_with_region_tl)},
     {"map_with_type_tl", FPTR(map_with_type_tl)},
-    {"map_with_region_type_tl", FPTR(map_with_region_type_tl)},
     {"map_fill", FPTR(map_fill)},
     {"map_alloc_for_type", FPTR(map_alloc_for_type),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR)}},
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
     // These shared slot kernels only decode/store existing descriptor storage.
     {"set_field_value", FPTR(set_field_value),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
@@ -1944,8 +1920,6 @@ JitImport jit_runtime_imports[] = {
     {"lambda_object_capture_method", FPTR(lambda_object_capture_method)},
     {"lambda_object_copy_environment", FPTR(lambda_object_copy_environment)},
     {"lambda_object_prepare_method_call", FPTR(lambda_object_prepare_method_call)},
-    {"object_fill", FPTR(object_fill)},
-    {"object_fill_checked", FPTR(object_fill_checked)},
     {"object_content", FPTR(object_content)},
     {"object_content_fill", FPTR(object_content_fill)},
     {"object_get", FPTR(object_get)},
@@ -2221,12 +2195,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"lambda_module_const_at", FPTR(lambda_module_const_at),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
-      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_module_const_at_state", FPTR(lambda_module_const_at_state),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
@@ -2299,13 +2267,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"fn_string_char_eq_ascii", FPTR(fn_string_char_eq_ascii),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_RESULT_SCALAR_STABLE |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"fn_string_char_word", FPTR(fn_string_char_word),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -2313,14 +2274,6 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED | JIT_IMPORT_LOOP_STABLE_SCALAR,
       JIT_EXCEPTION_PRESERVES}},
-    {"fn_string_char_eq", FPTR(fn_string_char_eq),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_RESULT_SCALAR_STABLE |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"it2l", FPTR(it2l),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
@@ -2412,7 +2365,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_le", FPTR(fn_le)},
     {"fn_ge", FPTR(fn_ge)},
     {"vec_cmp", FPTR(vec_cmp)},
-    {"fn_not", FPTR(fn_not)},
     {"fn_and", FPTR(fn_and)},
     {"fn_or", FPTR(fn_or)},
     // numeric dispatch/boxing can allocate but never calls guest code;
@@ -2457,7 +2409,6 @@ JitImport jit_runtime_imports[] = {
     {"pipe_map_val", FPTR(pipe_map_val)},
     {"pipe_map_key", FPTR(pipe_map_key)},
     {"iter_len", FPTR(iter_len)},
-    {"fn_virtual_content_check", FPTR(fn_virtual_content_check), JIT_IMPORT_STABLE_ITEM},
     {"fn_len_checked", FPTR(fn_len_checked), JIT_IMPORT_STABLE_ITEM},
     {"fn_len", FPTR(fn_len)},
     {"iter_key_at", FPTR(iter_key_at)},
@@ -2486,7 +2437,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_round_i", FPTR(fn_round_i), JIT_IMPORT_PURE_SCALAR},
     // collection length — type-specialized native variants
     {"fn_len_l", FPTR(fn_len_l), JIT_IMPORT_READ_ONLY_LENGTH},
-    {"fn_len_a", FPTR(fn_len_a), JIT_IMPORT_READ_ONLY_LENGTH},
     {"fn_len_s", FPTR(fn_len_s), JIT_IMPORT_READ_ONLY_LENGTH},
     {"fn_len_e", FPTR(fn_len_e)},
 
@@ -2507,13 +2457,8 @@ JitImport jit_runtime_imports[] = {
     {"fn_substring", FPTR(fn_substring)},
     {"fn_join", FPTR(fn_join)},
     {"fn_join_consume_open_array", FPTR(fn_join_consume_open_array)},
-    {"fn_join_consume_cert_array", FPTR(fn_join_consume_cert_array)},
-    {"fn_join_consume_cert_array_item", FPTR(fn_join_consume_cert_array_item)},
-    {"fn_join_consume_cert_array_pair", FPTR(fn_join_consume_cert_array_pair)},
     {"fn_join_fresh_array_item", FPTR(fn_join_fresh_array_item)},
     // native String* variants for string functions
-    {"fn_starts_with_str", FPTR(fn_starts_with_str)},
-    {"fn_ends_with_str", FPTR(fn_ends_with_str)},
     {"fn_ord_str", FPTR(fn_ord_str)},
     {"fn_ord_str_item", FPTR(fn_ord_str_item)},
 
@@ -2540,8 +2485,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"heap_calloc_class", FPTR(heap_calloc_class)},
-    {"lambda_region_begin", FPTR(lambda_region_begin)},
-    {"lambda_region_end", FPTR(lambda_region_end)},
     {"heap_gc_root_slot_new", FPTR(heap_gc_root_slot_new)},
     {"heap_data_calloc", FPTR(heap_data_calloc)},
     {"heap_create_name", FPTR(heap_create_name)},
@@ -2556,7 +2499,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"const_type", FPTR(const_type)},
-    {"const_type_with_tl", FPTR(const_type_with_tl)},
     {"const_pattern", FPTR(const_pattern)},
     {"const_pattern_with_tl", FPTR(const_pattern_with_tl)},
     {"target_equal", FPTR(target_equal)},
@@ -2632,7 +2574,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_array_set", FPTR(fn_array_set)},
     {"lambda_array_set_checked_item", FPTR(lambda_array_set_checked_item)},
     {"lambda_array_set_checked_preplanned", FPTR(lambda_array_set_checked_preplanned)},
-    {"lambda_array_set_checked_inplace_item", FPTR(lambda_array_set_checked_inplace_item)},
     {"lambda_array_path_set_checked", FPTR(lambda_array_path_set_checked)},
     {"lambda_array_path_set_checked_inplace", FPTR(lambda_array_path_set_checked_inplace)},
     {"lambda_array_mask_assign_checked", FPTR(lambda_array_mask_assign_checked)},
@@ -2708,20 +2649,15 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
-    {"cow_path_set_packed_index", FPTR(cow_path_set_packed_index)},
     {"cow_path_set", FPTR(cow_path_set)},
     {"cow_path_borrow", FPTR(cow_path_borrow)},
     {"cow_path_borrow_fixed", FPTR(cow_path_borrow_fixed)},
     {"cow_path_borrow_typed_map_field", FPTR(cow_path_borrow_typed_map_field)},
     {"cow_place_leaf", FPTR(cow_place_leaf)},
-    {"cow_place_leaf_fixed", FPTR(cow_place_leaf_fixed)},
     {"cow_path_borrow_keys", FPTR(cow_path_borrow_keys)},
-    {"cow_path_borrow_home_keys", FPTR(cow_path_borrow_home_keys)},
     {"cow_path_index", FPTR(cow_path_index)},
     {"cow_path_set_keys", FPTR(cow_path_set_keys)},
-    {"cow_place_leaf_keys", FPTR(cow_place_leaf_keys)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
-    {"lambda_array_int_push_inferred_cow", FPTR(lambda_array_int_push_inferred_cow)},
     // open growth clears its certificate before pushing, so it cannot invoke
     // a certified element constraint; allocation remains conservative.
     {"pn_push_cow", FPTR(pn_push_cow),
@@ -2754,11 +2690,9 @@ JitImport jit_runtime_imports[] = {
     {"lambda_raise_operand", FPTR(lambda_raise_operand)},
     {"lambda_fn_colour_arg_check", FPTR(lambda_fn_colour_arg_check)},
     {"lambda_fn_colour_guard_list", FPTR(lambda_fn_colour_guard_list)},
-    {"lambda_fn_colour_guard_args", FPTR(lambda_fn_colour_guard_args)},
     {"lambda_type_check_env", FPTR(lambda_type_check_env)},
     {"lambda_type_check_env_status", FPTR(lambda_type_check_env_status)},
     {"lambda_type_check_captured_env_status", FPTR(lambda_type_check_captured_env_status)},
-    {"lambda_type_value_is_exact", FPTR(lambda_type_value_is_exact)},
     {"lambda_value_type_is_exact", FPTR(lambda_value_type_is_exact)},
     {"lambda_type_value_from_contract", FPTR(lambda_type_value_from_contract)},
     // admission returns only a container or defect; contract/site pointers are
@@ -2766,13 +2700,6 @@ JitImport jit_runtime_imports[] = {
     {"lambda_fill_for_contract", FPTR(lambda_fill_for_contract),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
-      JIT_IMPORT_RESULT_SCALAR_STABLE}},
-    {"lambda_fill_for_contract_int_lane", FPTR(lambda_fill_for_contract_int_lane),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
@@ -2797,17 +2724,13 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"lambda_array_admit_numeric_contract", FPTR(lambda_array_admit_numeric_contract)},
-    {"lambda_array_empty_for_contract", FPTR(lambda_array_empty_for_contract)},
     {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
     {"lambda_map_path_set_checked_inplace", FPTR(lambda_map_path_set_checked_inplace)},
     {"lambda_map_path_set_checked_keys", FPTR(lambda_map_path_set_checked_keys)},
     {"lambda_array_push_checked", FPTR(lambda_array_push_checked)},
-    {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
-    {"lambda_array_set_checked_lane", FPTR(lambda_array_set_checked_lane)},
-    {"lambda_array_set_checked_inplace_lane", FPTR(lambda_array_set_checked_inplace_lane)},
 
     // ========================================================================
     // Runtime pool access
@@ -3816,25 +3739,9 @@ JitImport jit_runtime_imports[] = {
     {"lambda_task_start_document", FPTR(lambda_task_start_document)},
 
     // ========================================================================
-    // Trampolines for calling _b boxed wrappers from MIR Direct
+    // imported unary boxed constraint bridge
     // ========================================================================
-    {"fn_call_boxed_0_into", FPTR(fn_call_boxed_0_into)},
     {"fn_call_boxed_1_into", FPTR(fn_call_boxed_1_into)},
-    {"fn_call_boxed_2_into", FPTR(fn_call_boxed_2_into)},
-    {"fn_call_boxed_3_into", FPTR(fn_call_boxed_3_into)},
-    {"fn_call_boxed_4_into", FPTR(fn_call_boxed_4_into)},
-    {"fn_call_boxed_5_into", FPTR(fn_call_boxed_5_into)},
-    {"fn_call_boxed_6_into", FPTR(fn_call_boxed_6_into)},
-    {"fn_call_boxed_7_into", FPTR(fn_call_boxed_7_into)},
-    {"fn_call_boxed_8_into", FPTR(fn_call_boxed_8_into)},
-    {"fn_call_boxed_9_into", FPTR(fn_call_boxed_9_into)},
-    {"fn_call_boxed_10_into", FPTR(fn_call_boxed_10_into)},
-    {"fn_call_boxed_11_into", FPTR(fn_call_boxed_11_into)},
-    {"fn_call_boxed_12_into", FPTR(fn_call_boxed_12_into)},
-    {"fn_call_boxed_13_into", FPTR(fn_call_boxed_13_into)},
-    {"fn_call_boxed_14_into", FPTR(fn_call_boxed_14_into)},
-    {"fn_call_boxed_15_into", FPTR(fn_call_boxed_15_into)},
-    {"fn_call_boxed_16_into", FPTR(fn_call_boxed_16_into)},
 #ifndef LAMBDA_NO_JS
     {"js_call_export_0_into", FPTR(js_call_export_0_into)},
     {"js_call_export_1_into", FPTR(js_call_export_1_into)},
@@ -3848,7 +3755,6 @@ JitImport jit_runtime_imports[] = {
 #endif // LAMBDA_NO_JS
     {"fn_call_into", FPTR(fn_call_into)},
     {"fn_call_borrowed_into", FPTR(fn_call_borrowed_into)},
-    {"fn_call0_into", FPTR(fn_call0_into)},
     {"fn_call1_into", FPTR(fn_call1_into)},
     {"fn_call2_into", FPTR(fn_call2_into)},
     {"fn_call3_into", FPTR(fn_call3_into)},
@@ -4092,14 +3998,14 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         // full-contract interning uses heap-owned pool/hashmap metadata, without guest allocation
         "lambda_array_rep_cert_resolve",
-        // Exact String-character equality reads only the already-rooted Item.
-        "fn_string_char_eq_ascii", "fn_string_char_eq", "fn_string_ord_at", "fn_string_char_word",
+        // indexed string readers inspect the already-rooted Item without allocation.
+        "fn_string_ord_at", "fn_string_char_word",
         "get_ascii_char_string",
         "fn_str_eq_ptr", "fn_string_freeze",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
-        // These three read existing metadata; the element variant can allocate
+        // these length readers use existing metadata; the element variant can allocate
         // while flattening spread attributes and remains MAY_GC.
-        "fn_len_l", "fn_len_a", "fn_len_s",
+        "fn_len_l", "fn_len_s",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.
         "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",
         "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",

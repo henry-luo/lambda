@@ -13,9 +13,6 @@
 // Shared range materialization helper for runtime sequence consumers.
 Item fn_chr(Item codepoint);
 
-typedef struct LambdaRegion LambdaRegion;
-typedef struct LambdaRegionBlock LambdaRegionBlock;
-
 // Runtime map admissions repeat the same candidate/contract shape pair across
 // recursive calls. The expected key may also be a union whose member carrier
 // was proven once. The entries are context-owned so a cache cannot leak a
@@ -49,11 +46,6 @@ typedef struct Heap {
     // native weak storage keeps captures alive exactly while their runtime
     // type value or instance is live; static nominal records hold code only.
     uint64_t object_environments_root;
-    // Per-runtime caches for compiler-proven temporary-object regions.  These
-    // blocks never enter gc->all_objects and are recycled only after a region
-    // ends, so an ordinary heap object can never retain a region pointer.
-    LambdaRegion* region_free;
-    LambdaRegionBlock* region_free_blocks;
     LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
     uint32_t map_contract_cache_next;
     struct hashmap* array_rep_cert_by_contract;
@@ -78,9 +70,6 @@ extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global 
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);  // register env array as GC roots
 extern "C" void heap_unregister_gc_root_range(uint64_t* base);  // unregister env array root range by base
-LambdaRegion* lambda_region_begin(void);
-void lambda_region_end(LambdaRegion* region);
-void* lambda_region_calloc(LambdaRegion* region, size_t size, TypeId type_id);
 String* heap_create_name(const char* name, size_t len);
 String* heap_create_name(const char* name);
 Symbol* heap_create_symbol(const char* symbol, size_t len);
@@ -215,10 +204,8 @@ void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import);
 // A module's pub variable, qualified by the dependency that defines it, so two
 // imported modules exporting one name stay distinct symbols (as functions do).
 void write_var_name_for_script(StrBuf *strbuf, AstNode *node, const Script* import_script);
-bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
 // Shared AST/MIR helpers.
-bool has_typed_params(AstFuncNode* fn_node);
 // The entry fn_map_set writes for `name` (a repeated literal key's first).
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
 // The entry a member read resolves (a repeated literal key's last, S1.6).

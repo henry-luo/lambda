@@ -1070,23 +1070,6 @@ ArrayNum* array_float_new(int64_t length) {
     return array_num_new(ELEM_FLOAT64, length);
 }
 
-// T27-7: the cold arm of an emitted float literal. A compact array cannot
-// carry null, so a literal with a null member is rebuilt as generic storage;
-// the emitted fast arm keeps one allocation and direct stores.
-Item array_float_literal_with_nulls(ArrayNum* packed, uint64_t null_mask) {
-    if (!packed) return ItemNull;
-    RootFrame roots(2);
-    Rooted<ArrayNum*> source(roots, packed);
-    Rooted<Array*> result(roots, array());
-    int64_t length = source.get()->length;
-    for (int64_t i = 0; i < length; i++) {
-        bool is_null = i < 64 && ((null_mask >> i) & 1) != 0;
-        // push_d may collect; array_push roots the value before it grows
-        Item member = is_null ? ItemNull : push_d(source.get()->float_items[i]);
-        array_push(result.get(), member);
-    }
-    return array_end(result.get());
-}
 
 ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
     if (array_num_prepare_fill(arr, ELEM_FLOAT64, count, sizeof(double))) {
@@ -2680,15 +2663,6 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
     return rooted_out.get();
 }
 
-Item list_fill(List *list, int count, ...) {
-    va_list args;
-    va_start(args, count);
-    for (int i = 0; i < count; i++) {
-        list_push_spread(list, {.item = va_arg(args, uint64_t)});
-    }
-    va_end(args);
-    return list_end(list);
-}
 
 Item list_get(List *list, int64_t index) {
     if (!list || ((uintptr_t)list >> 56)) { return ItemNull; }
@@ -2710,20 +2684,16 @@ Map* map(int64_t type_index) {
 // The data buffer is placed immediately after the Map struct,
 // eliminating the separate heap_data_calloc call.
 // This is used for all static maps where byte_size is known at transpile time.
-Map* map_alloc_for_type(TypeMap* map_type, LambdaRegion* region,
-        int64_t minimum_capacity) {
+Map* map_alloc_for_type(TypeMap* map_type, int64_t minimum_capacity) {
     if (!map_type) return NULL;
     int64_t byte_size = map_type->byte_size;
     if (byte_size < minimum_capacity) byte_size = minimum_capacity;
     // fixed-slot JS shapes may reserve more storage than their current lanes.
     if (byte_size < 0 || byte_size > INT32_MAX) return NULL;
     size_t total_size = sizeof(Map) + (byte_size > 0 ? (size_t)byte_size : 0);
-    Map *m = region
-        ? (Map*)lambda_region_calloc(region, total_size, LMD_TYPE_MAP)
-        : (Map*)heap_calloc(total_size, LMD_TYPE_MAP);
+    Map *m = (Map*)heap_calloc(total_size, LMD_TYPE_MAP);
     if (!m) return NULL;
     m->type_id = LMD_TYPE_MAP;
-    if (region) m->is_heap = 1;
     m->type = map_type;
     if (byte_size > 0) {
         m->data = (char*)m + sizeof(Map);
@@ -2735,7 +2705,7 @@ Map* map_alloc_for_type(TypeMap* map_type, LambdaRegion* region,
 Map* map_with_data(int64_t type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
-    return map_alloc_for_type(map_type, NULL, 0);
+    return map_alloc_for_type(map_type, 0);
 }
 
 // MIR Direct module-type-list-aware wrapper: saves/restores context->type_list around
@@ -2748,30 +2718,12 @@ Map* map_with_tl(int64_t type_index, void* type_list_ptr) {
     return r;
 }
 
-// A non-null region capability is passed only by a direct call site whose
-// producer summary proves every map field is null or another region map.
-Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
-        void* type_list_ptr) {
-    if (!region) return map_with_tl(type_index, type_list_ptr);
-    ArrayList* type_list = (ArrayList*)type_list_ptr;
-    if (!type_list || type_index < 0 || type_index >= type_list->length) return NULL;
-    TypeMap* map_type = (TypeMap*)type_list->data[type_index];
-    return map_alloc_for_type(map_type, region, 0);
-}
-
 // A named map contract may be a TypeMap that is not itself the type-list entry:
 // aliases store a TypeType wrapper in that list. Pass the resolved TypeMap
 // directly so typed literals cannot cast a wrapper into a runtime map shape.
 Map* map_with_type_tl(TypeMap* map_type, void* type_list_ptr) {
     (void)type_list_ptr;
-    return map_alloc_for_type(map_type, NULL, 0);
-}
-
-Map* map_with_region_type_tl(LambdaRegion* region, TypeMap* map_type,
-        void* type_list_ptr) {
-    (void)type_list_ptr;
-    if (!region) return map_with_type_tl(map_type, type_list_ptr);
-    return map_alloc_for_type(map_type, region, 0);
+    return map_alloc_for_type(map_type, 0);
 }
 
 // Empty map types have no field storage. Root the new map while allocating
@@ -3204,19 +3156,6 @@ Object* object_with_tl(int64_t type_index, void* type_list_ptr) {
     return r;
 }
 
-Object* object_fill(Object* obj, ...) {
-    TypeObject *obj_type = (TypeObject*)obj->type;
-    // skip data allocation if already set (combined allocation via object_with_data)
-    if (!obj->data) {
-        obj->data = heap_data_calloc(obj_type->byte_size);
-    }
-    // set object fields (same layout as map)
-    va_list args;
-    va_start(args, obj);
-    set_fields((TypeMap*)obj_type, obj->data, args);
-    va_end(args);
-    return obj;
-}
 
 // S2.1.3 / D3.1.1: an object IS an element, so its content face is the object
 // itself — the same items/length/capacity an element carries. Kept as a named
@@ -3227,7 +3166,7 @@ List* object_content(Object* obj) {
 
 // Content append, mirroring element content exactly: the same list_push_spread
 // normalization (D3.3.1 — null dropped, adjacent strings merged, content lists
-// spliced). What it must NOT reuse is list_fill, whose list_end tail would run
+// spliced). A list-finishing fill would run
 // the element branch's frame bookkeeping on a value the caller still owns.
 Object* object_content_fill(Object* obj, int count, ...) {
     if (!obj) return NULL;
@@ -3247,8 +3186,7 @@ Object* object_content_fill_items(Object* obj, const Item* values, int count) {
     return obj;
 }
 
-// Array-taking sibling of object_fill for callers holding their field values
-// in a rooted Item span rather than in varargs (the T0 walker).
+// the caller holds field values in a rooted Item span across numeric coercion.
 Object* object_fill_items(Object* obj, const Item* values, int value_count) {
     if (!obj) return NULL;
     TypeObject* obj_type = (TypeObject*)obj->type;
@@ -3361,22 +3299,6 @@ Item object_from_fields(const TypeObject* declared, Item fields) {
     return (Item){.item = (uint64_t)(uintptr_t)object};
 }
 
-// The JIT's fill for a literal with deferred fields. Admission allocates, so
-// the values are rooted here first (the caller roots the object). Returns the
-// failure, or ItemNull once the object is filled.
-Item object_fill_checked(Object* obj, uint64_t deferred, ...) {
-    TypeObject* obj_type = (TypeObject*)obj->type;
-    int count = (int)obj_type->length;
-    RootSpan values((size_t)(count > 0 ? count : 1));
-    va_list args;
-    va_start(args, deferred);
-    for (int i = 0; i < count; i++) values.words()[i] = va_arg(args, uint64_t);
-    va_end(args);
-    Item failure = object_literal_admit_fields(obj_type, values.items(), count, deferred);
-    if (get_type_id(failure) == LMD_TYPE_ERROR) return failure;
-    object_fill_items(obj, values.items(), count);
-    return ItemNull;
-}
 
 // D3.1.1: an object wears its declared structural kind and reads its
 // attributes through the shared Map face, so this is map_get under a different
@@ -3730,25 +3652,6 @@ extern "C" Item fn_string_ascii_at(Item str_item, int64_t index) {
     return item_at(str_item, index);
 }
 
-extern "C" uint8_t fn_string_char_eq_ascii(Item str_item, int64_t index,
-        uint8_t expected) {
-    String* str = str_item.get_safe_string();
-    if (!str || index < 0) return 0;
-    if (str->is_ascii) {
-        return (uint64_t)index < str->len &&
-            (uint8_t)str->chars[index] == expected;
-    }
-
-    // Match item_at's UTF-8 indexing without constructing an intermediate
-    // one-character String solely to compare it with an ASCII literal.
-    size_t byte_offset = str_utf8_char_to_byte(str->chars, str->len,
-        (size_t)index);
-    if (byte_offset == STR_NPOS) return 0;
-    size_t char_len = str_utf8_char_len((unsigned char)str->chars[byte_offset]);
-    if (char_len == 0) char_len = 1;
-    return byte_offset + char_len <= str->len && char_len == 1 &&
-        (uint8_t)str->chars[byte_offset] == expected;
-}
 
 // Return the exact UTF-8 span selected by Lambda string indexing without
 // materializing its one-character String result. A missing character leaves
@@ -3804,23 +3707,6 @@ extern "C" Item fn_string_ord_at(Item str_item, int64_t index) {
         ? (Item){.item = lambda_int_box_lane(codepoint)} : ItemNull;
 }
 
-// The MIR caller has certified both operands as strings. This leaf has no
-// allocation or re-entry, so it can compare their indexed character spans
-// directly while preserving absence and UTF-8 equality (D4.3.3, S7.1.1v3).
-extern "C" uint8_t fn_string_char_eq(Item left_item, int64_t left_index,
-        Item right_item, int64_t right_index) {
-    String* left = left_item.get_safe_string();
-    String* right = right_item.get_safe_string();
-    const char* left_chars = NULL;
-    const char* right_chars = NULL;
-    size_t left_len = 0;
-    size_t right_len = 0;
-    bool has_left = string_char_span(left, left_index, &left_chars, &left_len);
-    bool has_right = string_char_span(right, right_index, &right_chars, &right_len);
-    if (has_left != has_right) return 0;
-    if (!has_left) return 1;
-    return left_len == right_len && memcmp(left_chars, right_chars, left_len) == 0;
-}
 // Get attribute by name from an Item (for map/element attribute access)
 Item item_attr(Item data, const char* key) {
     if (!data.item || !key) { return ItemNull; }

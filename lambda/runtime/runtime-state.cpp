@@ -924,19 +924,6 @@ extern "C" Item lambda_active_module_name_item(uint32_t module_name_index,
     return lambda_name_id_to_item(name_id);
 }
 
-extern "C" void* lambda_module_const_at(const LambdaModuleLayout* layout,
-        uint32_t index) {
-    EvalContext* owner = context;
-    if (!owner || !layout) return NULL;
-    uint32_t module_state_id = lambda_module_state_id_for_unit(owner,
-        layout->module_id);
-    if (module_state_id >= owner->module_state_capacity) return NULL;
-    LambdaModuleState* state = owner->module_states[module_state_id];
-    if (!state || !state->consts) return NULL;
-    // A generated literal may follow an arbitrary call; resolve through the
-    // owning context here so MIR cannot retain a call-clobbered pool register.
-    return ((void**)state->consts)[index];
-}
 
 extern "C" void* lambda_module_state_for_unit(void* runtime_context,
         uint32_t unit_id) {

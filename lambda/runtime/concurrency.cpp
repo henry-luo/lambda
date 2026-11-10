@@ -2383,7 +2383,7 @@ static Item process_progress(void* data, bool final) {
     line.set((Item){.item = s2it(string)});
     static const char* names[] = {"line"};
     static const TypeId types[] = {LMD_TYPE_STRING};
-    record.set(map_alloc_for_type(runtime_result_shape(names, types, 1), NULL, 0));
+    record.set(map_alloc_for_type(runtime_result_shape(names, types, 1), 0));
     if (!record.get()) return ItemNull;
     Item values[] = {line.get()};
     map_fill_items(record.get(), values, 1);
@@ -2516,7 +2516,7 @@ static Item process_result(LambdaProcess* process) {
     static const char* names[] = {"stdout", "stderr", "exit_code", "timed_out", "cancelled", "truncated"};
     static const TypeId types[] = {LMD_TYPE_ANY, LMD_TYPE_ANY, LMD_TYPE_INT,
         LMD_TYPE_BOOL, LMD_TYPE_BOOL, LMD_TYPE_BOOL};
-    result.set(map_alloc_for_type(runtime_result_shape(names, types, 6), NULL, 0));
+    result.set(map_alloc_for_type(runtime_result_shape(names, types, 6), 0));
     Item values[] = {output.get(), errors.get(), (Item){.item = i2it(process->result.exit_code)},
         (Item){.item = b2it(process->result.timed_out)}, (Item){.item = b2it(process->result.cancelled)},
         (Item){.item = b2it(process->result.output_limit_exceeded)}};

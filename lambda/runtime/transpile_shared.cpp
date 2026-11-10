@@ -11,32 +11,7 @@
 
 extern Type TYPE_ANY, TYPE_INT;
 
-bool has_typed_params(AstFuncNode* fn_node) {
-    AstNamedNode *param = fn_node->param;
-    while (param) {
-        TypeParam* pt = (TypeParam*)param->type;
-        if (pt) {
-            TypeId tid = pt->type_id;
-            if (is_typed_wrapper_param_type_id(tid)) {
-                return true;
-            }
-            // typed array parameters (int[], float[], etc.)
-            if (tid == LMD_TYPE_TYPE && pt->kind == TYPE_KIND_UNARY) {
-                return true;
-            }
-        }
-        param = (AstNamedNode*)param->next;
-    }
-    return false;
-}
 
-bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
-    (void)fn_node;
-    // A first-class Core Lambda value always names its boxed public wrapper.
-    // The raw JIT entry may use native operands, but publishing it would let a
-    // dynamic call reinterpret boxed Items as those native operands.
-    return true;
-}
 
 void write_fn_name_for_script_ex(StrBuf *strbuf, AstFuncNode* fn_node,
         const Script* import_script, const char* suffix) {

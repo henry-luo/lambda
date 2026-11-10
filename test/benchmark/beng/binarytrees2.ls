@@ -7,11 +7,7 @@ let N = 10
 // named node shape, used on the check() parameter to document the tree shape
 type Node = {left: Node?, right: Node?}
 
-// make_tree must return its map literals DIRECTLY. mir_region_producer_candidate()
-// only accepts a body of blocks/ifs/returns/map-literals, so binding the literal to
-// a local first (`var n: Node = {...}; return n`) disqualifies the function, drops
-// the caller's `_region` argument, and downgrades map_with_region_tl to the generic
-// heap map_with — ~1.6x on allocation-bound code.
+// fresh trees use the shared GC map allocator; the checker retains typed field access.
 fn make_tree(depth: int) Node {
     if (depth == 0) {
         return {left: null, right: null}

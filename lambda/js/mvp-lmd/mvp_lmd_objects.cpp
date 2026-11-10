@@ -113,7 +113,7 @@ extern "C" Item mvp_lmd_property_key(Item string) {
 }
 extern "C" Item mvp_lmd_object_new(TypeMap* shape, int64_t collection) {
     if (!collection) {
-        Map* object = map_alloc_for_type(shape, NULL, 0);
+        Map* object = map_alloc_for_type(shape, 0);
         return object ? Item{.map = object} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
     RootFrame roots(1);

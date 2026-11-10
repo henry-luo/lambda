@@ -52,6 +52,7 @@
 #include "lib/url.h"
 #include "lib/str.h"
 #include "lib/strbuf.h"
+#include "../lambda/runtime/sys_func_registry.h"
 #include "radiant/view.hpp"
 #include "radiant/radiant.hpp"
 #include "radiant/render.hpp"
@@ -67,6 +68,13 @@ extern const int32_t radiant_dom_type_binding_count;
 
 #ifndef _WIN32
 extern __thread Context* input_context;
+#endif
+
+#ifndef LAMBDA_NO_MIR
+TEST(LambdaJitImports, NoGcMetadataMatchesAudit) {
+    // registry edits must preserve the effect audit consumed by precise roots.
+    EXPECT_TRUE(jit_import_validate_no_gc_allowlist());
+}
 #endif
 
 TEST(LambdaArrayNumShape, RejectsOutOfRangeRankBeforeStackDecode) {
@@ -1498,6 +1506,35 @@ protected:
         pool = NULL;
     }
 };
+
+TEST_F(LambdaConcurrencyRuntime, GcMapAllocatorHonorsMinimumCapacity) {
+    // shape metadata outlives every map through the fixture's heap teardown.
+    TypeMap* shape = (TypeMap*)pool_calloc(pool, sizeof(TypeMap));
+    ASSERT_NE(shape, nullptr);
+    shape->type_id = LMD_TYPE_MAP;
+    shape->byte_size = sizeof(Item);
+    const int64_t capacities[] = {0, 4, 64};
+    RootFrame roots(1);
+    Rooted<Map*> owner(roots, nullptr);
+    for (int64_t capacity : capacities) {
+        owner.set(map_alloc_for_type(shape, capacity));
+        ASSERT_NE(owner.get(), nullptr);
+        ASSERT_TRUE(gc_is_managed(concurrency_test_gc, owner.get()));
+        int64_t expected = capacity > shape->byte_size ? capacity : shape->byte_size;
+        EXPECT_EQ(owner.get()->type, shape);
+        EXPECT_EQ(owner.get()->data_cap, expected);
+        EXPECT_EQ(owner.get()->data, (char*)owner.get() + sizeof(Map));
+        memset(owner.get()->data, 0x5a, (size_t)expected);
+        // the GC owns the header and inline data across a rooted collection.
+        gc_collect(concurrency_test_gc, eval.side_root_base,
+            eval.side_root_top - eval.side_root_base);
+        EXPECT_FALSE(gc_get_header(owner.get())->gc_flags & GC_FLAG_FREED);
+        for (int64_t i = 0; i < expected; i++)
+            EXPECT_EQ(((uint8_t*)owner.get()->data)[i], 0x5a);
+    }
+    EXPECT_EQ(map_alloc_for_type(nullptr, 0), nullptr);
+    EXPECT_EQ(map_alloc_for_type(shape, (int64_t)INT32_MAX + 1), nullptr);
+}
 
 TEST_F(LambdaConcurrencyRuntime, NativeMethodStorageUsesEphemeronsWithoutJsRealm) {
     EXPECT_EQ(js_active_runtime_state, nullptr);

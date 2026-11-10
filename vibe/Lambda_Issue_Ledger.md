@@ -554,6 +554,26 @@ Evidence: `temp/error-handling-merge-20261103T054805Z/latest-mvp-frontend.json`
 and `final-source-audit.json`.
 [Production qualification](<impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
 
+<a id="lr01-23"></a>**LR01-23 · AUTO fallback cache test expects a MIR import image · OPEN (2026-11-10)**
+
+`LambdaScriptCache.AutoFallbackCachesMirImportConeAndViews` computes the expected
+42 but fails its `cache_mir_artifact` and MIR-hit assertions: the dependency has
+an AST image and the second run adds no MIR cache hit. This reproduces both on
+the helper-retirement candidate and with all six changed runtime implementation
+objects restored from `fd07a893f`, under identical current headers, sibling
+archives and test code. It predates these helper deletions. Whether the defect
+is a stale tier-specific expectation or missing native-image reuse is not yet
+established; preserve the assertions pending that investigation (D8.3.1,
+D8.3.5, D8.5.1). It does not block the dead-helper audit.
+
+Reproduce from the Lambda checkout with
+`DYLD_LIBRARY_PATH="$PWD/modules/node-core" ./temp/mvp_helper_retirement/test-runtime.exe --gtest_filter=LambdaScriptCache.AutoFallbackCachesMirImportConeAndViews`.
+The private-path loader override is only needed for this temporary executable.
+Evidence: `temp/mvp_helper_retirement/cache-current.log`,
+`control/cache-test.log`, `control/summary.json`; the causal control retains the
+pre-cleanup helpers, and neither test oracle nor cache policy was changed.
+
+
 ## 2. Parsing & AST construction (LR02)
 
 <a id="lr02-1"></a>**LR02-1 · Relational result type is representation-sensitive · PARTIAL**
@@ -884,20 +904,16 @@ module cover the former truncation paths.
 not lift their independent structural caps. Implementation and qualification:
 [containment follow-up](<impl/Lambda_Impl_Ledger_Containment_Followup (done).md>).
 
-<a id="lr07-13"></a>**LR07-13 · TCO iteration ceiling, and the safety proof that would lift it · OPEN**
-Tail-recursive loops emit a guard raising a stack-overflow error past
-`LAMBDA_TCO_MAX_ITERATIONS` (`transpile-mir.cpp:27934`–`27941`); the interpreter
-enforces its own `LAMBDA_INTERP_TCO_MAX_ITERATIONS` (`interp.cpp:5051`). A
-correctly TCO'd loop consumes no native stack, so the ceiling is a proxy for a
-proof the transpiler declines to use.
+<a id="lr07-13"></a>**LR07-13 · Interpreter TCO iteration ceiling · OPEN**
 
-*Absorbed from [LR11-R6](<Lambda_Issue_Ledger (fixed).md#lr11-r6>) /
-[LR12-R3](<Lambda_Issue_Ledger (fixed).md#lr12-r3>) on 2026-09-10:*
-`is_tco_function_safe` (`safety_analyzer.cpp:441`) computes exactly that proof —
-"every recursive call in this function is in tail position, so after the goto
-transform the frame cannot grow" — and is **declared, defined, and never
-called**. Wiring it is what turns the iteration ceiling from a blanket cap into
-a guard only unproven functions pay for.
+The interpreter retains `LAMBDA_INTERP_TCO_MAX_ITERATIONS`; a correctly
+transformed tail loop consumes no native stack. Review the remaining ceiling
+against the execution/interrupt policy before changing it (D8.3.1–D8.3.2).
+The old Full MIR iteration guard disappeared with that emitter. Its unused
+`is_tco_function_safe` proof and two private walkers are removed in the
+2026-11-10 helper audit; neither T0 nor MVP called them. T0's live recursive-call
+identity and tail-position analysis remain. This retirement does not lift the
+interpreter ceiling. [Audit and evidence](impl/Lambda_Impl_MIR_Full_Retirement.md#runtime-helper-audit-2026-11-10).
 
 
 <a id="lr07-14"></a>**LR07-14 · Cross-cutting gaps · OPEN (rollup)**
@@ -1058,6 +1074,70 @@ suspected cause, not yet confirmed. Evidence:
 `temp/mvp_untyped_tuning_goal/p92-projection-full-control.log` and
 `p92-focused-units-2.log`. This does not block MVP tuning. The permanent
 MVP oracle is retained; no Full correctness pass is claimed.
+
+<a id="lr07-57"></a>**LR07-57 · Two MVP MIR-shape assertions disagree with current emission · OPEN (2026-11-10)**
+
+`test_implicit_tail_and_split_observations` expects `lambda_map_set_checked` in
+`updated_box`; `test_guarded_recursive_arrays` expects generic `fn_index` and
+checked-array-store calls in the guarded `place_queen` fallback. The selected
+calls do not appear in current MIR. Both assertions fail identically on the
+saved pre-cleanup executable (SHA256
+`21884b40fcb5392a1747838d91e27628064afb1599a9c1a998f3d95308ff903b`) and the
+helper-retirement release. The expected helpers remain implemented/registered;
+these are not unresolved deleted imports. Whether each oracle should follow
+newer lowering or exposes an optimization defect remains unconfirmed
+(D4.3.1, D7.3.1–D7.3.3). Do not weaken the assertions without tracing the
+relevant guarded path and checking its semantic fallback.
+
+Reproduce with `LAMBDA_TEST_EXE=<candidate> python3 -m unittest test_lambda_mir_mvp.LambdaMirMvpTests.test_implicit_tail_and_split_observations test_lambda_mir_mvp.LambdaMirMvpTests.test_guarded_recursive_arrays`
+from `test/benchmark`. Evidence: `temp/mvp_helper_retirement/tco-final-units.log`
+and `tco-oracle-control-2.log`; the saved pre-cleanup executable is
+`previous-root.exe` in that directory. This does not block dead-helper removal.
+
+
+<a id="lr07-58"></a>**LR07-58 · MVP rejects the u32 regression fixture during representation conversion · OPEN (2026-11-10)**
+
+`test/lambda/mvp/mir_mvp_u32.ls:10:23` fails with E501:
+`unsupported representation conversion in mvp_6_main: any (0) from 1 to 8`.
+The failure reproduces on the helper-retirement release and the saved
+pre-cleanup executable (SHA256
+`21884b40fcb5392a1747838d91e27628064afb1599a9c1a998f3d95308ff903b`), under
+normal, forced/poisoned and seeded GC, for both default and explicit MVP.
+This is a compiler admission/lowering failure, not a missing runtime import;
+its cause is not established. Retain the fixture and golden (D4.3.1, D8.2.5).
+
+Reproduce with `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/lambda/mvp/mir_mvp_u32.ls`.
+Evidence: `temp/mvp_helper_retirement/affected-goldens.log` and
+`affected-goldens-control.log`. This predates and does not block dead-helper
+retirement. The encompassing `test_benchmark_expansion_semantics` reports eight
+subcase failures from this single fixture.
+
+
+<a id="lr07-59"></a>**LR07-59 · Three execution-profile tests retain Full MIR emission expectations · OPEN (2026-11-10)**
+
+`LambdaOptProfile.ExecutedCallsAreCountedOnlyWhenEnabled`,
+`ExecutedCallsCanBeAttributedToCaller`, and `CowBindingDoesNotReloadLiveOwner`
+fail on both the helper-retirement release (SHA256
+`0e17c8c569764b0619088296bdb93fc5bfadc2f6cfde2f433b4fa55ea536ee75`)
+and the COW-site-attribution candidate. Semantic output, diagnostic TSV emission
+and overflow checks pass. The failures require retired `_accept_u32_`,
+`_shaped__raw0_`/`_shaped__raw1_`, `_main_`/`_capture_dynamic_` names, a
+`fn_len_l` call, or two `cow_bind_var` calls. Current MVP uses `mvp_*` entries,
+inlines the scalar/capture bodies and uses checked length helpers for these
+fixtures. The ordinary non-profiled native capture also bypasses a COW helper.
+
+The structural/counter oracles need an MVP audit that preserves their intent:
+opt-in diagnostics, executed-call attribution, and no spurious GC roots or
+safepoints (D6.3.1–D6.3.4, D7.3.1). Do not restore Full variants or add runtime
+calls solely to satisfy old counter shapes. Assertions remain unchanged.
+
+Reproduce with `LAMBDA_JS_OPT_EXE=<candidate> ./temp/mvp_regions_profile/test-opt.exe --gtest_filter='LambdaOptProfile.ExecutedCalls*:LambdaOptProfile.CowBindingDoesNotReloadLiveOwner'`.
+Evidence: `temp/mvp_regions_profile/profile-units-control.log`,
+`profile-units-candidate.log`, and the current TSVs under
+`temp/lambda_opt_contract/`. The separate COW census regression was caused by
+missing MVP site-wrapper selection and is fixed; it passes on the candidate.
+This issue does not block the allocator assessment or COW-site fix.
+
 
 ## 8. Memory management & GC (LR08)
 

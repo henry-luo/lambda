@@ -1537,7 +1537,7 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t need = 2 + plan_need_max_siblings(literal->item);
         if (ast_object_literal_spread_value(literal)) {
             // A typed `*:source` literal keeps the source and a member key
-            // alive while object_fill performs numeric coercion; the ordinary
+            // alive while object_fill_items performs numeric coercion; the ordinary
             // one-home literal floor omitted those two simultaneous homes.
             uint32_t spread_need = 3 + plan_need_max_siblings(literal->item);
             if (spread_need > need) need = spread_need;
