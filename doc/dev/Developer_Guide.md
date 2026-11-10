@@ -53,7 +53,7 @@ interpreter, pass `PYTHON` to Make; the value is propagated to sibling builds.
 
 ## 2. Setting Up Dependencies
 
-The setup scripts handle all dependency installation automatically:
+The setup scripts install platform packages and prepare owner-built dependencies:
 
 ```bash
 ./setup-mac-deps.sh        # macOS
@@ -61,7 +61,13 @@ The setup scripts handle all dependency installation automatically:
 ./setup-windows-deps.sh    # Windows (MSYS2)
 ```
 
-Pass `--clean` to any script to remove intermediate build artifacts.
+Pass `--dry-run` to inspect the package and build steps without changing the
+system. Lambda installs its development tools, then calls input's setup and
+Radiant's setup. `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` select sibling
+checkouts. Input and Radiant also provide their own `setup-<platform>-deps.sh`
+entry points; Radiant's invokes input's setup first. This follows the owner
+boundaries in D9.1.1v4 and D9.1.3v2. Use the project Make clean targets for
+build artifacts.
 
 ### Common Dependencies (All Platforms)
 
@@ -124,50 +130,16 @@ These libraries and tools are required on every platform.
 | **jsdom** (npm) | JavaScript DOM for test comparison |
 | **Puppeteer** (npm) | Browser automation for layout reference capture |
 
-### macOS-Specific (`setup-mac-deps.sh`)
+### Platform setup
 
-Requires **Homebrew**. Most libraries installed via `brew install`:
+On macOS, setup uses Homebrew. On Linux, it uses apt and builds pinned mbedTLS
+and mpdecimal into `../lambda-input/build/deps/linux-support/` with Premake
+and Make. On Windows, setup requires an MSYS2 CLANG64 or MINGW64 shell and
+uses pacman. Input builds its pinned curl, ThorVG, Brotli and utf8proc into
+`../lambda-input/build/deps/`; Radiant setup installs its graphics packages.
 
-```
-mbedtls@3  freetype  expat  glfw  libjpeg-turbo  giflib  libpng
-zlib  bzip2  pkg-config  libevent  premake
-```
-
-The split build prepares curl (with mbedTLS), ThorVG, Brotli and utf8proc under
-`../lambda-input/build/deps/`; WOFF2 uses vendored input sources. Platform setup
-also supplies dependencies under `mac-deps/` and through Homebrew.
-
-System frameworks: OpenGL, Cocoa, IOKit, CoreFoundation, CoreServices
-
-### Linux-Specific (`setup-linux-deps.sh`)
-
-Uses **apt** for system packages:
-
-```
-build-essential  libcurl4-openssl-dev  libmpdec-dev  libutf8proc-dev
-libssl-dev  zlib1g-dev  libnghttp2-dev  libncurses5-dev  libevent-dev
-libbrotli-dev  libfreetype6-dev  libexpat1-dev
-libglfw3-dev  libpng-dev  libbz2-dev  libturbojpeg0-dev  libgif-dev
-libgl1-mesa-dev  libglu1-mesa-dev  libegl1-mesa-dev  gettext
-```
-
-Source fallbacks use the dependency recipes for Google Test, utf8proc, mbedTLS
-and ThorVG. RE2 and WOFF2 are compiled from the vendored tree by the host build.
-
-### Windows-Specific (`setup-windows-deps.sh`)
-
-Requires **MSYS2** with CLANG64 (preferred) or MINGW64 environment. Uses `pacman`:
-
-```
-base-devel  mingw-w64-*-clang (or -gcc)
-mingw-w64-*-mpdecimal  mingw-w64-*-mbedtls
-mingw-w64-*-freetype  mingw-w64-*-glfw    mingw-w64-*-libpng
-mingw-w64-*-libjpeg-turbo  mingw-w64-*-giflib  mingw-w64-*-nodejs
-mingw-w64-*-pkgconf    ccache  git  vim  jq
-```
-
-Built from source in `win-native-deps/`:
-- libcurl (minimal, no HTTP/2), ThorVG, utf8proc; WOFF2 uses the vendored host sources.
+The macOS host build was verified on 2026-11-10. Linux and Windows setup plans
+were checked with `--dry-run`; full setup and build runs need platform testing.
 
 ### Dependency Architecture
 
@@ -182,7 +154,6 @@ such as RE2, image codecs and archive readers. The RDB TLS and plugin profile
 retains RDB8/RDB11 from `vibe/Lambda_IO_RDB.md`.
 
 ```bash
-make build-dependency DEP=thorvg
 make build-dependency DEP=googletest ARGS='--source build_temp/googletest --prefix temp/gtest-install'
 make build-typemeta-extract
 make test-build-dependencies
@@ -192,13 +163,14 @@ The metadata utility uses `--type-filter`; LLVM owns the generic `--filter`
 option in the shared Clang/LLVM libraries.
 
 `utils/build_dependencies.py` configures and builds under
-`temp/dependency-build/<system>-<architecture>/<dependency>/`. Platform setup
-scripts fetch sources and invoke those recipes; only installation into a system
-prefix uses sudo. PostgreSQL retains its configure probes and Make/Perl header
+`temp/dependency-build/<system>-<architecture>/<dependency>/`. Input setup fetches pinned input sources into its own checkout. Lambda-owned
+recipes are available separately through `make build-dependency`. PostgreSQL retains its configure probes and Make/Perl header
 generation; compilation and archiving use Premake. Other generated headers use
 the upstream templates and compiler probes rather than cached platform results.
-Some standalone dependency recipes use other build systems. For example, the
-input-owned ThorVG build uses Meson and Ninja, and its Brotli build uses CMake.
+Under D9.1.5, input-owned utf8proc, Brotli, ThorVG, curl and native
+dependencies use JSON recipes with Premake and Make. The input dependency
+pipeline was verified on macOS on 2026-11-10; Linux and Windows remain
+unverified. The standalone libpq configure step remains a conformance gap.
 
 The normal host build combines the generated Lambda build with the sibling
 archive builds:

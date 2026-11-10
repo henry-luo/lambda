@@ -298,6 +298,14 @@ DO30 are closed and appear only in §3.
 
 Status of `*`-marked rulings as of 2026-10-07.
 
+**D9.1.5* — Ruled 2026-11-10 (USER); partially implemented.** Input owns
+the shared JSON-driven Premake/Make dependency builder and the migrated
+utf8proc, Brotli, ThorVG, curl and native dependency recipes. These targets
+were built on macOS with the excluded tools blocked; Linux and Windows need
+verification (input issue LI-011). Lambda's standalone libpq recipe still
+invokes upstream `configure`, and the wider pipeline requires an audit; see
+`vibe/Lambda_Design_Radiant_Split.md` §6.
+
 **D1.2, D1.3, D1.4, and D1.5** remain partially implemented. The
 independent JS MVP profile that exercised D1.2/D1.3's private guest ABI and
 D1.5's private-root contract was removed from the active tree on 2026-10-07.

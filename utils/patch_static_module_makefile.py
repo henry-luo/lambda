@@ -32,21 +32,52 @@ def configured_archive_path(archive, root):
 
 
 def use_sibling_archives(content, root):
-    """Replace every generated provider reference in both link and prerequisites."""
+    """Replace provider links with owner archives and track their timestamps."""
     input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root).parent / 'lambda-input')).resolve()
     radiant_root = Path(os.environ.get('RADIANT_ROOT', Path(root).parent / 'radiant')).resolve()
-    profiles = ('debug', 'debug_asan', 'release', 'release_profile', 'coverage')
-    providers = {
-        '../lib/liblambda-data-cpp.a': input_root / 'build/lib/$(notdir $(OBJDIR))/liblambda-input.a',
-        '../lib/libradiant-cpp.a': radiant_root / 'build/lib/$(notdir $(OBJDIR))/libradiant.a',
+    profile = '$(notdir $(OBJDIR))'
+    archives = {
+        'lambda-data-cpp': input_root / f'build/lib/{profile}/liblambda-input.a',
+        'lambda-lib-cpp': input_root / f'build/lib/{profile}/liblambda-lib.a',
+        'radiant-cpp': radiant_root / f'build/lib/{profile}/libradiant.a',
     }
-    for profile in profiles:
-        providers[f'../lib/native/{profile}/liblambda-lib-cpp.a'] = input_root / f'build/lib/{profile}/liblambda-lib.a'
-    for original, archive in providers.items():
-        if original not in content:
-            raise RuntimeError(f'missing generated provider reference: {original}')
-        content = content.replace(original, str(archive))
-    return content
+    profiles = ('debug', 'debug_asan', 'release', 'release_profile', 'coverage')
+    legacy = {
+        '../lib/liblambda-data-cpp.a': archives['lambda-data-cpp'],
+        '../lib/libradiant-cpp.a': archives['radiant-cpp'],
+    }
+    for name in profiles:
+        legacy[f'../lib/native/{name}/liblambda-lib-cpp.a'] = input_root / f'build/lib/{name}/liblambda-lib.a'
+    if all(original in content for original in legacy):
+        for original, archive in legacy.items():
+            content = content.replace(original, str(archive))
+        return content
+
+    # Without local Premake provider projects, gmake emits -l names instead of
+    # paths. Substitute only complete linker tokens and add real prerequisites.
+    lines = []
+    found = set()
+    for line in content.splitlines(keepends=True):
+        selected = []
+        if line.startswith('LIBS +='):
+            tokens = line.split()
+            for name, archive in archives.items():
+                token = '-l' + name
+                if token in tokens:
+                    line = line.replace(token, str(archive))
+                    selected.append(str(archive))
+                    found.add(name)
+        lines.append(line)
+        if selected:
+            lines.append('LDDEPS += ' + ' '.join(selected) + '\n')
+    if found == set(archives):
+        return ''.join(lines)
+
+    # GNU linker groups may already contain the owner archive paths.
+    expected = ('liblambda-input.a', 'liblambda-lib.a', 'libradiant.a')
+    if all(name in content for name in expected):
+        return content
+    raise RuntimeError('missing generated sibling provider references')
 
 
 def main():

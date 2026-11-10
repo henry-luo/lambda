@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 65.0.0 (2026-11-09)
+**Spec version:** 65.1.0 (2026-11-10)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1417,6 +1417,12 @@ loosely.
   shared data model. `MarkBuilder` and `MarkEditor` use the `Input` owner.
   Ownership resolves layering; it does not require callback abstractions.
   [SM §9.4; Radiant_Split §3.1]
+- **D9.1.5* — GNU Make and Premake define the project build pipeline.** GNU
+  Make is the build entry point and executor for Lambda, `lambda-input` and
+  Radiant. Premake reads each owner's JSON build configuration and generates
+  Makefiles where needed. Project and dependency builds use no other build
+  system, including CMake, Meson, Ninja or Autotools (Autoconf/Automake).
+  [Radiant_Split §6]
 
 ### D9.2 Build profiles
 
@@ -1751,7 +1757,7 @@ authority to itself.*
 
 ## Appendix A — Implementation Status
 
-Status of the `*`-marked rulings on 2026-11-05. Each entry gives only the
+Status of the `*`-marked rulings on 2026-11-10. Each entry gives only the
 status and the live residue. The detailed footnotes, evidence and dates are in
 the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.md#2-implementation-footnotes).
 
@@ -1799,6 +1805,7 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D8.5.2, D8.5.3 | Not started. |
 | D8.6.4 | Instrumentation is in place. The exit ratchets are not yet met. |
 | D9.1.1–D9.1.4, D9.2.1, D9.5.6 | The three-project extraction has started. Input and Radiant still depend on runtime providers. See `vibe/impl/Lambda_Impl_Radiant_Split.md`. |
+| D9.1.5 | Partial: input's dependency recipes use Premake and Make and were verified on macOS; Linux and Windows remain unverified. Lambda's standalone libpq recipe still invokes upstream `configure`. See `vibe/impl/Lambda_Impl_Formal_Design_History.md` §2 and `vibe/Lambda_Design_Radiant_Split.md` §6. |
 | D9.4.6 | In place on macOS. Linux is generated but not verified. Windows is not covered. |
 | D9.5.3 | Not active since guest-language hosting was removed (2026-10-07). |
 | D9.5.5 | Partial: distinct VArray/Velmt TypeIds and carrier dispatch are in place. Some live collections are pending. |

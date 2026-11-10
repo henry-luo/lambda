@@ -119,7 +119,6 @@
     "lambda/serve/mcp_server.cpp",
     "lambda/serve/tls_handler.cpp"
   ],
-  "sqlite_version": "3.45.3",
   "exclude_source_files": [
     "radiant/webview_child_mac_static.cpp",
     "radiant/webview_layer_mac_static.cpp",
@@ -188,24 +187,24 @@
       "name": "mbedtls",
       "version": "3.6.4",
       "description": "mbedTLS - SSL/TLS library",
-      "include": "/opt/homebrew/include",
-      "lib": "/opt/homebrew/lib/libmbedtls.a",
+      "include": "/opt/homebrew/opt/mbedtls@3/include",
+      "lib": "/opt/homebrew/opt/mbedtls@3/lib/libmbedtls.a",
       "link": "static"
     },
     {
       "name": "mbedx509",
       "version": "3.6.4",
       "description": "mbedTLS - X.509 certificate parsing",
-      "include": "/opt/homebrew/include",
-      "lib": "/opt/homebrew/lib/libmbedx509.a",
+      "include": "/opt/homebrew/opt/mbedtls@3/include",
+      "lib": "/opt/homebrew/opt/mbedtls@3/lib/libmbedx509.a",
       "link": "static"
     },
     {
       "name": "mbedcrypto",
       "version": "3.6.4",
       "description": "mbedTLS - Cryptographic primitives",
-      "include": "/opt/homebrew/include",
-      "lib": "/opt/homebrew/lib/libmbedcrypto.a",
+      "include": "/opt/homebrew/opt/mbedtls@3/include",
+      "lib": "/opt/homebrew/opt/mbedtls@3/lib/libmbedcrypto.a",
       "link": "static"
     },
     {
@@ -1894,9 +1893,9 @@
         },
         {
           "name": "mpdec",
-          "include": "/usr/local/include",
-          "lib": "-lmpdec",
-          "link": "dynamic"
+          "include": "${input_root}/build/deps/linux-support/include",
+          "lib": "${input_root}/build/deps/linux-support/lib/libmpdec.a",
+          "link": "static"
         },
         {
           "name": "utf8proc",
@@ -1907,22 +1906,22 @@
         {
           "name": "mbedtls",
           "description": "mbedTLS - SSL/TLS library",
-          "include": "/usr/local/include",
-          "lib": "/usr/local/lib/libmbedtls.a",
+          "include": "${input_root}/build/deps/linux-support/include",
+          "lib": "${input_root}/build/deps/linux-support/lib/libmbedtls.a",
           "link": "static"
         },
         {
           "name": "mbedx509",
           "description": "mbedTLS - X.509 certificate parsing",
-          "include": "/usr/local/include",
-          "lib": "/usr/local/lib/libmbedx509.a",
+          "include": "${input_root}/build/deps/linux-support/include",
+          "lib": "${input_root}/build/deps/linux-support/lib/libmbedx509.a",
           "link": "static"
         },
         {
           "name": "mbedcrypto",
           "description": "mbedTLS - Cryptographic primitives",
-          "include": "/usr/local/include",
-          "lib": "/usr/local/lib/libmbedcrypto.a",
+          "include": "${input_root}/build/deps/linux-support/include",
+          "lib": "${input_root}/build/deps/linux-support/lib/libmbedcrypto.a",
           "link": "static"
         },
         {

@@ -931,7 +931,7 @@ build-node-crypto: build build-windows-host-import
 build-rdb-deps:
 	utils/build-rdb-deps.sh
 
-.PHONY: build-dependency build-typemeta-extract test-build-dependencies
+.PHONY: build-dependency build-typemeta-extract test-build-dependencies test-setup-dependencies
 build-dependency:
 	@test -n "$(DEP)" || { echo "Usage: make build-dependency DEP=thorvg [ARGS=...]"; exit 1; }
 	$(PYTHON) utils/build_dependencies.py $(DEP) --jobs $(JOBS) $(ARGS)
@@ -941,6 +941,9 @@ build-typemeta-extract:
 
 test-build-dependencies:
 	$(PYTHON) utils/test_build_deps.py
+
+test-setup-dependencies:
+	$(PYTHON) test/test_setup_deps.py
 
 build-rdb-drivers: build
 	@test -f mac-deps/rdb/lib/libpq.a -a -f mac-deps/rdb/lib/libmariadbclient.a || $(MAKE) build-rdb-deps
@@ -1391,16 +1394,9 @@ release-jube: package-jube
 # Build the compatibility host name and all test executables.
 build-jube-test: build-jube build-test
 
-# Force rebuild (clean + build)
+# Force rebuild through the same split-owner path as the normal host.
 rebuild: clean-all
-	@echo "Force rebuilding $(PROJECT_NAME) using Premake build system..."
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
-	@echo "Rebuild completed. Executable: lambda.exe"
+	$(MAKE) build JOBS="$(JOBS)"
 
 # Specific project builds
 lambda: build
@@ -3036,7 +3032,7 @@ clean-premake:
 	@echo "Premake5 artifacts cleaned."
 
 build-lambda-data:
-	$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE=debug -j$(JOBS)
+	$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE=debug JOBS="$(JOBS)" -j$(JOBS)
 	@mkdir -p build/premake
 	@$(MAKE) --no-print-directory TEST_BUILD_QUIET=$(TEST_BUILD_QUIET) generate-premake
 	@cd build/premake && $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
@@ -3076,7 +3072,7 @@ build-lambda-rt:
 	$(MAKE) build-lambda-split SPLIT_PROFILE=debug
 
 build-radiant:
-	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE=debug -j$(JOBS)
+	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE=debug JOBS="$(JOBS)" -j$(JOBS)
 
 build-lambda-static:
 	$(MAKE) build-lambda-split SPLIT_PROFILE=debug
@@ -3106,8 +3102,8 @@ build-lambda-split: $(MIR_LIB)
 			printf '%s\n' "$(SPLIT_LTO_FLAG)" > "$$stamp"; \
 		fi ;; \
 	esac
-	$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" $(SPLIT_ARCHIVE_OPTIONS) -j$(JOBS)
-	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" $(SPLIT_ARCHIVE_OPTIONS) -j$(JOBS)
+	$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" JOBS="$(JOBS)" $(SPLIT_ARCHIVE_OPTIONS) -j$(JOBS)
+	$(MAKE) -C "$(SPLIT_RADIANT_ROOT)" INPUT_ROOT="$(SPLIT_INPUT_ROOT)" PROFILE="$(SPLIT_PROFILE)" JOBS="$(JOBS)" $(SPLIT_ARCHIVE_OPTIONS) -j$(JOBS)
 	$(call run_make_with_error_summary,split-runtime,$(SPLIT_PROFILE)_native,-f lambda-rt-cpp.make LDDEPS=,all)
 	$(call run_make_with_error_summary,split-adapters,$(SPLIT_PROFILE)_native,-f lambda-radiant-adapter-cpp.make LDDEPS=,all)
 	$(call run_make_with_error_summary,split-node-core,$(SPLIT_PROFILE)_native,-f node-core.make,all)
@@ -3157,8 +3153,7 @@ build-test: build-lambda-data build-windows-host-import build-rdb-drivers test-p
 		$(MAKE) build-lambda-split SPLIT_PROFILE=debug SPLIT_OUTPUT=lambda.exe; \
 	fi
 	$(MAKE) build-lambda-split SPLIT_PROFILE=debug SPLIT_OUTPUT=lambda-static.exe
-	@# Select test projects explicitly: the generated all target also contains
-	@# legacy source-provider projects and the old monolithic host.
+	@# Select test projects explicitly; the workspace also contains host modules.
 	@projects=$$(awk '/^test_[^ :]+:/ { sub(/:$$/, "", $$1); print $$1 }' build/premake/Makefile); \
 		$(MAKE) -C build/premake config=debug_native $$projects -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@for module_dir in modules/node-core modules/node-fs; do \

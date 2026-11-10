@@ -1344,6 +1344,9 @@ class PremakeGenerator:
         targets = self.config.get('targets', [])
 
         for lib in targets:
+            # Imported provider manifests describe link closure, not local builds.
+            if lib.get('build_owner'):
+                continue
             only_variants = lib.get('only_variants', [])
             if only_variants and self.variant not in only_variants:
                 continue
@@ -1997,7 +2000,9 @@ class PremakeGenerator:
                     '    dependson {',
                 ])
                 for dep in internal_deps:
-                    self.premake_content.append(f'        "{dep}",')
+                    target_name = dep[:-4] if dep.endswith('-cpp') else dep
+                    if not configured_targets.get(target_name, {}).get('build_owner'):
+                        self.premake_content.append(f'        "{dep}",')
                 self.premake_content.extend([
                     '    }',
                     '    '
@@ -4264,8 +4269,11 @@ class PremakeGenerator:
         self.generate_library_projects()
         vlog("DEBUG: Generating complex libraries...")
         self.generate_complex_libraries()
-        vlog("DEBUG: Generating main program...")
-        self.generate_main_program()
+        # The default host is lambda-exe; only standalone variants use the
+        # legacy source-assembled main program.
+        if self.variant:
+            vlog("DEBUG: Generating variant main program...")
+            self.generate_main_program()
         vlog("DEBUG: Generating test projects...")
         self.generate_test_projects()
 
