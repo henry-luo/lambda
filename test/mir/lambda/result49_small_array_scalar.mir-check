@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.2.6/D6.2.1: a nonescaping exact local array should scalarize without any MVP constructor; escaping and absent-read controls retain a primitive constructor. The first group remains a missing-optimization control until MVP implements scalarization.",
+  "description": "D8.2.6/D6.2.1: a nonescaping exact local array scalarizes into native values; escaping and absent-read controls retain their primitive constructor.",
   "checks": [
     {
       "in_func": "mvp_#_fixed_reads",
@@ -9,6 +9,9 @@
         "call\t{{p}}, array_num_new_uninit,",
         "call\t{{p}}, lambda_fill_primitive_bits,",
         "call\t{{p}}, array_num_new,"
+      ],
+      "expect": [
+        "dadd\t"
       ]
     },
     {

@@ -1,27 +1,39 @@
 {
   "schema_version": 1,
-  "description": "D6.2.1/D6.3.2: MVP wide identities use owned homes and native float identities need no boxing. Inlined consumers keep noncollecting length calls and native stack probes; only cold capacity growth can reserve side stacks.",
+  "description": "D6.2.1/D6.3.2: MVP wide identities use owned homes and native float identities need no boxing. Inlined consumers keep noncollecting length calls and native stack probes; only cold capacity growth can reserve side stacks. D6.2.3: native wide inputs publish boxed values by storing directly into their precise scalar homes.",
   "checks": [
     {
       "in_func": "mvp_#_gc_scalar_home_i64",
       "expect": [
-        "bstart\t{{r}}",
-        "call\t{{p}}, lambda_item_adopt_scalar_home,"
+        "bstart\t{{r}}"
       ],
       "forbid": [
         "call\t{{p}}, lambda_stack_is_exhausted,",
-        "call\t{{p}}, push_d,"
+        "call\t{{p}}, push_d,",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,"
+      ],
+      "expect_seq": [
+        "mov\t{{r:param}}, arg0",
+        "mov\t{{r:raw}}, {{r:param}}",
+        "mov\ti64:({{r:home}}), {{r:raw}}",
+        "or\t{{r}}, {{r:home}}, 432345564227567616"
       ]
     },
     {
       "in_func": "mvp_#_gc_scalar_home_u64",
       "expect": [
-        "bstart\t{{r}}",
-        "call\t{{p}}, lambda_item_adopt_scalar_home,"
+        "bstart\t{{r}}"
       ],
       "forbid": [
         "call\t{{p}}, lambda_stack_is_exhausted,",
-        "call\t{{p}}, push_d,"
+        "call\t{{p}}, push_d,",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,"
+      ],
+      "expect_seq": [
+        "mov\t{{r:param}}, arg0",
+        "mov\t{{r:raw}}, {{r:param}}",
+        "mov\ti64:({{r:home}}), {{r:raw}}",
+        "or\t{{r}}, {{r:home}}, 504403158265495552"
       ]
     },
     {

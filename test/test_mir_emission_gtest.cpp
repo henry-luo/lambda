@@ -130,6 +130,25 @@ TEST(MirCheckMatcher, SequencesRetryPrefixesWithoutLeakingRegisterBindings) {
     EXPECT_FALSE(mir_check::match_sequence(lines, 6, steps, 3, positions, &depth, &exhausted));
 }
 
+TEST(MirCheckMatcher, ControlFlowLabelsRequireTheSameBackedge) {
+    const mir_check::MirLine lines[] = {
+        {"L17:", 1}, {"\tadd\t%r1, %r2, 1", 2}, {"\tjmp\tL17", 3}
+    };
+    mir_check::SeqExpectation steps[] = {
+        {"{{l:head}}:", false}, {"add\t{{r}}, {{r}}, 1", true}, {"jmp\t{{l:head}}", true}
+    };
+    size_t positions[3], depth = 0;
+    bool exhausted = false;
+    EXPECT_TRUE(mir_check::match_sequence(lines, 3, steps, 3, positions, &depth, &exhausted));
+    steps[2].pattern = "jmp\t{{l!head}}";
+    EXPECT_FALSE(mir_check::match_sequence(lines, 3, steps, 3, positions, &depth, &exhausted));
+    mir_check::RegisterCaptures captures;
+    EXPECT_TRUE(mir_check::line_contains("L17:", "{{l:head}}:", &captures));
+    EXPECT_FALSE(mir_check::line_contains("\tjmp\tL18", "jmp\t{{l:head}}", &captures));
+    EXPECT_FALSE(mir_check::line_contains("\tjmp\tLff", "jmp\t{{l}}"));
+    EXPECT_FALSE(mir_check::line_contains("\tjmp\tL17ff", "jmp\t{{l:head}}", &captures));
+}
+
 TEST(MvpMirAbi, OutcomeEntriesUseThePlatformCompanionTransport) {
     mir_check::CompileOptions options;
     mir_check::CompileResult compiled = mir_check::compile_and_dump(

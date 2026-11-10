@@ -4,44 +4,25 @@
 
 ## Current checkpoint
 
-- Follow-up at `c2f1d2426`: 148 of the 197 remaining legacy fixture
-  failures are resolved. The final controller has 235/284 passing emission
-  contracts and 284/284 passing semantic goldens in all three GC modes. See the
-  follow-up section below for root fixes, coverage and current qualification.
-- User requested migration of obsolete MIR optimization tests and new MVP
-  emission coverage. The preceding audit is under
-  `temp/mvp_optimization_coverage/coverage-report.md` (LR07-60).
-- Preserve intended native/checked behavior and exact cost review; do not
-  suppress implementation failures or restore retired Full helpers (D8.6.1,
-  D6.3, S9.1.2–S9.1.3).
-- Existing unrelated changes moved runtime declarations into Lambda ownership.
-  Their initial diff/hashes are saved under `temp/mvp_emission_test_update/`.
-  Concurrent commit `928281c28` captured that split and part of this migration.
-  Preserve it; use current source hashes for qualification. Sibling/vendor
-  sources remain read-only. Fixed Lambda-owned include dependencies exposed by
-  the split in the reactive-render adapter and RootFrame header.
-- Scope: explicit MVP function/callee selectors; reviewed helper/path
-  assertions and frame budgets; robust telemetry controls; focused Python gate
-  registration; small typed/untyped fixtures covering native paths and misses.
-- The follow-up fixes LR07-61 on release and LR07-63. LR07-62 and LR07-64
-  remain failing controls; the debug face of LR07-61 still needs qualification.
-  Missing tunings are not migration excuses.
-- Build private controllers/engine as needed, preserve shared `lambda.exe` and
-  run unit gates only. No Lambda/Radiant baseline or timing campaign.
-- Implemented 548 explicit MVP selectors and 93 callee/wrapper updates. Added
-  `{{n}}` ID and `{{p}}` prototype tokens with exact callee/argument controls;
-  626 helper assertions now ignore ABI suffix spelling. Shared harnesses accept
-  a private `LAMBDA_TEST_EXE` without replacing the shared engine.
-- Registered the focused Python emission gate and extracted the third Python
-  script adapter's common shape. Five report/selection contract units pass.
-- Added five typed/untyped kernel fixtures, manual goldens and 27 structural
-  groups, plus platform-aware outcome-lane coverage. All new JIT goldens pass in all three GC modes;
-  the new argument-order case exposes a T0 snapshot discrepancy (retain golden).
-- Reconnected planned-effect fault injection to MVP's actual plan/verifier.
-  The negative claim now rejects through MVP's emitted-effect verifier; empty
-  and unmatched-name controls execute successfully (D6.3.2). The release build
-  and private controllers are qualified below. Further old-corpus contract
-  review and compiler optimization work remain; the complete gates are not green.
+- Follow-up from `dced21367`: all 49 retained emission failures are resolved;
+  all 197 failures from the preceding migration are now covered. The complete
+  controller passes 582/582, including 285/285 emission contracts and 285/285
+  semantic goldens. Both poison-GC modes pass all 285 goldens.
+- Lambda size/frame ratchets pass 18/18 and shared JS capture checks pass 8/8.
+  Optimization contracts improve from 46/56 to 51/56, with no new failures.
+  The five retained failures include LR07-62, hyphen append work from LR07-64
+  and three borrowed-array/union admission cost contracts. See the current
+  qualification below; the entire optimization gate is not green.
+- Native/checked witnesses, semantic controls, precise ownership and reviewed
+  cost budgets remain explicit (D8.6.1, D6.3, S9.1.2–S9.1.3). No retired Full
+  helper is restored. LR07-61 is qualified on release only; LR07-65 remains a
+  separate T0 argument-snapshot issue.
+- Current receipts and source/controller/binary identities are under
+  `temp/mvp_remaining49/`. Earlier sections record preceding source versions;
+  the original audit is `temp/mvp_optimization_coverage/coverage-report.md`.
+- Only unit gates ran in this follow-up. The shared executable and
+  sibling/vendor sources remain unchanged. No Lambda/Radiant baseline,
+  performance campaign or commit was performed.
 
 ## Acceptance and verification budget
 
@@ -208,6 +189,126 @@ Lambda/Radiant baseline, Python aggregate, timing campaign or commit occur in
 this follow-up. Debug and non-macOS hosts are not requalified by these release
 unit results. Full corpus migration remains incomplete until the retained
 emission and optimization failures are fixed.
+
+## Remaining 49 contracts (2026-11-10)
+
+Base HEAD: `dced21367` (`mir test fixes`), clean checkout. Fix lowering gaps
+by family, then migrate obsolete Full ABI assertions to the resulting MVP
+native paths and checked siblings. All 49 original failures pass the complete
+gate. The corpus now has 285 fixtures, including a new structural membership
+revocation control. Working receipts and source identities are in
+`temp/mvp_remaining49/`.
+
+Implemented compiler changes:
+
+- Native non-nullable i64/u64 arithmetic and u64 bit operations preserve full
+  width and wrapped results. Exact compact integer admission checks the
+  complete tag/subtype encoding before native decode; stores use their native
+  width with COW and checked conversion misses. Nullable wide values stay
+  boxed; escaping scalar bits retain precise destination ownership
+  (D2.3.4–D2.3.5, D6.2.3). Native literal bits use immediates; transient boxed
+  literal operands reuse the immutable Input constant owner.
+- Predicate success joins retain bool/nullable-bool domains, including Error
+  alternatives; array-kind membership includes ranges. Native null tests use
+  the lane's absence marker (D2.3.5). Dominating nonnegative and matching
+  `len` bounds remove repeated array checks while auditing writes and loop
+  induction. No int32 bound is assumed for a 64-bit array length.
+- Admitted read-only record prefixes reuse their witnesses. Structural
+  membership facts describe field domains separately from physical layout;
+  mutation revokes them. Typed path stores retain live carrier/certificate,
+  null, COW and checked-miss guards. A mixed prefix containing an `any` slot
+  still checks its live shape: a prior write can repack it and move later
+  fields (D4.2.5–D4.2.6, D4.3.3, S11.4.10).
+- Total invariant native unary math can move outside a loop only with an
+  unchanged argument and a noncollecting, nonreentrant helper. Float indices
+  require exact integer round trips. Cached array lengths survive collecting
+  calls; physical length guards preserve checked virtual-container fallbacks
+  (D6.3.2, D8.2.6).
+- Self-tail lowering accepts safe boxed scalar versions, replacement records
+  and string builders, evaluates all replacement arguments before updating
+  bindings, and preserves ownership exclusions. A final string append may
+  borrow its owned buffer; ordinary observations still freeze it
+  (D6.2.1, D7.3.1, S9.1.2–S9.1.3).
+- Primitive nullable literals stage each member once, then choose packed
+  present storage or generic null storage; NaN remains distinct from absence.
+  Construction hints also reach implicit returns. Homogeneous private append
+  builders infer their primitive lane only after auditing every push;
+  nullable/mixed builders and later escaped widening keep checked semantics
+  (D4.3.1, D4.3.3).
+- One shared projection-use audit enables local array/record scalarization
+  and short pure array-result recipes. The latter guard actual source extents
+  once, with the ordinary checked call for short inputs. Escapes, reassignment,
+  duplicate/missing record keys and incompatible uses prevent scalarization
+  (D8.2.6). Whole-binding array facts audit every replacement and borrow.
+
+Contract updates retain native positive witnesses and checked negative
+controls. MIR label captures (`{{l:name}}`, `{{l!name}}`) bind actual backedges
+and cold joins; their matcher tests reject wrong labels and mixed hexadecimal
+suffixes. Literal-only scalarization and closed-call inference are tested
+with varied inputs, a rejected record field input and an actual allocating
+`split` RHS. New controls cover structural membership mutation, nullable typed
+path roots, mixed-prefix repacking and escaped builder COW/widening. Revised
+goldens accompany intentional fixture changes; the mixed-record regression's
+golden remains unchanged (D8.6.1, S9.1.2–S9.1.3).
+
+The overflow unit uses an existing non-tail negative fixture; the older
+duplicate also has a non-tail recurrence now that MVP optimizes its former
+self-tail. Profile units select named MVP bodies and current native length
+operations, and account for inlined nullable producers and printing controls.
+No unrelated admission/string-copy ceilings are raised.
+
+Emission budget review (D8.6.1), measured on private darwin release:
+
+| Probe | Module instructions | Reviewed cause |
+|---|---:|---|
+| Call-site inference | 557 → 599 | +42 guarded native scalar entry instructions; checked sibling and frame caps retained |
+| Prettier AST | 29,089 → 29,651 | pointer-array carrier/certificate admission guards; `print_node` adds 20 guards (+360), with the same helper-call population |
+| Array regions | 2,494 → 2,498 | packed nullable construction alternative; main adds two root stores and one static safepoint, with one allocation on either runtime arm |
+
+Only those reviewed caps change; budgets retain zero slack. Wide-literal
+emission passes its existing frame/instruction caps after removing unnecessary
+loads and scalar homes. Debug and non-macOS observations
+are not qualified by these release results. No Lambda/Radiant baseline,
+performance campaign, sibling/vendor source edit or shared executable
+replacement occurs in this follow-up.
+
+
+Current qualification, private release SHA256
+`6bd984ed27c89b1971094c0878fabfdf0c0074857c932f8a22d0208ff16e860c`:
+
+| Unit gate | Result | Receipt under `temp/mvp_remaining49/` |
+|---|---:|---|
+| Complete emission controller | 582/582 | `complete-emission.json` |
+| MIR emission contracts | 285/285 | same report |
+| Semantic goldens | 285/285 | same report |
+| Forced GC + poison, all goldens | 285/285 | `complete-forced-goldens.json` |
+| Seeded GC + poison, all goldens | 285/285 | `complete-seeded-goldens.json` |
+| Optimization contracts | 51/56 | `complete-opt.json` |
+| Lambda emission/frame ratchets + config | 18/18 | `complete-ratchet.json` |
+| Shared JS capture regressions | 8/8 | `complete-js-regressions.json` |
+
+Seeded collection uses seed 1847 with one-in-three allocation checks; forced
+collection uses `LAMBDA_GC_FORCE_EVERY=1`, both with freed-memory poisoning.
+`complete-identities.json` records the qualified source and private binaries.
+`complete-comparison.json` records no new failures against the preceding
+optimization report. Five previously failing optimization units are now green:
+checked scalar tail frames, read-only length roots, nullable literal
+construction, stable lengths after GC and linear string-tail copying.
+
+Five pre-existing optimization failures remain, with their assertions intact:
+
+| Contract | Current observation |
+|---|---|
+| `ImmutableArrayConsumerAdmitsOnce` | JIT child exit 139 (LR07-62) |
+| `BorrowedNumericArrayRetainsStoreLane` | one checked store, expected zero |
+| `RecursiveUnionFieldsReuseAdmittedContract` | 213 admissions, required below 40 |
+| `OpenUnionMemberShapeCachesAdmissionProof` | 198 cache hits, required above 200 |
+| `TypedHyphenUsesStringSpansAndOneTableAdmission` | 19,275 appends, required below 15,000 (LR07-64) |
+
+These are separate remaining optimization work, not emission fixture failures.
+The string-tail part of LR07-64 now records 125 in-place appends, 370 copied
+bytes and four freezes without changing its cost ceilings. No wall-clock
+performance claim follows from these unit counters.
 
 ## Budget review (D8.6.1)
 

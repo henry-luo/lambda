@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3, D6.3.4, D7.3.1: branch proofs.",
+  "description": "S11.4.10/D4.2.5: a true structural membership branch proves required field domains, allowing unchanged union arguments and scalar results to cross by identity. Packed offsets remain guarded and fn_member_by_id handles different source layouts.",
   "checks": [
     {
       "in_func": "mvp_#_checked_child",
       "count": {
-        "call\tlambda_type_check": 2
+        "call\tlambda_type_check": 0
       },
       "expect": [
         "call\tfn_member_by_id"

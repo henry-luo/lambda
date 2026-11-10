@@ -9,7 +9,7 @@
           "pattern": "mov\ti64:({{r:root}}), {{r}}"
         },
         {
-          "pattern": "call\t{{p}}, array_num_new,"
+          "pattern": "call\t{{p}}, fn_split2,"
         },
         {
           "pattern": "mov\t{{r}}, i64:({{r:root}})"

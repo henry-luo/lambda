@@ -1259,6 +1259,27 @@ See [the follow-up implementation/qualification](impl/Lambda_Impl_MVP_Optimizati
 and `temp/mvp_fixture_followup/record-identities.json`. The shared executable and
 sibling/vendor source remain unchanged; no baseline or timing campaign ran.
 
+Remaining-49 qualification (2026-11-10, base `dced21367`): all 49 retained
+emission failures are resolved. Private release SHA256
+`6bd984ed27c89b1971094c0878fabfdf0c0074857c932f8a22d0208ff16e860c`
+passes **582/582** controller checks: **285/285** emission contracts,
+**285/285** semantic goldens and 12 other checks. Both forced/poisoned and
+seeded/poisoned GC modes pass all 285 goldens. Lambda size/frame checks pass
+18/18 after three reviewed zero-slack budget updates (D8.6.1); shared JS
+capture controls pass 8/8. Native lanes, bounds/record proofs, nullable packed
+construction, scalarization, private builders and safe self-tail reuse are
+implemented rather than accepting generic paths as native witnesses.
+
+Optimization contracts improve to **51/56**, with no new failures. Retained
+failures are LR07-62, one checked borrowed numeric store, 213 recursive union
+admissions (ceiling below 40), 198 open-union cache hits (required above 200)
+and 19,275 hyphen appends (LR07-64). Their assertions remain intact. The current
+release implementation and receipts are in
+[the remaining-49 checkpoint](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-49-contracts-2026-11-10)
+and `temp/mvp_remaining49/complete-*.json`. Python aggregate checks were not
+rerun; this is unit-only qualification, with no baseline or timing campaign.
+The shared executable and sibling/vendor source remain unchanged.
+
 <a id="lr07-61"></a>**LR07-61 · Native MVP wide-scalar tail-forward fixture traps · PARTIAL (2026-11-10)**
 
 On the exact installed debug CLI identified in LR07-60,
@@ -1300,9 +1321,14 @@ provenance are unconfirmed. Evidence:
 `temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and
 `opt-results.json`; no fixture, golden or assertion is altered.
 
+Release follow-up (2026-11-10): `ImmutableArrayConsumerAdmitsOnce` still exits
+139 on the private host qualified in LR07-60. It already failed in the preceding
+release report, so this remains a separate outstanding defect. Evidence:
+`temp/mvp_remaining49/complete-opt.json`; root cause remains unconfirmed.
+
 <a id="lr07-63"></a>LR07-63 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-63>).
 
-<a id="lr07-64"></a>**LR07-64 · MVP string-tail fixture misses its copy-work contract · OPEN (2026-11-10)**
+<a id="lr07-64"></a>**LR07-64 · MVP string-tail fixture misses its copy-work contract · PARTIAL (2026-11-10)**
 
 `LambdaOptStrings.TailAccumulatorCopiesLinearBytes` at
 `test/test_lambda_opt_gtest.cpp:322` runs
@@ -1319,6 +1345,16 @@ cause is absent MVP tuning, changed admission or accounting is unconfirmed;
 do not relax the ceilings without tracing the actual work. Evidence:
 `temp/mvp_optimization_coverage/opt-results.json` and the profile TSVs under
 `temp/lambda_opt_contract/` (the latter may be overwritten by later unit runs).
+
+Release follow-up (2026-11-10): safe final-owner string append and self-tail
+reuse now pass the unchanged tail-copy contract: **125 in-place appends,
+370 copied bytes and four freezes**. Snapshot, later-argument observation and
+error goldens pass, including both poison-GC modes (S9.1.2–S9.1.3).
+`TypedHyphenUsesStringSpansAndOneTableAdmission` remains red at 19,275 append
+calls; its ceiling stays unchanged. Evidence:
+`temp/mvp_remaining49/complete-opt.json` and archived profiles under
+`temp/mvp_remaining49/complete-profiles/`. Keep this issue partial until the
+hyphen contract and rebuilt debug behavior are qualified.
 
 
 <a id="lr07-65"></a>**LR07-65 · T0 snapshots a plain argument after a later argument mutates its owner · OPEN (2026-11-10)**

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S9.1.2/D5.4.4: MVP native uniqueness guards protect borrowed writes; observed snapshots and escaped children share-mark inline before checked mutation.",
+  "description": "S9.1.2/D5.4.4: MVP native uniqueness guards protect borrowed writes; observed snapshots and escaped children share-mark inline before checked mutation. D8.2.6/S9.1.2: proved fresh, closed local stores omit impossible checked-store arms; snapshot and dynamic-value controls retain their observable behavior.",
   "checks": [
     {
       "in_func": "mvp_#_borrowed",
@@ -8,14 +8,16 @@
         "call\tcow_bind_var"
       ],
       "expect": [
-        "and\t{{r}}, {{r}}, 4294979584",
-        "call\t{{p}}, lambda_array_set_checked_item,"
-      ]
+        "mov\ti64:({{r}}), {{r}}"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 0
+      }
     },
     {
       "in_func": "mvp_#_snapshot",
       "expect": [
-        "call\t{{p}}, lambda_array_set_checked_item,"
+        "mov\ti64:({{r}}), {{r}}"
       ],
       "expect_seq": [
         {
@@ -27,7 +29,10 @@
         {
           "pattern": "mov\tu8:4({{r:owner}}), {{r:marked}}"
         }
-      ]
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 0
+      }
     },
     {
       "in_func": "mvp_#_escaped_child",

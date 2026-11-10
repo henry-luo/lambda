@@ -1,8 +1,8 @@
 // Test: Stack overflow protection
-// This tests that infinite recursion is caught gracefully
+// Non-tail recursion must retain stack checks when self tails become loops (D8.2.6).
 
-// Direct infinite recursion
-fn infinite_recurse(n) => infinite_recurse(n + 1)
+// addition after the call prevents tail-frame reuse
+fn infinite_recurse(n) => infinite_recurse(n + 1) + 1
 
 // Test direct recursion - should catch stack overflow
 infinite_recurse(0)

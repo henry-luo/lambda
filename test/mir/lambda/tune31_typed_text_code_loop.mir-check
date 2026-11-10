@@ -5,7 +5,8 @@
     {
       "in_func": "mvp_#_count_equal_codes",
       "expect": [
-        "\teq\t"
+        "\tbne\t",
+        "mov\t{{r}}, i64:({{r}})"
       ],
       "forbid": [
         "call\t{{p}}, fn_string_ascii_at,",

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3/S9.1.2: native scaled float write and checked COW miss share the selected index. The fresh local carries a proven writable witness before the first store.",
+  "description": "D4.3.3/S9.1.2: native scaled float write and checked COW miss share the selected index. The fresh local carries a proven writable witness before the first store. D8.2.6/S9.1.2: proved fresh, closed local stores omit impossible checked-store arms; snapshot and dynamic-value controls retain their observable behavior.",
   "checks": [
     {
       "in_func": "mvp_#_tune16_proved_float_store",
@@ -16,12 +16,10 @@
         }
       ],
       "count": {
-        "call\t{{p}}, lambda_array_set_checked_item,": 1
+        "call\t{{p}}, lambda_array_set_checked_item,": 0
       },
       "expect": [
-        "call\t{{p}}, lambda_report_boundary_failure,",
-        "beq\t",
-        "ubge\t"
+        "beq\t"
       ]
     }
   ]

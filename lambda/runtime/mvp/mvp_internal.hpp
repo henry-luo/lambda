@@ -54,7 +54,8 @@ static inline bool mvp_open_value_contract(Type* contract) {
 
 static inline bool mvp_exact_membership_domain(Type* type) {
     return type == &TYPE_NULL || type == &TYPE_ERROR || type == &TYPE_BOOL || type == &TYPE_STRING ||
-        type == &TYPE_SYMBOL || type == &TYPE_BINARY || type == &TYPE_DTIME || type == &TYPE_MAP;
+        type == &TYPE_SYMBOL || type == &TYPE_BINARY || type == &TYPE_DTIME || type == &TYPE_MAP ||
+        type == &TYPE_ARRAY;
 }
 
 static inline bool mvp_membership_proven(Type* source, Type* expected) {
@@ -181,12 +182,15 @@ struct MvpIntRange {
     int64_t lower;
     int64_t upper;
 };
+struct MvpScalarAggregate;
+
 struct MvpBinding {
     NameEntry* entry;
     AstNode* declaration;  // continuations reuse live-in identities with private parameter sites
     const char* state_name;
     Type* admission_contract;
     Type* producer_success_contract;
+    Type* membership_contract;
     Type* contract;
     Type* candidates[MVP_CANDIDATE_COUNT];
     ValueRep rep;
@@ -226,10 +230,12 @@ struct MvpBinding {
     bool constant_ready;
     bool readonly_literal;
     bool inferred_array;
+    bool inferred_append;
     bool array_present;
     bool record_written, record_accessed;
     bool string_buffer_owned;
     bool stable_scalar_home;
+    MvpScalarAggregate* scalar_aggregate;
 };
 
 static inline AstNode* mvp_binding_node(MvpBinding* binding) {
@@ -297,7 +303,23 @@ struct MvpModuleLocation {
     MIR_reg_t descriptor, state, slot;
 };
 
+struct MvpHoistedCall {
+    MvpHoistedCall* next;
+    AstCallNode* call;
+    MvpBinding* argument;
+    const char* helper;
+    MirValue result;
+};
+
+struct MvpScalarAggregate {
+    MvpScalarAggregate* next;
+    int count;
+    MirValue members[16];
+    String* keys[16];
+};
+
 struct MvpCompiler {
+    MvpScalarAggregate* scalar_aggregates;
     LambdaMvpModule* module;
     MvpFunction* function;
     MirEmitter em;
@@ -328,6 +350,7 @@ struct MvpCompiler {
     MvpFloatConstant* float_constants;
     MvpStringByte* string_bytes;
     MvpModuleLocation* module_locations;
+    MvpHoistedCall* hoisted_calls;
     MIR_insn_t constant_cursor;
     MIR_label_t tail_entry;
     MIR_reg_t argument_span;
@@ -455,6 +478,7 @@ Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler
 AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
+bool mvp_local_storage_stable(LambdaMvpModule* module, MvpBinding* binding, bool writes);
 MvpBinding* mvp_place_root(LambdaMvpModule* module, AstNode* node);
 bool mvp_array_sum_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArraySumPlan* plan);
 bool mvp_array_copy_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayCopyPlan* plan);

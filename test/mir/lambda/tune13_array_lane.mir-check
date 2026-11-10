@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3/S9.1.2: native packed writes retain canonical checked COW misses. abs stays native; min keeps its numeric-tower helper.",
+  "description": "D4.3.3/S9.1.2: native packed writes retain canonical checked COW misses. abs stays native; min keeps its numeric-tower helper. D8.2.6/S9.1.2: proved fresh, closed local stores omit impossible checked-store arms; snapshot and dynamic-value controls retain their observable behavior.",
   "checks": [
     {
       "in_func": "mvp_#_tune13_store",
@@ -19,10 +19,10 @@
         }
       ],
       "expect": [
-        "call\t{{p}}, lambda_array_set_checked_item,"
+        "mov\ti64:({{r}}), {{r}}"
       ],
       "count": {
-        "call\t{{p}}, lambda_array_set_checked_item,": 1
+        "call\t{{p}}, lambda_array_set_checked_item,": 0
       }
     },
     {
@@ -37,7 +37,7 @@
         "call\t{{p}}, fn_abs,"
       ],
       "count": {
-        "call\t{{p}}, lambda_array_set_checked_item,": 2
+        "call\t{{p}}, lambda_array_set_checked_item,": 0
       }
     }
   ]

@@ -41,11 +41,21 @@
         {
           "pattern": "call\t{{p}}, array_plain,"
         }
+      ]
+    },
+    {
+      "in_func": "mvp_#_literal_arg",
+      "expect": [
+        "dmov\td:"
       ],
       "forbid": [
         "call\t{{p}}, array_push,",
         "call\t{{p}}, array_push_capture,"
-      ]
+      ],
+      "in_range": {
+        "from": "call\t{{p}}, lambda_fill_primitive_bits,",
+        "to": "call\t{{p}}, array_plain,"
+      }
     },
     {
       "in_func": "mvp_#_const_index_pushed",

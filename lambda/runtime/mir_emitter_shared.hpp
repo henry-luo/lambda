@@ -1532,15 +1532,20 @@ static inline MIR_reg_t em_bind_scalar_home_result(MirEmitter* em, MIR_reg_t hom
     return result;
 }
 
-// materialize a cold Float payload in an already-reserved destination home.
-static inline MIR_reg_t em_store_f64_home(MirEmitter* em, MIR_reg_t value,
-        MIR_reg_t home, MIR_type_t type = MIR_T_D) {
+// materialize scalar bits in an already-reserved destination home.
+static inline MIR_reg_t em_store_scalar_home(MirEmitter* em, MIR_reg_t value,
+        MIR_reg_t home, MIR_type_t type, TypeId tag) {
     em_store_at(em, home, 0, type, value);
-    MIR_reg_t result = em_new_reg(em, "owned_float", MIR_T_I64);
+    MIR_reg_t result = em_new_reg(em, "owned_scalar", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, home),
-        MIR_new_uint_op(em->ctx, (uint64_t)LMD_TYPE_FLOAT << 56)));
+        MIR_new_uint_op(em->ctx, (uint64_t)tag << 56)));
     return em_bind_scalar_home_result(em, home, result);
+}
+
+static inline MIR_reg_t em_store_f64_home(MirEmitter* em, MIR_reg_t value,
+        MIR_reg_t home, MIR_type_t type = MIR_T_D) {
+    return em_store_scalar_home(em, value, home, type, LMD_TYPE_FLOAT);
 }
 
 static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,

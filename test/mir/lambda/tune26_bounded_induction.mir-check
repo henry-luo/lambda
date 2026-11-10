@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.3.4\u2013D2.3.5/D4.3.3: MVP bounded induction emits native square and stride arithmetic with direct loop branches and native indexed stores; checked carrier/store misses remain cold.",
+  "description": "D2.3.4\u2013D2.3.5/D4.3.3: MVP bounded induction emits native square and stride arithmetic with direct loop branches and native indexed stores; checked carrier/store misses remain cold. D8.2.6/S9.1.2: proved fresh, closed local stores omit impossible checked-store arms; snapshot and dynamic-value controls retain their observable behavior.",
   "checks": [
     {
       "in_func": "mvp_#_tune26_bounded_sieve",
@@ -10,15 +10,17 @@
         "\tadd\t"
       ],
       "expect": [
-        "mov\ti64:({{r}}), {{r}}",
-        "call\t{{p}}, lambda_array_set_checked_item,"
+        "mov\ti64:({{r}}), {{r}}"
       ],
       "forbid": [
         "call\t{{p}}, fn_mul,",
         "call\t{{p}}, fn_add,",
         "call\t{{p}}, lambda_int_lane_mul_slow,",
         "call\t{{p}}, lambda_int_lane_add_slow,"
-      ]
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 0
+      }
     }
   ]
 }

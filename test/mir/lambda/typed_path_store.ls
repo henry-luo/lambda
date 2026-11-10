@@ -30,6 +30,10 @@ pn replace_values(var world: World, index: int, values) any {
     world.rows[index].values = values
 }
 
+pn nullable_write(var world: World?, index: int, value: int) any {
+    world.rows[index].value = value
+}
+
 pn main() {
     // S7.7.2v2: discharge deferred admission before using the mutable record.
     let initial: World = {rows: [{value: 4, values: [1]}, null], counter: 0}
@@ -75,5 +79,10 @@ pn main() {
     var rejected_array = false
     replace_values(world, 0, ["wrong"]) ^ { rejected_array = true }
     print([world.rows[0].values, replacement, rejected_array])
+    print("\n")
+    var missing: World? = null
+    var rejected_root = false
+    nullable_write(missing, 0, 9) ^ { rejected_root = true }
+    print([rejected_root, missing == null])
     print("\n")
 }

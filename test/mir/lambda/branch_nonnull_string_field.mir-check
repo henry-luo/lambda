@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.2.5/S7.1.1v3: a dominated nullable receiver reads the packed string pointer. Unguarded/rebound receivers retain absence and member misses; MVP uses full named-field lookup for declared contracts.",
+  "description": "D4.2.5/S7.1.1v3: a dominated nullable receiver reads the packed string pointer. Unguarded/rebound receivers retain absence and member misses; MVP uses full named-field lookup for declared contracts. D4.2.5: an admitted read-only prefix has no reachable member fallback.",
   "checks": [
     {
       "in_func": "mvp_#_guarded",
@@ -8,7 +8,7 @@
         "mov\t{{r}}, i64:({{r}})"
       ],
       "count": {
-        "call\t{{p}}, fn_member,": 1
+        "call\t{{p}}, fn_member,": 0
       }
     },
     {

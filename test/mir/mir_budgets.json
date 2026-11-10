@@ -294,16 +294,16 @@
       "name": "lambda_tune4_callsite_inference",
       "script": "test/mir/lambda/callsite_inference.ls",
       "language": "lambda",
-      "description": "D2.3.4/D2.3.5: a closed scalar entry remains rootless; the open callable entry retains checked admission and homes.",
+      "description": "D2.3.4/D2.3.5: a closed scalar entry remains rootless; the open callable entry retains checked admission and homes. Reviewed 2026-11-10 (D8.6.1): +42 instructions enable the guarded native scalar entry while preserving the checked public sibling; frame caps stay unchanged.",
       "budgets": {
         "default": {
-          "module_insns": 557,
+          "module_insns": 599,
           "functions": {
             "mvp_#_closed_gap": {
               "insns": 29
             },
             "mvp_#_open_gap": {
-              "insns": 198
+              "insns": 240
             }
           },
           "frames": [
@@ -443,13 +443,13 @@
       "name": "lambda_corpus_prettier_ast",
       "script": "test/benchmark/text/prettier_ast2.ls",
       "language": "lambda",
-      "description": "D8.6.1: prettier pins module and print_node sizes, including inlined document constructors and checked dynamic fields.",
+      "description": "D8.6.1: prettier pins module and print_node sizes, including inlined document constructors and checked dynamic fields. Reviewed 2026-11-10 (D4.3.3/D8.6.1): live pointer-array carrier/certificate guards enable native admission before the existing checked fallback. print_node adds 20 such guards (+360 instructions), with identical helper-call populations; module adds 562. Exact darwin release observation, no slack.",
       "budgets": {
         "default": {
-          "module_insns": 29089,
+          "module_insns": 29651,
           "functions": {
             "mvp_#_print_node": {
-              "insns": 6923
+              "insns": 7283
             }
           }
         }
@@ -540,10 +540,10 @@
       "name": "lambda_mvp_array_regions",
       "script": "test/mir/lambda/mvp_array_regions.ls",
       "language": "lambda",
-      "description": "D4.3.3/D8.6.1: typed and erased array kernels include native loads/stores, checked misses, COW snapshots and required roots/homes.",
+      "description": "D4.3.3/D8.6.1: typed and erased array kernels include native loads/stores, checked misses, COW snapshots and required roots/homes. Reviewed 2026-11-10 (D6.3.2/D8.6.1): staged nullable primitive literals add a packed-construction alternative (+4 instructions, +2 root stores, +1 static safepoint in main). Each arm allocates once; roots and scalar homes stay unchanged.",
       "budgets": {
         "default": {
-          "module_insns": 2494,
+          "module_insns": 2498,
           "functions": {
             "mvp_#_typed_sum": {
               "insns": 307
@@ -558,7 +558,7 @@
               "insns": 201
             },
             "mvp_#_main": {
-              "insns": 1298
+              "insns": 1302
             },
             "main": {
               "insns": 45
@@ -600,10 +600,10 @@
             {
               "name": "mvp_#_main",
               "roots": 6,
-              "root_stores": 64,
+              "root_stores": 66,
               "scalar_homes": 7,
               "number_scratch": 0,
-              "safepoints": 48
+              "safepoints": 49
             },
             {
               "name": "main",
