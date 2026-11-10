@@ -8,20 +8,20 @@
         "mov\t{{r:cert}}, 0",
         ", {{r:cert}}, 0",
         ", 9007199254740991",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "call\t{{p}}, lambda_array_rep_cert_resolve,",
         "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved",
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,",
         ", {{r:cert}}, 0",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "call\t{{p}}, lambda_array_rep_cert_resolve,",
         "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,"
       ],
       "count": {
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 3,
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 3
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,": 3,
+        "call\t{{p}}, lambda_array_rep_cert_resolve,": 3
       },
       "forbid": [
-        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+        "call\t{{p}}, lambda_fill_for_contract_int_lane,"
       ]
     },
     {
@@ -30,20 +30,20 @@
         "mov\t{{r:cert}}, 0",
         ", {{r:cert}}, 0",
         ", 9007199254740991",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "call\t{{p}}, lambda_array_rep_cert_resolve,",
         "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved",
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,",
         ", {{r:cert}}, 0",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "call\t{{p}}, lambda_array_rep_cert_resolve,",
         "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,"
       ],
       "count": {
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 4,
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 4
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,": 4,
+        "call\t{{p}}, lambda_array_rep_cert_resolve,": 4
       },
       "forbid": [
-        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+        "call\t{{p}}, lambda_fill_for_contract_int_lane,"
       ]
     },
     {
@@ -52,16 +52,16 @@
         "mov\t{{r:cert}}, 0",
         ", {{r:cert}}, 0",
         ", 9007199254740991",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "call\t{{p}}, lambda_array_rep_cert_resolve,",
         "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,"
       ],
       "count": {
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 2,
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 2
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,": 2,
+        "call\t{{p}}, lambda_array_rep_cert_resolve,": 2
       },
       "forbid": [
-        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+        "call\t{{p}}, lambda_fill_for_contract_int_lane,"
       ]
     }
   ]

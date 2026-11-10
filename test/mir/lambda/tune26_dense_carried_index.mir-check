@@ -6,26 +6,25 @@
       "in_func": "mvp_#_tune26_dense_carried_index",
       "expect_seq": [
         {
-          "pattern": "\tbf\tL"
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
         },
         {
-          "pattern": "lsh\t{{r}}, {{r}}, 3"
+          "pattern": "add\t{{r:address}}, {{r}}, {{r:scaled}}"
         },
         {
-          "pattern": "dmov\t{{r}}, d:({{r}})"
+          "pattern": "dmov\t{{r:loaded}}, d:({{r:address}})"
         },
         {
-          "pattern": "dmul\t{{r}}"
+          "pattern": "dmul\t{{r:product}}, {{r:loaded}}, {{r}}"
         },
         {
-          "pattern": "dadd\t{{r}}"
-        },
-        {
-          "pattern": "dmov\t{{r}}, nan"
+          "pattern": "dadd\t{{r}}, {{r}}, {{r:product}}"
         }
       ],
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,",
+        "dmov\t{{r}}, nan",
+        "call\t{{p}}, fn_index,"
       ]
     }
   ]

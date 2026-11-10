@@ -5,24 +5,24 @@
     {
       "in_func": "mvp_#_set_row",
       "expect": [
-        "call\tfn_array_set_p, fn_array_set"
+        "call\t{{p}}, fn_array_set,"
       ],
       "forbid": [
-        "call\tlambda_array_set_checked_inplace_p, lambda_array_set_checked_inplace",
-        "call\tindex_assign_cow_p, index_assign_cow"
+        "call\t{{p}}, lambda_array_set_checked_inplace,",
+        "call\t{{p}}, index_assign_cow,"
       ]
     },
     {
       "in_func": "mvp_#_place",
       "expect": [
-        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx"
+        "call\t{{p}}, array_num_set_cow_idx,"
       ]
     },
     {
       "in_func": "mvp_#_widen",
       "forbid": [
-        "call\tlambda_array_set_checked_inplace_p, lambda_array_set_checked_inplace",
-        "call\tindex_assign_cow_p, index_assign_cow"
+        "call\t{{p}}, lambda_array_set_checked_inplace,",
+        "call\t{{p}}, index_assign_cow,"
       ]
     }
   ]

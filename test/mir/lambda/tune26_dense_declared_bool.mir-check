@@ -8,7 +8,7 @@
         "mov\t{{r}}, u8:({{r}})"
       ],
       "forbid": [
-        "call\titem_at_p, item_at"
+        "call\t{{p}}, item_at,"
       ]
     }
   ]

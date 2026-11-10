@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "description": "D4.2.5/D4.3.3/S9.1.2: MVP guards packed record reads, validates dynamic constructor fields and preserves snapshots through writes.",
+  "checks": [
+    {
+      "in_func": "mvp_#_typed_read",
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:base}}, arg0"
+        },
+        {
+          "pattern": "mov\t{{r:valid}}, 0"
+        },
+        {
+          "pattern": "and\t{{r:owner}}, {{r:base}}, 72057594037927935"
+        },
+        {
+          "pattern": "mov\t{{r:shape}}, i64:8({{r:owner}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:144({{r:shape}})"
+        },
+        {
+          "pattern": "mov\t{{r:valid}}, 1"
+        },
+        {
+          "pattern": "mov\t{{r:alias}}, {{r:base}}"
+        },
+        {
+          "pattern": "beq\tL{{n}}, {{r:valid}}, 0"
+        },
+        {
+          "pattern": "mov\t{{r:data}}, p:16({{r:alias}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:1({{r:data}})"
+        }
+      ],
+      "expect": [
+        "call\t{{p}}, fn_member,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_call_into,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_erased_read",
+      "expect": [
+        "i64:144(",
+        "i64:1(",
+        "call\t{{p}}, fn_member_by_id,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_call_into,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_construct",
+      "expect_seq": [
+        {
+          "pattern": "call\t{{p}}, lambda_type_check_lazy,"
+        },
+        {
+          "pattern": "call\t{{p}}, map_alloc_for_type,"
+        },
+        {
+          "pattern": "call\t{{p}}, set_field_value,"
+        }
+      ]
+    },
+    {
+      "in_func": "mvp_#_parsed",
+      "expect_seq": [
+        {
+          "pattern": "call\t{{p}}, fn_parse2,"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_type_check_lazy,"
+        },
+        {
+          "pattern": "call\t{{p}}, map_alloc_for_type,"
+        },
+        {
+          "pattern": "call\t{{p}}, set_field_value,"
+        }
+      ]
+    },
+    {
+      "in_func": "mvp_#_write",
+      "expect": [
+        "mov\ti64:1(",
+        "call\t{{p}}, lambda_map_set_checked,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ]
+    }
+  ]
+}

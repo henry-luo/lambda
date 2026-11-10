@@ -9,9 +9,9 @@
         "ddiv\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add",
-        "call\tfn_mul_p, fn_mul",
-        "call\tfn_div_p, fn_div"
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, fn_mul,",
+        "call\t{{p}}, fn_div,"
       ]
     }
   ]

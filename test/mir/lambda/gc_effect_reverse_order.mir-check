@@ -6,7 +6,7 @@
       "in_func": "mvp_#_gc_order_reverse_caller",
       "expect": [
         "call\tmvp_{{n}}_gc_order_reverse_leaf_dp",
-        "call\tfn_len_s_p, fn_len_s",
+        "call\t{{p}}, fn_len_s,",
         "bstart\t{{r}}"
       ],
       "forbid": [

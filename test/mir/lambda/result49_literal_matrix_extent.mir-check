@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_mul2",
       "count": {
-        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx": 1
+        "call\t{{p}}, array_num_set_cow_idx,": 1
       }
     }
   ]

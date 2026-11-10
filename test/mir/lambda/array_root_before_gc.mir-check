@@ -5,14 +5,14 @@
     {
       "in_func": "main",
       "expect_seq": [
-        { "pattern": "call\tarray_p, array" },
+        { "pattern": "call\t{{p}}, array," },
         { "pattern": "mov\ti64:({{r}}), {{r}}" },
         { "pattern": "call\tmvp_{{n}}_boxed_dp" },
-        { "pattern": "call\tarray_end_p, array_end" }
+        { "pattern": "call\t{{p}}, array_end," }
       ],
       "count": {
         "call\tmvp_{{n}}_boxed_dp": 3,
-        "call\tarray_end_p, array_end": 1
+        "call\t{{p}}, array_end,": 1
       }
     }
   ]

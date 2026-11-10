@@ -5,11 +5,11 @@
     {
       "in_func": "mvp_#_read_node",
       "expect": ["mov\t{{r}}, i64:16({{r}})"],
-      "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
+      "forbid": ["call\t{{p}}, fn_member_by_id,"]
     },
     {
       "in_func": "main",
-      "expect": ["call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]
+      "expect": ["call\t{{p}}, lambda_type_check_lazy,"]
     }
   ]
 }

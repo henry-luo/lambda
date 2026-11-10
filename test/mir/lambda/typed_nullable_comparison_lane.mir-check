@@ -4,12 +4,12 @@
   "checks": [
     {
       "in_func": "mvp_#_classify",
-      "forbid": ["call\tis_truthy_p, is_truthy"]
+      "forbid": ["call\t{{p}}, is_truthy,"]
     },
     {
       "in_func": "mvp_#_read_arithmetic",
       "expect": ["add\t"],
-      "count": {"call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 2}
+      "count": {"call\t{{p}}, lambda_type_check_lazy,": 2}
     }
   ]
 }

@@ -4,7 +4,7 @@
   "checks": [
     {
       "in_func": "mvp_#_consume_open_array",
-      "expect": ["call\tfn_join_consume_open_array_p, fn_join_consume_open_array"]
+      "expect": ["call\t{{p}}, fn_join_consume_open_array,"]
     }
   ]
 }

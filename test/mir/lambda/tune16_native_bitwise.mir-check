@@ -10,9 +10,9 @@
         "or\t{{r}}"
       ],
       "forbid": [
-        "call\tfn_band_item_p, fn_band_item",
-        "call\tfn_bxor_item_p, fn_bxor_item",
-        "call\tfn_bor_item_p, fn_bor_item"
+        "call\t{{p}}, fn_band_item,",
+        "call\t{{p}}, fn_bxor_item,",
+        "call\t{{p}}, fn_bor_item,"
       ]
     }
   ]

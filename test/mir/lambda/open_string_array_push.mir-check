@@ -14,7 +14,7 @@
         "mov\t{{r}}, i64:64({{r}})",
         "mov\ti64:({{r}}), {{r}}",
         "mov\ti64:40({{r}}), {{r}}",
-        "call\tpn_push_cow_p, pn_push_cow"
+        "call\t{{p}}, pn_push_cow,"
       ]
     }
   ]

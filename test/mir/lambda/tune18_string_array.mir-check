@@ -9,7 +9,7 @@
         "mov\ti64:("
       ],
       "forbid": [
-        "call\tfn_index_p, fn_index"
+        "call\t{{p}}, fn_index,"
       ]
     }
   ]

@@ -4,11 +4,11 @@
   "checks": [
     {
       "in_func": "mvp_#_relay",
-      "count": {"call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 1}
+      "count": {"call\t{{p}}, lambda_type_check_lazy,": 1}
     },
     {
       "in_func": "mvp_#_dynamic_size",
-      "expect": ["call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]
+      "expect": ["call\t{{p}}, lambda_type_check_lazy,"]
     },
     {
       "in_func": "mvp_#_add",

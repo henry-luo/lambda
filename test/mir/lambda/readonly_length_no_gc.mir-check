@@ -4,12 +4,12 @@
   "checks": [
     {
       "in_func": "mvp_#_lens",
-      "expect": ["u8:({{r}})", "i64:40({{r}})", "fn_len_l_p, fn_len_l", "fn_len_s_p, fn_len_s"],
-      "count": {"fn_len_l_p, fn_len_l": 2, "fn_len_s_p, fn_len_s": 1}
+      "expect": ["u8:({{r}})", "i64:40({{r}})", "call\t{{p}}, fn_len_l,", "call\t{{p}}, fn_len_s,"],
+      "count": {"call\t{{p}}, fn_len_l,": 2, "call\t{{p}}, fn_len_s,": 1}
     },
     {
       "in_func": "mvp_#_shaped",
-      "expect": ["fn_len_l_p, fn_len_l"]
+      "expect": ["call\t{{p}}, fn_len_l,"]
     }
   ]
 }

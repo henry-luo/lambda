@@ -4,8 +4,8 @@
   "checks": [
     {
       "in_func": "mvp_#_equal",
-      "expect": ["bstart", "fn_str_eq_ptr_p, fn_str_eq_ptr"],
-      "forbid": ["lambda_stack_is_exhausted_p, lambda_stack_is_exhausted", "lambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for"]
+      "expect": ["bstart", "call\t{{p}}, fn_str_eq_ptr,"],
+      "forbid": ["call\t{{p}}, lambda_stack_is_exhausted,", "call\t{{p}}, lambda_side_stack_ensure_for,"]
     }
   ]
 }

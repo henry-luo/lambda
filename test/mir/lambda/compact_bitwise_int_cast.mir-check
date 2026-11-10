@@ -5,11 +5,11 @@
     {
       "in_func": "mvp_#_compact_bitwise_int_cast",
       "count": {
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 0,
-        "call\tfn_int_p, fn_int": 1
+        "call\t{{p}}, lambda_type_check_lazy,": 0,
+        "call\t{{p}}, fn_int,": 1
       },
       "expect_seq": [
-        { "pattern": "call\tfn_int_p, fn_int" },
+        { "pattern": "call\t{{p}}, fn_int," },
         { "pattern": "eq\t{{r}}, {{r}}, 27" },
         { "pattern": "ret\t" }
       ]

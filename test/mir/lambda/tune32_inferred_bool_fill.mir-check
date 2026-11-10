@@ -6,7 +6,7 @@
       "in_func": "mvp_#_tune32_bool_hot",
       "expect": [
         "mov\tu8:({{r}}), {{r}}",
-        "call\titem_at_p, item_at"
+        "call\t{{p}}, item_at,"
       ],
       "expect_seq": [
         {

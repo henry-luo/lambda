@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_compare",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "call\t{{p}}, lambda_int_lane_to_double_c,",
         "\tdlt\t",
         "\tdle\t",
         "\tdgt\t",
@@ -21,7 +21,7 @@
     {
       "in_func": "mvp_#_select_lt",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "call\t{{p}}, lambda_int_lane_to_double_c,",
         "mov\t{{r}}, 2"
       ],
       "expect": [
@@ -40,7 +40,7 @@
     {
       "in_func": "mvp_#_select_read_lt",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "call\t{{p}}, lambda_int_lane_to_double_c,",
         "mov\t{{r}}, 2"
       ],
       "expect": [
@@ -51,7 +51,7 @@
     {
       "in_func": "mvp_#_compare_read",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c"
+        "call\t{{p}}, lambda_int_lane_to_double_c,"
       ],
       "expect": [
         "\tlt\t",
@@ -72,7 +72,7 @@
     {
       "in_func": "mvp_#_inferred_read_lt",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "call\t{{p}}, lambda_int_lane_to_double_c,",
         "mov\t{{r}}, 2"
       ],
       "expect": [

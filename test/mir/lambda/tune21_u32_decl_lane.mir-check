@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_rol",
       "count": {
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 1
+        "call\t{{p}}, lambda_type_check_lazy,": 1
       },
       "expect_seq": [
         {
@@ -15,7 +15,7 @@
           "pattern": "or\t{{r}}, 289637751035265024, %p1"
         },
         {
-          "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+          "pattern": "call\t{{p}}, lambda_type_check_lazy,"
         }
       ],
       "expect": [
@@ -25,7 +25,7 @@
     {
       "in_func": "mvp_#_safe_add",
       "count": {
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 2
+        "call\t{{p}}, lambda_type_check_lazy,": 2
       },
       "expect": [
         "ubgt\tL",

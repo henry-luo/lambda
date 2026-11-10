@@ -5,15 +5,15 @@
     {
       "in_func": "mvp_#_guarded",
       "expect": ["mov\t{{r}}, i64:({{r}})"],
-      "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
+      "forbid": ["call\t{{p}}, fn_member_by_id,"]
     },
     {
       "in_func": "mvp_#_unguarded",
-      "expect": ["call\tfn_member_by_id_p, fn_member_by_id"]
+      "expect": ["call\t{{p}}, fn_member_by_id,"]
     },
     {
       "in_func": "mvp_#_rebound",
-      "expect": ["call\tfn_member_by_id_p, fn_member_by_id"]
+      "expect": ["call\t{{p}}, fn_member_by_id,"]
     }
   ]
 }

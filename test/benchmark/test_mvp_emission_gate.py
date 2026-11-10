@@ -52,4 +52,5 @@ class GateContracts(unittest.TestCase):
         selected = {case._testMethodName for case in suite()}
         self.assertGreaterEqual(len(selected), 56)
         self.assertTrue({"test_native_recursive_mir", "test_guarded_float_body",
-                         "test_recursive_array_capture_effects", "test_modular_array_update"} <= selected)
+                         "test_recursive_array_capture_effects", "test_modular_array_update",
+                         "test_mvp_emission_region_goldens"} <= selected)

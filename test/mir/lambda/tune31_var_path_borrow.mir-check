@@ -5,11 +5,11 @@
     {
       "in_func": "mvp_#_tune31_repeat",
       "expect": [
-        "call\tcow_path_borrow_typed_map_field_p, cow_path_borrow_typed_map_field"
+        "call\t{{p}}, cow_path_borrow_typed_map_field,"
       ],
       "forbid": [
-        "call\tcow_path_borrow_fixed_p, cow_path_borrow_fixed",
-        "call\tcow_prepare_write_p, cow_prepare_write"
+        "call\t{{p}}, cow_path_borrow_fixed,",
+        "call\t{{p}}, cow_prepare_write,"
       ]
     }
   ]

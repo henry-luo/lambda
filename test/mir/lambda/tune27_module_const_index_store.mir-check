@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_tune27_module_const_index_store",
       "forbid": [
-        "call\tlambda_array_set_checked_inplace_item_p, lambda_array_set_checked_inplace_item"
+        "call\t{{p}}, lambda_array_set_checked_inplace_item,"
       ]
     }
   ]

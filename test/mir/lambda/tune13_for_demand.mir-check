@@ -5,9 +5,9 @@
     {
       "in_func": "mvp_#_tune13_discard",
       "forbid": [
-        "call\tarray_spreadable_p, array_spreadable",
-        "call\tarray_push_spread_p, array_push_spread",
-        "call\tarray_end_p, array_end"
+        "call\t{{p}}, array_spreadable,",
+        "call\t{{p}}, array_push_spread,",
+        "call\t{{p}}, array_end,"
       ],
       "expect": [
         "add\t{{r}}, {{r}}, {{r}}"
@@ -16,9 +16,9 @@
     {
       "in_func": "mvp_#_tune13_observed",
       "expect": [
-        "call\tarray_spreadable_p, array_spreadable",
-        "call\tarray_push_spread_p, array_push_spread",
-        "call\tarray_end_p, array_end"
+        "call\t{{p}}, array_spreadable,",
+        "call\t{{p}}, array_push_spread,",
+        "call\t{{p}}, array_end,"
       ]
     }
   ]

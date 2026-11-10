@@ -6,7 +6,7 @@
       "in_func": "mvp_#_byte_store",
       "expect": [
         "mov\tu8:",
-        "call\tlambda_array_set_checked"
+        "call\tlambda_array_set_checked_item"
       ]
     },
     {
@@ -14,14 +14,14 @@
       "expect_seq": [
         "call\tmvp_{{n}}_replace_dp",
         "mov\ti64:",
-        "call\tlambda_array_set_checked"
+        "call\tlambda_array_set_checked_item"
       ]
     },
     {
       "in_func": "mvp_#_sliced",
       "expect": [
         "mov\tu8:",
-        "call\tlambda_array_set_checked"
+        "call\tlambda_array_set_checked_item"
       ]
     }
   ]

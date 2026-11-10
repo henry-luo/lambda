@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_main",
       "expect": [
-        "call\tfn_string_ascii_at_p, fn_string_ascii_at"
+        "call\t{{p}}, fn_string_ascii_at,"
       ]
     }
   ]

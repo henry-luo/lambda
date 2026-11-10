@@ -6,7 +6,7 @@
       "in_func": "mvp_#_reverse_span",
       "expect": [
         "addo\t{{r}}, {{r}}, 1",
-        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ]
     },
     {
@@ -35,8 +35,8 @@
     {
       "in_func": "mvp_#_reverse_growing",
       "expect": [
-        "call\tlambda_array_push_checked_p, lambda_array_push_checked",
-        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+        "call\t{{p}}, lambda_array_push_checked,",
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ]
     }
   ]

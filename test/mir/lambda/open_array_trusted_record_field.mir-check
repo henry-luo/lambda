@@ -8,7 +8,7 @@
         "mov\t{{r}}, u8:({{r}})",
         "mov\t{{r}}, i64:8({{r}})",
         "mov\t{{r}}, i64:8({{r}})",
-        "call\tfn_member_by_id_p, fn_member_by_id"
+        "call\t{{p}}, fn_member_by_id,"
       ]
     }
   ]

@@ -5,14 +5,14 @@
     {
       "in_func": "mvp_#_closed_witness18",
       "forbid": [
-        "call\tensure_typed_array_p, ensure_typed_array",
+        "call\t{{p}}, ensure_typed_array,",
         "array_witness_bit"
       ]
     },
     {
       "in_func": "mvp_#_closed_witness18",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     }
   ]

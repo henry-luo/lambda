@@ -5,52 +5,52 @@
     {
       "in_func": "mvp_#_ret_param",
       "forbid": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     },
     {
       "in_func": "mvp_#_ret_null",
       "forbid": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     },
     {
       "in_func": "mvp_#_read_field",
       "forbid": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     },
     {
       "in_func": "mvp_#_alias_param",
       "forbid": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     },
     {
       "in_func": "mvp_#_const_index",
       "forbid": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     },
     {
       "in_func": "mvp_#_literal_arg",
       "expect_seq": [
         {
-          "pattern": "call\tarray_num_new_uninit_p, array_num_new_uninit"
+          "pattern": "call\t{{p}}, lambda_fill_primitive_bits,"
         },
         {
-          "pattern": "call\tarray_float_literal_with_nulls_p, array_float_literal_with_nulls"
+          "pattern": "call\t{{p}}, array_plain,"
         }
       ],
       "forbid": [
-        "call\tarray_push_p, array_push",
-        "call\tarray_push_capture_p, array_push_capture"
+        "call\t{{p}}, array_push,",
+        "call\t{{p}}, array_push_capture,"
       ]
     },
     {
       "in_func": "mvp_#_const_index_pushed",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     }
   ]

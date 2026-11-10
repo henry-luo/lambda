@@ -1,21 +1,36 @@
 {
   "schema_version": 1,
-  "description": "Tune32 T32-2: exact inferred string entries reuse byte/Unicode pair fusion; unknown receiver or selection keys retain ordinary access (D7.3.2, S7.1.1v3, S8.2.4v3).",
+  "description": "D7.3.1/S7.1.1v3: MVP compares allocation-free character words after guarded byte loads; Unicode and absence retain the checked leaf.",
   "checks": [
     {
       "in_func": "mvp_#_tune32_same_at",
-      "expect": ["call\tfn_string_char_eq_p, fn_string_char_eq", "mov\t{{r}}, u8:"],
-      "forbid": ["call\tfn_string_ascii_at_p, fn_string_ascii_at"]
+      "expect": [
+        "call\t{{p}}, fn_string_char_word,",
+        "mov\t{{r}}, u8:",
+        "\teq\t",
+        "u8:5("
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_string_ascii_at,"
+      ]
     },
     {
       "in_func": "mvp_#_tune32_open_at",
-      "expect": ["call\tfn_index_p, fn_index"],
-      "forbid": ["call\tfn_string_char_eq_p, fn_string_char_eq"]
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_string_char_word,"
+      ]
     },
     {
       "in_func": "mvp_#_tune32_borrowed_text",
-      "expect": ["call\tfn_index_p, fn_index"],
-      "forbid": ["call\tfn_string_char_eq_p, fn_string_char_eq"]
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_string_char_word,"
+      ]
     }
   ]
 }

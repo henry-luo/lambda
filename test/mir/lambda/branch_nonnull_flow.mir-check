@@ -4,13 +4,13 @@
   "checks": [
     {
       "in_func": "mvp_#_guarded",
-      "expect": ["call\tfn_eq_p, fn_eq"],
+      "expect": ["call\t{{p}}, fn_eq,"],
       "forbid": ["dmov\t{{r}}, nan"],
       "count": {"9221120237041090561": 1}
     },
     {
       "in_func": "mvp_#_guarded_reversed",
-      "expect": ["call\tfn_ne_p, fn_ne"],
+      "expect": ["call\t{{p}}, fn_ne,"],
       "forbid": ["dmov\t{{r}}, nan"],
       "count": {"9221120237041090561": 1}
     },

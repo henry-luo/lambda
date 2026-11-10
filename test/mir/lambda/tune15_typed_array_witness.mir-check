@@ -15,7 +15,7 @@
       "in_func": "mvp_#_tune15_array_consumer",
       "expect": [
         "and\t{{r}}, _array_witness, 1",
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     }
   ]

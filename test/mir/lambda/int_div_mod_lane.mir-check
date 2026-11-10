@@ -5,27 +5,27 @@
     {
       "in_func": "mvp_#_lane_div",
       "forbid": [
-        "call\tfn_idiv_p, fn_idiv",
-        "call\tfn_mod_p, fn_mod",
-        "call\tfmod_p, fmod",
-        "call\tlambda_numeric_boundary_admit_p, lambda_numeric_boundary_admit"
+        "call\t{{p}}, fn_idiv,",
+        "call\t{{p}}, fn_mod,",
+        "call\t{{p}}, fmod,",
+        "call\t{{p}}, lambda_numeric_boundary_admit,"
       ],
       "expect": [
         "div\t%r",
-        "call\tlambda_int_lane_divmod_slow_p, lambda_int_lane_divmod_slow"
+        "call\t{{p}}, lambda_int_lane_divmod_slow,"
       ]
     },
     {
       "in_func": "mvp_#_lane_mod",
       "forbid": [
-        "call\tfn_idiv_p, fn_idiv",
-        "call\tfn_mod_p, fn_mod",
-        "call\tfmod_p, fmod",
-        "call\tlambda_numeric_boundary_admit_p, lambda_numeric_boundary_admit"
+        "call\t{{p}}, fn_idiv,",
+        "call\t{{p}}, fn_mod,",
+        "call\t{{p}}, fmod,",
+        "call\t{{p}}, lambda_numeric_boundary_admit,"
       ],
       "expect": [
         "mod\t%r",
-        "call\tlambda_int_lane_divmod_slow_p, lambda_int_lane_divmod_slow"
+        "call\t{{p}}, lambda_int_lane_divmod_slow,"
       ]
     }
   ]

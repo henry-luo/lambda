@@ -1101,8 +1101,9 @@ inline bool select_scope(const MirDump& dump, const CheckGroup& group,
     return true;
 }
 
-// `{{n}}` matches a decimal compiler ID inside an instruction (for example a
-// direct MVP callee). Register tokens: `{{r}}` matches any generated register; `{{r:name}}`
+// `{{n}}` matches a decimal compiler ID; `{{p}}` matches one MIR prototype
+// operand. The callee remains explicit, independent of ABI signature suffixes.
+// Register tokens: `{{r}}` matches any generated register; `{{r:name}}`
 // binds `name` to the register on first use within one expect_seq and must
 // match the same register afterwards; `{{r!name}}` must be a register other
 // than the one bound to `name`. Captures live only for the duration of one
@@ -1114,7 +1115,8 @@ typedef std::map<std::string, std::string> RegisterCaptures;
 inline bool line_contains(const std::string& line, const std::string& pattern,
         RegisterCaptures* captures = NULL) {
     if (pattern.find("{{r") == std::string::npos &&
-            pattern.find("{{n}}") == std::string::npos) {
+            pattern.find("{{n}}") == std::string::npos &&
+            pattern.find("{{p}}") == std::string::npos) {
         return line.find(pattern) != std::string::npos;
     }
 
@@ -1127,6 +1129,19 @@ inline bool line_contains(const std::string& line, const std::string& pattern,
         bool matched = true;
         RegisterCaptures attempt = captures ? *captures : RegisterCaptures();
         while (pattern_index < pattern.size()) {
+            if (pattern.compare(pattern_index, 5, "{{p}}") == 0) {
+                size_t first = line_index;
+                while (line_index < line.size()) {
+                    char ch = line[line_index];
+                    if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                            (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' ||
+                            ch == '$' || ch == '%')) break;
+                    line_index++;
+                }
+                if (line_index == first) { matched = false; break; }
+                pattern_index += 5;
+                continue;
+            }
             if (pattern.compare(pattern_index, 5, "{{n}}") == 0) {
                 size_t digits = line_index;
                 while (line_index < line.size() && line[line_index] >= '0' &&

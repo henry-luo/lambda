@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_create_node",
       "forbid": [
-        "call\tfn_map_set_p, fn_map_set"
+        "call\t{{p}}, fn_map_set,"
       ]
     }
   ]

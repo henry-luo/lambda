@@ -1,30 +1,62 @@
 {
   "schema_version": 1,
-  "description": "S9.1.2, S10.6.1, D5.4.4: a proved pure tail accumulator detaches its incoming typed array and appends one or two items without allocating the RHS literal; an absent element keeps the checked fallback.",
+  "description": "S9.1.2/D5.4.4: MVP tail accumulators should append fresh items without materializing RHS arrays. Pair appends require two scalar append edges; the generic pair path remains a visible missed optimization.",
   "checks": [
     {
       "in_func": "mvp_#_build_direct",
-      "expect": ["call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item"],
-      "count": {"call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item": 1},
-      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end", "call\tfn_join_p, fn_join"]
+      "expect": [
+        "call\t{{p}}, fn_join_fresh_array_item,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_join_fresh_array_item,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, array_end,",
+        "call\t{{p}}, fn_join,"
+      ]
     },
     {
       "in_func": "mvp_#_build_conditional",
-      "expect": ["call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item"],
-      "count": {"call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item": 2},
-      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end", "call\tfn_join_p, fn_join"]
+      "expect": [
+        "call\t{{p}}, fn_join_fresh_array_item,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_join_fresh_array_item,": 2
+      },
+      "forbid": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, array_end,",
+        "call\t{{p}}, fn_join,"
+      ]
     },
     {
       "in_func": "mvp_#_build_pair",
-      "expect": ["call\tfn_join_consume_cert_array_pair_p, fn_join_consume_cert_array_pair"],
-      "count": {"call\tfn_join_consume_cert_array_pair_p, fn_join_consume_cert_array_pair": 1},
-      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end", "call\tfn_join_p, fn_join"]
+      "expect": [
+        "call\t{{p}}, fn_join_fresh_array_item,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_join_fresh_array_item,": 2
+      },
+      "forbid": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, array_end,",
+        "call\t{{p}}, fn_join,"
+      ]
     },
     {
       "in_func": "mvp_#_build_list",
-      "expect": ["call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item"],
-      "count": {"call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item": 1},
-      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end", "call\tfn_join_p, fn_join"]
+      "expect": [
+        "call\t{{p}}, fn_join_fresh_array_item,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_join_fresh_array_item,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, array_end,",
+        "call\t{{p}}, fn_join,"
+      ]
     }
   ]
 }

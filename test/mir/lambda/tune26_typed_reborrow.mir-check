@@ -8,7 +8,7 @@
         "call\tmvp_{{n}}_tune26_typed_reborrow_step_dp"
       ],
       "forbid": [
-        "call\tcow_prepare_write_p, cow_prepare_write"
+        "call\t{{p}}, cow_prepare_write,"
       ]
     }
   ]

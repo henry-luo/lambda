@@ -5,8 +5,8 @@
     {
       "in_func": "mvp_#_range18",
       "forbid": [
-        "call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow",
-        "call\tint2it_lane_p, int2it_lane",
+        "call\t{{p}}, lambda_int_lane_add_slow,",
+        "call\t{{p}}, int2it_lane,",
         "18014398509481982"
       ]
     },

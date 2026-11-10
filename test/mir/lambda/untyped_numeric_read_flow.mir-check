@@ -4,7 +4,7 @@
   "checks": [
     {
       "in_func": "mvp_#_probability_compare",
-      "expect": ["dlt\t{{r}}", "call\tfn_lt_p, fn_lt"]
+      "expect": ["dlt\t{{r}}", "call\t{{p}}, fn_lt,"]
     }
   ]
 }

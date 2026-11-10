@@ -5,25 +5,25 @@
     {
       "in_func": "mvp_#_tune15_int_from_float",
       "expect": ["call\tlambda_double_to_int_lane_c_p"],
-      "forbid": ["call\tfn_int_p, fn_int", "call\tfn_float_p, fn_float", "call\tfn_trunc_p, fn_trunc", "call\tfn_ord_str_item_p, fn_ord_str_item"]
+      "forbid": ["call\t{{p}}, fn_int,", "call\t{{p}}, fn_float,", "call\t{{p}}, fn_trunc,", "call\t{{p}}, fn_ord_str_item,"]
     },
     {
       "in_func": "mvp_#_tune15_float_from_int",
       "expect": ["call\tlambda_int_lane_to_double_c_p"],
-      "forbid": ["call\tfn_int_p, fn_int", "call\tfn_float_p, fn_float", "call\tfn_trunc_p, fn_trunc", "call\tfn_ord_str_item_p, fn_ord_str_item"]
+      "forbid": ["call\t{{p}}, fn_int,", "call\t{{p}}, fn_float,", "call\t{{p}}, fn_trunc,", "call\t{{p}}, fn_ord_str_item,"]
     },
     {
       "in_func": "mvp_#_tune15_trunc",
       "expect": ["call\ttrunc_p"],
-      "forbid": ["call\tfn_int_p, fn_int", "call\tfn_float_p, fn_float", "call\tfn_trunc_p, fn_trunc", "call\tfn_ord_str_item_p, fn_ord_str_item"]
+      "forbid": ["call\t{{p}}, fn_int,", "call\t{{p}}, fn_float,", "call\t{{p}}, fn_trunc,", "call\t{{p}}, fn_ord_str_item,"]
     },
     {
       "in_func": "mvp_#_tune15_ord",
       "expect": [
-        "call\tfn_ord_str_p, fn_ord_str",
+        "call\t{{p}}, fn_ord_str,",
         "bne\tL"
       ],
-      "forbid": ["call\tfn_int_p, fn_int", "call\tfn_float_p, fn_float", "call\tfn_trunc_p, fn_trunc", "call\tfn_ord_str_item_p, fn_ord_str_item"]
+      "forbid": ["call\t{{p}}, fn_int,", "call\t{{p}}, fn_float,", "call\t{{p}}, fn_trunc,", "call\t{{p}}, fn_ord_str_item,"]
     }
   ]
 }

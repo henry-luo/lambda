@@ -4,6 +4,7 @@
 // runtime side-stack API so value-model headers do not own collection state.
 #include "lambda-stack.h"
 #include "side_stack.h"
+#include "heap_api.h"
 
 extern "C" Context* eval_context_tls_runtime(void);
 

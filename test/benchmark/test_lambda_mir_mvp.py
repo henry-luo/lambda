@@ -23,6 +23,7 @@ GC_MODES = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
 
 # focused gate excludes benchmark campaigns and reference-tool builds.
 MIR_EMISSION_METHODS = (
+    'test_mvp_emission_region_goldens',
     'test_guarded_record_reads',
     'test_guarded_scalar_bodies',
     'test_open_record_stores',
@@ -150,6 +151,11 @@ class LambdaMirMvpTests(unittest.TestCase):
                 for source in fixtures:
                     with self.subTest(compiler=compiler, mode=mode, fixture=source.stem):
                         self.check_golden(source, {**mode, "LAMBDA_MIR_COMPILER": compiler})
+
+    def test_mvp_emission_region_goldens(self):
+        # D8.6.1: native kernels and guard misses retain values under precise GC.
+        names = ("numeric_regions", "array_regions", "call_ownership", "string_regions", "record_regions")
+        self.check_gc_fixtures(ROOT / "test/mir/lambda" / f"mvp_{name}.ls" for name in names)
 
     def test_ndim_canonical_values(self):
         names = ("typed_array_ndim_index", "typed_array_ndim_literal",
@@ -749,7 +755,13 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertNotIn("\tcall\tcow_capture_value", body)
             self.assertIn("\tcall\tfn_index", body)  # invalid keys retain checked absence
         for name in ("mutable_table", "effectful_read"):
-            self.assertIn("\tcall\tcow_capture_value", self.function_mir(source, name))
+            body = self.function_mir(source, name)
+            # MVP share-marks inline before evaluating a key that can replace its owner.
+            mark = re.search(r"\tmov\tu8:4\(%r[0-9a-f]+\), %r[0-9a-f]+\n", body)
+            self.assertIsNotNone(mark)
+            if name == "effectful_read":
+                self.assertLess(mark.end(), body.index("\tcall\tlambda_fill_"))
+        self.check_gc_fixtures((source,))
         lazy = self.function_mir(source, "lazy_condition")
         key = re.search(r"\tmov\t(%r[0-9a-f]+), arg1\n", lazy).group(1)
         key_read = re.search(r"\tmov\t%r[0-9a-f]+, " + re.escape(key) + r"\n", lazy)
@@ -1022,7 +1034,9 @@ class LambdaMirMvpTests(unittest.TestCase):
                     self.check_golden(source, mode)
         decimal = ROOT / "test/lambda/mvp/mir_mvp_decimal_dispatch.ls"
         self.assertEqual(self.function_mir(decimal, "decimal_ops").count("\tcall\tlambda_decimal_binary"), 6)
-        self.assertIn("\tcall\tfn_add", self.function_mir(decimal, "decimal_generic"))
+        generic = self.function_mir(decimal, "decimal_generic")
+        self.assertEqual(generic.count("\tcall\tlambda_decimal_binary"), 3)
+        self.assertNotIn("\tcall\tfn_add", generic)
         compared = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_scalar_outcomes.ls", "scalar_compare")
         self.assertIn("\tdlt\t", compared)
         self.assertIn("\tcall\tfn_lt", compared)
@@ -1198,7 +1212,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("lambda_type_check", body)  # the short-array return still fails its int boundary
         body = self.function_mir(source, "truth_count")
         self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
-        self.assertIn("fn_index", body)
+        self.assertIn("\tcall\tlambda_array_primitive_index", body)
         body = self.function_mir(source, "rotate_arrays")
         # only the saved alias and the later observed scratch require captures.
         self.assertLessEqual(len(re.findall(r"\tcall\tcow_capture_value_", body)), 4)
@@ -1502,7 +1516,8 @@ class LambdaMirMvpTests(unittest.TestCase):
         # a generic field replacement can rebuild a record's physical layout;
         # the subsequent typed call must establish its own prefix.
         body = self.function_mir(source, "updated_box")
-        self.assertIn("lambda_map_set_checked", body)
+        self.assertIn("\tcall\tindex_assign_cow", body)
+        self.assertIn("\tcall\tlambda_report_boundary_failure", body)
         self.assertIn("\tcall\tlambda_type_check", body)
 
     def test_guarded_recursive_arrays(self):
@@ -1510,9 +1525,9 @@ class LambdaMirMvpTests(unittest.TestCase):
         body = self.function_mir(source, "place_queen")
         first = body[:body.index("\tcall\tmvp_2_place_queen_dp")]
         self.assertGreater(first.count("\tcall\tlambda_stack_is_exhausted"), 0)
-        for helper in ("fn_index", "lambda_array_set_checked_item", "lambda_type_check", "cow_capture_value"):
+        for helper in ("lambda_array_primitive_index", "lambda_array_set_checked_item", "lambda_type_check", "cow_capture_value"):
             self.assertEqual(first.count("\tcall\t" + helper), 0, helper)
-            if helper in ("fn_index", "lambda_array_set_checked_item"):
+            if helper in ("lambda_array_primitive_index", "lambda_array_set_checked_item"):
                 self.assertGreater(body.count("\tcall\t" + helper), 0, helper)
         # the hot self edge has no owner replacement and publishes no borrow cells.
         self.assertNotRegex(first, r"mov\ti64:1(?:60|68|76|84)\(runtime\), %")
@@ -1595,8 +1610,11 @@ class LambdaMirMvpTests(unittest.TestCase):
             before_helper = body[:body.index("\tcall\t" + helper)]
             self.assertIn("\tjmp\t", before_helper)
         store = self.function_mir(source, "store_cast")
-        self.assertIn("lambda_array_set_checked_item", store)
-        self.assertNotIn("lambda_array_set_checked_preplanned", store)
+        # the converted value uses the preplanned contract; its miss remains checked.
+        self.assertIn("\tcall\tlambda_array_set_checked_preplanned", store)
+        self.assertIn("\tcall\tlambda_report_boundary_failure", store)
+        self.assertNotIn("\tcall\tlambda_array_set_checked_item", store)
+        self.check_gc_fixtures((source,))
 
     def test_float_predicate_branch(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_float_compare.ls", "find_prefix")

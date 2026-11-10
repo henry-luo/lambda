@@ -5,11 +5,11 @@
     {
       "in_func": "mvp_#_stable_abs",
       "expect_seq": [
-        "call\tfabs_p, fabs",
+        "call\t{{p}}, fabs,",
         "lt\t{{r}}, {{r}}, %p1"
       ],
       "count": {
-        "call\tfabs_p, fabs": 2
+        "call\t{{p}}, fabs,": 2
       }
     },
     {
@@ -19,7 +19,7 @@
         "to": "jmp\tL"
       },
       "forbid": [
-        "call\tfabs_p, fabs"
+        "call\t{{p}}, fabs,"
       ]
     }
   ]

@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_guarded_load",
       "expect_seq": [
-        { "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy" },
+        { "pattern": "call\t{{p}}, lambda_type_check_lazy," },
         { "pattern": "mov\t{{r}}, i64:32({{r}})" },
         { "pattern": "mov\t{{r}}, i64:40({{r}})" },
         { "pattern": "lt\t{{r}}, %p2, 0" },
@@ -17,7 +17,7 @@
     {
       "in_func": "mvp_#_guarded_store",
       "expect_seq": [
-        { "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy" },
+        { "pattern": "call\t{{p}}, lambda_type_check_lazy," },
         { "pattern": "dmov\t{{r}}, 9.50000000000000000000000000000000000000000000000000000e+00" },
         { "pattern": "dmov\td:({{r}}), {{r}}" }
       ]
@@ -25,7 +25,7 @@
     {
       "in_func": "mvp_#_dense_int_sum",
       "forbid": [
-        "call\titem_at_p, item_at",
+        "call\t{{p}}, item_at,",
         "dmov\t{{r}}, d:({{r}})"
       ],
       "expect": [
@@ -35,7 +35,7 @@
     {
       "in_func": "mvp_#_dense_int_linear_sum",
       "forbid": [
-        "call\titem_at_p, item_at",
+        "call\t{{p}}, item_at,",
         "dmov\t{{r}}, d:({{r}})"
       ],
       "expect": [

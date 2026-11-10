@@ -4,8 +4,8 @@
   "checks": [
     {
       "in_func": "mvp_#_append_value",
-      "expect": ["call\tfn_join_fresh_array_item_p, fn_join_fresh_array_item"],
-      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end"]
+      "expect": ["call\t{{p}}, fn_join_fresh_array_item,"],
+      "forbid": ["call\t{{p}}, array,", "call\t{{p}}, array_end,"]
     }
   ]
 }

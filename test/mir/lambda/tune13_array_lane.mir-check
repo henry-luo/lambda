@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_tune13_store",
       "expect": [
-        "call\tlambda_array_set_checked",
+        "call\tlambda_array_set_checked_item",
         "lsh\t{{r}}, {{r}}, 3"
       ]
     },
@@ -13,11 +13,11 @@
       "in_func": "mvp_#_tune13_builtin",
       "expect": [
         "neg\t",
-        "call\tfn_min2_p, fn_min2",
+        "call\t{{p}}, fn_min2,",
         "call\tarray_num_set_cow_idx"
       ],
       "forbid": [
-        "call\tfn_abs_p, fn_abs"
+        "call\t{{p}}, fn_abs,"
       ]
     }
   ]

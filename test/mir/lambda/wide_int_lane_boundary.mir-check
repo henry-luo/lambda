@@ -5,20 +5,20 @@
     {
       "in_func": "mvp_#_tower_join",
       "expect": [
-        "call\tfn_add_p, fn_add"
+        "call\t{{p}}, fn_add,"
       ]
     },
     {
       "in_func": "mvp_#_narrow_join",
       "expect": [
-        "call\tfn_mul_p, fn_mul",
-        "call\tcoerce_num_sized_p, coerce_num_sized"
+        "call\t{{p}}, fn_mul,",
+        "call\t{{p}}, coerce_num_sized,"
       ]
     },
     {
       "in_func": "mvp_#_wide_div",
       "expect": [
-        "call\tfn_idiv_p, fn_idiv"
+        "call\t{{p}}, fn_idiv,"
       ]
     }
   ]

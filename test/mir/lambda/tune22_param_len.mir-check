@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_tune22_param_len",
       "expect": ["i64:40("],
-      "forbid": ["mlen_kind", "call\tfn_len_p, fn_len", "call\tfn_len_a_p, fn_len_a"]
+      "forbid": ["mlen_kind", "call\t{{p}}, fn_len,", "call\t{{p}}, fn_len_a,"]
     }
   ]
 }

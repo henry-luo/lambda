@@ -72,6 +72,61 @@ TEST(MirCheckMatcher, DecimalCalleeIdsKeepTheCallContract) {
     EXPECT_TRUE(mir_check::line_contains("\tmov\t%r1f, 4", "mov\t{{r}}, 4"));
 }
 
+TEST(MirCheckMatcher, HelperChecksIgnorePrototypeSpellingButRequireTheCallee) {
+    EXPECT_TRUE(mir_check::line_contains("\tcall\tfn_index_p_r6_n1_a2, fn_index, %r0, %r1",
+        "call\t{{p}}, fn_index,"));
+    EXPECT_TRUE(mir_check::line_contains("\tcall\tfn_index_p, fn_index, %r0, %r1",
+        "call\t{{p}}, fn_index,"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tfn_index_p, fn_index_set, %r0",
+        "call\t{{p}}, fn_index,"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\t, fn_index, %r0",
+        "call\t{{p}}, fn_index,"));
+    EXPECT_TRUE(mir_check::line_contains("\tcall\tp2, helper, %r0, 7",
+        "call\t{{p}}, helper, {{r}}, 7"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tp2, helper, %r0, 8",
+        "call\t{{p}}, helper, {{r}}, 7"));
+}
+
+TEST(MvpMirAbi, OutcomeEntriesUseThePlatformCompanionTransport) {
+    mir_check::CompileOptions options;
+    mir_check::CompileResult compiled = mir_check::compile_and_dump(
+        "test/mir/lambda/mvp_call_ownership.ls", options);
+    ASSERT_TRUE(compiled.ok) << compiled.error;
+    const char* names[] = {"mvp_#_wide", "mvp_#_forward"};
+    for (const char* name : names) {
+        bool found = false;
+        for (const auto& function : compiled.dump.functions) {
+            if (!mir_check::function_name_matches(name, function.function)) continue;
+            ASSERT_FALSE(found) << "ambiguous outcome body " << name;
+            found = true;
+            ASSERT_FALSE(function.lines.empty());
+            const char* header = function.lines[0].text.c_str();
+#ifdef _WIN32
+            EXPECT_NE(strstr(header, "\tfunc\ti64, p:runtime"), nullptr) << name;
+#else
+            EXPECT_NE(strstr(header, "\tfunc\ti64, i64, p:runtime"), nullptr) << name;
+            bool distinct_pair = false;
+            for (const auto& line : function.lines) {
+                const char* text = line.text.c_str();
+                if (strncmp(text, "\tret\t%r", 7)) continue;
+                const char* comma = strchr(text, ',');
+                if (!comma) continue;
+                const char* first = text + 5;
+                const char* second = comma + 1;
+                while (*second == ' ') second++;
+                size_t first_len = (size_t)(comma - first);
+                size_t second_len = strcspn(second, " \t\r\n");
+                EXPECT_TRUE(first_len != second_len || memcmp(first, second, first_len))
+                    << "outcome lanes alias in " << name;
+                distinct_pair = true;
+            }
+            EXPECT_TRUE(distinct_pair) << "missing normal outcome pair in " << name;
+#endif
+        }
+        EXPECT_TRUE(found) << "missing outcome body " << name;
+    }
+}
+
 TEST(LambdaMirProfiling, DiagnosticCallsPreserveProductionRootsAndSafepoints) {
     const char* args[] = {"python3", "test/benchmark/check_profile_root_parity.py",
         "--exe", mir_check::executable(), "--cow-sites", nullptr};

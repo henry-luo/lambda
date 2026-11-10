@@ -6,7 +6,7 @@
       "in_func": "mvp_#_fixed_store",
       "forbid": [
         "call\tarray_num_set_cow_idx",
-        "call\tlambda_array_set_checked",
+        "call\tlambda_array_set_checked_item",
         "mul\t{{r}}, {{r}}, 8",
         "lt\t{{r}}, {{r}}, 0"
       ],
@@ -18,14 +18,14 @@
     {
       "in_func": "mvp_#_fixed_literal",
       "forbid": [
-        "call\tlambda_array_set_checked",
+        "call\tlambda_array_set_checked_item",
         "call\tarray_num_set_cow_idx"
       ]
     },
     {
       "in_func": "mvp_#_resized",
       "expect": [
-        "call\tlambda_array_set_checked",
+        "call\tlambda_array_set_checked_item",
         "ge\t{{r}}, {{r}}, {{r}}"
       ]
     }

@@ -6,14 +6,14 @@
       "in_func": "mvp_#_countdown",
       "forbid": [
         "call\tmvp_{{n}}_countdown_dp",
-        "call\tlambda_item_to_int_lane_c_p, lambda_item_to_int_lane_c"
+        "call\t{{p}}, lambda_item_to_int_lane_c,"
       ],
       "expect": [
         "add\t{{r}}, {{r}}, 1",
         "ble\t"
       ],
       "count": {
-        "call\tint2it_lane_p, int2it_lane": 1
+        "call\t{{p}}, int2it_lane,": 1
       }
     }
   ]

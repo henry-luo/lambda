@@ -5,12 +5,12 @@
     {
       "in_func": "mvp_#_build",
       "expect_any": [
-        "call\theap_calloc_class_p, heap_calloc_class",
+        "call\t{{p}}, heap_calloc_class,",
         "call\tmap_with_region"
       ],
       "forbid": [
         "call\tmap_fill_",
-        "call\tmap_with_tl_p, map_with_tl",
+        "call\t{{p}}, map_with_tl,",
         "call\tlambda_type_check_lazy"
       ]
     },

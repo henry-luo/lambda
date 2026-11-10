@@ -8,7 +8,7 @@
         "add\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add",
+        "call\t{{p}}, fn_add,",
         "call\tmvp_{{n}}_tune15_add_dp#_b",
         "call\tmvp_{{n}}_tune15_add_dp#"
       ]

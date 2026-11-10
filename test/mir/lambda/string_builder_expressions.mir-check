@@ -1,8 +1,26 @@
 {
   "schema_version": 1,
-  "description": "Fresh string expressions use one destination; nullable indexed strings retain generic join fallback.",
+  "description": "D7.3.1: MVP fuses fresh and nullable indexed pieces into one string destination; indexed pieces retain checked reads.",
   "checks": [
-    {"in_func": "mvp_#_expression_builder", "expect": ["fn_strcat_many"], "forbid": ["call\tfn_join_p, fn_join", "call\tfn_string_p, fn_string"]},
-    {"in_func": "mvp_#_indexed_builder", "expect": ["fn_strcat_many", "call\tfn_join_p, fn_join"]}
+    {
+      "in_func": "mvp_#_expression_builder",
+      "expect": [
+        "fn_strcat_many"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_join,",
+        "call\t{{p}}, fn_string,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_indexed_builder",
+      "expect": [
+        "fn_strcat_many",
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_join,"
+      ]
+    }
   ]
 }

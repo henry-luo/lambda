@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "description": "T29-5: the nested index store calls cow_path_set_packed_index before the per-link fn_index walk, and branches past the walk when it stored.",
+  "description": "S9.1.2/D5.4.4: a packed nested store should emit a native slot write and retain the canonical COW path fallback; retired Full packed-path adapters are not an oracle.",
   "checks": [
     {
       "in_func": "mvp_#_stamp",
-      "expect_seq": [
-        "call\tcow_path_set_packed_index",
-        "bne\t",
-        "call\tcow_path_index"
+      "expect": [
+        "mov\ti64:({{r}}), {{r}}",
+        "call\t{{p}}, cow_path_set_keys,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
       ]
     }
   ]

@@ -7,13 +7,13 @@
       "expect": [
         "call\tmvp_{{n}}_gc_order_alloc_leaf_dp",
         "call\tlambda_stack_is_exhausted",
-        "call\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, {{r}}, runtime, 2, 0"
+        "call\t{{p}}, lambda_side_stack_ensure_for, {{r}}, runtime, 2, 0"
       ],
       "expect_seq": [
         "mov\ti64:({{r}}), %p1",
         "call\tmvp_{{n}}_gc_order_alloc_leaf_dp",
         "mov\t%p1, i64:({{r}})",
-        "call\tfn_len_s_p, fn_len_s"
+        "call\t{{p}}, fn_len_s,"
       ],
       "forbid": [
         "call\tlambda_type_check_lazy"

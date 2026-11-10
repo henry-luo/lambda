@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "D4.3.3/S9.1.2: typed and erased sums retain native indexed reads and checked fallback. Native borrowed stores preserve a precisely observed snapshot; mixed writes retain the COW kernel.",
+  "checks": [
+    {"in_func": "mvp_#_typed_sum", "expect": ["call\t{{p}}, fn_index,"], "in_range": {"from": "call\t{{p}}, fn_index,"}},
+    {"in_func": "mvp_#_typed_sum", "in_range": {"from": "func\t", "to": "call\t{{p}}, fn_index,"}, "expect_seq": ["lsh\t{{r:scaled}}, {{r}}, 3", "add\t{{r:address}}, {{r}}, {{r:scaled}}", "mov\t{{r}}, i64:({{r:address}})"], "forbid": ["call\t{{p}}, fn_add,", "call\t{{p}}, fn_index,"]},
+    {"in_func": "mvp_#_erased_sum", "expect": ["call\t{{p}}, fn_index,", "call\t{{p}}, fn_add,"]},
+    {"in_func": "mvp_#_erased_sum", "in_range": {"from": "func\t", "to": "call\t{{p}}, fn_index,"}, "expect_seq": ["lsh\t{{r:scaled}}, {{r}}, 3", "add\t{{r:address}}, {{r}}, {{r:scaled}}", "mov\t{{r}}, i64:({{r:address}})"], "forbid": ["call\t{{p}}, fn_add,", "call\t{{p}}, fn_index,"]},
+    {"in_func": "mvp_#_typed_set", "expect": ["call\t{{p}}, lambda_array_set_checked_item,"]},
+    {"in_func": "mvp_#_typed_set", "in_range": {"from": "func\t", "to": "call\t{{p}}, lambda_array_set_checked_item,"}, "expect_seq": ["lsh\t{{r:scaled}}, {{r}}, 3", "add\t{{r:address}}, {{r}}, {{r:scaled}}", "mov\ti64:({{r:address}}), {{r}}"], "forbid": ["call\t{{p}}, lambda_array_set_checked_item,"]},
+    {"in_func": "mvp_#_erased_set", "expect": ["call\t{{p}}, index_assign_cow,", "call\t{{p}}, lambda_report_boundary_failure,"]}
+  ]
+}

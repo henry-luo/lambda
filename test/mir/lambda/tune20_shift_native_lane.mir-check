@@ -9,10 +9,10 @@
         { "pattern": "rsh\t{{r}}, %p1, {{r:c}}" }
       ],
       "forbid": [
-        "call\tfn_shr_item_p, fn_shr_item"
+        "call\t{{p}}, fn_shr_item,"
       ],
       "count": {
-        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
+        "call\t{{p}}, int2it_lane,": { "max": 1 }
       }
     },
     {
@@ -21,10 +21,10 @@
         "lsh\t{{r}}, %p1, %p2"
       ],
       "forbid": [
-        "call\tfn_shl_item_p, fn_shl_item"
+        "call\t{{p}}, fn_shl_item,"
       ],
       "count": {
-        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
+        "call\t{{p}}, int2it_lane,": { "max": 1 }
       }
     },
     {
@@ -34,11 +34,11 @@
         { "pattern": "and\t{{r}}, %p1, {{r:n}}" }
       ],
       "forbid": [
-        "call\tfn_band_item_p, fn_band_item",
-        "call\tfn_bnot_item_p, fn_bnot_item"
+        "call\t{{p}}, fn_band_item,",
+        "call\t{{p}}, fn_bnot_item,"
       ],
       "count": {
-        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
+        "call\t{{p}}, int2it_lane,": { "max": 1 }
       }
     }
   ]

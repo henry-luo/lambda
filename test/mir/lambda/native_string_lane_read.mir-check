@@ -11,9 +11,9 @@
         "u8:3(%p1)",
         "{{r}}, {{r}}, 7",
         "u8:7(%p1)",
-        "item_at_p, item_at"
+        "call\t{{p}}, item_at,"
       ],
-      "forbid": ["fn_index_p, fn_index"]
+      "forbid": ["call\t{{p}}, fn_index,"]
     }
   ]
 }

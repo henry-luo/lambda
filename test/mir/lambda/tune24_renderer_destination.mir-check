@@ -11,16 +11,16 @@
         "call\tfn_join"
       ],
       "count": {
-        "call\tfn_strcat_p, fn_strcat": 2
+        "call\t{{p}}, fn_strcat,": 2
       },
       "expect_seq": [
-        "call\tfn_strcat_p, fn_strcat",
-        "call\tfn_strcat_p, fn_strcat",
+        "call\t{{p}}, fn_strcat,",
+        "call\t{{p}}, fn_strcat,",
         "eq\t{{r}}, {{r}}, 27",
         "bf\tL",
         "mov\t{{r}}, {{r}}",
         { "pattern": "jmp\tL", "next_line": true },
-        "call\tit2s_p, it2s",
+        "call\t{{p}}, it2s,",
         "jmp\tL",
         "eq\t{{r}}, {{r}}, 27",
         "bf\tL",

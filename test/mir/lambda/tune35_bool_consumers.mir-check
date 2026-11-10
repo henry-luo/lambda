@@ -4,11 +4,11 @@
   "checks": [
     {
       "in_func": "mvp_#_classify",
-      "forbid": ["call\tis_truthy_p, is_truthy"]
+      "forbid": ["call\t{{p}}, is_truthy,"]
     },
     {
       "in_func": "mvp_#_compare_neighbors",
-      "forbid": ["call\tfn_eq_p, fn_eq", "call\tfn_ne_p, fn_ne"]
+      "forbid": ["call\t{{p}}, fn_eq,", "call\t{{p}}, fn_ne,"]
     }
   ]
 }

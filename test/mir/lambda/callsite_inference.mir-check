@@ -8,7 +8,7 @@
         "sub\t{{r}}"
       ],
       "forbid": [
-        "call\tfn_sub_p, fn_sub"
+        "call\t{{p}}, fn_sub,"
       ]
     },
     {
@@ -20,7 +20,7 @@
     {
       "in_func": "mvp_#_open_gap",
       "expect": [
-        "call\tfn_sub_p, fn_sub"
+        "call\t{{p}}, fn_sub,"
       ]
     }
   ]

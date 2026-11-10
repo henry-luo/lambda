@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6/S9.1.2: typed and inferred builders use string-specific joins, freeze observed values and preserve empty/Unicode character controls.",
+  "checks": [
+    {"in_func": "mvp_#_typed_build", "expect": ["call\t{{p}}, fn_strcat,", "call\t{{p}}, fn_string_freeze,"], "forbid": ["call\t{{p}}, fn_join,", "call\t{{p}}, fn_string,"]},
+    {"in_func": "mvp_#_erased_build", "expect": ["call\t{{p}}, fn_strcat,", "call\t{{p}}, fn_string_freeze,"], "forbid": ["call\t{{p}}, fn_join,", "call\t{{p}}, fn_string,"]},
+    {"in_func": "mvp_#_frozen", "expect_seq": ["call\t{{p}}, fn_string_freeze,", "call\t{{p}}, fn_strcat,"]},
+    {"in_func": "mvp_#_first_is_x", "expect": ["call\t{{p}}, fn_string_ord_at,"], "forbid": ["call\t{{p}}, fn_index,", "call\t{{p}}, fn_eq,", "call\t{{p}}, heap_strcpy,"]}
+  ]
+}

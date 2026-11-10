@@ -1,9 +1,31 @@
 {
   "schema_version": 1,
-  "description": "S12.1.2v3/D2.2.2: pure terminal-return kernels retain exclusive dispatch, private-tree regions and native string concat fusion.",
+  "description": "S12.1.2v3/D2.2.2: MVP statement-bodied functions retain recursive construction, native dispatch and fused string concatenation.",
   "checks": [
-    {"in_func": "main", "expect": ["lambda_region_begin"]},
-    {"in_func": "mvp_#_choose", "expect": ["bne"]},
-    {"in_func": "mvp_#_decorate", "expect": ["fn_strcat_many"], "forbid": ["call\tfn_join_p"]}
+    {
+      "in_func": "mvp_#_make_tree",
+      "expect": [
+        "call\t{{p}}, map_alloc_for_type,",
+        "call\tmvp_{{n}}_make_tree_dp,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_call_into,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_choose",
+      "expect": [
+        "bne"
+      ]
+    },
+    {
+      "in_func": "mvp_#_decorate",
+      "expect": [
+        "fn_strcat_many"
+      ],
+      "forbid": [
+        "call\tfn_join_p"
+      ]
+    }
   ]
 }

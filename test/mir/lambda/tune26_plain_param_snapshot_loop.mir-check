@@ -5,12 +5,12 @@
     {
       "in_func": "mvp_#_tune26_plain_param_snapshot_loop",
       "expect": [
-        "call\tcow_mark_shared_p, cow_mark_shared",
-        "call\tlambda_array_set_checked_lane_p, lambda_array_set_checked_lane"
+        "call\t{{p}}, cow_mark_shared,",
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ],
       "count": {
-        "call\tcow_mark_shared_p, cow_mark_shared": 1,
-        "call\tcow_prepare_write_p, cow_prepare_write": 0
+        "call\t{{p}}, cow_mark_shared,": 1,
+        "call\t{{p}}, cow_prepare_write,": 0
       }
     }
   ]

@@ -4,11 +4,11 @@
   "checks": [
     {
       "in_func": "mvp_#_int_interval_safe",
-      "forbid": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]
+      "forbid": ["call\t{{p}}, lambda_int_lane_add_slow,"]
     },
     {
       "in_func": "mvp_#_int_interval_crosses",
-      "expect": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]
+      "expect": ["call\t{{p}}, lambda_int_lane_add_slow,"]
     }
   ]
 }

@@ -6,9 +6,9 @@
       "in_func": "mvp_#_read_sum",
       "expect": [
         "func\td, i64, p:runtime",
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ],
-      "forbid": ["call\tit2d_p, it2d", "call\tpush_d_p, push_d"],
+      "forbid": ["call\t{{p}}, it2d,", "call\t{{p}}, push_d,"],
       "expect_seq": [
         "dmov\t{{r:left_loaded}}, d:(",
         {"pattern": "dmov\t{{r:left_lane}}, {{r:left_loaded}}", "next_line": true},
@@ -29,7 +29,7 @@
         "dadd\t{{r}}, {{r:left_value}}, {{r:right_value}}"
       ],
       "count": {
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 4,
+        "call\t{{p}}, lambda_type_check_lazy,": 4,
         "9221120237041090561": 2
       }
     }

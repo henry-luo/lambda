@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_tune26_typed_var_home_outer",
       "expect": [
-        "call\tcow_prepare_write_p, cow_prepare_write",
+        "call\t{{p}}, cow_prepare_write,",
         "call\tmvp_{{n}}_tune26_typed_var_home_inner_dp"
       ]
     }

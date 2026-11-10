@@ -45,17 +45,17 @@
           "pattern": "\tmov\ti64:({{r}}), %p4"
         },
         {
-          "pattern": "call\tarray_plain_p, array_plain"
+          "pattern": "call\t{{p}}, array_plain,"
         },
         {
-          "pattern": "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace"
+          "pattern": "call\t{{p}}, lambda_array_path_set_checked_inplace,"
         }
       ],
       "count": {
         "\tmul\t{{r}}, %p2, {{r}}": 1,
         "\tmul\t{{r}}, %p3, {{r}}": 1,
-        "call\tarray_plain_p, array_plain": 1,
-        "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace": 1,
+        "call\t{{p}}, array_plain,": 1,
+        "call\t{{p}}, lambda_array_path_set_checked_inplace,": 1,
         "\tubge\t": 2
       }
     }

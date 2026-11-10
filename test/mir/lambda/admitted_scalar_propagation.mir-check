@@ -4,17 +4,17 @@
   "checks": [
     {
       "in_func": "mvp_#_checked_float",
-      "expect": ["func\td, i64, p:runtime", "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]
+      "expect": ["func\td, i64, p:runtime", "call\t{{p}}, lambda_type_check_lazy,"]
     },
     {
       "in_func": "mvp_#_accumulate",
       "expect": ["func\td, i64, p:runtime"],
-      "forbid": ["call\tpush_d_p, push_d", "call\tlambda_report_boundary_failure_p"]
+      "forbid": ["call\t{{p}}, push_d,", "call\tlambda_report_boundary_failure_p"]
     },
     {
       "in_func": "mvp_#_read_int",
       "expect": ["func\ti64, i64, p:runtime"],
-      "forbid": ["call\tint2it_lane_p, int2it_lane"]
+      "forbid": ["call\t{{p}}, int2it_lane,"]
     },
     {
       "in_func": "mvp_#_preserved_union",

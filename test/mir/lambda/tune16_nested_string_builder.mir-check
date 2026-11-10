@@ -8,7 +8,7 @@
         "fn_strcat5"
       ],
       "forbid": [
-        "call\tfn_join_p, fn_join"
+        "call\t{{p}}, fn_join,"
       ]
     }
   ]

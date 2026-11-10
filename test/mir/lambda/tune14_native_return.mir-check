@@ -9,15 +9,15 @@
         "add\t{{r}}"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add",
-        "call\tlambda_item_adopt_scalar_home_p, lambda_item_adopt_scalar_home",
-        "call\tlambda_restore_number_frame_top_p, lambda_restore_number_frame_top"
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, lambda_restore_number_frame_top,"
       ]
     },
     {
       "in_func": "mvp_#_tune14_mutable",
       "forbid": [
-        "call\tfn_add_p, fn_add"
+        "call\t{{p}}, fn_add,"
       ],
       "expect": [
         ":\tfunc\ti64,",

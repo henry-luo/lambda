@@ -7,10 +7,10 @@
       "expect": [
         "mov\ti64:({{r}}), {{r}}",
         "mov\tu8:8({{r}}), {{r}}",
-        "call\tlambda_map_path_set_checked_keys_p, lambda_map_path_set_checked_keys"
+        "call\t{{p}}, lambda_map_path_set_checked_keys,"
       ],
       "count": {
-        "call\tlambda_map_path_set_checked_keys_p, lambda_map_path_set_checked_keys": 3
+        "call\t{{p}}, lambda_map_path_set_checked_keys,": 3
       }
     }
   ]

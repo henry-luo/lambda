@@ -7,7 +7,7 @@
       "expect": [
         "eq\t{{r}}, {{r}}, 9221120237041090561",
         "dmov\td:({{r}}), {{r}}",
-        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ]
     },
     {
@@ -15,7 +15,7 @@
       "expect": [
         "eq\t{{r}}, {{r}}, 9221120237041090561",
         "dmov\td:({{r}}), {{r}}",
-        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ]
     }
   ]

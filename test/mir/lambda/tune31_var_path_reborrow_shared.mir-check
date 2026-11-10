@@ -5,8 +5,8 @@
     {
       "in_func": "mvp_#_tune31_share_then_increment",
       "expect_seq": [
-        { "pattern": "call\tcow_prepare_write_p, cow_prepare_write" },
-        { "pattern": "call\tcow_path_borrow_typed_map_field_p, cow_path_borrow_typed_map_field" }
+        { "pattern": "call\t{{p}}, cow_prepare_write," },
+        { "pattern": "call\t{{p}}, cow_path_borrow_typed_map_field," }
       ]
     }
   ]

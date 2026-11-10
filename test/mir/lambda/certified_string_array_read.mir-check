@@ -4,21 +4,21 @@
   "checks": [
     {
       "in_func": "mvp_#_pick",
-      "expect": ["call\titem_at_p, item_at"],
-      "forbid": ["call\tfn_index_p, fn_index"]
+      "expect": ["call\t{{p}}, item_at,"],
+      "forbid": ["call\t{{p}}, fn_index,"]
     },
     {
       "in_func": "mvp_#_compound",
-      "expect": ["call\titem_at_p, item_at"],
-      "forbid": ["call\tfn_index_p, fn_index"]
+      "expect": ["call\t{{p}}, item_at,"],
+      "forbid": ["call\t{{p}}, fn_index,"]
     },
     {
       "in_func": "mvp_#_fallible",
-      "expect": ["call\tfn_index_p, fn_index"]
+      "expect": ["call\t{{p}}, fn_index,"]
     },
     {
       "in_func": "main",
-      "expect": ["call\tfn_index_p, fn_index"]
+      "expect": ["call\t{{p}}, fn_index,"]
     }
   ]
 }

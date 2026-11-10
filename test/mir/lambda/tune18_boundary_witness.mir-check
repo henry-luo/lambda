@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_boundary18",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     }
   ]

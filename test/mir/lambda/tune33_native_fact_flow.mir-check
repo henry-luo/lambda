@@ -8,10 +8,10 @@
         "fn_len_s"
       ],
       "forbid": [
-        "call\tfn_len_checked_p, fn_len_checked"
+        "call\t{{p}}, fn_len_checked,"
       ],
       "count": {
-        "call\tfn_index_p, fn_index": {
+        "call\t{{p}}, fn_index,": {
           "max": 2
         }
       }
@@ -22,7 +22,7 @@
         "fn_strcat_many"
       ],
       "forbid": [
-        "call\tfn_join_p, fn_join"
+        "call\t{{p}}, fn_join,"
       ]
     },
     {
@@ -34,7 +34,7 @@
     {
       "in_func": "mvp_#_guarded_step",
       "forbid": [
-        "call\tfn_add_p, fn_add"
+        "call\t{{p}}, fn_add,"
       ]
     },
     {

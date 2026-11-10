@@ -1,8 +1,20 @@
 {
   "schema_version": 1,
-  "description": "Tune32 T32-2: nested literal string elements select an immutable guarded entry and retain the complete boxed slow body for absent rows (D7.3.1).",
+  "description": "D7.3.1/S7.1.1v3: MVP compares allocation-free character words after guarded byte loads; Unicode and absence retain the checked leaf.",
   "checks": [
-    {"in_func": "mvp_#_tune32_nested_same", "expect": ["call\tfn_string_char_eq_p, fn_string_char_eq"]},
-    {"in_func": "mvp_#_tune32_nested_same", "expect": ["call\tfn_index_p, fn_index"]}
+    {
+      "in_func": "mvp_#_tune32_nested_same",
+      "expect": [
+        "call\t{{p}}, fn_string_char_word,",
+        "\teq\t",
+        "u8:5("
+      ]
+    },
+    {
+      "in_func": "mvp_#_tune32_nested_same",
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ]
+    }
   ]
 }

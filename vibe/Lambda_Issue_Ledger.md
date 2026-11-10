@@ -1127,7 +1127,7 @@ retirement. The encompassing `test_benchmark_expansion_semantics` reports eight
 subcase failures from this single fixture.
 
 
-<a id="lr07-59"></a>**LR07-59 · Three execution-profile tests retain Full MIR emission expectations · OPEN (2026-11-10)**
+<a id="lr07-59"></a>**LR07-59 · Three execution-profile tests retain Full MIR emission expectations · FIXED (2026-11-10)**
 
 `LambdaOptProfile.ExecutedCallsAreCountedOnlyWhenEnabled`,
 `ExecutedCallsCanBeAttributedToCaller`, and `CowBindingDoesNotReloadLiveOwner`
@@ -1153,7 +1153,18 @@ missing MVP site-wrapper selection and is fixed; it passes on the candidate.
 This issue does not block the allocator assessment or COW-site fix.
 
 
-<a id="lr07-60"></a>**LR07-60 · MIR optimization gates are not fully migrated to MVP · OPEN (2026-11-10)**
+Migration update (2026-11-10): the two executed-call tests now identify MVP
+entries, inlining and the canonical checked length helper. The COW test is now
+`CowBindingMarksInlineBeforeObservation`: it requires the native share-mark,
+observed COW mutation and unchanged values, rather than Full's helper count and
+retired physical caller. All three pass on the rebuilt release identified in
+the [migration checkpoint](impl/Lambda_Impl_MVP_Optimization_Tests.md).
+The separate diagnostic parity unit preserves roots, memory operations and
+safepoints, including COW site attribution (D6.3.2–D6.3.3). No Full helper or
+profiling event is restored.
+
+
+<a id="lr07-60"></a>**LR07-60 · MIR optimization gates are not fully migrated to MVP · PARTIAL (2026-11-10)**
 
 At clean `cf0caf5c7`, private test controllers built from current source run
 against the installed debug `lambda.exe`, SHA256
@@ -1197,6 +1208,36 @@ hashes: `temp/mvp_optimization_coverage/coverage-report.md` and
 LR07-57/LR07-59 retain the earlier assertion findings; naming failures do not
 explain all counter failures or the implementation defects below.
 
+
+Migration update (2026-11-10): explicit MVP selectors, exact callee checks
+independent of ABI prototype suffixes, current helper paths, profiler controls
+and new region fixtures are implemented. The missing-counter false pass now
+requires real emitted bodies and executed member calls. The planned-effect
+claim reaches MVP's verifier and rejects, with successful empty/unmatched-name
+controls (D6.3.2). The 57-method Python selection is registered in the normal
+Lambda gate and correctly reports failures.
+
+On private release SHA256
+`15b99367361d4a2f7482c7ded6f2966cf4958721348afc4a5f70c5f55efd1ac1`,
+new fixture/matcher/ABI/parity checks pass 10/10, all 17 Lambda size/frame probes
+pass (plus config), optimization contracts pass 46/56, and selected Python
+methods pass 54/57. The full emission controller passes 97/294: 87/284 fixture
+cases, including all five new fixtures, and 10 other checks. The older 279
+fixtures now pass 82 instead of two; 197 contracts still need further MVP path
+review or missing-optimization work. These failures are retained, not skipped.
+The seven JS budget probe objects remain unchanged; seven selected JS matcher
+regressions pass. MVP cost budgets are a reviewed compiler baseline migration,
+not a claim that Full emission size was preserved (D8.6.1).
+
+The remaining ten optimization contracts cover the immutable consumer crash,
+numeric borrowed-store work, recursive union admission/cache work, string tail
+copying/hyphen appends, checked-tail frame reuse, read-only length roots,
+nullable packed construction and redundant stable-length loads. Three Python
+checks retain missed propagation boxing, conditional modular and string-fusion
+contracts. See the checkpoint above and `temp/mvp_emission_test_update/` for
+exact reports, reviewed budget deltas, source/binary identities and the remaining
+fixture inventory. No baseline or benchmark timing campaign was run.
+
 <a id="lr07-61"></a>**LR07-61 · Native MVP wide-scalar tail-forward fixture traps · OPEN (2026-11-10)**
 
 On the exact installed debug CLI identified in LR07-60,
@@ -1210,6 +1251,14 @@ owning code defect or regression-introducing commit is established. No vendor
 change or workaround is made. Evidence:
 `temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and the emission/
 ratchet JSON/logs in the same directory. The engine was not rebuilt in this audit.
+
+
+Host qualification update (2026-11-10): the rebuilt release identified in the
+migration checkpoint executes this fixture and its size probe successfully.
+The installed debug host still traps during the paired budget observation.
+The underlying debug failure remains open; ABI sidecar mismatches on release
+are a separate test-contract issue. Evidence:
+`temp/mvp_emission_test_update/budget-actuals.json` and `final-ratchet.json`.
 
 <a id="lr07-62"></a>**LR07-62 · Native MVP immutable-array consumer fixture segfaults · OPEN (2026-11-10)**
 
@@ -1256,6 +1305,24 @@ cause is absent MVP tuning, changed admission or accounting is unconfirmed;
 do not relax the ceilings without tracing the actual work. Evidence:
 `temp/mvp_optimization_coverage/opt-results.json` and the profile TSVs under
 `temp/lambda_opt_contract/` (the latter may be overwritten by later unit runs).
+
+
+<a id="lr07-65"></a>**LR07-65 · T0 snapshots a plain argument after a later argument mutates its owner · OPEN (2026-11-10)**
+
+The new `test/mir/lambda/mvp_call_ownership.ls` calls
+`observe(values, change(values))` with `values = [3]`; `change` writes `9`.
+S9.1.3v3 requires the plain argument's snapshot before a later borrow mutation.
+The correct final line is `[3, 9]`. The rebuilt release JIT matches that golden
+under normal, forced/poisoned and seeded GC; its interpreter prints `[9, 9]`.
+The installed debug interpreter has the same mismatch. Both tiers exit zero,
+so exit status alone would hide it. The other four new fixture goldens match
+the release interpreter. Cause and regression provenance are unconfirmed.
+
+Reproduce: `LAMBDA_EXEC_BACKEND=interp <host> run test/mir/lambda/mvp_call_ownership.ls --no-log`.
+Evidence: `temp/mvp_emission_test_update/new-t0-controls.json`,
+`new-fixture-probes.json` and `final-python.json`. The release identity is in
+the LR07-60 migration update. Keep the expected result and report the T0 defect;
+it does not block MVP JIT emission tests (S9.1.2–S9.1.3v3).
 
 ## 8. Memory management & GC (LR08)
 

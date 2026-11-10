@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_tune26_fill_contract_reify",
       "expect": [
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,"
       ]
     }
   ]

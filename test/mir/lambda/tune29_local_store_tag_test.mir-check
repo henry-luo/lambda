@@ -5,13 +5,16 @@
     {
       "in_func": "mvp_#_fill_mod",
       "expect_seq": [
-        "call\tfn_mod",
+        "call\t{{p}}, fn_mod,",
         "bne\t",
-        "call\tlambda_array_set_checked_lane"
+        "call\t{{p}}, lambda_array_set_checked_preplanned,"
       ],
       "count": {
-        "call\tlambda_array_set_checked_lane": 2
-      }
+        "call\t{{p}}, lambda_array_set_checked_preplanned,": 1
+      },
+      "expect": [
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ]
     }
   ]
 }

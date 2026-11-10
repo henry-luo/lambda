@@ -5,11 +5,11 @@
     {
       "in_func": "mvp_#_concat_chain_tune22",
       "expect": ["fn_strcat4"],
-      "forbid": ["call\tfn_join_p, fn_join", "call\tfn_string_p, fn_string"]
+      "forbid": ["call\t{{p}}, fn_join,", "call\t{{p}}, fn_string,"]
     },
     {
       "in_func": "mvp_#_concat_mixed_tune22",
-      "expect": ["call\tfn_join_p, fn_join"]
+      "expect": ["call\t{{p}}, fn_join,"]
     }
   ]
 }

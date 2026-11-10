@@ -19,7 +19,7 @@
         }
       ],
       "forbid": [
-        "call\tarray_plain_p, array_plain"
+        "call\t{{p}}, array_plain,"
       ],
       "count": {
         "bne\t": 8
@@ -42,7 +42,7 @@
         }
       ],
       "forbid": [
-        "call\tarray_plain_p, array_plain"
+        "call\t{{p}}, array_plain,"
       ]
     }
   ]

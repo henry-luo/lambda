@@ -5,20 +5,20 @@
     {
       "in_func": "mvp_#_sum_codes",
       "forbid": [
-        "call\tfn_index_p, fn_index"
+        "call\t{{p}}, fn_index,"
       ]
     },
     {
       "in_func": "mvp_#_main",
       "expect_seq": [
-        "call\tfn_index_p, fn_index, {{r:raw}},",
+        "call\t{{p}}, fn_index, {{r:raw}},",
         "mov\t{{r:item}}, {{r:raw}}",
         "ursh\t{{r:tag}}, {{r:item}}, 56",
         "eq\t{{r}}, {{r:tag}}, 27",
         "call\tmvp_{{n}}_sum_codes_dp"
       ],
       "forbid": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,"
       ]
     }
   ]

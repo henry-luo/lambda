@@ -9,9 +9,9 @@
         "add\t{{r}}"
       ],
       "forbid": [
-        "call\tfn_lt_p, fn_lt",
-        "call\tfn_add_p, fn_add",
-        "call\tis_truthy_p, is_truthy"
+        "call\t{{p}}, fn_lt,",
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, is_truthy,"
       ]
     }
   ]

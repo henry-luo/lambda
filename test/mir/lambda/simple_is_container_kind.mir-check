@@ -4,17 +4,17 @@
   "checks": [
     {
       "in_func": "mvp_#_classify",
-      "count": {"call\titem_type_id_p, item_type_id": 2},
-      "forbid": ["call\tfn_is_p, fn_is", "call\tbase_type_p, base_type"]
+      "count": {"call\t{{p}}, item_type_id,": 2},
+      "forbid": ["call\t{{p}}, fn_is,", "call\t{{p}}, base_type,"]
     },
     {
       "in_func": "mvp_#_dynamic",
-      "expect": ["call\tfn_is_p, fn_is"]
+      "expect": ["call\t{{p}}, fn_is,"]
     },
     {
       "in_func": "mvp_#_error_kind",
       "count": {"eq\t{{r}}, {{r}}, 27": 2},
-      "forbid": ["call\tfn_is_p, fn_is", "call\tbase_type_p, base_type"]
+      "forbid": ["call\t{{p}}, fn_is,", "call\t{{p}}, base_type,"]
     }
   ]
 }

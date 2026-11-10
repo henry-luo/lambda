@@ -10,9 +10,9 @@
         "ble\t"
       ],
       "forbid": [
-        "call\tint2it_lane_p, int2it_lane",
-        "call\tlambda_item_to_int_lane_c_p, lambda_item_to_int_lane_c",
-        "call\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for"
+        "call\t{{p}}, int2it_lane,",
+        "call\t{{p}}, lambda_item_to_int_lane_c,",
+        "call\t{{p}}, lambda_side_stack_ensure_for,"
       ]
     }
   ]

@@ -15,7 +15,7 @@
         "mov\tu8:",
         "mov\tu16:",
         "mov\tu32:",
-        "call\tlambda_array_set_checked"
+        "call\tlambda_array_set_checked_item"
       ]
     }
   ]

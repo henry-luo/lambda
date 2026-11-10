@@ -5,13 +5,13 @@
     {
       "in_func": "mvp_#_tune30_norms",
       "expect": [
-        "call\tsqrt_p, sqrt, {{r}}, {{r}}",
-        "call\tsin_p, sin, {{r}}, {{r}}",
+        "call\t{{p}}, sqrt, {{r}}, {{r}}",
+        "call\t{{p}}, sin, {{r}}, {{r}}",
         "dadd\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
-        "call\tfn_math_sqrt_p, fn_math_sqrt",
-        "call\tfn_math_sin_p, fn_math_sin"
+        "call\t{{p}}, fn_math_sqrt,",
+        "call\t{{p}}, fn_math_sin,"
       ]
     }
   ]

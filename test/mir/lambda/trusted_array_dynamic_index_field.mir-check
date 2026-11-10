@@ -7,14 +7,14 @@
       "expect": [
         "mov\t{{r}}, u8:({{r}})",
         "mov\t{{r}}, i64:8({{r}})",
-        "call\tfn_member_by_id_p, fn_member_by_id"
+        "call\t{{p}}, fn_member_by_id,"
       ]
     },
     {
       "in_func": "mvp_#_selected_key",
       "expect": [
         "mov\t{{r}}, i64:8({{r}})",
-        "call\tfn_member_by_id_p, fn_member_by_id"
+        "call\t{{p}}, fn_member_by_id,"
       ]
     },
     {
@@ -22,7 +22,7 @@
       "expect": [
         "mov\t{{r}}, i64:64({{r}})",
         "mov\t{{r}}, i64:32({{r}})",
-        "call\titem_at_p, item_at"
+        "call\t{{p}}, item_at,"
       ]
     },
     {
@@ -32,7 +32,7 @@
         ", {{r}}, 18",
         "mov\t{{r}}, i64:64({{r}})",
         "mov\t{{r}}, i64:32({{r}})",
-        "call\titem_at_p, item_at"
+        "call\t{{p}}, item_at,"
       ]
     },
     {
@@ -40,7 +40,7 @@
       "expect": [
         "mov\t{{r}}, u8:42({{r}})",
         "mov\t{{r}}, u8:35({{r}})",
-        "call\tfn_member_by_id_p, fn_member_by_id"
+        "call\t{{p}}, fn_member_by_id,"
       ]
     }
   ]

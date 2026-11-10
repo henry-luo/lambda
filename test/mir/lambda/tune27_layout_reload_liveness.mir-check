@@ -8,7 +8,7 @@
         "call\t_tune27_alloc"
       ],
       "forbid": [
-        "call\tarray_float_set_p, array_float_set"
+        "call\t{{p}}, array_float_set,"
       ]
     }
   ]

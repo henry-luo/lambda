@@ -2,10 +2,10 @@
   "schema_version": 1,
   "description": "D5.4.4, D6.3.3: rooted read handles survive a direct pure call through owner or key; a mutating call reloads the place.",
   "checks": [
-    {"in_func": "mvp_#_read_across", "expect": ["call\t_observe"], "count": {"call\titem_at_p, item_at": 1}},
-    {"in_func": "mvp_#_key_across", "expect": ["call\tmvp_{{n}}_observe_dpkey"], "count": {"call\titem_at_p, item_at": 1}},
-    {"in_func": "mvp_#_read_across_gc", "expect": ["call\tmvp_{{n}}_observe_dpalloc"], "count": {"call\titem_at_p, item_at": 1}},
-    {"in_func": "mvp_#_read_after_change", "expect": ["call\t_change"], "count": {"call\titem_at_p, item_at": 2}},
+    {"in_func": "mvp_#_read_across", "expect": ["call\t_observe"], "count": {"call\t{{p}}, item_at,": 1}},
+    {"in_func": "mvp_#_key_across", "expect": ["call\tmvp_{{n}}_observe_dpkey"], "count": {"call\t{{p}}, item_at,": 1}},
+    {"in_func": "mvp_#_read_across_gc", "expect": ["call\tmvp_{{n}}_observe_dpalloc"], "count": {"call\t{{p}}, item_at,": 1}},
+    {"in_func": "mvp_#_read_after_change", "expect": ["call\t_change"], "count": {"call\t{{p}}, item_at,": 2}},
     {"in_func": "mvp_#_read_after_alias", "expect": ["call\t_retain_box"]}
   ]
 }

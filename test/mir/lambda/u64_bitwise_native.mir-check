@@ -10,13 +10,13 @@
         "and\t%r"
       ],
       "forbid": [
-        "call\tfn_bxor_item_p, fn_bxor_item",
-        "call\tfn_band_item_p, fn_band_item",
-        "call\tfn_bor_item_p, fn_bor_item",
-        "call\tit2u_p, it2u"
+        "call\t{{p}}, fn_bxor_item,",
+        "call\t{{p}}, fn_band_item,",
+        "call\t{{p}}, fn_bor_item,",
+        "call\t{{p}}, it2u,"
       ],
       "count": {
-        "call\tbox_uint64_value_p, box_uint64_value": 0
+        "call\t{{p}}, box_uint64_value,": 0
       }
     },
     {
@@ -25,29 +25,29 @@
         "ursh\t%r"
       ],
       "forbid": [
-        "call\tfn_ushr_item_p, fn_ushr_item",
-        "call\tit2u_p, it2u"
+        "call\t{{p}}, fn_ushr_item,",
+        "call\t{{p}}, it2u,"
       ],
       "count": {
-        "call\tbox_uint64_value_p, box_uint64_value": 0
+        "call\t{{p}}, box_uint64_value,": 0
       }
     },
     {
       "in_func": "mvp_#_widths",
       "forbid": [
-        "call\tfn_ushr_item_p, fn_ushr_item"
+        "call\t{{p}}, fn_ushr_item,"
       ]
     },
     {
       "in_func": "mvp_#_dynamic_shift",
       "expect": [
-        "call\tfn_ushr_item_p, fn_ushr_item"
+        "call\t{{p}}, fn_ushr_item,"
       ]
     },
     {
       "in_func": "mvp_#_erased",
       "expect": [
-        "call\tfn_bxor_item_p, fn_bxor_item"
+        "call\t{{p}}, fn_bxor_item,"
       ]
     }
   ]

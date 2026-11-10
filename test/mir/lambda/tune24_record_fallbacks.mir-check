@@ -8,10 +8,10 @@
         "_record_result0"
       ],
       "expect": [
-        "call\tmap_alloc_for_type_p, map_alloc_for_type"
+        "call\t{{p}}, map_alloc_for_type,"
       ],
       "count": {
-        "call\tset_field_value_p, set_field_value": 2
+        "call\t{{p}}, set_field_value,": 2
       }
     },
     {

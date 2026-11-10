@@ -8,7 +8,7 @@
         "dsub"
       ],
       "forbid": [
-        "call\tfn_sub_p, fn_sub"
+        "call\t{{p}}, fn_sub,"
       ]
     },
     {
@@ -17,7 +17,7 @@
         "dsub"
       ],
       "forbid": [
-        "call\tfn_sub_p, fn_sub"
+        "call\t{{p}}, fn_sub,"
       ]
     }
   ]

@@ -10,8 +10,8 @@
       "forbid": [
         "lambda_map_set_checked",
         "lambda_map_set_checked_inplace",
-        "call\tfn_map_set_p, fn_map_set",
-        "call\tfn_member_p, fn_member"
+        "call\t{{p}}, fn_map_set,",
+        "call\t{{p}}, fn_member,"
       ]
     },
     {
@@ -23,8 +23,8 @@
       "forbid": [
         "lambda_map_set_checked",
         "lambda_map_set_checked_inplace",
-        "call\tfn_map_set_p, fn_map_set",
-        "call\tfn_member_p, fn_member"
+        "call\t{{p}}, fn_map_set,",
+        "call\t{{p}}, fn_member,"
       ]
     }
   ]

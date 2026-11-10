@@ -5,8 +5,8 @@
     {
       "in_func": "mvp_#_count_set",
       "forbid": [
-        "call\tis_truthy_p, is_truthy",
-        "call\tbox_int64_value_p, box_int64_value"
+        "call\t{{p}}, is_truthy,",
+        "call\t{{p}}, box_int64_value,"
       ],
       "expect": [
         "and\t{{r}}, {{r}}, 1"
@@ -15,9 +15,9 @@
     {
       "in_func": "mvp_#_count_pairs",
       "forbid": [
-        "call\tis_truthy_p, is_truthy",
-        "call\tbox_int64_value_p, box_int64_value",
-        "call\tfn_not_p, fn_not"
+        "call\t{{p}}, is_truthy,",
+        "call\t{{p}}, box_int64_value,",
+        "call\t{{p}}, fn_not,"
       ],
       "expect": [
         "and\t{{r}}, {{r}}, 1"

@@ -9,8 +9,8 @@
         "mov\t{{r}}, -1"
       ],
       "forbid": [
-        "call\tlambda_module_state_for_unit_p, lambda_module_state_for_unit",
-        "call\tlambda_item_to_int_lane_c_p, lambda_item_to_int_lane_c"
+        "call\t{{p}}, lambda_module_state_for_unit,",
+        "call\t{{p}}, lambda_item_to_int_lane_c,"
       ]
     }
   ]

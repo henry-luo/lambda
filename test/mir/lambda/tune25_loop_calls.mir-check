@@ -5,11 +5,11 @@
     {
       "in_func": "mvp_#_local_while",
       "expect_seq": [
-        "call\tfabs_p, fabs",
+        "call\t{{p}}, fabs,",
         "lt\t{{r}}, {{r}}, %p1"
       ],
       "count": {
-        "call\tfabs_p, fabs": 2
+        "call\t{{p}}, fabs,": 2
       }
     },
     {
@@ -19,13 +19,13 @@
         "to": "jmp\tL"
       },
       "forbid": [
-        "call\tfabs_p, fabs"
+        "call\t{{p}}, fabs,"
       ]
     },
     {
       "in_func": "mvp_#_counted",
       "expect_seq": [
-        "call\tfabs_p, fabs",
+        "call\t{{p}}, fabs,",
         "ge\t"
       ],
       "forbid": [
@@ -37,7 +37,7 @@
       "in_func": "mvp_#_changing",
       "expect_seq": [
         "bt\t",
-        "call\tfabs_p, fabs",
+        "call\t{{p}}, fabs,",
         "dadd\t"
       ],
       "forbid": [

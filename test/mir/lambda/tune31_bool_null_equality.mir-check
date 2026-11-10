@@ -9,8 +9,8 @@
         "eq\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
-        "call\tfn_eq_p, fn_eq",
-        "call\tfn_ne_p, fn_ne"
+        "call\t{{p}}, fn_eq,",
+        "call\t{{p}}, fn_ne,"
       ]
     }
   ]

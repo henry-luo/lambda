@@ -8,8 +8,8 @@
         "mov\t{{r}}, i64:({{r}})"
       ],
       "forbid": [
-        "call\tfn_member_p, fn_member",
-        "call\tfn_index_p, fn_index"
+        "call\t{{p}}, fn_member,",
+        "call\t{{p}}, fn_index,"
       ]
     }
   ]

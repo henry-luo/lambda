@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_main",
       "expect_seq": [
-        "call\tcow_prepare_write_p, cow_prepare_write",
+        "call\t{{p}}, cow_prepare_write,",
         "call\tmvp_{{n}}_tune26_loop_cow_add_dp",
         "call\tmvp_{{n}}_tune26_loop_cow_snapshot_dp"
       ]

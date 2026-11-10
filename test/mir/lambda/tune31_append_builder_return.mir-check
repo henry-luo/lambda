@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "description": "Tune31 T31-2 / D4.2.1-D4.3.1, S9.2.2: a proven homogeneous append builder returns an int-lane ArrayNum and its direct consumer indexes that lane without generic array helpers.",
+  "description": "D4.3.3/S9.2.2: a homogeneous append builder should retain primitive construction and checked typed append kernels, with native consumption. MVP still misses this inferred-builder optimization.",
   "checks": [
     {
       "in_func": "mvp_#_build_codes",
       "expect": [
-        "call\tensure_typed_array_p, ensure_typed_array",
-        "call\tlambda_array_int_push_inferred_cow_p, lambda_array_int_push_inferred_cow"
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "call\t{{p}}, lambda_array_push_checked,"
       ],
       "forbid": [
-        "call\tpn_push_cow_p, pn_push_cow"
+        "call\t{{p}}, pn_push_cow,"
       ]
     },
     {
       "in_func": "mvp_#_sum_codes",
       "forbid": [
-        "call\tfn_index_p, fn_index"
+        "call\t{{p}}, fn_index,"
       ]
     }
   ]

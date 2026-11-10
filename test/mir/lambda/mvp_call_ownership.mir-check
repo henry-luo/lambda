@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "D6.2.1/D7.4.2/S9.1.3: native scalar and error arms, closure-owned captures and caller snapshots survive their retaining boundaries.",
+  "checks": [
+    {"in_func": "mvp_#_increment", "expect": ["add\t{{r}}, {{r}}, {{r}}", "call\t{{p}}, lambda_int_lane_add_slow,"], "forbid": ["call\t{{p}}, fn_add,", "lambda_type_check"]},
+    {"in_func": "mvp_#_forward", "expect": ["call\t{{p}}, lambda_type_check_lazy,"], "forbid": ["call\t{{p}}, fn_call_into,"]},
+    {"in_func": "mvp_#_wide", "expect": ["call\t{{p}}, lambda_item_adopt_scalar_home,"]},
+    {"in_func": "mvp_#_make_adder", "expect_seq": ["call\t{{p}}, heap_calloc_closure_env,", "call\t{{p}}, owned_item_slot_store,", "call\t{{p}}, to_closure_named,"]},
+    {"in_func": "mvp_#_add", "expect": ["call\t{{p}}, owned_item_slot_read,"]},
+    {"in_func": "mvp_#_change", "expect": ["call\t{{p}}, index_assign_cow,"]},
+    {"in_func": "mvp_#_main", "expect": ["call\t{{p}}, fn_call_into,", "call\t{{p}}, index_assign_cow,"]}
+  ]
+}

@@ -8,7 +8,7 @@
         "call\tcow_path_borrow_keys"
       ],
       "forbid": [
-        "call\tcow_path_borrow_p, cow_path_borrow,"
+        "call\t{{p}}, cow_path_borrow,"
       ]
     }
   ]

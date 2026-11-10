@@ -8,7 +8,7 @@
         "call\tmvp_{{n}}_sample18_dp"
       ],
       "count": {
-        "call\tensure_typed_array_p, ensure_typed_array": 1
+        "call\t{{p}}, ensure_typed_array,": 1
       }
     }
   ]

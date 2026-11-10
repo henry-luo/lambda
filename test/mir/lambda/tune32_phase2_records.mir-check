@@ -5,14 +5,14 @@
     {
       "in_func": "mvp_#_tune32_phase2_record",
       "expect": [
-        "call\tmap_alloc_for_type_p, map_alloc_for_type",
-        "call\tset_field_value_p, set_field_value"
+        "call\t{{p}}, map_alloc_for_type,",
+        "call\t{{p}}, set_field_value,"
       ]
     },
     {
       "in_func": "mvp_#_tune32_phase2_record_read",
       "expect": [
-        "call\tmap_shape_field_to_item_p, map_shape_field_to_item"
+        "call\t{{p}}, map_shape_field_to_item,"
       ]
     },
     {

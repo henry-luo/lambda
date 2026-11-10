@@ -5,46 +5,46 @@
     {
       "in_func": "mvp_#_tune14_float_sum",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
+        "call\t{{p}}, lambda_type_check_lazy,",
         "dadd\t{{r}}"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add"
+        "call\t{{p}}, fn_add,"
       ]
     },
     {
       "in_func": "mvp_#_tune14_bitwise",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
+        "call\t{{p}}, lambda_type_check_lazy,",
         "rsh\t{{r}}",
         "and\t{{r}}"
       ],
       "forbid": [
-        "call\tfn_shr_item_p, fn_shr_item",
-        "call\tfn_band_item_p, fn_band_item",
-        "call\tfn_int_p, fn_int"
+        "call\t{{p}}, fn_shr_item,",
+        "call\t{{p}}, fn_band_item,",
+        "call\t{{p}}, fn_int,"
       ]
     },
     {
       "in_func": "mvp_#_tune14_rebind",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
+        "call\t{{p}}, lambda_type_check_lazy,",
         "mov\t{{r}}, i64:({{r}})",
         "add\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
-        "call\tfn_index_p, fn_index",
-        "call\tfn_add_p, fn_add"
+        "call\t{{p}}, fn_index,",
+        "call\t{{p}}, fn_add,"
       ]
     },
     {
       "in_func": "mvp_#_tune14_widened",
       "expect": [
-        "call\tfn_index_p, fn_index",
-        "call\tfn_add_p, fn_add"
+        "call\t{{p}}, fn_index,",
+        "call\t{{p}}, fn_add,"
       ],
       "forbid": [
-        "call\tensure_typed_array_p, ensure_typed_array"
+        "call\t{{p}}, ensure_typed_array,"
       ]
     }
   ]

@@ -14,7 +14,7 @@
     {
       "in_func": "mvp_#_gc_mut_use",
       "expect": [
-        "call\tfn_len_s_p, fn_len_s",
+        "call\t{{p}}, fn_len_s,",
         "bstart\t{{r}}"
       ],
       "forbid": [

@@ -10,11 +10,11 @@
         "sub\t%r"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add",
-        "call\tfn_sub_p, fn_sub",
-        "call\tfn_mul_p, fn_mul",
-        "call\tbox_int64_value_p, box_int64_value",
-        "call\tit2l_p, it2l"
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, fn_sub,",
+        "call\t{{p}}, fn_mul,",
+        "call\t{{p}}, box_int64_value,",
+        "call\t{{p}}, it2l,"
       ]
     },
     {
@@ -25,12 +25,12 @@
         "sub\t%r"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add",
-        "call\tfn_sub_p, fn_sub",
-        "call\tfn_mul_p, fn_mul",
-        "call\tbox_uint64_value_p, box_uint64_value",
-        "call\tcoerce_uint64_p, coerce_uint64",
-        "call\tit2u_p, it2u"
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, fn_sub,",
+        "call\t{{p}}, fn_mul,",
+        "call\t{{p}}, box_uint64_value,",
+        "call\t{{p}}, coerce_uint64,",
+        "call\t{{p}}, it2u,"
       ]
     },
     {
@@ -40,12 +40,12 @@
         "add\t%r"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add",
-        "call\tfn_mul_p, fn_mul",
-        "call\tit2l_p, it2l"
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, fn_mul,",
+        "call\t{{p}}, it2l,"
       ],
       "count": {
-        "call\tbox_int64_value_p, box_int64_value": {
+        "call\t{{p}}, box_int64_value,": {
           "max": 1
         }
       }
@@ -57,13 +57,13 @@
         "add\t%r"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add",
-        "call\tfn_mul_p, fn_mul",
-        "call\tcoerce_uint64_p, coerce_uint64",
-        "call\tit2u_p, it2u"
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, fn_mul,",
+        "call\t{{p}}, coerce_uint64,",
+        "call\t{{p}}, it2u,"
       ],
       "count": {
-        "call\tbox_uint64_value_p, box_uint64_value": {
+        "call\t{{p}}, box_uint64_value,": {
           "max": 1
         }
       }
