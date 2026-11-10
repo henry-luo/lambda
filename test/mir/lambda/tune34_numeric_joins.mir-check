@@ -3,7 +3,7 @@
   "description": "D2.3: mixed numeric recurrences preserve observable member tags while float consumers use native arithmetic; nullable writes keep fallback.",
   "checks": [
     {
-      "in_func": "_half_walk_#",
+      "in_func": "mvp_#_half_walk",
       "expect": [
         "dsub",
         "dadd"
@@ -14,7 +14,7 @@
       ]
     },
     {
-      "in_func": "_member_tags_#",
+      "in_func": "mvp_#_member_tags",
       "expect": [
         "dadd",
         "dsub",

@@ -3,17 +3,17 @@
   "description": "D4.2.5/S11.4.10: optional record roots use admitted field offsets with a checked null fallback; returned-record guards also recognize persistent prefixes.",
   "checks": [
     {
-      "in_func": "_set_optional_#",
+      "in_func": "mvp_#_set_optional",
       "expect": ["mov\ti64:({{r}}), %p2", "call\tlambda_map_set_checked_inplace_p"],
       "forbid": ["call\tfn_map_set_p"]
     },
     {
-      "in_func": "_set_link_#",
+      "in_func": "mvp_#_set_link",
       "expect": ["mov\ti64:8({{r}}), {{r}}"],
       "forbid": ["call\tfn_map_set_p"]
     },
     {
-      "in_func": "_set_dynamic_#",
+      "in_func": "mvp_#_set_dynamic",
       "expect": ["call\tlambda_map_set_checked_inplace_p"]
     }
   ]

@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "lambda/lambda.h"
+#include "gc_scope.h"
 
 #ifdef __cplusplus
 extern "C" {

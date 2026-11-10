@@ -3,7 +3,7 @@
   "description": "Tune16 C3 lowers a fixed-shape scalar record read without routing through fn_member.",
   "checks": [
     {
-      "in_func": "_tune16_record_read_#",
+      "in_func": "mvp_#_tune16_record_read",
       "expect": [
         "mov\t{{r}}, i64:({{r}})"
       ],

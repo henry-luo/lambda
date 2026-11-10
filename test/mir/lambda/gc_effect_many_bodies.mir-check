@@ -3,9 +3,9 @@
   "description": "D6.3.1-D6.3.2: the 65th-plus GC-free body and a length leaf leave the caller rootless; the old fixed registry added a root slot.",
   "checks": [
     {
-      "in_func": "_gc_after_many_#",
+      "in_func": "mvp_#_gc_after_many",
       "expect": [
-        "call\t_gc_middle_",
+        "call\tmvp_{{n}}_gc_middle_dp",
         "call\tfn_len_s_p, fn_len_s",
         "bstart\t{{r}}"
       ],

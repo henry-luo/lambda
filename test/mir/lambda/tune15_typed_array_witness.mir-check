@@ -3,16 +3,16 @@
   "description": "Tune15 B2.2 passes a proven packed typed array through the direct native call ABI with an explicit witness mask.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
-        "call\t_tune15_array_consumer_"
+        "call\tmvp_{{n}}_tune15_array_consumer_dp"
       ],
       "forbid": [
-        "call\t_tune15_array_consumer_#_b"
+        "call\tmvp_{{n}}_tune15_array_consumer_dp#_b"
       ]
     },
     {
-      "in_func": "_tune15_array_consumer_#",
+      "in_func": "mvp_#_tune15_array_consumer",
       "expect": [
         "and\t{{r}}, _array_witness, 1",
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"

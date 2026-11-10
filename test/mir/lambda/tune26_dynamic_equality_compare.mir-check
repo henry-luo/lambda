@@ -3,7 +3,7 @@
   "description": "Tune26 T26-5: dynamic non-null IntLane equality excludes nan from raw equality and includes it in inequality. T29-3: one side's nan test decides the pair -- equal lanes are both nan or neither, and a lone nan already compares unequal (S4.1.2).",
   "checks": [
     {
-      "in_func": "_tune26_eq_pair_#",
+      "in_func": "mvp_#_tune26_eq_pair",
       "expect_seq": [
         "eq\t{{r}}, %p1, %p2",
         "ne\t{{r}}, %p1, -9223372036854775808",
@@ -14,7 +14,7 @@
       }
     },
     {
-      "in_func": "_tune26_ne_pair_#",
+      "in_func": "mvp_#_tune26_ne_pair",
       "expect_seq": [
         "ne\t{{r}}, %p1, %p2",
         "eq\t{{r}}, %p1, -9223372036854775808",

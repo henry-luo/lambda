@@ -3,7 +3,7 @@
   "description": "S4.4.4 / D2.3.4–D2.3.5: raw u64 bitwise trees and nonnegative literal ushr counts retain their word carrier; dynamic, erased and nullable operands retain checked runtime fallbacks. A proven raw u64 return crosses its identity boundary without allocating a number home.",
   "checks": [
     {
-      "in_func": "_lane_#",
+      "in_func": "mvp_#_lane",
       "expect": [
         "xor\t%r",
         "or\t%r",
@@ -20,7 +20,7 @@
       }
     },
     {
-      "in_func": "_logical_#",
+      "in_func": "mvp_#_logical",
       "expect": [
         "ursh\t%r"
       ],
@@ -33,19 +33,19 @@
       }
     },
     {
-      "in_func": "_widths_#",
+      "in_func": "mvp_#_widths",
       "forbid": [
         "call\tfn_ushr_item_p, fn_ushr_item"
       ]
     },
     {
-      "in_func": "_dynamic_shift_#",
+      "in_func": "mvp_#_dynamic_shift",
       "expect": [
         "call\tfn_ushr_item_p, fn_ushr_item"
       ]
     },
     {
-      "in_func": "_erased_#",
+      "in_func": "mvp_#_erased",
       "expect": [
         "call\tfn_bxor_item_p, fn_bxor_item"
       ]

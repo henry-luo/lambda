@@ -3,7 +3,7 @@
   "description": "D4.3.3, D6.3.4, D7.3.1: unsupported record-result ABIs retain boxed returns; inferred extra fields use descriptor construction without losing either field.",
   "checks": [
     {
-      "in_func": "_extra_#",
+      "in_func": "mvp_#_extra",
       "forbid": [
         "_record_result0"
       ],
@@ -15,19 +15,19 @@
       }
     },
     {
-      "in_func": "_floating_#",
+      "in_func": "mvp_#_floating",
       "forbid": [
         "_record_result0"
       ]
     },
     {
-      "in_func": "_local_#",
+      "in_func": "mvp_#_local",
       "forbid": [
         "_record_result0"
       ]
     },
     {
-      "in_func": "_empty_args_#",
+      "in_func": "mvp_#_empty_args",
       "expect": [
         "_record_result0"
       ],

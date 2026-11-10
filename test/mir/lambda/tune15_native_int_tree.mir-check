@@ -3,7 +3,7 @@
   "description": "Tune15 F1 keeps a closed integer arithmetic tree native through the float boundary.",
   "checks": [
     {
-      "in_func": "_tune15_integer_tree_#",
+      "in_func": "mvp_#_tune15_integer_tree",
       "expect": [
         "mulo\t{{r}}, {{r}}, {{r}}",
         "ddiv\t{{r}}, {{r}}, {{r}}"

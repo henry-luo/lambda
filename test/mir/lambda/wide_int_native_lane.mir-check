@@ -3,7 +3,7 @@
   "description": "i64/u64 `+ - *` lower to machine mul/add/sub on the wide lane instead of boxing through fn_add/fn_sub/fn_mul (D2.2.3). The accumulators pin the loop-carried case: at most ONE number home per function, taken at the boxed return boundary, never one per iteration — per-iteration homes are never reclaimed inside a loop body and used to exhaust the side stack around a million iterations (D6.2.3 / DO24). The u64 accumulator additionally forbids coerce_uint64, whose box/coerce/unbox round trip is the identity on a value already in the u64 lane.",
   "checks": [
     {
-      "in_func": "_wide_i64_#",
+      "in_func": "mvp_#_wide_i64",
       "expect": [
         "mul\t%r",
         "add\t%r",
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "in_func": "_wide_u64_#",
+      "in_func": "mvp_#_wide_u64",
       "expect": [
         "mul\t%r",
         "add\t%r",
@@ -34,7 +34,7 @@
       ]
     },
     {
-      "in_func": "_accumulate_i64_#",
+      "in_func": "mvp_#_accumulate_i64",
       "expect": [
         "mul\t%r",
         "add\t%r"
@@ -51,7 +51,7 @@
       }
     },
     {
-      "in_func": "_accumulate_u64_#",
+      "in_func": "mvp_#_accumulate_u64",
       "expect": [
         "mul\t%r",
         "add\t%r"

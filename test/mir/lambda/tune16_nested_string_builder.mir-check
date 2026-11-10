@@ -3,7 +3,7 @@
   "description": "Tune16 C5 flattens a nested concatenation RHS without routing the inner join through fn_join.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "fn_strcat5"
       ],

@@ -3,7 +3,7 @@
   "description": "v5: the `int` parameter uses the i64 lane, so it appears as `i64:`. Return convention 3 (RV1 shape 2): the body takes no caller home at all and hands the wide payload back on a second MIR result, so the obsolete adopt cluster is replaced by the pending-pair classify (ursh/sub/ubgt) and a two-lane `ret`.",
   "checks": [
     {
-      "in_func": "_accumulate_#",
+      "in_func": "mvp_#_accumulate",
       "return_convention": 3,
       "expect_any": [
         ":\tfunc\ti64, i64, p:runtime, i64:%p1, i64:%p2",

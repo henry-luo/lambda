@@ -3,7 +3,7 @@
   "description": "S4.4.4/S11.4.1v3: a compact bitwise result converted by int() has an int success and a possible error from its operand. The return boundary must forward that error without rechecking the successful int on every call.",
   "checks": [
     {
-      "in_func": "_compact_bitwise_int_cast_#",
+      "in_func": "mvp_#_compact_bitwise_int_cast",
       "count": {
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 0,
         "call\tfn_int_p, fn_int": 1

@@ -99,7 +99,7 @@ inline const char* host_config_key() {
     if (!cached.empty()) return cached.c_str();
     const char* log_path = "./temp/test_mir_ratchet_host_config.log";
     remove(log_path);
-    const char* args[] = {"./lambda.exe", "--help", NULL};
+    const char* args[] = {mir_check::executable(), "--help", NULL};
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", log_path},
         {"LAMBDA_LOG_LEVEL", "DEBUG"},
@@ -108,7 +108,7 @@ inline const char* host_config_key() {
     ShellOptions options = {0};
     options.env = env;
     options.merge_stderr = true;
-    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    ShellResult result = shell_exec(mir_check::executable(), args, &options);
     shell_result_free(&result);
     bool debug_host = false;
     FILE* log_file = fopen(log_path, "rb");

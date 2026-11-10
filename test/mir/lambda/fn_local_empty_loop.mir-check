@@ -3,14 +3,14 @@
   "description": "S2.5.3v3: imperative fn loop bodies normalize their empty result without allocating lists.",
   "checks": [
     {
-      "in_func": "_spin_#",
+      "in_func": "mvp_#_spin",
       "forbid": [
         "call\tlist_p",
         "call\tlist_end"
       ]
     },
     {
-      "in_func": "_shifted_#",
+      "in_func": "mvp_#_shifted",
       "forbid": [
         "call\tfn_shr_item_p",
         "call\tfn_mod_p",

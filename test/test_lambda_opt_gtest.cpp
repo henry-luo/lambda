@@ -139,11 +139,7 @@ static bool parse_profile(const std::string& path, AdmitProfile* out) {
 static const char* opt_executable() {
     const char* configured = getenv("LAMBDA_JS_OPT_EXE");
     if (configured && configured[0]) return configured;
-#ifdef _WIN32
-    return "lambda.exe";
-#else
-    return "./lambda.exe";
-#endif
+    return mir_check::executable();
 }
 
 struct FixtureRun {
@@ -264,8 +260,8 @@ TEST(LambdaOptGc, ContradictoryPlannedEffectFailsBeforePublication) {
     EXPECT_NE(result.exit_code, 0);
     const char* diagnostic = result.stderr_buf ? result.stderr_buf : "";
     const char* output = result.stdout_buf ? result.stdout_buf : "";
-    EXPECT_TRUE(strstr(diagnostic, "mir-gc-verify: collecting edge") ||
-        strstr(output, "mir-gc-verify: collecting edge"))
+    EXPECT_TRUE(strstr(diagnostic, "emitted helper effects exceed the planned noncollecting contract") ||
+        strstr(output, "emitted helper effects exceed the planned noncollecting contract"))
         << diagnostic << output;
     shell_result_free(&result);
 }

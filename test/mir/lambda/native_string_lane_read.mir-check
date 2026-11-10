@@ -3,7 +3,7 @@
   "description": "D4.3.3: an uncertified native string lane takes a physical guard before a direct load; item_at remains the cold fallback.",
   "checks": [
     {
-      "in_func": "_read__raw0_#",
+      "in_func": "mvp_#_read",
       "expect_seq": [
         "u8:(%p1)",
         "u8:2(%p1)",

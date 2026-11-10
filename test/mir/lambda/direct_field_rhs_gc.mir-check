@@ -3,10 +3,10 @@
   "description": "D5.4.4 / D6.3.1: a direct packed-field write reloads its data zone after a collecting RHS, with the owner rooted across the call; bool stores use one byte.",
   "checks": [
     {
-      "in_func": "_update_#",
+      "in_func": "mvp_#_update",
       "expect_seq": [
         { "pattern": "mov\ti64:({{r}}), %p1" },
-        { "pattern": "call\t_computed_" },
+        { "pattern": "call\tmvp_{{n}}_computed_dp" },
         { "pattern": "mov\t{{r}}, i64:16({{r}})" },
         { "pattern": "mov\ti64:({{r}}), {{r}}" }
       ],

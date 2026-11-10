@@ -3,23 +3,23 @@
   "description": "S7.1.1v3/D2.2.2: dominated != null and false == null branches drop operand/result null propagation, while an unguarded or rebound optional float keeps it.",
   "checks": [
     {
-      "in_func": "_guarded_#",
+      "in_func": "mvp_#_guarded",
       "expect": ["call\tfn_eq_p, fn_eq"],
       "forbid": ["dmov\t{{r}}, nan"],
       "count": {"9221120237041090561": 1}
     },
     {
-      "in_func": "_guarded_reversed_#",
+      "in_func": "mvp_#_guarded_reversed",
       "expect": ["call\tfn_ne_p, fn_ne"],
       "forbid": ["dmov\t{{r}}, nan"],
       "count": {"9221120237041090561": 1}
     },
     {
-      "in_func": "_unguarded_#",
+      "in_func": "mvp_#_unguarded",
       "expect": ["dmov\t{{r}}, nan"]
     },
     {
-      "in_func": "_rebound_#",
+      "in_func": "mvp_#_rebound",
       "expect": ["dmov\t{{r}}, nan"],
       "count": {"9221120237041090561": {"min": 2}}
     }

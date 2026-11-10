@@ -3,7 +3,7 @@
   "description": "The caller saves a number base twice: `twice`'s `int` parameter uses the v5 i64 lane, so its i64() argument remains a boxed Item until the wrapper's error boundary has accepted it. Return convention 3 (RV1 shape 2): the body carries no caller-home parameter and returns two lanes instead. Its public `_b` wrapper uses the RV12 context slot, so its direct caller must also carry no trailing home; the MT7 frame budget pins that physical ABI. The group pins the direct Item result and wrapper call, and forbids the retired sentinel boxer.",
   "checks": [
     {
-      "in_func": "_twice_#",
+      "in_func": "mvp_#_twice",
       "return_convention": 3,
       "expect_any": [
         ":\tfunc\ti64, i64, p:runtime, i64:%p1",
@@ -21,14 +21,14 @@
           "pattern": "call\tfn_int64_p"
         },
         {
-          "pattern": "call\t_twice_b_"
+          "pattern": "call\tmvp_{{n}}_twice_dpb_"
         }
       ],
       "count": {
         "call\tfn_int64_p": 1
       },
       "expect": [
-        "call\t_twice_b_"
+        "call\tmvp_{{n}}_twice_dpb_"
       ],
       "forbid": [
         "lambda_item_adopt_scalar_home",
@@ -39,7 +39,7 @@
       "in_func": "main",
       "return_convention": 3,
       "expect": [
-        "call\t_twice_b_"
+        "call\tmvp_{{n}}_twice_dpb_"
       ],
       "forbid": [
         "lambda_item_adopt_scalar_home"

@@ -3,7 +3,7 @@
   "description": "D3.3.1/S9.1.2: shared open-string append guards immutable/shared headers, native/view/JS flags and virtual storage before a slot write, with snapshot and growth fallback.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "ursh\t{{r}}, {{r}}, 56",
         ", {{r}}, 13",

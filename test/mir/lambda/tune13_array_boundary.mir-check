@@ -3,20 +3,20 @@
   "description": "Tune13 stable exact int[] occurrence bindings retain runtime admission at explicit boundaries and certificate-guarded native reads at the direct edge.",
   "checks": [
     {
-      "in_func": "_tune13_stable_call_#",
+      "in_func": "mvp_#_tune13_stable_call",
       "expect": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
-        "call\t_tune13_first_"
+        "call\tmvp_{{n}}_tune13_first_dp"
       ],
       "count": {
-        "call\t_tune13_first_": 1
+        "call\tmvp_{{n}}_tune13_first_dp": 1
       }
     },
     {
-      "in_func": "_tune13_widened_call_#",
+      "in_func": "mvp_#_tune13_widened_call",
       "expect": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
-        "call\t_tune13_first_"
+        "call\tmvp_{{n}}_tune13_first_dp"
       ]
     }
   ]

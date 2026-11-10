@@ -1075,7 +1075,7 @@ suspected cause, not yet confirmed. Evidence:
 `p92-focused-units-2.log`. This does not block MVP tuning. The permanent
 MVP oracle is retained; no Full correctness pass is claimed.
 
-<a id="lr07-57"></a>**LR07-57 · Two MVP MIR-shape assertions disagree with current emission · OPEN (2026-11-10)**
+<a id="lr07-57"></a>**LR07-57 · MVP MIR-shape assertions disagree with current emission · OPEN (2026-11-10)**
 
 `test_implicit_tail_and_split_observations` expects `lambda_map_set_checked` in
 `updated_box`; `test_guarded_recursive_arrays` expects generic `fn_index` and
@@ -1093,6 +1093,20 @@ Reproduce with `LAMBDA_TEST_EXE=<candidate> python3 -m unittest test_lambda_mir_
 from `test/benchmark`. Evidence: `temp/mvp_helper_retirement/tco-final-units.log`
 and `tco-oracle-control-2.log`; the saved pre-cleanup executable is
 `previous-root.exe` in that directory. This does not block dead-helper removal.
+
+The optimization-coverage audit at `cf0caf5c7` runs all 56 Python methods that
+inspect MVP MIR against the installed debug CLI (identity below, LR07-60).
+**47 pass and nine fail.** Besides the two original methods, failures are
+`test_immutable_indirect_keys`, `test_propagation_outcomes`,
+`test_batch_record_and_decimal_paths`, `test_fallible_inline_and_bool_count`,
+`test_nullable_numeric_cast_emission`, `test_modular_array_update` and
+`test_single_use_string_constructor`. These fail structural assertions; where
+semantic/GC checks precede the assertion, they complete successfully. Later
+assertions in the failed method are not qualified. Whether each mismatch is
+a stale oracle or a missed optimization remains unconfirmed. Source lines,
+assertions and raw MIR are preserved in
+`temp/mvp_optimization_coverage/python-emission.log`; the complete review is
+`coverage-report.md` there. No assertion is changed or skipped.
 
 
 <a id="lr07-58"></a>**LR07-58 · MVP rejects the u32 regression fixture during representation conversion · OPEN (2026-11-10)**
@@ -1138,6 +1152,110 @@ Evidence: `temp/mvp_regions_profile/profile-units-control.log`,
 missing MVP site-wrapper selection and is fixed; it passes on the candidate.
 This issue does not block the allocator assessment or COW-site fix.
 
+
+<a id="lr07-60"></a>**LR07-60 · MIR optimization gates are not fully migrated to MVP · OPEN (2026-11-10)**
+
+At clean `cf0caf5c7`, private test controllers built from current source run
+against the installed debug `lambda.exe`, SHA256
+`c6f6766f9e28aacec482d5762b90a4b22be885c21f2ee1eddf37b053a385a3aa`.
+The engine is not rebuilt for this read-only audit. Lambda emission fixtures
+pass **2/279**, Lambda size ratchets **0/12**, optimization contracts **31/55**
+(mixed T0/JS/JIT population), and selected MVP Python emission methods **47/56**.
+Authority: D8.6.1 (optimization regression checks), D6.3 (precise-root safety).
+
+Of 277 emission failures, 270 first fail because the sidecar selects a retired
+`_<name>_#` function, while the artifact contains `mvp_<id>_<name>`; the matcher
+in `test/test_mir_check_helpers.hpp:984` substitutes digits only. Five fail
+instruction assertions and two fail execution/compilation (LR07-61/LR07-63).
+Twenty-three sidecars positively require retired helpers. All 12 Lambda size
+probes retain old selectors or budgets: seven selector failures, four budget
+failures and the LR07-61 crash. These are not useful MVP regression gates until
+their native/fallback intent and costs are reviewed, not merely renamed.
+
+There is also a false-green optimization assertion:
+`LambdaOptProfile.MultiSourceParameterAvoidsWrongShapeGuard` passes at
+`test/test_lambda_opt_gtest.cpp:903`, although its TSV contains no
+`field_attempt` rows. `exec_profile_sum_prefix` returns zero when the retired
+`_print_node_`/`_expression_precedence_` prefixes do not exist, satisfying both
+ceilings. Require an active instrumentation/body control before crediting zero.
+The planned-effect rejection test at line 250 sets
+`LAMBDA_TEST_GC_PLAN_CLAIM`, but no MVP/runtime source reads that knob; it exits
+0 rather than exercising rejection. MVP still verifies emitted effects at
+`mvp_mir.cpp:8725`; the test no longer injects a contradictory plan.
+
+The current 142-method `test/benchmark/test_lambda_mir_mvp.py` is not invoked by
+the build configuration, Makefile, `.github` workflows or `utils`. Its benchmark
+golden method executes typed `*2.ls` variants only; the manifest verifies both
+variants' files exist, not that every untyped kernel is executed. Existing
+erased/untyped kernels give selective coverage. Register a bounded MVP unit
+selection and review typed/untyped mirror and cost-budget coverage. Do not mask
+the failed checks or weaken their semantic controls (S9.1.2–S9.1.3).
+
+Reproduction, exact selectors, raw JSON/logs, passed-family map and controller
+hashes: `temp/mvp_optimization_coverage/coverage-report.md` and
+`final-summary.json`. No baseline, complete GC sweep or timing campaign ran.
+LR07-57/LR07-59 retain the earlier assertion findings; naming failures do not
+explain all counter failures or the implementation defects below.
+
+<a id="lr07-61"></a>**LR07-61 · Native MVP wide-scalar tail-forward fixture traps · OPEN (2026-11-10)**
+
+On the exact installed debug CLI identified in LR07-60,
+`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=mvp LAMBDA_DISABLE_MIR_CACHE=1
+./lambda.exe test/mir/lambda/scalar_home_tail_forward.ls --no-log` terminates
+with signal 5 on **3/3 isolated runs**. The same script under `interp` succeeds
+3/3. It recursively adds `1i64` and forwards the scalar companion through a tail
+edge. It must return normally while respecting result/home lifetime
+(D6.2.1, D7.4.2). Both the emission and ratchet probes are blocked. No cause,
+owning code defect or regression-introducing commit is established. No vendor
+change or workaround is made. Evidence:
+`temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and the emission/
+ratchet JSON/logs in the same directory. The engine was not rebuilt in this audit.
+
+<a id="lr07-62"></a>**LR07-62 · Native MVP immutable-array consumer fixture segfaults · OPEN (2026-11-10)**
+
+On the exact installed debug CLI identified in LR07-60,
+`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=mvp LAMBDA_DISABLE_MIR_CACHE=1
+./lambda.exe run test/lambda/proc/tune23_array_consumer.ls --no-log` terminates
+with signal 11 on **3/3 isolated runs**. `interp` succeeds 3/3. The fixture reads
+a split-produced string array through a typed consumer, then checks that a
+later open alias mutation preserves its source. The optimization GTest
+`LambdaOptAdmission.ImmutableArrayConsumerAdmitsOnce` expects
+`[93, "one", 2, 42]` and bounded admission work. Array contracts, snapshots and
+precise ownership must hold (D4.3.3, D6.3, S9.1.2). Root cause and regression
+provenance are unconfirmed. Evidence:
+`temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and
+`opt-results.json`; no fixture, golden or assertion is altered.
+
+<a id="lr07-63"></a>**LR07-63 · MVP rejects the recursive array-witness emission fixture · OPEN (2026-11-10)**
+
+During the LR07-60 unit audit,
+`LAMBDA_EXEC_BACKEND=jit ./lambda.exe run
+test/mir/lambda/tune31_recursive_array_witness.ls` exits 1 with E501 at line 4:
+`Lambda MIR MVP: inlined error effect was not planned`. The emission fixture
+expects successful compilation/execution. Planner and inlining effects must
+agree before publication (D8.2.5, D6.3.2). The failing compiler diagnostic is
+confirmed on the identified installed binary; the underlying proof/plan defect
+is not diagnosed. Evidence:
+`temp/mvp_optimization_coverage/emission-results.json`. Do not treat this as an
+obsolete sidecar selector or weaken effect verification to accept it.
+
+<a id="lr07-64"></a>**LR07-64 · MVP string-tail fixture misses its copy-work contract · OPEN (2026-11-10)**
+
+`LambdaOptStrings.TailAccumulatorCopiesLinearBytes` at
+`test/test_lambda_opt_gtest.cpp:322` runs
+`test/mir/lambda/string_builder_tail.ls` on the LR07-60 installed debug CLI.
+Its semantic-output checks pass, but the profile reports **0 in-place appends**
+against a minimum of 120 and **8,435 copied bytes** against a ceiling below
+1,024. The fixture includes a 128-iteration final string accumulator plus
+snapshot, later-argument observation and error controls. Preserve those value
+semantics while investigating the missing copy-work improvement (S9.1.2,
+D8.6.1). `TypedHyphenUsesStringSpansAndOneTableAdmission` also exceeds its
+append-call ceiling: 19,275 against a limit below 15,000. The observations are
+allocation/call counters, not wall-clock benchmark regressions. Whether the
+cause is absent MVP tuning, changed admission or accounting is unconfirmed;
+do not relax the ceilings without tracing the actual work. Evidence:
+`temp/mvp_optimization_coverage/opt-results.json` and the profile TSVs under
+`temp/lambda_opt_contract/` (the latter may be overwritten by later unit runs).
 
 ## 8. Memory management & GC (LR08)
 

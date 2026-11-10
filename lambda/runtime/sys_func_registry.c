@@ -16,7 +16,8 @@
 #include <math.h>
 #include <stdbool.h>
 #include <setjmp.h>
-#include "sys_func_registry.h"  // includes lambda.h (brings in FPTR/NPTR macros)
+#include "../lambda.hpp"
+#include "sys_func_registry.h"
 #include "lambda-error.h"
 #include "concurrency.h"
 #include "runtime-state.h"

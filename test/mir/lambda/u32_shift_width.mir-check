@@ -3,7 +3,7 @@
   "description": "S4.4.4: an admitted u32 shift keeps its native MIR shift for counts below 32, while the full 64-bit count guard selects zero at or beyond 32. The .txt fixture checks counts 32, 33, 64 and 2^32 against the interpreter; narrowing the guard to 32 bits would admit 2^32 as zero.",
   "checks": [
     {
-      "in_func": "_left_#",
+      "in_func": "mvp_#_left",
       "expect_seq": [
         { "pattern": "ge\t{{r}}, %p2, 32" },
         { "pattern": "mov\t{{r:raw}}, 0" },
@@ -14,7 +14,7 @@
       ]
     },
     {
-      "in_func": "_right_#",
+      "in_func": "mvp_#_right",
       "expect_seq": [
         { "pattern": "ge\t{{r}}, %p2, 32" },
         { "pattern": "mov\t{{r:raw}}, 0" },

@@ -3,7 +3,7 @@
   "description": "D5.4.4: a first packed-bool write binds one unique record handle for adjacent fields; a changed index ends that proof. Packed leaves use byte stores.",
   "checks": [
     {
-      "in_func": "_set_flags_#",
+      "in_func": "mvp_#_set_flags",
       "count": {
         "and\t{{r}}, {{r}}, 1535": 1,
         "call\tcow_place_leaf_fixed": 1,
@@ -11,7 +11,7 @@
       }
     },
     {
-      "in_func": "_move_flags_#",
+      "in_func": "mvp_#_move_flags",
       "count": {
         "and\t{{r}}, {{r}}, 1535": 2
       },

@@ -3,7 +3,7 @@
   "description": "Tune26 T26-1: declared bool, int, and float fills retain their primitive lanes through native use after constant-time boundary admission.",
   "checks": [
     {
-      "in_func": "_tune26_bool_flags_#",
+      "in_func": "mvp_#_tune26_bool_flags",
       "expect": [
         "and\t{{r}}, {{r}}, 1"
       ],
@@ -12,7 +12,7 @@
       ]
     },
     {
-      "in_func": "_tune26_numeric_fill_#",
+      "in_func": "mvp_#_tune26_numeric_fill",
       "expect": [
         "dadd\t{{r}}, {{r}}, {{r}}"
       ]

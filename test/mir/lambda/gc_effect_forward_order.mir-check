@@ -3,9 +3,9 @@
   "description": "D6.3.1-D6.3.2: a later-declared NO_GC callee and a length leaf leave their caller rootless.",
   "checks": [
     {
-      "in_func": "_gc_order_forward_caller_#",
+      "in_func": "mvp_#_gc_order_forward_caller",
       "expect": [
-        "call\t_gc_order_forward_leaf_",
+        "call\tmvp_{{n}}_gc_order_forward_leaf_dp",
         "call\tfn_len_s_p, fn_len_s",
         "bstart\t{{r}}"
       ],

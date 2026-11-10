@@ -16,6 +16,7 @@ typedef struct InterpMapFieldPlan InterpMapFieldPlan;
 typedef struct InterpFieldPlan InterpFieldPlan;
 typedef struct InterpPlacePlan InterpPlacePlan;
 typedef struct NameScope NameScope;
+typedef struct TypeMap TypeMap;
 typedef struct TypeBinder TypeBinder;
 typedef struct TypeBoundRef TypeBoundRef;
 typedef struct LangProfile LangProfile;

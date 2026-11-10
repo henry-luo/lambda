@@ -3,21 +3,21 @@
   "description": "P4 / D3.2.1 / S7.1.1v3: a byte-packed bool only restricts its own slot; aligned fields of the same named record read directly, and null receivers yield ItemNull. Nullable bool fields and misaligned float slots retain their checked access path.",
   "checks": [
     {
-      "in_func": "_read_flag_#",
+      "in_func": "mvp_#_read_flag",
       "expect": ["mov\t{{r}}, u8:8({{r}})", "72057594037927936"],
       "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
     },
     {
-      "in_func": "_read_score_#",
+      "in_func": "mvp_#_read_score",
       "expect": ["dmov\t{{r}}, d:({{r}})", "72057594037927936"],
       "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
     },
     {
-      "in_func": "_read_optional_flag_#",
+      "in_func": "mvp_#_read_optional_flag",
       "expect": ["call\tfn_member_by_id_p, fn_member_by_id"]
     },
     {
-      "in_func": "_read_skewed_score_#",
+      "in_func": "mvp_#_read_skewed_score",
       "expect": ["call\tfn_member_by_id_p, fn_member_by_id"]
     }
   ]

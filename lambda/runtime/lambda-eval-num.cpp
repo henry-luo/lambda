@@ -1820,7 +1820,7 @@ extern "C" Symbol* fn_symbol(Item item) {
 // name: string or symbol - the local name
 // url: string or symbol - the namespace URL
 // fn_symbol2 - create namespaced symbol from name and URL
-// Keep the declaration in lambda.h so generated MIR sees the same signature.
+// The MIR import metadata and native declaration must match this C ABI.
 extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     GUARD_ERROR2(name_item, url_item);
     RootFrame roots(2);

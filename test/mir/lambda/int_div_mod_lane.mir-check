@@ -3,7 +3,7 @@
   "description": "Exact int div/mod use native signed lanes for finite operands while retaining the shared poison slow arm.",
   "checks": [
     {
-      "in_func": "_lane_div_#",
+      "in_func": "mvp_#_lane_div",
       "forbid": [
         "call\tfn_idiv_p, fn_idiv",
         "call\tfn_mod_p, fn_mod",
@@ -16,7 +16,7 @@
       ]
     },
     {
-      "in_func": "_lane_mod_#",
+      "in_func": "mvp_#_lane_mod",
       "forbid": [
         "call\tfn_idiv_p, fn_idiv",
         "call\tfn_mod_p, fn_mod",

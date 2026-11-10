@@ -3,7 +3,7 @@
   "description": "D4.3.3/D7.4.1: lazy activation-local certificates reuse equivalent full primitive contracts; initialization dominates conditional and loop first use. The existing guarded loop emits proven and generic siblings, with two fill sites per sibling sharing the activation register.",
   "checks": [
     {
-      "in_func": "_repeated_#",
+      "in_func": "mvp_#_repeated",
       "expect_seq": [
         "mov\t{{r:cert}}, 0",
         ", {{r:cert}}, 0",
@@ -25,7 +25,7 @@
       ]
     },
     {
-      "in_func": "_looped_#",
+      "in_func": "mvp_#_looped",
       "expect_seq": [
         "mov\t{{r:cert}}, 0",
         ", {{r:cert}}, 0",
@@ -47,7 +47,7 @@
       ]
     },
     {
-      "in_func": "_other_lanes_#",
+      "in_func": "mvp_#_other_lanes",
       "expect_seq": [
         "mov\t{{r:cert}}, 0",
         ", {{r:cert}}, 0",

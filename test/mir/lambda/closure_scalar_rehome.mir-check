@@ -3,7 +3,7 @@
   "description": "Bound-entry wrapper epilogue. Return convention 3 (RV12 slot transport): the wrapper is the C-reachable entry, so it takes no caller home at all — it builds the pending pair, stores lane 2 into Context::mir_companion_slot, restores the watermark, and returns a single result.",
   "checks": [
     {
-      "in_func": "_inner_b_#",
+      "in_func": "mvp_#_inner",
       "return_convention": 3,
       "forbid": [
         "_scalar_home",

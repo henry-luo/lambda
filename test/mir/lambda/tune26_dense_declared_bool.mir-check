@@ -3,7 +3,7 @@
   "description": "Tune26 T26-2: a counted local bool[] consumes its dominating declaration proof, so both finite and generic loop arms read the packed byte with dynamic bounds behavior but without rebuilding the carrier certificate.",
   "checks": [
     {
-      "in_func": "_tune26_dense_declared_bool_#",
+      "in_func": "mvp_#_tune26_dense_declared_bool",
       "expect": [
         "mov\t{{r}}, u8:({{r}})"
       ],

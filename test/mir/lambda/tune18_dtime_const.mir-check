@@ -3,7 +3,7 @@
   "description": "Tune18 E2.a keeps packable datetime literals as scalar MIR immediates and boxes only at the semantic comparison boundary.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "mov\ti64:"
       ],

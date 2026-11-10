@@ -3,7 +3,7 @@
   "description": "Tune26 T26-4: a native var bool[] loop may use the raw same-lane store only after its entry guard admits the exact carrier and proves the live COW owner unshared. The checked setter remains the cold arm, preserving S9.2.2 snapshot isolation.",
   "checks": [
     {
-      "in_func": "_tune26_var_param_unique_#",
+      "in_func": "mvp_#_tune26_var_param_unique",
       "expect_seq": [
         "mov\t{{r}}, u8:4({{r}})",
         "and\t{{r}}, {{r}}, 1",

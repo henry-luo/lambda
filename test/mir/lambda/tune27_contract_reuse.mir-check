@@ -3,37 +3,37 @@
   "description": "Tune27 T27-8 / T27-9 / S11.4.1v3 / D4.2.5: an already-admitted value does not re-cross a structurally identical contract (declared binding or record field through the optional wrapper, null against T?, a declared-binding alias, a non-raising call's declared return); a float literal under a float[] contract admits only its null-member arm; a constant index into a known-length local needs no null boundary, while a pushed local keeps it.",
   "checks": [
     {
-      "in_func": "_ret_param_#",
+      "in_func": "mvp_#_ret_param",
       "forbid": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]
     },
     {
-      "in_func": "_ret_null_#",
+      "in_func": "mvp_#_ret_null",
       "forbid": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]
     },
     {
-      "in_func": "_read_field_#",
+      "in_func": "mvp_#_read_field",
       "forbid": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]
     },
     {
-      "in_func": "_alias_param_#",
+      "in_func": "mvp_#_alias_param",
       "forbid": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]
     },
     {
-      "in_func": "_const_index_#",
+      "in_func": "mvp_#_const_index",
       "forbid": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]
     },
     {
-      "in_func": "_literal_arg_#",
+      "in_func": "mvp_#_literal_arg",
       "expect_seq": [
         {
           "pattern": "call\tarray_num_new_uninit_p, array_num_new_uninit"
@@ -48,7 +48,7 @@
       ]
     },
     {
-      "in_func": "_const_index_pushed_#",
+      "in_func": "mvp_#_const_index_pushed",
       "expect": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]

@@ -3,7 +3,7 @@
   "description": "Tune18 E1 consumes the proven ArrayNum in-bounds lane at a plain int declaration while retaining the nullable OOB rejection edge.",
   "checks": [
     {
-      "in_func": "_boundary18_#",
+      "in_func": "mvp_#_boundary18",
       "expect": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]

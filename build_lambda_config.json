@@ -7286,6 +7286,15 @@
     ],
     "script_tests": [
       {
+        "runner_name": "test_lambda_mvp_emission_units",
+        "name": "Lambda MVP Emission and Ownership Units",
+        "suite": "lambda",
+        "category": "baseline",
+        "script": "test/run_mvp_emission_units.js",
+        "args": [],
+        "parallel": false
+      },
+      {
         "runner_name": "test_devtools_protocol",
         "name": "Live DevTools Protocol",
         "suite": "radiant",

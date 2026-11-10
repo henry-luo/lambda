@@ -3,7 +3,7 @@
   "description": "T21-2c: boxed arithmetic round trips. (1) `int / int` and any int/float mix over inferred parameters already lowered natively but their AST type stayed `any`, so the next operator boxed both sides for fn_add and everything after it (float(), the division, the return) stayed boxed; the arithmetic operand oracle now reports the double lane the emitter produces, float() of that tree is the identity, and the proc return-lane proof admits a raw float() / native math builtin. (2) An unannotated `var` that is reassigned kept its float lane at every return but the proof refused every reassigned binding; it now proves the initializer and every write. (3) A comparison over such an inferred float local keeps an `any` AST type; the and/or gate now consumes its native 0/1 lane instead of boxing it for is_truthy.",
   "checks": [
     {
-      "in_func": "_eval_a_#",
+      "in_func": "mvp_#_eval_a",
       "forbid": [
         "call\tfn_add_p, fn_add",
         "call\tfn_float_p, fn_float",
@@ -16,7 +16,7 @@
       ]
     },
     {
-      "in_func": "_first_root_#",
+      "in_func": "mvp_#_first_root",
       "forbid": [
         "call\tpush_d_p, push_d",
         "call\tfn_math_sqrt_p, fn_math_sqrt"
@@ -26,7 +26,7 @@
       ]
     },
     {
-      "in_func": "_count_hits_#",
+      "in_func": "mvp_#_count_hits",
       "forbid": [
         "call\tis_truthy_p, is_truthy",
         "call\tfn_gt_p, fn_gt",

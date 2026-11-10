@@ -3,7 +3,7 @@
   "description": "S4.4.1 and D2.3.4-D2.3.5: canonical packed integer-sized parameters take an identity path after a tag, subtype, and reserved-bit check. Other Item carriers keep coerce_num_sized; int() decodes exact signed and unsigned payloads without fn_int.",
   "checks": [
     {
-      "in_func": "_accept_u32_#",
+      "in_func": "mvp_#_accept_u32",
       "expect_seq": [
         { "pattern": "and\t{{r:tag}}, %p1, -4294967296" },
         { "pattern": "beq\tL", "next_line": true },
@@ -19,7 +19,7 @@
       "forbid": ["call\tfn_int_p, fn_int"]
     },
     {
-      "in_func": "_accept_i8_#",
+      "in_func": "mvp_#_accept_i8",
       "expect_seq": [
         { "pattern": "and\t{{r:tag}}, %p1, -256" },
         { "pattern": "beq\tL", "next_line": true },
@@ -33,7 +33,7 @@
       "forbid": ["call\tfn_int_p, fn_int"]
     },
     {
-      "in_func": "_accept_u16_#",
+      "in_func": "mvp_#_accept_u16",
       "expect_seq": [
         { "pattern": "and\t{{r:tag}}, %p1, -65536" },
         { "pattern": "beq\tL", "next_line": true },
@@ -45,7 +45,7 @@
       "forbid": ["call\tfn_int_p, fn_int"]
     },
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "count": {
         "call\tfn_bor_item_p, fn_bor_item": 2,
         "call\tfn_int_p, fn_int": 2,

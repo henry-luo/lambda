@@ -3,17 +3,17 @@
   "description": "D4.3.3: a declared string[] uses its pointer certificate and keeps an item_at fallback, while an unproved array keeps generic indexing.",
   "checks": [
     {
-      "in_func": "_pick_#",
+      "in_func": "mvp_#_pick",
       "expect": ["call\titem_at_p, item_at"],
       "forbid": ["call\tfn_index_p, fn_index"]
     },
     {
-      "in_func": "_compound_#",
+      "in_func": "mvp_#_compound",
       "expect": ["call\titem_at_p, item_at"],
       "forbid": ["call\tfn_index_p, fn_index"]
     },
     {
-      "in_func": "_fallible_#",
+      "in_func": "mvp_#_fallible",
       "expect": ["call\tfn_index_p, fn_index"]
     },
     {

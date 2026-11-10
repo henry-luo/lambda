@@ -3,14 +3,14 @@
   "description": "T22-4: a total text split producer still crosses the one shared String[] admission boundary, which publishes the representation certificate before later direct reads (S11.4.1v3, D4.3.3).",
   "checks": [
     {
-      "in_func": "_tune22_split_words_#",
+      "in_func": "mvp_#_tune22_split_words",
       "expect": [
         "call\tfn_split2_p, fn_split2",
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
       ]
     },
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "call\tfn_split2_p, fn_split2",
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"

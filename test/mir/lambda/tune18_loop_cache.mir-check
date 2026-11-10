@@ -3,9 +3,9 @@
   "description": "Tune18 E2.b caches an inferred float-array witness at the binding and removes ensure_typed_array from repeated call edges.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
-        "call\t_sample18_"
+        "call\tmvp_{{n}}_sample18_dp"
       ],
       "count": {
         "call\tensure_typed_array_p, ensure_typed_array": 1

@@ -3,32 +3,32 @@
   "description": "D6.2.2/D6.3.1-D6.3.2: scalar homes preserve GC ownership, while callers whose live-string observation is a NO_GC length leaf use a native stack guard. Tune33: the eligible float leaf is emitted inline, retaining its NO_GC push_d and native stack guard.",
   "checks": [
     {
-      "in_func": "_gc_scalar_home_i64_#",
+      "in_func": "mvp_#_gc_scalar_home_i64",
       "expect": ["call\tbox_int64_value_p, box_int64_value", "bstart\t{{r}}"],
       "forbid": ["call\tlambda_stack_is_exhausted"]
     },
     {
-      "in_func": "_gc_scalar_home_u64_#",
+      "in_func": "mvp_#_gc_scalar_home_u64",
       "expect": ["call\tbox_uint64_value_p, box_uint64_value", "bstart\t{{r}}"],
       "forbid": ["call\tlambda_stack_is_exhausted"]
     },
     {
-      "in_func": "_gc_scalar_home_float_#",
+      "in_func": "mvp_#_gc_scalar_home_float",
       "expect": ["call\tpush_d_p, push_d", "bstart\t{{r}}"],
       "forbid": ["call\tlambda_stack_is_exhausted"]
     },
     {
-      "in_func": "_gc_scalar_use_i64_#",
-      "expect": ["call\t_gc_scalar_home_i64_", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
+      "in_func": "mvp_#_gc_scalar_use_i64",
+      "expect": ["call\tmvp_{{n}}_gc_scalar_home_i64_dp", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
       "forbid": ["call\tlambda_stack_is_exhausted"]
     },
     {
-      "in_func": "_gc_scalar_use_u64_#",
-      "expect": ["call\t_gc_scalar_home_u64_", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
+      "in_func": "mvp_#_gc_scalar_use_u64",
+      "expect": ["call\tmvp_{{n}}_gc_scalar_home_u64_dp", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
       "forbid": ["call\tlambda_stack_is_exhausted"]
     },
     {
-      "in_func": "_gc_scalar_use_float_#",
+      "in_func": "mvp_#_gc_scalar_use_float",
       "expect": ["call\tpush_d_p, push_d", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
       "forbid": ["call\tlambda_stack_is_exhausted"]
     }

@@ -3,7 +3,7 @@
   "description": "Tune26 T26-4: a plain float[] parameter marks its activation snapshot at entry and lazily detaches through the first reached store, so write-free recursive activations do not clone. Tune27: the RHS `values[i] + 0.5` carries a nullable float lane (an out-of-range read), so its cold arm takes the checked lane setter that rejects null (S7.1.3v2) rather than the representation-agnostic COW helper, which would widen the packed array.",
   "checks": [
     {
-      "in_func": "_tune26_plain_param_snapshot_loop_#",
+      "in_func": "mvp_#_tune26_plain_param_snapshot_loop",
       "expect": [
         "call\tcow_mark_shared_p, cow_mark_shared",
         "call\tlambda_array_set_checked_lane_p, lambda_array_set_checked_lane"

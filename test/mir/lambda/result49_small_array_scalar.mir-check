@@ -2,8 +2,8 @@
   "schema_version": 1,
   "description": "S9.1.2, D6.2, D8.2.5: fixed reads of a private short float[] stay in lanes; escaping and absent reads retain materialized arrays.",
   "checks": [
-    {"in_func": "_fixed_reads_#", "forbid": ["call\tarray_float_new_p, array_float_new", "call\tarray_num_new_uninit_p, array_num_new_uninit"]},
-    {"in_func": "_escape_#", "expect": ["call\tarray_num_new_uninit_p, array_num_new_uninit"]},
-    {"in_func": "_absent_read_#", "expect": ["call\tarray_num_new_uninit_p, array_num_new_uninit"]}
+    {"in_func": "mvp_#_fixed_reads", "forbid": ["call\tarray_float_new_p, array_float_new", "call\tarray_num_new_uninit_p, array_num_new_uninit"]},
+    {"in_func": "mvp_#_escape", "expect": ["call\tarray_num_new_uninit_p, array_num_new_uninit"]},
+    {"in_func": "mvp_#_absent_read", "expect": ["call\tarray_num_new_uninit_p, array_num_new_uninit"]}
   ]
 }

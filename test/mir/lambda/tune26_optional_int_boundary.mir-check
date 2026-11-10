@@ -3,7 +3,7 @@
   "description": "Tune26 / S4.1 / D2.3.4 / D4.3.3: ord(any) returns a checked int|null Item, and a plain int declaration calls its sole, cold lambda_type_check only off the int arm; the int path must not box and dynamically traverse the already closed result. Re-pinned 2026-09-27 (S11.4.3, LR12-36): `value: any` may hold an error, which is now ord's value instead of a return from decode before the call. The operand's error tag (27) is tested ahead of fn_ord and joined with its result, the declaration branches on that join's int tag straight into the cold check, and decode keeps only its normal and stack-overflow returns.",
   "checks": [
     {
-      "in_func": "_decode_#",
+      "in_func": "mvp_#_decode",
       "expect_seq": [
         {
           "pattern": "eq\t{{r}}, {{r}}, 27"

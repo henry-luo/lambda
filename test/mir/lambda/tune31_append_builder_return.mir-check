@@ -3,7 +3,7 @@
   "description": "Tune31 T31-2 / D4.2.1-D4.3.1, S9.2.2: a proven homogeneous append builder returns an int-lane ArrayNum and its direct consumer indexes that lane without generic array helpers.",
   "checks": [
     {
-      "in_func": "_build_codes_#",
+      "in_func": "mvp_#_build_codes",
       "expect": [
         "call\tensure_typed_array_p, ensure_typed_array",
         "call\tlambda_array_int_push_inferred_cow_p, lambda_array_int_push_inferred_cow"
@@ -13,7 +13,7 @@
       ]
     },
     {
-      "in_func": "_sum_codes_#",
+      "in_func": "mvp_#_sum_codes",
       "forbid": [
         "call\tfn_index_p, fn_index"
       ]

@@ -3,12 +3,12 @@
   "description": "S7.7.2v2/S7.7.4v2/D2.5.3: a retained local check does not force boxed scalar returns; returned and propagated outcomes keep their error behavior.",
   "checks": [
     {
-      "in_func": "_keeps_initializer_#",
+      "in_func": "mvp_#_keeps_initializer",
       "expect": ["func\ti64, p:runtime", "mov\t{{r}}, 7"],
       "forbid": ["360287970189639687"]
     },
     {
-      "in_func": "_keeps_assignment_#",
+      "in_func": "mvp_#_keeps_assignment",
       "expect": ["func\ti64, p:runtime", "mov\t{{r}}, 9"],
       "forbid": ["360287970189639689"]
     }

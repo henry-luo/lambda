@@ -54,8 +54,27 @@ TEST(LambdaMirEmissionCorpus, IsNotEmpty) {
         << "no .ls fixtures found in " << kLambdaMirDir;
 }
 
+TEST(MirCheckMatcher, MvpSelectorsRequireTheNamedBody) {
+    EXPECT_TRUE(mir_check::function_name_matches("mvp_#_reduce", "mvp_12_reduce"));
+    EXPECT_FALSE(mir_check::function_name_matches("mvp_#_reduce", "mvp_12_reduce_dp"));
+    EXPECT_FALSE(mir_check::function_name_matches("mvp_#_reduce", "_reduce_12"));
+    EXPECT_FALSE(mir_check::function_name_matches("mvp_#_reduce", "mvp__reduce"));
+    EXPECT_TRUE(mir_check::function_name_matches("_js_reduce_#", "_js_reduce_12"));
+}
+
+TEST(MirCheckMatcher, DecimalCalleeIdsKeepTheCallContract) {
+    EXPECT_TRUE(mir_check::line_contains("\tcall\tmvp_12_sum_dp, mvp_12_sum, %r1",
+        "call\tmvp_{{n}}_sum_dp, mvp_{{n}}_sum"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tmvp_12_sum_dp, mvp_12_sum, %r1",
+        "call\tmvp_{{n}}_reduce_dp"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tmvp_ab_sum_dp", "call\tmvp_{{n}}_sum_dp"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tmvp__sum_dp", "call\tmvp_{{n}}_sum_dp"));
+    EXPECT_TRUE(mir_check::line_contains("\tmov\t%r1f, 4", "mov\t{{r}}, 4"));
+}
+
 TEST(LambdaMirProfiling, DiagnosticCallsPreserveProductionRootsAndSafepoints) {
-    const char* args[] = {"python3", "test/benchmark/check_profile_root_parity.py", nullptr};
+    const char* args[] = {"python3", "test/benchmark/check_profile_root_parity.py",
+        "--exe", mir_check::executable(), "--cow-sites", nullptr};
     ShellResult result = shell_exec_simple("python3", args);
     EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     shell_result_free(&result);

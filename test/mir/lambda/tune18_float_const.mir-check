@@ -3,7 +3,7 @@
   "description": "Tune18 E2.a keeps CP1 double literals as MIR immediates in the loop body.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "dmov\t{{r}}, 0.00000000000000000000000000000000000000000000000000000e+00",
         "dmov\t{{r}}, 1.00000000000000000000000000000000000000000000000000000e+00",

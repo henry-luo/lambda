@@ -3,7 +3,7 @@
   "description": "Tune18 module-level string[] indexing uses a certificate-guarded direct pointer-lane load; a failed guard falls back to item_at rather than fn_index dispatch.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "mov\ti64:("
       ],

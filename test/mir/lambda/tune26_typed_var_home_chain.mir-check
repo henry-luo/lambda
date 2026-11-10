@@ -3,10 +3,10 @@
   "description": "Tune26 T26-4: a direct typed var-array call transports the caller root home so a post-snapshot COW detach is published back through the outer borrow under S9.2.2 and D6.1.1.",
   "checks": [
     {
-      "in_func": "_tune26_typed_var_home_outer_#",
+      "in_func": "mvp_#_tune26_typed_var_home_outer",
       "expect": [
         "call\tcow_prepare_write_p, cow_prepare_write",
-        "call\t_tune26_typed_var_home_inner_"
+        "call\tmvp_{{n}}_tune26_typed_var_home_inner_dp"
       ]
     }
   ]

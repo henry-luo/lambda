@@ -3,7 +3,7 @@
   "description": "Tune31 follow-on / D4.3.3: after source text is admitted as int[] code lanes, the repeated comparison loop emits raw lane equality and must not call string indexing or generic equality.",
   "checks": [
     {
-      "in_func": "_count_equal_codes_#",
+      "in_func": "mvp_#_count_equal_codes",
       "expect": [
         "\teq\t"
       ],

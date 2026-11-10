@@ -3,11 +3,11 @@
   "description": "D4.3.3, D6.3.4, D7.3.1: record results. S7.7.2/S7.7.3 (2026-10-31): unannotated defect-capable record calls preserve the boxed error join; member/join fallbacks are required until an error-capable scalar-record proof exists. Raw result destinations and allocation exclusions remain checked.",
   "checks": [
     {
-      "in_func": "_render_#",
+      "in_func": "mvp_#_render",
       "expect": [
         "_record_result0",
-        "call\t_render_",
-        "call\t_result_",
+        "call\tmvp_{{n}}_render_dp",
+        "call\tmvp_{{n}}_result_dp",
         "call\tfn_member_by_id"
       ],
       "forbid": [
@@ -16,9 +16,9 @@
       ]
     },
     {
-      "in_func": "_project_#",
+      "in_func": "mvp_#_project",
       "expect": [
-        "call\t_render_",
+        "call\tmvp_{{n}}_render_dp",
         "call\tfn_member_by_id"
       ],
       "forbid": [
@@ -26,7 +26,7 @@
       ]
     },
     {
-      "in_func": "_result_b_#",
+      "in_func": "mvp_#_result",
       "expect": [
         "call\tmap_fill"
       ]

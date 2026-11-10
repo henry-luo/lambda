@@ -12,7 +12,7 @@ Run `make help` for a quick summary, or see below for full details.
 
 | Target          | Description                                                                                                                                                                          |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `build`         | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain (Clang on all platforms; CLANG64 on Windows/MSYS2 to avoid Universal CRT). Builds normal Tree-sitter input libraries, RE2, and embed headers. The Lambda, JavaScript, and TypeScript reference grammars are built only by `lambda-cst`. |
+| `build`         | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain (Clang on all platforms; CLANG64 on Windows/MSYS2 to avoid Universal CRT). Builds normal Tree-sitter input libraries and RE2. The Lambda, JavaScript, and TypeScript reference grammars are built only by `lambda-cst`. |
 | `debug`         | Debug build with AddressSanitizer enabled.                                                                                                                                           |
 | `release`       | Optimized release build. Runs `clean-all` first, then compiles with LTO, dead code elimination, symbol visibility control, and strips debug symbols. Output: `lambda.exe`.   |
 | `rebuild`       | Force complete rebuild (`clean-all` + `build`).                                                                                                                                      |
@@ -54,7 +54,7 @@ make lambda-headless    # headless full release build (no GUI)
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `clean`                     | Remove compiled object files (`build/obj`, `build/lib`), legacy `.o`/`.d` files, executables (`lambda.exe`, `lambda_debug.exe`, `lambda_release.exe`), and transpiled temp files. **Does not** remove tree-sitter libraries, RE2 library, or build directories themselves. Fast — allows incremental rebuild. |
 | `clean-test`                | Remove test executables, test output directories, `.dSYM` bundles, and test build JSON files.                                                                                                                                                                                                                 |
-| `clean-grammar`             | Remove auto-generated Lambda CST grammar and embed files: `parser.c`, `grammar.json`, `node-types.json`, and `lambda-embed.h`.                                                                                                                                                                                   |
+| `clean-grammar`             | Remove auto-generated Lambda CST grammar files: `parser.c`, `grammar.json`, and `node-types.json`.                                                                                                                                                                                   |
 | `clean-premake`             | Remove Premake build directory (`build/premake`) and generated `.lua`/`.make` files.                                                                                                                                                                                                                          |
 | `clean-all`                 | Deep clean. Runs `clean-premake` + `clean-test`, then removes `lambda.exe`, all build directories, and Tree-sitter and MIR build outputs. Sibling project archives are preserved. |
 | `distclean`                 | Most thorough clean. Runs `clean-all` + `clean-grammar` + `clean-test`, then removes all `.exe` files.                                                                                                                                                                                                        |
@@ -87,10 +87,9 @@ The build system automatically manages the dependency chain:
 
 ```
 grammar.js → parser.c → lambda-cst verifier
-lambda.h   → lambda-embed.h
 ```
 
-When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated before `lambda-cst` is built.
+When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated before `lambda-cst` is built. Direct MIR emission does not embed or parse `lambda.h` (D1.6).
 
 ---
 

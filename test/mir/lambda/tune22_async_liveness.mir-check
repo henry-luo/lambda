@@ -3,7 +3,7 @@
   "description": "RA1: locals live across wait() stay in registers; the parked activation keeps its native frame, so no binding is spilled to an async frame.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "call\tpn_wait1"
       ],

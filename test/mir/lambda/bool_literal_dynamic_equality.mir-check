@@ -3,7 +3,7 @@
   "description": "S5.1.1–S5.1.2: a dynamic Item compared with a bool literal uses its bool tag and low byte; no deep equality helper is needed, including for null and error values.",
   "checks": [
     {
-      "in_func": "_equals_true_#",
+      "in_func": "mvp_#_equals_true",
       "forbid": ["fn_eq"],
       "expect_seq": [
         { "pattern": "and\t{{r}}, %p1, -72057594037927681" },
@@ -11,7 +11,7 @@
       ]
     },
     {
-      "in_func": "_differs_false_#",
+      "in_func": "mvp_#_differs_false",
       "forbid": ["fn_ne"],
       "expect_seq": [
         { "pattern": "and\t{{r}}, %p1, -72057594037927681" },
@@ -19,7 +19,7 @@
       ]
     },
     {
-      "in_func": "_both_dynamic_#",
+      "in_func": "mvp_#_both_dynamic",
       "expect": ["call\tfn_eq_value_p, fn_eq_value"]
     }
   ]

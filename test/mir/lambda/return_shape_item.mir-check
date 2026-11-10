@@ -3,7 +3,7 @@
   "description": "Action B: proven wide-free boxed procedural returns use one Item lane; wide and unknown returns retain the companion protocol.",
   "checks": [
     {
-      "in_func": "_boxed_stable_#",
+      "in_func": "mvp_#_boxed_stable",
       "expect": [
         "func\ti64, p:runtime"
       ],
@@ -16,7 +16,7 @@
     },
     {
       "return_convention": 3,
-      "in_func": "_boxed_wide_#",
+      "in_func": "mvp_#_boxed_wide",
       "expect_any": [
         "func\ti64, i64, p:runtime, i64:%p1",
         "func\ti64, p:runtime, i64:%p1"
@@ -28,7 +28,7 @@
     },
     {
       "return_convention": 3,
-      "in_func": "_boxed_unknown_#",
+      "in_func": "mvp_#_boxed_unknown",
       "expect_any": [
         "func\ti64, i64, p:runtime, i64:%p1",
         "func\ti64, p:runtime, i64:%p1"
@@ -39,7 +39,7 @@
     },
     {
       "return_convention": 3,
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "lambda_item_resolve_pending"
       ]

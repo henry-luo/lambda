@@ -3,7 +3,7 @@
   "description": "D2.3/D7.3.3: admitted strings keep native length and array reads, and forwarded string results reach existing join fusion. Open/error operands retain checked len.",
   "checks": [
     {
-      "in_func": "_native_rows_#",
+      "in_func": "mvp_#_native_rows",
       "expect": [
         "fn_len_s"
       ],
@@ -17,7 +17,7 @@
       }
     },
     {
-      "in_func": "_wrap_text_#",
+      "in_func": "mvp_#_wrap_text",
       "expect": [
         "fn_strcat_many"
       ],
@@ -26,19 +26,19 @@
       ]
     },
     {
-      "in_func": "_any_count_#",
+      "in_func": "mvp_#_any_count",
       "expect": [
         "fn_len_checked"
       ]
     },
     {
-      "in_func": "_guarded_step_#",
+      "in_func": "mvp_#_guarded_step",
       "forbid": [
         "call\tfn_add_p, fn_add"
       ]
     },
     {
-      "in_func": "_string_key_b_#",
+      "in_func": "mvp_#_string_key",
       "expect": [
         "it2s"
       ]

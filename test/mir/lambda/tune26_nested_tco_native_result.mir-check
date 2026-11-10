@@ -3,9 +3,9 @@
   "description": "D2.3.4-D2.3.5: a non-error native recursive result remains in its IntLane when it becomes the argument of the outer tail-call backedge.",
   "checks": [
     {
-      "in_func": "_nested_count_#",
+      "in_func": "mvp_#_nested_count",
       "expect": [
-        "call\t_nested_count_",
+        "call\tmvp_{{n}}_nested_count_dp",
         "add\t{{r}}, {{r}}, 1",
         "ble\t"
       ],

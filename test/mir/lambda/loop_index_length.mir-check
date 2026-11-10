@@ -2,9 +2,9 @@
   "schema_version": 1,
   "description": "S7.1.1v3/D2.4.3: a stable counted loop emits one raw read and no repeated bounds or null arm; mismatched arrays and early writes keep their fallback.",
   "checks": [
-    {"in_func": "_sum_#", "expect": ["dadd\t{{r}}", "lsh\t{{r}}"], "forbid": ["dmov\t{{r}}, nan", "ult\t{{r}}"]},
-    {"in_func": "_mismatched_#", "expect": ["dmov\t{{r}}, nan"]},
-    {"in_func": "_early_write_#", "expect": ["dmov\t{{r}}, nan"]},
-    {"in_func": "_resized_#", "expect": ["dmov\t{{r}}, nan"]}
+    {"in_func": "mvp_#_sum", "expect": ["dadd\t{{r}}", "lsh\t{{r}}"], "forbid": ["dmov\t{{r}}, nan", "ult\t{{r}}"]},
+    {"in_func": "mvp_#_mismatched", "expect": ["dmov\t{{r}}, nan"]},
+    {"in_func": "mvp_#_early_write", "expect": ["dmov\t{{r}}, nan"]},
+    {"in_func": "mvp_#_resized", "expect": ["dmov\t{{r}}, nan"]}
   ]
 }

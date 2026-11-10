@@ -2,10 +2,10 @@
   "schema_version": 1,
   "description": "D2.5.2/D8.2.4: guarded float result loads retain OOB, while defect and rebound receivers keep the boxed read.",
   "checks": [
-    {"in_func": "_read_probabilities_#", "expect": ["dmov\t{{r}}, d:("]},
-    {"in_func": "_changed_probabilities_#", "expect": ["call\tfn_index_p, fn_index"]},
-    {"in_func": "_main_#", "expect": ["call\tfn_index_p, fn_index"]},
-    {"in_func": "_guarded_fill_#", "expect": ["call\tfn_fill_p, fn_fill", "call\t_first_value_"],
+    {"in_func": "mvp_#_read_probabilities", "expect": ["dmov\t{{r}}, d:("]},
+    {"in_func": "mvp_#_changed_probabilities", "expect": ["call\tfn_index_p, fn_index"]},
+    {"in_func": "mvp_#_main", "expect": ["call\tfn_index_p, fn_index"]},
+    {"in_func": "mvp_#_guarded_fill", "expect": ["call\tfn_fill_p, fn_fill", "call\tmvp_{{n}}_first_value_dp"],
      "forbid": ["call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]}
   ]
 }

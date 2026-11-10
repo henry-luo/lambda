@@ -3,7 +3,7 @@
   "description": "S7.7.2v2/S7.6.3v3: explicit propagation checks declaration admission before native arithmetic; the later checked reassignment keeps its cold diagnostic edge. Three admission calls remain.",
   "checks": [
     {
-      "in_func": "_add_at_#",
+      "in_func": "mvp_#_add_at",
       "expect_seq": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",

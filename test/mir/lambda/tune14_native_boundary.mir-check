@@ -3,7 +3,7 @@
   "description": "Tune14 A1 keeps proved float and integer array paths on native MIR lanes, preserves the same-contract array witness across rebinding, and retains generic admission for a widened any[] control.",
   "checks": [
     {
-      "in_func": "_tune14_float_sum_#",
+      "in_func": "mvp_#_tune14_float_sum",
       "expect": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
         "dadd\t{{r}}"
@@ -13,7 +13,7 @@
       ]
     },
     {
-      "in_func": "_tune14_bitwise_#",
+      "in_func": "mvp_#_tune14_bitwise",
       "expect": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
         "rsh\t{{r}}",
@@ -26,7 +26,7 @@
       ]
     },
     {
-      "in_func": "_tune14_rebind_#",
+      "in_func": "mvp_#_tune14_rebind",
       "expect": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
         "mov\t{{r}}, i64:({{r}})",
@@ -38,7 +38,7 @@
       ]
     },
     {
-      "in_func": "_tune14_widened_#",
+      "in_func": "mvp_#_tune14_widened",
       "expect": [
         "call\tfn_index_p, fn_index",
         "call\tfn_add_p, fn_add"

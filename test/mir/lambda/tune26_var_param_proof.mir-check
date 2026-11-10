@@ -3,7 +3,7 @@
   "description": "Tune26 T26-4: a native var bool[] parameter consumes the entry witness once, keeps COW and dynamic bounds checks on each store, and reuses its admitted layout for the paired read.",
   "checks": [
     {
-      "in_func": "_tune26_var_param_proof_#",
+      "in_func": "mvp_#_tune26_var_param_proof",
       "expect_seq": [
         "mov\t{{r}}, u8:4({{r}})",
         "and\t{{r}}, {{r}}, 1",

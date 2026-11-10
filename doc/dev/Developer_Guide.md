@@ -452,7 +452,9 @@ Lambda AST  ──→  MVP planner/lowering  ──→  MIR instructions (MIR_MO
 - No intermediate C code is involved — instructions like `MIR_MOV`, `MIR_ADD`, `MIR_CALL` are built directly.
 
 The vendored MIR dependency still contains its upstream C2MIR frontend, but
-Lambda no longer feeds generated Lambda C into it.
+Lambda no longer feeds generated Lambda C into it. Direct MIR emission does
+not parse or embed `lambda.h` in generated modules; native compiler and runtime
+sources use the shared value layouts and runtime ABI during their own build.
 
 ### Key Files
 
@@ -464,7 +466,7 @@ Lambda no longer feeds generated Lambda C into it.
 | `lambda/runtime/mir_emitter_shared.hpp` | Shared MIR emission, roots, calls and ABI helpers |
 | `lambda/runtime/mir.c` | MIR contexts, import resolution and native generation |
 | `lambda/runtime/sys_func_registry.c` | Runtime helper addresses and audited import effects |
-| `lambda/lambda.h` | C ABI callable from interpreted and generated code |
+| `lambda/lambda.h` (in `lambda-input`) | Shared C/C++ value model owned by `lambda-input` |
 | `lambda/mir/` | Vendored MIR dependency; do not edit in place |
 
 ### Runtime Helper Registry

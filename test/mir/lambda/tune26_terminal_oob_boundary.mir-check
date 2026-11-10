@@ -3,7 +3,7 @@
   "description": "S7.7.2v2/S7.6.3v3/D2.5.3: sole immediate propagation may fuse each float[] read's admission. Pin both native null guards before their exact values reach arithmetic, retain both cold diagnostics, and test negative, left-OOB and right-OOB outcomes at runtime.",
   "checks": [
     {
-      "in_func": "_read_sum_#",
+      "in_func": "mvp_#_read_sum",
       "expect": [
         "func\td, i64, p:runtime",
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"

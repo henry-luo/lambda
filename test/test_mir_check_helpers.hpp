@@ -58,6 +58,11 @@
 
 namespace mir_check {
 
+inline const char* executable() {
+    const char* configured = getenv("LAMBDA_TEST_EXE");
+    return configured && configured[0] ? configured : "./lambda.exe";
+}
+
 // ---------------------------------------------------------------------------
 // Minimal JSON reader (objects, arrays, strings, integers, booleans, null)
 // ---------------------------------------------------------------------------
@@ -836,7 +841,7 @@ struct ProcessResult {
 inline ShellResult run_lambda_command(const char* subcommand, const char* script_path,
         bool mir_interp, bool quiet, const char* const* extra_args, const ShellOptions* options) {
     ArrayList* args = arraylist_new(12);
-    arraylist_append(args, (void*)"./lambda.exe");
+    arraylist_append(args, (void*)executable());
     if (subcommand) arraylist_append(args, (void*)subcommand);
     if (mir_interp) arraylist_append(args, (void*)"--mir-interp");
     bool js = subcommand && strcmp(subcommand, "js") == 0;
@@ -847,7 +852,7 @@ inline ShellResult run_lambda_command(const char* subcommand, const char* script
         arraylist_append(args, (void*)extra_args[i]);
     }
     arraylist_append(args, nullptr);
-    ShellResult result = shell_exec("./lambda.exe", (const char**)args->data, options);
+    ShellResult result = shell_exec(executable(), (const char**)args->data, options);
     arraylist_free(args);
     return result;
 }
@@ -977,10 +982,9 @@ inline CompileResult compile_and_dump(const std::string& script_path, Language l
 // Evaluation
 // ---------------------------------------------------------------------------
 
-// '#' in an in_func selector matches a run of one or more digits. Both
-// frontends name generated symbols with a source-offset id (_accumulate_371,
-// _js_helper_752_body), so a fixture that spelled the id would break whenever
-// its own comments moved. A selector without '#' is matched exactly.
+// '#' matches decimal compiler IDs, including MVP's mvp_#_source_name and
+// JS source-offset names. Other characters match exactly; backend namespaces
+// are explicit so a missing body cannot silently select another compiler.
 inline bool function_name_matches(const std::string& pattern, size_t p,
                                   const std::string& name, size_t n) {
     while (p < pattern.size()) {
@@ -1097,7 +1101,8 @@ inline bool select_scope(const MirDump& dump, const CheckGroup& group,
     return true;
 }
 
-// Register tokens: `{{r}}` matches any generated register; `{{r:name}}`
+// `{{n}}` matches a decimal compiler ID inside an instruction (for example a
+// direct MVP callee). Register tokens: `{{r}}` matches any generated register; `{{r:name}}`
 // binds `name` to the register on first use within one expect_seq and must
 // match the same register afterwards; `{{r!name}}` must be a register other
 // than the one bound to `name`. Captures live only for the duration of one
@@ -1108,7 +1113,8 @@ typedef std::map<std::string, std::string> RegisterCaptures;
 
 inline bool line_contains(const std::string& line, const std::string& pattern,
         RegisterCaptures* captures = NULL) {
-    if (pattern.find("{{r") == std::string::npos) {
+    if (pattern.find("{{r") == std::string::npos &&
+            pattern.find("{{n}}") == std::string::npos) {
         return line.find(pattern) != std::string::npos;
     }
 
@@ -1121,6 +1127,14 @@ inline bool line_contains(const std::string& line, const std::string& pattern,
         bool matched = true;
         RegisterCaptures attempt = captures ? *captures : RegisterCaptures();
         while (pattern_index < pattern.size()) {
+            if (pattern.compare(pattern_index, 5, "{{n}}") == 0) {
+                size_t digits = line_index;
+                while (line_index < line.size() && line[line_index] >= '0' &&
+                        line[line_index] <= '9') line_index++;
+                if (line_index == digits) { matched = false; break; }
+                pattern_index += 5;
+                continue;
+            }
             if (pattern.compare(pattern_index, 3, "{{r") == 0) {
                 size_t close = pattern.find("}}", pattern_index);
                 if (close == std::string::npos) { matched = false; break; }

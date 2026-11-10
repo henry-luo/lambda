@@ -3,16 +3,16 @@
   "description": "D4.2.1/D4.2.3/S7.1.3v2: a local nullable int lane checks the null sentinel before a trusted record write, while an unproven indexed value retains the checked setter.",
   "checks": [
     {
-      "in_func": "_advance_#",
+      "in_func": "mvp_#_advance",
       "expect": ["mov\ti64:16({{r}}), {{r}}"],
       "forbid": ["call\tlambda_map_set_checked_inplace_p"]
     },
     {
-      "in_func": "_possibly_null_#",
+      "in_func": "mvp_#_possibly_null",
       "expect": ["call\tlambda_map_set_checked_inplace_p, lambda_map_set_checked_inplace"]
     },
     {
-      "in_func": "_possibly_null_local_#",
+      "in_func": "mvp_#_possibly_null_local",
       "expect": ["beq\t", "72057594037927936",
                  "mov\ti64:({{r}}), {{r}}",
                  "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"],

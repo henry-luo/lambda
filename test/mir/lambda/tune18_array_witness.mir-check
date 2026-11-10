@@ -3,9 +3,9 @@
   "description": "Tune18 reuses a stable local typed-array witness at repeated native call edges while the callee retains its entry admission.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
-        "call\t_take18_"
+        "call\tmvp_{{n}}_take18_dp"
       ]
     }
   ]

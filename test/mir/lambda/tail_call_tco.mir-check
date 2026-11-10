@@ -3,9 +3,9 @@
   "description": "Self-recursive tail call is turned into a counter-guarded loop: the function contains no call back into itself and retains the documented 1000000 iteration cap. Internal register spelling is deliberately opaque, so this checks the emitted loop shape rather than a diagnostic register name.",
   "checks": [
     {
-      "in_func": "_factorial_#",
+      "in_func": "mvp_#_factorial",
       "forbid": [
-        "call\t_factorial_"
+        "call\tmvp_{{n}}_factorial_dp"
       ],
       "expect": [
         "add\t{{r}}, {{r}}, 1",

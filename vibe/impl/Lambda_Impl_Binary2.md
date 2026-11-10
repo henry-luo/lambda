@@ -1,5 +1,9 @@
 # Lambda Binary Phase 6 — Shared Byte-Storage Unification Implementation Plan
 
+> **Historical C2MIR references:** The Lambda C-text backend and embedded
+> `lambda.h` pipeline were removed (D1.6). Direct MIR does not parse or embed
+> that header; measurements and gates below describe the earlier architecture.
+
 > **Status:** Complete — implementation Phases 0–6 and all applicable regression gates verified
 > **Plan date:** 2026-07-15
 > **Design authority:** [Lambda_Type_Binary.md](../Lambda_Type_Binary.md) §11

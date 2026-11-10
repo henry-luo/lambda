@@ -4142,6 +4142,14 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         MvpBinding* binding = mvp_local_binding(m, ((AstAssignStamNode*)index->nodes[i])->object);
         if (binding) binding->record_written = true;
     }
+    // fault injection reaches the same emitted-effect verifier as ordinary
+    // plans; it must reject before any entry is linked or published (D6.3.2).
+    const char* no_gc_claim = getenv("LAMBDA_TEST_GC_PLAN_CLAIM");
+    for (uint32_t i = 0; no_gc_claim && no_gc_claim[0] && i < m->function_count; i++) {
+        MvpFunction* function = &m->functions[i];
+        if (function->ast->name && strcmp(function->ast->name->chars, no_gc_claim) == 0)
+            function->abi.effects.may_gc = false;
+    }
     return !m->failed;
 }
 

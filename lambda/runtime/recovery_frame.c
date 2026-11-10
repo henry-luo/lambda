@@ -1,3 +1,4 @@
+#include "../lambda.hpp"
 #include "recovery_frame.h"
 
 #include <string.h>

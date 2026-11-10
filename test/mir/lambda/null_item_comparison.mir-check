@@ -3,7 +3,7 @@
   "description": "S5.1.1v2 / D2.3.4–D2.3.5: erased null predicates preserve Error and Type-value fallback, combine the null tag and zero pointer, and invert equality for inequality.",
   "checks": [
     {
-      "in_func": "_equals_null_#",
+      "in_func": "mvp_#_equals_null",
       "expect": [
         "ursh\t{{r}},",
         "{{r}}, 27",
@@ -16,7 +16,7 @@
       ]
     },
     {
-      "in_func": "_differs_null_#",
+      "in_func": "mvp_#_differs_null",
       "expect": [
         "ursh\t{{r}},",
         "{{r}}, 27",
@@ -29,7 +29,7 @@
       ]
     },
     {
-      "in_func": "_indexed_#",
+      "in_func": "mvp_#_indexed",
       "expect": [
         "ursh\t{{r}},",
         "{{r}}, 27",
@@ -42,7 +42,7 @@
       ]
     },
     {
-      "in_func": "_local_#",
+      "in_func": "mvp_#_local",
       "expect": [
         "ursh\t{{r}},",
         "{{r}}, 27",

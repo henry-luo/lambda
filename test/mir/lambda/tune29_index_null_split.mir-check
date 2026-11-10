@@ -3,26 +3,26 @@
   "description": "T29-3 (D2.4.3): an int tree over possibly out-of-range reads tests each read once for null and branches to one null result -- no operator carries the old pair null test (eq/eq/or), and a literal operand is never tested. A non-null int equality tests nan on one side only (S4.1.2).",
   "checks": [
     {
-      "in_func": "_step_#",
+      "in_func": "mvp_#_step",
       "expect": ["beq\t"],
       "forbid": ["\tor\t"]
     },
     {
-      "in_func": "_two_reads_#",
+      "in_func": "mvp_#_two_reads",
       "forbid": ["\tor\t"]
     },
     {
-      "in_func": "_nullable_var_#",
+      "in_func": "mvp_#_nullable_var",
       "forbid": ["\tor\t"]
     },
     {
-      "in_func": "_eq_pair_#",
+      "in_func": "mvp_#_eq_pair",
       "count": {
         "-9223372036854775808": 1
       }
     },
     {
-      "in_func": "_ne_pair_#",
+      "in_func": "mvp_#_ne_pair",
       "count": {
         "-9223372036854775808": 1
       }

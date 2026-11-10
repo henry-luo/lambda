@@ -3,7 +3,7 @@
   "description": "Tune4 M2 / v5: the closed integer caller set emits native i64 subtraction with a band guard, while an escaped callee keeps generic arithmetic for unseen float callers.",
   "checks": [
     {
-      "in_func": "_closed_gap_#",
+      "in_func": "mvp_#_closed_gap",
       "expect": [
         "sub\t{{r}}"
       ],
@@ -12,13 +12,13 @@
       ]
     },
     {
-      "in_func": "_open_gap_#",
+      "in_func": "mvp_#_open_gap",
       "expect": [
         "sub\t{{r}}"
       ]
     },
     {
-      "in_func": "_open_gap_b_#",
+      "in_func": "mvp_#_open_gap",
       "expect": [
         "call\tfn_sub_p, fn_sub"
       ]

@@ -3,7 +3,7 @@
   "description": "Tune26: a matched primitive fill reaches the shared numeric array admission, which reifies its empty arm and installs the declaration certificate before a float[] borrowed write (S4.1, D4.3.3, S9.2.2). The destination-aware fill producer performs the same shared admission and certificate installation once (D4.3.3).",
   "checks": [
     {
-      "in_func": "_tune26_fill_contract_reify_#",
+      "in_func": "mvp_#_tune26_fill_contract_reify",
       "expect": [
         "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
       ]

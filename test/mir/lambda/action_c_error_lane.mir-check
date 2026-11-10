@@ -3,7 +3,7 @@
   "description": "Action C error-lane boundary: the checked native scalar path carries value and ItemNull/error separately and does not resolve a pending pair.",
   "checks": [
     {
-      "in_func": "_checked_double_#",
+      "in_func": "mvp_#_checked_double",
       "expect": ["ret\t"],
       "expect_any": [
         "func\td, i64, p:runtime",
@@ -14,7 +14,7 @@
       ]
     },
     {
-      "in_func": "_checked_double_b_#",
+      "in_func": "mvp_#_checked_double",
       "forbid": [
         "lambda_item_resolve_pending"
       ]

@@ -3,7 +3,7 @@
   "description": "Tune26 T26-5: int-literal ordered comparisons use the raw predicate plus one sentinel exclusion, preserving nan/null and infinity ordering.",
   "checks": [
     {
-      "in_func": "_tune26_lt_literal_#",
+      "in_func": "mvp_#_tune26_lt_literal",
       "expect_seq": [
         "mov\t{{r}}, 2",
         "lt\t{{r}}, %p1, {{r}}",
@@ -12,7 +12,7 @@
       ]
     },
     {
-      "in_func": "_tune26_literal_lt_#",
+      "in_func": "mvp_#_tune26_literal_lt",
       "expect_seq": [
         "mov\t{{r}}, 2",
         "lt\t{{r}}, {{r}}, %p1",
@@ -21,7 +21,7 @@
       ]
     },
     {
-      "in_func": "_tune26_gt_literal_#",
+      "in_func": "mvp_#_tune26_gt_literal",
       "expect_seq": [
         "mov\t{{r}}, 2",
         "gt\t{{r}}, %p1, {{r}}",
@@ -30,7 +30,7 @@
       ]
     },
     {
-      "in_func": "_tune26_literal_gt_#",
+      "in_func": "mvp_#_tune26_literal_gt",
       "expect_seq": [
         "mov\t{{r}}, 2",
         "gt\t{{r}}, {{r}}, %p1",

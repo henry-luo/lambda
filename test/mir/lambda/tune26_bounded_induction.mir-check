@@ -3,7 +3,7 @@
   "description": "Tune26 T26-3: the bounded induction sibling checks its finite entry range once, then uses raw square, comparison, and stride arithmetic. The generic sibling remains in the function for out-of-range Lambda ints.",
   "checks": [
     {
-      "in_func": "_tune26_bounded_sieve_#",
+      "in_func": "mvp_#_tune26_bounded_sieve",
       "expect_seq": [
         "le\t{{r}}, {{r}}, 46342",
         "le\t{{r}}, %p1, 2147483647",

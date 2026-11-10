@@ -109,7 +109,7 @@ Third-party sources retain their licenses, pinned provenance, and existing patch
 
 The requested input library cannot consist only of parser translation units. Parsers and formatters use `Input`, `Item`, `Element`, name/shape machinery, allocation contexts, and Mark APIs. Those runtime-independent definitions and providers must be included in its closure.
 
-Keep one canonical representation shared with Lambda (D2.1.1). Do not fork `Item` or add a JSON serialization boundary between the projects. Public input headers must be usable without transitively exposing `Runtime`, `EvalContext`, AST implementation, GC roots, or MIR.
+Keep one canonical representation shared with Lambda (D2.1.1). Do not fork `Item` or add a JSON serialization boundary between the projects. Public input headers must be usable without transitively exposing `Runtime`, `EvalContext`, AST implementation, GC roots, or MIR. `lambda-input` owns `lambda/lambda.h` for its shared value declarations; Lambda owns runtime declarations in `lambda/lambda.hpp` and runtime-owned C interfaces. Native consumers must preserve the shared layout and linkage when the mixed header is split (D9.1.1v4, D9.1.3v2). The removed C2MIR backend parsed an embedded header; direct MIR emission does not (D1.6).
 
 The standalone formatting API admits the native formats without a runtime. Wiki, math, and other targets implemented by shipped Lambda Script packages remain Lambda integration features; requesting them through standalone input reports that a script writer is required. Keep their successful integrated behavior and tests in Lambda. Do not introduce a second native writer or count those targets as standalone formatter coverage.
 

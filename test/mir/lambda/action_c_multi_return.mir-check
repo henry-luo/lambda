@@ -4,7 +4,7 @@
   "checks": [
     {
       "return_convention": 3,
-      "in_func": "_pending_item_#",
+      "in_func": "mvp_#_pending_item",
       "expect": ["ret\t"],
       "expect_any": [
         "func\ti64, i64, p:runtime, i64:%p1",
@@ -16,7 +16,7 @@
     },
     {
       "return_convention": 3,
-      "in_func": "_maybe_pending_#",
+      "in_func": "mvp_#_maybe_pending",
       "expect": [
         "lambda_item_resolve_pending"
       ]

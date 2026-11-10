@@ -3,19 +3,19 @@
   "description": "D4.3.3, D6.3.4, D7.3.1: borrow interval.",
   "checks": [
     {
-      "in_func": "_borrowed_#",
+      "in_func": "mvp_#_borrowed",
       "forbid": [
         "call\tcow_bind_var"
       ]
     },
     {
-      "in_func": "_snapshot_#",
+      "in_func": "mvp_#_snapshot",
       "expect": [
         "call\tcow_bind_var"
       ]
     },
     {
-      "in_func": "_escaped_child_#",
+      "in_func": "mvp_#_escaped_child",
       "expect": [
         "call\tcow_bind_var"
       ]

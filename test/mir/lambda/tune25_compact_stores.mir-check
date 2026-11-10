@@ -3,14 +3,14 @@
   "description": "D8.2.6, D4.3.3, D6.3.4, S7.1.3v2: loop demand and checked native mutation.",
   "checks": [
     {
-      "in_func": "_bytes_#",
+      "in_func": "mvp_#_bytes",
       "expect": [
         "mov\tu8:",
         "call\tlambda_array_set_checked_inplace"
       ]
     },
     {
-      "in_func": "_widths_#",
+      "in_func": "mvp_#_widths",
       "expect": [
         "mov\tu8:",
         "mov\tu16:",

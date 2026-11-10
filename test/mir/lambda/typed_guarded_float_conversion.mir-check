@@ -3,7 +3,7 @@
   "description": "D2.3.4\u2013D2.4.3/S7.7.2: guarded float conversion retains its boxed cold error path and a native successful tree.",
   "checks": [
     {
-      "in_func": "_typed_#",
+      "in_func": "mvp_#_typed",
       "expect": [
         "ddiv\t",
         "call\tfn_float_p, fn_float"
@@ -11,11 +11,11 @@
       "count": {"call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 1}
     },
     {
-      "in_func": "_mixed_decl_#",
+      "in_func": "mvp_#_mixed_decl",
       "expect": ["call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]
     },
     {
-      "in_func": "_scalar_conversion_#",
+      "in_func": "mvp_#_scalar_conversion",
       "expect": ["dsub\t"],
       "forbid": ["call\tfn_float_p, fn_float"]
     }

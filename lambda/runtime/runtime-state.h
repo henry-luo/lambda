@@ -5,9 +5,8 @@
 
 #include <stdint.h>
 
-// Active runtime process state. This declaration deliberately lives outside
-// frozen lambda.h so consumers of the native/MIR-direct runtime have a
-// provider-owned surface.
+// Active runtime process state lives in a runtime-owned interface. The shared
+// input value header does not own the evaluator or process state (D9.1.3v2).
 #ifdef __cplusplus
 struct EvalContext;
 struct Context;

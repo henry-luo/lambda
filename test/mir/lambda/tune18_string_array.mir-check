@@ -3,7 +3,7 @@
   "description": "Tune18 string[] indexing uses its certificate-guarded raw pointer lane, the shared physical element address, and preserves item_at as the representation-safe slow path.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "lsh\t{{r}}, {{r}}, 3",
         "mov\ti64:("

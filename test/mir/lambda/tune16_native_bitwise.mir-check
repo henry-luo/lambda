@@ -3,7 +3,7 @@
   "description": "Tune16 C2 keeps proved integer band, bor, and bxor operations on native MIR lanes.",
   "checks": [
     {
-      "in_func": "_tune16_native_bitwise_#",
+      "in_func": "mvp_#_tune16_native_bitwise",
       "expect": [
         "and\t{{r}}",
         "xor\t{{r}}",

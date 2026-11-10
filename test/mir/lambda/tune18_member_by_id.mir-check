@@ -3,7 +3,7 @@
   "description": "Tune18 E3 passes static member names as NameIds and preserves the generic fallback only outside the static map hop.",
   "checks": [
     {
-      "in_func": "_walk_chain18_#",
+      "in_func": "mvp_#_walk_chain18",
       "expect": [
         "call\tfn_member_by_id_p, fn_member_by_id"
       ],

@@ -1,3 +1,4 @@
+#include "../lambda.hpp"
 #include "lambda/io/mark_output_builder.hpp"
 #include "lambda/core/collection_storage.h"
 #include "lambda-error.h"

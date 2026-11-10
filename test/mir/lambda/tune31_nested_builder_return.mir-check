@@ -3,19 +3,19 @@
   "description": "D4.2.1-D4.3.1/S11.4.3: an indexed item from a certified outer builder retains the untyped consumer's error guard without repeating its identity admission; the raw consumer has no generic index helper.",
   "checks": [
     {
-      "in_func": "_sum_codes_#",
+      "in_func": "mvp_#_sum_codes",
       "forbid": [
         "call\tfn_index_p, fn_index"
       ]
     },
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect_seq": [
         "call\tfn_index_p, fn_index, {{r:raw}},",
         "mov\t{{r:item}}, {{r:raw}}",
         "ursh\t{{r:tag}}, {{r:item}}, 56",
         "eq\t{{r}}, {{r:tag}}, 27",
-        "call\t_sum_codes_"
+        "call\tmvp_{{n}}_sum_codes_dp"
       ],
       "forbid": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"

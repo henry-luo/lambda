@@ -3,7 +3,7 @@
   "description": "Tune15 B1.3 preserves the packed integer witness inferred from an unannotated fill(n, int) binding.",
   "checks": [
     {
-      "in_func": "_tune15_fill_witness_#",
+      "in_func": "mvp_#_tune15_fill_witness",
       "expect": [
         "call\tfn_fill_p, fn_fill",
         "lsh\t{{r}}, {{r}}, 3",

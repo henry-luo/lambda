@@ -3,22 +3,22 @@
   "description": "D4.3.3/S7.1.1v3: scalar fields of an admitted record-array element use the direct nullable receiver path, while a string field retains null-preserving generic access.",
   "checks": [
     {
-      "in_func": "_read_value_#",
+      "in_func": "mvp_#_read_value",
       "expect": ["mov\t{{r}}, i64:({{r}})"],
       "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
     },
     {
-      "in_func": "_read_flag_#",
+      "in_func": "mvp_#_read_flag",
       "expect": ["mov\t{{r}}, u8:8({{r}})"],
       "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
     },
     {
-      "in_func": "_read_nested_#",
+      "in_func": "mvp_#_read_nested",
       "expect": ["mov\t{{r}}, i64:({{r}})"],
       "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
     },
     {
-      "in_func": "_read_text_#",
+      "in_func": "mvp_#_read_text",
       "expect": ["call\tfn_member_by_id_p, fn_member_by_id"]
     }
   ]

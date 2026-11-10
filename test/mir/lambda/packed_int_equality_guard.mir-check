@@ -3,7 +3,7 @@
   "description": "S5.1.1–S5.1.2: packed finite int pairs use a guarded direct comparison, while other numeric representations keep fn_eq/fn_ne.",
   "checks": [
     {
-      "in_func": "_one_#",
+      "in_func": "mvp_#_one",
       "expect_seq": [
         { "pattern": "and\t{{r}}, %p1, -72057594037927936" },
         { "pattern": "bne\tL" },
@@ -12,7 +12,7 @@
       ]
     },
     {
-      "in_func": "_not_one_#",
+      "in_func": "mvp_#_not_one",
       "expect_seq": [
         { "pattern": "and\t{{r}}, %p1, -72057594037927936" },
         { "pattern": "bne\tL" },

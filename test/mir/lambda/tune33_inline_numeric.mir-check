@@ -3,27 +3,27 @@
   "description": "S4.1.2/S4.1.5: bounded recursive expansion keeps a real deeper call; nested leaves inline, and fallible sized declarations retain their checked boundary.",
   "checks": [
     {
-      "in_func": "_recursive_sum_#",
+      "in_func": "mvp_#_recursive_sum",
       "count": {
-        "call\t_recursive_sum_": 1
+        "call\tmvp_{{n}}_recursive_sum_dp": 1
       }
     },
     {
-      "in_func": "_nested_#",
+      "in_func": "mvp_#_nested",
       "forbid": [
-        "call\t_twice_"
+        "call\tmvp_{{n}}_twice_dp"
       ]
     },
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "lambda_type_check_lazy"
       ]
     },
     {
-      "in_func": "_tail_div_#",
+      "in_func": "mvp_#_tail_div",
       "forbid": [
-        "call\t_tail_div_"
+        "call\tmvp_{{n}}_tail_div_dp"
       ]
     }
   ]

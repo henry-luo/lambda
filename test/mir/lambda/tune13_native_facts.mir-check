@@ -3,7 +3,7 @@
   "description": "Tune13 audited abs/min result facts preserve the native int lane from indexed reads through typed locals and return. Typed-performance audit: abs keeps the integer lane and its poison/null sentinels directly (S7.10.5v3, D2.2.2).",
   "checks": [
     {
-      "in_func": "_tune13_native_fact_#",
+      "in_func": "mvp_#_tune13_native_fact",
       "expect": [
         "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
         "neg\t",

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "description": "S12.1.2v3/D6.2.1: recursive explicit-return functions use their proven native lane, while handler and fallthrough exits retain dynamic scalar ownership.",
   "checks": [
-    {"in_func": "_fib_#", "forbid": ["call\tlambda_item_resolve_pending", "call\tfn_add_p"]},
-    {"in_func": "_plain_#", "forbid": ["call\tlambda_item_resolve_pending", "call\tfn_add_p"]}
+    {"in_func": "mvp_#_fib", "forbid": ["call\tlambda_item_resolve_pending", "call\tfn_add_p"]},
+    {"in_func": "mvp_#_plain", "forbid": ["call\tlambda_item_resolve_pending", "call\tfn_add_p"]}
   ]
 }

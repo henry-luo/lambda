@@ -3,7 +3,7 @@
   "description": "T29-1 (D5.4.4): a record place spelled in several statements is navigated once -- one certificate check, one un-sharing slow arm -- and its later reads and writes go through the handle; replacing the container between spellings forces a second navigation.",
   "checks": [
     {
-      "in_func": "_step_#",
+      "in_func": "mvp_#_step",
       "count": {
         "and\t{{r}}, {{r}}, 1535": 1,
         "call\tcow_place_leaf_fixed": 1,
@@ -15,7 +15,7 @@
       ]
     },
     {
-      "in_func": "_reset_#",
+      "in_func": "mvp_#_reset",
       "count": {
         "and\t{{r}}, {{r}}, 1535": 2
       },

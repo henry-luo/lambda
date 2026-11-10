@@ -3,7 +3,7 @@
   "description": "Tune16 preserves subtraction in the dense native index emitter for dynamic typed-array loops.",
   "checks": [
     {
-      "in_func": "_tune16_dynamic_typed_array_loop_#",
+      "in_func": "mvp_#_tune16_dynamic_typed_array_loop",
       "expect": [
         "sub\t{{r}}"
       ]
