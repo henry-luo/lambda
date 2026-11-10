@@ -6201,8 +6201,10 @@
               "gtest_main"
             ],
             "parallel": false,
-            "case_workers": 5,
-            "case_batch_size": 50,
+            "case_workers": 2,
+            "case_worker_slots": 3,
+            "worker_slots": 6,
+            "case_batch_size": 150,
             "icon": "\ud83d\udc11"
           },
           {

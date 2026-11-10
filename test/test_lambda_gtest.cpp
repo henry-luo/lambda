@@ -207,6 +207,14 @@ TEST(ChartAnimationTests, PaintFallbackDoesNotRaiseAcrossTiers) {
     }
 }
 
+TEST(NativeFontTests, CachedMathFactsKeepIndependentValuesAcrossTiers) {
+    for (const char* tier : {"interp", "auto", "jit"}) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/proc/math_metrics_cache.ls",
+            "test/lambda/proc/math_metrics_cache.txt", true, tier);
+    }
+}
+
 TEST(DocBookTests, PinnedXslTngBodiesAgree) {
     const char* modes[] = {NULL, "--chunked"};
     for (const char* mode : modes) {

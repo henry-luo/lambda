@@ -869,6 +869,10 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
         pass->mir_instruction_count, pass->mir_largest_function_instruction_count,
         document_context || g_js_force_document_interp, opt_level,
         lambda_mir_lazy_enabled());
+    // eager imports generate every body, including cold exports. Bound their
+    // aggregate O2 work as well as the largest individual function.
+    selection.optimize_level = mir_native_optimize_level(
+        pass->mir_instruction_count, selection.optimize_level, MIR_EAGER_MODULE_O1_THRESHOLD);
     if (!use_interp && !pass->tp->requires_native_mir_exports &&
             selection.interface_kind == MIR_LINK_INTERP) {
         use_interp = true;
@@ -877,7 +881,7 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
             document_context ? " [document]" : "");
     }
     if (!use_interp && selection.optimize_level != opt_level) {
-        log_info("lambda-mir: policy selected opt=%u for large function (was %u)",
+        log_info("lambda-mir: policy selected opt=%u for large module (was %u)",
             selection.optimize_level, opt_level);
         MIR_gen_set_optimize_level(pass->ctx, selection.optimize_level);
     }

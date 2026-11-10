@@ -17,6 +17,7 @@
 #define MIR_RADIANT_AST_NODE_THRESHOLD 25000U
 #define MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT 15000U
 #define MIR_LARGE_FUNCTION_O1_THRESHOLD 20000ULL
+#define MIR_EAGER_MODULE_O1_THRESHOLD 5000ULL
 
 static inline bool mir_large_interp_enabled(void);
 
@@ -33,8 +34,9 @@ typedef struct MirLinkSelection {
 
 // oversized native bodies keep native execution without paying for O2's global passes.
 static inline unsigned int mir_native_optimize_level(
-        uint64_t largest_function_insns, unsigned int optimize_level) {
-    return largest_function_insns > MIR_LARGE_FUNCTION_O1_THRESHOLD && optimize_level > 1
+        uint64_t instruction_count, unsigned int optimize_level,
+        uint64_t budget = MIR_LARGE_FUNCTION_O1_THRESHOLD) {
+    return instruction_count > budget && optimize_level > 1
         ? 1 : optimize_level;
 }
 
