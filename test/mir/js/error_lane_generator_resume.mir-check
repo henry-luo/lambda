@@ -1,15 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D6.4, D9.5.2, D7.4.3: the formal generator uses Lambda Activation parking and observes its suspension-failure lane once.",
+  "description": "D6.1.1, D7.4.3: a simple-parameter generator without yield starts lazily and needs no synthetic suspension or suspension-failure lane.",
   "checks": [
     {
       "in_func": "mvp_lmd_f17",
-      "expect": [
-        "call\tmvp_lmd_generator_park"
-      ],
       "count": {
-        "call\tmvp_lmd_generator_park": 1,
-        "{{r}}, 27": 1
+        "call\tmvp_lmd_generator_park": 0,
+        "{{r}}, 27": 0
       },
       "forbid": [
         "js_gen_park"

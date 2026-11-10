@@ -1,7 +1,10 @@
 # LambdaJS jq performance analysis for Result55
 
-**Date:** 2026-11-10. **Status:** investigation complete; improvements proposed,
-not implemented. **Authority:** D6.1.1–D6.1.4, D6.3.3, D6.3.6, D7.4.1,
+Implementation follow-up: [jq optimization and AUTO generator promotion](<../impl/JS_MVP_Lmd_Jq_Optimization (done).md>).
+
+**Date:** 2026-11-10. **Status:** investigation complete; implementation and
+qualification are tracked in the follow-up above. The measurements and source
+descriptions below describe the original control. **Authority:** D6.1.1–D6.1.4, D6.3.3, D6.3.6, D7.4.1,
 D8.4.2, D8.4.4–D8.4.5. This report changes no ruling.
 
 ## Finding

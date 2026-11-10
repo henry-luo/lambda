@@ -416,6 +416,9 @@ The MIR tier is unchanged (111 MB and 52 MB for the two parked cases). A parked 
 - One generator yielding 1M times takes 1260 ms, against 1681 ms.
 - 20,000 awaits take about 160 ms, against 172 ms.
 
+The following measurements and three mechanisms describe the 2026-10-04
+implementation. The current parked-page policy is RA13v2 below.
+
 What took the footprint down:
 1. **Cold-park compaction (RA13).** A thread keeps its 16 most recently parked activations warm. Past that, the oldest is copied out — its native stack from the saved stack pointer up, plus both segments' used words, typically 2–3 KB — provided the total is at most 16 KB. Its pages are then discarded (`MADV_FREE_REUSABLE` on macOS), but the address range stays reserved. A resume copies the image back to the same addresses, so interior pointers stay valid. While compacted, collections mark the activation's roots from the image, and destroying it restores the image first so its recovery chain can be walked. An activation that is too large to compact keeps its pages, and a tight await loop never leaves the warm window, so it pays nothing.
 2. **Smaller, single reservations (RA14).** Each activation is one mapping: a 2 MB stack, then its 512 KB root segment and 512 KB number segment. The earlier 8 MB + 4 MB + 4 MB in three mappings gave every activation its own page-table pages; on arm64 with 16 KB pages one page-table page covers 32 MB. That cost about 7 KB per parked activation even after compaction. A 1 MB stack measured only 7 MB less per 10,000 parked activations, so 2 MB is kept for recursion headroom (RA-O5).
@@ -527,9 +530,30 @@ Unchanged and relied on: D6.1.3, D6.3.2, D7.2.2, D7.5.1, S7.11, S13.1–S13.2, K
 | RA10 | Suspending under a native barrier, or with no activation, is a reported fault | ratified, implemented (P0, barrier P6) |
 | RA11 | Tier selection reads hit counters only, never function colour | ratified, implemented (P1, P4) |
 | RA12 | AI11 retired: T0 executes suspending definitions | implemented (P1) |
-| RA13 | Cold-park compaction: beyond a warm window of 16 parked activations per thread, the oldest is copied out (if its used extent is ≤ 16 KB) and its pages discarded; resume restores it in place | ruled (user, 2026-10-04); implemented |
+| RA13v2 | D6.1.1v2: a resident-byte budget replaces per-suspension count eviction; pressure and collections batch image compaction, resume restores in place, and abandoned recovery chains can be read from the image | user-authorized 2026-11-10; implementation and qualification in the jq optimization plan |
 | RA14 | One mapping per activation: 2 MB stack + 512 KB root + 512 KB number segments | implemented; size is RA-O5 |
 | RA15 | The GC root visitor walks the resume chain and strong activations only | implemented |
+
+### RA13v2 — Resident-page budgeting (2026-11-11)
+
+**D6.1.1v2, D6.3.3, D6.3.6; user authorized the jq optimization proposals.**
+The 16-activation count rule repeatedly discarded and restored live jqjs
+delegation chains. The current policy accounts for page-rounded used native,
+root and number regions. Its per-thread budget equals the ordinary native
+stack budget (currently 32 MiB). Crossing it compacts oldest eligible parked
+activations until half the budget remains. Collections also trim toward that
+half-budget target. Large activations still retain their pages when the used
+image exceeds 16 KiB; this policy does not reduce their stack limit.
+
+The image retains exact roots and original stack addresses. Abandonment walks
+only the linked recovery-frame records, translating native record addresses
+through the saved image and releasing heap-owned records directly. It does
+not scan native bytes for roots or restore pages that will never run again.
+A pooled mapping discarded this way is reclaimed before reuse. The existing
+32-mapping idle pool and its collection-time trimming remain separate policy.
+
+Evidence and verification status:
+[LambdaJS jq optimization](<impl/JS_MVP_Lmd_Jq_Optimization (done).md>).
 
 ## 13. Open items
 

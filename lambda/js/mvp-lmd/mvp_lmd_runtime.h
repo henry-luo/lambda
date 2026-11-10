@@ -21,6 +21,7 @@ struct MvpLmdWeakFamily { const char* name; int prototype_owner; };
 extern const MvpLmdWeakFamily mvp_lmd_weak_families[4];
 extern const JsCollectionStorageOps mvp_lmd_collection_storage_ops;
 struct AstClassNode;
+struct AstFuncNode;
 struct JsTemplateLiteralNode;
 struct JsTemplateObjectOps;
 struct MvpLmdHost;
@@ -300,7 +301,8 @@ Item mvp_lmd_arguments_cell(Item owner, String* key, bool detach = false);
 Item mvp_lmd_function_bound(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments,
     uint64_t count, int skip = 0, MvpLmdNativeEntry entry = nullptr,
-    Item target = Item{.item = ITEM_JS_UNDEFINED}, MvpLmdProgram* import_program = nullptr);
+    Item target = Item{.item = ITEM_JS_UNDEFINED}, MvpLmdProgram* import_program = nullptr,
+    MvpLmdProgram* entry_program = nullptr);
 MvpLmdProgram* mvp_lmd_program_realm(MvpLmdProgram* program);
 MvpLmdProgram* mvp_lmd_program_for_global(MvpLmdProgram* program, Item global);
 uint32_t mvp_lmd_program_realm_key(MvpLmdProgram* program);
@@ -436,6 +438,9 @@ Item mvp_lmd_to_primitive(Item value, int64_t hint, int64_t library_objects = 1)
 Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item error);
 Item mvp_lmd_generator_park(Item value, int64_t kind);
 Item mvp_lmd_generator_delegate(MvpLmdProgram* program, Item value);
+Item mvp_lmd_generator_call_source(MvpLmdProgram* program, Item implementation,
+    Item source, Item receiver, Item* arguments, uint64_t count);
+bool mvp_lmd_generator_lazy_parameters(const AstFuncNode* definition);
 Item mvp_lmd_iterator_get(MvpLmdProgram* program, Item source);
 Item mvp_lmd_iterator_method(MvpLmdProgram* program, Item source);
 Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item source,
@@ -443,7 +448,7 @@ Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item source,
 Item mvp_lmd_iterator_get_with_method(MvpLmdProgram* program, Item source, Item method);
 Item mvp_lmd_iterator_step(Item record, Item value, int64_t count);
 Item mvp_lmd_iterator_step_value(Item record);
-Item mvp_lmd_iterator_step_read_value(Item record, bool read_value);
+extern "C" Item mvp_lmd_iterator_step_read_value(Item record, int64_t read_value);
 Item mvp_lmd_iterator_close(Item record, Item completion);
 Item mvp_lmd_iterator_close_mode(Item record, Item completion, int64_t asynchronous);
 Item mvp_lmd_iterator_collect(MvpLmdProgram* program, Item target, Item source, Item mapper, Item receiver);

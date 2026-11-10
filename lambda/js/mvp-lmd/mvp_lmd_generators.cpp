@@ -17,6 +17,8 @@ const char* const mvp_lmd_iterator_names[LMD_ITERATOR_COUNT] = {"Map Iterator", 
 
 static Item sequence_next(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 static Item sequence_next_value(MvpLmdProgram*, Item, Item, bool*);
+static Item generator_resume(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
+static Item generator_resume_impl(MvpLmdProgram*, Item, Item, int, bool, bool = true);
 
 static bool iterator_object(Item value) {
     return mvp_lmd_is_object(value);
@@ -75,11 +77,37 @@ extern "C" Item mvp_lmd_iterator_step(Item record, Item value, int64_t count) {
 extern "C" Item mvp_lmd_iterator_step_value(Item record) {
     return mvp_lmd_iterator_step_read_value(record, true);
 }
-Item mvp_lmd_iterator_step_read_value(Item record, bool read_value) {
+extern "C" Item mvp_lmd_iterator_step_read_value(Item record, int64_t read_value) {
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, record), result(roots, ItemNull);
     Item next = held.get().array->items[1];
+    Item receiver = held.get().array->items[0];
+    if (get_type_id(receiver) == LMD_TYPE_MAP && receiver.map->map_kind == MAP_KIND_GENERATOR) {
+        auto* state = &((JsGeneratorMapCarrier*)receiver.map)->state;
+        Item implementation = js_generator_implementation(state);
+        bool intrinsic = false;
+        MvpLmdProgram* program = NULL;
+        if (!state->is_async && !state->ast_host && state->runtime_context == context &&
+                get_type_id(implementation) == LMD_TYPE_FUNC &&
+                function_has_abi(implementation.function, FN_ENTRY_ABI_MVP_LMD) && get_type_id(next) == LMD_TYPE_FUNC) {
+            program = ((MvpLmdCallable*)implementation.function)->program;
+            if (function_has_abi(next.function, FN_ENTRY_ABI_MVP_LMD) && next.function->ptr == (fn_ptr)generator_resume) {
+                intrinsic = next.function->requires_runtime_context && next.function->runtime_context == context &&
+                    ((MvpLmdNativeCallable*)next.function)->state == NULL;
+                // a borrowed intrinsic owns validation errors in its callable's
+                // realm, exactly as the shared invoke kernel does (D8.4.4).
+                if (intrinsic) program = ((MvpLmdCallable*)next.function)->program;
+            }
+            else if (function_has_abi(next.function, FN_ENTRY_ABI_JS_FUNCTION))
+                intrinsic = next.item == js_intrinsic_binding_get(JS_BUILTIN_OWNER_GENERATOR_INTERNAL, "next", 4).item;
+        }
+        if (intrinsic) {
+            MvpLmdRealmScope realm(program);
+            return realm.complete(generator_resume_impl(program, receiver,
+                Item{.item = ITEM_JS_UNDEFINED}, 0, false, read_value != 0));
+        }
+    }
     if (get_type_id(next) == LMD_TYPE_FUNC && function_has_abi(next.function, FN_ENTRY_ABI_MVP_LMD) &&
             next.function->requires_runtime_context && next.function->runtime_context == context &&
             next.function->ptr == (fn_ptr)sequence_next) {
@@ -188,6 +216,8 @@ extern "C" Item mvp_lmd_iterator_collect_with_method(MvpLmdProgram* program, Ite
 }
 
 Item mvp_lmd_iterator_result(MvpLmdProgram* program, Item value, bool done) {
+    Item prepared = js_try_make_iter_result(mvp_lmd_program_library(program)->object_shape, value, done);
+    if (prepared.item != ITEM_NULL) return prepared;
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
     uint64_t home = 0;
@@ -324,29 +354,33 @@ static Item sequence_next(Context*, MvpLmdProgram* program, Item*, uint64_t, Ite
 }
 static Item generator_body(Activation*, Item object) {
     JsGeneratorStateRecord* state = &((JsGeneratorMapCarrier*)object.map)->state;
-    MvpLmdNativeCallable* callable = (MvpLmdNativeCallable*)state->ast_function.function;
+    MvpLmdNativeCallable* callable = (MvpLmdNativeCallable*)js_generator_implementation(state).function;
     auto run = [&]() {
         return mvp_lmd_function_forward(state->ast_function, state->ast_this, state->ast_arguments,
-            NULL, 0, 0, (MvpLmdNativeEntry)callable->state);
+            NULL, 0, 0, (MvpLmdNativeEntry)callable->state,
+            Item{.item = ITEM_JS_UNDEFINED}, nullptr, callable->program);
     };
     if (!js_active_runtime_state) return run();
     // Promise/bridge callbacks can be the first resumer; their native call chain is temporary.
     JsOwnedCallActivation call_facts;
     return run();
 }
-Item mvp_lmd_generator_resume(MvpLmdProgram* program, Item receiver, Item value, int operation) {
+static Item generator_resume_impl(MvpLmdProgram* program, Item receiver, Item value, int operation,
+        bool materialize, bool read_value) {
     if (get_type_id(receiver) != LMD_TYPE_MAP || receiver.map->map_kind != MAP_KIND_GENERATOR)
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     JsGeneratorStateRecord* state = &((JsGeneratorMapCarrier*)receiver.map)->state;
     if (state->is_async || state->runtime_context != context || state->executing)
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    if (state->ast_host || get_type_id(state->ast_function) != LMD_TYPE_FUNC ||
-            !function_has_abi(state->ast_function.function, FN_ENTRY_ABI_MVP_LMD))
+    Item implementation = js_generator_implementation(state);
+    if (state->ast_host || get_type_id(implementation) != LMD_TYPE_FUNC ||
+            !function_has_abi(implementation.function, FN_ENTRY_ABI_MVP_LMD))
         return operation == 1 ? js_generator_return(receiver, value)
         : operation == 2 ? js_generator_throw(receiver, value) : js_generator_next(receiver, value);
     if (!state->started && operation) {
         state->done = true; activation_destroy(state->activation); state->activation = NULL;
     }
+    if (state->done && !materialize) return Item{.item = JS_ITER_DONE_SENTINEL};
     if (state->done) return operation == 2 ? mvp_lmd_throw(value, 0) :
         mvp_lmd_iterator_result(program, operation == 1 ? value : Item{.item = ITEM_JS_UNDEFINED}, true);
     RootFrame roots(2);
@@ -354,13 +388,29 @@ Item mvp_lmd_generator_resume(MvpLmdProgram* program, Item receiver, Item value,
     Rooted<Item> held(roots, receiver), result(roots, ItemNull);
     uint64_t result_home = 0;
     state->started = state->executing = true; state->state = operation;
+    if (!state->activation) state->activation = activation_create(generator_body, held.get(), false, state);
+    if (!state->activation) { state->executing = false; return mvp_lmd_fail(LMD_MVP_MEMORY, 0); }
     ActivationStatus status = activation_resume(state->activation, value);
     result.set(lambda_item_adopt_scalar_home(activation_value(state->activation), &result_home)); state->executing = false;
     state->done = status == ACTIVATION_DONE;
     bool delegated_result = state->delegate.item && state->delegate.item != ITEM_NULL;
     if (activation_fault(state->activation)) result.set(mvp_lmd_fail(LMD_MVP_RANGE, 0));
     if (state->done) { activation_destroy(state->activation); state->activation = NULL; }
+    if (!materialize && !item_is_error(result.get())) {
+        if (state->done) return Item{.item = JS_ITER_DONE_SENTINEL};
+        // a delegated custom result still owns observable done/value getters.
+        if (delegated_result) {
+            Item done = iterator_property(result.get(), "done");
+            if (item_is_error(done)) return done;
+            if (mvp_lmd_truthy(done)) return Item{.item = JS_ITER_DONE_SENTINEL};
+            if (read_value) result.set(iterator_property(result.get(), "value"));
+        }
+        return read_value ? js_retain_scalar(result.get()) : Item{.item = ITEM_JS_UNDEFINED};
+    }
     return item_is_error(result.get()) || delegated_result ? result.get() : mvp_lmd_iterator_result(program, result.get(), state->done);
+}
+Item mvp_lmd_generator_resume(MvpLmdProgram* program, Item receiver, Item value, int operation) {
+    return generator_resume_impl(program, receiver, value, operation, true);
 }
 static Item generator_resume(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
         Item self, Item receiver, Item) {
@@ -395,9 +445,18 @@ Item mvp_lmd_generator_create_ast(MvpLmdProgram* program, Item internal, Item wr
 Item mvp_lmd_generator_call(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
         Item self, Item receiver, Item target) {
     if (target.item != ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    RootFrame roots(4);
+    return mvp_lmd_generator_call_source(program, self, self, receiver, args, count);
+}
+bool mvp_lmd_generator_lazy_parameters(const AstFuncNode* definition) {
+    return definition && !definition->is_async &&
+        !js_ast_collect_parameter_facts(definition->params).has_non_simple_params;
+}
+Item mvp_lmd_generator_call_source(MvpLmdProgram* program, Item implementation,
+        Item source, Item receiver, Item* args, uint64_t count) {
+    RootFrame roots(5);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> function(roots, self), object(roots, ItemNull), owner(roots, receiver), arguments(roots, mvp_lmd_array_new(0));
+    Rooted<Item> function(roots, implementation), callee(roots, source), object(roots, ItemNull), owner(roots, receiver),
+        arguments(roots, mvp_lmd_array_new(count));
     if (item_is_error(arguments.get())) return arguments.get();
     for (uint64_t i = 0; i < count; i++) {
         Item stored = mvp_lmd_array_store(arguments.get(), i, args[i]);
@@ -432,24 +491,29 @@ Item mvp_lmd_generator_call(Context*, MvpLmdProgram* program, Item* args, uint64
     carrier->base.type = &cls->shape; object.set(Item{.map = &carrier->base});
     JsGeneratorStateRecord* state = &carrier->state;
     durable_activation_init(state, LMD_TYPE_MAP, DURABLE_ACTIVATION_JS_GENERATOR);
-    state->runtime_context = context; state->ast_function = function.get();
-    state->ast_arguments = arguments.get(); state->ast_this = owner.get();
-    state->activation = activation_create(generator_body, object.get(), false, state);
-    if (!state->activation) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    // Parameter initialization runs at call time; the MIR prologue parks before the body.
-    state->executing = true;
-    ActivationStatus status = activation_resume(state->activation, Item{.item = ITEM_JS_UNDEFINED});
-    state->executing = false;
-    if (status != ACTIVATION_SUSPENDED) {
-        Item result = activation_value(state->activation);
-        if (activation_fault(state->activation)) result = mvp_lmd_fail(LMD_MVP_RANGE, 0);
-        state->done = true; activation_destroy(state->activation); state->activation = NULL;
-        return item_is_error(result) ? result : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    state->runtime_context = context; state->ast_function = callee.get();
+    state->implementation = function.get();
+    state->ast_arguments = arguments.get();
+    owned_item_slot_store(&state->ast_this, 1, 0, owner.get());
+    // simple bindings have no call-time effects; their private argument snapshot
+    // is enough until first next(). Defaults/patterns retain eager initialization.
+    if (!mvp_lmd_generator_lazy_parameters(definition)) {
+        state->activation = activation_create(generator_body, object.get(), false, state);
+        if (!state->activation) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        state->executing = true;
+        ActivationStatus status = activation_resume(state->activation, Item{.item = ITEM_JS_UNDEFINED});
+        state->executing = false;
+        if (status != ACTIVATION_SUSPENDED) {
+            Item result = activation_value(state->activation);
+            if (activation_fault(state->activation)) result = mvp_lmd_fail(LMD_MVP_RANGE, 0);
+            state->done = true; activation_destroy(state->activation); state->activation = NULL;
+            return item_is_error(result) ? result : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        }
     }
     MvpLmdLibraryState* library = mvp_lmd_program_library(program);
-    if (library->mutable_prototypes || library->generator_function_values) {
+    if (callee.get().item != function.get().item || library->mutable_prototypes || library->generator_function_values) {
         // parameter defaults run before this live lookup, just as on the async generator path.
-        owner.set(iterator_property(function.get(), "prototype"));
+        owner.set(iterator_property(callee.get(), "prototype"));
         if (item_is_error(owner.get())) return owner.get();
         if (!iterator_object(owner.get())) owner.set(library->values[LMD_LIBRARY_GENERATOR_PROTOTYPE]);
         Item linked = mvp_lmd_set_prototype(object.get(), owner.get());
@@ -510,7 +574,7 @@ extern "C" Item mvp_lmd_generator_park(Item value, int64_t kind) {
     if (!activation || !activation_user(activation)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     if (kind == 2) {
         auto* state = (JsGeneratorStateRecord*)activation_user(activation);
-        return mvp_lmd_generator_delegate(((MvpLmdCallable*)state->ast_function.function)->program, value);
+        return mvp_lmd_generator_delegate(((MvpLmdCallable*)js_generator_implementation(state).function)->program, value);
     }
     return activation_suspend(value);
 }

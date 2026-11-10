@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 65.1.0 (2026-11-10)
+**Spec version:** 66.0.0 (2026-11-11)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -869,13 +869,14 @@ reflected and matched (S10.1, S11).*
 
 ### D6.1 Stacks
 
-- **D6.1.1 — Three stack mechanisms have different owners.** The native C
+- **D6.1.1v2 — Three stack mechanisms have different owners.** The native C
   stack is invisible to the GC. Two watermarked side stacks hold values: the
   root stack, which the collector scans precisely, and the number stack,
   which it never scans. Activation stacks run suspendable bodies: a Lambda
   task, or a JS generator, async function or module body. Each one runs on its
   own native stack with its own root and number segments, and it parks in
-  place.
+  place. Parked-page reclamation uses a resident-byte budget. Memory pressure
+  and collections batch reclamation; suspension alone does not evict by count.
   A parked activation contributes only its root segment, traced through its
   owner. LIFO lifetimes use the side stacks. Non-LIFO lifetimes own their
   scalars in tail regions of their own allocation. No tier transforms a
