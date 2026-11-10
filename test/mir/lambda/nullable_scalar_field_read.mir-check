@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.2.5/S7.1.1v3: admitted native field lanes retain nullable receiver branches and one checked named-field fallback per read, including optional and unaligned slots.",
+  "description": "D4.2.5/S7.1.1v3: nullable receivers retain their checked member arm; non-null admitted receivers load optional or unaligned field storage directly.",
   "checks": [
     {
       "in_func": "mvp_#_read_flag",
@@ -25,19 +25,19 @@
     {
       "in_func": "mvp_#_read_optional_flag",
       "expect": [
-        "call\t{{p}}, fn_member,"
+        "mov\t{{r}}, u8:({{r}})"
       ],
       "count": {
-        "call\t{{p}}, fn_member,": 1
+        "call\t{{p}}, fn_member,": 0
       }
     },
     {
       "in_func": "mvp_#_read_skewed_score",
       "expect": [
-        "call\t{{p}}, fn_member,"
+        "dmov\t{{r}}, d:1({{r}})"
       ],
       "count": {
-        "call\t{{p}}, fn_member,": 1
+        "call\t{{p}}, fn_member,": 0
       }
     }
   ]

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3/S9.2.2: a homogeneous append builder should retain primitive construction and checked typed append kernels, with native consumption. MVP still misses this inferred-builder optimization.",
+  "description": "D4.3.1/D4.3.3/S9.2.2: exact homogeneous appends use private packed construction and checked append, without adding a source annotation. Native consumer reads jump over their generic miss kernel; unknown and absent inputs retain that kernel.",
   "checks": [
     {
       "in_func": "mvp_#_build_codes",
@@ -14,8 +14,37 @@
     },
     {
       "in_func": "mvp_#_sum_codes",
+      "expect_seq": [
+        "mov\t{{r}}, i64:({{r}})",
+        "jmp\t{{l:read_done}}",
+        "call\t{{p}}, fn_index,",
+        "{{l:read_done}}:",
+        "add\t{{r}}, {{r}}, {{r}}"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": 1
+      }
+    },
+    {
+      "in_func": "mvp_#_nullable_codes",
+      "expect": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, pn_push_cow,"
+      ],
       "forbid": [
-        "call\t{{p}}, fn_index,"
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "call\t{{p}}, lambda_array_push_checked,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_mixed_codes",
+      "expect": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, pn_push_cow,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "call\t{{p}}, lambda_array_push_checked,"
       ]
     }
   ]

@@ -1,14 +1,33 @@
 {
   "schema_version": 1,
-  "description": "S7.1.1v3, D2.4.3: the short-circuit length relation removes the repeated index bounds branch; counter-domain checks stay for very large arrays and a negative start stays checked.",
+  "description": "S7.1.1v3/D2.4.3: dominating length tests remove repeated bounds checks. Each MVP guarded/checked body retains one check for the other unconstrained array; negative starts remain checked.",
   "checks": [
     {
       "in_func": "mvp_#_prefix_count",
-      "forbid": ["ubge"]
+      "forbid": [
+        "ubge"
+      ]
     },
     {
       "in_func": "mvp_#_pair_prefix_count",
-      "count": {"ubge": 1}
+      "count": {
+        "ubge": 2
+      }
+    },
+    {
+      "in_func": "mvp_#_pair_prefix_count",
+      "in_range": {
+        "from": "ubge",
+        "to": "ubge"
+      },
+      "expect": [
+        "mov\t{{r}}, i64:32({{r}})",
+        "mov\t{{r}}, i64:({{r}})"
+      ],
+      "count": {
+        "ubge": 1,
+        "i64:32(": 2
+      }
     }
   ]
 }

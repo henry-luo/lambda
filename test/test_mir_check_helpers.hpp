@@ -1103,6 +1103,7 @@ inline bool select_scope(const MirDump& dump, const CheckGroup& group,
 
 // `{{n}}` matches a decimal compiler ID; `{{p}}` matches one MIR prototype
 // operand. The callee remains explicit, independent of ABI signature suffixes.
+// `{{l:name}}` binds a control-flow label so a backedge must name its header.
 // Register tokens: `{{r}}` matches any generated register; `{{r:name}}`
 // binds `name` to the register on first use within one expect_seq and must
 // match the same register afterwards; `{{r!name}}` must be a register other
@@ -1115,6 +1116,7 @@ typedef std::map<std::string, std::string> RegisterCaptures;
 inline bool line_contains(const std::string& line, const std::string& pattern,
         RegisterCaptures* captures = NULL) {
     if (pattern.find("{{r") == std::string::npos &&
+            pattern.find("{{l") == std::string::npos &&
             pattern.find("{{n}}") == std::string::npos &&
             pattern.find("{{p}}") == std::string::npos) {
         return line.find(pattern) != std::string::npos;
@@ -1150,28 +1152,36 @@ inline bool line_contains(const std::string& line, const std::string& pattern,
                 pattern_index += 5;
                 continue;
             }
-            if (pattern.compare(pattern_index, 3, "{{r") == 0) {
+            bool label = pattern.compare(pattern_index, 3, "{{l") == 0;
+            if (label || pattern.compare(pattern_index, 3, "{{r") == 0) {
                 size_t close = pattern.find("}}", pattern_index);
                 if (close == std::string::npos) { matched = false; break; }
                 std::string token = pattern.substr(pattern_index + 3, close - pattern_index - 3);
-                if (line_index + 2 > line.size() || line[line_index] != '%' ||
-                        line[line_index + 1] != 'r') {
+                if (label ? line_index >= line.size() || line[line_index] != 'L' :
+                        line_index + 2 > line.size() || line[line_index] != '%' || line[line_index + 1] != 'r') {
                     matched = false;
                     break;
                 }
-                line_index += 2;
+                line_index += label ? 1 : 2;
                 size_t hex_start = line_index;
                 while (line_index < line.size() &&
                         ((line[line_index] >= '0' && line[line_index] <= '9') ||
-                         (line[line_index] >= 'a' && line[line_index] <= 'f'))) {
+                         (!label && line[line_index] >= 'a' && line[line_index] <= 'f'))) {
                     line_index++;
                 }
                 if (line_index == hex_start) {
                     matched = false;
                     break;
                 }
+                if (label && line_index < line.size() &&
+                        ((line[line_index] >= 'a' && line[line_index] <= 'z') ||
+                         (line[line_index] >= 'A' && line[line_index] <= 'Z') || line[line_index] == '_')) {
+                    matched = false;
+                    break;
+                }
                 if (captures && !token.empty()) {
                     std::string reg = line.substr(hex_start, line_index - hex_start);
+                    if (label) reg.insert(0, "L");
                     std::string name = token.substr(1);
                     RegisterCaptures::iterator bound = attempt.find(name);
                     if (token[0] == ':') {

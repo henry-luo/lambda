@@ -11,8 +11,8 @@
         "lt\t{{r}}, {{r}}, 0"
       ],
       "expect": [
-        "add\t{{r}}, {{r}}, 24",
-        "dmov\t{{r}}, d:24({{r}})"
+        "dmov\td:({{r}}), {{r}}",
+        "dmov\t{{r}}, d:({{r}})"
       ]
     },
     {
@@ -25,8 +25,8 @@
     {
       "in_func": "mvp_#_resized",
       "expect": [
-        "call\tlambda_array_set_checked_item",
-        "ge\t{{r}}, {{r}}, {{r}}"
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "ubge\t"
       ]
     }
   ]

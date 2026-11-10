@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3/S9.1.2: MVP guards packed integer and byte writes and keeps one canonical cold setter per source store.",
+  "description": "D4.3.3/S9.1.2: MVP guards packed integer and byte writes and keeps one canonical cold setter per source store. D8.2.6: three proven local stores omit cold setters; rejected/snapshot writes retain the other three.",
   "checks": [
     {
       "in_func": "mvp_#_tune17_typed_store",
@@ -11,7 +11,7 @@
         "call\t{{p}}, lambda_report_boundary_failure,"
       ],
       "count": {
-        "call\t{{p}}, lambda_array_set_checked_item,": 6
+        "call\t{{p}}, lambda_array_set_checked_item,": 3
       }
     }
   ]

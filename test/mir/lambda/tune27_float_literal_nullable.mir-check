@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3/S7.1.3v2: a nullable float literal should keep a packed non-null arm with native stores and a generic nullable fallback. MVP currently misses the packed arm; retain this optimization requirement with current helpers.",
+  "description": "D4.3.3/S7.1.3v2: nullable primitive members are staged once; present floats use packed storage and native stores, null uses generic storage, and mixed literals remain generic.",
   "checks": [
     {
       "in_func": "mvp_#_tune27_float_literal_nullable",
       "expect_seq": [
         {
-          "pattern": "call\t{{p}}, lambda_fill_primitive_bits,"
+          "pattern": "call\t{{p}}, array_num_new,"
         },
         {
           "pattern": "dmov\td:8({{r}})"

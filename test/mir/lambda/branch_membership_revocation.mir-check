@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "S11.4.10/D4.2.5: structural membership retains native/checked layout dispatch without readmission for a required int field; an arm that mutates the receiver retains its later admission.",
+  "checks": [
+    {
+      "in_func": "mvp_#_observed",
+      "forbid": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ],
+      "expect": [
+        "call\t{{p}}, fn_member_by_id,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_revoked",
+      "expect": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_union_value",
+      "expect": [
+        "call\t{{p}}, fn_member_by_id,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_item_to_int_lane_c,"
+      ]
+    }
+  ]
+}

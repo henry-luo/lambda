@@ -285,6 +285,13 @@ substring wildcard. Matcher units include rejected names, missing IDs and
 changed arguments. `LAMBDA_TEST_EXE` selects a private engine for all shared
 MIR harnesses; it does not replace the shared executable.
 
+D8.6.1 control-flow witnesses also support `{{l}}`, `{{l:name}}` and
+`{{l!name}}` for decimal MIR labels. Named captures require the same label
+at a loop backedge or a cold-path join, independent of register and label
+renumbering. Invalid mixed hexadecimal label spellings are rejected. Scoped
+contracts retain MVP's checked sibling while asserting native fast-path
+dataflow; a whole-function helper count must include every emitted version.
+
 ### MT2 — promote dumps to env-opt-in in all builds. *(DECIDED)*
 
 Establish one explicit artifact contract, available in debug and release:

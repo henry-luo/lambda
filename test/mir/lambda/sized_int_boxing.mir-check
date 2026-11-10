@@ -1,19 +1,24 @@
 {
   "schema_version": 1,
-  "description": "D6.2.1/D7.4.2: signed/unsigned extreme constants use the audited boxers and owned binding homes. No dynamic type validation is needed for literal storage.",
+  "description": "D6.2.1/D7.4.2: wide literals stay in raw words until array publication, then store their full bits in destination-owned scalar homes. No runtime boxer or validation round trip is needed.",
   "checks": [
     {
       "in_func": "main",
-      "expect": [
-        "call\tbox_int64_value_p",
-        "call\tbox_uint64_value_p",
-        "call\t{{p}}, lambda_item_adopt_scalar_home,"
+      "expect_seq": [
+        "mov\ti64:({{r:signed_home}}), {{r}}",
+        "or\t{{r:signed}}, {{r:signed_home}}, 432345564227567616",
+        "call\t{{p}}, array_push, {{r}}, {{r:signed}}",
+        "mov\ti64:({{r:unsigned_home}}), {{r}}",
+        "or\t{{r:unsigned}}, {{r:unsigned_home}}, 504403158265495552",
+        "call\t{{p}}, array_push, {{r}}, {{r:unsigned}}"
       ],
       "count": {
-        "call\t{{p}}, box_int64_value,": 1,
-        "call\t{{p}}, box_uint64_value,": 1
+        "or\t{{r}}, {{r}}, 432345564227567616": 1,
+        "or\t{{r}}, {{r}}, 504403158265495552": 1
       },
       "forbid": [
+        "call\t{{p}}, box_int64_value,",
+        "call\t{{p}}, box_uint64_value,",
         "call\t{{p}}, lambda_type_check_lazy,"
       ]
     }

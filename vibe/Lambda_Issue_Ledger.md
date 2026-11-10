@@ -1259,6 +1259,43 @@ See [the follow-up implementation/qualification](impl/Lambda_Impl_MVP_Optimizati
 and `temp/mvp_fixture_followup/record-identities.json`. The shared executable and
 sibling/vendor source remain unchanged; no baseline or timing campaign ran.
 
+Remaining-49 qualification (2026-11-10, base `dced21367`): all 49 retained
+emission failures are resolved. Private release SHA256
+`6bd984ed27c89b1971094c0878fabfdf0c0074857c932f8a22d0208ff16e860c`
+passes **582/582** controller checks: **285/285** emission contracts,
+**285/285** semantic goldens and 12 other checks. Both forced/poisoned and
+seeded/poisoned GC modes pass all 285 goldens. Lambda size/frame checks pass
+18/18 after three reviewed zero-slack budget updates (D8.6.1); shared JS
+capture controls pass 8/8. Native lanes, bounds/record proofs, nullable packed
+construction, scalarization, private builders and safe self-tail reuse are
+implemented rather than accepting generic paths as native witnesses.
+
+Optimization contracts improve to **51/56**, with no new failures. Retained
+failures are LR07-62, one checked borrowed numeric store, 213 recursive union
+admissions (ceiling below 40), 198 open-union cache hits (required above 200)
+and 19,275 hyphen appends (LR07-64). Their assertions remain intact. The current
+release implementation and receipts are in
+[the remaining-49 checkpoint](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-49-contracts-2026-11-10)
+and `temp/mvp_remaining49/complete-*.json`. Python aggregate checks were not
+rerun; this is unit-only qualification, with no baseline or timing campaign.
+The shared executable and sibling/vendor source remain unchanged.
+
+Final-five GTest qualification (2026-11-10, base `b3463551a` plus qualified
+diff): optimization contracts now pass **56/56** and the complete emission
+controller passes **588/588** (288 emission contracts, 288 goldens, 12 other
+checks). Both poison-GC modes pass all 288 goldens and all five repaired
+optimization units. The original 582 cases remain present and pass. Lambda
+emission/frame ratchets pass 18/18 after one reviewed zero-slack budget update
+(D8.6.1). LR07-62 and LR07-64 are resolved on private release SHA256
+`104fdc33ddc9cdefd42b39bb52b37b9c118903b417ed001913fd5e921eba9e83`.
+The remaining cache unit used an impossible Full-era hit lower bound; it now
+pins exact valid-crossing accounting, a 201-admission cap and the existing
+four-miss/no-map-cache/malformed-child controls. Other optimization ceilings
+remain unchanged. See [implementation/qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#final-five-optimization-units-2026-11-10)
+and `temp/mvp_opt_remaining5/qualified-*.json`. Keep LR07-60 partial for the
+unrerun Python aggregate and other unqualified configurations; the GTest
+emission/optimization gates are green. No baseline or timing campaign ran.
+
 <a id="lr07-61"></a>**LR07-61 · Native MVP wide-scalar tail-forward fixture traps · PARTIAL (2026-11-10)**
 
 On the exact installed debug CLI identified in LR07-60,
@@ -1285,41 +1322,11 @@ a rebuilt debug host is not qualified here. Keep that residue explicit.
 See [implementation/receipts](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-fixture-follow-up-2026-11-10)
 and `temp/mvp_fixture_followup/record-backend-parity.json`.
 
-<a id="lr07-62"></a>**LR07-62 · Native MVP immutable-array consumer fixture segfaults · OPEN (2026-11-10)**
-
-On the exact installed debug CLI identified in LR07-60,
-`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=mvp LAMBDA_DISABLE_MIR_CACHE=1
-./lambda.exe run test/lambda/proc/tune23_array_consumer.ls --no-log` terminates
-with signal 11 on **3/3 isolated runs**. `interp` succeeds 3/3. The fixture reads
-a split-produced string array through a typed consumer, then checks that a
-later open alias mutation preserves its source. The optimization GTest
-`LambdaOptAdmission.ImmutableArrayConsumerAdmitsOnce` expects
-`[93, "one", 2, 42]` and bounded admission work. Array contracts, snapshots and
-precise ownership must hold (D4.3.3, D6.3, S9.1.2). Root cause and regression
-provenance are unconfirmed. Evidence:
-`temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and
-`opt-results.json`; no fixture, golden or assertion is altered.
+<a id="lr07-62"></a>LR07-62 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-62>).
 
 <a id="lr07-63"></a>LR07-63 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-63>).
 
-<a id="lr07-64"></a>**LR07-64 · MVP string-tail fixture misses its copy-work contract · OPEN (2026-11-10)**
-
-`LambdaOptStrings.TailAccumulatorCopiesLinearBytes` at
-`test/test_lambda_opt_gtest.cpp:322` runs
-`test/mir/lambda/string_builder_tail.ls` on the LR07-60 installed debug CLI.
-Its semantic-output checks pass, but the profile reports **0 in-place appends**
-against a minimum of 120 and **8,435 copied bytes** against a ceiling below
-1,024. The fixture includes a 128-iteration final string accumulator plus
-snapshot, later-argument observation and error controls. Preserve those value
-semantics while investigating the missing copy-work improvement (S9.1.2,
-D8.6.1). `TypedHyphenUsesStringSpansAndOneTableAdmission` also exceeds its
-append-call ceiling: 19,275 against a limit below 15,000. The observations are
-allocation/call counters, not wall-clock benchmark regressions. Whether the
-cause is absent MVP tuning, changed admission or accounting is unconfirmed;
-do not relax the ceilings without tracing the actual work. Evidence:
-`temp/mvp_optimization_coverage/opt-results.json` and the profile TSVs under
-`temp/lambda_opt_contract/` (the latter may be overwritten by later unit runs).
-
+<a id="lr07-64"></a>LR07-64 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-64>).
 
 <a id="lr07-65"></a>**LR07-65 · T0 snapshots a plain argument after a later argument mutates its owner · OPEN (2026-11-10)**
 

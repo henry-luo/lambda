@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.6.1: zero-slack emitted MIR and precise-frame ratchets. Lambda budgets were migrated from retired Full MIR to MVP on 2026-11-10. Default records the measured darwin release companion ABI; other hosts get no slack and must qualify explicit profiles when they differ. Existing darwin debug MVP probes emitted identical counts/frames. JS probes are unchanged. This is a compiler baseline migration, not evidence of speed improvements. Tests never write this file.",
+  "description": "D8.6.1: zero-slack emitted MIR and precise-frame ratchets. Lambda budgets were migrated from retired Full MIR to MVP on 2026-11-10. Default records the measured darwin release companion ABI; other hosts get no slack and must qualify explicit profiles when they differ. Existing darwin debug MVP probes emitted identical counts/frames. JS probes are unchanged. This is a compiler baseline migration, not evidence of speed improvements. Tests never write this file. Result55 tuning records reviewed signed-zero decoding and guarded primitive-store growth, and tightens the reduced ownership-frame records; zero slack remains in force.",
   "probes": [
     {
       "name": "lambda_scalar_home_donation",
@@ -194,7 +194,7 @@
       "description": "D7.3.1/D6.3.3: closure environment construction, nested captures and dynamic calls retain precise roots.",
       "budgets": {
         "default": {
-          "module_insns": 5073
+          "module_insns": 5169
         }
       }
     },
@@ -205,7 +205,7 @@
       "description": "D4.3.3/D6.3.3: float-array construction, checked carriers and collecting calls retain native and boxed paths.",
       "budgets": {
         "default": {
-          "module_insns": 3839
+          "module_insns": 3862
         }
       }
     },
@@ -260,13 +260,13 @@
       "description": "D4.3.3/D6.3.3: native guarded loads need no roots; stores retain a checked fallback and its precise frame.",
       "budgets": {
         "default": {
-          "module_insns": 1681,
+          "module_insns": 1689,
           "functions": {
             "mvp_#_guarded_load": {
               "insns": 123
             },
             "mvp_#_guarded_store": {
-              "insns": 211
+              "insns": 219
             }
           },
           "frames": [
@@ -294,16 +294,16 @@
       "name": "lambda_tune4_callsite_inference",
       "script": "test/mir/lambda/callsite_inference.ls",
       "language": "lambda",
-      "description": "D2.3.4/D2.3.5: a closed scalar entry remains rootless; the open callable entry retains checked admission and homes.",
+      "description": "D2.3.4/D2.3.5: a closed scalar entry remains rootless; the open callable entry retains checked admission and homes. Reviewed 2026-11-10 (D8.6.1): +42 instructions enable the guarded native scalar entry while preserving the checked public sibling; frame caps stay unchanged.",
       "budgets": {
         "default": {
-          "module_insns": 557,
+          "module_insns": 615,
           "functions": {
             "mvp_#_closed_gap": {
               "insns": 29
             },
             "mvp_#_open_gap": {
-              "insns": 198
+              "insns": 256
             }
           },
           "frames": [
@@ -398,10 +398,10 @@
       "description": "D6.3.2: libm leaves retain noncollecting calls while surrounding conversions and result homes remain explicit.",
       "budgets": {
         "default": {
-          "module_insns": 695,
+          "module_insns": 759,
           "functions": {
             "mvp_#_tune30_norms": {
-              "insns": 564
+              "insns": 628
             }
           }
         }
@@ -443,13 +443,13 @@
       "name": "lambda_corpus_prettier_ast",
       "script": "test/benchmark/text/prettier_ast2.ls",
       "language": "lambda",
-      "description": "D8.6.1: prettier pins module and print_node sizes, including inlined document constructors and checked dynamic fields.",
+      "description": "D8.6.1: prettier pins module and print_node sizes, including inlined document constructors and checked dynamic fields. Reviewed 2026-11-10 (D4.3.3/D8.6.1): live pointer-array carrier/certificate guards enable native admission before the existing checked fallback. print_node adds 20 such guards (+360 instructions), with identical helper-call populations; module adds 562. Exact darwin release observation, no slack.",
       "budgets": {
         "default": {
-          "module_insns": 29089,
+          "module_insns": 29667,
           "functions": {
             "mvp_#_print_node": {
-              "insns": 6923
+              "insns": 7283
             }
           }
         }
@@ -540,25 +540,25 @@
       "name": "lambda_mvp_array_regions",
       "script": "test/mir/lambda/mvp_array_regions.ls",
       "language": "lambda",
-      "description": "D4.3.3/D8.6.1: typed and erased array kernels include native loads/stores, checked misses, COW snapshots and required roots/homes.",
+      "description": "D4.3.3/D8.6.1: typed and erased array kernels include native loads/stores, checked misses, COW snapshots and required roots/homes. Reviewed 2026-11-10 (D6.3.2/D8.6.1): staged nullable primitive literals add a packed-construction alternative (+4 instructions, +2 root stores, +1 static safepoint in main). Each arm allocates once; roots and scalar homes stay unchanged. Reviewed final-five optimization fixes, 2026-11-10 (D8.6.1/D6.3.2): +6 typed_sum instructions skip admission on a proved present scalar; +21 main instructions prepare a shared indexed owner before its closed var mutator and refresh native witnesses. The cold preparation adds two root stores and one static safepoint, with unchanged root/home counts. Unique owners skip the helper. Review: temp/mvp_opt_remaining5/review-{typed_sum,main}.diff; exact darwin release caps, no slack.",
       "budgets": {
         "default": {
-          "module_insns": 2494,
+          "module_insns": 2679,
           "functions": {
             "mvp_#_typed_sum": {
-              "insns": 307
+              "insns": 313
             },
             "mvp_#_erased_sum": {
-              "insns": 525
+              "insns": 541
             },
             "mvp_#_typed_set": {
               "insns": 118
             },
             "mvp_#_erased_set": {
-              "insns": 201
+              "insns": 247
             },
             "mvp_#_main": {
-              "insns": 1298
+              "insns": 1415
             },
             "main": {
               "insns": 45
@@ -600,10 +600,10 @@
             {
               "name": "mvp_#_main",
               "roots": 6,
-              "root_stores": 64,
+              "root_stores": 68,
               "scalar_homes": 7,
               "number_scratch": 0,
-              "safepoints": 48
+              "safepoints": 50
             },
             {
               "name": "main",
@@ -624,7 +624,7 @@
       "description": "D7.3.1/D7.4.2/S9.1.2: direct/boxed calls, closure environments, companion results and argument snapshots retain their precise frames.",
       "budgets": {
         "default": {
-          "module_insns": 1464,
+          "module_insns": 1339,
           "functions": {
             "mvp_#_increment": {
               "insns": 18
@@ -633,7 +633,7 @@
               "insns": 147
             },
             "mvp_#_wide": {
-              "insns": 91
+              "insns": 13
             },
             "mvp_#_make_adder": {
               "insns": 67
@@ -642,13 +642,13 @@
               "insns": 103
             },
             "mvp_#_change": {
-              "insns": 49
+              "insns": 51
             },
             "mvp_#_observe": {
               "insns": 90
             },
             "mvp_#_main": {
-              "insns": 852
+              "insns": 803
             },
             "main": {
               "insns": 47
@@ -673,11 +673,11 @@
             },
             {
               "name": "mvp_#_wide",
-              "roots": 2,
-              "root_stores": 3,
-              "scalar_homes": 1,
+              "roots": 0,
+              "root_stores": 0,
+              "scalar_homes": 0,
               "number_scratch": 0,
-              "safepoints": 4
+              "safepoints": 1
             },
             {
               "name": "mvp_#_make_adder",
@@ -714,10 +714,10 @@
             {
               "name": "mvp_#_main",
               "roots": 5,
-              "root_stores": 47,
+              "root_stores": 43,
               "scalar_homes": 5,
               "number_scratch": 0,
-              "safepoints": 36
+              "safepoints": 34
             },
             {
               "name": "main",
@@ -738,7 +738,7 @@
       "description": "D7.3.1/S9.1.2: typed and erased builders, frozen observations and ASCII/Unicode indexing retain bounded emission and roots.",
       "budgets": {
         "default": {
-          "module_insns": 784,
+          "module_insns": 789,
           "functions": {
             "mvp_#_typed_build": {
               "insns": 60
@@ -750,10 +750,10 @@
               "insns": 103
             },
             "mvp_#_first_is_x": {
-              "insns": 34
+              "insns": 35
             },
             "mvp_#_main": {
-              "insns": 481
+              "insns": 485
             },
             "main": {
               "insns": 45

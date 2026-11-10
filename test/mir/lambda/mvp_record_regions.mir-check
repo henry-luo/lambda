@@ -1,46 +1,19 @@
 {
   "schema_version": 1,
-  "description": "D4.2.5/D4.3.3/S9.1.2: MVP guards packed record reads, validates dynamic constructor fields and preserves snapshots through writes.",
+  "description": "D4.2.5/D4.3.3/S9.1.2: MVP guards packed record reads, validates dynamic constructor fields and preserves snapshots through writes. D4.2.5: admitted read-only prefixes reuse entry admission; erased controls keep live shape guards.",
   "checks": [
     {
       "in_func": "mvp_#_typed_read",
       "expect_seq": [
-        {
-          "pattern": "mov\t{{r:base}}, arg0"
-        },
-        {
-          "pattern": "mov\t{{r:valid}}, 0"
-        },
-        {
-          "pattern": "and\t{{r:owner}}, {{r:base}}, 72057594037927935"
-        },
-        {
-          "pattern": "mov\t{{r:shape}}, i64:8({{r:owner}})"
-        },
-        {
-          "pattern": "mov\t{{r}}, i64:144({{r:shape}})"
-        },
-        {
-          "pattern": "mov\t{{r:valid}}, 1"
-        },
-        {
-          "pattern": "mov\t{{r:alias}}, {{r:base}}"
-        },
-        {
-          "pattern": "beq\tL{{n}}, {{r:valid}}, 0"
-        },
-        {
-          "pattern": "mov\t{{r:data}}, p:16({{r:alias}})"
-        },
-        {
-          "pattern": "mov\t{{r}}, i64:1({{r:data}})"
-        }
-      ],
-      "expect": [
-        "call\t{{p}}, fn_member,"
+        "mov\t{{r:base}}, arg0",
+        "mov\t{{r:alias}}, {{r:base}}",
+        "mov\t{{r:data}}, p:16({{r:alias}})",
+        "mov\t{{r}}, i64:1({{r:data}})"
       ],
       "forbid": [
-        "call\t{{p}}, fn_call_into,"
+        "call\t{{p}}, fn_call_into,",
+        "call\t{{p}}, fn_member,",
+        "i64:144("
       ]
     },
     {

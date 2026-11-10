@@ -17,7 +17,7 @@
         "mov\t{{r}}, i64:({{r:address}})"
       ],
       "count": {
-        "call\t{{p}}, fn_index,": 1
+        "call\t{{p}}, fn_index,": 2
       }
     },
     {

@@ -1,11 +1,16 @@
 {
   "schema_version": 1,
-  "description": "Tune31 T31-3 / S5.1.1, S6.1.2: a reassigned nullable comparison binding is not stable, so the generic equality helper remains responsible for total Item equality.",
+  "description": "S5.1.1/S6.1.2/D4.3.1: assigning true preserves the proved bool success domain; typed nullable comparisons stay native while generic index misses preserve absence and Error.",
   "checks": [
     {
       "in_func": "mvp_#_compare_after_write",
       "expect": [
-        "call\t{{p}}, fn_ne_value,"
+        "call\t{{p}}, fn_index,",
+        "eq\t{{r}}, {{r}}, 9221120237041090561"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_ne_value,",
+        "call\t{{p}}, is_truthy,"
       ]
     }
   ]

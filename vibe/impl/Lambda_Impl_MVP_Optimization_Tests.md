@@ -4,44 +4,24 @@
 
 ## Current checkpoint
 
-- Follow-up at `c2f1d2426`: 148 of the 197 remaining legacy fixture
-  failures are resolved. The final controller has 235/284 passing emission
-  contracts and 284/284 passing semantic goldens in all three GC modes. See the
-  follow-up section below for root fixes, coverage and current qualification.
-- User requested migration of obsolete MIR optimization tests and new MVP
-  emission coverage. The preceding audit is under
-  `temp/mvp_optimization_coverage/coverage-report.md` (LR07-60).
-- Preserve intended native/checked behavior and exact cost review; do not
-  suppress implementation failures or restore retired Full helpers (D8.6.1,
-  D6.3, S9.1.2–S9.1.3).
-- Existing unrelated changes moved runtime declarations into Lambda ownership.
-  Their initial diff/hashes are saved under `temp/mvp_emission_test_update/`.
-  Concurrent commit `928281c28` captured that split and part of this migration.
-  Preserve it; use current source hashes for qualification. Sibling/vendor
-  sources remain read-only. Fixed Lambda-owned include dependencies exposed by
-  the split in the reactive-render adapter and RootFrame header.
-- Scope: explicit MVP function/callee selectors; reviewed helper/path
-  assertions and frame budgets; robust telemetry controls; focused Python gate
-  registration; small typed/untyped fixtures covering native paths and misses.
-- The follow-up fixes LR07-61 on release and LR07-63. LR07-62 and LR07-64
-  remain failing controls; the debug face of LR07-61 still needs qualification.
-  Missing tunings are not migration excuses.
-- Build private controllers/engine as needed, preserve shared `lambda.exe` and
-  run unit gates only. No Lambda/Radiant baseline or timing campaign.
-- Implemented 548 explicit MVP selectors and 93 callee/wrapper updates. Added
-  `{{n}}` ID and `{{p}}` prototype tokens with exact callee/argument controls;
-  626 helper assertions now ignore ABI suffix spelling. Shared harnesses accept
-  a private `LAMBDA_TEST_EXE` without replacing the shared engine.
-- Registered the focused Python emission gate and extracted the third Python
-  script adapter's common shape. Five report/selection contract units pass.
-- Added five typed/untyped kernel fixtures, manual goldens and 27 structural
-  groups, plus platform-aware outcome-lane coverage. All new JIT goldens pass in all three GC modes;
-  the new argument-order case exposes a T0 snapshot discrepancy (retain golden).
-- Reconnected planned-effect fault injection to MVP's actual plan/verifier.
-  The negative claim now rejects through MVP's emitted-effect verifier; empty
-  and unmatched-name controls execute successfully (D6.3.2). The release build
-  and private controllers are qualified below. Further old-corpus contract
-  review and compiler optimization work remain; the complete gates are not green.
+- Final-five follow-up from `b3463551a`: optimization contracts pass **56/56**.
+  The immutable consumer crash, borrowed numeric store and recursive union/
+  hyphen work gaps are fixed. The open-union cache unit now checks exact
+  admission accounting instead of an obsolete Full-era hit lower bound.
+- Complete emission controller: **588/588**, including **288/288** MIR contracts
+  and **288/288** semantic goldens. All preceding 582 cases remain present and
+  pass. Both poison-GC modes pass all 288 goldens and all five repaired
+  optimization units. Three new fixtures retain checked/layout/null controls.
+- Lambda emission/frame gates pass **18/18**. The one reviewed budget update
+  adds a present-value admission guard and cold COW preparation; no slack or
+  unrelated frame/cost ceiling is added (D8.6.1, D6.3.2).
+- Current receipts and identities are under `temp/mvp_opt_remaining5/`.
+  Historical sections below describe earlier source versions. LR07-62 and
+  LR07-64 are resolved on this private release; LR07-61's rebuilt-debug residue
+  and the separate LR07-65 T0 snapshot issue remain outside this qualification.
+- The shared executable and sibling/vendor sources remain unchanged. Only
+  unit gates ran: no Lambda/Radiant baseline, Python aggregate, wall-clock
+  performance campaign or commit.
 
 ## Acceptance and verification budget
 
@@ -209,6 +189,126 @@ this follow-up. Debug and non-macOS hosts are not requalified by these release
 unit results. Full corpus migration remains incomplete until the retained
 emission and optimization failures are fixed.
 
+## Remaining 49 contracts (2026-11-10)
+
+Base HEAD: `dced21367` (`mir test fixes`), clean checkout. Fix lowering gaps
+by family, then migrate obsolete Full ABI assertions to the resulting MVP
+native paths and checked siblings. All 49 original failures pass the complete
+gate. The corpus now has 285 fixtures, including a new structural membership
+revocation control. Working receipts and source identities are in
+`temp/mvp_remaining49/`.
+
+Implemented compiler changes:
+
+- Native non-nullable i64/u64 arithmetic and u64 bit operations preserve full
+  width and wrapped results. Exact compact integer admission checks the
+  complete tag/subtype encoding before native decode; stores use their native
+  width with COW and checked conversion misses. Nullable wide values stay
+  boxed; escaping scalar bits retain precise destination ownership
+  (D2.3.4–D2.3.5, D6.2.3). Native literal bits use immediates; transient boxed
+  literal operands reuse the immutable Input constant owner.
+- Predicate success joins retain bool/nullable-bool domains, including Error
+  alternatives; array-kind membership includes ranges. Native null tests use
+  the lane's absence marker (D2.3.5). Dominating nonnegative and matching
+  `len` bounds remove repeated array checks while auditing writes and loop
+  induction. No int32 bound is assumed for a 64-bit array length.
+- Admitted read-only record prefixes reuse their witnesses. Structural
+  membership facts describe field domains separately from physical layout;
+  mutation revokes them. Typed path stores retain live carrier/certificate,
+  null, COW and checked-miss guards. A mixed prefix containing an `any` slot
+  still checks its live shape: a prior write can repack it and move later
+  fields (D4.2.5–D4.2.6, D4.3.3, S11.4.10).
+- Total invariant native unary math can move outside a loop only with an
+  unchanged argument and a noncollecting, nonreentrant helper. Float indices
+  require exact integer round trips. Cached array lengths survive collecting
+  calls; physical length guards preserve checked virtual-container fallbacks
+  (D6.3.2, D8.2.6).
+- Self-tail lowering accepts safe boxed scalar versions, replacement records
+  and string builders, evaluates all replacement arguments before updating
+  bindings, and preserves ownership exclusions. A final string append may
+  borrow its owned buffer; ordinary observations still freeze it
+  (D6.2.1, D7.3.1, S9.1.2–S9.1.3).
+- Primitive nullable literals stage each member once, then choose packed
+  present storage or generic null storage; NaN remains distinct from absence.
+  Construction hints also reach implicit returns. Homogeneous private append
+  builders infer their primitive lane only after auditing every push;
+  nullable/mixed builders and later escaped widening keep checked semantics
+  (D4.3.1, D4.3.3).
+- One shared projection-use audit enables local array/record scalarization
+  and short pure array-result recipes. The latter guard actual source extents
+  once, with the ordinary checked call for short inputs. Escapes, reassignment,
+  duplicate/missing record keys and incompatible uses prevent scalarization
+  (D8.2.6). Whole-binding array facts audit every replacement and borrow.
+
+Contract updates retain native positive witnesses and checked negative
+controls. MIR label captures (`{{l:name}}`, `{{l!name}}`) bind actual backedges
+and cold joins; their matcher tests reject wrong labels and mixed hexadecimal
+suffixes. Literal-only scalarization and closed-call inference are tested
+with varied inputs, a rejected record field input and an actual allocating
+`split` RHS. New controls cover structural membership mutation, nullable typed
+path roots, mixed-prefix repacking and escaped builder COW/widening. Revised
+goldens accompany intentional fixture changes; the mixed-record regression's
+golden remains unchanged (D8.6.1, S9.1.2–S9.1.3).
+
+The overflow unit uses an existing non-tail negative fixture; the older
+duplicate also has a non-tail recurrence now that MVP optimizes its former
+self-tail. Profile units select named MVP bodies and current native length
+operations, and account for inlined nullable producers and printing controls.
+No unrelated admission/string-copy ceilings are raised.
+
+Emission budget review (D8.6.1), measured on private darwin release:
+
+| Probe | Module instructions | Reviewed cause |
+|---|---:|---|
+| Call-site inference | 557 → 599 | +42 guarded native scalar entry instructions; checked sibling and frame caps retained |
+| Prettier AST | 29,089 → 29,651 | pointer-array carrier/certificate admission guards; `print_node` adds 20 guards (+360), with the same helper-call population |
+| Array regions | 2,494 → 2,498 | packed nullable construction alternative; main adds two root stores and one static safepoint, with one allocation on either runtime arm |
+
+Only those reviewed caps change; budgets retain zero slack. Wide-literal
+emission passes its existing frame/instruction caps after removing unnecessary
+loads and scalar homes. Debug and non-macOS observations
+are not qualified by these release results. No Lambda/Radiant baseline,
+performance campaign, sibling/vendor source edit or shared executable
+replacement occurs in this follow-up.
+
+
+Current qualification, private release SHA256
+`6bd984ed27c89b1971094c0878fabfdf0c0074857c932f8a22d0208ff16e860c`:
+
+| Unit gate | Result | Receipt under `temp/mvp_remaining49/` |
+|---|---:|---|
+| Complete emission controller | 582/582 | `complete-emission.json` |
+| MIR emission contracts | 285/285 | same report |
+| Semantic goldens | 285/285 | same report |
+| Forced GC + poison, all goldens | 285/285 | `complete-forced-goldens.json` |
+| Seeded GC + poison, all goldens | 285/285 | `complete-seeded-goldens.json` |
+| Optimization contracts | 51/56 | `complete-opt.json` |
+| Lambda emission/frame ratchets + config | 18/18 | `complete-ratchet.json` |
+| Shared JS capture regressions | 8/8 | `complete-js-regressions.json` |
+
+Seeded collection uses seed 1847 with one-in-three allocation checks; forced
+collection uses `LAMBDA_GC_FORCE_EVERY=1`, both with freed-memory poisoning.
+`complete-identities.json` records the qualified source and private binaries.
+`complete-comparison.json` records no new failures against the preceding
+optimization report. Five previously failing optimization units are now green:
+checked scalar tail frames, read-only length roots, nullable literal
+construction, stable lengths after GC and linear string-tail copying.
+
+Five pre-existing optimization failures remain, with their assertions intact:
+
+| Contract | Current observation |
+|---|---|
+| `ImmutableArrayConsumerAdmitsOnce` | JIT child exit 139 (LR07-62) |
+| `BorrowedNumericArrayRetainsStoreLane` | one checked store, expected zero |
+| `RecursiveUnionFieldsReuseAdmittedContract` | 213 admissions, required below 40 |
+| `OpenUnionMemberShapeCachesAdmissionProof` | 198 cache hits, required above 200 |
+| `TypedHyphenUsesStringSpansAndOneTableAdmission` | 19,275 appends, required below 15,000 (LR07-64) |
+
+These are separate remaining optimization work, not emission fixture failures.
+The string-tail part of LR07-64 now records 125 in-place appends, 370 copied
+bytes and four freezes without changing its cost ceilings. No wall-clock
+performance claim follows from these unit counters.
+
 ## Budget review (D8.6.1)
 
 These are first MVP budgets, rather than a claim that old Full emission costs
@@ -239,3 +339,105 @@ roots, inserted root stores, scalar homes, number scratch and safepoints.
 Numeric loops/divmod remain rootless with no scalar homes; array and record
 misses retain their checked frames; closure and wide-value crossings retain
 owned homes. These ceilings add zero slack to the observed MIR.
+
+
+## Final five optimization units (2026-11-10)
+
+Base `b3463551a`, clean checkout. Fix the five retained runtime/optimization
+failures without relaxing their cost ceilings or semantic output controls
+(D4.2.5, D4.3.3, D6.3, D8.6.1, S9.1.2–S9.1.3). Start with the immutable-array
+consumer crash, then borrowed numeric stores, recursive union proof reuse,
+open-union cache reuse and typed hyphen append work. Investigate all families
+before batching related compiler fixes. Working checkpoint and evidence:
+`temp/mvp_opt_remaining5/checkpoint.md`. Focused unit checks during development;
+complete unit qualification after fixes, no Lambda/Radiant baseline or timings.
+
+
+Implementation:
+
+- A split producer's observed `string[]` domain now audits builtin writes with
+  that domain. An open alias may widen with `push(42)`; later indexing retains
+  the resulting integer Item instead of masking and retagging it as a string
+  pointer (D4.3.3, S12.2.1v3). The original consumer output/COW checks remain.
+- A collecting, closed primitive-array mutator can prepare a shared whole-owner
+  borrow once, then keep native store witnesses. Pure argument evaluation,
+  invariant admission and closed-storage proofs are required. Only already
+  indexed owners use this path; guarded numeric regions and forwarding-only
+  re-borrows retain their existing exclusivity proof. The shared AST write
+  query excludes read-only callees; a noncollecting callee gains no new
+  collecting preparation. Existing snapshots and projected-place handling are
+  preserved (D6.3.2, S9.1.2–S9.1.3).
+- Required scalar/Item-union fields common to every union arm retain their
+  domain without claiming shared field offsets. Equivalent nullable spellings
+  stay one `Node?`, rather than `Node? | Node?`; a proven non-null success skips
+  redundant union admission. Writes/borrows, optional or absent fields and
+  nested named map/array layouts retain their own checks. Parsed reversed-field
+  child records require their receiving layout crossing (D4.2.5, D4.3.3,
+  S11.4.10).
+- Text slice producers retain String/Null/Error according to their source and
+  offsets. Concatenation can fuse whole spans after Error classification;
+  absent offsets still produce null, negative bounds clamp and fractional
+  offsets reject (S7.1.2, S7.9.3). The hyphen script and append ceiling remain
+  unchanged.
+- The open-union cache assertion now accounts for the MVP work it measures:
+  201 admissions comprise 198 hits, two cold misses and one rejected scalar.
+  The obsolete lower bound above 200 hits was impossible after construction
+  admission elision. The replacement requires exact valid-crossing accounting,
+  no more than 201 admissions, the unchanged four-miss ceiling, no map relation
+  cache hits, and the original malformed-child rejection (D8.6.1).
+
+Three new `.ls`/`.txt`/`.mir-check` sets cover common union field proofs and
+mutation/open-arm/parsed-layout misses, slice fusion with checked offsets, and
+read-only var array forwarding without COW preparation. Named label/dataflow
+sequences distinguish hot proof reuse from checked null/layout paths. Existing
+five cost assertions retain their ceilings; only the stale cache-hit assertion
+is migrated to the stronger work-accounting relation above.
+
+
+Qualification: private darwin release SHA256
+`104fdc33ddc9cdefd42b39bb52b37b9c118903b417ed001913fd5e921eba9e83`,
+with source/controller/report identities in
+`temp/mvp_opt_remaining5/qualified-identities.json`.
+
+| Unit gate | Result | Receipt under `temp/mvp_opt_remaining5/` |
+|---|---:|---|
+| Complete optimization gate | 56/56 | `qualified-opt.json` |
+| Complete emission controller | 588/588 | `qualified-emission.json` |
+| Emission contracts / semantic goldens | 288/288 each | same report |
+| Forced GC + poison, all goldens | 288/288 | `qualified-forced-goldens.json` |
+| Seeded GC + poison, all goldens | 288/288 | `qualified-seeded-goldens.json` |
+| Five repaired optimization units, forced GC + poison | 5/5 | `qualified-forced-opt-five.json` |
+| Five repaired optimization units, seeded GC + poison | 5/5 | `qualified-seeded-opt-five.json` |
+| Lambda emission/frame ratchets + config | 18/18 | `qualified-ratchet.json` |
+
+Seeded collection uses seed 1847, one-in-three allocation checks; forced mode
+collects at every allocation. Both poison freed storage. No preceding emission
+case was removed, disabled or newly failed. Normal-mode profile snapshots are
+in `qualified-profiles/`; GC-mode snapshots have separate directories.
+
+| Repaired contract | Before | Qualified result |
+|---|---:|---:|
+| Immutable string-array consumer | exit 139 | correct `[93, "one", 2, 42]`, zero mutable-value conversions |
+| Borrowed numeric checked stores | 1 | 0 |
+| Recursive union admissions | 213 | 13 (ceiling remains below 40) |
+| Open union cache | stale requirement above 200 hits | 201 admissions = 198 hits + two misses + one rejected scalar |
+| Typed hyphen append calls | 19,275 | 11,091 (ceiling remains below 15,000; one table admission) |
+
+These are unit work counters, not timing results. The two new native proof/
+slice contracts reject the preceding release (`base-contract-negatives.json`).
+The read-only borrow contract rejects an intermediate over-eager preparation
+(`readonly-negative.json`) and passes the final compiler. The parsed nested
+Payload golden fixes the expected number at 9 and retains its receiving check.
+
+D8.6.1 budget review: only `lambda_mvp_array_regions` grows, by 27 module
+instructions. `typed_sum` adds six instructions to bypass admission for an
+already proved present scalar. `main` adds 21 for conditional shared-owner
+preparation plus native-witness refresh, two root stores and one static
+safepoint. Root counts, scalar homes and number scratch remain unchanged;
+unique owners skip the preparation helper. Exact caps are 2,525 module,
+313 `typed_sum`, 1,323 `main`, 68 main root stores and 50 main safepoints.
+All other probe objects are unchanged. Review artifacts:
+`array-regions-base.mir`, `array-regions-qualified.mir`,
+`review-typed_sum.diff`, `review-main.diff` and `qualified-ratchet-review.json`.
+Debug/non-macOS engines, Python aggregate checks and wall-clock benchmark
+performance are not requalified by these release unit results.

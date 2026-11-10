@@ -32,7 +32,7 @@
       ],
       "count": {
         "call\t{{p}}, fn_index,": 1,
-        "call\t{{p}}, fn_member,": 2
+        "call\t{{p}}, fn_member,": 1
       }
     },
     {

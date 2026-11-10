@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **278 anchored records**, preserving fixed, resolved,
+This archive contains **280 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -990,6 +990,88 @@ S2.5.8 has indexing and every sequence operation see a symbol as its code points
 **All nine issues are archived below as [LR06-R1…R9](#lr06-r1r9).** The C2MIR backend no longer exists in the tree.
 
 ## 7. MIR Direct transpiler & JIT (LR07)
+
+<a id="lr07-62"></a>**LR07-62 · Native MVP immutable-array consumer fixture segfaults · RESOLVED (2026-11-10; private release unit qualification)**
+
+On the exact installed debug CLI identified in LR07-60,
+`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=mvp LAMBDA_DISABLE_MIR_CACHE=1
+./lambda.exe run test/lambda/proc/tune23_array_consumer.ls --no-log` terminates
+with signal 11 on **3/3 isolated runs**. `interp` succeeds 3/3. The fixture reads
+a split-produced string array through a typed consumer, then checks that a
+later open alias mutation preserves its source. The optimization GTest
+`LambdaOptAdmission.ImmutableArrayConsumerAdmitsOnce` expects
+`[93, "one", 2, 42]` and bounded admission work. Array contracts, snapshots and
+precise ownership must hold (D4.3.3, D6.3, S9.1.2). Root cause and regression
+provenance are unconfirmed. Evidence:
+`temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and
+`opt-results.json`; no fixture, golden or assertion is altered.
+
+Release follow-up (2026-11-10): `ImmutableArrayConsumerAdmitsOnce` still exits
+139 on the private host qualified in LR07-60. It already failed in the preceding
+release report, so this remains a separate outstanding defect. Evidence:
+`temp/mvp_remaining49/complete-opt.json`; root cause remains unconfirmed.
+
+Resolution (2026-11-10, base `b3463551a` plus qualified diff): producer-domain
+seeding omitted the preserved element domain from its builtin mutation audit.
+After `alias.push(42)`, MVP still treated the alias as `string[]`; indexing
+masked the integer payload and added the string tag. LLDB observed a string
+Item with pointer 0x2a in formatting. The compiler now revokes that observation
+for widening builtin writes (D4.3.3, S12.2.1v3). No formatter or sibling source
+was changed. The unchanged consumer unit returns `[93, "one", 2, 42]`, with
+zero mutable-value conversions, under normal and both poison-GC modes.
+Qualified release SHA256:
+`104fdc33ddc9cdefd42b39bb52b37b9c118903b417ed001913fd5e921eba9e83`.
+The complete optimization gate passes 56/56 and emission passes 588/588;
+all 288 semantic goldens pass both poison-GC modes. The installed debug
+executable was not rebuilt; these results qualify the private release.
+See [implementation/qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#final-five-optimization-units-2026-11-10)
+and `temp/mvp_opt_remaining5/qualified-*.json`.
+
+
+<a id="lr07-64"></a>**LR07-64 · MVP string-tail fixture misses its copy-work contract · RESOLVED (2026-11-10; private release unit qualification)**
+
+`LambdaOptStrings.TailAccumulatorCopiesLinearBytes` at
+`test/test_lambda_opt_gtest.cpp:322` runs
+`test/mir/lambda/string_builder_tail.ls` on the LR07-60 installed debug CLI.
+Its semantic-output checks pass, but the profile reports **0 in-place appends**
+against a minimum of 120 and **8,435 copied bytes** against a ceiling below
+1,024. The fixture includes a 128-iteration final string accumulator plus
+snapshot, later-argument observation and error controls. Preserve those value
+semantics while investigating the missing copy-work improvement (S9.1.2,
+D8.6.1). `TypedHyphenUsesStringSpansAndOneTableAdmission` also exceeds its
+append-call ceiling: 19,275 against a limit below 15,000. The observations are
+allocation/call counters, not wall-clock benchmark regressions. Whether the
+cause is absent MVP tuning, changed admission or accounting is unconfirmed;
+do not relax the ceilings without tracing the actual work. Evidence:
+`temp/mvp_optimization_coverage/opt-results.json` and the profile TSVs under
+`temp/lambda_opt_contract/` (the latter may be overwritten by later unit runs).
+
+Release follow-up (2026-11-10): safe final-owner string append and self-tail
+reuse now pass the unchanged tail-copy contract: **125 in-place appends,
+370 copied bytes and four freezes**. Snapshot, later-argument observation and
+error goldens pass, including both poison-GC modes (S9.1.2–S9.1.3).
+`TypedHyphenUsesStringSpansAndOneTableAdmission` remains red at 19,275 append
+calls; its ceiling stays unchanged. Evidence:
+`temp/mvp_remaining49/complete-opt.json` and archived profiles under
+`temp/mvp_remaining49/complete-profiles/`. At that checkpoint the issue
+remained partial pending hyphen/debug qualification.
+
+Resolution (2026-11-10, base `b3463551a` plus qualified diff): the remaining
+hyphen gap came from MVP discarding slice's registry result relation as `any`.
+String/Null/Error producer facts now enable span concatenation fusion while
+classifying Error before pointer conversion and preserving absent/fractional
+bounds (S7.1.2, S7.9.3). The unchanged hyphen script records 11,091 appends,
+below its original 15,000 ceiling, and one table admission. The earlier string
+self-tail fix also remains green. All five repaired optimization units pass
+normal, forced/poisoned and seeded/poisoned modes; cost ceilings are unchanged.
+Qualified release SHA256:
+`104fdc33ddc9cdefd42b39bb52b37b9c118903b417ed001913fd5e921eba9e83`.
+The complete optimization gate passes 56/56 and emission passes 588/588;
+all 288 semantic goldens pass both poison-GC modes. The installed debug
+executable was not rebuilt; these results qualify the private release.
+See [implementation/qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#final-five-optimization-units-2026-11-10)
+and `temp/mvp_opt_remaining5/qualified-*.json`.
+
 
 <a id="lr07-63"></a>**LR07-63 · MVP rejects the recursive array-witness emission fixture · RESOLVED (2026-11-10; private release unit qualification)**
 

@@ -2110,6 +2110,10 @@ bool lambda_type_layout_proves_contract(Type* type) {
 // element -- may hold a list at run time.
 bool lambda_type_may_hold_list(Type* type) {
     for (int depth = 0; type && depth <= 16; depth++) {
+        // aliases and binder bounds retain their value kind; treating their
+        // wrapper as open would erase already-admitted map/union proofs.
+        Type* unwrapped = contract_unwrap_type(type);
+        if (unwrapped != type) { type = unwrapped; continue; }
         switch (type->type_id) {
         case LMD_TYPE_ANY:
         case LMD_TYPE_ARRAY:

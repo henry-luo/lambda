@@ -8805,7 +8805,6 @@ static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
     }
     case AST_NODE_OBJECT_TYPE: {
         AstObjectTypeNode* object = (AstObjectTypeNode*)node;
-        direct_bind_rewrite_object_shape(bind, object);
         direct_bind_rewrite_node(bind, object->item, node);
         direct_bind_rewrite_node(bind, object->base_type, node);
         direct_bind_rewrite_node(bind, object->content, node);
@@ -8880,6 +8879,8 @@ static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
         AstObjectTypeNode* object = (AstObjectTypeNode*)node;
         object->entry = direct_bind_entry(bind, object->entry);
         object->base_entry = direct_bind_entry(bind, object->base_entry);
+        // synthetic field bindings must be canonical before index publication.
+        direct_bind_rewrite_object_shape(bind, object);
         break;
     }
     case AST_NODE_OBJECT_LITERAL:

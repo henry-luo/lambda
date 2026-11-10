@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "description": "S7.1.2/S7.9.3/D8.6.1: fuse text slices after Error classification, preserve null offsets as empty join fragments, and retain the checked offset helper.",
+  "checks": [
+    {
+      "in_func": "mvp_#_bracket",
+      "expect_seq": [
+        "call\t{{p}}, fn_slice3,",
+        "ursh\t{{r:tag}}, {{r:slice}}, 56",
+        "beq\t{{l:error}}, {{r:tag}}, 27",
+        "and\t{{r:pointer}}, {{r:slice}}, 72057594037927935",
+        "mov\t{{r:text}}, {{r:pointer}}",
+        "bne\t{{l:nonnull}}, {{r:text}}, 0",
+        "mov\t{{r:empty}}, p:{{n}}({{r}})",
+        "mov\t{{r:text}}, {{r:empty}}",
+        "{{l:nonnull}}:",
+        "call\t{{p}}, fn_strcat_many, {{r}}, 0, 3, {{r}}, {{r:text}},",
+        "{{l:error}}:"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_join,"
+      ],
+      "expect": [
+        "call\t{{p}}, fn_slice3,"
+      ]
+    }
+  ]
+}

@@ -354,6 +354,16 @@ static bool ast_index_publish_node(AstIndex* index, AstNode* node, AstNodeId id)
         index->node_bindings[id] = binding_id;
     }
     switch (node->node_type) {
+    case AST_NODE_OBJECT_TYPE: {
+        Type* type = node->type && node->type->type_id == LMD_TYPE_TYPE ? ((TypeType*)node->type)->type : NULL;
+        if (!type || !type->is_nominal) return true;
+        // explicit ~.field access still needs the synthetic method-field local,
+        // even when no bare identifier publishes its binding (D8.2.4).
+        FOR_EACH_MAP_FIELD((TypeObject*)type, field)
+            if (field->binding && ast_index_publish_binding(index, field->binding) == AST_BINDING_ID_INVALID)
+                return false;
+        return true;
+    }
     case AST_NODE_DECOMPOSE: {
         AstDecomposeNode* decomposition = (AstDecomposeNode*)node;
         // unread targets still own storage; their synthetic declarators are

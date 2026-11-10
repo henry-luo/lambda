@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.2.2/S4.1.2: exact interval endpoints retain a slow arm only when the len() maximum can cross INT53_MAX.",
+  "description": "D2.2.2/S4.1.2: exact interval endpoints retain a slow arm only when the explicitly guarded maximum can cross INT53_MAX.",
   "checks": [
     {
       "in_func": "mvp_#_int_interval_safe",

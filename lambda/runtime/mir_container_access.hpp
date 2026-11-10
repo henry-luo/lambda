@@ -477,9 +477,10 @@ static inline MIR_reg_t em_item_null_compare(MirEmitter* em, MIR_reg_t item,
 static inline MIR_reg_t em_semantic_value_type_test(MirEmitter* em, MIR_reg_t item, Type* expected) {
     bool scalar = expected == &TYPE_NULL || expected == &TYPE_BOOL || expected == &TYPE_INT ||
         expected == &TYPE_FLOAT || expected == &TYPE_STRING || expected == &TYPE_ERROR;
-    static const struct { Type* type; TypeId aliases[2]; int count; } containers[] = {
+    static const struct { Type* type; TypeId aliases[3]; int count; } containers[] = {
         {&TYPE_MAP, {LMD_TYPE_VMAP}, 1},
-        {&TYPE_ARRAY, {LMD_TYPE_ARRAY_NUM, LMD_TYPE_VARRAY}, 2},
+        // generic array membership includes ranges (S11.1.4).
+        {&TYPE_ARRAY, {LMD_TYPE_ARRAY_NUM, LMD_TYPE_VARRAY, LMD_TYPE_RANGE}, 3},
         {&TYPE_ELMT, {LMD_TYPE_VELMT}, 1},
     };
     int alternative = -1;

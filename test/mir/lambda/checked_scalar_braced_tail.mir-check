@@ -1,20 +1,35 @@
 {
   "schema_version": 1,
-  "description": "D8.2.6/S9.1.2: a checked int result in a braced block keeps a proven self-call in tail position, including an allocating local and live array parameter; a non-tail operand or changed pointer owner remains a call.",
+  "description": "D8.2.6/S9.1.2: a checked int result in a braced block loops to the same body label after its allocating local and native updates, retaining a live array parameter. Non-tail and changed-owner controls retain calls.",
   "checks": [
     {
       "in_func": "mvp_#_checked_tail",
-      "expect": ["add\t{{r}}, {{r}}, 1", "ble\t"],
-      "forbid": ["call\tmvp_{{n}}_checked_tail_dp"],
-      "count": {", 1000000": 1}
+      "forbid": [
+        "call\tmvp_{{n}}_checked_tail_dp"
+      ],
+      "in_range": {
+        "from": "call\t{{p}}, lambda_stack_is_exhausted,",
+        "to": "ret\t"
+      },
+      "expect_seq": [
+        "{{l:body}}:",
+        "call\t{{p}}, fn_string,",
+        "add\t{{r}}, {{r}}, {{r}}",
+        "call\t{{p}}, fn_len_s,",
+        "jmp\t{{l:body}}"
+      ]
     },
     {
       "in_func": "mvp_#_non_tail",
-      "expect": ["call\tmvp_{{n}}_non_tail_dp"]
+      "expect": [
+        "call\tmvp_{{n}}_non_tail_dp"
+      ]
     },
     {
       "in_func": "mvp_#_changing_owner",
-      "expect": ["call\tmvp_{{n}}_changing_owner_dp"]
+      "expect": [
+        "call\tmvp_{{n}}_changing_owner_dp"
+      ]
     }
   ]
 }

@@ -2,6 +2,37 @@
 
 ## Current checkpoint
 
+- Merge integration on 2026-11-10: HEAD `bbf9bf261` (tuning) plus
+  MERGE_HEAD `ea4cb4de9` (baseline and slow-test repairs). Resolve the two
+  MVP conflicts by retaining both behaviors. The merge remains uncommitted.
+- Share the single-read analysis through the MVP module header: both append
+  fusion and admission discharge need it. Keep the admitted three-statement
+  append chain, the adjacent transfer, compact numeric stores and original
+  checked keys, and tail-accumulator ownership.
+- Fresh merged functional coverage passes 2,281 script cases, 921 math cases,
+  143 structured cases and 63 MVP units. The incoming repairs supersede the
+  pre-merge baseline failures below.
+- Integration repairs preserve consuming array joins before string
+  speculation and share one late ownership check across erased primitive
+  stores. Alias/binder wrappers retain their value kind during list imaging;
+  unchanged annotated union bindings reuse their existing reification, while
+  projected/inferred values retain admission (D4.2.5, D4.3.1, S11.1.6v2).
+- Focused gates pass 588/588 MIR emission cases, 56/56 optimization cases and
+  63/63 MVP units. Nine reviewed zero-slack size records include signed-zero decoding
+  and guarded-store growth, with smaller ownership frames tightened too
+  (D8.6.1). Semantic goldens are unchanged by merge integration.
+- Final `make test-lambda-baseline`: **7,365/7,365 pass**, zero failures,
+  partials or skips. `make test262-baseline`: **40,261/40,261 baseline tests
+  pass**, zero regressions. All **25/25 MIR size probes** also pass against
+  the pinned release host. Logs/reports are `temp/result55_tuning/merged-*`.
+- Merge integration is complete and staged without committing. A short
+  post-merge timing screen confirms an incoming Matrix optimization-policy
+  tradeoff, detailed below; refining that policy remains performance work.
+- The timing tables below measure the pre-merge candidate7. They do not
+  claim exact merged-compiler timings. Published Result54/55 remain immutable.
+
+## Pre-merge tuning checkpoint
+
 - Updated 2026-11-10; main checkout `/Users/henryluo/Projects/Lambda-opus`,
   `master`, starting commit `dced2136789c8ed2e164875d3f339c37d4bd5eb6`.
 - User requests continued compiler/runtime tuning of the five named untyped
@@ -160,6 +191,38 @@ its two-sided interval spans parity. Substantial historical gaps remain:
 Matrix is still about five times its syntax-matched Result54 measurement;
 Triangl about 2.8 times; Ray about 3.6 times. These cross-snapshot ratios are
 descriptive because the historical language revision uses different syntax.
+
+## Post-merge performance check
+
+The merged release SHA256 is
+`2e2f9e84af377d130fe0c107e87305dd48d548da973f03b32a975d9262110f57`.
+`merged-v-candidate7-18.json` compares it with the pre-merge tuned candidate7
+over the same 18 target/counterpart sources, three alternating pairs and one
+warmup. All goldens, stdout hashes and provenance stability checks pass.
+Typed JSON Gen improves a further 19.4%, and typed Three-way Merge 5.4% in
+this screen. The only >5% slowdowns are the two Matrix Statistics variants.
+
+`merged-matrix-recheck.json` confirms those in 15 pairs, with equal golden
+stdout, stable provenance and zero merged wins:
+
+| Mode | Pre-merge tuned ms | Merged ms | Change |
+|---|---:|---:|---:|
+| untyped | 81.309 | 102.496 | +26.1% |
+| typed | 21.975 | 31.758 | +44.5% |
+
+The incoming `MIR_EAGER_MODULE_O1_THRESHOLD` caps aggregate eager-module
+optimization at O1 above 5,000 instructions; its completed slow-test plan
+explicitly left long-running eager throughput unqualified (D8.3.1–D8.3.4).
+`merged-matrix-opt-isolation.json` isolates O1/O2 within the same pre-merge
+binary using rotated triplets, one warmup and five measurements through the
+same single-script batch path. Untyped medians are 81.551 ms at O2 and
+105.147 ms at O1; typed medians are 21.948 ms and 30.495 ms. The merged
+host, with O2 requested but the aggregate cap active, measures 100.603 ms
+and 29.839 ms. Every output matches. This identifies the optimization cap
+as the dominant cause of the post-merge Matrix slowdown. Preserve the
+incoming startup fix; a policy refinement needs both cold-import latency
+and steady-state acceptance. No benchmark source or published snapshot
+was changed for this check.
 
 ## Qualification evidence
 

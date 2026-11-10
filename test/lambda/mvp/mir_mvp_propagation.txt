@@ -1,4 +1,5 @@
 [7, 8, true, true]
+[inf, inf, inf, nan]
 [false, false, "tail"]
 [true, true, "tail"]
 [true, 11]

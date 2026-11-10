@@ -14,7 +14,7 @@
       "in_func": "mvp_#_reverse_span",
       "in_range": {
         "from": "lsh\t{{r}}, {{r}}, 3",
-        "to": "bt\tL"
+        "to": "call\t{{p}}, lambda_int_lane_add_slow,"
       },
       "expect_seq": [
         {
@@ -31,7 +31,10 @@
         "\tge\t",
         "\tlt\t",
         "call\tfn_index"
-      ]
+      ],
+      "count": {
+        "mov\ti64:({{r}}), {{r}}": 2
+      }
     },
     {
       "in_func": "mvp_#_reverse_growing",

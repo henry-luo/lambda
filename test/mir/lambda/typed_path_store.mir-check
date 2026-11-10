@@ -29,6 +29,17 @@
       "forbid": [
         "call\t{{p}}, array_plain,"
       ]
+    },
+    {
+      "in_func": "mvp_#_nullable_write",
+      "expect_seq": [
+        "and\t{{r:pointer}}, {{r}}, 72057594037927935",
+        "beq\t{{l}}, {{r:pointer}}, 0",
+        "mov\t{{r}}, p:16({{r:pointer}})"
+      ],
+      "expect": [
+        "call\t{{p}}, lambda_map_path_set_checked_keys,"
+      ]
     }
   ]
 }

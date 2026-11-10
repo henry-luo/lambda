@@ -82,6 +82,7 @@
 #include "lib/math_utils.h"
 #include "lib/str.h"
 #include "lib/byte_builder.h"
+#include "lib/lru_cache.h"
 #include "lib/font/font_math.h"
 #include "lib/image.h"
 #include "lib/endian.h"
@@ -4552,10 +4553,18 @@ static FontContext* radiant_build_query_fonts(Item faces) {
 struct RadiantQueryFontCache {
     FontContext* fonts;
     ByteBuilder key;
+    LruCache* math_glyphs;
 };
+
+static void radiant_query_math_cache_clear(void* opaque) {
+    RadiantQueryFontCache* cache = (RadiantQueryFontCache*)opaque;
+    if (cache->math_glyphs) lru_cache_free(cache->math_glyphs);
+    cache->math_glyphs = nullptr;
+}
 
 static void radiant_query_font_cache_clear(void* opaque) {
     RadiantQueryFontCache* cache = (RadiantQueryFontCache*)opaque;
+    radiant_query_math_cache_clear(cache);
     if (cache->fonts) font_context_destroy(cache->fonts);
     cache->fonts = nullptr;
     byte_builder_destroy(&cache->key);
@@ -4568,8 +4577,8 @@ static void radiant_query_font_cache_destroy(void* opaque) {
 
 static const uint32_t RADIANT_QUERY_FONT_CACHE_OWNER = 0x52464e54; // RFNT
 static const ContextCapsuleOps radiant_query_font_cache_ops = {
-    "radiant.query_fonts", CONTEXT_CAPSULE_LIFETIME_CONTEXT, sizeof(RadiantQueryFontCache),
-    nullptr, nullptr, radiant_query_font_cache_destroy
+    "radiant.query_fonts", CONTEXT_CAPSULE_LIFETIME_REALM, sizeof(RadiantQueryFontCache),
+    nullptr, radiant_query_math_cache_clear, radiant_query_font_cache_destroy
 };
 
 // compare complete resource bytes and normalized styles, never GC addresses or
@@ -4884,6 +4893,60 @@ static Item radiant_math_glyph_record(FontHandle* font, const FontMathTable* mat
     return result.get();
 }
 
+struct RadiantMathGlyphCacheEntry {
+    Context* owner;
+    FontHandle* font;
+    uint64_t value;
+};
+
+static void radiant_math_glyph_cache_evict(const char*, void* opaque, size_t, void*) {
+    RadiantMathGlyphCacheEntry* entry = (RadiantMathGlyphCacheEntry*)opaque;
+    heap_unregister_gc_root_for(entry->owner, &entry->value);
+    font_handle_release(entry->font);
+    mem_free(entry);
+}
+
+static Item radiant_math_cached_glyph_record(FontContext* fonts, FontHandle* font,
+        const FontMathTable* math, uint32_t codepoint, float scale) {
+    RadiantQueryFontCache* cache = ::context ? (RadiantQueryFontCache*)context_capsule_extension(
+        ::context, RADIANT_QUERY_FONT_CACHE_OWNER, 0) : nullptr;
+    if (!cache || cache->fonts != fonts)
+        return radiant_math_glyph_record(font, math, codepoint, scale);
+    if (!cache->math_glyphs) {
+        LruCacheConfig config = {};
+        config.max_entries = 2048;
+        config.on_evict = radiant_math_glyph_cache_evict;
+        cache->math_glyphs = lru_cache_new(&config);
+    }
+    // retain the actual resolved face, not its requested family; fallback and
+    // font-resource replacement must never alias another face's geometry.
+    uint32_t scale_bits;
+    memcpy(&scale_bits, &scale, sizeof(scale_bits));
+    char key[80];
+    snprintf(key, sizeof(key), "%p:%x:%x", (void*)font, codepoint, scale_bits);
+    RadiantMathGlyphCacheEntry* entry = cache->math_glyphs
+        ? (RadiantMathGlyphCacheEntry*)lru_cache_get(cache->math_glyphs, key) : nullptr;
+    if (entry) return (Item){.item = entry->value};
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_math_glyph_record(font, math, codepoint, scale));
+    if (!cache->math_glyphs || radiant_item_is_missing(result.get())) return result.get();
+    entry = (RadiantMathGlyphCacheEntry*)mem_calloc(1, sizeof(*entry), MEM_CAT_RENDER);
+    if (!entry) return result.get();
+    entry->owner = ::context;
+    entry->value = result.get().item;
+    if (!heap_register_gc_root_for(entry->owner, &entry->value)) {
+        mem_free(entry);
+        return result.get();
+    }
+    entry->font = font_handle_retain(font);
+    // the cache is a second immutable observer; writes through a returned
+    // record must detach. Realm release unregisters every precise root.
+    cow_mark_shared(result.get());
+    if (!lru_cache_put(cache->math_glyphs, key, entry, sizeof(*entry)))
+        radiant_math_glyph_cache_evict(key, entry, sizeof(*entry), nullptr);
+    return result.get();
+}
+
 static Item radiant_font_metrics_record(FontHandle* handle, const FontMetrics* metrics, float size) {
     RootFrame roots(1);
     Rooted<Item> result(roots, radiant_obj_new());
@@ -4960,10 +5023,10 @@ RADIANT_C_API Item fn_radiant_math_metrics(Item style_item, Item codepoints_item
                     bool fallback_has_math = font_get_math_table(fallback, &fallback_math);
                     const FontMetrics* fallback_metrics = font_get_metrics(fallback);
                     glyph.set(fallback_metrics && fallback_metrics->em_size > 0.0f && (fallback_has_math || !fallback_math.data)
-                        ? radiant_math_glyph_record(fallback, fallback_has_math ? &fallback_math : nullptr,
+                        ? radiant_math_cached_glyph_record(fonts, fallback, fallback_has_math ? &fallback_math : nullptr,
                             (uint32_t)cp, style.size_px / fallback_metrics->em_size) : ItemNull);
                     font_handle_release(fallback);
-                } else glyph.set(radiant_math_glyph_record(handle, has_math ? &math : nullptr, (uint32_t)cp, scale));
+                } else glyph.set(radiant_math_cached_glyph_record(fonts, handle, has_math ? &math : nullptr, (uint32_t)cp, scale));
                 radiant_array_push_item(glyphs.get(), glyph.get());
             }
         }

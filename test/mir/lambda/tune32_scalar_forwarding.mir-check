@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D7.3.2/D2.3.5: MVP inlines closed scalar forwarding and compares native lanes. Unknown operand kinds retain their checked comparison sibling.",
+  "description": "D7.3.2/D2.3.5: MVP inlines closed scalar forwarding and compares native lanes. Unknown operand kinds retain their checked comparison sibling. Guarded and checked outer bodies each inline the two checked comparison alternatives.",
   "checks": [
     {
       "in_func": "mvp_#_tune32_scalar_forward",
@@ -24,7 +24,7 @@
       ],
       "count": {
         "call\t{{p}}, fn_lt,": {
-          "max": 2
+          "max": 4
         }
       }
     }

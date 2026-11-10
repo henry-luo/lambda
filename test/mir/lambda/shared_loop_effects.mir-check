@@ -1,22 +1,26 @@
 {
   "schema_version": 1,
-  "description": "D6.3/D7.4.3: immutable native arguments admit total scalar calls before the loop test, including a zero-trip invocation. 2026-09-13: a guarded `while` emits a proven fast arm plus a canonical generic sibling (D2.2.2, D7.3.1), so the hoisted call is emitted once per ARM. The count tracks that; the property itself -- the call is admitted before the loop test and never from inside the body -- is pinned by the expect_seq and by the second group, which forbids the call inside the proven arm's body (loop test .. back edge). The loop test the hoisted call must precede is now the native int-lane compare (T19-C); it no longer widens to the double lane, so the ordering pin follows `lt`.",
+  "description": "D6.3/D8.2.6: total native math on stable homes executes once before the initial loop test, including zero-trip inputs; the captured backedge enters a body with no repeated call. Changed operands stay in the loop, retained streams allocate, and procedural effects keep their inlined checked stores.",
   "checks": [
     {
       "in_func": "mvp_#_stable_abs",
       "expect_seq": [
-        "call\t{{p}}, fabs,",
-        "lt\t{{r}}, {{r}}, %p1"
+        "call\t{{p}}, fabs, {{r:absolute}},",
+        "jmp\t{{l:test}}",
+        "{{l:body}}:",
+        "dadd\t{{r}}, {{r}}, {{r:absolute}}",
+        "{{l:test}}:",
+        "blt\t{{l:body}},"
       ],
       "count": {
-        "call\t{{p}}, fabs,": 2
+        "call\t{{p}}, fabs,": 1
       }
     },
     {
       "in_func": "mvp_#_stable_abs",
       "in_range": {
-        "from": "lt\t{{r}}, {{r}}, %p1",
-        "to": "jmp\tL"
+        "from": "jmp\tL",
+        "to": "ret\t"
       },
       "forbid": [
         "call\t{{p}}, fabs,"

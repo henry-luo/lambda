@@ -278,7 +278,7 @@ TEST(LambdaOptGc, ContradictoryPlannedEffectFailsBeforePublication) {
 TEST(LambdaOptGc, RootlessMirStackProbeStillRecoversOverflow) {
     const char* executable = opt_executable();
     const char* args[] = {executable, "--tier=jit",
-        "test/lambda/negative/test_stack_overflow.ls", NULL};
+        "test/lambda/negative/runtime/stack_overflow.ls", NULL};
     ShellEnvEntry env[] = {
         {"LAMBDA_DISABLE_MIR_CACHE", "1"},
         {NULL, NULL}
@@ -681,6 +681,8 @@ TEST(LambdaOptNumeric, ExactSizedParameterAdmissionMatchesInterpreter) {
 
 // D6.4.4: diagnostic call counters are emitted only for the opted-in JIT;
 // the same source and tier must retain identical observable output.
+static uint64_t exec_profile_function(const char*, const char*, const char*);
+
 TEST(LambdaOptProfile, ExecutedCallsAreCountedOnlyWhenEnabled) {
     ensure_opt_dir();
     const char* executable = opt_executable();
@@ -716,10 +718,11 @@ TEST(LambdaOptProfile, ExecutedCallsAreCountedOnlyWhenEnabled) {
             char* profile = read_text_file(profile_path);
             ASSERT_NE(profile, nullptr);
             // small scalar callees inline into the MVP main entry.
-            EXPECT_NE(strstr(profile, "boxed\tmvp_3_main\t1\n"), nullptr);
+            EXPECT_EQ(exec_profile_function(profile, "boxed", "mvp_#_main"), 1u);
             EXPECT_NE(strstr(profile, "helper\tpn_print\t26"), nullptr);
-            EXPECT_NE(strstr(profile, "frame_entry\tmvp_3_main\t1\n"), nullptr);
-            EXPECT_NE(strstr(profile, "root_reload\tmvp_3_main\t"), nullptr);
+            EXPECT_EQ(exec_profile_function(profile, "frame_entry", "mvp_#_main"), 1u);
+            EXPECT_GT(exec_profile_function(profile, "root_reload", "mvp_#_main"), 0u);
+            EXPECT_LT(exec_profile_function(profile, "root_reload", "mvp_#_main"), UINT64_MAX);
             // NO_GC diagnostic markers do not create production root reloads.
             EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
             free(profile);
@@ -758,8 +761,9 @@ TEST(LambdaOptProfile, ExecutedCallsCanBeAttributedToCaller) {
     shell_result_free(&result);
     char* profile = read_text_file(profile_path);
     ASSERT_NE(profile, nullptr);
-    EXPECT_NE(strstr(profile, "helper\tmvp_0_lens -> fn_len_checked\t2\n"), nullptr);
-    EXPECT_NE(strstr(profile, "helper\tmvp_1_shaped -> fn_len_checked\t2\n"), nullptr);
+    EXPECT_EQ(exec_profile_function(profile, "helper", "mvp_#_lens -> fn_len_checked"), UINT64_MAX);
+    EXPECT_EQ(exec_profile_function(profile, "helper", "mvp_#_shaped -> fn_len_l"), 2u);
+    EXPECT_EQ(exec_profile_function(profile, "frame_entry", "mvp_#_lens"), 1u);
     EXPECT_NE(strstr(profile, "helper\tmvp_0_lens -> fn_len_s\t1\n"), nullptr);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
     free(profile);
@@ -983,10 +987,13 @@ TEST(LambdaOptProfile, ReadOnlyLengthAvoidsGcRootTraffic) {
         "test/mir/lambda/readonly_length_no_gc.ls", "[7, 2, 1]\n",
         profile_path);
     ASSERT_NE(profile, nullptr);
-    EXPECT_NE(strstr(profile, "helper\tfn_len_checked\t4"), nullptr);
+    EXPECT_EQ(exec_profile_count_prefix(profile, "helper\tfn_len_checked"), UINT64_MAX);
+    EXPECT_EQ(exec_profile_count_prefix(profile, "helper\tfn_len_l"), 2u);
     EXPECT_NE(strstr(profile, "helper\tfn_len_s\t1"), nullptr);
     EXPECT_EQ(exec_profile_function(profile, "frame_entry", "mvp_#_lens"), 1u);
-    EXPECT_LE(exec_profile_function(profile, "root_reload", "mvp_#_lens"), 3u);
+    // eliding the unused binder can remove every collecting edge and its row.
+    const uint64_t reloads = exec_profile_function(profile, "root_reload", "mvp_#_lens");
+    EXPECT_TRUE(reloads == UINT64_MAX || reloads <= 3u);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
     free(profile);
 }
@@ -1008,15 +1015,19 @@ TEST(LambdaOptProfile, FiniteIntLiteralArraySkipsPerElementSetters) {
 }
 
 // D6.3.1/D4.3.3: a packed float literal fills its buffer before the next
-// safepoint; the one nullable arm still builds a generic array on demand.
+// safepoint; nullable misses, mixed literals and printed wrappers stay generic.
 TEST(LambdaOptProfile, FloatLiteralFillsBeforeNullableFallback) {
     char* profile = run_profiled_lambda_fixture(
         "test/mir/lambda/tune27_float_literal_nullable.ls",
         "[2.5, null]",
-        "temp/lambda_opt_contract/float_literal_uninit.tsv");
+        "temp/lambda_opt_contract/float_literal_uninit.tsv", true);
     ASSERT_NE(profile, nullptr);
-    EXPECT_LT(exec_profile_count_prefix(profile, "helper\tlambda_fill_primitive_bits"), UINT64_MAX);
-    EXPECT_LE(exec_profile_count_prefix(profile, "helper\tarray_plain"), 1u);
+    // these small producers inline into main: two present nullable literals
+    // and one NaN literal pack; one miss, two mixed and three wrappers do not.
+    EXPECT_EQ(exec_profile_function(profile, "helper", "mvp_#_main -> array_plain"), 6u);
+    EXPECT_EQ(exec_profile_function(profile, "helper", "mvp_#_main -> array_num_new"), 3u);
+    EXPECT_GT(exec_profile_function(profile, "helper", "mvp_#_main -> lambda_fill_primitive_bits"), 0u);
+    EXPECT_LT(exec_profile_function(profile, "helper", "mvp_#_main -> lambda_fill_primitive_bits"), UINT64_MAX);
     mir_check::run_fixture("test/mir/lambda/tune27_float_literal_nullable.ls",
         "test/mir/lambda/tune27_float_literal_nullable.mir-check", mir_check::LANG_LAMBDA);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
@@ -1460,7 +1471,13 @@ TEST(LambdaOptAdmission, OpenUnionMemberShapeCachesAdmissionProof) {
     // The open first arm cannot statically certify `child`, so the recursive
     // boundary remains. A compiler-built member carrier proves it once per
     // shape and the context cache reuses that proof (D4.2.5, D7.3.2-D7.3.3).
-    EXPECT_GT(run.profile.get("union_map_rep_cache_hits"), 200u);
+    const uint64_t admissions = run.profile.get("union_admit_calls");
+    const uint64_t misses = run.profile.get("union_map_rep_cache_misses");
+    // MVP skips construction checks. Each remaining valid map crossing is a
+    // cache hit or one cold miss; the malformed scalar accounts for one reject.
+    ASSERT_GT(admissions, misses + 1u);
+    EXPECT_LE(admissions, 201u);
+    EXPECT_EQ(run.profile.get("union_map_rep_cache_hits"), admissions - misses - 1u);
     EXPECT_LE(run.profile.get("union_map_rep_cache_misses"), 4u);
     EXPECT_EQ(run.profile.get("map_admit_relation_cache_hits"), 0u);
     // The malformed child must still reach the checked slow path.

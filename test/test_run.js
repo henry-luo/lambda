@@ -406,6 +406,7 @@ function discoverTests(config) {
                     runnerArgs: t.runner_args || [],
                     caseWorkers: t.case_workers || 1,
                     caseWorkersEnv: t.case_workers_env,
+                    caseWorkerSlots: t.case_worker_slots || 1,
                     caseBatchSize: t.case_batch_size || 1,
                     caseBatchSizeEnv: t.case_batch_size_env,
                     caseWorkerArgs: t.case_worker_args || [],
@@ -646,11 +647,13 @@ function scheduleTests(tests) {
  */
 function runTest(testInfo) {
     const requestedWorkers = Number(process.env[testInfo.caseWorkersEnv] || testInfo.caseWorkers || 1);
+    const availableSlots = Math.min(MAX_CASE_CONCURRENT, testInfo.allocatedSlots || MAX_CASE_CONCURRENT);
+    const caseWorkerSlots = Math.max(1, Math.min(availableSlots, testInfo.caseWorkerSlots || 1));
     const caseWorkers = Math.max(1, Math.min(MAX_CASE_CONCURRENT,
-        testInfo.allocatedSlots || MAX_CASE_CONCURRENT, Math.floor(requestedWorkers) || 1));
+        Math.floor(availableSlots / caseWorkerSlots), Math.floor(requestedWorkers) || 1));
     if (testInfo.isGtest && !testInfo.caseWorker && !testInfo.listCases &&
-        !process.env.GTEST_TOTAL_SHARDS && (caseWorkers > 1 || testInfo.isolatedCwd)) {
-        return runGtestCases(testInfo, caseWorkers);
+        !process.env.GTEST_TOTAL_SHARDS && (caseWorkers > 1 || testInfo.isolatedCwd || testInfo.caseWorkerSlots > 1)) {
+        return runGtestCases(testInfo, caseWorkers, caseWorkerSlots);
     }
     return new Promise((resolve) => {
         const { baseName, exePath, scriptPath } = testInfo;
@@ -900,7 +903,7 @@ function runTest(testInfo) {
 }
 
 // suites may opt into bounded batches to reuse expensive native modules between cases.
-async function runGtestCases(testInfo, workers) {
+async function runGtestCases(testInfo, workers, caseWorkerSlots) {
     const { baseName } = testInfo;
     const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
     const logFile = path.join(TEST_OUTPUT_DIR, `${baseName}.log`);
@@ -970,8 +973,8 @@ async function runGtestCases(testInfo, workers) {
             const batch = batches[next++].cases;
             const workerName = `${baseName}_cases/${batch[0].index}`;
             const result = await runTest({ ...testInfo, cwd, baseName: workerName, caseWorker: true,
-                minimumPassed: 0, allocatedSlots: 1,
-                env: { ...testInfo.env, LAMBDA_TEST_MAX_CONCURRENT: '1' },
+                minimumPassed: 0, allocatedSlots: caseWorkerSlots,
+                env: { ...testInfo.env, LAMBDA_TEST_MAX_CONCURRENT: String(caseWorkerSlots) },
                 runnerArgs: [...runnerArgs, ...testInfo.caseWorkerArgs, `--gtest_filter=${batch.map(c => c.name).join(':')}`] });
             let data;
             try { data = JSON.parse(fs.readFileSync(path.join(TEST_OUTPUT_DIR, `${workerName}_results.json`), 'utf8')); } catch (_) {}

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.2.5: MVP reads the packed field through its pointer-typed data slot; one checked member fallback retains the nullable/layout miss.",
+  "description": "D4.2.5: MVP reads the packed field through its pointer-typed data slot; one checked member fallback retains the nullable/layout miss. D4.2.5: an admitted read-only prefix has no reachable member fallback.",
   "checks": [
     {
       "in_func": "mvp_#_tune16_record_read",
@@ -13,7 +13,7 @@
         }
       ],
       "count": {
-        "call\t{{p}}, fn_member,": 1
+        "call\t{{p}}, fn_member,": 0
       },
       "forbid": [
         "call\t{{p}}, fn_index,"

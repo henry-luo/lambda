@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.2.5: exact and nullable record boundaries keep native pointer-typed packed reads; reordered dynamic input still reifies through admission.",
+  "description": "D4.2.5: exact and nullable record boundaries keep native pointer-typed packed reads; reordered dynamic input still reifies through admission. D4.2.5: an admitted read-only prefix has no reachable member fallback.",
   "checks": [
     {
       "in_func": "mvp_#_read_node",
@@ -16,7 +16,7 @@
         }
       ],
       "count": {
-        "call\t{{p}}, fn_member,": 1
+        "call\t{{p}}, fn_member,": 0
       }
     },
     {
