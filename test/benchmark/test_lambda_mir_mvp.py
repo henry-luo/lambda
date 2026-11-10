@@ -40,6 +40,8 @@ MIR_EMISSION_METHODS = (
     'test_unused_array_binders',
     'test_recursive_union_constructors',
     'test_projected_scalar_hints',
+    'test_logical_carriers_and_closed_outcomes',
+    'test_guarded_reduction_carriers',
     'test_batch_record_and_decimal_paths',
     'test_static_scalar_fallback',
     'test_native_shift_mir',
@@ -142,6 +144,20 @@ class LambdaMirMvpTests(unittest.TestCase):
             "COW_EXEC_PROFILE_OUT": str(Path(self.scratch.name) / "scalar-keys.tsv"),
         })
         self.assertNotIn("cow_capture_value", body)
+
+    def test_logical_carriers_and_closed_outcomes(self):
+        self.check_gc_fixtures((ROOT / "test/lambda/mvp/mir_mvp_logical_carriers.ls",))
+        # these previously excluded workloads exposed collecting comparisons
+        # inside purportedly closed regions and a nested Boolean carrier join.
+        for script in ("awfy/deltablue.ls", "larceny/quicksort.ls", "text/jq_bf2.ls"):
+            with self.subTest(script=script):
+                self.check_golden(ROOT / "test/benchmark" / script)
+
+    def test_guarded_reduction_carriers(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_guarded_reductions.ls"
+        self.check_gc_fixtures((source,))
+        # D7.4.1: independently bounded projections select a native float ABI.
+        self.assertIn("d:arg0", self.function_mir(source, "finite_scale").splitlines()[0])
 
     def test_benchmark_goldens(self):
         for suite, name in CASES:
@@ -1222,7 +1238,8 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_nullable_comparison_mir(self):
         body = self.function_mir(ROOT / "test/benchmark/larceny/quicksort2.ls", "partition")
         native = body[:body.index("\tcall\tfn_index")]
-        self.assertIn("\tle\t", native)
+        # branch demand consumes the comparison directly, without a Boolean phi.
+        self.assertRegex(native, r"\t(?:le|ble|bgt)\t")
         self.assertNotIn("fn_le", native)
         # the checked sibling retains the pivot's deferred admission outcome (S7.7.2v2).
         self.assertIn("fn_le", body)

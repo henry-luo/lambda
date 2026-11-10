@@ -15,9 +15,17 @@
 #include "test_lambda_helpers.hpp"
 #include "../lambda/mir/mir.h"
 #include "../lambda/mir/mir-gen.h"
+#include "../lambda/runtime/mir_policy.hpp"
 #include "lib/file.h"
 
 static const char* kLambdaMirDir = "test/mir/lambda";
+
+TEST(LambdaMirPolicy, EagerBudgetBoundsIndividualBodies) {
+    EXPECT_EQ(mir_eager_optimize_level(5000, 2), 2u);
+    EXPECT_EQ(mir_eager_optimize_level(5001, 2), 1u);
+    EXPECT_EQ(mir_eager_optimize_level(5000, 0), 0u);
+    EXPECT_EQ(mir_eager_optimize_level(5000, 1), 1u);
+}
 
 static std::vector<mir_check::Fixture> collect_lambda_fixtures() {
     return mir_check::discover_fixtures(kLambdaMirDir, ".ls");

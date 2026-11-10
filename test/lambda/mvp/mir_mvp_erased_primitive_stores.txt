@@ -6,3 +6,6 @@
 [4, [false, "b", false], 3]
 [6, [true, false, true, false, true, false]]
 [6, [true, false, true, false, true, false], [true, true, true, true, true, true]]
+[true, false, true]
+[1.5, -2.5]
+[true, false]

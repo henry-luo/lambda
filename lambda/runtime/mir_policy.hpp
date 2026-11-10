@@ -17,7 +17,7 @@
 #define MIR_RADIANT_AST_NODE_THRESHOLD 25000U
 #define MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT 15000U
 #define MIR_LARGE_FUNCTION_O1_THRESHOLD 20000ULL
-#define MIR_EAGER_MODULE_O1_THRESHOLD 5000ULL
+#define MIR_EAGER_FUNCTION_O1_THRESHOLD 5000ULL
 
 static inline bool mir_large_interp_enabled(void);
 
@@ -38,6 +38,14 @@ static inline unsigned int mir_native_optimize_level(
         uint64_t budget = MIR_LARGE_FUNCTION_O1_THRESHOLD) {
     return instruction_count > budget && optimize_level > 1
         ? 1 : optimize_level;
+}
+
+// bound the global optimization cost of one body, independent of how many
+// unrelated small exports share its eagerly generated module.
+static inline unsigned int mir_eager_optimize_level(
+        uint64_t largest_function_insns, unsigned int optimize_level) {
+    return mir_native_optimize_level(largest_function_insns, optimize_level,
+        MIR_EAGER_FUNCTION_O1_THRESHOLD);
 }
 
 // The code generator is vendored; policy selects its interface before it is

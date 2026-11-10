@@ -58,4 +58,15 @@ pn main() {
     let offset_saved = offset_values
     let offset_end = stride_offset(offset_values, 0, 6, 2)^
     print([offset_end, offset_values, offset_saved]); print("\n")
+    // canonical certificates admit primitive stores, while refinements and
+    // counted owners keep the checked receiver protocol (D4.3.3).
+    var typed_flags: bool[] = fill(3, true)^
+    bool_store(typed_flags, 1, false)^
+    print(typed_flags); print("\n")
+    var typed_numbers: float[] = fill(2, 1.5)^
+    float_store(typed_numbers, 1, -2.5)^
+    print(typed_numbers); print("\n")
+    var counted: bool[2] = [true, true]
+    bool_store(counted, 1, false)^
+    print(counted); print("\n")
 }

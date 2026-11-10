@@ -257,10 +257,10 @@
       "name": "lambda_tune4_typed_array_guard",
       "script": "test/mir/lambda/typed_array_guard.ls",
       "language": "lambda",
-      "description": "D4.3.3/D6.3.3: native guarded loads need no roots; stores retain a checked fallback and its precise frame.",
+      "description": "D4.3.3/D6.3.3: native guarded loads need no roots; stores retain a checked fallback and its precise frame. Reviewed 2026-11-10 (D8.6.1): +156 module instructions add the affine whole-loop reduction alternative in dense_int_sum and its bounded main expansion (+78 each), including entry scalar/owner and endpoint guards. Checked siblings and frame budgets stay unchanged. Review: temp/result54_tuning/size-review/opcode-deltas.json; release candidates 12 and 14 confirm exact caps.",
       "budgets": {
         "default": {
-          "module_insns": 1689,
+          "module_insns": 1845,
           "functions": {
             "mvp_#_guarded_load": {
               "insns": 123
@@ -540,16 +540,16 @@
       "name": "lambda_mvp_array_regions",
       "script": "test/mir/lambda/mvp_array_regions.ls",
       "language": "lambda",
-      "description": "D4.3.3/D8.6.1: typed and erased array kernels include native loads/stores, checked misses, COW snapshots and required roots/homes. Reviewed 2026-11-10 (D6.3.2/D8.6.1): staged nullable primitive literals add a packed-construction alternative (+4 instructions, +2 root stores, +1 static safepoint in main). Each arm allocates once; roots and scalar homes stay unchanged. Reviewed final-five optimization fixes, 2026-11-10 (D8.6.1/D6.3.2): +6 typed_sum instructions skip admission on a proved present scalar; +21 main instructions prepare a shared indexed owner before its closed var mutator and refresh native witnesses. The cold preparation adds two root stores and one static safepoint, with unchanged root/home counts. Unique owners skip the helper. Review: temp/mvp_opt_remaining5/review-{typed_sum,main}.diff; exact darwin release caps, no slack.",
+      "description": "D4.3.3/D8.6.1: typed and erased array kernels include native loads/stores, checked misses, COW snapshots and required roots/homes. Reviewed 2026-11-10 (D6.3.2/D8.6.1): staged nullable primitive literals add a packed-construction alternative (+4 instructions, +2 root stores, +1 static safepoint in main). Each arm allocates once; roots and scalar homes stay unchanged. Reviewed final-five optimization fixes, 2026-11-10 (D8.6.1/D6.3.2): +6 typed_sum instructions skip admission on a proved present scalar; +21 main instructions prepare a shared indexed owner before its closed var mutator and refresh native witnesses. The cold preparation adds two root stores and one static safepoint, with unchanged root/home counts. Unique owners skip the helper. Review: temp/mvp_opt_remaining5/review-{typed_sum,main}.diff; exact darwin release caps, no slack. Reviewed 2026-11-10 (D8.6.1): the erased reduction adds 17 instructions to discharge and publish its boxed accumulator across the affine loop; typed_sum shrinks by 4, giving +13 module instructions. Frame/root/home counts do not grow. Review: temp/result54_tuning/size-review/opcode-deltas.json; release candidates 12 and 14 agree, with zero slack.",
       "budgets": {
         "default": {
-          "module_insns": 2679,
+          "module_insns": 2692,
           "functions": {
             "mvp_#_typed_sum": {
-              "insns": 313
+              "insns": 309
             },
             "mvp_#_erased_sum": {
-              "insns": 541
+              "insns": 558
             },
             "mvp_#_typed_set": {
               "insns": 118
