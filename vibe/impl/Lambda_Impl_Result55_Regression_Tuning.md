@@ -2,6 +2,30 @@
 
 ## Current checkpoint
 
+- Published the recorded candidate23 measurements into Result55 on 2026-11-11
+  from checkout HEAD `0794892c47`. This publishes the previously qualified
+  binary, not a new benchmark or qualification of the later merged sources.
+- All **142 JIT execution cells** (71 workloads, typed and untyped; D8.3.1)
+  come from three alternating pairs plus one warmup. The tracked source is
+  `test/benchmark/benchmark_results_v55_lambda_tuned.json`; Result55 records
+  the separate run in `_metadata.merged_engines`.
+- Cached the exact release as `test/benchmark/exe/lambda-v55-4e046a786b-tuned-c23`,
+  SHA-256 `f5376e67ccf8b6a67b082d812529ec3e9d89665d367f1be2d033efc25c4bc0e8`.
+  Its patch and qualification provenance are retained beside the archive.
+- Regenerated `Overall_Result55.md` and the history chart. JIT/Node geomeans
+  are **0.56x untyped** and **0.39x typed**. Typed sumfp reports zero and is
+  marked below timer resolution; raw invalid-timing statuses remain in its
+  detail and zero does not enter positive geomeans.
+- Original C2MIR, LambdaJS, Node and AUTO end-to-end cells, their sample/status
+  details, original snapshot metadata and original release archive are
+  unchanged. Part 2 of the regenerated report is byte-identical. JSON,
+  population, source-to-cell mapping, chart XML and rendered chart checks pass.
+- Candidate23 has post-measurement Lambda **7,370/7,370** and Test262
+  **40,261/40,261** qualification. Its historical replay still has 35
+  slower/equal medians versus Result54: the all-faster tuning goal remains open.
+
+## Qualified tuning checkpoint (before later merges)
+
 - Updated 2026-11-11, master HEAD `4e046a786`. Task changes remain
   uncommitted; both earlier merges are committed and no conflicts remain.
   No vendor/sibling source, benchmark workload or published Result54/55 is
