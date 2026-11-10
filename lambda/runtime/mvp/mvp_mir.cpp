@@ -1797,7 +1797,7 @@ static AstNode* integer_string_argument(MvpCompiler* c, AstNode* node) {
     }
     if (!target || target->node_type != AST_NODE_SYS_FUNC ||
             ((AstSysFuncNode*)target)->fn_info->fn != SYSFUNC_STRING ||
-            mvp_value_contract(c->module, mvp_call_argument(call, 0)) != &TYPE_INT) return NULL;
+            mvp_inferred_scalar_contract(mvp_value_contract(c->module, mvp_call_argument(call, 0))) != &TYPE_INT) return NULL;
     return mvp_call_argument(call, 0);
 }
 
@@ -7123,7 +7123,14 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
             LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT, node);
     }
     case AST_NODE_INDEX_EXPR: return array_read(c, (AstFieldNode*)node);
-    case AST_NODE_MEMBER_EXPR: return member_read(c, (AstFieldNode*)node);
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* member = (AstFieldNode*)node;
+        ShapeEntry* field = c->current_item == c->method_receiver
+            ? mvp_method_member(c->function, member->object, member->field) : NULL;
+        // explicit receiver reads share the field locals updated by bare-name writes.
+        if (field) return read_binding(c, mvp_binding(c->module, field->binding), node, true);
+        return member_read(c, member);
+    }
     case AST_NODE_START:
         return value(c, em_start_task(&c->em, (AstStartNode*)node, mvp_check_task_arguments),
             LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
@@ -7292,6 +7299,15 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
     case AST_NODE_MEMBER_ASSIGN_STAM: {
         AstAssignStamNode* n = (AstAssignStamNode*)node;
         if (mvp_edit_model_place(c->function, n->object)) return edit_model_store(c, n, true);
+        ShapeEntry* field = c->current_item == c->method_receiver
+            ? mvp_method_member(c->function, n->object, n->key) : NULL;
+        if (field) {
+            MvpBinding* binding = mvp_binding(c->module, field->binding);
+            // publish through the same method epilogue as a bare field assignment.
+            store_binding(c, binding, assignment_value(c, n), "assignment to");
+            binding->method_field_written = true;
+            return null_value(c);
+        }
         if (mvp_local_binding(c->module, n->object)) member_write(c, n);
         else {
             MvpPlace place = place_path(c, n->object, n->key, true);
@@ -7664,36 +7680,54 @@ static AstNode* owner_permutation(MvpCompiler* c, AstNode* first) {
     return plan.last;
 }
 
+static bool sole_declaration_read(MvpCompiler* c, AstDeclaratorNode* declaration, AstNode* read) {
+    AstIndex* index = &c->module->tp->ast_index;
+    uint32_t count = 0, reads = 0;
+    const AstNodeId* uses = ast_index_binding_uses(index,
+        ast_index_find_binding_entry(index, declaration->entry), &count);
+    read = ast_unwrap_primary_to_leaf(read);
+    for (uint32_t i = 0; i < count; i++) {
+        AstNode* use = index->nodes[uses[i]];
+        if (use == declaration || use == declaration->id) continue;
+        if (use != read) return false;
+        reads++;
+    }
+    return reads == 1;
+}
+
 static AstNode* append_string_recipe(MvpCompiler* c, AstNode* first) {
     if (first->node_type != AST_NODE_VAR_STAM && first->node_type != AST_NODE_LET_STAM) return NULL;
     AstNode* declaration = ((AstVarDeclNode*)first)->declarations;
     AstNode* next = first->next;
-    if (!declaration || declaration->next || declaration->node_type != AST_NODE_VARIABLE_DECLARATOR ||
-            !next || next->node_type != AST_NODE_ASSIGN_STAM) return NULL;
+    if (!declaration || declaration->next || declaration->node_type != AST_NODE_VARIABLE_DECLARATOR || !next) return NULL;
+    AstDeclaratorNode* admitted = NULL;
+    if (next->node_type == AST_NODE_LET_STAM) {
+        admitted = (AstDeclaratorNode*)((AstVarDeclNode*)next)->declarations;
+        if (!admitted || admitted->node_type != AST_NODE_VARIABLE_DECLARATOR || admitted->next ||
+                !admitted->entry || admitted->entry->admission_may_fail ||
+                admitted->declared_type != &TYPE_STRING) return NULL;
+        next = next->next;
+    }
+    if (!next || next->node_type != AST_NODE_ASSIGN_STAM) return NULL;
     AstDeclaratorNode* d = (AstDeclaratorNode*)declaration;
     AstAssignStamNode* assignment = (AstAssignStamNode*)next;
     MvpBinding* temporary = mvp_binding(c->module, d->entry);
     MvpBinding* owner = mvp_binding(c->module, assignment->target_entry);
     if (!temporary || !owner || temporary == owner || temporary->contract != &TYPE_STRING ||
             owner->contract != &TYPE_STRING || !string_recipe_size(c->module, d->init, NULL)) return NULL;
+    AstNode* joined_value = admitted ? admitted->init : assignment->value;
+    if (admitted && (mvp_local_binding(c->module, assignment->value) != mvp_binding(c->module, admitted->entry) ||
+            !sole_declaration_read(c, admitted, assignment->value) ||
+            !mvp_admission_proven(c->module, mvp_value_contract(c->module, joined_value), &TYPE_STRING))) return NULL;
     AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS]; int size = 0;
-    if (!ast_collect_join_leaves(assignment->value, leaves, &size) || size != 2 ||
+    if (!ast_collect_join_leaves(joined_value, leaves, &size) || size != 2 ||
             mvp_local_binding(c->module, leaves[0]) != owner || mvp_local_binding(c->module, leaves[1]) != temporary)
         return NULL;
-    AstIndex* index = &c->module->tp->ast_index;
-    uint32_t count = 0; unsigned reads = 0;
-    const AstNodeId* uses = ast_index_binding_uses(index, ast_index_find_binding_entry(index, d->entry), &count);
-    AstNode* leaf = ast_unwrap_primary_to_leaf(leaves[1]);
-    for (uint32_t i = 0; i < count; i++) {
-        AstNode* use = index->nodes[uses[i]];
-        if (use == declaration || use == d->id) continue;
-        if (use != leaf) return NULL;
-        reads++;
-    }
-    if (reads != 1) return NULL;
+    if (!sole_declaration_read(c, d, leaves[1])) return NULL;
     // the adjacent, single-use constructor contributes its pieces directly;
     // prefix reading is effect-free and constructor arguments retain their order.
-    MirValue joined = string_concat(c, assignment->value, owner, temporary, d->init);
+    // a proven, single-use admission temporary does not add an observation.
+    MirValue joined = string_concat(c, joined_value, owner, temporary, d->init);
     if (!joined.reg) return NULL;
     store_binding(c, owner, joined);
     return next;
@@ -7822,17 +7856,7 @@ static AstNode* discharged_declaration(MvpCompiler* c, AstNode* first) {
     if (!from || !to || !from->entry->admission_may_fail || from->owner != c->function->id ||
             !init || init->node_type != AST_NODE_UNARY || ((AstUnaryNode*)init)->op != OPERATOR_PROPAGATE ||
             mvp_local_binding(c->module, ((AstUnaryNode*)init)->operand) != from) return NULL;
-    AstIndex* index = &c->module->tp->ast_index;
-    uint32_t count = 0, reads = 0;
-    const AstNodeId* uses = ast_index_binding_uses(index,
-        ast_index_find_binding_entry(index, from->entry), &count);
-    for (uint32_t i = 0; i < count; i++) {
-        AstNode* use = index->nodes[uses[i]];
-        if (use == source || use == source->id) continue;
-        if (use != ast_unwrap_primary_to_leaf(((AstUnaryNode*)init)->operand)) return NULL;
-        reads++;
-    }
-    if (reads != 1) return NULL;
+    if (!sole_declaration_read(c, source, ((AstUnaryNode*)init)->operand)) return NULL;
     // the sole observation immediately discharges the validation outcome.
     // No effect can observe a boxed intermediate between these declarations
     // (S7.6.3v3, S7.7.2v2); failure still validates the enclosing return.
@@ -9415,7 +9439,8 @@ bool mvp_emit_function(LambdaMvpModule* m, MvpFunction* fn) {
         f->return_label = label(&c);
         FOR_EACH_MAP_FIELD(fn->method_owner, field) {
             MvpBinding* binding = mvp_binding(m, field->binding);
-            if (!binding || !field->name || !ast_body_may_write_entry(fn->ast->body, field->binding, true)) continue;
+            if (!binding || !field->name || (!binding->method_field_written &&
+                    !ast_body_may_write_entry(fn->ast->body, field->binding, true))) continue;
             MirValue item = convert(&c, value(&c, binding->reg, binding->contract->type_id,
                 binding->rep, binding->contract), VALUE_REP_ITEM);
             em_method_field_store(&c.em, c.method_receiver, field, item.reg,

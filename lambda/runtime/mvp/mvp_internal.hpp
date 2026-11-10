@@ -143,6 +143,15 @@ static inline ShapeEntry* mvp_method_field(MvpFunction* function, NameEntry* ent
     return NULL;
 }
 
+static inline ShapeEntry* mvp_method_member(MvpFunction* function, AstNode* object, AstNode* key) {
+    object = ast_unwrap_primary_to_leaf(object);
+    key = ast_unwrap_primary_to_leaf(key);
+    if (!function || !function->method_owner || !object || object->node_type != AST_NODE_CURRENT_ITEM ||
+            !key || key->node_type != AST_NODE_IDENT) return NULL;
+    String* name = ((AstIdentNode*)key)->name;
+    return find_shape_read_field_by_name((TypeMap*)function->method_owner, name->chars, name->len);
+}
+
 static inline FnCapture* mvp_function_capture(MvpFunction* function, NameEntry* entry) {
     for (FnCapture* capture = function && function->ast ? function->ast->captures : NULL;
             capture; capture = capture->next)
@@ -234,6 +243,7 @@ struct MvpBinding {
     bool array_present;
     bool record_written, record_accessed;
     bool string_buffer_owned;
+    bool method_field_written;
     bool stable_scalar_home;
     MvpScalarAggregate* scalar_aggregate;
 };

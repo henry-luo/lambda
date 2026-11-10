@@ -834,10 +834,14 @@ class LambdaMirMvpTests(unittest.TestCase):
                       "LAMBDA_GC_POISON_FREED": "1"}):
             with self.subTest(mode=mode):
                 self.check_golden(source, mode)
-        body = self.function_mir(source, "plus_one")
-        self.assertIn("i64, i64, p:runtime", body)
-        self.assertNotIn("\tcall\tint2it_lane", body)
-        self.assertNotIn("\tcall\tint2it_lane", self.function_mir(source, "fused"))
+        for name in ("plus_one", "fused"):
+            body = self.function_mir(source, name)
+            self.assertIn("i64, i64, p:runtime", body)
+            self.assertIn("\tadd\t", body)
+            # stored outcomes may box full-range int lanes before discharge;
+            # the returned success/error pair and arithmetic remain native.
+            self.assertNotIn("\tcall\tfn_add", body)
+            self.assertRegex(body, r"\tret\t[^\n,]+, [^\n,]+\n")
         native = self.function_mir(source, "float_update").split("\tcall\tfn_index", 1)[0]
         self.assertIn("\tdmul\t", native)
         self.assertNotIn("lambda_type_check", native)
@@ -1264,7 +1268,11 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertNotIn("map_fill", constructor)
             self.assertNotIn("cow_capture_value", constructor)
         body = self.function_mir(source, "shifted")
-        native = body[:body.index("\tcall\tarray_plain_")]
+        # the checked sibling also tries packed allocation before array_plain;
+        # its entry is the target of the native version's extent guard.
+        extent = re.search(r"\tblt\t(L\d+), [^\n,]+, 3\n", body)
+        self.assertIsNotNone(extent)
+        native = body[:body.index("\n" + extent.group(1) + ":")]
         self.assertIn("lambda_fill_primitive_bits", native)
         self.assertGreaterEqual(native.count("\tdadd\t"), 3)
         self.assertNotIn("\tcall\tfn_index_", native)
@@ -1671,11 +1679,21 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertRegex(first, r"\tmod\t[^\n]+, 31\n")
         self.assertIn("\tcall\tfn_int", affine)
         conditional = self.function_mir(source, "conditional_step")
-        native = conditional[:conditional.index("\tcall\tfn_index")]
-        self.assertNotIn("\tcall\tfmod_", native)
-        self.assertNotIn("\tcall\tlambda_int_lane_add_slow", native)
+        # a preceding dense version retains saturation for arbitrary integers.
+        # identify the bounded modular store itself, including its range guard.
+        native = re.search(
+            r"\tubgt\tL\d+, ([^\n,]+), 9007199254740988\n"
+            r"\tadd\t([^\n,]+), \1, 3\n"
+            r"\tand\t([^\n,]+), \2, 15\n"
+            r"\tmov\ti64:\([^\n]+\), \3\n", conditional)
+        self.assertIsNotNone(native)
+        self.assertIn("\tcall\tfn_index", conditional)
 
     def test_single_use_string_constructor(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_admitted_string_append.ls"
+        self.check_gc_fixtures([source])
+        fused = self.function_mir(source, "append")
+        self.assertRegex(fused, r"\tcall\tfn_strcat_values_[^\n]+, 1, 4,")
         body = self.function_mir(ROOT / "test/benchmark/kostya/json_gen2.ls", "benchmark")
         # coalesced literal runs and integer lanes join directly into the owner.
         self.assertRegex(body, r"\tcall\tfn_strcat_values_[^\n]+, 1, 8,")

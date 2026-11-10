@@ -3406,6 +3406,8 @@ static bool admitted_assignment(LambdaMvpModule* m, AstAssignStamNode* assignmen
         AstFunctionId owner, bool final_domains) {
     if (assignment->object && assignment->key) {
         if (owner < m->function_count && mvp_edit_model_place(&m->functions[owner], assignment->object)) return true;
+        if (assignment->node_type == AST_NODE_MEMBER_ASSIGN_STAM && owner < m->function_count &&
+                mvp_method_member(&m->functions[owner], assignment->object, assignment->key)) return true;
         AstCowPath path = {};
         MvpBinding* b = ast_collect_cow_path(&path, assignment->object)
             ? mvp_local_binding(m, path.root) : NULL;
