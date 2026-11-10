@@ -134,6 +134,10 @@ bool lambda_recovery_frame_end(LambdaRecoveryFrame* frame);
 // Release the heap-owned frames of a chain whose native stack is abandoned
 // without running (an activation destroyed while parked).
 void lambda_recovery_frame_discard_chain(LambdaRecoveryFrame* top);
+// translate stack-resident records through a parked native image; heap-owned
+// frames retain their original addresses and are released normally.
+void lambda_recovery_frame_discard_image_chain(LambdaRecoveryFrame* top,
+    const void* image, uintptr_t native_low, size_t native_bytes);
 
 // Explicit-owner setup is for tests and control-plane code. Runtime execution
 // pushes through the TLS-owner form above.

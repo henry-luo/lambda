@@ -599,8 +599,8 @@ AstFieldNode* mvp_string_index(LambdaMvpModule* m, AstNode* node, int depth, boo
         (dynamic_key || mvp_value_contract(m, index->field, depth + 1)->type_id == LMD_TYPE_INT) ? index : NULL;
 }
 
-static bool binding_var_borrow(LambdaMvpModule* m, MvpBinding* binding,
-        Type* preserved = NULL, bool open_only = false) {
+static bool binding_var_borrow_scan(LambdaMvpModule* m, MvpBinding* binding,
+        Type* preserved, bool open_only) {
     AstIndex* index = &m->tp->ast_index;
     for (AstNodeId i = 0; i < index->count; i++) {
         if (index->nodes[i]->node_type != AST_NODE_CALL_EXPR) continue;
@@ -643,6 +643,15 @@ static bool binding_var_borrow(LambdaMvpModule* m, MvpBinding* binding,
         }
     }
     return false;
+}
+
+static bool binding_var_borrow(LambdaMvpModule* m, MvpBinding* binding,
+        Type* preserved = NULL, bool open_only = false) {
+    // plain borrow queries depend only on the frozen AST, not evolving storage proofs (D8.2.4).
+    if (preserved) return binding_var_borrow_scan(m, binding, preserved, open_only);
+    int8_t* cached = &binding->var_borrow_cache[open_only ? 1 : 0];
+    if (!*cached) *cached = binding_var_borrow_scan(m, binding, NULL, open_only) ? 1 : -1;
+    return *cached > 0;
 }
 
 bool mvp_consuming_array_join(LambdaMvpModule* m, MvpBinding* binding, AstNode* value) {

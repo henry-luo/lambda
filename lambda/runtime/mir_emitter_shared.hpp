@@ -451,6 +451,7 @@ struct MirEmitter {
     // from module state; foreign hosted compilers use the same boundary when
     // their callback ABI owns a separate result home.
     bool helper_results_skip_rehome;
+    bool compact_code; // outline representation checks when lowering exceeds its debug budget
     void (*before_may_gc_call)(void* owner);
     void (*after_may_gc_call)(void* owner);
     void (*root_call_value)(void* owner, MIR_reg_t reg,
@@ -1553,6 +1554,13 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
                                                    MIR_reg_t item,
                                                    MIR_reg_t target_home) {
     if (mode == SCALAR_RETURN_NONE) return item;
+    if (em->compact_code && mode == SCALAR_RETURN_DYNAMIC && target_home) {
+        // the existing NO_GC leaf copies into the same colored destination home.
+        MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
+        MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item), MIR_new_reg_op(em->ctx, target_home)};
+        return em_bind_scalar_home_result(em, target_home, em_call_with_args(em,
+            "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true));
+    }
     // packed values pass through; only admitted wide lanes need a destination copy.
     MIR_reg_t result = em_new_reg(em, "adopt_result", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
@@ -2972,39 +2980,6 @@ static inline bool em_root_call_may_collect(MIR_insn_t insn,
     return true;
 }
 
-static inline void em_root_reload_live_values_after_call(MirEmitter* em,
-        MIR_insn_t call, const MirRootCandidate* candidates,
-        int candidate_count, const int* candidate_slots,
-        const uint64_t* live_after, const uint64_t* definitions) {
-    if (!em || !call || !candidates || !candidate_slots || !live_after ||
-            !definitions) return;
-    MIR_insn_t after = call;
-    for (int ci = 0; ci < candidate_count; ci++) {
-        uint64_t bit = UINT64_C(1) << (ci & 63);
-        if ((live_after[ci >> 6] & bit) == 0 ||
-                (definitions[ci >> 6] & bit) != 0 ||
-                candidate_slots[ci] < 0) {
-            continue;
-        }
-        MIR_reg_t reg = candidates[ci].reg;
-        MIR_type_t type = MIR_reg_type(em->ctx, reg, em->func);
-        if (!mir_gc_value_needs_root(candidates[ci].value_class, type)) continue;
-        if (type != MIR_T_P) type = MIR_T_I64;
-        // A MAY_GC call may move an Item and clobber an ABI argument register.
-        // The side-root slot is the canonical post-safepoint value (D6.3.1).
-        MIR_insn_t reload = MIR_new_insn(em->ctx, MIR_MOV,
-            MIR_new_reg_op(em->ctx, reg),
-            MIR_new_mem_op(em->ctx, type,
-                (MIR_disp_t)candidate_slots[ci] *
-                    (MIR_disp_t)sizeof(uint64_t),
-                em->frame.root_base, 0, 1));
-        MIR_insert_insn_after(em->ctx, em->func_item, after, reload);
-        em_profile_before_call(em, reload,
-            MIR_item_name(em->ctx, em->func_item), LAMBDA_EXEC_ROOT_RELOAD);
-        after = reload;
-    }
-}
-
 // T29-7b: a pinned root home keeps its explicit memory operands, so its slot
 // could not move and the frame spanned the highest pinned home however sparse
 // the pins were (deltablue2: 1,250 slots across 99 functions). Pinned homes are
@@ -3325,8 +3300,6 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)collecting_call_count * (size_t)word_count;
     uint64_t* call_live_in = collecting_call_count > 0 ? (uint64_t*)mem_alloc(
         call_liveness_word_count * sizeof(uint64_t), MEM_CAT_TEMP) : NULL;
-    uint64_t* call_live_out = collecting_call_count > 0 ? (uint64_t*)mem_alloc(
-        call_liveness_word_count * sizeof(uint64_t), MEM_CAT_TEMP) : NULL;
     uint8_t* candidate_defined = (uint8_t*)mem_alloc(
         (size_t)candidate_count * sizeof(uint8_t), MEM_CAT_TEMP);
     int max_home_id = 0;
@@ -3346,7 +3319,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)candidate_count * sizeof(int), MEM_CAT_TEMP);
     int* set_candidates = (int*)mem_alloc(
         (size_t)candidate_count * sizeof(int), MEM_CAT_TEMP);
-    if ((collecting_call_count > 0 && (!call_live_in || !call_live_out)) ||
+    if ((collecting_call_count > 0 && !call_live_in) ||
             !candidate_defined || !home_to_slot || !candidate_slots ||
             !set_candidates) {
         log_error("mir-semantic-root-write-back: publication allocation failed");
@@ -3366,11 +3339,6 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             (size_t)word_count * sizeof(uint64_t));
         for (int i = blocks[bi].end - 1; i >= blocks[bi].start; i--) {
             int call_liveness = call_liveness_by_instruction[i];
-            if (call_liveness >= 0) {
-                memcpy(call_live_out + (size_t)call_liveness *
-                        (size_t)word_count, scratch_in,
-                    (size_t)word_count * sizeof(uint64_t));
-            }
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
             memset(insn_definitions, 0,
                 (size_t)word_count * sizeof(uint64_t));
@@ -3769,18 +3737,8 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
                     }
                     publication_mode = 0;
                 }
-                memset(insn_uses, 0,
-                    (size_t)word_count * sizeof(uint64_t));
-                memset(insn_definitions, 0,
-                    (size_t)word_count * sizeof(uint64_t));
-                em_collect_root_candidate_bits(em->ctx, current,
-                    reg_to_candidate, reg_map_count, insn_uses,
-                    insn_definitions);
-                em_root_reload_live_values_after_call(em, current,
-                    root_candidates, candidate_count, candidate_slots,
-                    call_live_out + (size_t)call_liveness *
-                        (size_t)word_count,
-                    insn_definitions);
+                // D5.3.1: rooted Item/header addresses never move. Binding and
+                // data-buffer refreshes remain with the emitting call owner.
             }
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
             memset(insn_definitions, 0,
@@ -3827,7 +3785,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     mem_free(liveness_successors); mem_free(liveness_worklist);
     mem_free(liveness_queued);
     mem_free(call_liveness_by_instruction);
-    mem_free(call_live_in); mem_free(call_live_out);
+    mem_free(call_live_in);
     mem_free(candidate_defined);
     mem_free(home_to_slot); mem_free(candidate_slots); mem_free(set_candidates);
     mem_free(interference); mem_free(used_colors);

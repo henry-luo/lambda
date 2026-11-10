@@ -5537,6 +5537,7 @@ struct JsP2AdmissionScan {
     bool method_subtree;
     bool constant_templates;
     bool body_capture_reads;
+    bool generator = false;
 };
 
 static void js_interp_p2_reject(JsP2AdmissionScan* scan,
@@ -5551,7 +5552,7 @@ static void js_interp_p2_scan_parameters(AstFuncNode* definition,
         JsP2AdmissionScan* scan) {
     for (JsAstNode* parameter = (JsAstNode*)definition->params; parameter &&
             !scan->reject_reason; parameter = (JsAstNode*)parameter->next) {
-        if (!scan->method_subtree) {
+        if (!scan->method_subtree && !scan->generator) {
             js_interp_p2_scan_node(parameter, scan);
             continue;
         }
@@ -5779,6 +5780,10 @@ static void js_interp_p2_scan_node(JsAstNode* node,
     case AST_NODE_AWAIT:
     case AST_NODE_YIELD:
         break;
+    case AST_NODE_FOR_OF_STAM:
+    case AST_NODE_FOR_IN_STAM:
+        if (!scan->generator) js_interp_p2_reject(scan, "unplanned syntax");
+        break;
     default:
         js_interp_p2_reject(scan, "unplanned syntax");
         break;
@@ -5874,7 +5879,7 @@ bool js_interp_p2_is_body_capture(JsScript* script, AstFunctionId function_id,
 
 static bool js_interp_p2_module_method(JsScript* script, AstFuncNode* definition,
         AstFunctionId function_id) {
-    if (!script->is_es_module || definition->node_type != AST_NODE_METHOD ||
+    if (definition->node_type != AST_NODE_METHOD ||
             function_id >= script->ast_index.function_count) return false;
     auto* method = (JsMethodDefinitionNode*)definition;
     if (method->kind != JsMethodDefinitionNode::JS_METHOD_METHOD ||
@@ -5905,7 +5910,9 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
              definition->node_type != AST_NODE_METHOD)) {
         return "definition shape";
     }
-    if (definition->is_generator || definition->is_async) return "suspended definition";
+    // synchronous generator bodies already park on the shared activation ABI;
+    // async admission also needs Promise/await ownership proofs (D8.4.5).
+    if (definition->is_async) return "suspended definition";
     // object methods retain function-expression AST nodes but cannot be cloned as function source.
     if ((function->flags & JS_FUNC_FLAG_METHOD) && definition->node_type != AST_NODE_METHOD)
         return "method definition shape";
@@ -5952,7 +5959,8 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
             return "arrow definition shape";
         if (!js_interp_p2_simple_parameters(definition)) return "arrow parameter shape";
     }
-    if (method && (!hot_entry || !js_interp_p2_module_method(script, definition, function_id)))
+    if (method && (!hot_entry || (!script->is_es_module && !definition->is_generator) ||
+            !js_interp_p2_module_method(script, definition, function_id)))
         return "method definition shape";
     if (function_id == AST_FUNCTION_ID_INVALID ||
             (!method && !body_capture_reads && ((!arrow && ast_index_function_parent(&script->ast_index, function_id) !=
@@ -5965,8 +5973,9 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     }
     // ordinary template promotion remains deferred independently of this slice.
     JsP2AdmissionScan scan = {script, function_id, NULL,
-        hot_entry && script->is_es_module && method,
-        hot_entry && script->is_es_module && (method || arrow), body_capture_reads};
+        hot_entry && method && (script->is_es_module || definition->is_generator),
+        hot_entry && (script->is_es_module || definition->is_generator) && (method || arrow),
+        body_capture_reads, definition->is_generator};
     js_interp_p2_scan_parameters(definition, &scan);
     js_interp_p2_scan_node((JsAstNode*)definition->body, &scan);
     if (scan.reject_reason) return scan.reject_reason;

@@ -14,6 +14,9 @@ struct JsSuspendedActivation : DurableActivation {
     Context* runtime_context = NULL;
     void* state_fn = NULL;
     Item ast_function = {};
+    // a promoted definition keeps its observable callee separate from the
+    // immutable MIR implementation retained by this instance (D8.4.5).
+    Item implementation = {};
     Item ast_arguments = {};
     // context-owned interpreter policy follows this body across every park.
     const JsInterpHostOps* ast_host = NULL;
@@ -39,7 +42,13 @@ struct JsGeneratorStateRecord : JsSuspendedActivation {
     Item private_home_class = {};
     Item delegate = {};
     Item ast_this = {};
+    // the receiver can outlive its caller before a lazy first next (D6.1.3).
+    uint64_t ast_this_scalar = 0;
 };
+
+static inline Item js_generator_implementation(const JsGeneratorStateRecord* state) {
+    return state->implementation.item ? state->implementation : state->ast_function;
+}
 
 
 // One carrier layout and lifecycle for full JS and MVP MIR activations.

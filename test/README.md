@@ -159,16 +159,22 @@ committed write status and bounded leases when the peer stops reading.
 ## 2. Suites (`build_lambda_config.json` → `test.test_suites`)
 
 The Lambda Runtime suite uses up to two case workers with 150-case batches,
-scheduling previously slow cases first. Each reserves three nested script slots
+scheduling previously slow cases first. Each reserves four nested script slots
 through `case_worker_slots` and `LAMBDA_TEST_MAX_CONCURRENT`; the scheduler reduces
 the case-worker count to fit the total allocation. The heavy-load four-slot cap
-therefore runs one case worker with three nested slots. Every discovered golden
+therefore runs one case worker with four nested slots. Every discovered golden
 and explicit interpreter/AUTO/JIT check still runs (**D8.3.2**). Direct native runs use an internal batch pool and execute
 the explicit GTest cases sequentially. Use
 `node test/test_run.js --target=lambda --category=baseline --include-test=test_lambda_gtest`
 for the scheduled suite; `LAMBDA_TEST_MAX_CONCURRENT=1` selects serial execution.
 Each case batch can fill three existing 50-script CLI batches, using its reserved
 slots during golden execution as well as the explicit tier checks.
+
+Pure tier fixtures start the demo first and interleave its tiers. Larger fixture
+sets use small batches, ordered by source size, to amortize process startup while each
+script still receives a fresh heap (**D8.5.1**). The MIR GC stress runner reserves
+four slots for its independent pure-script profiles; all reference, forced and
+randomized schedules remain selected (**D6.3.1–D6.3.3**).
 
 `NativeFontTests.CachedMathFactsKeepIndependentValuesAcrossTiers` and the paired
 `proc/math_metrics_cache.ls` golden check cached MATH glyph facts, nested mutation,

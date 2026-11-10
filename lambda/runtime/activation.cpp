@@ -23,12 +23,9 @@
 // Pages every activation touches again near its stack top survive a trim.
 #define ACTIVATION_STACK_KEEP_BYTES (16u * 1024u)
 #define ACTIVATION_POOL_MAX 32
-// Cold-park compaction (§8.1 mitigation 3). Once more than WARM_MAX
-// activations are parked on a thread, the oldest is copied out to the heap and
-// its pages returned, provided its used stack and segments fit in
-// COMPACT_MAX_BYTES; a larger one keeps its pages. A tight await loop never
-// exceeds the warm window and pays nothing.
-#define ACTIVATION_WARM_MAX 16
+// bound parked resident pages by the ordinary native-stack budget; batch
+// compaction avoids repeatedly paging a live delegation chain (D6.1.1).
+#define ACTIVATION_WARM_BUDGET_BYTES LAMBDA_STACK_DEFAULT_BUDGET
 #define ACTIVATION_COMPACT_MAX_BYTES (16u * 1024u)
 #define ACTIVATION_AMBIENT_EXT_BYTES 256
 #define ACTIVATION_AMBIENT_HOOK_MAX 4
@@ -105,6 +102,7 @@ struct Activation {
     Activation* warm_prev;
     Activation* warm_next;
     bool warm;
+    size_t warm_bytes;
     // Too large to compact; never retried while parked.
     bool pinned;
     // Compacted: the used native stack, root and number words live in `image`
@@ -132,7 +130,7 @@ typedef struct ActivationThread {
     Activation* strong;
     Activation* warm_head;
     Activation* warm_tail;
-    int warm_count;
+    size_t warm_bytes;
 } ActivationThread;
 
 static __thread ActivationThread activation_thread;
@@ -415,7 +413,8 @@ static void warm_unlink(Activation* activation) {
     else thread->warm_tail = activation->warm_prev;
     activation->warm_prev = activation->warm_next = NULL;
     activation->warm = false;
-    thread->warm_count--;
+    thread->warm_bytes -= activation->warm_bytes;
+    activation->warm_bytes = 0;
 }
 
 static void warm_append(Activation* activation) {
@@ -426,7 +425,12 @@ static void warm_append(Activation* activation) {
     else thread->warm_head = activation;
     thread->warm_tail = activation;
     activation->warm = true;
-    thread->warm_count++;
+    size_t page = fiber_page_size();
+    auto rounded = [page](size_t bytes) { return (bytes + page - 1) & ~(page - 1); };
+    activation->warm_bytes = rounded(activation->stacks->native.high - (uintptr_t)activation->sp) +
+        rounded((activation->ambient.side_root_top - activation->ambient.side_root_base) * sizeof(uint64_t)) +
+        rounded((activation->ambient.side_number_top - activation->ambient.side_number_base) * sizeof(uint64_t));
+    thread->warm_bytes += activation->warm_bytes;
 }
 
 // The used extent of each region of a parked activation: the native stack
@@ -521,17 +525,20 @@ static void activation_restore(Activation* activation) {
     activation->image = NULL;
 }
 
-// A freshly parked activation joins the warm window; the oldest one past
-// the window is compacted if it is small enough.
-static void activation_note_parked(Activation* activation) {
-    if (activation->pinned) return;
-    warm_append(activation);
+static void activation_trim_parked(size_t budget) {
     ActivationThread* thread = &activation_thread;
-    while (thread->warm_count > ACTIVATION_WARM_MAX) {
+    while (thread->warm_head && thread->warm_bytes > budget) {
         Activation* cold = thread->warm_head;
         warm_unlink(cold);
         activation_compact(cold);
     }
+}
+
+static void activation_note_parked(Activation* activation) {
+    if (activation->pinned) return;
+    warm_append(activation);
+    if (activation_thread.warm_bytes > ACTIVATION_WARM_BUDGET_BYTES)
+        activation_trim_parked(ACTIVATION_WARM_BUDGET_BYTES / 2);
 }
 
 // Return to the resumer. The departing activation's state is saved first so a
@@ -817,11 +824,16 @@ extern "C" void activation_destroy(Activation* activation) {
     }
     warm_unlink(activation);
     if (activation->stacks) {
-        // Abandoned while parked or never started: its frames never run again.
-        // The recovery chain is read from the stack, so bring a compacted
-        // image back first.
-        activation_restore(activation);
-        lambda_recovery_frame_discard_chain(activation->ambient.recovery_top);
+        // abandoned stacks never run again; walk their precise recovery records
+        // in the saved image without recommitting dead pages (D6.3.6).
+        lambda_recovery_frame_discard_image_chain(activation->ambient.recovery_top,
+            activation->image, activation->stacks->native.high - activation->image_native_bytes,
+            activation->image_native_bytes);
+        if (activation->image) {
+            mem_free(activation->image);
+            activation->image = NULL;
+            activation->stacks->discarded = true;
+        }
         strong_unlink(activation);
         stacks_release(activation->stacks);
         activation->stacks = NULL;
@@ -857,6 +869,7 @@ extern "C" void activation_trace(const Activation* activation, gc_heap_t* gc) {
 
 extern "C" void activation_gc_visit_roots(gc_heap_t* gc) {
     stacks_trim_pool();
+    activation_trim_parked(ACTIVATION_WARM_BUDGET_BYTES / 2);
     ActivationThread* thread = &activation_thread;
     EvalContext* owner = context;
     // The base stack and every activation between it and the running one are

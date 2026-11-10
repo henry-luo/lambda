@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D6.3.2\u2013D6.3.3: the allocating leaf inlines; its fill call must publish and reload the live string before the noncollecting length read.",
+  "description": "D5.3.1/D6.3.2\u2013D6.3.3: the allocating leaf inlines; its fill call publishes the live string before its stable register is used by the noncollecting length read.",
   "checks": [
     {
       "in_func": "mvp_#_gc_order_alloc_caller",
@@ -18,9 +18,6 @@
         },
         {
           "pattern": "call\t{{p}}, fn_fill,"
-        },
-        {
-          "pattern": "mov\t{{r:text}}, i64:({{r:roots}})"
         },
         {
           "pattern": "mov\t{{r:arg}}, {{r:text}}"

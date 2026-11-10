@@ -7,6 +7,7 @@
 #include "../lambda/runtime/mvp/mvp.hpp"
 #include "../lambda/runtime/module_registry.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
+#include "../lambda/runtime/suspended_activation.hpp"
 #include "../lambda/runtime/interp.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
@@ -1849,7 +1850,7 @@ TEST(JsInterpreter, ModuleClassMethodsPromoteWithoutReplacingCallableMetadata) {
     }
 }
 
-TEST(JsInterpreter, ModuleClassMethodPromotionKeepsExcludedShapesInterpreted) {
+TEST(JsInterpreter, ModuleClassMethodPromotionChecksAdmissionBoundaries) {
     JsExecutionBackendScope selected("auto");
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1893,9 +1894,108 @@ TEST(JsInterpreter, ModuleClassMethodPromotionKeepsExcludedShapesInterpreted) {
     for (int i = 1; i < 15; i++) {
         Item method = js_get_key_default(methods, (Item){.item = i2it(i)});
         ASSERT_EQ(get_type_id(method), LMD_TYPE_FUNC) << i;
-        EXPECT_EQ(js_fn_body_kind((JsFunction*)method.function), JS_FUNCTION_BODY_AST) << i;
+        EXPECT_EQ(js_fn_body_kind((JsFunction*)method.function), i == 13
+            ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << i;
     }
     runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoGeneratorPromotionKeepsExistingInstancesAndCallableIdentity) {
+    for (const char* backend : {"auto", "ast"}) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 2;
+        runtime.js_promotion_backedge_threshold = 1;
+        const char source[] = R"JS(
+            var closed=0, defaults=0;
+            function* sequence(limit=(defaults++,3)) {
+                try {
+                    for(var i=0;i<limit;i++) yield i;
+                    return sequence;
+                } finally { closed++; }
+            }
+            var alias=sequence, text=sequence.toString(), proto=sequence.prototype;
+            var old=sequence();
+            if(defaults!==1 || old.next().value!==0) throw 'old start';
+            var fresh=sequence();
+            if(defaults!==2 || sequence!==alias || sequence.toString()!==text ||
+               sequence.prototype!==proto || Object.getPrototypeOf(fresh)!==proto) throw 'identity';
+            if(fresh.next().value!==0 || old.next().value!==1 || old.next().value!==2 ||
+               old.next().value!==sequence || closed!==1) throw 'old continuation';
+            gc();
+            if(fresh.return(9).value!==9 || closed!==2) throw 'compiled close';
+            globalThis.__generatorOriginal=old;
+            globalThis.__generatorPromoted=fresh;
+            sequence;
+        )JS";
+        Item item = transpile_js_to_mir(&runtime, source, "auto-generator-identity.js", NULL);
+        ASSERT_FALSE(item_is_error(item));
+        ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+        auto* function = (JsFunction*)item.function;
+        EXPECT_EQ(function->code->p2_promotion.state == FN_PROMOTION_COMPILED,
+            runtime.js_promotion_auto);
+        // a yielding loop cannot hand an existing interpreter activation to an ordinary continuation.
+        EXPECT_EQ(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_NONE);
+        Item old = js_get_key_cstr(js_get_global_this(), "__generatorOriginal");
+        Item fresh = js_get_key_cstr(js_get_global_this(), "__generatorPromoted");
+        ASSERT_NE(js_generator_get_ast_state(old), nullptr);
+        ASSERT_NE(js_generator_get_ast_state(fresh), nullptr);
+        EXPECT_NE(js_generator_get_ast_state(old)->ast_host, nullptr);
+        EXPECT_EQ(js_generator_get_ast_state(fresh)->implementation.item != 0,
+            runtime.js_promotion_auto);
+        EXPECT_EQ(js_generator_get_ast_state(fresh)->ast_function.item, item.item);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, AutoPromotesClassicGeneratorMethodsAndPreservesDelegation) {
+    for (const char* backend : {"auto", "ast"}) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 2;
+        runtime.js_promotion_backedge_threshold = 10000;
+        const char source[] = R"JS(
+            var caught=0, closed=0;
+            class Counter {
+                constructor(){this.value=4}
+                *values(limit=2) {
+                    try {
+                        yield this.value;
+                        for(var value of [limit,limit+1]) yield value;
+                        yield* [7,8];
+                    } catch(error) { caught+=error; yield 12; }
+                    finally { closed++; }
+                }
+            }
+            var counter=new Counter(), method=counter.values;
+            var old=counter.values(), fresh=counter.values();
+            if(old.next().value!==4 || fresh.next().value!==4 || fresh.next().value!==2 ||
+               fresh.next().value!==3 || fresh.next().value!==7 || fresh.next().value!==8 ||
+               !fresh.next().done || closed!==1) throw 'iteration';
+            var abrupt=counter.values();
+            abrupt.next();
+            if(abrupt.throw(5).value!==12 || caught!==5 || !abrupt.next().done || closed!==2)
+                throw 'throw continuation';
+            old.return();
+            if(counter.values!==method || method.name!=='values' || method.length!==0 || closed!==3)
+                throw 'metadata or finalization';
+            method;
+        )JS";
+        Item item = transpile_js_to_mir(&runtime, source, "auto-generator-method.js", NULL);
+        ASSERT_FALSE(item_is_error(item));
+        ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+        EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state == FN_PROMOTION_COMPILED,
+            runtime.js_promotion_auto);
+        runtime_cleanup(&runtime);
+    }
 }
 
 TEST(JsInterpreter, WrappedModuleMethodsKeepDistinctHomesAndRejectOuterCaptures) {

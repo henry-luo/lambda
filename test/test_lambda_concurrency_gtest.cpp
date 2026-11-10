@@ -45,6 +45,7 @@
 #include "../lambda/validator/validator.hpp"
 #include "lib/mem_factory.h"
 #include "lib/memtrack.h"
+#include "lib/fiber.h"
 #include "lib/mempool.h"
 #include "lib/file.h"
 #include "lib/rdb_sqlite_tx.h"
@@ -4051,12 +4052,14 @@ TEST_F(ActivationCore, FiniteNativeOverflowLandsOnTheActivationsOwnBoundary) {
 }
 
 TEST_F(ActivationCore, ColdParkedActivationsCompactAndRestore) {
-    // Past the warm window the oldest parked activations are copied out and
+    // past the resident budget the oldest parked activations are copied out and
     // their pages returned; a collection must still see their roots, and a
     // resume must find every frame and root exactly where it left them.
-    const int count = 64;
-    Activation* held[count];
-    Activation* counters[count];
+    const int count = LAMBDA_STACK_DEFAULT_BUDGET / (4 * fiber_page_size()) + 1;
+    Activation** held = (Activation**)mem_calloc(count, sizeof(Activation*), MEM_CAT_EVAL);
+    Activation** counters = (Activation**)mem_calloc(count, sizeof(Activation*), MEM_CAT_EVAL);
+    ASSERT_NE(held, nullptr);
+    ASSERT_NE(counters, nullptr);
     for (int i = 0; i < count; i++) {
         held[i] = activation_create(activation_hold_string, ItemNull, true, NULL);
         ASSERT_NE(held[i], nullptr);
@@ -4082,7 +4085,41 @@ TEST_F(ActivationCore, ColdParkedActivationsCompactAndRestore) {
     }
     // Abandoning compacted and warm activations alike releases them.
     for (int i = 0; i < count; i++) activation_destroy(counters[i]);
+    mem_free(held);
+    mem_free(counters);
     EXPECT_EQ(activation_current(), nullptr);
+}
+
+static Item activation_park_mixed_recovery_chain(Activation*, Item) {
+    LambdaRecoveryFrame local = {};
+    if (!lambda_recovery_frame_push(&local, LAMBDA_RECOVERY_CAP_TEST_CONTAINMENT)) return ItemError;
+    LambdaRecoveryFrame* owned = lambda_recovery_frame_begin_for(context,
+        LAMBDA_RECOVERY_CAP_TEST_CONTAINMENT);
+    if (!owned) return ItemError;
+    activation_suspend(ItemNull);
+    bool released = lambda_recovery_frame_end(owned) && lambda_recovery_frame_pop(&local);
+    return Item{.item = b2it(released)};
+}
+
+TEST_F(ActivationCore, ColdAbandonmentWalksMixedRecoveryOwnership) {
+    const int count = LAMBDA_STACK_DEFAULT_BUDGET / (2 * fiber_page_size()) + 1;
+    Activation** parked = (Activation**)mem_calloc(count, sizeof(Activation*), MEM_CAT_EVAL);
+    ASSERT_NE(parked, nullptr);
+    for (int i = 0; i < count; i++) {
+        parked[i] = activation_create(activation_park_mixed_recovery_chain, ItemNull, true, NULL);
+        ASSERT_NE(parked[i], nullptr);
+        ASSERT_EQ(activation_resume(parked[i], ItemNull), ACTIVATION_SUSPENDED);
+    }
+    heap_gc_collect();
+    for (int i = 0; i < count; i++) {
+        if (i & 1) {
+            EXPECT_EQ(activation_resume(parked[i], ItemNull), ACTIVATION_DONE);
+            EXPECT_EQ(activation_value(parked[i]).item, (uint64_t)ITEM_TRUE);
+        }
+        activation_destroy(parked[i]);
+    }
+    mem_free(parked);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
 }
 
 TEST_F(ActivationCore, AbandonedParkedActivationsAreReleased) {

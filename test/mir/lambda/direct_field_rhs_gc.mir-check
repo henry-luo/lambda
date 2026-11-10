@@ -1,21 +1,18 @@
 {
   "schema_version": 1,
-  "description": "D5.4.4/D6.3.1: the collecting RHS is inlined with the record in a precise root. Only after allocation/reload does MVP obtain the data pointer and store the int and one-byte bool; checked COW misses remain.",
+  "description": "D5.3.1/D5.4.4/D6.3.1: the collecting RHS is inlined with the stable record in a precise root. Only after allocation does MVP obtain the data pointer and store the int and one-byte bool; checked COW misses remain.",
   "checks": [
     {
       "in_func": "mvp_#_update",
       "expect_seq": [
         {
-          "pattern": "mov\ti64:({{r:root}}), {{r}}"
+          "pattern": "mov\ti64:({{r:root}}), {{r:record}}"
         },
         {
           "pattern": "call\t{{p}}, fn_split2,"
         },
         {
-          "pattern": "mov\t{{r}}, i64:({{r:root}})"
-        },
-        {
-          "pattern": "mov\t{{r:data}}, p:16({{r}})"
+          "pattern": "mov\t{{r:data}}, p:16({{r:record}})"
         },
         {
           "pattern": "mov\ti64:({{r:data}}), {{r}}"

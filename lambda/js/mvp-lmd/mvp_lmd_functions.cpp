@@ -104,11 +104,16 @@ extern "C" Item mvp_lmd_with_binding(Item owner, Item key, Item value, int64_t o
 }
 
 Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments,
-        uint64_t count, int skip, MvpLmdNativeEntry entry, Item target, MvpLmdProgram* import_program) {
+        uint64_t count, int skip, MvpLmdNativeEntry entry, Item target, MvpLmdProgram* import_program,
+        MvpLmdProgram* entry_program) {
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;
     Rooted<Item> callee(roots, function), self(roots, receiver), head(roots, prefix), new_target(roots, target);
-    Item extent = prefix.item == ITEM_JS_UNDEFINED ? Item{.item = i2it(0)} : mvp_lmd_sequence_length(head.get());
+    // only generated suspendable bodies supply entry: their prefix is a
+    // private retained actual-argument snapshot, with no guest accessors.
+    bool private_prefix = entry && get_type_id(head.get()) == LMD_TYPE_ARRAY;
+    Item extent = private_prefix ? Item{.item = i2it(head.get().array->length)} :
+        prefix.item == ITEM_JS_UNDEFINED ? Item{.item = i2it(0)} : mvp_lmd_sequence_length(head.get());
     if (item_is_error(extent)) return extent;
     uint64_t first = (uint64_t)it2i(extent);
     first = first > (uint64_t)skip ? first - skip : 0;
@@ -130,7 +135,8 @@ Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* a
         span.items()[first + i] = lambda_item_adopt_scalar_home(value, &homes[first + i]);
     }
     for (uint64_t i = 0; i < first; i++) {
-        Item value = mvp_lmd_array_index_property(head.get(), i + skip, ItemNull, LMD_PROP_GET);
+        Item value = private_prefix ? head.get().array->items[i + skip] :
+            mvp_lmd_array_index_property(head.get(), i + skip, ItemNull, LMD_PROP_GET);
         if (item_is_error(value)) {
             context->side_number_top = watermark;
             return value;
@@ -149,11 +155,11 @@ Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* a
             span.items()[i] = exposed;
         }
     }
-    MvpLmdCallable* callable = (MvpLmdCallable*)callee.get().function;
     Item result;
     if (entry) {
-        MvpLmdRealmScope realm(callable->program);
-        result = realm.complete(entry(context, callable->program, span.items(), first + count,
+        MvpLmdProgram* program = entry_program ? entry_program : ((MvpLmdCallable*)callee.get().function)->program;
+        MvpLmdRealmScope realm(program);
+        result = realm.complete(entry(context, program, span.items(), first + count,
             callee.get(), self.get(), Item{.item = ITEM_JS_UNDEFINED}));
     } else result = mvp_lmd_class_invoke(callee.get(), self.get(), span.items(), first + count, new_target.get());
     result = lambda_item_resolve_pending_slot(result);

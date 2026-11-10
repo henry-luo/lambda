@@ -2486,6 +2486,20 @@ deeper or other callable sites, suspended/dynamic definitions, eval/with
 and arguments/new.target/super remain excluded. Constructors, accessors,
 static/computed/private methods stay excluded. Other admission, thresholds
 and all loop handoff remain unchanged.
+*(v43, 2026-11-11, USER; D8.4.5, D6.1.1v2)* The checked hot-entry
+slice also admits synchronous generator functions and public class instance
+generator methods in classic scripts or modules. Its parameter scan retains
+supported identifier defaults, and its body scan admits for-of/for-in, yield
+and yield-star through the existing shared operation kernels. Other capture,
+dynamic-scope, private/super, constructor, static/computed-method and async
+exclusions remain. Each newly compiled generator retains its original
+observable callable and a separate precisely traced MIR implementation.
+Existing interpreter instances retain their AST environments and walker;
+promotion never migrates a suspended instance. Class method clones retain
+strictness and generator syntax, and call-time parameter effects precede the
+original callable's live prototype lookup. Qualification and limits:
+[jq optimization](<impl/JS_MVP_Lmd_Jq_Optimization (done).md>).
+
 *(v14, 2026-09-22)* A promoted definition may read
 or write a direct non-computed named property of its ordinary `this`
 receiver. The existing call kernel installs that receiver; P2 appends its

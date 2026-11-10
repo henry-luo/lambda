@@ -17,7 +17,20 @@
 #define MIR_RADIANT_AST_NODE_THRESHOLD 25000U
 #define MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT 15000U
 #define MIR_LARGE_FUNCTION_O1_THRESHOLD 20000ULL
+#ifdef NDEBUG
 #define MIR_EAGER_FUNCTION_O1_THRESHOLD 5000ULL
+#else
+#define MIR_EAGER_FUNCTION_O1_THRESHOLD 1000ULL
+#endif
+
+// bound debug lowering growth before polymorphic checks become native code.
+static inline bool mir_compact_lowering(uint32_t ast_nodes) {
+#ifdef NDEBUG
+    return false;
+#else
+    return ast_nodes > 256;
+#endif
+}
 
 static inline bool mir_large_interp_enabled(void);
 
@@ -32,12 +45,17 @@ typedef struct MirLinkSelection {
     unsigned int optimize_level;
 } MirLinkSelection;
 
-// oversized native bodies keep native execution without paying for O2's global passes.
+// oversized debug images favor compilation latency; optimized hosts retain O1.
 static inline unsigned int mir_native_optimize_level(
         uint64_t instruction_count, unsigned int optimize_level,
         uint64_t budget = MIR_LARGE_FUNCTION_O1_THRESHOLD) {
-    return instruction_count > budget && optimize_level > 1
-        ? 1 : optimize_level;
+#ifdef NDEBUG
+    const unsigned int bounded_level = 1;
+#else
+    const unsigned int bounded_level = 0;
+#endif
+    return instruction_count > budget && optimize_level > bounded_level
+        ? bounded_level : optimize_level;
 }
 
 // bound the global optimization cost of one body, independent of how many
@@ -50,7 +68,7 @@ static inline unsigned int mir_eager_optimize_level(
 
 // The code generator is vendored; policy selects its interface before it is
 // invoked. A cold document and an oversized module use the interpreter ABI,
-// while a single large native body gives up only the expensive O2 pass.
+// while a single large native body uses the bounded optimizer level.
 static inline MirLinkSelection mir_select_link_interface(
         uint64_t total_insns, uint64_t largest_function_insns,
         bool document_attached, unsigned int optimize_level,

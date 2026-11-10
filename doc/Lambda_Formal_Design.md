@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 65.0.0 (2026-11-09)
+**Spec version:** 66.0.0 (2026-11-11)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -869,13 +869,14 @@ reflected and matched (S10.1, S11).*
 
 ### D6.1 Stacks
 
-- **D6.1.1 — Three stack mechanisms have different owners.** The native C
+- **D6.1.1v2 — Three stack mechanisms have different owners.** The native C
   stack is invisible to the GC. Two watermarked side stacks hold values: the
   root stack, which the collector scans precisely, and the number stack,
   which it never scans. Activation stacks run suspendable bodies: a Lambda
   task, or a JS generator, async function or module body. Each one runs on its
   own native stack with its own root and number segments, and it parks in
-  place.
+  place. Parked-page reclamation uses a resident-byte budget. Memory pressure
+  and collections batch reclamation; suspension alone does not evict by count.
   A parked activation contributes only its root segment, traced through its
   owner. LIFO lifetimes use the side stacks. Non-LIFO lifetimes own their
   scalars in tail regions of their own allocation. No tier transforms a
@@ -1417,6 +1418,12 @@ loosely.
   shared data model. `MarkBuilder` and `MarkEditor` use the `Input` owner.
   Ownership resolves layering; it does not require callback abstractions.
   [SM §9.4; Radiant_Split §3.1]
+- **D9.1.5* — GNU Make and Premake define the project build pipeline.** GNU
+  Make is the build entry point and executor for Lambda, `lambda-input` and
+  Radiant. Premake reads each owner's JSON build configuration and generates
+  Makefiles where needed. Project and dependency builds use no other build
+  system, including CMake, Meson, Ninja or Autotools (Autoconf/Automake).
+  [Radiant_Split §6]
 
 ### D9.2 Build profiles
 
@@ -1751,7 +1758,7 @@ authority to itself.*
 
 ## Appendix A — Implementation Status
 
-Status of the `*`-marked rulings on 2026-11-05. Each entry gives only the
+Status of the `*`-marked rulings on 2026-11-10. Each entry gives only the
 status and the live residue. The detailed footnotes, evidence and dates are in
 the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.md#2-implementation-footnotes).
 
@@ -1799,6 +1806,7 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D8.5.2, D8.5.3 | Not started. |
 | D8.6.4 | Instrumentation is in place. The exit ratchets are not yet met. |
 | D9.1.1–D9.1.4, D9.2.1, D9.5.6 | The three-project extraction has started. Input and Radiant still depend on runtime providers. See `vibe/impl/Lambda_Impl_Radiant_Split.md`. |
+| D9.1.5 | Partial: input's dependency recipes use Premake and Make and were verified on macOS; Linux and Windows remain unverified. Lambda's standalone libpq recipe still invokes upstream `configure`. See `vibe/impl/Lambda_Impl_Formal_Design_History.md` §2 and `vibe/Lambda_Design_Radiant_Split.md` §6. |
 | D9.4.6 | In place on macOS. Linux is generated but not verified. Windows is not covered. |
 | D9.5.3 | Not active since guest-language hosting was removed (2026-10-07). |
 | D9.5.5 | Partial: distinct VArray/Velmt TypeIds and carrier dispatch are in place. Some live collections are pending. |

@@ -21,10 +21,21 @@
 static const char* kLambdaMirDir = "test/mir/lambda";
 
 TEST(LambdaMirPolicy, EagerBudgetBoundsIndividualBodies) {
-    EXPECT_EQ(mir_eager_optimize_level(5000, 2), 2u);
-    EXPECT_EQ(mir_eager_optimize_level(5001, 2), 1u);
-    EXPECT_EQ(mir_eager_optimize_level(5000, 0), 0u);
-    EXPECT_EQ(mir_eager_optimize_level(5000, 1), 1u);
+#ifdef NDEBUG
+    const uint64_t budget = 5000;
+    const unsigned int bounded_level = 1;
+    EXPECT_FALSE(mir_compact_lowering(257));
+#else
+    const uint64_t budget = 1000;
+    const unsigned int bounded_level = 0;
+    EXPECT_TRUE(mir_compact_lowering(257));
+#endif
+    EXPECT_FALSE(mir_compact_lowering(256));
+    EXPECT_EQ(mir_eager_optimize_level(budget, 2), 2u);
+    EXPECT_EQ(mir_eager_optimize_level(budget + 1, 2), bounded_level);
+    EXPECT_EQ(mir_eager_optimize_level(budget, 0), 0u);
+    EXPECT_EQ(mir_eager_optimize_level(budget, 1), 1u);
+    EXPECT_EQ(mir_native_optimize_level(20001, 2), bounded_level);
 }
 
 static std::vector<mir_check::Fixture> collect_lambda_fixtures() {

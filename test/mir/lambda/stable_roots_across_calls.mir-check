@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "D5.3.1/D6.3.1: retain exact lifetime roots across adjacent allocations, mixed joins and checked-multiply overflow branches.",
+  "checks": [
+    {
+      "in_func": "_stable_roots_b_#",
+      "count": {"call\t{{p}}, fn_split2,": 3},
+      "expect": ["\tmulo\t", "\tbo\t"]
+    }
+  ]
+}

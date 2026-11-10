@@ -1392,6 +1392,9 @@ Item js_generator_return(Item generator, Item value);
  */
 Item js_generator_throw(Item generator, Item error);
 Item js_make_iter_result(Item value, bool done);
+// returns null when the shared shape tree declines; callers retain their
+// ordinary property-definition path for that storage-policy miss.
+Item js_try_make_iter_result(struct TypeMap* base, Item value, bool done);
 
 /**
  * v15: Create a 2-element array [value, next_state] for generator state machine returns.
