@@ -4,6 +4,7 @@
 #include "lib/windows_compat.h"
 #include "lib/strbuf.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/mvp/mvp.hpp"
 #include "../lambda/runtime/module_registry.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/runtime/interp.hpp"
@@ -4943,7 +4944,7 @@ static void check_resident_lambda_exports(bool satellite) {
         AstFuncNode* definition=nullptr;auto* ast=(AstScript*)module->ast_root;
         for(NameEntry* binding=ast->global_vars->first;binding;binding=binding->next)
             if(binding->name&&!strcmp(binding->name->chars,"increment")){definition=(AstFuncNode*)binding->node;break;}
-        ASSERT_NE(definition,nullptr);void* entry=nullptr;ASSERT_TRUE(compile_ast_function_satellite(&runtime,module,definition,&entry));
+        ASSERT_NE(definition,nullptr);void* entry=nullptr;ASSERT_TRUE(lambda_mvp_compile_function(&runtime,module,definition,&entry));
         anchor=module->jit_context;ASSERT_NE(anchor,nullptr);ASSERT_NE(entry,nullptr);
         retained.set(Item{.function=to_fn_named(nullptr,1,"retained_increment")});retained.get().function->def_module=module;
         lambda_function_set_type(retained.get().function,(TypeFunc*)definition->type);lambda_function_publish_boxed_entry(retained.get().function,definition,entry);

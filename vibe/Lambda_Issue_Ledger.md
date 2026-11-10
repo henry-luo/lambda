@@ -1017,6 +1017,16 @@ suspected cause, not yet confirmed in Full. Evidence:
 MVP fixture and its Error oracle are retained unchanged; Full correctness
 is not claimed for this case.
 
+Additional reproduction, 2026-11-10 on frozen P26 and P86 Full:
+`test/lambda/mvp/mir_mvp_nested_primitive_stores.ls` preserves the rows on
+negative/NaN/fractional keys and a non-container child, but reports normal
+results instead of Errors on its last two lines. MVP passes the unchanged
+golden under normal/forced/seeded GC. Evidence:
+`temp/mvp_untyped_tuning_goal/p86-nested-full-control.log` and
+`p86-focused-units-2.log`. Whether the rejected indexed-store outcome has
+the same cause as the original projected-map defect is unconfirmed
+(**S7.1.3v3 / S7.7.3**).
+
 <a id="lr07-55"></a>**LR07-55 · Full MIR replaces the outer borrowed owner on a different-owner recursive edge · OPEN**
 
 The same P26/P81 Full controls reproduce this with
@@ -1030,6 +1040,24 @@ publication is suspected; an identical cause to LR07-53 is unconfirmed.
 Evidence and frozen P26 SHA are as in LR07-54. This does not block MVP
 tuning. The immutable golden remains the MVP acceptance oracle, and Full's
 observed failure remains recorded separately.
+
+<a id="lr07-56"></a>**LR07-56 · Full MIR plain argument observes a later argument's write · OPEN**
+
+Reproduced 2026-11-10 on frozen P26 Full (SHA256
+`39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`)
+and current P92 Full. Run `LAMBDA_EXEC_BACKEND=jit
+LAMBDA_MIR_COMPILER=production <exe> run
+test/lambda/mvp/mir_mvp_projection_call_snapshots.ls --no-log`. The last
+call, `earlier(owner, change(owner))`, must keep the first plain argument's
+40-valued snapshot while the second argument writes 60 to the caller's
+owner (**S9.1.2 / S9.1.3v3**). Full prints `[60, 60]`; the unchanged golden
+requires `[40, 60]`. The first four projection/whole-root/local-write/alias
+cases pass both compilers. P92 MVP passes all five under normal, forced and
+seeded GC. The Full call-site capture/evaluation-order interaction is a
+suspected cause, not yet confirmed. Evidence:
+`temp/mvp_untyped_tuning_goal/p92-projection-full-control.log` and
+`p92-focused-units-2.log`. This does not block MVP tuning. The permanent
+MVP oracle is retained; no Full correctness pass is claimed.
 
 ## 8. Memory management & GC (LR08)
 

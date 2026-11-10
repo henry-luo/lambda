@@ -348,7 +348,7 @@ static inline bool js_fn_is_js_layout(const void* callable) {
 // (2) No generated code reads a JsFunction field. JS MIR lowers every call to
 //     a named C helper (js_call_function_into and friends) and dispatches
 //     through `fn->invoke` in C, so unlike Lambda's `Function` -- whose
-//     `flags` word transpile-mir.cpp loads at a baked `offsetof` -- this
+//     `flags` word MIR lowering loads at a baked `offsetof` -- this
 //     record has no emitted-offset reader to preserve.
 // (3) The collector reaches this record only through the js_function_trace
 //     hook, which uses field names; the raw LAMBDA_GC_OFF_FUNCTION_* path in

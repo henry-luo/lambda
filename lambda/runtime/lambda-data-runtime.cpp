@@ -38,6 +38,18 @@ void set_fields_items(TypeMap *map_type, void* map_data, const Item* values,
 Item typeditem_to_item(TypedItem *titem);
 Item fn_input1(Item url);
 
+extern "C" void lambda_set_field_f64(ShapeEntry* field, void* slot, double number) {
+    const LaneStorageDesc* storage = shape_entry_storage(field);
+    if (field->name && !field->flags && !field->is_optional &&
+            storage->kind == LANE_STORAGE_TYPED_ITEM && storage->value_domain == LMD_TYPE_ANY) {
+        // the packed destination owns the double; no transient Item home escapes.
+        TypedItem stored = {.type_id = LMD_TYPE_FLOAT, .double_val = number};
+        memcpy(slot, &stored, sizeof(stored));
+        return;
+    }
+    set_field_value(field, slot, lambda_float_ptr_to_item(&number));
+}
+
 Item push_k(DateTime val) {
     // Datetime must be heap-owned because this active-runtime constructor can
     // cross a collection safepoint and its value cannot live in a transient
@@ -216,6 +228,33 @@ Item array_get(Array *array, int64_t index) {
         return array_native_lane_read(array, index);
     }
     return container_scalar_read((Container*)array, array_item_read(array, index));
+}
+
+// admitted rank-one primitive reads need no Item boxing or number homes.
+// The caller proves the element domain; views still resolve live storage.
+extern "C" uint64_t lambda_array_primitive_index(Item owner, int64_t index, int64_t elem_type) {
+    ArrayNumElemType lane = (ArrayNumElemType)elem_type;
+    uint64_t absent = lane == ELEM_FLOAT ? FLOAT_LANE_NULL_BITS
+        : lane == ELEM_BOOL ? BOOL_ERROR : (uint64_t)INT_LANE_NULL;
+    TypeId kind = get_type_id(owner);
+    if ((kind != LMD_TYPE_ARRAY_NUM && kind != LMD_TYPE_ARRAY && kind != LMD_TYPE_ELEMENT) ||
+            !owner.array || (uint64_t)index >= (uint64_t)owner.array->length) return absent;
+    if (kind == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* array = owner.array_num;
+        if (array_num_rank(array) != 1 || array->get_elem_type() != lane ||
+                !array_num_resolve_data(array, false)) return absent;
+        int64_t offset = array_num_element_offset(array, index);
+        if (lane == ELEM_BOOL) return ((uint8_t*)array->data)[offset] ? BOOL_TRUE : BOOL_FALSE;
+        uint64_t bits;
+        memcpy(&bits, (char*)array->data + offset * sizeof(bits), sizeof(bits));
+        return bits;
+    }
+    Item member = array_item_read(owner.array, index);
+    TypeId type = get_type_id(member);
+    if (lane == ELEM_INT && type == LMD_TYPE_INT) return (uint64_t)lambda_int_item_to_lane(member.item);
+    if (lane == ELEM_BOOL && type == LMD_TYPE_BOOL) return member.bool_val ? BOOL_TRUE : BOOL_FALSE;
+    if (lane == ELEM_FLOAT && type == LMD_TYPE_FLOAT) return lambda_float_lane_from_double(member.get_double());
+    return absent;
 }
 
 // ============================================================================

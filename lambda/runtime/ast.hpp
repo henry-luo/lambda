@@ -1380,7 +1380,7 @@ static inline bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_va
             ast_for_discards_result(node));
 }
 
-// share procedural result classification across T0, Full MIR and MVP (S2.5.3v3).
+// share procedural result classification across T0 and MVP (S2.5.3v3).
 static inline AstNode* ast_block_last_value(AstNode* first, bool procedural,
         int* value_count, int* decl_count, int* stam_count,
         AstNode** terminal = nullptr) {

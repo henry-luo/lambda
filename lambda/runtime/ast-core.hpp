@@ -1121,7 +1121,7 @@ static inline bool ast_is_direct_numeric_mask_assignment(AstNode* node) {
          object->type->type_id == LMD_TYPE_ARRAY_NUM);
 }
 
-// --- Shared AST shape helpers (promoted from transpile-mir.cpp, rule 13) ---
+// --- Shared AST shape helpers for interpreters and MIR lowering ---
 // Both tiers need the same answers about an assignment target, so the walks
 // live here rather than being re-derived: the MIR lowering and the T0 walker
 // call these same functions.
@@ -1892,13 +1892,6 @@ typedef struct FnAnalysis {
     int js_formal_length;
     struct hashmap* js_cached_scope_slot_collisions;
     const char* may_await_cause;
-    // Defect-origin scanning is invariant after a call-site round. Its atomic
-    // epoch keeps retained-template compilation from reading another worker's
-    // result (D8.2.5).
-    uint32_t mir_cached_defect_origin_epoch;
-    bool mir_cached_defect_origin;
-    FnVariantAnalysis variants[4];
-    int variant_count;
     // T0 activation shape, filled by the frame-plan pass (AI5). FnAnalysis is
     // the designated carrier for per-function facts, so the plan lives here
     // rather than on AstFuncNode.
@@ -1925,17 +1918,6 @@ static inline int ast_function_capture_count(const AstFuncNode* fn_node) {
     // synthetic definitions may precede analysis publication; captures use
     // FnCapture::next, never an AST-list utility.
     return ast_capture_count(fn_node->captures);
-}
-
-static inline FnVariantAnalysis* fn_analysis_variant(
-        FnAnalysis* analysis, FnEntryKind kind) {
-    if (!analysis) return NULL;
-    for (int i = 0; i < analysis->variant_count; i++) {
-        if (analysis->variants[i].entry.kind == kind) {
-            return &analysis->variants[i];
-        }
-    }
-    return NULL;
 }
 
 typedef union FnExt {

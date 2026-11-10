@@ -96,6 +96,7 @@ struct MvpFunction {
     TypeObject* method_owner;
     const char* name;
     const char* js_export_name;
+    NameEntry* interp_binding;
     Script* js_export_owner;
     MIR_item_t target;
     MIR_item_t js_export_ref;
@@ -115,6 +116,7 @@ struct MvpFunction {
     bool no_value_result;
     bool owns_open_scopes;
     bool guarded_array_entry;
+    bool body_may_gc;  // excludes conservative admission at the parameter boundary
 };
 
 static inline bool mvp_edit_model_place(MvpFunction* function, AstNode* object) {
@@ -181,6 +183,7 @@ struct MvpIntRange {
 };
 struct MvpBinding {
     NameEntry* entry;
+    AstNode* declaration;  // continuations reuse live-in identities with private parameter sites
     const char* state_name;
     Type* admission_contract;
     Type* producer_success_contract;
@@ -229,12 +232,18 @@ struct MvpBinding {
     bool stable_scalar_home;
 };
 
+static inline AstNode* mvp_binding_node(MvpBinding* binding) {
+    return binding->declaration ? binding->declaration : binding->entry ? binding->entry->node : NULL;
+}
+
 struct LambdaMvpModule {
     Transpiler* tp;
     MIR_context_t ctx;
     MIR_module_t module;
     MIR_item_t consts;
     MIR_item_t layout;
+    const MirModuleNames* names;
+    bool satellite;
     ArrayList* property_keys;
     HashMap* imports;
     MvpFunction* functions;
@@ -388,6 +397,7 @@ Type* mvp_join_value_contracts(LambdaMvpModule* module, Type* left, Type* right)
 Type* mvp_bound_array_contract(Type* contract);
 Type* mvp_contract(AstNode* declaration);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
+bool mvp_interp_binding(LambdaMvpModule* module, NameEntry* entry, Script** owner, int* slot);
 AstFunctionId mvp_node_owner(LambdaMvpModule* module, AstNodeId id);
 MvpFunction* mvp_require_function_reference(LambdaMvpModule* module, AstFuncNode* target,
     AstNode* callee, Script* owner = NULL);

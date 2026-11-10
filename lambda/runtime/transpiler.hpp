@@ -281,7 +281,14 @@ bool prepare_context_module_state(void* mir_ctx, void* consts, void* type_list);
 }
 #endif
 
-// MIR transpiler functions
+// JS imports retain Function environments instead of publishing raw Core entries.
+static inline bool lambda_import_is_js(const AstImportNode* import) {
+    return import && import->is_cross_lang && import->script &&
+        import->script->profile == &js_profile;
+}
+
+// Lambda execution and MIR module services
+bool lambda_const_materialize_script(Transpiler* tp);
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                       bool run_main = false, Script** out_script = nullptr);
 // Load and initialize a file-backed package without synthesizing an import script.
@@ -294,20 +301,6 @@ const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
 Input* run_lambda_document_transform_with_options(Runtime* runtime,
     const char* input_target, const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count);
-void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
-                                   double* out_jit_init_ms = nullptr,
-                                   double* out_transpile_ms = nullptr,
-                                   double* out_mir_gen_ms = nullptr,
-                                   uint64_t* out_mir_module_count = nullptr,
-                                   uint64_t* out_mir_function_count = nullptr,
-                                   uint64_t* out_mir_instruction_count = nullptr);
-
-// P2: compile one T0-supported definition into a Script-owned MIR satellite.
-// Its module bindings are read from the existing T0 slab; the resulting
-// address has the normal generated boxed ABI.
-bool compile_ast_function_satellite(Runtime* runtime, Script* script,
-                                    const AstFuncNode* fn, void** out_boxed_entry);
-
 // A worker-built satellite is inert until the evaluator seals its module-state
 // layout and publishes its entries. The fixed member set keeps the image
 // self-contained and mirrors the bounded direct-callee cluster.
@@ -346,13 +339,6 @@ bool interp_satellite_image_retain(Script* script, InterpSatelliteImage* image);
 // phase boundaries; MIR internals are never asynchronously interrupted.
 typedef bool (*InterpSatelliteCancelProbe)(void* context);
 
-// Builds a private MIR image without writing a Script, its const/type lists,
-// module state, or Function entries. `sequence` is allocated before enqueue
-// and is therefore stable regardless of worker completion order.
-bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
-        const AstFuncNode* fn, uint32_t sequence,
-        InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
-        InterpSatelliteImage** out_image);
 void interp_satellite_image_destroy(InterpSatelliteImage* image);
 
 // Detaches a Transpiler from a direct-import list. The Script-owned list stays

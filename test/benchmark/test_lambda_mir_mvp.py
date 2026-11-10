@@ -46,6 +46,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         env.update(LAMBDA_EXEC_BACKEND="jit", LAMBDA_MIR_COMPILER="mvp")
         env.pop("JS_MIR_INTERP", None)
         env.update(overrides or {})
+        env = {key: val for key, val in env.items() if val is not None}
         command = [str(self.exe), "run", str(source)]
         if not logging:
             command.append("--no-log")
@@ -67,7 +68,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_benchmark_goldens(self):
         for suite, name in CASES:
-            for compiler in ("mvp", "production"):
+            for compiler in (None, "mvp"):
                 with self.subTest(suite=suite, name=name, compiler=compiler):
                     self.check_golden(ROOT / "test/benchmark" / suite / f"{name}2.ls",
                                       {"LAMBDA_MIR_COMPILER": compiler})
@@ -84,7 +85,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def check_gc_fixtures(self, fixtures):
         fixtures = tuple(fixtures)
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             for mode in GC_MODES:
                 for source in fixtures:
                     with self.subTest(compiler=compiler, mode=mode, fixture=source.stem):
@@ -266,11 +267,45 @@ class LambdaMirMvpTests(unittest.TestCase):
         # ordinary snapshot flags remain; a known string has no Array view descriptor.
         self.assertNotRegex(text, r"\tmov\t[^\n]+, u8:2\(")
 
+    def test_nested_primitive_stores(self):
+        # LR07-54: Full also loses the Error from rejected nested indexed stores.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_nested_primitive_stores.ls", mode)
+
+    def test_primitive_readers_and_singleton_joins(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_primitive_readers.ls"
+        self.check_gc_fixtures((source, ROOT / "test/lambda/mvp/mir_mvp_singleton_joins.ls"))
+        for name in ("float_at", "int_at", "bool_at"):
+            body = self.function_mir(source, name)
+            self.assertIn("lambda_array_primitive_index", body)
+            self.assertNotIn("\tcall\tfn_index", body)
+            self.assertNotIn("lambda_stack_is_exhausted", body)
+            self.assertIn("\tbstart\t", body)
+        body = self.function_mir(source, "literal_fields")
+        self.assertNotIn("slot_image", body)
+        self.assertEqual(len(re.findall(r"\tmov\t[^\n]+, p:32\(", body)), 3)
+
+    def test_projection_call_snapshots(self):
+        # LR07-56: archived Full observes the later argument's write through the plain argument.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_projection_call_snapshots.ls", mode)
+
+    def test_sized_conversion_results(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_sized_conversion_results.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "random_value")
+        self.assertTrue(body.splitlines()[0].startswith("\td, i64,"))
+        body = self.function_mir(source, "float_record")
+        self.assertIn("lambda_set_field_f64", body)
+        self.assertNotIn("slot_image", body)
+
     def test_counted_admission_and_callable_pipe(self):
         # D4.3.3/S10.1.7v2: resizing invalidates counts; nested ~ is not free.
         cases = (("array_count_resized_binding", "error[E201]", "maximum allowed is 3"),
                  ("pipe_body_bound_current", "error[E212]", "pipe target is not callable"))
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             for mode in GC_MODES:
                 for name, code, message in cases:
                     with self.subTest(compiler=compiler, mode=mode, fixture=name):
@@ -368,7 +403,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                 with self.subTest(tier=tier, mode=mode):
                     self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_member_contracts.ls",
                                       {**mode, "LAMBDA_EXEC_BACKEND": tier,
-                                       "LAMBDA_MIR_COMPILER": "mvp" if tier == "jit" else "production"})
+                                       "LAMBDA_MIR_COMPILER": "mvp" if tier == "jit" else None})
 
     def test_captured_dependent_annotations(self):
         # S11.4.8v2/D4.1.4: captured annotations and same-spelling aliases
@@ -517,7 +552,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_query_window_scalar_ownership(self):
         # retain the cold floats when append growth moves their source buffer.
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             for seed in (1592594996, 17, 31, 42, 77, 101, 239, 1024):
                 with self.subTest(compiler=compiler, seed=seed):
                     self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_query_windows.ls",
@@ -536,7 +571,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1", "COW_EXEC_PROFILE": "1",
                   "COW_EXEC_PROFILE_OUT": str(Path(self.scratch.name) / "capture-profile.tsv")})
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             for mode in modes:
                 for fixture in (source, ROOT / "test/lambda/mvp/mir_mvp_u32.ls",
                                 ROOT / "test/lambda/mvp/mir_mvp_index_recurrence.ls"):
@@ -642,7 +677,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 }
 ''')
         source.with_suffix(".txt").write_text("true 1 2\n")
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             with self.subTest(compiler=compiler):
                 self.check_golden(source, {"LAMBDA_MIR_COMPILER": compiler,
                     "LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"})
@@ -743,6 +778,15 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("\tcall\tfn_strcat3", body)
         self.assertIn("\tcall\tfn_join", body)
 
+    def test_full_mir_control_must_be_explicit(self):
+        with mock.patch.object(sys, "argv", ["lambda_mir_mvp.py", "--release"]), \
+                mock.patch.object(sys, "stderr"), \
+                mock.patch.object(lambda_mir_mvp, "ensure_c2m") as build_reference:
+            with self.assertRaises(SystemExit) as rejected:
+                lambda_mir_mvp.main()
+            self.assertEqual(rejected.exception.code, 2)
+            build_reference.assert_not_called()
+
     def test_failed_engine_remains_unqualified(self):
         executable = Path(self.scratch.name) / "failed.exe"
         executable.write_text("#!/bin/sh\nexit 17\n")
@@ -761,7 +805,7 @@ class LambdaMirMvpTests(unittest.TestCase):
             shutil.copy2(ROOT / "test/benchmark/r7rs" / name, corpus / "r7rs" / name)
         shutil.copytree(ROOT / "test/benchmark/c2mir", corpus / "c2mir")
         command = [sys.executable, str(ROOT / "test/benchmark/lambda_mir_mvp.py"),
-            "--release", "--exe", str(executable), "--record-failures", "--case", "r7rs/fib",
+            "--release", "--exe", str(executable), "--control", str(executable), "--record-failures", "--case", "r7rs/fib",
             "--runs", "3", "--warmups", "1", "--output", str(report), "--source-manifest", str(manifest),
             "--c2mir-exe", str(reference), "--benchmark-root", str(corpus)]
         result = subprocess.run(command,
@@ -802,7 +846,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                 expected = source.parent.parent / (source.stem + "2.txt")
             return expected.read_text().strip() + "\n__TIMING__:1.0\n"
 
-        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe),
+        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--control", str(self.exe),
             "--subset", "float-array", "--runs", "3", "--warmups", "1",
             "--c2mir-exe", str(reference), "--output", str(report)]
         with mock.patch.object(sys, "argv", command), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
@@ -818,7 +862,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         reference = Path(self.scratch.name) / "unported-reference.exe"
         reference.write_bytes(b"fixture reference identity")
         report = Path(self.scratch.name) / "unported.json"
-        arguments = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--c2mir-exe", str(reference),
+        arguments = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--control", str(self.exe), "--c2mir-exe", str(reference),
                      "--case", "jetstream/richards", "--runs", "3", "--warmups", "1", "--output", str(report)]
         with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke",
                 return_value="richards: PASS\n__TIMING__:1.0\n"):
@@ -835,7 +879,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         output = Path(self.scratch.name) / "mvp-regression.json"
         for mode in ("--regression-only", "--lambda-only"):
             with self.subTest(mode=mode):
-                arguments = ["lambda_mir_mvp.py", "--release", mode, "--exe", str(self.exe),
+                arguments = ["lambda_mir_mvp.py", "--release", mode, "--exe", str(self.exe), "--control", str(self.exe),
                     "--previous-mvp", str(self.exe), "--c2mir-exe", str(reference), "--case", "r7rs/fib",
                     "--runs", "3", "--warmups", "1", "--output", str(output)]
                 with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke",
@@ -874,7 +918,7 @@ class LambdaMirMvpTests(unittest.TestCase):
             elapsed = 1 if env["LAMBDA_MIR_COMPILER"] == "mvp" else 2
             return f"{text}\n__TIMING__:{elapsed}\n"
 
-        arguments = ["lambda_mir_mvp.py", "--release", "--lambda-only", "--exe", str(self.exe),
+        arguments = ["lambda_mir_mvp.py", "--release", "--lambda-only", "--exe", str(self.exe), "--control", str(self.exe),
                      "--variant", "both", "--case", "r7rs/fib", "--runs", "3", "--warmups", "1",
                      "--benchmark-root", str(corpus), "--output", str(output)]
         with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
@@ -968,7 +1012,7 @@ class LambdaMirMvpTests(unittest.TestCase):
             state["busy"] = False
             return [{"pid": 123, "program": "make"}] if busy else []
 
-        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe),
+        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--control", str(self.exe),
             "--pause-for-jobs", "--case", "r7rs/fib", "--runs", "3", "--warmups", "1",
             "--output", str(report)]
         with mock.patch.object(sys, "argv", command), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
@@ -1084,7 +1128,8 @@ class LambdaMirMvpTests(unittest.TestCase):
             with self.subTest(source=source.name, function=function):
                 body = self.function_mir(source, function)
                 self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
-                self.assertIn("fn_index", body)  # short/negative extents keep the checked sibling
+                # collecting bodies keep fn_index; rootless bodies use the lane sibling.
+                self.assertRegex(body, r"\tcall\t(?:fn_index|lambda_array_primitive_index)")
 
     def test_fallible_inline_and_bool_count(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_consumers.ls"
@@ -1160,7 +1205,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_erased_array_iterations(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_erased_iterations.ls"
-        for compiler in ("production", "mvp"):
+        for compiler in (None, "mvp"):
             for stress in GC_MODES:
                 with self.subTest(compiler=compiler, stress=stress):
                     self.check_golden(source, {**stress, "LAMBDA_MIR_COMPILER": compiler})
@@ -1219,7 +1264,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                           'pn main() { print([bad is error, bad.code]) }\n')
         # S7.7.2v2 retains a deferred validation outcome and continues into main.
         source.with_suffix(".txt").write_text("[true, 201]\n")
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             with self.subTest(compiler=compiler):
                 self.check_golden(source, {"LAMBDA_MIR_COMPILER": compiler})
 
@@ -1227,7 +1272,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         source = Path(self.scratch.name) / "static_mismatch.ls"
         source.write_text('pn main() { print("EXECUTED"); let bad: int = "wrong" }\n')
         source.with_suffix(".txt").write_text("")
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             with self.subTest(compiler=compiler):
                 result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler})
                 self.assertNotEqual(result.returncode, 0)
@@ -1249,14 +1294,94 @@ class LambdaMirMvpTests(unittest.TestCase):
                 source.with_suffix(".txt").write_text(expected + "\n")
                 self.check_golden(source)
 
-    def test_selector_is_explicit(self):
+    def test_default_compiler_preserves_tiers(self):
         source = ROOT / "test/benchmark/r7rs/fib2.ls"
-        for options in ({"LAMBDA_EXEC_BACKEND": "auto"}, {"LAMBDA_EXEC_BACKEND": "interp"},
-                        {"LAMBDA_MIR_COMPILER": "unknown"}):
-            with self.subTest(options=options):
-                result = self.run_script(source, options)
+        for compiler in (None, "", "mvp"):
+            for tier in (None, "jit", "auto", "interp"):
+                with self.subTest(compiler=compiler, tier=tier):
+                    dump = Path(self.scratch.name) / f"selector-{compiler}-{tier}.mir"
+                    result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler,
+                        "LAMBDA_EXEC_BACKEND": tier, "LAMBDA_MIR_DUMP_PATH": str(dump),
+                        "LAMBDA_SATELLITE_SYNC": "1", "LAMBDA_FUNC_JIT_THRESHOLD": "1",
+                        "LAMBDA_DISABLE_MIR_CACHE": "1", "LAMBDA_RSS_REPORT": "1"}, logging=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), "fib: PASS")
+                    self.assertNotIn("[ERR!]", result.stderr)
+                    if tier == "interp":
+                        self.assertFalse(dump.exists())
+                    else:
+                        body = dump.read_text()
+                        self.assertEqual(bool(re.search(r"^(?:lambda_mvp|mvp_lambda_sat_\d+):\tmodule", body, re.M)),
+                            True)
+        result = self.run_script(source, {"LAMBDA_MIR_COMPILER": "unknown"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("LAMBDA_MIR_COMPILER accepts only mvp", result.stderr)
+
+    def test_retired_full_mir_is_rejected(self):
+        source = ROOT / "test/benchmark/r7rs/fib2.ls"
+        for tier in ("interp", "auto", "jit"):
+            with self.subTest(tier=tier):
+                result = self.run_script(source, {"LAMBDA_MIR_COMPILER": "production",
+                                                 "LAMBDA_EXEC_BACKEND": tier})
                 self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Full MIR is retired", result.stderr)
                 self.assertNotIn("fib: PASS", result.stdout)
+
+    def test_mvp_interpreter_promotion(self):
+        source = ROOT / "test/benchmark/r7rs/fib2.ls"
+        nodes = {}
+        for tier in ("interp", "auto"):
+            result = self.run_script(source, {"LAMBDA_EXEC_BACKEND": tier,
+                "LAMBDA_MIR_COMPILER": None, "LAMBDA_SATELLITE_SYNC": "1",
+                "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_RSS_REPORT": "1"})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("[ERR!]", result.stderr)
+            nodes[tier] = int(re.search(r"nodes=(\d+)", result.stderr)[1])
+        # verify that the published native entry actually replaces AST work.
+        self.assertLess(nodes["auto"], nodes["interp"])
+
+    def test_mvp_satellite_gc(self):
+        sources = ("satellite_property_key_relocation", "proc/interp_satellite_cluster",
+                   "transpile_float_fmt_satellite")
+        for name in sources:
+            for stress in GC_MODES:
+                with self.subTest(fixture=name, stress=stress):
+                    source = ROOT / "test/lambda" / (name + ".ls")
+                    result = self.run_script(source, {**stress, "LAMBDA_MIR_COMPILER": None,
+                        "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                        "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_LOOP_JIT_THRESHOLD": "2"})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                    self.assertNotIn("[ERR!]", result.stderr)
+
+    def test_mvp_loop_handoff(self):
+        for name in ("fn_local_loop_handoff", "proc/interp_loop_handoff", "proc/for_loop_handoff"):
+            with self.subTest(fixture=name):
+                source = ROOT / "test/lambda" / (name + ".ls")
+                dump = Path(self.scratch.name) / (source.stem + "-handoff.mir")
+                result = self.run_script(source, {"LAMBDA_MIR_COMPILER": None,
+                    "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                    "LAMBDA_FUNC_JIT_THRESHOLD": "1000000", "LAMBDA_LOOP_JIT_THRESHOLD": "2",
+                    "LAMBDA_MIR_DUMP_PATH": str(dump)}, logging=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                self.assertNotIn("[ERR!]", result.stderr)
+                self.assertRegex(dump.read_text(), r"mvp_lambda_sat_\d+:\tmodule")
+
+    def test_mvp_external_call_arguments(self):
+        names = ("interp_variadic", "interp_variadic_promoted", "interp_named_args",
+                 "default_callback_frame", "mvp/mir_mvp_variadic_modules",
+                 "mvp/mir_mvp_variadic_recursion")
+        for name in names:
+            for stress in GC_MODES:
+                with self.subTest(fixture=name, stress=stress):
+                    source = ROOT / "test/lambda" / (name + ".ls")
+                    result = self.run_script(source, {**stress, "LAMBDA_MIR_COMPILER": None,
+                        "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                        "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_LOOP_JIT_THRESHOLD": "2"})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                    self.assertNotIn("[ERR!]", result.stderr)
 
     def test_native_recursive_mir(self):
         body = self.function_mir(ROOT / "test/benchmark/r7rs/fib2.ls", "fib")
@@ -1346,6 +1471,10 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_native_constructor_lanes(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_constructor_boundary.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "native_fields")
+        self.assertNotIn("set_field_value", body)
+        self.assertRegex(body, r"\tdmov\td:\d*\(%")
         for name in ("freshly", "float_values", "bool_values"):
             body = self.function_mir(source, name)
             native = body[:body.index("\tcall\tlambda_fill_primitive_bits")]
@@ -1470,7 +1599,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                           'print(saved is error); return saved }; pn main() { return assign("bad") }\n')
         source.with_suffix(".txt").write_text("true\n")
         # S7.7.4v2 continues with the retained Error; main then returns that Error.
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             with self.subTest(compiler=compiler):
                 result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler})
                 self.assertGreater(result.returncode, 0, result.stdout + result.stderr)

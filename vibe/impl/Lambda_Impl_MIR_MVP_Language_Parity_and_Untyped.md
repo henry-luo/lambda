@@ -18,6 +18,14 @@ object layouts, type system, scheduler and precise GC remain shared.
 
 ## Current checkpoint
 
+- **Full MIR retirement, 2026-11-10:** the interpreter uses MVP APIs directly; Full emitter/build branches and public-return variants are removed. Current task checkpoint: [MVP interpreter alignment and retirement](Lambda_Impl_MIR_Full_Retirement.md#current-checkpoint). The release runtime archive builds, but full-host validation is blocked by Radiant event-protocol mismatch **RI-004**. Root executables remain the prior default-switch build. No retirement runtime correctness/performance qualification is claimed.
+
+- **Historical default-compiler integration, before retirement, 2026-11-10:** MVP is the default for eager MIR and AUTO/interpreter promotion; Full remains explicit `production`. Both root executables are rebuilt in release. Final validation passes **13 focused Python methods and 9 selected Lambda GTests**. No baseline or benchmark sweep ran. Changes are uncommitted; no jobs remain running. Identity and receipts: §10.100 / `temp/mvp_default_switch/final-summary.json`. Prior P101 performance receipts below remain historical, not measurements of this integration.
+
+- **Previous performance checkpoint, before default integration (2026-11-10).** Retained **P101**, SHA256 `d51a190813cd9847482d88d7c7e60655e5aed35eb03de6e741a57611bc99cb7f`; compiler sources matched its manifest at that checkpoint. Ten focused methods passed, plus a final paired/GC constructor check with the added recursive/mixed-kind cases. P101 Splay: **208.439/Full 207.540/P82 212.163 ms**, 31 pairs; still **0.43% slower than Full**. DeltaBlue, Pnpoly and Mbrot have P92 31-pair Full wins. P99's three focused typed repeats have no slowdown flags; P101 has no complete typed qualification. Last complete campaigns remain P81 untyped / P92 typed. P102 is discarded. Rebuild the runtime archive before linking: it was last built with P102. Next: close Splay, then current 77-case untyped/typed milestone screens. Details: §10.99 / `temp/mvp_untyped_tuning_goal/batch3-checkpoint.json`. No baseline, shared executable replacement, sibling edit or commit.
+
+- **Resumed 2026-11-10:** new user-requested goal on clean HEAD `8aca6eeb7` (P82 tuning committed in `cc2c40dbe`). Retained compiler identity still matches P82. Continue all remaining untyped misses together and preserve typed performance. The frozen P81 eleven-crossing gate remains satisfied; avoid another aggregate campaign until the next implementation milestone. P84 investigates loss of the coarse Map carrier across private calls whose normal record results have different layouts (**D4.3.1 / D7.4.1 / D6.3**). No root executable replacement or baseline is planned.
+
 - **Resumed:** 2026-11-09 at the user's request, master `14f48f209`; merge complete, initially clean tree.
 - **Latest continuation:** master `1540d9228`. After the user updated Radiant to `558eb3e`, the original private release build/link succeeds. [RI-003](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-003) is resolved: both property providers occur exactly once in `libradiant.a`, required symbols are defined, and typed/untyped Fibonacci goldens pass under both compilers (4/4). MVP record-read tuning resumes below (§10.92); the owner boundary is unchanged (**D9.1.1v4 / D9.1.3v2**).
 - **Scope:** the latest request prioritizes untyped MVP performance against Full MIR on all 77 benchmarks, with no typed MVP regression. Preserve the existing correctness changes, formal semantic oracles and shared runtime (**D4.3.1**, **D8.3.1–D8.3.3**).
@@ -5226,3 +5234,302 @@ the performance objective is **incomplete**, with the four Full misses and
 two prior-MVP flags above retained in the checkpoint. Resume from P82 and
 the existing profiles; do not use the rejected P83 archive as the retained
 candidate.
+
+
+### 10.99 Resumed tuning: nested primitive stores, reads and constructors (P84–P102)
+
+Resumed on clean `8aca6eeb7` at the user's request, with a new active goal.
+P82 sources match its archived manifest; the earlier tuning was committed as
+`cc2c40dbe`. P26 remains the frozen Full control, and P82 is the immediate
+MVP control. The P81 eleven-crossing validation gate remains satisfied. No
+root executable replacement, Lambda/Radiant baseline or sibling edit is used.
+
+P84's proposed coarse Map domain adds no measurable gain on the six focused
+rows and is discarded. Its receipts remain. P85 extends the existing guarded
+scalar-place walk to an indexed primitive leaf: guard each ancestor's physical
+kind, live descriptor and COW ownership, then the exact numeric lane and
+bounds. A nonempty representation certificate keeps the checked setter.
+Only the final store mutates data; a miss retains the canonical collecting
+writer and once-evaluated keys (**D4.3.1 / D4.3.3 / D6.3 / S9.1.2**).
+P86 keeps the existing packed N-D arm before this alternative. The inherited
+List certificate offset is shared through `em_array_rep_cert`; no runtime
+container or type layout changes.
+
+P87 extends the existing singleton-join helper to same-lane numeric prefixes,
+with exact source/member/result roots across allocation and existing byte-copy
+and admitted-store kernels. Erased singleton joins can select this helper;
+alternate scalar/list/N-D/Error domains retain its canonical fallback
+(**S10.6.1 / D6.3**). P88 replaces the cold boxed read only for proved rank-one
+primitive arrays and native integer keys. `lambda_array_primitive_index`
+returns scalar lane bits, handles bounds, empty arrays and live strided storage,
+and never allocates or reenters. The registry audits this effect; the planner
+and emitter agree. Open/Error/coordinate reads still retain their original
+dispatch. Removing cold collecting reads lets Pnpoly retain a rootless entry
+without altering the shared native-stack guard heuristic (**S7.1.1v3 / D6.3**).
+
+P88 focused five-pair medians, candidate/Full/P82: Mbrot
+**0.363/0.567/0.653 ms**, Pnpoly **1.605/1.857/1.858 ms**, both bootstrap
+wins. Splay **207.900/204.120/209.401 ms** and JetStream DeltaBlue
+**53.770/28.110/54.157 ms** remain open. These are self-reported execution
+boundaries, excluding compilation, with unchanged benchmark goldens. No
+complete 77-case P88 campaign is implied.
+
+P89/P90 investigate constructor helper overhead: an ordered mixed record can
+store a proved pointer/null field directly even when other fields need the
+canonical descriptor setter. Inferred descriptors guard their live type and
+flags first; the canonical NO_GC setter remains on a miss. Scalar ownership,
+field admission and precise roots stay unchanged (**D2.6.2 / D6.3**).
+P89 is an unmeasured intermediate; P90 factors the common fallback and is the
+current frozen candidate, pending focused correctness/performance evidence.
+
+The new nested-store fixture covers unique/shared rows, mixed numeric kinds,
+retyping, effectful keys and rejected paths. Its first attempt used postfix
+`^` on an explicitly infallible helper and is corrected to call it directly;
+the semantic golden is unchanged. MVP passes all three GC modes. Frozen P26
+Full and P86 Full lose Errors on rejected nested stores, extending the
+existing LR07-54 observation. Receipts remain in
+`temp/mvp_untyped_tuning_goal/p86-focused-units*.log` and
+`p86-nested-full-control.log`; Full correctness is not claimed. The P88
+eight-method check passes semantic goldens; two old emission assertions
+expect the replaced `fn_index` name. Their replacements now require the
+noncollecting primitive helper in the checked sibling. P90 adds permanent
+primitive-reader/singleton-join fixture/golden pairs and focused MIR checks.
+Typed performance qualification and all-row closure remain pending.
+
+
+P90's five-pair screen retains Mbrot/Pnpoly Full wins. Constructor mixed-field
+stores do not establish a Splay win. The P90 new-fixture attempt correctly
+rejects literal `0 div 0` at compile time; the test now produces an int poison
+through `int(math.sqrt(-1.0))`. Standalone printed Error messages are raw
+text, so the newly authored singleton golden is corrected on both compilers.
+The two new reader/join fixtures then pass paired normal/forced/seeded GC
+checks, including rootless primitive-reader MIR. The five other P90 methods
+pass, including native reduction/branch/copy emission and inferred records.
+
+P91 identifies the main DeltaBlue COW root: `cow_param_retained` includes
+retained descendants, while `cow_param_root_retained` distinguishes the
+whole root. MVP already captures a retained projection at its callee boundary
+(**S9.1.2 / S9.3.1 / D5.4.5**). Pure actuals, a proved receiving boundary and
+no parameter writes permit borrowing the whole owner without redundantly
+sharing it for that child. Simultaneous var aliases retain ordinary captures.
+P92 restricts the newly allowed descendant-retention case to non-reentrant
+callees; the existing strict nonretention rule remains. No snapshot/capture
+is removed from the actual child-retention boundary.
+
+P91 five-pair JetStream DeltaBlue: **9.330/Full 27.940/P90 53.142 ms**, a
+bootstrap win over both controls. Splay has a lower median
+214.465/Full 218.110/P90 219.738, but is inconclusive; no closure is claimed.
+CD remains a Full win. P91's six focused ownership methods have no MVP
+failures; paired Full checks retain LR07-53 and the earlier live-borrow
+publication failure. Their goldens remain unchanged. P92 adds a paired
+projection-call snapshot fixture for returned/wrapped/captured children,
+whole-root returns, local writes, simultaneous borrows and effectful later
+arguments. Qualification is pending the frozen P92 release.
+
+
+P92's six focused methods pass (`p92-focused-units-3.log`), with paired
+reader/join/N-D controls and MVP-only oracles where frozen Full retains a
+defect. The new projection-call fixture corrects its declared procedure's
+body syntax; the required results are unchanged. Full's later-argument
+snapshot failure reproduces on P26 and is recorded as LR07-56.
+
+P92 **31-pair / three-warmup** confirmations retain three Full wins:
+DeltaBlue **9.639/Full 28.690/P82 55.466 ms**, Pnpoly
+**1.733/1.934/1.934 ms**, Mbrot **0.376/0.600/0.684 ms**. Splay remains
+slower at **211.924/208.649/211.392 ms**. These are focused receipts, not
+a synthetic complete screen. P92 is frozen by its manifest.
+
+P93 investigates the remaining Splay constructor cost. A sufficiently large
+primitive literal whose members are all literal nodes can copy an
+Input-owned byte template with the audited NO_GC `memcpy`. It still allocates
+fresh runtime header/data on every evaluation, retains the certificate
+constructor where required, and emits ordinary expression evaluation for
+nonliteral/effectful members (**D5.1.2 / D6.3 / S9.1.2**). The reader fixture
+now checks independently mutable literal results, float/subnormal bits and
+the fresh allocation plus bulk-copy MIR. Both focused methods pass on P93
+(`p93-focused-units.log`); its Splay comparison is pending.
+
+
+P93 has no bootstrap Splay improvement (211.134/Full 205.320/P92
+210.529 ms) and is discarded, including its test-only template assertions.
+Retained compiler sources again match P92. Its typed 77-case, five-pair
+regression screen is running against P82; all completed outputs match. The
+runtime archive was last compiled as P93, so rebuild it before a later link.
+`batch3-checkpoint.json` records the active goal and next investigation.
+
+
+P92's complete typed campaign passes **77/77 outputs**, five pairs/one warmup
+against P82. Over its 76 nonzero rows, geometric MVP/P82 is **0.99897**;
+Sumfp remains timer-resolution-limited. It flags Bounce (0.027/0.026 ms),
+Splay (520.056/510.941) and Fast Diff (90.091/87.925). These flags remain
+open until longer repeats; no regression-free claim is made.
+
+P94 fixes a demonstrated producer-fact gap: the emitter already converts a
+proved u32 to an int/float scalar, but `mvp_value_contract` returned `any`
+for that input. Reuse the registry's successful result type for this exact
+numeric family and preserve an incoming Error independently. No receiving
+contract changes (**D4.3.1 / S7.7.3 / S4.4.1**). Diagnostic MIR confirms
+Splay's `next_random` result now uses a double lane and `generate_payload`
+takes its tag as a double; both were boxed in P92. The new sized-conversion
+fixture passes both compilers across all GC modes, preserving Error payloads.
+Its first ABI assertion incorrectly demanded a native tag despite an explicit
+opaque Error actual; it now checks the actual random-value producer's native
+float result. The opaque Error case remains unchanged.
+
+P95 discards P89/P90's mixed-field constructor experiment: it established no
+Splay gain and adds inferred descriptor guards to the typed Splay MIR. The
+original constructor policy is restored. Bounce/Fast Diff diagnostics show
+fewer calls/instructions after the primitive-read change; their longer
+measurement is still needed, rather than changing inlining on speculation.
+P95 is the current frozen candidate. Ten focused unit methods pass
+(`p95-focused-units.log`), including all five new fixture/golden pairs and
+normal/forced/seeded GC. Its untyped Splay 31-pair confirmation is running.
+No complete P95 aggregate or typed regression clearance is implied.
+
+
+P95's 31-pair repeats confirm all three typed flags. P96 limits the native
+read fallback to bodies that can lose a collecting frame; Bounce and Fast
+Diff recover in 15 pairs. Parameter admission alone must not select this
+cost policy, so P99 records `body_may_gc` separately while leaving the public
+effect contract unchanged. Pure primitive readers retain the NO_GC sibling;
+already-collecting bodies keep their previous boxed cold path (**D6.3**).
+Normalized P96/P82 timed typed-Splay functions are identical, but its
+0.8% timing flag remains open.
+
+P97 uses the proved expression domain when deciding whether a literal field
+needs a list image, instead of the broader original AST type. P98 retains
+an exact float lane across allocation into an `any` field and uses a small
+NO_GC destination-owned TypedItem setter; alternate live descriptors delegate
+to `set_field_value`. Packed storage uses memcpy, preserving negative zero,
+subnormal and NaN bytes (**D2.6.2 / D6.3 / S11.1.6v2**). Five semantic/MIR
+methods pass; a sixth exposes the overly broad P96 parameter-effect policy,
+fixed in P99. P98 Splay is 207.118/Full 205.341/P82 210.722 ms (five pairs),
+still not a Full win.
+
+P99 permits trusted declared records' fixed-width pointer fields in the
+existing all-native constructor. Requiring the descriptor `native` flag
+excluded some declared pointer contracts even though `field_has_direct_lane` proves
+their storage width. Inferred pointer layouts remain on the checked setter;
+field admission, insertion captures and precise roots remain unchanged
+(**D4.2.5 / S9.1.2 / D6.3**). Eight focused methods pass, including paired
+normal/forced/seeded GC for a mixed array/float/nullable-child record, the
+sized conversion/packed float cases and rootless primitive-reader MIR.
+P99 focused typed and untyped performance qualification is in progress.
+
+
+P99 focused typed repeats have no slowdown flags: Splay 513.556/P82
+511.294 ms, Bounce 0.026/0.026, Fast Diff 89.130/89.234 (15 pairs).
+Untyped Splay remains slower, 210.233/Full 207.629/P82 212.552 (five pairs).
+The trusted-shape native constructor is exercised by the new mixed-record
+case. A diagnostic P100 removal confirms that generic descriptors for some
+declared pointer contracts still require this clause; P101 restores it.
+Ordinary pointer bases already set `native`; that flag is not uniformly
+scalar-only. P97's proved-domain imaging also reduces the typed constructor.
+
+P100 removes list imaging for array-literal producers, which always produce
+an array or Error, and hoists the payload address across contiguous primitive
+literal stores. Only literal primary nodes qualify; effectful members retain
+the existing per-expression owner reload (**S11.1.6v2 / D6.3**). It keeps fresh
+allocation per evaluation and does not share a constant array. The reader
+fixture checks independently mutable int/float/bool literal results and
+requires one payload load per literal, without slot-image calls.
+
+
+P100's new fixture initially leaves a fallible projected store unacknowledged
+and fails E228 on both compilers. P101 routes it through an explicit `any`
+procedure and propagates its outcome; expected snapshots are unchanged.
+P100 also deliberately removes the P99 trusted-pointer clause to check
+necessity; its native-constructor MIR test fails, so P101 restores it with
+the corrected descriptor rationale above. No failure is waived.
+
+
+P101 passes ten focused methods (`p101-focused-units.log`). Its 31-pair
+Splay result is 208.439/Full 207.540/P82 212.163 ms: a bootstrap improvement
+over P82, but still 0.43% slower than Full. No all-row target is closed.
+
+P102 revisits a narrower part of the discarded P84 kind proof after repairing
+its consumers. Private functions whose every normal return is a record can
+keep `TYPE_MAP` across differing layouts; a later non-map return widens to
+the original contract. Receiving contracts and Error transport remain intact
+(**D4.3.1 / D7.4.1 / S7.7.3**). The emitter now uses that semantic kind to
+avoid list imaging, and generic-map native results retain the existing
+record inlining policy instead of losing expansion. No Map parameter
+narrowing or field-layout proof is added. Permanent paired/GC coverage adds
+recursive differently shaped records and a mixed int/map widening case.
+
+
+**Wrap-up, 2026-11-10:** P102 passes five focused methods, but its five-pair
+Splay 211.071/Full 208.208/P82 212.352 ms establishes no gain. DeltaBlue
+9.397/28.328/55.190 and CD 303.753/484.235/309.931 retain their wins.
+P102 is discarded; compiler sources again match P101's recorded experiment
+source manifest (`p101-wrapup-source-check.json`). The runtime archive still
+contains P102 objects and must be rebuilt before another link. P101's ten
+focused methods passed before the experiment; its final paired/GC constructor
+method also passes with the additional recursive and mixed-kind cases
+(`p101-wrapup-units.log`). Only P102-specific carrier assertions are removed
+with the discarded optimization; semantic goldens remain.
+
+No jobs remain running. Work is paused at the user's wrap-up request; no active goal remains.
+The every-untyped-row Full target and current complete typed no-regression
+qualification remain open. No complete P101/P102 aggregate, Lambda/Radiant
+baseline, shared executable replacement, sibling edit or commit is claimed.
+
+
+### 10.100 MVP is the default Lambda MIR compiler
+
+The user requested the compiler switch on 2026-11-10. Unset or empty
+`LAMBDA_MIR_COMPILER` selects MVP. Explicit `production` retains Full MIR for
+comparison. Compiler selection is independent of `interp`/`auto`/`jit`; AUTO
+starts in T0 and promotes through the selected compiler. Strict `interp`
+never compiles code. This implements the existing tier policy, with no new
+semantic ruling (**D8.3.1–D8.3.4 / D8.5.1**). No-MIR builds keep their
+interpreter default and reject an explicit unavailable MVP request.
+
+Interpreter satellite compilation previously bypassed the eager selector. It
+now dispatches to MVP or Full before lowering. Both use the existing snapshot
+pools, code-generation lock, linker, cancellation, Script-owned image lifetime
+and evaluator safe-point publication. Common module names/artifacts move to
+`mir_module.hpp`; no Full lowering is called from the MVP adapter. The MVP
+index uses the existing complete Lambda traversal so copied for clauses and
+other language-specific edges remain indexed (**D8.2.4 / D8.3.4**).
+
+Private continuation parameter/iterator sites retain their original binding
+identities through `MvpBinding::declaration`. The retained AST and T0 slots
+are not retagged. Public satellite entries use checked boxed parameters and
+the MVP public return protocol. External callees, imports and globals resolve
+through the resident T0 slab. Statically known out-of-image calls reuse MVP's
+argument admission and precise borrow/write-back planning, then invoke the
+existing `fn_call_borrowed_into` dispatcher. Variadic actuals are unpacked from
+the already evaluated rest array, without evaluating source arguments again
+(**D7.4.1 / S9.1.3v3 / D6.3**).
+
+Property keys read each image's suffix base, assigned at publication. MVP's
+compiler-only constants remain in the image's owned snapshot list and BSS;
+they do not extend the running T0 constant table. Type-registry growth still
+fails closed. Cached imports retain their logical owner/slot identities
+(**D8.3.5 / D8.5.1 / D6.3**).
+
+Focused handoff checks exposed a T0 planner undercount: projected `var`
+preparation runs while the callee and its frame-owned argument span remain
+rooted. `plan_need` now includes that span rather than only the old callee
+root. The for-loop continuation also starts at its retained walk position
+instead of replaying the prefix (**D6.3 / D8.3.2**). Existing semantic goldens
+are unchanged. The recent merge's stale output-demand forward declarations
+in MVP are aligned with their existing definitions so current HEAD builds.
+
+Validation receipts are under `temp/mvp_default_switch/`. The private release
+build succeeds. Twelve focused methods pass in `focused-units-9.log`,
+including selector/tier dispatch, actual native promotion, property-key/var
+transport/float GC cases, handoff, recursion, constructors, N-D values and
+snapshots. Eighteen external-call GC subcases pass in
+`external-call-units.log`. Separate whole-script, asynchronous publication
+and strict-T0 projected-borrow probes match unchanged goldens with no runtime
+errors (`lifecycle-probes.json`). Final qualification passes **13 focused Python methods** against the rebuilt
+root `lambda.exe` (`final-focused-units.log`) and **9 selected Lambda GTests**
+(`focused-gtests-2.log`). The first GTest attempt used the old root executable
+because the split makefile defaults to `lambda-static.exe`; explicitly linking
+`TARGET=../../lambda.exe` resolves the selector launch failure. Both root
+executables now include the switch. `final-summary.json` records release
+configuration, binary hashes, changed runtime source hashes and HEAD
+`751e08b3b` plus this uncommitted integration. No jobs remain running.
+No Lambda/Radiant baseline, benchmark sweep, sibling edit or commit is used.

@@ -637,11 +637,11 @@ TEST(LambdaNativeModuleImports, DescriptorMetadataMatchesResolvedEntries) {
     EXPECT_FALSE(jit_import_get_metadata("missing_descriptor_function", &missing));
 }
 
-TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
+TEST(LambdaScriptCache, ReusesMvpImagesAcrossCompilerSpellings) {
     const struct { const char* source; const char* identity; } cases[] = {
         {"fn answer() => 41; answer() + 1", "<lambda-cache-compiler-isolation>"},
         // method tables and bound receiver snapshots must survive evaluator
-        // teardown and reuse the image belonging to their compiler (S9.3.1).
+        // teardown and reuse the same MVP image (S9.3.1).
         {"type C { value: int,\n fn read() => value\n pn bump() { value = value + 1 } }\n"
          "pn main() { var c = <C value: 7>; let saved = c.read; c.bump()^;\n"
          "if (saved() == 7 and c.read() == 8) 42 else 0 }",
@@ -658,7 +658,7 @@ TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
          "let result = outer(1, 2); if (result == [0, 2, 1]) 42 else 0",
          "<lambda-cache-variadic-isolation>"},
         // binder selections belong to an invocation, including cached images
-        // entered under another compiler and a fresh EvalContext (D4.1.4).
+        // entered under a fresh EvalContext (D4.1.4).
         {"fn choose(T: type, value: T) T => value;\n"
          "fn selected(value: number as T) type => T;\n"
          "let a = choose(int, 40)^; let b = choose(float, 2.5)^;\n"
@@ -666,7 +666,7 @@ TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
          "if (a == 40 and b == 2.5 and integral == int and fractional == float) 42 else 0",
          "<lambda-cache-binder-isolation>"}
     };
-    const char* compilers[] = {"mvp", "production", "mvp"};
+    const char* compilers[] = {nullptr, "mvp", ""};
     for (const auto& test : cases) {
         const Script* owners[3] = {};
         for (unsigned i = 0; i < 3; i++) {
@@ -683,7 +683,7 @@ TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
             Script* instance = (Script*)runtime.scripts->data[0];
             owners[i] = instance->cache_template ? instance->cache_template : instance;
             EXPECT_TRUE(owners[i]->cache_owned_template);
-            if (i == 1) EXPECT_NE(owners[1], owners[0]);
+            if (i == 1) EXPECT_EQ(owners[1], owners[0]);
             if (i == 2) EXPECT_EQ(owners[2], owners[0]);
         }
     }
@@ -814,7 +814,6 @@ TEST(LambdaScriptCache, MvpCallsInterpretedFunctionAndNativeCallback) {
         // pin T0 while invoking the already compiled MVP entries, so this
         // unit cannot pass by promoting the interpreted leg to native code.
         compiler.select(LAMBDA_TIER_INTERP);
-        compiler.select_compiler("production");
         Script* interpreted = load_script(context->runtime,
             "test/lambda/mvp/_cache_interpreted_relay.ls",
             "fn relay(cb: function, n: int) any^ {\n"

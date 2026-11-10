@@ -581,7 +581,7 @@
         "lambda/runtime/lambda-eval-science.cpp",
         "lambda/runtime/lambda-eval-num.cpp",
         "lambda/runtime/runner.cpp",
-        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mvp/mvp_driver.cpp",
         "lambda/runtime/transpile_shared.cpp",
         "lambda/runtime/safety_analyzer.cpp",
         "lambda/runtime/vmap.cpp",
@@ -1404,7 +1404,7 @@
       "description": "Desktop twin of the iOS phase-1 profile (vibe/Lambda_Design_Mobile.md MB2): the full lambda.exe with GLFW Radiant and the JS/TS runtime, minus MIR -- T0 AST interpreters only (Lambda and LambdaJS), no JIT, no MIR code generation",
       "output": "lambda-nomir.exe",
       "extra_exclude_source_files": [
-        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mvp/mvp_driver.cpp",
         "lambda/runtime/mvp/mvp_plan.cpp",
         "lambda/runtime/mvp/mvp_mir.cpp",
         "lambda/runtime/mir.c",
@@ -2582,7 +2582,7 @@
         "lambda/host/safety/worker_main.cpp"
       ],
       "extra_exclude_source_files": [
-        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mvp/mvp_driver.cpp",
         "lambda/runtime/mvp/mvp_plan.cpp",
         "lambda/runtime/mvp/mvp_mir.cpp",
         "lambda/runtime/mir.c",
