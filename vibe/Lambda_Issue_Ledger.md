@@ -1379,6 +1379,35 @@ Evidence: `temp/mvp_emission_test_update/new-t0-controls.json`,
 the LR07-60 migration update. Keep the expected result and report the T0 defect;
 it does not block MVP JIT emission tests (S9.1.2–S9.1.3v3).
 
+<a id="lr07-66"></a>**LR07-66 · Existing JIT/T0 differences block interpreter census refresh · OPEN (2026-11-11)**
+
+The checked-subscript repair passes all 2,216 interpreter goldens, but
+`make interp-sweep ARGS='--jobs 3 --timeout 30'` reports 1,543 matches and six
+differences in its 1,549-row corpus. It refuses list regeneration. Five
+differences reproduce unchanged on the saved original host present at starting
+checkout `8b4fbd521`
+(SHA256 `ee2abf8ce1b8d11639ca210a7618b75d89255546d65200666f7a35ecc40b01fe`):
+
+| Fixture under `test/lambda/` | Interpreter | Eager JIT |
+|---|---|---|
+| `js_array_props_tail_bridge.ls` | golden, final boolean `true` | final boolean `false` |
+| `last_defect_receiver.ls` | golden | compile exit 1 |
+| `ledger_optional_fields.ls` | golden | signal 11 |
+| `proc/interp_var_writeback.ls` | golden | compile exit 1 |
+| `proc/proc_fill_bool_inferred_read.ls` | golden | compile exit 1 |
+
+The sixth row, `conc/proc_handler_fault_after_wait.ls`, differs in the bounded
+sweep but matches in the subsequent isolated before/after probe; its cause is
+unconfirmed. Both probe tiers print `error308` and exit zero in isolation.
+
+Reproduce each stable row with `LAMBDA_EXEC_BACKEND=jit ./lambda.exe <path>`;
+use `run <path>` for `proc/` rows. Repeat with `interp`. Evidence:
+`temp/sweep_full.tsv`, `temp/interp-e501/sweep.log`, and
+`temp/interp-e501/sweep-divergences.json`. Source causes and introducing commits
+remain unconfirmed. These differences violate tier parity (S1.6, D8.3.1),
+block census regeneration, and do not block the interpreter E501 repair.
+The failing oracles and all three generated coverage lists are preserved.
+
 ## 8. Memory management & GC (LR08)
 
 

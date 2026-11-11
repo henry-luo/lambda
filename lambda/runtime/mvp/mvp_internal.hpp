@@ -149,12 +149,7 @@ static inline ShapeEntry* mvp_method_field(MvpFunction* function, NameEntry* ent
 }
 
 static inline ShapeEntry* mvp_method_member(MvpFunction* function, AstNode* object, AstNode* key) {
-    object = ast_unwrap_primary_to_leaf(object);
-    key = ast_unwrap_primary_to_leaf(key);
-    if (!function || !function->method_owner || !object || object->node_type != AST_NODE_CURRENT_ITEM ||
-            !key || key->node_type != AST_NODE_IDENT) return NULL;
-    String* name = ((AstIdentNode*)key)->name;
-    return find_shape_read_field_by_name((TypeMap*)function->method_owner, name->chars, name->len);
+    return ast_object_member_field(function ? function->method_owner : NULL, object, key);
 }
 
 static inline FnCapture* mvp_function_capture(MvpFunction* function, NameEntry* entry) {
