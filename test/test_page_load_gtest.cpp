@@ -60,6 +60,7 @@ extern "C" {
 
 // Timeout per page in seconds
 #define PAGE_TIMEOUT_SECONDS 15
+#define PAGE_LOAD_METRICS_PATH "test/online/page_load_metrics.csv"
 
 // ============================================================================
 // Test info
@@ -477,6 +478,65 @@ static void run_page_tests_parallel(int jobs) {
     }
 }
 
+static bool page_load_write_csv_string(FILE* file, const char* value) {
+    if (fputc('"', file) == EOF) return false;
+    for (const char* cursor = value; *cursor; cursor++) {
+        if (*cursor == '"' && fputc('"', file) == EOF) return false;
+        if (fputc(*cursor, file) == EOF) return false;
+    }
+    return fputc('"', file) != EOF;
+}
+
+static bool save_page_load_metrics() {
+    FILE* file = fopen(PAGE_LOAD_METRICS_PATH, "w");
+    if (!file) {
+        std::cerr << "Could not write page-load metrics to "
+                  << PAGE_LOAD_METRICS_PATH << std::endl;
+        return false;
+    }
+
+    bool saved = fprintf(file,
+        "page_name,page_path,elapsed_ms,layout_ms,render_ms,peak_rss_bytes,"
+        "baseline_footprint_bytes,current_footprint_bytes,peak_footprint_bytes,"
+        "page_footprint_delta_bytes,memtrack_live_seen,memtrack_live_bytes,"
+        "memtrack_live_count,timed_out,exit_code\n") > 0;
+    for (size_t i = 0; saved && i < g_page_tests.size(); i++) {
+        const PageTestInfo& info = g_page_tests[i];
+        const PageTestResult& result = g_page_results[i];
+        uint64_t retained_footprint = result.current_footprint_bytes > 0
+            ? result.current_footprint_bytes
+            : result.peak_footprint_bytes;
+        uint64_t footprint_delta =
+            result.baseline_footprint_bytes > 0 &&
+                    retained_footprint >= result.baseline_footprint_bytes
+                ? retained_footprint - result.baseline_footprint_bytes
+                : 0;
+
+        saved = page_load_write_csv_string(file, info.test_name.c_str()) &&
+            fputc(',', file) != EOF &&
+            page_load_write_csv_string(file, info.html_path.c_str()) &&
+            fprintf(file,
+                ",%.3f,%.3f,%.3f,%llu,%llu,%llu,%llu,%llu,%d,%llu,%llu,%d,%d\n",
+                result.elapsed_ms, result.layout_ms, result.render_ms,
+                (unsigned long long)result.peak_rss_bytes,
+                (unsigned long long)result.baseline_footprint_bytes,
+                (unsigned long long)result.current_footprint_bytes,
+                (unsigned long long)result.peak_footprint_bytes,
+                (unsigned long long)footprint_delta,
+                result.memtrack_live_seen ? 1 : 0,
+                (unsigned long long)result.memtrack_live_bytes,
+                (unsigned long long)result.memtrack_live_count,
+                result.timed_out ? 1 : 0, result.exit_code) > 0;
+    }
+
+    if (fclose(file) != 0) saved = false;
+    if (!saved) {
+        std::cerr << "Could not finish writing page-load metrics to "
+                  << PAGE_LOAD_METRICS_PATH << std::endl;
+    }
+    return saved;
+}
+
 // ============================================================================
 // Parameterized test fixture
 // ============================================================================
@@ -660,6 +720,9 @@ int main(int argc, char** argv) {
         std::cout << "All " << g_page_tests.size() << " pages loaded in "
                   << ms << " ms (" << jobs << " parallel jobs)\n\n";
     }
+
+    if (!save_page_load_metrics()) return 1;
+    std::cout << "Page-load metrics saved to " << PAGE_LOAD_METRICS_PATH << "\n\n";
 
     return RUN_ALL_TESTS();
 }
