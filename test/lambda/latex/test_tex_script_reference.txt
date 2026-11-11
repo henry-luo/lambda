@@ -1,0 +1,76 @@
+"== expansion ==
+LT:[x][yz][w]
+LT:<2|1><cd|ab>
+LT:(x)(y)(a.b)(c)
+LT:E[xy|z]
+LT:F(a b c)
+LT:2143
+LT:II
+LT:[X]
+LT:macro:->\x Y
+LT:[X]Y
+LT:macro:->\x 
+LT:FB
+LT:\relax
+LT:\a b
+LT:\x\%~
+LT:7-12
+LT:mcmlxxxivmmmmcmxcix
+LT:6565255511
+LT:macro:->17x
+LT:macro:->\x \y 
+LT:macro:->X\y X
+LT:\relax
+LT:the letter athe character 1begin-group character {end-group character }macro parameter character #math shift character $
+LT:the letter a
+LT:\char"41
+LT:\mathchar"7161
+LT:\count12
+LT:\long macro:#1->#1
+LT:undefined
+LT:ABCX
+LT:abc
+LT:next is a
+LT:next is other
+LT:after 5
+== etex ==
+LT:\x a##b {c}
+LT:\x \y 
+LT:macro:->\x Y
+LT:macro:->\p X
+LT:\protected macro:->P
+LT:XY
+LT:macro:->XY
+LT:-110
+LT:.62
+LT:macro:->X
+LT:macro:->X
+LT:yes
+LT:0{0}
+LT:10
+LT:(\x )
+LT:the character x
+LT:X\y 
+LT:macro:->X\y \x 
+== tokens ==
+LT:AB \relax
+LT:macro:->z
+LT:TILDE and ~
+LT:AB
+LT:bracketed
+LT:SxS yS{} z
+LT:a  b
+LT:\ \% \s
+LT:macro:->E
+LT:xmacro:->z
+LT:/x
+LT:xyq
+LT:BBC
+LT:one two
+LT:\csname\endcsname
+LT:\relax
+LT:52147483647x
+LT:21474836472147483647
+LT:\count\catcode\the\if\endlinechar
+LT:\parindent\baselineskip\everypar\fi
+LT:714915"

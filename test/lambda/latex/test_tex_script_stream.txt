@@ -1,0 +1,16 @@
+"group argument:"
+[["char", "a", 11], ["char", "{", 1], ["char", "b", 11], ["char", "c", 11], ["char", "}", 2], ["char", "d", 11]]
+"following token:"
+["Z"]
+"single argument:"
+[["char", "x", 11]]
+"extra brace:"
+["tex-extra-brace", "}"]
+"runaway group:"
+["tex-runaway-argument"]
+"short argument paragraph:"
+["tex-runaway-argument", "par"]
+"long argument paragraph:"
+[["control", "par", null]]
+"injected input:"
+["A", "Z"]

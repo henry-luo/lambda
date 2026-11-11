@@ -1,0 +1,20 @@
+"control words, comments, empty lines:"
+[["control", "alpha", null], ["char", "x", 11], ["control", "par", null], ["control", "%", null], ["char", " ", 10], ["char", "y", 11], ["char", " ", 10]]
+"dynamic category codes:"
+[11, 11]
+"superscript notation:"
+[["char", "A", 11], ["char", "B", 11], ["char", " ", 10]]
+"control symbols and spaces:"
+[["control", "!", null], ["char", " ", 10], ["char", "A", 11], ["control", " ", null], ["char", "B", 11], ["char", " ", 10]]
+"CRLF and trimmed spaces:"
+[["char", "a", 11], ["char", " ", 10], ["char", "b", 11], ["char", " ", 10], ["control", "par", null], ["char", "c", 11], ["char", " ", 10]]
+"disabled endline:"
+[["char", "a", 11], ["char", "b", 11]]
+"active character:"
+[["char", "x", 11], ["active", "~", 13], ["char", "y", 11], ["char", " ", 10]]
+"unicode defaults to other:"
+[["char", "é", 12], ["char", " ", 10]]
+"unicode positions:"
+[[0, 2], [2, 3], [3, 3]]
+"changed code after a token:"
+["a", 11]
