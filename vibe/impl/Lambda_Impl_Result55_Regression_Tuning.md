@@ -1,6 +1,64 @@
 # Result55 typed and untyped regression tuning
 
-## Current checkpoint
+## Current checkpoint — 2026-11-11
+
+- Retained candidate 3 release: temp/result55_c2mir_tuning/candidate3,
+  SHA-256 b92cd702c385f7b6d196b7d0f66fb25a4e5721daad408a461db8290ba35ceaf5.
+  Nested builtin mutation uses a rooted key span instead of a heap path array.
+  One-field typed map mutation reuses the guarded place borrow, with the
+  checked walker on a layout or ownership miss (S9.1.2, D5.4.4,
+  D6.3.1–D6.3.4). New fixtures exercise shared, nullable, growth and invalid
+  paths. No benchmark workload or sibling source changed.
+- Patched Result55's six selected MIR cells with the seven-pair candidate 3
+  medians. The exact timings and per-sample details are in
+  test/benchmark/benchmark_results_v55_lambda_tuned.json; the canonical result,
+  generated report and history chart are updated. Other rows and engines keep
+  their previous measurements. The Result55 Lambda geomeans remain 0.56
+  untyped and 0.39 typed.
+- Seven paired release runs versus the pinned Result55 candidate23, one
+  warmup, all six outputs equal and all binary/source/module stability flags
+  true: temp/result55_c2mir_tuning/candidate3-final-vs-v55.json. Typed Havlak
+  634.906 → 465.878 ms (0.7338×, seven wins); untyped Havlak
+  5001.85 → 4778.59 ms (0.9554×); typed DeltaBlue
+  18.831 → 18.443 ms (0.9794×); untyped DeltaBlue
+  40.185 → 38.847 ms (0.9667×). Base64 is near parity: typed
+  9.498 → 9.462 ms, untyped 7.290 → 7.313 ms. Historical C2MIR medians
+  make the remaining typed gaps 12.07×, 15.36× and 16.72× for Havlak,
+  DeltaBlue and base64 respectively. These are cross-run ratios.
+- Candidate 2's direct integer-leaf append was rejected: it removed 107,176
+  pn_push calls but its guard cost left typed Havlak at 1.0044× versus
+  candidate 1 in five pairs. Candidate 4's one-byte string append was
+  rejected: 15 pairs gave typed base64 1.0029× versus candidate 3. Both
+  experiments were removed. Candidate 3's untyped Havlak MIR is identical to
+  candidate 1 after normalizing address constants; a separate nine-pair
+  comparison had a 1.0107× untyped median despite that identical MIR.
+- Final source passes 65/65 MVP emission units, 25/25 MIR ratchets, full
+  Lambda baseline 7,387/7,387 and pinned release Test262
+  40,261/40,261 with zero regressions. Logs and reports are under
+  temp/result55_c2mir_tuning/.
+- The earlier all-faster Result54 goal remains open. This direct replay leaves
+  untyped Havlak at 2.844× its Result54 median and typed base64 at 1.758×.
+  Next investigation: untyped nested-map place walking and repeated typed
+  base64 guards; preserve the aggregate gates at the next milestone.
+
+## Previous checkpoint
+
+- 2026-11-11, master `d0ec7dcc0`, starting from the committed Result55 patch.
+  Active task: reduce the typed Lambda/C2MIR gaps in `kostya/base64`,
+  `awfy/havlak`, and `awfy/deltablue`. The measured diagnosis and source-pinned
+  evidence are in `temp/result55_c2mir_analysis/checkpoint.md`.
+- Candidate 1 replaces the heap path-array construction in nested builtin
+  mutation with the existing rooted key-span walker. `cow_place_leaf_keys`
+  uses the same detach, key and error logic as `cow_place_leaf`; a focused
+  nullable/shared nested-push fixture and the existing MIR assertion are
+  updated (S9.1.2, D5.4.4, D6.3.1–D6.3.4). No benchmark workloads, sibling
+  sources, or Result55 measurements are changed.
+- Private release build and focused validation are pending. Next: verify the
+  new fixture and emission checks, run paired release measurements against
+  the pinned Result55 binary, then either retain the measured improvement or
+  revert the candidate before attempting typed-leaf specialization.
+
+## Published Result55 checkpoint
 
 - Published the recorded candidate23 measurements into Result55 on 2026-11-11
   from checkout HEAD `0794892c47`. This publishes the previously qualified

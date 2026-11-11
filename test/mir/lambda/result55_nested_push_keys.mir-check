@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "S9.1.2/D5.4.4: nested push walks the evaluated rooted keys without a temporary path array, and preserves shared or invalid paths.",
+  "checks": [
+    {
+      "in_func": "mvp_#_append",
+      "expect": [
+        "call\t{{p}}, cow_place_leaf_keys,",
+        "call\t{{p}}, pn_push,"
+      ],
+      "forbid": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, array_push_verbatim,"
+      ]
+    }
+  ]
+}

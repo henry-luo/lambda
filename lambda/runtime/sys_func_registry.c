@@ -2578,6 +2578,7 @@ JitImport jit_runtime_imports[] = {
     {"cow_path_borrow_fixed", FPTR(cow_path_borrow_fixed)},
     {"cow_path_borrow_typed_map_field", FPTR(cow_path_borrow_typed_map_field)},
     {"cow_place_leaf", FPTR(cow_place_leaf)},
+    {"cow_place_leaf_keys", FPTR(cow_place_leaf_keys)},
     {"cow_path_borrow_keys", FPTR(cow_path_borrow_keys)},
     {"cow_path_index", FPTR(cow_path_index)},
     {"cow_path_set_keys", FPTR(cow_path_set_keys)},

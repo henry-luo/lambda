@@ -15,6 +15,7 @@
 - **Engines in this report:** MIR (untyped), MIR (typed), C2MIR, LambdaJS, Node.js
 - **Results source:** `test/benchmark/benchmark_results_v55.json`
 - **Separately measured:** MIR (untyped), MIR (typed) measured on 2026-11-11, 3 run(s) from `test/benchmark/benchmark_results_v55_lambda_tuned.json` on Lambda commit `4e046a786b`. Part 1 JIT execution only: qualified candidate23 release test/benchmark/exe/lambda-v55-4e046a786b-tuned-c23 (SHA-256 f5376e67ccf8b6a67b082d812529ec3e9d89665d367f1be2d033efc25c4bc0e8), built from this base commit plus the recorded tuning patch. Three alternating release pairs against Result54 after one warmup, MIR cache disabled, with exact output checks. Post-run qualification passed Lambda 7,370/7,370 and Test262 40,261/40,261. AUTO end-to-end and other engines retain their original Result55 measurements. Typed r7rs/sumfp reports zero and is marked below timer resolution; positive geomeans exclude it.
+- **Separately measured:** MIR (untyped), MIR (typed) measured on 2026-11-11, 7 run(s) from `temp/result55_c2mir_tuning/candidate3-result55-merge-source.json` on Lambda commit `d0ec7dcc0a`. Selected six-cell Lambda refresh from seven paired release runs versus pinned Result55 candidate23; candidate archive SHA-256 b92cd702c385f7b6d196b7d0f66fb25a4e5721daad408a461db8290ba35ceaf5. These cells supersede the candidate23 measurements; other engines and rows retain their original Result55 provenance.
 - **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists
 
 JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes 15, hashmap 1). Each Lambda `.ls` port implements exactly one `runIteration()`, so every engine times the same work. A previous revision hard-coded 8 repeats for every file, which made the JS engines run 8/50 of Lambda's work on richards and splay, and 8x too much on the former single-frame Navier workload and hashmap. Navier now times all 15 frames and checks checksum 77; older snapshots that timed one JS frame require a fresh measurement for comparison.
@@ -32,7 +33,7 @@ Each engine's own `__TIMING__` figure: the timed workload only, with process sta
 | Suite | Total | Timed MIR (untyped) | Timed MIR (typed) | Timed C2MIR | Timed LambdaJS | Timed Node.js | MIR (untyped)/Node geo | MIR (typed)/Node geo | C2MIR/Node geo | LambdaJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 9 | 10 | 10 | 10 | 0.14x | 0.19x | 0.21x | 0.26x |
-| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 0.83x | 0.39x | 0.12x | 2.59x |
+| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 0.82x | 0.38x | 0.12x | 2.59x |
 | BENG | 8 | 8 | 8 | 8 | 8 | 8 | 0.17x | 0.14x | 0.10x | 1.49x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 0.54x | 0.36x | 0.22x | 0.51x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 0.50x | 0.38x | 0.32x | 0.74x |
@@ -47,8 +48,8 @@ The first population is the only one comparable with Result38; the complete-suit
 
 | Population | Rows | MIR (typed)/Node geo | MIR (untyped)/Node geo | MIR (typed)/C2MIR geo | C2MIR matched rows |
 |---|---:|---:|---:|---:|---:|
-| v38-comparable (without the four text extensions) | 67 | 0.36x | 0.50x | 1.77x | 67 |
-| complete current suite | 71 | 0.39x | 0.56x | 1.79x | 71 |
+| v38-comparable (without the four text extensions) | 67 | 0.36x | 0.50x | 1.76x | 67 |
+| complete current suite | 71 | 0.39x | 0.56x | 1.78x | 71 |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -59,16 +60,16 @@ The first population is the only one comparable with Result38; the complete-suit
 
 How far MIR (typed) is from the same workload written in a statically typed language. These columns are a reference bound, not another Lambda execution path: they say what is still on the table, and C2MIR is the sharper of the two because it shares MIR's code generator, so a gap there is attributable to Lambda's front end rather than to the backend.
 
-- **MIR (typed) / C2MIR geomean:** 1.79x over 71 of 71 rows
+- **MIR (typed) / C2MIR geomean:** 1.78x over 71 of 71 rows
 
 **Widest gaps vs C2MIR**
 
 | Benchmark | MIR (typed) | C2MIR | MIR (typed)/C2MIR |
 |---|---:|---:|---:|
-| kostya/base64 | 9.49 | 0.566 | 16.8x |
-| awfy/havlak | 632.4 | 38.6 | 16.4x |
-| awfy/deltablue | 18.7 | 1.20 | 15.6x |
+| kostya/base64 | 9.46 | 0.566 | 16.7x |
+| awfy/deltablue | 18.4 | 1.20 | 15.4x |
 | jetstream/splay | 281.6 | 19.0 | 14.8x |
+| awfy/havlak | 465.9 | 38.6 | 12.1x |
 | awfy/cd | 172.1 | 14.9 | 11.5x |
 | text/microdiff | 28.1 | 2.63 | 10.7x |
 | jetstream/crypto_sha1 | 27.8 | 2.62 | 10.6x |
@@ -140,8 +141,8 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | nbody | compute | 3.04 [2.99–3.14] | 1.72 [1.70–1.75] | 1.49 [1.48–1.50] | 128.5 [127.0–128.8] | 5.47 [5.28–5.50] | 0.56x | 0.31x | 0.27x | 23.5x |
 | richards | macro | 256.6 [255.2–272.2] | 98.3 [98.3–99.2] | 29.2 [29.0–29.2] | 230.1 [229.6–230.9] | 47.2 [47.1–47.9] | 5.43x | 2.08x | 0.62x | 4.87x |
 | json | macro | 3.45 [3.36–3.46] | 1.42 [1.41–1.43] | 0.263 [0.252–0.266] | 10.0 [9.87–10.3] | 2.74 [2.65–2.90] | 1.26x | 0.52x | 0.10x | 3.65x |
-| deltablue | macro | 39.4 [39.1–40.4] | 18.7 [18.7–24.2] | 1.20 [1.18–1.22] | 96.4 [94.7–128.3] | 11.8 [11.5–11.8] | 3.36x | 1.59x | 0.10x | 8.20x |
-| havlak | macro | 4.93s [4.92s–5.06s] | 632.4 [630.6–662.2] | 38.6 [38.5–39.0] | 2.60s [2.48s–2.60s] | 93.1 [92.9–93.3] | 52.9x | 6.79x | 0.41x | 27.9x |
+| deltablue | macro | 38.8 [38.5–39.4] | 18.4 [18.2–18.6] | 1.20 [1.18–1.22] | 96.4 [94.7–128.3] | 11.8 [11.5–11.8] | 3.30x | 1.57x | 0.10x | 8.20x |
+| havlak | macro | 4.78s [4.74s–4.94s] | 465.9 [453.2–499.2] | 38.6 [38.5–39.0] | 2.60s [2.48s–2.60s] | 93.1 [92.9–93.3] | 51.3x | 5.01x | 0.41x | 27.9x |
 | cd | macro | 346.2 [345.9–346.5] | 172.1 [172.0–173.0] | 14.9 [14.8–15.0] | 404.5 [402.7–406.5] | 35.6 [35.4–36.0] | 9.71x | 4.83x | 0.42x | 11.4x |
 
 ### BENG
@@ -164,7 +165,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | brainfuck | interpreter | 84.6 [84.5–85.1] | 76.3 [75.8–76.4] | 28.1 [26.9–29.0] | 41.3 [41.1–42.1] | 33.4 [33.1–33.8] | 2.53x | 2.28x | 0.84x | 1.24x |
 | matmul | numeric | 5.16 [5.16–5.17] | 5.12 [5.12–5.22] | 6.05 [6.03–6.07] | 7.10 [7.06–7.13] | 15.5 [15.4–16.3] | 0.33x | 0.33x | 0.39x | 0.46x |
 | primes | numeric | 1.83 [1.82–1.85] | 0.909 [0.907–0.912] | 1.55 [1.53–1.56] | 2.77 [2.76–2.79] | 4.29 [4.26–4.43] | 0.43x | 0.21x | 0.36x | 0.65x |
-| base64 | string | 7.32 [7.31–7.32] | 9.49 [9.49–10.0] | 0.566 [0.565–0.568] | 9.80 [9.80–9.81] | 17.3 [17.1–17.4] | 0.42x | 0.55x | 0.03x | 0.57x |
+| base64 | string | 7.31 [7.29–7.37] | 9.46 [9.39–9.49] | 0.566 [0.565–0.568] | 9.80 [9.80–9.81] | 17.3 [17.1–17.4] | 0.42x | 0.55x | 0.03x | 0.57x |
 | levenshtein | string | 4.10 [4.10–4.17] | 1.21 [1.15–1.21] | 0.765 [0.763–0.794] | 1.57 [1.53–1.57] | 3.97 [3.92–3.97] | 1.03x | 0.31x | 0.19x | 0.40x |
 | json_gen | data | 4.44 [4.44–4.45] | 1.56 [1.54–1.58] | 1.45 [1.45–1.46] | 4.00 [3.97–4.05] | 6.15 [6.10–6.16] | 0.72x | 0.25x | 0.24x | 0.65x |
 | collatz | numeric | 156.6 [155.7–157.1] | 151.8 [151.2–153.1] | 222.5 [222.3–224.2] | 228.1 [226.3–228.4] | 1.42s [1.41s–1.46s] | 0.11x | 0.11x | 0.16x | 0.16x |

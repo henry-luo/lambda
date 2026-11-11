@@ -1765,6 +1765,7 @@ extern "C" {
     // builtin mutator place (push/splice/set): spine detach; a non-container
     // link is returned as the value for the mutator to reject
     Item cow_place_leaf(Item owner, Item path);
+    Item cow_place_leaf_keys(Item owner, const Item* keys, int64_t count);
     // key-span borrow: `count` (1..LAMBDA_PATH_KEYS_MAX) evaluated keys
     // in caller memory, rooted by the walker
     Item cow_path_borrow_keys(Item owner, const Item* keys, int64_t count);

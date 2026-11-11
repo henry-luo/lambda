@@ -5,7 +5,7 @@
     {
       "in_func": "mvp_#_main",
       "expect": [
-        "call\t{{p}}, cow_place_leaf,",
+        "call\t{{p}}, cow_place_leaf_keys,",
         "call\t{{p}}, pn_push,"
       ],
       "forbid": [
@@ -16,7 +16,7 @@
         "mov\tu8:4(": {
           "max": 5
         },
-        "call\t{{p}}, cow_place_leaf,": 2,
+        "call\t{{p}}, cow_place_leaf_keys,": 2,
         "call\t{{p}}, pn_push,": 2
       },
       "expect_seq": [

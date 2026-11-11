@@ -5176,16 +5176,24 @@ static MirValue mutate_collection(MvpCompiler* c, AstCallNode* node, SysFuncInfo
     if (place.count) {
         // detach and install the spine before entering an in-place mutator;
         // every key and value is already rooted (S9.2.2).
-        MIR_reg_t detached = em_call_1(&c->em, cow_import("cow_prepare_write", "cow_prepare_write_profiled"), MIR_T_I64,
-            MIR_T_I64, reg(c, owner.reg), true);
-        publish_place(c, place.root, detached);
-        MIR_reg_t path = em_call_0(&c->em, "array_plain", MIR_T_P, true);
-        value(c, path, LMD_TYPE_ARRAY, VALUE_REP_ITEM, &TYPE_ARRAY);
-        for (int i = 0; i < place.count; i++)
-            em_call_void_2(&c->em, "array_push_verbatim", MIR_T_P, reg(c, path),
-                MIR_T_I64, reg(c, place.keys[i]), true);
-        MIR_reg_t leaf = em_call_2(&c->em, "cow_place_leaf", MIR_T_I64,
-            MIR_T_I64, reg(c, detached), MIR_T_I64, reg(c, path), true);
+        bool typed_field = place.count == 1 && place.field && place.field_shape &&
+            place.field_shape->is_trusted_contract && mvp_array_element(place.leaf_contract);
+        MIR_reg_t detached;
+        if (typed_field) detached = prepare_place_owner(c, place.root);
+        else {
+            detached = em_call_1(&c->em, cow_import("cow_prepare_write", "cow_prepare_write_profiled"), MIR_T_I64,
+                MIR_T_I64, reg(c, owner.reg), true);
+            publish_place(c, place.root, detached);
+        }
+        MIR_reg_t leaf;
+        if (typed_field) leaf = borrow_place_field(c, &place, detached);
+        else {
+            MIR_reg_t keys = place_keys_span(c, &place);
+            leaf = em_call_3(&c->em, "cow_place_leaf_keys", MIR_T_I64,
+                MIR_T_I64, reg(c, detached), MIR_T_P, reg(c, keys),
+                MIR_T_I64, imm(c, place.count), true);
+            release_argument_span(c, keys, place.count);
+        }
         value(c, leaf, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
         result = collection_mutation_call(c, info->fn, leaf, args, false);
     } else {
