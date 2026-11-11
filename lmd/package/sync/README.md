@@ -14,6 +14,9 @@ hashing and signature verification. Transport and editor integration belong to
 effectful host adapters. The [native local agent](LOCAL_REPOSITORY.md) implements
 encrypted immutable repositories, filesystem reconciliation, installation
 journals and recovery in Lambda Script, using narrow native crypto/disk APIs.
+The [authenticated native peer adapter](PEER.md) connects independent agents on
+LAN/reachable IPv4 endpoints, with encrypted enrollment, signed device sessions,
+missing-object exchange, signed workspace checkpoints and periodic retry.
 Package distribution/imports follow D1.7 and D9.3.4.
 
 ## Run the examples
@@ -83,6 +86,12 @@ preserve atomic groups on recovery and relay paths.
 | `lambda.sync.workspace_rules` | Validate events, observed identities, revisions and document links |
 | `lambda.sync.workspace_tree` | Ordered placement replay, tombstones, revision heads and deterministic conflict views |
 | `lambda.sync.workspace_zip` | `capture`, `from_archive`, `read_file`, `update`, save preparation/commit, `refresh_file`, external imports/review and restart |
+| `lambda.sync.peer_identity` | Signed device descriptors, encrypted invitations, credential scopes, local trust/revocation |
+| `lambda.sync.peer_session` | Signed ephemeral handshake and direction/sequence-bound encrypted records |
+| `lambda.sync.peer_exchange` | Pinned signed checkpoints, inventory pages, object fragments and admission |
+| `lambda.sync.peer` | Native listener, mutually authenticated connections, requests and bidirectional exchange |
+| `lambda.sync.peer_agent` | Device/space setup, enrollment, current-grant checks, serve/sync/watch and status |
+| `lambda.sync.peer_cli` | Runnable JSON-request CLI; see [peer setup and limits](PEER.md) |
 
 Pure APIs return immutable values. The ZIP `save` procedure performs explicit
 filesystem output. Fallible calls use ordinary errors and postfix
@@ -240,7 +249,7 @@ recovery; it does not silently replay them into a new schema.
 This reference implementation uses array-based indexes and quadratic LCS.
 Arbitrary Mark subtree reparenting, rich-text span intent beyond explicit Mark trees,
 namespace adapter completion, browser execution, physical GC, and deployed
-editor/network/cloud adapters remain separate work. The local repository stores
+editor, Internet-traversal and cloud adapters remain separate work. The local repository stores
 encrypted objects and retains history permanently; its limits and host qualification
 are documented [separately](LOCAL_REPOSITORY.md). Native ZIP
 capture/output is reused through its existing public API. No native

@@ -1522,6 +1522,8 @@ as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 
 ## 12. Procedural runtime (LR12)
 
+<a id="lr12-47"></a>LR12-47 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-47>).
+
 <a id="lr12-46"></a>LR12-46 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-46>).
 
 <a id="lr12-45"></a>LR12-45 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-45>).
@@ -2211,3 +2213,21 @@ compares `{id:42}` bound to `file` with records bound to `json` and
 This observation predates the workspace task's native rebuild; it is not a
 recheck of the final qualified executable. No common parser/resolver cause or
 intended syntax has been established, and this evidence does not close the issue.
+
+
+## Peer-sync qualification: TeX/expl3 package-echo golden mismatch — 2026-11-11
+
+**Status:** OPEN — the aggregate Lambda baseline is **7,475/7,476**, with the
+sole failure in `test/lambda/latex/test_tex_script_expl3.ls`. Its `script expl3
+package` golden expects `A` but receives `usepackage{expl3}A`; the duplicate
+case expects `X ` but receives `usepackage{expl3}usepackage{expl3}X `. The
+isolated unchanged test reproduces the same mismatch. These cases inspect the
+script expansion's direct output-token values; this report does not decide
+whether that projection, its golden or the expansion needs correction.
+Evidence in the Lambda checkout: `temp/sync-peer/baseline.log`,
+`expl3-recheck.log` and `expl3-recheck.json`.
+
+The peer task changed neither the TeX modules nor their goldens; the mismatch
+is outside its sync-module paths and does not block the focused peer acceptance
+gates. This report does not assess the separately recorded package-echo selection
+fix. S1.8 and D10.2.2 remain the applicable input boundary.

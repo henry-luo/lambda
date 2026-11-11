@@ -575,6 +575,8 @@ extern "C" Item pn_io_websocket_open2(Item url, Item options) { return io_websoc
 extern "C" Item pn_io_websocket_open1(Item url) { return pn_io_websocket_open2(url, ItemNull); }
 
 extern "C" Item pn_io_websocket_listen2(Item port_item, Item options) {
+    Item allowed = ItemNull;
+    if (!io_fs_allow_unbrokered("io.websocket.listen", &allowed)) return allowed;
     int64_t port;
     if (!lambda_item_to_int64_exact(port_item, &port) || port < 0 || port > 65535)
         return io_fs_error(ERR_TYPE_MISMATCH, "io.websocket.listen: port must be an int from 0 to 65535");
@@ -595,15 +597,26 @@ extern "C" Item pn_io_websocket_listen2(Item port_item, Item options) {
     struct sockaddr_in address = {};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    Item bind_value = io_fs_option_get(&opts, "bind");
+    if (is_text_type_id(get_type_id(bind_value)) && memchr(bind_value.get_chars(), 0, bind_value.get_len())) {
+        ws_free(s); return ws_error("bind must not contain NUL");
+    }
+    char* bind_address = nullptr;
+    if (!io_fs_option_text(&opts, "bind", &bind_address, &error)) { ws_free(s); return error; }
+    // non-loopback exposure is explicit; retain loopback as the existing default.
+    if (bind_address && inet_pton(AF_INET, bind_address, &address.sin_addr) != 1) {
+        mem_free(bind_address); ws_free(s); return ws_error("bind must be a numeric IPv4 address");
+    }
+    mem_free(bind_address);
     address.sin_port = htons((uint16_t)port);
     socklen_t size = sizeof(address);
     if (s->socket == NETWORK_INVALID_SOCKET || bind(s->socket, (struct sockaddr*)&address, sizeof(address)) != 0 ||
         listen(s->socket, 16) != 0 || getsockname(s->socket, (struct sockaddr*)&address, &size) != 0 ||
-        !network_socket_nonblocking(s->socket)) { ws_free(s); return ws_error("cannot bind the loopback listener"); }
+        !network_socket_nonblocking(s->socket)) { ws_free(s); return ws_error("cannot bind the listener"); }
     s->port = ntohs(address.sin_port);
     s->waiter = lambda_socket_waiter_new((uint64_t)s->socket);
     if (!s->waiter) { ws_free(s); return ws_error("cannot watch the listener"); }
-    log_debug("io.websocket: loopback listener on port %d", s->port);
+    log_debug("io.websocket: listener on port %d", s->port);
     return ws_publish(s);
 }
 extern "C" Item pn_io_websocket_listen(Item port) { return pn_io_websocket_listen2(port, ItemNull); }

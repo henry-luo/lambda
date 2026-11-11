@@ -16,6 +16,9 @@
 #include <mbedtls/md.h>
 #include <mbedtls/gcm.h>
 #include <mbedtls/platform_util.h>
+#include <openssl/evp.h>
+#include <openssl/provider.h>
+#include <openssl/err.h>
 #include <string.h>
 
 static mbedtls_md_type_t hash_algorithm(Item algorithm) {
@@ -175,3 +178,70 @@ extern "C" Item pn_io_crypto_key(void) {
     mbedtls_platform_zeroize(secret, sizeof(secret));
     return result ? (Item){.item = x2it(result)} : ItemError;
 }
+
+namespace {
+// isolated built-in provider matches signature verification and ignores ambient configuration.
+struct CryptoRawKey {
+    OSSL_LIB_CTX* context = nullptr;
+    OSSL_PROVIDER* provider = nullptr;
+    EVP_PKEY* key = nullptr;
+    CryptoRawKey(const char* scheme, const uint8_t* seed) {
+        if (OPENSSL_init_crypto(OPENSSL_INIT_NO_LOAD_CONFIG, nullptr) != 1) return;
+        context = OSSL_LIB_CTX_new();
+        if (context && OSSL_PROVIDER_set_default_search_path(context, "") == 1)
+            provider = OSSL_PROVIDER_load(context, "default");
+        if (provider) key = EVP_PKEY_new_raw_private_key_ex(context, scheme, "provider=default", seed, 32);
+    }
+    ~CryptoRawKey() {
+        EVP_PKEY_free(key);
+        if (provider) OSSL_PROVIDER_unload(provider);
+        OSSL_LIB_CTX_free(context); ERR_clear_error();
+    }
+};
+Item crypto_raw(Item seed, Item argument, int operation) {
+    if (get_type_id(seed) == LMD_TYPE_ERROR) return seed;
+    if (get_type_id(argument) == LMD_TYPE_ERROR) return argument;
+    const uint8_t *secret, *bytes; size_t secret_size, size;
+    if (get_type_id(seed) != LMD_TYPE_BINARY || !signature_bytes(seed, &secret, &secret_size) || secret_size != 32)
+        return io_fs_error(ERR_TYPE_MISMATCH, "io.crypto: raw private key must be 32 bytes");
+    const char* scheme = "ED25519";
+    if (operation == 0) {
+        if (!is_text_type_id(get_type_id(argument)) ||
+                !((argument.get_len() == 7 && !memcmp(argument.get_chars(), "ed25519", 7)) ||
+                  (argument.get_len() == 6 && !memcmp(argument.get_chars(), "x25519", 6))))
+            return io_fs_error(ERR_INVALID_OPERATION, "io.crypto.public: expected ed25519 or x25519");
+        if (argument.get_len() == 6) scheme = "X25519";
+    } else if (!signature_bytes(argument, &bytes, &size) || size > 8 * 1024 * 1024 ||
+            (operation == 2 && (get_type_id(argument) != LMD_TYPE_BINARY || size != 32)))
+        return io_fs_error(ERR_TYPE_MISMATCH, "io.crypto: invalid message or X25519 public key");
+    if (operation == 2) scheme = "X25519";
+    CryptoRawKey own(scheme, secret);
+    uint8_t output[64] = {}; size_t length = operation == 1 ? 64 : 32;
+    bool ok = false;
+    if (own.key && operation == 0) ok = EVP_PKEY_get_raw_public_key(own.key, output, &length) == 1;
+    else if (own.key && operation == 1) {
+        EVP_MD_CTX* digest = EVP_MD_CTX_new();
+        static const uint8_t empty = 0;
+        ok = digest && EVP_DigestSignInit_ex(digest, nullptr, nullptr, own.context,
+            "provider=default", own.key, nullptr) == 1 &&
+            EVP_DigestSign(digest, output, &length, bytes ? bytes : &empty, size) == 1;
+        EVP_MD_CTX_free(digest);
+    } else if (own.key) {
+        EVP_PKEY* peer = EVP_PKEY_new_raw_public_key_ex(own.context, "X25519", "provider=default", bytes, size);
+        EVP_PKEY_CTX* derive = EVP_PKEY_CTX_new_from_pkey(own.context, own.key, "provider=default");
+        ok = peer && derive && EVP_PKEY_derive_init(derive) == 1 && EVP_PKEY_derive_set_peer(derive, peer) == 1 &&
+            EVP_PKEY_derive(derive, output, &length) == 1;
+        EVP_PKEY_CTX_free(derive); EVP_PKEY_free(peer);
+        uint8_t nonzero = 0;
+        for (size_t i = 0; i < length; ++i) nonzero |= output[i];
+        ok = ok && nonzero; // reject low-order peers even if a provider accepts the all-zero secret.
+    }
+    Binary* result = ok ? heap_binary_from_bytes((const char*)output, length) : nullptr;
+    mbedtls_platform_zeroize(output, sizeof(output));
+    return !ok ? io_fs_error(ERR_INVALID_OPERATION, "io.crypto: raw key operation rejected") :
+        result ? (Item){.item = x2it(result)} : ItemError;
+}
+}
+extern "C" Item fn_io_crypto_public(Item seed, Item scheme) { return crypto_raw(seed, scheme, 0); }
+extern "C" Item fn_io_crypto_sign(Item seed, Item message) { return crypto_raw(seed, message, 1); }
+extern "C" Item fn_io_crypto_agree(Item seed, Item peer) { return crypto_raw(seed, peer, 2); }

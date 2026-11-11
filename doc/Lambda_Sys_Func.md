@@ -1974,7 +1974,7 @@ calling task (**S13.1.2v2**) while other tasks and windows continue running.
 | `ws.send(connection, data)` | `null` | Write one text or binary message; `null` sends empty text |
 | `ws.receive(connection, timeout_ms?)` | `{type, data, code, was_clean}` | Wait for a complete message or peer close; timeout defaults to zero (unlimited) |
 | `ws.close(handle, code?, reason?)` | `null` | Close with status 1000 by default, or close a listener; repeated close is harmless |
-| `ws.listen(port, options?)` | listener | Listen on IPv4 loopback only; zero selects a free port, available as `listener.port` |
+| `ws.listen(port, options?)` | listener | Listen on IPv4 loopback by default; explicit `bind` selects an interface; zero selects a free port, available as `listener.port` |
 | `ws.accept(listener, timeout_ms?)` | connection | Accept a native or permitted browser client and complete its Upgrade handshake |
 
 `open` options: `timeout_ms` (default 30000, range 1–3600000),
@@ -2007,7 +2007,8 @@ an interrupted connection. Buffers are bounded; text and close reasons are
 UTF-8 validated, client frames are randomly masked, fragmented messages are
 reassembled, and ping/pong is handled automatically.
 
-Listener options are `origins` (one exact Origin or an array), `protocols`
+Listener options are `bind` (numeric IPv4 address; default `127.0.0.1`),
+`origins` (one exact Origin or an array), `protocols`
 (server preference order), and `max_message_bytes` (the same default/range as
 `open`, inherited by accepted connections for receiving and sending).
 By default requests carrying Origin are refused;
@@ -2017,6 +2018,10 @@ No-Origin native clients remain permitted. TLS listeners, general `serve`
 Upgrade routes, application credentials and compression/extensions remain
 outside this milestone. See `lambda demo chat` and
 [the chat plan](../vibe/impl/Lambda_Impl_Chat.md) for the application layer.
+Binding to a LAN interface or `0.0.0.0` is explicit. Bound security clients
+without a broker operation cannot acquire this unbrokered listener (D11.1.2).
+The [native sync peer](../lmd/package/sync/PEER.md) adds application authentication
+and encrypted records for its LAN profile.
 
 Browser document realms also expose the [WHATWG `WebSocket` API](https://websockets.spec.whatwg.org/):
 `new WebSocket(url, protocols?)`, the four state constants, `url`, `readyState`,
@@ -2074,6 +2079,10 @@ D11.1.2. They expose mechanisms; repository policy remains Lambda Script.
   `open(key, envelope, context)` authenticates/decrypts and returns bytes or null
   for empty plaintext (S2.2.2v2); `mac(key, bytes)` returns HMAC-SHA256. Keys must
   be 32-byte binaries; payloads are bounded to 8 MiB and context to 64 KiB.
+  Pure `public(seed, scheme)` derives a raw public key for `'ed25519'` or
+  `'x25519'`; `sign(seed, bytes)` returns a 64-byte Ed25519 signature;
+  `agree(seed, peer_key)` performs X25519 and rejects low-order peers. Raw seeds
+  and public keys are 32 bytes. Signing uses the existing 8 MiB message bound.
 - `lambda.io.disk`: procedures `resolve(root)`, `inspect(root, relative)`,
   `entries(root, relative, limit)`, `capture(root, relative, limit)`,
   `install(root, relative, bytes, expected_token)`, `erase(root, relative, token)`,

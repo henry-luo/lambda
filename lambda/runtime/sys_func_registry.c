@@ -823,6 +823,12 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_uuid", FPTR(pn_uuid), NULL, NULL, false, 0},
 
     // narrow native crypto and anchored filesystem access; repository policy is script-owned.
+    {SYSFUNC_IO_CRYPTO_PUBLIC, "io_crypto_public", 2, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_io_crypto_public", FPTR(fn_io_crypto_public), NULL, NULL, false, 0, false, &TYPE_BINARY, true},
+    {SYSFUNC_IO_CRYPTO_SIGN, "io_crypto_sign", 2, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_io_crypto_sign", FPTR(fn_io_crypto_sign), NULL, NULL, false, 0, false, &TYPE_BINARY, true},
+    {SYSFUNC_IO_CRYPTO_AGREE, "io_crypto_agree", 2, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_io_crypto_agree", FPTR(fn_io_crypto_agree), NULL, NULL, false, 0, false, &TYPE_BINARY, true},
     {SYSPROC_IO_CRYPTO_KEY, "io_crypto_key", 0, &TYPE_BINARY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_crypto_key", FPTR(pn_io_crypto_key), NULL, NULL, false, 0},
     {SYSPROC_IO_CRYPTO_SEAL, "io_crypto_seal", 3, &TYPE_BINARY, true, false, false, LMD_TYPE_ANY, true,
@@ -4074,7 +4080,7 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
     static const char* const mail_send_options[] = {"user", "password", "token", "pin", "timeout", "tls",
         "from", "to", NULL};
     static const char* const websocket_options[] = {"timeout_ms", "max_message_bytes", "ca_file", "origin", "protocols", NULL};
-    static const char* const websocket_listen_options[] = {"origins", "protocols", "max_message_bytes", NULL};
+    static const char* const websocket_listen_options[] = {"origins", "protocols", "max_message_bytes", "bind", NULL};
     switch (fn) {
     case SYSPROC_IO_WEBSOCKET_LISTEN:
         if (options_arg_index) *options_arg_index = 1;

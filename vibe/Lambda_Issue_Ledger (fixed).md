@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **286 anchored records**, preserving fixed, resolved,
+This archive contains **287 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -2089,6 +2089,52 @@ Four caps in one subsystem failed four ways, silent truncation among them. `SHAP
 
 
 ## 12. Procedural runtime (LR12)
+
+<a id="lr12-47"></a>**LR12-47 · Draft peer credential updates can restore revoked membership · RESOLVED (2026-11-11)**
+
+**Resolution:** Device initialization is create-only. Credential mutations read,
+validate and replace the encrypted row in the same SQLite scope; invite/revoke
+callbacks derive from that current row. They cannot silently overwrite current
+membership with the draft's obsolete file snapshot (D11.2.3, S12.4.4v4).
+Contended cross-process admission is a separate unqualified capability, recorded
+as input **LI-015**; no successful concurrent-writer guarantee is made.
+
+**Qualification:** six focused peer/native fixtures pass on interpreter/AUTO/JIT,
+normally and under every-allocation GC/poison; the rebuilt host repeated six stress
+cases per tier. Twelve independent-process acceptance cases pass on every tier,
+including active-session and later-session revocation; the rebuilt AUTO host
+repeats all twelve. The optional contention gate retains its acquisition/uncertain
+commit failure. Broader Lambda baseline is **7,475/7,476**; the single isolated
+TeX/expl3 golden mismatch is recorded separately and was left unchanged.
+Evidence: `temp/sync-peer/{qualified-*,accepted-process-*,rebuilt-*,baseline.log}`,
+`credential-stale-before.log`, `final-process-*.log` and `qualification-inputs.json`.
+[Peer implementation record](<impl/Lambda_Impl_Sync_Peer (done).md>).
+
+<details><summary>Original report and investigation</summary>
+
+The first uncommitted peer adapter loaded an encrypted membership file, derived
+an update, then re-read only its current filesystem token before overwriting it.
+Another administrative operation could change membership between load and save;
+the later stale snapshot would silently restore a revoked peer. This was a new
+script-host integration defect, not an existing SQLite or file-anchor defect.
+`temp/sync-peer/_credential_stale.ls` reproduced the old API by loading a member,
+revoking it, then saving the obsolete value: the member was present again.
+Evidence: `temp/sync-peer/credential-stale-before.log` ends in `true`.
+
+The patch makes credential creation create-only and stores the encrypted row in
+`device.sqlite`. Mutations read current credentials and write the replacement in
+the same existing SQLite scope; agent invite/revoke callbacks update that current
+value. This prevents obsolete file overwrites, but does not promise successful
+contended writer admission. That additional gate is blocked on input LI-015;
+`test_peer.py --contention` retains its failure without retries or owner-side edits. This preserves host-controlled grants (D11.2.3, D11.1.2),
+without claiming rollback protection against an administrator restoring old data.
+`sync_peer_identity.ls` checks duplicate creation rejection and retained revocation;
+the independent-process peer gate concurrently invites one device and revokes
+another. Focused normal/GC goldens pass on all tiers; the final process gate and
+Lambda baseline are tracked in [the peer plan](<impl/Lambda_Impl_Sync_Peer (done).md>).
+
+</details>
+
 
 <a id="lr12-14"></a>**LR12-14 · A matrix-row value aliased its source both ways · FIXED 2026-11-03 (S9.1.2, S9.2.2v2)**
 

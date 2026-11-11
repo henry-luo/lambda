@@ -9,8 +9,10 @@ provide cryptography and anchored filesystem access through D11.1.2.
 
 This is the local milestone of [the sync design](../../../vibe/Lambda_Design_Data_Sync.md#121-file-sync-and-periodic-fallback).
 It does not deploy a network service. A trusted host supplies keys and authenticated
-message admission; it can call scans periodically. Watching, direct peer transport,
-cloud publication, periodic HTTP fallback and editor bindings follow separately.
+message admission; it can call scans periodically. The [native peer adapter](PEER.md)
+now supplies explicit pairing, authenticated LAN transport and periodic retry.
+Native filesystem watchers, cloud publication, periodic HTTP fallback and editor
+bindings follow separately.
 
 ## Start a repository
 
@@ -59,6 +61,7 @@ key material and must not be serialized, logged or shared as application state.
 | `create(path, key, space, root, device, chunker?)` | Create the local repository and empty workspace; return a handle. |
 | `open_repository(path, key, space)` | Authenticate and validate existing state; return a fresh writer handle. |
 | `status(handle)` | Read the committed local state without advancing it. |
+| `acknowledge(handle, peer, frontier)` | Validate and persist a peer's accepted causal frontier; this does not mark it cloud-saved. |
 | `scan(handle)` | Capture the whole tree, reconcile from the accepted disk baseline, and commit content before the new head. |
 | `transact(handle, commands)` | Apply existing workspace commands; referenced content must already be available. |
 | `publish(handle, entry, bytes, document?)` | Store file bytes and publish a saved revision, preserving observed competing parents. |

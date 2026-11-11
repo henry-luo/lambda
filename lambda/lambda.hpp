@@ -408,6 +408,9 @@ typedef enum SysFunc {
     SYSPROC_IO_DISK_ERASE,
     SYSPROC_IO_DISK_DIRECTORY,
     SYSPROC_IO_DISK_RESOLVE,
+    SYSFUNC_IO_CRYPTO_PUBLIC,
+    SYSFUNC_IO_CRYPTO_SIGN,
+    SYSFUNC_IO_CRYPTO_AGREE,
 } SysFunc;
 
 #ifdef __cplusplus
@@ -1446,6 +1449,9 @@ extern "C" {
     Item fn_verify_signature(Item key, Item message, Item signature, Item scheme);
     Item pn_uuid(void);
     Item pn_io_crypto_key(void);
+    Item fn_io_crypto_public(Item seed, Item scheme);
+    Item fn_io_crypto_sign(Item seed, Item message);
+    Item fn_io_crypto_agree(Item seed, Item peer);
     Item pn_io_crypto_seal(Item key, Item bytes, Item context);
     Item fn_io_crypto_open(Item key, Item bytes, Item context);
     Item fn_io_crypto_mac(Item key, Item bytes);

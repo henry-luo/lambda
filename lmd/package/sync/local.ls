@@ -187,6 +187,12 @@ pub pn receive(handle, packet, admission) any^ {
     })^
 }
 
+pub pn acknowledge(handle, peer, frontier) any^ {
+    return mutate(handle,pn (tx,k,current)=> {
+        return {*:current,endpoint:p.acknowledge(current.endpoint,peer,frontier)^}
+    })^
+}
+
 pub pn snapshot(handle, label) any^ {
     return mutate(handle,pn (tx,k,current)=> {
         dependencies(tx,k,current.endpoint)^

@@ -264,6 +264,14 @@ A public DHT is unnecessary for the selected private-group audience.
 
 ### 4.2 Transport choice
 
+The first implemented native LAN profile uses the existing WebSocket transport
+with explicit IPv4 binding, signed ephemeral device authentication and encrypted
+application records. This limits new C++ to native mechanisms (D11.1.2); pairing,
+framing and exchange policy stay in Lambda Script (S12.1.1v3).
+[Peer API and protocol](../lmd/package/sync/PEER.md) define its bounds and explicit
+checkpoint-authority grants. It supports direct LAN/reachable addresses, not
+Internet traversal, browser hosting or automatic discovery.
+
 The proposed common native/browser transport is WebRTC DataChannels, using
 ICE/STUN for connectivity establishment. Reliable channels carry update batches
 and requested file content; disposable presence can use a separate channel.
@@ -1560,8 +1568,15 @@ SQLite locator catalog and encrypted local head, Gear chunking, complete scans,
 workspace reconciliation, installation journals, snapshots and recovery. Policy
 is Lambda Script (S12.1.1v3); C++ exposes crypto and file-anchor mechanisms through
 D11.1.2. [API and current limits](../lmd/package/sync/LOCAL_REPOSITORY.md).
-Direct transports, cloud adapters, polling deployment, key enrollment and editor
-bindings remain subsequent acceptance work; this does not complete §12.1.
+Internet traversal, cloud adapters, polling deployment, broader key management
+and editor bindings remain subsequent acceptance work; this does not complete §12.1.
+
+The [native peer milestone](<impl/Lambda_Impl_Sync_Peer (done).md>) adds independent-agent
+pairing, encrypted enrollment, authenticated LAN exchange, missing-object transfer,
+signed checkpoints, persisted peer acknowledgments and periodic client retries.
+Its explicit full-space writer/checkpoint grants and host-supplied wrapping keys
+do not qualify file-only sharing, account recovery, Internet traversal, cloud
+publication, OS key-vault integration or the remaining §12.1 deployment gates.
 
 Deliver a space with enrollment, regular files/directories, durable journaling,
 direct peer transfer, object-store publication, periodic fallback, conflict
