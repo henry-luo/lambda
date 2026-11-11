@@ -31,6 +31,9 @@ pn main() {
     let png_path = root ++ "/study.png"
     let png_bytes = paint.export_png(back, png_path)^
     let decoded = load(png_path)^
+    // an opened painting presents its whole canvas on the first frame
+    var shown = back
+    let first_frame = paint.frame(shown)^
     // a paper texture built from a spec is stored as that spec and rebuilt on open
     let textured = paint.with_texture(s, {kind: 'cold_press', seed: 5, size: 32})^
     let tpath = root ++ "/textured.painting"
@@ -49,7 +52,7 @@ pn main() {
         back.layer == s.layer and back.paper == s.paper and not paint.can_undo(back),
         paint.painted_tiles(back.layer) == paint.painted_tiles(s.layer) and paint.painted_tiles(s.layer) < 15,
         paint.color_at(back, 100, 33)^ == paint.color_at(s, 100, 33)^,
-        paint.frame(back)^.rect == [0, 0, 300, 140],
+        first_frame.rect == [0, 0, 300, 140],
         png_bytes > 0 and shape(decoded) == [140, 300, 4] and decoded[33][100] == paint.flattened(s)^[33][100],
         rejected, missing, doc[3].width == 256 and doc[3].height == 119,
         reopened.texture_spec == textured.texture_spec and reopened.texture == textured.texture and back.texture == null]

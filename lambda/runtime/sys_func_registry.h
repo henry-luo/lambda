@@ -120,6 +120,9 @@ typedef struct SysFuncInfo {
     // (S9.1.3v4); NULL, or a NULL entry, means any.
     uint32_t var_mask;
     Type* const* var_bounds;
+    // D7.6.5: the function only reads its arguments: it keeps none of them,
+    // nor any part of one, and returns neither (JUBE_FN_READS_ARGS).
+    bool reads_args;
 } SysFuncInfo;
 
 static inline bool sysfunc_arg_is_var(const SysFuncInfo* info, int index) {

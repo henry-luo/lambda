@@ -184,14 +184,15 @@ pub fn mark(s, rect = null) map => ({*: s, dirty: union(s.dirty, if (rect == nul
 
 fn background(s) array^ => strokes.in_space([s.paper[0], s.paper[1], s.paper[2], 1.0], s.layer.blend_space)^
 
-// frame(session) -> {session, rect, pixels}: the dirty rectangle as (h, w, 4) sRGB u8 samples over
-// the paper, ready for dom.set_canvas_pixels_rect, and the session with nothing left to present.
-// rect and pixels are null when nothing changed.
-pub fn frame(s) map^ {
+// frame(var session) -> {rect, pixels} (PT7 in-place form): the dirty rectangle as (h, w, 4) sRGB
+// u8 samples over the paper, ready for dom.set_canvas_pixels_rect, leaving nothing to present.
+// rect and pixels are null when nothing changed. A frame built as a new session would share the
+// layer with it (S9.3.1), so the next feed would copy the stroke's tiles again.
+pub pn frame(var s) map^ {
     let r = clipped(s.layer, s.dirty)
-    if (r == null) ({session: {*: s, dirty: null}, rect: null, pixels: null})
-    else ({session: {*: s, dirty: null}, rect: r,
-        pixels: layers.present(s.layer, {rect: r, background: background(s)^})^})
+    s.dirty = null
+    if ((r == null)^) { return {rect: null, pixels: null} }
+    return {rect: r, pixels: layers.present(s.layer, {rect: r, background: background(s)^})^}
 }
 
 // color_at(session, x, y) -> the sRGB [r, g, b] in [0, 1] shown at a layer pixel (paint over paper).

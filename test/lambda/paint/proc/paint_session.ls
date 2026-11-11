@@ -14,29 +14,34 @@ pn main() {
     let pen = paint.brush({size: 10.0, hardness: 1.0})^
     let red = [1.0, 0.0, 0.0]
     let s0 = paint.session(96, 64)^
-    let first = paint.frame(s0)^
+    // frame presents the dirty rect and clears it in place (PT7)
+    var shown = s0
+    let first = paint.frame(shown)^
+    let again = paint.frame(shown)^
 
     // one stroke in two batches; each frame presents only what changed since the last one
-    var s = paint.begin(first.session, 1, pen, red)^
+    var s = paint.begin(shown, 1, pen, red)^
     let begun = s
     let fed = paint.feed(s, 1, [[10.0, 20.0, 1.0], [30.0, 20.0, 1.0]])^
     let fb = paint.frame(s)^
-    s = fb.session
     let second = paint.feed(s, 1, [[50.0, 20.0, 1.0]])^
     let fc = paint.frame(s)^
     let empty = paint.feed(s, 1, [])^
-    let done = paint.end(fc.session, 1)^
+    let done = paint.end(s, 1)^
 
     // undo restores the earlier layer and marks the stroke's area; redo puts it back
-    let u = paint.undo(done)^
+    var u = paint.undo(done)^
+    let undone = u
     let fu = paint.frame(u)^
-    let r = paint.redo(fu.session)^
+    let r = paint.redo(u)^
 
     // a new stroke after undo drops the redo branch; a cancelled stroke leaves no entry
     let branch = stroked(u, 2, pen, [0.0, 0.0, 1.0], [[10.0, 40.0, 1.0], [40.0, 40.0, 1.0]])^
     var c = paint.begin(branch, 1, pen, red)^
     paint.feed(c, 1, [[60.0, 50.0, 1.0], [80.0, 50.0, 1.0]])^
     let cancelled = paint.cancel(c, 1)^
+    var cancelled_view = cancelled
+    let cancel_frame = paint.frame(cancelled_view)^
 
     // a press from another pointer ends the stroke in progress first; undo during a stroke cancels it
     var p = paint.begin(branch, 1, pen, red)^
@@ -74,6 +79,8 @@ pn main() {
     // clear is one undo entry; paper colour shows under the paint
     let cleared = paint.clear(done)^
     let cream = paint.session(8, 8, {paper: [1.0, 0.9, 0.8]})^
+    var cream_view = cream
+    let cream_frame = paint.frame(cream_view)^
 
     // brush adjustments keep the brush kind; viewport samples map into layer pixels
     let wide = paint.adjust_brush(pen, {size: 30.0, opacity: 0.5})^
@@ -83,7 +90,7 @@ pn main() {
     return {
         first_frame_is_whole: first.rect == [0, 0, 96, 64] and shape(first.pixels) == [64, 96, 4] and
             first.pixels[10][10] == [255, 255, 255, 255],
-        nothing_left: paint.frame(first.session)^.rect == null,
+        nothing_left: again.rect == null and again.pixels == null and shown.dirty == null,
         stroke_rect: fb.rect[0] < 10 and fb.rect[2] > 30 and fb.rect[1] < 20 and fb.rect[3] > 20 and fb.rect[2] < 96,
         stroke_pixels: fb.pixels[20 - fb.rect[1]][20 - fb.rect[0]] == [255, 0, 0, 255],
         feed_reports_rect: fed.rect == fb.rect and fed.work > 0,
@@ -93,10 +100,10 @@ pn main() {
         one_undo_entry: paint.can_undo(done) and not paint.can_redo(done) and len(done.undo) == 1,
         undo_entry_unpainted: paint.color_at({*: done, layer: done.undo[0].layer}, 40, 20)^ == [1.0, 1.0, 1.0],
         painted: paint.color_at(done, 40, 20)^ == [1.0, 0.0, 0.0] and paint.color_at(done, 40, 50)^ == [1.0, 1.0, 1.0],
-        undo: paint.color_at(u, 40, 20)^ == [1.0, 1.0, 1.0] and paint.can_redo(u) and fu.rect[0] < 10 and fu.rect[2] > 50,
+        undo: paint.color_at(undone, 40, 20)^ == [1.0, 1.0, 1.0] and paint.can_redo(undone) and fu.rect[0] < 10 and fu.rect[2] > 50,
         redo: paint.color_at(r, 40, 20)^ == [1.0, 0.0, 0.0] and r.layer == done.layer and not paint.can_redo(r),
         branch_drops_redo: not paint.can_redo(branch) and len(branch.undo) == 1 and paint.color_at(branch, 20, 40)^ == [0.0, 0.0, 1.0],
-        cancel: cancelled.layer == branch.layer and len(cancelled.undo) == 1 and paint.frame(cancelled)^.rect[0] < 60,
+        cancel: cancelled.layer == branch.layer and len(cancelled.undo) == 1 and cancel_frame.rect[0] < 60,
         second_pointer_commits: len(p2.undo) == 2 and p2.active.pointer == 2,
         undo_cancels_stroke: paint.undo(q)^.layer == p2.layer,
         feed_needs_stroke: refused is error and idle == branch,
@@ -104,7 +111,7 @@ pn main() {
         session_grain: stroked(textured, 1, gritty, ink, path)^.layer == grained,
         wash_matches_pure: w.layer == whole_wash,
         clear: paint.color_at(cleared, 40, 20)^ == [1.0, 1.0, 1.0] and len(cleared.undo) == 2,
-        paper: paint.frame(cream)^.pixels[0][0] == [255, 230, 204, 255],
+        paper: cream_frame.pixels[0][0] == [255, 230, 204, 255],
         adjust_round: wide.size == 30.0 and wide.opacity == 0.5 and wide.hardness == 1.0,
         adjust_mypaint: mp.kind == 'mypaint' and mp.compiled.base_radius > 3.99 and mp.compiled.base_radius < 4.01,
         in_layer: mapped == [[20.0, 10.0, 1.0, 10.0, 0.0, 0.0, 1.0]]

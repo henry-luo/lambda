@@ -2,7 +2,8 @@
 
 - **Status:** design proposal — return-value convention; RF7 (native
   procedures with `var` parameters) RATIFIED by USER 2026-11-11 as D7.6.3*,
-  D7.6.4*, S9.1.3v4 and S9.2.1v2
+  D7.6.4*, S9.1.3v4 and S9.2.1v2; RF8 (natives that only read their
+  arguments) RATIFIED by USER 2026-11-11 as D7.6.5*
 - **Date:** 2026-08-05
 - **Scope:** Lambda system functions and procedures that search, select,
   transform, or mutate collections and strings
@@ -580,9 +581,9 @@ procedure's bound is not covariance (S9.1.3v4).
 - *First kernel:* `radiant.paint_stroke` (`radiant_paint_adapter.cpp`) shares
   its batch reader and renderer with `radiant.paint_dabs`. `lambda.paint`'s
   `stroke(var layer, …)` and `feed(var session, …)` call it on their own place
-  (Lambda_Pkg_Paint PT7). A Lambda `pn` that receives a member place beside
-  container parameters snapshots the leaf, so the in-place write must not pass
-  through such a hop (LR12-45).
+  (Lambda_Pkg_Paint PT7). A Lambda `pn` call now uses the same alias mask:
+  it borrows a member place in place unless a plain argument may alias it
+  (LR12-45, fixed 2026-11-11).
 - *Tests:* `test/lambda/proc/native_var_proc.ls` covers binding and place
   homes, snapshots, parity with the pure form, a typed binding and a
   rejected budget, on three tiers and under forced GC.
@@ -639,6 +640,73 @@ updated to S9.1.3v4):
 Ratification (2026-11-11): design spec 66.0.0 → 66.1.0 (rulings added
 compatibly); semantics spec 88.0.0 → 89.0.0 (S9.1.3 and S9.2.1 revised in
 place); Appendix A rows added to both; Appendix C rows point at RF7.
+
+### RF8 — Native functions that only read their arguments (RATIFIED, USER 2026-11-11)
+
+**Problem.** Lambda keeps plain values as snapshots (S9.1.2). A native that
+returns a container holding part of its argument creates a second observer, so
+a later write through the caller's binding must not show through the result.
+MVP guarantees this by capturing every container it passes to a system or host
+function. The registry records nothing about argument retention, so a native
+that only reads its argument pays the same capture. In `lambda demo paint`,
+`radiant.paint_present` reads the layer once per frame; the capture marked the
+layer shared, and the next batch of the stroke copied every tile it touched
+(Lambda_Pkg_Paint PT7).
+
+**Form.** A host-module function can carry `JUBE_FN_READS_ARGS`. The flag
+promises that the function keeps no reference to an argument or to a part of
+one, and that its result contains neither. `SysFuncInfo::reads_args` records
+it. Two consumers honour it:
+- MVP's system-call lowering reads a binding argument without capturing it.
+- The parameter retention scan does not count the call as keeping an argument,
+  so a Lambda function that only passes its parameter to such a native does
+  not look as if it retains it.
+
+**Trust.** This is an audit promise by the module author, not a proof. The
+codebase otherwise narrows by proof; the user chose the flag over a store-side
+change to all natives (below). A wrong flag lets a later write through the
+caller's binding show through the result. Registration rejects the flag on a
+procedure with `var` positions, because those write.
+
+**Alternative considered.** A store-side rule: the natives' result builders
+mark the argument elements they insert (S9.3.1), after which neither tier
+captures native arguments. It needs an audit of every native that copies
+elements into its result, and part of the storing code (`array_set`) belongs to
+lambda-input, so the flag was chosen for read-only natives.
+
+**LR12-47 (later the same day).** The store-side rule was then applied to the
+built-in kernels to fix LR12-47. Their results shared argument items, so a
+write through either the argument or the result reached the other, on both
+tiers in the result direction. The kernels capture each item they place
+(`array_push_verbatim_capture`, `array_capture_items`); `array_set` and
+`array_copy_owned_items` stay untouched. MVP still captures container arguments
+to every native without the flag, as D7.6.5 says; for the built-ins that
+capture is now redundant, and removing it would need a revised ruling.
+
+**As implemented (2026-11-11).** `lambda/jube/jube.h` (`JUBE_FN_READS_ARGS`),
+`sys_func_registry.h` (`reads_args`), the Jube registration in `build_ast.cpp`,
+`cow_param_retention_scan_node`, and the generic system-call lowering in
+`mvp_mir.cpp`. Flagged: `radiant.paint_present`, `paint_sample`,
+`paint_tiles_encode`, `paint_tiles_decode`. Not flagged: `paint_dabs`,
+`paint_wash` and `paint_import`, whose results share the input's tiles, and
+`paint_stroke`. Two refinements landed with it: a final callee keeps a bare
+argument only if it retains its parameter as a root, and a pure `fn` callee
+cannot make a reentry that writes the caller's root (S12.1.1v3). With all three,
+the demo replay writes 38 of 57 tiles in place on AUTO, as on T0.
+
+**Formal text** (design spec 67.2.0):
+
+> - **D7.6.5\* — A native function can declare that it only reads its
+>   arguments.** A host-module function registered with `JUBE_FN_READS_ARGS`
+>   keeps no reference to an argument or to a part of one, and its result
+>   contains neither. Its callers pass container arguments as borrows: the
+>   compiler does not capture them, and the parameter retention analysis does
+>   not count the call as keeping an argument (S9.1.2). The module author makes
+>   this promise; the runtime does not check it. A function that keeps or
+>   returns any part of an argument, for example a layer that shares the
+>   argument's tiles, must not carry the flag. Registration rejects the flag on
+>   a procedure with `var` positions, which write. Without the flag a native is
+>   assumed to keep its arguments. [Sys_Func RF8; USER 2026-11-11]
 
 ---
 

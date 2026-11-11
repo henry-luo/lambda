@@ -2825,7 +2825,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         RootSpan place_values((size_t)dispatch_argc);
         RootSpan place_paths((size_t)dispatch_argc);
         NameEntry* place_roots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        bool snapshot_home = ast_call_has_plain_container_parameter(direct_signature);
+        // LR12-45: a place borrows in place unless a plain argument may alias it
+        bool snapshot_home = !node->var_alias_proven || node->var_alias_capture_mask != 0;
         if (!place_values.valid() || !place_paths.valid()) return ItemError;
         // homes and evaluated keys belong to the caller, never movable field buffers.
         auto publish_places = [&](Item result) {

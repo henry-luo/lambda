@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **280 anchored records**, preserving fixed, resolved,
+This archive contains **284 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -4081,3 +4081,51 @@ Only this owner issue record is added before approval. Native replay-summary
 output is independently repaired and passes the exact UI/view inventories.
 
 **Resolution:** the user explicitly approved the scoped two-file repair. Both adapters now select the existing workspace Lambda host. The normal page snapshot passes 51/51 and all 5,936 combined layout cases execute; the same ten remaining comparisons are tracked as Radiant RI-010. The required native/static/dynamic owner gate and reported UI/view inventories pass with their existing skips. No reference, baseline score, tolerance or fixture selection was changed. The implementation and pinned receipt are in `../../radiant/vibe/Radiant_Impl_Failed_Test_Repairs.md` and `../../radiant/temp/radiant-failed-20261111/verification-summary.json`. The pending-approval paragraph above records the original stopping condition; authorization has now been received and the source repair is applied.
+
+## Place borrows and the watercolor timeout — 2026-11-11
+
+<a id="lr12-45"></a>
+
+**LR12-45 — A member place passed to a Lambda `pn` beside container parameters is snapshotted, so every write copies · RESOLVED, 2026-11-11.**
+Authority: **S9.1.2, S9.1.3, D7.6.3, D7.6.4**. Performance only; no semantics changed.
+
+*Defect.* A `var` argument that is a member or index place (`f(s.layer, table)`) was borrowed in place only in a narrow shape. MVP required pure arguments, exactly one `var` parameter and no other parameter whose contract may hold a container (`exclusive_place`). T0 snapshotted the home whenever the callee had any plain container or untyped parameter (`ast_call_has_plain_container_parameter`). Outside that shape the leaf was captured, so the callee's first write copied it on every call. A related JIT residue: a bare binding passed to a plain call was captured after a native `var` call had borrowed it, or when the callee was a forwarding wrapper in another module.
+
+*Fix.*
+- `var_alias_capture_mask` (`build_ast.cpp`) is now computed by one helper for every call with `var` arguments, native or Lambda. A plain slot is flagged when it reads a borrowed root or calls a definition that might return part of one; `var_alias_proven` records that the scan ran. MVP borrows a place in place when the arguments are pure and the mask is empty. T0 snapshots the home only when the mask is not empty or was not computed. The coarse helper is deleted.
+- MVP's open-contract borrow query (`binding_var_borrow_scan` with `open_only`) skips native `var` positions. A native never changes the owner's kind or stores an error (D7.6.4 step 5), so an untyped binding no longer widens to `any`, and its later plain calls no longer capture it. Storage-proof queries still count native borrows.
+- The parameter retention scan (`cow_param_retention_scan_node`) consults a callee's own facts when its module has finished building (`AstFuncNode::cow_param_effects_final`, set in `lambda_ast_decide_cow_borrows`). An argument is kept only where the callee's parameter is retained, is `var`, or has no parameter of its own. A returned parameter is not kept, because the callee marks what it returns (LR12-11). A forwarding wrapper such as a package facade therefore no longer makes its parameter look retained to every caller.
+
+*Evidence.* Probes run `radiant.paint_stroke` batches between calls that pass `s.layer` to a module `pn` beside a container argument, `s.layer` of a `var` parameter, or a binding through a facade, a direct import or a local `fn`. Each now copies the touched tile once and writes it in place on the next three batches, on interp, JIT and auto. Before, each batch copied (on all tiers for the place cases, on JIT for the binding cases). Disabling the retention refinement alone brings back the copies through the facade on JIT.
+- New goldens: `test/lambda/proc/var_place_alias.ls` (aliasing plain arguments stay snapshots: a root read, the whole root, a binding holding the leaf, repeated batches, two places, a list place) and `test/lambda/proc/var_retained_import.ls` (kept and returned values through a wrapper stay snapshots; read-only arguments are written in place). Both agree on all three tiers, also under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` with `LAMBDA_FUNC_JIT_THRESHOLD=2`.
+- Gates: `test_lambda_gtest` 2,303/2,303. The JIT pass and the T0 differential fail only their pre-existing 8 and 10 cases. `test_lambda_runtime_gtest` 332/332, the paint UI suite 6/6 and the paint demo replay 46/46.
+
+<a id="lr12-46"></a>
+
+**LR12-46 — `proc_procart_watercolor_sim` times out in the Lambda baseline · RESOLVED, 2026-11-11.**
+Authority: **D8.3.1**. Another session recorded this as LR12-45 the same day, with the cause unconfirmed; it was renumbered because LR12-45 was already assigned in this checkout.
+
+*Cause.* Admitting calls to `var` procedures with default parameters on T0 (`ast_direct_call_var_parameter_entries`) moved the watercolor module from whole-module MIR onto AUTO's T0-first path, where it took 244 s against 2 s on JIT. A promoted function is compiled alone and sees each sibling as `imported`, and `mvp_index_key` refused imported callees. So `c[row + imin(w - 1, x + r)]` in `box_blur` marked `c` shared before each read, and the next store cloned the whole cells array: 3.3 million clones and 2.7 TB copied in one run.
+
+*Fix* (in `852ae67ed`). `mvp_index_key` excludes only JS exports: its purity test reads AST facts, which a sibling shares, and a Lambda `fn` cannot write the receiver wherever it is compiled (S12.1.1v3). AUTO now runs the script in 3 s, and `test_lambda_gtest` passes the fixture. Record: `vibe/impl/Lambda_Impl_Paint.md`, 2026-11-11.
+
+## System-function results alias their arguments — 2026-11-11
+
+<a id="lr12-47"></a>
+
+**LR12-47 — A system function's or `++`'s result shares its argument's items, so a write through either one reaches the other · FIXED, 2026-11-11.**
+Authority: **S9.1.2, S9.3.1**. A semantics defect on both tiers.
+
+*Defect.* Natives that build their result from an argument's items stored those Items without capturing them. A write through the argument after the call reached the result, and a write through the result reached the argument; the second direction changed even a `let` binding (`var j = d ++ e; j[1].n = 7` changed `e`). The entry was filed as T0-only: MVP captures every container argument to a native, which hid the argument direction, but the result direction failed on both tiers. Affected: `take`, `drop`, `slice`, `reverse` (also as a method), `a[i to j]`, `sort` (plain and by key), `unique`, `except` and `intersect`, `zip`, `fill`, `reduce`, and every arm of `++`, including the consuming `acc = acc ++ e` and `null ++ a`.
+
+*Fix.* The kernels apply S9.3.1 where they store, as literal, comprehension and spread insertion already did:
+- `array_push_verbatim_capture` and `array_capture_items` (`lambda-data-runtime.cpp`) capture an item, or a bulk-copied range, as it is placed. Pointer and Item lanes are read through their lane; other lanes hold no container.
+- `lambda-vector.cpp`: `vector_select_items` (take, drop, slice, reverse, `[i to j]`), `vector_to_plain_array` (sort), `fn_unique`, `vector_keep_by_membership`, `fn_zip`, `fn_fill` and `fn_reduce`. `reduce` captures its result, which can be an item or whatever the callback returned of its parameters.
+- `lambda-eval.cpp`, the `++` arms: the native-lane, same-kind and mixed-kind joins and a sequence beside a scalar capture every item. The consuming join captures only the appended items, so `acc = acc ++ e` stays linear. `left ++ [item]` captures the left items; MVP captures a named literal item where it compiles the literal. The null identity captures the operand it returns.
+
+Share-marking at the call site was rejected: capturing the arguments and marking the result, as LR12-11 does for Lambda callees. It cannot cover the consuming join without marking the accumulator, which would force a copy on every iteration. `array_push` and `array_copy_owned_items` stay policy-free: LambdaJS and the host bridges build containers with them under reference semantics, and the second belongs to lambda-input.
+
+*Evidence.* `test/lambda/proc/native_result_alias.ls` writes through the argument and through the result for each kernel. It agrees on interp, JIT and auto, also with `LAMBDA_FUNC_JIT_THRESHOLD=2` under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. 40 goldens that call the changed kernels pass on interp and JIT under forced GC. Gates: `test_lambda_gtest` 2,304/2,304; the JIT pass and the T0 differential (`test_interp_gtest`) fail only their pre-existing 8 and 10 cases; `test_lambda_runtime_gtest` 332/332. The paint UI replays (`canvas_rect` 20/20, `pen_input` 11/11) pass, and the paint demo replay passes 46/46 with its tile counts unchanged (38 written in place, 19 copied, on T0 and AUTO).
+
+*Left as is.* `content(e)` returns a read-only view of the element's storage, which is a view question, not an insertion. MVP still captures container arguments to every native without `JUBE_FN_READS_ARGS` (D7.6.5). For the built-ins that capture is now redundant, and removing it would need a revised ruling. Release-build performance was not measured.
+

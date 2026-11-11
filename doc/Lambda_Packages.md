@@ -4944,9 +4944,9 @@ progress, the rectangle still to be shown, and stroke-level undo and redo:
 var s = paint.session(1200, 800)^                      // {paper: [r, g, b], history_budget}
 s = paint.begin(s, evt.pointerId, brush, [0.1, 0.2, 0.5])^
 paint.feed(s, evt.pointerId, paint.in_layer(dom.pointer_samples(evt), box, s))^   // in place: {rect, work}
-let f = paint.frame(s)^                                // {session, rect, pixels}
+let f = paint.frame(s)^                                // in place: {rect, pixels}
 if (f.rect != null) dom.set_canvas_pixels_rect(canvas, f.pixels, f.rect)^
-s = paint.end(f.session, evt.pointerId)^               // one undo entry
+s = paint.end(s, evt.pointerId)^                       // one undo entry
 ```
 
 - `feed(var session, pointer, samples)` is a procedure that continues the stroke in place and
@@ -4954,12 +4954,15 @@ s = paint.end(f.session, evt.pointerId)^               // one undo entry
   stroke's undo entry keeps; later batches write those tiles in place while nothing else holds
   the session. Placing the session into another container between batches, such as a view
   state rebuilt as `{*: st, ps: s}`, shares it (**S9.3.1**), so the next batch copies its tiles
-  again, as the pure form did.
+  again. Keep it in place instead: pass `st.ps` to `feed` and `frame`, and update other fields
+  with member writes such as `st.token = 0`. Compute the samples first, since a plain argument
+  that reads `st` keeps the borrow a snapshot.
 - `in_layer(samples, box, session, pressure)` moves pen samples from viewport CSS pixels into
   layer pixels for a canvas shown in `box` (`dom.bounding_box`). A non-null `pressure` replaces
   each sample's pressure; a demo might pass 1.0 for a mouse.
-- `frame` returns the dirty rectangle as `(h, w, 4)` sRGB `u8` samples over the paper, and
-  `null`s when nothing changed. A new session's first frame is the whole canvas.
+- `frame(var session)` is a procedure that returns the dirty rectangle as `(h, w, 4)` sRGB `u8`
+  samples over the paper, `{rect, pixels}`, and clears it in place; both are `null` when nothing
+  changed. A new session's first frame is the whole canvas.
 - `undo`, `redo`, `can_undo`, `can_redo`, `clear`, `cancel(s, pointer)` and `mark(s, rect)`
   (present again) complete the history. A history entry keeps the previous layer, whose
   untouched tiles are shared. Entries are dropped oldest first once the tiles they keep exceed

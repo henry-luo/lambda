@@ -629,8 +629,12 @@ static bool binding_var_borrow_scan(LambdaMvpModule* m, MvpBinding* binding,
                 return true;
             }
         }
-        // D7.6.3: a native `var` procedure borrows its places as a Lambda pn does.
-        SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
+        // D7.6.3: a native `var` procedure borrows its places as a Lambda pn does,
+        // so storage proofs see it. It never changes the owner's kind or stores
+        // an error: the caller's kind check rejects the first and the second is
+        // the call's outcome (D7.6.4 step 5). An open-contract query, which asks
+        // whether the binding must widen to `any`, therefore skips it.
+        SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC && !open_only
             ? ((AstSysFuncNode*)callee)->fn_info : NULL;
         for (int j = 0; sys && sys->var_mask && j < mvp_call_argument_count(call); j++)
             if (sysfunc_arg_is_var(sys, j) &&

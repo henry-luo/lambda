@@ -4744,16 +4744,12 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
     // pure builtin allocations cannot mutate an earlier actual; its precise root still survives GC.
     for (int n = 0; n < provided || n < f->abi.param_count; n++)
         pure_arguments &= mvp_pure_key(actuals[n], 0, true);
-    // a single borrow with pure scalar siblings cannot retain an ancestor or
-    // change the selected place while later arguments are evaluated (S9.1.3).
-    bool exclusive_place = pure_arguments;
-    int var_count = 0;
-    for (AstNamedNode* p = f->ast->param; p; p = (AstNamedNode*)p->next) {
-        TypeParam* type = lambda_type_param(p->type);
-        if (type && type->is_var_param) var_count++;
-        else exclusive_place &= !ast_type_may_be_container(mvp_contract(p));
-    }
-    exclusive_place &= var_count == 1;
+    // pure arguments cannot change a selected place while later arguments are
+    // evaluated, and an empty alias mask proves that no plain argument reads a
+    // borrowed root or calls something that might return part of one, so its
+    // snapshot cannot share the leaf (S9.1.3, LR12-45).
+    bool exclusive_place = pure_arguments && call && call->var_alias_proven &&
+        !call->var_alias_capture_mask;
     int i = 0;
     for (; i < f->abi.param_count; param = (AstNamedNode*)param->next, i++) {
         AstNode* arg = actuals[i];
@@ -4818,12 +4814,16 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
             mvp_parameter_borrowable(c->module, param);
         // snapshot elision needs no physical layout proof. An unchanged
         // boundary and the shared effects suffice for a nonretaining reader.
+        // a pure `fn` writes nothing, and whatever it reenters is pure too
+        // (S12.1.1v3), so reentry through it cannot change the caller's root.
+        bool reentry_writes = f->abi.effects.may_reenter && lambda_type_func_is_proc(f->ast->type);
         bool observes_parameter = pure_arguments && source && param->entry &&
             !lambda_type_param(param->type)->is_var_param &&
-            // a retained projection captures its own child. Without reentry,
-            // that boundary suffices; a whole-root escape still needs capture.
+            // a retained projection captures its own child. Without a reentry
+            // that writes, that boundary suffices; a whole-root escape still
+            // needs capture.
             !param->entry->cow_param_mutated && (!param->entry->cow_param_retained ||
-                (!param->entry->cow_param_root_retained && !f->abi.effects.may_reenter)) &&
+                (!param->entry->cow_param_root_retained && !reentry_writes)) &&
             mvp_boundary_proven(source->contract, mvp_contract(param));
         // a confined callee copies at entry. Pure actuals and absence of a
         // simultaneous var borrow preserve the argument-evaluation snapshot.
@@ -5830,7 +5830,13 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
     }
     MirValue arguments[LAMBDA_MAX_FUNCTION_ARGS];
     int i = 0;
-    for (; i < mvp_call_argument_count(node); i++) arguments[i] = expression(c, mvp_call_argument(node, i));
+    for (; i < mvp_call_argument_count(node); i++) {
+        AstNode* arg = mvp_call_argument(node, i);
+        // D7.6.5: a function that only reads its arguments keeps no second
+        // observer, so a binding passes as a borrow instead of being captured.
+        MvpBinding* borrowed = info->reads_args ? mvp_local_binding(c->module, arg) : NULL;
+        arguments[i] = borrowed ? read_binding(c, borrowed, arg, false) : expression(c, arg);
+    }
     MIR_label_t slice_done = NULL;
     MIR_reg_t slice_result = 0;
     if (info->fn == SYSFUNC_SLICE && i == 3 && result_rep == VALUE_REP_ITEM) {

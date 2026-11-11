@@ -539,17 +539,6 @@ static inline bool ast_declared_type_is_open_item(Type* declared) {
         (right && right->type_id == LMD_TYPE_ANY);
 }
 
-// a plain container argument may snapshot an ancestor of a borrowed place.
-// scalar-only siblings cannot alias its storage, so the home may reuse the leaf.
-static inline bool ast_call_has_plain_container_parameter(const TypeFunc* signature) {
-    for (const TypeParam* param = signature ? signature->param : NULL;
-            param; param = param->next) {
-        if (!param->is_var_param && (!param->full_type ||
-                ast_type_may_be_container(param->full_type))) return true;
-    }
-    return false;
-}
-
 // `arg_nodes` (optional) receives the resolved argument node for each `var`
 // parameter, so a caller can tell a PLACE borrow (`f(var m.rows[i])`, CW25)
 // from a bare-binding borrow. A place has no NameEntry of its own, so its

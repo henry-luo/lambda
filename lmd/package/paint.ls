@@ -53,7 +53,10 @@ pub fn can_undo(s) bool => sessions.can_undo(s)
 pub fn can_redo(s) bool => sessions.can_redo(s)
 pub fn clear(s) map^ => sessions.clear(s)^
 pub fn mark(s, rect = null) map => sessions.mark(s, rect)
-pub fn frame(s) map^ => sessions.frame(s)^
+// frame presents the dirty rect and clears it in place: {rect, pixels} (PT7).
+pub pn frame(var s) map^ {
+    return sessions.frame(s)^
+}
 pub fn color_at(s, x: int, y: int) array^ => sessions.color_at(s, x, y)^
 pub fn in_layer(samples, box, s, pressure = null) array => sessions.in_layer(samples, box, s, pressure)
 
