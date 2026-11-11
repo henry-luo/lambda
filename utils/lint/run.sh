@@ -28,7 +28,7 @@ RULES_DIR="$ROOT/utils/lint/rules"
 REPORT_DIR="$ROOT/test_output/lint"
 INPUT_ROOT="$(cd "${LAMBDA_INPUT_ROOT:-$ROOT/../lambda-input}" && pwd)"
 RADIANT_ROOT="$(cd "${RADIANT_ROOT:-$ROOT/../radiant}" && pwd)"
-SCAN_ROOTS=(lambda test "$INPUT_ROOT/lib" "$RADIANT_ROOT/radiant")
+SCAN_ROOTS=(lambda test "$INPUT_ROOT/lib" "$INPUT_ROOT/lambda/core/lambda_typed.hpp" "$RADIANT_ROOT/radiant")
 
 # Structural checks: "<id>:<command>". Each runs after the pattern pass and
 # counts as failed iff the command exits non-zero.
@@ -133,7 +133,7 @@ if (( ! STRUCTURAL_ONLY )); then
   if [[ -n "$sibling_rules" ]]; then
     sibling_args=(scan --inline-rules "$sibling_rules" --follow --include-metadata --json=stream
       --globs '!lib/image/lib*/**' --globs '!lib/image/giflib/**' --globs '!lib/zip/**')
-    for owner in "$INPUT_ROOT:lib" "$RADIANT_ROOT:radiant"; do
+    for owner in "$INPUT_ROOT:lib" "$INPUT_ROOT:lambda/core/lambda_typed.hpp" "$RADIANT_ROOT:radiant"; do
       owner_root=${owner%:*}; owner_path=${owner##*:}
       owner_raw=$(cd "$owner_root" && ast-grep "${sibling_args[@]}" "$owner_path" 2>/dev/null || true)
       if [[ -n "$owner_raw" ]]; then

@@ -7,7 +7,7 @@
 #   1. add the linker name below (Itanium-mangled for C++, no Mach-O "_"),
 #      followed by "# <consuming modules>";
 #   2. mark the owner declaration with its layer's LAMBDA_*_API macro
-#      (lib/lambda_api.h); vendored archives already have default visibility.
+#      (lambda/lambda.h); vendored archives already have default visibility.
 # Drop an entry once no module imports it. `make check-host-exports` verifies
 # that the host exports every entry and that modules import nothing else.
 

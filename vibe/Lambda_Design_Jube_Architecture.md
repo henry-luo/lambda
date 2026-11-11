@@ -268,7 +268,7 @@ from it, in any build configuration. Every entry is a host-internal import
 that JA5 forbids in the end state, so the list is the JA2 `dynamic_lookup`
 debt made explicit, bounded and reviewable. A module that needs another
 runtime symbol has it **opened case by case**: a list entry naming its
-consumers, plus the `LAMBDA_*_API` marker (`lib/lambda_api.h`, the SM4
+consumers, plus the `LAMBDA_*_API` marker (`lambda/lambda.h`, the SM4
 export macros) on the symbol's owner declaration. Vendored archives already have default
 visibility and need only the entry. An entry no module imports is dropped.
 Hosts without the Jube loader (`lambda-cli`, `lambda-wasm`) export nothing.

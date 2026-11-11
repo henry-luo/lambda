@@ -14,7 +14,15 @@
 
 #ifndef LAMBDA_STACK_H
 #define LAMBDA_STACK_H
-#include "lib/lambda_api.h"
+#ifndef LAMBDA_API_ONLY
+#define LAMBDA_API_ONLY
+#define LAMBDA_API_ONLY_LOCAL
+#endif
+#include "lambda/lambda.h"
+#ifdef LAMBDA_API_ONLY_LOCAL
+#undef LAMBDA_API_ONLY_LOCAL
+#undef LAMBDA_API_ONLY
+#endif
 
 #include <stdint.h>
 #include <stdbool.h>

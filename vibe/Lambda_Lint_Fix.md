@@ -402,7 +402,7 @@ limits.
 | miscellaneous | 14 | scattered |
 
 **Structural fix:** introduce a single bounded-alloca helper in
-[`lib/lambda_alloca.h`](../lib/lambda_alloca.h):
+[`lib/alloca.h`](../lib/alloca.h):
 
 ```c
 // Asserts size <= LAMBDA_ALLOCA_MAX_BYTES so silent stack overflow on an

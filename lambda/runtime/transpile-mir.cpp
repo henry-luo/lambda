@@ -29,7 +29,7 @@ extern "C" int lambda_mir_lazy_enabled(void);
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
 #include "lib/log.h"
-#include "lib/lambda_alloca.h"
+#include "lib/alloca.h"
 #include "lib/memtrack.h"
 #include "lib/mem_grow.hpp"
 #include "lib/mem_factory.h"

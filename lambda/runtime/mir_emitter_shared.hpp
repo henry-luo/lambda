@@ -16,7 +16,7 @@
 #include "lib/log.h"
 #include "lib/memtrack.h"
 #include "lib/mem_grow.hpp"
-#include "lib/lambda_alloca.h"
+#include "lib/alloca.h"
 
 typedef void (*MirResultCheck)(void* owner, MIR_reg_t result);
 

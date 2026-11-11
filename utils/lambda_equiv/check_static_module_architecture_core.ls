@@ -2,7 +2,6 @@
 import .static_arch_scan
 import .path_utils
 
-let compatibility_forwarders = ["lib/lambda_typed.hpp"]
 let public_headers = [
     {path: "lambda/lambda.h", owner: "runtime-candidate"},
     {path: "lambda/lambda.hpp", owner: "mixed-active-core-io-rt"},
@@ -58,7 +57,7 @@ pn include_inventory(paths) any^ {
     for (target_path in paths) {
         let path = relative_path(target_path)
         if ((starts_with(path, "lib/") and not starts_with(path, "lib/gc/") and
-            path != "lib/side_stack.c" and not contains(compatibility_forwarders, path))^) {
+            path != "lib/side_stack.c")^) {
             let source = input(target_path, "text")^
             add_include_edges(path, source, "lambda",
                               "move caller upward or replace with lib-neutral API",

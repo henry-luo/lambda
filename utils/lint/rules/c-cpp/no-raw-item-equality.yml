@@ -16,4 +16,4 @@ rule:
 files:
   - "lambda/runtime/vmap.cpp"
   - "lambda/runtime/render_map.cpp"
-  - "lib/lambda_typed.hpp"
+  - "lambda/core/lambda_typed.hpp"
