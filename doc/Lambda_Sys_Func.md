@@ -2064,6 +2064,27 @@ pn unread_count(password) {
 }
 ```
 
+#### lambda.io.crypto and lambda.io.disk
+
+The native local sync repository also uses two narrow modules under D9.3.4 /
+D11.1.2. They expose mechanisms; repository policy remains Lambda Script.
+
+- `lambda.io.crypto`: `key()` generates 32 random bytes; `seal(key, bytes, context)`
+  returns a versioned AES-256-GCM envelope. These are procedures. Pure
+  `open(key, envelope, context)` authenticates/decrypts and returns bytes or null
+  for empty plaintext (S2.2.2v2); `mac(key, bytes)` returns HMAC-SHA256. Keys must
+  be 32-byte binaries; payloads are bounded to 8 MiB and context to 64 KiB.
+- `lambda.io.disk`: procedures `resolve(root)`, `inspect(root, relative)`,
+  `entries(root, relative, limit)`, `capture(root, relative, limit)`,
+  `install(root, relative, bytes, expected_token)`, `erase(root, relative, token)`,
+  and `directory(root, relative)` reuse held-directory file anchors. Capture
+  returns bytes and observed metadata; null byte content represents an empty
+  existing file (S2.2.4). Null install token means create-only. Existing-file
+  replacement/removal requires a current token. Tokens detect substitution,
+  not exclusion of all external writers. Unsupported entries/platforms and
+  unbrokered use under a bound security client fail closed.
+
+See [local repository API, formats and limits](../lmd/package/sync/LOCAL_REPOSITORY.md).
 #### lambda.io.sqlite
 
 Import `lambda.io.sqlite` with an alias to execute one parameterized SQLite

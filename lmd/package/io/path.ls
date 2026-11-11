@@ -26,6 +26,10 @@ pub fn normal_path(path) any^ {
 pub fn resolve_path(base_dir,path) any^ =>
     normal_path(if (starts_with(path,"/")) path else base_dir ++ "/" ++ path)
 
+// callers resolving physical roots first can reject equal or nested storage domains.
+pub fn overlaps(a,b) any^ => a == b or a == "/" or b == "/" or
+    starts_with(a,b ++ "/")^ or starts_with(b,a ++ "/")^
+
 // File browsers expand the caller's home directory before lexical normalization.
 pub fn absolute(path,base,home="/") any^ {
     let expanded = if (path == "~") home else if (starts_with(path,"~/")) home ++ slice(path,1) else path;

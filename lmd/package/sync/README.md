@@ -1,162 +1,248 @@
-# Lambda Script replication prototype
+# Lambda Script document and workspace replication
 
-Experimental, pure Lambda Script modules for the
-[data-sync design](../../../vibe/Lambda_Design_Data_Sync.md).
-This is an in-memory replication/session model. It is not connected to the
-editor application, filesystem, peer transport or object storage.
+An experimental, transport-independent CRDT protocol implemented in pure Lambda
+Script. It supports Text and Mark-oriented documents, bounded delta exchange,
+authenticated checkpoint recovery, atomic editing, saved history and restart.
+Workspace transactions add stable file/directory identities, cycle-safe moves,
+saved revision heads and ZIP-backed namespaces.
+The [v1 protocol contract](../../../vibe/Lambda_Design_CRDT_Protocol.md) defines
+its formats, invariants and limits; the broader
+[data-sync design](../../../vibe/Lambda_Design_Data_Sync.md) defines integration.
 
-The core uses RGA sequences with retained deletion anchors and causal multi-value
-registers. Text and Mark containers share these primitives. The algorithms run
-in `fn` code under S12.1.1v3; local variables are private implementation state.
-Native services supply SHA-256 fingerprints, not the merge algorithm. Package
-imports/source distribution follow D9.3.4 and D1.7.
+The algorithms run in `fn` code (S12.1.1v3). Existing native primitives supply
+hashing and signature verification. Transport and editor integration belong to
+effectful host adapters. The [native local agent](LOCAL_REPOSITORY.md) implements
+encrypted immutable repositories, filesystem reconciliation, installation
+journals and recovery in Lambda Script, using narrow native crypto/disk APIs.
+Package distribution/imports follow D1.7 and D9.3.4.
 
-## Try it
-
-From the repository root:
+## Run the examples
 
 ```sh
+./lambda.exe test/lambda/sync_protocol_example.ls
 ./lambda.exe test/lambda/sync_example.ls
+./lambda.exe test/lambda/sync_workspace_example.ls
+./lambda.exe run test/lambda/proc/sync_local_filesystem.ls
 ```
 
-The example starts with `Hello world` on disk. Lambda inserts `!` without
-saving, an external editor saves `Hello world?`, and the merged live text becomes
-`Hello! world?`. The external save remains the disk version until a modeled save.
-An older peer then merges after detailed update packets have been compacted.
+The first demonstrates a direct transaction followed by offline checkpoint
+recovery. The second preserves unsaved editor changes while importing an external
+save from the known disk base.
+
+## Endpoint API
 
 ```lambda
-import core: lambda.sync.core
 import text: lambda.sync.text
-import session: lambda.sync.session
+import protocol: lambda.sync.protocol
+import codec: lambda.sync.codec
 
-let original = session.start(text.from_text("doc", "seed", "Hello world")^)^
-let local = session.update(original,
-    text.insert(original.live, "alice", 5, "!")^)^
-let merged = session.import_external(local, "disk-1", "external-1",
-    original.base.id, "Hello world?", "Hello world?")^;
-[text.read(merged.live)^, merged.disk, session.dirty(merged)^]
+let base = text.from_text("document", "seed", "Hello")^
+let alice = protocol.local_change(protocol.start(base)^, "alice",
+    [{kind:'text', start:5, count:0, value:"!"}])^.endpoint
+let bob = protocol.start(base)^
+let message = protocol.next(alice, protocol.have(bob.replica)^)^
+// the host has already authenticated the original author for these exact operations
+let received = protocol.accept(bob, codec.encode(message)^,
+    {actors:["alice"], checkpoints:[]})^;
+text.read(received.replica)^
 ```
 
-Result: `["Hello! world?", "Hello world?", true]`.
+Result: `Hello!`. Real host code can use `auth.admission(message, proofs, grants)`
+to verify original Ed25519 authorship and obtain the admission record. Never
+construct that record solely from an unverified relay's claimed actor IDs.
+Checkpoint admission names the exact authorized digest.
+
+Exchange HAVE/`next` messages until both applied frontiers cover the advertised
+work. Keep original transaction proofs while relaying. A missing compacted prefix
+returns `checkpoint_required`; pin its immutable state and send `frames` for the
+advertised digest. The receiver merges its pending work with the complete
+validated checkpoint. P2P and periodic HTTP polling use identical messages.
+`reply` is the lower-level standalone-operation API; use endpoint `next` to
+preserve atomic groups on recovery and relay paths.
 
 ## Modules
 
 | Module | Principal operations |
 |---|---|
-| `lambda.sync.core` | `receive`, `merge`, `packet`, `receive_packet`, `compact`, `snapshot`, `restore` |
-| `lambda.sync.sequence` | Shared RGA insertion/removal and LCS correspondence |
-| `lambda.sync.text` | `from_text`, `read`, `insert`, `remove`, `splice`, `replace`, external `reconcile` |
-| `lambda.sync.mark` | `from_value`, `value`, `value_at`, `child`, `set`, `remove_field`, `splice`, `reconcile`, `conflicts` |
-| `lambda.sync.session` | `start`, `update`, `import_external`, `dirty`, `save`, `resolve`, `deleted`, `compact`, `retain` |
+| `lambda.sync.core` | Causal receive/join, operation receipts, RGA/register primitives, `validate`, `compact`, `snapshot`, `restore` |
+| `lambda.sync.schema` | Shared structural, identity, clock and descriptor checks |
+| `lambda.sync.codec` | Canonical versioned typed `encode`, `decode`, `digest` |
+| `lambda.sync.auth` | Signed operation/transaction/checkpoint domains and grant-based `admission` |
+| `lambda.sync.protocol` | `start`, `have`, `next`, `accept`, checkpoint `frames`, ACK, `record_durable`, `bootstrap`, endpoint validation |
+| `lambda.sync.sequence` | RGA adapters and LCS correspondence |
+| `lambda.sync.text` | Unicode `read`, `insert`, `remove`, `splice`, `replace`, guarded external `reconcile` |
+| `lambda.sync.mark` | Stable containers, fields, child text, root replacement, tag/order edits, blob fields and explicit conflict resolution |
+| `lambda.sync.change` | Atomic command execution, operation groups, pinned compensating undo |
+| `lambda.sync.position` | Stable cursor gaps and affinity through deleted anchors |
+| `lambda.sync.presence` | Receiver-local leases with replay-resistant counters |
+| `lambda.sync.blob` | Immutable descriptors, integrity checks, availability and retained roots |
+| `lambda.sync.session` | External imports, exact-frontier save preparation/commit, saved parents, conflict/dirty state and retention selection |
+| `lambda.sync.store` | Validated endpoint/session persistence bundles and fresh-writer restore |
+| `lambda.sync.workspace` | `start`, `transact`, `have`, `read`, `entry`, `path`, `content`, `payload`, `document`, retained `roots` |
+| `lambda.sync.workspace_commands` | Lower namespace commands and transaction-local creation aliases |
+| `lambda.sync.workspace_rules` | Validate events, observed identities, revisions and document links |
+| `lambda.sync.workspace_tree` | Ordered placement replay, tombstones, revision heads and deterministic conflict views |
+| `lambda.sync.workspace_zip` | `capture`, `from_archive`, `read_file`, `update`, save preparation/commit, `refresh_file`, external imports/review and restart |
 
-All operations return new values. Callers retain older states when they need
-snapshot history. Public fallible calls use ordinary error outcomes and postfix
-`^`; errors do not mutate the supplied state.
+Pure APIs return immutable values. The ZIP `save` procedure performs explicit
+filesystem output. Fallible calls use ordinary errors and postfix
+`^`. A failed operation leaves the supplied state available for recovery.
 
-## Replication contract
+## Editing and data
 
-- A document actor owns a contiguous counter stream. Actor IDs are explicit
-  nonempty strings supplied by the caller, with fresh identities after a clone
-  or restoring an obsolete writer state. The prototype does not enroll devices
-  or allocate durable actor identities for a host.
-- Operation identity is `(actor, counter)`; Lamport time orders RGA siblings.
-  Receivers buffer missing dependencies and reject conflicting reuse of an ID.
-  SHA-256 operation receipts preserve that detection after packet compaction.
-- State joins use immutable RGA atoms, deletion sets and causal dot-store joins
-  for field assignments. A delayed assignment removes only values in its own
-  observed context. Concurrent field replacements remain explicit alternatives;
-  `mark.value` reports an error until those fields are resolved.
-- `packet(sender, peer)` returns missing incremental operations when available,
-  otherwise a compact checkpoint. Checkpoint receipt merges the old peer's
-  pending edits with the current state. Incompatible documents/profiles/epochs
-  are rejected; retiring an epoch and rebasing its pending work is not modeled.
-- `compact` drops covered packet logs and deleted sequence payloads, retaining
-  their IDs/order anchors, causal coverage and receipts. It does not collect RGA
-  anchors or unreachable structured nodes, and metadata can grow with editing.
-  Saved snapshots retain the exact endpoint states they capture.
+Actors own contiguous counter streams. Allocate a fresh actor after cloning or
+restoring obsolete state; `store.load` enforces freshness against known work.
+Operation fingerprints detect conflicting reuse even after compaction. RGA
+sequence order and causal multi-value joins converge independently of packet
+order. Concurrent field, root, tag, order and blob replacements retain explicit
+alternatives rather than selecting a timestamp winner.
 
-The packet/snapshot records and formatter-derived fingerprints are experimental
-representations, not a canonical production wire/repository format. Receipts
-detect counter forks in these tests; they are not signatures, grants, checkpoint
-authorization or a hostile-input security boundary.
+The Mark profile has a permanent document-value register, so root types can
+change. Use `content_node` to get its current editable child. Maps, arrays,
+elements and text children have stable IDs; user fields contain no sync metadata.
+Map order is significant to projection/dirty detection while native map equality
+remains unordered (S2.3.1v2). Element projection follows S2.6 content normalization.
 
-## Mark model
+Native maps/arrays/text/scalars project directly. An element projects to the
+inspection record `{kind:'element', tag, attributes, children}`; external writers
+and native-element reconstruction are separate. Names requiring an unavailable
+lossless namespace adapter fail explicitly (S8.2.2v6; existing
+[LR03-40](../../../vibe/Lambda_Issue_Ledger.md#lr03-40)).
 
-The prototype constructs stable map, array, element and editable-text nodes.
-Maps/attributes have ordered key sequences and multi-value fields; arrays and
-element children have RGA item sequences. Child ownership is fixed at creation.
-Primitive values, including small binaries, are atomic field/sequence values.
-Map order remains distinct from unordered map equality (S2.3.1v2).
+`local_change` supports text/child splices, field set/remove/resolve, scalar/root
+replacement, tags, key order and blob fields. Transactions install atomically
+when their prerequisites arrive, survive restart, and retain relay grouping
+until checkpoint coverage. Undo creates new compensating edits and retains
+concurrent unrelated text insertions. Field changes after the transaction need
+explicit resolution; the editor consumes each pinned undo token once.
 
-`mark.value` projects native maps, arrays, strings and scalar values. An element
-projects to the inspection record `{kind:'element', tag, attributes, children}`;
-this is not an external format writer or a native-element reconstruction API.
-Element content projection drops null/empty strings and merges adjacent strings
-and binaries under S2.6.1v2–S2.6.5, while replication identities stay separate.
-An ordinary array keeps its null and empty-string entries.
+Small binary values are atomic, with a 64 KiB inline limit. Larger attachments
+use indivisible manifest/size/hash/media-type descriptors. Blob alternatives,
+retained versions and detached recovery state retain their content roots.
+Availability checks do not upload or encrypt bytes.
 
-External differences preserve known map fields and text identities. LCS
-correspondence detects multiple optimal matched identity sets; ambiguous text or
-structured sequences require review. Changed container sequences without a
-reliable correspondence also require review. Quadratic LCS and array-based
-indexes are small-input reference choices, not performance claims.
+## Persistence, saves and external edits
 
-Rich-text span semantics, arbitrary subtree moves, tag replacement, schema
-migration, exact external-format round trips and browser hosting are not
-qualified. Initial/new map-key order is retained; explicit reordering of existing
-map keys is not an editing operation in this model. Namespaced XML/Mark fidelity
-remains gated by S8.2.2v6 /
-[LR03-40](../../../vibe/Lambda_Issue_Ledger.md#lr03-40).
+`store.seal` returns bytes for a validated checksummed bundle; the host must store
+them atomically. `store.load` restores unsaved live state, pending messages,
+checkpoint progress, saved history and recovery branches with a fresh writer.
 
-## External changes and history
+Receipt, local durability and cloud durability are separate. Receiving data never
+marks it cloud-durable. After verified publication, `record_durable` records a
+captured frontier and required blob availability. Newer live edits stay pending.
+Signing, grant distribution, durable writes and publication evidence are host
+responsibilities under D11.2.3–D11.2.4.
 
-`import_external(session, id, actor, base_id, raw, parsed)` accepts a host's
-captured bytes plus parsed data, or a parse error in `parsed`. Capture and parse
-are outside this pure model. The host must establish their relationship to the
-known materialized base; ordinary external editors do not provide causal tokens.
-An unknown/stale base or failed/ambiguous parse retains the input for review.
+`prepare_save` captures export/state at one frontier. `commit_save` advances the
+disk version without absorbing later edits, and rejects an intervening disk-base
+change. Received saved heads retain their parentage. `retain` selects logical
+endpoints while protecting active bases; daily policy and physical deletion are
+repository maintenance work.
 
-The import uses a fresh actor and forks from the accepted disk checkpoint,
-not the live editor buffer. Publishing it later does not imply that it observed
-local unsaved edits. Repeated import IDs are idempotent; reusing an ID with
-different input is rejected. Successful imports advance the disk base to the
-external branch, while the merged live document can remain dirty.
+External changes fork from the accepted disk base under a fresh import actor,
+not from the unsaved live buffer. Disjoint changes merge with a notice; overlap,
+unknown bases, parsing failures and ambiguous identity mapping preserve raw input
+and unsaved work for review. Successful external saves advance the disk base to
+the external branch. No capture/save race guarantee is implied without a host
+adapter. Repeated import IDs remain idempotent after compaction.
 
-Overlapping text replacements, multi-value fields and deletion of a child edited
-on the other branch retain both inputs with a review notice. Disjoint changes
-merge with a non-blocking notice when the editor was dirty. `save` refuses an
-unresolved review/deletion, and `resolve` requires an explicit state containing
-the observed causal context. No filesystem operation is performed by either.
+## Workspace transactions
 
-`save` creates a self-contained immutable snapshot and modeled disk version.
-`retain(session, ids)` demonstrates selecting saved endpoints, preserving the
-current disk base and conflict bases. Calendar/time-zone policy evaluation,
-physical reachability collection and fenced deletion are not implemented.
-Completed external imports can reduce to idempotence receipts during session
-compaction; unresolved inputs remain intact. Thus thinning saved versions need
-not retain every external file payload or every keystroke packet.
+`workspace.start(id)` creates a namespace endpoint with profile `workspace` and
+schema `["workspace",1]`. `transact(endpoint, actor, commands)` uses the same
+signed atomic-group protocol as document editing. Use `workspace.have(endpoint)`
+for negotiation, then `protocol.next`/`accept`. Pass `workspace.model` to lower-level
+protocol functions whose default schema is the document model.
 
-## Evidence and limits
+| Command kind | Required fields after `kind` | Optional fields |
+|---|---|---|
+| `create` | `type:'file'|'dir'`, `parent`, `name`; files also need `content` | `as` transaction-local alias; `document` checkpoint link |
+| `move` | `entry` | `parent`, `name`; omitted components retain current placement |
+| `delete` | `entry` | — |
+| `restore` | `entry` | `deletions`; defaults to observed active tombstones |
+| `publish` | `entry`, `content` | `parents`; defaults to observed revision heads; `document` |
 
-The existing Lambda golden harness discovers `test/lambda/sync_*.ls`; every
-fixture has a `.txt` expected result. Fixtures cover merge algebra, 120 delivery
-orders, 225 text replacement pairs, duplicates, causal buffering, Unicode,
-field/delete conflicts, external imports, saved endpoints, serialized recovery,
-counter forks and an old peer returning after compaction. Run with
-`--tier=interp`, `--tier=auto` and `--tier=jit`.
+References are stable `[actor,counter]` entry IDs or aliases declared by an earlier
+creation in the same group. The root is `workspace.root`. A file's initial
+revision and its identity are allocated together. Revision hashes include the
+workspace ID and epoch as well as the file ID. Content references come from
+`workspace.content(bytes)` or an immutable repository adapter. Keep the returned
+object bytes separately; metadata receipt does not transfer them. The
+[workspace example](../../../test/lambda/sync_workspace_example.ls) creates a
+directory, moves a file and publishes its saved version in one transaction.
 
-Implementation checkpoint and exact verification results are in the
-[implementation record](<../../../vibe/impl/Lambda_Impl_Sync_Prototype (done).md>).
-No network, storage durability, encryption, directory-move implementation,
-device authentication, host save-race guarantee, automatic calendar maintenance
-or UI integration is implied by these model checks.
+`read(replica)` returns entries and explicit conflicts. Listings expose one
+cycle-free placement, retained content heads and tombstones, plus generated
+conflict names that avoid real/generated name collisions. `path(..., true)` uses
+those materialization names. Logical names stay unchanged. `roots` includes
+historical content references and linked document/workspace checkpoints; durability
+evidence must cover both. `document(saved_checkpoint)` builds a captured link.
 
-Algorithm references:
+Every workspace event survives same-epoch compaction. Full sorted placement
+replay supports late offline operations and reconsideration of suppressed moves.
+It is a reference implementation, with no bounded-history or performance claim.
+Namespace compensation uses explicit commands, rather than document undo tokens.
 
-- [Gomes et al., Verifying Strong Eventual Consistency, 2017](https://arxiv.org/abs/1707.01747),
-  with the [RGA reference/proofs](https://github.com/trvedata/crdt-isabelle).
-- [Almeida et al., Delta State Replicated Data Types, v1](https://arxiv.org/abs/1603.01529v1),
-  with the [authors' dot-kernel/MV-register reference](https://github.com/CBaquero/delta-enabled-crdts).
+## ZIP workspaces
 
-This independently composed Lambda prototype does not inherit those proofs or
-claim their binary protocol compatibility.
+`workspace_zip.from_archive(id, actor, input(path,'zip')^)` imports a captured
+archive. `read_file(id, actor, path)` additionally captures the outer bytes once
+before parsing and remembers their hash for guarded saves. Nested archives remain
+binary members until explicitly opened. Empty directories/files and opaque
+binary payloads are retained. The initial capture limits are 10,000 entries and
+64 MiB uncompressed payload; existing native archive quotas apply as well. Bulk
+imports form groups bounded by 128 operations and the actual 64 KiB wire image,
+including long names and causal context.
+
+Apply workspace transactions to `session.endpoint`, then call
+`workspace_zip.update(session, endpoint, new_objects)`. `prepare_save` returns a
+pinned baseline and constructed `fs` tree. A host can write that tree using
+`output(..., {format:'zip', deterministic:true})`, then call `commit_save` after
+successful, verified publication. Later edits remain dirty. The `save` procedure
+performs the read/check/atomic-write/readback sequence itself. A new target must
+be absent; replacing an existing Save As target requires its explicit expected
+hash. Host CAS/locking is required to exclude the final external-write race.
+
+`refresh_file(session, import_id, fresh_actor, hints)` imports a new capture from
+the known source. `import_external` accepts a separately captured archive and base
+ID. Rename hints are `{entry, path}` records backed by host/user identity evidence;
+directory hints cover descendants. Equal bytes alone do not establish a rename.
+Without evidence, path additions/removals retain separate histories. Type changes
+and ambiguous associations retain captured input for review; `resolve_review`
+records an explicit resolution after the caller has applied chosen commands.
+
+`seal`/`load` persist the archive session, endpoint, object bytes and pending
+review captures in a checksummed bundle. `load` requires a fresh actor. These
+reference bundles use the codec's 8 MiB decode limit; large production blobs
+belong in the separately journaled local object repository. ZIP output normalizes
+container metadata and compression, preserving member names/payload bytes rather
+than original compressed representation or every extra field. This package does
+not add a hidden synchronization member to user archives.
+
+## Qualification and limits
+
+`test/lambda/sync_*.ls` fixtures cover delivery/merge laws, typed scalar boundaries,
+canonical encoding, signatures, malformed input, transaction relay/restart,
+checkpoint framing, offline recovery, saved frontiers, external edits and blobs.
+Workspace fixtures add move replay schedules, concurrent deletion/restore,
+revision heads, signed namespace groups, ZIP round trips/external merges,
+restart and long-name batch sizing.
+Exact verification evidence is recorded in the
+[implementation plan](<../../../vibe/impl/Lambda_Impl_Sync_Protocol (done).md>).
+Workspace/ZIP evidence is in the
+[workspace plan](<../../../vibe/impl/Lambda_Impl_Sync_Workspace (done).md>).
+
+Same-epoch compaction removes detailed packets and deleted payloads while keeping
+anchors, causality, conflict state and counter-fork evidence. Metadata and detached
+nodes can grow. Epoch retirement preserves old pending branches for explicit
+recovery; it does not silently replay them into a new schema.
+
+This reference implementation uses array-based indexes and quadratic LCS.
+Arbitrary Mark subtree reparenting, rich-text span intent beyond explicit Mark trees,
+namespace adapter completion, browser execution, physical GC, and deployed
+editor/network/cloud adapters remain separate work. The local repository stores
+encrypted objects and retains history permanently; its limits and host qualification
+are documented [separately](LOCAL_REPOSITORY.md). Native ZIP
+capture/output is reused through its existing public API. No native
+CRDT runtime, upstream wire compatibility, transferred formal proof, or production
+performance claim is implied.

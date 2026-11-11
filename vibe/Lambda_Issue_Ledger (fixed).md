@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **280 anchored records**, preserving fixed, resolved,
+This archive contains **286 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -1538,6 +1538,98 @@ Covered by fixture `test/mir/lambda/root_publication_map_keys.ls`, checked on al
 `pn f() { var acc: i64 = 0i64; acc = acc + 7i64; return acc }` then `let r = f(); print(string(r))` printed `null` on the JIT (`fn_string unhandled type: raw_pointer`) and `7` on T0; a large value segfaulted. It predated the day's sized-integer work (reproduced with all of it reverted). `test/mir/lambda/wide_int_native_lane.ls` had passed only because its overflowing constant produced the same wrong output on every run, and neither harness read its values.
 **Root cause:** the wide integer was never the problem — the pending-pair return resolved correctly. `string()` returns a raw `String*` (`C_RET_STRING`). The call's carrier was the boxed `any` lane because `mir_call_may_defect` saw a defect-capable operand (f's typed `var` store), so `mir_call_value_from_result` published the register as an Item; but no rejected join was built (`rejected_error_flows` was false), so nothing boxed the raw pointer, and `print` received it untagged. **Fix:** `POST_PROCESS_CARRIER` at the three generic system-call return points boxes a raw C return (`String*`, `Symbol*`, int64, double) with `emit_box` whenever the call's carrier is `any`; `bool` and DateTime returns were already boxed by their post-processing. The two predicates still answer differently (MIR defect facts vs the AST's rejected-flow flag); only the representation mismatch is fixed. **Tests:** `test/mir/lambda/wide_int_native_lane.txt` plus `LambdaTypedPathTests.WideIntNativeLaneValues` / `…Jit` now pin the fixture's values.
 
+<a id="lr07-66"></a>**LR07-66 · JIT logical joins choose a native Boolean lane before joining actual outcomes · RESOLVED (2026-11-11; found during document CRDT implementation)**
+
+**Observed:** eager JIT rejected `false or not natural(record.total)^ or false`
+with `any from VALUE_REP_ITEM(1) to VALUE_REP_I64(5)`, while interpreter/AUTO
+executed it. The permanent reduction is
+`test/lambda/logical_not_closed_call.ls/.txt`; `natural` checks an integer's
+range. It also covers comprehension/`all`, Error propagation, null and skipped
+operands. S3.4 requires encountered errors and selected values to survive
+logical evaluation; D4.3.1 forbids inference from changing correct results.
+
+**Confirmed cause and fix:** `lambda/runtime/mvp/mvp_mir.cpp` selected the
+logical result's Boolean representation from the planned normal domain,
+although the actual right producer retained a tagged Item/Error carrier.
+The logical value arm now joins actual operand outcomes as Items, preserves
+their semantic and successful domains, and narrows only a clean Bool result.
+The initial unary-not-only experiment was removed; the shared logical join
+is the repair. No semantics, test oracle or harness was weakened.
+
+**Qualification:** all 21 affected fixtures passed on interpreter, AUTO and
+JIT, normally and with every-allocation GC/freed-memory poisoning in isolated
+300-second batches. Lambda baseline **7,423/7,423**, including runtime
+**2,312/2,312** and native MIR GC **368/368**. Evidence:
+`temp/sync-protocol/{interp,auto,jit}.log`, per-tier stress summaries,
+`baseline.log`, `qualified-inputs.json` and `jit-backtrace.log`.
+[Implementation and qualification](<impl/Lambda_Impl_Sync_Protocol (done).md#compiler-investigation>).
+The default-timeout cleanup crash remains separately open as
+[LR01-24](Lambda_Issue_Ledger.md#lr01-24).
+
+<a id="lr07-67"></a>**LR07-67 · JIT loses an imported procedure caller's success domain after caret propagation · RESOLVED (2026-11-11; found during workspace/ZIP CRDT implementation)**
+
+**Observed:** `let saved = z.save(...)^` in the ZIP-save fixture triggered
+`E501: unsupported representation conversion in mvp_*_main: any (0) from 1 to 8`
+(Item to raw GC pointer). Interpreter/AUTO succeeded. The permanent reduction
+is `test/lambda/proc/propagated_import_record.ls/.txt`, with helper
+`test/lambda/mod_propagated_import_record.ls`: a procedure builds a map after
+propagating an erased `any^` call; its importer checks both the returned map
+and recovered error. The golden is `[true, "test", "unexpected"]`.
+
+**Confirmed cause and fix:** LLDB traced the rejected conversion to the
+`saved` binding in `store_binding`. The caller inferred a map, but
+`direct_call` passed a null source AST to `propagated_value` after the erased
+body ABI returned an Item. That discarded the caller's narrower successful
+domain after checking Error. `lambda/runtime/mvp/mvp_mir.cpp` now supplies
+the actual call AST to the existing helper. The fix preserves inference
+equivalence (D4.3.1) and binding outcomes (S7.7.2v2); it adds no receiving
+contract, forced binding type or new conversion path.
+
+**Qualification:** 32 focused fixtures passed on each of interpreter, AUTO
+and JIT, normally and in the full isolated GC/poison sweep. Following the
+baseline rebuild, all 32 normal fixtures and six relevant stress fixtures
+were rechecked on every tier. Lambda baseline **7,437/7,437**, runtime
+**2,326/2,326**, native MIR GC **368/368**. Final debug executable SHA256:
+`e5860fd168129a1c2a82989b15412311512d5cd7859f20a61633215021e6cabf`.
+Evidence: `temp/sync-workspace/jit-binding.log`, `jit-backtrace.log`,
+`*-rebuilt-normal.log`, `*-rebuilt-stress-summary.log`, `baseline.log` and
+`qualification-inputs.json`.
+[Implementation and qualification](<impl/Lambda_Impl_Sync_Workspace (done).md>).
+LR07-58 and the TeX dynamic stream-map E501 report remain separate open
+issues; a shared cause has not been established.
+
+<a id="lr07-68"></a>**LR07-68 · Binary conversion promises a non-null result to JIT joins · RESOLVED (2026-11-11)**
+
+**Resolution:** The registry now declares an optional successful result for `binary()`, enforcing S2.2.2v2 / D4.3.1. The shared optional-result relation feeds direct calls and builtin value types. `binary_nullable_join.ls/.txt` retains null through concatenation and loop accumulators on every tier; no script workaround or admission weakening is used.
+
+**Qualification:** final Lambda baseline **7,458/7,458**, runtime **2,347/2,347**,
+native MIR GC **368/368**. Normal coverage is **44/44** on interpreter, AUTO and
+JIT. Selected GC/poison runs passed **7/7** on JIT and **4/4** on interpreter/AUTO;
+the rebuilt host repeated four focused normal and four stress fixtures per tier.
+Evidence: `temp/sync-local/baseline.log`, `normal-coverage.json`, per-tier stress
+summaries, `*-post-build-*-summary.log` and `qualification-inputs.json`.
+[Implementation and qualification](<impl/Lambda_Impl_Sync_Local_Repository (done).md>).
+
+<details><summary>Original report and investigation before qualification</summary>
+
+`binary([])^ ++ binary([1,2])^`, including a loop accumulator initialized
+with `binary([])^`, succeeds on the interpreter and reports E309
+`fn_join: failed to concatenate binary operands` under eager JIT. The repository
+reconstruction fixture exposed it; the reduced regression is
+`test/lambda/binary_nullable_join.ls/.txt`.
+
+Confirmed cause: the system-function registry declares successful `binary()`
+results as clean `binary`, although the empty-array conversion returns null
+under S2.2.2v2. The JIT therefore boxes a nonexistent binary pointer instead
+of preserving the null identity operand (D4.3.1). The patch adds a registry-owned
+optional result relation, used by direct calls and first-class builtin types.
+No fixture/harness weakening or script workaround is used. Initial evidence:
+`temp/_sync_binary_join.ls`, `temp/sync-local-repository-jit.log`.
+Qualification is tracked in
+[the local repository plan](<impl/Lambda_Impl_Sync_Local_Repository (done).md>).
+
+</details>
+
 ## 8. Memory management & GC (LR08)
 
 <a id="lr08-14"></a>**LR08-14 · UI attribute retyping misclassifies arena buffers as pool migrations (D3.4.5 / D5.5.1–D5.5.2) · FIXED 2026-10-29 (Lambda baseline 8,410/8,410 and native replay qualified)**
@@ -2477,6 +2569,66 @@ Runtime cost: release builds, paired A/B against the tree before this fix, 11 pa
 
 <a id="lr12-39"></a>**LR12-39 · A copy-on-write copy of a parsed container inherited `is_immortal`, so every later write copied it again and an un-republished write was lost (S9.1.2) · FIXED 2026-10-06 (found the same day, while writing the D3.4.3 external-parent fixture)**
 `let doc = parse("{\"a\": 1}", 'json')^; var p = doc; p.c = 3; p["d"] = "four"` ended with no `d`, on both tiers; so did `p["c"] = 3; p["d"] = "four"`. A first index write alone, a member write, and a literal source all kept it. `clone_mutable_container_flags` (lambda-eval.cpp) copies the source's flag byte and clears `is_static` and `is_data_migrated`, but kept `is_immortal`, which `map_pooled` sets on every parsed map. `cow_prepare_write` treats an immortal container as shared, so each write to the copy copied it again and returned a new object; the compiler republishes the result of the write that detaches a marked alias, but rightly treats the copy as unique afterwards, so the second write's new object was dropped. The copy's data is written in the mutable encoding, so keeping the bit also made immortal-owner reads (`map_read_field_for_owner`, `container_scalar_read`) misread its wide scalars. **Fix:** a COW copy clears `is_immortal`. Covered by `test/lambda/proc/map_external_parent.ls` (the parsed section), on JIT and auto and in the forced-GC sweep. Found alongside, still open: [LR12-40](<Lambda_Issue_Ledger (fixed).md#lr12-40>) and [LR12-41](<Lambda_Issue_Ledger (fixed).md#lr12-41>).
+<a id="lr12-45"></a>**LR12-45 · New disk API dereferences an immediate limit as a wide integer · RESOLVED (2026-11-11)**
+
+**Resolution:** The new disk bridge decodes an immediate `LMD_TYPE_INT` with `it2i()` instead of dereferencing a wide scalar home (D2.3.4). Root enumeration uses the held root anchor, and empty-file publication supplies the shared writer's required non-null zero-length buffer. Capture, enumeration, empty content and stale tokens are covered by the native integration fixture.
+
+**Qualification:** final Lambda baseline **7,458/7,458**, runtime **2,347/2,347**,
+native MIR GC **368/368**. Normal coverage is **44/44** on interpreter, AUTO and
+JIT. Selected GC/poison runs passed **7/7** on JIT and **4/4** on interpreter/AUTO;
+the rebuilt host repeated four focused normal and four stress fixtures per tier.
+Evidence: `temp/sync-local/baseline.log`, `normal-coverage.json`, per-tier stress
+summaries, `*-post-build-*-summary.log` and `qualification-inputs.json`.
+[Implementation and qualification](<impl/Lambda_Impl_Sync_Local_Repository (done).md>).
+
+<details><summary>Original report and investigation before qualification</summary>
+
+The first uncommitted `lambda.io.disk.capture(root,"a.bin",100)` implementation
+crashed at address `0x64`. LLDB identified `Item::get_int64()` in the shared
+limit decoder: it checked for an immediate `LMD_TYPE_INT` but then used the
+pointer-backed wide scalar accessor (D2.3.4). This was introduced during the
+local-repository work, not reproduced on the starting runtime without that API.
+The patch uses `it2i()` after the tag check; it changes no integer semantics.
+The native integration regression checks bounded capture/enumeration and
+stale-token rejection. Evidence: `temp/sync-local-native-backtrace.log`;
+fixture `test/lambda/proc/sync_local_native.ls/.txt`.
+Final tier and forced-GC qualification is pending in
+[the local repository plan](<impl/Lambda_Impl_Sync_Local_Repository (done).md>).
+
+</details>
+
+<a id="lr12-46"></a>**LR12-46 · `io.delete` rejects dangling symlinks before the physical remover runs · RESOLVED (2026-11-11)**
+
+**Resolution:** The Lambda wrapper delegates directly to the existing physical remover, which uses `lstat` and never follows a link into its target. The redundant following existence check is removed. Invalid/deletion failures now return a current rich error, preserving S12.4.4v4 / D11.1.2 behavior and avoiding a stale prior message. No sibling source changed.
+
+**Qualification:** final Lambda baseline **7,458/7,458**, runtime **2,347/2,347**,
+native MIR GC **368/368**. Normal coverage is **44/44** on interpreter, AUTO and
+JIT. Selected GC/poison runs passed **7/7** on JIT and **4/4** on interpreter/AUTO;
+the rebuilt host repeated four focused normal and four stress fixtures per tier.
+Evidence: `temp/sync-local/baseline.log`, `normal-coverage.json`, per-tier stress
+summaries, `*-post-build-*-summary.log` and `qualification-inputs.json`.
+[Implementation and qualification](<impl/Lambda_Impl_Sync_Local_Repository (done).md>).
+
+<details><summary>Original report and investigation before qualification</summary>
+
+The external-sync test correctly rejects a symlink during a complete scan,
+but cleanup with `io.delete` fails if the link target does not exist. The
+Lambda wrapper in `lambda/runtime/lambda-proc.cpp` first calls `file_exists`,
+which follows the link. The existing shared `file_delete_recursive` already
+uses `lstat` and physical traversal and can remove that directory entry safely.
+The wrapper's bare ItemError also allowed an older caught error's message to
+appear as the failure, obscuring the cause. No sibling source defect is involved.
+
+The patch removes the redundant following check and returns a rich, current
+error for invalid targets/deletion failure (D11.1.2, S12.4.4v4).
+Regression: `test/lambda/proc/io_delete_symlink.ls/.txt` checks a dangling link,
+a link to a directory, preserved target bytes, and the missing-path diagnostic.
+Evidence: `temp/sync-local-external-probe.log`, the temporary stage trace and
+`temp/sync-local/external-interp.log`. Final qualification is pending in
+[the local repository plan](<impl/Lambda_Impl_Sync_Local_Repository (done).md>).
+
+</details>
+
 ## 13. Schema validator (LR13)
 
 <a id="lr13-17"></a>**LR13-17 · CLI schema imports dereference a null runtime · FIXED 2026-10-29 (verified 2026-10-28)**

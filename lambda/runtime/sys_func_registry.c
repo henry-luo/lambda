@@ -429,7 +429,7 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_BINARY, "binary", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_binary", FPTR(fn_binary), NULL, NULL, false, 0,
-     false, &TYPE_BINARY, true},
+     false, &TYPE_BINARY, true, SYS_RESULT_OPTIONAL},
 
     {SYSFUNC_BINARY_DECODE, "binary_decode", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "fn_binary_decode", FPTR(fn_binary_decode), NULL, NULL, false, 0,
@@ -821,6 +821,32 @@ SysFuncInfo sys_func_defs[] = {
     // uuid(): a random UUID; a procedure, since each call differs
     {SYSPROC_UUID, "uuid", 0, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_uuid", FPTR(pn_uuid), NULL, NULL, false, 0},
+
+    // narrow native crypto and anchored filesystem access; repository policy is script-owned.
+    {SYSPROC_IO_CRYPTO_KEY, "io_crypto_key", 0, &TYPE_BINARY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_crypto_key", FPTR(pn_io_crypto_key), NULL, NULL, false, 0},
+    {SYSPROC_IO_CRYPTO_SEAL, "io_crypto_seal", 3, &TYPE_BINARY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_crypto_seal", FPTR(pn_io_crypto_seal), NULL, NULL, false, 0},
+    {SYSFUNC_IO_CRYPTO_OPEN, "io_crypto_open", 3, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_io_crypto_open", FPTR(fn_io_crypto_open), NULL, NULL, false, 0,
+     false, &TYPE_BINARY, true, SYS_RESULT_OPTIONAL},
+    {SYSFUNC_IO_CRYPTO_MAC, "io_crypto_mac", 2, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_io_crypto_mac", FPTR(fn_io_crypto_mac), NULL, NULL, false, 0,
+     false, &TYPE_BINARY, true},
+    {SYSPROC_IO_DISK_INSPECT, "io_disk_inspect", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_inspect", PROFILE_FILE_IO_FPTR(pn_io_disk_inspect), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_ENTRIES, "io_disk_entries", 3, &TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_entries", PROFILE_FILE_IO_FPTR(pn_io_disk_entries), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_CAPTURE, "io_disk_capture", 3, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_capture", PROFILE_FILE_IO_FPTR(pn_io_disk_capture), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_INSTALL, "io_disk_install", 4, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_install", PROFILE_FILE_IO_FPTR(pn_io_disk_install), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_ERASE, "io_disk_erase", 3, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_erase", PROFILE_FILE_IO_FPTR(pn_io_disk_erase), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_DIRECTORY, "io_disk_directory", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_directory", PROFILE_FILE_IO_FPTR(pn_io_disk_directory), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_RESOLVE, "io_disk_resolve", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_resolve", PROFILE_FILE_IO_FPTR(pn_io_disk_resolve), NULL, NULL, false, 0},
 
     {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,

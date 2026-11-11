@@ -82,6 +82,8 @@ typedef enum SysFuncResultKind {
     SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT,
     // A slice additionally retains a binary source as binary.
     SYS_RESULT_SLICE_OF_ARGUMENT,
+    // A solid scalar producer can represent its empty successful result as null.
+    SYS_RESULT_OPTIONAL,
 } SysFuncResultKind;
 
 // System function metadata + JIT import pointer

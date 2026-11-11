@@ -14,6 +14,8 @@
 #include "lib/signature.h"
 
 #include <mbedtls/md.h>
+#include <mbedtls/gcm.h>
+#include <mbedtls/platform_util.h>
 #include <string.h>
 
 static mbedtls_md_type_t hash_algorithm(Item algorithm) {
@@ -106,4 +108,70 @@ extern "C" Item pn_uuid(void) {
     char text[UUID_STR_LEN];
     uuid_v4_format(bytes, text);
     return io_fs_make_string(text, UUID_STR_LEN - 1);
+}
+
+// LGC1 || random 96-bit nonce || 128-bit tag || ciphertext. Context is GCM AAD.
+static Item crypto_aead(Item key, Item input, Item context, bool encrypt) {
+    Item args[] = {key, input, context};
+    for (Item arg : args) if (get_type_id(arg) == LMD_TYPE_ERROR) return arg;
+    const uint8_t *secret, *bytes, *aad; size_t secret_size, size, aad_size;
+    if (get_type_id(key) != LMD_TYPE_BINARY || !signature_bytes(key, &secret, &secret_size) || secret_size != 32 ||
+            !signature_bytes(input, &bytes, &size) || !signature_bytes(context, &aad, &aad_size) ||
+            size > 8 * 1024 * 1024 + 32 || aad_size > 65536)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.crypto: expected a 32-byte key and bounded bytes/context");
+    if (!encrypt && (size < 32 || memcmp(bytes, "LGC1", 4)))
+        return io_fs_error(ERR_INVALID_OPERATION, "io.crypto: invalid ciphertext envelope");
+    size_t plain_size = encrypt ? size : size - 32;
+    if (plain_size > 8 * 1024 * 1024)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.crypto: payload limit");
+    size_t output_size = encrypt ? size + 32 : plain_size;
+    uint8_t* output = (uint8_t*)mem_calloc(output_size ? output_size : 1, 1, MEM_CAT_EVAL);
+    if (!output) return ItemError;
+    mbedtls_gcm_context cipher;
+    mbedtls_gcm_init(&cipher);
+    int status = mbedtls_gcm_setkey(&cipher, MBEDTLS_CIPHER_ID_AES, secret, 256);
+    if (!status && encrypt) {
+        memcpy(output, "LGC1", 4);
+        if (!crypto_random(output + 4, 12)) status = -1;
+        else status = mbedtls_gcm_crypt_and_tag(&cipher, MBEDTLS_GCM_ENCRYPT, size,
+            output + 4, 12, aad, aad_size, bytes, output + 32, 16, output + 16);
+    } else if (!status) {
+        // authenticated decryption must verify before any plaintext is exposed.
+        status = mbedtls_gcm_auth_decrypt(&cipher, plain_size, bytes + 4, 12, aad, aad_size,
+            bytes + 16, 16, bytes + 32, output);
+    }
+    mbedtls_gcm_free(&cipher);
+    Binary* result = status || !output_size ? nullptr : heap_binary_from_bytes((const char*)output, output_size);
+    mbedtls_platform_zeroize(output, output_size);
+    mem_free(output);
+    return status ? io_fs_error(ERR_INVALID_OPERATION, "io.crypto: authentication or encryption failed") :
+        !output_size ? ItemNull : result ? (Item){.item = x2it(result)} : ItemError;
+}
+
+extern "C" Item pn_io_crypto_seal(Item key, Item bytes, Item context) {
+    return crypto_aead(key, bytes, context, true);
+}
+extern "C" Item fn_io_crypto_open(Item key, Item bytes, Item context) {
+    return crypto_aead(key, bytes, context, false);
+}
+extern "C" Item fn_io_crypto_mac(Item key, Item input) {
+    if (get_type_id(key) == LMD_TYPE_ERROR) return key;
+    if (get_type_id(input) == LMD_TYPE_ERROR) return input;
+    const uint8_t *secret, *bytes; size_t secret_size, size;
+    if (get_type_id(key) != LMD_TYPE_BINARY || !signature_bytes(key, &secret, &secret_size) || secret_size != 32 ||
+            !signature_bytes(input, &bytes, &size) || size > 8 * 1024 * 1024)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.crypto.mac: expected a 32-byte key and bounded bytes");
+    uint8_t digest[32];
+    if (mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), secret, secret_size, bytes, size, digest))
+        return io_fs_error(ERR_INTERNAL_ERROR, "io.crypto.mac: provider failure");
+    Binary* result = heap_binary_from_bytes((const char*)digest, sizeof(digest));
+    mbedtls_platform_zeroize(digest, sizeof(digest));
+    return result ? (Item){.item = x2it(result)} : ItemError;
+}
+extern "C" Item pn_io_crypto_key(void) {
+    uint8_t secret[32];
+    if (!crypto_random(secret, sizeof(secret))) return io_fs_error(ERR_INTERNAL_ERROR, "io.crypto.key: no entropy source");
+    Binary* result = heap_binary_from_bytes((const char*)secret, sizeof(secret));
+    mbedtls_platform_zeroize(secret, sizeof(secret));
+    return result ? (Item){.item = x2it(result)} : ItemError;
 }

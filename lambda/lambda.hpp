@@ -397,6 +397,17 @@ typedef enum SysFunc {
     SYSPROC_IO_RDB_EXPORT_COMMIT,
     SYSPROC_IO_RDB_EXPORT_ABORT,
     SYSPROC_IO_SQLITE_SNAPSHOT_DIGEST, // lambda.io.sqlite snapshot_digest(tx) - bounded read snapshot
+    SYSPROC_IO_CRYPTO_KEY,
+    SYSPROC_IO_CRYPTO_SEAL,
+    SYSFUNC_IO_CRYPTO_OPEN,
+    SYSFUNC_IO_CRYPTO_MAC,
+    SYSPROC_IO_DISK_INSPECT,
+    SYSPROC_IO_DISK_ENTRIES,
+    SYSPROC_IO_DISK_CAPTURE,
+    SYSPROC_IO_DISK_INSTALL,
+    SYSPROC_IO_DISK_ERASE,
+    SYSPROC_IO_DISK_DIRECTORY,
+    SYSPROC_IO_DISK_RESOLVE,
 } SysFunc;
 
 #ifdef __cplusplus
@@ -1434,6 +1445,17 @@ extern "C" {
     Item fn_hash(Item value, Item algorithm);
     Item fn_verify_signature(Item key, Item message, Item signature, Item scheme);
     Item pn_uuid(void);
+    Item pn_io_crypto_key(void);
+    Item pn_io_crypto_seal(Item key, Item bytes, Item context);
+    Item fn_io_crypto_open(Item key, Item bytes, Item context);
+    Item fn_io_crypto_mac(Item key, Item bytes);
+    Item pn_io_disk_inspect(Item root, Item relative);
+    Item pn_io_disk_entries(Item root, Item relative, Item limit);
+    Item pn_io_disk_capture(Item root, Item relative, Item limit);
+    Item pn_io_disk_install(Item root, Item relative, Item bytes, Item expected);
+    Item pn_io_disk_erase(Item root, Item relative, Item expected);
+    Item pn_io_disk_directory(Item root, Item relative);
+    Item pn_io_disk_resolve(Item root);
     Item fn_split(Item str, Item sep);
     // A literal ASCII split whose result stores tagged Items for guest arrays.
     Item fn_split_literal_items(Item str, Item sep);

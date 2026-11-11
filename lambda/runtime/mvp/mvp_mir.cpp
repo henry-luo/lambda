@@ -3583,34 +3583,27 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
     MirValue a = c->consuming_array_join == (AstNode*)n
         ? observed_expression(c, n->left) : binary_operand(c, n->left, n->right, n->op);
     if (n->op == OPERATOR_AND || n->op == OPERATOR_OR) {
-        bool right_null = false;
-        Type* right_base = lambda_type_nullable_lane_base(mvp_value_contract(c->module, n->right, 0, c->dense_arrays), &right_null);
-        bool booleans = a.semantic_type == LMD_TYPE_BOOL && right_base && right_base->type_id == LMD_TYPE_BOOL;
-        // keep the selected bool? sentinel intact; logical selection does not
-        // turn an encountered absence into false (S3.4).
-        Type* logical_contract = nullable(a) || right_null ? c->module->nullable_bool : &TYPE_BOOL;
         MIR_reg_t r = em_new_reg(&c->em, "logical", MIR_T_I64);
-        // a nested selection can prove bool while still carrying a tagged
-        // Item. Both incoming arms must use the selected phi's carrier (S3.4).
-        a = convert(c, a, booleans ? VALUE_REP_I64 : VALUE_REP_ITEM);
+        // the right producer can retain an Error Item despite its planned
+        // normal Bool domain. Join actual outcomes before selecting a lane (S3.4).
+        a = convert(c, a, VALUE_REP_ITEM);
         move(c, r, reg(c, a.reg));
         MIR_label_t done = label(c);
-        if (!booleans) branch(c, MIR_BEQ, done,
+        branch(c, MIR_BEQ, done,
             reg(c, operation(c, MIR_URSH, reg(c, r), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
         branch(c, n->op == OPERATOR_AND ? MIR_BEQ : MIR_BNE, done, reg(c, truth(c, a)), imm(c, 0));
         MirValue b = expression(c, n->right);
-        b = convert(c, b, booleans ? VALUE_REP_I64 : VALUE_REP_ITEM);
+        b = convert(c, b, VALUE_REP_ITEM);
         move(c, r, reg(c, b.reg)); mark(c, done);
         // selection preserves both complete operand domains, including their
         // Error alternatives; a clean text join can keep its pointer carrier.
-        Type* selected = booleans ? logical_contract :
-            mvp_join_value_contracts(c->module, a.semantic_contract, b.semantic_contract);
-        MirValue result = value(c, r, selected->type_id,
-            booleans ? VALUE_REP_I64 : VALUE_REP_ITEM, selected, n);
+        Type* selected = mvp_join_value_contracts(c->module, a.semantic_contract, b.semantic_contract);
+        MirValue result = value(c, r, selected->type_id, VALUE_REP_ITEM, selected, n);
         // either selected normal value keeps its producer domain; the Error
         // branch above still bypasses truth and preserves the original Item.
-        if (!booleans) result.admitted_success_contract = normal_join_contract(c, a, b);
-        return result;
+        result.admitted_success_contract = normal_join_contract(c, a, b);
+        return selected->type_id == LMD_TYPE_BOOL && !lambda_type_accepts_error(selected)
+            ? convert(c, result, VALUE_REP_I64) : result;
     }
     MirValue b = binary_operand(c, n->right, n->left, n->op);
     LambdaNumericKind left_wide = numeric_kind(a), right_wide = numeric_kind(b);
@@ -5056,7 +5049,9 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
                 lambda_type_union_normalized(c->module->tp->pool, result_contract, &TYPE_ERROR));
         if (dense_call && !f->abi.effects.may_return_error && normal.rep == VALUE_REP_ITEM)
             normal.semantic_contract = &TYPE_ANY_NO_ERROR;
-        return propagated_value(c, normal, NULL);
+        // imported call sites can prove a narrower success domain than the
+        // erased body ABI; retain it after the caret discharges Error (D4.3.1).
+        return propagated_value(c, normal, (AstNode*)call);
     }
     if (discard) {
         em_apply_value_demand(&c->em, result.normal, MIR_VALUE_DISCARD);

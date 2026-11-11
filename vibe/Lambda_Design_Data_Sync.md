@@ -23,10 +23,11 @@ restore points and compact eligible CRDT representations across removed saves.
 External file/directory changes are required inputs, including external edits
 to a document open in Lambda with unsaved live changes. Reconcile those inputs
 without discarding either side and warn about concurrent external editing.
-The move algorithm recommended
-in §6.3 and the detailed storage/retention policies remain proposals for review.
-Protocol encoding details, reference algorithm selection, and support-library
-selections below remain proposals. This document does not claim a production
+Workspace transactions and ZIP-backed namespaces are selected extensions. The
+experimental [CRDT protocol](Lambda_Design_CRDT_Protocol.md) implements document
+replication and the ordered move-replay reference selected in §6.3. Detailed
+repository publication, storage/retention and deployment policies still require
+their own implementation gates. This document does not claim a production
 implementation or ratification into the formal specifications.
 
 **Scope:** Directory and file synchronization, collaborative documents, and
@@ -142,7 +143,7 @@ scan must not be interpreted as a directory-wide deletion.
 The synchronized working directory remains available to other applications;
 exclusive ownership is limited to the sync agent's private repository state.
 External filesystem observations enter the same revision/operation pipeline
-as managed changes (§6.6). For an open document, the editor retains its live
+as managed changes (§6.7). For an open document, the editor retains its live
 state while an import bridge reconciles the changed disk content (§7.8).
 
 ### 2.2 Function endpoint
@@ -688,7 +689,22 @@ without requiring Git's repository format or a manual commit workflow. Automatic
 reconciliation does not mean every concurrent user intention has a single
 conflict-free result.
 
-### 6.6 External directory and file changes
+### 6.6 Workspace transactions and ZIP-backed namespaces
+
+Use atomic workspace transactions for multi-entry creation, placement,
+deletion/restore and saved-version publication. Content transactions keep their
+Text/Mark document scope; a workspace transaction references captured document
+versions. Stable member IDs let ZIP archives use the same namespace model.
+Member changes replicate independently, and saving rebuilds the archive at a
+captured frontier through the existing ZIP writer. External archive replacements
+merge from the accepted baseline, preserving unsaved live changes.
+
+The event, revision, move, lifecycle, save and external-import contracts are
+defined once in [CRDT protocol §10](Lambda_Design_CRDT_Protocol.md#10-workspace-transactions-and-zip-workspaces).
+ZIP input/output follows S12.4.1v3/S14.3.1v3 and the `fs` carrier under D9.5.5;
+filesystem effects remain in host procedures under S12.1.1v3.
+
+### 6.7 External directory and file changes
 
 Support ordinary filesystem operations by other applications, both while the
 agent runs and while it is stopped. External creates allocate node IDs;
@@ -850,10 +866,14 @@ editable text within Mark trees, and structured containers. Select and document
 the reference algorithms before implementing their rules; combining isolated
 rules from different implementations is not a convergence argument.
 
-The current experimental package uses RGA sequences and causal multi-value
-registers as a finite baseline, referencing the RGA verification work and
-Almeida et al.'s dot-kernel design. This is prototype evidence, not final
-selection or qualification of a complete production Mark-tree CRDT.
+The experimental [document protocol v1](Lambda_Design_CRDT_Protocol.md) uses
+RGA sequences and causal multi-value registers, referencing the RGA verification
+work and Almeida et al.'s dot-kernel design. The Lambda Script package implements
+typed encoding, authored atomic groups, bounded anti-entropy, admitted checkpoints,
+exact-frontier saves, persistence bundles and explicit epoch recovery. It defines
+fixed child ownership; arbitrary document subtree moves remain outside v1.
+This qualifies the reference document protocol rather than deployed editor,
+transport, filesystem, browser or encrypted-repository integration.
 
 Keep deterministic state transitions and reconciliation in `fn` code. Supply
 replica IDs, counters, operations, and state explicitly; do not derive merge
@@ -1534,6 +1554,15 @@ implementation work remains in its owning project under D9.1.1v4 and D9.1.3v2.
 
 ### 12.1 File sync and periodic fallback
 
+The [local repository implementation](<impl/Lambda_Impl_Sync_Local_Repository (done).md>)
+now covers the native local foundation: encrypted immutable files, a rebuildable
+SQLite locator catalog and encrypted local head, Gear chunking, complete scans,
+workspace reconciliation, installation journals, snapshots and recovery. Policy
+is Lambda Script (S12.1.1v3); C++ exposes crypto and file-anchor mechanisms through
+D11.1.2. [API and current limits](../lmd/package/sync/LOCAL_REPOSITORY.md).
+Direct transports, cloud adapters, polling deployment, key enrollment and editor
+bindings remain subsequent acceptance work; this does not complete §12.1.
+
 Deliver a space with enrollment, regular files/directories, durable journaling,
 direct peer transfer, object-store publication, periodic fallback, conflict
 copies, and recovery. Include local/cloud revision objects and offline changeset
@@ -1697,6 +1726,12 @@ during external imports are also selected requirements.
 | Encryption and key lifecycle | Select vetted suites, key wrapping/recovery, rotation, protected local indexes, and isolated file-share capabilities; encryption itself is selected. |
 | Retention and maintenance | Specify daily/tiered policy fields, save-time validation, zone/bucket rules, arrival/deletion grace and overlap; qualify cross-save representations, snapshot pins, fenced purge, mirror/cache policy and future stable-frontier/epoch cuts. |
 | Sharing granularity | Confirm the first shared-space and individual-file-link surface; defer complex inherited exceptions. |
+
+The [reference document protocol](Lambda_Design_CRDT_Protocol.md) now answers
+the document-layer identity, scalar encoding, inline-binary limit, blob descriptor,
+signature-domain, compact-checkpoint, atomic-edit and saved-frontier contracts.
+Its native qualification does not close the repository, external-format,
+filesystem, UI, browser or deployment gates above.
 
 Long polling is a later measured option. It is not required by the first protocol
 or implemented as a hidden waiting loop behind periodic pulls.
@@ -1893,6 +1928,12 @@ not interchangeable merely because they all synchronize or version data.
 
 ## Appendix S. Superseded wording
 
+- ~~The current experimental package uses RGA sequences and causal multi-value
+  registers as a finite baseline, referencing the RGA verification work and
+  Almeida et al.'s dot-kernel design. This is prototype evidence, not final
+  selection or qualification of a complete production Mark-tree CRDT.~~
+  Expanded by the versioned document protocol in §7.5 and its linked contract;
+  deployment and general subtree-move qualification remain separate.
 - ~~Retain incremental updates and complete CRDT checkpoints in object storage.~~
   Replaced by §7.5, §7.7 and §10.1: persist live updates until an authorized,
   merge-safe compact replacement covers them. Retain saved versions under their

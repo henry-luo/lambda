@@ -1536,29 +1536,19 @@ Item pn_io_delete(Item path_item) {
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
-        log_error("io.delete: invalid path argument");
-        return ItemError;
+        return io_fs_error(ERR_TYPE_MISMATCH, "io.delete: invalid path argument");
     }
 
     const char* path = path_buf->str;
 
     log_debug("io.delete: %s", path);
 
-    if (!file_exists(path)) {
-        log_error("io.delete: path does not exist: %s", path);
-        strbuf_free(path_buf);
-        return ItemError;
-    }
-
+    // the shared remover uses lstat/physical traversal; a following existence
+    // check would reject dangling links before their directory entry can be removed.
     int result = file_delete_recursive(path);
-
-    if (result != 0) {
-        log_error("io.delete: failed to delete %s", path);
-    }
-
+    Item outcome = result != 0 ? io_fs_error(ERR_FILE_WRITE_ERROR, "io.delete: failed to delete %s", path) : ItemNull;
     strbuf_free(path_buf);
-
-    return (result != 0) ? ItemError : ItemNull;
+    return outcome;
 }
 
 // io.mkdir(path) - Create directory (recursive)

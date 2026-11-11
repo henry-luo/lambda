@@ -832,7 +832,7 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     // Search and ordinal operations have one optional scalar result: a valid
     // non-negative integer or no value. Their former -1 sentinel made the
     // public type look total and prevented Lambda's `value or default` idiom.
-    if (sysfunc_returns_optional_int(info)) {
+    if (sysfunc_returns_optional_int(info) || info->result_kind == SYS_RESULT_OPTIONAL) {
         return lambda_type_nullable_normalized(tp->pool,
             success ? success : (Type*)&TYPE_INT);
     }
@@ -3612,6 +3612,8 @@ static const struct { const char* path; const char* module; } io_leaf_modules[] 
     {"lambda.io.sqlite", "io_sqlite"},
     {"lambda.io.rdb", "io_rdb"},
     {"lambda.io.websocket", "io_websocket"},
+    {"lambda.io.crypto", "io_crypto"},
+    {"lambda.io.disk", "io_disk"},
 };
 
 static const char* io_leaf_module_path(const char* module) {
@@ -4423,7 +4425,7 @@ static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocat
     type->param_count = type->is_variadic ? 0 : info->arg_count;
     type->required_param_count = type->is_variadic ? 0 : type->param_count;
     type->returned = info->return_type;
-    type->inferred_return = info->success_type ? info->success_type : info->return_type;
+    type->inferred_return = sys_func_success_result_type(tp, info, NULL, NULL);
     set_function_return_contract(type, info->return_type, true);
     type->is_proc = info->is_proc;
     type->can_raise = info->can_raise;

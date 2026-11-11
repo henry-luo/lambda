@@ -2,6 +2,7 @@
 import c: .core
 import text: .text
 import mark: .mark
+import codec: .codec
 
 pub fn value(replica) any^ => if (replica.profile == 'text') text.read(replica)^ else mark.value(replica)^
 
@@ -9,7 +10,7 @@ fn encoded(replica) any^ => if (replica.profile == 'text') text.read(replica)^ e
 
 fn version(replica, raw, projected, parents) any^ {
     let saved = c.snapshot(replica)^
-    return {*:saved, id:hash(format([saved.id,raw],'mark')^,'sha256')^,
+    return {*:saved, id:codec.digest([saved.id,raw,parents])^,
         raw:raw, value:projected, parents:parents}
 }
 
@@ -27,7 +28,7 @@ pub fn dirty(session) any^ {
     if (len(session.conflicts) > 0 or session.deleted) { return true }
     let projected: any^ = value(session.live)
     if (projected is error) { return true }
-    return projected != session.disk
+    return codec.digest(projected)^ != codec.digest(session.disk)^
 }
 
 fn same_deleted_targets(base, a, b) any^ => any([for (atom in base.atoms where
@@ -61,8 +62,9 @@ fn hold(session, record, reason) => {*:session,
 // the host supplies captured raw bytes and either parsed Mark data or a parse error.
 pub fn import_external(session, import_id, actor, base_id, raw, parsed:any) any^ {
     if (not (import_id is string) or import_id == "") raise error("sync: import ID must be nonempty text")
-    let projected = if (parsed is error) {parse_error:parsed.message} else parsed
-    let fingerprint = hash(format([actor,base_id,raw,projected],'mark')^,'sha256')^
+    let normalized:any^ = if (parsed is error) parsed else mark.normalize(parsed)
+    let projected = if (normalized is error) {parse_error:normalized.message} else normalized
+    let fingerprint = codec.digest([actor,base_id,raw,projected])^
     let previous = c.lookup(session.imports,import_id)^
     if (previous != null) {
         if (previous.fingerprint != fingerprint) raise error("sync: import ID reused with different input")
@@ -70,7 +72,7 @@ pub fn import_external(session, import_id, actor, base_id, raw, parsed:any) any^
     }
     let record = {id:import_id,actor:actor,base_id:base_id,raw:raw,external:projected,fingerprint:fingerprint}
     if (base_id != session.base.id) { return hold(session,record,"unknown or stale external base") }
-    if (parsed is error) { return hold(session,record,parsed.message) }
+    if (normalized is error) { return hold(session,record,normalized.message) }
     if (session.deleted) { return hold(session,record,"document was deleted") }
     if (not (actor is string) or actor == "" or c.clock_get(session.live.clock,actor) != 0) {
         return hold(session,record,"external import needs a fresh document actor")
@@ -93,10 +95,38 @@ pub fn import_external(session, import_id, actor, base_id, raw, parsed:any) any^
             else if (unsaved) [*session.notices,"External changes merged; your unsaved edits are retained."] else session.notices}
 }
 
-pub fn save(session) any^ {
+pub fn heads(session) any^ => [for (saved in session.versions where
+    not any([for (other in session.versions) contains(other.parents,saved.id)^])) saved.id]
+
+pub fn prepare_save(session) any^ {
     if (session.deleted or len(session.conflicts) > 0) raise error("sync: resolve external conflicts before saving")
-    let saved = version(session.live,encoded(session.live)^,value(session.live)^,[session.base.id])^
-    return {*:session,base:saved,disk:saved.value,versions:remember(session.versions,saved)}
+    return {base_id:session.base.id,saved:version(session.live,encoded(session.live)^,value(session.live)^,heads(session)^)^}
+}
+
+pub fn validate_version(saved) any^ {
+    let restored = c.restore(saved)^
+    if (saved.id != codec.digest([saved.digest,saved.raw,saved.parents])^ or
+        not (saved.parents is array) or len(unique(saved.parents)) != len(saved.parents) or
+        codec.digest(value(restored)^)^ != codec.digest(saved.value)^) raise error("sync: corrupt saved version")
+    return true
+}
+
+pub fn commit_save(session, prepared) any^ {
+    if (session.deleted or len(session.conflicts) > 0 or prepared.base_id != session.base.id)
+        raise error("sync: disk base changed during save")
+    validate_version(prepared.saved)^
+    if (not c.dominates(session.live.clock,prepared.saved.frontier)^)
+        raise error("sync: save frontier exceeds live state")
+    c.merge(session.live,prepared.saved.replica)^
+    return {*:session,base:prepared.saved,disk:prepared.saved.value,versions:remember(session.versions,prepared.saved)}
+}
+
+pub fn save(session) any^ => commit_save(session,prepare_save(session)^)^
+
+// received saved revisions do not overwrite this device's materialized disk base.
+pub fn receive_version(session, saved) any^ {
+    validate_version(saved)^
+    return {*:session,live:c.merge(session.live,saved.replica)^,versions:remember(session.versions,saved)}
 }
 
 pub fn resolve(session, replica) any^ {

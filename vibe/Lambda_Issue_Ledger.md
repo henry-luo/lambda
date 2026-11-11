@@ -18,6 +18,23 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Sync implementation runtime findings — 2026-11-11
+
+The local-repository follow-up fixed and archived [LR07-68](#lr07-68),
+[LR12-45](#lr12-45) and [LR12-46](#lr12-46), with the final **7,458/7,458**
+baseline and tier/GC evidence. The general builtin dynamic-call adapter gap
+[LR07-69](#lr07-69) remains open; it is independent of the direct APIs used by sync.
+
+Registered two defects found and fixed during CRDT implementation:
+[LR07-66](<Lambda_Issue_Ledger (fixed).md#lr07-66>) preserves actual logical
+operand outcomes before choosing a native Boolean lane (S3.4, D4.3.1);
+[LR07-67](<Lambda_Issue_Ledger (fixed).md#lr07-67>) retains the imported
+caller's success-domain proof after caret propagation (D4.3.1). Both are
+resolved and archived with reductions, fixes and qualification evidence.
+The separate timeout/cleanup crash [LR01-24](#lr01-24) remains open. The
+workspace member-access observation below retains its original probe; its
+semantics and cause remain unconfirmed. Those two earlier archived records add no live issues.
+
 ## Radiant integration layout-host selection — 2026-11-11
 
 <a id="lr12-44"></a>
@@ -250,13 +267,13 @@ Counts:
 
 | Area ID | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
-| LR01 | Compilation pipeline, CLI & REPL | 5 | 2 | 0 | 7 |
+| LR01 | Compilation pipeline, CLI & REPL | 6 | 2 | 0 | 8 |
 | LR02 | Parsing & AST construction | 2 | 4 | 0 | 6 |
 | LR03 | Value & type model | 3 | 1 | 0 | 4 |
 | LR04 | Numbers, decimal & datetime | 5 | 1 | 0 | 6 |
 | LR05 | Strings, symbols & vectors | 2 | 1 | 0 | 3 |
 | LR06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
-| LR07 | MIR Direct transpiler & JIT | 8 | 0 | 0 | 8 |
+| LR07 | MIR Direct transpiler & JIT | 9 | 0 | 0 | 9 |
 | LR08 | Memory management & GC | 6 | 0 | 0 | 6 |
 | LR09 | Runtime builtins | 3 | 0 | 0 | 3 |
 | LR10 | Error handling | 1 | 0 | 0 | 1 |
@@ -264,9 +281,9 @@ Counts:
 | LR12 | Procedural runtime | 5 | 0 | 0 | 5 |
 | LR13 | Schema validator | 6 | 1 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 5 | 1 | 0 | 6 |
-| **Live total** | | **59** | **11** | **0** | **70** |
+| **Live total** | | **61** | **11** | **0** | **72** |
 
-The active ledger now contains 70 live records, with the 64 previously counted
+The active ledger now contains 72 live records, with the 64 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
@@ -581,6 +598,31 @@ Evidence: `temp/mvp_helper_retirement/cache-current.log`,
 `control/cache-test.log`, `control/summary.json`; the causal control retains the
 pre-cleanup helpers, and neither test oracle nor cache policy was changed.
 
+
+<a id="lr01-24"></a>**LR01-24 · Forced-GC batch timeout can crash during cleanup · OPEN (2026-11-11)**
+
+On `21fdc7cf6` plus the document-protocol changes and logical-join fix,
+the interpreter's `sync_laws.ls` reaches the standard batch harness's 60-second
+limit under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. The process
+prints `BATCH_END 124`, then the shell reports segmentation fault 11 before the
+next fixture. Normal interpreter/AUTO/JIT runs complete successfully. No CRDT
+assertion fails before the stress timeout.
+
+Reproduction: run `test/test_lambda_gtest.exe` with
+`LAMBDA_EXEC_BACKEND=interp`, both GC variables above, and
+`--gtest_filter='AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/sync_*'`.
+Evidence: `temp/sync-protocol/interp-forced-gc.log`, especially the timeout and
+subsequent teardown crash. `lambda/main.cpp:4920` uses `sigsetjmp`/alarm around
+script evaluation and continues into `runtime_reset_heap` at `:4984`. A signal
+jump bypassing precise-root/owner cleanup is a candidate cause, not confirmed
+(D6.3.3, D6.4.3). Do not restore conservative stack scanning or mask the crash
+in the harness. This needs a separate cancellation/cleanup investigation.
+
+The CRDT qualification reruns the unchanged stress fixtures with the existing
+`test-batch --timeout=300` option and checks process exit, complete markers and
+goldens. That distinguishes the stress budget from protocol correctness; it
+does not fix or close this timeout-path issue. Progress:
+[CRDT protocol implementation](<impl/Lambda_Impl_Sync_Protocol (done).md>).
 
 ## 2. Parsing & AST construction (LR02)
 
@@ -1353,6 +1395,31 @@ Evidence: `temp/mvp_emission_test_update/new-t0-controls.json`,
 the LR07-60 migration update. Keep the expected result and report the T0 defect;
 it does not block MVP JIT emission tests (S9.1.2–S9.1.3v3).
 
+<a id="lr07-66"></a>LR07-66 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-66>).
+
+<a id="lr07-67"></a>LR07-67 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-67>).
+
+<a id="lr07-68"></a>LR07-68 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-68>).
+
+<a id="lr07-69"></a>**LR07-69 · Builtin reference values have no boxed dynamic-call adapter · OPEN (2026-11-11; existing runtime capability gap)**
+
+`let f = crypto.open; f(key, ciphertext, context)` reports E229
+`fn_call_into: function does not publish a Core boxed dynamic-call entry`.
+Direct `crypto.open(...)` calls work. This is the existing general builtin
+reference boundary, not an AES-GCM defect: `to_sys_fn_named` in
+`lambda/runtime/lambda-eval.cpp` deliberately marks heterogeneous native
+function pointers as `FN_ENTRY_ABI_FOREIGN` and identity/name-only;
+`lambda_dynamic_call` rejects that ABI before invocation. The interpreter and
+MVP both construct those same reference values. D7.2.1/D7.3 describe the boxed
+dynamic-call target; a general builtin adapter remains missing.
+
+Evidence: `temp/sync-local/native-first-class.ls` and
+`temp/sync-local/native-first-class-jit.log` from the standalone native probe. The two dynamic-reference assertions are excluded from the direct
+API fixture's qualification scope, and the failure is retained here rather than
+adding a per-crypto ABI exception. The sync implementation calls native APIs
+directly and does not depend on this missing general adapter. No runtime fix,
+golden reinterpretation or formal-spec change is claimed for LR07-69.
+
 ## 8. Memory management & GC (LR08)
 
 
@@ -1455,8 +1522,9 @@ as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 
 ## 12. Procedural runtime (LR12)
 
+<a id="lr12-46"></a>LR12-46 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-46>).
 
-
+<a id="lr12-45"></a>LR12-45 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-45>).
 
 <a id="lr12-1"></a>**LR12-1 · `fetch_response_to_item` returns a bare String · OPEN**
 `// TODO: Implement proper map structure when the complex type system is
@@ -2128,3 +2196,18 @@ has a golden result passing in interpreter and JIT modes. The production parse
 path is still the C++ implementation. Expansion, primitives, AST construction,
 public-entry migration, formal ruling updates and full parity remain open;
 the earlier authorization blocker is removed.
+
+
+## Workspace-sync observation of member access on a `file` binding — 2026-11-11
+
+**Status:** OPEN — semantics and cause unconfirmed. This is independent evidence
+for the `file`-binding finding, not a separate confirmed runtime defect.
+
+Workspace-sync evidence: `temp/sync-workspace/_lex_probe.ls`
+compares `{id:42}` bound to `file` with records bound to `json` and
+`member_record`. The archived debug AUTO output in
+`temp/sync-workspace/lex.log` is
+`[file.id, 43, 44, {entry:file.id}, {entry:43}, {entry:44}]`.
+This observation predates the workspace task's native rebuild; it is not a
+recheck of the final qualified executable. No common parser/resolver cause or
+intended syntax has been established, and this evidence does not close the issue.
