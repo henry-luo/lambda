@@ -5702,6 +5702,7 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         return;
     }
     case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
     case AST_NODE_ARROW_FUNC: {
         if (!scan->method_subtree) {
             js_interp_p2_reject(scan, "nested callable");
@@ -5718,7 +5719,6 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         js_interp_p2_scan_node((JsAstNode*)definition->body, scan);
         return;
     }
-    case AST_NODE_FUNC_EXPR:
     case AST_NODE_METHOD:
         js_interp_p2_reject(scan, "nested callable");
         break;
@@ -5782,7 +5782,7 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         break;
     case AST_NODE_FOR_OF_STAM:
     case AST_NODE_FOR_IN_STAM:
-        if (!scan->generator) js_interp_p2_reject(scan, "unplanned syntax");
+        // ordinary bodies use the same iterator kernels; the child scan still rejects compound heads.
         break;
     default:
         js_interp_p2_reject(scan, "unplanned syntax");
@@ -5825,18 +5825,19 @@ static Runtime* js_interp_promotion_policy(void) {
 static JsAstNode* js_interp_parameter_leaf_expression(JsFunction* function);
 static bool js_interp_module_predicate_expression(JsFunction* function);
 
-static bool js_interp_p2_has_class_ancestor(AstIndex* index, AstNode* node) {
+static bool js_interp_p2_has_unsupported_site_ancestor(AstIndex* index, AstNode* node) {
     for (AstNode* parent = ast_index_parent(index, node); parent;
             parent = ast_index_parent(index, parent)) {
         if (parent->node_type == AST_NODE_CLASS || parent->node_type == AST_NODE_CLASS_EXPR ||
-                parent->node_type == AST_NODE_FIELD || parent->node_type == JS_AST_NODE_STATIC_BLOCK)
+                parent->node_type == AST_NODE_FIELD || parent->node_type == JS_AST_NODE_STATIC_BLOCK ||
+                parent->node_type == JS_AST_NODE_WITH_STATEMENT)
             return true;
     }
     return false;
 }
 
 static bool js_interp_p2_has_supported_module_wrapper(AstIndex* index,
-        AstFunctionId function_id) {
+        AstFunctionId function_id, bool allow_suspended = false) {
     if (function_id >= index->function_count) return false;
     AstFunctionId wrapper = ast_index_function_parent(index, function_id);
     if (wrapper == AST_FUNCTION_ID_INVALID) return true;
@@ -5847,9 +5848,14 @@ static bool js_interp_p2_has_supported_module_wrapper(AstIndex* index,
         auto* property = (JsPropertyNode*)site;
         if (property->method || property->is_getter || property->is_setter) return false;
     }
-    return (outer->node_type == AST_NODE_FUNC || outer->node_type == AST_NODE_FUNC_EXPR ||
-        outer->node_type == AST_NODE_ARROW_FUNC) && !outer->is_async && !outer->is_generator &&
-        ast_index_function_parent(index, wrapper) == AST_FUNCTION_ID_INVALID;
+    if ((outer->node_type != AST_NODE_FUNC && outer->node_type != AST_NODE_FUNC_EXPR &&
+            outer->node_type != AST_NODE_ARROW_FUNC) ||
+            (!allow_suspended && (outer->is_async || outer->is_generator)) ||
+            ast_index_function_parent(index, wrapper) != AST_FUNCTION_ID_INVALID) return false;
+    // a capture-free callable still inherits its wrapper's dynamic name resolution.
+    JsAstFunctionFacts facts = js_ast_collect_function_facts(outer->params, outer->body);
+    if (facts.has_direct_eval || facts.observes_direct_eval || facts.has_with) return false;
+    return true;
 }
 
 static bool js_interp_p2_simple_parameters(AstFuncNode* definition) {
@@ -5877,7 +5883,7 @@ bool js_interp_p2_is_body_capture(JsScript* script, AstFunctionId function_id,
         declarator && declarator->node_type == AST_NODE_VARIABLE_DECLARATOR;
 }
 
-static bool js_interp_p2_module_method(JsScript* script, AstFuncNode* definition,
+static bool js_interp_p2_public_method(JsScript* script, AstFuncNode* definition,
         AstFunctionId function_id) {
     if (definition->node_type != AST_NODE_METHOD ||
             function_id >= script->ast_index.function_count) return false;
@@ -5893,7 +5899,7 @@ static bool js_interp_p2_module_method(JsScript* script, AstFuncNode* definition
     AstNode* cls = body ? ast_index_parent(index, body) : NULL;
     if (!cls || (cls->node_type != AST_NODE_CLASS && cls->node_type != AST_NODE_CLASS_EXPR) ||
             ((AstClassNode*)cls)->body != body) return false;
-    if (js_interp_p2_has_class_ancestor(index, cls)) return false;
+    if (js_interp_p2_has_unsupported_site_ancestor(index, cls)) return false;
     return js_interp_p2_has_supported_module_wrapper(index, function_id);
 }
 
@@ -5934,7 +5940,7 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
         ast_index_function_parent(&script->ast_index, function_id) != AST_FUNCTION_ID_INVALID;
     if (body_capture_reads) {
         AstIndex* index = &script->ast_index;
-        if (js_interp_p2_has_class_ancestor(index, definition) ||
+        if (js_interp_p2_has_unsupported_site_ancestor(index, definition) ||
                 !js_interp_p2_has_supported_module_wrapper(index, function_id))
             return "capture wrapper shape";
         auto* wrapper = (AstFuncNode*)index->functions[ast_index_function_parent(index, function_id)].node;
@@ -5953,14 +5959,15 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     }
     // D8.4.5 permits one wrapper only when the arrow needs no activation bridge.
     if (arrow) {
-        if (!hot_entry || !script->is_es_module ||
-                js_interp_p2_has_class_ancestor(&script->ast_index, (AstNode*)definition) ||
-                !js_interp_p2_has_supported_module_wrapper(&script->ast_index, function_id))
+        if (!hot_entry ||
+                js_interp_p2_has_unsupported_site_ancestor(&script->ast_index, (AstNode*)definition) ||
+                !js_interp_p2_has_supported_module_wrapper(&script->ast_index, function_id,
+                    !script->is_es_module))
             return "arrow definition shape";
         if (!js_interp_p2_simple_parameters(definition)) return "arrow parameter shape";
     }
-    if (method && (!hot_entry || (!script->is_es_module && !definition->is_generator) ||
-            !js_interp_p2_module_method(script, definition, function_id)))
+    if (method && (!hot_entry ||
+            !js_interp_p2_public_method(script, definition, function_id)))
         return "method definition shape";
     if (function_id == AST_FUNCTION_ID_INVALID ||
             (!method && !body_capture_reads && ((!arrow && ast_index_function_parent(&script->ast_index, function_id) !=
@@ -5973,8 +5980,8 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     }
     // ordinary template promotion remains deferred independently of this slice.
     JsP2AdmissionScan scan = {script, function_id, NULL,
-        hot_entry && method && (script->is_es_module || definition->is_generator),
-        hot_entry && (script->is_es_module || definition->is_generator) && (method || arrow),
+        hot_entry && method,
+        hot_entry && (method || arrow),
         body_capture_reads, definition->is_generator};
     js_interp_p2_scan_parameters(definition, &scan);
     js_interp_p2_scan_node((JsAstNode*)definition->body, &scan);

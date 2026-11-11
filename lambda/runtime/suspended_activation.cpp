@@ -1,5 +1,6 @@
 #include "suspended_activation.hpp"
 #include "gc/gc_heap.h"
+#include "lib/mem.h"
 #include <assert.h>
 
 extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc) {
@@ -46,6 +47,11 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     js_suspended_activation_gc_trace(gen, gc);
     gc_mark_item(gc, gen->private_home_class.item);
     gc_mark_item(gc, gen->delegate.item);
+    if (gen->compact) {
+        gc_mark_item(gc, gen->compact->saved.item);
+        gc_mark_item(gc, gen->compact->pending.item);
+        gc_mark_item(gc, gen->compact->parent.item);
+    }
     gc_mark_item(gc, gen->ast_this.item);
     if (gen->is_async) {
         JsAsyncGeneratorMapCarrier* carrier = (JsAsyncGeneratorMapCarrier*)map;
@@ -61,4 +67,6 @@ extern "C" void js_generator_map_heap_destroy(Map* map) {
     JsGeneratorStateRecord* gen = &((JsGeneratorMapCarrier*)map)->state;
     activation_destroy(gen->activation);
     gen->activation = NULL;
+    mem_free(gen->compact);
+    gen->compact = NULL;
 }

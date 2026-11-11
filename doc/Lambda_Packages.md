@@ -51,6 +51,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 
 | Package | Import path | Status | What it does | Used by the CLI |
 |---------|-------------|--------|--------------|-----------------|
+| `sync` | `lambda.sync.core`, `lambda.sync.text`, `lambda.sync.mark`, `lambda.sync.session` | Experimental replication prototype | Pure Text/Mark replication, compact checkpoints, external-import branches and saved-version model; [scope and API](../lmd/package/sync/README.md) | `./lambda.exe test/lambda/sync_example.ls`; no production sync command |
 | `image` | `lambda.image`, `lambda.image.edit` | Initial native `u8` profile | Raster Velmts, layered composition, animation, PSD/GIF I/O and snapshot editing/history; see [Image Package](Lambda_Image.md) | `input(path, 'psd')` and automatic PSD detection |
 | `ime.chinese` | `lambda.ime.chinese` | M4 Traditional profile | Simplified and OpenCC-prepared Traditional pinyin packs, pure candidates/session reduction, partial selection, punctuation, paging, settings and explicit learning persistence; the DOM adapter adds native candidates, profile selection and window/document opt-in. See [Chinese IME](Lambda_IME_Chinese.md). Namespace: D9.3.4. | `./lambda.exe view test/demo/ime/chinese.ls` (prepare the local pack first) |
 | `doc.wiki` | `lambda.doc.wiki` | Initial static profiles | Wiki-family writers, shared tasks, and loss reports | `lambda convert -t wiki:<flavor>` |

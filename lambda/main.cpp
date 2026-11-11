@@ -526,6 +526,10 @@ struct JsTest262AstHarness {
     bool prepare_failed;
 };
 
+static bool js_test262_ast_first_requested() {
+    return js_ast_interpreter_requested() || js_execution_auto_requested();
+}
+
 static void js_test262_clear_ast_harness(Runtime* runtime,
         JsTest262AstHarness* harness) {
     if (!harness) return;
@@ -607,6 +611,12 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
                 filename, result_home);
         }
         return transpile_js_module_to_mir(runtime, source, filename);
+    }
+    if (js_execution_auto_requested()) {
+        // retain AST harness ownership in AUTO while keeping its normal per-source MIR fallback.
+        return test262_native_harness
+            ? transpile_js_to_mir_test262_native_len(runtime, source, source_len, filename, result_home)
+            : transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
     }
     if (js_ast_interpreter_requested()) {
         // The harness and its test body must share the requested execution
@@ -5034,7 +5044,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         bool lifecycle_timing = lifecycle_env && lifecycle_env[0] &&
                                 strcmp(lifecycle_env, "0") != 0;
         bool hot_reload = true; // persistent heap between tests (default: on)
-        bool mvp_lmd = !js_ast_interpreter_requested() && !js_execution_auto_requested();
+        bool mvp_lmd = !js_test262_ast_first_requested();
         for (int i = 2; i < argc; i++) {
             if (strncmp(argv[i], "--timeout=", 10) == 0) {
                 batch_timeout = atoi(argv[i] + 10);
@@ -5218,7 +5228,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 if (harness_includes) {
                     // retained includes own a separate Script so their strict
                     // directive cannot change the base assertion harness.
-                    if (js_ast_interpreter_requested() && ast_harness.script &&
+                    if (js_test262_ast_first_requested() && ast_harness.script &&
                             !ast_harness.includes_script) {
                         ast_harness.includes_script = js_interp_prepare_script(&runtime,
                             harness_src, total_read, "<harness-includes>");
@@ -5249,7 +5259,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     js_test262_clear_ast_harness(&runtime, &ast_harness);
                 }
 
-                if (js_ast_interpreter_requested()) {
+                if (js_test262_ast_first_requested()) {
                     ast_harness.script = js_interp_prepare_script(&runtime,
                         harness_src, total_read, "<harness>");
                     ast_harness.prepare_failed = ast_harness.script == NULL;
@@ -5409,7 +5419,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // The AST selector registers every classic source as a retained
             // JsScript. Raw/native jobs have no harness checkpoint, so capture
             // their own generation before dispatch as well.
-            bool ast_test_generation_active = !mvp_lmd && js_ast_interpreter_requested() &&
+            bool ast_test_generation_active = !mvp_lmd && js_test262_ast_first_requested() &&
                 !inline_module_source;
             int ast_test_script_checkpoint = runtime.scripts ? runtime.scripts->length : 0;
             uint32_t ast_test_module_state_checkpoint = runtime.next_module_state_id;

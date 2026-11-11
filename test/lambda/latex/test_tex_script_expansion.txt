@@ -1,0 +1,556 @@
+"parameterless:"
+{
+  text: "ABAB",
+  issue: null
+}
+"undelimited arguments:"
+{
+  text: "cabc",
+  issue: null
+}
+"nested argument groups:"
+{
+  text: "a{b}c",
+  issue: null
+}
+"nested definitions:"
+{
+  text: "AB",
+  issue: null
+}
+"local definition:"
+{
+  text: "{B}A",
+  issue: null
+}
+"recursive budget:"
+{
+  text: "",
+  issue: "tex-budget"
+}
+"delimited arguments:"
+{
+  text: "(x)(y)",
+  issue: null
+}
+"delimiter inside group:"
+{
+  text: "[a,b]",
+  issue: null
+}
+"control delimiter:"
+{
+  text: "[ab]",
+  issue: null
+}
+"leading delimiter:"
+{
+  text: "[x]",
+  issue: null
+}
+"mismatched delimiter:"
+{
+  text: "",
+  issue: "tex-macro-mismatch"
+}
+"brace delimiter:"
+{
+  text: "(X){Y}",
+  issue: null
+}
+"brace delimiter after text:"
+{
+  text: "(X){Y}",
+  issue: null
+}
+"expandafter:"
+{
+  text: "[X]Y",
+  issue: null
+}
+"noexpand:"
+[["control", "x"], ["char", "X"], ["char", "Y"]]
+"noexpand assignment:"
+{
+  text: "Y",
+  issue: null
+}
+"global definition:"
+{
+  text: "{{}}B",
+  issue: null
+}
+"global prefix:"
+{
+  text: "{}B",
+  issue: null
+}
+"long argument:"
+[["char", "["], ["char", "a"], ["control", "par"], ["char", "b"], ["char", "]"]]
+"short argument:"
+{
+  text: "",
+  issue: "tex-runaway-argument"
+}
+"changed catcode in a control word:"
+{
+  text: "Y",
+  issue: null
+}
+"local catcode:"
+{
+  tokens: [["char", "{", 1], ["char", "!", 11], ["char", "}", 2], ["char", "!", 12]],
+  issue: null
+}
+"global catcode:"
+{
+  tokens: [["char", "{", 1], ["char", "}", 2], ["char", "!", 11]],
+  issue: null
+}
+"expanded catcode number:"
+{
+  text: "Y",
+  issue: null
+}
+"budget while scanning a number:"
+{
+  text: "",
+  issue: "tex-budget"
+}
+"constructed control sequence:"
+{
+  text: "FB",
+  issue: null
+}
+"expanded control sequence name:"
+{
+  text: "FB",
+  issue: null
+}
+"constructed undefined name:"
+{
+  text: "LR",
+  issue: null
+}
+"constructed primitive:"
+{
+  text: "Y",
+  issue: null
+}
+"expanded definition:"
+{
+  text: "AY",
+  issue: null
+}
+"global expanded definition:"
+{
+  text: "{}A",
+  issue: null
+}
+"missing argument in expanded definition:"
+{
+  text: "",
+  issue: "tex-extra-brace"
+}
+"conditionals:"
+{
+  text: "AD",
+  issue: null
+}
+"nested skipped conditional:"
+{
+  text: "A",
+  issue: null
+}
+"numeric conditionals:"
+{
+  text: "TO",
+  issue: null
+}
+"defined conditionals:"
+{
+  text: "YY",
+  issue: null
+}
+"incomplete conditional:"
+{
+  text: "A",
+  issue: "tex-incomplete-if"
+}
+"unsupported conditional:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive"
+}
+"let retains meaning:"
+{
+  text: "AB",
+  issue: null
+}
+"let character:"
+{
+  text: "Z",
+  issue: null
+}
+"let primitive:"
+{
+  text: "Y",
+  issue: null
+}
+"let undefined:"
+{
+  text: "Y",
+  issue: null
+}
+"global let:"
+{
+  text: "{}B",
+  issue: null
+}
+"ifx macros:"
+{
+  text: "Y",
+  issue: null
+}
+"ifx undefined:"
+{
+  text: "Y",
+  issue: null
+}
+"ifx different macros:"
+{
+  text: "Y",
+  issue: null
+}
+"constructed name is relax:"
+{
+  text: "Y",
+  issue: null
+}
+"if and ifcat:"
+{
+  text: " TT",
+  issue: null
+}
+"ifcsname does not define:"
+{
+  text: "YY",
+  issue: null
+}
+"ifcsname finds macro:"
+{
+  text: "Y",
+  issue: null
+}
+"string control sequence:"
+{
+  text: "\\x",
+  issue: null
+}
+"integer conversion:"
+{
+  text: "5,255,511",
+  issue: null
+}
+"number expands its argument:"
+{
+  text: "12",
+  issue: null
+}
+"terminal write:"
+{
+  messages: ["LT:[x][yz]"],
+  issue: null
+}
+"meaning of macro:"
+{
+  text: "macro:->\\x Y",
+  issue: null
+}
+"meaning of character:"
+{
+  text: "the letter a",
+  issue: null
+}
+"roman numerals:"
+{
+  text: "mcmlxxxivmmmmcmxcix",
+  issue: null
+}
+"unsupported primitive name:"
+["tex-unsupported-primitive", "dimen"]
+"count register:"
+{
+  text: "17",
+  issue: null
+}
+"local count:"
+{
+  text: "{4}3",
+  issue: null
+}
+"global count:"
+{
+  text: "{}4",
+  issue: null
+}
+"countdef:"
+{
+  text: "9",
+  issue: null
+}
+"countdef equality:"
+{
+  text: "Y",
+  issue: null
+}
+"token register expands at use:"
+{
+  text: "B",
+  issue: null
+}
+"token register in edef:"
+{
+  text: "B",
+  issue: null
+}
+"token register copy:"
+{
+  text: "AB",
+  issue: null
+}
+"token register local:"
+{
+  text: "{B}A",
+  issue: null
+}
+"token register global:"
+{
+  text: "{}B",
+  issue: null
+}
+"token register alias:"
+{
+  text: "AB",
+  issue: null
+}
+"character definition:"
+{
+  text: "A,65,\\char\"41",
+  issue: null
+}
+"math character definition:"
+{
+  text: "\\mathchar\"7161",
+  issue: null
+}
+"character aliases:"
+{
+  text: "Y",
+  issue: null
+}
+"case shift before expansion:"
+{
+  text: "ABCX",
+  issue: null
+}
+"custom lowercase code:"
+{
+  text: "xyq",
+  issue: null
+}
+"local lowercase code:"
+{
+  text: "{q}z",
+  issue: null
+}
+"global lowercase code:"
+{
+  text: "{}q",
+  issue: null
+}
+"futurelet:"
+{
+  text: " Ta",
+  issue: null
+}
+"afterassignment:"
+{
+  text: "XY",
+  issue: null
+}
+"catcode quantity:"
+{
+  text: "11",
+  issue: null
+}
+"escapechar:"
+{
+  text: "x,/x",
+  issue: null
+}
+"local escapechar:"
+{
+  text: "{x}\\x",
+  issue: null
+}
+"protected definition:"
+{
+  text: "macro:->\\p ",
+  issue: null
+}
+"protected expansion:"
+{
+  text: "P",
+  issue: null
+}
+"unexpanded definition:"
+{
+  text: "B",
+  issue: null
+}
+"detokenize:"
+{
+  text: "\\x a##b",
+  issue: null
+}
+"numexpr precedence:"
+{
+  text: "14,20",
+  issue: null
+}
+"numexpr rounding:"
+{
+  text: "-2,8",
+  issue: null
+}
+"numexpr scaling:"
+{
+  text: "2147483647",
+  issue: null
+}
+"scantokens:"
+{
+  text: "X",
+  issue: null
+}
+"scantokens shared catcodes:"
+{
+  text: "Y",
+  issue: null
+}
+"scantokens eof hook:"
+{
+  text: "X",
+  issue: null
+}
+"scantokens eof insertion:"
+{
+  text: "AZ",
+  issue: null
+}
+"scantokens local eof hook:"
+{
+  text: "{AZ}B",
+  issue: null
+}
+"count arithmetic:"
+{
+  text: "11",
+  issue: null
+}
+"count division:"
+{
+  text: "-3",
+  issue: null
+}
+"count alias arithmetic:"
+{
+  text: "42",
+  issue: null
+}
+"count arithmetic scopes:"
+{
+  text: "{5}{}12",
+  issue: null
+}
+"count arithmetic afterassignment:"
+{
+  text: "X5",
+  issue: null
+}
+"count arithmetic zero divisor:"
+{
+  text: "",
+  issue: "tex-arith-overflow"
+}
+"count arithmetic overflow:"
+{
+  text: "",
+  issue: "tex-arith-overflow"
+}
+"aftergroup order:"
+{
+  text: "{}ABC",
+  issue: null
+}
+"nested aftergroup:"
+{
+  text: "{{}BC}AD",
+  issue: null
+}
+"explicit group:"
+{
+  text: "X3",
+  issue: null
+}
+"global in explicit group:"
+{
+  text: "7",
+  issue: null
+}
+"mismatched group end:"
+{
+  text: "{",
+  issue: "tex-extra-endgroup"
+}
+"case conditional branches:"
+{
+  text: "A,B,C",
+  issue: null
+}
+"case conditional negative:"
+{
+  text: "C",
+  issue: null
+}
+"nested case skipping:"
+{
+  text: "C",
+  issue: null
+}
+"case without matching branch:"
+{
+  text: "C",
+  issue: null
+}
+"unless conditionals:"
+{
+  text: "T,T",
+  issue: null
+}
+"unless nested scan:"
+{
+  text: "T",
+  issue: null
+}
+"unless defined:"
+{
+  text: "T",
+  issue: null
+}
+"invalid unless:"
+{
+  text: "",
+  issue: "tex-bad-unless"
+}

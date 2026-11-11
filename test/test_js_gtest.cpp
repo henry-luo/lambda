@@ -14,6 +14,7 @@
 #include "test_baseline_mode.hpp"
 #include "../lambda/runtime/compiler_timing.hpp"
 #include "test_ast_tune_capture.hpp"
+#include "lib/strbuf.h"
 
 extern "C" {
 #include "lib/shell.h"
@@ -1059,6 +1060,46 @@ TEST(JavaScriptRegression, ModuleEntryPrelinksOwnAndImportNameTables) {
     ASSERT_NE(strstr(result.stdout_buf, "Hello, World!"), nullptr) << result.stdout_buf;
     ASSERT_NE(strstr(result.stdout_buf, "BATCH_END 0"), nullptr) << result.stdout_buf;
     shell_result_free(&result);
+}
+
+TEST(JavaScriptRegression, AutoBatchRestoresHarnessForEveryRealm) {
+    for (bool native : {false, true}) {
+        SCOPED_TRACE(native);
+        StrBuf* manifest = strbuf_new();
+        StrBuf* path = strbuf_new();
+        ASSERT_NE(manifest, nullptr);
+        ASSERT_NE(path, nullptr);
+        strbuf_append_format(path, "./temp/js_auto_harness_%d_%d.txt", (int)getpid(), native);
+        if (native) strbuf_append_str(manifest, "native-harness:ast\n");
+        else {
+            const char harness[] = "var calls=0;function check(){if(++calls!==1)throw Error('realm leak')}";
+            const char includes[] = "var included=true;";
+            strbuf_append_format(manifest, "harness:%zu\n%s\nharness-includes:%zu\n%s\n",
+                strlen(harness), harness, strlen(includes), includes);
+        }
+        const char* body = native ? "assert.sameValue(1,1);console.log('AUTO_BATCH_OK')" :
+            "check();if(!included)throw Error('missing includes');gc();console.log('AUTO_BATCH_OK')";
+        for (int i=0;i<3;i++) strbuf_append_format(manifest,
+            "source:auto_harness_%d:%zu\n%s\n", i, strlen(body), body);
+        FILE* output = fopen(path->str, "wb");
+        ASSERT_NE(output, nullptr);
+        EXPECT_EQ(fwrite(manifest->str, 1, manifest->length, output), manifest->length);
+        fclose(output);
+        strbuf_free(manifest);
+        const char* args[] = {LAMBDA_EXE, "js-test-batch", "--timeout=10", NULL};
+        ShellEnvEntry env[] = {{"JS_EXEC_BACKEND", "auto"}, {"JS_FUNC_JIT_THRESHOLD", "1"}, {NULL, NULL}};
+        ShellOptions options = {};
+        options.stdin_path = path->str; options.env = env;
+        options.merge_stderr = true; options.timeout_ms = 15000;
+        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        unlink(path->str); strbuf_free(path);
+        ASSERT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        ASSERT_NE(result.stdout_buf, nullptr);
+        int completed = 0;
+        for (const char* at = result.stdout_buf; (at = strstr(at, "BATCH_END 0")); at++) completed++;
+        EXPECT_EQ(completed, 3) << result.stdout_buf;
+        shell_result_free(&result);
+    }
 }
 
 TEST(JavaScriptRegression, DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext) {

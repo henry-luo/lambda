@@ -18,6 +18,14 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Radiant integration layout-host selection — 2026-11-11
+
+<a id="lr12-44"></a>
+
+**LR12-44 — RESOLVED:** the user-approved Lambda layout/snapshot host selection
+repair is applied. See [cause, patch and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-44>).
+Radiant RI-010 retains the ten independent layout comparisons.
+
 ## Numeric conversion and recursive type follow-up — 2026-11-03
 
 The user adopted **S4.1.6 / S11.4.12v2**. `int()` now returns an int with
@@ -2071,3 +2079,52 @@ together, not individually.
    covers the point.
 4. **Do not close an issue from a doc edit alone.** A resolution needs a
    verified source anchor, as every fixed-archive entry has.
+
+## Lambda Script expl3 subset needs a TeX expansion boundary — 2026-11-11
+
+**Status:** OPEN — feature integration boundary. **Dependent task blocked:** yes,
+the requested expl3 subset in `lambda.doc.latex`. Authority: D9.1.3v2,
+D10.2.2, D8.3.1 and D11.2.1.
+
+`lmd/package/doc/latex/latex.ls` calls `parse` before its adapters run. Input's
+`run_tex_engine` performs TeX expansion during that parse, and its current
+`EngineOptions` and `InputParseOptions` carry adapter names and raw commands,
+not a way to call Lambda Script during expansion. Consequently a script module
+used by the existing post-expansion adapters cannot implement expandable expl3
+operations, scoped TeX assignments or macro definitions at the point TeX needs
+them. Reproduce by inspecting those entry points and the expl3 fixture at
+`test/lambda/latex/fixtures/local_packages/lmdexpl.sty`.
+
+The requested implementation needs Lambda-owned package/runtime work and an
+agreed input/host boundary; the shape of that boundary is not yet decided.
+Input must not import the runtime, values crossing the boundary require precise
+rooting, and resource authority must be preserved. Input-side design and the
+candidate first subset are recorded in `../lambda-input/vibe/input/Input_Latex.md`.
+
+### Superseding request: full TeX and LaTeX script port — 2026-11-11
+
+The user now requests porting the TeX engine to Lambda Script and moving the
+entire LaTeX handling path to script, superseding the partial expl3 bridge
+request above. **Dependent task blocked:** yes, pending Lambda-owned package,
+runtime, formal-design and test work and a coordinated input migration.
+
+Current evidence: `lambda.doc.latex.latex.parse_source` calls the built-in
+`parse`; input's `parse_latex_direct` runs `tex::Engine` and then the C++
+`DirectLatexParser`, while `parse_tex_expansion` exposes the engine directly.
+Inspect `lmd/package/doc/latex/latex.ls`, input's `lambda/input/input-latex-c.cpp`
+and `lambda/input/input.cpp`. A package-only engine leaves those public and
+native entry points unchanged. D10.2.2 currently places every LaTeX parse at
+the input boundary, so the requested migration requires coordinated revision
+of that ruling. Preserve S1.8 (TeX remains data), D9.1.3v2 (no input runtime
+imports), D11.2.1 authority and existing conformance and document fixtures.
+
+Input-side scope and candidate compatibility gates are documented in
+`../lambda-input/vibe/input/Input_Latex.md`. No script engine has been shipped.
+
+2026-11-11 follow-up: the user authorized coordinated edits to the Lambda and
+input checkouts. `lmd/package/doc/latex/tex_engine/reader.ls` starts the script
+port with incremental token reading, and `test/lambda/latex/test_tex_script_reader`
+has a golden result passing in interpreter and JIT modes. The production parse
+path is still the C++ implementation. Expansion, primitives, AST construction,
+public-entry migration, formal ruling updates and full parity remain open;
+the earlier authorization blocker is removed.

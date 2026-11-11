@@ -12,13 +12,53 @@
 #include "../js_builtin_catalog.hpp"
 #include "../js_property_attrs.h"
 #include "../js_props.h"
+#include "lib/mem.h"
 
 const char* const mvp_lmd_iterator_names[LMD_ITERATOR_COUNT] = {"Map Iterator", "Set Iterator", "String Iterator"};
+static const char* const generator_resume_names[] = {"next", "return", "throw"};
 
 static Item sequence_next(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 static Item sequence_next_value(MvpLmdProgram*, Item, Item, bool*);
 static Item generator_resume(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 static Item generator_resume_impl(MvpLmdProgram*, Item, Item, int, bool, bool = true);
+static thread_local JsCompactGeneratorFrame* active_compact_frame = NULL;
+static thread_local unsigned compact_delegate_depth = 0;
+static Item generator_delegate_drive(JsGeneratorStateRecord*, Item, Item, int, bool);
+static Item compact_delegate_body(Activation*, Item);
+
+static bool compact_contains_yield(JsAstNode* node, void*) {
+    return node && (node->node_type == AST_NODE_YIELD ||
+        js_ast_any_child(node, compact_contains_yield, NULL));
+}
+
+int mvp_lmd_generator_compact_kind(const AstFuncNode* definition) {
+    if (!mvp_lmd_generator_lazy_parameters(definition) || !definition->is_generator ||
+            !definition->body || definition->body->node_type != AST_NODE_BLOCK) return 0;
+    AstNode* statement = ((AstBlockNode*)definition->body)->statements;
+    if (!statement) return 0;
+    // earlier statements run to completion before the final suspension.
+    while (statement->next) {
+        if (compact_contains_yield((JsAstNode*)statement, NULL)) return 0;
+        statement = statement->next;
+    }
+    if (statement->node_type != AST_NODE_EXPR_STMT) return 0;
+    AstNode* expression = ((AstExprStmtNode*)statement)->expression;
+    if (!expression || expression->node_type != AST_NODE_YIELD) return 0;
+    AstYieldNode* yield = (AstYieldNode*)expression;
+    if (yield->argument && compact_contains_yield((JsAstNode*)yield->argument, NULL)) return 0;
+    return yield->delegate ? 2 : 1;
+}
+
+extern "C" Item mvp_lmd_compact_generator_park(Item value, int64_t kind) {
+    JsCompactGeneratorFrame* frame = active_compact_frame;
+    if (!frame || frame->position) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    frame->delegates = kind == 2;
+    Item saved = frame->delegates ? mvp_lmd_iterator_get(frame->program, value) : value;
+    if (item_is_error(saved)) return saved;
+    frame->saved = lambda_item_adopt_scalar_home(saved, &frame->scalar_home);
+    frame->position = frame->delegates ? 2 : 1;
+    return Item{.item = ITEM_JS_UNDEFINED};
+}
 
 static bool iterator_object(Item value) {
     return mvp_lmd_is_object(value);
@@ -77,36 +117,36 @@ extern "C" Item mvp_lmd_iterator_step(Item record, Item value, int64_t count) {
 extern "C" Item mvp_lmd_iterator_step_value(Item record) {
     return mvp_lmd_iterator_step_read_value(record, true);
 }
+static MvpLmdProgram* generator_intrinsic_program(Item method, Item receiver, int operation) {
+    if (get_type_id(receiver) != LMD_TYPE_MAP || receiver.map->map_kind != MAP_KIND_GENERATOR ||
+            get_type_id(method) != LMD_TYPE_FUNC) return NULL;
+    auto* state = &((JsGeneratorMapCarrier*)receiver.map)->state;
+    Item implementation = js_generator_implementation(state);
+    if (state->is_async || state->ast_host || state->runtime_context != context ||
+            get_type_id(implementation) != LMD_TYPE_FUNC ||
+            !function_has_abi(implementation.function, FN_ENTRY_ABI_MVP_LMD)) return NULL;
+    if (function_has_abi(method.function, FN_ENTRY_ABI_MVP_LMD) &&
+            method.function->ptr == (fn_ptr)generator_resume &&
+            method.function->requires_runtime_context && method.function->runtime_context == context &&
+            (intptr_t)((MvpLmdNativeCallable*)method.function)->state == operation)
+        return ((MvpLmdCallable*)method.function)->program;
+    const char* name = generator_resume_names[operation];
+    if (function_has_abi(method.function, FN_ENTRY_ABI_JS_FUNCTION) &&
+            method.item == js_intrinsic_binding_get(JS_BUILTIN_OWNER_GENERATOR_INTERNAL, name, strlen(name)).item)
+        return ((MvpLmdCallable*)implementation.function)->program;
+    return NULL;
+}
 extern "C" Item mvp_lmd_iterator_step_read_value(Item record, int64_t read_value) {
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, record), result(roots, ItemNull);
     Item next = held.get().array->items[1];
     Item receiver = held.get().array->items[0];
-    if (get_type_id(receiver) == LMD_TYPE_MAP && receiver.map->map_kind == MAP_KIND_GENERATOR) {
-        auto* state = &((JsGeneratorMapCarrier*)receiver.map)->state;
-        Item implementation = js_generator_implementation(state);
-        bool intrinsic = false;
-        MvpLmdProgram* program = NULL;
-        if (!state->is_async && !state->ast_host && state->runtime_context == context &&
-                get_type_id(implementation) == LMD_TYPE_FUNC &&
-                function_has_abi(implementation.function, FN_ENTRY_ABI_MVP_LMD) && get_type_id(next) == LMD_TYPE_FUNC) {
-            program = ((MvpLmdCallable*)implementation.function)->program;
-            if (function_has_abi(next.function, FN_ENTRY_ABI_MVP_LMD) && next.function->ptr == (fn_ptr)generator_resume) {
-                intrinsic = next.function->requires_runtime_context && next.function->runtime_context == context &&
-                    ((MvpLmdNativeCallable*)next.function)->state == NULL;
-                // a borrowed intrinsic owns validation errors in its callable's
-                // realm, exactly as the shared invoke kernel does (D8.4.4).
-                if (intrinsic) program = ((MvpLmdCallable*)next.function)->program;
-            }
-            else if (function_has_abi(next.function, FN_ENTRY_ABI_JS_FUNCTION))
-                intrinsic = next.item == js_intrinsic_binding_get(JS_BUILTIN_OWNER_GENERATOR_INTERNAL, "next", 4).item;
-        }
-        if (intrinsic) {
-            MvpLmdRealmScope realm(program);
-            return realm.complete(generator_resume_impl(program, receiver,
-                Item{.item = ITEM_JS_UNDEFINED}, 0, false, read_value != 0));
-        }
+    if (MvpLmdProgram* program = generator_intrinsic_program(next, receiver, 0)) {
+        // borrowed intrinsics own validation errors in their callable's realm (D8.4.4).
+        MvpLmdRealmScope realm(program);
+        return realm.complete(generator_resume_impl(program, receiver,
+            Item{.item = ITEM_JS_UNDEFINED}, 0, false, read_value != 0));
     }
     if (get_type_id(next) == LMD_TYPE_FUNC && function_has_abi(next.function, FN_ENTRY_ABI_MVP_LMD) &&
             next.function->requires_runtime_context && next.function->runtime_context == context &&
@@ -352,8 +392,7 @@ static Item sequence_next(Context*, MvpLmdProgram* program, Item*, uint64_t, Ite
     Item value = sequence_next_value(program, self, receiver, &done);
     return item_is_error(value) ? value : mvp_lmd_iterator_result(program, value, done);
 }
-static Item generator_body(Activation*, Item object) {
-    JsGeneratorStateRecord* state = &((JsGeneratorMapCarrier*)object.map)->state;
+static Item generator_run_body(JsGeneratorStateRecord* state) {
     MvpLmdNativeCallable* callable = (MvpLmdNativeCallable*)js_generator_implementation(state).function;
     auto run = [&]() {
         return mvp_lmd_function_forward(state->ast_function, state->ast_this, state->ast_arguments,
@@ -364,6 +403,180 @@ static Item generator_body(Activation*, Item object) {
     // Promise/bridge callbacks can be the first resumer; their native call chain is temporary.
     JsOwnedCallActivation call_facts;
     return run();
+}
+static Item generator_body(Activation*, Item object) {
+    return generator_run_body(&((JsGeneratorMapCarrier*)object.map)->state);
+}
+static Item compact_delegate_body(Activation*, Item object) {
+    JsGeneratorStateRecord* state = &((JsGeneratorMapCarrier*)object.map)->state;
+    JsCompactGeneratorFrame* frame = state->compact;
+    return generator_delegate_drive(state, frame->saved,
+        frame->pending, frame->pending_operation, false);
+}
+
+static Item generator_resume_activation(JsGeneratorStateRecord* state, Item receiver,
+        Item input, bool* finished, uint64_t* output_home) {
+    if (!state->activation) {
+        ActivationEntry body = state->compact && state->compact->position == 4
+            ? compact_delegate_body : generator_body;
+        state->activation = activation_create(body, receiver, false, state);
+    }
+    if (!state->activation) { *finished = true; return mvp_lmd_fail(LMD_MVP_MEMORY, 0); }
+    // each activation has a separate native stack and its own delegation depth.
+    unsigned previous_depth = compact_delegate_depth;
+    compact_delegate_depth = 0;
+    ActivationStatus status = activation_resume(state->activation, input);
+    compact_delegate_depth = previous_depth;
+    Item result = lambda_item_adopt_scalar_home(activation_value(state->activation), output_home);
+    *finished = status == ACTIVATION_DONE;
+    if (activation_fault(state->activation)) result = mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    if (*finished) {
+        activation_destroy(state->activation); state->activation = NULL;
+        if (state->compact && state->compact->position == 4 && !item_is_error(result) && state->state != 1)
+            result = Item{.item = ITEM_JS_UNDEFINED};
+    }
+    return result;
+}
+
+// callers root the record/input and result across these observable protocol accesses.
+static Item generator_delegate_request(JsGeneratorStateRecord* state, Item record,
+        Item received, int operation, bool* finished) {
+    *finished = false;
+    Item method = operation ? iterator_property(record.array->items[0], generator_resume_names[operation])
+        : record.array->items[1];
+    if (item_is_error(method)) return method;
+    if (operation && (method.item == ITEM_NULL || method.item == ITEM_JS_UNDEFINED)) {
+        *finished = true;
+        if (operation == 1) { state->state = 1; return received; }
+        Item closed = mvp_lmd_iterator_close(record, Item{.item = ITEM_JS_UNDEFINED});
+        return item_is_error(closed) ? closed : mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    }
+    return mvp_lmd_is_callable(method) ? method : mvp_lmd_fail(LMD_MVP_TYPE, 0);
+}
+static Item generator_delegate_result(JsGeneratorStateRecord* state, Item result,
+        int operation, bool* finished) {
+    *finished = false;
+    if (item_is_error(result)) return result;
+    if (!iterator_object(result)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    Item done = iterator_property(result, "done");
+    if (item_is_error(done)) return done;
+    if (mvp_lmd_truthy(done)) {
+        state->state = operation == 1 ? 1 : 0;
+        *finished = true;
+        return iterator_property(result, "value");
+    }
+    // yield* exposes the delegate's result object, including its getters.
+    state->delegate = result;
+    return result;
+}
+static Item generator_delegate_step(JsGeneratorStateRecord* state,
+        Item record, Item received, int operation, bool* finished) {
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, record), input(roots, received), result(roots, ItemNull), method(roots, ItemNull);
+    method.set(generator_delegate_request(state, held.get(), input.get(), operation, finished));
+    if (*finished || item_is_error(method.get())) return method.get();
+    Item argument = input.get();
+    result.set(mvp_lmd_class_invoke(method.get(), held.get().array->items[0], &argument, 1,
+        Item{.item = ITEM_JS_UNDEFINED}));
+    return generator_delegate_result(state, result.get(), operation, finished);
+}
+
+static Item compact_generator_resume(MvpLmdProgram* program, JsGeneratorStateRecord* state,
+        Item receiver, Item input, int operation, bool first, bool* finished) {
+    RootFrame roots(4);
+    *finished = true;
+    if (!roots.valid()) return ItemError;
+    uint64_t input_home = 0, result_home = 0;
+    Rooted<Item> current(roots, receiver), received(roots, lambda_item_adopt_scalar_home(input, &input_home)),
+        result(roots, ItemNull), method(roots, ItemNull);
+    auto retain = [&](Item value) { result.set(lambda_item_adopt_scalar_home(value, &result_home)); };
+    state->compact->resume_program = program;
+    bool returning = false;
+    for (;;) {
+        state = &((JsGeneratorMapCarrier*)current.get().map)->state;
+        JsCompactGeneratorFrame* frame = state->compact;
+        bool done = false, delegation = returning;
+        {
+            MvpLmdRealmScope body_realm(frame->program);
+            if (returning) {
+                retain(generator_delegate_result(state, result.get(), frame->pending_operation, &done));
+            } else {
+                if (frame->position == 0) {
+                    JsCompactGeneratorFrame* previous = active_compact_frame;
+                    active_compact_frame = frame;
+                    retain(generator_run_body(state));
+                    active_compact_frame = previous;
+                    done = item_is_error(result.get()) || frame->position == 0;
+                }
+                if (!done && frame->position == 1) {
+                    done = !first;
+                    retain(first ? frame->saved : operation == 2 ? mvp_lmd_throw(received.get(), 0)
+                        : operation == 1 ? received.get() : Item{.item = ITEM_JS_UNDEFINED});
+                } else if (!done && frame->position == 2) {
+                    delegation = true;
+                    state->delegate = ItemNull;
+                    if (first) { received.set(Item{.item = ITEM_JS_UNDEFINED}); operation = 0; }
+                    frame->pending_operation = operation;
+                    if (compact_delegate_depth >= 512) {
+                        // opaque callbacks can recurse; switch stacks without replaying the JIT prelude.
+                        frame->pending = lambda_item_adopt_scalar_home(received.get(), &frame->pending_scalar_home);
+                        frame->position = 4;
+                        retain(generator_resume_activation(state, current.get(), Item{.item = ITEM_JS_UNDEFINED},
+                            &done, &frame->pending_scalar_home));
+                        delegation = false;
+                    } else {
+                        method.set(generator_delegate_request(state, frame->saved, received.get(), operation, &done));
+                        if (done || item_is_error(method.get())) retain(method.get());
+                        else {
+                            Item child = frame->saved.array->items[0];
+                            MvpLmdProgram* child_program = generator_intrinsic_program(method.get(), child, operation);
+                            auto* child_state = child_program ? &((JsGeneratorMapCarrier*)child.map)->state : NULL;
+                            if (child_state && child_state->compact && child_state->compact->position != 4 &&
+                                    !child_state->done && !child_state->executing && (child_state->started || !operation)) {
+                                // intrinsic compact delegation is a heap link, never a recursive native call.
+                                child_state->compact->parent = current.get();
+                                child_state->compact->resume_program = child_program;
+                                first = !child_state->started;
+                                child_state->started = child_state->executing = true;
+                                child_state->state = operation;
+                                current.set(child); returning = false;
+                                continue;
+                            }
+                            Item argument = received.get();
+                            compact_delegate_depth++;
+                            retain(mvp_lmd_class_invoke(method.get(), child, &argument, 1,
+                                Item{.item = ITEM_JS_UNDEFINED}));
+                            compact_delegate_depth--;
+                            retain(generator_delegate_result(state, result.get(), operation, &done));
+                        }
+                    }
+                }
+            }
+            if (item_is_error(result.get())) done = true;
+            if (delegation && done && !item_is_error(result.get()) && state->state != 1)
+                retain(Item{.item = ITEM_JS_UNDEFINED});
+            if (done) {
+                frame->saved = Item{.item = ITEM_JS_UNDEFINED};
+                if (frame->position != 4) frame->position = 3;
+            }
+            retain(body_realm.complete(result.get()));
+        }
+        if (current.get().item == receiver.item) {
+            *finished = done;
+            return js_retain_scalar(result.get());
+        }
+        state->done = done; state->executing = false;
+        {
+            MvpLmdRealmScope resume_realm(frame->resume_program);
+            bool delegated = state->delegate.item && state->delegate.item != ITEM_NULL;
+            if (!item_is_error(result.get()) && !delegated)
+                retain(mvp_lmd_iterator_result(frame->resume_program, result.get(), done));
+            retain(resume_realm.complete(result.get()));
+        }
+        current.set(frame->parent); frame->parent = ItemNull;
+        returning = true;
+    }
 }
 static Item generator_resume_impl(MvpLmdProgram* program, Item receiver, Item value, int operation,
         bool materialize, bool read_value) {
@@ -387,15 +600,21 @@ static Item generator_resume_impl(MvpLmdProgram* program, Item receiver, Item va
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, receiver), result(roots, ItemNull);
     uint64_t result_home = 0;
+    bool first = !state->started;
     state->started = state->executing = true; state->state = operation;
-    if (!state->activation) state->activation = activation_create(generator_body, held.get(), false, state);
-    if (!state->activation) { state->executing = false; return mvp_lmd_fail(LMD_MVP_MEMORY, 0); }
-    ActivationStatus status = activation_resume(state->activation, value);
-    result.set(lambda_item_adopt_scalar_home(activation_value(state->activation), &result_home)); state->executing = false;
-    state->done = status == ACTIVATION_DONE;
+    if (state->compact && state->compact->position != 4) {
+        bool finished = false;
+        result.set(lambda_item_adopt_scalar_home(compact_generator_resume(program, state,
+            held.get(), value, operation, first, &finished), &result_home));
+        state->done = finished;
+    } else {
+        bool finished = false;
+        result.set(lambda_item_adopt_scalar_home(generator_resume_activation(state,
+            held.get(), value, &finished, &result_home), &result_home));
+        state->done = finished;
+    }
+    state->executing = false;
     bool delegated_result = state->delegate.item && state->delegate.item != ITEM_NULL;
-    if (activation_fault(state->activation)) result.set(mvp_lmd_fail(LMD_MVP_RANGE, 0));
-    if (state->done) { activation_destroy(state->activation); state->activation = NULL; }
     if (!materialize && !item_is_error(result.get())) {
         if (state->done) return Item{.item = JS_ITER_DONE_SENTINEL};
         // a delegated custom result still owns observable done/value getters.
@@ -495,6 +714,11 @@ Item mvp_lmd_generator_call_source(MvpLmdProgram* program, Item implementation,
     state->implementation = function.get();
     state->ast_arguments = arguments.get();
     owned_item_slot_store(&state->ast_this, 1, 0, owner.get());
+    if (((MvpLmdNativeCallable*)function.get().function)->compact_kind) {
+        state->compact = (JsCompactGeneratorFrame*)mem_calloc(1, sizeof(JsCompactGeneratorFrame), MEM_CAT_JS_RUNTIME);
+        if (!state->compact) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        state->compact->program = program;
+    }
     // simple bindings have no call-time effects; their private argument snapshot
     // is enough until first next(). Defaults/patterns retain eager initialization.
     if (!mvp_lmd_generator_lazy_parameters(definition)) {
@@ -521,45 +745,19 @@ Item mvp_lmd_generator_call_source(MvpLmdProgram* program, Item implementation,
     }
     return object.get();
 }
-// both walkers drive yield* on the delegating activation, so nested resumptions
-// do not accumulate the entire iterator chain on their caller's native stack.
-Item mvp_lmd_generator_delegate(MvpLmdProgram* program, Item value) {
-    auto* state = (JsGeneratorStateRecord*)activation_user(activation_current());
-    bool interpreted = state->ast_host != NULL;
-    RootFrame roots(4);
+// the activation fallback resumes an already acquired iterator record.
+static Item generator_delegate_drive(JsGeneratorStateRecord* state,
+        Item starting_record, Item initial_input, int initial_operation, bool interpreted) {
+    RootFrame roots(3);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> record(roots, mvp_lmd_iterator_get(program, value)), result(roots, ItemNull),
-        received(roots, Item{.item = ITEM_JS_UNDEFINED}), method(roots, ItemNull);
+    Rooted<Item> record(roots, starting_record), result(roots, ItemNull), received(roots, initial_input);
     uint64_t received_home = 0;
-    if (item_is_error(record.get())) return record.get();
-    int operation = 0;
+    int operation = initial_operation;
     for (;;) {
-        if (!operation) result.set(mvp_lmd_iterator_step(record.get(), received.get(), 1));
-        else {
-            method.set(iterator_property(record.get().array->items[0], operation == 1 ? "return" : "throw"));
-            if (item_is_error(method.get())) return method.get();
-            if (method.get().item == ITEM_NULL || method.get().item == ITEM_JS_UNDEFINED) {
-                if (operation == 1) return interpreted ? js_gen_return_signal(received.get()) : received.get();
-                Item closed = mvp_lmd_iterator_close(record.get(), Item{.item = ITEM_JS_UNDEFINED});
-                return item_is_error(closed) ? closed : mvp_lmd_fail(LMD_MVP_TYPE, 0);
-            }
-            if (!mvp_lmd_is_callable(method.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-            Item argument = received.get();
-            result.set(mvp_lmd_class_invoke(method.get(), record.get().array->items[0], &argument, 1,
-                Item{.item = ITEM_JS_UNDEFINED}));
-        }
+        bool finished = false;
+        result.set(generator_delegate_step(state, record.get(), received.get(), operation, &finished));
         if (item_is_error(result.get())) return result.get();
-        if (!iterator_object(result.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-        Item done = iterator_property(result.get(), "done");
-        if (item_is_error(done)) return done;
-        if (mvp_lmd_truthy(done)) {
-            state->state = operation == 1 ? 1 : 0;
-            Item completed = iterator_property(result.get(), "value");
-            return interpreted && operation == 1 && !item_is_error(completed)
-                ? js_gen_return_signal(completed) : completed;
-        }
-        // Delegation exposes the delegate's result object itself, including extra fields.
-        state->delegate = result.get();
+        if (finished) return interpreted && operation == 1 ? js_gen_return_signal(result.get()) : result.get();
         if (interpreted) state->state = JS_GEN_PARK_YIELD;
         received.set(lambda_item_adopt_scalar_home(activation_suspend(result.get()), &received_home));
         state->delegate = ItemNull;
@@ -568,6 +766,14 @@ Item mvp_lmd_generator_delegate(MvpLmdProgram* program, Item value) {
         if (interpreted && operation) received.set(lambda_item_adopt_scalar_home(operation == 1
             ? js_gen_return_signal_value(received.get()) : js_gen_throw_signal_value(received.get()), &received_home));
     }
+}
+Item mvp_lmd_generator_delegate(MvpLmdProgram* program, Item value) {
+    auto* state = (JsGeneratorStateRecord*)activation_user(activation_current());
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> record(roots, mvp_lmd_iterator_get(program, value));
+    return item_is_error(record.get()) ? record.get() : generator_delegate_drive(
+        state, record.get(), Item{.item = ITEM_JS_UNDEFINED}, 0, state->ast_host != NULL);
 }
 extern "C" Item mvp_lmd_generator_park(Item value, int64_t kind) {
     Activation* activation = activation_current();
@@ -854,11 +1060,10 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
     Item result = native_generator ? ItemNull : mvp_lmd_library_class_initialize(program, state, &state->generator,
         LMD_LIBRARY_GENERATOR, "Generator", generator_construct, 0, state->generator_function_values == NULL);
     if (item_is_error(result)) return result;
-    const char* names[] = {"next", "return", "throw"};
     for (int i = 0; i < 3; i++) {
         if (native_generator) break;
-        result = mvp_lmd_named_set(state->values[LMD_LIBRARY_GENERATOR_PROTOTYPE], names[i],
-            mvp_lmd_native_function(program, (void*)(intptr_t)i, generator_resume, 1, names[i]));
+        result = mvp_lmd_named_set(state->values[LMD_LIBRARY_GENERATOR_PROTOTYPE], generator_resume_names[i],
+            mvp_lmd_native_function(program, (void*)(intptr_t)i, generator_resume, 1, generator_resume_names[i]));
         if (item_is_error(result)) return result;
     }
     result = mvp_lmd_library_class_initialize(program, state, &state->iterator,
