@@ -44,6 +44,30 @@ static Item primitive_payload(Item object) {
     return field ? map_shape_field_to_item(object.map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
 }
 
+static TypeMap* string_wrapper_shape(TypeMap* base, uint32_t length) {
+    Map scratch = {};
+    scratch.type = base;
+    TypeMap* shape = map_clone_typemap_for_mutation(&scratch, context->pool, true);
+    if (!shape) return NULL;
+    // construct the unpublished descriptor chain once; per-character reflag transitions copy every prefix.
+    for (uint64_t i = 0; i <= length; i++) {
+        bool index = i < length;
+        String* name = index ? js_property_index_name(i) : heap_create_name("length", 6);
+        ShapeEntry* entry = name ? alloc_shape_entry(context->pool, name,
+            index ? LMD_TYPE_STRING : LMD_TYPE_INT, shape->last) : NULL;
+        if (!entry) return NULL;
+        entry->flags = JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE | (index ? 0 : JSPD_NON_ENUMERABLE);
+        entry->byte_offset = shape->byte_size;
+        shape->byte_size += shape_entry_storage_size(entry);
+        if (shape->byte_size > INT32_MAX) return NULL;
+        if (!shape->shape) shape->shape = entry;
+        shape->last = entry;
+        shape->length++;
+    }
+    typemap_hash_build(shape, context->pool);
+    return shape;
+}
+
 Item mvp_lmd_box_primitive(Item value, Item prototype) {
     if (mvp_lmd_is_object(value)) return value;
     TypeId type = get_type_id(value);
@@ -88,20 +112,26 @@ Item mvp_lmd_box_primitive(Item value, Item prototype) {
     }
     if (kind == LMD_PRIMITIVE_STRING) {
         String* string = primitive.get().get_string();
+        uint32_t length = utf8_to_utf16_length(string->chars, string->len);
+        TypeMap* base = (TypeMap*)object.get().map->type;
+        TypeMap* shape = string_wrapper_shape(base, length);
+        Map* wrapper = shape ? map_alloc_for_type(shape, 0) : NULL;
+        if (!wrapper) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        memcpy(wrapper->data, object.get().map->data, base->byte_size);
+        object.set(Item{.map = wrapper});
         Utf16Iterator iter = {(const unsigned char*)string->chars, string->len, 0, -1};
-        uint16_t unit; uint32_t length = 0;
+        uint16_t unit; uint32_t index = 0;
         while (utf16_iterator_next(&iter, &unit)) {
-            key.set(mvp_lmd_number_to_string(length++));
-            if (item_is_error(key.get())) return key.get();
+            String* name = js_property_index_name(index++);
+            if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            key.set(Item{.item = s2it(name)});
             character.set(mvp_lmd_string_at(ItemNull, unit, LMD_STRING_FROM_CODE));
             if (item_is_error(character.get())) return character.get();
-            Item stored = mvp_lmd_named_set(object.get(), key.get().get_string()->chars, character.get(),
-                JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
-            if (item_is_error(stored)) return stored;
+            if (!map_shape_set(object.get().map, key.get().get_string(), character.get()))
+                return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         }
-        Item stored = mvp_lmd_named_set(object.get(), "length", Item{.item = i2it(length)},
-            JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
-        if (item_is_error(stored)) return stored;
+        if (!map_shape_set(object.get().map, heap_create_name("length", 6), Item{.item = i2it(length)}))
+            return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
     return object.get();
 }

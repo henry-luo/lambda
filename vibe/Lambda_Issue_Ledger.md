@@ -18,6 +18,13 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+
+## Online JavaScript shape memory — 2026-11-11
+
+<a id="lr03-46"></a>
+
+- [LR03-46 — String wrapper and private object growth retain quadratic shape metadata](<Lambda_Issue_Ledger (fixed).md#lr03-46>).
+
 ## Watercolor simulation baseline timeout — 2026-11-11
 
 <a id="lr12-45"></a>

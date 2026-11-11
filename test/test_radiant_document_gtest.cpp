@@ -15020,6 +15020,40 @@ TEST_F(RadiantDocumentTest, CollapsedTableSpansGroupsAndOuterEdgesRetainGridGeom
     }
 }
 
+TEST_F(RadiantDocumentTest, BoundaryFragmentsAreConsumedOncePerBox) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>table{border-collapse:collapse}"
+        "td{border:1px solid red;width:20px;height:10px}</style>"
+        "<table id=result><tr><td id=cell></td></tr></table>"
+        "<div style='columns:2;column-gap:0;width:100px;height:50px'>"
+        "<div id=fragment style='background:red'><div style='height:100px'></div></div></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    PaintList paint;
+    DisplayList list;
+    paint_list_init(&paint, nullptr);
+    dl_init(&list, nullptr);
+    RasterRenderContext raster = {};
+    raster.ui_context = lam::up(&ui);
+    raster.paint_list = lam::up(&paint);
+    raster.dl = lam::up(&list);
+    raster.raster_scale = 1.0f;
+    struct Case { const char* id; int commands; } cases[] = {{"cell", 4}, {"fragment", 2}};
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.id);
+        DomElement* element = dom_find_element_by_id(document->root, entry.id);
+        ASSERT_NE(element, nullptr);
+        dl_clear(&list);
+        for (int pass = 0; pass < 32; pass++) {
+            render_bound(&raster, lam::view_require_block(element));
+            EXPECT_TRUE(paint.empty());
+            EXPECT_EQ(list.item_count(), (pass + 1) * entry.commands);
+        }
+    }
+    dl_destroy(&list);
+    paint_list_destroy(&paint);
+}
+
 TEST_F(RadiantDocumentTest, IntrinsicTablesShareCollapsedBorderGeometry) {
     ASSERT_NE(load("test/html/layout_table_intrinsic_collapsed_borders.html"), nullptr);
     process_document_font_faces(&ui, document);

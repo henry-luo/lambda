@@ -2851,6 +2851,44 @@ TEST(RadiantViewTest, StaticSnapshotDoesNotAdvanceTimersDuringNativeLayout) {
     shell_result_free(&result);
 }
 
+TEST(RadiantViewTest, FileExportsCaptureRecurringFramesWithoutAdvancingDelayedTimers) {
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "./temp/test_radiant_export_recurring_frames.html";
+    const char source[] = "<!doctype html><body><div id=box>before load</div><script>"
+        "window.addEventListener('load',function(){"
+        "document.getElementById('box').textContent='capture ready';"
+        "console.log('EXPORT_LOAD_READY');"
+        "setTimeout(function(){console.log('EXPORT_LATE_TIMER');},1000);"
+        "function frame(){console.log('EXPORT_FRAME_READY');requestAnimationFrame(frame);}"
+        "requestAnimationFrame(frame);});</script></body>";
+    ASSERT_EQ(write_binary_file(page, source, sizeof(source) - 1), 0);
+    const char* formats[] = {"png", "svg", "pdf"};
+    for (const char* format : formats) {
+        SCOPED_TRACE(format);
+        char output[256];
+        snprintf(output, sizeof(output), "./temp/test_radiant_export_recurring_frames.%s", format);
+        remove(output);
+        const char* args[] = {"./lambda.exe", "render", page, "-o", output,
+            "-vw", "120", "-vh", "80", nullptr};
+        const ShellEnvEntry env[] = {{"LAMBDA_LOG_LEVEL", "NOTICE"}, {nullptr, nullptr}};
+        ShellOptions options = {};
+        options.env = env;
+        options.merge_stderr = true;
+        options.timeout_ms = 10000;
+        ShellResult result = shell_exec("./lambda.exe", args, &options);
+        const char* text = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_FALSE(result.timed_out) << text;
+        EXPECT_EQ(result.exit_code, 0) << text;
+        EXPECT_NE(strstr(text, "EXPORT_LOAD_READY"), nullptr) << text;
+        EXPECT_NE(strstr(text, "EXPORT_FRAME_READY"), nullptr) << text;
+        EXPECT_EQ(strstr(text, "EXPORT_LATE_TIMER"), nullptr) << text;
+        EXPECT_TRUE(test_radiant_view_file_readable(output));
+        shell_result_free(&result);
+        remove(output);
+    }
+    remove(page);
+}
+
 TEST(RadiantViewTest, AuthorScriptFailureDoesNotPublishRootsAfterHeapRetirement) {
     test_radiant_view_ensure_temp_dir();
     const char* page = "./temp/test_radiant_view_failed_script_cleanup.html";

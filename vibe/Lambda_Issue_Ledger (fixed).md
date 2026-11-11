@@ -732,6 +732,55 @@ With `type R = {a: int, path: array?, vat: any?, w: any, b: int}` held in `var r
 
 <a id="lr03-42"></a>**LR03-42 · A rebuild or growth of an element carrying a plain map type read element fields past the end of that type (D3.1.1) · FIXED 2026-10-06 (found the same day, when Impl_Map_Transition_Coverage P2 read the copied tag)**
 `map_rebuild_for_type_change` (D3.4.5) and `map_extend_open_shape`'s private path build a `TypeElmt` for an element container and copied `name`, `name_id`, `content_list` and `ns` from the old type cast to `TypeElmt`. When the container carries a plain `TypeMap` -- `test_item_repr_gtest`'s `ObjectShapeMutationRebuildsPackedFields` builds such an object, and nothing ruled it out -- that read ran past the allocation and gave the new type a garbage tag. Nothing dereferenced the tag until P2's structural fingerprint did, which crashed. **Fix:** both sites copy element fields only from a type whose own `type_id` is element (`typemap_has_element_layout`), and the tree paths (`map_extend_via_runtime_tree`, the P2 retype) require the container's kind to match its type's, so a tree node never installs a map type on an element or the reverse.
+### LR03-46 — Online JavaScript shape memory — 2026-11-11
+
+<a id="lr03-46"></a>
+
+**LR03-46 — RESOLVED, 2026-11-11:** online captures expose
+quadratic metadata retention in two LambdaJS construction paths. Authority:
+**D3.4.3** (bounded sharing/private ownership), **D6.3** (precise GC),
+**S9.1.2** (preserved Lambda copy semantics). Sibling edits were explicitly
+authorized by the user.
+
+Azure's String boxing defined and reflagged every UTF16 character index,
+copying the full shape prefix each time. Its allocation snapshot contained
+1.77GB and 30M allocations in the transition arena. The wrapper now builds
+one complete unpublished index/length shape before storing characters;
+subclass identity, lone/pair surrogate units and immutable descriptors remain.
+Azure's post-script allocator reservation fell from 1,925,873,344 to
+160,050,837 bytes and its documentation PNG exports.
+
+Ko-fi separately exhausted the shape graph and entered the runtime's private
+fallback, which copied the entire shape into pool storage on each new field.
+A native pool allocation stack identifies `map_extend_open_shape` beneath
+MVP DefineOwnProperty and interpreter assignments; the process was repeatedly
+killed before capture. The MVP writer now uses the existing shared map-growth
+helper for genuinely absent fields on single-receiver, unverified private JS
+shapes. Generic Lambda COW map extension is unchanged. Input's helper prepares
+an unlinked descriptor and grows GC data before publishing the field, so a
+collecting growth callback sees a complete old shape. Ko-fi now loads/exports
+with about 349MB physical footprint at final cascade; its post-script allocator
+snapshot reserves 282,172,342 bytes. Its browser request remains HTTP403.
+
+`JsMvpLmd.LongStringWrappersDoNotRetainQuadraticShapePrefixes` verifies String
+semantics and bounded retained arena memory. The new
+`JsFormalMir.PrivateObjectGrowthAfterShapeBudgetDeclinesStaysLinear` exhausts
+the graph, grows 768 fields plus Symbol/non-enumerable keys, forces collections,
+and checks contents, sibling isolation, prototype identity and pool allocations.
+The final Lambda baseline passes 7,415/7,415, including all 859 JavaScript
+native cases, 368 MIR GC stress cases and 47 representation cases. The private
+growth regression verifies forced collections actually occurred before resetting
+the stress schedule. The final Radiant gate passes 8,164 with 299 partial /
+20 skipped of 8,483. References, deadlines, TLS verification and memory budgets
+remain unchanged; Relume's longer capture uses the existing explicit parent
+budget override and records it in the manifest.
+
+Evidence: `temp/online-recovery/azure-arena-trace-output.log`,
+`kofi-pool-trace-output.log`, `kofi-native-sample.txt`,
+`kofi-private-fixed-memory.json`, and the canonical online capture logs/PNGs.
+Temporary allocator instrumentation was removed.
+
+
 ## 4. Numbers, decimal & datetime (LR04)
 
 <a id="lr03-43"></a>**LR03-43 · The runtime shape tree outlived the runtime name pool, so a later batch script matched a stale edge by a recycled NameId and gave a group the wrong key (D3.4.3, D5.6.2) · FIXED 2026-10-06 (found and fixed the same day; exposed by Impl_Map_Transition_Coverage P3, which put group-by groups on the tree)**
