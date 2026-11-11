@@ -3,6 +3,7 @@ final class TextBench {
         NativeBench.prepared(prepare,work,v->NativeBench.check(v==expected),v->System.out.println(prefix+v));
     }
     static void run(String name){switch(name){
+        case "spelling"->Spelling.run();
         case "text_search"->TextSearch.run();
         case "jq_mix","jq_records","jq_bf","jq_tree"->JqBench.run(name);
         case "prettier_ast"->Pretty.run();

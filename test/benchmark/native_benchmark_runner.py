@@ -156,7 +156,8 @@ def runtime_metadata(language):
             BASE / 'native_benchmark_runner.py', BASE / f'run_{language}_benchmarks.py']
     fixtures = sorted((BASE / 'text').glob('*.json')) + sorted(p for p in (BASE / 'text/jq').iterdir() if p.suffix in ('.jq', '.bf', '.json'))
     fixtures += sorted((BASE / 'native_ports/fixtures').iterdir())
-    fixtures += [BASE / 'beng/input/fasta_1000.txt', BASE / 'julia/expected.json', BASE / 'julia/SUITE.md']
+    fixtures += [BASE / 'beng/input/fasta_1000.txt', BASE / 'julia/expected.json', BASE / 'julia/SUITE.md',
+                 BASE / 'text/spelling_document.txt', ROOT / 'lmd/package/doc/spelling/data/en-US.dict']
     fixtures += sorted((BASE / 'beng').glob('*.txt'))
     return {'executable': exe, 'version': version,
             'executable_sha256': contract.sha256(exe) if exe else None,

@@ -118,14 +118,16 @@ on paint_activate(evt) {
 }
 on paint_frame(evt) {
     if ((evt.event_phase != 2 or evt.detail != session.token)^) { return 'pass' }
-    let f = paint.frame(session.ps) ^ { session = {*: session, token: 0}; return 'handled' }
+    // the frame and the token update write the state in place: a rebuilt state would share the
+    // paint session again, and the next batch would copy the stroke's tiles (PT7)
+    session.token = 0
+    let f = paint.frame(session.ps) ^ { return 'handled' }
     if (f.rect != null) {
         let canvas = present.node(evt.target, "canvas")
         // the first frame sizes the bitmap; later frames write only their rectangle
         if (f.rect == [0, 0, model.width(session), model.height(session)]) dom.set_canvas_pixels(canvas, f.pixels)^
         else dom.set_canvas_pixels_rect(canvas, f.pixels, f.rect)^
     }
-    session = {*: session, ps: f.session, token: 0}
     return 'handled'
 }
 on click(evt) {
@@ -191,11 +193,14 @@ on pointerdown(evt) {
     let eraser = evt.button == 5
     if (evt.button != 0 and not eraser) { return 'pass' }
     let b = model.stroke_brush(session, eraser) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
-    var ps = paint.begin(session.ps, evt.pointerId, b, session.color) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
-    // feed paints in place (PT7); a failed feed leaves session.ps as it was
-    paint.feed(ps, evt.pointerId, samples(owner, session, evt)) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
+    let begun = paint.begin(session.ps, evt.pointerId, b, session.color) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
+    let pts = samples(owner, session, evt)
+    session.ps = begun
+    // feed paints the state's session in place (PT7)
+    paint.feed(session.ps, evt.pointerId, pts) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
     dom.set_pointer_capture(stage, evt.pointerId)
-    session = requested(owner, {*: session, ps: ps, stroke: {pointer: evt.pointerId, eraser: eraser}})
+    session.stroke = {pointer: evt.pointerId, eraser: eraser}
+    if ((session.token == 0)^) { session.token = dom.request_frame(owner, "paint_frame") }
     return 'prevent-default'
 }
 on pointermove(evt) {
@@ -208,9 +213,11 @@ on pointermove(evt) {
         return 'prevent-default'
     }
     if ((session.stroke == null or session.stroke.pointer != evt.pointerId)^) { return 'pass' }
-    var ps = session.ps
-    paint.feed(ps, evt.pointerId, samples(owner, session, evt)) ^ { return 'prevent-default' }
-    session = requested(owner, {*: session, ps: ps})
+    // the samples are read first: a plain argument that reads `session` would keep the feed's
+    // borrow of session.ps a snapshot (LR12-45)
+    let pts = samples(owner, session, evt)
+    paint.feed(session.ps, evt.pointerId, pts) ^ { return 'prevent-default' }
+    if ((session.token == 0)^) { session.token = dom.request_frame(owner, "paint_frame") }
     return 'prevent-default'
 }
 on pointerup(evt) {

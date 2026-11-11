@@ -444,7 +444,8 @@ RADIANT_C_API Item fn_radiant_paint_stroke(Item* home, Item dabs_item, Item opti
         if (item_is_error(cow_path_set_raw(layer.get(), key.get(), tiles.get()))) return paint_error("cannot install paint tiles");
     }
     const uint8_t* touched = (const uint8_t*)batch.touched.data;
-    int64_t in_place = 0, copied = 0;
+    // release and no-log builds erase the diagnostic that consumes these counters
+    [[maybe_unused]] int64_t in_place = 0, copied = 0;
     for (int64_t i = 0; i < batch.info.tiles_x * batch.info.tiles_y; i++) {
         if (!touched[i]) continue;
         Item tile = ItemReader(tiles.get().to_const()).asArray().get(i).item();

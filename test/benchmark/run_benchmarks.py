@@ -192,10 +192,11 @@ LARCENY = [
 ]
 
 # Text-library workloads are included by default and selectable with `-s text`.
-# Each has Lambda, C2MIR, Go, Python, and Node implementations.
+# Ports vary by workload; unavailable native implementations are reported as missing.
 TEXT = [
     ("fast_diff", "text-diff", "test/benchmark/text/fast_diff.ls", "test/benchmark/text/fast_diff.js", "test/benchmark/text/python/fast_diff.py"),
     ("microdiff", "data-diff", "test/benchmark/text/microdiff.ls", "test/benchmark/text/microdiff.js", "test/benchmark/text/python/microdiff.py"),
+    ("spelling", "spelling", "test/benchmark/text/spelling.ls", "test/benchmark/text/spelling.js", "test/benchmark/text/python/spelling.py"),
     ("hyphen", "hyphenation", "test/benchmark/text/hyphen.ls", "test/benchmark/text/hyphen.js", "test/benchmark/text/python/hyphen.py"),
     ("prettier_ast", "formatting", "test/benchmark/text/prettier_ast.ls", "test/benchmark/text/prettier_ast.js", "test/benchmark/text/python/prettier_ast.py"),
     ("text_search", "search", "test/benchmark/text/text_search.ls", "test/benchmark/text/text_search.js", "test/benchmark/text/python/text_search.py"),

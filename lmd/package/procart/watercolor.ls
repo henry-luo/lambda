@@ -134,8 +134,8 @@ pub fn trail(x0: float, y0: float, x1: float, y1: float, radius: float, flow: fl
 
 // brush kinds: pigment arrives by f^2 (clamped at one), water by f and pressure by f^2; clear water
 // also re-suspends deposited pigment; a blot removes pigment from both layers (Washes applyStamp).
-// The disc is walked here from scalars: a member-place var borrow (s.cells) passed together with an
-// array argument costs a copy of the whole sheet per call in the current runtime.
+// The disc is walked here from scalars, so the member-place var borrow (s.cells) has only scalar
+// siblings and is borrowed in place (LR12-45).
 pn brush_cells(var c: float[], n: int, w: int, h: int, cx: float, cy: float, r: float, kind: int, channel: int,
         amount: float, wet_gain: float, pressure_gain: float, lift: float) {
     let g = (SUSPENDED + channel) * n, wet = WET * n, pressure = PRESSURE * n

@@ -18,31 +18,37 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
-
 ## Online JavaScript shape memory — 2026-11-11
 
 <a id="lr03-46"></a>
 
 - [LR03-46 — String wrapper and private object growth retain quadratic shape metadata](<Lambda_Issue_Ledger (fixed).md#lr03-46>).
 
-## Watercolor simulation baseline timeout — 2026-11-11
+## System-function results alias their arguments — 2026-11-11
+
+<a id="lr12-47"></a>
+
+**LR12-47 — FIXED:** system functions and `++` that place an argument's items
+into their result now capture them (S9.3.1), so a write through the argument or
+through the result no longer reaches the other, on either tier. See
+[cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-47>).
+
+## Place borrows and the watercolor timeout — 2026-11-11
 
 <a id="lr12-45"></a>
 
-**LR12-45 — OPEN:** `make test-lambda-baseline` passes 7,412 of 7,413
-tests but times out in
-`AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/proc_procart_watercolor_sim`.
-A focused repeat with the same GTest filter also reaches the existing 60s
-deadline (status 124). The cause is **unconfirmed**. This is not a blocker for
-the Kian Hup viewer rendering repair: this fixture imports the unchanged
-`lambda.procart.watercolor` procedural simulation and does not exercise the
-edited DOM, stylesheet, canvas-paint or button-layout paths. Ownership and
-execution context: **D9.1.1v4 / D8.3.1**.
+**LR12-45 — RESOLVED:** a member place passed to a Lambda `pn` beside container
+arguments is now borrowed in place on both tiers unless a plain argument may
+alias it, and MVP no longer captures a binding passed to a forwarding wrapper
+or left untyped by a native `var` call. See
+[cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-45>).
 
-Evidence: `temp/kianhup-style/baseline-lambda.log` and
-`test-watercolor.log`. No runtime workaround, deadline change, golden change,
-or test exclusion was made. This debug baseline run is a functional check;
-no performance conclusion or measurement is claimed.
+<a id="lr12-46"></a>
+
+**LR12-46 — RESOLVED:** the `proc_procart_watercolor_sim` timeout (recorded
+here as LR12-45 by another session on the same day, renumbered because that ID
+was already in use) came from promoted functions copying the whole cells array
+on each store. See [cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-46>).
 
 ## Radiant integration layout-host selection — 2026-11-11
 
@@ -1379,6 +1385,35 @@ Evidence: `temp/mvp_emission_test_update/new-t0-controls.json`,
 the LR07-60 migration update. Keep the expected result and report the T0 defect;
 it does not block MVP JIT emission tests (S9.1.2–S9.1.3v3).
 
+<a id="lr07-66"></a>**LR07-66 · Existing JIT/T0 differences block interpreter census refresh · OPEN (2026-11-11)**
+
+The checked-subscript repair passes all 2,216 interpreter goldens, but
+`make interp-sweep ARGS='--jobs 3 --timeout 30'` reports 1,543 matches and six
+differences in its 1,549-row corpus. It refuses list regeneration. Five
+differences reproduce unchanged on the saved original host present at starting
+checkout `8b4fbd521`
+(SHA256 `ee2abf8ce1b8d11639ca210a7618b75d89255546d65200666f7a35ecc40b01fe`):
+
+| Fixture under `test/lambda/` | Interpreter | Eager JIT |
+|---|---|---|
+| `js_array_props_tail_bridge.ls` | golden, final boolean `true` | final boolean `false` |
+| `last_defect_receiver.ls` | golden | compile exit 1 |
+| `ledger_optional_fields.ls` | golden | signal 11 |
+| `proc/interp_var_writeback.ls` | golden | compile exit 1 |
+| `proc/proc_fill_bool_inferred_read.ls` | golden | compile exit 1 |
+
+The sixth row, `conc/proc_handler_fault_after_wait.ls`, differs in the bounded
+sweep but matches in the subsequent isolated before/after probe; its cause is
+unconfirmed. Both probe tiers print `error308` and exit zero in isolation.
+
+Reproduce each stable row with `LAMBDA_EXEC_BACKEND=jit ./lambda.exe <path>`;
+use `run <path>` for `proc/` rows. Repeat with `interp`. Evidence:
+`temp/sweep_full.tsv`, `temp/interp-e501/sweep.log`, and
+`temp/interp-e501/sweep-divergences.json`. Source causes and introducing commits
+remain unconfirmed. These differences violate tier parity (S1.6, D8.3.1),
+block census regeneration, and do not block the interpreter E501 repair.
+The failing oracles and all three generated coverage lists are preserved.
+
 ## 8. Memory management & GC (LR08)
 
 
@@ -1686,12 +1721,6 @@ channel).
 
 *Remaining (needs a ruling):* whether a write error from a plain `pn` must escape a **discarded statement-position call in its caller**, rather than being available as the call's result. This separate caller-boundary policy is not decided by repairing the originating store.
 
-
-<a id="lr12-45"></a>**LR12-45 · A member place passed to a Lambda `pn` beside container parameters is snapshotted, so every write copies · OPEN (found 2026-11-11)**
-
-A `var` argument that is a member or index place (`f(s.layer, table)`) is borrowed in place only in a narrow shape. MVP requires an "exclusive place": pure argument expressions, exactly one `var` parameter, and no other parameter whose contract may hold a container (`exclusive_place` in `mvp_mir.cpp`). T0 snapshots the home whenever the callee has any plain container or untyped parameter (`ast_call_has_plain_container_parameter`, `snapshot_home` in `interp.cpp`). Outside that shape the leaf is captured (`cow_capture_value`), so the callee's first write copies it, on every call. S9.1.2/S9.1.3 require plain arguments to be snapshots; they do not require the place to be captured when no plain argument can alias it. Native `var` procedures already use the precise rule: capture only plain arguments that read a borrowed root or call a definition that might return one (**D7.6.3**, `var_alias_capture_mask`).
-
-*Evidence:* a probe passing `s.layer` to a module `pn into(var l, table)` copied the touched tile on each of 4 calls (JIT), while a bare binding stayed in place. `lambda.paint` therefore calls `radiant.paint_stroke` directly on `s.layer` (Lambda_Pkg_Paint PT7); `procart.watercolor`'s `brush_cells` walks its disc from scalars for the same reason (comment at its definition). *Fix direction:* apply the native rule to Lambda `pn` place borrows on both tiers. Not a semantics change: only performance is affected.
 
 ## 13. Schema validator (LR13)
 

@@ -155,6 +155,22 @@ void expect_tiers_agree(const std::string& name, const std::string& source) {
     EXPECT_EQ(jit.exit_code, interp.exit_code) << name << ": tier exit codes diverge";
 }
 
+// D8.3.2: suspending procedures stay on T0 task activations without promotion.
+void expect_task_tiers_agree(const char* path, const char* expected) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        RunResult result = run_script(path, tier, true);
+        EXPECT_EQ(result.exit_code, 0) << result.stderr_text;
+        EXPECT_EQ(trim_trailing(result.stdout_text), trim_trailing(expected));
+        if (strcmp(tier, "jit") != 0) {
+            EXPECT_EQ(summary_field(result.stderr_text, "executed="), 1);
+            EXPECT_EQ(summary_field(result.stderr_text, "fallback="), 0);
+            EXPECT_EQ(summary_field(result.stderr_text, "excluded="), 0);
+        }
+    }
+}
+
 //==============================================================================
 // 1. Differential over the committed subset
 //==============================================================================
@@ -303,7 +319,7 @@ TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     RunResult raw_jit = run_script(raw_variant_path, "jit");
     RunResult raw_interp = run_script(raw_variant_path, "interp");
     EXPECT_EQ(trim_trailing(raw_default.stdout_text),
-        "[1, 2.5, true, \"four\", 5, 6, 11, 2.5, 13, 1, 2, int, int, 2, 2, \"Shape\", \"Circle\"]");
+        trim_trailing(read_file("test/lambda/type_binder_raw_variants.txt")));
     EXPECT_EQ(trim_trailing(raw_default.stdout_text),
         trim_trailing(raw_jit.stdout_text));
     EXPECT_EQ(trim_trailing(raw_default.stdout_text),
@@ -333,14 +349,15 @@ TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     write_script("temp/interp_type_binder_nested.ls",
         "fn select(a: {x: any as V}, b: V) V => b;\n"
         "let source: any = {x: 1};\n"
-        "select(source, \"wrong\")\n");
+        "select(source, \"wrong\")^\n");
+    write_script("temp/interp_type_binder_nested.txt", "");
     RunResult nested_jit = run_script("temp/interp_type_binder_nested.ls", "jit");
     RunResult nested_interp = run_script("temp/interp_type_binder_nested.ls", "interp");
     EXPECT_NE(nested_jit.exit_code, 0);
     EXPECT_EQ(nested_jit.exit_code, nested_interp.exit_code);
     EXPECT_EQ(trim_trailing(nested_jit.stdout_text), trim_trailing(nested_interp.stdout_text));
-    EXPECT_NE(nested_jit.stderr_text.find("type check at parameter 'b'"),
-        decltype(nested_jit.stderr_text)::npos);
+    EXPECT_NE(strstr(nested_jit.stderr_text.c_str(), "error[E201]"), nullptr);
+    EXPECT_NE(strstr(nested_jit.stderr_text.c_str(), "type check at argument 2"), nullptr);
     EXPECT_EQ(summary_field(nested_interp.stderr_text, "fallback="), 0);
 }
 
@@ -694,39 +711,25 @@ TEST(InterpWalker, ImmutableProcAliasStaysSynchronous) {
     EXPECT_EQ(jit.exit_code, interp.exit_code);
 }
 
-TEST(InterpWalker, ImmutableProcAliasWithTaskStaysPinned) {
-    // The companion of the test above: when the aliased target really does
-    // await, the caller cannot stay in T0, and delegating it needs the boxed
-    // MIR satellite. Since the AUTO landing that membrane fails closed on
-    // indirect Lambda calls -- the boxed dispatcher has no caller-root
-    // write-back channel for a target it cannot name (D8.3.1, D4.3.1). The
-    // AUTO retains its counted fallback; explicit T0 rejects before execution
-    // because the task continuation requires MIR (D8.3.1).
+TEST(InterpWalker, ImmutableProcAliasWithTaskStaysInterpreted) {
+    // D8.3.2: an indirect suspending call needs no MIR satellite.
     const char* path = "temp/interp_case_proc_alias_task.ls";
     write_script(path,
         "pn worker() { sleep(1)^ }\n"
         "pn main() { let run = worker\n run() }\n");
     write_script("temp/interp_case_proc_alias_task.txt", "");
-    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_PROC");
-    RunResult automatic = run_script(path, "auto", /*procedural=*/true);
-    EXPECT_EQ(automatic.exit_code, 0);
-    EXPECT_EQ(summary_field(automatic.stderr_text, "fallback="), 1);
+    expect_task_tiers_agree(path, "");
 }
 
-TEST(InterpFallback, ExplicitInterpreterRejectsTaskSatellite) {
-    // this body used to pass the scan and compile a satellite despite the pin
+TEST(InterpWalker, ExplicitInterpreterRunsSuspendingProcedure) {
     const char* path = "temp/interp_case_strict_task.ls";
     write_script(path, "pn main() { sleep(1)^; print(\"task executed\\n\") }\n");
     write_script("temp/interp_case_strict_task.txt", "task executed\n");
-    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_PROC");
-    RunResult jit = run_script(path, "jit", true);
-    EXPECT_EQ(jit.exit_code, 0);
-    EXPECT_EQ(trim_trailing(jit.stdout_text),
-        trim_trailing(read_file("temp/interp_case_strict_task.txt")));
+    expect_task_tiers_agree(path, "task executed\n");
 }
 
-TEST(InterpFallback, ExplicitInterpreterRejectsUnsupportedImport) {
-    // imports can arrive through prebuilt AST templates; neither path may JIT
+TEST(InterpWalker, ExplicitInterpreterRunsSuspendingImport) {
+    // imported AST templates execute on T0 task activations too (D8.3.2).
     write_script("temp/interp_case_strict_provider.ls",
         "pub pn worker() { sleep(1)^ }\n");
     write_script("temp/interp_case_strict_provider.txt", "");
@@ -734,11 +737,22 @@ TEST(InterpFallback, ExplicitInterpreterRejectsUnsupportedImport) {
     write_script(path, "import .interp_case_strict_provider\n"
         "pn main() { worker(); print(\"import executed\\n\") }\n");
     write_script("temp/interp_case_strict_import.txt", "import executed\n");
-    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_PROC");
-    RunResult jit = run_script(path, "jit", true);
-    EXPECT_EQ(jit.exit_code, 0);
-    EXPECT_EQ(trim_trailing(jit.stdout_text),
-        trim_trailing(read_file("temp/interp_case_strict_import.txt")));
+    expect_task_tiers_agree(path, "import executed\n");
+}
+
+TEST(InterpFallback, ExplicitInterpreterRejectsUnboundMethodReceiver) {
+    // D8.3.1: an unsupported receiver still fails before any T0 execution.
+    const char* path = "temp/interp_case_unbound_method_receiver.ls";
+    write_script(path,
+        "type Counter { value: int, fn get() => value }\n"
+        "fn create() => <Counter value: 7>\n"
+        "create().get()^\n");
+    write_script("temp/interp_case_unbound_method_receiver.txt", "7\n");
+    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_CALL_EXPR", false);
+    RunResult automatic = run_script(path, "auto");
+    EXPECT_EQ(automatic.exit_code, 0) << automatic.stderr_text;
+    EXPECT_EQ(trim_trailing(automatic.stdout_text), "7");
+    EXPECT_EQ(summary_field(automatic.stderr_text, "fallback="), 1);
 }
 
 TEST(InterpWalker, QueensRunsEntirelyUnderInterpreter) {
@@ -973,20 +987,26 @@ TEST(InterpWalker, FixedArityCallsBeyondFourUseFixedAbi) {
     EXPECT_EQ(jit.exit_code, interp.exit_code);
 }
 
-TEST(InterpFallback, CharacterRangeIndexRemainsPinned) {
-    // `to` can also make a character range, so it cannot use the integer COW
-    // bridge merely because the loop's conservative AST type is `any`.
+TEST(InterpWalker, CharacterRangeIndexUsesCheckedStore) {
+    // S7.1.3v3: character keys reach the hard write error, never index zero.
     const char* path = "temp/interp_case_char_range_index.ls";
     write_script(path,
         "pn main() {\n"
         "    var values = [null, null, null]\n"
         "    for c in \"a\" to \"c\" { values[c] = c }\n"
         "}\n");
-    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_INDEX_ASSIGN_STAM");
+    write_script("temp/interp_case_char_range_index.txt", "");
+    RunResult interp = run_script(path, "interp", true);
+    EXPECT_NE(interp.exit_code, 0);
+    EXPECT_TRUE(interp.stdout_text.empty());
+    EXPECT_NE(strstr(interp.stderr_text.c_str(), "error[E201]"), nullptr)
+        << interp.stderr_text;
+    EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 1);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
 }
 
-TEST(InterpFallback, DerivedDynamicNdimCoordinatesRemainUnsupported) {
-    // a scalar arithmetic key must not admit an unplanned coordinate list
+TEST(InterpWalker, DerivedDynamicNdimCoordinatesUseCheckedStore) {
+    // coordinates are decoded dynamically before the shared checked store
     const char* path = "temp/interp_case_derived_ndim_index.ls";
     write_script(path,
         "pn write_coords(var values, i, j) { values[i + 0, j + 0] = 99 }\n"
@@ -996,11 +1016,18 @@ TEST(InterpFallback, DerivedDynamicNdimCoordinatesRemainUnsupported) {
         "    print(values[0, 1] ++ \"\\n\")\n"
         "}\n");
     write_script("temp/interp_case_derived_ndim_index.txt", "99\n");
-    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_INDEX_ASSIGN_STAM");
-    auto jit = run_script(path, "jit", true);
-    ASSERT_EQ(jit.exit_code, 0) << jit.stderr_text;
-    EXPECT_EQ(trim_trailing(jit.stdout_text),
-        trim_trailing(read_file("temp/interp_case_derived_ndim_index.txt")));
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        RunResult result = run_script(path, tier, true);
+        ASSERT_EQ(result.exit_code, 0) << result.stderr_text;
+        EXPECT_EQ(trim_trailing(result.stdout_text),
+            trim_trailing(read_file("temp/interp_case_derived_ndim_index.txt")));
+        if (strcmp(tier, "interp") == 0) {
+            EXPECT_EQ(summary_field(result.stderr_text, "executed="), 1);
+            EXPECT_EQ(summary_field(result.stderr_text, "fallback="), 0);
+        }
+    }
 }
 
 }  // namespace

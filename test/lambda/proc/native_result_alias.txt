@@ -1,0 +1,7 @@
+{
+  through_argument: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  filled: 1,
+  through_result: [1, 1, 1],
+  extra: 1,
+  written: [9, 9, 9, 9, 9, 9, 9, 9, 9]
+}

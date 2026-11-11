@@ -497,6 +497,20 @@ static inline bool ast_declared_type_is_map(Type* declared) {
         lambda_type_nonnull_map_contract(semantic));
 }
 
+// the entry a member read resolves (a repeated literal key's last, S1.6)
+ShapeEntry* find_shape_read_field_by_name(TypeMap* map_type, const char* name, int name_len);
+
+// explicit receiver fields share the same binding as bare method fields
+static inline ShapeEntry* ast_object_member_field(TypeObject* owner,
+        AstNode* object, AstNode* key) {
+    object = ast_unwrap_primary_to_leaf(object);
+    key = ast_unwrap_primary_to_leaf(key);
+    if (!owner || !object || object->node_type != AST_NODE_CURRENT_ITEM ||
+            !key || key->node_type != AST_NODE_IDENT) return NULL;
+    String* name = ((AstIdentNode*)key)->name;
+    return find_shape_read_field_by_name((TypeMap*)owner, name->chars, name->len);
+}
+
 // Object fields take precedence over methods at member lookup time. Keep the
 // same table walk available to both T0 admission and execution so a callable
 // field cannot be mistaken for a bound method.
@@ -537,17 +551,6 @@ static inline bool ast_declared_type_is_open_item(Type* declared) {
     Type* right = type_field_unwrap_simple_decl(binary->right);
     return (left && left->type_id == LMD_TYPE_ANY) ||
         (right && right->type_id == LMD_TYPE_ANY);
-}
-
-// a plain container argument may snapshot an ancestor of a borrowed place.
-// scalar-only siblings cannot alias its storage, so the home may reuse the leaf.
-static inline bool ast_call_has_plain_container_parameter(const TypeFunc* signature) {
-    for (const TypeParam* param = signature ? signature->param : NULL;
-            param; param = param->next) {
-        if (!param->is_var_param && (!param->full_type ||
-                ast_type_may_be_container(param->full_type))) return true;
-    }
-    return false;
 }
 
 // `arg_nodes` (optional) receives the resolved argument node for each `var`

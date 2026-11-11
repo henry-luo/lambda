@@ -489,6 +489,9 @@ void array_push(Array* arr, Item item);  // sequence append: splices a list (D3.
 void array_push_verbatim(Array* arr, Item item);  // verbatim append: one value, one item (D3.3.1)
 // S9.3.1 capturing append for Lambda literals/comprehensions; array_push does not capture.
 void array_push_capture(Array* arr, Item item);
+// S9.3.1 (LR12-47): natives placing their arguments' items into a result.
+void array_push_verbatim_capture(Array* arr, Item item);
+void array_capture_items(Array* arr, int64_t start, int64_t end);
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
 // S12.3.5v2: `*x` is the list of x's items -- a sequence's items (a range
 // materialized), nothing for null, any other value as one item -- collapsed

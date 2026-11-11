@@ -1,0 +1,45 @@
+{
+  no_alias: {
+    n: 2,
+    seen: 10
+  },
+  other: {
+    n: 10
+  },
+  root_read: {
+    n: 2,
+    seen: 1
+  },
+  whole_root: {
+    n: 2,
+    seen: 5
+  },
+  whole_root_n: 5,
+  held_place: {
+    n: 2,
+    seen: 1
+  },
+  held: {
+    n: 1,
+    seen: 0
+  },
+  repeated: {
+    n: 5,
+    seen: 10
+  },
+  before: {
+    n: 0,
+    seen: 0
+  },
+  both_x: {
+    n: 101
+  },
+  both_y: {
+    n: 102
+  },
+  k: {
+    n: 100
+  },
+  items: [8, 2, 3],
+  extra: [7]
+}

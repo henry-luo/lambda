@@ -384,8 +384,9 @@ static bool jube_signature_var_params(const JubeFuncDef* fn, int arg_count,
         p = end < close ? end + 1 : close;
     }
     if (!*mask) return true;
-    // T0 dispatches at most five arguments; MIR classifies the first eight.
-    if (!jube_signature_is_proc(fn->signature) || (fn->flags & JUBE_FN_VARARGS) ||
+    // T0 dispatches at most five arguments; MIR classifies the first eight. A
+    // `var` position writes, so it cannot be declared read-only (D7.6.5).
+    if (!jube_signature_is_proc(fn->signature) || (fn->flags & (JUBE_FN_VARARGS | JUBE_FN_READS_ARGS)) ||
             arg_count < 0 || arg_count > 5 || !fn->native_func) return false;
     if (!jube_signature_params(fn->native_signature, &open, &close)) return false;
     p = open + 1;
@@ -449,6 +450,7 @@ static void register_jube_sys_funcs(void) {
             record->info.is_proc = jube_signature_is_proc(fn->signature);
             record->info.is_overloaded = false;
             record->info.is_method_eligible = (fn->flags & JUBE_FN_METHOD_ELIGIBLE) != 0;
+            record->info.reads_args = (fn->flags & JUBE_FN_READS_ARGS) != 0;
             record->info.first_param_type = jube_signature_first_param_type_id(fn->signature);
             record->info.can_raise = false;
             record->info.c_ret_type = C_RET_ITEM;
@@ -4247,18 +4249,18 @@ static bool validate_var_argument_root(Transpiler* tp, SourceSpan diagnostic_spa
     return true;
 }
 
-// D7.6.3 / S9.1.3v4: a plain argument must stay a snapshot while a native
+// D7.6.3 / S9.1.3v4: a plain argument must stay a snapshot while a callee
 // writes a `var` place in place. Its value may share storage with the place when
 // it reads a borrowed root, or calls a definition that might return one.
-typedef struct NativeAliasScan {
+typedef struct VarAliasScan {
     AstNode* top;
     NameEntry* const* roots;
     int root_count;
     bool found;
-} NativeAliasScan;
+} VarAliasScan;
 
-static void native_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
-    NativeAliasScan* scan = (NativeAliasScan*)opaque;
+static void var_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
+    VarAliasScan* scan = (VarAliasScan*)opaque;
     if (scan->found || !child) return;
     if (parent == scan->top && child == scan->top->next) return;
     if (child->node_type == AST_NODE_IDENT) {
@@ -4273,13 +4275,35 @@ static void native_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) 
             return;
         }
     }
-    ast_visit_core_children(child, native_alias_scan_cb, opaque);
+    ast_visit_core_children(child, var_alias_scan_cb, opaque);
 }
 
-static bool native_argument_may_alias(AstNode* arg, NameEntry* const* roots, int count) {
-    NativeAliasScan scan = {arg, roots, count, false};
-    native_alias_scan_cb(arg, NULL, &scan);
+static bool argument_may_alias_roots(AstNode* arg, NameEntry* const* roots, int count) {
+    VarAliasScan scan = {arg, roots, count, false};
+    var_alias_scan_cb(arg, NULL, &scan);
     return scan.found;
+}
+
+// D7.6.3 / S9.1.3: the plain argument slots of a call with `var` arguments whose
+// values may share storage with a borrowed root. A pipe receiver is evaluated
+// outside the argument list and stays a snapshot. Native procedures mark these
+// values shared before the borrow; a Lambda `pn` borrows a place in place only
+// when no slot may alias (LR12-45).
+static uint16_t var_alias_capture_mask(AstNode* const* args, const bool* is_var,
+        int count, bool pipe_inject) {
+    NameEntry* roots[LAMBDA_MAX_FUNCTION_ARGS];
+    int root_count = 0;
+    for (int i = 0; i < count; i++) {
+        AstIdentNode* root = is_var[i] && args[i] ? compound_root_ident(args[i]) : NULL;
+        if (root && root->entry) roots[root_count++] = root->entry;
+    }
+    uint16_t mask = pipe_inject ? 1 : 0;
+    for (int i = pipe_inject ? 1 : 0; i < count; i++) {
+        if (!is_var[i] && args[i] && !ast_is_omitted_argument(args[i]) &&
+                argument_may_alias_roots(args[i], roots, root_count))
+            mask |= (uint16_t)(1u << i);
+    }
+    return mask;
 }
 
 // D7.6.3: a native procedure's `var` arguments pass the Lambda `pn` checks. The
@@ -4330,22 +4354,15 @@ static void validate_native_var_arguments(Transpiler* tp, SourceSpan span,
             if (!should_continue_transpiling(tp)) return;
         }
     }
-    NameEntry* places[LAMBDA_MAX_FUNCTION_ARGS];
-    int place_count = 0;
-    index = call->pipe_inject ? 1 : 0;
-    for (AstNode* arg = call->argument; arg; arg = arg->next, index++) {
-        AstIdentNode* root = sysfunc_arg_is_var(info, index) ? compound_root_ident(arg) : NULL;
-        if (root && root->entry && place_count < LAMBDA_MAX_FUNCTION_ARGS)
-            places[place_count++] = root->entry;
+    AstNode* slots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    bool slot_is_var[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    int count = call->pipe_inject ? 1 : 0;
+    for (AstNode* arg = call->argument; arg && count < LAMBDA_MAX_FUNCTION_ARGS; arg = arg->next, count++) {
+        slots[count] = arg;
+        slot_is_var[count] = sysfunc_arg_is_var(info, count);
     }
-    // a pipe receiver is evaluated outside the argument list; keep it a snapshot.
-    call->var_alias_capture_mask = call->pipe_inject ? 1 : 0;
-    index = call->pipe_inject ? 1 : 0;
-    for (AstNode* arg = call->argument; arg && index < 16; arg = arg->next, index++) {
-        if (!sysfunc_arg_is_var(info, index) &&
-                native_argument_may_alias(arg, places, place_count))
-            call->var_alias_capture_mask |= (uint16_t)(1u << index);
-    }
+    call->var_alias_capture_mask = var_alias_capture_mask(slots, slot_is_var, count, call->pipe_inject);
+    call->var_alias_proven = true;
 }
 
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
@@ -4385,6 +4402,17 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     int slot_count = resolve_call_boundary_arguments(call, injected, by_param);
     AstFuncNode* named_callee = ast_call_has_named_args(call)
         ? ast_direct_call_function(call) : NULL;
+    // LR12-45: a place borrow stays in place unless a plain argument may alias it.
+    bool slot_is_var[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    bool has_var_slot = false;
+    int var_slot = 0;
+    for (TypeParam* p = func_type->param; p && var_slot < LAMBDA_MAX_FUNCTION_ARGS; p = p->next, var_slot++)
+        has_var_slot |= slot_is_var[var_slot] = p->is_var_param;
+    if (has_var_slot) {
+        call->var_alias_capture_mask = var_alias_capture_mask(by_param, slot_is_var,
+            slot_count < var_slot ? slot_count : var_slot, call->pipe_inject);
+        call->var_alias_proven = true;
+    }
 
     // Resolve every binder site before checking references. This makes a
     // same-name multi-site join independent of parameter order (TG13v2).
@@ -9590,6 +9618,8 @@ static void lambda_ast_decide_cow_borrows(Transpiler* tp, AstScript* script,
     lambda_ast_note_var_root_sharing(functions);
     for (int i = 0; i < functions->length; i++) {
         AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+        // the module is complete: its callers in other modules may rely on these facts
+        if (fn) fn->cow_param_effects_final = true;
         lambda_ast_note_place_copy_place_writes(fn);
         lambda_ast_lower_rmw_borrows(fn);
         lambda_ast_plan_place_handles(tp, fn);
@@ -12406,6 +12436,39 @@ static bool cow_param_nested_function_uses_entry(AstNode* node, void* data) {
     return true;
 }
 
+// S9.1.2: a callee whose module finished building has final parameter facts.
+static AstFuncNode* cow_param_final_callee(AstCallNode* call) {
+    AstFuncNode* target = ast_direct_call_function(call);
+    TypeFunc* signature = target && ((AstNode*)target)->type &&
+            ((AstNode*)target)->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)((AstNode*)target)->type : NULL;
+    return target && target->cow_param_effects_final && signature && !signature->is_variadic
+        ? target : NULL;
+}
+
+// whether a final callee may keep `arg`: its parameter is retained, is a `var`
+// parameter, or the argument has no parameter of its own. A returned parameter
+// is not kept: the callee marks what it returns of its parameters (LR12-11).
+// The bare-name question asks whether the parameter itself is retained; a
+// callee that keeps only a part of it does not keep the bare argument.
+static bool cow_param_callee_keeps(AstCallNode* call, AstFuncNode* callee, AstNode* arg,
+        bool bare_only) {
+    int source_count = ast_linked_node_count(call->argument);
+    if (source_count + (call->pipe_inject ? 1 : 0) > LAMBDA_MAX_FUNCTION_ARGS) return true;
+    AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    ast_resolve_call_arguments(call, callee, source_count, resolved);
+    int index = 0;
+    for (AstNamedNode* param = callee->param; param && index < LAMBDA_MAX_FUNCTION_ARGS;
+            param = (AstNamedNode*)((AstNode*)param)->next, index++) {
+        if (resolved[index] != arg) continue;
+        TypeParam* type = (TypeParam*)((AstNode*)param)->type;
+        NameEntry* entry = param->entry;
+        return !type || type->is_var_param || !entry ||
+            (bare_only ? entry->cow_param_root_retained : entry->cow_param_retained);
+    }
+    return true;
+}
+
 static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     CowParamEffectScan* scan = (CowParamEffectScan*)data;
     if (!scan || !node) return false;
@@ -12456,22 +12519,29 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         // nothing that outlives the call. Counting it as an escape marked every
         // `let keys = tree.keys` in cd2's find and copied the array on the
         // following put (+37k copies). The registry row carries both facts.
-        // Only the bare-name (place-copy) question uses this: the CW29
-        // parameter sweep keeps its unknown-callee conservatism.
+        // The parameter sweep uses it too: `float(s.layer.width)` made `s`
+        // look retained, so every caller captured its argument (LR12-45).
         AstNode* callee = ast_unwrap_primary(call->function);
         SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
             ? ((AstSysFuncNode*)callee)->fn_info : NULL;
-        // The local-part recursion (depth > 0) asks only the retention
-        // question, which a pure scalar builtin cannot answer yes to either.
-        bool pure_scalar_sys = (scan->bare_only || scan->depth > 0) && sys && !sys->is_proc &&
-            sys->return_type && sys->return_type->type_id != LMD_TYPE_ANY &&
-            !ast_type_needs_mutable_clone(sys->return_type->type_id) &&
-            sys->return_type->type_id != LMD_TYPE_TYPE &&
-            sys->return_type->type_id != LMD_TYPE_FUNC;
-        if (pure_scalar_sys) break;
+        // `T | error` rows name `any` as their return type; the success type
+        // describes the value, and an error result holds no argument (RV14a).
+        Type* sys_result = sys ? (sys->success_type ? sys->success_type : sys->return_type) : NULL;
+        bool pure_scalar_sys = sys && !sys->is_proc &&
+            sys_result && sys_result->type_id != LMD_TYPE_ANY &&
+            !ast_type_needs_mutable_clone(sys_result->type_id) &&
+            sys_result->type_id != LMD_TYPE_TYPE &&
+            sys_result->type_id != LMD_TYPE_FUNC;
+        // D7.6.5: a function registered as only reading its arguments keeps none.
+        if (pure_scalar_sys || (sys && sys->reads_args)) break;
+        // a callee from a finished module keeps an argument only where its own
+        // final facts say so, so a forwarding wrapper (a package facade) does
+        // not make its parameter look retained to every caller (S9.1.2).
+        AstFuncNode* final_callee = cow_param_final_callee(call);
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
             if (cow_param_scan_matches(scan, arg)) {
-                // The callee's effect can be unknown at this function's
+                if (final_callee && !cow_param_callee_keeps(call, final_callee, arg, scan->bare_only)) continue;
+                // Any other callee's effect can be unknown at this function's
                 // completion (including forward and dynamic targets).
                 cow_param_note_alias(scan);
                 break;

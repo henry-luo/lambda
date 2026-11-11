@@ -13,8 +13,8 @@ import run_julia_benchmarks as julia
 class JuliaRunnerTests(unittest.TestCase):
     def test_registered_port_coverage(self):
         entries = julia.benchmark_entries(True)
-        self.assertEqual(77, len(entries))
-        self.assertEqual(71, len(julia.benchmark_entries()))
+        self.assertEqual(78, len(entries))
+        self.assertEqual(72, len(julia.benchmark_entries()))
         self.assertFalse([f"{b['suite']}/{b['name']}" for b in entries
                           if julia.port_source(b['suite'], b['name']) is None])
 
@@ -61,6 +61,14 @@ class JuliaRunnerTests(unittest.TestCase):
             path = Path("test/benchmark/text/jq") / name
             self.assertEqual(julia.sha256(julia.PROJECT_ROOT / path),
                              metadata["fixtures_sha256"][str(path)])
+
+    def test_spelling_inputs_are_hashed(self):
+        with patch.object(julia, "julia_executable", return_value=None):
+            metadata = julia.runtime_metadata()
+        for name in ("test/benchmark/text/spelling_document.txt",
+                     "test/benchmark/text/spelling_expected.json",
+                     "lmd/package/doc/spelling/data/en-US.dict"):
+            self.assertEqual(julia.sha256(julia.PROJECT_ROOT / name), metadata["fixtures_sha256"][name])
 
     def test_unified_runner_rejects_missing_execution_timer(self):
         results, row = {"r7rs": {"fib": {}}}, {}

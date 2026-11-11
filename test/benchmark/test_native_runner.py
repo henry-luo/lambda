@@ -13,8 +13,8 @@ import verify_julia_suite as micro_verifier
 class NativeRunnerTests(unittest.TestCase):
     def test_registered_coverage(self):
         entries = native.contract.benchmark_entries(True)
-        self.assertEqual(77, len(entries))
-        self.assertEqual(71, len(native.contract.benchmark_entries()))
+        self.assertEqual(78, len(entries))
+        self.assertEqual(72, len(native.contract.benchmark_entries()))
         manifest = json.loads((native.BASE / 'native_ports/manifest.json').read_text())
         self.assertEqual({f"{e['suite']}/{e['name']}" for e in entries}, set(manifest['entries']))
         for language in ('java', 'erlang'):
@@ -81,6 +81,15 @@ class NativeRunnerTests(unittest.TestCase):
                 self.assertEqual(native.contract.sha256(native.ROOT / path), metadata['fixtures_sha256'][str(path)])
             for path in ('native_benchmark_runner.py', 'native_ports/manifest.json', f'run_{language}_benchmarks.py'):
                 self.assertIn('test/benchmark/' + path, metadata['sources_sha256'])
+
+    def test_spelling_inputs_are_hashed(self):
+        for language in ('java', 'erlang'):
+            with patch.object(native, 'executable', return_value=None):
+                metadata = native.runtime_metadata(language)
+            for name in ('test/benchmark/text/spelling_document.txt',
+                         'test/benchmark/text/spelling_expected.json',
+                         'lmd/package/doc/spelling/data/en-US.dict'):
+                self.assertEqual(native.contract.sha256(native.ROOT / name), metadata['fixtures_sha256'][name])
 
     def test_environment_validation(self):
         with patch.dict(os.environ, {'NATIVE_BENCH_WARMUP': '2'}):

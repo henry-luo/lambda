@@ -323,110 +323,33 @@ typedef struct ScanCtx {
     AstNodeId skip_end;
 } ScanCtx;
 
-static bool interp_integer_literal(AstNode* node) {
-    AstNode* original = node;
-    node = ast_unwrap_primary(node);
-    if (!node) {
-        // Number literals are childless PRIMARY nodes; their primary type,
-        // rather than an absent inner AST node, is the integer proof.
-        return original && original->type &&
-            (original->type->type_id == LMD_TYPE_INT ||
-             original->type->type_id == LMD_TYPE_INT64);
+NameEntry* interp_method_store_entry(const AstIndex* index, AstNode* node) {
+    if (!index || !node || node->node_type != AST_NODE_MEMBER_ASSIGN_STAM) return NULL;
+    AstCompoundAssignNode* assignment = (AstCompoundAssignNode*)node;
+    AstNode* parent = ast_index_parent(index, node);
+    while (parent && parent->node_type != AST_NODE_PROC) {
+        // these bodies replace `~`, so they cannot name the method receiver
+        if (parent->node_type == AST_NODE_FUNC || parent->node_type == AST_NODE_FUNC_EXPR ||
+                parent->node_type == AST_NODE_PIPE || parent->node_type == AST_NODE_MATCH_ARM ||
+                parent->node_type == AST_NODE_FOR_EXPR || parent->node_type == AST_NODE_VIEW)
+            return NULL;
+        parent = ast_index_parent(index, parent);
     }
-    if (node->node_type == AST_NODE_UNARY) {
-        AstUnaryNode* unary = (AstUnaryNode*)node;
-        return (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) &&
-            interp_integer_literal(unary->operand);
-    }
-    return node->node_type == AST_NODE_LITERAL && node->type &&
-        (node->type->type_id == LMD_TYPE_INT ||
-         node->type->type_id == LMD_TYPE_INT64);
+    AstNode* owner = parent ? ast_index_parent(index, parent) : NULL;
+    if (!owner || owner->node_type != AST_NODE_OBJECT_TYPE || !owner->type ||
+            owner->type->type_id != LMD_TYPE_TYPE) return NULL;
+    ShapeEntry* field = ast_object_member_field((TypeObject*)((TypeType*)owner->type)->type,
+        assignment->object, assignment->key);
+    return field ? field->binding : NULL;
 }
 
-// `a[i, j]` reaches ArrayNum's existing N-D helpers only when the binding is a
-// direct numeric literal (or its plain alias) and every coordinate is a fixed
-// integer. The static proof keeps generic tuple-like indexing and effectful
-// coordinate evaluation on MIR while retaining c15's axis-bound behavior.
-// Keep the N-D read proof aligned with the runtime carrier. `reshape` and
-// `transpose` return ArrayNum views even though their registry result type is
-// `any`; rejecting those aliases would route valid ArrayNum indexing to MIR
-// solely because the type graph forgets the concrete carrier.
-static bool interp_array_num_expr(AstNode* node, int depth) {
-    if (!node || depth >= 16) return false;
-    node = ast_unwrap_primary(node);
-    if (!node) return false;
-    if (node->node_type == AST_NODE_ARRAY) {
-        int64_t shape[AST_COW_PATH_MAX] = {};
-        ArrayNumElemType element = ELEM_INT;
-        return detect_ndim_literal(node, shape, AST_COW_PATH_MAX,
-            &element, true) >= 1;
-    }
-    if (node->node_type == AST_NODE_IDENT) {
-        NameEntry* entry = ((AstIdentNode*)node)->entry;
-        if (!entry || !entry->node || entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) {
-            return false;
-        }
-        return interp_array_num_expr(((AstDeclaratorNode*)entry->node)->init, depth + 1);
-    }
-    if (node->node_type != AST_NODE_CALL_EXPR) return false;
-    AstCallNode* call = (AstCallNode*)node;
-    AstNode* callee = ast_unwrap_primary(call->function);
-    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
-    SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
-    if (!info || (info->fn != SYSFUNC_RESHAPE && info->fn != SYSFUNC_TRANSPOSE)) {
-        return false;
-    }
-    return call->argument && interp_array_num_expr(call->argument, depth + 1);
-}
-
-static bool interp_literal_ndim_indices(AstNode* first_index) {
+// reads and writes both decode coordinates through the checked runtime ABI
+static bool interp_ndim_indices_supported(AstNode* first_index) {
     int count = 0;
     for (AstNode* index = first_index; index; index = index->next) {
-        if (count >= AST_COW_PATH_MAX || !interp_integer_literal(index)) return false;
-        count++;
+        if (++count > AST_COW_PATH_MAX) return false;
     }
     return count >= 2;
-}
-
-static bool interp_direct_ndim_indices(AstNode* object, AstNode* first_index) {
-    return interp_array_num_expr(ast_unwrap_primary(object), 0) &&
-        interp_literal_ndim_indices(first_index);
-}
-
-// Scalar stores retain boxed keys through the checked COW setter (S7.1.3v2).
-// Arithmetic over an admitted dynamic binding uses that same runtime check;
-// it need not acquire a declared int type to enter T0. Keep character loops
-// and vector/slice syntax outside this path; their store shapes differ.
-static bool interp_checked_scalar_index_expr(AstNode* node) {
-    if (node && node->type &&
-            (node->type->type_id == LMD_TYPE_INT ||
-             node->type->type_id == LMD_TYPE_INT64)) return true;
-    if (interp_integer_literal(node)) return true;
-    node = ast_unwrap_primary(node);
-    if (!node) return false;
-    if (node->node_type == AST_NODE_IDENT) {
-        NameEntry* entry = ((AstIdentNode*)node)->entry;
-        if (!entry) return false;
-        if (!entry->declared_type && (!entry->node ||
-                (entry->node->node_type != AST_NODE_FOR_CLAUSE &&
-                 entry->node->node_type != AST_NODE_FOR_INDEX))) return true;
-        if (!entry->node || entry->node->node_type != AST_NODE_FOR_CLAUSE) return false;
-        AstLoopNode* loop = (AstLoopNode*)entry->node;
-        AstNode* source = ast_unwrap_primary(loop->as);
-        // one integer `to` bound excludes a character range on every success
-        return source && source->node_type == AST_NODE_BINARY &&
-            ((AstBinaryNode*)source)->op == OPERATOR_TO &&
-            (interp_integer_literal(((AstBinaryNode*)source)->left) ||
-             interp_integer_literal(((AstBinaryNode*)source)->right));
-    }
-    if (node->node_type != AST_NODE_BINARY) return false;
-    AstBinaryNode* binary = (AstBinaryNode*)node;
-    if (binary->op != OPERATOR_ADD && binary->op != OPERATOR_SUB &&
-            binary->op != OPERATOR_MUL) {
-        return false;
-    }
-    return interp_checked_scalar_index_expr(binary->left) &&
-        interp_checked_scalar_index_expr(binary->right);
 }
 
 typedef struct SatelliteScanCtx {
@@ -592,12 +515,16 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // `a[i] = v`, `a.f = v`, and nested paths through a plain binding root use
     // cow_path_set: it owns every detach/relink decision (S9.1.2), while T0
     // only publishes its replacement root. The alias mark comes from
-    // cow_bind_var at the binding boundary, exactly as lowering does. Still
-    // gated: a declared map/array contract, whose checked setters
-    // validate the full occurrence contract before installing a replacement.
+    // cow_bind_var at the binding boundary, exactly as lowering does. Declared
+    // map/array contracts use checked setters that validate the full occurrence
+    // contract before installing a replacement.
     if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
             node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        if (interp_method_store_entry(sc->index, node)) {
+            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
+            return;
+        }
         AstCowPath path = {};
         // ca->object is only the immediate parent on a nested write; use the
         // collected root or `h[0][0] = v` would be rejected before T0 runs it.
@@ -617,16 +544,14 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         bool direct_ndim_scalar_assignment =
             node->node_type == AST_NODE_INDEX_ASSIGN_STAM && path.count == 0 &&
             ca->key && ca->key->next &&
-            interp_direct_ndim_indices(ca->object, ca->key);
+            interp_ndim_indices_supported(ca->key);
+        // Single keys stay boxed through the checked setters. A call, text
+        // concatenation or dynamic key needs the same runtime domain check as
+        // an identifier, not a static integer proof (S7.1.3v3).
         bool indexed_key = node->node_type != AST_NODE_INDEX_ASSIGN_STAM ||
-            (ca->key && !ca->key->next &&
-             (interp_checked_scalar_index_expr(ca->key) ||
-              (ca->key->type && (ca->key->type->type_id == LMD_TYPE_STRING ||
-                                ca->key->type->type_id == LMD_TYPE_SYMBOL))));
-        // A multi-coordinate scalar store has already proved each key is an
-        // integral coordinate; treating its linked key list as an unsupported
-        // dynamic index forced the whole T0 module to fall back despite the
-        // checked N-D runtime path being available.
+            (ca->key && !ca->key->next);
+        // Multi-coordinate stores decode and validate each coordinate at run
+        // time; admission only proves the fixed buffer can hold the key list.
         indexed_key = indexed_key || direct_numeric_mask_assignment ||
             direct_ndim_scalar_assignment;
         bool open_any_array = entry &&
@@ -690,13 +615,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         }
     }
     // `t[i, j]` carries a chain of index expressions for one N-D subscript.
-    // Literal coordinates use the checked runtime N-D reader, even when a call
-    // returns the array. Requiring a literal receiver rejected image.sample's
-    // read_region(...)^[0,0] before any imported function ran (D8.3.1).
+    // Every coordinate uses fn_int64_index and the checked N-D reader. Dynamic
+    // and non-integral keys therefore have the same total read as literals;
+    // only the coordinate buffer's capacity constrains admission (S8.2.1v4).
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* field = (AstFieldNode*)node;
         if (field->field && field->field->next &&
-                !interp_literal_ndim_indices(field->field)) {
+                !interp_ndim_indices_supported(field->field)) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
@@ -1278,7 +1203,7 @@ static uint32_t plan_need(AstNode* node) {
         // unrelated bindings under collection pressure.
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
         uint32_t o = plan_need(ca->object);
-        uint32_t k = 1 + plan_need(ca->key);
+        uint32_t k = 2 + plan_need_max_siblings(ca->key);
         uint32_t v = 2 + plan_need(ca->value);
         uint32_t at_call = 3;
         uint32_t best = o > k ? o : k;
@@ -1308,7 +1233,7 @@ static uint32_t plan_need(AstNode* node) {
     case AST_NODE_INDEX_EXPR: {
         AstFieldNode* f = (AstFieldNode*)node;
         uint32_t o = plan_need(f->object);
-        uint32_t k = 1 + plan_need(f->field);
+        uint32_t k = 1 + plan_need_max_siblings(f->field);
         uint32_t at_call = 2;
         uint32_t best = o > k ? o : k;
         return best > at_call ? best : at_call;
