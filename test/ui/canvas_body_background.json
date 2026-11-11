@@ -1,0 +1,58 @@
+{
+  "name": "A zero-height body propagates tiled images to the canvas and inline buttons keep their dimensions",
+  "html": "test/html/canvas_body_background.html",
+  "viewport": {
+    "width": 200,
+    "height": 200
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "var h=document.querySelector('button').getBoundingClientRect().height; document.getElementById('result').textContent = document.body.getBoundingClientRect().height === 0 && Math.abs(h-33.6)<0.02 ? 'canvas and button sized' : 'FAIL '+h;"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result"
+      },
+      "equals": "canvas and button sized"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 50,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 1,
+      "min_b": 0,
+      "max_b": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 1,
+      "min_g": 0,
+      "max_g": 1,
+      "min_b": 254,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.documentElement.style.backgroundColor='rgb(0,255,0)';"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 1,
+      "min_g": 254,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 1
+    }
+  ]
+}

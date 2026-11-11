@@ -1,0 +1,7 @@
+{
+  "name": "Navigator reports the viewer cookie service through a branded read-only getter",
+  "html": "test/html/js_navigator_cookie_enabled.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "cookie initialization complete"}
+  ]
+}

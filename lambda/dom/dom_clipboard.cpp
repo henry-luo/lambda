@@ -1957,7 +1957,8 @@ static Item js_clipboard_install_interface(Item global, const char* name,
 
 static const char* navigator_properties[] = {
     "clipboard", "permissions", "serviceWorker", "platform", "userAgent",
-    "appName", "appVersion", "vendor", "language", "languages", "maxTouchPoints"
+    "appName", "appVersion", "vendor", "language", "languages", "maxTouchPoints",
+    "cookieEnabled"
 };
 
 static Item navigator_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
@@ -1991,6 +1992,8 @@ static Item navigator_create(Item global, Item clipboard, Item permissions, Item
     for (const char* value : identity) JS_RETURN_IF_ERROR(js_array_push(state.get(), make_str(value)));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), languages.get()));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = i2it(1)}));
+    // feature probes must reflect the session cookie service used by document.cookie.
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = b2it(dom_cookies_enabled())}));
     NameRef private_key = name_pool_create_unique_private(context->name_pool, {"Navigator", 9});
     if (!private_key) return ItemError;
     JS_RETURN_IF_ERROR(js_private_field_define(object.get(), (Item){.item = s2it(private_key)}, state.get()));

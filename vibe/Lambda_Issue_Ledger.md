@@ -18,6 +18,25 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Watercolor simulation baseline timeout — 2026-11-11
+
+<a id="lr12-45"></a>
+
+**LR12-45 — OPEN:** `make test-lambda-baseline` passes 7,412 of 7,413
+tests but times out in
+`AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/proc_procart_watercolor_sim`.
+A focused repeat with the same GTest filter also reaches the existing 60s
+deadline (status 124). The cause is **unconfirmed**. This is not a blocker for
+the Kian Hup viewer rendering repair: this fixture imports the unchanged
+`lambda.procart.watercolor` procedural simulation and does not exercise the
+edited DOM, stylesheet, canvas-paint or button-layout paths. Ownership and
+execution context: **D9.1.1v4 / D8.3.1**.
+
+Evidence: `temp/kianhup-style/baseline-lambda.log` and
+`test-watercolor.log`. No runtime workaround, deadline change, golden change,
+or test exclusion was made. This debug baseline run is a functional check;
+no performance conclusion or measurement is claimed.
+
 ## Radiant integration layout-host selection — 2026-11-11
 
 <a id="lr12-44"></a>

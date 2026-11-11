@@ -906,9 +906,9 @@ static void dom_pre_remove_for_move(DomElement* parent, DomNode* child) {
     dom_pre_remove(child, true, !same_document);
 }
 
-static bool dom_detach_dom_node(DomNode* node) {
+static bool dom_detach_dom_node(DomNode* node, bool notify_removal = true) {
     if (!node || !node->parent) return true;
-    dom_pre_remove(node);
+    if (notify_removal) dom_pre_remove(node);
     DomNode* old_parent = node->parent;
     return old_parent->remove_child(node);
 }
@@ -2872,6 +2872,10 @@ static CookieJar* dom_document_cookie_jar(DomDocument* document) {
     }
     return document && document->resource_manager
         ? document->resource_manager->cookie_jar : nullptr;
+}
+
+extern "C" bool dom_cookies_enabled(void) {
+    return dom_document_cookie_jar((DomDocument*)dom_get_document()) != nullptr;
 }
 
 static Item dom_document_cookie_value(DomDocument* document) {
@@ -8700,6 +8704,8 @@ typedef enum JsDomReflectKind {
     X("src", "src", STR, 0, DOM_TAG_IMG | DOM_TAG_SCRIPT | DOM_TAG_IFRAME | DOM_TAG_EMBED | \
         DOM_TAG_SOURCE | DOM_TAG_TRACK | DOM_TAG_AUDIO | DOM_TAG_VIDEO | DOM_TAG_INPUT) \
     X("href", "href", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK | DOM_TAG_BASE) \
+    /* stylesheet discovery reads the reflected content attribute. */ \
+    X("rel", "rel", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK) \
     X("alt", "alt", STR, 0, DOM_TAG_IMG) \
     X("dir", "dir", STR, 0, DOM_TAG_ANY) \
     X("lang", "lang", STR, 0, DOM_TAG_ANY) \
@@ -12337,12 +12343,13 @@ extern "C" Item dom_scroll_operation_bridge(Item elem_item,
     return make_js_undefined();
 }
 
-static bool dom_append_backed_element(DomElement* parent, DomNode* child) {
+static bool dom_append_backed_element(DomElement* parent, DomNode* child,
+                                     bool notify_removal = true) {
     if (!parent || !child || !child->is_element()) return false;
     parent = dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
     if (child->parent == (DomNode*)parent && parent->last_child == child) return true;
-    dom_pre_remove_for_move(parent, child);
+    if (notify_removal) dom_pre_remove_for_move(parent, child);
     DomElement* child_elem = child->as_element();
     int64_t backed_index = dom_backed_node_index(parent, child_elem);
     if (backed_index >= 0) {
@@ -12391,6 +12398,29 @@ static bool dom_insert_backed_element(DomElement* parent, DomNode* child, DomNod
 
 static bool dom_insert_backed_text(DomElement* parent, DomText* text, DomNode* reference) {
     return radiant_dom_insert_backed_text(parent, text, reference, &lambda_backed_tree_operations);
+}
+
+static bool dom_append_backed_child(DomElement* parent, DomNode* child,
+                                   bool notify_removal = true) {
+    if (child->is_element()) return dom_append_backed_element(parent, child, notify_removal);
+    if (child->is_text()) {
+        if (notify_removal) dom_pre_remove_if_attached(child);
+        return dom_insert_backed_text(parent, child->as_text(), nullptr);
+    }
+    return dom_detach_dom_node(child, notify_removal) && ((DomNode*)parent)->append_child(child);
+}
+
+extern "C" bool dom_parser_move_child(void* parent_ptr, void* child_ptr) {
+    DomElement* parent = (DomElement*)parent_ptr;
+    DomNode* child = (DomNode*)child_ptr;
+    if (!parent || !child || dom_node_owner_document(child) != parent->doc) {
+        log_error("dom_parser_move: invalid document for parent=%p child=%p", parent, child);
+        return false;
+    }
+    // parser staging preserves backing order without publishing script mutations or reactions.
+    bool appended = dom_append_backed_child(parent, child, false);
+    if (!appended) log_error("dom_parser_move: could not append node type=%d to %s", child->node_type, parent->tag_name);
+    return appended;
 }
 
 static bool dom_insert_fragment_children_before(DomElement* parent,
@@ -12693,17 +12723,7 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         }
     }
     if (!dom_prepare_cross_document_insertion(child_node, elem)) return ItemNull;
-    if (child_node->is_element()) {
-        // DOM-created elements have independent Mark backings, so append through
-        // DomElement to preserve the renderer's tree as well as DOM links.
-        if (!dom_append_backed_element(elem, child_node)) return ItemNull;
-    } else if (child_node->is_text()) {
-        dom_pre_remove_if_attached(child_node);
-        if (!dom_insert_backed_text(elem, child_node->as_text(), nullptr)) return ItemNull;
-    } else if (!dom_detach_dom_node(child_node) ||
-               !((DomNode*)elem)->append_child(child_node)) {
-        return ItemNull;
-    }
+    if (!dom_append_backed_child(elem, child_node)) return ItemNull;
     dom_post_insert((DomNode*)elem, child_node);
     dom_document_refresh_root(elem);
     if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
