@@ -2938,7 +2938,7 @@ class PremakeGenerator:
         if 'lambda-runtime-full' in dependencies:
             # the static validation front end needs runtime/Radiant providers.
             # D9.4.4: host-owned trace functions must not bind to a replaceable Node module.
-            for host_dependency in ('lambda-rt', 'radiant'):
+            for host_dependency in ('lambda-rt', 'lambda-radiant-adapter', 'radiant'):
                 if host_dependency not in dependencies:
                     dependencies.append(host_dependency)
         configured_targets = {

@@ -7083,7 +7083,9 @@
           {
             "source": "test/test_lambda_extended_gtest.cpp",
             "name": "Lambda Extended Tests",
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "binary": "test_lambda_extended_gtest.exe",
             "libraries": [
               "gtest",
