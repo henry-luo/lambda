@@ -34,8 +34,15 @@ fn preview_size(w: int, h: int) array {
     [max(1, int(floor(float(h) * k))), max(1, int(floor(float(w) * k)))]
 }
 
-fn thumbnail_size(w: int, h: int) array => if (w >= h) [max(1, int(round(float(h) * THUMBNAIL / w))), min(w, THUMBNAIL)]
-    else [min(h, THUMBNAIL), max(1, int(round(float(w) * THUMBNAIL / h)))]
+// [height, width] of the thumbnail: the painting scaled so its longer side is at most THUMBNAIL.
+fn thumbnail_size(w: int, h: int) array {
+    let k = min(1.0, float(THUMBNAIL) / float(max(w, h)));
+    [max(1, int(round(float(h) * k))), max(1, int(round(float(w) * k)))]
+}
+
+// the session's paper texture as an <assets> entry, when it was built from a spec.
+fn assets_doc(s) element => if (s.texture_spec == null) (<assets>)
+    else (<assets <paper kind: string(s.texture_spec.kind), seed: s.texture_spec.seed, size: s.texture_spec.size>>)
 
 fn layer_doc(id, l) element => <layer id: id, format: string(l.format), sample: string(l.sample),
     blend_space: string(l.blend_space), tile: l.tile, tiles: "layers/" ++ id ++ ".tiles">
@@ -45,7 +52,7 @@ pub fn document(s) element^ {
     let l = s.layer
     let t = thumbnail_size(l.width, l.height)
     let p = preview_size(l.width, l.height)
-    let parts = [<assets>, layer_doc("paint", l), <preview src: "preview.png", width: p[1], height: p[0]>,
+    let parts = [assets_doc(s), layer_doc("paint", l), <preview src: "preview.png", width: p[1], height: p[0]>,
         <thumbnail src: "thumbnail.png", width: t[1], height: t[0]>];
     (<painting version: VERSION, width: l.width, height: l.height, seed: 1, render_key: "", paper: s.paper, *parts>)
 }
@@ -119,7 +126,11 @@ pub pn load(path, options = {}) map^ {
     let blank = layers.layer(doc.width, doc.height, {format: ld.format, sample: ld.sample,
         blend_space: ld.blend_space, tile: ld.tile})^
     let layer = radiant.paint_tiles_decode(input(tiles, 'binary')^, blank)^
-    let base = sessions.session(doc.width, doc.height, {paper: doc.paper, blend_space: ld.blend_space,
+    // a paper texture stored as a spec is rebuilt, so later strokes keep their grain
+    let assets = [for (c in content(doc) ^ { [] } where (c is element and name(c) == 'assets') ^ { false }) c]
+    let papers = if (len(assets) == 0) [] else [for (c in content(assets[0]) ^ { [] } where (c is element and name(c) == 'paper') ^ { false }) c]
+    let texture = if (len(papers) == 0) null else ({kind: papers[0].kind, seed: papers[0].seed, size: papers[0].size})
+    let base = sessions.session(doc.width, doc.height, {paper: doc.paper, blend_space: ld.blend_space, texture: texture,
         *: if (o.history_budget == null) ({}) else ({history_budget: o.history_budget})})^
     return {*: base, layer: layer}
 }

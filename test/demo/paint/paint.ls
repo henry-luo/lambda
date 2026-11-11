@@ -146,6 +146,13 @@ on click(evt) {
     else { return 'pass' }
     return 'handled'
 }
+on change(evt) {
+    if (dom.get_attribute(evt.target, "id") != "paper") { return 'pass' }
+    let owner = owner_of(evt)
+    let next = model.with_paper(session, dom.get_state(evt.target, "value")) ^ { session = failed(owner, session, ^.message); return 'handled' }
+    session = publish(owner, next)
+    return 'handled'
+}
 on input(evt) {
     let id = dom.get_attribute(evt.target, "id")
     if (not (id in ["size", "opacity", "hue", "sat", "val"])) { return 'pass' }
@@ -184,10 +191,11 @@ on pointerdown(evt) {
     let eraser = evt.button == 5
     if (evt.button != 0 and not eraser) { return 'pass' }
     let b = model.stroke_brush(session, eraser) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
-    let begun = paint.begin(session.ps, evt.pointerId, b, session.color) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
-    let fed = paint.feed(begun, evt.pointerId, samples(owner, session, evt)) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
+    var ps = paint.begin(session.ps, evt.pointerId, b, session.color) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
+    // feed paints in place (PT7); a failed feed leaves session.ps as it was
+    paint.feed(ps, evt.pointerId, samples(owner, session, evt)) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
     dom.set_pointer_capture(stage, evt.pointerId)
-    session = requested(owner, {*: session, ps: fed, stroke: {pointer: evt.pointerId, eraser: eraser}})
+    session = requested(owner, {*: session, ps: ps, stroke: {pointer: evt.pointerId, eraser: eraser}})
     return 'prevent-default'
 }
 on pointermove(evt) {
@@ -200,8 +208,9 @@ on pointermove(evt) {
         return 'prevent-default'
     }
     if ((session.stroke == null or session.stroke.pointer != evt.pointerId)^) { return 'pass' }
-    let fed = paint.feed(session.ps, evt.pointerId, samples(owner, session, evt)) ^ { return 'prevent-default' }
-    session = requested(owner, {*: session, ps: fed})
+    var ps = session.ps
+    paint.feed(ps, evt.pointerId, samples(owner, session, evt)) ^ { return 'prevent-default' }
+    session = requested(owner, {*: session, ps: ps})
     return 'prevent-default'
 }
 on pointerup(evt) {

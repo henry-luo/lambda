@@ -5524,6 +5524,8 @@ static const JubeFuncDef radiant_functions[] = {
     // Lambda_Pkg_Paint PT15: pure paint kernels over tiled typed-array layers
     {"paint_dabs", "fn(layer: map, dabs: any, options: map|null) -> map", (fn_ptr)fn_radiant_paint_dabs, JUBE_FN_NONE,
      "Item fn_radiant_paint_dabs(Item layer, Item dabs, Item options)", (fn_ptr)fn_radiant_paint_dabs},
+    {"paint_stroke", "pn(var layer: map, dabs: any, options: map|null) -> map", (fn_ptr)fn_radiant_paint_stroke, JUBE_FN_NONE,
+     "Item fn_radiant_paint_stroke(Item* layer, Item dabs, Item options)", (fn_ptr)fn_radiant_paint_stroke},
     {"paint_wash", "fn(source: map, coverage: map, options: map) -> map", (fn_ptr)fn_radiant_paint_wash, JUBE_FN_NONE,
      "Item fn_radiant_paint_wash(Item source, Item coverage, Item options)", (fn_ptr)fn_radiant_paint_wash},
     {"paint_import", "fn(layer: map, pixels: any, options: map|null) -> map", (fn_ptr)fn_radiant_paint_import, JUBE_FN_NONE,

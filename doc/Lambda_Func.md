@@ -367,7 +367,13 @@ leaving the retained value unchanged.
 Writable member/index places can be passed to `var` parameters, including
 scalar fields such as `increment(record.count)`. Rebinding the parameter
 updates that caller place, and writes made before a handled error remain
-visible. Ordinary copies stay snapshots (S9.1.3v3).
+visible. Ordinary copies stay snapshots (S9.1.3v4).
+
+System procedures can take `var` parameters too, for example
+`radiant.paint_stroke(layer, dabs, options)`, which paints into `layer` in
+place. The argument follows the same rules, but the procedure's declared type is
+a bound, not an exact type: any place whose declared type conforms to it is
+accepted, and the procedure keeps the value in that type (S9.1.3v4, D7.6.3).
 
 ```lambda
 pn publish_first(var doc: element) {

@@ -114,7 +114,22 @@ typedef struct SysFuncInfo {
     // argument by `result_arg_index`, which only the AST builder can see.
     SysFuncResultKind result_kind;
     int result_arg_index;
+    // D7.6.3: bit i marks a `var` position. Its C argument is the address of
+    // the caller-owned home (`Item*`), never a value, and the caller writes the
+    // home back on every return. `var_bounds[i]` is the declared bound
+    // (S9.1.3v4); NULL, or a NULL entry, means any.
+    uint32_t var_mask;
+    Type* const* var_bounds;
 } SysFuncInfo;
+
+static inline bool sysfunc_arg_is_var(const SysFuncInfo* info, int index) {
+    return info && index >= 0 && index < 32 && (info->var_mask & (1u << index));
+}
+
+static inline Type* sysfunc_var_bound(const SysFuncInfo* info, int index) {
+    return sysfunc_arg_is_var(info, index) && info->var_bounds
+        ? info->var_bounds[index] : NULL;
+}
 
 // S17.8.1: the option names a system function defines, and the index of its
 // options argument; NULL for a function without a registered options map.
@@ -502,6 +517,7 @@ static inline bool sysfunc_native_math_always_float(SysFunc fn) {
 extern SysFuncInfo sys_func_defs[];
 extern const int sys_func_def_count;
 fn_ptr find_dynamic_sys_func_import(const char* c_func_name);
+const SysFuncInfo* find_dynamic_sys_func_info(const char* c_func_name);
 
 // Runtime JIT imports (non-sys-func entries: operators, runtime infra, JS, etc.)
 extern JitImport jit_runtime_imports[];

@@ -1,0 +1,11 @@
+{
+  build_up: true,
+  build_up_painted: true,
+  wash: true,
+  smudge: true,
+  grain: true,
+  second_stroke: true,
+  kept_unchanged: true,
+  bad_colour: true,
+  bad_option: true
+}

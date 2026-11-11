@@ -5,6 +5,7 @@
 #include "lambda/core/mark_reader.hpp"
 
 RADIANT_C_API Item fn_radiant_paint_dabs(Item layer, Item dabs, Item options);
+RADIANT_C_API Item fn_radiant_paint_stroke(Item* layer_home, Item dabs, Item options);
 RADIANT_C_API Item fn_radiant_paint_wash(Item source, Item coverage, Item options);
 RADIANT_C_API Item fn_radiant_paint_import(Item layer, Item pixels, Item options);
 RADIANT_C_API Item fn_radiant_paint_present(Item layer, Item options);

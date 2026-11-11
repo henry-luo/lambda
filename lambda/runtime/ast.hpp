@@ -561,14 +561,17 @@ static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
     AstFuncNode* target = ast_direct_call_function(call);
     if (!target || !signature || !entries || signature->is_variadic ||
             signature->param_count < 0 ||
-            signature->param_count > LAMBDA_MAX_FUNCTION_ARGS ||
-            signature->required_param_count != signature->param_count) {
+            signature->param_count > LAMBDA_MAX_FUNCTION_ARGS) {
         return false;
     }
 
     int source_count = 0;
     for (AstNode* arg = call->argument; arg; arg = arg->next) source_count++;
-    if (source_count + (call->pipe_inject ? 1 : 0) != signature->param_count) return false;
+    // an omitted optional parameter takes its default in the callee frame,
+    // as for any direct call; only `var` positions need a caller place.
+    int supplied = source_count + (call->pipe_inject ? 1 : 0);
+    if (supplied < signature->required_param_count ||
+            supplied > signature->param_count) return false;
 
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     ast_resolve_call_arguments(call, target, source_count, resolved);
@@ -578,7 +581,8 @@ static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
         if (arg_nodes) arg_nodes[index] = NULL;
         if (!param || !param->is_var_param) continue;
         AstNode* argument = ast_unwrap_primary(resolved[index]);
-        if (!argument) return false;
+        // an omitted `var` argument has no caller place to borrow
+        if (!argument || ast_is_omitted_argument(argument)) return false;
         if (arg_nodes) arg_nodes[index] = argument;
         if (argument->node_type != AST_NODE_IDENT) {
             // CW25: a member/index path is a place borrow. Only shapes the

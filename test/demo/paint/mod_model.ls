@@ -19,6 +19,14 @@ let ROUND = [{name: "Round", options: {size: 12.0, hardness: 0.85}},
     {name: "Marker", options: {size: 24.0, hardness: 0.6, mode: 'wash', opacity: 0.45}}]
 let MYB = [{name: "Pencil", file: "pencil.myb"}, {name: "Ink", file: "ink.myb"},
     {name: "Charcoal", file: "charcoal.myb"}, {name: "Blender", file: "blender.myb"}]
+// bitmap-tip brushes (surface.tip); Chalk and Charcoal also read the paper's grain.
+let TIPPED = [{name: "Chalk", tip: 'chalk', options: {size: 30.0, spacing: 0.15, grain: 0.7, angle_jitter: 180.0}},
+    {name: "Flat", tip: 'flat', options: {size: 26.0, angle: 35.0, spacing: 0.08}},
+    {name: "Speckle", tip: 'speckle', options: {size: 40.0, spacing: 0.35}}]
+pub let PAPERS = [{kind: "smooth", label: "Smooth"}, {kind: "cold_press", label: "Cold press"},
+    {kind: "rough", label: "Rough"}, {kind: "canvas", label: "Canvas"}]
+// the paper's height-field tile, in pixels: small enough to build quickly at start-up
+pub let PAPER_SIZE = 128
 
 // a palette entry: a brush with the size and opacity its controls set.
 pub fn entry(name, b) => if ((string(b.kind) ^ { "" }) == "mypaint")
@@ -29,11 +37,14 @@ pub fn entry(name, b) => if ((string(b.kind) ^ { "" }) == "mypaint")
 // the palette: built-in round brushes and the .myb brushes found beside the demo.
 pub fn palette(base) array^ {
     let rounds = [for (r in ROUND) entry(r.name, paint.brush(r.options)^)]
-    let mybs = [for (m in MYB) entry(m.name, paint.brush_from_myb(input(url_resolve(base, "brushes/" ++ m.file), 'json')^)^.brush)];
-    [*rounds, *mybs]
+    let mybs = [for (m in MYB) (let b = paint.brush_from_myb(input(url_resolve(base, "brushes/" ++ m.file), 'json')^)^.brush,
+        entry(m.name, if (m.name == "Charcoal") paint.brush({kind: 'mypaint', settings: b.settings, grain: 0.6})^ else b))]
+    let tipped = [for (t in TIPPED) entry(t.name, paint.brush({*: t.options, tip: paint.tip(t.tip, {size: 64})^})^)];
+    [*rounds, *mybs, *tipped]
 }
 
-pub fn initial(brushes) map^ => {ps: paint.session(WIDTH, HEIGHT)^, tool: "brush", brush: 0, brushes: brushes,
+pub fn initial(brushes) map^ => {ps: paint.session(WIDTH, HEIGHT, {texture: {kind: 'cold_press', size: PAPER_SIZE}})^,
+    tool: "brush", brush: 0, brushes: brushes,
     eraser: entry("Eraser", paint.brush({size: 32.0, hardness: 0.7, erase: true})^),
     color: [0.11, 0.13, 0.3], zoom: 1.0, pan: {x: 0.0, y: 0.0}, token: 0, stroke: null, drag: null,
     space: false, status: "Ready"}
@@ -54,6 +65,16 @@ fn tool_status(tool) => if (tool == "brush") "Brush: drag on the canvas to paint
 
 pub fn with_brush(st, i) => if (i >= 0 and i < (len(st.brushes) ^ { 0 }))
     ({*: st, brush: i, tool: "brush", status: "Brush: " ++ st.brushes[i].name}) else st
+
+// the paper kind the session's texture was built from ("smooth" for none).
+pub fn paper_kind(st) => if (st.ps.texture_spec == null) "smooth" else string(st.ps.texture_spec.kind) ^ { "smooth" }
+
+pub fn with_paper(st, kind) map^ {
+    let label = [for (p in PAPERS where p.kind == kind) p.label]
+    if (len(label) == 0) raise error("Paint: unknown paper " ++ string(kind))
+    else ({*: st, ps: paint.with_texture(st.ps, if (kind == "smooth") null else ({kind: kind, size: PAPER_SIZE}))^,
+        status: "Paper: " ++ label[0] ++ " (grained brushes such as Chalk show it)"})
+}
 
 pub fn with_color(st, rgb) => ({*: st, color: [for (v in rgb) clamp(float(v), 0.0, 1.0)]})
 

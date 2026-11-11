@@ -626,6 +626,12 @@ static bool binding_var_borrow_scan(LambdaMvpModule* m, MvpBinding* binding,
                 return true;
             }
         }
+        // D7.6.3: a native `var` procedure borrows its places as a Lambda pn does.
+        SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+        for (int j = 0; sys && sys->var_mask && j < mvp_call_argument_count(call); j++)
+            if (sysfunc_arg_is_var(sys, j) &&
+                    mvp_place_root(m, mvp_call_argument(call, j)) == binding) return true;
         // a projected var argument can invalidate the root's transitive proof.
         for (int j = 0; j < mvp_call_argument_count(call) && param; j++, param = (AstNamedNode*)param->next) {
             AstNode* arg = mvp_call_argument(call, j);
@@ -3465,6 +3471,10 @@ static bool admitted_call(LambdaMvpModule* m, AstCallNode* call, bool task_launc
     SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
     if (!info || (info->fn != SYSPROC_PRINT && count > LAMBDA_MAX_FUNCTION_ARGS))
         return mvp_reject(m, call, "unsupported builtin argument count");
+    // D7.6.3: each `var` home is a local binding or a place rooted at one.
+    for (int j = 0; info->var_mask && j < count; j++)
+        if (sysfunc_arg_is_var(info, j) && !mvp_place_root(m, mvp_call_argument(call, j)))
+            return mvp_reject(m, call, "native var arguments require a local place");
     switch (info->fn) {
     case SYSPROC_PRINT: case SYSPROC_SELECT:
         return true;

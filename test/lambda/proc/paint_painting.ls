@@ -2,11 +2,18 @@
 // a preview and a thumbnail; opening it restores the exact pixels without replaying strokes.
 import paint: lambda.paint
 
+// one stroke fed in place in one batch (PT7)
+pn stroked(s, b, color, samples) map^ {
+    var t = paint.begin(s, 1, b, color)^
+    paint.feed(t, 1, samples)^
+    return paint.end(t, 1)^
+}
+
 pn painted() map^ {
     let pen = paint.brush({size: 14.0, hardness: 0.9})^
     let s0 = paint.session(300, 140, {paper: [0.96, 0.94, 0.88]})^
-    let a = paint.end(paint.feed(paint.begin(s0, 1, pen, [0.8, 0.1, 0.1])^, 1, [[20.0, 30.0, 1.0], [280.0, 40.0, 0.6]])^, 1)^
-    return paint.end(paint.feed(paint.begin(a, 1, pen, [0.1, 0.2, 0.7])^, 1, [[150.0, 10.0, 0.4], [160.0, 130.0, 1.0]])^, 1)^
+    let a = stroked(s0, pen, [0.8, 0.1, 0.1], [[20.0, 30.0, 1.0], [280.0, 40.0, 0.6]])^
+    return stroked(a, pen, [0.1, 0.2, 0.7], [[150.0, 10.0, 0.4], [160.0, 130.0, 1.0]])^
 }
 
 pn main() {
@@ -24,6 +31,11 @@ pn main() {
     let png_path = root ++ "/study.png"
     let png_bytes = paint.export_png(back, png_path)^
     let decoded = load(png_path)^
+    // a paper texture built from a spec is stored as that spec and rebuilt on open
+    let textured = paint.with_texture(s, {kind: 'cold_press', seed: 5, size: 32})^
+    let tpath = root ++ "/textured.painting"
+    paint.save_painting(textured, tpath)^
+    let reopened = paint.open_painting(tpath)^
     let bad = root ++ "/not.painting"
     output("hello", bad, 'text')^
     let rejected = (paint.open_painting(bad) ^ { "rejected" }) == "rejected"
@@ -39,5 +51,6 @@ pn main() {
         paint.color_at(back, 100, 33)^ == paint.color_at(s, 100, 33)^,
         paint.frame(back)^.rect == [0, 0, 300, 140],
         png_bytes > 0 and shape(decoded) == [140, 300, 4] and decoded[33][100] == paint.flattened(s)^[33][100],
-        rejected, missing]
+        rejected, missing, doc[3].width == 256 and doc[3].height == 119,
+        reopened.texture_spec == textured.texture_spec and reopened.texture == textured.texture and back.texture == null]
 }

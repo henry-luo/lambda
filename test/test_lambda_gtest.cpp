@@ -308,6 +308,7 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsMatchGoldens) {
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/lambda/paint/proc",
     "test/lambda/archive",
     "test/lambda/ime",
     "test/lambda/docbook/proc",

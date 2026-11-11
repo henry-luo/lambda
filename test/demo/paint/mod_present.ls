@@ -51,6 +51,15 @@ pn brushes(owner, st) {
     }
 }
 
+// the paper menu follows the session's texture, including one a painting file brought back.
+pn present_paper(owner, st) {
+    let control = node(owner, "paper")
+    let kind = model.paper_kind(st)
+    if (dom.get_state(control, "value") != kind) dom.set_state(control, "value", kind)
+    dom.set_attribute(owner, "data-paper", kind)
+    return kind
+}
+
 pub pn sync(owner, st) {
     for (t in model.TOOLS) set_class(node(owner, "tool-" ++ t), "active", st.tool == t)^
     brushes(owner, st)^
@@ -61,6 +70,7 @@ pub pn sync(owner, st) {
     set_slider(owner, "hue", int(round(hsv.h)) % 360, "")^
     set_slider(owner, "sat", int(round(hsv.s * 100.0)), "")^
     set_slider(owner, "val", int(round(hsv.v * 100.0)), "")^
+    let paper = present_paper(owner, st)^
     let color = model.hex(st.color)^
     dom.style_set_property(node(owner, "color-chip"), "background-color", color)
     dom.set_attribute(owner, "data-color", color)

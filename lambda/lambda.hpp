@@ -1754,6 +1754,8 @@ extern "C" {
     Item cow_path_set_inplace(Item owner, Item path, Item value);
     // CW25: detach root..leaf and return the leaf, for a `var` path borrow.
     Item cow_path_borrow(Item owner, Item path);
+    Item lambda_var_home_check_kind(Item before, Item after, const char* procedure);
+    bool cow_item_is_unique(Item value);
     Item cow_path_borrow_home(Item owner, Item path);
     // CW25: bounded descriptor form for compiler-known member/int paths.
     Item cow_path_borrow_fixed(Item owner, int64_t count,

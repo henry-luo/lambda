@@ -157,6 +157,7 @@ typedef struct JubeSysFuncRecord {
     SysFuncInfo info;
     char name[128];
     char c_func_name[128];
+    Type* var_bounds[LAMBDA_MAX_FUNCTION_ARGS];  // D7.6.3 bounds, NULL = any
 } JubeSysFuncRecord;
 
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -334,6 +335,72 @@ static bool jube_extract_native_c_name(const char* native_signature, char* out, 
     return true;
 }
 
+// A signature's parameter list: the text between the first `(` and its `)`.
+// Module signatures carry no nested parentheses (jube_signature_arg_count).
+static bool jube_signature_params(const char* signature, const char** open,
+        const char** close) {
+    *open = signature ? strchr(signature, '(') : NULL;
+    *close = *open ? strchr(*open, ')') : NULL;
+    return *open && *close && *close > *open;
+}
+
+static const char* jube_skip_space(const char* p, const char* end) {
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    return p;
+}
+
+// the declared bound of a `var` position (S9.1.3v4); NULL accepts any value.
+static Type* jube_var_bound(const char* text, const char* end) {
+    text = jube_skip_space(text, end);
+    if (text >= end || jube_type_name_matches(text, "any")) return NULL;
+    if (jube_type_name_matches(text, "map")) return &TYPE_MAP;
+    if (jube_type_name_matches(text, "array")) return (Type*)&TYPE_ARRAY;
+    Type* scalar = jube_type_from_type_id(jube_signature_type_id(text));
+    return scalar == &TYPE_ANY ? NULL : scalar;
+}
+
+// D7.6.3: a module procedure names each `var` position in its Lambda signature
+// (`pn(var layer: map, ...)`) and takes the home address at the same position
+// of its native signature (`Item* layer`). Any other spelling is refused, so a
+// write can never be lost to value semantics.
+static bool jube_signature_var_params(const JubeFuncDef* fn, int arg_count,
+        uint32_t* mask, Type** bounds) {
+    *mask = 0;
+    const char *open, *close;
+    if (!jube_signature_params(fn->signature, &open, &close)) return true;
+    const char* p = open + 1;
+    for (int index = 0; p < close; index++) {
+        const char* end = p;
+        while (end < close && *end != ',') end++;
+        const char* text = jube_skip_space(p, end);
+        if (end - text > 4 && strncmp(text, "var", 3) == 0 &&
+                (text[3] == ' ' || text[3] == '\t')) {
+            if (index >= 32 || index >= LAMBDA_MAX_FUNCTION_ARGS) return false;
+            *mask |= 1u << index;
+            const char* colon = text;
+            while (colon < end && *colon != ':') colon++;
+            bounds[index] = colon < end ? jube_var_bound(colon + 1, end) : NULL;
+        }
+        p = end < close ? end + 1 : close;
+    }
+    if (!*mask) return true;
+    // T0 dispatches at most five arguments; MIR classifies the first eight.
+    if (!jube_signature_is_proc(fn->signature) || (fn->flags & JUBE_FN_VARARGS) ||
+            arg_count < 0 || arg_count > 5 || !fn->native_func) return false;
+    if (!jube_signature_params(fn->native_signature, &open, &close)) return false;
+    p = open + 1;
+    for (int index = 0; p < close; index++) {
+        const char* end = p;
+        while (end < close && *end != ',') end++;
+        const char* text = jube_skip_space(p, end);
+        bool home = end - text > 4 && strncmp(text, "Item", 4) == 0 &&
+            *jube_skip_space(text + 4, end) == '*';
+        if (home != ((*mask & (1u << index)) != 0)) return false;
+        p = end < close ? end + 1 : close;
+    }
+    return true;
+}
+
 static int jube_count_module_functions(void) {
     jube_register_builtin_modules();
 
@@ -394,6 +461,17 @@ static void register_jube_sys_funcs(void) {
             record->info.native_arg_count = 0;
             record->info.success_type = record->info.return_type;
             record->info.may_return_error = false;
+            if (!jube_signature_var_params(fn, record->info.arg_count,
+                    &record->info.var_mask, record->var_bounds)) {
+                // D7.6.3: fail closed. An fn, a variadic entry or a value-typed
+                // native slot cannot carry a `var` position.
+                log_error("JUBE_AST: %s: a `var` position needs a pn signature and an Item* native slot",
+                    record->name);
+                memset(record, 0, sizeof(*record));
+                out--;
+                continue;
+            }
+            record->info.var_bounds = record->info.var_mask ? record->var_bounds : NULL;
 
             // Descriptor functions are registered as module-prefixed sys funcs
             // so legacy MIR call lowering sees the same metadata shape.
@@ -452,18 +530,23 @@ void ensure_sys_func_maps_initialized() {
     init_sys_func_maps();
 }
 
-extern "C" fn_ptr find_dynamic_sys_func_import(const char* c_func_name) {
+extern "C" const SysFuncInfo* find_dynamic_sys_func_info(const char* c_func_name) {
     if (!c_func_name) return NULL;
     init_sys_func_maps();
 #ifndef SIMPLE_SCHEMA_PARSER
     for (int i = 0; i < jube_sys_func_record_count; i++) {
         SysFuncInfo* info = &jube_sys_func_records[i].info;
         if (info->c_func_name && strcmp(info->c_func_name, c_func_name) == 0) {
-            return info->func_ptr;
+            return info;
         }
     }
 #endif
     return NULL;
+}
+
+extern "C" fn_ptr find_dynamic_sys_func_import(const char* c_func_name) {
+    const SysFuncInfo* info = find_dynamic_sys_func_info(c_func_name);
+    return info ? info->func_ptr : NULL;
 }
 
 // Check if a name matches any system function (regardless of arg count)
@@ -4129,6 +4212,142 @@ static bool parameter_short_circuits_argument_error(Transpiler* tp,
         (lambda_type_accepts_error(argument->type) || ordinary_outcome_has_error(tp, argument));
 }
 
+// S9.1.3v4: a `var` argument roots at a mutable local binding, and two `var`
+// arguments of one call never share a root. Lambda and native procedures share
+// these checks (D7.6.3). Returns false only when transpiling must stop.
+static bool validate_var_argument_root(Transpiler* tp, SourceSpan diagnostic_span,
+        AstNode* arg, int arg_index, NameEntry** roots, int* root_count) {
+    AstIdentNode* root = compound_root_ident(arg);
+    if (!root || !root->entry || !root->entry->is_mutable) {
+        record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
+            "argument %d for `var` parameter must be a mutable `var` binding",
+            arg_index + 1);
+        return should_continue_transpiling(tp);
+    }
+    // CW31 face 4: a mutable view conflicts through its BASE, so
+    // two subviews of one array (or a view and its base) reject at
+    // the sanctioned whole-base granularity. Distinct bases stay
+    // independent; region-precise checking is the ladder's later rung.
+    NameEntry* effective_root = root->entry->view_base
+        ? root->entry->view_base : root->entry;
+    for (int i = 0; i < *root_count; i++) {
+        if (roots[i] == effective_root) {
+            record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
+                roots[i] == root->entry
+                    ? "argument %d overlaps another `var` parameter; pass distinct mutable bindings"
+                    : "argument %d overlaps another `var` parameter through their shared view base; pass views of distinct arrays",
+                arg_index + 1);
+            break;
+        }
+    }
+    if (*root_count < 64) roots[(*root_count)++] = effective_root;
+    // A `var` call mutates this local root. Record a place-copy
+    // root before lowering so both tiers bind an S9.1.2 snapshot.
+    direct_note_place_copy_var_borrow(tp, diagnostic_span, arg);
+    return true;
+}
+
+// D7.6.3 / S9.1.3v4: a plain argument must stay a snapshot while a native
+// writes a `var` place in place. Its value may share storage with the place when
+// it reads a borrowed root, or calls a definition that might return one.
+typedef struct NativeAliasScan {
+    AstNode* top;
+    NameEntry* const* roots;
+    int root_count;
+    bool found;
+} NativeAliasScan;
+
+static void native_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
+    NativeAliasScan* scan = (NativeAliasScan*)opaque;
+    if (scan->found || !child) return;
+    if (parent == scan->top && child == scan->top->next) return;
+    if (child->node_type == AST_NODE_IDENT) {
+        for (int i = 0; i < scan->root_count; i++)
+            if (((AstIdentNode*)child)->entry == scan->roots[i]) scan->found = true;
+        return;
+    }
+    if (child->node_type == AST_NODE_CALL_EXPR) {
+        AstNode* callee = ast_unwrap_primary(((AstCallNode*)child)->function);
+        if (!callee || callee->node_type != AST_NODE_SYS_FUNC) {
+            scan->found = true;
+            return;
+        }
+    }
+    ast_visit_core_children(child, native_alias_scan_cb, opaque);
+}
+
+static bool native_argument_may_alias(AstNode* arg, NameEntry* const* roots, int count) {
+    NativeAliasScan scan = {arg, roots, count, false};
+    native_alias_scan_cb(arg, NULL, &scan);
+    return scan.found;
+}
+
+// D7.6.3: a native procedure's `var` arguments pass the Lambda `pn` checks. The
+// type rule is the bound of S9.1.3v4: the place's declared type must conform to
+// the registered bound, and the native keeps the value in that type. Only
+// places the borrow walker can name travel through a home.
+static void validate_native_var_arguments(Transpiler* tp, SourceSpan span,
+        AstCallNode* call, SysFuncInfo* info) {
+    NameEntry* roots[64];
+    int root_count = 0;
+    int index = call->pipe_inject ? 1 : 0;
+    if (call->pipe_inject && sysfunc_arg_is_var(info, 0)) {
+        record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
+            "argument 1 for `var` parameter cannot be a pipe receiver");
+        return;
+    }
+    for (AstNode* arg = call->argument; arg; arg = arg->next, index++) {
+        if (!sysfunc_arg_is_var(info, index)) continue;
+        AstNode* place = ast_unwrap_primary(arg);
+        AstCowPath path = {};
+        bool named = place && (place->node_type == AST_NODE_IDENT ||
+            (ast_collect_cow_path(&path, place) && path.count > 0 && path.root &&
+             path.root->node_type == AST_NODE_IDENT));
+        AstIdentNode* root = compound_root_ident(arg);
+        if (!named || !root || !root->entry || root->entry->import) {
+            record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
+                "argument %d for `var` parameter must be a local `var` binding or a member/index place of one",
+                index + 1);
+            if (!should_continue_transpiling(tp)) return;
+            continue;
+        }
+        if (!validate_var_argument_root(tp, span, arg, index, roots, &root_count)) return;
+        Type* bound = sysfunc_var_bound(info, index);
+        if (!bound) continue;
+        Type* declared = place->node_type == AST_NODE_IDENT ? arg->type :
+            declared_compound_destination_type(tp, arg, NULL);
+        if (!declared) declared = arg->type;
+        if (declared && lambda_static_boundary_relation(declared, bound, true) ==
+                STATIC_BOUNDARY_REJECTED) {
+            char expected_name[128];
+            char actual_name[128];
+            lambda_type_format_name(bound, expected_name, sizeof(expected_name));
+            lambda_type_format_name(declared, actual_name, sizeof(actual_name));
+            record_type_error_code(tp, source_span_start_line(tp, span),
+                ERR_ARGUMENT_TYPE_MISMATCH,
+                "argument %d for `var` parameter must conform to %s, got %s",
+                index + 1, expected_name, actual_name);
+            if (!should_continue_transpiling(tp)) return;
+        }
+    }
+    NameEntry* places[LAMBDA_MAX_FUNCTION_ARGS];
+    int place_count = 0;
+    index = call->pipe_inject ? 1 : 0;
+    for (AstNode* arg = call->argument; arg; arg = arg->next, index++) {
+        AstIdentNode* root = sysfunc_arg_is_var(info, index) ? compound_root_ident(arg) : NULL;
+        if (root && root->entry && place_count < LAMBDA_MAX_FUNCTION_ARGS)
+            places[place_count++] = root->entry;
+    }
+    // a pipe receiver is evaluated outside the argument list; keep it a snapshot.
+    call->var_alias_capture_mask = call->pipe_inject ? 1 : 0;
+    index = call->pipe_inject ? 1 : 0;
+    for (AstNode* arg = call->argument; arg && index < 16; arg = arg->next, index++) {
+        if (!sysfunc_arg_is_var(info, index) &&
+                native_argument_may_alias(arg, places, place_count))
+            call->var_alias_capture_mask |= (uint16_t)(1u << index);
+    }
+}
+
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
     if (call && !validate_duplicate_call_arguments(tp, call,
@@ -4247,38 +4466,10 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         TypeBinder* binder_site = expected_param->binder ? expected_param->binder :
             static_contract_binder_site(parameter_boundary_type(expected_param));
         if (expected_param->is_var_param) {
-            AstIdentNode* root = compound_root_ident(arg);
-            if (!root || !root->entry || !root->entry->is_mutable) {
-                record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
-                    "argument %d for `var` parameter must be a mutable `var` binding",
-                    arg_index + 1);
-                if (!should_continue_transpiling(tp)) {
-                    call->type = &TYPE_ERROR;
-                    return false;
-                }
-            } else {
-                // CW31 face 4: a mutable view conflicts through its BASE, so
-                // two subviews of one array (or a view and its base) reject at
-                // the sanctioned whole-base granularity. Distinct bases stay
-                // independent; region-precise checking is the ladder's later rung.
-                NameEntry* effective_root = root->entry->view_base
-                    ? root->entry->view_base : root->entry;
-                for (int i = 0; i < var_arg_root_count; i++) {
-                    if (var_arg_root_entries[i] == effective_root) {
-                        record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
-                            var_arg_root_entries[i] == root->entry
-                                ? "argument %d overlaps another `var` parameter; pass distinct mutable bindings"
-                                : "argument %d overlaps another `var` parameter through their shared view base; pass views of distinct arrays",
-                            arg_index + 1);
-                        break;
-                    }
-                }
-                if (var_arg_root_count < 64) {
-                    var_arg_root_entries[var_arg_root_count++] = effective_root;
-                }
-                // A `var` call mutates this local root. Record a place-copy
-                // root before lowering so both tiers bind an S9.1.2 snapshot.
-                direct_note_place_copy_var_borrow(tp, diagnostic_span, arg);
+            if (!validate_var_argument_root(tp, diagnostic_span, arg, arg_index,
+                    var_arg_root_entries, &var_arg_root_count)) {
+                call->type = &TYPE_ERROR;
+                return false;
             }
             // CW25/E207: a PLACE argument (`f(var m.rows[i])`) carries `any` as
             // its own node type -- a member/index read does not propagate its
@@ -11496,6 +11687,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             // as a user `var` call; admission may now be an identity.
             direct_note_place_copy_var_borrow(tp, span, call->argument);
         }
+        if (info->var_mask) validate_native_var_arguments(tp, span, call, info);
         call->can_raise = info->can_raise || sys_func_call_may_return_error(tp, info,
             call->argument, call->pipe_receiver);
         direct_check_literal_options(tp, info, call->argument,

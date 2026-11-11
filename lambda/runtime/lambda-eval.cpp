@@ -13858,6 +13858,34 @@ static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
     return rooted_current.get();
 }
 
+// D7.6.4 step 2: a native writes a level in place only when nothing else can
+// observe it; a shared, static or immortal container needs a copy first.
+bool cow_item_is_unique(Item value) {
+    Container* container = cow_item_container(value);
+    return container && !container->is_static && !container->is_immortal &&
+        (container->cow_state & COW_STATE_SHARED) == 0;
+}
+
+// D7.6.3: before a typed place reloads a native procedure's home, the caller
+// checks that the value kept its kind (D7.6.4 step 5): the container kind, an
+// ArrayNum's element kind (the map_kind byte) and a map's or element's shape.
+// A changed kind is a defect of the native; the place keeps its old value.
+Item lambda_var_home_check_kind(Item before, Item after, const char* procedure) {
+    TypeId kind = get_type_id(before);
+    bool kept = get_type_id(after) == kind;
+    if (kept && kind == LMD_TYPE_ARRAY_NUM) {
+        kept = ((Container*)(uintptr_t)before.item)->map_kind ==
+            ((Container*)(uintptr_t)after.item)->map_kind;
+    } else if (kept && (kind == LMD_TYPE_MAP || kind == LMD_TYPE_ELEMENT)) {
+        kept = ((Map*)(uintptr_t)before.item)->type == ((Map*)(uintptr_t)after.item)->type;
+    }
+    if (kept) return after;
+    log_error("var-home: native procedure '%s' changed the kind of a typed var argument",
+        procedure ? procedure : "<native>");
+    return runtime_error_item(ERR_TYPE_MISMATCH,
+        "a native procedure changed the kind of a typed var argument", NULL);
+}
+
 Item cow_path_borrow_home(Item owner, Item path) {
     return cow_path_borrow_impl(owner, path, 0, NULL, false, true);
 }

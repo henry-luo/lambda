@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 66.0.0 (2026-11-11)
+**Spec version:** 66.1.1 (2026-11-11)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1158,6 +1158,34 @@ reflected and matched (S10.1, S11).*
   helper. The registration checklist of Sys_Func §8 applies to every new sys
   func. The COW write-back value and the expression result are different
   concerns. [Sys_Func §7–§8]
+- **D7.6.3* — A native procedure can take `var` parameters.** A system
+  procedure or a host-module `pn` can declare `var` positions. Registration
+  rejects a `var` position in an `fn`, on a variadic position, or on an async
+  procedure. A call uses the checks of S9.1.3v4 and the caller-owned home of
+  D5.4.6. The native entry receives the address of each home as an `Item*`.
+  This address is not a value: the caller does not root it, box it or put it
+  in a value span. A typed binding goes through a boxed home. The caller
+  checks the kind of the published value before it reloads the binding. The
+  caller writes back each home on every return, also on an error result. A
+  dynamic call to such a procedure stays rejected (D7.2.2). `push`, `splice`
+  and map `set` keep their own lowering, because they can change the kind of
+  an untyped place. [Sys_Func RF7; PT7]
+- **D7.6.4* — A native procedure writes through its home in a fixed
+  order.** The native must do these steps:
+  1. Check the arguments and reserve the resources before the first write.
+  2. Un-share one level at a time, down to the storage that it writes
+     (D5.4.1, D5.4.2).
+  3. Store each replacement in the home, or in its unique parent, before the
+     next allocation point.
+  4. Take data-zone pointers after the last allocation point, and lend them
+     for the work of the call only (D5.4.4, D5.5.2). A call into Lambda code
+     is an allocation point.
+  5. Keep the kind of the value. Change members, never the container kind,
+     the element kind or the map shape.
+
+  The native keeps neither the home address nor a data-zone pointer after it
+  returns. Its return value is the expression result, not the write-back
+  value (D7.6.2). [Sys_Func RF7]
 
 ## D8 Compilation and Execution Tiers
 
@@ -1758,7 +1786,7 @@ authority to itself.*
 
 ## Appendix A — Implementation Status
 
-Status of the `*`-marked rulings on 2026-11-10. Each entry gives only the
+Status of the `*`-marked rulings on 2026-11-11. Each entry gives only the
 status and the live residue. The detailed footnotes, evidence and dates are in
 the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.md#2-implementation-footnotes).
 
@@ -1799,6 +1827,7 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D7.4.2 | In place; the trailing scalar-home operand is retired. |
 | D7.4.3 | In place (2026-08-17) for Lambda, LambdaJS, Jube and hosted boundaries. |
 | D7.5.2 | Not started: process isolation first, thread isolation after the audit and DO20. |
+| D7.6.3, D7.6.4 | Partial (2026-11-11). Host-module procedures work on T0 and MVP, with fail-closed registration, the S9.1.3v4 checks, home transport, write-back and the kind check. `radiant.paint_stroke` is the first kernel; `lambda.paint`'s `stroke` and `feed` procedures write through it. Built-in rows can set `var_mask`, but registration does not validate them yet and none uses it. |
 | D8.2.1–D8.2.6 | The shared indexed compiler substrate and pass manager are in place. Structural convergence of the two front ends is incomplete. |
 | D8.3.1–D8.3.4 | AUTO, strict `interp`, loop and tail handoff, clusters and background compilation are in place. Handoff breadth stays open (DO33). |
 | D8.4.1, D8.4.2, D8.4.5 | AST-first AUTO with MVP-Lmd MIR is in place. Promotion admission grows by checked extensions. |
@@ -1948,7 +1977,7 @@ in the [implementation history §3](../vibe/impl/Lambda_Impl_Formal_Design_Histo
 | D7.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D7.4 | LC1v2 and call-ABI notes; IR1–IR8; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D7.5 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
-| D7.6 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
+| D7.6 | Sys_Func §4 (RF7), §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D8.1 | CGP1–CGP21 | `Lambda_Design_Grammar_Parser.md`, `Lambda_Grammar_Parser.md` |
 | D8.2 | U1–U36 | `Lambda_Design_Unified_AST.md`, `Lambda_Design_JS_Unified.md` |
 | D8.3 | AI1–AI25, AIO1–AIO13; RI1–RI6 | `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_Repl_Interp.md` |

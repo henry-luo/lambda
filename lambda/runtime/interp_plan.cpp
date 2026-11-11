@@ -1375,6 +1375,25 @@ static uint32_t plan_need(AstNode* node) {
                     }
                 }
             }
+            // D7.6.3: a native `var` place evaluates its keys through the same
+            // three scratch homes (interp_eval_place_keys).
+            AstNode* sys = ast_unwrap_primary(c->function);
+            SysFuncInfo* info = sys && sys->node_type == AST_NODE_SYS_FUNC
+                ? ((AstSysFuncNode*)sys)->fn_info : NULL;
+            int index = c->pipe_inject ? 1 : 0;
+            for (AstNode* arg = info && info->var_mask ? c->argument : NULL; arg;
+                    arg = arg->next, index++) {
+                AstCowPath place = {};
+                if (!sysfunc_arg_is_var(info, index) ||
+                        !ast_collect_cow_path(&place, ast_unwrap_primary(arg))) continue;
+                uint32_t keys = 0;
+                for (int seg = 0; seg < place.count; seg++) {
+                    uint32_t key = plan_need(place.segment[seg]);
+                    if (key > keys) keys = key;
+                }
+                uint32_t borrow = 1 + argument_slots + 3 + keys;
+                if (borrow > best) best = borrow;
+            }
         }
         return best;
     }

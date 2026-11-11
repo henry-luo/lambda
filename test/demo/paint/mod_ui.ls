@@ -17,6 +17,9 @@ fn slider(id, label, low, high, value) => <label class:"slider", <span class:"ca
     <input id:id, type:"range", min:string(low), max:string(high), step:"1", value:string(value)>
     <span class:"value", id:id ++ "-value", "">>
 
+fn paper_select() => <label class:"slider", <span class:"caption", "Paper">
+    <select id:"paper", 'aria-label':"Paper texture", *[for (p in model.PAPERS) <option value:p.kind, p.label>]>>
+
 fn zoom_label() => <span id:"zoom-value", class:"zoom", "100%">
 
 fn action(id, label, title) => <button type:"button", class:"action", id:"action-" ++ id, 'data-action':id, title:title, label>
@@ -37,12 +40,13 @@ pub fn tree(st) => <div id:"paint", class:"paint-app", tabindex:"-1",
             action("export", "Export PNG", "Write the painting as a PNG beside the file")>>
         <div class:"bar",
         <div class:"group brushes", id:"brushes", 'data-items':brush_markup(st), *brush_buttons(st)>
+        <div class:"group paper", paper_select()>
         <div class:"group history", action("undo", "Undo", "Undo (⌘Z)") action("redo", "Redo", "Redo (⇧⌘Z)")
             action("clear", "Clear", "Clear the canvas")>
         <div class:"group view", action("zoom-out", "−", "Zoom out (-)") zoom_label()
             action("zoom-in", "+", "Zoom in (+)") action("fit", "Fit", "Fit the canvas (0)") action("actual", "1:1", "Actual pixels (1)")>
         <div class:"group import", <input id:"myb-path", type:"text", placeholder:"path/to/brush.myb", 'aria-label':"MyPaint brush file">
-            action("import", "Import .myb", "Add a MyPaint brush to the palette")>>>
+            action("import", "Import", "Add a MyPaint .myb brush to the palette")>>>
     <main id:"stage", class:"stage tool-brush",
         <div id:"sheet", class:"sheet", <canvas id:"canvas", width:string(model.WIDTH), height:string(model.HEIGHT)>>>
     <footer id:"status", class:"status", "Ready">
