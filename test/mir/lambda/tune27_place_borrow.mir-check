@@ -1,20 +1,35 @@
 {
   "schema_version": 1,
-  "description": "Tune27 T27-4 / S9.2.2 / T27-7: `push(m.a, v)` borrows its place (cow_place_leaf_keys) and appends raw (pn_push) instead of going through a path setter; the two named array insertions (`m.a = x`, `m.b = x`) are the only captures -- the scalar `push(acc.items, i)` needs none.",
+  "description": "S9.1.2\u2013S9.1.3v3/D5.4.4: map-field push borrows its place and appends directly; named values and observations share-mark inline instead of Full capture adapters.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
-        "call\tcow_place_leaf_keys_p, cow_place_leaf_keys",
-        "call\tpn_push_p, pn_push"
+        "call\t{{p}}, cow_place_leaf_keys,",
+        "call\t{{p}}, pn_push,"
       ],
       "forbid": [
         "call\tlambda_map_path_set_checked",
-        "call\tcow_path_set_p, cow_path_set"
+        "call\t{{p}}, cow_path_set,"
       ],
       "count": {
-        "call\tcow_capture_value_p, cow_capture_value": 2
-      }
+        "mov\tu8:4(": {
+          "max": 5
+        },
+        "call\t{{p}}, cow_place_leaf_keys,": 2,
+        "call\t{{p}}, pn_push,": 2
+      },
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:flags}}, u8:4({{r:owner}})"
+        },
+        {
+          "pattern": "or\t{{r:marked}}, {{r:flags}}, 1"
+        },
+        {
+          "pattern": "mov\tu8:4({{r:owner}}), {{r:marked}}"
+        }
+      ]
     }
   ]
 }

@@ -1,57 +1,114 @@
 {
   "schema_version": 1,
-  "description": "S4.4.1 and D2.3.4-D2.3.5: canonical packed integer-sized parameters take an identity path after a tag, subtype, and reserved-bit check. Other Item carriers keep coerce_num_sized; int() decodes exact signed and unsigned payloads without fn_int.",
+  "description": "S4.4.1/D2.3.4\u2013D2.3.5: erased callers admit canonical compact ints by tag, subtype and reserved-bit prefix, retaining a checked rejection path; admitted callees decode exact payloads without fn_int. MVP guarded and checked caller bodies each retain one boundary miss.",
   "checks": [
     {
-      "in_func": "_accept_u32_#",
+      "in_func": "mvp_#_accept_u32",
       "expect_seq": [
-        { "pattern": "and\t{{r:tag}}, %p1, -4294967296" },
-        { "pattern": "beq\tL", "next_line": true },
-        { "pattern": "call\tcoerce_num_sized_p, coerce_num_sized" },
-        { "pattern": "mov\t{{r:admitted}}, {{r}}" },
-        { "pattern": "jmp\tL", "next_line": true },
-        { "pattern": "mov\t{{r:admitted}}, %p1" },
-        { "pattern": "and\t{{r}}, {{r:admitted}}, 4294967295" }
+        {
+          "pattern": "and\t{{r:payload}}, {{r}}, 4294967295"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_int,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_dynamic_u32",
+      "expect_seq": [
+        {
+          "pattern": "and\t{{r:prefix}}, {{r}}, -4294967296"
+        },
+        {
+          "pattern": "beq\t"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_type_check_lazy,"
+        }
       ],
       "count": {
-        "call\tcoerce_num_sized_p, coerce_num_sized": 1
+        "call\t{{p}}, lambda_type_check_lazy,": 2
       },
-      "forbid": ["call\tfn_int_p, fn_int"]
+      "forbid": [
+        "call\t{{p}}, coerce_num_sized,"
+      ]
     },
     {
-      "in_func": "_accept_i8_#",
+      "in_func": "mvp_#_accept_i8",
       "expect_seq": [
-        { "pattern": "and\t{{r:tag}}, %p1, -256" },
-        { "pattern": "beq\tL", "next_line": true },
-        { "pattern": "call\tcoerce_num_sized_p, coerce_num_sized" },
-        { "pattern": "mov\t{{r:admitted}}, %p1" },
-        { "pattern": "and\t{{r}}, {{r:admitted}}, 255" },
-        { "pattern": "lsh\t{{r}}" },
-        { "pattern": "rsh\t{{r}}" }
+        {
+          "pattern": "and\t{{r:payload}}, {{r}}, 255"
+        },
+        {
+          "pattern": "lsh\t{{r:signed}}, {{r:payload}}, 56"
+        },
+        {
+          "pattern": "rsh\t{{r}}, {{r:signed}}, 56"
+        }
       ],
-      "count": {"call\tcoerce_num_sized_p, coerce_num_sized": 1},
-      "forbid": ["call\tfn_int_p, fn_int"]
+      "forbid": [
+        "call\t{{p}}, fn_int,"
+      ]
     },
     {
-      "in_func": "_accept_u16_#",
+      "in_func": "mvp_#_dynamic_i8",
       "expect_seq": [
-        { "pattern": "and\t{{r:tag}}, %p1, -65536" },
-        { "pattern": "beq\tL", "next_line": true },
-        { "pattern": "call\tcoerce_num_sized_p, coerce_num_sized" },
-        { "pattern": "mov\t{{r:admitted}}, %p1" },
-        { "pattern": "and\t{{r}}, {{r:admitted}}, 65535" }
+        {
+          "pattern": "and\t{{r:prefix}}, {{r}}, -256"
+        },
+        {
+          "pattern": "beq\t"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_type_check_lazy,"
+        }
       ],
-      "count": {"call\tcoerce_num_sized_p, coerce_num_sized": 1},
-      "forbid": ["call\tfn_int_p, fn_int"]
-    },
-    {
-      "in_func": "_main_#",
       "count": {
-        "call\tfn_bor_item_p, fn_bor_item": 2,
-        "call\tfn_int_p, fn_int": 2,
-        "call\tfn_add_p, fn_add": 1,
-        "call\tfn_ushr_item_p, fn_ushr_item": 1,
-        "call\tfn_shl_item_p, fn_shl_item": 1
+        "call\t{{p}}, lambda_type_check_lazy,": 2
+      },
+      "forbid": [
+        "call\t{{p}}, coerce_num_sized,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_accept_u16",
+      "expect_seq": [
+        {
+          "pattern": "and\t{{r:payload}}, {{r}}, 65535"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_int,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_dynamic_u16",
+      "expect_seq": [
+        {
+          "pattern": "and\t{{r:prefix}}, {{r}}, -65536"
+        },
+        {
+          "pattern": "beq\t"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_type_check_lazy,"
+        }
+      ],
+      "count": {
+        "call\t{{p}}, lambda_type_check_lazy,": 2
+      },
+      "forbid": [
+        "call\t{{p}}, coerce_num_sized,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_main",
+      "count": {
+        "call\t{{p}}, fn_bor_item,": 2,
+        "call\t{{p}}, fn_int,": 3,
+        "call\t{{p}}, fn_add,": 1,
+        "call\t{{p}}, fn_ushr_item,": 1,
+        "call\t{{p}}, fn_shl_item,": 6
       }
     }
   ]

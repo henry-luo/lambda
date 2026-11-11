@@ -68,8 +68,14 @@ pub fn generate(seed,id,detail,palette) map^ {
     let shell = if (id == "geode") [solid.oval([0.0,0.9,0.0],[2.1,0.9,2.1],"#8c8178","body",[0.0,0.0,0.0],"bowl"),
         solid.oval([0.0,0.9,0.0],[1.95,0.72,1.95],"#c3a0ce","body",[0.0,0.0,0.0],"bowl")] else []
     let all_parts = [*shell,*pieces]
-    let edge_parts = [for (part in all_parts,let definition = [for (d in definitions where d.tree.id == part.shape) d][0])
-        for (edge in definition.edges) solid.placed(solid.stem(definition.points[edge[0]],definition.points[edge[1]],0.006,"#4b5b59","edge"),solid.matrix(part))];
+    // repeated instances share the definition's local edge geometry and its local matrix.
+    let edge_models=map([for (definition in definitions)
+        (definition.tree.id,[for (edge in definition.edges)
+            (let model=solid.stem(definition.points[edge[0]],definition.points[edge[1]],0.006,"#4b5b59","edge"),
+             {*:model,matrix:solid.matrix(model)})])])
+    // every edge of one part shares its placement matrix.
+    let edge_parts = [for (part in all_parts,let placement=solid.matrix(part))
+        for (edge in edge_models[part.shape]) solid.placed(edge,placement)];
     {recipe:recipe,parts:all_parts,edges:edge_parts,resources:definitions |> ~.tree,
      metrics:[{label:"Solid pieces",value:len(all_parts)},{label:"Facet edges",value:len(edge_parts)},{label:"Colorway",value:COLORWAYS[palette]}]}
 }

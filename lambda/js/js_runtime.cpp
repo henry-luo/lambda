@@ -3281,7 +3281,7 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     if (data_cap < 0) return js_new_object();
     // Lambda's combined allocation publishes the shape and payload together;
     // no unrooted instance or partially initialized header spans a safepoint.
-    Map* m = map_alloc_for_type(tm, NULL, data_cap);
+    Map* m = map_alloc_for_type(tm, data_cap);
     return m ? (Item){.map = m} : js_new_object();
 }
 
@@ -13057,7 +13057,8 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
     // If fn.prototype is not an object, js_generator_create falls back to depth-2.
-    if (!ast_direct && (fn->flags & JS_FUNC_FLAG_GENERATOR)) {
+    if (!ast_direct && (fn->flags & JS_FUNC_FLAG_GENERATOR) &&
+            !(fn->code && fn->code->p2_promotion.state == FN_PROMOTION_COMPILED)) {
         js_generator_callee_proto = js_get_name_key(func_item, "prototype", 9);
     }
     bool derived_ctor_call = !ast_direct && derived_ctor_requested;
@@ -26777,8 +26778,35 @@ static bool js_promise_attach_reaction(Item promise, Item on_fulfilled,
 static Item js_async_generator_delegate(Item value);
 static Item js_get_iterator_record(Item iterable, bool asynchronous);
 
+extern "C" Item js_try_make_iter_result(TypeMap* base, Item value, bool done) {
+    if (!base) return ItemNull;
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, js_retain_scalar(value)), value_key(roots, js_name_item("value", 5)),
+        done_key(roots, js_name_item("done", 4));
+    Input* tree = runtime_shape_tree();
+    ShapeEntry* value_field = NULL;
+    ShapeEntry* done_field = NULL;
+    TypeMap* shape = tree ? type_tree_add_map_field(tree, base, value_key.get().get_string(),
+        LMD_TYPE_ANY, &value_field) : NULL;
+    shape = shape ? type_tree_add_map_field(tree, shape, done_key.get().get_string(),
+        LMD_TYPE_BOOL, &done_field) : NULL;
+    if (!shape || !value_field || !done_field) return ItemNull;
+    Map* result = map_alloc_for_type(shape, 0);
+    if (!result) return ItemError;
+    // these fresh own slots cannot invoke guest code; TypedItem storage owns
+    // wide scalar payloads before the input activation is released (D6.1.3).
+    map_field_store((char*)result->data + value_field->byte_offset, held.get(), LMD_TYPE_ANY);
+    map_field_store((char*)result->data + done_field->byte_offset, Item{.item = b2it(done)}, LMD_TYPE_BOOL);
+    return Item{.map = result};
+}
+
 // Helper: create {value, done} iterator result object
 extern "C" Item js_make_iter_result(Item value, bool done) {
+    if (!js_promise_host_ops()) {
+        Item result = js_try_make_iter_result(js_empty_object_type_map(), value, done);
+        if (result.item != ITEM_NULL) return result;
+    }
     JS_ROOTS(roots, value_root, js_retain_scalar(value), result_root, js_promise_public_object(),
         value_key, js_name_item("value", 5), done_key, js_name_item("done", 4));
     // Property insertion may collect; retain both the fresh result map and a
@@ -26992,7 +27020,7 @@ extern "C" Item js_generator_create_body(ActivationEntry body, void* func_ptr,
     gen->delegate = ItemNull;
     gen->ast_function = function.get();
     gen->ast_arguments = arguments.get();
-    gen->ast_this = receiver.get();
+    owned_item_slot_store(&gen->ast_this, 1, 0, receiver.get());
     if (is_async) {
         JsAsyncGeneratorMapCarrier* async = (JsAsyncGeneratorMapCarrier*)carrier;
         runtime_job_queue_init(&async->requests, &async->request_storage);
@@ -27156,9 +27184,11 @@ static Item js_generator_resume_after_delegate_error(Item generator, JsGenerator
 
 static bool js_generator_resume_mvp(JsGenerator* state, Item generator, Item input,
         int operation, Item* result) {
-    if (!state || state->is_async || state->ast_host || get_type_id(state->ast_function) != LMD_TYPE_FUNC ||
-            !function_has_abi(state->ast_function.function, FN_ENTRY_ABI_MVP_LMD)) return false;
-    auto* program = ((MvpLmdCallable*)state->ast_function.function)->program;
+    if (!state || state->is_async || state->ast_host) return false;
+    Item implementation = js_generator_implementation(state);
+    if (get_type_id(implementation) != LMD_TYPE_FUNC ||
+            !function_has_abi(implementation.function, FN_ENTRY_ABI_MVP_LMD)) return false;
+    auto* program = ((MvpLmdCallable*)implementation.function)->program;
     // shared prototype methods resume the receiver's activation and retain its error realm.
     MvpLmdRealmScope realm(program);
     *result = realm.complete(mvp_lmd_generator_resume(program, generator, input, operation));

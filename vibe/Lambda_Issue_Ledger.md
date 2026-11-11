@@ -554,6 +554,26 @@ Evidence: `temp/error-handling-merge-20261103T054805Z/latest-mvp-frontend.json`
 and `final-source-audit.json`.
 [Production qualification](<impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
 
+<a id="lr01-23"></a>**LR01-23 · AUTO fallback cache test expects a MIR import image · OPEN (2026-11-10)**
+
+`LambdaScriptCache.AutoFallbackCachesMirImportConeAndViews` computes the expected
+42 but fails its `cache_mir_artifact` and MIR-hit assertions: the dependency has
+an AST image and the second run adds no MIR cache hit. This reproduces both on
+the helper-retirement candidate and with all six changed runtime implementation
+objects restored from `fd07a893f`, under identical current headers, sibling
+archives and test code. It predates these helper deletions. Whether the defect
+is a stale tier-specific expectation or missing native-image reuse is not yet
+established; preserve the assertions pending that investigation (D8.3.1,
+D8.3.5, D8.5.1). It does not block the dead-helper audit.
+
+Reproduce from the Lambda checkout with
+`DYLD_LIBRARY_PATH="$PWD/modules/node-core" ./temp/mvp_helper_retirement/test-runtime.exe --gtest_filter=LambdaScriptCache.AutoFallbackCachesMirImportConeAndViews`.
+The private-path loader override is only needed for this temporary executable.
+Evidence: `temp/mvp_helper_retirement/cache-current.log`,
+`control/cache-test.log`, `control/summary.json`; the causal control retains the
+pre-cleanup helpers, and neither test oracle nor cache policy was changed.
+
+
 ## 2. Parsing & AST construction (LR02)
 
 <a id="lr02-1"></a>**LR02-1 · Relational result type is representation-sensitive · PARTIAL**
@@ -884,20 +904,16 @@ module cover the former truncation paths.
 not lift their independent structural caps. Implementation and qualification:
 [containment follow-up](<impl/Lambda_Impl_Ledger_Containment_Followup (done).md>).
 
-<a id="lr07-13"></a>**LR07-13 · TCO iteration ceiling, and the safety proof that would lift it · OPEN**
-Tail-recursive loops emit a guard raising a stack-overflow error past
-`LAMBDA_TCO_MAX_ITERATIONS` (`transpile-mir.cpp:27934`–`27941`); the interpreter
-enforces its own `LAMBDA_INTERP_TCO_MAX_ITERATIONS` (`interp.cpp:5051`). A
-correctly TCO'd loop consumes no native stack, so the ceiling is a proxy for a
-proof the transpiler declines to use.
+<a id="lr07-13"></a>**LR07-13 · Interpreter TCO iteration ceiling · OPEN**
 
-*Absorbed from [LR11-R6](<Lambda_Issue_Ledger (fixed).md#lr11-r6>) /
-[LR12-R3](<Lambda_Issue_Ledger (fixed).md#lr12-r3>) on 2026-09-10:*
-`is_tco_function_safe` (`safety_analyzer.cpp:441`) computes exactly that proof —
-"every recursive call in this function is in tail position, so after the goto
-transform the frame cannot grow" — and is **declared, defined, and never
-called**. Wiring it is what turns the iteration ceiling from a blanket cap into
-a guard only unproven functions pay for.
+The interpreter retains `LAMBDA_INTERP_TCO_MAX_ITERATIONS`; a correctly
+transformed tail loop consumes no native stack. Review the remaining ceiling
+against the execution/interrupt policy before changing it (D8.3.1–D8.3.2).
+The old Full MIR iteration guard disappeared with that emitter. Its unused
+`is_tco_function_safe` proof and two private walkers are removed in the
+2026-11-10 helper audit; neither T0 nor MVP called them. T0's live recursive-call
+identity and tail-position analysis remain. This retirement does not lift the
+interpreter ceiling. [Audit and evidence](impl/Lambda_Impl_MIR_Full_Retirement.md#runtime-helper-audit-2026-11-10).
 
 
 <a id="lr07-14"></a>**LR07-14 · Cross-cutting gaps · OPEN (rollup)**
@@ -1017,6 +1033,16 @@ suspected cause, not yet confirmed in Full. Evidence:
 MVP fixture and its Error oracle are retained unchanged; Full correctness
 is not claimed for this case.
 
+Additional reproduction, 2026-11-10 on frozen P26 and P86 Full:
+`test/lambda/mvp/mir_mvp_nested_primitive_stores.ls` preserves the rows on
+negative/NaN/fractional keys and a non-container child, but reports normal
+results instead of Errors on its last two lines. MVP passes the unchanged
+golden under normal/forced/seeded GC. Evidence:
+`temp/mvp_untyped_tuning_goal/p86-nested-full-control.log` and
+`p86-focused-units-2.log`. Whether the rejected indexed-store outcome has
+the same cause as the original projected-map defect is unconfirmed
+(**S7.1.3v3 / S7.7.3**).
+
 <a id="lr07-55"></a>**LR07-55 · Full MIR replaces the outer borrowed owner on a different-owner recursive edge · OPEN**
 
 The same P26/P81 Full controls reproduce this with
@@ -1030,6 +1056,294 @@ publication is suspected; an identical cause to LR07-53 is unconfirmed.
 Evidence and frozen P26 SHA are as in LR07-54. This does not block MVP
 tuning. The immutable golden remains the MVP acceptance oracle, and Full's
 observed failure remains recorded separately.
+
+<a id="lr07-56"></a>**LR07-56 · Full MIR plain argument observes a later argument's write · OPEN**
+
+Reproduced 2026-11-10 on frozen P26 Full (SHA256
+`39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`)
+and current P92 Full. Run `LAMBDA_EXEC_BACKEND=jit
+LAMBDA_MIR_COMPILER=production <exe> run
+test/lambda/mvp/mir_mvp_projection_call_snapshots.ls --no-log`. The last
+call, `earlier(owner, change(owner))`, must keep the first plain argument's
+40-valued snapshot while the second argument writes 60 to the caller's
+owner (**S9.1.2 / S9.1.3v3**). Full prints `[60, 60]`; the unchanged golden
+requires `[40, 60]`. The first four projection/whole-root/local-write/alias
+cases pass both compilers. P92 MVP passes all five under normal, forced and
+seeded GC. The Full call-site capture/evaluation-order interaction is a
+suspected cause, not yet confirmed. Evidence:
+`temp/mvp_untyped_tuning_goal/p92-projection-full-control.log` and
+`p92-focused-units-2.log`. This does not block MVP tuning. The permanent
+MVP oracle is retained; no Full correctness pass is claimed.
+
+<a id="lr07-57"></a>**LR07-57 · MVP MIR-shape assertions disagree with current emission · OPEN (2026-11-10)**
+
+`test_implicit_tail_and_split_observations` expects `lambda_map_set_checked` in
+`updated_box`; `test_guarded_recursive_arrays` expects generic `fn_index` and
+checked-array-store calls in the guarded `place_queen` fallback. The selected
+calls do not appear in current MIR. Both assertions fail identically on the
+saved pre-cleanup executable (SHA256
+`21884b40fcb5392a1747838d91e27628064afb1599a9c1a998f3d95308ff903b`) and the
+helper-retirement release. The expected helpers remain implemented/registered;
+these are not unresolved deleted imports. Whether each oracle should follow
+newer lowering or exposes an optimization defect remains unconfirmed
+(D4.3.1, D7.3.1–D7.3.3). Do not weaken the assertions without tracing the
+relevant guarded path and checking its semantic fallback.
+
+Reproduce with `LAMBDA_TEST_EXE=<candidate> python3 -m unittest test_lambda_mir_mvp.LambdaMirMvpTests.test_implicit_tail_and_split_observations test_lambda_mir_mvp.LambdaMirMvpTests.test_guarded_recursive_arrays`
+from `test/benchmark`. Evidence: `temp/mvp_helper_retirement/tco-final-units.log`
+and `tco-oracle-control-2.log`; the saved pre-cleanup executable is
+`previous-root.exe` in that directory. This does not block dead-helper removal.
+
+The optimization-coverage audit at `cf0caf5c7` runs all 56 Python methods that
+inspect MVP MIR against the installed debug CLI (identity below, LR07-60).
+**47 pass and nine fail.** Besides the two original methods, failures are
+`test_immutable_indirect_keys`, `test_propagation_outcomes`,
+`test_batch_record_and_decimal_paths`, `test_fallible_inline_and_bool_count`,
+`test_nullable_numeric_cast_emission`, `test_modular_array_update` and
+`test_single_use_string_constructor`. These fail structural assertions; where
+semantic/GC checks precede the assertion, they complete successfully. Later
+assertions in the failed method are not qualified. Whether each mismatch is
+a stale oracle or a missed optimization remains unconfirmed. Source lines,
+assertions and raw MIR are preserved in
+`temp/mvp_optimization_coverage/python-emission.log`; the complete review is
+`coverage-report.md` there. No assertion is changed or skipped.
+
+
+<a id="lr07-58"></a>**LR07-58 · MVP rejects the u32 regression fixture during representation conversion · OPEN (2026-11-10)**
+
+`test/lambda/mvp/mir_mvp_u32.ls:10:23` fails with E501:
+`unsupported representation conversion in mvp_6_main: any (0) from 1 to 8`.
+The failure reproduces on the helper-retirement release and the saved
+pre-cleanup executable (SHA256
+`21884b40fcb5392a1747838d91e27628064afb1599a9c1a998f3d95308ff903b`), under
+normal, forced/poisoned and seeded GC, for both default and explicit MVP.
+This is a compiler admission/lowering failure, not a missing runtime import;
+its cause is not established. Retain the fixture and golden (D4.3.1, D8.2.5).
+
+Reproduce with `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/lambda/mvp/mir_mvp_u32.ls`.
+Evidence: `temp/mvp_helper_retirement/affected-goldens.log` and
+`affected-goldens-control.log`. This predates and does not block dead-helper
+retirement. The encompassing `test_benchmark_expansion_semantics` reports eight
+subcase failures from this single fixture.
+
+
+<a id="lr07-59"></a>**LR07-59 · Three execution-profile tests retain Full MIR emission expectations · FIXED (2026-11-10)**
+
+`LambdaOptProfile.ExecutedCallsAreCountedOnlyWhenEnabled`,
+`ExecutedCallsCanBeAttributedToCaller`, and `CowBindingDoesNotReloadLiveOwner`
+fail on both the helper-retirement release (SHA256
+`0e17c8c569764b0619088296bdb93fc5bfadc2f6cfde2f433b4fa55ea536ee75`)
+and the COW-site-attribution candidate. Semantic output, diagnostic TSV emission
+and overflow checks pass. The failures require retired `_accept_u32_`,
+`_shaped__raw0_`/`_shaped__raw1_`, `_main_`/`_capture_dynamic_` names, a
+`fn_len_l` call, or two `cow_bind_var` calls. Current MVP uses `mvp_*` entries,
+inlines the scalar/capture bodies and uses checked length helpers for these
+fixtures. The ordinary non-profiled native capture also bypasses a COW helper.
+
+The structural/counter oracles need an MVP audit that preserves their intent:
+opt-in diagnostics, executed-call attribution, and no spurious GC roots or
+safepoints (D6.3.1–D6.3.4, D7.3.1). Do not restore Full variants or add runtime
+calls solely to satisfy old counter shapes. Assertions remain unchanged.
+
+Reproduce with `LAMBDA_JS_OPT_EXE=<candidate> ./temp/mvp_regions_profile/test-opt.exe --gtest_filter='LambdaOptProfile.ExecutedCalls*:LambdaOptProfile.CowBindingDoesNotReloadLiveOwner'`.
+Evidence: `temp/mvp_regions_profile/profile-units-control.log`,
+`profile-units-candidate.log`, and the current TSVs under
+`temp/lambda_opt_contract/`. The separate COW census regression was caused by
+missing MVP site-wrapper selection and is fixed; it passes on the candidate.
+This issue does not block the allocator assessment or COW-site fix.
+
+
+Migration update (2026-11-10): the two executed-call tests now identify MVP
+entries, inlining and the canonical checked length helper. The COW test is now
+`CowBindingMarksInlineBeforeObservation`: it requires the native share-mark,
+observed COW mutation and unchanged values, rather than Full's helper count and
+retired physical caller. All three pass on the rebuilt release identified in
+the [migration checkpoint](impl/Lambda_Impl_MVP_Optimization_Tests.md).
+The separate diagnostic parity unit preserves roots, memory operations and
+safepoints, including COW site attribution (D6.3.2–D6.3.3). No Full helper or
+profiling event is restored.
+
+
+<a id="lr07-60"></a>**LR07-60 · MIR optimization gates are not fully migrated to MVP · PARTIAL (2026-11-10)**
+
+At clean `cf0caf5c7`, private test controllers built from current source run
+against the installed debug `lambda.exe`, SHA256
+`c6f6766f9e28aacec482d5762b90a4b22be885c21f2ee1eddf37b053a385a3aa`.
+The engine is not rebuilt for this read-only audit. Lambda emission fixtures
+pass **2/279**, Lambda size ratchets **0/12**, optimization contracts **31/55**
+(mixed T0/JS/JIT population), and selected MVP Python emission methods **47/56**.
+Authority: D8.6.1 (optimization regression checks), D6.3 (precise-root safety).
+
+Of 277 emission failures, 270 first fail because the sidecar selects a retired
+`_<name>_#` function, while the artifact contains `mvp_<id>_<name>`; the matcher
+in `test/test_mir_check_helpers.hpp:984` substitutes digits only. Five fail
+instruction assertions and two fail execution/compilation (LR07-61/LR07-63).
+Twenty-three sidecars positively require retired helpers. All 12 Lambda size
+probes retain old selectors or budgets: seven selector failures, four budget
+failures and the LR07-61 crash. These are not useful MVP regression gates until
+their native/fallback intent and costs are reviewed, not merely renamed.
+
+There is also a false-green optimization assertion:
+`LambdaOptProfile.MultiSourceParameterAvoidsWrongShapeGuard` passes at
+`test/test_lambda_opt_gtest.cpp:903`, although its TSV contains no
+`field_attempt` rows. `exec_profile_sum_prefix` returns zero when the retired
+`_print_node_`/`_expression_precedence_` prefixes do not exist, satisfying both
+ceilings. Require an active instrumentation/body control before crediting zero.
+The planned-effect rejection test at line 250 sets
+`LAMBDA_TEST_GC_PLAN_CLAIM`, but no MVP/runtime source reads that knob; it exits
+0 rather than exercising rejection. MVP still verifies emitted effects at
+`mvp_mir.cpp:8725`; the test no longer injects a contradictory plan.
+
+The current 142-method `test/benchmark/test_lambda_mir_mvp.py` is not invoked by
+the build configuration, Makefile, `.github` workflows or `utils`. Its benchmark
+golden method executes typed `*2.ls` variants only; the manifest verifies both
+variants' files exist, not that every untyped kernel is executed. Existing
+erased/untyped kernels give selective coverage. Register a bounded MVP unit
+selection and review typed/untyped mirror and cost-budget coverage. Do not mask
+the failed checks or weaken their semantic controls (S9.1.2–S9.1.3).
+
+Reproduction, exact selectors, raw JSON/logs, passed-family map and controller
+hashes: `temp/mvp_optimization_coverage/coverage-report.md` and
+`final-summary.json`. No baseline, complete GC sweep or timing campaign ran.
+LR07-57/LR07-59 retain the earlier assertion findings; naming failures do not
+explain all counter failures or the implementation defects below.
+
+
+Migration update (2026-11-10): explicit MVP selectors, exact callee checks
+independent of ABI prototype suffixes, current helper paths, profiler controls
+and new region fixtures are implemented. The missing-counter false pass now
+requires real emitted bodies and executed member calls. The planned-effect
+claim reaches MVP's verifier and rejects, with successful empty/unmatched-name
+controls (D6.3.2). The 57-method Python selection is registered in the normal
+Lambda gate and correctly reports failures.
+
+On private release SHA256
+`15b99367361d4a2f7482c7ded6f2966cf4958721348afc4a5f70c5f55efd1ac1`,
+new fixture/matcher/ABI/parity checks pass 10/10, all 17 Lambda size/frame probes
+pass (plus config), optimization contracts pass 46/56, and selected Python
+methods pass 54/57. The full emission controller passes 97/294: 87/284 fixture
+cases, including all five new fixtures, and 10 other checks. The older 279
+fixtures now pass 82 instead of two; 197 contracts still need further MVP path
+review or missing-optimization work. These failures are retained, not skipped.
+The seven JS budget probe objects remain unchanged; seven selected JS matcher
+regressions pass. MVP cost budgets are a reviewed compiler baseline migration,
+not a claim that Full emission size was preserved (D8.6.1).
+
+The remaining ten optimization contracts cover the immutable consumer crash,
+numeric borrowed-store work, recursive union admission/cache work, string tail
+copying/hyphen appends, checked-tail frame reuse, read-only length roots,
+nullable packed construction and redundant stable-length loads. Three Python
+checks retain missed propagation boxing, conditional modular and string-fusion
+contracts. See the checkpoint above and `temp/mvp_emission_test_update/` for
+exact reports, reviewed budget deltas, source/binary identities and the remaining
+fixture inventory. No baseline or benchmark timing campaign was run.
+
+Follow-up qualification (2026-11-10, base `c2f1d2426` plus the recorded working
+diff): 148 of those 197 emission failures are resolved. The final private
+release controller passes **530/579**, comprising **235/284** MIR contracts,
+**284/284** semantic goldens and 11 other checks. The goldens are now mandatory;
+12 formerly absent files are supplied. All 284 also pass under each forced and
+seeded poison-GC mode. Named-register sequence matching retries ambiguous
+prefixes without leaking bindings or relaxing adjacency. Eight shared JS
+capture controls pass. Lambda size/frame ratchets remain 18/18 with unchanged
+budgets; optimization contracts remain 46/56 with the same ten failures.
+No new whole emission fixture fails. Remaining 49 MIR contracts stay red.
+
+The nullable-scalar conversion, wide-result publication, recursive-array effect
+classification and stale nullable/nested/borrowed record proofs are fixed by
+root cause. Unannotated record mutation succeeds, snapshots remain unchanged,
+and later typed crossings reject invalid data (D3.4.5, S11.4.10). The new record
+controls fail on the preceding host and pass on the fixed host. Current release
+SHA256 is `cb1fac1e77f2b7ac74163f3be0c0b1734446c9289148deca629a738af11ee8ef`.
+See [the follow-up implementation/qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-fixture-follow-up-2026-11-10)
+and `temp/mvp_fixture_followup/record-identities.json`. The shared executable and
+sibling/vendor source remain unchanged; no baseline or timing campaign ran.
+
+Remaining-49 qualification (2026-11-10, base `dced21367`): all 49 retained
+emission failures are resolved. Private release SHA256
+`6bd984ed27c89b1971094c0878fabfdf0c0074857c932f8a22d0208ff16e860c`
+passes **582/582** controller checks: **285/285** emission contracts,
+**285/285** semantic goldens and 12 other checks. Both forced/poisoned and
+seeded/poisoned GC modes pass all 285 goldens. Lambda size/frame checks pass
+18/18 after three reviewed zero-slack budget updates (D8.6.1); shared JS
+capture controls pass 8/8. Native lanes, bounds/record proofs, nullable packed
+construction, scalarization, private builders and safe self-tail reuse are
+implemented rather than accepting generic paths as native witnesses.
+
+Optimization contracts improve to **51/56**, with no new failures. Retained
+failures are LR07-62, one checked borrowed numeric store, 213 recursive union
+admissions (ceiling below 40), 198 open-union cache hits (required above 200)
+and 19,275 hyphen appends (LR07-64). Their assertions remain intact. The current
+release implementation and receipts are in
+[the remaining-49 checkpoint](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-49-contracts-2026-11-10)
+and `temp/mvp_remaining49/complete-*.json`. Python aggregate checks were not
+rerun; this is unit-only qualification, with no baseline or timing campaign.
+The shared executable and sibling/vendor source remain unchanged.
+
+Final-five GTest qualification (2026-11-10, base `b3463551a` plus qualified
+diff): optimization contracts now pass **56/56** and the complete emission
+controller passes **588/588** (288 emission contracts, 288 goldens, 12 other
+checks). Both poison-GC modes pass all 288 goldens and all five repaired
+optimization units. The original 582 cases remain present and pass. Lambda
+emission/frame ratchets pass 18/18 after one reviewed zero-slack budget update
+(D8.6.1). LR07-62 and LR07-64 are resolved on private release SHA256
+`104fdc33ddc9cdefd42b39bb52b37b9c118903b417ed001913fd5e921eba9e83`.
+The remaining cache unit used an impossible Full-era hit lower bound; it now
+pins exact valid-crossing accounting, a 201-admission cap and the existing
+four-miss/no-map-cache/malformed-child controls. Other optimization ceilings
+remain unchanged. See [implementation/qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#final-five-optimization-units-2026-11-10)
+and `temp/mvp_opt_remaining5/qualified-*.json`. Keep LR07-60 partial for the
+unrerun Python aggregate and other unqualified configurations; the GTest
+emission/optimization gates are green. No baseline or timing campaign ran.
+
+<a id="lr07-61"></a>**LR07-61 · Native MVP wide-scalar tail-forward fixture traps · PARTIAL (2026-11-10)**
+
+On the exact installed debug CLI identified in LR07-60,
+`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=mvp LAMBDA_DISABLE_MIR_CACHE=1
+./lambda.exe test/mir/lambda/scalar_home_tail_forward.ls --no-log` terminates
+with signal 5 on **3/3 isolated runs**. The same script under `interp` succeeds
+3/3. It recursively adds `1i64` and forwards the scalar companion through a tail
+edge. It must return normally while respecting result/home lifetime
+(D6.2.1, D7.4.2). Both the emission and ratchet probes are blocked. No cause,
+owning code defect or regression-introducing commit is established. No vendor
+change or workaround is made. Evidence:
+`temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and the emission/
+ratchet JSON/logs in the same directory. The engine was not rebuilt in this audit.
+
+
+Qualification correction (2026-11-10): the earlier release check credited
+exit zero and a passing size probe, but its value output was malformed.
+`runtime_publish_result` retained a transient pending wide Item without resolving
+its companion. It now resolves that pair before publication (D6.2.1). The
+fixture's new golden requires `5`; native JIT, MIR interpreter and both poison-GC
+modes pass on the release identified above. The size/frame ratchet still passes.
+The unchanged installed debug executable is not evidence about this fix;
+a rebuilt debug host is not qualified here. Keep that residue explicit.
+See [implementation/receipts](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-fixture-follow-up-2026-11-10)
+and `temp/mvp_fixture_followup/record-backend-parity.json`.
+
+<a id="lr07-62"></a>LR07-62 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-62>).
+
+<a id="lr07-63"></a>LR07-63 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-63>).
+
+<a id="lr07-64"></a>LR07-64 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-64>).
+
+<a id="lr07-65"></a>**LR07-65 · T0 snapshots a plain argument after a later argument mutates its owner · OPEN (2026-11-10)**
+
+The new `test/mir/lambda/mvp_call_ownership.ls` calls
+`observe(values, change(values))` with `values = [3]`; `change` writes `9`.
+S9.1.3v3 requires the plain argument's snapshot before a later borrow mutation.
+The correct final line is `[3, 9]`. The rebuilt release JIT matches that golden
+under normal, forced/poisoned and seeded GC; its interpreter prints `[9, 9]`.
+The installed debug interpreter has the same mismatch. Both tiers exit zero,
+so exit status alone would hide it. The other four new fixture goldens match
+the release interpreter. Cause and regression provenance are unconfirmed.
+
+Reproduce: `LAMBDA_EXEC_BACKEND=interp <host> run test/mir/lambda/mvp_call_ownership.ls --no-log`.
+Evidence: `temp/mvp_emission_test_update/new-t0-controls.json`,
+`new-fixture-probes.json` and `final-python.json`. The release identity is in
+the LR07-60 migration update. Keep the expected result and report the T0 defect;
+it does not block MVP JIT emission tests (S9.1.2–S9.1.3v3).
 
 ## 8. Memory management & GC (LR08)
 

@@ -1,35 +1,65 @@
 {
   "schema_version": 1,
-  "description": "S7.6.3v3/S7.7.2v2/D6.2.1: validated scalar success uses a native lane and error companion; unions, nullable values and captures retain their Item contract.",
+  "description": "S7.6.3v3/S7.7.2v2/D6.2.1: MVP uses native floating success lanes where planned, inline Item float bits for observed outcomes and captures, and a checked cold path for indexed integers.",
   "checks": [
     {
-      "in_func": "_checked_float_#",
-      "expect": ["func\td, i64, p:runtime", "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]
+      "in_func": "mvp_#_checked_float",
+      "expect": [
+        "func\ti64, p:runtime",
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
     },
     {
-      "in_func": "_accumulate_#",
-      "expect": ["func\td, i64, p:runtime"],
-      "forbid": ["call\tpush_d_p, push_d", "call\tlambda_report_boundary_failure_p"]
+      "in_func": "mvp_#_accumulate",
+      "expect": [
+        "func\ti64, p:runtime"
+      ],
+      "forbid": [
+        "call\t{{p}}, push_d,",
+        "call\tlambda_report_boundary_failure_p"
+      ]
     },
     {
-      "in_func": "_read_int_#",
-      "expect": ["func\ti64, i64, p:runtime"],
-      "forbid": ["call\tint2it_lane_p, int2it_lane"]
+      "in_func": "mvp_#_read_int",
+      "expect": [
+        "mov\t{{r}}, i64:({{r}})"
+      ],
+      "forbid": [
+        "call\t{{p}}, int2it_lane,"
+      ],
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, fn_index,"
+      }
     },
     {
-      "in_func": "_preserved_union_#",
-      "expect": ["func\ti64, i64, p:runtime"],
-      "forbid": ["func\td, i64, p:runtime"]
+      "in_func": "mvp_#_preserved_union",
+      "forbid": [
+        "call\t{{p}}, push_d,"
+      ],
+      "expect_any": [
+        "func\td, i64, p:runtime",
+        "func\td, p:runtime"
+      ]
     },
     {
-      "in_func": "_inner_#",
-      "expect": ["func\ti64, i64, p:runtime"],
-      "forbid": ["func\td, i64, p:runtime"]
+      "in_func": "mvp_#_inner",
+      "expect": [
+        "func\ti64, p:runtime"
+      ],
+      "forbid": [
+        "func\td, i64, p:runtime"
+      ]
     },
     {
-      "in_func": "_nullable_#",
-      "expect": ["func\ti64, i64, p:runtime"],
-      "forbid": ["func\td, i64, p:runtime"]
+      "in_func": "mvp_#_nullable",
+      "forbid": [
+        "call\t{{p}}, push_d,"
+      ],
+      "expect_any": [
+        "func\td, i64, p:runtime",
+        "func\td, p:runtime"
+      ]
     }
   ]
 }

@@ -1,5 +1,5 @@
 // S5.1.1–S5.1.2: a dynamic Item compared with a bool literal needs only
-// the bool tag and payload, including when the Item is null or an error.
+// the bool tag and payload for normal values; errors propagate (S5.1.1v2).
 pn equals_true(x: any) bool^ {
     return x == true
 }

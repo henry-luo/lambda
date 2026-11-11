@@ -1,19 +1,25 @@
 {
   "schema_version": 1,
-  "description": "Tune16 C2 keeps proved integer band, bor, and bxor operations on native MIR lanes.",
+  "description": "S4.4.4/D2.3.5: native integer bitwise arms coexist with one checked helper per source operator for poison/unsupported lanes.",
   "checks": [
     {
-      "in_func": "_tune16_native_bitwise_#",
+      "in_func": "mvp_#_tune16_native_bitwise",
       "expect": [
-        "and\t{{r}}",
-        "xor\t{{r}}",
-        "or\t{{r}}"
+        "and\t{{r}}, {{r}}, {{r}}",
+        "xor\t{{r}}, {{r}}, {{r}}",
+        "or\t{{r}}, {{r}}, {{r}}"
       ],
-      "forbid": [
-        "call\tfn_band_item_p, fn_band_item",
-        "call\tfn_bxor_item_p, fn_bxor_item",
-        "call\tfn_bor_item_p, fn_bor_item"
-      ]
+      "count": {
+        "call\t{{p}}, fn_band_item,": {
+          "max": 1
+        },
+        "call\t{{p}}, fn_bxor_item,": {
+          "max": 1
+        },
+        "call\t{{p}}, fn_bor_item,": {
+          "max": 1
+        }
+      }
     }
   ]
 }

@@ -1,14 +1,18 @@
 {
   "schema_version": 1,
-  "description": "S7.1.3v2: typed cold stores retain the checked error boundary. Tune17 T2 keeps declared int and bool array writes on their raw lanes with checked fallbacks. T29-5 (2026-09-17): a non-null int value takes the compact COW store (array_num_set_cow_idx) on a statically proven int[] root, as bool and non-null float values already did; out-of-range stores still raise through fn_array_set.",
+  "description": "D4.3.3/S9.1.2: MVP guards packed integer and byte writes and keeps one canonical cold setter per source store. D8.2.6: three proven local stores omit cold setters; rejected/snapshot writes retain the other three.",
   "checks": [
     {
-      "in_func": "_tune17_typed_store_#",
+      "in_func": "mvp_#_tune17_typed_store",
       "expect": [
-        "call\tarray_num_set_cow_idx",
+        "and\t{{r}}, {{r}}, 4294979584",
         "mov\ti64:({{r}}), {{r}}",
-        "mov\tu8:({{r}}), {{r}}"
-      ]
+        "mov\tu8:({{r}}), {{r}}",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 3
+      }
     }
   ]
 }

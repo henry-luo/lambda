@@ -1,43 +1,65 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3, D6.3.4, D7.3.1: record context.",
+  "description": "D4.3.3/D6.3.4/D7.3.1: MVP returns a native record pointer, inlines constructor/forwarding calls, reads admitted fields directly and loops for self tails. Allocation counts bound materialized result/context records.",
   "checks": [
     {
-      "in_func": "_count_#",
-      "expect": [
-        "_record_result0"
-      ],
+      "in_func": "mvp_#_count",
       "forbid": [
-        "call\t_count_",
+        "call\tmvp_{{n}}_count_dp",
         "call\tmap_fill",
         "call\theap_calloc_class",
         "call\tfn_member"
-      ]
-    },
-    {
-      "in_func": "_forward_#",
-      "expect": [
-        "_record_result0",
-        "call\t_count_"
       ],
-      "forbid": [
-        "call\tfn_member"
+      "count": {
+        "call\t{{p}}, map_alloc_for_type,": 2
+      },
+      "expect": [
+        "p:16({{r}})",
+        "func\tp, p:runtime",
+        "func\tp, p:runtime",
+        "func\tp, p:runtime",
+        "func\tp, p:runtime"
       ]
     },
     {
-      "in_func": "_swap_#",
+      "in_func": "mvp_#_forward",
       "forbid": [
-        "call\t_swap_",
-        "call\tmap_fill",
-        "call\tfn_member"
+        "call\tmvp_{{n}}_count_dp",
+        "call\t{{p}}, fn_member,"
+      ],
+      "count": {
+        "call\t{{p}}, map_alloc_for_type,": 2
+      },
+      "expect": [
+        "p:16({{r}})"
       ]
     },
     {
-      "in_func": "_chain_#",
+      "in_func": "mvp_#_swap",
       "forbid": [
-        "call\t_chain_",
+        "call\tmvp_{{n}}_swap_dp",
         "call\tmap_fill",
         "call\tfn_member"
+      ],
+      "count": {
+        "call\t{{p}}, map_alloc_for_type,": 1
+      },
+      "expect": [
+        "p:16({{r}})"
+      ]
+    },
+    {
+      "in_func": "mvp_#_chain",
+      "forbid": [
+        "call\tmvp_{{n}}_chain_dp",
+        "call\tmap_fill",
+        "call\tfn_member"
+      ],
+      "count": {
+        "call\t{{p}}, map_alloc_for_type,": 3
+      },
+      "expect": [
+        "p:16({{r}})"
       ]
     }
   ]

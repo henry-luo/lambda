@@ -47,14 +47,15 @@ pub fn normalize(parameters={}) map^ {
 }
 
 // sample the original centerline, so attachment positions do not depend on tessellation.
-pub fn sample(branch,fraction) map {
+fn sample_frame(branch,fraction,frames:any) map {
     let x=fraction*float(len(branch.points)-1),index=min(len(branch.points)-2,int(floor(x))),u=x-float(index)
     let a=branch.points[index],b=branch.points[index+1]
-    let f=primitive.frames(branch.points)[index]
+    let f=frames[index]
     let h=v.unit(v.subtract(b,a)),l=v.unit(v.cross(f.n,h));
     {frame:{position:v.add(a,v.times(v.subtract(b,a),u)),h:h,l:l,u:v.cross(h,l)},
      radius:branch.radii[index]+(branch.radii[index+1]-branch.radii[index])*u}
 }
+pub fn sample(branch,fraction) map => sample_frame(branch,fraction,primitive.frames(branch.points))
 fn branch(k:u64,parameters,level:int,id,parent,initial,radius,length_factor=1.0) array {
     let p=parameters.levels[level],key=rng.derive(k,id)
     let length=p.length*length_factor*rng.between(rng.derive(key,"length"),1.0-parameters.variation,1.0+parameters.variation)
@@ -69,8 +70,10 @@ fn branch(k:u64,parameters,level:int,id,parent,initial,radius,length_factor=1.0)
         [*acc,{*:next,position:v.add(previous.position,v.times(next.h,step))}]
     })
     let result={id:id,parent:parent,level:level,points:grown |> ~.position,
-        radii:[for (i in 0 to p.sections) radius*(1.0-p.taper*float(i)/float(p.sections))]};
-    [result,*[for (j in 0 to (p.children-1),let fraction=p.start+(0.95-p.start)*(float(j)+0.5)/float(p.children),let attachment=sample(result,fraction),
+        radii:[for (i in 0 to p.sections) radius*(1.0-p.taper*float(i)/float(p.sections))]}
+    // all child attachments share the parent's immutable centerline frames.
+    let frames=if (p.children>0) primitive.frames(result.points) else [];
+    [result,*[for (j in 0 to (p.children-1),let fraction=p.start+(0.95-p.start)*(float(j)+0.5)/float(p.children),let attachment=sample_frame(result,fraction,frames),
         let spin=rng.between(rng.derive(key,"azimuth"),0.0,360.0)+float(j)*p.twist,
         let rolled=turtle.turned(attachment.frame,attachment.frame.h,spin),
         let child=turtle.turned(rolled,rolled.l,parameters.levels[level+1].angle))
@@ -79,9 +82,10 @@ fn branch(k:u64,parameters,level:int,id,parent,initial,radius,length_factor=1.0)
 pub fn skeleton(k:u64,parameters={}) map^ {
     let p=normalize(parameters)^
     let branches=branch(k,p,0,"root",null,turtle.frame(),p.levels[0].radius)
-    let leaves=[for (b in branches where ((b.level == len(p.levels)-1) ^ { false }))
+    // leaf attachments reuse each branch's transported frame table.
+    let leaves=[for (b in branches,let frames=primitive.frames(b.points) where ((b.level == len(p.levels)-1) ^ { false }))
         for (i in 0 to (p.leaves.count-1),let key=rng.at(rng.derive(k,[b.id,"leaves"]),i),
-            let at=sample(b,p.leaves.start+(1.0-p.leaves.start)*(float(i)+0.5)/float(p.leaves.count)),
+            let at=sample_frame(b,p.leaves.start+(1.0-p.leaves.start)*(float(i)+0.5)/float(p.leaves.count),frames),
             let rolled=turtle.turned(at.frame,at.frame.h,float(i)*137.507764+rng.between(rng.derive(key,"turn"),-16.0,16.0)),
             let f=turtle.turned(rolled,rolled.l,p.leaves.angle),let size=rng.between(key,1.0-p.leaves.size_variance,1.0+p.leaves.size_variance))
             for (j in 0 to (p.leaves.leaflets-1))

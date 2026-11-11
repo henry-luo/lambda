@@ -1,16 +1,26 @@
 {
   "schema_version": 1,
-  "description": "Tune18 string[] indexing uses its certificate-guarded raw pointer lane, the shared physical element address, and preserves item_at as the representation-safe slow path.",
+  "description": "D4.3.3: string-array reads load the boxed element directly behind bounds/layout guards; exactly one generic index fallback remains.",
   "checks": [
     {
-      "in_func": "_main_#",
-      "expect": [
-        "lsh\t{{r}}, {{r}}, 3",
-        "mov\ti64:("
+      "in_func": "mvp_#_main",
+      "expect_seq": [
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:addr}})"
+        }
       ],
-      "forbid": [
-        "call\tfn_index_p, fn_index"
-      ]
+      "expect": [
+        "i64:40("
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": 1
+      }
     }
   ]
 }

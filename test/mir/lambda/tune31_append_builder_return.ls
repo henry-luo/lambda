@@ -21,6 +21,25 @@ pn sum_codes(codes) {
     total
 }
 
+// nullable and mixed append domains keep ordinary open construction.
+pn nullable_codes(text: string) {
+    var codes = []
+    codes.push(ord(text[99]))^
+    codes
+}
+
+pn mixed_codes() {
+    var codes = []
+    codes.push(1)^
+    codes.push("x")^
+    codes
+}
+
 pn main() {
     print(sum_codes(build_codes("AB")) ++ "\n")
+    var escaped = build_codes("AB")
+    let snapshot = escaped
+    escaped[0] = "x"
+    print([snapshot, escaped, nullable_codes("AB"), mixed_codes()])
+    print("\n")
 }

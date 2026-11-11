@@ -5146,15 +5146,20 @@ static LmdValue iterator_value(LmdCompiler* c, MIR_reg_t record, MIR_reg_t activ
         MIR_label_t done, bool elision = false, bool asynchronous = false) {
     // an abrupt IteratorStep/IteratorValue marks this iterator done; enclosing iterators still close.
     move(c, active, integer(c, 0));
-    MIR_reg_t result = asynchronous
-        ? em_call_1(&c->em, "js_async_iterator_step_result", MIR_T_I64, MIR_T_I64, reg(c, record), true)
-        : em_call_3(&c->em, "mvp_lmd_iterator_step", MIR_T_I64,
-            MIR_T_I64, reg(c, record), MIR_T_I64, integer(c, ITEM_JS_UNDEFINED), MIR_T_I64, integer(c, 0), true);
+    if (!asynchronous) {
+        MIR_reg_t value = em_call_2(&c->em, "mvp_lmd_iterator_step_read_value", MIR_T_I64,
+            MIR_T_I64, reg(c, record), MIR_T_I64, integer(c, !elision), true);
+        check_error(c, value);
+        branch(c, MIR_BEQ, done, reg(c, value), integer(c, JS_ITER_DONE_SENTINEL));
+        move(c, active, integer(c, 1));
+        return stable_item(c, value);
+    }
+    MIR_reg_t result = em_call_1(&c->em, "js_async_iterator_step_result", MIR_T_I64,
+        MIR_T_I64, reg(c, record), true);
     check_error(c, result); boxed(c, result);
-    if (asynchronous) { result = emit_await(c, result); check_error(c, result); boxed(c, result); }
-    MIR_reg_t finished = asynchronous
-        ? em_call_1(&c->em, "js_iterator_result_done", MIR_T_I64, MIR_T_I64, reg(c, result), true)
-        : property_access(c, LMD_PROP_GET, result, text(c, "done").reg);
+    result = emit_await(c, result); check_error(c, result); boxed(c, result);
+    MIR_reg_t finished = em_call_1(&c->em, "js_iterator_result_done", MIR_T_I64,
+        MIR_T_I64, reg(c, result), true);
     check_error(c, finished); branch_truth(c, done, truth(c, boxed(c, finished)));
     LmdValue value = boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
     if (!elision) {
@@ -9343,6 +9348,10 @@ static const LmdImport imports[] = {
     {"mvp_lmd_generator_resume_kind", (void*)mvp_lmd_generator_resume_kind, AUDIT(JIT_EFFECT_NO_GC, SCALAR, 0)},
     {"mvp_lmd_iterator_get", (void*)mvp_lmd_iterator_get, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_iterator_step", (void*)mvp_lmd_iterator_step, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
+    {"mvp_lmd_iterator_step_read_value", (void*)mvp_lmd_iterator_step_read_value,
+        {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,SCALAR),
+            JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_DYNAMIC)|JIT_IMPORT_ARGS_BORROWED_AUDITED,
+            JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_iterator_close", (void*)mvp_lmd_iterator_close, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_iterator_collect", (void*)mvp_lmd_iterator_collect, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,ITEM)|ARG(4,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_call_array", (void*)mvp_lmd_call_array, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_F64)|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
@@ -9642,7 +9651,7 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f, uint32_t* instruc
             else bind_pattern(&c, a, boxed(&c, value), true);
         }
         c.parameter_initializer = false;
-        if (f->ast->is_generator) {
+        if (f->ast->is_generator && !mvp_lmd_generator_lazy_parameters(f->ast)) {
             MIR_reg_t parked = em_call_2(&c.em, f->ast->is_async ? "js_gen_park" : "mvp_lmd_generator_park", MIR_T_I64,
                 MIR_T_I64, integer(&c, ITEM_JS_UNDEFINED), MIR_T_I64, integer(&c, f->ast->is_async ? 0 : 1), true);
             check_error(&c, parked);
@@ -12946,7 +12955,8 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     if (!js_function_source_span(script->source, script->source_length, definition, &text, &length)) return ItemError;
     StrBuf* source = strbuf_new();
     if (!source) return ItemError;
-    if (script->strict_mode) strbuf_append_str(source, "'use strict';\n");
+    if (script->strict_mode || definition->node_type == AST_NODE_METHOD)
+        strbuf_append_str(source, "'use strict';\n");
     // D8.2.4: clone only the checked body's resolved dependencies. Copying a
     // wide module scope made planning and the unused synthetic main quadratic.
     // separately parsed continuations resolve that same slice by spelling.
@@ -12997,7 +13007,7 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     if (as_expression) strbuf_append_char(source, '(');
     if (method) {
         // D8.4.5 preserves checked defaults verbatim and the original method metadata.
-        strbuf_append_str(source, "function(");
+        strbuf_append_str(source, definition->is_generator ? "function*(" : "function(");
         for (AstNode* parameter = definition->params; parameter; parameter = parameter->next) {
             SourceSpan span = parameter->source_span;
             if (!js_ast_parameter_binding_identifier(parameter) || span.end_byte <= span.start_byte ||
@@ -13108,8 +13118,10 @@ Item mvp_lmd_call_function_satellite(Item compiled, Item source, Item receiver,
     if (callable->runtime_context != context) return ItemError;
     MvpLmdRealmScope realm(callable->program);
     // retain the original callable as `self`, including named-expression recursion and identity.
-    Item result = ((MvpLmdNativeEntry)callable->ptr)(context, callable->program, arguments, count,
-        source, receiver, make_js_undefined());
+    Item result = callable->def && ((AstFuncNode*)callable->def)->is_generator
+        ? mvp_lmd_generator_call_source(callable->program, compiled, source, receiver, arguments, count)
+        : ((MvpLmdNativeEntry)callable->ptr)(context, callable->program, arguments, count,
+            source, receiver, make_js_undefined());
     result = lambda_item_resolve_pending_slot(result);
     result = realm.complete(result);
     return result_home ? lambda_item_adopt_scalar_home(result, result_home) : result;

@@ -1,0 +1,14 @@
+{
+  "version": 3,
+  "comment": "Lambda paint demo: a pressure-sized inking pen with smoothed tracking. Original settings for this demo.",
+  "group": "",
+  "parent_brush_name": "",
+  "settings": {
+    "opaque": {"base_value": 1.0, "inputs": {}},
+    "opaque_multiply": {"base_value": 0.0, "inputs": {"pressure": [[0.0, 0.0], [0.05, 1.0], [1.0, 1.0]]}},
+    "radius_logarithmic": {"base_value": 1.0, "inputs": {"pressure": [[0.0, -1.2], [1.0, 0.4]]}},
+    "hardness": {"base_value": 0.97, "inputs": {}},
+    "dabs_per_actual_radius": {"base_value": 3.0, "inputs": {}},
+    "slow_tracking": {"base_value": 1.5, "inputs": {}}
+  }
+}

@@ -1555,6 +1555,14 @@ invalidate an unannotated local's proof. Nullable record stores reuse the
 non-null arm's offsets only after receiver, incoming field contract and COW
 ownership checks; the null arm retains RHS evaluation and the checked failure.
 
+For example, after `var r = make_record(); r.value = "bad"`, where the return
+contract declares `value: int`, the unannotated local accepts the write and
+revokes the old layout proof (D3.4.5, S11.4.10). A retained COW snapshot keeps
+its original value. A later crossing into that record contract validates the
+changed value again and rejects it. An explicitly annotated `var r: Record`
+instead checks the write before publication. This applies the existing rulings;
+it does not turn a return annotation into an inferred local write contract.
+
 Array crossings compare the existing certificate and physical carrier together
 (D4.3.3). Value-preserving transforms may retain a certificate after restoring
 its native lane, and must recheck any changed length before publication. Broad

@@ -455,6 +455,55 @@ def expect_static_module_archive_profiles() -> None:
             fail('split link lost profile-specific input archive')
 
 
+def expect_owner_projects_not_generated(module) -> None:
+    generator = linux_validation_generator(module)
+    owners = [target for target in generator.config['targets'] if target.get('build_owner')]
+    if 'image_codecs' in generator.config or 'archive_codecs' in generator.config:
+        fail('Lambda imported input-owned codec build configuration')
+    expected = {'re2', 'lambda-archive-readers', 'lambda-image-codecs', 'lambda-lib', 'lambda-data', 'radiant'}
+    if {target['name'] for target in owners} != expected:
+        fail('sibling provider ownership metadata is incomplete')
+    generator.generate_complex_libraries()
+    emitted = '\n'.join(generator.premake_content)
+    for target in owners:
+        name = target['name']
+        if f'project "{name}"' in emitted or f'project "{name}-cpp"' in emitted:
+            fail(f'{name} is still generated as a Lambda provider project')
+    if 'project "lambda-rt-cpp"' not in emitted:
+        fail('owner filtering removed the Lambda runtime project')
+
+    patcher_path = ROOT / 'utils/patch_static_module_makefile.py'
+    spec = importlib.util.spec_from_file_location('patch_static_module_makefile', patcher_path)
+    patcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(patcher)
+    source = 'LIBS += -lradiant-cpp -llambda-data-cpp -llambda-lib-cpp -lpthread\n'
+    patched = patcher.use_sibling_archives(source, str(ROOT))
+    if '-lradiant-cpp' in patched or '-llambda-data-cpp' in patched or '-llambda-lib-cpp' in patched:
+        fail('split host retained linker names for removed provider projects')
+    for archive in ('libradiant.a', 'liblambda-input.a', 'liblambda-lib.a'):
+        if patched.count(archive) != 2:
+            fail(f'split host did not link and track owner archive {archive}')
+
+
+def expect_only_variants_generate_legacy_main(module) -> None:
+    with tempfile.TemporaryDirectory(dir=ROOT / 'temp') as directory:
+        output = Path(directory) / 'premake5.lua'
+        generator = linux_validation_generator(module)
+        generator.generate_premake_file(str(output))
+        text = output.read_text()
+        if re.search(r'^project "lambda"$', text, re.M) or \
+                not re.search(r'^project "lambda-exe"$', text, re.M) or \
+                'startproject "lambda-exe"' not in text:
+            fail('the default workspace must contain only the split Lambda host')
+        generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'linux',
+                                            variant='cli',
+                                            linux_multiarch_triplet=TEST_MULTIARCH_TRIPLET,
+                                            linux_pkg_config_includes=[])
+        generator.generate_premake_file(str(output))
+        if 'project "lambda-cli"' not in output.read_text():
+            fail('the CLI variant lost its standalone main project')
+
+
 def expect_radiant_property_ownership(module) -> None:
     generator = linux_validation_generator(module)
     targets = {target['name']: target for target in generator.config['targets']}
@@ -622,6 +671,8 @@ def main() -> int:
     expect_static_runtime_providers(module, "linux")
     expect_archive_link_deps(module)
     expect_static_module_archive_profiles()
+    expect_owner_projects_not_generated(module)
+    expect_only_variants_generate_legacy_main(module)
     expect_radiant_property_ownership(module)
     expect_radiant_media_platform_selection(module)
     expect_release_full_lto(module)

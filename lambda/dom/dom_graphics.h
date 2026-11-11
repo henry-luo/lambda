@@ -17,6 +17,7 @@ using DomCanvasStateSnapshot = RadiantCanvasStateSnapshot;
 #define DOM_CANVAS_ENGINE_OPERATIONS(OP) \
     OP(bool, ensure, (void* canvas_element)) \
     OP(bool, set_pixels, (void* canvas_element, const uint8_t* rgba, uint32_t width, uint32_t height, const int64_t* strides)) \
+    OP(bool, write_pixels, (void* canvas_element, const uint8_t* rgba, uint32_t width, uint32_t height, const int64_t* strides, uint32_t x, uint32_t y)) \
     OP(StrBuf*, to_data_url, (void* canvas_element)) \
     OP(bool, set_dimension, (void* canvas_element, bool is_width, uint32_t value)) \
     OP(bool, reset_from_attributes, (void* canvas_element)) \

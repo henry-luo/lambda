@@ -23,6 +23,17 @@ pn retained_argument() any { return retain(fill(2, 7)) }
 pn readonly_length(a: int[]) int { return len(a) }
 pn forward_read(a: int[]) int^ { return sum(a) }
 pn forwarded_argument() int^ { return forward_read(fill(2, 7)) }
+type NativeFields = {values: int[], scalar: float, child: {label: string}?}
+fn native_fields(values: int[], scalar: float) NativeFields =>
+    {values: values, scalar: scalar, child: null}
+fn record_tree(depth: int) any {
+    if (depth == 0) { return {value: [1, 2]} }
+    return {left: record_tree(depth - 1), right: record_tree(depth - 1)}
+}
+fn mixed_kind(flag: bool) any {
+    if (flag) { return 17 }
+    return {value: 23}
+}
 pn main() {
     print(freshly(2, 3)); print("\n")
     print(call_fill(2, 7)); print("\n")
@@ -46,4 +57,10 @@ pn main() {
     print(escaped); print("\n")
     print(readonly_length(fill(0, 7))); print(" "); print(readonly_length(fill(65, 7))); print("\n")
     print(forwarded_argument()); print("\n")
+    var source: int[] = [2, 4]
+    let saved = native_fields(source, -0.0)
+    source[0] = 8
+    print([saved.values, 1.0 / saved.scalar < 0.0, saved.child]); print("\n")
+    let tree = record_tree(2)
+    print([tree.left.right.value, mixed_kind(true), mixed_kind(false).value]); print("\n")
 }

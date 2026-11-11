@@ -12,11 +12,31 @@
 #include <vector>
 
 #include "test_mir_check_helpers.hpp"
+#include "test_lambda_helpers.hpp"
 #include "../lambda/mir/mir.h"
 #include "../lambda/mir/mir-gen.h"
+#include "../lambda/runtime/mir_policy.hpp"
 #include "lib/file.h"
 
 static const char* kLambdaMirDir = "test/mir/lambda";
+
+TEST(LambdaMirPolicy, EagerBudgetBoundsIndividualBodies) {
+#ifdef NDEBUG
+    const uint64_t budget = 5000;
+    const unsigned int bounded_level = 1;
+    EXPECT_FALSE(mir_compact_lowering(257));
+#else
+    const uint64_t budget = 1000;
+    const unsigned int bounded_level = 0;
+    EXPECT_TRUE(mir_compact_lowering(257));
+#endif
+    EXPECT_FALSE(mir_compact_lowering(256));
+    EXPECT_EQ(mir_eager_optimize_level(budget, 2), 2u);
+    EXPECT_EQ(mir_eager_optimize_level(budget + 1, 2), bounded_level);
+    EXPECT_EQ(mir_eager_optimize_level(budget, 0), 0u);
+    EXPECT_EQ(mir_eager_optimize_level(budget, 1), 1u);
+    EXPECT_EQ(mir_native_optimize_level(20001, 2), bounded_level);
+}
 
 static std::vector<mir_check::Fixture> collect_lambda_fixtures() {
     return mir_check::discover_fixtures(kLambdaMirDir, ".ls");
@@ -38,6 +58,18 @@ TEST_P(LambdaMirEmissionTest, MatchesMirCheck) {
     mir_check::run_fixture(fixture.script_path, fixture.sidecar_path, mir_check::LANG_LAMBDA);
 }
 
+TEST_P(LambdaMirEmissionTest, MatchesGolden) {
+    const auto& fixture = GetParam();
+    char golden[1024];
+    int size = snprintf(golden, sizeof(golden), "%.*s.txt",
+        (int)fixture.script_path.size() - 3, fixture.script_path.c_str());
+    ASSERT_GT(size, 0);
+    ASSERT_LT((size_t)size, sizeof(golden));
+    // MIR patterns and stress parity alone cannot reject a consistently wrong value.
+    test_lambda_script_against_file(fixture.script_path.c_str(), golden,
+        mir_check::script_is_procedural(fixture.script_path), "jit", "mvp", mir_check::executable());
+}
+
 static std::string fixture_name(const ::testing::TestParamInfo<mir_check::Fixture>& info) {
     return info.param.name;
 }
@@ -54,8 +86,131 @@ TEST(LambdaMirEmissionCorpus, IsNotEmpty) {
         << "no .ls fixtures found in " << kLambdaMirDir;
 }
 
+TEST(MirCheckMatcher, MvpSelectorsRequireTheNamedBody) {
+    EXPECT_TRUE(mir_check::function_name_matches("mvp_#_reduce", "mvp_12_reduce"));
+    EXPECT_FALSE(mir_check::function_name_matches("mvp_#_reduce", "mvp_12_reduce_dp"));
+    EXPECT_FALSE(mir_check::function_name_matches("mvp_#_reduce", "_reduce_12"));
+    EXPECT_FALSE(mir_check::function_name_matches("mvp_#_reduce", "mvp__reduce"));
+    EXPECT_TRUE(mir_check::function_name_matches("_js_reduce_#", "_js_reduce_12"));
+}
+
+TEST(MirCheckMatcher, DecimalCalleeIdsKeepTheCallContract) {
+    EXPECT_TRUE(mir_check::line_contains("\tcall\tmvp_12_sum_dp, mvp_12_sum, %r1",
+        "call\tmvp_{{n}}_sum_dp, mvp_{{n}}_sum"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tmvp_12_sum_dp, mvp_12_sum, %r1",
+        "call\tmvp_{{n}}_reduce_dp"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tmvp_ab_sum_dp", "call\tmvp_{{n}}_sum_dp"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tmvp__sum_dp", "call\tmvp_{{n}}_sum_dp"));
+    EXPECT_TRUE(mir_check::line_contains("\tmov\t%r1f, 4", "mov\t{{r}}, 4"));
+}
+
+TEST(MirCheckMatcher, HelperChecksIgnorePrototypeSpellingButRequireTheCallee) {
+    EXPECT_TRUE(mir_check::line_contains("\tcall\tfn_index_p_r6_n1_a2, fn_index, %r0, %r1",
+        "call\t{{p}}, fn_index,"));
+    EXPECT_TRUE(mir_check::line_contains("\tcall\tfn_index_p, fn_index, %r0, %r1",
+        "call\t{{p}}, fn_index,"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tfn_index_p, fn_index_set, %r0",
+        "call\t{{p}}, fn_index,"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\t, fn_index, %r0",
+        "call\t{{p}}, fn_index,"));
+    EXPECT_TRUE(mir_check::line_contains("\tcall\tp2, helper, %r0, 7",
+        "call\t{{p}}, helper, {{r}}, 7"));
+    EXPECT_FALSE(mir_check::line_contains("\tcall\tp2, helper, %r0, 8",
+        "call\t{{p}}, helper, {{r}}, 7"));
+}
+
+TEST(MirCheckMatcher, SequencesRetryPrefixesWithoutLeakingRegisterBindings) {
+    const mir_check::MirLine lines[] = {
+        {"\tlsh\t%r1, %r0, 3", 1}, {"\tadd\t%r2, %r3, %r1", 2},
+        {"\tmov\ti64:(%r2), %r4", 3},
+        {"\tlsh\t%r5, %r0, 3", 4}, {"\tadd\t%r6, %r3, %r5", 5},
+        {"\tmov\t%r7, i64:(%r6)", 6}
+    };
+    mir_check::SeqExpectation steps[] = {
+        {"lsh\t{{r:offset}}, {{r}}, 3", false},
+        {"add\t{{r:address}}, {{r}}, {{r:offset}}", true},
+        {"mov\t{{r}}, i64:({{r:address}})", true}
+    };
+    size_t positions[3], depth = 0;
+    bool exhausted = false;
+    EXPECT_TRUE(mir_check::match_sequence(lines, 6, steps, 3, positions, &depth, &exhausted));
+    EXPECT_EQ(depth, 3u);
+    EXPECT_EQ(positions[0], 3u);
+    EXPECT_FALSE(exhausted);
+    EXPECT_FALSE(mir_check::match_sequence(lines, 3, steps, 3, positions, &depth, &exhausted));
+    const mir_check::MirLine delayed[] = {
+        {"\tlsh\t%r5, %r0, 3", 1}, {"\tadd\t%r6, %r3, %r5", 2},
+        {"L1:", 3}, {"\tmov\t%r7, i64:(%r6)", 4}
+    };
+    EXPECT_FALSE(mir_check::match_sequence(delayed, 4, steps, 3, positions, &depth, &exhausted));
+    steps[2].next_line = false;
+    EXPECT_TRUE(mir_check::match_sequence(delayed, 4, steps, 3, positions, &depth, &exhausted));
+    steps[2].pattern = "mov\t{{r}}, i64:({{r:offset}})";
+    EXPECT_FALSE(mir_check::match_sequence(lines, 6, steps, 3, positions, &depth, &exhausted));
+}
+
+TEST(MirCheckMatcher, ControlFlowLabelsRequireTheSameBackedge) {
+    const mir_check::MirLine lines[] = {
+        {"L17:", 1}, {"\tadd\t%r1, %r2, 1", 2}, {"\tjmp\tL17", 3}
+    };
+    mir_check::SeqExpectation steps[] = {
+        {"{{l:head}}:", false}, {"add\t{{r}}, {{r}}, 1", true}, {"jmp\t{{l:head}}", true}
+    };
+    size_t positions[3], depth = 0;
+    bool exhausted = false;
+    EXPECT_TRUE(mir_check::match_sequence(lines, 3, steps, 3, positions, &depth, &exhausted));
+    steps[2].pattern = "jmp\t{{l!head}}";
+    EXPECT_FALSE(mir_check::match_sequence(lines, 3, steps, 3, positions, &depth, &exhausted));
+    mir_check::RegisterCaptures captures;
+    EXPECT_TRUE(mir_check::line_contains("L17:", "{{l:head}}:", &captures));
+    EXPECT_FALSE(mir_check::line_contains("\tjmp\tL18", "jmp\t{{l:head}}", &captures));
+    EXPECT_FALSE(mir_check::line_contains("\tjmp\tLff", "jmp\t{{l}}"));
+    EXPECT_FALSE(mir_check::line_contains("\tjmp\tL17ff", "jmp\t{{l:head}}", &captures));
+}
+
+TEST(MvpMirAbi, OutcomeEntriesUseThePlatformCompanionTransport) {
+    mir_check::CompileOptions options;
+    mir_check::CompileResult compiled = mir_check::compile_and_dump(
+        "test/mir/lambda/mvp_call_ownership.ls", options);
+    ASSERT_TRUE(compiled.ok) << compiled.error;
+    const char* names[] = {"mvp_#_wide", "mvp_#_forward"};
+    for (const char* name : names) {
+        bool found = false;
+        for (const auto& function : compiled.dump.functions) {
+            if (!mir_check::function_name_matches(name, function.function)) continue;
+            ASSERT_FALSE(found) << "ambiguous outcome body " << name;
+            found = true;
+            ASSERT_FALSE(function.lines.empty());
+            const char* header = function.lines[0].text.c_str();
+#ifdef _WIN32
+            EXPECT_NE(strstr(header, "\tfunc\ti64, p:runtime"), nullptr) << name;
+#else
+            EXPECT_NE(strstr(header, "\tfunc\ti64, i64, p:runtime"), nullptr) << name;
+            bool distinct_pair = false;
+            for (const auto& line : function.lines) {
+                const char* text = line.text.c_str();
+                if (strncmp(text, "\tret\t%r", 7)) continue;
+                const char* comma = strchr(text, ',');
+                if (!comma) continue;
+                const char* first = text + 5;
+                const char* second = comma + 1;
+                while (*second == ' ') second++;
+                size_t first_len = (size_t)(comma - first);
+                size_t second_len = strcspn(second, " \t\r\n");
+                EXPECT_TRUE(first_len != second_len || memcmp(first, second, first_len))
+                    << "outcome lanes alias in " << name;
+                distinct_pair = true;
+            }
+            EXPECT_TRUE(distinct_pair) << "missing normal outcome pair in " << name;
+#endif
+        }
+        EXPECT_TRUE(found) << "missing outcome body " << name;
+    }
+}
+
 TEST(LambdaMirProfiling, DiagnosticCallsPreserveProductionRootsAndSafepoints) {
-    const char* args[] = {"python3", "test/benchmark/check_profile_root_parity.py", nullptr};
+    const char* args[] = {"python3", "test/benchmark/check_profile_root_parity.py",
+        "--exe", mir_check::executable(), "--cow-sites", nullptr};
     ShellResult result = shell_exec_simple("python3", args);
     EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     shell_result_free(&result);

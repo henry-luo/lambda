@@ -11,32 +11,7 @@
 
 extern Type TYPE_ANY, TYPE_INT;
 
-bool has_typed_params(AstFuncNode* fn_node) {
-    AstNamedNode *param = fn_node->param;
-    while (param) {
-        TypeParam* pt = (TypeParam*)param->type;
-        if (pt) {
-            TypeId tid = pt->type_id;
-            if (is_typed_wrapper_param_type_id(tid)) {
-                return true;
-            }
-            // typed array parameters (int[], float[], etc.)
-            if (tid == LMD_TYPE_TYPE && pt->kind == TYPE_KIND_UNARY) {
-                return true;
-            }
-        }
-        param = (AstNamedNode*)param->next;
-    }
-    return false;
-}
 
-bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
-    (void)fn_node;
-    // A first-class Core Lambda value always names its boxed public wrapper.
-    // The raw JIT entry may use native operands, but publishing it would let a
-    // dynamic call reinterpret boxed Items as those native operands.
-    return true;
-}
 
 void write_fn_name_for_script_ex(StrBuf *strbuf, AstFuncNode* fn_node,
         const Script* import_script, const char* suffix) {
@@ -135,38 +110,8 @@ AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal) {
     return NULL;
 }
 
-// An optional-field contract cannot prove common offsets for raw field loads.
-bool has_named_shape(TypeMap* map_type, bool require_stored_fields) {
-    if (!map_type->struct_name) return false;
-    if (!map_type->shape || map_type->length == 0) return false;
-    FOR_EACH_MAP_FIELD(map_type, field) {
-        if (!field->name || (require_stored_fields && field->is_optional)) return false;
-    }
-    return true;
-}
 
-bool has_fixed_shape(TypeMap* map_type) {
-    if (!has_named_shape(map_type, true)) return false;
-    FOR_EACH_MAP_FIELD(map_type, field) {
-        if (field->byte_offset % sizeof(void*) != 0) return false;
-    }
-    return true;
-}
 
-bool is_direct_access_type(TypeId type_id) {
-    switch (type_id) {
-    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_UINT64:
-    case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
-    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
- case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
-    case LMD_TYPE_PATH:
-        return true;
-    default:
-        return false;
-    }
-}
 
 bool static_literal_item_from_type(Type* type, Item* out) {
     if (!type || !out) return false;
@@ -255,14 +200,6 @@ bool lambda_literal_contract_value(const Type* type, Item* out) {
     }
 }
 
-TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
-    Type* t = field->type;
-    if (unwrap_type_type && t && t->type_id == LMD_TYPE_TYPE) {
-        Type* inner = ((TypeType*)t)->type;
-        if (inner) return inner->type_id;
-    }
-    return t ? t->type_id : LMD_TYPE_ANY;
-}
 
 struct WidenedDependency {
     const NameEntry* entry;

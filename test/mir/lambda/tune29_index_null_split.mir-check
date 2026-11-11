@@ -1,31 +1,71 @@
 {
   "schema_version": 1,
-  "description": "T29-3 (D2.4.3): an int tree over possibly out-of-range reads tests each read once for null and branches to one null result -- no operator carries the old pair null test (eq/eq/or), and a literal operand is never tested. A non-null int equality tests nan on one side only (S4.1.2).",
+  "description": "D2.4.3/S4.1.2: nullable integer trees keep absence separate from poison. Each guarded or checked equality body tests NaN on one operand; MVP emits both bodies.",
   "checks": [
     {
-      "in_func": "_step_#",
-      "expect": ["beq\t"],
-      "forbid": ["\tor\t"]
+      "in_func": "mvp_#_step",
+      "expect": [
+        "beq\t"
+      ],
+      "forbid": [
+        "\tor\t"
+      ]
     },
     {
-      "in_func": "_two_reads_#",
-      "forbid": ["\tor\t"]
+      "in_func": "mvp_#_two_reads",
+      "forbid": [
+        "\tor\t"
+      ]
     },
     {
-      "in_func": "_nullable_var_#",
-      "forbid": ["\tor\t"]
+      "in_func": "mvp_#_nullable_var",
+      "forbid": [
+        "\tor\t"
+      ]
     },
     {
-      "in_func": "_eq_pair_#",
+      "in_func": "mvp_#_eq_pair",
+      "count": {
+        "-9223372036854775808": 2
+      },
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_ne_pair",
+      "count": {
+        "-9223372036854775808": 2
+      },
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_eq_pair",
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, fn_index,"
+      },
       "count": {
         "-9223372036854775808": 1
-      }
+      },
+      "expect": [
+        "lsh\t{{r}}, {{r}}, 3"
+      ]
     },
     {
-      "in_func": "_ne_pair_#",
+      "in_func": "mvp_#_ne_pair",
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, fn_index,"
+      },
       "count": {
         "-9223372036854775808": 1
-      }
+      },
+      "expect": [
+        "lsh\t{{r}}, {{r}}, 3"
+      ]
     }
   ]
 }

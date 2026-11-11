@@ -45,6 +45,7 @@
 #include "../lambda/validator/validator.hpp"
 #include "lib/mem_factory.h"
 #include "lib/memtrack.h"
+#include "lib/fiber.h"
 #include "lib/mempool.h"
 #include "lib/file.h"
 #include "lib/rdb_sqlite_tx.h"
@@ -52,6 +53,7 @@
 #include "lib/url.h"
 #include "lib/str.h"
 #include "lib/strbuf.h"
+#include "../lambda/runtime/sys_func_registry.h"
 #include "radiant/view.hpp"
 #include "radiant/radiant.hpp"
 #include "radiant/render.hpp"
@@ -67,6 +69,13 @@ extern const int32_t radiant_dom_type_binding_count;
 
 #ifndef _WIN32
 extern __thread Context* input_context;
+#endif
+
+#ifndef LAMBDA_NO_MIR
+TEST(LambdaJitImports, NoGcMetadataMatchesAudit) {
+    // registry edits must preserve the effect audit consumed by precise roots.
+    EXPECT_TRUE(jit_import_validate_no_gc_allowlist());
+}
 #endif
 
 TEST(LambdaArrayNumShape, RejectsOutOfRangeRankBeforeStackDecode) {
@@ -637,11 +646,11 @@ TEST(LambdaNativeModuleImports, DescriptorMetadataMatchesResolvedEntries) {
     EXPECT_FALSE(jit_import_get_metadata("missing_descriptor_function", &missing));
 }
 
-TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
+TEST(LambdaScriptCache, ReusesMvpImagesAcrossCompilerSpellings) {
     const struct { const char* source; const char* identity; } cases[] = {
         {"fn answer() => 41; answer() + 1", "<lambda-cache-compiler-isolation>"},
         // method tables and bound receiver snapshots must survive evaluator
-        // teardown and reuse the image belonging to their compiler (S9.3.1).
+        // teardown and reuse the same MVP image (S9.3.1).
         {"type C { value: int,\n fn read() => value\n pn bump() { value = value + 1 } }\n"
          "pn main() { var c = <C value: 7>; let saved = c.read; c.bump()^;\n"
          "if (saved() == 7 and c.read() == 8) 42 else 0 }",
@@ -658,7 +667,7 @@ TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
          "let result = outer(1, 2); if (result == [0, 2, 1]) 42 else 0",
          "<lambda-cache-variadic-isolation>"},
         // binder selections belong to an invocation, including cached images
-        // entered under another compiler and a fresh EvalContext (D4.1.4).
+        // entered under a fresh EvalContext (D4.1.4).
         {"fn choose(T: type, value: T) T => value;\n"
          "fn selected(value: number as T) type => T;\n"
          "let a = choose(int, 40)^; let b = choose(float, 2.5)^;\n"
@@ -666,7 +675,7 @@ TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
          "if (a == 40 and b == 2.5 and integral == int and fractional == float) 42 else 0",
          "<lambda-cache-binder-isolation>"}
     };
-    const char* compilers[] = {"mvp", "production", "mvp"};
+    const char* compilers[] = {nullptr, "mvp", ""};
     for (const auto& test : cases) {
         const Script* owners[3] = {};
         for (unsigned i = 0; i < 3; i++) {
@@ -683,7 +692,7 @@ TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
             Script* instance = (Script*)runtime.scripts->data[0];
             owners[i] = instance->cache_template ? instance->cache_template : instance;
             EXPECT_TRUE(owners[i]->cache_owned_template);
-            if (i == 1) EXPECT_NE(owners[1], owners[0]);
+            if (i == 1) EXPECT_EQ(owners[1], owners[0]);
             if (i == 2) EXPECT_EQ(owners[2], owners[0]);
         }
     }
@@ -814,7 +823,6 @@ TEST(LambdaScriptCache, MvpCallsInterpretedFunctionAndNativeCallback) {
         // pin T0 while invoking the already compiled MVP entries, so this
         // unit cannot pass by promoting the interpreted leg to native code.
         compiler.select(LAMBDA_TIER_INTERP);
-        compiler.select_compiler("production");
         Script* interpreted = load_script(context->runtime,
             "test/lambda/mvp/_cache_interpreted_relay.ls",
             "fn relay(cb: function, n: int) any^ {\n"
@@ -1499,6 +1507,35 @@ protected:
         pool = NULL;
     }
 };
+
+TEST_F(LambdaConcurrencyRuntime, GcMapAllocatorHonorsMinimumCapacity) {
+    // shape metadata outlives every map through the fixture's heap teardown.
+    TypeMap* shape = (TypeMap*)pool_calloc(pool, sizeof(TypeMap));
+    ASSERT_NE(shape, nullptr);
+    shape->type_id = LMD_TYPE_MAP;
+    shape->byte_size = sizeof(Item);
+    const int64_t capacities[] = {0, 4, 64};
+    RootFrame roots(1);
+    Rooted<Map*> owner(roots, nullptr);
+    for (int64_t capacity : capacities) {
+        owner.set(map_alloc_for_type(shape, capacity));
+        ASSERT_NE(owner.get(), nullptr);
+        ASSERT_TRUE(gc_is_managed(concurrency_test_gc, owner.get()));
+        int64_t expected = capacity > shape->byte_size ? capacity : shape->byte_size;
+        EXPECT_EQ(owner.get()->type, shape);
+        EXPECT_EQ(owner.get()->data_cap, expected);
+        EXPECT_EQ(owner.get()->data, (char*)owner.get() + sizeof(Map));
+        memset(owner.get()->data, 0x5a, (size_t)expected);
+        // the GC owns the header and inline data across a rooted collection.
+        gc_collect(concurrency_test_gc, eval.side_root_base,
+            eval.side_root_top - eval.side_root_base);
+        EXPECT_FALSE(gc_get_header(owner.get())->gc_flags & GC_FLAG_FREED);
+        for (int64_t i = 0; i < expected; i++)
+            EXPECT_EQ(((uint8_t*)owner.get()->data)[i], 0x5a);
+    }
+    EXPECT_EQ(map_alloc_for_type(nullptr, 0), nullptr);
+    EXPECT_EQ(map_alloc_for_type(shape, (int64_t)INT32_MAX + 1), nullptr);
+}
 
 TEST_F(LambdaConcurrencyRuntime, NativeMethodStorageUsesEphemeronsWithoutJsRealm) {
     EXPECT_EQ(js_active_runtime_state, nullptr);
@@ -4015,12 +4052,14 @@ TEST_F(ActivationCore, FiniteNativeOverflowLandsOnTheActivationsOwnBoundary) {
 }
 
 TEST_F(ActivationCore, ColdParkedActivationsCompactAndRestore) {
-    // Past the warm window the oldest parked activations are copied out and
+    // past the resident budget the oldest parked activations are copied out and
     // their pages returned; a collection must still see their roots, and a
     // resume must find every frame and root exactly where it left them.
-    const int count = 64;
-    Activation* held[count];
-    Activation* counters[count];
+    const int count = LAMBDA_STACK_DEFAULT_BUDGET / (4 * fiber_page_size()) + 1;
+    Activation** held = (Activation**)mem_calloc(count, sizeof(Activation*), MEM_CAT_EVAL);
+    Activation** counters = (Activation**)mem_calloc(count, sizeof(Activation*), MEM_CAT_EVAL);
+    ASSERT_NE(held, nullptr);
+    ASSERT_NE(counters, nullptr);
     for (int i = 0; i < count; i++) {
         held[i] = activation_create(activation_hold_string, ItemNull, true, NULL);
         ASSERT_NE(held[i], nullptr);
@@ -4046,7 +4085,41 @@ TEST_F(ActivationCore, ColdParkedActivationsCompactAndRestore) {
     }
     // Abandoning compacted and warm activations alike releases them.
     for (int i = 0; i < count; i++) activation_destroy(counters[i]);
+    mem_free(held);
+    mem_free(counters);
     EXPECT_EQ(activation_current(), nullptr);
+}
+
+static Item activation_park_mixed_recovery_chain(Activation*, Item) {
+    LambdaRecoveryFrame local = {};
+    if (!lambda_recovery_frame_push(&local, LAMBDA_RECOVERY_CAP_TEST_CONTAINMENT)) return ItemError;
+    LambdaRecoveryFrame* owned = lambda_recovery_frame_begin_for(context,
+        LAMBDA_RECOVERY_CAP_TEST_CONTAINMENT);
+    if (!owned) return ItemError;
+    activation_suspend(ItemNull);
+    bool released = lambda_recovery_frame_end(owned) && lambda_recovery_frame_pop(&local);
+    return Item{.item = b2it(released)};
+}
+
+TEST_F(ActivationCore, ColdAbandonmentWalksMixedRecoveryOwnership) {
+    const int count = LAMBDA_STACK_DEFAULT_BUDGET / (2 * fiber_page_size()) + 1;
+    Activation** parked = (Activation**)mem_calloc(count, sizeof(Activation*), MEM_CAT_EVAL);
+    ASSERT_NE(parked, nullptr);
+    for (int i = 0; i < count; i++) {
+        parked[i] = activation_create(activation_park_mixed_recovery_chain, ItemNull, true, NULL);
+        ASSERT_NE(parked[i], nullptr);
+        ASSERT_EQ(activation_resume(parked[i], ItemNull), ACTIVATION_SUSPENDED);
+    }
+    heap_gc_collect();
+    for (int i = 0; i < count; i++) {
+        if (i & 1) {
+            EXPECT_EQ(activation_resume(parked[i], ItemNull), ACTIVATION_DONE);
+            EXPECT_EQ(activation_value(parked[i]).item, (uint64_t)ITEM_TRUE);
+        }
+        activation_destroy(parked[i]);
+    }
+    mem_free(parked);
+    EXPECT_EQ(lambda_recovery_frame_current(), nullptr);
 }
 
 TEST_F(ActivationCore, AbandonedParkedActivationsAreReleased) {

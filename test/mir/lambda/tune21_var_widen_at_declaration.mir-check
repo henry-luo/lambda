@@ -1,24 +1,50 @@
 {
   "schema_version": 1,
-  "description": "D2.3: inferred mixed locals stay boxed at their declarations, including skipped assignments. Tune34 admits complete numeric recurrences to float consumers without changing the local Item tag; subtraction and comparison can now run natively after decoding that Item.",
+  "description": "D2.3.5: mixed locals keep Item storage, with a guarded native floating subtraction and a canonical checked miss for nonnumeric values.",
   "checks": [
     {
-      "in_func": "_f_#",
+      "in_func": "mvp_#_f",
       "expect": [
         "dsub"
       ],
       "forbid": [
-        "call\tfn_sub_p, fn_sub"
-      ]
+        "call\t{{p}}, fn_sub,"
+      ],
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, fn_sub,"
+      }
     },
     {
-      "in_func": "_g_#",
+      "in_func": "mvp_#_g",
       "expect": [
         "dsub"
       ],
       "forbid": [
-        "call\tfn_sub_p, fn_sub"
-      ]
+        "call\t{{p}}, fn_sub,"
+      ],
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, fn_sub,"
+      }
+    },
+    {
+      "in_func": "mvp_#_f",
+      "expect": [
+        "call\t{{p}}, fn_sub,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_sub,": 1
+      }
+    },
+    {
+      "in_func": "mvp_#_g",
+      "expect": [
+        "call\t{{p}}, fn_sub,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_sub,": 1
+      }
     }
   ]
 }

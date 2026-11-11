@@ -93,7 +93,7 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 ### Core System Architecture
 - **Parser**: Direct C lexer/parser (`lambda/runtime/parser/lambda_lexer.c`, `lambda_parser.c`); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
 - **AST Builder**: `lambda/runtime/build_ast.cpp` - constructs typed AST from parser reductions
-- **Transpiler**: `lambda/runtime/transpile-mir.cpp` - MIR Direct JIT, the only back end (the C-text transpiler is removed, see rule 14)
+- **Transpiler**: `lambda/runtime/mvp/mvp_driver.cpp`, `lambda/runtime/mvp/mvp_mir.cpp` - MIR Direct JIT, the only back end (the C-text transpiler is removed, see rule 14)
 - **Execution**: tiered per D8.3.1 — `lambda/runtime/interp.cpp` is the T0 AST-walking interpreter; hot definitions promote to MIR JIT (`lambda/runtime/mir.c`)
 - **Runtime builtins**: `lambda/runtime/lambda-eval.cpp` - the C-ABI `fn_*` library that interpreted and JIT'd code call into (not an evaluator)
 - **Type System**: `lambda/lambda-data.hpp` - 20+ built-in types with inference
@@ -187,7 +187,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 | Execution & builtins | `lambda/runtime/interp.cpp` (T0 interpreter), `lambda/runtime/lambda-eval.cpp` (builtins) |
 | Memory management | `lambda/runtime/lambda-mem.cpp` |
 | AST & parsing | `lambda/runtime/build_ast.cpp`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/parser/lambda_lexer.c` |
-| JIT compilation | `lambda/runtime/transpile-mir.cpp`, `lambda/runtime/mir.c` |
+| JIT compilation | `lambda/runtime/mvp/mvp_driver.cpp`, `lambda/runtime/mvp/mvp_mir.cpp`, `lambda/runtime/mir.c` |
 | Data construction | `lambda/io/mark_builder.hpp`, `lambda/core/mark_reader.hpp`, `lambda/io/mark_editor.hpp` |
 | Input parsers | `lambda/input/input.cpp` (dispatcher), `lambda/input/input-*.cpp` |
 | Output formatters | `lambda/format/` |

@@ -46,6 +46,8 @@ let DEMOS = [
      blurb: "Shapes and connectors, inspired by draw.io."},
     {name: "sketch", title: "Sketch", cat: "design", sub: "Vector illustration",
      blurb: "Sketch with brushes, shape paths and build layered illustrations."},
+    {name: "paint", title: "Paint", cat: "design", sub: "Digital painting",
+     blurb: "Paint with pen pressure and tilt, MyPaint brushes and smudging."},
     {name: "greetings", title: "Greetings", cat: "design", sub: "Card designer",
      blurb: "Design a greeting card, preview it open, print and fold."},
     {name: "dreamhome", title: "Dreamhome", cat: "design", sub: "Home planner",
@@ -83,7 +85,7 @@ let CATEGORIES = [
     {key: "games", title: "Games", blurb: "Arcade classics, brass puzzle machines, a word game and a city to drive, all native."},
     {key: "productivity", title: "Productivity", blurb: "Write, plan and present in full editors."},
     {key: "photography", title: "Photography", blurb: "Browse a library, grade a photo, stack layers."},
-    {key: "design", title: "Design", blurb: "Illustrations, diagrams, greeting cards and homes, ready to share or walk through."},
+    {key: "design", title: "Design", blurb: "Illustrations, paintings, diagrams, greeting cards and homes, ready to share or walk through."},
     {key: "science", title: "Data & Science", blurb: "Charts, graphs and interactive 3D worlds."},
     {key: "media", title: "Books & Media", blurb: "Classics to read, scores that play, an instrument you draw, and a city's history as a 3D film."},
     {key: "utilities", title: "Utilities", blurb: "Files, mail and the web, kept tidy."}

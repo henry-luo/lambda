@@ -1,16 +1,28 @@
 {
   "schema_version": 1,
-  "description": "S5.1.2/S11.4.1v3: equality of an explicit string-success/error join guards both Item tags, compares string pointers on success, and preserves fn_eq for the non-string arm.",
+  "description": "S5.1.1v2\u2013S5.1.2v2/S11.4.1v3: checked string outcomes test Error before pointer comparison and the string comparator. Missing results propagate through equality without dispatching generic equality.",
   "checks": [
     {
-      "in_func": "_main_#",
-      "expect": ["fn_str_eq_ptr_p, fn_str_eq_ptr", "fn_eq_value_p, fn_eq_value", "fn_ne_value_p, fn_ne_value"],
+      "in_func": "mvp_#_main",
+      "expect": [
+        "call\t{{p}}, fn_str_eq_ptr,",
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ],
       "expect_seq": [
-        { "pattern": "and\t{{r}}, {{r}}, -72057594037927936" },
-        { "pattern": "bne\tL" },
-        "fn_str_eq_ptr_p, fn_str_eq_ptr",
-        "fn_eq_value_p, fn_eq_value"
-      ]
+        {
+          "pattern": "beq\tL{{n}}, {{r}}, 27"
+        },
+        {
+          "pattern": "call\t{{p}}, fn_str_eq_ptr,"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_eq_value,",
+        "call\t{{p}}, fn_ne_value,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_str_eq_ptr,": 5
+      }
     }
   ]
 }

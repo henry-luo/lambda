@@ -1,21 +1,12 @@
 #pragma once
-#ifndef LAMBDA_API_ONLY
-#define LAMBDA_API_ONLY
-#define LAMBDA_API_ONLY_LOCAL
-#endif
-#include "lambda/lambda.h"
-#ifdef LAMBDA_API_ONLY_LOCAL
-#undef LAMBDA_API_ONLY_LOCAL
-#undef LAMBDA_API_ONLY
-#endif
+#include "lambda/core/api.h"
 
 #include "lambda/core/name_identity.h"
 
 #include <stdint.h>
 
-// Active runtime process state. This declaration deliberately lives outside
-// frozen lambda.h so consumers of the native/MIR-direct runtime have a
-// provider-owned surface.
+// Active runtime process state lives in a runtime-owned interface. The shared
+// input value header does not own the evaluator or process state (D9.1.3v2).
 #ifdef __cplusplus
 struct EvalContext;
 struct Context;
@@ -106,7 +97,6 @@ private:
 extern "C" {
 #endif
 
-typedef struct LambdaConstPool LambdaConstPool;
 
 // D6.4.1: native I/O reads the canonical owner's run configuration.
 LAMBDA_RT_API bool lambda_dry_run_enabled(void);
@@ -186,21 +176,9 @@ Item lambda_active_module_name_item(uint32_t module_name_index,
 // ABI parameter only between generated MIR functions.
 LAMBDA_RT_API Context* eval_context_tls_runtime(void);
 void* lambda_module_state_for_unit(void* runtime_context, uint32_t unit_id);
-void* lambda_module_const_at(const struct LambdaModuleLayout* layout,
-                             uint32_t index);
-void* lambda_module_const_at_state(void* module_state, uint32_t index);
 Item lambda_module_var_at(void* module_state, uint32_t slot);
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 Item lambda_active_module_var_at(uint32_t slot);
-// RC-J7v2: per-compilation-unit literal pools. A unit acquires one pool at
-// lowering, appends each interned body to it, and its generated code resolves
-// a literal with `lambda_unit_const_at(unit_id, index)`. The unit id keeps the
-// emission relocatable (DI14); the pools are released with the context, since
-// a retired module slab can leave live code behind.
-#define LAMBDA_CONST_UNIT_NONE ((uint32_t)0xFFFFFFFFu)
-LambdaConstPool* lambda_const_pool_acquire(uint32_t* out_unit_id);
-int32_t lambda_const_pool_append(LambdaConstPool* pool, void* body);
-Item lambda_unit_const_at(uint32_t unit_id, uint32_t index);
 void lambda_active_module_var_store(uint32_t slot, Item item);
 void lambda_module_state_reset(void);
 void lambda_module_state_destroy(void);

@@ -209,6 +209,31 @@ function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = 
 }
 
 try {
+    for (const budget of [1, 4, 5, 8]) check(`Lambda case workers reserve nested tier slots within ${budget} slots`, () => {
+        fs.writeFileSync(path.join(fixture, 'test_lambda_gtest.exe'), fake, { mode: 0o755 });
+        const output = path.join(fixture, `lambda-tier-budget-${budget}`);
+        const trace = path.join(fixture, `lambda-tier-trace-${budget}`);
+        fs.mkdirSync(trace);
+        const child = invoke(['--target=lambda', '--include-test=test_lambda_gtest'], {
+            LAMBDA_TEST_BIN_DIR: fixture, LAMBDA_TEST_OUTPUT_DIR: output,
+            LAMBDA_TEST_MAX_CONCURRENT: String(budget), FAKE_SUITE_TRACE_DIR: trace,
+        });
+        assert.equal(child.status, 0, child.stdout + child.stderr);
+        const rows = fs.readdirSync(trace).map(name => JSON.parse(fs.readFileSync(path.join(trace, name), 'utf8')));
+        const slots = Math.min(4, budget, Math.max(1, os.cpus().length - 1));
+        assert.ok(rows.length > 0);
+        assert.ok(rows.every(row => row.cap === slots));
+        const events = rows.flatMap(row => [{ time: row.start, delta: row.cap },
+            { time: row.end, delta: -row.cap }]).sort((a, b) => a.time - b.time || a.delta - b.delta);
+        let active = 0;
+        for (const event of events) {
+            active += event.delta;
+            assert.ok(active <= Math.min(budget, Math.max(1, os.cpus().length - 1)));
+        }
+        const saved = JSON.parse(fs.readFileSync(path.join(output, 'test_lambda_gtest_results.json'), 'utf8'));
+        assert.equal(saved.tests, 4);
+        assert.equal(saved.failures, 0);
+    });
     check('Lambda-owned baselines exclude sibling sources even with stale executables', () => {
         fs.writeFileSync(path.join(fixture, 'test_zip_gtest.exe'), fake, { mode: 0o755 });
         for (const suite of ['lambda', 'radiant']) {

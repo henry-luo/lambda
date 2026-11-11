@@ -36,6 +36,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/physics",
     "test/lambda/navigation",
     "test/lambda/procart",
+    "test/lambda/paint",
     "test/lambda/ui_dtna",
     "test/lambda/ui_bold",
     "test/lambda/ui_wired",
@@ -97,43 +98,92 @@ TEST(NumericConversionTests, UntypedU64ConversionAgreesAcrossTiers) {
 }
 
 struct LambdaTierFixture {
-    const char* directory;
-    const char* name;
+    const char* const* scripts;
+    const char* const* expected;
+    size_t count;
     const char* tier;
+    bool check_errors;
 };
 
 static void test_lambda_tier_fixture(void* opaque) {
     const LambdaTierFixture* fixture = (const LambdaTierFixture*)opaque;
     SCOPED_TRACE(fixture->tier);
-    SCOPED_TRACE(fixture->name);
-    char script[512], expected[512];
-    snprintf(script, sizeof(script), "%s%s%s.ls", fixture->directory ? fixture->directory : "",
-        fixture->directory ? "/" : "", fixture->name);
-    snprintf(expected, sizeof(expected), "%s%s%s.txt", fixture->directory ? fixture->directory : "",
-        fixture->directory ? "/" : "", fixture->name);
-    test_lambda_script_against_file(script, expected, false, fixture->tier);
+    if (fixture->check_errors) {
+        for (size_t i = 0; i < fixture->count; i++) {
+            SCOPED_TRACE(fixture->scripts[i]);
+            const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", fixture->tier},
+                {"LAMBDA_LOG_LEVEL", "ERROR"}, {NULL, NULL}};
+            const char* args[] = {LAMBDA_EXE, fixture->scripts[i], NULL};
+            ShellOptions options = {};
+            options.env = env;
+            options.timeout_ms = 30000;
+            ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
+            EXPECT_FALSE(result.timed_out);
+            EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+            char* expected = read_text_file(fixture->expected[i]);
+            EXPECT_NE(expected, nullptr);
+            if (expected) EXPECT_STREQ(result.stdout_buf, expected);
+            free(expected);
+            EXPECT_EQ(strstr(result.stderr_buf ? result.stderr_buf : "", "runtime error"), nullptr)
+                << (result.stderr_buf ? result.stderr_buf : "");
+            shell_result_free(&result);
+        }
+        return;
+    }
+    test_lambda_batch_against_files(fixture->scripts, fixture->expected,
+        fixture->count, false, fixture->tier);
 }
 
-// pure fixtures have isolated CLI processes and no shared output files; reuse the batch ceiling.
+// small groups overlap costly tiers; larger fixture sets amortize process startup.
 static void test_pure_fixtures_across_tiers(const char* const* fixtures,
-        size_t fixture_count, const char* directory = nullptr, const char* demo = nullptr) {
-    const char* tiers[] = {"interp", "auto", "jit"};
+        size_t fixture_count, const char* directory = nullptr, const char* demo = nullptr,
+        bool check_errors = false) {
+    // overlap each fixture's tiers; large demo work must start before the package tail.
+    const char* tiers[] = {"jit", "auto", "interp"};
+    const size_t tier_count = sizeof(tiers) / sizeof(tiers[0]);
     size_t count = fixture_count + (demo ? 1 : 0);
     if (count == 0) return;
-    size_t job_count = count * (sizeof(tiers) / sizeof(tiers[0]));
+    size_t batch_size = count > 2 * test_batch_worker_limit(count) ? 3 : 1;
+    size_t batch_count = (count + batch_size - 1) / batch_size;
+    size_t job_count = batch_count * tier_count;
+    char (*paths)[2][512] = (char (*)[2][512])calloc(count, sizeof(*paths));
+    const char** scripts = (const char**)calloc(count * 2, sizeof(const char*));
+    ASSERT_NE(paths, nullptr);
+    ASSERT_NE(scripts, nullptr);
+    const char** expected = scripts + count;
+    for (size_t i = 0; i < count; i++) {
+        bool is_demo = demo && i == 0;
+        const char* dir = is_demo ? "test/demo/procart/tests" : directory;
+        const char* name = is_demo ? demo : fixtures[i - (demo ? 1 : 0)];
+        snprintf(paths[i][0], sizeof(paths[i][0]), "%s%s%s.ls", dir ? dir : "", dir ? "/" : "", name);
+        snprintf(paths[i][1], sizeof(paths[i][1]), "%s%s%s.txt", dir ? dir : "", dir ? "/" : "", name);
+        scripts[i] = paths[i][0]; expected[i] = paths[i][1];
+    }
+    // source size estimates fixture cost; put larger batches ahead of the short tail.
+    if (batch_size > 1) for (size_t i = 1; i < count; i++) {
+        const char* script = scripts[i]; const char* golden = expected[i];
+        int64_t bytes = file_size(script);
+        size_t j = i;
+        while (j > 0 && file_size(scripts[j - 1]) < bytes) {
+            scripts[j] = scripts[j - 1]; expected[j] = expected[j - 1]; j--;
+        }
+        scripts[j] = script; expected[j] = golden;
+    }
     LambdaTierFixture* jobs = (LambdaTierFixture*)calloc(job_count, sizeof(LambdaTierFixture));
     ASSERT_NE(jobs, nullptr);
-    ThreadPool* pool = tp_create((int)lambda_batch_worker_limit(job_count));
+    ThreadPool* pool = tp_create((int)test_batch_worker_limit(job_count));
     for (size_t i = 0; i < job_count; i++) {
-        size_t fixture = i % count;
-        jobs[i] = {fixture == fixture_count ? "test/demo/procart/tests" : directory,
-            fixture == fixture_count ? demo : fixtures[fixture], tiers[i / count]};
+        size_t start = (i / tier_count) * batch_size;
+        size_t size = count - start < batch_size ? count - start : batch_size;
+        jobs[i] = {scripts + start, expected + start, size, tiers[i % tier_count], check_errors};
         if (!pool || !tp_submit(pool, test_lambda_tier_fixture, &jobs[i])) {
             if (pool) tp_wait_all(pool);
             test_lambda_tier_fixture(&jobs[i]);
         }
     }
     if (pool) tp_destroy(pool);
+    free(scripts);
+    free(paths);
     free(jobs);
 }
 
@@ -187,22 +237,15 @@ TEST(ProcartAnimalTests, SpecimensAndSurfacesAcrossTiers) {
 
 // Golden output alone cannot catch raised errors that paint probing subsequently handles.
 TEST(ChartAnimationTests, PaintFallbackDoesNotRaiseAcrossTiers) {
-    const char* tiers[] = {"interp", "auto", "jit"};
-    for (const char* tier : tiers) {
+    const char* fixtures[] = {"test/lambda/chart/test_animation_colors"};
+    test_pure_fixtures_across_tiers(fixtures, 1, nullptr, nullptr, true);
+}
+
+TEST(NativeFontTests, CachedMathFactsKeepIndependentValuesAcrossTiers) {
+    for (const char* tier : {"interp", "auto", "jit"}) {
         SCOPED_TRACE(tier);
-        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier},
-            {"LAMBDA_LOG_LEVEL", "ERROR"}, {NULL, NULL}};
-        const char* args[] = {LAMBDA_EXE, "test/lambda/chart/test_animation_colors.ls", NULL};
-        ShellOptions options = {};
-        options.env = env;
-        options.timeout_ms = 30000;
-        ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
-        EXPECT_FALSE(result.timed_out);
-        EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
-        EXPECT_STREQ(result.stdout_buf, "[]\n");
-        EXPECT_EQ(strstr(result.stderr_buf ? result.stderr_buf : "", "runtime error"), nullptr)
-            << (result.stderr_buf ? result.stderr_buf : "");
-        shell_result_free(&result);
+        test_lambda_script_against_file("test/lambda/proc/math_metrics_cache.ls",
+            "test/lambda/proc/math_metrics_cache.txt", true, tier);
     }
 }
 
@@ -889,17 +932,23 @@ TEST(LambdaTierParityTests, UnannotatedIndexWriteStopsMain) {
 // explicit exclusions used to pass this test by silently executing MIR
 TEST(LambdaTierParityTests, Tune27FixturesHonorTierSupport) {
     static const char* const tiers[] = {"interp", "jit", "auto"};
-    for (size_t f = 0; f < sizeof(kTune27TierParity) / sizeof(kTune27TierParity[0]); f++) {
-        for (size_t t = 0; t < 3; t++) {
-            SCOPED_TRACE(std::string(kTune27TierParity[f].script) + " on " + tiers[t]);
+    const size_t count = sizeof(kTune27TierParity) / sizeof(kTune27TierParity[0]);
+    const char* scripts[count];
+    const char* expected[count];
+    // procedural fixtures may write the same paths on each tier; keep tiers sequential.
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        size_t selected = 0;
+        for (size_t f = 0; f < count; f++) {
             if (t == 0 && kTune27TierParity[f].interp_unsupported) {
                 expect_interp_rejection(LAMBDA_EXE, kTune27TierParity[f].script,
                     kTune27TierParity[f].interp_unsupported);
             } else {
-                test_lambda_script_against_file(kTune27TierParity[f].script,
-                    kTune27TierParity[f].expected, true, tiers[t]);
+                scripts[selected] = kTune27TierParity[f].script;
+                expected[selected++] = kTune27TierParity[f].expected;
             }
         }
+        test_lambda_batch_against_files(scripts, expected, selected, true, tiers[t]);
     }
 }
 
@@ -924,6 +973,19 @@ public:
     ScopedTestEnv& operator=(const ScopedTestEnv&) = delete;
 };
 
+TEST(LambdaTierParityTests, PromotedCallsPreserveArguments) {
+    ScopedTestEnv function_threshold("LAMBDA_FUNC_JIT_THRESHOLD", "2");
+    ScopedTestEnv synchronous("LAMBDA_SATELLITE_SYNC", "1");
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/interp_promoted_optional_args.ls",
+            "test/lambda/interp_promoted_optional_args.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/proc/interp_promoted_mutated_arguments.ls",
+            "test/lambda/proc/interp_promoted_mutated_arguments.txt", true, tier);
+    }
+}
+
 TEST(LambdaCompilerSelectionTests, MvpLanePreservesExplicitInterpreterAndAuto) {
     ScopedTestEnv compiler("LAMBDA_TEST_MIR_COMPILER", "mvp");
     ScopedTestEnv inherited_compiler("LAMBDA_MIR_COMPILER", "mvp");
@@ -933,8 +995,7 @@ TEST(LambdaCompilerSelectionTests, MvpLanePreservesExplicitInterpreterAndAuto) {
         LambdaTestCompilerEnv environment(tier);
         ASSERT_TRUE(environment.valid);
         EXPECT_STREQ(environment.entries[0].value, tier ? tier : "jit");
-        EXPECT_STREQ(environment.entries[1].value,
-            !tier || strcmp(tier, "jit") == 0 ? "mvp" : "production");
+        EXPECT_STREQ(environment.entries[1].value, "mvp");
         test_lambda_script_against_file("test/benchmark/r7rs/fib2.ls",
             "test/benchmark/r7rs/fib2.txt", true, tier);
     }

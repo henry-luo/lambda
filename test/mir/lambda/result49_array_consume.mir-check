@@ -3,8 +3,8 @@
   "description": "S9.1.2, S10.6.1: a local open-array self-concat can consume its old binding while preserving a captured snapshot and self-RHS.",
   "checks": [
     {
-      "in_func": "_consume_open_array_#",
-      "expect": ["call\tfn_join_consume_open_array_p, fn_join_consume_open_array"]
+      "in_func": "mvp_#_consume_open_array",
+      "expect": ["call\t{{p}}, fn_join_consume_open_array,"]
     }
   ]
 }

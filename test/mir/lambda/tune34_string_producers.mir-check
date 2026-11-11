@@ -1,8 +1,28 @@
 {
   "schema_version": 1,
-  "description": "D7.3.3: a bounded concat producer admits every string argument together and keeps the boxed miss body.",
+  "description": "D7.3.3/S10.6.1: exact string entry guards select one fused concat; an erased sequence/error miss keeps its boxed join tree.",
   "checks": [
-    {"in_func": "_assemble_#", "expect": ["fn_strcat_many"], "forbid": ["call\tfn_join_p, fn_join"]},
-    {"in_func": "_assemble_b_#", "expect": ["fn_join"]}
+    {
+      "in_func": "mvp_#_assemble",
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, fn_join,"
+      },
+      "expect": [
+        "call\t{{p}}, fn_strcat_many,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_join,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_assemble",
+      "expect": [
+        "call\t{{p}}, fn_join,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_strcat_many,": 1
+      }
+    }
   ]
 }

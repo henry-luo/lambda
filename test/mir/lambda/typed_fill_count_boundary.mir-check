@@ -2,8 +2,41 @@
   "schema_version": 1,
   "description": "D4.3.3: a destination-aware fill establishes its full certificate with the original exact-count and failure semantics.",
   "checks": [
-    {"in_func": "_build_#", "expect": ["call\tlambda_fill_for_contract_p, lambda_fill_for_contract"], "forbid": ["call\tfn_fill_p, fn_fill", "call\tlambda_array_admit_numeric_contract_p, lambda_array_admit_numeric_contract"]},
-    {"in_func": "_call_fill_#", "expect": ["call\tlambda_fill_for_contract_p, lambda_fill_for_contract"], "forbid": ["call\tfn_fill_p, fn_fill", "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]},
-    {"in_func": "_native_fill_#", "expect": ["call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved, {{r}}, %p1,"], "forbid": ["call\tfn_fill_p, fn_fill"]}
+    {
+      "in_func": "mvp_#_build",
+      "expect": [
+        "call\t{{p}}, lambda_fill_for_contract,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_fill,",
+        "call\t{{p}}, lambda_array_admit_numeric_contract,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_call_fill",
+      "expect": [
+        "call\t{{p}}, lambda_fill_for_contract,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_fill,",
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_native_fill",
+      "expect": [
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_fill,"
+      ],
+      "expect_seq": [
+        "mov\t{{r:param}}, arg0",
+        "mov\t{{r:count}}, {{r:param}}",
+        "ubgt\t{{l}}, {{r:count}}, 9007199254740991",
+        "call\t{{p}}, lambda_fill_primitive_bits, {{r}}, {{r:count}},",
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved, {{r}}, {{r:count}},"
+      ]
+    }
   ]
 }

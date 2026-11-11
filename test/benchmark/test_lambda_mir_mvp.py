@@ -21,6 +21,75 @@ GC_MODES = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
             {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
              "LAMBDA_GC_POISON_FREED": "1"})
 
+# focused gate excludes benchmark campaigns and reference-tool builds.
+MIR_EMISSION_METHODS = (
+    'test_mvp_emission_region_goldens',
+    'test_guarded_record_reads',
+    'test_guarded_scalar_bodies',
+    'test_open_record_stores',
+    'test_boxed_array_witness',
+    'test_guarded_store_keys_and_string_ord',
+    'test_primitive_readers_and_singleton_joins',
+    'test_sized_conversion_results',
+    'test_immutable_indirect_keys',
+    'test_confined_array_snapshots',
+    'test_snapshot_loop_lifetime',
+    'test_propagation_outcomes',
+    'test_string_outcome_appends',
+    'test_owned_string_append_transfers',
+    'test_unused_array_binders',
+    'test_recursive_union_constructors',
+    'test_projected_scalar_hints',
+    'test_logical_carriers_and_closed_outcomes',
+    'test_guarded_reduction_carriers',
+    'test_batch_record_and_decimal_paths',
+    'test_static_scalar_fallback',
+    'test_native_shift_mir',
+    'test_inferred_primitive_loops',
+    'test_boxed_integer_iterations',
+    'test_nullable_comparison_mir',
+    'test_error_only_return_to_union',
+    'test_guarded_numeric_iterations',
+    'test_indexed_region_and_call_boundary',
+    'test_exact_binary_fraction',
+    'test_array_reduction_mir',
+    'test_fallible_inline_and_bool_count',
+    'test_guarded_float_body',
+    'test_guarded_float_loop',
+    'test_records_and_readonly_kernel_emission',
+    'test_allocating_vector_emission',
+    'test_guarded_iterations_and_borrow_inlining',
+    'test_erased_array_iterations',
+    'test_untyped_native_ranges',
+    'test_untyped_recursive_snapshots',
+    'test_recursive_array_capture_effects',
+    'test_closed_kernel_loops',
+    'test_native_recursive_mir',
+    'test_native_countdown_mir',
+    'test_readonly_array_tail',
+    'test_implicit_tail_and_split_observations',
+    'test_guarded_recursive_arrays',
+    'test_constructor_admission_once',
+    'test_native_constructor_lanes',
+    'test_readonly_constant_constructor',
+    'test_adjacent_copy_loop',
+    'test_native_bitwise_tree',
+    'test_guarded_array_branch',
+    'test_singleton_integer_constants',
+    'test_power_two_divmod',
+    'test_nullable_numeric_cast_emission',
+    'test_float_predicate_branch',
+    'test_native_string_array_read',
+    'test_scalar_record_witness',
+    'test_erased_float_comparison',
+    'test_modular_array_update',
+    'test_single_use_string_constructor',
+    'test_bounded_counter_mir',
+    'test_native_success_consumers',
+    'test_float_constants_precede_loop',
+    'test_pure_scalar_index_calls',
+)
+
 class LambdaMirMvpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -46,6 +115,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         env.update(LAMBDA_EXEC_BACKEND="jit", LAMBDA_MIR_COMPILER="mvp")
         env.pop("JS_MIR_INTERP", None)
         env.update(overrides or {})
+        env = {key: val for key, val in env.items() if val is not None}
         command = [str(self.exe), "run", str(source)]
         if not logging:
             command.append("--no-log")
@@ -57,17 +127,41 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(strip_timing(result.stdout), lambda_mir_mvp.lambda_golden_path(source).read_text().strip())
 
-    def function_mir(self, source, name):
+    def function_mir(self, source, name, overrides=None):
         dump = Path(self.scratch.name) / f"{source.stem}.mir"
-        result = self.run_script(source, {"LAMBDA_MIR_DUMP_PATH": str(dump)}, logging=True)
+        options = dict(overrides or {}, LAMBDA_MIR_DUMP_PATH=str(dump))
+        result = self.run_script(source, options, logging=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         match = re.search(rf"mvp_\d+_{re.escape(name)}:\tfunc(.*?)\tendfunc", dump.read_text(), re.S)
         self.assertIsNotNone(match, f"missing MIR function {name}")
         return match.group(1)
 
+    def test_pure_scalar_index_calls(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_scalar_index_calls.ls"
+        self.check_golden(source)
+        body = self.function_mir(source, "accumulate", {
+            "COW_EXEC_PROFILE": "1",
+            "COW_EXEC_PROFILE_OUT": str(Path(self.scratch.name) / "scalar-keys.tsv"),
+        })
+        self.assertNotIn("cow_capture_value", body)
+
+    def test_logical_carriers_and_closed_outcomes(self):
+        self.check_gc_fixtures((ROOT / "test/lambda/mvp/mir_mvp_logical_carriers.ls",))
+        # these previously excluded workloads exposed collecting comparisons
+        # inside purportedly closed regions and a nested Boolean carrier join.
+        for script in ("awfy/deltablue.ls", "larceny/quicksort.ls", "text/jq_bf2.ls"):
+            with self.subTest(script=script):
+                self.check_golden(ROOT / "test/benchmark" / script)
+
+    def test_guarded_reduction_carriers(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_guarded_reductions.ls"
+        self.check_gc_fixtures((source,))
+        # D7.4.1: independently bounded projections select a native float ABI.
+        self.assertIn("d:arg0", self.function_mir(source, "finite_scale").splitlines()[0])
+
     def test_benchmark_goldens(self):
         for suite, name in CASES:
-            for compiler in ("mvp", "production"):
+            for compiler in (None, "mvp"):
                 with self.subTest(suite=suite, name=name, compiler=compiler):
                     self.check_golden(ROOT / "test/benchmark" / suite / f"{name}2.ls",
                                       {"LAMBDA_MIR_COMPILER": compiler})
@@ -84,11 +178,16 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def check_gc_fixtures(self, fixtures):
         fixtures = tuple(fixtures)
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             for mode in GC_MODES:
                 for source in fixtures:
                     with self.subTest(compiler=compiler, mode=mode, fixture=source.stem):
                         self.check_golden(source, {**mode, "LAMBDA_MIR_COMPILER": compiler})
+
+    def test_mvp_emission_region_goldens(self):
+        # D8.6.1: native kernels and guard misses retain values under precise GC.
+        names = ("numeric_regions", "array_regions", "call_ownership", "string_regions", "record_regions")
+        self.check_gc_fixtures(ROOT / "test/mir/lambda" / f"mvp_{name}.ls" for name in names)
 
     def test_ndim_canonical_values(self):
         names = ("typed_array_ndim_index", "typed_array_ndim_literal",
@@ -266,11 +365,56 @@ class LambdaMirMvpTests(unittest.TestCase):
         # ordinary snapshot flags remain; a known string has no Array view descriptor.
         self.assertNotRegex(text, r"\tmov\t[^\n]+, u8:2\(")
 
+    def test_nested_primitive_stores(self):
+        # LR07-54: Full also loses the Error from rejected nested indexed stores.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_nested_primitive_stores.ls", mode)
+
+    def test_guarded_store_keys_and_string_ord(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_guarded_store_keys.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "ordinal")
+        self.assertIn("\tcall\tfn_string_ord_at", body)
+        self.assertIn("\tcall\tfn_index", body)
+        self.assertIn("\tcall\tfn_ord", body)
+        self.assertIn("u8:", body[:body.index("\tcall\tfn_string_ord_at")])
+
+    def test_primitive_readers_and_singleton_joins(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_primitive_readers.ls"
+        self.check_gc_fixtures((source, ROOT / "test/lambda/mvp/mir_mvp_singleton_joins.ls"))
+        for name in ("float_at", "int_at", "bool_at"):
+            body = self.function_mir(source, name)
+            self.assertIn("lambda_array_primitive_index", body)
+            self.assertNotIn("\tcall\tfn_index", body)
+            self.assertNotIn("lambda_stack_is_exhausted", body)
+            self.assertIn("\tbstart\t", body)
+        body = self.function_mir(source, "literal_fields")
+        self.assertNotIn("slot_image", body)
+        self.assertEqual(len(re.findall(r"\tmov\t[^\n]+, p:32\(", body)), 3)
+
+    def test_projection_call_snapshots(self):
+        # LR07-56: archived Full observes the later argument's write through the plain argument.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_projection_call_snapshots.ls", mode)
+
+    def test_sized_conversion_results(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_sized_conversion_results.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "random_value")
+        self.assertTrue(body.splitlines()[0].startswith("\td, i64,"))
+        body = self.function_mir(source, "float_record")
+        self.assertIn("lambda_set_field_f64", body)
+        self.assertNotIn("slot_image", body)
+
     def test_counted_admission_and_callable_pipe(self):
         # D4.3.3/S10.1.7v2: resizing invalidates counts; nested ~ is not free.
         cases = (("array_count_resized_binding", "error[E201]", "maximum allowed is 3"),
                  ("pipe_body_bound_current", "error[E212]", "pipe target is not callable"))
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             for mode in GC_MODES:
                 for name, code, message in cases:
                     with self.subTest(compiler=compiler, mode=mode, fixture=name):
@@ -368,7 +512,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                 with self.subTest(tier=tier, mode=mode):
                     self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_member_contracts.ls",
                                       {**mode, "LAMBDA_EXEC_BACKEND": tier,
-                                       "LAMBDA_MIR_COMPILER": "mvp" if tier == "jit" else "production"})
+                                       "LAMBDA_MIR_COMPILER": "mvp" if tier == "jit" else None})
 
     def test_captured_dependent_annotations(self):
         # S11.4.8v2/D4.1.4: captured annotations and same-spelling aliases
@@ -517,7 +661,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_query_window_scalar_ownership(self):
         # retain the cold floats when append growth moves their source buffer.
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             for seed in (1592594996, 17, 31, 42, 77, 101, 239, 1024):
                 with self.subTest(compiler=compiler, seed=seed):
                     self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_query_windows.ls",
@@ -536,7 +680,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                  {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"},
                  {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1", "COW_EXEC_PROFILE": "1",
                   "COW_EXEC_PROFILE_OUT": str(Path(self.scratch.name) / "capture-profile.tsv")})
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             for mode in modes:
                 for fixture in (source, ROOT / "test/lambda/mvp/mir_mvp_u32.ls",
                                 ROOT / "test/lambda/mvp/mir_mvp_index_recurrence.ls"):
@@ -642,7 +786,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 }
 ''')
         source.with_suffix(".txt").write_text("true 1 2\n")
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             with self.subTest(compiler=compiler):
                 self.check_golden(source, {"LAMBDA_MIR_COMPILER": compiler,
                     "LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"})
@@ -654,7 +798,13 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertNotIn("\tcall\tcow_capture_value", body)
             self.assertIn("\tcall\tfn_index", body)  # invalid keys retain checked absence
         for name in ("mutable_table", "effectful_read"):
-            self.assertIn("\tcall\tcow_capture_value", self.function_mir(source, name))
+            body = self.function_mir(source, name)
+            # MVP share-marks inline before evaluating a key that can replace its owner.
+            mark = re.search(r"\tmov\tu8:4\(%r[0-9a-f]+\), %r[0-9a-f]+\n", body)
+            self.assertIsNotNone(mark)
+            if name == "effectful_read":
+                self.assertLess(mark.end(), body.index("\tcall\tlambda_fill_"))
+        self.check_gc_fixtures((source,))
         lazy = self.function_mir(source, "lazy_condition")
         key = re.search(r"\tmov\t(%r[0-9a-f]+), arg1\n", lazy).group(1)
         key_read = re.search(r"\tmov\t%r[0-9a-f]+, " + re.escape(key) + r"\n", lazy)
@@ -716,10 +866,14 @@ class LambdaMirMvpTests(unittest.TestCase):
                       "LAMBDA_GC_POISON_FREED": "1"}):
             with self.subTest(mode=mode):
                 self.check_golden(source, mode)
-        body = self.function_mir(source, "plus_one")
-        self.assertIn("i64, i64, p:runtime", body)
-        self.assertNotIn("\tcall\tint2it_lane", body)
-        self.assertNotIn("\tcall\tint2it_lane", self.function_mir(source, "fused"))
+        for name in ("plus_one", "fused"):
+            body = self.function_mir(source, name)
+            self.assertIn("i64, i64, p:runtime", body)
+            self.assertIn("\tadd\t", body)
+            # stored outcomes may box full-range int lanes before discharge;
+            # the returned success/error pair and arithmetic remain native.
+            self.assertNotIn("\tcall\tfn_add", body)
+            self.assertRegex(body, r"\tret\t[^\n,]+, [^\n,]+\n")
         native = self.function_mir(source, "float_update").split("\tcall\tfn_index", 1)[0]
         self.assertIn("\tdmul\t", native)
         self.assertNotIn("lambda_type_check", native)
@@ -732,6 +886,42 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("\tdmul\t", native)
         self.assertNotIn("lambda_type_check", native)
 
+    def test_owned_string_append_transfers(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_string_append_transfers.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "erased_append")
+        self.assertIn("\tcall\tfn_strcat", body)
+        self.assertIn("\tcall\tfn_join", body)
+
+    def test_unused_array_binders(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_unused_array_binders.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "word_at")
+        self.assertNotIn("lambda_type_check_env_status", body)
+        self.assertIn("lambda_type_check_env_status", self.function_mir(source, "observed"))
+        self.assertIn("lambda_type_check_env_status", self.function_mir(source, "repeated"))
+
+    def test_recursive_union_constructors(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_recursive_union_constructors.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        self.assertNotIn("lambda_type_check_lazy", self.function_mir(source, "build"))
+        self.assertIn("lambda_type_check_lazy", self.function_mir(source, "checked"))
+
+    def test_projected_scalar_hints(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_projected_scalar_hints.ls"
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(source, mode)
+        body = self.function_mir(source, "square")
+        self.assertIn("\tdmul\t", body)
+        self.assertIn("\tcall\tfn_mul", body)
+
     def test_string_outcome_appends(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_string_outcomes.ls"
         for mode in ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
@@ -742,6 +932,15 @@ class LambdaMirMvpTests(unittest.TestCase):
         body = self.function_mir(source, "repeat_text")
         self.assertIn("\tcall\tfn_strcat3", body)
         self.assertIn("\tcall\tfn_join", body)
+
+    def test_full_mir_control_must_be_explicit(self):
+        with mock.patch.object(sys, "argv", ["lambda_mir_mvp.py", "--release"]), \
+                mock.patch.object(sys, "stderr"), \
+                mock.patch.object(lambda_mir_mvp, "ensure_c2m") as build_reference:
+            with self.assertRaises(SystemExit) as rejected:
+                lambda_mir_mvp.main()
+            self.assertEqual(rejected.exception.code, 2)
+            build_reference.assert_not_called()
 
     def test_failed_engine_remains_unqualified(self):
         executable = Path(self.scratch.name) / "failed.exe"
@@ -761,7 +960,7 @@ class LambdaMirMvpTests(unittest.TestCase):
             shutil.copy2(ROOT / "test/benchmark/r7rs" / name, corpus / "r7rs" / name)
         shutil.copytree(ROOT / "test/benchmark/c2mir", corpus / "c2mir")
         command = [sys.executable, str(ROOT / "test/benchmark/lambda_mir_mvp.py"),
-            "--release", "--exe", str(executable), "--record-failures", "--case", "r7rs/fib",
+            "--release", "--exe", str(executable), "--control", str(executable), "--record-failures", "--case", "r7rs/fib",
             "--runs", "3", "--warmups", "1", "--output", str(report), "--source-manifest", str(manifest),
             "--c2mir-exe", str(reference), "--benchmark-root", str(corpus)]
         result = subprocess.run(command,
@@ -802,7 +1001,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                 expected = source.parent.parent / (source.stem + "2.txt")
             return expected.read_text().strip() + "\n__TIMING__:1.0\n"
 
-        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe),
+        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--control", str(self.exe),
             "--subset", "float-array", "--runs", "3", "--warmups", "1",
             "--c2mir-exe", str(reference), "--output", str(report)]
         with mock.patch.object(sys, "argv", command), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
@@ -818,7 +1017,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         reference = Path(self.scratch.name) / "unported-reference.exe"
         reference.write_bytes(b"fixture reference identity")
         report = Path(self.scratch.name) / "unported.json"
-        arguments = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--c2mir-exe", str(reference),
+        arguments = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--control", str(self.exe), "--c2mir-exe", str(reference),
                      "--case", "jetstream/richards", "--runs", "3", "--warmups", "1", "--output", str(report)]
         with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke",
                 return_value="richards: PASS\n__TIMING__:1.0\n"):
@@ -835,7 +1034,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         output = Path(self.scratch.name) / "mvp-regression.json"
         for mode in ("--regression-only", "--lambda-only"):
             with self.subTest(mode=mode):
-                arguments = ["lambda_mir_mvp.py", "--release", mode, "--exe", str(self.exe),
+                arguments = ["lambda_mir_mvp.py", "--release", mode, "--exe", str(self.exe), "--control", str(self.exe),
                     "--previous-mvp", str(self.exe), "--c2mir-exe", str(reference), "--case", "r7rs/fib",
                     "--runs", "3", "--warmups", "1", "--output", str(output)]
                 with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke",
@@ -874,7 +1073,7 @@ class LambdaMirMvpTests(unittest.TestCase):
             elapsed = 1 if env["LAMBDA_MIR_COMPILER"] == "mvp" else 2
             return f"{text}\n__TIMING__:{elapsed}\n"
 
-        arguments = ["lambda_mir_mvp.py", "--release", "--lambda-only", "--exe", str(self.exe),
+        arguments = ["lambda_mir_mvp.py", "--release", "--lambda-only", "--exe", str(self.exe), "--control", str(self.exe),
                      "--variant", "both", "--case", "r7rs/fib", "--runs", "3", "--warmups", "1",
                      "--benchmark-root", str(corpus), "--output", str(output)]
         with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
@@ -918,7 +1117,9 @@ class LambdaMirMvpTests(unittest.TestCase):
                     self.check_golden(source, mode)
         decimal = ROOT / "test/lambda/mvp/mir_mvp_decimal_dispatch.ls"
         self.assertEqual(self.function_mir(decimal, "decimal_ops").count("\tcall\tlambda_decimal_binary"), 6)
-        self.assertIn("\tcall\tfn_add", self.function_mir(decimal, "decimal_generic"))
+        generic = self.function_mir(decimal, "decimal_generic")
+        self.assertEqual(generic.count("\tcall\tlambda_decimal_binary"), 3)
+        self.assertNotIn("\tcall\tfn_add", generic)
         compared = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_scalar_outcomes.ls", "scalar_compare")
         self.assertIn("\tdlt\t", compared)
         self.assertIn("\tcall\tfn_lt", compared)
@@ -968,7 +1169,7 @@ class LambdaMirMvpTests(unittest.TestCase):
             state["busy"] = False
             return [{"pid": 123, "program": "make"}] if busy else []
 
-        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe),
+        command = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--control", str(self.exe),
             "--pause-for-jobs", "--case", "r7rs/fib", "--runs", "3", "--warmups", "1",
             "--output", str(report)]
         with mock.patch.object(sys, "argv", command), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
@@ -1037,7 +1238,8 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_nullable_comparison_mir(self):
         body = self.function_mir(ROOT / "test/benchmark/larceny/quicksort2.ls", "partition")
         native = body[:body.index("\tcall\tfn_index")]
-        self.assertIn("\tle\t", native)
+        # branch demand consumes the comparison directly, without a Boolean phi.
+        self.assertRegex(native, r"\t(?:le|ble|bgt)\t")
         self.assertNotIn("fn_le", native)
         # the checked sibling retains the pivot's deferred admission outcome (S7.7.2v2).
         self.assertIn("fn_le", body)
@@ -1084,7 +1286,8 @@ class LambdaMirMvpTests(unittest.TestCase):
             with self.subTest(source=source.name, function=function):
                 body = self.function_mir(source, function)
                 self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
-                self.assertIn("fn_index", body)  # short/negative extents keep the checked sibling
+                # collecting bodies keep fn_index; rootless bodies use the lane sibling.
+                self.assertRegex(body, r"\tcall\t(?:fn_index|lambda_array_primitive_index)")
 
     def test_fallible_inline_and_bool_count(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_consumers.ls"
@@ -1093,7 +1296,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("lambda_type_check", body)  # the short-array return still fails its int boundary
         body = self.function_mir(source, "truth_count")
         self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
-        self.assertIn("fn_index", body)
+        self.assertIn("\tcall\tlambda_array_primitive_index", body)
         body = self.function_mir(source, "rotate_arrays")
         # only the saved alias and the later observed scratch require captures.
         self.assertLessEqual(len(re.findall(r"\tcall\tcow_capture_value_", body)), 4)
@@ -1134,7 +1337,11 @@ class LambdaMirMvpTests(unittest.TestCase):
             self.assertNotIn("map_fill", constructor)
             self.assertNotIn("cow_capture_value", constructor)
         body = self.function_mir(source, "shifted")
-        native = body[:body.index("\tcall\tarray_plain_")]
+        # the checked sibling also tries packed allocation before array_plain;
+        # its entry is the target of the native version's extent guard.
+        extent = re.search(r"\tblt\t(L\d+), [^\n,]+, 3\n", body)
+        self.assertIsNotNone(extent)
+        native = body[:body.index("\n" + extent.group(1) + ":")]
         self.assertIn("lambda_fill_primitive_bits", native)
         self.assertGreaterEqual(native.count("\tdadd\t"), 3)
         self.assertNotIn("\tcall\tfn_index_", native)
@@ -1160,7 +1367,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_erased_array_iterations(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_erased_iterations.ls"
-        for compiler in ("production", "mvp"):
+        for compiler in (None, "mvp"):
             for stress in GC_MODES:
                 with self.subTest(compiler=compiler, stress=stress):
                     self.check_golden(source, {**stress, "LAMBDA_MIR_COMPILER": compiler})
@@ -1219,7 +1426,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                           'pn main() { print([bad is error, bad.code]) }\n')
         # S7.7.2v2 retains a deferred validation outcome and continues into main.
         source.with_suffix(".txt").write_text("[true, 201]\n")
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             with self.subTest(compiler=compiler):
                 self.check_golden(source, {"LAMBDA_MIR_COMPILER": compiler})
 
@@ -1227,7 +1434,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         source = Path(self.scratch.name) / "static_mismatch.ls"
         source.write_text('pn main() { print("EXECUTED"); let bad: int = "wrong" }\n')
         source.with_suffix(".txt").write_text("")
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             with self.subTest(compiler=compiler):
                 result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler})
                 self.assertNotEqual(result.returncode, 0)
@@ -1249,14 +1456,94 @@ class LambdaMirMvpTests(unittest.TestCase):
                 source.with_suffix(".txt").write_text(expected + "\n")
                 self.check_golden(source)
 
-    def test_selector_is_explicit(self):
+    def test_default_compiler_preserves_tiers(self):
         source = ROOT / "test/benchmark/r7rs/fib2.ls"
-        for options in ({"LAMBDA_EXEC_BACKEND": "auto"}, {"LAMBDA_EXEC_BACKEND": "interp"},
-                        {"LAMBDA_MIR_COMPILER": "unknown"}):
-            with self.subTest(options=options):
-                result = self.run_script(source, options)
+        for compiler in (None, "", "mvp"):
+            for tier in (None, "jit", "auto", "interp"):
+                with self.subTest(compiler=compiler, tier=tier):
+                    dump = Path(self.scratch.name) / f"selector-{compiler}-{tier}.mir"
+                    result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler,
+                        "LAMBDA_EXEC_BACKEND": tier, "LAMBDA_MIR_DUMP_PATH": str(dump),
+                        "LAMBDA_SATELLITE_SYNC": "1", "LAMBDA_FUNC_JIT_THRESHOLD": "1",
+                        "LAMBDA_DISABLE_MIR_CACHE": "1", "LAMBDA_RSS_REPORT": "1"}, logging=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), "fib: PASS")
+                    self.assertNotIn("[ERR!]", result.stderr)
+                    if tier == "interp":
+                        self.assertFalse(dump.exists())
+                    else:
+                        body = dump.read_text()
+                        self.assertEqual(bool(re.search(r"^(?:lambda_mvp|mvp_lambda_sat_\d+):\tmodule", body, re.M)),
+                            True)
+        result = self.run_script(source, {"LAMBDA_MIR_COMPILER": "unknown"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("LAMBDA_MIR_COMPILER accepts only mvp", result.stderr)
+
+    def test_retired_full_mir_is_rejected(self):
+        source = ROOT / "test/benchmark/r7rs/fib2.ls"
+        for tier in ("interp", "auto", "jit"):
+            with self.subTest(tier=tier):
+                result = self.run_script(source, {"LAMBDA_MIR_COMPILER": "production",
+                                                 "LAMBDA_EXEC_BACKEND": tier})
                 self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Full MIR is retired", result.stderr)
                 self.assertNotIn("fib: PASS", result.stdout)
+
+    def test_mvp_interpreter_promotion(self):
+        source = ROOT / "test/benchmark/r7rs/fib2.ls"
+        nodes = {}
+        for tier in ("interp", "auto"):
+            result = self.run_script(source, {"LAMBDA_EXEC_BACKEND": tier,
+                "LAMBDA_MIR_COMPILER": None, "LAMBDA_SATELLITE_SYNC": "1",
+                "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_RSS_REPORT": "1"})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("[ERR!]", result.stderr)
+            nodes[tier] = int(re.search(r"nodes=(\d+)", result.stderr)[1])
+        # verify that the published native entry actually replaces AST work.
+        self.assertLess(nodes["auto"], nodes["interp"])
+
+    def test_mvp_satellite_gc(self):
+        sources = ("satellite_property_key_relocation", "proc/interp_satellite_cluster",
+                   "transpile_float_fmt_satellite")
+        for name in sources:
+            for stress in GC_MODES:
+                with self.subTest(fixture=name, stress=stress):
+                    source = ROOT / "test/lambda" / (name + ".ls")
+                    result = self.run_script(source, {**stress, "LAMBDA_MIR_COMPILER": None,
+                        "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                        "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_LOOP_JIT_THRESHOLD": "2"})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                    self.assertNotIn("[ERR!]", result.stderr)
+
+    def test_mvp_loop_handoff(self):
+        for name in ("fn_local_loop_handoff", "proc/interp_loop_handoff", "proc/for_loop_handoff"):
+            with self.subTest(fixture=name):
+                source = ROOT / "test/lambda" / (name + ".ls")
+                dump = Path(self.scratch.name) / (source.stem + "-handoff.mir")
+                result = self.run_script(source, {"LAMBDA_MIR_COMPILER": None,
+                    "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                    "LAMBDA_FUNC_JIT_THRESHOLD": "1000000", "LAMBDA_LOOP_JIT_THRESHOLD": "2",
+                    "LAMBDA_MIR_DUMP_PATH": str(dump)}, logging=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                self.assertNotIn("[ERR!]", result.stderr)
+                self.assertRegex(dump.read_text(), r"mvp_lambda_sat_\d+:\tmodule")
+
+    def test_mvp_external_call_arguments(self):
+        names = ("interp_variadic", "interp_variadic_promoted", "interp_named_args",
+                 "default_callback_frame", "mvp/mir_mvp_variadic_modules",
+                 "mvp/mir_mvp_variadic_recursion")
+        for name in names:
+            for stress in GC_MODES:
+                with self.subTest(fixture=name, stress=stress):
+                    source = ROOT / "test/lambda" / (name + ".ls")
+                    result = self.run_script(source, {**stress, "LAMBDA_MIR_COMPILER": None,
+                        "LAMBDA_EXEC_BACKEND": "auto", "LAMBDA_SATELLITE_SYNC": "1",
+                        "LAMBDA_FUNC_JIT_THRESHOLD": "1", "LAMBDA_LOOP_JIT_THRESHOLD": "2"})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+                    self.assertNotIn("[ERR!]", result.stderr)
 
     def test_native_recursive_mir(self):
         body = self.function_mir(ROOT / "test/benchmark/r7rs/fib2.ls", "fib")
@@ -1317,7 +1604,8 @@ class LambdaMirMvpTests(unittest.TestCase):
         # a generic field replacement can rebuild a record's physical layout;
         # the subsequent typed call must establish its own prefix.
         body = self.function_mir(source, "updated_box")
-        self.assertIn("lambda_map_set_checked", body)
+        self.assertIn("\tcall\tindex_assign_cow", body)
+        self.assertIn("\tcall\tlambda_report_boundary_failure", body)
         self.assertIn("\tcall\tlambda_type_check", body)
 
     def test_guarded_recursive_arrays(self):
@@ -1325,9 +1613,9 @@ class LambdaMirMvpTests(unittest.TestCase):
         body = self.function_mir(source, "place_queen")
         first = body[:body.index("\tcall\tmvp_2_place_queen_dp")]
         self.assertGreater(first.count("\tcall\tlambda_stack_is_exhausted"), 0)
-        for helper in ("fn_index", "lambda_array_set_checked_item", "lambda_type_check", "cow_capture_value"):
+        for helper in ("lambda_array_primitive_index", "lambda_array_set_checked_item", "lambda_type_check", "cow_capture_value"):
             self.assertEqual(first.count("\tcall\t" + helper), 0, helper)
-            if helper in ("fn_index", "lambda_array_set_checked_item"):
+            if helper in ("lambda_array_primitive_index", "lambda_array_set_checked_item"):
                 self.assertGreater(body.count("\tcall\t" + helper), 0, helper)
         # the hot self edge has no owner replacement and publishes no borrow cells.
         self.assertNotRegex(first, r"mov\ti64:1(?:60|68|76|84)\(runtime\), %")
@@ -1346,6 +1634,10 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_native_constructor_lanes(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_constructor_boundary.ls"
+        self.check_gc_fixtures((source,))
+        body = self.function_mir(source, "native_fields")
+        self.assertNotIn("set_field_value", body)
+        self.assertRegex(body, r"\tdmov\td:\d*\(%")
         for name in ("freshly", "float_values", "bool_values"):
             body = self.function_mir(source, name)
             native = body[:body.index("\tcall\tlambda_fill_primitive_bits")]
@@ -1406,8 +1698,11 @@ class LambdaMirMvpTests(unittest.TestCase):
             before_helper = body[:body.index("\tcall\t" + helper)]
             self.assertIn("\tjmp\t", before_helper)
         store = self.function_mir(source, "store_cast")
-        self.assertIn("lambda_array_set_checked_item", store)
-        self.assertNotIn("lambda_array_set_checked_preplanned", store)
+        # the converted value uses the preplanned contract; its miss remains checked.
+        self.assertIn("\tcall\tlambda_array_set_checked_preplanned", store)
+        self.assertIn("\tcall\tlambda_report_boundary_failure", store)
+        self.assertNotIn("\tcall\tlambda_array_set_checked_item", store)
+        self.check_gc_fixtures((source,))
 
     def test_float_predicate_branch(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_float_compare.ls", "find_prefix")
@@ -1453,11 +1748,21 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertRegex(first, r"\tmod\t[^\n]+, 31\n")
         self.assertIn("\tcall\tfn_int", affine)
         conditional = self.function_mir(source, "conditional_step")
-        native = conditional[:conditional.index("\tcall\tfn_index")]
-        self.assertNotIn("\tcall\tfmod_", native)
-        self.assertNotIn("\tcall\tlambda_int_lane_add_slow", native)
+        # a preceding dense version retains saturation for arbitrary integers.
+        # identify the bounded modular store itself, including its range guard.
+        native = re.search(
+            r"\tubgt\tL\d+, ([^\n,]+), 9007199254740988\n"
+            r"\tadd\t([^\n,]+), \1, 3\n"
+            r"\tand\t([^\n,]+), \2, 15\n"
+            r"\tmov\ti64:\([^\n]+\), \3\n", conditional)
+        self.assertIsNotNone(native)
+        self.assertIn("\tcall\tfn_index", conditional)
 
     def test_single_use_string_constructor(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_admitted_string_append.ls"
+        self.check_gc_fixtures([source])
+        fused = self.function_mir(source, "append")
+        self.assertRegex(fused, r"\tcall\tfn_strcat_values_[^\n]+, 1, 4,")
         body = self.function_mir(ROOT / "test/benchmark/kostya/json_gen2.ls", "benchmark")
         # coalesced literal runs and integer lanes join directly into the owner.
         self.assertRegex(body, r"\tcall\tfn_strcat_values_[^\n]+, 1, 8,")
@@ -1470,7 +1775,7 @@ class LambdaMirMvpTests(unittest.TestCase):
                           'print(saved is error); return saved }; pn main() { return assign("bad") }\n')
         source.with_suffix(".txt").write_text("true\n")
         # S7.7.4v2 continues with the retained Error; main then returns that Error.
-        for compiler in ("mvp", "production"):
+        for compiler in (None, "mvp"):
             with self.subTest(compiler=compiler):
                 result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler})
                 self.assertGreater(result.returncode, 0, result.stdout + result.stderr)

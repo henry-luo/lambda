@@ -225,7 +225,7 @@ static Item loopback_request_item(const char* head) {
                 value.set(io_fs_make_string(decoded_value ? decoded_value : "", value_length));
                 mem_free(decoded_name);
                 mem_free(decoded_value);
-                map.set(map_alloc_for_type(runtime_result_shape(pair_names, pair_types, 2), NULL, 0));
+                map.set(map_alloc_for_type(runtime_result_shape(pair_names, pair_types, 2), 0));
                 if (!map.get()) return ItemError;
                 Item pair[] = {name.get(), value.get()};
                 map_fill_items(map.get(), pair, 2);
@@ -238,7 +238,7 @@ static Item loopback_request_item(const char* head) {
     char* decoded_path = url_decode_component(target, path_length, &decoded_path_length);
     Rooted<Item> path(roots, io_fs_make_string(decoded_path ? decoded_path : "", decoded_path_length));
     mem_free(decoded_path);
-    map.set(map_alloc_for_type(runtime_result_shape(request_names, request_types, 3), NULL, 0));
+    map.set(map_alloc_for_type(runtime_result_shape(request_names, request_types, 3), 0));
     if (!map.get()) return ItemError;
     Item values[] = {method.get(), path.get(), (Item){.array = query.get()}};
     map_fill_items(map.get(), values, 3);

@@ -1,15 +1,38 @@
 {
   "schema_version": 1,
-  "description": "S4.1.2/D4.3.3: finite literal int arrays use direct freshly allocated lanes; dynamic members retain checked stores.",
+  "description": "S4.1.2/D4.3.3: MVP fills finite literals with direct stores. The closed dynamic member specializes to seven and still uses scaled stores.",
   "checks": [
     {
-      "in_func": "_literal_#",
-      "expect": ["call\tarray_num_new_uninit_p, array_num_new_uninit", "i64:({{r}})"],
-      "forbid": ["call\tarray_int_set_p, array_int_set", "call\tarray_int_new_p, array_int_new"]
+      "in_func": "mvp_#_literal",
+      "expect_seq": [
+        {
+          "pattern": "call\t{{p}}, lambda_fill_primitive_bits, {{r:array}}, 4,"
+        },
+        {
+          "pattern": "mov\t{{r:items}}, p:32({{r:array}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r:items}}), {{r}}"
+        },
+        {
+          "pattern": "mov\ti64:24({{r:items}}), {{r}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, array_int_set,",
+        "call\t{{p}}, array_push,"
+      ]
     },
     {
-      "in_func": "_dynamic_#",
-      "expect": ["call\tarray_int_set_p, array_int_set"]
+      "in_func": "mvp_#_dynamic",
+      "expect": [
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "lsh\t{{r}}, {{r}}, 3",
+        "mov\ti64:({{r}}), {{r}}"
+      ],
+      "forbid": [
+        "call\t{{p}}, array_int_set,"
+      ]
     }
   ]
 }

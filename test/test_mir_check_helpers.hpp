@@ -58,6 +58,11 @@
 
 namespace mir_check {
 
+inline const char* executable() {
+    const char* configured = getenv("LAMBDA_TEST_EXE");
+    return configured && configured[0] ? configured : "./lambda.exe";
+}
+
 // ---------------------------------------------------------------------------
 // Minimal JSON reader (objects, arrays, strings, integers, booleans, null)
 // ---------------------------------------------------------------------------
@@ -836,7 +841,7 @@ struct ProcessResult {
 inline ShellResult run_lambda_command(const char* subcommand, const char* script_path,
         bool mir_interp, bool quiet, const char* const* extra_args, const ShellOptions* options) {
     ArrayList* args = arraylist_new(12);
-    arraylist_append(args, (void*)"./lambda.exe");
+    arraylist_append(args, (void*)executable());
     if (subcommand) arraylist_append(args, (void*)subcommand);
     if (mir_interp) arraylist_append(args, (void*)"--mir-interp");
     bool js = subcommand && strcmp(subcommand, "js") == 0;
@@ -847,7 +852,7 @@ inline ShellResult run_lambda_command(const char* subcommand, const char* script
         arraylist_append(args, (void*)extra_args[i]);
     }
     arraylist_append(args, nullptr);
-    ShellResult result = shell_exec("./lambda.exe", (const char**)args->data, options);
+    ShellResult result = shell_exec(executable(), (const char**)args->data, options);
     arraylist_free(args);
     return result;
 }
@@ -977,10 +982,9 @@ inline CompileResult compile_and_dump(const std::string& script_path, Language l
 // Evaluation
 // ---------------------------------------------------------------------------
 
-// '#' in an in_func selector matches a run of one or more digits. Both
-// frontends name generated symbols with a source-offset id (_accumulate_371,
-// _js_helper_752_body), so a fixture that spelled the id would break whenever
-// its own comments moved. A selector without '#' is matched exactly.
+// '#' matches decimal compiler IDs, including MVP's mvp_#_source_name and
+// JS source-offset names. Other characters match exactly; backend namespaces
+// are explicit so a missing body cannot silently select another compiler.
 inline bool function_name_matches(const std::string& pattern, size_t p,
                                   const std::string& name, size_t n) {
     while (p < pattern.size()) {
@@ -1097,6 +1101,9 @@ inline bool select_scope(const MirDump& dump, const CheckGroup& group,
     return true;
 }
 
+// `{{n}}` matches a decimal compiler ID; `{{p}}` matches one MIR prototype
+// operand. The callee remains explicit, independent of ABI signature suffixes.
+// `{{l:name}}` binds a control-flow label so a backedge must name its header.
 // Register tokens: `{{r}}` matches any generated register; `{{r:name}}`
 // binds `name` to the register on first use within one expect_seq and must
 // match the same register afterwards; `{{r!name}}` must be a register other
@@ -1108,7 +1115,10 @@ typedef std::map<std::string, std::string> RegisterCaptures;
 
 inline bool line_contains(const std::string& line, const std::string& pattern,
         RegisterCaptures* captures = NULL) {
-    if (pattern.find("{{r") == std::string::npos) {
+    if (pattern.find("{{r") == std::string::npos &&
+            pattern.find("{{l") == std::string::npos &&
+            pattern.find("{{n}}") == std::string::npos &&
+            pattern.find("{{p}}") == std::string::npos) {
         return line.find(pattern) != std::string::npos;
     }
 
@@ -1121,28 +1131,57 @@ inline bool line_contains(const std::string& line, const std::string& pattern,
         bool matched = true;
         RegisterCaptures attempt = captures ? *captures : RegisterCaptures();
         while (pattern_index < pattern.size()) {
-            if (pattern.compare(pattern_index, 3, "{{r") == 0) {
+            if (pattern.compare(pattern_index, 5, "{{p}}") == 0) {
+                size_t first = line_index;
+                while (line_index < line.size()) {
+                    char ch = line[line_index];
+                    if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                            (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' ||
+                            ch == '$' || ch == '%')) break;
+                    line_index++;
+                }
+                if (line_index == first) { matched = false; break; }
+                pattern_index += 5;
+                continue;
+            }
+            if (pattern.compare(pattern_index, 5, "{{n}}") == 0) {
+                size_t digits = line_index;
+                while (line_index < line.size() && line[line_index] >= '0' &&
+                        line[line_index] <= '9') line_index++;
+                if (line_index == digits) { matched = false; break; }
+                pattern_index += 5;
+                continue;
+            }
+            bool label = pattern.compare(pattern_index, 3, "{{l") == 0;
+            if (label || pattern.compare(pattern_index, 3, "{{r") == 0) {
                 size_t close = pattern.find("}}", pattern_index);
                 if (close == std::string::npos) { matched = false; break; }
                 std::string token = pattern.substr(pattern_index + 3, close - pattern_index - 3);
-                if (line_index + 2 > line.size() || line[line_index] != '%' ||
-                        line[line_index + 1] != 'r') {
+                if (label ? line_index >= line.size() || line[line_index] != 'L' :
+                        line_index + 2 > line.size() || line[line_index] != '%' || line[line_index + 1] != 'r') {
                     matched = false;
                     break;
                 }
-                line_index += 2;
+                line_index += label ? 1 : 2;
                 size_t hex_start = line_index;
                 while (line_index < line.size() &&
                         ((line[line_index] >= '0' && line[line_index] <= '9') ||
-                         (line[line_index] >= 'a' && line[line_index] <= 'f'))) {
+                         (!label && line[line_index] >= 'a' && line[line_index] <= 'f'))) {
                     line_index++;
                 }
                 if (line_index == hex_start) {
                     matched = false;
                     break;
                 }
+                if (label && line_index < line.size() &&
+                        ((line[line_index] >= 'a' && line[line_index] <= 'z') ||
+                         (line[line_index] >= 'A' && line[line_index] <= 'Z') || line[line_index] == '_')) {
+                    matched = false;
+                    break;
+                }
                 if (captures && !token.empty()) {
                     std::string reg = line.substr(hex_start, line_index - hex_start);
+                    if (label) reg.insert(0, "L");
                     std::string name = token.substr(1);
                     RegisterCaptures::iterator bound = attempt.find(name);
                     if (token[0] == ':') {
@@ -1172,6 +1211,57 @@ inline bool line_contains(const std::string& line, const std::string& pattern,
         }
     }
     return false;
+}
+
+struct SequenceSearch {
+    const MirLine* lines;
+    size_t line_count;
+    const SeqExpectation* steps;
+    size_t step_count;
+    size_t* current;
+    size_t* best;
+    size_t depth = 0;
+    size_t remaining = 1000000;
+    bool exhausted = false;
+};
+
+inline bool search_sequence(SequenceSearch* search, size_t step, size_t cursor,
+        const RegisterCaptures& captures) {
+    if (step == search->step_count) return true;
+    const SeqExpectation& want = search->steps[step];
+    size_t end = want.next_line && cursor < search->line_count
+        ? cursor + 1 : search->line_count;
+    for (size_t line = cursor; line < end; line++) {
+        // ambiguous failed contracts must report failure rather than stall the gate.
+        if (!search->remaining) { search->exhausted = true; return false; }
+        search->remaining--;
+        RegisterCaptures attempt = captures;
+        if (!line_contains(search->lines[line].text, want.pattern, &attempt)) continue;
+        search->current[step] = line;
+        if (step + 1 > search->depth) {
+            search->depth = step + 1;
+            memcpy(search->best, search->current, search->depth * sizeof(size_t));
+        }
+        if (search_sequence(search, step + 1, line + 1, attempt)) return true;
+        if (search->exhausted) return false;
+    }
+    return false;
+}
+
+// captures belong to a complete sequence, not the first matching prefix. A
+// store can share a load's address prefix without satisfying its final read.
+inline bool match_sequence(const MirLine* lines, size_t line_count,
+        const SeqExpectation* steps, size_t step_count, size_t* positions,
+        size_t* matched_steps, bool* exhausted) {
+    size_t* current = (size_t*)calloc(step_count ? step_count : 1, sizeof(size_t));
+    if (!current) { *matched_steps = 0; *exhausted = true; return false; }
+    SequenceSearch search = {lines, line_count, steps, step_count, current, positions};
+    RegisterCaptures captures;
+    bool matched = search_sequence(&search, 0, 0, captures);
+    *matched_steps = search.depth;
+    *exhausted = search.exhausted;
+    free(current);
+    return matched;
 }
 
 // count emitted instructions in a slice of dump text. Instruction lines start
@@ -1350,35 +1440,28 @@ inline void run_fixture(const std::string& script_path, const std::string& sidec
             }
         }
         if (!group.expect_seq.empty()) {
-            size_t cursor = 0;
-            bool matched_all = true;
+            size_t* positions = (size_t*)calloc(group.expect_seq.size(), sizeof(size_t));
+            ASSERT_NE(positions, nullptr) << "cannot allocate MIR sequence trace";
+            size_t matched_steps = 0;
+            bool exhausted = false;
+            bool matched_all = match_sequence(lines.data(), lines.size(),
+                group.expect_seq.data(), group.expect_seq.size(), positions, &matched_steps, &exhausted);
             std::string trace;
-            RegisterCaptures seq_captures;   // {{r:name}} / {{r!name}} scope
             for (size_t step = 0; step < group.expect_seq.size(); step++) {
                 const SeqExpectation& want = group.expect_seq[step];
-                size_t found = std::string::npos;
-                if (want.next_line) {
-                    // CHECK-NEXT analogue: the very next line must match.
-                    if (cursor < lines.size() && line_contains(lines[cursor].text, want.pattern, &seq_captures)) {
-                        found = cursor;
-                    }
-                } else {
-                    for (size_t i = cursor; i < lines.size(); i++) {
-                        if (line_contains(lines[i].text, want.pattern, &seq_captures)) { found = i; break; }
-                    }
-                }
-                if (found == std::string::npos) {
-                    matched_all = false;
+                if (step >= matched_steps) {
                     trace += "  step " + std::to_string(step) + " NOT FOUND: \"" + want.pattern + "\"" +
                              (want.next_line ? " (required on the immediately next line)" : "") + "\n";
                     break;
                 }
                 trace += "  step " + std::to_string(step) + " matched line " +
-                         std::to_string(lines[found].number) + ": \"" + want.pattern + "\"\n";
-                cursor = found + 1;
+                         std::to_string(lines[positions[step]].number) + ": \"" + want.pattern + "\"\n";
             }
+            free(positions);
             EXPECT_TRUE(matched_all)
-                << "expect_seq did not match in order\n" << trace << context;
+                << "expect_seq did not match in order\n"
+                << (exhausted ? "sequence search limit reached; narrow the contract\n" : "")
+                << trace << context;
         }
     }
     // A fixture whose every group targets another convention would otherwise

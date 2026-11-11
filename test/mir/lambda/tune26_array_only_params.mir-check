@@ -1,24 +1,25 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-1: a typed-array-only signature selects the raw witness ABI even with an array return, so the callee reads its packed float lanes without item_at.",
+  "description": "D4.3.3/D7.4.2: MVP derives typed-array layout guards from the carriers, computes floating lanes natively and preserves checked write misses. The array result crosses the direct companion boundary.",
   "checks": [
     {
-      "in_func": "_tune26_array_only_params_#",
+      "in_func": "mvp_#_tune26_array_only_params",
       "expect": [
-        "and\t{{r}}, _array_witness, 1",
-        "and\t{{r}}, _array_witness, 2"
+        "dmov\t{{r}}, d:(",
+        "dadd\t",
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ],
       "forbid": [
-        "call\titem_at_p, item_at"
+        "call\t{{p}}, fn_add,"
       ]
     },
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
-        "call\t_tune26_array_only_params_"
+        "call\tmvp_{{n}}_tune26_array_only_params_dp"
       ],
       "forbid": [
-        "call\t_tune26_array_only_params_#_b"
+        "call\t{{p}}, fn_call_into,"
       ]
     }
   ]

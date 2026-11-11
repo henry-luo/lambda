@@ -73,6 +73,8 @@ pn intervening(var values: int[], x: any) int^ {
 }
 pn main() {
     print([checked(7), plus_one(7), checked("bad") is error, plus_one("bad") is error]); print("\n")
+    // S4.1.2, S7.6.3v3: boxed outcomes retain the int lane's saturated values.
+    print([plus_one(9007199254740991), fused(9007199254740991), plus_one(int(inf)), fused(int(nan))]); print("\n")
     print(outcomes(7)); print("\n"); print(outcomes("bad")); print("\n")
     var values: int[] = [1]
     let rejected = propagated(values, "bad")

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "description": "D4.2.5/S11.4.10/D8.6.1: common required union fields keep their nullable domain without claiming shared offsets; null and open/mutated receivers retain checked admission.",
+  "checks": [
+    {
+      "in_func": "mvp_#_walk",
+      "expect_seq": [
+        "beq\t{{l:checked}}, {{r:child}}, 72057594037927936",
+        "jmp\t{{l:admitted}}",
+        "{{l:checked}}:",
+        "call\t{{p}}, lambda_type_check_lazy,",
+        "{{l:admitted}}:"
+      ],
+      "expect": [
+        "call\t{{p}}, fn_member_by_id,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_open_child",
+      "expect": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_changed",
+      "expect": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_envelope_number",
+      "expect": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
+    }
+  ]
+}

@@ -1,31 +1,54 @@
 {
   "schema_version": 1,
-      "description": "S7.1.1v3: bounds compare all 64 index bits. Typed numeric-array loads use the certificate-guarded direct ArrayNum data lane. Offsets 32/40 are ArrayNum::items/length under the D3.1.1 container chain (Map -> Array -> Element), where every container carries Map's attribute face first; they were 8/16 before that change. Runtime admission uses lambda_type_check and a failed certificate guard falls back to item_at rather than reinterpreting storage.",
+  "description": "D4.3.3: MVP derives native carrier/bounds guards rather than passing Full witness parameters. Packed reads/stores retain canonical checked misses; integer reductions use integer memory lanes.",
   "checks": [
     {
-      "in_func": "_guarded_load_#",
+      "in_func": "mvp_#_guarded_load",
       "expect_seq": [
-        { "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy" },
-        { "pattern": "mov\t{{r}}, i64:32({{r}})" },
-        { "pattern": "mov\t{{r}}, i64:40({{r}})" },
-        { "pattern": "lt\t{{r}}, %p2, 0" },
-        { "pattern": "ge\t{{r}}, %p2, {{r}}" },
-        { "pattern": "lsh\t{{r}}, %p2, 3" },
-        { "pattern": "dmov\t{{r}}, d:({{r}})" }
-      ]
-    },
-    {
-      "in_func": "_guarded_store_#",
-      "expect_seq": [
-        { "pattern": "call\tlambda_type_check_lazy_p, lambda_type_check_lazy" },
-        { "pattern": "dmov\t{{r}}, 9.50000000000000000000000000000000000000000000000000000e+00" },
-        { "pattern": "dmov\td:({{r}}), {{r}}" }
-      ]
-    },
-    {
-      "in_func": "_dense_int_sum_#",
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "dmov\t{{r}}, d:({{r:addr}})"
+        }
+      ],
+      "expect": [
+        "mov\t{{r}}, u32:(",
+        "i64:40(",
+        "call\t{{p}}, lambda_array_primitive_index,"
+      ],
       "forbid": [
-        "call\titem_at_p, item_at",
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_guarded_store",
+      "expect_seq": [
+        {
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
+        },
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "dmov\td:({{r:addr}}), {{r}}"
+        }
+      ],
+      "expect": [
+        "9.50000000000000000000000000000000000000000000000000000e+00",
+        "call\t{{p}}, lambda_array_set_checked_item,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_dense_int_sum",
+      "forbid": [
+        "call\t{{p}}, item_at,",
         "dmov\t{{r}}, d:({{r}})"
       ],
       "expect": [
@@ -33,9 +56,9 @@
       ]
     },
     {
-      "in_func": "_dense_int_linear_sum_#",
+      "in_func": "mvp_#_dense_int_linear_sum",
       "forbid": [
-        "call\titem_at_p, item_at",
+        "call\t{{p}}, item_at,",
         "dmov\t{{r}}, d:({{r}})"
       ],
       "expect": [

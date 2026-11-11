@@ -1,24 +1,24 @@
 {
   "schema_version": 1,
-  "description": "T21-2e: call-site string lane. count_a's `s` is passed a string literal by one caller and an untypable local-call result by another; the closed string edge among typable callers plus subscript-only use selects the String* lane. T22 replaces the one-character Item materialization (`fn_string_ascii_at`) with fn_string_char_eq_ascii, preserving the same String* lane while avoiding allocation for the literal comparison. first's `s` is also passed an array literal, a concrete non-string caller, so it keeps the boxed parameter and the generic subscript. The .txt golden pins that the untypable caller (make(4)) still reaches the slow body correctly on both tiers.",
+  "description": "D7.3.1/S7.1.1v3: MVP compares guarded ASCII bytes directly; ord-at retains Unicode and absent-index semantics.",
   "checks": [
     {
-      "in_func": "_count_a_#",
+      "in_func": "mvp_#_count_a",
       "expect": [
-        "call\tfn_string_char_eq_ascii_p, fn_string_char_eq_ascii",
-        "call\tfn_len_s_p, fn_len_s"
+        "call\t{{p}}, fn_string_ord_at,",
+        "call\t{{p}}, fn_len_s,"
       ],
       "forbid": [
-        "call\tfn_index_p, fn_index",
-        "call\titem_at_p, item_at",
-        "call\tfn_string_ascii_at_p, fn_string_ascii_at",
-        "call\tfn_len_p, fn_len"
+        "call\t{{p}}, fn_index,",
+        "call\t{{p}}, item_at,",
+        "call\t{{p}}, fn_string_ascii_at,",
+        "call\t{{p}}, fn_len,"
       ]
     },
     {
-      "in_func": "_first_#",
+      "in_func": "mvp_#_first",
       "forbid": [
-        "call\tfn_string_ascii_at_p, fn_string_ascii_at"
+        "call\t{{p}}, fn_string_ascii_at,"
       ]
     }
   ]

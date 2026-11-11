@@ -10891,6 +10891,98 @@ let doneB=b.next();check(doneB.done&&doneB.value===36&&readB()===36);true;
 )JS");
 }
 
+TEST_F(JsMvpLmd, IntrinsicGeneratorStepsRetainProtocolAndScalarHomes) {
+    boolean(R"JS(
+function check(value){if(!value)throw 'intrinsic generator protocol'}
+function* scalars(){for(let i=0;i<2000;i++)yield i%2?5e-324:-0}
+let count=0;
+for(const value of scalars()){check(count%2?value===5e-324:Object.is(value,-0));count++}
+check(count===2000);
+let doneReads=0,valueReads=0,closed=0;
+const record={get done(){doneReads++;return false},get value(){valueReads++;return 5e-324}};
+const input={next(){return record},return(){closed++;return {done:true}},[Symbol.iterator](){return this}};
+function* delegate(value){yield* value}
+for(const value of delegate(input)){check(value===5e-324);break}
+check(doneReads===2&&valueReads===1&&closed===1);
+const visible=delegate(input);check(visible.next()===record);visible.return();
+let reads=0,steps=0;
+const overridden=scalars();
+Object.defineProperty(overridden,'next',{get(){reads++;return function(){steps++;return {done:steps>2,value:steps}}}});
+let total=0;for(const value of overridden)total+=value;
+check(reads===1&&steps===3&&total===3);
+doneReads=0;valueReads=0;closed=0;
+const [,selected]=input;
+check(doneReads===2&&valueReads===1&&selected===5e-324&&closed===1);
+true;
+)JS");
+    ASSERT_NE(context, nullptr);
+    EXPECT_EQ(context->side_root_top, context->side_root_base);
+    EXPECT_LT(context->side_number_top - context->side_number_base, 4);
+}
+
+TEST_F(JsMvpLmd, GeneratorResultOwnDescriptorsAndCallTimeEffects) {
+    boolean(R"JS(
+function check(value){if(!value)throw 'generator result ownership'}
+let effects=0,body=0,setters=0;
+// descriptor objects must not inherit the value setter being installed.
+const setterDescriptor=Object.create(null);
+setterDescriptor.set=function(v){setters++};setterDescriptor.configurable=true;
+Object.defineProperty(Object.prototype,'value',setterDescriptor);
+Object.defineProperty(Object.prototype,'done',setterDescriptor);
+function* values(value){body++;yield value;return 5e-324}
+let fresh=values(5e-324);check(body===0);fresh.return();check(body===0);
+let current=values(5e-324),first=current.next(),last=current.next();
+check(setters===0&&body===1&&first.value===5e-324&&!first.done&&last.value===5e-324&&last.done);
+check(Object.getPrototypeOf(first)===Object.prototype&&Object.keys(first).join(',')==='value,done');
+const descriptor=Object.getOwnPropertyDescriptor(first,'value');
+check(descriptor.writable&&descriptor.enumerable&&descriptor.configurable);
+gc();check(first.value===5e-324&&last.value===5e-324);
+function* eager(value=(effects++,2)){body++;yield value}
+const before=eager();check(effects===1&&body===1);before.return();check(body===1);
+function* invalid({value}){yield value}
+let threw=false;try{invalid(null)}catch(e){threw=e instanceof TypeError}check(threw);
+delete Object.prototype.value;delete Object.prototype.done;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, IntrinsicGeneratorStepKeepsBorrowedNextErrorRealm) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    Item result = run(R"JS(
+const child=$262.createRealm();
+const foreignNext=child.evalScript('(function*(){})().next');
+let current;
+function* source(){
+    try {for(const value of current){}}
+    catch(error){yield Object.getPrototypeOf(error)===child.global.TypeError.prototype}
+}
+const localNext=source.prototype.next;
+current=source();current.next=foreignNext;
+localNext.call(current).value===true;
+)JS", &host);
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsMvpLmd, LazyGeneratorOwnsBorrowedReceiverScalar) {
+    run("function* receiver(){'use strict';yield this;return this} receiver;");
+    RootFrame roots(2);
+    Rooted<Item> function(roots, mvp_lmd_result(execution)), iterator(roots, ItemNull);
+    ASSERT_EQ(get_type_id(function.get()), LMD_TYPE_FUNC);
+    uint64_t home = 0;
+    Item receiver = lambda_item_adopt_scalar_home(push_d(5e-324), &home);
+    ASSERT_TRUE(lambda_item_uses_scalar_home(receiver));
+    iterator.set(mvp_lmd_class_invoke(function.get(), receiver, NULL, 0, make_js_undefined()));
+    ASSERT_FALSE(item_is_error(iterator.get()));
+    // the call borrowed this native home; an outliving generator must own it.
+    double changed = 42.75;
+    memcpy(&home, &changed, sizeof(home));
+    heap_gc_collect();
+    auto* program = ((MvpLmdCallable*)function.get().function)->program;
+    Item result = mvp_lmd_generator_resume(program, iterator.get(), make_js_undefined(), 0);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(mvp_lmd_class_property(result, js_name_item("value"), ItemNull, LMD_PROP_GET).get_double(), 5e-324);
+}
+
 TEST_F(JsMvpLmd, MirDirectEvalGeneratorParameterCells) {
     boolean(R"JS(
 function check(x){if(!x)throw 'generator parameters'}

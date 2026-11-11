@@ -1,35 +1,39 @@
 {
   "schema_version": 1,
-  "description": "T29-2 (D4.2.5, D4.2.6): a typed path store through a declared record and a certified record array compares no shape pointer at any step (only the certificate's three compares remain) and tests only the certificate and the optional element for null; an undeclared root takes the generic setter.",
+  "description": "D4.2.5/D4.3.3/S9.2.2: admitted record paths reuse reified prefixes, validate a live array certificate and each owner\u2019s live COW state, retain an optional-child null test, and share the checked path setter on a miss. An unannotated returned record retains its canonical open COW path.",
   "checks": [
     {
-      "in_func": "_set_cell_#",
-      "expect": [
-        "call\tlambda_map_path_set_checked_keys"
-      ],
-      "count": {
-        "beq\t": 2,
-        "bne\t": 3
+      "in_func": "mvp_#_set_cell",
+      "in_range": {
+        "from": "p:16(",
+        "to": "call\t{{p}}, lambda_map_path_set_checked_keys,"
       },
       "expect_seq": [
-        {
-          "pattern": "mov\t{{r}}, u8:4({{r}})"
-        },
-        {
-          "pattern": "mov\t{{r}}, i64:64({{r}})"
-        },
-        {
-          "pattern": "mov\ti64:({{r}}), "
-        },
-        {
-          "pattern": "call\tlambda_map_path_set_checked_keys"
-        }
+        "mov\t{{r:array}}, i64:({{r}})",
+        "mov\t{{r:cert}}, i64:64({{r}})",
+        "mov\t{{r}}, u16:",
+        "mov\t{{r}}, u16:",
+        "mov\t{{r:child}}, i64:({{r}})",
+        "mov\t{{r:data}}, p:16({{r}})",
+        "mov\ti64:({{r:data}}), {{r}}"
+      ],
+      "expect": [
+        "and\t{{r}}, {{r}}, 4294979584"
+      ],
+      "forbid": [
+        "i64:144("
       ]
     },
     {
-      "in_func": "_set_inferred_#",
+      "in_func": "mvp_#_set_cell",
+      "count": {
+        "call\t{{p}}, lambda_map_path_set_checked_keys,": 1
+      }
+    },
+    {
+      "in_func": "mvp_#_set_inferred",
       "expect": [
-        "call\tfn_map_set"
+        "call\t{{p}}, cow_path_set_keys,"
       ]
     }
   ]

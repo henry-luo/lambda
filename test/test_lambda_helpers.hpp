@@ -16,6 +16,8 @@
 #include "test_script_discovery.hpp"
 #include "test_process.h"
 #include "test_lambda_compiler.hpp"
+#include "test_batch_process.hpp"
+#include "lib/file.h"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -147,16 +149,17 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 // `tier` pins LAMBDA_EXEC_BACKEND (e.g. "jit"); NULL keeps the default auto tier, which
 // only reaches the JIT for functions hot enough to promote.
 inline char* execute_lambda_script(const char* script_path, bool is_procedural = false,
-        const char* tier = NULL, const char* compiler = NULL) {
+        const char* tier = NULL, const char* compiler = NULL,
+        const char* executable = LAMBDA_EXE) {
     LambdaTestCompilerEnv environment(tier, nullptr, compiler);
     if (!environment.valid) return nullptr;
-    const char* args[5] = {LAMBDA_EXE};
+    const char* args[5] = {executable};
     unsigned count = 1;
     if (is_procedural) args[count++] = "run";
     args[count++] = "--no-log"; args[count++] = script_path;
     ShellOptions options = {};
     options.env = environment.entries;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = shell_exec(executable, args, &options);
     if (result.exit_code != 0 || result.timed_out || result.output_limit_exceeded) {
         ADD_FAILURE() << script_path << ": Lambda exit " << result.exit_code << "\n"
             << (result.stderr_buf ? result.stderr_buf : "");
@@ -370,19 +373,11 @@ inline void strip_lambda_protocol_lines(char* output) {
     *write = '\0';
 }
 
-// Helper function to test lambda script against expected output file
-inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path,
-        bool is_procedural, const char* tier = NULL, const char* compiler = NULL) {
-    const char* script_name = strrchr(script_path, '/');
-    script_name = script_name ? script_name + 1 : script_path;
-
+inline void test_lambda_output_against_file(char* actual_output, const char* script_path,
+        const char* expected_file_path) {
     // direct and tier-parity fixtures use the same platform golden as discovery.
     char* expected_output = read_expected_output(platform_expected_path(expected_file_path).c_str());
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
-
-    char* actual_output = execute_lambda_script(script_path, is_procedural, tier, compiler);
-    ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path
-        << (tier ? " (LAMBDA_EXEC_BACKEND=" : "") << (tier ? tier : "") << (tier ? ")" : "");
 
     // Trim whitespace from actual output
     trim_trailing_whitespace(actual_output);
@@ -393,12 +388,61 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
     trim_trailing_whitespace(actual_output);
 
     // Compare outputs
-    ASSERT_STREQ(expected_output, actual_output)
+    EXPECT_STREQ(expected_output, actual_output)
         << "Output mismatch for script: " << script_path
         << " (expected " << strlen(expected_output) << " chars, got " << strlen(actual_output) << " chars)";
 
     free(expected_output);
+}
+
+// Helper function to test lambda script against expected output file
+inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path,
+        bool is_procedural, const char* tier = NULL, const char* compiler = NULL,
+        const char* executable = LAMBDA_EXE) {
+    char* actual_output = execute_lambda_script(script_path, is_procedural, tier, compiler, executable);
+    ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path
+        << (tier ? " (LAMBDA_EXEC_BACKEND=" : "") << (tier ? tier : "") << (tier ? ")" : "");
+    test_lambda_output_against_file(actual_output, script_path, expected_file_path);
     free(actual_output);
+}
+
+// share immutable imported code between fixtures, with a fresh runtime/heap per script (D8.5.1).
+inline void test_lambda_batch_against_files(const char* const* scripts,
+        const char* const* expected, size_t count, bool procedural, const char* tier) {
+    ASSERT_TRUE(create_dir("temp"));
+    const size_t chunk_size = 32;
+    for (size_t start = 0; start < count; start += chunk_size) {
+        size_t size = count - start < chunk_size ? count - start : chunk_size;
+        TestBatchResult results[chunk_size] = {};
+        StrBuf* manifest = strbuf_new();
+        for (size_t i = 0; i < size; i++)
+            strbuf_append_format(manifest, "%s%s\n", procedural ? "run " : "", scripts[start + i]);
+        char path[160];
+        snprintf(path, sizeof(path), "temp/tier_batch_%d_%p.txt", (int)getpid(), (void*)results);
+        int written = write_text_file_atomic(path, manifest->str);
+        strbuf_free(manifest);
+        ASSERT_EQ(written, 0) << path;
+        const char* args[] = {LAMBDA_EXE, "test-batch", "--no-log", "--timeout=60", nullptr};
+        LambdaTestCompilerEnv environment(tier);
+        ShellOptions options = {};
+        options.env = environment.entries;
+        options.stdin_path = path;
+        options.timeout_ms = (int)size * 65000;
+        ShellResult process = shell_exec(LAMBDA_EXE, args, &options);
+        remove(path);
+        StrBuf* error = strbuf_new();
+        bool decoded = test_batch_decode(process, scripts + start, size, results, error);
+        EXPECT_TRUE(decoded) << error->str << "\n" << (process.stderr_buf ? process.stderr_buf : "");
+        for (size_t i = 0; i < size; i++) {
+            SCOPED_TRACE(scripts[start + i]);
+            EXPECT_EQ(results[i].exit_code, 0) << (results[i].output ? results[i].output->str : "");
+            if (decoded && results[i].exit_code == 0)
+                test_lambda_output_against_file(results[i].output->str, scripts[start + i], expected[start + i]);
+            test_batch_result_free(&results[i]);
+        }
+        strbuf_free(error);
+        shell_result_free(&process);
+    }
 }
 
 // ============================================================================
@@ -652,29 +696,6 @@ inline size_t lambda_capture_batch_chunk_size() {
     return BATCH_CHUNK_SIZE;
 }
 
-// Max parallel sub-batch processes to avoid resource exhaustion. A Lambda
-// baseline run already shares the host with the other GTest binaries; eight
-// compiler children can exhaust VM/file-descriptor pressure and terminate a
-// child before it emits its final BATCH_END record.
-static const size_t MAX_PARALLEL_LAMBDA_BATCHES = 4;
-
-// honor the suite allocation as well as capture limits so nested pools cannot
-// multiply the shared runner's process budget.
-static size_t lambda_batch_worker_limit(size_t batch_count) {
-    size_t limit = std::min(MAX_PARALLEL_LAMBDA_BATCHES, batch_count);
-    const char* limits[] = {"AST_TUNE_BATCH_WORKERS", "LAMBDA_TEST_MAX_CONCURRENT"};
-    for (const char* name : limits) {
-        const char* override_value = getenv(name);
-        if (!override_value || !*override_value) continue;
-        char* end = nullptr;
-        unsigned long parsed = strtoul(override_value, &end, 10);
-        if (end != override_value && *end == '\0' && parsed > 0) {
-            if (parsed < limit) limit = (size_t)parsed;
-        }
-    }
-    return limit;
-}
-
 // Run multiple scripts using test-batch command, splitting into sub-batches
 // to avoid memory/state accumulation in the lambda.exe process.
 // Sub-batches run in parallel threads for faster execution.
@@ -701,7 +722,7 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     std::atomic<size_t> next_batch{0};
     std::atomic<size_t> completed_scripts{0};
     std::mutex progress_mutex;
-    size_t num_workers = lambda_batch_worker_limit(batches.size());
+    size_t num_workers = test_batch_worker_limit(batches.size());
     std::vector<std::thread> threads;
     for (size_t w = 0; w < num_workers; w++) {
         threads.emplace_back([&]() {

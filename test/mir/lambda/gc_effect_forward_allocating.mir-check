@@ -1,19 +1,30 @@
 {
   "schema_version": 1,
-  "description": "D6.3.1-D6.3.2/S7.4.2v3: an allocating direct callee retains the live string and its boxed success/error join. The int^ return reuses the exact integer outcome proof, removing three admission-only root slots. The string is still saved before the allocating call and reloaded before the NO_GC length call.",
+  "description": "D5.3.1/D6.3.2\u2013D6.3.3: the allocating leaf inlines; its fill call publishes the live string before its stable register is used by the noncollecting length read.",
   "checks": [
     {
-      "in_func": "_gc_order_alloc_caller_#",
+      "in_func": "mvp_#_gc_order_alloc_caller",
       "expect": [
-        "call\t_gc_order_alloc_leaf_",
-        "call\tlambda_stack_is_exhausted",
-        "call\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, {{r}}, runtime, 2, 0"
+        "call\t{{p}}, fn_fill,",
+        "call\t{{p}}, lambda_stack_is_exhausted,",
+        "call\t{{p}}, lambda_side_stack_ensure_for,"
       ],
       "expect_seq": [
-        "mov\ti64:({{r}}), %p1",
-        "call\t_gc_order_alloc_leaf_",
-        "mov\t%p1, i64:({{r}})",
-        "call\tfn_len_s_p, fn_len_s"
+        {
+          "pattern": "mov\t{{r:text}}, arg0"
+        },
+        {
+          "pattern": "mov\ti64:({{r:roots}}), {{r:text}}"
+        },
+        {
+          "pattern": "call\t{{p}}, fn_fill,"
+        },
+        {
+          "pattern": "mov\t{{r:arg}}, {{r:text}}"
+        },
+        {
+          "pattern": "call\t{{p}}, fn_len_s, {{r}}, {{r:arg}}"
+        }
       ],
       "forbid": [
         "call\tlambda_type_check_lazy"

@@ -29,11 +29,10 @@ fn colors(id,palette) array {
     else [[68,74,73],[150,156,147],[227,224,206]]
 }
 
-fn pixel(id,x,y,n,key,detail,palette) array^ {
+fn pixel(id,x,y,n,grain,detail,palette) array^ {
     let u = float(x)/float(SIZE)
     let v = float(y)/float(SIZE)
     let c = colors(id,palette)
-    let grain = rng.unit(rng.at(key,y*SIZE+x))
     let repeats = float(2+detail);
     if (id == "wood") (let wave = sin(2.0*math.pi*(repeats*v+0.3*sin(2.0*math.pi*u)+n*0.3)),
         mix(c[0],c[2],0.45+0.33*wave+0.045*grain))
@@ -63,8 +62,10 @@ pub fn generate(seed,id,detail,palette) map^ {
     let key = rng.derive(rng.key(seed),id)
     let gen = noise.make(key,{kind:'simplex',fractal:'fbm',octaves:3,frequency:0.012+0.003*float(detail),period:[float(SIZE),float(SIZE)]})^
     let field = noise.field(gen,SIZE,SIZE)
+    // row-major keyed draws match unit(at(key,y*SIZE+x)) without per-pixel RNG calls.
+    let grains = rng.units(key,SIZE*SIZE)^
     let samples = reshape([for (y in 0 to (SIZE-1),x in 0 to (SIZE-1))
-        for (c in [*pixel(id,x,y,field[y][x],key,detail,palette),255]) u8(c)],[SIZE,SIZE,4])
+        for (c in [*pixel(id,x,y,field[y][x],grains[y*SIZE+x],detail,palette),255]) u8(c)],[SIZE,SIZE,4])
     let raster = img.from_array(samples)^
     let encoded = img.encode(raster,{format:'png'})^;
     {recipe:recipe,uri:media.data_uri(encoded,"image/png")^,bytes:encoded,field:field,generator:gen,

@@ -1,37 +1,56 @@
 {
   "schema_version": 1,
-  "description": "Tune29 §19.1 (D5.4.4, COW Appendix D): a named handle passed as a plain argument to a callee that keeps no root stays a borrow, with its store-back inside one arm (CW36); a callee that may return the handle's root keeps the borrow but the call-site result mark shares it, so the later write detaches; handing the root to a `var` writer while the copy is alive snapshots the bind.",
+  "description": "S9.1.2\u2013S9.1.3v3/D5.4.4: MVP keeps rooted RMW handles for read-only/escaping calls; an intervening var mutation uses a snapshot and refreshes the checked place.",
   "checks": [
     {
-      "in_func": "_read_then_write_#",
+      "in_func": "mvp_#_read_then_write",
       "expect": [
-        "call\tcow_bind_rmw_handle"
+        "call\t{{p}}, cow_bind_rmw_root,",
+        "call\t{{p}}, index_assign_cow,"
       ],
       "forbid": [
-        "call\tcow_bind_var"
+        "call\t{{p}}, cow_bind_var,"
       ]
     },
     {
-      "in_func": "_root_escapes_#",
+      "in_func": "mvp_#_root_escapes",
       "expect_seq": [
         {
-          "pattern": "call\tcow_bind_rmw_handle"
+          "pattern": "call\t{{p}}, cow_bind_rmw_root,"
         },
         {
-          "pattern": "call\tcow_mark_shared"
+          "pattern": "mov\t{{r:flags}}, u8:4({{r:owner}})"
         },
         {
-          "pattern": "call\tmap_set_cow"
+          "pattern": "or\t{{r:marked}}, {{r:flags}}, 1"
+        },
+        {
+          "pattern": "mov\tu8:4({{r:owner}}), {{r:marked}}"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_map_set_checked,"
         }
       ]
     },
     {
-      "in_func": "_root_to_var_#",
+      "in_func": "mvp_#_root_to_var",
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:flags}}, u8:4({{r:owner}})"
+        },
+        {
+          "pattern": "or\t{{r:marked}}, {{r:flags}}, 1"
+        },
+        {
+          "pattern": "mov\tu8:4({{r:owner}}), {{r:marked}}"
+        }
+      ],
       "expect": [
-        "call\tcow_bind_var"
+        "call\t{{p}}, lambda_map_path_set_checked_keys,",
+        "call\t{{p}}, index_assign_cow,"
       ],
       "forbid": [
-        "call\tcow_bind_rmw_handle"
+        "call\t{{p}}, cow_bind_rmw_root,"
       ]
     }
   ]

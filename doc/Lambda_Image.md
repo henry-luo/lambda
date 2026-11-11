@@ -104,6 +104,12 @@ pixels. Source/settings changes require starting a new continuation; equal
 source snapshots are interchangeable under **S5.4.3**. Pass returned state
 unchanged. Retaining an earlier state permits a separate preview branch.
 
+The brush is `lambda.paint`'s round dab brush with the linear falloff ([paint](Lambda_Packages.md#30-paint--painting-with-brushes)).
+Its wash dabs accumulate on u8 coverage tiles, and the composite against the frozen
+source stays native. In the returned state, `distance` is the stroke's arc length so
+far and `next` is the next dab index. Dabs sit at fixed arc-length steps, so a split
+stroke matches the whole stroke by construction.
+
 ```lambda
 let settings = {size:20,flow:0.5,opacity:0.6,color:[1,0,0,1]}
 let first = img.paint_stroke_step(source,[[10,10,0.5]],settings)^

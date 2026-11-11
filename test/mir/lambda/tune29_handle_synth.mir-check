@@ -1,27 +1,32 @@
 {
   "schema_version": 1,
-  "description": "T29-1 (D5.4.4): a record place spelled in several statements is navigated once -- one certificate check, one un-sharing slow arm -- and its later reads and writes go through the handle; replacing the container between spellings forces a second navigation.",
+  "description": "D5.4.4/S9.1.2: MVP guards packed record fields per access without a synthetic Full handle. Fixed paths keep native integer stores and checked path publication; replacement keeps a fresh checked root setter.",
   "checks": [
     {
-      "in_func": "_step_#",
+      "in_func": "mvp_#_step",
+      "expect": [
+        "and\t{{r}}, {{r}}, 4294979584",
+        "mov\ti64:",
+        "call\t{{p}}, lambda_map_path_set_checked_keys,"
+      ],
       "count": {
-        "and\t{{r}}, {{r}}, 1535": 1,
-        "call\tcow_place_leaf_fixed": 1,
-        "call\tlambda_map_path_set_checked_keys": 2
-      },
-      "forbid": [
-        "call\titem_at",
-        "call\tfn_index"
-      ]
+        "and\t{{r}}, {{r}}, 4294979584": {
+          "max": 9
+        }
+      }
     },
     {
-      "in_func": "_reset_#",
+      "in_func": "mvp_#_reset",
+      "expect": [
+        "and\t{{r}}, {{r}}, 4294979584",
+        "mov\ti64:",
+        "call\t{{p}}, lambda_map_set_checked,"
+      ],
       "count": {
-        "and\t{{r}}, {{r}}, 1535": 2
-      },
-      "forbid": [
-        "call\tcow_place_leaf_fixed"
-      ]
+        "and\t{{r}}, {{r}}, 4294979584": {
+          "max": 2
+        }
+      }
     }
   ]
 }

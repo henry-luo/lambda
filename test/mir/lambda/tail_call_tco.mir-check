@@ -1,18 +1,24 @@
 {
   "schema_version": 1,
-  "description": "Self-recursive tail call is turned into a counter-guarded loop: the function contains no call back into itself and retains the documented 1000000 iteration cap. Internal register spelling is deliberately opaque, so this checks the emitted loop shape rather than a diagnostic register name.",
+  "description": "D7.3.2/D8.2.6: MVP emits native integer tail recursion as a loop with an entry stack guard, without Full iteration counters, self calls or Item round trips. Overflow retains one native integer slow helper.",
   "checks": [
     {
-      "in_func": "_factorial_#",
+      "in_func": "mvp_#_factorial",
       "forbid": [
-        "call\t_factorial_"
+        "call\tmvp_{{n}}_factorial_dp",
+        "call\t{{p}}, int2it_lane,",
+        "call\t{{p}}, lambda_item_to_int_lane_c,"
       ],
       "expect": [
-        "add\t{{r}}, {{r}}, 1",
-        "ble\t"
+        "bstart\t",
+        "bgt\t",
+        "sub\t",
+        "mulo\t",
+        "bo\t",
+        "jmp\t"
       ],
       "count": {
-        ", 1000000": 1
+        "call\t{{p}}, lambda_int_lane_mul_slow,": 1
       }
     }
   ]

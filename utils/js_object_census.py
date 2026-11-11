@@ -86,7 +86,7 @@ def map_kind_disposition(path: Path, line: str) -> tuple[str, str]:
         return "physical_runtime_carrier", "runtime carrier allocation/trace/payload"
     if rel.endswith("lambda/js/js_runtime_state.cpp"):
         return "physical_array_companion", "runtime array companion allocation"
-    if rel.endswith("lambda/runtime/transpile-mir.cpp"):
+    if rel.endswith("lambda/runtime/const_materialize.cpp"):
         return "physical_input", "Input/compiled Map construction"
     if rel.endswith("lambda/runtime/lambda-eval.cpp"):
         return "physical_copy", "container copy preserves physical layout"

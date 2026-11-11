@@ -538,6 +538,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"midtown", "#midtown #city", true},
         {"slides", "#slides-editor #stage"},
         {"sheet", "#sheet-grid"},
+        {"paint", "#paint #canvas"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},
         {"chart", ".demo-tile"},
     };

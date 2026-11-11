@@ -1,36 +1,85 @@
 {
   "schema_version": 1,
-  "description": "D6.2.2/D6.3.1-D6.3.2: scalar homes preserve GC ownership, while callers whose live-string observation is a NO_GC length leaf use a native stack guard. Tune33: the eligible float leaf is emitted inline, retaining its NO_GC push_d and native stack guard.",
+  "description": "D6.2.1/D6.3.2: MVP wide identities use owned homes and native float identities need no boxing. Inlined consumers keep noncollecting length calls and native stack probes; only cold capacity growth can reserve side stacks. D6.2.3: native wide inputs publish boxed values by storing directly into their precise scalar homes.",
   "checks": [
     {
-      "in_func": "_gc_scalar_home_i64_#",
-      "expect": ["call\tbox_int64_value_p, box_int64_value", "bstart\t{{r}}"],
-      "forbid": ["call\tlambda_stack_is_exhausted"]
+      "in_func": "mvp_#_gc_scalar_home_i64",
+      "expect": [
+        "bstart\t{{r}}"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_stack_is_exhausted,",
+        "call\t{{p}}, push_d,",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,"
+      ],
+      "expect_seq": [
+        "mov\t{{r:param}}, arg0",
+        "mov\t{{r:raw}}, {{r:param}}",
+        "mov\ti64:({{r:home}}), {{r:raw}}",
+        "or\t{{r}}, {{r:home}}, 432345564227567616"
+      ]
     },
     {
-      "in_func": "_gc_scalar_home_u64_#",
-      "expect": ["call\tbox_uint64_value_p, box_uint64_value", "bstart\t{{r}}"],
-      "forbid": ["call\tlambda_stack_is_exhausted"]
+      "in_func": "mvp_#_gc_scalar_home_u64",
+      "expect": [
+        "bstart\t{{r}}"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_stack_is_exhausted,",
+        "call\t{{p}}, push_d,",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,"
+      ],
+      "expect_seq": [
+        "mov\t{{r:param}}, arg0",
+        "mov\t{{r:raw}}, {{r:param}}",
+        "mov\ti64:({{r:home}}), {{r:raw}}",
+        "or\t{{r}}, {{r:home}}, 504403158265495552"
+      ]
     },
     {
-      "in_func": "_gc_scalar_home_float_#",
-      "expect": ["call\tpush_d_p, push_d", "bstart\t{{r}}"],
-      "forbid": ["call\tlambda_stack_is_exhausted"]
+      "in_func": "mvp_#_gc_scalar_home_float",
+      "expect": [
+        "bstart\t{{r}}"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_stack_is_exhausted,",
+        "call\t{{p}}, push_d,"
+      ]
     },
     {
-      "in_func": "_gc_scalar_use_i64_#",
-      "expect": ["call\t_gc_scalar_home_i64_", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
-      "forbid": ["call\tlambda_stack_is_exhausted"]
+      "in_func": "mvp_#_gc_scalar_use_i64",
+      "expect": [
+        "bstart\t{{r}}",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, fn_len_s,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_stack_is_exhausted,",
+        "call\t{{p}}, push_d,"
+      ]
     },
     {
-      "in_func": "_gc_scalar_use_u64_#",
-      "expect": ["call\t_gc_scalar_home_u64_", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
-      "forbid": ["call\tlambda_stack_is_exhausted"]
+      "in_func": "mvp_#_gc_scalar_use_u64",
+      "expect": [
+        "bstart\t{{r}}",
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, fn_len_s,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_stack_is_exhausted,",
+        "call\t{{p}}, push_d,"
+      ]
     },
     {
-      "in_func": "_gc_scalar_use_float_#",
-      "expect": ["call\tpush_d_p, push_d", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
-      "forbid": ["call\tlambda_stack_is_exhausted"]
+      "in_func": "mvp_#_gc_scalar_use_float",
+      "expect": [
+        "bstart\t{{r}}",
+        "call\t{{p}}, fn_len_s,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_stack_is_exhausted,",
+        "call\t{{p}}, push_d,"
+      ]
     }
   ]
 }

@@ -551,7 +551,10 @@ results land in typed variables.
 > `needs_boxed_entry` / `needs_boxed_slow_body` on the per-function native
 > info, not as the `_n`/`_b` C symbols this record's early sections describe.
 
-### DD9 — Structured returns: `Ret*` is the error ABI, not a general return convention
+### DD9 — Structured returns (historical)
+
+> **Current status:** The `Ret*` family below describes the retired C backend.
+> Active code uses the explicit completion and companion-lane ABI (D1.4, D6.2.1).
 
 Returning `Item` makes "value", "null", and "error" indistinguishable without a
 tag check, gives a native-returning function no way to signal failure, and
@@ -593,31 +596,29 @@ error pointer when one is recoverable and to the non-null sentinel
 - **`.err` may be a sentinel — never dereference it blindly, never hand it to
   `err2it()`**
 
-**Current reach (DD9.2).** `Ret*` is live as the **runtime C ABI for
-`can_raise` system functions and procedures** (`pn_send`, `pn_receive`,
-`pn_wait1`, io, …) declared in `lambda.h`. It is not the general MIR Direct
-user-function return convention; MIR Direct's own error returns use the
-`ITEM_ERROR` sentinel path, and the current return convention is
-`Lambda_Design_Compiling_Return_Value.md` (v3, companion-lane pairs). The two
-coexist: `Ret*` at the C runtime boundary, lanes inside generated code.
+**Current reach (DD9.2).** The historical `Ret*` types are absent from the
+active headers. Lambda's native runtime declarations are in `lambda.hpp` and
+its runtime-owned headers; the current return convention is documented in
+`Lambda_Design_Compiling_Return_Value.md` (v3, companion-lane pairs).
 
-**C/C++ dual-compilation constraint (DD9.3).** `lambda.h` compiles as C (for
-the JIT runtime) **and** as C++. In C++ mode `Item` is only forward-declared in
-`lambda.h`; the full struct is in `lambda.hpp`. Therefore **any inline function
-in `lambda.h` taking or returning `Item` by value must sit inside
-`#ifndef __cplusplus`**, with a C++ counterpart in `lambda.hpp` after the
-struct. `Ret*` types with no `Item` field (`RetBool`, `RetMap`, …) and their
-constructors are unconditional; `RetItem`, `ri_ok`/`ri_err`,
-`item_to_ri`/`ri_to_item`, `p2it`, `err2it`/`it2err`, and the container unbox
-helpers are split.
+**C/C++ dual-compilation constraint (DD9.3).** Native C components, including
+the collector and MIR runtime, and C++ consumers use the shared value ABI.
+In C++ mode `Item` is forward-declared in `lambda.h` and defined in
+`lambda/core/value.hpp`. A by-value inline needs a complete `Item`, so its C
+form is guarded by `#ifndef __cplusplus` and its C++ form follows the full
+struct definition. Direct MIR does not parse or embed `lambda.h` in generated
+modules (D1.6); this constraint comes from native consumers. The C and C++
+forms of `p2it`, `err2it`/`it2err`, and the container unbox helpers remain in
+their respective value-model headers.
 
-### DD9.4 — Unboxing is type-checked, never a blind cast
+### DD9.4 — Container admission and unboxing
 
-Container unboxing goes through `it2map`, `it2list`, `it2elmt`, `it2obj`,
-`it2arr`, `it2range`, `it2path`, each of which checks the tag byte and the
-`Container.type_id` and returns `NULL` on mismatch. Blind `(void*)` casts —
-what the C path's early wrapper did — crash on null or type mismatch. `p2it()`
-is the safe inverse: `NULL → ITEM_NULL`.
+The `it2map`, `it2list`, `it2elmt`, `it2obj`, `it2arr`, `it2range` and
+`it2path` helpers are unchecked pointer conversions. The current MIR path
+admits declared container parameters at the boxed boundary before casting;
+`p2it()` maps a null pointer to `ITEM_NULL`. D2.3.3 specifies checked helpers;
+its implementation status records that admission currently meets the safety
+goal while the ruling text awaits a user decision.
 
 ### DD10 — Hot-path lowerings
 
@@ -769,24 +770,20 @@ native function) was designed but **deferred**: the hot narrowing cases (`%`,
 `//`, `len`) are handled inline, and a table would add indirection without
 adding coverage.
 
-### DD12.1 — The JIT header diet has a hard floor
+### DD12.1 — Header ownership after C2MIR
 
-`lambda.h` is embedded byte-for-byte into every C2MIR module, so shrinking it
-shrank JIT parse time. Moving out what the JIT never touched — `TypeKind`,
-`Path`/`PathMeta` (to `lambda-path.h`), `Target`, `Name`, `get_type_name()` —
-cut `lambda.h` 1,239 → 1,061 lines and the embedded payload 4,115 → 3,393 lines
-(**17.5 %**).
+The retired C2MIR backend parsed an embedded copy of `lambda.h` for each
+module. Its header-size and generated-C declaration constraints are historical;
+D1.6 removes that backend. Direct MIR constructs instructions and import
+prototypes without parsing or embedding this header.
 
-The proposal's estimate of 56 % was wrong, and the reason is worth keeping:
-**the JIT reads struct fields directly.** Generated code touches
-`Function.closure_field_count/flags/ptr`, `Range.start/end`, `List.items/length`,
-`Map.data`, `Element.items/length/data`, `String.chars/len`. Those definitions
-cannot leave. Further reduction requires converting field access to accessor
-functions — trading parse time for call overhead.
-
-This decision is **now moot for compile time** (no C2MIR path re-parses the
-header) but remains the correct account of the header's shape and of why the
-container definitions live where they do.
+Generated code still accesses value and runtime fields by their ABI offsets.
+The compiler, collector, native runtime and input consumers must agree on the
+corresponding layouts and call signatures, with layout assertions retained.
+These requirements do not fix the declarations in `lambda.h`: under D9.1.1v4
+and D9.1.3v2, input owns the shared value surface and Lambda owns its runtime
+interface. Moving a declaration must preserve C and C++ consumers, symbol
+linkage, ABI offsets and precise roots.
 
 ---
 

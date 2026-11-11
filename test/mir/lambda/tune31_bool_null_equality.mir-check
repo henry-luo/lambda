@@ -3,14 +3,14 @@
   "description": "Tune31 T31-3 / S5.1.1, S6.1.2, D2.4.2: stable boxed Bool-or-null comparison bindings use canonical Item equality, so null/null, null/bool and bool/bool keep their total equality results without fn_eq/fn_ne.",
   "checks": [
     {
-      "in_func": "_compare_neighbors_#",
+      "in_func": "mvp_#_compare_neighbors",
       "expect": [
         "ne\t{{r}}, {{r}}, {{r}}",
         "eq\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
-        "call\tfn_eq_p, fn_eq",
-        "call\tfn_ne_p, fn_ne"
+        "call\t{{p}}, fn_eq,",
+        "call\t{{p}}, fn_ne,"
       ]
     }
   ]

@@ -1,63 +1,68 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3/S7.1.3v2/S9.2.2: an exact int[][] write guards the ArrayNum kind, owned N-D layout and int lane in one header word, then checks rank and both extents before computing its two strides. The native store precedes the allocation-bearing checked fallback. Parameter registers are preserved directly (%p2 row, %p3 column, %p4 value).",
+  "description": "D4.3.3/S9.1.3v3: MVP checks packed rank/extents and scales each native coordinate once before its unique-owner store. The checked miss uses a precise rooted key span, without constructing a path array.",
   "checks": [
     {
-      "in_func": "_store_#",
+      "in_func": "mvp_#_store",
       "expect_seq": [
         {
-          "pattern": "\tmov\t{{r:header}}, u32:(%p1)"
+          "pattern": "mov\t{{r:header}}, u32:({{r:owner}})"
         },
         {
-          "pattern": "\tand\t{{r:header}}, {{r:header}}, 4278386943"
+          "pattern": "and\t{{r:header}}, {{r:header}}, 4278386943"
         },
         {
-          "pattern": ", {{r:header}}, 65553"
+          "pattern": "bne\tL{{n}}, {{r:header}}, 65553"
         },
         {
-          "pattern": "\tmov\t{{r:shape}}, i64:48(%p1)"
+          "pattern": "mov\t{{r:shape}}, i64:48({{r:owner}})"
         },
         {
-          "pattern": "\tmov\t{{r:rank}}, u8:({{r:shape}})"
+          "pattern": "mov\t{{r:rank}}, u8:({{r:shape}})"
         },
         {
-          "pattern": ", {{r:rank}}, 2"
+          "pattern": "bne\tL{{n}}, {{r:rank}}, 2"
         },
         {
-          "pattern": "\tmov\t{{r:rows}}, i64:40({{r:shape}})"
+          "pattern": "mov\t{{r:rows}}, i64:40({{r:shape}})"
         },
         {
-          "pattern": ", %p2, {{r:rows}}"
+          "pattern": "ubge\tL{{n}}, {{r:row}}, {{r:rows}}"
         },
         {
-          "pattern": "\tmul\t{{r}}, %p2, {{r}}"
+          "pattern": "mul\t{{r}}, {{r:row}}, {{r}}"
         },
         {
-          "pattern": "\tmov\t{{r:columns}}, i64:48({{r:shape}})"
+          "pattern": "mov\t{{r:columns}}, i64:48({{r:shape}})"
         },
         {
-          "pattern": ", %p3, {{r:columns}}"
+          "pattern": "ubge\tL{{n}}, {{r:column}}, {{r:columns}}"
         },
         {
-          "pattern": "\tmul\t{{r}}, %p3, {{r}}"
+          "pattern": "mul\t{{r}}, {{r:column}}, {{r}}"
         },
         {
-          "pattern": "\tmov\ti64:({{r}}), %p4"
+          "pattern": "and\t{{r}}, {{r}}, 4294979584"
         },
         {
-          "pattern": "call\tarray_plain_p, array_plain"
+          "pattern": "mov\ti64:({{r}}), {{r}}"
         },
         {
-          "pattern": "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace"
+          "pattern": "mov\ti64:8({{r:keys}}), {{r}}"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_map_path_set_checked_keys, {{r}}, {{r}}, {{r}}, {{r:keys}}, 196610,"
         }
       ],
       "count": {
-        "\tmul\t{{r}}, %p2, {{r}}": 1,
-        "\tmul\t{{r}}, %p3, {{r}}": 1,
-        "call\tarray_plain_p, array_plain": 1,
-        "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace": 1,
-        "\tubge\t": 2
-      }
+        "\tmul\t": 2,
+        "\tubge\t": 2,
+        "call\t{{p}}, lambda_map_path_set_checked_keys,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, array_push,"
+      ]
     }
   ]
 }

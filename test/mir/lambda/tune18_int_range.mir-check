@@ -1,20 +1,30 @@
 {
   "schema_version": 1,
-  "description": "Tune18 consumes the bounded len() interval before emitting the int53 saturation quartet and second boxing test. Tune27 T27-9: the int53 band test is one shared 64-bit `add v, INT53_MAX` / `ule t, 2 * INT53_MAX` pair instead of GE/LE/AND.",
+  "description": "D2.3.4\u2013D2.3.5: MVP reads array length directly and guards the raw addition before a cold overflow helper. The second private function specializes its closed literal inputs and needs no slow arithmetic or boxing.",
   "checks": [
     {
-      "in_func": "_range18_#",
+      "in_func": "mvp_#_range18",
+      "expect_seq": [
+        "i64:40(",
+        "add\t{{r}}, {{r}}, {{r}}",
+        "ubgt\tL",
+        "jmp\tL",
+        "call\t{{p}}, lambda_int_lane_add_slow,"
+      ],
       "forbid": [
-        "call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow",
-        "call\tint2it_lane_p, int2it_lane",
-        "18014398509481982"
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, int2it_lane,"
       ]
     },
     {
-      "in_func": "_range18_unproven_#",
+      "in_func": "mvp_#_range18_unproven",
       "expect": [
-        "add\t{{r}}, {{r}}, 9007199254740991",
-        "{{r}}, 18014398509481982"
+        "add\t{{r}}, {{r}}, {{r}}"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_add,",
+        "call\t{{p}}, lambda_int_lane_add_slow,",
+        "call\t{{p}}, int2it_lane,"
       ]
     }
   ]

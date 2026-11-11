@@ -1,44 +1,54 @@
 {
   "schema_version": 1,
-  "description": "T20-3 #3 (D2.3.4-D2.3.5): the inline native shift/bitwise lowering opens each operand's proven `int` lane -- the word instruction consumes the raw parameter registers directly. The shl/shr registry rows describe only the boxed fn_*_item fallback; when the emitter requested that Item descriptor for the inline operands, both were boxed before the shift and the tag bits were shifted (paraffins nb(23) = inf, mandelbrot2 `bor: operands must be integer`). The single int2it_lane per function is the result box.",
+  "description": "D2.3.4\u2013D2.3.5/S4.1.2: native shifts and bitwise instructions consume raw copied parameter lanes. MVP finite guards retain one boxed helper per sentinel/invalid-count miss; no operand tag bits reach the word instruction.",
   "checks": [
     {
-      "in_func": "_half_#",
+      "in_func": "mvp_#_half",
       "expect_seq": [
-        { "pattern": "mov\t{{r:c}}, 1" },
-        { "pattern": "rsh\t{{r}}, %p1, {{r:c}}" }
+        "mov\t{{r:param}}, arg0",
+        "mov\t{{r:value}}, {{r:param}}",
+        "mov\t{{r:count}}, 1",
+        "rsh\t{{r}}, {{r:value}}, {{r:count}}"
       ],
       "forbid": [
-        "call\tfn_shr_item_p, fn_shr_item"
+        "call\t{{p}}, fn_shr_item,",
+        "call\t{{p}}, int2it_lane,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_shift",
+      "expect_seq": [
+        "mov\t{{r:a}}, arg0",
+        "mov\t{{r:b}}, arg1",
+        "mov\t{{r:left}}, {{r:a}}",
+        "mov\t{{r:right}}, {{r:b}}",
+        "lsh\t{{r}}, {{r:left}}, {{r:right}}"
       ],
       "count": {
-        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
+        "call\t{{p}}, fn_shl_item,": 1
       }
     },
     {
-      "in_func": "_shift_#",
-      "expect": [
-        "lsh\t{{r}}, %p1, %p2"
-      ],
+      "in_func": "mvp_#_shift",
+      "in_range": {
+        "from": "mov\t{{r}}, arg0",
+        "to": "lsh\t"
+      },
       "forbid": [
-        "call\tfn_shl_item_p, fn_shl_item"
-      ],
-      "count": {
-        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
-      }
+        "call\t{{p}}, int2it_lane,",
+        "360287970189639680"
+      ]
     },
     {
-      "in_func": "_mask_#",
+      "in_func": "mvp_#_mask",
       "expect_seq": [
-        { "pattern": "xor\t{{r:n}}, %p2, -1" },
-        { "pattern": "and\t{{r}}, %p1, {{r:n}}" }
-      ],
-      "forbid": [
-        "call\tfn_band_item_p, fn_band_item",
-        "call\tfn_bnot_item_p, fn_bnot_item"
+        "xor\t{{r}}, {{r}}, -1",
+        "call\t{{p}}, fn_bnot_item,",
+        "and\t{{r}}, {{r}}, {{r}}"
       ],
       "count": {
-        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
+        "call\t{{p}}, fn_bnot_item,": 1,
+        "call\t{{p}}, fn_band_item,": 1
       }
     }
   ]

@@ -19,7 +19,7 @@
         "import\tfn_max2_u",
         "import\tfn_sign_i",
         "import\tfn_sign_f",
-        "call\tfn_abs_p, fn_abs"
+        "call\t{{p}}, fn_abs,"
       ]
     }
   ]

@@ -15,6 +15,8 @@ struct HotwireServerState {
     StrBuf* requests;
 };
 
+static const unsigned kHotwireDrainIdleMs = 100;
+
 static const char* hotwire_header(HttpRequest* request, const char* name) {
     const char* value = http_request_header(request, name);
     return value ? value : "";
@@ -35,7 +37,7 @@ static void hotwire_route(HttpRequest* request, HttpResponse* response, void* da
         http_response_text(response, 200, "lambda-hotwire");
     } else if (!strcmp(request->path, "/slow-fetch")) {
         // Outlast the idle watchdog even if startup timers grant one extra interval.
-        uv_sleep(11000);
+        uv_sleep(kHotwireDrainIdleMs * 3);
         http_response_text(response, 200, "ready");
     } else if (!strcmp(request->path, "/")) {
         http_response_html(response, 200,
@@ -162,7 +164,10 @@ class HotwireHttpTest : public HotwireHttpServerTest, public testing::WithParamI
 TEST_F(HotwireHttpServerTest, PendingFetchOutlivesIdleWatchdog) {
     const char* arguments[] = {"./lambda.exe", "js", "test/js/event_loop_pending_fetch.js",
         "--document", document_url, "--no-log", NULL};
-    ShellEnvEntry environment[] = {{"JS_EXEC_BACKEND", "mir"}, {NULL, NULL}};
+    char idle_ms[16];
+    snprintf(idle_ms, sizeof(idle_ms), "%u", kHotwireDrainIdleMs);
+    ShellEnvEntry environment[] = {{"JS_EXEC_BACKEND", "mir"},
+        {"LAMBDA_JS_DRAIN_IDLE_MS", idle_ms}, {NULL, NULL}};
     ShellOptions options = {};
     options.env = environment;
     options.timeout_ms = 30000;

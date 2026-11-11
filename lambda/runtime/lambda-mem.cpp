@@ -38,124 +38,6 @@ extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc);
 static void gc_finalize_all_objects(gc_heap_t *gc);
 extern "C" void vmap_gc_destroy(void* obj, void* data);
 
-struct LambdaRegionBlock {
-    LambdaRegionBlock* next;
-    size_t capacity;
-    size_t used;
-    uint8_t data[];
-};
-
-struct LambdaRegion {
-    LambdaRegion* next_free;
-    LambdaRegionBlock* blocks;
-};
-
-static const size_t LAMBDA_REGION_BLOCK_BYTES = 64 * 1024;
-
-static LambdaRegionBlock* lambda_region_take_block(Heap* heap, size_t required) {
-    if (!heap) return NULL;
-    LambdaRegionBlock** link = &heap->region_free_blocks;
-    while (*link) {
-        LambdaRegionBlock* block = *link;
-        if (block->capacity >= required) {
-            *link = block->next;
-            block->next = NULL;
-            block->used = 0;
-            return block;
-        }
-        link = &block->next;
-    }
-    size_t capacity = LAMBDA_REGION_BLOCK_BYTES;
-    if (capacity < required && !math_size_align_up(required, 16u, &capacity)) return NULL;
-    size_t block_bytes = 0;
-    if (!lam::checked_add(sizeof(LambdaRegionBlock), capacity, &block_bytes)) return NULL;
-    LambdaRegionBlock* block = (LambdaRegionBlock*)mem_alloc(block_bytes, MEM_CAT_EVAL);
-    if (!block) return NULL;
-    block->next = NULL;
-    block->capacity = capacity;
-    block->used = 0;
-    return block;
-}
-
-extern "C" LambdaRegion* lambda_region_begin(void) {
-    if (!context || !context->heap) return NULL;
-    Heap* heap = context->heap;
-    LambdaRegion* region = heap->region_free;
-    if (region) {
-        heap->region_free = region->next_free;
-    } else {
-        region = (LambdaRegion*)mem_alloc(sizeof(LambdaRegion), MEM_CAT_EVAL);
-        if (!region) return NULL;
-    }
-    region->next_free = NULL;
-    region->blocks = NULL;
-    return region;
-}
-
-extern "C" void* lambda_region_calloc(LambdaRegion* region, size_t size,
-        TypeId type_id) {
-    if (!region || !context || !context->heap || size > UINT32_MAX) return NULL;
-    // Keep forced-GC stress meaningful for temporary graphs: region pointers
-    // are intentionally absent from all_objects, and this summary guarantees
-    // they have no outgoing ordinary-GC edge to trace.
-    gc_heap_maybe_force_collect(context->heap->gc, "lambda_region_calloc");
-    size_t slot_size = 0;
-    if (!lam::checked_add(sizeof(gc_header_t), size, &slot_size) ||
-        !math_size_align_up(slot_size, 16u, &slot_size)) return NULL;
-    LambdaRegionBlock* block = region->blocks;
-    if (!block || block->capacity - block->used < slot_size) {
-        block = lambda_region_take_block(context->heap, slot_size);
-        if (!block) return NULL;
-        block->next = region->blocks;
-        region->blocks = block;
-    }
-    uint8_t* slot = block->data + block->used;
-    block->used += slot_size;
-    // Region slots keep the ordinary adjacent header layout, but are not linked
-    // into all_objects: this first region summary permits no outgoing GC edge.
-    memset(slot, 0, slot_size);
-    gc_header_t* header = (gc_header_t*)slot;
-    header->type_tag = (uint16_t)type_id;
-    header->alloc_size = (uint32_t)size;
-    void* result = (void*)(header + 1);
-    assert_raw_item_pointer(result);
-    return result;
-}
-
-extern "C" void lambda_region_end(LambdaRegion* region) {
-    if (!region || !context || !context->heap) return;
-    Heap* heap = context->heap;
-    LambdaRegionBlock* block = region->blocks;
-    while (block) {
-        LambdaRegionBlock* next = block->next;
-#ifndef NDEBUG
-        // A region value must not survive its proven post-dominating end.
-        memset(block->data, 0xA5, block->used);
-#endif
-        block->used = 0;
-        block->next = heap->region_free_blocks;
-        heap->region_free_blocks = block;
-        block = next;
-    }
-    region->blocks = NULL;
-    region->next_free = heap->region_free;
-    heap->region_free = region;
-}
-
-static void lambda_region_destroy_caches(Heap* heap) {
-    if (!heap) return;
-    while (heap->region_free) {
-        LambdaRegion* next = heap->region_free->next_free;
-        mem_free(heap->region_free);
-        heap->region_free = next;
-    }
-    while (heap->region_free_blocks) {
-        LambdaRegionBlock* next = heap->region_free_blocks->next;
-        mem_free(heap->region_free_blocks);
-        heap->region_free_blocks = next;
-    }
-}
-
 extern "C" void js_function_gc_destroy(void* data);
 
 void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag) {
@@ -832,23 +714,6 @@ extern "C" void* heap_calloc_js_accessor_cell(size_t size) {
     return gc_heap_calloc(context->heap->gc, size, GC_TYPE_JS_ACCESSOR);
 }
 
-extern "C" int64_t lambda_restore_number_frame_top(uint64_t* top) {
-    Context* runtime = (Context*)context;
-    if (!runtime || !top || !runtime->side_number_base ||
-            !runtime->side_number_top || top < runtime->side_number_base ||
-            top > runtime->side_number_top) {
-        // This NO_GC JIT epilogue cannot enter logging because formatting may
-        // allocate before the invalid scalar-frame invariant is terminated.
-        abort();
-    }
-#ifndef NDEBUG
-    // A returned Item must have been adopted before this watermark is restored;
-    // poison makes any missed activation-home escape fail deterministically.
-    memset(top, 0xA5, (size_t)(runtime->side_number_top - top) * sizeof(uint64_t));
-#endif
-    runtime->side_number_top = top;
-    return 0;
-}
 
 extern "C" void* heap_calloc_closure_env(size_t size) {
     if (!context || !context->heap || !context->heap->gc || size == 0) return NULL;
@@ -1288,19 +1153,7 @@ Item push_d(double dval) {
     return flt2it(dval);
 }
 
-extern "C" uint64_t lambda_mir_double_bits(double dval) {
-    AutoAssertNoGC no_gc;
-    uint64_t bits;
-    memcpy(&bits, &dval, sizeof(bits));
-    return bits;
-}
 
-extern "C" double lambda_mir_bits_double(uint64_t bits) {
-    AutoAssertNoGC no_gc;
-    double dval;
-    memcpy(&dval, &bits, sizeof(dval));
-    return dval;
-}
 
 extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
     AutoAssertNoGC no_gc;
@@ -1438,7 +1291,6 @@ void heap_destroy() {
 #ifndef LAMBDA_NO_TASKS
         activation_release_pool();
 #endif
-        lambda_region_destroy_caches(context->heap);
         if (context->heap->array_rep_cert_by_contract)
             hashmap_free(context->heap->array_rep_cert_by_contract);
         // sys.* Mark data and its Input belong to this heap generation.

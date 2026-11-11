@@ -12,7 +12,7 @@
 #include "lib/hashmap_helpers.h"
 #include "mir.h"
 #include "mir-gen.h"
-#include "lambda/lambda.h"
+#include "lambda/lambda.hpp"
 #include "lambda-error.h"
 #include "runtime-state.h"
 #include "sys_func_registry.h"
@@ -328,37 +328,6 @@ void jit_log_code_addresses(MIR_context_t ctx) {
     }
 }
 
-// compile MIR code to native code
-void* jit_gen_func(MIR_context_t ctx, const char *func_name) {
-    log_debug("finding and to load module: %s", func_name);
-    MIR_item_t mir_func = NULL;
-    for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
-        module = DLIST_NEXT (MIR_module_t, module)) {
-        MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
-        log_info("Loaded module: %p, items: %p", module, (void*)mitem);
-        for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
-            print_module_item(mitem);
-            if (mitem->item_type != MIR_func_item) { continue; }
-            if (strcmp(mitem->u.func->name, func_name) == 0) mir_func = mitem;
-        }
-        MIR_load_module(ctx, module);
-    }
-    if (!mir_func) {
-        log_error("Failed to find function '%s'", func_name);
-        return NULL;
-    }
-
-    log_debug("Generating native code...");
-    // link MIR code with external functions
-    MIR_link(ctx, lambda_mir_lazy_enabled()
-        ? MIR_set_lazy_gen_interface : MIR_set_gen_interface, import_resolver);
-    // generate native code
-    void* func_ptr =  MIR_gen(ctx, mir_func);
-    log_debug("generated fn ptr: %p", func_ptr);
-    jit_log_code_addresses(ctx);
-    return func_ptr;
-}
-
 // Free the MIR IR (insn lists + reg tables) of every generated function in ctx,
 // keeping the published machine code callable through item->addr/call_addr.
 // The IR's only post-generation consumers are re-generation (short-circuited
@@ -438,21 +407,6 @@ void* find_func(MIR_context_t ctx, const char *fn_name) {
     return NULL;
 }
 
-void* find_func_prefix(MIR_context_t ctx, const char *prefix) {
-    if (!ctx) return NULL;  // same T0 case as find_func above
-    size_t prefix_len = strlen(prefix);
-    for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
-        module = DLIST_NEXT (MIR_module_t, module)) {
-        MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
-        for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
-            if (mitem->item_type == MIR_func_item) {
-                if (strncmp(mitem->u.func->name, prefix, prefix_len) == 0)
-                    return mitem->addr;
-            }
-        }
-    }
-    return NULL;
-}
 
 void* find_data(MIR_context_t ctx, const char *data_name) {
     log_debug("finding data: %s, %p", data_name, ctx);
@@ -480,9 +434,6 @@ void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized) {
     MIR_finish(ctx);
 }
 
-void jit_cleanup(MIR_context_t ctx) {
-    jit_cleanup_mode(ctx, !g_mir_interp_mode);
-}
 
 static bool module_layout_bss_name(const char* name) {
     if (!name) return false;

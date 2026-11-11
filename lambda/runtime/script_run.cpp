@@ -137,7 +137,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
     runner_init(runtime, &runner);
 
     // Enable MIR Direct mode for every module (main + all imports).
-    // Each compile_script_as_mir_direct() call clears dynamic_imports, registers the module's
+    // Each lambda_mvp_compile_script() call clears dynamic_imports, registers the module's
     // direct sub-imports' pub symbols, then does transpile_mir_ast() + MIR_link().
     // Imports are compiled depth-first, so by the time any module is linked its dependencies
     // are already in dynamic_imports.

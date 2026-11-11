@@ -1,37 +1,73 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-5: non-null dynamic ordered IntLane pairs exclude the one nan sentinel that can spuriously satisfy a raw predicate.",
+  "description": "S4.1.2/S6.1.2: the native ordered predicate and its NaN exclusion share the same operand registers; MVP applies the exclusion after computing the predicate.",
   "checks": [
     {
-      "in_func": "_tune26_lt_pair_#",
+      "in_func": "mvp_#_tune26_lt_pair",
       "expect_seq": [
-        "ne\t{{r}}, %p1, -9223372036854775808",
-        "lt\t{{r}}, %p1, %p2",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "\tlt\t{{r:pred}}, {{r:left}}, {{r:right}}"
+        },
+        {
+          "pattern": "ne\t{{r:valid}}, {{r:left}}, -9223372036854775808"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:pred}}, {{r:valid}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_lt,"
       ]
     },
     {
-      "in_func": "_tune26_le_pair_#",
+      "in_func": "mvp_#_tune26_le_pair",
       "expect_seq": [
-        "ne\t{{r}}, %p1, -9223372036854775808",
-        "le\t{{r}}, %p1, %p2",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "\tle\t{{r:pred}}, {{r:left}}, {{r:right}}"
+        },
+        {
+          "pattern": "ne\t{{r:valid}}, {{r:left}}, -9223372036854775808"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:pred}}, {{r:valid}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_le,"
       ]
     },
     {
-      "in_func": "_tune26_gt_pair_#",
+      "in_func": "mvp_#_tune26_gt_pair",
       "expect_seq": [
-        "ne\t{{r}}, %p2, -9223372036854775808",
-        "gt\t{{r}}, %p1, %p2",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "\tgt\t{{r:pred}}, {{r:left}}, {{r:right}}"
+        },
+        {
+          "pattern": "ne\t{{r:valid}}, {{r:right}}, -9223372036854775808"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:pred}}, {{r:valid}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_gt,"
       ]
     },
     {
-      "in_func": "_tune26_ge_pair_#",
+      "in_func": "mvp_#_tune26_ge_pair",
       "expect_seq": [
-        "ne\t{{r}}, %p2, -9223372036854775808",
-        "ge\t{{r}}, %p1, %p2",
-        "and\t{{r}}, {{r}}, {{r}}"
+        {
+          "pattern": "\tge\t{{r:pred}}, {{r:left}}, {{r:right}}"
+        },
+        {
+          "pattern": "ne\t{{r:valid}}, {{r:right}}, -9223372036854775808"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:pred}}, {{r:valid}}"
+        }
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_ge,"
       ]
     }
   ]

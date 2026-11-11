@@ -41,12 +41,6 @@
       ]
     },
     {
-      "script": "${input_root}/scripts/generate_image_config.py",
-      "args": [
-        "build_lambda_config.json"
-      ]
-    },
-    {
       "script": "utils/generate_update_verifier.py",
       "args": []
     }
@@ -87,6 +81,7 @@
     "lambda/network",
     "radiant",
     "radiant/scene3d",
+    "radiant/paint",
     "lib/physics"
   ],
   "source_files": [
@@ -118,7 +113,6 @@
     "lambda/serve/mcp_server.cpp",
     "lambda/serve/tls_handler.cpp"
   ],
-  "sqlite_version": "3.45.3",
   "exclude_source_files": [
     "radiant/webview_child_mac_static.cpp",
     "radiant/webview_layer_mac_static.cpp",
@@ -187,24 +181,24 @@
       "name": "mbedtls",
       "version": "3.6.4",
       "description": "mbedTLS - SSL/TLS library",
-      "include": "/opt/homebrew/include",
-      "lib": "/opt/homebrew/lib/libmbedtls.a",
+      "include": "/opt/homebrew/opt/mbedtls@3/include",
+      "lib": "/opt/homebrew/opt/mbedtls@3/lib/libmbedtls.a",
       "link": "static"
     },
     {
       "name": "mbedx509",
       "version": "3.6.4",
       "description": "mbedTLS - X.509 certificate parsing",
-      "include": "/opt/homebrew/include",
-      "lib": "/opt/homebrew/lib/libmbedx509.a",
+      "include": "/opt/homebrew/opt/mbedtls@3/include",
+      "lib": "/opt/homebrew/opt/mbedtls@3/lib/libmbedx509.a",
       "link": "static"
     },
     {
       "name": "mbedcrypto",
       "version": "3.6.4",
       "description": "mbedTLS - Cryptographic primitives",
-      "include": "/opt/homebrew/include",
-      "lib": "/opt/homebrew/lib/libmbedcrypto.a",
+      "include": "/opt/homebrew/opt/mbedtls@3/include",
+      "lib": "/opt/homebrew/opt/mbedtls@3/lib/libmbedcrypto.a",
       "link": "static"
     },
     {
@@ -338,7 +332,7 @@
     },
     {
       "name": "image-codecs",
-      "description": "Image I/O codecs built by the Lambda source target",
+      "description": "Input-owned image codec archive",
       "lib": "${input_root}/build/lib/native/%{cfg.buildcfg}/liblambda-image-codecs.a",
       "include": "${input_root}/build_temp/image-config/include",
       "link": "static",
@@ -370,7 +364,7 @@
     },
     {
       "name": "archive-readers",
-      "description": "Pinned native archive reader source closure",
+      "description": "Input-owned native archive reader archive",
       "lib": "${input_root}/build/lib/native/%{cfg.buildcfg}/liblambda-archive-readers.a",
       "include": "lib/zip",
       "link": "static",
@@ -580,7 +574,7 @@
         "lambda/runtime/lambda-eval-science.cpp",
         "lambda/runtime/lambda-eval-num.cpp",
         "lambda/runtime/runner.cpp",
-        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mvp/mvp_driver.cpp",
         "lambda/runtime/transpile_shared.cpp",
         "lambda/runtime/safety_analyzer.cpp",
         "lambda/runtime/vmap.cpp",
@@ -1114,6 +1108,7 @@
       "extra_exclude_source_files": [
         "radiant/clipboard_mac.mm",
         "radiant/ime_mac.mm",
+        "radiant/pen_mac.mm",
         "radiant/app_icon_mac.mm",
         "radiant/webview_child_mac.mm",
         "radiant/webview_layer_mac.mm",
@@ -1402,7 +1397,7 @@
       "description": "Desktop twin of the iOS phase-1 profile (vibe/Lambda_Design_Mobile.md MB2): the full lambda.exe with GLFW Radiant and the JS/TS runtime, minus MIR -- T0 AST interpreters only (Lambda and LambdaJS), no JIT, no MIR code generation",
       "output": "lambda-nomir.exe",
       "extra_exclude_source_files": [
-        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mvp/mvp_driver.cpp",
         "lambda/runtime/mvp/mvp_plan.cpp",
         "lambda/runtime/mvp/mvp_mir.cpp",
         "lambda/runtime/mir.c",
@@ -1892,9 +1887,9 @@
         },
         {
           "name": "mpdec",
-          "include": "/usr/local/include",
-          "lib": "-lmpdec",
-          "link": "dynamic"
+          "include": "${input_root}/build/deps/linux-support/include",
+          "lib": "${input_root}/build/deps/linux-support/lib/libmpdec.a",
+          "link": "static"
         },
         {
           "name": "utf8proc",
@@ -1905,22 +1900,22 @@
         {
           "name": "mbedtls",
           "description": "mbedTLS - SSL/TLS library",
-          "include": "/usr/local/include",
-          "lib": "/usr/local/lib/libmbedtls.a",
+          "include": "${input_root}/build/deps/linux-support/include",
+          "lib": "${input_root}/build/deps/linux-support/lib/libmbedtls.a",
           "link": "static"
         },
         {
           "name": "mbedx509",
           "description": "mbedTLS - X.509 certificate parsing",
-          "include": "/usr/local/include",
-          "lib": "/usr/local/lib/libmbedx509.a",
+          "include": "${input_root}/build/deps/linux-support/include",
+          "lib": "${input_root}/build/deps/linux-support/lib/libmbedx509.a",
           "link": "static"
         },
         {
           "name": "mbedcrypto",
           "description": "mbedTLS - Cryptographic primitives",
-          "include": "/usr/local/include",
-          "lib": "/usr/local/lib/libmbedcrypto.a",
+          "include": "${input_root}/build/deps/linux-support/include",
+          "lib": "${input_root}/build/deps/linux-support/lib/libmbedcrypto.a",
           "link": "static"
         },
         {
@@ -2116,6 +2111,7 @@
         "radiant/app_icon_mac_static.cpp",
         "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
+        "radiant/pen_mac_static.cpp",
         "radiant/rdt_video_stub.cpp"
       ],
       "additional_source_files": [],
@@ -2579,7 +2575,7 @@
         "lambda/host/safety/worker_main.cpp"
       ],
       "extra_exclude_source_files": [
-        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mvp/mvp_driver.cpp",
         "lambda/runtime/mvp/mvp_plan.cpp",
         "lambda/runtime/mvp/mvp_mir.cpp",
         "lambda/runtime/mir.c",
@@ -6198,8 +6194,10 @@
               "gtest_main"
             ],
             "parallel": false,
-            "case_workers": 5,
-            "case_batch_size": 50,
+            "case_workers": 2,
+            "case_worker_slots": 4,
+            "worker_slots": 8,
+            "case_batch_size": 150,
             "icon": "\ud83d\udc11"
           },
           {
@@ -6352,6 +6350,7 @@
               "lambda-lib"
             ],
             "binary": "test_mir_gc_stress_gtest.exe",
+            "worker_slots": 4,
             "libraries": [
               "gtest",
               "gtest_main"
@@ -7282,6 +7281,15 @@
       }
     ],
     "script_tests": [
+      {
+        "runner_name": "test_lambda_mvp_emission_units",
+        "name": "Lambda MVP Emission and Ownership Units",
+        "suite": "lambda",
+        "category": "baseline",
+        "script": "test/run_mvp_emission_units.js",
+        "args": [],
+        "parallel": false
+      },
       {
         "runner_name": "test_devtools_protocol",
         "name": "Live DevTools Protocol",

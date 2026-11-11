@@ -3,25 +3,61 @@
   "description": "S4.4.4: an admitted u32 shift keeps its native MIR shift for counts below 32, while the full 64-bit count guard selects zero at or beyond 32. The .txt fixture checks counts 32, 33, 64 and 2^32 against the interpreter; narrowing the guard to 32 bits would admit 2^32 as zero.",
   "checks": [
     {
-      "in_func": "_left_#",
+      "in_func": "mvp_#_left",
       "expect_seq": [
-        { "pattern": "ge\t{{r}}, %p2, 32" },
-        { "pattern": "mov\t{{r:raw}}, 0" },
-        { "pattern": "jmp\tL", "next_line": true },
-        { "pattern": "lsh\t{{r}}, {{r}}, %p2" },
-        { "pattern": "and\t{{r:raw}}, {{r}}, 4294967295" },
-        { "pattern": "or\t{{r}}, 289637751035265024, {{r:raw}}" }
+        {
+          "pattern": "mov\t{{r:param}}, arg1"
+        },
+        {
+          "pattern": "mov\t{{r:count}}, {{r:param}}"
+        },
+        {
+          "pattern": "ge\t{{r}}, {{r:count}}, 32"
+        },
+        {
+          "pattern": "mov\t{{r:raw}}, 0"
+        },
+        {
+          "pattern": "lsh\t{{r:shifted}}, {{r}}, {{r:count}}"
+        },
+        {
+          "pattern": "and\t{{r:raw}}, {{r:shifted}}, 4294967295"
+        },
+        {
+          "pattern": "or\t{{r}}, 289637751035265024, {{r:raw}}"
+        }
+      ],
+      "forbid": [
+        "ges\t"
       ]
     },
     {
-      "in_func": "_right_#",
+      "in_func": "mvp_#_right",
       "expect_seq": [
-        { "pattern": "ge\t{{r}}, %p2, 32" },
-        { "pattern": "mov\t{{r:raw}}, 0" },
-        { "pattern": "jmp\tL", "next_line": true },
-        { "pattern": "ursh\t{{r}}, {{r}}, %p2" },
-        { "pattern": "and\t{{r:raw}}, {{r}}, 4294967295" },
-        { "pattern": "or\t{{r}}, 289637751035265024, {{r:raw}}" }
+        {
+          "pattern": "mov\t{{r:param}}, arg1"
+        },
+        {
+          "pattern": "mov\t{{r:count}}, {{r:param}}"
+        },
+        {
+          "pattern": "ge\t{{r}}, {{r:count}}, 32"
+        },
+        {
+          "pattern": "mov\t{{r:raw}}, 0"
+        },
+        {
+          "pattern": "ursh\t{{r:shifted}}, {{r}}, {{r:count}}"
+        },
+        {
+          "pattern": "and\t{{r:raw}}, {{r:shifted}}, 4294967295"
+        },
+        {
+          "pattern": "or\t{{r}}, 289637751035265024, {{r:raw}}"
+        }
+      ],
+      "forbid": [
+        "ges\t"
       ]
     }
   ]

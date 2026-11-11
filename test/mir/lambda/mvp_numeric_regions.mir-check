@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6/S4: typed and inferred integer loops retain native arithmetic, rootless entry guards and power-of-two div/mod lowering.",
+  "checks": [
+    {"in_func": "mvp_#_typed_total", "expect": ["add\t{{r}}, {{r}}, {{r}}", "blt\t"], "forbid": ["fn_add", "lambda_int_lane_add_slow", "lambda_type_check", "lambda_side_stack_ensure_for"]},
+    {"in_func": "mvp_#_erased_total", "expect": ["add\t{{r}}, {{r}}, {{r}}", "blt\t"], "forbid": ["fn_add", "lambda_int_lane_add_slow", "lambda_type_check", "lambda_side_stack_ensure_for"]},
+    {"in_func": "mvp_#_typed_divmod", "expect": ["rsh\t{{r}}, {{r}}, 3", "and\t{{r}}, {{r}}, 7"], "forbid": ["div\t", "mod\t", "lambda_int_lane_divmod_slow", "fn_idiv"]},
+    {"in_func": "mvp_#_erased_divmod", "expect": ["rsh\t{{r}}, {{r}}, 3", "and\t{{r}}, {{r}}, 7"], "forbid": ["div\t", "mod\t", "lambda_int_lane_divmod_slow", "fn_idiv"]}
+  ]
+}

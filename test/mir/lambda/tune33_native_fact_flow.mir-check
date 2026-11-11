@@ -1,46 +1,56 @@
 {
   "schema_version": 1,
-  "description": "D2.3/D7.3.3: admitted strings keep native length and array reads, and forwarded string results reach existing join fusion. Open/error operands retain checked len.",
+  "description": "D2.3.4/D4.3.3/D7.3.3: strings retain native len and concatenation, while each erased array read keeps one checked fallback. Native integer-success arithmetic coexists with the polymorphic cold add; identity forwarding decodes string pointers without coercing other Items.",
   "checks": [
     {
-      "in_func": "_native_rows_#",
+      "in_func": "mvp_#_native_rows",
       "expect": [
-        "fn_len_s"
+        "fn_len_s",
+        "i64:32("
       ],
       "forbid": [
-        "call\tfn_len_checked_p, fn_len_checked"
+        "call\t{{p}}, fn_len_checked,"
       ],
       "count": {
-        "call\tfn_index_p, fn_index": {
-          "max": 2
+        "call\t{{p}}, fn_index,": {
+          "max": 4
         }
       }
     },
     {
-      "in_func": "_wrap_text_#",
+      "in_func": "mvp_#_wrap_text",
       "expect": [
         "fn_strcat_many"
       ],
       "forbid": [
-        "call\tfn_join_p, fn_join"
+        "call\t{{p}}, fn_join,"
       ]
     },
     {
-      "in_func": "_any_count_#",
+      "in_func": "mvp_#_any_count",
       "expect": [
         "fn_len_checked"
       ]
     },
     {
-      "in_func": "_guarded_step_#",
-      "forbid": [
-        "call\tfn_add_p, fn_add"
+      "in_func": "mvp_#_guarded_step",
+      "forbid": [],
+      "count": {
+        "call\t{{p}}, fn_add,": 1
+      },
+      "expect": [
+        "add\t",
+        "ubgt\t"
       ]
     },
     {
-      "in_func": "_string_key_b_#",
+      "in_func": "mvp_#_string_key",
       "expect": [
-        "it2s"
+        "eq\t{{r}}, {{r}}, 13",
+        "and\t{{r}}, {{r}}, 72057594037927935"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_string,"
       ]
     }
   ]

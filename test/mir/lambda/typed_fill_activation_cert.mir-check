@@ -1,67 +1,71 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3/D7.4.1: lazy activation-local certificates reuse equivalent full primitive contracts; initialization dominates conditional and loop first use. The existing guarded loop emits proven and generic siblings, with two fill sites per sibling sharing the activation register.",
+  "description": "D4.3.3/D6.3.3: MVP resolves immutable primitive certificates at compilation, so constructors pass them directly with no runtime resolver. Each source fill has one fast primitive constructor and an exact-count checked miss; loop metadata stays outside runtime allocation.",
   "checks": [
     {
-      "in_func": "_repeated_#",
+      "in_func": "mvp_#_repeated",
       "expect_seq": [
-        "mov\t{{r:cert}}, 0",
-        ", {{r:cert}}, 0",
-        ", 9007199254740991",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
-        "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved",
-        ", {{r:cert}}, 0",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
-        "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+        {
+          "pattern": "ubgt\tL{{n}}, {{r}}, 9007199254740991"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_fill_primitive_bits,"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,"
+        }
       ],
       "count": {
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 3,
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 3
+        "call\t{{p}}, lambda_fill_primitive_bits,": 3,
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,": 3
       },
       "forbid": [
-        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+        "call\t{{p}}, lambda_array_rep_cert_resolve,",
+        "call\t{{p}}, lambda_fill_for_contract_int_lane,"
       ]
     },
     {
-      "in_func": "_looped_#",
+      "in_func": "mvp_#_looped",
       "expect_seq": [
-        "mov\t{{r:cert}}, 0",
-        ", {{r:cert}}, 0",
-        ", 9007199254740991",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
-        "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved",
-        ", {{r:cert}}, 0",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
-        "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+        {
+          "pattern": "ubgt\tL{{n}}, {{r}}, 9007199254740991"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_fill_primitive_bits,"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,"
+        }
       ],
       "count": {
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 4,
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 4
+        "call\t{{p}}, lambda_fill_primitive_bits,": 3,
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,": 2
       },
       "forbid": [
-        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+        "call\t{{p}}, lambda_array_rep_cert_resolve,",
+        "call\t{{p}}, lambda_fill_for_contract_int_lane,"
       ]
     },
     {
-      "in_func": "_other_lanes_#",
+      "in_func": "mvp_#_other_lanes",
       "expect_seq": [
-        "mov\t{{r:cert}}, 0",
-        ", {{r:cert}}, 0",
-        ", 9007199254740991",
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
-        "mov\t{{r:cert}}, {{r}}",
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+        {
+          "pattern": "ubgt\tL{{n}}, {{r}}, 9007199254740991"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_fill_primitive_bits,"
+        },
+        {
+          "pattern": "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,"
+        }
       ],
       "count": {
-        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 2,
-        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 2
+        "call\t{{p}}, lambda_fill_primitive_bits,": 2,
+        "call\t{{p}}, lambda_fill_for_contract_int_lane_resolved,": 2
       },
       "forbid": [
-        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+        "call\t{{p}}, lambda_array_rep_cert_resolve,",
+        "call\t{{p}}, lambda_fill_for_contract_int_lane,"
       ]
     }
   ]

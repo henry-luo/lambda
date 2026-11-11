@@ -3,19 +3,19 @@
   "description": "Tune34 continuation: guarded lowering retains its original semantic miss paths.",
   "checks": [
     {
-      "in_func": "_visit_#",
+      "in_func": "mvp_#_visit",
       "expect": [
         "lambda_array_scalar_snapshot"
       ]
     },
     {
-      "in_func": "_recursive_select_b_#",
+      "in_func": "mvp_#_recursive_select",
       "expect": [
-        "cow_mark_shared",
-        "member_set_cow"
+        "call\t{{p}}, index_assign_cow,",
+        "mov\tu8:4({{r}}), {{r}}"
       ],
       "forbid": [
-        "call\\tfn_array_set_p, fn_array_set"
+        "call\t{{p}}, lambda_array_scalar_snapshot,"
       ]
     }
   ]

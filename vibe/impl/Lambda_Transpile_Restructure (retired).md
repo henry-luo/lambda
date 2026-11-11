@@ -1,5 +1,9 @@
 # Lambda C Transpiler — Structured Refactoring Proposal
 
+> **Historical record:** The C-text C2MIR backend and its embedded `lambda.h`
+> pipeline were removed (D1.6). Direct MIR does not parse or embed this header;
+> the header-placement constraints below describe the retired backend.
+
 ## Overview
 
 This document proposes a structured refactoring of the Lambda C transpiler (`transpile.cpp`) to address four categories of architectural issues:

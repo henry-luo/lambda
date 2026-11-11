@@ -1,6 +1,6 @@
 #include "side_stack.h"
 
-#include "lambda/lambda.h"
+#include "lambda/lambda.hpp"
 #include "lib/fiber.h"
 #include "lib/log.h"
 #include <stdlib.h>

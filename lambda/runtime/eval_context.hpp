@@ -1,5 +1,6 @@
 #pragma once
 #include "lambda/core/data.hpp"
+#include "../lambda.hpp"
 #include "context_capsule.h"
 
 typedef struct Heap Heap;
@@ -30,15 +31,6 @@ typedef struct LambdaModuleState {
     // the slab; cached code still resolves any mismatch through its unit id.
     uint32_t module_layout_id;
 } LambdaModuleState;
-
-// RC-J7v2: a compilation unit's shared literal pool. Keyed by unit id rather
-// than by the active module state because an `eval`'d unit compiles separately
-// while sharing its caller's environment: one state, two index namespaces.
-typedef struct LambdaConstPool {
-    void** entries;          // mem-owned String* bodies
-    uint32_t count;
-    uint32_t capacity;
-} LambdaConstPool;
 
 // Runtime-facing scalar materializers are needed by native input adapters as
 // well as generated code. Keep DateTime construction here because static input
@@ -88,13 +80,6 @@ typedef struct EvalContext : Context {
     // JSCU27: one directory for context-owned subsystem state. Reading a
     // capsule is an indexed load; the lifecycle contract travels with it.
     ContextCapsuleDirectory capsule_directory;
-    // RC-J7v2: literal pools indexed by compilation-unit id. Held here rather
-    // than on the module slab because units outnumber slabs -- direct `eval`
-    // compiles a fresh unit into its caller's slab -- and because every unit's
-    // generated code dies with this context, which is when the pools are freed.
-    LambdaConstPool** const_pools;
-    uint32_t const_pool_capacity;
-    uint32_t const_pool_count;
     // borrowing realm controllers share slabs; their temporary selection cannot change the allocator.
     Runtime* module_state_allocator;
 } EvalContext;

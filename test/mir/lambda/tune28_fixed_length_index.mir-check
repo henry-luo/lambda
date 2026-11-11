@@ -3,30 +3,30 @@
   "description": "T28-7: literal indices into fixed-length locals are proven in bounds -- no length load compare, no negative test, no checked cold store, no index multiply. A local resized by push keeps the checked path.",
   "checks": [
     {
-      "in_func": "_fixed_store_#",
+      "in_func": "mvp_#_fixed_store",
       "forbid": [
         "call\tarray_num_set_cow_idx",
-        "call\tlambda_array_set_checked",
+        "call\tlambda_array_set_checked_item",
         "mul\t{{r}}, {{r}}, 8",
         "lt\t{{r}}, {{r}}, 0"
       ],
       "expect": [
-        "add\t{{r}}, {{r}}, 24",
-        "dmov\t{{r}}, d:24({{r}})"
+        "dmov\td:({{r}}), {{r}}",
+        "dmov\t{{r}}, d:({{r}})"
       ]
     },
     {
-      "in_func": "_fixed_literal_#",
+      "in_func": "mvp_#_fixed_literal",
       "forbid": [
-        "call\tlambda_array_set_checked",
+        "call\tlambda_array_set_checked_item",
         "call\tarray_num_set_cow_idx"
       ]
     },
     {
-      "in_func": "_resized_#",
+      "in_func": "mvp_#_resized",
       "expect": [
-        "call\tlambda_array_set_checked",
-        "ge\t{{r}}, {{r}}, {{r}}"
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "ubge\t"
       ]
     }
   ]

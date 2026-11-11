@@ -380,18 +380,6 @@ static inline bool ast_call_result_needs_capture(AstNode* expr) {
     return ast_call_may_return_argument(expr) || ast_call_returns_retained_container(expr);
 }
 
-// ...and whether that object may be an argument's own root rather than a part
-// of it: only then is the argument root itself shared by the result mark.
-static inline bool ast_call_may_return_argument_root(AstNode* expr) {
-    AstNode* node = ast_unwrap_primary(expr);
-    if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
-    AstFuncNode* callee = ast_direct_call_function((AstCallNode*)node);
-    for (AstNamedNode* param = callee ? callee->param : NULL; param;
-            param = (AstNamedNode*)((AstNode*)param)->next) {
-        if (param->entry && param->entry->cow_param_root_returned) return true;
-    }
-    return false;
-}
 
 static inline bool ast_call_has_named_args(const AstCallNode* call) {
     for (AstNode* arg = call ? call->argument : NULL; arg; arg = arg->next) {
@@ -1380,7 +1368,7 @@ static inline bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_va
             ast_for_discards_result(node));
 }
 
-// share procedural result classification across T0, Full MIR and MVP (S2.5.3v3).
+// share procedural result classification across T0 and MVP (S2.5.3v3).
 static inline AstNode* ast_block_last_value(AstNode* first, bool procedural,
         int* value_count, int* decl_count, int* stam_count,
         AstNode** terminal = nullptr) {

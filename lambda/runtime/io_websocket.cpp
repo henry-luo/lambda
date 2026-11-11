@@ -748,7 +748,7 @@ static Item ws_event(unsigned opcode, const char* bytes, size_t length, int code
         Binary* binary = heap_binary_from_bytes(bytes, (int64_t)length);
         data.set(binary ? (Item){.item = x2it(binary)} : ItemError);
     } else data.set(io_fs_make_string(bytes, length));
-    Rooted<Map*> result(roots, map_alloc_for_type(runtime_result_shape(names, types, 4), NULL, 0));
+    Rooted<Map*> result(roots, map_alloc_for_type(runtime_result_shape(names, types, 4), 0));
     if (!result.get()) return ItemError;
     Item values[] = {type.get(), data.get(), (Item){.item = i2it(code)}, (Item){.item = clean ? ITEM_TRUE : ITEM_FALSE}};
     map_fill_items(result.get(), values, 4);

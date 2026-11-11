@@ -1,23 +1,54 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3, D6.3.4, D7.3.1: borrow interval.",
+  "description": "S9.1.2/D5.4.4: MVP native uniqueness guards protect borrowed writes; observed snapshots and escaped children share-mark inline before checked mutation. D8.2.6/S9.1.2: proved fresh, closed local stores omit impossible checked-store arms; snapshot and dynamic-value controls retain their observable behavior.",
   "checks": [
     {
-      "in_func": "_borrowed_#",
+      "in_func": "mvp_#_borrowed",
       "forbid": [
         "call\tcow_bind_var"
-      ]
+      ],
+      "expect": [
+        "mov\ti64:({{r}}), {{r}}"
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 0
+      }
     },
     {
-      "in_func": "_snapshot_#",
+      "in_func": "mvp_#_snapshot",
       "expect": [
-        "call\tcow_bind_var"
-      ]
+        "mov\ti64:({{r}}), {{r}}"
+      ],
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:flags}}, u8:4({{r:owner}})"
+        },
+        {
+          "pattern": "or\t{{r:marked}}, {{r:flags}}, 1"
+        },
+        {
+          "pattern": "mov\tu8:4({{r:owner}}), {{r:marked}}"
+        }
+      ],
+      "count": {
+        "call\t{{p}}, lambda_array_set_checked_item,": 0
+      }
     },
     {
-      "in_func": "_escaped_child_#",
+      "in_func": "mvp_#_escaped_child",
       "expect": [
-        "call\tcow_bind_var"
+        "call\t{{p}}, cow_path_set_keys,"
+      ],
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:flags}}, u8:4({{r:owner}})"
+        },
+        {
+          "pattern": "or\t{{r:marked}}, {{r:flags}}, 1"
+        },
+        {
+          "pattern": "mov\tu8:4({{r:owner}}), {{r:marked}}"
+        }
       ]
     }
   ]

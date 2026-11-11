@@ -1,5 +1,9 @@
 # Lambda.exe Binary Size Analysis & Optimization Report
 
+> **Historical C2MIR references:** The Lambda C-text backend and embedded
+> `lambda.h` pipeline were removed (D1.6). Direct MIR does not parse or embed
+> that header; measurements and gates below describe the earlier architecture.
+
 **Generated**: February 14, 2026
 **Platform**: macOS arm64
 

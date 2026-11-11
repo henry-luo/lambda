@@ -25,4 +25,6 @@ pn main() {
     print(" ")
     print(mask(255, 15))
     print("\n")
+    print([half(-24), shift(-2, 3), mask(127, 7)])
+    print("\n")
 }

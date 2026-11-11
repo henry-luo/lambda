@@ -1,24 +1,43 @@
 {
   "schema_version": 1,
-  "description": "T29-3: a proven in-band operand skips its tests. The literal divisors in residues need no zero test; the counter equality tests nan once; a `div` result keeps its nan test (S4.1.2).",
+  "description": "S4.1.2/D2.3.4: bounded residues use native div/mod without slow helpers. A guarded array counter compares raw lanes; an unproved quotient retains its single checked division miss.",
   "checks": [
     {
-      "in_func": "_residues_#",
-      "count": {
-        "call\tlambda_int_lane_divmod_slow": 4
-      },
-      "forbid": ["ne\t{{r}}, {{r}}, 0"]
+      "in_func": "mvp_#_residues",
+      "expect": [
+        "\tdiv\t",
+        "\tmod\t"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_int_lane_divmod_slow,",
+        "call\t{{p}}, fn_mod,",
+        "call\t{{p}}, fn_idiv,"
+      ]
     },
     {
-      "in_func": "_counter_hits_#",
+      "in_func": "mvp_#_counter_hits",
+      "expect": [
+        "\tbge\t",
+        "mov\t{{r}}, i64:({{r}})"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_eq_value,"
+      ],
       "count": {
-        "-9223372036854775808": 1
+        "call\t{{p}}, lambda_array_primitive_index,": {
+          "max": 1
+        }
       }
     },
     {
-      "in_func": "_quotient_eq_#",
+      "in_func": "mvp_#_quotient_eq",
+      "expect": [
+        "\tdiv\t",
+        "-9223372036854775808",
+        "call\t{{p}}, lambda_int_lane_divmod_slow,"
+      ],
       "count": {
-        "-9223372036854775808": 1
+        "call\t{{p}}, lambda_int_lane_divmod_slow,": 1
       }
     }
   ]

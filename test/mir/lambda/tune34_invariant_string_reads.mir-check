@@ -3,7 +3,7 @@
   "description": "Tune34 continuation: guarded lowering retains its original semantic miss paths.",
   "checks": [
     {
-      "in_func": "_matches_#",
+      "in_func": "mvp_#_matches",
       "expect": [
         "fn_string_char_word"
       ]

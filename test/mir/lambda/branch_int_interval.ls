@@ -38,4 +38,7 @@ pn main() {
     print(bounded_local(9)); print(" ")
     print(bounded_param(9)); print(" ")
     print(rebound_param(9)); print("\n")
+    // keep the negative controls open to values that actually need overflow handling.
+    print(unbounded(9007199254740991)); print(" ")
+    print(leaked(9007199254740991)); print("\n")
 }

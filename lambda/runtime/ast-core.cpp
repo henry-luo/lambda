@@ -354,6 +354,16 @@ static bool ast_index_publish_node(AstIndex* index, AstNode* node, AstNodeId id)
         index->node_bindings[id] = binding_id;
     }
     switch (node->node_type) {
+    case AST_NODE_OBJECT_TYPE: {
+        Type* type = node->type && node->type->type_id == LMD_TYPE_TYPE ? ((TypeType*)node->type)->type : NULL;
+        if (!type || !type->is_nominal) return true;
+        // explicit ~.field access still needs the synthetic method-field local,
+        // even when no bare identifier publishes its binding (D8.2.4).
+        FOR_EACH_MAP_FIELD((TypeObject*)type, field)
+            if (field->binding && ast_index_publish_binding(index, field->binding) == AST_BINDING_ID_INVALID)
+                return false;
+        return true;
+    }
     case AST_NODE_DECOMPOSE: {
         AstDecomposeNode* decomposition = (AstDecomposeNode*)node;
         // unread targets still own storage; their synthetic declarators are
@@ -1596,15 +1606,21 @@ extern "C" bool ast_map_literal_keys_follow_contract(AstMapNode* map_node,
     return !expected_field && !item;
 }
 
-// a destination must fit every concrete field before construction adopts it
-extern "C" bool ast_map_contract_storage_valid(TypeMap* expected) {
+// descriptor-based construction also supports dynamically tagged field slots.
+extern "C" bool ast_map_contract_storage_fits(TypeMap* expected) {
     if (!expected || !expected->shape) return false;
     FOR_EACH_MAP_FIELD(expected, field) {
         if (!field->name || !field->type) return false;
-        TypeId storage = shape_entry_storage_type_id(field);
-        if (storage == LMD_TYPE_ANY) return false;
         if (!shape_entry_storage_fits_data(field, expected->byte_size)) return false;
     }
+    return true;
+}
+
+// native consumers additionally require a concrete field carrier.
+extern "C" bool ast_map_contract_storage_valid(TypeMap* expected) {
+    if (!ast_map_contract_storage_fits(expected)) return false;
+    FOR_EACH_MAP_FIELD(expected, field)
+        if (shape_entry_storage_type_id(field) == LMD_TYPE_ANY) return false;
     return true;
 }
 

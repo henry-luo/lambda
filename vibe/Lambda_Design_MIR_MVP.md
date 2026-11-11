@@ -3,9 +3,12 @@
 **Date:** 2026-11-05
 
 Next implementation milestone: [language parity and untyped execution](impl/Lambda_Impl_MIR_MVP_Language_Parity_and_Untyped.md).
-That expansion is planned; the measurements below describe the preceding tuning work.
+That record tracks language coverage and untyped tuning; the measurements below describe earlier typed tuning.
 
-**Status:** experimental typed compiler behind an explicit selector. Coverage
+**Status:** sole Lambda MIR compiler as of 2026-11-10; T0 promotes through MVP
+(**D1.6, D8.3.1–D8.3.4**). Full MIR is retired. Source-retirement validation is
+[tracked separately](impl/Lambda_Impl_MIR_Full_Retirement.md#current-checkpoint);
+the release host now builds after Radiant issue RI-004. The historical typed coverage
 extends to **all 77 registered typed benchmark entries** across eight suites:
 the previously covered 48 plus 29 additions, including duplicate suite ports.
 Runtime types, data layouts, and precise ownership remain shared
@@ -18,7 +21,7 @@ queries with grouping and ordering (**S2.5.2v2, S7.9.3, S9.1.2–S9.2.3,
 S14.1.1v2**). It retains independent MVP planning and lowering; shared physical
 helpers now also construct literal paths and plain function objects.
 
-The current release has faster medians than Full MIR on **all 77 entries**.
+The typed release measured on 2026-11-05 has faster medians than Full MIR on **all 77 entries**.
 Its complete 30-pair primary campaign, including the matched 10,000-call Sumfp
 supplement, clears all 77 confidence gates. Five completed 50-pair confirmations
 leave **76 clear wins and one inconclusive result**: CD remains faster at
@@ -43,6 +46,16 @@ retains the helper (**D5.4.1–D5.4.4, S3.4, S9.1.2–S9.1.3, S9.3.1,
 S7.9.3, S17.7.1**). Dynamic native admission preserves existing contracts
 (**S4.1, S11.4.1v5, D4.3.3**). Runtime types, layouts and precise ownership
 remain shared.
+
+The user requested region allocation retirement after the
+[region/profiling assessment](impl/Lambda_Impl_MIR_MVP_Regions_and_Profiling.md)
+established no speedup in actual MVP benchmarks. Region-only wrappers/imports
+and the allocator/block caches are removed. The user-approved input header
+and all native/JS/MVP calls use the GC-only, two-argument allocator; LI-006 is
+resolved (D9.1.1v4, D9.1.3v2). No region-backed MVP graph lowering was implemented.
+COW site attribution selects existing diagnostic wrappers during
+compilation (D6.3.2–D6.3.4); its private candidate passes focused correctness
+checks but has an unresolved small GCBench timing regression.
 
 Both formerly invalid Full controls now pass: TextSearch's active recurrence
 proof prevents a compiler stack overflow (**D8.2.5**), and NavierStokes retains
@@ -493,6 +506,7 @@ behavior and limits are recorded in the
 lambda/runtime/mvp/
     mvp.hpp           admission/compile interface and artifact ownership
     mvp_internal.hpp  small compiler records using existing Type/MirValue/ABI types
+    mvp_driver.cpp    eager/satellite compilation, linking and image ownership
     mvp_plan.cpp      admission, function/effect/representation planning
     mvp_mir.cpp       scalar/control/call lowering through MirEmitter
     mvp_array.cpp     array lowering as M2 needs it
@@ -503,12 +517,23 @@ Keep files cohesive; this is not a requirement to create empty modules. Common
 code stays common, and a third similar lowering case requires extracting the
 shared operation rather than adding another copy.
 
-The initial execution hook can use a development-only selector such as
-`LAMBDA_MIR_COMPILER=production|mvp` under explicit `LAMBDA_EXEC_BACKEND=jit`.
-This selects a compiler implementation within MIR, not a new tier. Default
-execution retains the production compiler. Reject an incompatible selector
-combination explicitly; MVP never silently falls back. Set the selector before
-process startup; switching it within an existing `Runtime` is unsupported.
+MVP is the sole MIR compiler. Unset/empty `LAMBDA_MIR_COMPILER` and the
+compatibility spelling `mvp` use the same compiler and cache identity;
+`production` is rejected because Full MIR is retired. `LAMBDA_EXEC_BACKEND`
+retains its three tiers: `jit` compiles eagerly, `auto` starts in T0 and promotes
+through MVP, and `interp` stays in T0 (**D8.3.1–D8.3.4**). No-MIR builds remain
+interpreter-only and reject an explicit MVP request. Historical Full comparisons
+must use an archived executable; they are not a current compiler mode.
+
+The shared driver, module linking, view registration and satellite ownership
+live in `mvp/mvp_driver.cpp`. The interpreter calls `lambda_mvp_compile_script`
+and `lambda_mvp_compile_function_snapshot` and publishes the MVP boxed ABI.
+`FnAnalysis` remains frontend/T0 metadata; MVP owns representation and return
+plans privately, including in immutable worker snapshots (**D8.2.4, D8.3.4**).
+`const_materialize.cpp` owns compiler-neutral constant construction. The old
+Full emitter and its variant metadata are removed; runtime types, value layouts,
+precise roots and shared C-ABI helpers retain their existing contracts
+(**D2.1.1, D6.3, D7.4.2**).
 
 Use the ordinary script/source owner and `Runtime`/`EvalContext` to create,
 execute, and destroy the MIR artifact. Extract a narrow reusable lifecycle hook
@@ -525,7 +550,6 @@ Existing reuse points to inspect before adding code:
 | `lambda/runtime/compiler_pass.cpp`, `ast.hpp`, `transpiler.hpp` | Shared pass manager, indexed unit and function analysis. |
 | `lambda/runtime/type_contract.hpp`, `type_contract.cpp` | Boundary relations, full array contracts and representation certificates. |
 | `lambda/runtime/mir_emitter_shared.hpp` | `MirValue`, representation conversion, ABI/companion returns, roots and physical emission. |
-| `lambda/runtime/mir_loop_invariants.hpp` | Existing effect-checked scalar loop-invariant operations. |
 | `lambda/runtime/sys_func_registry.h`, `sys_func_registry.c` | Audited builtin/import contracts and effects. |
 | `lambda/runtime/mir.c`, `mir_policy.hpp`, `mir_dump.cpp` | MIR lifecycle, optimization/link policy and artifacts. |
 | `lambda/runtime/runtime-state.h`, `lambda-root-frame.hpp` | Context ownership and precise native-helper roots. |

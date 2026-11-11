@@ -497,8 +497,6 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     // instead of being rebuilt from MIR-embedded bytes on every evaluation. The
     // pool is acquired lazily at the first literal and owned by the context,
     // because this builder dies while its compiled code is still callable.
-    tp->const_unit_id = LAMBDA_CONST_UNIT_NONE;
-    tp->const_pool = NULL;
     tp->error_buf = NULL;
 
     tp->strict_mode = false;

@@ -1,4 +1,7 @@
 import sequence: lambda.editor.core.doc
+import paint_brushes: lambda.paint.brush
+import paint_layers: lambda.paint.layer
+import paint_strokes: lambda.paint.stroke
 
 // D9.3.4 / S9.1.2: Raster storage is native; document composition stays in Lambda values.
 pub fn blank(options) element^ => lambda.sys.image_raster(null, options)^
@@ -249,11 +252,47 @@ pub fn invert_coverage(coverage) element^ => edit_samples(coverage,"invert")^
 pub fn feather_coverage(coverage,radius) element^ => edit_samples(coverage,"feather",{radius:radius})^
 pub fn coverage_bounds(coverage) any^ => edit_samples(coverage,"bounds")^
 pub fn coverage_overlay(coverage) element^ => edit_samples(coverage,"overlay")^
-pub fn paint_stroke(raster,options) element^ => edit_samples(raster,"stroke",options)^
-// S9.2.2: a continuation retains immutable coverage and the frozen pre-stroke source.
-pub fn paint_stroke_step(raster,points,options={},previous=null) map^ =>
-    edit_samples(raster,"stroke_step",{points:points,settings:{*:checked_options(options,
-        ["size","hardness","spacing","flow","opacity","color","mode","selection","origin"])^},previous:previous})^
+// Lambda_Pkg_Paint PT13: the brush is lambda.paint's round dab brush with the linear falloff,
+// accumulated as u8 wash coverage; the composite against the frozen source stays native.
+fn stroke_brush(o) map^ {
+    if (o.size != null and ((o.size > 4096) ^ { false })) raise error("image: stroke size must be at most 4096")
+    else paint_brushes.brush({size: if (o.size == null) 20.0 else o.size, hardness: if (o.hardness == null) 0.8 else o.hardness,
+        spacing: if (o.spacing == null) 0.2 else o.spacing, flow: if (o.flow == null) 1.0 else o.flow,
+        aa: 0.0, profile: 'linear', mode: 'wash'})^
+}
+// one batch of stroke coverage: {layer, rect, carry, work}; pressure scales each dab's flow.
+fn stroke_coverage(raster, o, points, previous) map^ {
+    let b = stroke_brush(o)^
+    let carry = if (previous == null) null else ({point: previous.point, arc: previous.distance, next: previous.next})
+    let blank = paint_layers.layer(raster.width, raster.height, {format: 'coverage', sample: 'u8'})^
+    let base = if (previous == null) blank else previous.layer
+    let d = paint_strokes.dabs(b, [1.0, 1.0, 1.0], points, carry, 'srgb')^
+    let spent = if (previous == null) 0 else previous.work
+    let painted = paint_strokes.render(base, d.table, d.count, {budget: paint_strokes.BUDGET - spent})^;
+    {layer: painted.layer, rect: painted.rect, carry: d.carry, work: spent + painted.work}
+}
+pub fn paint_stroke(raster,options) element^ {
+    let o = checked_options(options,["points","size","hardness","spacing","flow","opacity","color","mode","selection","origin"])^
+    let s = stroke_coverage(raster,o,o.points,null)^
+    edit_samples(raster,"stroke",{coverage:s.layer,rect:s.rect,opacity:o.opacity,color:o.color,mode:o.mode,
+        selection:o.selection,origin:o.origin})^
+}
+fn stroke_batch(raster,points,settings,previous) map^ {
+    let s = stroke_coverage(raster,settings,points,previous)^
+    let step = edit_samples(raster,"stroke_step",{coverage:s.layer,rect:s.rect,
+        base:if (previous == null) null else previous.raster,opacity:settings.opacity,color:settings.color,
+        mode:settings.mode,selection:settings.selection,origin:settings.origin})^;
+    {source:raster,settings:settings,raster:step.raster,coverage:step.coverage,rect:step.rect,
+     point:s.carry.point,distance:s.carry.arc,next:s.carry.next,layer:s.layer,work:s.work}
+}
+// S9.2.2: a continuation retains immutable coverage and the frozen pre-stroke source;
+// S5.4.3: equal source snapshots remain interchangeable across batches.
+pub fn paint_stroke_step(raster,points,options={},previous=null) map^ {
+    let settings = {*:checked_options(options,["size","hardness","spacing","flow","opacity","color","mode","selection","origin"])^}
+    if (previous != null and not ((previous is map and previous.source == raster and previous.settings == settings) ^ { false }))
+        raise error("image: stroke continuation requires the same source and settings")
+    else stroke_batch(raster,points,settings,previous)^
+}
 pub fn paint_fill(raster,options) element^ => edit_samples(raster,"fill",options)^
 pub fn gradient(raster,options) element^ => edit_samples(raster,"gradient",options)^
 pub fn wand(raster,point,options={}) element^ =>
@@ -274,4 +313,11 @@ pub fn from_bytes(bytes,options) element^ {
 
 pub fn histogram(raster) array^ => edit_samples(raster,"histogram")^
 
-pub fn retouch(raster,options) element^ => edit_samples(raster,"retouch",options)^
+pub fn retouch(raster,options) element^ {
+    let o = checked_options(options,["points","size","hardness","spacing","flow","opacity","selection","origin","kind",
+        "strength","radius","sample","sample_offset","context","context_offset"])^
+    let s = stroke_coverage(raster,o,o.points,null)^
+    edit_samples(raster,"retouch",{coverage:s.layer,rect:s.rect,opacity:o.opacity,selection:o.selection,origin:o.origin,
+        kind:o.kind,strength:o.strength,radius:o.radius,sample:o.sample,sample_offset:o.sample_offset,
+        context:o.context,context_offset:o.context_offset})^
+}

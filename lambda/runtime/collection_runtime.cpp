@@ -317,35 +317,6 @@ Item pn_push_cow(Item owner, Item value) {
     return pn_push(replacement, value);
 }
 
-// The ordinary open push path keeps an uncertified ArrayNum's lane or widens it
-// (array_num_push_open). MIR reaches this entry only after its append-builder
-// proof has closed every writer to a total int producer, so it skips that
-// decision. Preserve COW before growth, then store with the native lane's own
-// admission check (D4.2.1, D4.3.1, S9.2.2).
-Item lambda_array_int_push_inferred_cow(Item owner, Item value) {
-    if (get_type_id(owner) != LMD_TYPE_ARRAY_NUM ||
-            (get_type_id(value) != LMD_TYPE_INT &&
-             !lambda_item_is_merged_poison(value.item))) {
-        return ItemError;
-    }
-    RootFrame roots(2);
-    Rooted<Item> rooted_owner(roots, owner);
-    Rooted<Item> rooted_value(roots, value);
-    rooted_owner.set(cow_prepare_write(rooted_owner.get()));
-    if (get_type_id(rooted_owner.get()) == LMD_TYPE_ERROR) return ItemError;
-
-    ArrayNum* array = rooted_owner.get().array_num;
-    if (!array || array->get_elem_type() != ELEM_INT ||
-            !array_reserve_append_slots((Array*)array, 1)) {
-        return ItemError;
-    }
-    array = rooted_owner.get().array_num;
-    // ArrayNum owns its lane directly; generic Array native-lane helpers use
-    // a separate descriptor bit and therefore cannot address this payload.
-    array_int_set(array, array->length,
-        lambda_int_item_to_lane(rooted_value.get().item));
-    return rooted_owner.get();
-}
 
 Item pn_splice(Item arr_item, Item start_item, Item count_item) {
     TypeId tid = get_type_id(arr_item);

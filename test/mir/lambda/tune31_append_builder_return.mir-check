@@ -1,21 +1,50 @@
 {
   "schema_version": 1,
-  "description": "Tune31 T31-2 / D4.2.1-D4.3.1, S9.2.2: a proven homogeneous append builder returns an int-lane ArrayNum and its direct consumer indexes that lane without generic array helpers.",
+  "description": "D4.3.1/D4.3.3/S9.2.2: exact homogeneous appends use private packed construction and checked append, without adding a source annotation. Native consumer reads jump over their generic miss kernel; unknown and absent inputs retain that kernel.",
   "checks": [
     {
-      "in_func": "_build_codes_#",
+      "in_func": "mvp_#_build_codes",
       "expect": [
-        "call\tensure_typed_array_p, ensure_typed_array",
-        "call\tlambda_array_int_push_inferred_cow_p, lambda_array_int_push_inferred_cow"
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "call\t{{p}}, lambda_array_push_checked,"
       ],
       "forbid": [
-        "call\tpn_push_cow_p, pn_push_cow"
+        "call\t{{p}}, pn_push_cow,"
       ]
     },
     {
-      "in_func": "_sum_codes_#",
+      "in_func": "mvp_#_sum_codes",
+      "expect_seq": [
+        "mov\t{{r}}, i64:({{r}})",
+        "jmp\t{{l:read_done}}",
+        "call\t{{p}}, fn_index,",
+        "{{l:read_done}}:",
+        "add\t{{r}}, {{r}}, {{r}}"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": 1
+      }
+    },
+    {
+      "in_func": "mvp_#_nullable_codes",
+      "expect": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, pn_push_cow,"
+      ],
       "forbid": [
-        "call\tfn_index_p, fn_index"
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "call\t{{p}}, lambda_array_push_checked,"
+      ]
+    },
+    {
+      "in_func": "mvp_#_mixed_codes",
+      "expect": [
+        "call\t{{p}}, array_plain,",
+        "call\t{{p}}, pn_push_cow,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_fill_primitive_bits,",
+        "call\t{{p}}, lambda_array_push_checked,"
       ]
     }
   ]

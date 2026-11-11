@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D2.4.3 / S9.1.3: the admitted float[] carrier proof survives a borrow; the live COW byte still guards unique stores independently of the read extent proof. The unproven carrier header sequence is checked in tune32_inferred_bool_fill.",
+  "description": "D2.4.3/S9.1.3: MVP checks admitted float storage with packed immutable header words, keeps live COW checks for stores, and emits native multiply/load/store kernels with independent checked mutation fallback. Closed finite dimensions use ordinary MUL rather than Full MULO.",
   "checks": [
     {
-      "in_func": "_matmul_#",
+      "in_func": "mvp_#_matmul",
       "expect": [
-        "mov\t{{r}}, u8:4({{r}})"
+        "and\t{{r}}, {{r}}, 4294979584",
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ],
       "forbid": [
         "u8:2({{r}})",
@@ -13,17 +14,20 @@
       ]
     },
     {
-      "in_func": "_matmul_#",
+      "in_func": "mvp_#_matmul",
+      "in_range": {
+        "from": "mov\t{{r}}, arg0",
+        "to": "call\t{{p}}, fn_index,"
+      },
       "expect_seq": [
-        {
-          "pattern": "mulo\t{{r}}, {{r}}, {{r}}"
-        },
-        {
-          "pattern": "and\t{{r:g}}, {{r:g}}, {{r}}"
-        },
-        {
-          "pattern": "and\t{{r!g}}, {{r:g}}, {{r}}"
-        }
+        "and\t{{r}}, {{r}}, 4294979584",
+        "dmov\t{{r:left}}, d:({{r}})",
+        "dmov\t{{r:right}}, d:({{r}})",
+        "dmul\t{{r}}, {{r:left}}, {{r:right}}",
+        "dmov\td:({{r}}), {{r}}"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ]
     }
   ]

@@ -2,7 +2,7 @@
 object
 key
 20
-[99, [10, 99, 30]]
+[20, [10, 99, 30]]
 [null, "b"]
 [2.5, 2.5, null]
 [null, null, null, null]

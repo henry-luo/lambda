@@ -5,6 +5,7 @@
  * All functions use Item (uint64_t) as the primary data type.
  */
 #pragma once
+#include "lambda/core/api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -1391,6 +1392,9 @@ Item js_generator_return(Item generator, Item value);
  */
 Item js_generator_throw(Item generator, Item error);
 Item js_make_iter_result(Item value, bool done);
+// returns null when the shared shape tree declines; callers retain their
+// ordinary property-definition path for that storage-policy miss.
+Item js_try_make_iter_result(struct TypeMap* base, Item value, bool done);
 
 /**
  * v15: Create a 2-element array [value, next_state] for generator state machine returns.
@@ -1763,8 +1767,6 @@ Item js_is_constructor(Item fn);
 Item js_test262_native_harness_install(void);
 Item js_262_get_agent_object(void);
 Item js_test262_build_string(Item args);
-uint64_t lambda_mir_double_bits(double dval);
-double lambda_mir_bits_double(uint64_t bits);
 // Runtime entry points shared across JS translation units.
 uint64_t js_get_heap_epoch(void);
 Item js_get_typed_array_base_proto(void);

@@ -3,6 +3,7 @@
 type State = {value: int, flag: bool}
 
 pn computed() int {
+    let collection = split("a,b", ",")
     let values = [10, 20, 30]
     return values[0] + values[1]
 }

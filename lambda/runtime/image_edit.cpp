@@ -166,69 +166,68 @@ static double edit_selection(const RasterBuffer* selection, const double* origin
     return raster_buffer_pixel(selection, (uint32_t)px, (uint32_t)py)[0] / 255.0;
 }
 
-static bool edit_dab(RasterEdit& edit, double px, double py, double radius, double hardness, double flow, size_t* work) {
-    int64_t left = (int64_t)fmax(0, floor(px - radius)), top = (int64_t)fmax(0, floor(py - radius));
-    int64_t right = (int64_t)fmin(edit.result->width, ceil(px + radius)), bottom = (int64_t)fmin(edit.result->height, ceil(py + radius));
-    if (right <= left || bottom <= top) return true;
-    size_t area = (size_t)(right - left) * (bottom - top);
-    if (area > 128000000 - *work) return edit.fail("stroke exceeds the bounded dab work budget");
-    *work += area;
-    for (int64_t y = top; y < bottom; y++) for (int64_t x = left; x < right; x++) {
-        double distance = hypot(x + 0.5 - px, y + 0.5 - py) / radius;
-        double coverage = distance <= hardness ? 1 : hardness >= 1 ? 0 : fmax(0, (1 - distance) / (1 - hardness));
-        if (coverage <= 0) continue;
-        double old = raster_buffer_pixel(edit.result, (uint32_t)x, (uint32_t)y)[0] / 255.0;
-        uint8_t sample = (uint8_t)lround((1 - (1 - old) * (1 - coverage * flow)) * 255);
-        if (!edit.write((uint32_t)x, (uint32_t)y, &sample)) return false;
+// Lambda_Pkg_Paint PT13: stroke coverage comes from lambda.paint, whose engine accumulates the
+// brush's wash dabs into a coverage layer of u8 (tile, tile) arrays (null for untouched tiles).
+// The tiles are read in place; nothing allocates from the GC heap while they are in use (D5.4.4).
+struct PaintCoverage {
+    ByteStorage* index = nullptr;
+    const uint8_t** tiles = nullptr;
+    uint32_t tile = 0, columns = 0, rows = 0;
+    uint32_t left = 0, top = 0, right = 0, bottom = 0;   // the samples whose coverage the batch changed
+    ~PaintCoverage() { if (index) byte_storage_release(index); }
+    double at(uint32_t x, uint32_t y) const {
+        const uint8_t* samples = tiles[(size_t)(y / tile) * columns + x / tile];
+        return samples ? samples[(size_t)(y % tile) * tile + x % tile] / 255.0 : 0;
     }
-    return true;
-}
-
-struct StrokeProgress {
-    double point[3] = {}, distance = 0;
-    size_t work = 0;
-};
-
-static bool edit_stroke(RasterEdit& edit, const RasterBuffer* source, Item options,
-        Item previous, StrokeProgress& progress) {
-    double size, hardness, spacing, flow;
-    if (!edit.number(options, "size", 20, 0.5, 4096, &size) || !edit.number(options, "hardness", 0.8, 0, 1, &hardness) ||
-        !edit.number(options, "spacing", 0.2, 0.01, 2, &spacing) || !edit.number(options, "flow", 1, 0, 1, &flow)) return false;
-    ItemReader points(item_attr(options, "points").to_const());
-    if (!points.isArray() || !points.asArray().length() || points.asArray().length() > 65536)
-        return edit.fail("stroke requires 1 to 65536 points");
-    double a[3], b[3], step = fmax(0.25, size * spacing), distance_to_next = step;
-    int64_t first = 1, work = 0;
-    if (get_type_id(previous) != LMD_TYPE_NULL) {
-        const RasterBuffer* coverage = lambda_raster_buffer(item_attr(previous,"coverage"));
-        if (!coverage || coverage->width!=source->width || coverage->height!=source->height || coverage->channels!=1 ||
-            !edit.point(item_attr(previous,"point"),a) ||
-            !edit.number(previous,"distance",-1,0,step,&distance_to_next) ||
-            !lambda_item_to_int64_exact(item_attr(previous,"work"),&work) || work<0 || work>128000000)
-            return edit.fail("invalid stroke continuation");
-        edit.result = raster_buffer_fork(coverage);
-        if (!edit.result) return edit.fail("cannot allocate stroke coverage index");
-        first = 0;
-    } else {
-        if (!edit.create(source->width, source->height, 1) || !edit.point(points.asArray().get(0), a)) return false;
-        if (!edit_dab(edit, a[0], a[1], size / 2, hardness, flow * a[2], &progress.work)) return false;
-    }
-    progress.work += (size_t)work;
-    // carry spacing across segments so event subdivision cannot change dab placement.
-    for (int64_t i = first; i < points.asArray().length(); i++) {
-        if (!edit.point(points.asArray().get(i), b)) return false;
-        double length = hypot(b[0] - a[0], b[1] - a[1]), at = distance_to_next;
-        while (at <= length && length > 0) {
-            double t = at / length;
-            if (!edit_dab(edit, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
-                size / 2, hardness, flow * (a[2] + (b[2] - a[2]) * t), &progress.work)) return false;
-            at += step;
+    bool read(RasterEdit& edit, Item layer, Item rect, const RasterBuffer* source) {
+        double width, height, size;
+        if (!is_map_family_type_id(get_type_id(layer)) || !edit_is(item_attr(layer, "format"), "coverage") ||
+            !edit_is(item_attr(layer, "sample"), "u8")) return edit.fail("stroke coverage must be a lambda.paint u8 coverage layer");
+        if (!edit.number(layer, "width", 0, 1, 16000000, &width) || !edit.number(layer, "height", 0, 1, 16000000, &height) ||
+            !edit.number(layer, "tile", 0, 1, 4096, &size) || width != source->width || height != source->height ||
+            floor(size) != size) return edit.fail("stroke coverage must match the raster extent");
+        tile = (uint32_t)size;
+        columns = (source->width - 1) / tile + 1; rows = (source->height - 1) / tile + 1;
+        ItemReader list(item_attr(layer, "tiles").to_const());
+        if (!list.isArray() || list.asArray().length() != (int64_t)columns * rows) return edit.fail("stroke coverage lists the wrong number of tiles");
+        index = byte_storage_alloc((size_t)columns * rows * sizeof(uint8_t*), MEM_CAT_TEMP);
+        if (!index) return edit.fail("cannot allocate the stroke coverage index");
+        tiles = (const uint8_t**)index->data;
+        for (int64_t i = 0; i < (int64_t)columns * rows; i++) {
+            Item entry = list.asArray().get(i).item();
+            tiles[i] = nullptr;
+            if (get_type_id(entry) == LMD_TYPE_NULL) continue;
+            int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+            if (get_type_id(entry) != LMD_TYPE_ARRAY_NUM || entry.array_num->get_elem_type() != ELEM_UINT8 ||
+                array_num_get_shape_strides(entry.array_num, shape, strides) != 2 || shape[0] != tile || shape[1] != tile ||
+                !array_num_is_dense(entry.array_num)) return edit.fail("stroke coverage tiles must be dense u8 (tile, tile) arrays");
+            tiles[i] = (const uint8_t*)entry.array_num->data;
         }
-        distance_to_next = at - length; memcpy(a, b, sizeof(a));
+        if (get_type_id(rect) == LMD_TYPE_NULL) return true;
+        int64_t bounds[4];
+        if (!lambda_image_rect(rect, bounds)) return edit.fail("stroke coverage rect must be [x0, y0, x1, y1]");
+        left = (uint32_t)fmax(0, (double)bounds[0]); top = (uint32_t)fmax(0, (double)bounds[1]);
+        right = (uint32_t)fmin(source->width, fmax(0, (double)bounds[2]));
+        bottom = (uint32_t)fmin(source->height, fmax(0, (double)bounds[3]));
+        if (right < left) right = left; if (bottom < top) bottom = top;
+        return true;
     }
-    memcpy(progress.point,a,sizeof(a)); progress.distance=distance_to_next;
-    return true;
-}
+    // the public continuation keeps a gray Raster of the cumulative coverage.
+    RasterBuffer* gray(RasterEdit& edit, uint32_t width, uint32_t height) const {
+        if (!edit.create(width, height, 1)) return nullptr;
+        for (uint32_t r = 0; r < rows; r++) for (uint32_t c = 0; c < columns; c++) {
+            const uint8_t* samples = tiles[(size_t)r * columns + c];
+            if (!samples) continue;
+            for (uint32_t y = r * tile; y < height && y < (r + 1) * tile; y++)
+                for (uint32_t x = c * tile; x < width && x < (c + 1) * tile; x++) {
+                    uint8_t s = samples[(size_t)(y - r * tile) * tile + (x - c * tile)];
+                    if (s && !edit.write(x, y, &s)) return nullptr;
+                }
+        }
+        RasterBuffer* result = edit.result; edit.result = nullptr;
+        return result;
+    }
+};
 
 struct RetouchPaint {
     const RasterBuffer *sample=nullptr, *context=nullptr;
@@ -309,7 +308,7 @@ struct RetouchPaint {
 };
 
 static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item options, const char* operation,
-        Item previous = ItemNull, RasterEdit* accumulated = nullptr, StrokeProgress* progress = nullptr) {
+        PaintCoverage* accumulated = nullptr) {
     if (!source || (source->channels != 1 && source->channels != 4)) return edit.fail("paint requires gray coverage or RGBA samples");
     double opacity, origin[3] = {};
     if (!edit.number(options, "opacity", 1, 0, 1, &opacity)) return false;
@@ -335,13 +334,15 @@ static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item option
         length_squared = (end[0] - start[0]) * (end[0] - start[0]) + (end[1] - start[1]) * (end[1] - start[1]);
         if (length_squared <= 0) return edit.fail("gradient endpoints must differ");
     }
-    RasterEdit local_coverage; StrokeProgress local_progress;
-    RasterEdit& coverage = accumulated ? *accumulated : local_coverage;
-    if (stroke && !edit_stroke(coverage, source, options,previous,progress ? *progress : local_progress)) return edit.fail(coverage.error);
+    PaintCoverage local_coverage;
+    PaintCoverage& coverage = accumulated ? *accumulated : local_coverage;
+    if (stroke && !coverage.read(edit, item_attr(options, "coverage"), item_attr(options, "rect"), source)) return false;
     if (retouch && tool.neighborhood && coverage.right>coverage.left && coverage.bottom>coverage.top &&
         (uint64_t)(coverage.right-coverage.left)*(coverage.bottom-coverage.top)*(2*tool.radius+1)*(2*tool.radius+1)*(tool.heal?2:1)>128000000)
         return edit.fail("retouch neighborhood exceeds the work budget");
-    const RasterBuffer* base = get_type_id(previous)==LMD_TYPE_NULL ? source : lambda_raster_buffer(item_attr(previous,"raster"));
+    // a stroke batch recomposites only its changed coverage onto the previous preview.
+    Item preview = item_attr(options, "base");
+    const RasterBuffer* base = get_type_id(preview)==LMD_TYPE_NULL ? source : lambda_raster_buffer(preview);
     if (!base || base->width!=source->width || base->height!=source->height || base->channels!=source->channels)
         return edit.fail("invalid stroke preview raster");
     // coverage accumulates across batches; opacity is always applied to the frozen source.
@@ -351,7 +352,7 @@ static bool edit_paint(RasterEdit& edit, const RasterBuffer* source, Item option
     uint32_t right = stroke ? coverage.right : source->width, bottom = stroke ? coverage.bottom : source->height;
     for (uint32_t y = top; y < bottom; y++) for (uint32_t x = left; x < right; x++) {
         double alpha = opacity * edit_selection(selection, origin, x, y);
-        if (stroke) alpha *= raster_buffer_pixel(coverage.result, x, y)[0] / 255.0;
+        if (stroke) alpha *= coverage.at(x, y);
         if (alpha <= 0) continue;
         uint8_t sample[4], paint[4]; memcpy(sample, raster_buffer_pixel(source, x, y), source->channels);
         memcpy(paint, color, source->channels);
@@ -479,38 +480,28 @@ static bool edit_parameters(Item options, const char* allowed) {
     return true;
 }
 
+// one batch of an incremental stroke: {raster, coverage, rect}. lambda.image keeps the
+// continuation (source, settings, carry, work) in Lambda; the composite stays native.
 static Item edit_stroke_step(Item source, Item config) {
-    RootFrame roots(3);
-    Rooted<Item> owner(roots,source), settings(roots,item_attr(config,"settings")), previous(roots,item_attr(config,"previous"));
-    if (!edit_parameters(settings.get()," size hardness spacing flow opacity color mode selection origin "))
-        return lambda_image_error("unknown stroke setting");
+    RootFrame roots(2);
+    Rooted<Item> owner(roots,source), options(roots,config);
     const RasterBuffer* pixels=lambda_raster_buffer(owner.get());
-    // S5.4.3: equal source snapshots remain interchangeable across continuation batches.
-    if (!pixels || (get_type_id(previous.get())!=LMD_TYPE_NULL &&
-        (!is_map_family_type_id(get_type_id(previous.get())) || fn_eq(item_attr(previous.get(),"source"),owner.get())!=BOOL_TRUE ||
-            fn_eq(item_attr(previous.get(),"settings"),settings.get())!=BOOL_TRUE)))
-        return lambda_image_error("stroke continuation requires the same source and settings");
-    RootedValueBuilder options;
-    MapReader opts=MapReader::fromItem(settings.get());
-    auto entries=opts.entries(); const char* key; ItemReader field;
-    while (entries.next(&key,&field)) options.put(key,field.item());
-    options.put("points",item_attr(config,"points"));
-    RasterEdit edit,coverage; StrokeProgress progress;
-    if (!edit_paint(edit,pixels,options.value.get(),"stroke",previous.get(),&coverage,&progress))
+    if (!pixels) return lambda_image_error("stroke requires a Raster");
+    RasterEdit edit, gray_edit;
+    PaintCoverage coverage;
+    if (!edit_paint(edit,pixels,options.get(),"stroke",&coverage))
         return lambda_image_error(edit.error ? edit.error : "stroke continuation failed");
-    RootedValueBuilder result,point(true),rect(true);
-    result.put("source",owner.get()); result.put("settings",settings.get());
+    // the coverage tiles are GC arrays: copy them before the first wrap allocates (D5.4.4).
+    RasterBuffer* gray=coverage.gray(gray_edit,pixels->width,pixels->height);
+    if (!gray) return lambda_image_error(gray_edit.error ? gray_edit.error : "cannot copy stroke coverage");
+    RootedValueBuilder result,rect(true);
     RasterBuffer* output=edit.result; edit.result=nullptr;
     Item wrapped=lambda_raster_wrap(output,item_attr(owner.get(),"color"));
-    if (item_is_error(wrapped)) return wrapped;
+    if (item_is_error(wrapped)) { raster_buffer_destroy(gray); return wrapped; }
     result.put("raster",wrapped);
-    output=coverage.result; coverage.result=nullptr;
-    wrapped=lambda_raster_wrap(output,ItemNull);
+    wrapped=lambda_raster_wrap(gray,ItemNull);
     if (item_is_error(wrapped)) return wrapped;
     result.put("coverage",wrapped);
-    for (int i=0;i<3;i++) point.append(push_d(progress.point[i]));
-    result.put("point",point.value.get()); result.put("distance",push_d(progress.distance));
-    result.put("work",{.item=i2it(progress.work)});
     // selection clipping and zero opacity may accumulate coverage without changing any samples.
     if (edit.right>edit.left && edit.bottom>edit.top) {
         uint32_t bounds[]={edit.left,edit.top,edit.right,edit.bottom};
@@ -531,9 +522,9 @@ extern "C" Item fn_image_edit(Item raster, Item options) {
     // each operation has one checked parameter surface; misspellings never silently fall back.
     const char* allowed = !strcmp(operation, "shape") ? " op width height shape start end points " :
         !strcmp(operation, "combine") ? " op other mode " : !strcmp(operation, "feather") ? " op radius " :
-        !strcmp(operation, "stroke") ? " op points size hardness spacing flow opacity color mode selection origin " :
-        !strcmp(operation, "stroke_step") ? " op points settings previous " :
-        !strcmp(operation,"retouch") ? " op points size hardness spacing flow opacity selection origin kind strength radius sample sample_offset context context_offset " :
+        !strcmp(operation, "stroke") ? " op coverage rect base opacity color mode selection origin " :
+        !strcmp(operation, "stroke_step") ? " op coverage rect base opacity color mode selection origin " :
+        !strcmp(operation,"retouch") ? " op coverage rect opacity selection origin kind strength radius sample sample_offset context context_offset " :
         !strcmp(operation, "fill") ? " op color opacity mode selection origin " :
         !strcmp(operation, "gradient") ? " op color end_color start end kind opacity selection origin " :
         !strcmp(operation, "wand") ? " op point tolerance contiguous " :

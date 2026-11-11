@@ -3,7 +3,7 @@
 #include "mir_emitter_shared.hpp"
 #include "recovery_frame.h"
 
-// EvalContext uses the same single-inheritance layout as Full's heap offsets.
+// EvalContext extends Context through single non-virtual inheritance.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
 static constexpr size_t MIR_EVAL_CONTEXT_VARGS_OFFSET = offsetof(EvalContext, current_vargs);

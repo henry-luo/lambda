@@ -1,50 +1,55 @@
 {
   "schema_version": 1,
-  "description": "Tune14 A1 keeps proved float and integer array paths on native MIR lanes, preserves the same-contract array witness across rebinding, and retains generic admission for a widened any[] control.",
+  "description": "D2.3.4\u2013D2.3.5/D4.3.3: native float/int arithmetic and guarded packed reads retain checked misses. Bitwise sentinel/error arms each keep one tower helper; widened input retains generic arithmetic.",
   "checks": [
     {
-      "in_func": "_tune14_float_sum_#",
+      "in_func": "mvp_#_tune14_float_sum",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
+        "call\t{{p}}, lambda_type_check_lazy,",
         "dadd\t{{r}}"
       ],
       "forbid": [
-        "call\tfn_add_p, fn_add"
+        "call\t{{p}}, fn_add,"
       ]
     },
     {
-      "in_func": "_tune14_bitwise_#",
+      "in_func": "mvp_#_tune14_bitwise",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
+        "call\t{{p}}, lambda_type_check_lazy,",
         "rsh\t{{r}}",
         "and\t{{r}}"
       ],
+      "count": {
+        "call\t{{p}}, fn_shr_item,": 1,
+        "call\t{{p}}, fn_band_item,": 1
+      },
       "forbid": [
-        "call\tfn_shr_item_p, fn_shr_item",
-        "call\tfn_band_item_p, fn_band_item",
-        "call\tfn_int_p, fn_int"
+        "call\t{{p}}, fn_int,"
       ]
     },
     {
-      "in_func": "_tune14_rebind_#",
+      "in_func": "mvp_#_tune14_rebind",
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
+        "call\t{{p}}, lambda_type_check_lazy,",
         "mov\t{{r}}, i64:({{r}})",
-        "add\t{{r}}, {{r}}, {{r}}"
+        "add\t{{r}}, {{r}}, {{r}}",
+        "i64:32("
       ],
       "forbid": [
-        "call\tfn_index_p, fn_index",
-        "call\tfn_add_p, fn_add"
-      ]
+        "call\t{{p}}, fn_add,"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": 2
+      }
     },
     {
-      "in_func": "_tune14_widened_#",
+      "in_func": "mvp_#_tune14_widened",
       "expect": [
-        "call\tfn_index_p, fn_index",
-        "call\tfn_add_p, fn_add"
+        "call\t{{p}}, fn_index,",
+        "call\t{{p}}, fn_add,"
       ],
       "forbid": [
-        "call\tensure_typed_array_p, ensure_typed_array"
+        "call\t{{p}}, ensure_typed_array,"
       ]
     }
   ]

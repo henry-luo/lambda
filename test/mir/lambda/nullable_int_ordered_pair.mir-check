@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "S4.1.2/S6.1.2/D2.2.2: all nullable integer ordered relations use signed predicates with NaN exclusion and separate null absorption; no float conversion is required. Branch demand avoids forming the null marker; native int stores admit poison and guard only null (S3.1, D3.2.2-D3.2.1, D8.2.6). Inferred any parameters retain absence handling; a null-copy mutation must not acquire an int[] source contract.",
+  "description": "S4.1.2/S6.1.2: native int pairs preserve null and poison. The comparison procedure also inlines its explicitly float-typed consumer, so only the integer prefix forbids floating conversion. Full-width null-store tests retain checked fallback and nullable predicates use the 0/1/2 bool lane.",
   "checks": [
     {
-      "in_func": "_compare_#",
+      "in_func": "mvp_#_compare",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "call\t{{p}}, lambda_int_lane_to_double_c,",
         "\tdlt\t",
         "\tdle\t",
         "\tdgt\t",
@@ -16,32 +16,32 @@
         "\tle\t",
         "\tgt\t",
         "\tge\t"
-      ]
+      ],
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, lambda_int_lane_to_double_c,"
+      }
     },
     {
-      "in_func": "_select_lt_#",
+      "in_func": "mvp_#_select_lt",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
-        "mov\t{{r}}, 2"
+        "call\t{{p}}, lambda_int_lane_to_double_c,"
       ],
       "expect": [
         "\tlt\t"
       ]
     },
     {
-      "in_func": "_select_float_lt_#",
-      "forbid": [
-        "mov\t{{r}}, 2"
-      ],
+      "in_func": "mvp_#_select_float_lt",
+      "forbid": [],
       "expect": [
         "\tdlt\t"
       ]
     },
     {
-      "in_func": "_select_read_lt_#",
+      "in_func": "mvp_#_select_read_lt",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
-        "mov\t{{r}}, 2"
+        "call\t{{p}}, lambda_int_lane_to_double_c,"
       ],
       "expect": [
         "\tlt\t",
@@ -49,35 +49,35 @@
       ]
     },
     {
-      "in_func": "_compare_read_#",
+      "in_func": "mvp_#_compare_read",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c"
+        "call\t{{p}}, lambda_int_lane_to_double_c,"
       ],
       "expect": [
         "\tlt\t",
-        "\tubge\t",
-        "mov\t{{r}}, 2"
+        "\tubge\t"
       ]
     },
     {
-      "in_func": "_store_poison_#",
-      "forbid": [
-        "\tubgt\t"
-      ],
+      "in_func": "mvp_#_store_poison",
+      "forbid": [],
       "expect": [
-        "\tbeq\t",
-        "72057594037927936"
+        "beq\tL{{n}}, {{r}}, 72057594037927936",
+        "call\t{{p}}, lambda_array_set_checked_item,"
       ]
     },
     {
-      "in_func": "_inferred_read_lt_#",
+      "in_func": "mvp_#_inferred_read_lt",
       "forbid": [
-        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
-        "mov\t{{r}}, 2"
+        "call\t{{p}}, lambda_int_lane_to_double_c,"
       ],
       "expect": [
         "\tlt\t"
-      ]
+      ],
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, fn_index,"
+      }
     }
   ]
 }

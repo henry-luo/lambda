@@ -1,35 +1,81 @@
 {
   "schema_version": 1,
-  "description": "S7.1.1v3, D6.3.1, D7.3.1: a guarded ASCII scan reads bytes directly and retains the generic Unicode and absent-index loop.",
+  "description": "D7.3.1/S7.1.1v3: MVP compares guarded ASCII bytes directly; ord-at retains Unicode and absent-index semantics.",
   "checks": [
     {
-      "in_func": "_last_code_#",
-      "expect": ["u8:4", "u8:5", "call\tfn_string_ord_at_p, fn_string_ord_at"],
-      "count": {"u8:4(": 2, "u8:5(": 2, "call\tfn_string_ord_at_p, fn_string_ord_at": 1},
-      "forbid": ["call\tfn_string_ascii_at_p, fn_string_ascii_at", "call\tfn_ord_str_p, fn_ord_str"]
+      "in_func": "mvp_#_last_code",
+      "expect": [
+        "u8:4",
+        "u8:5",
+        "call\t{{p}}, fn_string_ord_at,"
+      ],
+      "count": {
+        "u8:4(": 1,
+        "u8:5(": 1,
+        "call\t{{p}}, fn_string_ord_at,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, fn_string_ascii_at,",
+        "call\t{{p}}, fn_ord_str,"
+      ]
     },
     {
-      "in_func": "_fold_digits_#",
-      "expect": ["u8:4", "u8:5", "call\tfn_string_ord_at_p, fn_string_ord_at"],
-      "count": {"u8:4(": 2, "u8:5(": 2, "call\tfn_string_ord_at_p, fn_string_ord_at": 1},
-      "forbid": ["call\tfn_string_ascii_at_p, fn_string_ascii_at", "call\tfn_ord_str_p, fn_ord_str"]
+      "in_func": "mvp_#_fold_digits",
+      "expect": [
+        "u8:4",
+        "u8:5",
+        "call\t{{p}}, fn_string_ord_at,"
+      ],
+      "count": {
+        "u8:4(": 1,
+        "u8:5(": 1,
+        "call\t{{p}}, fn_string_ord_at,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, fn_string_ascii_at,",
+        "call\t{{p}}, fn_ord_str,"
+      ]
     },
     {
-      "in_func": "_skip_spaces_#",
-      "expect": ["u8:5", "call\tfn_string_char_eq_ascii_p, fn_string_char_eq_ascii"],
-      "count": {"u8:4(": 2, "u8:5(": 2, "call\tfn_string_char_eq_ascii_p, fn_string_char_eq_ascii": 1},
-      "forbid": ["call\tfn_string_ascii_at_p, fn_string_ascii_at"]
+      "in_func": "mvp_#_skip_spaces",
+      "expect": [
+        "u8:5",
+        "call\t{{p}}, fn_string_ord_at,"
+      ],
+      "count": {
+        "u8:4(": 1,
+        "u8:5(": 1,
+        "call\t{{p}}, fn_string_ord_at,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, fn_string_ascii_at,"
+      ]
     },
     {
-      "in_func": "_scan_word_#",
-      "expect": ["u8:5", "call\tfn_string_char_eq_ascii_p, fn_string_char_eq_ascii"],
-      "count": {"u8:4(": 2, "u8:5(": 2, "call\tfn_string_char_eq_ascii_p, fn_string_char_eq_ascii": 1},
-      "forbid": ["call\tfn_string_ascii_at_p, fn_string_ascii_at"]
+      "in_func": "mvp_#_scan_word",
+      "expect": [
+        "u8:5",
+        "call\t{{p}}, fn_string_ord_at,"
+      ],
+      "count": {
+        "u8:4(": 1,
+        "u8:5(": 1,
+        "call\t{{p}}, fn_string_ord_at,": 1
+      },
+      "forbid": [
+        "call\t{{p}}, fn_string_ascii_at,"
+      ]
     },
     {
-      "in_func": "_changing_source_#",
-      "expect": ["call\tfn_string_char_eq_ascii_p, fn_string_char_eq_ascii"],
-      "count": {"u8:4(": 1, "u8:5(": 1, "call\tfn_string_char_eq_ascii_p, fn_string_char_eq_ascii": 1}
+      "in_func": "mvp_#_changing_source",
+      "expect": [
+        "call\t{{p}}, fn_string_ord_at,"
+      ],
+      "count": {
+        "u8:4(": 1,
+        "u8:5(": 1,
+        "call\t{{p}}, fn_string_ord_at,": 1
+      }
     }
   ]
 }

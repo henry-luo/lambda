@@ -3,7 +3,7 @@
 **Status:** architecture ratified on 2026-11-05; implementation in progress.
 **Date:** 2026-11-05.
 **Scope:** extract the shared input/data foundation into `lambda-input`, extract the native Radiant engine into a sibling project, and keep language execution and integration in Lambda.
-**Authority:** [D9.1.1v4, D9.1.2v2–D9.1.4v2, D9.2.1v2 and D9.5.6v2](../doc/Lambda_Formal_Design.md) ratify the new boundaries. The implementation plan tracks remaining conformance; the current build does not yet satisfy them.
+**Authority:** [D9.1.1v4–D9.1.5, D9.2.1v2 and D9.5.6v2](../doc/Lambda_Formal_Design.md) ratify the project boundaries and build pipeline. The implementation plan tracks remaining conformance; the current build does not yet satisfy them.
 **Related record:** [Lambda Static Module Split](Lambda_Design_Static_Modules.md). This extends that build-boundary work; it does not introduce a competing ruling-ID series.
 
 ### Specification linkage
@@ -13,6 +13,7 @@
 | D9.1.1v4, D9.2.1v2, D9.5.6v2 | Replace the Radiant-over-runtime direction and embedding contract; keep event handling and script writers in Lambda. |
 | D9.1.2v2, D11.1.2 | Preserve centralized resource acquisition and policy; relocate the standalone portion into `lambda-input`. |
 | D9.1.3v2–D9.1.4v2 | Preserve provider ownership, checked boundaries, and the Mark reader/builder/editor layering. |
+| D9.1.5 | Use Make as the project build entry point and executor; use Premake with owner JSON configuration to generate Makefiles where needed. Do not introduce another build system for dependencies. |
 | D2.1.1, D5.1.1–D5.1.3 | Preserve the shared value representation and separation of Input-owned data from runtime GC. |
 | D5.2.1, D5.2.3, D5.2.5 | Preserve allocator contexts, retained ownership, and ordered cleanup. |
 | D5.5.1–D5.5.3, D6.3.3 | Preserve the Radiant ownership seam, copied presentation data, and precise runtime roots. |
@@ -109,7 +110,7 @@ Third-party sources retain their licenses, pinned provenance, and existing patch
 
 The requested input library cannot consist only of parser translation units. Parsers and formatters use `Input`, `Item`, `Element`, name/shape machinery, allocation contexts, and Mark APIs. Those runtime-independent definitions and providers must be included in its closure.
 
-Keep one canonical representation shared with Lambda (D2.1.1). Do not fork `Item` or add a JSON serialization boundary between the projects. Public input headers must be usable without transitively exposing `Runtime`, `EvalContext`, AST implementation, GC roots, or MIR.
+Keep one canonical representation shared with Lambda (D2.1.1). Do not fork `Item` or add a JSON serialization boundary between the projects. Public input headers must be usable without transitively exposing `Runtime`, `EvalContext`, AST implementation, GC roots, or MIR. `lambda-input` owns `lambda/lambda.h` for its shared value declarations; Lambda owns runtime declarations in `lambda/lambda.hpp` and runtime-owned C interfaces. Native consumers must preserve the shared layout and linkage when the mixed header is split (D9.1.1v4, D9.1.3v2). The removed C2MIR backend parsed an embedded header; direct MIR emission does not (D1.6).
 
 The standalone formatting API admits the native formats without a runtime. Wiki, math, and other targets implemented by shipped Lambda Script packages remain Lambda integration features; requesting them through standalone input reports that a script writer is required. Keep their successful integrated behavior and tests in Lambda. Do not introduce a second native writer or count those targets as standalone formatter coverage.
 
@@ -178,7 +179,15 @@ Document teardown must stop new work, cancel or drain pending callbacks, detach 
 
 Ship `lambda-input` and Radiant as static libraries with public headers and machine-readable dependency metadata. Illustrative Unix archive names are `liblambda-input.a` and `libradiant.a`; platform suffixes follow the toolchain. Do not promise a stable cross-version C++ binary ABI. Rebuild consumers when the shared data/API configuration changes.
 
-Each project owns its source manifest, dependency pins, generated code, tests, and developer entry points. Retain the current declarative build approach during extraction unless a separate build-system decision is made. Edit JSON configuration and generators, then regenerate build outputs; never hand-edit generated Premake Lua.
+Each project owns its source manifest, dependency pins, generated code, tests, and developer entry points. **D9.1.5 build decision (2026-11-10):** GNU Make is the only project build entry point and executor for Lambda, `lambda-input` and Radiant. Premake reads each owner's JSON build configuration and generates Makefiles where needed. Project and dependency builds use no other build system, including CMake, Meson, Ninja or Autotools (Autoconf/Automake). A helper may fetch pinned sources or generate headers and metadata, but it does not delegate compilation to another build system. Edit JSON configuration and generators, then regenerate build outputs; never hand-edit generated Premake Lua.
+
+On 2026-11-10, platform setup was split by owner: Lambda prepares host and
+runtime development tools and calls input and Radiant setup; input prepares
+its libraries and Radiant prepares its graphics packages. Each sibling also
+has a standalone setup entry point. Linux input setup builds pinned mbedTLS
+and mpdecimal locally with Premake and Make. This follows D9.1.1v4, D9.1.3v2
+and D9.1.5. The macOS host build and all three setup dry runs were checked;
+Linux and Windows still require native setup and build verification.
 
 The input and Radiant packages must export the transitive system/vendor link requirements. A static archive does not automatically bundle all libraries it references. The Lambda build must consume the exported targets/metadata and compile each provider once, rather than rebuilding libraries from cross-repository source globs.
 
@@ -334,4 +343,6 @@ The controlling rule is provider ownership (D9.1.3v2). A changed include path, o
 
 On 2026-11-09, Radiant removed its whole-directory input migration links. Native sources resolve `lib/` and `lambda/` header prefixes through the configured input root, and the native archive links without Lambda runtime or DOM code. A build guard rejects directory links and input source files in a header facade. The remaining vendor artifacts still require separate packaging (D9.1.1v4, D9.1.3v2).
 
-Lambda no longer has top-level `lib` or `radiant` source links. Its build resolves those logical paths from the selected sibling roots; input has no remaining source-tree symlinks into Lambda. The normal build still compiles sibling sources, while the split build links sibling archives. Vendor provisioning and cross-platform archive integration remain open (D9.1.1v4, D9.1.3v2).
+Lambda no longer has top-level `lib` or `radiant` source links. Its build resolves logical paths from the selected sibling roots; input has no remaining source-tree symlinks into Lambda. The normal build links the sibling archives. Lambda's default Premake workspace does not generate sibling provider projects or the old monolithic host; owner metadata supplies the link closure. Specialized variants and white-box tests still compile selected sibling sources. Vendor provisioning and cross-platform archive integration remain open (D9.1.1v4, D9.1.3v2).
+
+On 2026-11-10, the build-toolchain audit found that input's dependency builds used CMake, Meson/Ninja and curl's Autotools `configure` workflow. Input now owns the pre-split JSON recipes and shared Premake/Make builder, with compiler probes for curl; the dependency targets build on macOS with those other tools blocked. The remaining cross-platform qualification is tracked as LI-011 in the [input issue ledger](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md). D9.1.5 remains partial: Lambda's standalone libpq recipe still invokes upstream `configure`, and the full cross-project pipeline requires further audit.

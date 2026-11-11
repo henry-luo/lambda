@@ -94,6 +94,11 @@
       "tags": ["photo_album", "baseline"]
     },
     {
+      "name": "paint",
+      "globs": ["test/ui/paint/*.json"],
+      "tags": ["paint", "baseline"]
+    },
+    {
       "name": "note",
       "globs": ["test/ui/note/*.json"],
       "tags": ["note"]

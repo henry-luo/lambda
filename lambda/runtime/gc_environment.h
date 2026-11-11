@@ -5,11 +5,7 @@
 // their extension through this view instead of teaching the collector a second
 // independent storage protocol.
 
-#ifdef __cplusplus
 #include "../lambda.hpp"
-#else
-#include "lambda/lambda.h"
-#endif
 
 typedef enum GcEnvironmentLayoutKind {
     GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS = 0,

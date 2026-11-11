@@ -66,6 +66,14 @@ pn null_field(record: Record?) Record {
 
 pn admit_record(value) Record? { return value }
 
+pn observe_mutated_return() {
+    var child = make_record(true)
+    let before = child
+    // D3.4.5/S11.4.10: the unannotated write succeeds and revokes admission.
+    child.value = "bad"
+    return [child.value, child is Record, before.value, admit_record(child) is error]
+}
+
 pn effect_value() int {
     print("rhs\n")
     return 1
@@ -96,6 +104,7 @@ pn main() {
     set_nested(holder, 13)^
     print([holder_before.child.value, holder.child.value, record.value]); print("\n")
     print([read_return(true), read_return(false), read_rebound()]); print("\n")
+    print(observe_mutated_return()); print("\n")
     var absent: Record? = null
     let null_store = effectful_store(absent)
     print([null_store is error, absent]); print("\n")

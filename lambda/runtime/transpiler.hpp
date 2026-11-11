@@ -13,9 +13,6 @@
 // Shared range materialization helper for runtime sequence consumers.
 Item fn_chr(Item codepoint);
 
-typedef struct LambdaRegion LambdaRegion;
-typedef struct LambdaRegionBlock LambdaRegionBlock;
-
 // Runtime map admissions repeat the same candidate/contract shape pair across
 // recursive calls. The expected key may also be a union whose member carrier
 // was proven once. The entries are context-owned so a cache cannot leak a
@@ -49,11 +46,6 @@ typedef struct Heap {
     // native weak storage keeps captures alive exactly while their runtime
     // type value or instance is live; static nominal records hold code only.
     uint64_t object_environments_root;
-    // Per-runtime caches for compiler-proven temporary-object regions.  These
-    // blocks never enter gc->all_objects and are recycled only after a region
-    // ends, so an ordinary heap object can never retain a region pointer.
-    LambdaRegion* region_free;
-    LambdaRegionBlock* region_free_blocks;
     LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
     uint32_t map_contract_cache_next;
     struct hashmap* array_rep_cert_by_contract;
@@ -78,9 +70,6 @@ extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global 
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);  // register env array as GC roots
 extern "C" void heap_unregister_gc_root_range(uint64_t* base);  // unregister env array root range by base
-LambdaRegion* lambda_region_begin(void);
-void lambda_region_end(LambdaRegion* region);
-void* lambda_region_calloc(LambdaRegion* region, size_t size, TypeId type_id);
 String* heap_create_name(const char* name, size_t len);
 String* heap_create_name(const char* name);
 Symbol* heap_create_symbol(const char* symbol, size_t len);
@@ -215,10 +204,8 @@ void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import);
 // A module's pub variable, qualified by the dependency that defines it, so two
 // imported modules exporting one name stay distinct symbols (as functions do).
 void write_var_name_for_script(StrBuf *strbuf, AstNode *node, const Script* import_script);
-bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
 // Shared AST/MIR helpers.
-bool has_typed_params(AstFuncNode* fn_node);
 // The entry fn_map_set writes for `name` (a repeated literal key's first).
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
 // The entry a member read resolves (a repeated literal key's last, S1.6).
@@ -232,9 +219,6 @@ AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
 // evaluated once so omitted fields inherit the source value before typed-field
 // storage coercion runs.
 AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal);
-bool has_fixed_shape(TypeMap* map_type);
-bool has_named_shape(TypeMap* map_type, bool require_stored_fields = false);
-bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
 void decimal_payload_release(Decimal* dec);
 void decimal_constants_release(struct _ArrayList* constants);
@@ -253,7 +237,6 @@ Type* unwrap_simple_type_type(Type* type);
 Type* set_type_any(Transpiler* tp, AnyReason reason);
 Type* set_lit_type_any(Transpiler* tp, AnyReason reason);
 TypeId census_any_type_id(Transpiler* tp, AnyReason reason);
-TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);
 bool ast_expr_has_widened_dependency(AstNode* node);
@@ -264,14 +247,11 @@ MIR_context_t jit_init(unsigned int optimize_level);
 // Hosted profiles that select native MIR must not inherit the process-wide
 // interpreter diagnostic mode used by other compilation paths.
 MIR_context_t jit_init_native(unsigned int optimize_level);
-void* jit_gen_func(MIR_context_t ctx, const char *func_name);
 void jit_log_code_addresses(MIR_context_t ctx);
 size_t jit_release_generated_ir(MIR_context_t ctx);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
-void* find_func_prefix(MIR_context_t ctx, const char *prefix);
 void* find_data(MIR_context_t ctx, const char *data_name);
-void jit_cleanup(MIR_context_t ctx);
 void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized);
 void register_dynamic_import(const char *name, void *addr);
 void clear_dynamic_imports(void);
@@ -281,7 +261,14 @@ bool prepare_context_module_state(void* mir_ctx, void* consts, void* type_list);
 }
 #endif
 
-// MIR transpiler functions
+// JS imports retain Function environments instead of publishing raw Core entries.
+static inline bool lambda_import_is_js(const AstImportNode* import) {
+    return import && import->is_cross_lang && import->script &&
+        import->script->profile == &js_profile;
+}
+
+// Lambda execution and MIR module services
+bool lambda_const_materialize_script(Transpiler* tp);
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                       bool run_main = false, Script** out_script = nullptr);
 // Load and initialize a file-backed package without synthesizing an import script.
@@ -294,20 +281,6 @@ const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
 Input* run_lambda_document_transform_with_options(Runtime* runtime,
     const char* input_target, const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count);
-void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
-                                   double* out_jit_init_ms = nullptr,
-                                   double* out_transpile_ms = nullptr,
-                                   double* out_mir_gen_ms = nullptr,
-                                   uint64_t* out_mir_module_count = nullptr,
-                                   uint64_t* out_mir_function_count = nullptr,
-                                   uint64_t* out_mir_instruction_count = nullptr);
-
-// P2: compile one T0-supported definition into a Script-owned MIR satellite.
-// Its module bindings are read from the existing T0 slab; the resulting
-// address has the normal generated boxed ABI.
-bool compile_ast_function_satellite(Runtime* runtime, Script* script,
-                                    const AstFuncNode* fn, void** out_boxed_entry);
-
 // A worker-built satellite is inert until the evaluator seals its module-state
 // layout and publishes its entries. The fixed member set keeps the image
 // self-contained and mirrors the bounded direct-callee cluster.
@@ -346,13 +319,6 @@ bool interp_satellite_image_retain(Script* script, InterpSatelliteImage* image);
 // phase boundaries; MIR internals are never asynchronously interrupted.
 typedef bool (*InterpSatelliteCancelProbe)(void* context);
 
-// Builds a private MIR image without writing a Script, its const/type lists,
-// module state, or Function entries. `sequence` is allocated before enqueue
-// and is therefore stable regardless of worker completion order.
-bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
-        const AstFuncNode* fn, uint32_t sequence,
-        InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
-        InterpSatelliteImage** out_image);
 void interp_satellite_image_destroy(InterpSatelliteImage* image);
 
 // Detaches a Transpiler from a direct-import list. The Script-owned list stays

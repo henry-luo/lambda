@@ -3,12 +3,12 @@
   "description": "D2.3.4: checked boolean success/error results retain direct truth tests, including the cold failed float admission.",
   "checks": [
     {
-      "in_func": "_classify_#",
-      "forbid": ["call\tis_truthy_p, is_truthy"]
+      "in_func": "mvp_#_classify",
+      "forbid": ["call\t{{p}}, is_truthy,"]
     },
     {
-      "in_func": "_compare_neighbors_#",
-      "forbid": ["call\tfn_eq_p, fn_eq", "call\tfn_ne_p, fn_ne"]
+      "in_func": "mvp_#_compare_neighbors",
+      "forbid": ["call\t{{p}}, fn_eq,", "call\t{{p}}, fn_ne,"]
     }
   ]
 }

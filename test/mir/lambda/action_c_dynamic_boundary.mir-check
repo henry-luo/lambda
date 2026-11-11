@@ -4,20 +4,23 @@
   "checks": [
     {
       "return_convention": 3,
-      "in_func": "_pending_item_#",
-      "expect": ["ret\t"],
+      "in_func": "mvp_#_pending_item",
+      "expect": [
+        "ret\t"
+      ],
       "expect_any": [
-        "func\ti64, i64, p:runtime, i64:%p1",
-        "func\ti64, p:runtime, i64:%p1"
+        "func\ti64, i64, p:runtime, i64:arg0",
+        "func\ti64, p:runtime, i64:arg0"
       ],
       "forbid": [
         "lambda_item_resolve_pending"
       ]
     },
     {
-      "in_func": "_apply_fn_#",
+      "in_func": "mvp_#_apply_fn",
       "expect": [
-        "fn_call1_into"
+        "call\t{{p}}, fn_call_into,",
+        "call\t{{p}}, array_push_verbatim,"
       ]
     },
     {

@@ -1,19 +1,31 @@
 {
   "schema_version": 1,
-  "description": "The in-progress array is published to a root slot before the element calls that can collect, and stays rooted through array_end (Stack API #7; the BUG-001 shape).",
+  "description": "D6.3.3: MVP inlines all three scalar producers. The generic array is rooted before its first push and before array_end; subsequent collecting publication reloads that exact root. No direct scalar call or native root scan is required.",
   "checks": [
     {
       "in_func": "main",
       "expect_seq": [
-        { "pattern": "call\tarray_p, array" },
-        { "pattern": "mov\ti64:({{r}}), {{r}}" },
-        { "pattern": "call\t_boxed_" },
-        { "pattern": "call\tarray_end_p, array_end" }
+        {
+          "pattern": "call\t{{p}}, array_plain, {{r:array}}"
+        },
+        {
+          "pattern": "mov\ti64:({{r:root}}), {{r:array}}"
+        },
+        {
+          "pattern": "call\t{{p}}, array_push,"
+        },
+        {
+          "pattern": "call\t{{p}}, array_end,"
+        }
       ],
       "count": {
-        "call\t_boxed_": 3,
-        "call\tarray_end_p, array_end": 1
-      }
+        "call\t{{p}}, array_push,": 3,
+        "call\t{{p}}, array_end,": 1,
+        "\tmul\t": 3
+      },
+      "forbid": [
+        "call\tmvp_{{n}}_boxed_dp"
+      ]
     }
   ]
 }

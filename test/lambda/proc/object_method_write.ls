@@ -9,6 +9,21 @@ type Counter {
     fn get() => value
     pn bump() { value = value + 1 }
     pn add(n: int) { value = value + n }
+    fn get_explicit() => ~.value
+    pn bump_explicit() { ~.value = ~.value + 1 }
+    pn mixed() {
+        ~.value = value + 1
+        value = ~.value + 1
+        ~.value = ~.value + 1
+        return
+    }
+}
+
+// D3.1.4: explicit-only fields still need indexed receiver locals.
+type ExplicitCounter {
+    count: int = 0
+    pn bump() { ~.count = ~.count + 1 }
+    fn get() => ~.count
 }
 
 pn main() {
@@ -19,4 +34,12 @@ pn main() {
     print(c.get()); print("\n")
     c.add(10)^
     print(c.value); print(" "); print(c.get()); print("\n")
+    let saved = c
+    c.bump_explicit()^
+    print([c.value, c.get_explicit(), saved.value]); print("\n")
+    c.mixed()^
+    print([c.value, c.get_explicit(), saved.value]); print("\n")
+    var explicit = <ExplicitCounter>
+    explicit.bump()^
+    print([explicit.count, explicit.get()]); print("\n")
 }

@@ -1,17 +1,16 @@
 {
   "schema_version": 1,
-  "description": "S7.7.2v2/S7.6.3v3: explicit propagation checks declaration admission before native arithmetic; the later checked reassignment keeps its cold diagnostic edge. Three admission calls remain.",
+  "description": "D2.3.4/D6.2.1/S7.7.2v2: native float arithmetic keeps two cold nullable-read admissions and scalar companion failure transport; no extra final admission is required.",
   "checks": [
     {
-      "in_func": "_add_at_#",
+      "in_func": "mvp_#_add_at",
       "expect_seq": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
-        "dadd",
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "dadd\t",
+        "call\t{{p}}, lambda_type_check_lazy,",
+        "call\t{{p}}, lambda_type_check_lazy,"
       ],
       "count": {
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 3
+        "call\t{{p}}, lambda_type_check_lazy,": 2
       }
     }
   ]

@@ -3,8 +3,8 @@
   "description": "A guarded float array comparison retains the complete boxed fallback for absence, errors and representation changes (S7.1.1v3, D4.3.3).",
   "checks": [
     {
-      "in_func": "_probability_compare_#",
-      "expect": ["dlt\t{{r}}", "call\tfn_lt_p, fn_lt"]
+      "in_func": "mvp_#_probability_compare",
+      "expect": ["dlt\t{{r}}", "call\t{{p}}, fn_lt,"]
     }
   ]
 }

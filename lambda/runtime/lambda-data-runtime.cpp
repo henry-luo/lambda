@@ -38,6 +38,18 @@ void set_fields_items(TypeMap *map_type, void* map_data, const Item* values,
 Item typeditem_to_item(TypedItem *titem);
 Item fn_input1(Item url);
 
+extern "C" void lambda_set_field_f64(ShapeEntry* field, void* slot, double number) {
+    const LaneStorageDesc* storage = shape_entry_storage(field);
+    if (field->name && !field->flags && !field->is_optional &&
+            storage->kind == LANE_STORAGE_TYPED_ITEM && storage->value_domain == LMD_TYPE_ANY) {
+        // the packed destination owns the double; no transient Item home escapes.
+        TypedItem stored = {.type_id = LMD_TYPE_FLOAT, .double_val = number};
+        memcpy(slot, &stored, sizeof(stored));
+        return;
+    }
+    set_field_value(field, slot, lambda_float_ptr_to_item(&number));
+}
+
 Item push_k(DateTime val) {
     // Datetime must be heap-owned because this active-runtime constructor can
     // cross a collection safepoint and its value cannot live in a transient
@@ -183,25 +195,6 @@ Array* array() {
     return arr;
 }
 
-Array* array_fill(Array* arr, int count, ...) {
-    if (count > 0) {
-        size_t bytes;
-        if (lam::checked_mul((size_t)count, sizeof(Item), &bytes)) {
-            arr->items = (Item*)heap_data_alloc(bytes);
-        }
-        if (arr->items) {                     // skip on overflow/OOM — array stays empty
-            arr->capacity = count;
-            va_list args;
-            va_start(args, count);
-            for (int i = 0; i < count; i++) {
-                array_push(arr, va_arg(args, Item));
-            }
-            va_end(args);
-        }
-    }
-    log_item({.array = arr}, "array_filled");
-    return arr;
-}
 
 static Item container_scalar_read(Container* owner, Item item) {
     return scalar_storage_read(item, owner && owner->is_immortal);
@@ -216,6 +209,33 @@ Item array_get(Array *array, int64_t index) {
         return array_native_lane_read(array, index);
     }
     return container_scalar_read((Container*)array, array_item_read(array, index));
+}
+
+// admitted rank-one primitive reads need no Item boxing or number homes.
+// The caller proves the element domain; views still resolve live storage.
+extern "C" uint64_t lambda_array_primitive_index(Item owner, int64_t index, int64_t elem_type) {
+    ArrayNumElemType lane = (ArrayNumElemType)elem_type;
+    uint64_t absent = lane == ELEM_FLOAT ? FLOAT_LANE_NULL_BITS
+        : lane == ELEM_BOOL ? BOOL_ERROR : (uint64_t)INT_LANE_NULL;
+    TypeId kind = get_type_id(owner);
+    if ((kind != LMD_TYPE_ARRAY_NUM && kind != LMD_TYPE_ARRAY && kind != LMD_TYPE_ELEMENT) ||
+            !owner.array || (uint64_t)index >= (uint64_t)owner.array->length) return absent;
+    if (kind == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* array = owner.array_num;
+        if (array_num_rank(array) != 1 || array->get_elem_type() != lane ||
+                !array_num_resolve_data(array, false)) return absent;
+        int64_t offset = array_num_element_offset(array, index);
+        if (lane == ELEM_BOOL) return ((uint8_t*)array->data)[offset] ? BOOL_TRUE : BOOL_FALSE;
+        uint64_t bits;
+        memcpy(&bits, (char*)array->data + offset * sizeof(bits), sizeof(bits));
+        return bits;
+    }
+    Item member = array_item_read(owner.array, index);
+    TypeId type = get_type_id(member);
+    if (lane == ELEM_INT && type == LMD_TYPE_INT) return (uint64_t)lambda_int_item_to_lane(member.item);
+    if (lane == ELEM_BOOL && type == LMD_TYPE_BOOL) return member.bool_val ? BOOL_TRUE : BOOL_FALSE;
+    if (lane == ELEM_FLOAT && type == LMD_TYPE_FLOAT) return lambda_float_lane_from_double(member.get_double());
+    return absent;
 }
 
 // ============================================================================
@@ -352,20 +372,6 @@ static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64
         arr->length = length;  arr->capacity = length + extra;
     }
     return arr;
-}
-
-static bool array_num_prepare_fill(ArrayNum* arr, ArrayNumElemType elem_type,
-                                   int count, size_t elem_size) {
-    if (!arr || count <= 0) return false;
-    arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(elem_type);
-    size_t bytes;
-    if (!lam::checked_mul((size_t)count, elem_size, &bytes)) return false;
-    arr->data = heap_data_alloc_uninit(bytes);  // every lane is written by the varargs fill
-    if (!arr->data) return false;
-    arr->length = count;
-    arr->capacity = count;
-    return true;
 }
 
 ArrayNum* array_num_new_external_view(Container* base, void* data_base,
@@ -950,37 +956,8 @@ ArrayNum* array_int_new(int64_t length) {
     return array_num_new(ELEM_INT, length);
 }
 
-ArrayNum* array_int_fill(ArrayNum *arr, int count, ...) {
-    if (array_num_prepare_fill(arr, ELEM_INT, count, sizeof(int64_t))) {
-        va_list args;
-        va_start(args, count);
-        for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, int64_t);   // v5: lane storage
-        }
-        va_end(args);
-    }
-    return arr;
-}
 
-Item array_int_get(ArrayNum *array, int64_t index) {
-    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
-    // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_NUM)
-        return array_get((Array*)array, index);
-    if (index < 0 || index >= array->length) {
-        log_debug("array_int_get: index out of bounds: %lld", (long long)index);
-        return ItemNull;  // return null instead of error
-    }
-    Item item = (Item){.item = lambda_int_box_lane(array->items[index])};
-    return item;
-}
 
-// Fast path: return raw int64_t without boxing — for use when result type is known int
-// Only used for immutable arrays (let) where type widening cannot occur.
-int64_t array_int_get_raw(ArrayNum *array, int64_t index) {
-    if (!array || (uint64_t)index >= (uint64_t)array->length) return 0;
-    return array->items[index];
-}
 
 ArrayNum* array_int64() {
     return array_num_new(ELEM_INT64, 0);
@@ -991,36 +968,8 @@ ArrayNum* array_int64_new(int64_t length) {
     return array_num_new(ELEM_INT64, length);
 }
 
-ArrayNum* array_int64_fill(ArrayNum *arr, int count, ...) {
-    if (array_num_prepare_fill(arr, ELEM_INT64, count, sizeof(int64_t))) {
-        va_list args;
-        va_start(args, count);
-        for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, int64_t);
-        }
-        va_end(args);
-    }
-    return arr;
-}
 
-Item array_int64_get(ArrayNum* array, int64_t index) {
-    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
-    // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_NUM)
-        return array_get((Array*)array, index);
-    if (index < 0 || index >= array->length) {
-        log_debug("array_int64_get: index out of bounds: %lld", (long long)index);
-        return ItemNull;
-    }
-    return box_int64_value(array->items[index]);
-}
 
-// Fast path: return raw int64_t without boxing
-// Only used for immutable arrays (let) where type widening cannot occur.
-int64_t array_int64_get_raw(ArrayNum *array, int64_t index) {
-    if (!array || (uint64_t)index >= (uint64_t)array->length) return 0;
-    return array->items[index];
-}
 
 ArrayNum* array_float() {
     return array_num_new(ELEM_FLOAT64, 0);
@@ -1031,55 +980,9 @@ ArrayNum* array_float_new(int64_t length) {
     return array_num_new(ELEM_FLOAT64, length);
 }
 
-// T27-7: the cold arm of an emitted float literal. A compact array cannot
-// carry null, so a literal with a null member is rebuilt as generic storage;
-// the emitted fast arm keeps one allocation and direct stores.
-Item array_float_literal_with_nulls(ArrayNum* packed, uint64_t null_mask) {
-    if (!packed) return ItemNull;
-    RootFrame roots(2);
-    Rooted<ArrayNum*> source(roots, packed);
-    Rooted<Array*> result(roots, array());
-    int64_t length = source.get()->length;
-    for (int64_t i = 0; i < length; i++) {
-        bool is_null = i < 64 && ((null_mask >> i) & 1) != 0;
-        // push_d may collect; array_push roots the value before it grows
-        Item member = is_null ? ItemNull : push_d(source.get()->float_items[i]);
-        array_push(result.get(), member);
-    }
-    return array_end(result.get());
-}
 
-ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
-    if (array_num_prepare_fill(arr, ELEM_FLOAT64, count, sizeof(double))) {
-        va_list args;
-        va_start(args, count);
-        for (int i = 0; i < count; i++) {
-            arr->float_items[i] = va_arg(args, double);
-        }
-        va_end(args);
-    }
-    return arr;
-}
 
-Item array_float_get(ArrayNum* array, int64_t index) {
-    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
-    // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_NUM)
-        return array_get((Array*)array, index);
-    if (index < 0 || index >= array->length) {
-        log_debug("array_float_get: index out of bounds: %lld", (long long)index);
-        return ItemNull;
-    }
-    return push_d(array->float_items[index]);
-}
 
-// fast path — only used for immutable arrays where type widening cannot occur
-double array_float_get_value(ArrayNum *arr, int64_t index) {
-    if (!arr || index < 0 || index >= arr->length) {
-        return NAN;  // Return NaN for invalid access
-    }
-    return arr->float_items[index];
-}
 
 void array_float_set(ArrayNum *arr, int64_t index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
@@ -2641,15 +2544,6 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
     return rooted_out.get();
 }
 
-Item list_fill(List *list, int count, ...) {
-    va_list args;
-    va_start(args, count);
-    for (int i = 0; i < count; i++) {
-        list_push_spread(list, {.item = va_arg(args, uint64_t)});
-    }
-    va_end(args);
-    return list_end(list);
-}
 
 Item list_get(List *list, int64_t index) {
     if (!list || ((uintptr_t)list >> 56)) { return ItemNull; }
@@ -2671,20 +2565,16 @@ Map* map(int64_t type_index) {
 // The data buffer is placed immediately after the Map struct,
 // eliminating the separate heap_data_calloc call.
 // This is used for all static maps where byte_size is known at transpile time.
-Map* map_alloc_for_type(TypeMap* map_type, LambdaRegion* region,
-        int64_t minimum_capacity) {
+Map* map_alloc_for_type(TypeMap* map_type, int64_t minimum_capacity) {
     if (!map_type) return NULL;
     int64_t byte_size = map_type->byte_size;
     if (byte_size < minimum_capacity) byte_size = minimum_capacity;
     // fixed-slot JS shapes may reserve more storage than their current lanes.
     if (byte_size < 0 || byte_size > INT32_MAX) return NULL;
     size_t total_size = sizeof(Map) + (byte_size > 0 ? (size_t)byte_size : 0);
-    Map *m = region
-        ? (Map*)lambda_region_calloc(region, total_size, LMD_TYPE_MAP)
-        : (Map*)heap_calloc(total_size, LMD_TYPE_MAP);
+    Map *m = (Map*)heap_calloc(total_size, LMD_TYPE_MAP);
     if (!m) return NULL;
     m->type_id = LMD_TYPE_MAP;
-    if (region) m->is_heap = 1;
     m->type = map_type;
     if (byte_size > 0) {
         m->data = (char*)m + sizeof(Map);
@@ -2693,46 +2583,14 @@ Map* map_alloc_for_type(TypeMap* map_type, LambdaRegion* region,
     return m;
 }
 
-Map* map_with_data(int64_t type_index) {
-    ArrayList* type_list = (ArrayList*)context->type_list;
-    TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
-    return map_alloc_for_type(map_type, NULL, 0);
-}
 
-// MIR Direct module-type-list-aware wrapper: saves/restores context->type_list around
-// map_with_data so cross-module calls use this module's own type_list.
-Map* map_with_tl(int64_t type_index, void* type_list_ptr) {
-    void* saved = context->type_list;
-    context->type_list = type_list_ptr;
-    Map* r = map_with_data(type_index);
-    context->type_list = saved;
-    return r;
-}
-
-// A non-null region capability is passed only by a direct call site whose
-// producer summary proves every map field is null or another region map.
-Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
-        void* type_list_ptr) {
-    if (!region) return map_with_tl(type_index, type_list_ptr);
-    ArrayList* type_list = (ArrayList*)type_list_ptr;
-    if (!type_list || type_index < 0 || type_index >= type_list->length) return NULL;
-    TypeMap* map_type = (TypeMap*)type_list->data[type_index];
-    return map_alloc_for_type(map_type, region, 0);
-}
 
 // A named map contract may be a TypeMap that is not itself the type-list entry:
 // aliases store a TypeType wrapper in that list. Pass the resolved TypeMap
 // directly so typed literals cannot cast a wrapper into a runtime map shape.
 Map* map_with_type_tl(TypeMap* map_type, void* type_list_ptr) {
     (void)type_list_ptr;
-    return map_alloc_for_type(map_type, NULL, 0);
-}
-
-Map* map_with_region_type_tl(LambdaRegion* region, TypeMap* map_type,
-        void* type_list_ptr) {
-    (void)type_list_ptr;
-    if (!region) return map_with_type_tl(map_type, type_list_ptr);
-    return map_alloc_for_type(map_type, region, 0);
+    return map_alloc_for_type(map_type, 0);
 }
 
 // Empty map types have no field storage. Root the new map while allocating
@@ -3128,7 +2986,7 @@ Object* object(int64_t type_index) {
 }
 
 // Allocate object struct + data buffer in a single GC allocation.
-// Same approach as map_with_data — data placed immediately after the struct.
+// place object data immediately after its header, as map_alloc_for_type does.
 static Object* object_alloc_with_type(TypeObject* obj_type) {
     int64_t byte_size = obj_type->byte_size;
     size_t total_size = sizeof(Object) + (byte_size > 0 ? (size_t)byte_size : 0);
@@ -3165,30 +3023,11 @@ Object* object_with_tl(int64_t type_index, void* type_list_ptr) {
     return r;
 }
 
-Object* object_fill(Object* obj, ...) {
-    TypeObject *obj_type = (TypeObject*)obj->type;
-    // skip data allocation if already set (combined allocation via object_with_data)
-    if (!obj->data) {
-        obj->data = heap_data_calloc(obj_type->byte_size);
-    }
-    // set object fields (same layout as map)
-    va_list args;
-    va_start(args, obj);
-    set_fields((TypeMap*)obj_type, obj->data, args);
-    va_end(args);
-    return obj;
-}
 
-// S2.1.3 / D3.1.1: an object IS an element, so its content face is the object
-// itself — the same items/length/capacity an element carries. Kept as a named
-// accessor so content-face call sites read the same way for both kinds.
-List* object_content(Object* obj) {
-    return (List*)obj;
-}
 
 // Content append, mirroring element content exactly: the same list_push_spread
 // normalization (D3.3.1 — null dropped, adjacent strings merged, content lists
-// spliced). What it must NOT reuse is list_fill, whose list_end tail would run
+// spliced). A list-finishing fill would run
 // the element branch's frame bookkeeping on a value the caller still owns.
 Object* object_content_fill(Object* obj, int count, ...) {
     if (!obj) return NULL;
@@ -3208,8 +3047,7 @@ Object* object_content_fill_items(Object* obj, const Item* values, int count) {
     return obj;
 }
 
-// Array-taking sibling of object_fill for callers holding their field values
-// in a rooted Item span rather than in varargs (the T0 walker).
+// the caller holds field values in a rooted Item span across numeric coercion.
 Object* object_fill_items(Object* obj, const Item* values, int value_count) {
     if (!obj) return NULL;
     TypeObject* obj_type = (TypeObject*)obj->type;
@@ -3322,22 +3160,6 @@ Item object_from_fields(const TypeObject* declared, Item fields) {
     return (Item){.item = (uint64_t)(uintptr_t)object};
 }
 
-// The JIT's fill for a literal with deferred fields. Admission allocates, so
-// the values are rooted here first (the caller roots the object). Returns the
-// failure, or ItemNull once the object is filled.
-Item object_fill_checked(Object* obj, uint64_t deferred, ...) {
-    TypeObject* obj_type = (TypeObject*)obj->type;
-    int count = (int)obj_type->length;
-    RootSpan values((size_t)(count > 0 ? count : 1));
-    va_list args;
-    va_start(args, deferred);
-    for (int i = 0; i < count; i++) values.words()[i] = va_arg(args, uint64_t);
-    va_end(args);
-    Item failure = object_literal_admit_fields(obj_type, values.items(), count, deferred);
-    if (get_type_id(failure) == LMD_TYPE_ERROR) return failure;
-    object_fill_items(obj, values.items(), count);
-    return ItemNull;
-}
 
 // D3.1.1: an object wears its declared structural kind and reads its
 // attributes through the shared Map face, so this is map_get under a different
@@ -3691,25 +3513,6 @@ extern "C" Item fn_string_ascii_at(Item str_item, int64_t index) {
     return item_at(str_item, index);
 }
 
-extern "C" uint8_t fn_string_char_eq_ascii(Item str_item, int64_t index,
-        uint8_t expected) {
-    String* str = str_item.get_safe_string();
-    if (!str || index < 0) return 0;
-    if (str->is_ascii) {
-        return (uint64_t)index < str->len &&
-            (uint8_t)str->chars[index] == expected;
-    }
-
-    // Match item_at's UTF-8 indexing without constructing an intermediate
-    // one-character String solely to compare it with an ASCII literal.
-    size_t byte_offset = str_utf8_char_to_byte(str->chars, str->len,
-        (size_t)index);
-    if (byte_offset == STR_NPOS) return 0;
-    size_t char_len = str_utf8_char_len((unsigned char)str->chars[byte_offset]);
-    if (char_len == 0) char_len = 1;
-    return byte_offset + char_len <= str->len && char_len == 1 &&
-        (uint8_t)str->chars[byte_offset] == expected;
-}
 
 // Return the exact UTF-8 span selected by Lambda string indexing without
 // materializing its one-character String result. A missing character leaves
@@ -3765,23 +3568,6 @@ extern "C" Item fn_string_ord_at(Item str_item, int64_t index) {
         ? (Item){.item = lambda_int_box_lane(codepoint)} : ItemNull;
 }
 
-// The MIR caller has certified both operands as strings. This leaf has no
-// allocation or re-entry, so it can compare their indexed character spans
-// directly while preserving absence and UTF-8 equality (D4.3.3, S7.1.1v3).
-extern "C" uint8_t fn_string_char_eq(Item left_item, int64_t left_index,
-        Item right_item, int64_t right_index) {
-    String* left = left_item.get_safe_string();
-    String* right = right_item.get_safe_string();
-    const char* left_chars = NULL;
-    const char* right_chars = NULL;
-    size_t left_len = 0;
-    size_t right_len = 0;
-    bool has_left = string_char_span(left, left_index, &left_chars, &left_len);
-    bool has_right = string_char_span(right, right_index, &right_chars, &right_len);
-    if (has_left != has_right) return 0;
-    if (!has_left) return 1;
-    return left_len == right_len && memcmp(left_chars, right_chars, left_len) == 0;
-}
 // Get attribute by name from an Item (for map/element attribute access)
 Item item_attr(Item data, const char* key) {
     if (!data.item || !key) { return ItemNull; }
@@ -4309,44 +4095,5 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
 
     // incompatible type (e.g., int[] but got a string)
     log_error("ensure_typed_array: cannot coerce %s to %s[]", get_type_name(item_tid), get_type_name(element_type_id));
-    return NULL;
-}
-
-// Runtime coercion for compact sized typed arrays (u8[], i16[], f32[], etc.)
-// Converts generic Array/List or ARRAY_NUM → compact sized ARRAY_NUM.
-void* ensure_sized_array(Item item, int64_t elem_type_int) {
-    ArrayNumElemType target_et = (ArrayNumElemType)(int)elem_type_int;
-    TypeId item_tid = get_type_id(item);
-
-    // already the correct compact typed array — pass through
-    if (item_tid == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == target_et) {
-            return (void*)arr;
-        }
-        // cross-convert from different ARRAY_NUM elem_type
-        int64_t length = arr->length;
-        ArrayNum* typed = array_num_new(target_et, length);
-        for (int64_t i = 0; i < length; i++) {
-            Item val = array_num_get(arr, i);
-            array_num_set_item(typed, i, val);
-        }
-        return typed;
-    }
-
-    if (item_tid == LMD_TYPE_NULL) return NULL;
-
-    // convert generic Array/List to compact sized array
-    if (item_tid == LMD_TYPE_ARRAY) {
-        Array* arr = item.array;
-        int64_t length = arr->length;
-        ArrayNum* typed = array_num_new(target_et, length);
-        for (int64_t i = 0; i < length; i++) {
-            array_num_set_item(typed, i, array_item_read(arr, i));
-        }
-        return typed;
-    }
-
-    log_error("ensure_sized_array: cannot coerce %s to compact typed array", get_type_name(item_tid));
     return NULL;
 }

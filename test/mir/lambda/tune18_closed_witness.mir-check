@@ -1,18 +1,28 @@
 {
   "schema_version": 1,
-  "description": "Tune18 follow-on omits redundant typed-array witness admission in a closed inferred raw body while the boxed boundary uses the shared contract admission.",
+  "description": "D4.3.3/D7.3.1: the closed inferred entry receives a raw carrier and computes native float arithmetic behind carrier guards without an admission helper.",
   "checks": [
     {
-      "in_func": "_closed_witness18_#",
-      "forbid": [
-        "call\tensure_typed_array_p, ensure_typed_array",
-        "array_witness_bit"
-      ]
-    },
-    {
-      "in_func": "_closed_witness18_b_#",
+      "in_func": "mvp_#_closed_witness18",
+      "expect_seq": [
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "dmov\t{{r}}, d:({{r:addr}})"
+        }
+      ],
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "p:arg0",
+        "dadd\t",
+        "call\t{{p}}, lambda_array_primitive_index,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_type_check_lazy,",
+        "call\t{{p}}, fn_add,"
       ]
     }
   ]

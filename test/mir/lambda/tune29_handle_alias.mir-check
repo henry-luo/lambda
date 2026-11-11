@@ -1,15 +1,22 @@
 {
   "schema_version": 1,
-  "description": "Tune29 §19.1 (S9.1.2, D5.4.1): the nested handle `c1` is rebound in one `if` arm; the join keeps the path that skips the arm possibly shared, so every store through the chain consults the share bit (member_set_cow, or the owner spine check) instead of the raw fn_array_set that leaked the write into another binding's array.",
+  "description": "S9.1.2/D5.4.4: a conditional nested-handle rebind retains two rooted RMW owners and checked COW array/map publication after the join. Erased primitive alternatives share one additional late owner guard.",
   "checks": [
     {
-      "in_func": "_arr_set_#",
+      "in_func": "mvp_#_arr_set",
+      "expect": [
+        "and\t{{r}}, {{r}}, 4294979584",
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, lambda_map_set_checked,"
+      ],
       "count": {
-        "call\tcow_bind_rmw_handle": 2,
-        "call\tmember_set_cow": 2
+        "call\t{{p}}, cow_bind_rmw_root,": 2,
+        "and\t{{r}}, {{r}}, 4294979584": {
+          "max": 9
+        }
       },
       "forbid": [
-        "call\tfn_array_set"
+        "call\t{{p}}, fn_array_set,"
       ]
     }
   ]

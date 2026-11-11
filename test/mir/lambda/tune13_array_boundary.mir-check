@@ -1,22 +1,45 @@
 {
   "schema_version": 1,
-  "description": "Tune13 stable exact int[] occurrence bindings retain runtime admission at explicit boundaries and certificate-guarded native reads at the direct edge.",
+  "description": "D4.3.3/S11.4.6v4: MVP inlines the consumer. Same-contract input avoids one validator; open input retains its extra admission. Both keep native loads and checked misses.",
   "checks": [
     {
-      "in_func": "_tune13_stable_call_#",
-      "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
-        "call\t_tune13_first_"
+      "in_func": "mvp_#_tune13_stable_call",
+      "expect_seq": [
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:addr}})"
+        }
       ],
       "count": {
-        "call\t_tune13_first_": 1
-      }
+        "call\t{{p}}, lambda_type_check_lazy,": 1
+      },
+      "forbid": [
+        "call\tmvp_{{n}}_tune13_first_dp"
+      ]
     },
     {
-      "in_func": "_tune13_widened_call_#",
-      "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy",
-        "call\t_tune13_first_"
+      "in_func": "mvp_#_tune13_widened_call",
+      "expect_seq": [
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:addr}})"
+        }
+      ],
+      "count": {
+        "call\t{{p}}, lambda_type_check_lazy,": 2
+      },
+      "forbid": [
+        "call\tmvp_{{n}}_tune13_first_dp"
       ]
     }
   ]

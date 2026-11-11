@@ -1,11 +1,26 @@
 {
   "schema_version": 1,
-  "description": "Tune18 reuses a stable local typed-array witness at repeated native call edges while the callee retains its entry admission.",
+  "description": "D4.3.3/D7.3.1: MVP inlines the repeated typed consumer, retaining packed native reads and a checked miss without dynamic dispatch.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
+      "expect_seq": [
+        {
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
+        },
+        {
+          "pattern": "add\t{{r:addr}}, {{r}}, {{r:scaled}}"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r:addr}})"
+        }
+      ],
       "expect": [
-        "call\t_take18_"
+        "call\t{{p}}, lambda_fill_primitive_bits,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_take18_dp",
+        "call\t{{p}}, fn_call_into,"
       ]
     }
   ]

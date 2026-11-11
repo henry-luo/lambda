@@ -2547,6 +2547,26 @@ limited to 4096 pixels per dimension and 4,194,304 pixels, and reject an existin
 WebGL context. No borrowed array pointer survives the call (**D5.5.2**).
 The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 
+`dom.set_canvas_pixels_rect(canvas,pixels,[x0,y0,x1,y1])^` writes an `(h, w, 4)`
+ubyte array into the existing bitmap at that rectangle, whose width and height
+must be the array's, and leaves every other pixel as it was. It does not resize
+the bitmap, and it rejects a rectangle outside it. When the canvas is drawn
+without a transform or a filter, only the area the rectangle covers is repainted;
+otherwise the canvas repaints as after a whole upload. Painting uses it to present
+only the pixels a stroke changed.
+
+`dom.pointer_samples(evt)` returns the pen or mouse samples behind a pointer event
+as one `f32` array of shape `(N, 7)`. Each row is `x, y, pressure, tilt_x, tilt_y,
+twist, time`, the stroke sample layout of [`lambda.paint`](Lambda_Packages.md#30-paint--painting-with-brushes).
+`x` and `y` are viewport CSS pixels like `clientX`, and `time` is seconds on the
+clock of `evt.timeStamp`. A `pointermove` gives every sample since the previous
+move, oldest first, with the event itself last; a press or release gives one row.
+Another event with a pointer position gives its own point, and any other event
+gives an empty `(0, 7)` array. Pointer events also carry the W3C fields
+`pointerType`, `pressure`, `tangentialPressure`, `tiltX`, `tiltY` and `twist`.
+On macOS a tablet pen reports them; a mouse reports pressure 0.5 while a button
+is down and 0 otherwise.
+
 `radiant.image_job(owner, request)^` also accepts `channel:"thumbnail"` for
 asynchronous file decoding. Import `radiant`, then submit
 `{action:"start", channel:"thumbnail", path:"photo.jpg", width:76, height:68}`.

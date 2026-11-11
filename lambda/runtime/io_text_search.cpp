@@ -258,7 +258,7 @@ Item match_list(const IoSearchRun* run, const FtsHit* h, const char* text, size_
             if (get_type_id(values[j]) == LMD_TYPE_ERROR) ok = false;
         }
         if (!ok) break;
-        map.set(map_alloc_for_type(run->match_shape, NULL, 0));
+        map.set(map_alloc_for_type(run->match_shape, 0));
         if (!map.get()) {
             ok = false;
             break;
@@ -315,7 +315,7 @@ Item document_map(const IoSearchRun* run, const FtsHit* h, const char* data, siz
         values[i] = vals[i]->get();
         if (get_type_id(values[i]) == LMD_TYPE_ERROR) return ItemError;
     }
-    map.set(map_alloc_for_type(run->shape, NULL, 0));
+    map.set(map_alloc_for_type(run->shape, 0));
     if (!map.get()) return ItemError;
     for (int i = 0; i < run->fields; i++) values[i] = vals[i]->get();
     map_fill_items(map.get(), values, run->fields);
@@ -455,7 +455,7 @@ static Item io_text_search_impl(Item source, Item query, Item options) {
             RootFrame inner(2);
             Rooted<Item> file(inner, file_item(&run, &hits[i]));
             Rooted<Map*> map(inner, (Map*)NULL);
-            map.set(get_type_id(file.get()) == LMD_TYPE_ERROR ? NULL : map_alloc_for_type(run.shape, NULL, 0));
+            map.set(get_type_id(file.get()) == LMD_TYPE_ERROR ? NULL : map_alloc_for_type(run.shape, 0));
             if (!map.get()) {
                 ok = false;
                 break;

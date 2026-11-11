@@ -3,23 +3,15 @@
   "description": "Tune32 T32-1 / D4.3.3: boolean fill uses guarded packed byte stores without manufacturing an array certificate; empty, absent, mixed and snapshot cases retain source semantics.",
   "checks": [
     {
-      "in_func": "_tune32_bool_hot_#",
+      "in_func": "mvp_#_tune32_bool_hot",
       "expect": [
         "mov\tu8:({{r}}), {{r}}",
-        "call\titem_at_p, item_at"
+        "call\t{{p}}, fn_index,"
       ],
       "expect_seq": [
-        {
-          "pattern": "mov\t{{r:dense_type}}, u8:({{r:array}})"
-        },
-        {
-          "pattern": ", {{r:dense_type}}, 17",
-          "next_line": true
-        },
-        {
-          "pattern": "mov\t{{r}}, u8:2({{r:array}})",
-          "next_line": true
-        }
+        "mov\t{{r:header}}, u32:({{r:array}})",
+        "and\t{{r:header}}, {{r:header}}, 4278386943",
+        "bne\t{{l}}, {{r:header}}, 3489660945"
       ]
     }
   ]

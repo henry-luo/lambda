@@ -79,8 +79,11 @@ pub fn weighted(k: u64, items, weights) {
 }
 
 // sort by keyed uniform ranks: a uniform permutation without mutation.
-pub fn shuffle(k: u64, items) array => [for (e in ((sort([for (i, x in items) {r: unit(at(k, i)), x: x}],
-    (e) => e.r)) ^ { [] })) e.x]
+pub fn shuffle(k: u64, items) array {
+    // share the keyed batch used by units; sorting retains its original rank order.
+    let ranks = units(k,len(items));
+    [for (e in ((sort([for (i, x in items) {r:ranks[i],x:x}],(e)=>e.r)) ^ { [] })) e.x]
+}
 pub fn sample(k: u64, items, m: int) array => [for (i, x in shuffle(k, items) where i < m) x]
 pub fn perm(k: u64, n: int) array => shuffle(k, [for (i in 0 to (n - 1)) i])
 

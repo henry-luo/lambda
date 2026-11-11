@@ -1,27 +1,34 @@
 {
   "schema_version": 1,
-  "description": "D8.2.6, D4.3.3, D6.3.4, S7.1.3v2: loop demand and checked native mutation.",
+  "description": "S7.1.3v2/S9.1.2/D6.3.4: compact stores keep exact-width native writes and checked misses. An inlined key producer replaces the owner before the store; each constructor runs once. Slice aliases retain checked COW publication.",
   "checks": [
     {
-      "in_func": "_byte_store_#",
+      "in_func": "mvp_#_byte_store",
       "expect": [
         "mov\tu8:",
-        "call\tlambda_array_set_checked"
+        "call\tlambda_array_set_checked_item"
       ]
     },
     {
-      "in_func": "_ordered_#",
+      "in_func": "mvp_#_ordered",
       "expect_seq": [
-        "call\t_replace_",
+        "call\t{{p}}, array_end,",
+        "call\t{{p}}, array_end,",
         "mov\ti64:",
-        "call\tlambda_array_set_checked"
+        "call\t{{p}}, lambda_array_set_checked_item,"
+      ],
+      "count": {
+        "call\t{{p}}, array_end,": 2
+      },
+      "forbid": [
+        "call\tmvp_{{n}}_replace_dp"
       ]
     },
     {
-      "in_func": "_sliced_#",
+      "in_func": "mvp_#_sliced",
       "expect": [
         "mov\tu8:",
-        "call\tlambda_array_set_checked"
+        "call\tlambda_array_set_checked_item"
       ]
     }
   ]

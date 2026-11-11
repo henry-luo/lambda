@@ -1,12 +1,23 @@
 # MIR Emission Testing — pattern checks, dynamic oracles, and size ratchets
 
-**Status:** REVISED 2026-07-22 — MT1, MT2, MT4, MT5, and MT7 are the active
+**Status:** REVISED 2026-11-10 — MT1, MT2, MT4, MT5, and MT7 are the active
 design. MT7 keeps **0% slack**, with manually lifted, platform-aware thresholds
 in `test/mir/mir_budgets.json`. MT3 (the independent structural verifier) is
 **DEFERRED** until MIR emission and the Stack API contract are stable and
 finalized; its future direction is documented, but it is not an implementation
 phase or current acceptance gate. MT6 remains optional behind a coupling spike.
 MT8 and OQ3 (Python/Bash/Ruby scope) remain deferred.
+
+**MVP migration (2026-11-10):** Lambda selectors now name `mvp_#_<name>`
+bodies explicitly. Helper checks identify the callee independently of its ABI
+prototype, and new typed/erased fixtures cover numeric and array regions,
+record construction, call ownership and strings. The focused Python emission
+selection is registered in the Lambda baseline. MVP instruction/frame budgets
+replace retired Full budgets with no slack (D8.6.1); this establishes a new
+compiler baseline and does not claim an emission-size or timing improvement.
+The complete older fixture corpus is **not green**. Contract review and MVP
+optimization failures remain recorded in
+[the migration checkpoint](impl/Lambda_Impl_MVP_Optimization_Tests.md).
 
 **P1, P2 and P3 are IMPLEMENTED (2026-07-22).** The MT2 artifact contract, the
 MT1 harness with its baseline drivers, the
@@ -22,8 +33,9 @@ release builds (§9.2) and a C2MIR-vs-MIR-Direct optimization gap (§9.3) -- and
 **Date:** 2026-07-22
 
 **Scope:** unit and regression testing of MIR **emission** (AST → MIR lowering)
-for Lambda (`lambda/transpile-mir.cpp`) and LambdaJS (`lambda/js/js_mir_*.cpp`)
-over the shared emitter (`lambda/mir_emitter_shared.hpp`), with the Stack API
+for Lambda (`lambda/runtime/mvp/mvp_plan.cpp`, `mvp_mir.cpp`) and LambdaJS
+(`lambda/js/js_mir_*.cpp`) over the shared emitter
+(`lambda/runtime/mir_emitter_shared.hpp`), with the Stack API
 frame/rooting/scalar-home protocol as the first-class subject. Python, Bash,
 and Ruby front-ends inherit the harness mechanics (they already have analogous
 dump paths) but are out of initial scope. MIR→native codegen (the vendored MIR
@@ -209,8 +221,9 @@ A shared GTest helper (`test/test_mir_check_helpers.hpp`) providing:
    alone. Assertions select a module and function (`main`, user fns, `js_main`)
    and may select an occurrence when names repeat — the CHECK-LABEL analogue.
    An `in_func` selector may contain `#`, which matches a run of one or more
-   digits, because both frontends embed a source-offset id in generated symbol
-   names (`_accumulate_371`, `_js_helper_752_body`); see §8.2. A selector with
+   digits. MVP uses function IDs (`mvp_12_accumulate`); JS embeds source IDs
+   (`_js_helper_752_body`). Namespaces and the remaining spelling match exactly;
+   `mvp_#_accumulate` does not select its `_dp` prototype. A selector with
    no `#` is matched exactly. `*` selects the whole artifact.
 4. **Assertion forms**, extending the orphaned `.transpile` JSON, one sidecar
    per snippet (OQ1 DECIDED: JSON `.mir-check` sidecar files):
@@ -244,12 +257,9 @@ A shared GTest helper (`test/test_mir_check_helpers.hpp`) providing:
    convert the three orphaned `.transpile` fixtures (their `expect` strings
    target C2MIR C output — re-derive equivalent MIR-Direct patterns).
 
-Repository-policy note: test-only C++ harnesses may use `std::` containers and
-strings. Code under `lambda/`, including production emitter/runtime changes,
-continues to use the project `lib/` equivalents. The matching-`.txt` rule
-applies to Lambda regression scripts added under `test/lambda`; the emission
-fixtures under `test/mir/lambda` are governed by their `.mir-check` sidecars
-and do not require behavioral `.txt` companions.
+New Lambda emission fixtures carry both `.mir-check` contracts and `.txt`
+semantic goldens. The MVP region fixtures reuse those goldens under normal,
+forced/poisoned and seeded GC (D6.3.3, S9.1.2–S9.1.3v3).
 
 **MT1 addendum (2026-09-14, Tune27 pins).** Register tokens gained named
 captures scoped to one `expect_seq`: `{{r:name}}` binds the register on first
@@ -265,6 +275,22 @@ probes: the ratchet counts exclude `local` declarations (an `awk` over
 not relink a `lambda.exe` that a later `make release` left newer than the
 debug objects -- capture budgets only from a binary the ratchet itself just
 built.
+
+**MVP matcher addendum (2026-11-10).** `{{n}}` matches one or more decimal
+digits in a pattern, including direct-callee IDs. `{{p}}` matches one MIR
+identifier operand, so `call\t{{p}}, fn_index,` accepts ABI prototype suffix
+changes while requiring the exact helper target. Keep the trailing comma:
+`fn_index` alone also prefixes other helper names. Neither token is a general
+substring wildcard. Matcher units include rejected names, missing IDs and
+changed arguments. `LAMBDA_TEST_EXE` selects a private engine for all shared
+MIR harnesses; it does not replace the shared executable.
+
+D8.6.1 control-flow witnesses also support `{{l}}`, `{{l:name}}` and
+`{{l!name}}` for decimal MIR labels. Named captures require the same label
+at a loop backedge or a cold-path join, independent of register and label
+renumbering. Invalid mixed hexadecimal label spellings are rejected. Scoped
+contracts retain MVP's checked sibling while asserting native fast-path
+dataflow; a whole-function helper count must include every emitted version.
 
 ### MT2 — promote dumps to env-opt-in in all builds. *(DECIDED)*
 

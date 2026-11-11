@@ -1,26 +1,58 @@
 {
   "schema_version": 1,
-  "description": "S5.1.1–S5.1.2: a dynamic Item compared with a bool literal uses its bool tag and low byte; no deep equality helper is needed, including for null and error values.",
+  "description": "S5.1.1v2\u2013S5.1.2v2: guarded bool operands compare native bits; the generic literal arm tests Error before comparing Items. Dynamic pairs retain the canonical equality helper.",
   "checks": [
     {
-      "in_func": "_equals_true_#",
-      "forbid": ["fn_eq"],
+      "in_func": "mvp_#_equals_true",
+      "forbid": [
+        "fn_eq"
+      ],
       "expect_seq": [
-        { "pattern": "and\t{{r}}, %p1, -72057594037927681" },
-        { "pattern": "eq\t{{r}}, {{r}}, 216172782113783809" }
+        {
+          "pattern": "ursh\t{{r:tag}}, {{r:value}}, 56"
+        },
+        {
+          "pattern": "eq\t{{r}}, {{r:tag}}, 3"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:value}}, 1"
+        },
+        {
+          "pattern": "beq\tL{{n}}, {{r:error_tag}}, 27"
+        },
+        {
+          "pattern": "\teq\t{{r}}, {{r}}, {{r}}"
+        }
       ]
     },
     {
-      "in_func": "_differs_false_#",
-      "forbid": ["fn_ne"],
+      "in_func": "mvp_#_differs_false",
+      "forbid": [
+        "fn_ne"
+      ],
       "expect_seq": [
-        { "pattern": "and\t{{r}}, %p1, -72057594037927681" },
-        { "pattern": "ne\t{{r}}, {{r}}, 216172782113783808" }
+        {
+          "pattern": "ursh\t{{r:tag}}, {{r:value}}, 56"
+        },
+        {
+          "pattern": "eq\t{{r}}, {{r:tag}}, 3"
+        },
+        {
+          "pattern": "and\t{{r}}, {{r:value}}, 1"
+        },
+        {
+          "pattern": "beq\tL{{n}}, {{r:error_tag}}, 27"
+        },
+        {
+          "pattern": "\tne\t{{r}}, {{r}}, {{r}}"
+        }
       ]
     },
     {
-      "in_func": "_both_dynamic_#",
-      "expect": ["call\tfn_eq_value_p, fn_eq_value"]
+      "in_func": "mvp_#_both_dynamic",
+      "expect": [
+        "call\t{{p}}, fn_eq_value,"
+      ]
     }
   ]
 }

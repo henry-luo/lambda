@@ -16,6 +16,7 @@ typedef struct InterpMapFieldPlan InterpMapFieldPlan;
 typedef struct InterpFieldPlan InterpFieldPlan;
 typedef struct InterpPlacePlan InterpPlacePlan;
 typedef struct NameScope NameScope;
+typedef struct TypeMap TypeMap;
 typedef struct TypeBinder TypeBinder;
 typedef struct TypeBoundRef TypeBoundRef;
 typedef struct LangProfile LangProfile;
@@ -302,7 +303,7 @@ struct NameEntry {
     // Whether this binding holds a freshly-produced container, so an alias of
     // it is an ownership boundary that must share the root before a later write
     // (cow_bind_var). Both tiers decide it with the same rule; the JIT keeps the
-    // equivalent on MirVarEntry::cow_owned.
+    // equivalent in its per-function binding plan.
     bool cow_owned;
     // CW24: this binding was initialized from a *place* -- a member/index read
     // rooted at a mutable binding -- so under S9.1.2 it holds a COPY. Writes
@@ -1121,7 +1122,7 @@ static inline bool ast_is_direct_numeric_mask_assignment(AstNode* node) {
          object->type->type_id == LMD_TYPE_ARRAY_NUM);
 }
 
-// --- Shared AST shape helpers (promoted from transpile-mir.cpp, rule 13) ---
+// --- Shared AST shape helpers for interpreters and MIR lowering ---
 // Both tiers need the same answers about an assignment target, so the walks
 // live here rather than being re-derived: the MIR lowering and the T0 walker
 // call these same functions.
@@ -1259,7 +1260,7 @@ extern "C" bool ast_call_returns_retained_container(AstNode* node);
 // container": literals, fresh-result calls and `new` own their value, while member and
 // index reads are borrows of an existing one. The IDENT case is deliberately
 // not here -- it propagates the *source binding's* own answer, which each tier
-// resolves through its own binding table (MirVarEntry / NameEntry::cow_owned).
+// resolves through its own binding plan or NameEntry::cow_owned.
 static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
     root_expr = ast_cow_value_source(root_expr);
     if (!root_expr) return false;
@@ -1892,13 +1893,6 @@ typedef struct FnAnalysis {
     int js_formal_length;
     struct hashmap* js_cached_scope_slot_collisions;
     const char* may_await_cause;
-    // Defect-origin scanning is invariant after a call-site round. Its atomic
-    // epoch keeps retained-template compilation from reading another worker's
-    // result (D8.2.5).
-    uint32_t mir_cached_defect_origin_epoch;
-    bool mir_cached_defect_origin;
-    FnVariantAnalysis variants[4];
-    int variant_count;
     // T0 activation shape, filled by the frame-plan pass (AI5). FnAnalysis is
     // the designated carrier for per-function facts, so the plan lives here
     // rather than on AstFuncNode.
@@ -1925,17 +1919,6 @@ static inline int ast_function_capture_count(const AstFuncNode* fn_node) {
     // synthetic definitions may precede analysis publication; captures use
     // FnCapture::next, never an AST-list utility.
     return ast_capture_count(fn_node->captures);
-}
-
-static inline FnVariantAnalysis* fn_analysis_variant(
-        FnAnalysis* analysis, FnEntryKind kind) {
-    if (!analysis) return NULL;
-    for (int i = 0; i < analysis->variant_count; i++) {
-        if (analysis->variants[i].entry.kind == kind) {
-            return &analysis->variants[i];
-        }
-    }
-    return NULL;
 }
 
 typedef union FnExt {
@@ -1978,6 +1961,7 @@ extern "C" {
 #endif
 bool ast_map_literal_keys_follow_contract(AstMapNode* literal, TypeMap* expected);
 bool ast_map_contract_storage_valid(TypeMap* expected);
+bool ast_map_contract_storage_fits(TypeMap* expected);
 #ifdef __cplusplus
 }
 #endif

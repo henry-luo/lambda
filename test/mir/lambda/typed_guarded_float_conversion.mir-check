@@ -1,23 +1,33 @@
 {
   "schema_version": 1,
-  "description": "D2.3.4\u2013D2.4.3/S7.7.2: guarded float conversion retains its boxed cold error path and a native successful tree.",
+  "description": "S4.5.3/S7.7.2v2: proven float conversion/division admits natively without a redundant validator; mixed nullable sums retain checked admission and native subtractions avoid boxed float conversion.",
   "checks": [
     {
-      "in_func": "_typed_#",
+      "in_func": "mvp_#_typed",
       "expect": [
         "ddiv\t",
-        "call\tfn_float_p, fn_float"
+        "call\t{{p}}, fn_float,",
+        "i2d\t",
+        "call\t{{p}}, lambda_int_lane_to_double_c,"
       ],
-      "count": {"call\tlambda_type_check_lazy_p, lambda_type_check_lazy": 1}
+      "count": {
+        "call\t{{p}}, lambda_type_check_lazy,": 0
+      }
     },
     {
-      "in_func": "_mixed_decl_#",
-      "expect": ["call\tlambda_type_check_lazy_p, lambda_type_check_lazy"]
+      "in_func": "mvp_#_mixed_decl",
+      "expect": [
+        "call\t{{p}}, lambda_type_check_lazy,"
+      ]
     },
     {
-      "in_func": "_scalar_conversion_#",
-      "expect": ["dsub\t"],
-      "forbid": ["call\tfn_float_p, fn_float"]
+      "in_func": "mvp_#_scalar_conversion",
+      "expect": [
+        "dsub\t"
+      ],
+      "forbid": [
+        "call\t{{p}}, fn_float,"
+      ]
     }
   ]
 }

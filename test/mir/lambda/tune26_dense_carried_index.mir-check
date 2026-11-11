@@ -3,29 +3,28 @@
   "description": "Tune26 / D2.3.4-D2.3.5 / D4.3.3: an extent-minus-one index updated from the counter immediately before its unit increment is in-bounds on the dense arm. One guard versions the complete float expression tree; its miss retains checked nullable loads. Tune27 T27-7: the float null lane is a double immediate, not a call.",
   "checks": [
     {
-      "in_func": "_tune26_dense_carried_index_#",
+      "in_func": "mvp_#_tune26_dense_carried_index",
       "expect_seq": [
         {
-          "pattern": "\tbf\tL"
+          "pattern": "lsh\t{{r:scaled}}, {{r}}, 3"
         },
         {
-          "pattern": "lsh\t{{r}}, {{r}}, 3"
+          "pattern": "add\t{{r:address}}, {{r}}, {{r:scaled}}"
         },
         {
-          "pattern": "dmov\t{{r}}, d:({{r}})"
+          "pattern": "dmov\t{{r:loaded}}, d:({{r:address}})"
         },
         {
-          "pattern": "dmul\t{{r}}"
+          "pattern": "dmul\t{{r:product}}, {{r:loaded}}, {{r}}"
         },
         {
-          "pattern": "dadd\t{{r}}"
-        },
-        {
-          "pattern": "dmov\t{{r}}, nan"
+          "pattern": "dadd\t{{r}}, {{r}}, {{r:product}}"
         }
       ],
       "expect": [
-        "call\tlambda_type_check_lazy_p, lambda_type_check_lazy"
+        "call\t{{p}}, lambda_type_check_lazy,",
+        "dmov\t{{r}}, nan",
+        "call\t{{p}}, fn_index,"
       ]
     }
   ]

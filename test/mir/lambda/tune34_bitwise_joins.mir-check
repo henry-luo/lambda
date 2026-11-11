@@ -2,6 +2,6 @@
   "schema_version": 1,
   "description": "S4.1/D7.3.3: guarded complete int tuples use native bitwise instructions with canonical boxing and the original miss helpers.",
   "checks": [
-    {"in_func": "_words_#", "expect": ["xor", "lsh", "fn_bxor_item", "fn_shl_item"]}
+    {"in_func": "mvp_#_words", "expect": ["xor", "lsh", "fn_bxor_item", "fn_shl_item"]}
   ]
 }

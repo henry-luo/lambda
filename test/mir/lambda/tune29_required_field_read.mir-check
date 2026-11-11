@@ -1,27 +1,32 @@
 {
   "schema_version": 1,
-  "description": "T29-2 (D4.2.6): a required record field is read with no empty-slot arm and a member read through it has no receiver null test; an optional field and a nullable receiver keep their arms.",
+  "description": "D4.2.6/S11.4.10: the enforced non-null prefix reads required child and scalar slots directly, without fallback member calls. Optional fields and nullable receivers retain their absence arms.",
   "checks": [
     {
-      "in_func": "_read_required_#",
+      "in_func": "mvp_#_read_required",
+      "expect_seq": [
+        "mov\t{{r:parent_data}}, p:16({{r}})",
+        "mov\t{{r:child}}, i64:8({{r:parent_data}})",
+        "mov\t{{r:child_data}}, p:16({{r:child}})",
+        "mov\t{{r}}, i64:({{r:child_data}})"
+      ],
       "forbid": [
-        "72057594037927936",
-        "beq\t",
-        "bne\t"
+        "call\t{{p}}, fn_member,",
+        "call\t{{p}}, fn_member_by_id,"
       ],
       "count": {
-        "mov\t{{r}}, i64:16({{r}})": 2
+        "mov\t{{r}}, p:16({{r}})": 2
       }
     },
     {
-      "in_func": "_read_optional_#",
+      "in_func": "mvp_#_read_optional",
       "expect": [
         "beq\t",
         "72057594037927936"
       ]
     },
     {
-      "in_func": "_read_nullable_receiver_#",
+      "in_func": "mvp_#_read_nullable_receiver",
       "expect": [
         "bne\t",
         "72057594037927936"

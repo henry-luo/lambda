@@ -6,5 +6,6 @@
 [true, null]
 [9, 13, 9]
 [7, null, null]
+["bad", false, 7, true]
 rhs
 [true, null]

@@ -3,26 +3,26 @@
   "description": "S8.2.4: finite range and exact round-trip guards precede direct numeric-position reads; widened arrays keep fn_index.",
   "checks": [
     {
-      "in_func": "_local_values_#",
+      "in_func": "mvp_#_local_values",
       "expect": [
         "d2i",
         "i2d"
       ]
     },
     {
-      "in_func": "_erase_#",
+      "in_func": "mvp_#_erase",
       "expect": [
         "fn_index"
       ]
     },
     {
-      "in_func": "_read_numeric_#",
+      "in_func": "mvp_#_read_numeric",
       "expect": [
         "fn_index"
       ]
     },
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
         "effectful_array",
         "effectful_key"

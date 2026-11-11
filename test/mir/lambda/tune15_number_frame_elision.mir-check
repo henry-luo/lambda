@@ -1,16 +1,17 @@
 {
   "schema_version": 1,
-  "description": "Tune15 B2.1 elides the empty number frame for a native-only function while retaining the native integer operation.",
+  "description": "D2.3.5/D6.2.1: MVP native-only leaf arithmetic needs no scalar home, number-frame restore or side-stack reservation.",
   "checks": [
     {
-      "in_func": "_tune15_leaf_#",
+      "in_func": "mvp_#_tune15_leaf",
       "expect": [
-        "add\t{{r}}, %p1, {{r}}"
+        "add\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
         "side_number_top",
         "lambda_restore_number_frame_top",
-        "lambda_item_adopt_scalar_home"
+        "lambda_item_adopt_scalar_home",
+        "call\t{{p}}, lambda_side_stack_ensure_for,"
       ]
     }
   ]

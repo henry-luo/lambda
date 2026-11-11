@@ -1,15 +1,25 @@
 {
   "schema_version": 1,
-  "description": "Tune18 E2.b caches an inferred float-array witness at the binding and removes ensure_typed_array from repeated call edges.",
+  "description": "D4.3.3/D7.3.1: MVP inlines the repeated consumer and reads its packed float lane through the existing carrier witness. No dynamic adapter or Full witness-conversion helper is needed; one checked source-read fallback remains.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
-        "call\t_sample18_"
+        "dadd\t"
       ],
       "count": {
-        "call\tensure_typed_array_p, ensure_typed_array": 1
-      }
+        "call\t{{p}}, fn_index,": 1
+      },
+      "expect_seq": [
+        "i64:32(",
+        "lsh\t{{r:offset}}, {{r}}, 3",
+        "add\t{{r:address}}, {{r}}, {{r:offset}}",
+        "dmov\t{{r}}, d:({{r:address}})"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_sample18_dp",
+        "call\t{{p}}, fn_call_into,"
+      ]
     }
   ]
 }

@@ -1,24 +1,54 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3: a declared string[] uses its pointer certificate and keeps an item_at fallback, while an unproved array keeps generic indexing.",
+  "description": "D4.3.3/S7.1.1v3: MVP reads certified pointer carriers through guarded native slots and retains one checked miss per source read. Poisoned keys retain Error propagation, while the unproved alias keeps its ordinary checked path.",
   "checks": [
     {
-      "in_func": "_pick_#",
-      "expect": ["call\titem_at_p, item_at"],
-      "forbid": ["call\tfn_index_p, fn_index"]
+      "in_func": "mvp_#_pick",
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\t{{p}}, item_at,"
+      ],
+      "expect_seq": [
+        "i64:32(",
+        "lsh\t{{r:offset}}, {{r}}, 3",
+        "add\t{{r:address}}, {{r}}, {{r:offset}}",
+        "mov\t{{r}}, i64:({{r:address}})"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": 1
+      }
     },
     {
-      "in_func": "_compound_#",
-      "expect": ["call\titem_at_p, item_at"],
-      "forbid": ["call\tfn_index_p, fn_index"]
+      "in_func": "mvp_#_compound",
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ],
+      "forbid": [
+        "call\t{{p}}, item_at,"
+      ],
+      "expect_seq": [
+        "i64:32(",
+        "lsh\t{{r:offset}}, {{r}}, 3",
+        "add\t{{r:address}}, {{r}}, {{r:offset}}",
+        "mov\t{{r}}, i64:({{r:address}})"
+      ],
+      "count": {
+        "call\t{{p}}, fn_index,": 1
+      }
     },
     {
-      "in_func": "_fallible_#",
-      "expect": ["call\tfn_index_p, fn_index"]
+      "in_func": "mvp_#_fallible",
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ]
     },
     {
       "in_func": "main",
-      "expect": ["call\tfn_index_p, fn_index"]
+      "expect": [
+        "call\t{{p}}, fn_index,"
+      ]
     }
   ]
 }

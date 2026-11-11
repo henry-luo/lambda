@@ -1,5 +1,9 @@
 # Lambda Transpiler — Structural Efficiency Proposal
 
+> **Historical record:** The C-text C2MIR backend and its embedded `lambda.h`
+> pipeline were removed (D1.6). Direct MIR does not parse or embed this header;
+> the header-placement constraints below describe the retired backend.
+
 ## Overview
 
 This document proposes structural improvements to the Lambda transpiler pipeline to make it leaner, more configuration-driven, and more efficient. The three primary objectives are:

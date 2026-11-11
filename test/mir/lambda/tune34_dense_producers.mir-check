@@ -1,8 +1,31 @@
 {
   "schema_version": 1,
-  "description": "D4.3.3: dense producer guards cover the complete read/write tuple; widening and retained owners keep their ordinary setters.",
+  "description": "D4.3.3/D7.3.3: MVP inlines least and retains native scalar comparisons and packed index guards. Its erased owners keep a checked COW miss; null writes use representation-changing publication without acquiring a declared element contract.",
   "checks": [
-    {"in_func": "_rows_#", "expect": ["least", "fill"]},
-    {"in_func": "_changing_lane_#", "expect": ["fn_array_set"]}
+    {
+      "in_func": "mvp_#_rows",
+      "expect": [
+        "\tlt\t",
+        "i64:32(",
+        "call\t{{p}}, fn_fill,",
+        "call\t{{p}}, index_assign_cow,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_least_dp",
+        "call\t{{p}}, lambda_array_set_checked_item,"
+      ],
+      "count": {
+        "call\t{{p}}, index_assign_cow,": 1
+      }
+    },
+    {
+      "in_func": "mvp_#_changing_lane",
+      "expect": [
+        "call\t{{p}}, index_assign_cow,"
+      ],
+      "forbid": [
+        "call\t{{p}}, lambda_array_set_checked_item,"
+      ]
+    }
   ]
 }

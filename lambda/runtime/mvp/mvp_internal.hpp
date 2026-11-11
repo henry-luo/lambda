@@ -54,7 +54,8 @@ static inline bool mvp_open_value_contract(Type* contract) {
 
 static inline bool mvp_exact_membership_domain(Type* type) {
     return type == &TYPE_NULL || type == &TYPE_ERROR || type == &TYPE_BOOL || type == &TYPE_STRING ||
-        type == &TYPE_SYMBOL || type == &TYPE_BINARY || type == &TYPE_DTIME || type == &TYPE_MAP;
+        type == &TYPE_SYMBOL || type == &TYPE_BINARY || type == &TYPE_DTIME || type == &TYPE_MAP ||
+        type == &TYPE_ARRAY;
 }
 
 static inline bool mvp_membership_proven(Type* source, Type* expected) {
@@ -88,6 +89,8 @@ enum MvpCandidateKind {
     MVP_CANDIDATE_RECORD, MVP_CANDIDATE_SCALAR, MVP_CANDIDATE_ARRAY_ELEMENT, MVP_CANDIDATE_COUNT
 };
 
+static constexpr uint32_t MVP_INLINE_COST_LIMIT = 256;
+
 struct MvpFunction {
     AstFuncNode* ast;
     AstViewNode* view;
@@ -96,6 +99,7 @@ struct MvpFunction {
     TypeObject* method_owner;
     const char* name;
     const char* js_export_name;
+    NameEntry* interp_binding;
     Script* js_export_owner;
     MIR_item_t target;
     MIR_item_t js_export_ref;
@@ -112,9 +116,12 @@ struct MvpFunction {
     uint32_t inline_cost;
     bool imported;
     bool boxed_entry;
+    bool erase_unused_binders;
     bool no_value_result;
     bool owns_open_scopes;
     bool guarded_array_entry;
+    bool body_may_gc;  // excludes conservative admission at the parameter boundary
+    bool integer_leaf_query_active;
 };
 
 static inline bool mvp_edit_model_place(MvpFunction* function, AstNode* object) {
@@ -130,7 +137,8 @@ static inline bool mvp_variadic_function(const MvpFunction* function) {
 }
 
 static inline uint16_t mvp_function_binder_count(const MvpFunction* function) {
-    return function && function->ast ? ((TypeFunc*)function->ast->type)->binder_count : 0;
+    return function && function->ast && !function->erase_unused_binders
+        ? ((TypeFunc*)function->ast->type)->binder_count : 0;
 }
 
 static inline ShapeEntry* mvp_method_field(MvpFunction* function, NameEntry* entry) {
@@ -138,6 +146,15 @@ static inline ShapeEntry* mvp_method_field(MvpFunction* function, NameEntry* ent
     for (ShapeEntry* field = owner ? owner->shape : NULL; field; field = typemap_next_field(owner, field))
         if (field->binding == entry) return field;
     return NULL;
+}
+
+static inline ShapeEntry* mvp_method_member(MvpFunction* function, AstNode* object, AstNode* key) {
+    object = ast_unwrap_primary_to_leaf(object);
+    key = ast_unwrap_primary_to_leaf(key);
+    if (!function || !function->method_owner || !object || object->node_type != AST_NODE_CURRENT_ITEM ||
+            !key || key->node_type != AST_NODE_IDENT) return NULL;
+    String* name = ((AstIdentNode*)key)->name;
+    return find_shape_read_field_by_name((TypeMap*)function->method_owner, name->chars, name->len);
 }
 
 static inline FnCapture* mvp_function_capture(MvpFunction* function, NameEntry* entry) {
@@ -169,6 +186,7 @@ struct MvpErrorTarget {
     MIR_reg_t error;
     MvpCleanup* cleanup_base;
     bool unwinds;
+    bool success_scratch;  // normal paths overwrite this slot before observing it
 };
 struct MvpScope {
     MvpScope* parent;
@@ -179,11 +197,15 @@ struct MvpIntRange {
     int64_t lower;
     int64_t upper;
 };
+struct MvpScalarAggregate;
+
 struct MvpBinding {
     NameEntry* entry;
+    AstNode* declaration;  // continuations reuse live-in identities with private parameter sites
     const char* state_name;
     Type* admission_contract;
     Type* producer_success_contract;
+    Type* membership_contract;
     Type* contract;
     Type* candidates[MVP_CANDIDATE_COUNT];
     ValueRep rep;
@@ -223,11 +245,19 @@ struct MvpBinding {
     bool constant_ready;
     bool readonly_literal;
     bool inferred_array;
+    bool inferred_append;
     bool array_present;
     bool record_written, record_accessed;
     bool string_buffer_owned;
+    bool method_field_written;
     bool stable_scalar_home;
+    int8_t var_borrow_cache[2];  // zero unknown, positive borrowed, negative unborrowed
+    MvpScalarAggregate* scalar_aggregate;
 };
+
+static inline AstNode* mvp_binding_node(MvpBinding* binding) {
+    return binding->declaration ? binding->declaration : binding->entry ? binding->entry->node : NULL;
+}
 
 struct LambdaMvpModule {
     Transpiler* tp;
@@ -235,6 +265,8 @@ struct LambdaMvpModule {
     MIR_module_t module;
     MIR_item_t consts;
     MIR_item_t layout;
+    const MirModuleNames* names;
+    bool satellite;
     ArrayList* property_keys;
     HashMap* imports;
     MvpFunction* functions;
@@ -247,6 +279,8 @@ struct LambdaMvpModule {
     LambdaMvpStats stats;
     int label_counter;
     bool failed;
+    bool local_ranges_only;
+    bool integer_inline_proof;
     Type* nullable_int;
     Type* nullable_bool;
     Type* nullable_float;
@@ -288,7 +322,23 @@ struct MvpModuleLocation {
     MIR_reg_t descriptor, state, slot;
 };
 
+struct MvpHoistedCall {
+    MvpHoistedCall* next;
+    AstCallNode* call;
+    MvpBinding* argument;
+    const char* helper;
+    MirValue result;
+};
+
+struct MvpScalarAggregate {
+    MvpScalarAggregate* next;
+    int count;
+    MirValue members[16];
+    String* keys[16];
+};
+
 struct MvpCompiler {
+    MvpScalarAggregate* scalar_aggregates;
     LambdaMvpModule* module;
     MvpFunction* function;
     MirEmitter em;
@@ -319,6 +369,7 @@ struct MvpCompiler {
     MvpFloatConstant* float_constants;
     MvpStringByte* string_bytes;
     MvpModuleLocation* module_locations;
+    MvpHoistedCall* hoisted_calls;
     MIR_insn_t constant_cursor;
     MIR_label_t tail_entry;
     MIR_reg_t argument_span;
@@ -352,12 +403,14 @@ struct MvpArrayCopyPlan {
     MvpBinding* counter;
     AstNode* limit;
     int64_t read_offset, write_offset;
+    Type* element;
 };
 
 struct MvpArrayReversePlan {
     MvpBinding* array;
     MvpBinding* first;
     MvpBinding* last;
+    Type* element;
 };
 
 struct MvpNumericLoopPlan {
@@ -387,7 +440,10 @@ Type* mvp_inferred_scalar_contract(Type* contract);
 Type* mvp_join_value_contracts(LambdaMvpModule* module, Type* left, Type* right);
 Type* mvp_bound_array_contract(Type* contract);
 Type* mvp_contract(AstNode* declaration);
+Type* mvp_parameter_contract(MvpFunction* function, AstNamedNode* parameter);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
+bool mvp_interp_binding(LambdaMvpModule* module, NameEntry* entry, Script** owner, int* slot);
+Script* mvp_import_owner(LambdaMvpModule* module, NameEntry* entry);
 AstFunctionId mvp_node_owner(LambdaMvpModule* module, AstNodeId id);
 MvpFunction* mvp_require_function_reference(LambdaMvpModule* module, AstFuncNode* target,
     AstNode* callee, Script* owner = NULL);
@@ -442,20 +498,34 @@ void mvp_refine_guarded_locals(LambdaMvpModule* module, MvpFunction* function);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler, Type* operand);
-AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);
+AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0,
+    bool dynamic_key = false);
+struct MvpStringAppendPlan {
+    AstDeclaratorNode* declaration;
+    AstAssignStamNode* assignment;
+    MvpBinding* temporary;
+    MvpBinding* owner;
+    bool transfer;
+};
+bool mvp_string_append_plan(LambdaMvpModule* module, AstNode* first, MvpStringAppendPlan* plan);
+bool mvp_sole_declaration_read(LambdaMvpModule* module, AstDeclaratorNode* declaration, AstNode* read);
 bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
+bool mvp_local_storage_stable(LambdaMvpModule* module, MvpBinding* binding, bool writes);
 MvpBinding* mvp_place_root(LambdaMvpModule* module, AstNode* node);
 bool mvp_array_sum_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArraySumPlan* plan);
 bool mvp_array_copy_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayCopyPlan* plan);
+bool mvp_unit_step(LambdaMvpModule*, AstAssignStamNode*, int64_t);
 bool mvp_array_reverse_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayReversePlan* plan);
 bool mvp_numeric_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
 bool mvp_numeric_region_advance(LambdaMvpModule* module, AstNode* region, MvpNumericLoopPlan* plan);
 bool mvp_numeric_inline_plan(LambdaMvpModule* module, MvpFunction* function, MvpNumericLoopPlan* plan,
     bool guarded_inputs = false);
 bool mvp_integer_leaf_body(LambdaMvpModule* module, MvpFunction* function, bool allow_calls);
+bool mvp_call_admission_proven(LambdaMvpModule* module, AstCallNode* call,
+        int depth = 0, bool dense_arrays = false);
 Type* mvp_integer_leaf_result(LambdaMvpModule* module, AstCallNode* call, int depth = 0,
-        bool dense_arrays = false);
+        bool dense_arrays = false, uint32_t* expanded_cost = NULL);
 bool mvp_index_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpIndexLoopPlan* plan);
 bool mvp_index_function_plan(LambdaMvpModule* module, MvpFunction* function, MvpIndexLoopPlan* plan);
 bool mvp_emit_function(LambdaMvpModule* module, MvpFunction* function);

@@ -18,6 +18,6 @@ fn checked(x: any) int^ {
 }
 
 pn main() {
-    print([project(7), project(-2), escape(5), checked(9)])
+    print([project(7), project(-2), escape(5), checked(9), checked("bad") is error])
     print("\n")
 }

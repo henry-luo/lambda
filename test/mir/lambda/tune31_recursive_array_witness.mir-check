@@ -1,16 +1,35 @@
 {
   "schema_version": 1,
-  "description": "Tune31 T31-1 / D4.2.1-D4.3.1: an initial numeric fill and self-recursive var forwarding retain the inferred ArrayNum lane. The raw recursive body must use its native store instead of boxed indexing.",
+  "description": "D4.3.3/D6.3.2: guarded inferred array recursion inherits its extent and native integer store proof. The checked sibling retains representation-agnostic COW and error publication; inline effects must agree with the carrier classification.",
   "checks": [
     {
-      "in_func": "_recursive_fill_#",
-      "expect": [
-        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx"
+      "in_func": "mvp_#_recursive_fill",
+      "in_range": {
+        "from": "func\t",
+        "to": "call\t{{p}}, index_assign_cow,"
+      },
+      "expect_seq": [
+        "and\t{{r}}, {{r}}, 4294979584",
+        "i64:32(",
+        "lsh\t{{r:offset}}, {{r}}, 3",
+        "add\t{{r:address}}, {{r}}, {{r:offset}}",
+        "mov\ti64:({{r:address}}), {{r}}",
+        "call\tmvp_{{n}}_recursive_fill_dp"
       ],
       "forbid": [
-        "call\tfn_index_p, fn_index",
-        "call\tfn_array_set_p, fn_array_set"
+        "call\t{{p}}, fn_index,",
+        "call\t{{p}}, fn_array_set,"
       ]
+    },
+    {
+      "in_func": "mvp_#_recursive_fill",
+      "expect": [
+        "call\t{{p}}, index_assign_cow,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
+      ],
+      "count": {
+        "call\t{{p}}, index_assign_cow,": 2
+      }
     }
   ]
 }

@@ -1,6 +1,9 @@
 # Lambda Script — Developer Guide
 
 > **Last verified against tree:** 2026-08-23 *(initial stamp from git history)*
+> MVP compiler sections updated against sources on 2026-11-10. The release host
+> builds after RI-004; focused verification and remaining failures are recorded in
+> [the retirement checkpoint](../../vibe/impl/Lambda_Impl_MIR_Full_Retirement.md#current-checkpoint).
 
 This guide is for developers working on the **Lambda and Radiant C++ runtime engine** itself — building the compiler, modifying the parser, extending the JIT backend, and developing the layout engine.
 
@@ -50,7 +53,7 @@ interpreter, pass `PYTHON` to Make; the value is propagated to sibling builds.
 
 ## 2. Setting Up Dependencies
 
-The setup scripts handle all dependency installation automatically:
+The setup scripts install platform packages and prepare owner-built dependencies:
 
 ```bash
 ./setup-mac-deps.sh        # macOS
@@ -58,7 +61,13 @@ The setup scripts handle all dependency installation automatically:
 ./setup-windows-deps.sh    # Windows (MSYS2)
 ```
 
-Pass `--clean` to any script to remove intermediate build artifacts.
+Pass `--dry-run` to inspect the package and build steps without changing the
+system. Lambda installs its development tools, then calls input's setup and
+Radiant's setup. `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` select sibling
+checkouts. Input and Radiant also provide their own `setup-<platform>-deps.sh`
+entry points; Radiant's invokes input's setup first. This follows the owner
+boundaries in D9.1.1v4 and D9.1.3v2. Use the project Make clean targets for
+build artifacts.
 
 ### Common Dependencies (All Platforms)
 
@@ -121,65 +130,34 @@ These libraries and tools are required on every platform.
 | **jsdom** (npm) | JavaScript DOM for test comparison |
 | **Puppeteer** (npm) | Browser automation for layout reference capture |
 
-### macOS-Specific (`setup-mac-deps.sh`)
+### Platform setup
 
-Requires **Homebrew**. Most libraries installed via `brew install`:
+On macOS, setup uses Homebrew. On Linux, it uses apt and builds pinned mbedTLS
+and mpdecimal into `../lambda-input/build/deps/linux-support/` with Premake
+and Make. On Windows, setup requires an MSYS2 CLANG64 or MINGW64 shell and
+uses pacman. Input builds its pinned curl, ThorVG, Brotli and utf8proc into
+`../lambda-input/build/deps/`; Radiant setup installs its graphics packages.
 
-```
-mbedtls@3  freetype  expat  glfw  libjpeg-turbo  giflib  libpng
-zlib  bzip2  pkg-config  libevent  premake
-```
-
-The split build prepares curl (with mbedTLS), ThorVG, Brotli and utf8proc under
-`../lambda-input/build/deps/`; WOFF2 uses vendored input sources. Platform setup
-also supplies dependencies under `mac-deps/` and through Homebrew.
-
-System frameworks: OpenGL, Cocoa, IOKit, CoreFoundation, CoreServices
-
-### Linux-Specific (`setup-linux-deps.sh`)
-
-Uses **apt** for system packages:
-
-```
-build-essential  libcurl4-openssl-dev  libmpdec-dev  libutf8proc-dev
-libssl-dev  zlib1g-dev  libnghttp2-dev  libncurses5-dev  libevent-dev
-libbrotli-dev  libfreetype6-dev  libexpat1-dev
-libglfw3-dev  libpng-dev  libbz2-dev  libturbojpeg0-dev  libgif-dev
-libgl1-mesa-dev  libglu1-mesa-dev  libegl1-mesa-dev  gettext
-```
-
-Source fallbacks use the dependency recipes for Google Test, utf8proc, mbedTLS
-and ThorVG. RE2 and WOFF2 are compiled from the vendored tree by the host build.
-
-### Windows-Specific (`setup-windows-deps.sh`)
-
-Requires **MSYS2** with CLANG64 (preferred) or MINGW64 environment. Uses `pacman`:
-
-```
-base-devel  mingw-w64-*-clang (or -gcc)
-mingw-w64-*-mpdecimal  mingw-w64-*-mbedtls
-mingw-w64-*-freetype  mingw-w64-*-glfw    mingw-w64-*-libpng
-mingw-w64-*-libjpeg-turbo  mingw-w64-*-giflib  mingw-w64-*-nodejs
-mingw-w64-*-pkgconf    ccache  git  vim  jq
-```
-
-Built from source in `win-native-deps/`:
-- libcurl (minimal, no HTTP/2), ThorVG, utf8proc; WOFF2 uses the vendored host sources.
+The macOS host build was verified on 2026-11-10. Linux and Windows setup plans
+were checked with `--dry-run`; full setup and build runs need platform testing.
 
 ### Dependency Architecture
 
 `build_lambda_config.json` owns the host, runtime and test graph. Its
 `config_imports` loads `build_deps_config.json` and the sibling
 `build_targets.json` manifests. `utils/generate_premake.py`
-(`PremakeGenerator`) generates the host configuration; `utils/build_config.py`
-(`load_build_config`) merges imports and rejects cycles or duplicate targets.
+(`PremakeGenerator`) generates the host configuration; input's
+`scripts/build_config.py` (`load_build_config`) merges selected imports and
+rejects cycles or duplicate targets.
 Input and Radiant build their own static archives from their manifests, as
-required by D9.1.1v4 and D9.1.3v2. Input also prepares native dependencies
-such as RE2, image codecs and archive readers. The RDB TLS and plugin profile
+required by D9.1.1v4 and D9.1.3v2. Their `build_owner` metadata supplies link
+dependencies without generating duplicate Lambda-side provider projects.
+Input owns its image configuration and native dependencies such as RE2,
+image codecs and archive readers. Standalone CLI and other specialized
+variants still use their explicitly selected sources. The RDB TLS and plugin profile
 retains RDB8/RDB11 from `vibe/Lambda_IO_RDB.md`.
 
 ```bash
-make build-dependency DEP=thorvg
 make build-dependency DEP=googletest ARGS='--source build_temp/googletest --prefix temp/gtest-install'
 make build-typemeta-extract
 make test-build-dependencies
@@ -189,13 +167,14 @@ The metadata utility uses `--type-filter`; LLVM owns the generic `--filter`
 option in the shared Clang/LLVM libraries.
 
 `utils/build_dependencies.py` configures and builds under
-`temp/dependency-build/<system>-<architecture>/<dependency>/`. Platform setup
-scripts fetch sources and invoke those recipes; only installation into a system
-prefix uses sudo. PostgreSQL retains its configure probes and Make/Perl header
+`temp/dependency-build/<system>-<architecture>/<dependency>/`. Input setup fetches pinned input sources into its own checkout. Lambda-owned
+recipes are available separately through `make build-dependency`. PostgreSQL retains its configure probes and Make/Perl header
 generation; compilation and archiving use Premake. Other generated headers use
 the upstream templates and compiler probes rather than cached platform results.
-Some standalone dependency recipes use other build systems. For example, the
-input-owned ThorVG build uses Meson and Ninja, and its Brotli build uses CMake.
+Under D9.1.5, input-owned utf8proc, Brotli, ThorVG, curl and native
+dependencies use JSON recipes with Premake and Make. The input dependency
+pipeline was verified on macOS on 2026-11-10; Linux and Windows remain
+unverified. The standalone libpq configure step remains a conformance gap.
 
 The normal host build combines the generated Lambda build with the sibling
 archive builds:
@@ -377,7 +356,7 @@ the generated Lambda CST is built only for `lambda-cst` verification.
    implemented in `lambda/runtime/parser/lambda_parser.c` and semantic AST
    changes in `lambda/runtime/build_ast.cpp`.
 
-4. **Update the transpiler** — add MIR generation in `lambda/transpile-mir.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
+4. **Update the transpiler** — add MIR generation in `lambda/runtime/mvp/mvp_mir.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
 
 5. **Build and test**:
    ```bash
@@ -439,78 +418,68 @@ Lambda AST  ──→  transpile.cpp  ──→  C source code string
 #### Supported: Direct MIR (AST → MIR IR → machine code)
 
 ```
-Lambda AST  ──→  transpile-mir.cpp  ──→  MIR instructions (MIR_MOV, MIR_ADD, MIR_CALL, ...)
+Lambda AST  ──→  MVP planner/lowering  ──→  MIR instructions (MIR_MOV, MIR_ADD, MIR_CALL, ...)
                                                     │
                                                     ▼
                                            MIR generator  ──→  machine code
 ```
 
-- `lambda/transpile-mir.cpp` emits MIR IR instructions directly via the MIR C API.
+- `lambda/runtime/mvp/mvp_mir.cpp` emits MIR IR instructions directly via the MIR C API.
 - No intermediate C code is involved — instructions like `MIR_MOV`, `MIR_ADD`, `MIR_CALL` are built directly.
 
 The vendored MIR dependency still contains its upstream C2MIR frontend, but
-Lambda no longer feeds generated Lambda C into it.
+Lambda no longer feeds generated Lambda C into it. Direct MIR emission does
+not parse or embed `lambda.h` in generated modules; native compiler and runtime
+sources use the shared value layouts and runtime ABI during their own build.
 
 ### Key Files
 
 | File | Role |
 |------|------|
-| `lambda/transpile-mir.cpp` | Emits MIR IR directly from Lambda AST (direct path) |
-| `lambda/mir.c` | MIR context, runtime import registry, linking, and code generation |
-| `lambda/lambda.h` | C API header — function signatures callable from JIT code |
-| `include/mir.h` | MIR library API (upstream, v0.2) |
-| `build_temp/mir/` | MIR library source (built into `libmir.a`) |
+| `lambda/runtime/mvp/mvp_driver.cpp` | Eager/satellite compilation, linking, module layout and image lifetime |
+| `lambda/runtime/mvp/mvp_plan.cpp` | Admission, binding, effect and representation planning |
+| `lambda/runtime/mvp/mvp_mir.cpp` | Lowers planned Lambda operations into MIR |
+| `lambda/runtime/mir_emitter_shared.hpp` | Shared MIR emission, roots, calls and ABI helpers |
+| `lambda/runtime/mir.c` | MIR contexts, import resolution and native generation |
+| `lambda/runtime/sys_func_registry.c` | Runtime helper addresses and audited import effects |
+| `lambda/lambda.h` (in `lambda-input`) | Shared C/C++ value model owned by `lambda-input` |
+| `lambda/mir/` | Vendored MIR dependency; do not edit in place |
 
-### Runtime Function Registry (`mir.c`)
+### Runtime Helper Registry
 
-The `func_list[]` table in `mir.c` maps ~150+ function names to function pointers, making them available to JIT-compiled code. Categories include:
+`sys_func_registry.c` publishes helper addresses and their GC, reentry and
+result contracts; `mir.c` resolves those imports. T0 and MVP use the same C-ABI
+runtime helpers (**D7.4.1**). To add a helper, implement it in its owning runtime
+module, declare its C ABI, register its address and precise effects, then call
+it through the existing emitter helpers. A collecting call must keep live
+values in precise roots (**D6.3**).
 
-- **Collection constructors**: `new_array`, `new_list`, `new_map`, `new_element`
-- **Arithmetic/math**: `op_add`, `op_sub`, `op_mul`, `op_div`, `op_mod`, `op_pow`, `math_sin`, `math_cos`, etc.
-- **String operations**: `str_concat`, `str_len`, `str_slice`, `str_find`, etc.
-- **Type operations**: `get_type_id`, `to_int`, `to_float`, `to_string`, `to_decimal`
-- **Pipe support**: `pipe_map_len`, `pipe_map_val`, `pipe_map_key`
-- **Error handling**: `raise_error`, `get_error`
+### MVP Compiler Architecture
 
-When adding new runtime functions:
+`mvp_driver.cpp` runs indexed compiler passes: constant materialization/folding,
+planning, lowering, finalization and linking (**D8.2.5**). The planner owns
+per-function binding, representation and return plans; lowering consumes those
+plans through `MirEmitter`. `const_materialize.cpp` holds compiler-neutral
+static collection construction. Full MIR's emitter and `MirTranspiler` are
+retired.
 
-1. **Implement** the function in C (in an appropriate source file).
-2. **Declare** it in `lambda/lambda.h` so MIR-compiled code can reference it.
-3. **Register** it in `func_list[]` in `lambda/mir.c`:
-   ```c
-   {"my_new_func", (void*)my_new_func},
-   ```
-4. **Call** from transpiled code — emit a `MIR_CALL` instruction in `transpile-mir.cpp`.
-
-### MIR Transpiler Architecture (`transpile-mir.cpp`)
-
-The `MirTranspiler` struct manages the direct MIR emission context:
-
-- **MIR context/module/function**: Manages IR construction lifecycle
-- **Import cache**: HashMap of `MirImportEntry` (proto + import pairs) — avoids duplicate imports
-- **Variable scope stack**: 64 levels deep for nested scopes
-- **Loop label stack**: 32 levels for nested loop break/continue
-- **Register counter**: Sequential allocation of MIR virtual registers
-- **Pipe context registers**: `pipe_item_reg`, `pipe_index_reg` for pipe expression evaluation
-- **TCO support**: `tco_func`, `tco_label` for tail-call optimization
-- **Closure support**: `current_closure`, `env_reg` for captured variable environments
+The interpreter starts cold definitions in T0 under AUTO and requests private
+MVP satellite images for eligible hot definitions. Publication links property
+keys and entries only at evaluator safe points; pools and native code remain
+owned until the last caller retires (**D8.3.1–D8.3.5**).
 
 ### Type Mapping
 
-Lambda types map to MIR types as follows:
-
-| Lambda Type | MIR Type | Width |
-|------------|----------|-------|
-| `float` | `MIR_T_D` | 64-bit double |
-| All others (int, string, list, map, ...) | `MIR_T_I64` | 64-bit integer (tagged pointers) |
-
-This reflects Lambda's tagged-pointer data model where most values are 64-bit `Item` values carrying both type and data information.
+The shared `Item` representation remains the public boxed value contract.
+MVP may use native integer or double lanes and raw pointers internally when its
+plans prove the corresponding ABI and lifetime rules. Public boxed entries
+use an Item and a caller-owned scalar companion (**D2.1.1, D6.2.1, D7.4.2**).
 
 ### Running MIR-specific Tests
 
 ```bash
 make test-mir                    # Run MIR JIT test suite
-./lambda.exe script.ls           # Run a script with JIT (default mode)
+./lambda.exe --tier=jit script.ls  # Compile eagerly with MVP; AUTO is the default tier
 ```
 
 ### Debugging JIT Code
@@ -820,11 +789,13 @@ Renamed 2026-10-03. Current binaries no longer read the old names.
 | Variable | Values (default) | Old name |
 |----------|------------------|----------|
 | `LAMBDA_EXEC_BACKEND` | `interp` \| `auto` \| `jit` (`auto`) | `LAMBDA_TIER` |
+| `LAMBDA_MIR_COMPILER` | unset/empty or `mvp`; MVP is the sole compiler for JIT and AUTO promotion. `production` is rejected: Full MIR is retired (D8.3.1–D8.3.4). | — |
 | `LAMBDA_FUNC_JIT_THRESHOLD` | calls before promotion (5) | `LAMBDA_JIT_THRESHOLD` |
 | `LAMBDA_LOOP_JIT_THRESHOLD` | loop back-edges before handoff (10000) | `LAMBDA_JIT_BACKEDGE` |
 | `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`; unset/empty also AUTO, D8.4.2) | `JS_EXECUTION_BACKEND` |
 | `JS_FUNC_JIT_THRESHOLD` | (5) | `JS_JIT_THRESHOLD` |
 | `JS_LOOP_JIT_THRESHOLD` | (10000) | `JS_JIT_BACKEDGE` |
+| `LAMBDA_JS_DRAIN_IDLE_MS` | JS idle-drain watchdog interval, 1–30000 ms (5000); finite native requests retain the 30000 ms total grace budget | — |
 
 Archived binaries in the git-ignored `test/benchmark/exe/` (see its `MANIFEST.md`) read only the old names. `run_benchmarks.py` and `run_paired_benchmarks.py` set both names.
 

@@ -88,107 +88,9 @@ struct MirImportCacheEntry {
     MirImportEntry entry;
 };
 
-struct VarEntry {
-    // The builder-resolved binding identity. MIR scope maps retain a spelling
-    // index for synthetic lowering-only locals, but source identifiers must
-    // enter through this edge rather than re-resolving a name (D8.2.4).
-    NameEntry* binding;
-    MIR_reg_t reg;
-    // Lambda confined captures use one GC-owned home; JS retains its own env ABI.
-    MIR_reg_t lambda_shared_home;
-    MIR_reg_t method_field_present; // optional receiver fields retain absence across read-only calls
-    int root_slot;
-    int gc_home_id;
-    MIR_type_t mir_type;
-    TypeId type_id;
-    // DOM4 flow fact: a declared Jube carrier type proven for this binding.
-    // It is compiler metadata only; generated MIR carries slot/ordinal ints.
-    const JubeTypeDef* jube_type;
-    TypeId elem_type;
-    // elem_type came from a declared annotation rather than from local fill()
-    // narrowing, so the representation is only guaranteed at function entry.
-    // Indexed fast paths must re-check the runtime elem_type before using it.
-    bool elem_type_guarded;
-    NumSizedType num_type;
-    int env_offset;
-    bool is_state_var;
-    const char* state_name_ptr;
-    bool from_env;
-    int env_slot;
-    MIR_reg_t env_reg;
-    bool from_shared_env;
-    bool in_scope_env;
-    int scope_env_slot;
-    MIR_reg_t scope_env_reg;
-    // This local mirrors a direct binding promoted out of a synchronous IIFE.
-    // Name matches alone are insufficient because a nested lexical declaration
-    // can legally shadow the promoted variable.
-    bool is_iife_module_var_binding;
-    Type* full_type;
-    bool is_let_const;
-    bool is_const;
-    bool is_nfe_binding;
-    bool from_block_func_decl;
-    bool from_catch_param;
-    bool tdz_active;
-    uint32_t binding_start;
-    uint32_t binding_end;
-    bool from_hoist;
-    bool cow_marked;
-    bool cow_children_may_be_shared;
-    bool cow_owned;
-    // An explicit `var` parameter is an in/out borrow of the caller's root.
-    // Checked stores must publish through that shared root, not retain a
-    // transactional replacement only in the callee's local register.
-    bool is_var_param;
-    // This binding may carry an exclusive String buffer on some control-flow path.
-    // Ordinary reads freeze its runtime flag; the may-own fact survives branches.
-    bool string_buffer_owned;
-    // A local initialized by an exact integer zero literal can safely serve as
-    // the counted accumulator of a compiler-proven positive-step loop.
-    bool compact_int_known_zero;
-    // A local initialized by an exact positive integer can prove `counter - 1`
-    // nonnegative inside its monotonic forward loop.
-    bool compact_int_known_positive;
-    // Exact typed-array bindings may cache their stable payload descriptor for
-    // repeated native reads. The cache is installed only after the body has
-    // ruled out representation-changing aliases or borrowed writes.
-    MIR_reg_t typed_array_cache_ptr;
-    MIR_reg_t typed_array_cache_items;
-    MIR_reg_t typed_array_cache_len;
-    bool typed_array_cache_valid;
-    // The local declaration boundary established this exact T[] proof. It is
-    // cleared on whole-binding replacement; the layout cache alone is only a
-    // physical carrier witness and cannot stand in for this contract.
-    Type* typed_array_contract_proven;
-    // T27-9: static length of a local array (`fill(K, v)` with literal K, or a
-    // literal of K members); -1 when unknown. `known_length_stable` caches the
-    // body scan proving no rebind/push/splice/borrow/capture can change it:
-    // 0 unscanned, 1 refuted, 2 stable.
-    int64_t known_length;
-    uint8_t known_length_stable;
-    bool is_live_default_binding;
-    const char* live_binding_specifier;
-};
-
-typedef VarEntry MirVarEntry;
-typedef VarEntry JsMirVarEntry;
-
-struct VarScopeEntry {
-    const char* name;
-    VarEntry var;
-};
-
-typedef VarScopeEntry JsVarScopeEntry;
-
-typedef TypedHashMap<VarScopeEntry,
-    HashMapCStrMemberKeyOps<VarScopeEntry, &VarScopeEntry::name>> EmVarScopeMap;
 typedef TypedHashMap<MirImportCacheEntry,
     HashMapCStrMemberKeyOps<MirImportCacheEntry, &MirImportCacheEntry::name>> EmImportCacheMap;
 
-static inline HashMap* em_var_scope_new(size_t capacity) {
-    return EmVarScopeMap::create(capacity);
-}
 
 static inline HashMap* em_import_cache_new(size_t capacity) {
     return EmImportCacheMap::create(capacity);
@@ -277,17 +179,12 @@ static inline void mir_append_emit_insn(MIR_context_t ctx,
     MIR_append_insn(ctx, func_item, insn);
 }
 
-static inline void mir_append_emit_label(MIR_context_t ctx,
-                                         MIR_item_t func_item,
-                                         MIR_label_t label) {
-    MIR_append_insn(ctx, func_item, label);
-}
 
 // ============================================================================
 // MirEmitter — bundled emit state shared by both transpilers (Lambda + JS).
 // Holds the immutable MIR context handle plus the per-function emit cursor
 // (current function item/reg-alloc target, register + label counters) and the
-// import cache. Lambda MirTranspiler and MVP LmdCompiler embed one and route
+// import cache. Lambda MVP and LambdaJS LmdCompiler embed one and route
 // their primitive emit helpers (new_reg / emit_insn / emit_label / calls)
 // through the em_* functions below, so the primitives exist once instead of
 // once per transpiler (Unified-AST plan Phase 0, P0.1).
@@ -323,11 +220,6 @@ enum MirReturnLaneKind {
     RETURN_LANE_NONE = 0,
     RETURN_LANE_SCALAR = 1,
     RETURN_LANE_ERROR = 2,
-};
-struct MirRootBinding {
-    MIR_reg_t reg;
-    int slot;
-    int home_id;
 };
 struct MirEnvBinding {
     MIR_reg_t source_reg;
@@ -499,11 +391,6 @@ struct MirFrameState {
     // never written to a root slot or scalar home (D6.2.1).
     MIR_reg_t pending_return_item;
     MIR_reg_t pending_return_companion;
-    // rv4.2 ownership is frame-local. Nested function emission suspends the
-    // outer frame, so the live pair must be restored with that frame rather
-    // than leaking into the nested body (D6.2.1).
-    MIR_reg_t pending_live_item;
-    MIR_reg_t pending_live_companion;
     MIR_reg_t error_return_reg;
     MIR_reg_t incoming_scalar_home;
     MirReturnLaneKind return_lane_kind;
@@ -513,15 +400,7 @@ struct MirFrameState {
     // published physical range but are initialized by their owning lowering
     // path before use (D6.3.1).
     int fixed_root_slots;
-    int gc_home_count;
     int fixed_number_slots;
-    MirRootBinding* root_bindings;
-    int root_binding_count;
-    int root_binding_capacity;
-    int* root_binding_by_reg;
-    int root_binding_by_reg_capacity;
-    int* root_binding_by_home;
-    int root_binding_by_home_capacity;
     int root_store_count;
     int may_gc_call_count;
     int no_gc_call_count;
@@ -572,19 +451,16 @@ struct MirEmitter {
     // from module state; foreign hosted compilers use the same boundary when
     // their callback ABI owns a separate result home.
     bool helper_results_skip_rehome;
+    bool compact_code; // outline representation checks when lowering exceeds its debug budget
     void (*before_may_gc_call)(void* owner);
     void (*after_may_gc_call)(void* owner);
     void (*root_call_value)(void* owner, MIR_reg_t reg,
         JitValueClass value_class);
     void (*note_call_exception)(void* owner, JitExceptionEffect effect);
     MirValue (*convert_rep)(void* owner, MirValue value, ValueRep required);
-    // Shared structural lowering recurses into the owning language through
-    // these two hooks (D8.2.1: operator semantics dispatch through the
-    // profile; D8.2.6: the common layer owns demand). Both receive
-    // `call_owner`; lowering sees demand before producing the value, so a
-    // branch can avoid materializing an intermediate representation.
+    // shared lowering passes demand to the language before producing a value,
+    // so a branch can avoid an intermediate representation (D8.2.1, D8.2.6).
     MirValue (*lower_value)(void* owner, AstNode* node, uint32_t demand);
-    MIR_reg_t (*emit_condition)(void* owner, MirValue value);
     // Hosted compilers provide their build-coupled catalog lookup. Core
     // transpilers leave this NULL and retain the existing registry path.
     bool (*lookup_import_metadata)(const char* name, JitImportMetadata* metadata);
@@ -609,23 +485,6 @@ struct MirEmitter {
     MIR_reg_t bitcast_slot_addr;
 };
 
-// Profiles locate Item-only module slots; the common layer owns conversion.
-struct MirModuleSlotProfile {
-    MirEmitter* emitter;
-    void* owner;
-    MirValue (*load_item)(void* owner, uint32_t slot, TypeId semantic_type);
-    void (*store_item)(void* owner, uint32_t slot, MirValue item);
-};
-
-// Linked children share ordering while profiles retain semantic handling.
-typedef void (*MirLinkedNodeVisitor)(void* owner, AstNode* node, bool is_last);
-static inline void em_visit_linked_nodes(AstNode* first, void* owner,
-        MirLinkedNodeVisitor visit) {
-    if (!visit) return;
-    for (AstNode* node = first; node; node = node->next)
-        visit(owner, node, node->next == NULL);
-}
-
 template <typename Node>
 static inline int em_linked_node_count(const Node* first) {
     return ast_linked_node_count((const AstNode*)first);
@@ -637,20 +496,6 @@ static inline void em_note_pending_materialize(MirEmitter* em,
     em->pending_materialize_counts[reason]++;
 }
 
-// MIR accepts only NUL-terminated names, but backend-only symbols must not
-// inherit source identifier length or spelling limits.  The numeric suffix is
-// a compiler-owned identity; source bindings remain represented by AST names.
-static inline int mir_format_backend_name(char* out, size_t out_size,
-                                          char kind, uint64_t id) {
-    if (!out || out_size == 0) return 0;
-    int written = snprintf(out, out_size, "%%%c%llx", kind,
-        (unsigned long long)id);
-    if (written < 0 || (size_t)written >= out_size) {
-        out[out_size - 1] = '\0';
-        return 0;
-    }
-    return written;
-}
 
 static inline StrView mir_em_persist_name(MirEmitter* em, StrView name) {
     if (!name.str) return (StrView){NULL, 0};
@@ -703,9 +548,6 @@ static inline void em_function_argument_register(MirEmitter* em, MIR_reg_t reg) 
 static inline void em_frame_dispose(MirEmitter* em) {
     if (!em) return;
     MirFrameState* frame = &em->frame;
-    if (frame->root_bindings) mem_free(frame->root_bindings);
-    if (frame->root_binding_by_reg) mem_free(frame->root_binding_by_reg);
-    if (frame->root_binding_by_home) mem_free(frame->root_binding_by_home);
     if (frame->gc_candidates) mem_free(frame->gc_candidates);
     if (frame->gc_candidate_by_reg) mem_free(frame->gc_candidate_by_reg);
     if (frame->gc_call_sites) mem_free(frame->gc_call_sites);
@@ -717,27 +559,7 @@ static inline void em_frame_dispose(MirEmitter* em) {
     em->pending_live_companion = 0;
 }
 
-// Detach the complete frame: partial saves leaked new facts across nested
-// function finalization.
-static inline MirFrameState em_frame_suspend(MirEmitter* em) {
-    MirFrameState saved = {};
-    if (!em) return saved;
-    saved = em->frame;
-    saved.pending_live_item = em->pending_live_item;
-    saved.pending_live_companion = em->pending_live_companion;
-    em->pending_live_item = 0;
-    em->pending_live_companion = 0;
-    memset(&em->frame, 0, sizeof(em->frame));
-    return saved;
-}
 
-static inline void em_frame_restore(MirEmitter* em, MirFrameState saved) {
-    if (!em) return;
-    em_frame_dispose(em);
-    em->frame = saved;
-    em->pending_live_item = saved.pending_live_item;
-    em->pending_live_companion = saved.pending_live_companion;
-}
 
 static inline bool em_root_ensure_index_map(int** map, int* capacity,
         int key) {
@@ -752,102 +574,9 @@ static inline bool em_root_ensure_index_map(int** map, int* capacity,
     return true;
 }
 
-// Root-binding identity is representation-neutral frame metadata. Both
-// language lowerers publish it through this owner; profile code chooses which
-// semantic values need roots but cannot maintain a second binding map.
-static inline void em_root_register_binding(MirEmitter* em, MIR_reg_t reg,
-        int slot, int home_id) {
-    if (!em || !reg || slot < 0) return;
-    MirFrameState* frame = &em->frame;
-    int reg_key = (int)reg;
-    if (!em_root_ensure_index_map(&frame->root_binding_by_reg,
-            &frame->root_binding_by_reg_capacity, reg_key) ||
-            (home_id > 0 && !em_root_ensure_index_map(
-                &frame->root_binding_by_home,
-                &frame->root_binding_by_home_capacity, home_id))) {
-        log_error("mir-root-bindings: index-map allocation failed");
-        abort();
-    }
-    int index = home_id > 0 ? frame->root_binding_by_home[home_id]
-        : frame->root_binding_by_reg[reg_key];
-    if (index >= 0 && index < frame->root_binding_count) {
-        MirRootBinding* binding = &frame->root_bindings[index];
-        if (binding->reg != reg && binding->reg > 0 &&
-                binding->reg < (MIR_reg_t)frame->root_binding_by_reg_capacity &&
-                frame->root_binding_by_reg[binding->reg] == index) {
-            frame->root_binding_by_reg[binding->reg] = -1;
-        }
-        binding->reg = reg;
-        binding->slot = slot;
-        if (frame->root_binding_by_reg[reg_key] < 0) {
-            frame->root_binding_by_reg[reg_key] = index;
-        }
-        return;
-    }
-    if (!lam::mem_grow_array(&frame->root_bindings,
-            &frame->root_binding_capacity, frame->root_binding_count + 1,
-            32, MEM_CAT_TEMP)) {
-        log_error("mir-root-bindings: binding allocation failed");
-        abort();
-    }
-    index = frame->root_binding_count++;
-    MirRootBinding* binding = &frame->root_bindings[index];
-    binding->reg = reg;
-    binding->slot = slot;
-    binding->home_id = home_id;
-    if (frame->root_binding_by_reg[reg_key] < 0) {
-        frame->root_binding_by_reg[reg_key] = index;
-    }
-    if (home_id > 0) frame->root_binding_by_home[home_id] = index;
-}
 
-static inline void em_root_unbind_home(MirEmitter* em, int home_id) {
-    if (!em || home_id <= 0) return;
-    MirFrameState* frame = &em->frame;
-    if (home_id >= frame->root_binding_by_home_capacity) return;
-    int index = frame->root_binding_by_home[home_id];
-    if (index < 0 || index >= frame->root_binding_count) return;
-    MirRootBinding* binding = &frame->root_bindings[index];
-    if (binding->reg > 0 &&
-            binding->reg < (MIR_reg_t)frame->root_binding_by_reg_capacity &&
-            frame->root_binding_by_reg[binding->reg] == index) {
-        frame->root_binding_by_reg[binding->reg] = -1;
-    }
-    binding->reg = 0;
-}
 
-static inline int em_root_binding_slot_for_reg(const MirEmitter* em,
-        MIR_reg_t reg) {
-    if (!em || !reg) return -1;
-    const MirFrameState* frame = &em->frame;
-    if (reg < (MIR_reg_t)frame->root_binding_by_reg_capacity) {
-        int index = frame->root_binding_by_reg[reg];
-        if (index >= 0 && index < frame->root_binding_count) {
-            return frame->root_bindings[index].slot;
-        }
-    }
-    for (int index = 0; index < frame->root_binding_count; index++) {
-        if (frame->root_bindings[index].reg == reg) {
-            return frame->root_bindings[index].slot;
-        }
-    }
-    return -1;
-}
 
-// A root home tracks its latest semantic register until the shared write-back
-// pass materializes it at collection boundaries. Frontends must not retain a
-// parallel register cache for that ownership relation (D6.3.4).
-static inline MIR_reg_t em_root_binding_reg_for_slot(const MirEmitter* em,
-        int slot) {
-    const MirFrameState* frame = em ? &em->frame : NULL;
-    if (!frame || slot < 0) return 0;
-    for (int index = frame->root_binding_count - 1; index >= 0; index--) {
-        if (frame->root_bindings[index].slot == slot) {
-            return frame->root_bindings[index].reg;
-        }
-    }
-    return 0;
-}
 
 static inline bool em_root_note_candidate(MirRootCandidate** candidates,
         int* candidate_count, int* candidate_capacity,
@@ -964,10 +693,6 @@ static inline bool mir_gc_value_needs_root(JitValueClass value_class,
     }
 }
 
-static inline int em_gc_new_home(MirEmitter* em) {
-    if (!em) return -1;
-    return ++em->frame.gc_home_count;
-}
 
 // Boxed scalar returns need a lifetime policy that is independent of their
 // machine return type. Both Lambda and LambdaJS use this classification so
@@ -1039,30 +764,6 @@ static inline bool em_error_lane_in_register(FnCompanionTransport companion) {
     return em_returns_result_pair(companion);
 }
 
-// RV9 debug check. It runs in the COMPILER, not in generated code: the emitted
-// MIR must stay byte-identical across build configurations (the MT7 ratchet and
-// the `.mir-check` fixtures compare it), so a debug-only runtime assert is not
-// available on this path. Cross-checks the call site's belief about the error
-// lane's transport against the callee descriptor's, the same defence
-// `em_assert_callee_result_count` gives the result COUNT.
-static inline void em_assert_error_lane_agreement(const char* call_name,
-        const FnVariantAnalysis* variant, bool call_site_uses_register) {
-#ifndef NDEBUG
-    if (!variant || variant->result.shape != RETURN_SHAPE_NATIVE_ERROR) return;
-    bool callee_uses_register = em_error_lane_in_register(variant->result.companion);
-    if (callee_uses_register != call_site_uses_register) {
-        log_error("mir: error-lane encoding mismatch calling %s — call site "
-            "reads the %s form, callee writes the %s form. `ItemNull` is not "
-            "zero, so this would report every successful call as an error "
-            "(RV9/RV10).", call_name ? call_name : "<anon>",
-            call_site_uses_register ? "register" : "context-lane",
-            callee_uses_register ? "register" : "context-lane");
-        abort();
-    }
-#else
-    (void)call_name; (void)variant; (void)call_site_uses_register;
-#endif
-}
 
 // The transport an entry uses, derived once from its shape and reachability.
 // `c_reachable` is true for the public `_b` wrappers (boxed-call trampolines,
@@ -1362,8 +1063,18 @@ static inline MIR_reg_t em_int_lane_abs(MirEmitter* em, MIR_reg_t operand) {
 // callers materialize fallback operands before branching; this guard never collects.
 static inline MIR_reg_t em_guard_finite_int(MirEmitter* em, MirValue input, MIR_label_t miss) {
     MIR_reg_t lane = input.reg;
-    if (input.rep != VALUE_REP_INT_LANE) {
-        assert(input.rep == VALUE_REP_ITEM);
+    if (input.rep != VALUE_REP_INT_LANE && input.rep != VALUE_REP_ITEM) {
+        // a Lambda int lives only in an int lane or an Item. Any other Lambda carrier (int64,
+        // uint64, float, or a raw pointer such as a Type*) proves another type, so it always
+        // misses, exactly as its boxed Item would fail the int tag test (D2.3.4-D2.3.5).
+        assert(input.rep == VALUE_REP_I64 || input.rep == VALUE_REP_U64 || input.rep == VALUE_REP_F64 ||
+               input.rep == VALUE_REP_RAW_GC_POINTER || input.rep == VALUE_REP_RAW_NON_GC_POINTER);
+        lane = em_new_reg(em, "int_none", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, lane), MIR_new_int_op(em->ctx, 0)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, miss)));
+        return lane;
+    }
+    if (input.rep == VALUE_REP_ITEM) {
         MIR_reg_t tag = em_new_reg(em, "int_tag", MIR_T_I64);
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
             MIR_new_reg_op(em->ctx, input.reg), MIR_new_int_op(em->ctx, 56)));
@@ -1597,14 +1308,6 @@ static inline void em_store_frame_top(MirEmitter* em, MIR_reg_t runtime,
         MIR_new_reg_op(em->ctx, value)));
 }
 
-static inline void em_store_frame_slot_typed(MirEmitter* em,
-        MIR_reg_t frame_base, int slot, MIR_reg_t value, MIR_type_t type) {
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
-        MIR_new_mem_op(em->ctx, type,
-            (MIR_disp_t)slot * (MIR_disp_t)sizeof(uint64_t),
-            frame_base, 0, 1),
-        MIR_new_reg_op(em->ctx, value)));
-}
 // Result15: routing double<->bits reinterpretation through the 2-insn
 // lambda_mir_double_bits/lambda_mir_bits_double leaf helpers made hot numeric
 // loops layout-sensitive — up to 20% swings from placement of the JIT->helper
@@ -1830,15 +1533,20 @@ static inline MIR_reg_t em_bind_scalar_home_result(MirEmitter* em, MIR_reg_t hom
     return result;
 }
 
-// materialize a cold Float payload in an already-reserved destination home.
-static inline MIR_reg_t em_store_f64_home(MirEmitter* em, MIR_reg_t value,
-        MIR_reg_t home, MIR_type_t type = MIR_T_D) {
+// materialize scalar bits in an already-reserved destination home.
+static inline MIR_reg_t em_store_scalar_home(MirEmitter* em, MIR_reg_t value,
+        MIR_reg_t home, MIR_type_t type, TypeId tag) {
     em_store_at(em, home, 0, type, value);
-    MIR_reg_t result = em_new_reg(em, "owned_float", MIR_T_I64);
+    MIR_reg_t result = em_new_reg(em, "owned_scalar", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, home),
-        MIR_new_uint_op(em->ctx, (uint64_t)LMD_TYPE_FLOAT << 56)));
+        MIR_new_uint_op(em->ctx, (uint64_t)tag << 56)));
     return em_bind_scalar_home_result(em, home, result);
+}
+
+static inline MIR_reg_t em_store_f64_home(MirEmitter* em, MIR_reg_t value,
+        MIR_reg_t home, MIR_type_t type = MIR_T_D) {
+    return em_store_scalar_home(em, value, home, type, LMD_TYPE_FLOAT);
 }
 
 static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
@@ -1846,6 +1554,13 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
                                                    MIR_reg_t item,
                                                    MIR_reg_t target_home) {
     if (mode == SCALAR_RETURN_NONE) return item;
+    if (em->compact_code && mode == SCALAR_RETURN_DYNAMIC && target_home) {
+        // the existing NO_GC leaf copies into the same colored destination home.
+        MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
+        MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item), MIR_new_reg_op(em->ctx, target_home)};
+        return em_bind_scalar_home_result(em, target_home, em_call_with_args(em,
+            "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true));
+    }
     // packed values pass through; only admitted wide lanes need a destination copy.
     MIR_reg_t result = em_new_reg(em, "adopt_result", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
@@ -2223,44 +1938,8 @@ static inline MIR_reg_t em_module_property_key_at(MirEmitter* em,
     return em_load_at(em, keys, (MIR_disp_t)index * sizeof(NameId), MIR_T_U32, "static_name_id");
 }
 
-static inline MirValue em_load_module_slot(const MirModuleSlotProfile* profile,
-        uint32_t slot, TypeId semantic_type, uint32_t demand,
-        ValueRep required = VALUE_REP_NONE) {
-    if (!profile || !profile->emitter || !profile->load_item) {
-        log_error("mir-module-slot: missing load profile");
-        abort();
-    }
-    if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
-    return em_apply_value_demand(profile->emitter,
-        profile->load_item(profile->owner, slot, semantic_type), demand, required);
-}
 
-static inline void em_store_module_slot(const MirModuleSlotProfile* profile,
-        uint32_t slot, MirValue value) {
-    if (!profile || !profile->emitter || !profile->store_item) {
-        log_error("mir-module-slot: missing store profile");
-        abort();
-    }
-    // A persisted slot is an Item root, never a frontend-native scalar lane.
-    value = em_apply_value_demand(profile->emitter, value,
-        MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
-    profile->store_item(profile->owner, slot, value);
-}
 
-// `variant` lets a construct with its own lane policy (Lambda's loop test
-// selects a native comparison lane) override the profile's default truthiness
-// emitter without reintroducing a per-site profile record.
-static inline MIR_reg_t em_lower_condition(MirEmitter* em, AstNode* node,
-        MIR_reg_t (*variant)(void* owner, MirValue value) = NULL) {
-    MIR_reg_t (*emit)(void*, MirValue) = variant ? variant : (em ? em->emit_condition : NULL);
-    if (!em || !emit) {
-        log_error("mir-lowering: missing condition hook");
-        abort();
-    }
-    MirValue value = em_lower_value(em, node, MIR_VALUE_BRANCH);
-    value = em_materialize_pending_value(em, value, MIR_PENDING_REASON_BRANCH);
-    return emit(em->call_owner, value);
-}
 
 // a proviso observes one value, without sequence traversal or a new contract
 // boundary. Only true keeps it; false, absence and predicate Error reject it.
@@ -2279,30 +1958,6 @@ static inline MIR_reg_t em_proviso_result(MirEmitter* em, MIR_reg_t subject,
     return result;
 }
 
-// A join or completion consumes its pending result before writing its destination.
-static inline MirValue em_move_value_to_destination(MirEmitter* em,
-        MirValue value, MIR_reg_t destination,
-        ValueRep required = VALUE_REP_NONE) {
-    uint32_t demand = MIR_VALUE_DEST_REG;
-    if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
-    value = em_apply_value_demand(em, value, demand, required);
-    if (!em || !destination || !value.reg) return value;
-    MIR_type_t destination_type = MIR_reg_type(em->ctx, destination, em->func);
-    // MIR_MOV preserves the legacy I64/P word carrier; reject other cross-class moves.
-    bool word_carrier_move = (destination_type == MIR_T_I64 &&
-            value.mir_type == MIR_T_P) || (destination_type == MIR_T_P &&
-            value.mir_type == MIR_T_I64);
-    if (destination_type != value.mir_type && !word_carrier_move) {
-        log_error("mir-value: destination type mismatch source=%d destination=%d",
-            (int)value.mir_type, (int)destination_type);
-        abort();
-    }
-    em_emit_insn(em, MIR_new_insn(em->ctx,
-        destination_type == MIR_T_D ? MIR_DMOV : MIR_MOV,
-        MIR_new_reg_op(em->ctx, destination),
-        MIR_new_reg_op(em->ctx, value.reg)));
-    return value;
-}
 static inline int em_add_const(MirEmitter* em, void* ptr) {
     if (!em || !em->const_list || !ptr) return -1;
     arraylist_append(em->const_list, ptr);
@@ -2326,14 +1981,6 @@ static inline MIR_reg_t em_load_const(MirEmitter* em, int const_index,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, ptr),
         MIR_new_mem_op(em->ctx, as_type, const_index * 8, consts, 0, 1)));
     return ptr;
-}
-static inline void mir_emit_i64_const_to_reg(MIR_context_t ctx,
-                                             MIR_item_t func_item,
-                                             MIR_reg_t reg,
-                                             int64_t value) {
-    mir_append_emit_insn(ctx, func_item,
-        MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, reg),
-            MIR_new_int_op(ctx, value)));
 }
 static inline void mir_prepare_call_args(MIR_var_t* args,
                                          MIR_type_t* arg_types,
@@ -2557,50 +2204,7 @@ static inline void em_insert_root_publication_guard(MirEmitter* em,
     MIR_insert_insn_before(em->ctx, em->func_item, before, ready);
 }
 
-// D3: does any instruction other than `def` read `reg`? Covers register
-// operands and the base/index of memory operands, so a value that is only ever
-// addressed through memory still counts as live.
-static inline bool em_reg_is_read(MirEmitter* em, MIR_reg_t reg, MIR_insn_t def) {
-    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
-            insn = DLIST_NEXT(MIR_insn_t, insn)) {
-        if (insn == def) continue;
-        for (size_t i = 0; i < insn->nops; i++) {
-            MIR_op_t* op = &insn->ops[i];
-            if (op->mode == MIR_OP_REG && op->u.reg == reg) return true;
-            if (op->mode == MIR_OP_MEM &&
-                    (op->u.mem.base == reg || op->u.mem.index == reg)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
 
-// D3: drop a prologue load nothing consumes. The type-list, heap and gc-heap
-// pointers are established eagerly at every function entry because *some*
-// bodies need them for allocation; a leaf like fib reads none of them and paid
-// four instructions per call for the privilege. Removing them here rather than
-// emitting lazily keeps emission order independent of where the first use
-// happens to land (a lazy load inside a loop or a branch would be worse).
-//
-// Only a MOV whose destination is the register is a candidate: anything with
-// side effects stays regardless of whether its result is read.
-static inline bool em_drop_unused_definition(MirEmitter* em, MIR_reg_t reg) {
-    if (!reg || !em->func) return false;
-    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
-            insn = DLIST_NEXT(MIR_insn_t, insn)) {
-        if (insn->code != MIR_MOV || insn->nops != 2 ||
-                insn->ops[0].mode != MIR_OP_REG || insn->ops[0].u.reg != reg) {
-            continue;
-        }
-        if (!em_reg_is_read(em, reg, insn)) {
-            MIR_remove_insn(em->ctx, em->func_item, insn);
-            return true;
-        }
-        return false;
-    }
-    return false;
-}
 
 // JC23: entry guards must not allocate temporary registers before lowering a
 // body. The root liveness planner keys its candidates by those registers, so
@@ -3376,39 +2980,6 @@ static inline bool em_root_call_may_collect(MIR_insn_t insn,
     return true;
 }
 
-static inline void em_root_reload_live_values_after_call(MirEmitter* em,
-        MIR_insn_t call, const MirRootCandidate* candidates,
-        int candidate_count, const int* candidate_slots,
-        const uint64_t* live_after, const uint64_t* definitions) {
-    if (!em || !call || !candidates || !candidate_slots || !live_after ||
-            !definitions) return;
-    MIR_insn_t after = call;
-    for (int ci = 0; ci < candidate_count; ci++) {
-        uint64_t bit = UINT64_C(1) << (ci & 63);
-        if ((live_after[ci >> 6] & bit) == 0 ||
-                (definitions[ci >> 6] & bit) != 0 ||
-                candidate_slots[ci] < 0) {
-            continue;
-        }
-        MIR_reg_t reg = candidates[ci].reg;
-        MIR_type_t type = MIR_reg_type(em->ctx, reg, em->func);
-        if (!mir_gc_value_needs_root(candidates[ci].value_class, type)) continue;
-        if (type != MIR_T_P) type = MIR_T_I64;
-        // A MAY_GC call may move an Item and clobber an ABI argument register.
-        // The side-root slot is the canonical post-safepoint value (D6.3.1).
-        MIR_insn_t reload = MIR_new_insn(em->ctx, MIR_MOV,
-            MIR_new_reg_op(em->ctx, reg),
-            MIR_new_mem_op(em->ctx, type,
-                (MIR_disp_t)candidate_slots[ci] *
-                    (MIR_disp_t)sizeof(uint64_t),
-                em->frame.root_base, 0, 1));
-        MIR_insert_insn_after(em->ctx, em->func_item, after, reload);
-        em_profile_before_call(em, reload,
-            MIR_item_name(em->ctx, em->func_item), LAMBDA_EXEC_ROOT_RELOAD);
-        after = reload;
-    }
-}
-
 // T29-7b: a pinned root home keeps its explicit memory operands, so its slot
 // could not move and the frame spanned the highest pinned home however sparse
 // the pins were (deltablue2: 1,250 slots across 99 functions). Pinned homes are
@@ -3729,8 +3300,6 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)collecting_call_count * (size_t)word_count;
     uint64_t* call_live_in = collecting_call_count > 0 ? (uint64_t*)mem_alloc(
         call_liveness_word_count * sizeof(uint64_t), MEM_CAT_TEMP) : NULL;
-    uint64_t* call_live_out = collecting_call_count > 0 ? (uint64_t*)mem_alloc(
-        call_liveness_word_count * sizeof(uint64_t), MEM_CAT_TEMP) : NULL;
     uint8_t* candidate_defined = (uint8_t*)mem_alloc(
         (size_t)candidate_count * sizeof(uint8_t), MEM_CAT_TEMP);
     int max_home_id = 0;
@@ -3750,7 +3319,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)candidate_count * sizeof(int), MEM_CAT_TEMP);
     int* set_candidates = (int*)mem_alloc(
         (size_t)candidate_count * sizeof(int), MEM_CAT_TEMP);
-    if ((collecting_call_count > 0 && (!call_live_in || !call_live_out)) ||
+    if ((collecting_call_count > 0 && !call_live_in) ||
             !candidate_defined || !home_to_slot || !candidate_slots ||
             !set_candidates) {
         log_error("mir-semantic-root-write-back: publication allocation failed");
@@ -3770,11 +3339,6 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             (size_t)word_count * sizeof(uint64_t));
         for (int i = blocks[bi].end - 1; i >= blocks[bi].start; i--) {
             int call_liveness = call_liveness_by_instruction[i];
-            if (call_liveness >= 0) {
-                memcpy(call_live_out + (size_t)call_liveness *
-                        (size_t)word_count, scratch_in,
-                    (size_t)word_count * sizeof(uint64_t));
-            }
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
             memset(insn_definitions, 0,
                 (size_t)word_count * sizeof(uint64_t));
@@ -4173,18 +3737,8 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
                     }
                     publication_mode = 0;
                 }
-                memset(insn_uses, 0,
-                    (size_t)word_count * sizeof(uint64_t));
-                memset(insn_definitions, 0,
-                    (size_t)word_count * sizeof(uint64_t));
-                em_collect_root_candidate_bits(em->ctx, current,
-                    reg_to_candidate, reg_map_count, insn_uses,
-                    insn_definitions);
-                em_root_reload_live_values_after_call(em, current,
-                    root_candidates, candidate_count, candidate_slots,
-                    call_live_out + (size_t)call_liveness *
-                        (size_t)word_count,
-                    insn_definitions);
+                // D5.3.1: rooted Item/header addresses never move. Binding and
+                // data-buffer refreshes remain with the emitting call owner.
             }
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
             memset(insn_definitions, 0,
@@ -4231,7 +3785,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     mem_free(liveness_successors); mem_free(liveness_worklist);
     mem_free(liveness_queued);
     mem_free(call_liveness_by_instruction);
-    mem_free(call_live_in); mem_free(call_live_out);
+    mem_free(call_live_in);
     mem_free(candidate_defined);
     mem_free(home_to_slot); mem_free(candidate_slots); mem_free(set_candidates);
     mem_free(interference); mem_free(used_colors);
@@ -4244,41 +3798,6 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     return true;
 }
 
-static inline bool em_finalize_recorded_roots(MirEmitter* em,
-        MIR_reg_t frame_base, MIR_insn_t anchor,
-        MirRootWriteBackResult* result, const char* log_label) {
-    MirFrameState* frame = em ? &em->frame : NULL;
-    if (!frame || (!frame->gc_candidate_count && !frame->fixed_root_slots)) return true;
-    int home_count = frame->root_slot_count + 1;
-    uint8_t* preserved = (uint8_t*)mem_calloc(
-        (size_t)home_count, sizeof(uint8_t), MEM_CAT_TEMP);
-    if (!preserved) {
-        log_error("mir-root-write-back: preserved-home allocation failed");
-        abort();
-    }
-    int retained = 0;
-    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns);
-            insn; insn = DLIST_NEXT(MIR_insn_t, insn)) {
-        if (!em_is_eager_root_store(insn, frame_base)) continue;
-        int home = (int)(insn->ops[0].u.mem.disp /
-            (MIR_disp_t)sizeof(uint64_t)) + 1;
-        if (home <= 0 || home >= home_count) {
-            log_error("mir-root-write-back: invalid retained home %d", home);
-            abort();
-        }
-        preserved[home] = 1;
-        retained++;
-    }
-    bool optimized = em_finalize_semantic_root_write_back(em, frame_base,
-        anchor, retained > 0, frame->root_slot_count,
-        &frame->gc_candidates, &frame->gc_candidate_count,
-        &frame->gc_candidate_capacity, &frame->gc_candidate_by_reg,
-        &frame->gc_candidate_by_reg_capacity, frame->gc_call_sites,
-        frame->gc_call_site_count, result, log_label, preserved, home_count,
-        retained > 0, retained);
-    mem_free(preserved);
-    return optimized;
-}
 
 static inline int em_scalar_home_new(MirEmitter* em) {
     if (!em || !em->frame.active) return 0;
@@ -4316,9 +3835,6 @@ static inline MirFrameRef em_scalar_home_ref(MirEmitter* em,
     return {MIR_FRAME_REF_LOCAL_SCALAR_HOME, logical_home_id};
 }
 
-static inline MirFrameRef em_discard_scalar_home_ref(void) {
-    return {MIR_FRAME_REF_DISCARD_SCRATCH, 0};
-}
 
 static inline MirFrameRef em_fixed_number_scratch_ref(int slot) {
     return slot >= 0 ? MirFrameRef{MIR_FRAME_REF_FIXED_SCRATCH, slot}
@@ -5065,16 +4581,6 @@ static inline void em_profile_before_call(MirEmitter* em, MIR_insn_t call,
     MIR_insert_insn_before(em->ctx, em->func_item, call, mark);
 }
 
-static inline void em_profile_root_stores(MirEmitter* em) {
-    if (!em || !em->profile_call_id || !em->frame.root_base) return;
-    const char* name = MIR_item_name(em->ctx, em->func_item);
-    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
-            insn = DLIST_NEXT(MIR_insn_t, insn)) {
-        if (em_is_eager_root_store(insn, em->frame.root_base)) {
-            em_profile_before_call(em, insn, name, LAMBDA_EXEC_ROOT_STORE);
-        }
-    }
-}
 
 static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
                                                   const char* fn_name,
@@ -5083,8 +4589,7 @@ static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
                                                   MIR_type_t* arg_types,
                                                   MIR_op_t* arg_ops,
                                                   bool include_signature,
-                                                  bool refresh_after_gc,
-                                                  MIR_reg_t indirect_target = 0) {
+                                                  bool refresh_after_gc) {
     MirImportEntry* ie = em_resolve_import(em, fn_name, ret_type, nargs,
         arg_types, include_signature);
     if (!ie) return 0;
@@ -5150,11 +4655,8 @@ static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
         arg_types, arg_ops);
 
     MIR_reg_t res = em_new_reg(em, fn_name, ret_type);
-    // An indirect target shares the import's proto and audited metadata: the
-    // caller asserts the code address has exactly that signature and effects.
     MIR_insn_t call = mir_new_call_with_target(em->ctx, resolved.proto,
-        indirect_target ? MIR_new_reg_op(em->ctx, indirect_target)
-                        : MIR_new_ref_op(em->ctx, resolved.import),
+        MIR_new_ref_op(em->ctx, resolved.import),
         res, nargs, arg_ops);
     if (em->insert_after) {
         MIR_insert_insn_after(em->ctx, em->func_item, em->insert_after, call);
@@ -5162,8 +4664,7 @@ static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
     } else {
         mir_append_emit_insn(em->ctx, em->func_item, call);
     }
-    em_profile_before_call(em, call, fn_name,
-        indirect_target ? LAMBDA_EXEC_CALL_INDIRECT : LAMBDA_EXEC_CALL_HELPER);
+    em_profile_before_call(em, call, fn_name, LAMBDA_EXEC_CALL_HELPER);
     em_after_resolved_call(em, fn_name, &resolved.call, call, res, ret_type);
     if (refresh_after_gc && em->after_may_gc_call &&
             resolved.call.effects.gc != JIT_EFFECT_NO_GC) {
@@ -5189,36 +4690,7 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
         arg_ops, include_signature, true);
 }
 
-// Call the code address in `target` under `signature_name`'s import proto and
-// metadata, so safepoint, root and exception bookkeeping match a direct call to
-// that import exactly. `target` must have that import's C signature.
-static inline MIR_reg_t em_call_indirect_as(MirEmitter* em,
-                                            const char* signature_name,
-                                            MIR_reg_t target,
-                                            MIR_type_t ret_type,
-                                            int nargs,
-                                            MIR_type_t* arg_types,
-                                            MIR_op_t* arg_ops) {
-    return em_call_with_args_policy(em, signature_name, ret_type, nargs,
-        arg_types, arg_ops, true, true, target);
-}
 
-// Load the code address of import `fn_name` into `dst`, so one
-// em_call_indirect_as under that signature can select between the import and a
-// stored entry with the same signature (a single call, safepoint and carrier).
-static inline bool em_load_import_address(MirEmitter* em,
-                                          const char* fn_name,
-                                          MIR_reg_t dst,
-                                          MIR_type_t ret_type,
-                                          int nargs,
-                                          MIR_type_t* arg_types) {
-    MirImportEntry* ie = em_resolve_import(em, fn_name, ret_type, nargs,
-        arg_types, true);
-    if (!ie) return false;
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, dst),
-        MIR_new_ref_op(em->ctx, ie->import)));
-    return true;
-}
 
 static inline MIR_reg_t em_call_terminal_with_args(MirEmitter* em,
                                                    const char* fn_name,
@@ -5538,18 +5010,6 @@ static inline MIR_reg_t em_double_to_int_lane(MirEmitter* em, MIR_reg_t d_reg,
     return result;
 }
 
-// JC23: BSTART changes MIR's inline-allocation lowering, so source-invocation
-// checks use this audited NO_GC leaf instead. Native entry checks are inserted
-// after body finalization by em_insert_native_stack_guard.
-static inline void em_branch_if_stack_exhausted(MirEmitter* em,
-        MIR_label_t overflow) {
-    MIR_reg_t limit = em_load_at(em, em->frame.runtime,
-        (MIR_disp_t)offsetof(Context, stack_limit), MIR_T_I64, "stack_limit");
-    MIR_reg_t exhausted = em_call_1(em, "lambda_stack_is_exhausted", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(em->ctx, limit), false);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-        MIR_new_label_op(em->ctx, overflow), MIR_new_reg_op(em->ctx, exhausted)));
-}
 
 static inline MIR_reg_t em_call_2(MirEmitter* em, const char* fn_name,
                                   MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
@@ -5582,7 +5042,7 @@ static inline MIR_reg_t em_print_arguments(MirEmitter* em, AstNode* arguments,
             MIR_T_I64, MIR_new_reg_op(em->ctx, item.reg), true);
     }
     // retain MVP's existing single-call provider outcome; the variadic
-    // protocol and Full's existing path complete with null.
+    // protocol completes with null.
     if (preserve_single_outcome && (receiver ? !arguments : arguments && !arguments->next)) return printed;
     MIR_reg_t absent = em_new_reg(em, "print_null", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
@@ -5674,10 +5134,6 @@ static inline MIR_reg_t em_call_8(MirEmitter* em, const char* fn_name,
         include_signature);
 }
 
-static inline void em_call_void_0(MirEmitter* em, const char* fn_name,
-                                  bool include_signature) {
-    em_call_void_with_args(em, fn_name, 0, NULL, NULL, include_signature);
-}
 
 static inline void em_call_void_1(MirEmitter* em, const char* fn_name,
                                   MIR_type_t a1t, MIR_op_t a1, bool include_signature) {
@@ -5720,15 +5176,6 @@ static inline void em_call_void_5(MirEmitter* em, const char* fn_name,
     em_call_void_with_args(em, fn_name, 5, types, ops, include_signature);
 }
 
-static inline void em_call_void_6(MirEmitter* em, const char* fn_name,
-        MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
-        MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4,
-        MIR_type_t a5t, MIR_op_t a5, MIR_type_t a6t, MIR_op_t a6,
-        bool include_signature) {
-    MIR_type_t types[6] = {a1t, a2t, a3t, a4t, a5t, a6t};
-    MIR_op_t ops[6] = {a1, a2, a3, a4, a5, a6};
-    em_call_void_with_args(em, fn_name, 6, types, ops, include_signature);
-}
 
 // Branch to `not_list` unless the boxed item is a list: a container pointer
 // (no tag byte) whose header is an array or packed array with the kind bit

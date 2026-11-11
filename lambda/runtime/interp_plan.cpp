@@ -288,8 +288,7 @@ const char* interp_node_kind_name(AstNodeType kind) {
 // Import shapes the walker can bind at all. Namespace/default imports and
 // non-JS hosted languages have no walker equivalent.
 static bool interp_import_shape_supported(const AstImportNode* imp) {
-    bool hosted_js = imp->is_cross_lang && imp->script &&
-        imp->script->profile == &js_profile;
+    bool hosted_js = lambda_import_is_js(imp);
     return !imp->namespace_name && !imp->default_name && imp->script &&
         (!imp->is_cross_lang || hosted_js);
 }
@@ -531,8 +530,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         if (call_callee && call_callee->node_type == AST_NODE_IDENT) {
             AstIdentNode* imported = (AstIdentNode*)call_callee;
             AstImportNode* import = imported->entry ? imported->entry->import : NULL;
-            if (import && import->is_cross_lang && import->script &&
-                    import->script->profile == &js_profile &&
+            if (lambda_import_is_js(import) &&
                     ast_call_has_named_args(call)) {
                 // The hosted JS membrane exposes a fixed positional bridge;
                 // it has no Lambda formal-name adapter to reorder arguments.
@@ -879,7 +877,7 @@ typedef struct PlanCtx {
 
 // A binding owns its container when the initializer produces a fresh one, or
 // when it aliases a binding that already owns one -- the same forward
-// propagation the JIT performs over MirVarEntry::cow_owned. Declarations are
+// propagation the JIT performs over its binding plan. Declarations are
 // visited in source order, so the source binding is always decided first.
 static void plan_mark_cow_owned(NameEntry* entry) {
     AstNode* decl = entry ? entry->node : NULL;
@@ -1370,7 +1368,9 @@ static uint32_t plan_need(AstNode* node) {
                             uint32_t key = plan_need(place.segment[seg]);
                             if (key > keys) keys = key;
                         }
-                        uint32_t borrow = 1 + 3 + keys;
+                        // projected preparation runs while the callee and
+                        // frame-owned argument span are still rooted (D6.3).
+                        uint32_t borrow = 1 + argument_slots + 3 + keys;
                         if (borrow > best) best = borrow;
                     }
                 }
@@ -1537,7 +1537,7 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t need = 2 + plan_need_max_siblings(literal->item);
         if (ast_object_literal_spread_value(literal)) {
             // A typed `*:source` literal keeps the source and a member key
-            // alive while object_fill performs numeric coercion; the ordinary
+            // alive while object_fill_items performs numeric coercion; the ordinary
             // one-home literal floor omitted those two simultaneous homes.
             uint32_t spread_need = 3 + plan_need_max_siblings(literal->item);
             if (spread_need > need) need = spread_need;
@@ -2298,8 +2298,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
             sc->ok = false;
             return;
         }
-        bool hosted_js = entry->import && entry->import->is_cross_lang &&
-            entry->import->script && entry->import->script->profile == &js_profile;
+        bool hosted_js = lambda_import_is_js(entry->import);
         if (entry->import && !hosted_js &&
                 !interp_satellite_import_supported(sc->script, entry)) {
             sc->ok = false;

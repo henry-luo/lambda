@@ -27,6 +27,7 @@
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
 #include "../runtime/gc/gc_heap.h"
+#include "../runtime/lambda-number-runtime.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "lib/log.h"
 #include "lib/mem.h"
@@ -2170,7 +2171,8 @@ extern "C" Item js_create_native_pointer_event(const char* type,
     double client_x, double client_y,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
-    const char* pointer_type, int pointer_id, bool is_primary)
+    const char* pointer_type, int pointer_id, bool is_primary,
+    const DomPointerAxes* axes)
 {
     Item init = js_create_native_event_init(true, true, true);
     stamp_client_coordinates(init, client_x, client_y, true);
@@ -2180,10 +2182,75 @@ extern "C" Item js_create_native_pointer_event(const char* type,
     event_set_int(init, "pointerId", pointer_id);
     event_set_double(init, "width", 1.0);
     event_set_double(init, "height", 1.0);
-    event_set_double(init, "pressure", buttons ? 0.5 : 0.0);
+    // Pointer Events 3 §4.1.2: a device without pressure reports 0.5 while a button is down.
+    event_set_double(init, "pressure", axes ? axes->pressure : buttons ? 0.5 : 0.0);
+    if (axes) {
+        event_set_double(init, "tangentialPressure", axes->tangential_pressure);
+        event_set_int(init, "tiltX", (int)lround(axes->tilt_x));
+        event_set_int(init, "tiltY", (int)lround(axes->tilt_y));
+        event_set_int(init, "twist", (int)lround(axes->twist) % 360);
+    }
     event_set_str(init, "pointerType", pointer_type ? pointer_type : "mouse");
     event_set_bool(init, "isPrimary", is_primary);
     return js_create_trusted_native_event(type, init, js_ctor_pointer_event_fn);
+}
+
+// PT10 / PE6: an event's pointer samples as f32[N, 7] rows of x, y, pressure, tilt_x, tilt_y,
+// twist and time, lambda.paint's stroke sample layout. Time is in seconds on the clock of the
+// event's timeStamp, so the last coalesced sample's time is timeStamp / 1000.
+static const int64_t DOM_POINTER_SAMPLE_FIELDS = 7;
+
+static ArrayNum* dom_pointer_sample_array(int64_t rows) {
+    int64_t shape[2] = {rows, DOM_POINTER_SAMPLE_FIELDS};
+    return alloc_ndim_arraynum(ELEM_FLOAT32, 2, shape);
+}
+
+extern "C" void dom_event_set_pointer_samples(Item event, const DomPointerSample* samples, int count) {
+    if (!samples || count <= 0) return;
+    RootFrame roots(2);
+    Rooted<Item> event_root(roots, event);
+    double now = init_double(event_root.get(), "timeStamp", 0.0) / 1000.0;
+    ArrayNum* array = dom_pointer_sample_array(count);
+    if (!array) {
+        log_error("pointer-samples: cannot allocate %d rows", count);
+        return;
+    }
+    float* rows = (float*)array->data;
+    for (int i = 0; i < count; i++) {
+        const DomPointerSample& s = samples[i];
+        float row[DOM_POINTER_SAMPLE_FIELDS] = {s.x, s.y, s.pressure, s.tilt_x, s.tilt_y, s.twist,
+            (float)(now - s.age)};
+        memcpy(rows + i * DOM_POINTER_SAMPLE_FIELDS, row, sizeof(row));
+    }
+    Rooted<Item> rows_root(roots, (Item){.array_num = array});
+    dom_realm_set_name(event_root.get(), "__pointer_samples", rows_root.get());
+}
+
+// dom.pointer_samples(evt): the samples a native pointer event coalesces, oldest first, this event
+// last (PT-O8). Another event with a pointer position (script-created, or from a source that keeps
+// no samples) gives its own point as one row; any other event gives no rows.
+extern "C" Item dom_core_pointer_samples(Item event) {
+    RootFrame roots(1);
+    Rooted<Item> event_root(roots, event);
+    if (js_event_is_object(event_root.get())) {
+        Item stashed = dom_realm_get_name(event_root.get(), "__pointer_samples");
+        if (get_type_id(stashed) == LMD_TYPE_ARRAY_NUM) return stashed;
+    }
+    bool positioned = js_event_is_object(event_root.get()) &&
+        init_present(read_init(event_root.get(), "clientX"));
+    ArrayNum* array = dom_pointer_sample_array(positioned ? 1 : 0);
+    if (!array) return ItemError;
+    if (positioned) {
+        Item ev = event_root.get();
+        double pressure = init_present(read_init(ev, "pressure")) ? init_double(ev, "pressure", 0.0)
+            : init_int(ev, "buttons", 0) ? 0.5 : 0.0;
+        float row[DOM_POINTER_SAMPLE_FIELDS] = {(float)init_double(ev, "clientX", 0.0),
+            (float)init_double(ev, "clientY", 0.0), (float)pressure,
+            (float)init_double(ev, "tiltX", 0.0), (float)init_double(ev, "tiltY", 0.0),
+            (float)init_double(ev, "twist", 0.0), (float)(init_double(ev, "timeStamp", 0.0) / 1000.0)};
+        memcpy(array->data, row, sizeof(row));
+    }
+    return (Item){.array_num = array};
 }
 
 static Item js_create_native_touch_point(double client_x, double client_y) {

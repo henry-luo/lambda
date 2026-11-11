@@ -1,5 +1,29 @@
 {
   "schema_version": 1,
-  "description": "D3.4.6: live packed descriptors retain the full miss decoder and snapshot semantics.",
-  "checks": [{"in_func": "_read_left_#", "expect": ["map_shape_field_to_item"]}]
+  "description": "D3.4.5\u2013D3.4.6/D2.6.2: MVP guards both the inferred shape and its live field descriptor before reading a native slot. Retags and unrelated shapes use the checked name lookup; no Full descriptor adapter is needed.",
+  "checks": [
+    {
+      "in_func": "mvp_#_read_left",
+      "expect": [
+        "p:16(",
+        "p:8(",
+        "u8:57(",
+        "call\t{{p}}, fn_member_by_id,"
+      ],
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:desc}}, p:8({{r:field}})"
+        },
+        {
+          "pattern": "bne\tL{{n}}, {{r:desc}}, "
+        },
+        {
+          "pattern": "mov\t{{r:storage}}, u8:57({{r:field}})"
+        },
+        {
+          "pattern": "bne\tL{{n}}, {{r:storage}}, 0"
+        }
+      ]
+    }
+  ]
 }

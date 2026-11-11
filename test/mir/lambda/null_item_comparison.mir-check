@@ -1,57 +1,49 @@
 {
   "schema_version": 1,
-  "description": "S5.1.1v2 / D2.3.4–D2.3.5: erased null predicates preserve Error and Type-value fallback, combine the null tag and zero pointer, and invert equality for inequality.",
+  "description": "S5.1.1v2/S7.9.2v3: null equality tests scalar tags/payload directly, preserves an error operand, and retains the metadata-object comparison helper.",
   "checks": [
     {
-      "in_func": "_equals_null_#",
+      "in_func": "mvp_#_equals_null",
       "expect": [
-        "ursh\t{{r}},",
-        "{{r}}, 27",
-        "{{r}}, 24",
-        "eq\t{{r}}, {{r}}, 1",
-        "eq\t{{r}}, %p1, 0",
-        "or\t{{r}}, {{r}}, {{r}}",
-        "call\tfn_eq_value_p",
-        ", fn_eq_value,"
-      ]
-    },
-    {
-      "in_func": "_differs_null_#",
-      "expect": [
-        "ursh\t{{r}},",
-        "{{r}}, 27",
-        "{{r}}, 24",
-        "eq\t{{r}}, {{r}}, 1",
-        "eq\t{{r}}, %p1, 0",
-        "or\t{{r}}, {{r}}, {{r}}",
-        "call\tfn_ne_value_p",
-        ", fn_ne_value,"
-      ]
-    },
-    {
-      "in_func": "_indexed_#",
-      "expect": [
-        "ursh\t{{r}},",
         "{{r}}, 27",
         "{{r}}, 24",
         "eq\t{{r}}, {{r}}, 1",
         "eq\t{{r}}, {{r}}, 0",
         "or\t{{r}}, {{r}}, {{r}}",
-        "call\tfn_ne_value_p",
-        ", fn_ne_value,"
+        "call\t{{p}}, fn_eq_value, {{r}}, {{r}}, 72057594037927936"
       ]
     },
     {
-      "in_func": "_local_#",
+      "in_func": "mvp_#_differs_null",
       "expect": [
-        "ursh\t{{r}},",
         "{{r}}, 27",
         "{{r}}, 24",
         "eq\t{{r}}, {{r}}, 1",
         "eq\t{{r}}, {{r}}, 0",
         "or\t{{r}}, {{r}}, {{r}}",
-        "call\tfn_eq_value_p",
-        ", fn_eq_value,"
+        "call\t{{p}}, fn_ne_value, {{r}}, {{r}}, 72057594037927936"
+      ]
+    },
+    {
+      "in_func": "mvp_#_indexed",
+      "expect": [
+        "{{r}}, 27",
+        "{{r}}, 24",
+        "eq\t{{r}}, {{r}}, 1",
+        "eq\t{{r}}, {{r}}, 0",
+        "or\t{{r}}, {{r}}, {{r}}",
+        "call\t{{p}}, fn_ne_value, {{r}}, {{r}}, 72057594037927936"
+      ]
+    },
+    {
+      "in_func": "mvp_#_local",
+      "expect": [
+        "{{r}}, 27",
+        "{{r}}, 24",
+        "eq\t{{r}}, {{r}}, 1",
+        "eq\t{{r}}, {{r}}, 0",
+        "or\t{{r}}, {{r}}, {{r}}",
+        "call\t{{p}}, fn_eq_value, {{r}}, {{r}}, 72057594037927936"
       ]
     }
   ]

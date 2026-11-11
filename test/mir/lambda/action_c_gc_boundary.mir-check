@@ -1,24 +1,35 @@
 {
   "schema_version": 1,
-  "description": "Action C: array/root publication resolves a pending direct result before the collecting array builder observes it.",
+  "description": "D6.2.1/D7.4.2: MVP inlines the pending producer and owns its scalar home before array publication; only the module entry resolves the companion pair.",
   "checks": [
     {
       "return_convention": 3,
-      "in_func": "_pending_item_#",
-      "expect": ["ret\t"],
+      "in_func": "mvp_#_pending_item",
+      "expect": [
+        "ret\t"
+      ],
       "expect_any": [
-        "func\ti64, i64, p:runtime, i64:%p1",
-        "func\ti64, p:runtime, i64:%p1"
+        "func\ti64, i64, p:runtime, i64:arg0",
+        "func\ti64, p:runtime, i64:arg0"
       ],
       "forbid": [
         "lambda_item_resolve_pending"
       ]
     },
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
-        "lambda_item_resolve_pending",
-        "array_push"
+        "call\t{{p}}, lambda_item_adopt_scalar_home,",
+        "call\t{{p}}, array_push,"
+      ],
+      "forbid": [
+        "call\tmvp_{{n}}_pending_item_dp"
+      ]
+    },
+    {
+      "in_func": "main",
+      "expect": [
+        "call\t{{p}}, lambda_item_resolve_pending,"
       ]
     }
   ]

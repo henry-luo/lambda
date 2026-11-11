@@ -6,7 +6,7 @@
 #include <cstring>
 #include "lib/shell.h"
 
-// select MVP only for JIT arms; explicit T0/AUTO arms keep their actual tier.
+// compiler selection is independent of the explicit execution tier (D8.3.1).
 struct LambdaTestCompilerEnv {
     ShellEnvEntry entries[16] = {};
     bool valid = true;
@@ -20,15 +20,15 @@ struct LambdaTestCompilerEnv {
             ADD_FAILURE() << "invalid Lambda test tier: " << tier;
             valid = false; return;
         }
-        if (selected && *selected && strcmp(selected, "production") && strcmp(selected, "mvp")) {
-            ADD_FAILURE() << "LAMBDA_TEST_MIR_COMPILER must be production or mvp";
+        if (selected && *selected && strcmp(selected, "mvp")) {
+            ADD_FAILURE() << "LAMBDA_TEST_MIR_COMPILER accepts only mvp; Full MIR is retired";
             valid = false; return;
         }
         unsigned count = 0;
         if (selected && *selected) {
             if (!tier) tier = "jit";
             entries[count++] = {"LAMBDA_EXEC_BACKEND", tier};
-            entries[count++] = {"LAMBDA_MIR_COMPILER", strcmp(tier, "jit") ? "production" : selected};
+            entries[count++] = {"LAMBDA_MIR_COMPILER", selected};
         } else if (tier) entries[count++] = {"LAMBDA_EXEC_BACKEND", tier};
         for (unsigned i = 0; extra && extra[i].key; i++) {
             if (count + 1 >= sizeof(entries) / sizeof(entries[0])) {

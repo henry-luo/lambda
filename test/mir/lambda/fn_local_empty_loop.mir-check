@@ -1,21 +1,29 @@
 {
   "schema_version": 1,
-  "description": "S2.5.3v3: imperative fn loop bodies normalize their empty result without allocating lists.",
+  "description": "S2.5.3v3/S2.5.5v2/D2.3.4: statement-only functions allocate no result list. Native shift/branch arithmetic retains one checked sentinel fallback, rather than forbidding its cold arm.",
   "checks": [
     {
-      "in_func": "_spin_#",
+      "in_func": "mvp_#_spin",
       "forbid": [
         "call\tlist_p",
         "call\tlist_end"
       ]
     },
     {
-      "in_func": "_shifted_#",
+      "in_func": "mvp_#_shifted",
       "forbid": [
-        "call\tfn_shr_item_p",
-        "call\tfn_mod_p",
-        "call\tfn_gt_p"
-      ]
+        "call\t{{p}}, fn_mod,",
+        "call\t{{p}}, fn_gt,",
+        "call\t{{p}}, list,",
+        "call\t{{p}}, list_end,"
+      ],
+      "expect": [
+        "rsh\t",
+        "ble\t"
+      ],
+      "count": {
+        "call\t{{p}}, fn_shr_item,": 1
+      }
     }
   ]
 }

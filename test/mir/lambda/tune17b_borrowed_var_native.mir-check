@@ -1,14 +1,18 @@
 {
   "schema_version": 1,
-  "description": "A borrowed `var` record parameter keeps its function's native body and its call sites on the direct raw edge. Routing through the `_b` adapter re-boxes every sibling scalar argument without adding any borrow/COW admission.",
+  "description": "S9.1.3v3/D7.3.1: MVP inlines the known var-record/array mutator. Native integer arithmetic and checked store-back boundaries retain the caller homes without dynamic boxed dispatch.",
   "checks": [
     {
-      "in_func": "_main_#",
+      "in_func": "mvp_#_main",
       "expect": [
-        "call\t_tune17b_step_"
+        "add\t",
+        "call\t{{p}}, lambda_map_set_checked,",
+        "call\t{{p}}, lambda_array_set_checked_item,",
+        "call\t{{p}}, lambda_report_boundary_failure,"
       ],
       "forbid": [
-        "call\t_tune17b_step_b_"
+        "call\tmvp_{{n}}_tune17b_step_dp",
+        "call\t{{p}}, fn_call_into,"
       ]
     }
   ]

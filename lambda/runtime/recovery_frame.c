@@ -1,3 +1,4 @@
+#include "../lambda.hpp"
 #include "recovery_frame.h"
 
 #include <string.h>
@@ -202,11 +203,18 @@ LambdaRecoveryFrame* lambda_recovery_frame_begin_for(Context* runtime_context,
 }
 
 void lambda_recovery_frame_discard_chain(LambdaRecoveryFrame* top) {
-    // The chain belongs to a parked native stack that will never run again;
-    // its stack-resident frames vanish with the stack, heap frames do not.
+    lambda_recovery_frame_discard_image_chain(top, NULL, 0, 0);
+}
+
+void lambda_recovery_frame_discard_image_chain(LambdaRecoveryFrame* top,
+        const void* image, uintptr_t native_low, size_t native_bytes) {
     while (top) {
-        LambdaRecoveryFrame* previous = top->previous;
-        if (top->heap_owned) mem_free(top);
+        const LambdaRecoveryFrame* record = top;
+        uintptr_t offset = (uintptr_t)top - native_low;
+        if (image && offset < native_bytes)
+            record = (const LambdaRecoveryFrame*)((const uint8_t*)image + offset);
+        LambdaRecoveryFrame* previous = record->previous;
+        if (record->heap_owned) mem_free(top);
         top = previous;
     }
 }

@@ -3,7 +3,7 @@
   "description": "Tune34 continuation: guarded lowering retains its original semantic miss paths.",
   "checks": [
     {
-      "in_func": "_compare_#",
+      "in_func": "mvp_#_compare",
       "expect": [
         "dlt",
         "dgt",
@@ -12,7 +12,7 @@
       ]
     },
     {
-      "in_func": "_ordered_store_#",
+      "in_func": "mvp_#_ordered_store",
       "expect": [
         "map_set_cow_resolved"
       ]

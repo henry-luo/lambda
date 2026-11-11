@@ -204,22 +204,17 @@ static inline void em_array_cert_word_guard(MirEmitter* em, MIR_reg_t cert,
         MIR_new_int_op(em->ctx, (int64_t)expected)));
 }
 
-// the inherited list prefix is shared by ArrayNum; Full asserts this offset.
+// the inherited list prefix is shared by ArrayNum (lambda-data.hpp).
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 #endif
-static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
-        Type* contract, MIR_label_t l_bail, bool primitive_admission = false) {
-    LambdaArrayContractInfo info = {};
-    if (!lambda_array_contract_info(contract, &info)) return;
-    MIR_reg_t cert = em_new_reg(em, "array_cert", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, cert),
-        MIR_new_mem_op(em->ctx, MIR_T_I64, offsetof(List, rep_cert),
-            arr_ptr, 0, 1)));
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, l_bail),
-        MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
+static inline MIR_reg_t em_array_rep_cert(MirEmitter* em, MIR_reg_t array) {
+    return em_load_at(em, array, offsetof(List, rep_cert), MIR_T_I64, "array_cert");
+}
 
+static inline void em_array_cert_contract_guard(MirEmitter* em, MIR_reg_t cert,
+        const LambdaArrayContractInfo& info, MIR_label_t l_bail, bool primitive_admission) {
     // Adjacent immutable bytes form one guard, in host byte order. This keeps
     // every rank/layout/nullability check while avoiding per-byte branches.
     static_assert(offsetof(ArrayRepCert, flags) == offsetof(ArrayRepCert, rank) + 1,
@@ -249,6 +244,30 @@ static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
     em_array_cert_word_guard(em, cert, MIR_T_U16,
         (int)(offsetof(ArrayRepCert, leaf_lane) + offsetof(LaneStorageDesc, kind)),
         lane, UINT64_MAX, l_bail);
+}
+
+static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
+        Type* contract, MIR_label_t l_bail, bool primitive_admission = false) {
+    LambdaArrayContractInfo info = {};
+    if (!lambda_array_contract_info(contract, &info)) return;
+    MIR_reg_t cert = em_array_rep_cert(em, arr_ptr);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, l_bail),
+        MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
+    em_array_cert_contract_guard(em, cert, info, l_bail, primitive_admission);
+}
+
+static inline void em_array_primitive_store_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
+        Type* contract, MIR_label_t l_bail) {
+    LambdaArrayContractInfo info = {};
+    if (!lambda_array_contract_info(contract, &info)) return;
+    MIR_reg_t cert = em_array_rep_cert(em, arr_ptr);
+    MIR_label_t ready = MIR_new_label(em->ctx);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, ready),
+        MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
+    // a canonical, uncounted primitive certificate admits exactly these
+    // bytes. Refined/reified/count-dependent owners retain checked stores.
+    em_array_cert_contract_guard(em, cert, info, l_bail, true);
+    em_emit_label(em, ready);
 }
 
 #if defined(__GNUC__)
@@ -296,7 +315,7 @@ static inline void em_open_string_append(MirEmitter* em, MIR_reg_t owner,
         MIR_new_reg_op(em->ctx, state), MIR_new_int_op(em->ctx, CONTAINER_STATE_VIRTUAL_LIST)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, cold),
         MIR_new_reg_op(em->ctx, state)));
-    MIR_reg_t cert = em_load_at(em, array, offsetof(List, rep_cert), MIR_T_I64, "string_push_cert");
+    MIR_reg_t cert = em_array_rep_cert(em, array);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, cold),
         MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
     MIR_reg_t extra = em_load_at(em, array, LAMBDA_GC_OFF_LIST_EXTRA, MIR_T_I64, "string_push_extra");
@@ -476,9 +495,10 @@ static inline MIR_reg_t em_item_null_compare(MirEmitter* em, MIR_reg_t item,
 static inline MIR_reg_t em_semantic_value_type_test(MirEmitter* em, MIR_reg_t item, Type* expected) {
     bool scalar = expected == &TYPE_NULL || expected == &TYPE_BOOL || expected == &TYPE_INT ||
         expected == &TYPE_FLOAT || expected == &TYPE_STRING || expected == &TYPE_ERROR;
-    static const struct { Type* type; TypeId aliases[2]; int count; } containers[] = {
+    static const struct { Type* type; TypeId aliases[3]; int count; } containers[] = {
         {&TYPE_MAP, {LMD_TYPE_VMAP}, 1},
-        {&TYPE_ARRAY, {LMD_TYPE_ARRAY_NUM, LMD_TYPE_VARRAY}, 2},
+        // generic array membership includes ranges (S11.1.4).
+        {&TYPE_ARRAY, {LMD_TYPE_ARRAY_NUM, LMD_TYPE_VARRAY, LMD_TYPE_RANGE}, 3},
         {&TYPE_ELMT, {LMD_TYPE_VELMT}, 1},
     };
     int alternative = -1;
@@ -575,7 +595,7 @@ static inline MIR_reg_t em_finalize_query_stream(MirEmitter* em, MIR_reg_t outpu
 }
 
 // admitted nullable strings compare exact UTF-8 bytes, including embedded NUL.
-// Promoted from Full's literal comparator; no character decoding is needed (S5.1).
+// literal string comparison needs no character decoding (S5.1).
 static inline MIR_reg_t em_string_literal_pointer_eq(MirEmitter* em, MIR_reg_t subject,
         MIR_reg_t literal, String* bytes, MIR_reg_t result = 0) {
     if (!result) {

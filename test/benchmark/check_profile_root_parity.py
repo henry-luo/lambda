@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Ensure diagnostic MIR calls do not introduce production safepoints (D6.3.3)."""
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -14,20 +15,25 @@ from analyze_js_mir import parse_frames
 from analyze_mir_gap import parse_mir
 
 
-def check(script, directory):
+def check(script, directory, executable=ROOT / "lambda.exe", cow_sites=False):
     outputs, snapshots = [], []
     for enabled in (False, True):
         prefix = directory / (script.stem + ("_profile" if enabled else "_plain"))
         env = {key: value for key, value in os.environ.items()
-               if not key.startswith(("LAMBDA_", "JS_EXECUTION_"))}
+               if not key.startswith(("LAMBDA_", "JS_EXECUTION_", "COW_EXEC_PROFILE"))}
         env.update(LAMBDA_EXEC_BACKEND="jit", LAMBDA_DISABLE_MIR_CACHE="1",
                    LAMBDA_MIR_DUMP_PATH=str(prefix.with_suffix(".mir")),
                    LAMBDA_LOG_FILE=str(prefix.with_suffix(".log")),
                    LAMBDA_MIR_LOG_FRAME_SLOTS="1", TMPDIR=str(ROOT / "temp"))
+        if cow_sites:
+            # compare attribution with aggregate accounting held constant.
+            env.update(COW_EXEC_PROFILE="1", COW_EXEC_PROFILE_SITES="1" if enabled else "0",
+                       COW_EXEC_PROFILE_OUT=str(prefix.with_suffix(".cow.tsv")),
+                       COW_EXEC_PROFILE_SITES_OUT=str(prefix.with_suffix(".sites.tsv")))
         if enabled:
             env.update(LAMBDA_EXEC_PROFILE="1",
                        LAMBDA_EXEC_PROFILE_OUT=str(prefix.with_suffix(".tsv")))
-        process = subprocess.run([str(ROOT / "lambda.exe"), "run", str(script)],
+        process = subprocess.run([str(executable), "run", str(script)],
                                  env=env, cwd=ROOT, capture_output=True, text=True, timeout=60)
         if process.returncode:
             raise AssertionError(process.stderr)
@@ -53,14 +59,21 @@ def check(script, directory):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--exe", type=Path, default=ROOT / "lambda.exe")
+    parser.add_argument("--cow-sites", action="store_true")
+    args = parser.parse_args()
     directory = ROOT / "temp/mir_check" / ("profile_parity_" + str(os.getpid()))
     directory.mkdir(parents=True, exist_ok=True)
     scripts = ("array_root_before_gc", "tune26_dense_carried_index",
                "typed_fill_activation_cert")
-    results = [check(ROOT / "test/mir/lambda" / (name + ".ls"), directory)
+    if args.cow_sites:
+        scripts += ("string_cow_capture_guard",)
+    results = [check(ROOT / "test/mir/lambda" / (name + ".ls"), directory,
+                     args.exe.resolve(), args.cow_sites)
                for name in scripts]
     (directory / "result.json").write_text(json.dumps(results, indent=2) + "\n")
-    print("MIR profile parity: helper, dense-loop and fill metadata fixtures preserve roots and safepoints")
+    print("MIR profile parity: selected fixtures preserve roots, safepoints and memory operations")
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ void js_suspended_activation_gc_trace(
         js_suspended_activation_trace_environment);
     if (activation->with_env) gc_mark_object_ptr(gc, activation->with_env);
     gc_mark_item(gc, activation->ast_function.item);
+    gc_mark_item(gc, activation->implementation.item);
     gc_mark_item(gc, activation->ast_arguments.item);
     // A parked interpreted body's frames live in its activation's segment.
     activation_trace(activation->activation, gc);
