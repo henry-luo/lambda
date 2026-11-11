@@ -705,7 +705,7 @@ the defining headers.
 | `ArrayOwnedList<T, Domain>` | ✅ landed | 1 user (table collapsed borders) |
 | `PersistentList`, `promote_list_to_pool` | ⬜ not implemented | |
 | Radiant `view_as` / `view_require` / group helpers / `dom_as` | ✅ adopted | `view_require<>` 174, `view_as_block` 264, `view_require_block` 259, `dom_as<>` 31; `*_require` is `LAM_CHECK`; `visit_view` and the `IsBlockView` template path unused |
-| `ItemOf` / `as` / `require` / `visit` / group traits | ✅ landed | in `lambda/core/lambda_typed.hpp` (`lib/lambda_typed.hpp` forwards); `visit` in `print.cpp` and MarkBuilder deep copy; witnesses in MarkReader / MarkBuilder; `as_map` excludes Element |
+| `ItemOf` / `as` / `require` / `visit` / group traits | ✅ landed | in `lambda/core/lambda_typed.hpp`; `visit` in `print.cpp` and MarkBuilder deep copy; witnesses in MarkReader / MarkBuilder; `as_map` excludes Element |
 | `HoleSentinel`, `ShapeRef` / `shape_next` | ✅ landed | 2 and 11 sites |
 | `MarkBuilder` typed outputs, typed GC-borrow parameters | ✅ landed | |
 | `ItemOrError` | ⬜ not implemented | `MaybeItemOf` exists in `item_tagged.hpp`, unused |
@@ -768,9 +768,7 @@ the defining headers.
 3. **`no-item-payload-cast` silently skips two of its four files:** its scope
    names `lambda/mark_builder.cpp` and `lambda/mark_reader.cpp`, which moved to
    `lambda/io/mark_builder.cpp` and `lambda/core/mark_reader.cpp`.
-4. **Other stale paths:** `no-item-high-tag-literal` and `no-raw-item-equality`
-   list `lib/lambda_typed.hpp` (now a forwarder to `lambda/core/lambda_typed.hpp`);
-   `no-item-high-tag-literal` lists `lib/gc/gc_heap.c` (now
+4. **Other stale paths:** `no-item-high-tag-literal` lists `lib/gc/gc_heap.c` (now
    `lambda/runtime/gc/gc_heap.c`); `no-raw-css-value-stack` ignores the removed
    `radiant/css_temp_decl.hpp`.
 

@@ -178,13 +178,20 @@ End state: one name everywhere — config target, premake project, archive (`lib
 
 ## 7. SM4 — `LAMBDA_API` and hidden visibility
 
-Add `lib/lambda_api.h`:
+`lambda/lambda.h` owns the visibility annotations (D9.1.1v4, D9.1.3v2).
+Library headers request its annotation-only section so they do not import the
+value ABI; a later normal include still provides the complete header.
 
 ```c
-#if defined(_WIN32) && defined(LAMBDA_BUILD_SHARED)
-  #define LAMBDA_API __declspec(dllexport)      /* per-module import/export split
-                                                   deferred until a DLL consumer exists */
-#elif defined(LAMBDA_BUILD_SHARED)
+#if defined(_WIN32)
+  #if defined(LAMBDA_BUILD_SHARED)
+    #define LAMBDA_API __declspec(dllexport)
+  #elif defined(LAMBDA_USE_SHARED)
+    #define LAMBDA_API __declspec(dllimport)
+  #else
+    #define LAMBDA_API
+  #endif
+#elif defined(__GNUC__) || defined(__clang__)
   #define LAMBDA_API __attribute__((visibility("default")))
 #else
   #define LAMBDA_API
@@ -745,7 +752,7 @@ Each phase ends green: `make build` + `make test-lambda-baseline` + `make test-r
 
 | Phase | Work | Gate |
 |---|---|---|
-| **P0** | **COMPLETE.** Added `lib/lambda_api.h` (`LAMBDA_{LIB,CORE,IO,RT}_API`, `RADIANT_API`) as the future public-surface annotation. Static target compilation now uses hidden visibility; the existing hosted-language DSO keeps its reviewed visibility path until it has an explicit exported host ABI. Added `utils/check_static_module_architecture.py` to the unified lint structural checks in report-only mode; it inventories frozen C2MIR exclusions, active public-header provider markers, include direction debt, §2.2 runtime-native IO classifications, and the predicted unresolved/weak-link baseline that the five DSOs must retire. `static-module-inventory` and `static-module-boundary-baseline` write JSON review artifacts under `temp/`. Declared all five planned boundary DSOs under `static_module_validation` in the build config; generation/enforcement waits for P2/P5 when source groups are real. | `make build`; `make lint ARGS='--rule ^static-module-architecture$'`; `make static-module-inventory`; `make static-module-boundary-baseline`; no C2MIR diff |
+| **P0** | **COMPLETE.** Added `lib/lambda_api.h` (since merged into `lambda/lambda.h`) (`LAMBDA_{LIB,CORE,IO,RT}_API`, `RADIANT_API`) as the future public-surface annotation. Static target compilation now uses hidden visibility; the existing hosted-language DSO keeps its reviewed visibility path until it has an explicit exported host ABI. Added `utils/check_static_module_architecture.py` to the unified lint structural checks in report-only mode; it inventories frozen C2MIR exclusions, active public-header provider markers, include direction debt, §2.2 runtime-native IO classifications, and the predicted unresolved/weak-link baseline that the five DSOs must retire. `static-module-inventory` and `static-module-boundary-baseline` write JSON review artifacts under `temp/`. Declared all five planned boundary DSOs under `static_module_validation` in the build config; generation/enforcement waits for P2/P5 when source groups are real. | `make build`; `make lint ARGS='--rule ^static-module-architecture$'`; `make static-module-inventory`; `make static-module-boundary-baseline`; no C2MIR diff |
 | **P1a** | **IMPLEMENTED.** Public `input.hpp` and `format.h` no longer define `LAMBDA_STATIC`; the narrow internal `LAMBDA_IO_STATIC_VALUES` mode is only compiled into the static input implementation. `InputAllocationContext` owns parser/document Pool/Arena/UI policy through its own TLS slot, while runtime allocation, roots, stack limits, scalar homes, and dry-run state remain on `EvalContext`/`Context`. Active paths select their owner explicitly rather than inheriting allocation behavior from include order. The P0 report continues to inventory public selector regressions, excluding frozen C2MIR. | static input/core DSO links; macro-hygiene inventory; `make test-lambda-baseline`; no C2MIR diff |
 | **P1b** | **IMPLEMENTED.** `MarkBuilder`/`MarkEditor` and Target URL/path normalization live in `lambda/io/`; `MarkReader`, `item_tagged.hpp`, `lambda_typed.hpp`, core item-printing declarations, the NamePool/ShapePool allocator registry, allocation-free collection tail rebasing, and Target identity/equality live in `lambda/core/`; Context-coupled side-stack, stack-overflow recovery, native root-frame/rooted/no-GC helpers, heap/GC registries, complete collector (`gc_heap`, object/data zones), procedural runtime/dry-run state, AST emitter, scalar-home number helpers, GC-safe collection growth, runtime Path traversal, and runtime PDF wrappers live in `lambda/runtime/`. `format.cpp` uses the core print header instead of `ast.hpp`; `lambda.hpp` is compatibility-only, re-exporting IO/rt facilities whose providers are in those lower modules. IO has an explicit Pool/Arena collection provider and PDF parser entry point, while `runner` registers the active runtime Path pool provider; neither path falls back to ambient GC allocation. `runtime/heap_api.h` and `runtime/runtime-state.h` replace active ad-hoc heap/root/dry-run declarations without extending frozen C2MIR headers. The resource manager now asks its IO-owned processor hook to release decoded image objects and schedule layout updates; Radiant registers the implementation, so IO never dereferences `DocState`. The old collection implementations in `lambda-data.cpp` are disabled compatibility text only; the monolithic and static manifests compile the owner implementations. | focused Mark build/read/edit + stress-GC gates; core/io source-group probes; `make build-lambda-static`; no C2MIR diff |
 | **P1c** | Consolidate genuinely duplicate pool/arena constructors only after P1a–P1b tests establish equivalent ownership semantics. Do not add a core heap mode. | allocation/lifetime focused tests; baselines |

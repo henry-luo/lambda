@@ -17,13 +17,6 @@ from split_paths import logical_project_path, project_source_path as owned_path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_CONFIG = ROOT / "build_lambda_config.json"
 
-# These paths preserve source compatibility while the authoritative public
-# declarations live in their owning Lambda module. They are not lib providers
-# and therefore do not represent a lib-to-Lambda dependency.
-COMPATIBILITY_FORWARDERS = {
-    "lib/lambda_typed.hpp",
-}
-
 PUBLIC_HEADERS = {
     "lambda/lambda.h": "runtime-candidate",
     "lambda/lambda.hpp": "mixed-active-core-io-rt",
@@ -97,8 +90,7 @@ def include_inventory() -> dict:
     for path in paths_under("lib"):
         relative = logical_path(path)
         # These files are already classified rt for P1b, not lib violations.
-        if (relative.startswith("lib/gc/") or relative == "lib/side_stack.c" or
-                relative in COMPATIBILITY_FORWARDERS):
+        if relative.startswith("lib/gc/") or relative == "lib/side_stack.c":
             continue
         text = path.read_text(encoding="utf-8")
         for match in LAMBDA_INCLUDE.finditer(text):

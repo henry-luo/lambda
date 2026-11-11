@@ -213,14 +213,8 @@ static inline MIR_reg_t em_array_rep_cert(MirEmitter* em, MIR_reg_t array) {
     return em_load_at(em, array, offsetof(List, rep_cert), MIR_T_I64, "array_cert");
 }
 
-static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
-        Type* contract, MIR_label_t l_bail, bool primitive_admission = false) {
-    LambdaArrayContractInfo info = {};
-    if (!lambda_array_contract_info(contract, &info)) return;
-    MIR_reg_t cert = em_array_rep_cert(em, arr_ptr);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, l_bail),
-        MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
-
+static inline void em_array_cert_contract_guard(MirEmitter* em, MIR_reg_t cert,
+        const LambdaArrayContractInfo& info, MIR_label_t l_bail, bool primitive_admission) {
     // Adjacent immutable bytes form one guard, in host byte order. This keeps
     // every rank/layout/nullability check while avoiding per-byte branches.
     static_assert(offsetof(ArrayRepCert, flags) == offsetof(ArrayRepCert, rank) + 1,
@@ -250,6 +244,30 @@ static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
     em_array_cert_word_guard(em, cert, MIR_T_U16,
         (int)(offsetof(ArrayRepCert, leaf_lane) + offsetof(LaneStorageDesc, kind)),
         lane, UINT64_MAX, l_bail);
+}
+
+static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
+        Type* contract, MIR_label_t l_bail, bool primitive_admission = false) {
+    LambdaArrayContractInfo info = {};
+    if (!lambda_array_contract_info(contract, &info)) return;
+    MIR_reg_t cert = em_array_rep_cert(em, arr_ptr);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, l_bail),
+        MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
+    em_array_cert_contract_guard(em, cert, info, l_bail, primitive_admission);
+}
+
+static inline void em_array_primitive_store_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
+        Type* contract, MIR_label_t l_bail) {
+    LambdaArrayContractInfo info = {};
+    if (!lambda_array_contract_info(contract, &info)) return;
+    MIR_reg_t cert = em_array_rep_cert(em, arr_ptr);
+    MIR_label_t ready = MIR_new_label(em->ctx);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, ready),
+        MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
+    // a canonical, uncounted primitive certificate admits exactly these
+    // bytes. Refined/reified/count-dependent owners retain checked stores.
+    em_array_cert_contract_guard(em, cert, info, l_bail, true);
+    em_emit_label(em, ready);
 }
 
 #if defined(__GNUC__)

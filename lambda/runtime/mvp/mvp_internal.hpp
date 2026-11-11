@@ -89,6 +89,8 @@ enum MvpCandidateKind {
     MVP_CANDIDATE_RECORD, MVP_CANDIDATE_SCALAR, MVP_CANDIDATE_ARRAY_ELEMENT, MVP_CANDIDATE_COUNT
 };
 
+static constexpr uint32_t MVP_INLINE_COST_LIMIT = 256;
+
 struct MvpFunction {
     AstFuncNode* ast;
     AstViewNode* view;
@@ -119,6 +121,7 @@ struct MvpFunction {
     bool owns_open_scopes;
     bool guarded_array_entry;
     bool body_may_gc;  // excludes conservative admission at the parameter boundary
+    bool integer_leaf_query_active;
 };
 
 static inline bool mvp_edit_model_place(MvpFunction* function, AstNode* object) {
@@ -183,6 +186,7 @@ struct MvpErrorTarget {
     MIR_reg_t error;
     MvpCleanup* cleanup_base;
     bool unwinds;
+    bool success_scratch;  // normal paths overwrite this slot before observing it
 };
 struct MvpScope {
     MvpScope* parent;
@@ -275,6 +279,8 @@ struct LambdaMvpModule {
     LambdaMvpStats stats;
     int label_counter;
     bool failed;
+    bool local_ranges_only;
+    bool integer_inline_proof;
     Type* nullable_int;
     Type* nullable_bool;
     Type* nullable_float;
@@ -397,12 +403,14 @@ struct MvpArrayCopyPlan {
     MvpBinding* counter;
     AstNode* limit;
     int64_t read_offset, write_offset;
+    Type* element;
 };
 
 struct MvpArrayReversePlan {
     MvpBinding* array;
     MvpBinding* first;
     MvpBinding* last;
+    Type* element;
 };
 
 struct MvpNumericLoopPlan {
@@ -507,14 +515,17 @@ bool mvp_local_storage_stable(LambdaMvpModule* module, MvpBinding* binding, bool
 MvpBinding* mvp_place_root(LambdaMvpModule* module, AstNode* node);
 bool mvp_array_sum_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArraySumPlan* plan);
 bool mvp_array_copy_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayCopyPlan* plan);
+bool mvp_unit_step(LambdaMvpModule*, AstAssignStamNode*, int64_t);
 bool mvp_array_reverse_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayReversePlan* plan);
 bool mvp_numeric_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpNumericLoopPlan* plan);
 bool mvp_numeric_region_advance(LambdaMvpModule* module, AstNode* region, MvpNumericLoopPlan* plan);
 bool mvp_numeric_inline_plan(LambdaMvpModule* module, MvpFunction* function, MvpNumericLoopPlan* plan,
     bool guarded_inputs = false);
 bool mvp_integer_leaf_body(LambdaMvpModule* module, MvpFunction* function, bool allow_calls);
+bool mvp_call_admission_proven(LambdaMvpModule* module, AstCallNode* call,
+        int depth = 0, bool dense_arrays = false);
 Type* mvp_integer_leaf_result(LambdaMvpModule* module, AstCallNode* call, int depth = 0,
-        bool dense_arrays = false);
+        bool dense_arrays = false, uint32_t* expanded_cost = NULL);
 bool mvp_index_loop_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpIndexLoopPlan* plan);
 bool mvp_index_function_plan(LambdaMvpModule* module, MvpFunction* function, MvpIndexLoopPlan* plan);
 bool mvp_emit_function(LambdaMvpModule* module, MvpFunction* function);

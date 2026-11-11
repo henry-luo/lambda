@@ -13930,6 +13930,11 @@ Item cow_place_leaf(Item owner, Item path) {
     return cow_path_borrow_impl(owner, path, 0, NULL, true);
 }
 
+Item cow_place_leaf_keys(Item owner, const Item* keys, int64_t count) {
+    // the caller roots evaluated keys; the shared walker still detaches each link.
+    return cow_path_borrow_impl(owner, ItemNull, count, keys, true);
+}
+
 
 
 // NM-O8: `publish_in_place` skips the ROOT detach. A `var` parameter's root was

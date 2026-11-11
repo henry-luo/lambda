@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "D5.4.4/S9.1.2: a typed map field uses the guarded borrow helper while preserving the checked nested-push fallback.",
+  "checks": [
+    {
+      "in_func": "mvp_#_append",
+      "expect": [
+        "call\t{{p}}, cow_path_borrow_typed_map_field,",
+        "call\t{{p}}, pn_push,"
+      ],
+      "forbid": [
+        "call\t{{p}}, cow_place_leaf_keys,",
+        "call\t{{p}}, array_plain,"
+      ]
+    }
+  ]
+}

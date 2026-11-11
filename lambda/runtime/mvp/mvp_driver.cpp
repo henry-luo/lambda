@@ -867,10 +867,10 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
         pass->mir_instruction_count, pass->mir_largest_function_instruction_count,
         document_context || g_js_force_document_interp, opt_level,
         lambda_mir_lazy_enabled());
-    // eager imports generate every body, including cold exports. Bound their
-    // aggregate O2 work as well as the largest individual function.
-    selection.optimize_level = mir_native_optimize_level(
-        pass->mir_instruction_count, selection.optimize_level, MIR_EAGER_MODULE_O1_THRESHOLD);
+    // global O2 passes scale with individual bodies. Unrelated small exports
+    // must not lower a bounded kernel merely by sharing its module (D8.3.1).
+    selection.optimize_level = mir_eager_optimize_level(
+        pass->mir_largest_function_instruction_count, selection.optimize_level);
     if (!use_interp && !pass->tp->requires_native_mir_exports &&
             selection.interface_kind == MIR_LINK_INTERP) {
         use_interp = true;
