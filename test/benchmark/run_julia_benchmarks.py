@@ -129,6 +129,9 @@ def runtime_metadata():
     fixtures.update({str(path.relative_to(PROJECT_ROOT)): sha256(path)
                      for path in sorted(jq_dir.iterdir())
                      if path.suffix in (".jq", ".json", ".bf")})
+    for path in (PROJECT_ROOT / "test/benchmark/text/spelling_document.txt",
+                 PROJECT_ROOT / "lmd/package/doc/spelling/data/en-US.dict"):
+        fixtures[str(path.relative_to(PROJECT_ROOT))] = sha256(path)
     fasta = PROJECT_ROOT / "test/benchmark/beng/input/fasta_1000.txt"
     fixtures[str(fasta.relative_to(PROJECT_ROOT))] = sha256(fasta)
     contract = JULIA_ROOT / "expected.json"

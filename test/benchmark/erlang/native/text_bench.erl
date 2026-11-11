@@ -2,6 +2,7 @@
 -export([run/1]).
 checksum(Prefix,Module,Expected)->native_bench:prepared(fun Module:prepare/0,fun Module:work/1,
     fun(V)->native_bench:check(V=:=Expected)end,fun(V)->io:format("~s~B~n",[Prefix,V])end,fun(_)->ok end).
+run("spelling")->spelling:run();
 run("text_search")->text_search:run();
 run("prettier_ast")->pretty:run();
 run("fast_diff")->checksum("CHECKSUM:",fast_diff,390912);

@@ -2,9 +2,26 @@
 
 These are standalone text-library benchmarks. The JavaScript files embed the
 library cores or load their checked-in fixture data; `*.ls`, `*2.ls`,
-`c2mir/*.c`, `python/*.py`, `../julia/text/*.jl`, and `../go/cmd/text/*` implement the same bounded
-workloads for the Lambda and native reference columns.
+`c2mir/*.c`, `python/*.py`, `../julia/text/*.jl`, and `../go/cmd/text/*` implement bounded
+workloads for the Lambda and native reference columns, where ports exist.
 
+- spelling: one English prose check using the Word demo's
+  `lambda.doc.spelling` package and its installed en-US level-60 vocabulary.
+  `generate_spelling_fixture.py` creates a fixed ASCII document and an
+  independently annotated ordered list of misspellings and code-point offsets;
+  the document has 7,110 tokens and 720 issue occurrences. The Lambda entry
+  points both call the production checker, which supplies its own types. The
+  JavaScript, Python, Julia, Go, Java and Erlang ports decode the same
+  front-coded dictionary into native sets and use native string and regex
+  operations. Their token
+  handling covers this fixture's ASCII letters, capitalization and apostrophes;
+  they are not general replacements for Word's Unicode-aware checker. All ports
+  load dictionary, document and expected issues before timing, then time one
+  complete check including issue construction. After timing, each compares the
+  complete ordered issue list against the annotations. The fixed document was
+  sized for roughly 500 ms on the development machine's Lambda release build;
+  times vary by machine and execution tier. A C2MIR port is not supplied for
+  this row.
 - fast_diff.js: multiline source-text diffs with semantic cleanup, 256 rounds
   over six old/new source pairs. `generate_fast_diff_fixture.js` extracts the
   source pairs into `fast_diff_pairs.json` for the Go and Python ports.

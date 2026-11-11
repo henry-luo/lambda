@@ -6530,7 +6530,10 @@ static MirValue member_read(MvpCompiler* c, AstFieldNode* node) {
     ShapeEntry* field = mvp_member_field(c->module, node, &shape, true);
     bool speculative = !field;
     // large debug images use keyed lookup rather than three guessed record layouts.
-    if (speculative && name && !c->em.compact_code) {
+    // Error metadata is not a record: unrelated speculative shapes cannot
+    // describe its fields or their carriers (S7.4.4).
+    if (speculative && name && !c->em.compact_code &&
+            !mvp_boundary_proven(owner.semantic_contract, &TYPE_ERROR)) {
         shape = mvp_member_candidate(c->module, node->object, name);
         if (shape) field = find_shape_read_field_by_name(shape, name->chars, name->len);
     }

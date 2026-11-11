@@ -46,7 +46,7 @@ run `python3 -m unittest discover -s test/interp -p test_lambda_process.py`.
 | **Kostya** | `kostya/` | 7 | [kostya/benchmarks](https://github.com/kostya/benchmarks) | Community: brainfuck, matmul, base64, JSON |
 | **Larceny** | `larceny/` | 12 | [Larceny/Gabriel](https://www.larcenists.org/) | Gabriel suite: search, symbolic, allocation |
 | **JetStream** | `jetstream/` | 9 | [JetStream](https://browserbench.org/JetStream/) | SunSpider/Octane classics: n-body, deltablue, richards, splay |
-| **Text libraries** | `text/` | 7 | Embedded JS library sources and AST fixture | fast-diff, microdiff, hyphen, Prettier AST, search, merge, and log-pipeline workloads |
+| **Text libraries** | `text/` | 12 | Library sources, shared fixtures, and the installed English dictionary | diff, spelling, hyphenation, formatting, search, merge, log processing, and four jq workloads |
 | **Julia microbenchmarks** | `julia/` | 4 | [Julia Microbenchmarks](https://github.com/JuliaLang/Microbenchmarks) | Integer conversion, small-matrix statistics, reciprocal-square summation and formatted output |
 
 **Total: 73 declared suite entries.** The runner keeps 67 report rows after
