@@ -2765,23 +2765,15 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
     fn_slot.set(callee_value);
     if (item_is_error(fn_slot.get())) return fn_slot.get();
 
-    bool has_borrows = ast_type_func_has_var_parameter(direct_signature);
-    // a `var` call passes the callee's full arity, an omitted optional as
-    // ITEM_MISSING_ARGUMENT, as MIR callers and named calls do. A shorter list
-    // would send a promoted callee through the optional-argument adapter, which
-    // drops the borrowed homes, so every write copied the borrowed container.
-    // The padded words exceed the planned frame window and use the RootSpan route.
-    bool pad_optional = has_borrows && !has_named_args &&
-        argc < direct_signature->param_count;
-    int dispatch_argc = has_named_args ? named_param_count :
-        pad_optional ? direct_signature->param_count : argc;
+    int dispatch_argc = has_named_args ? named_param_count : argc;
     InterpArgumentRoots arg_roots(f,
-        (uint32_t)(dispatch_argc > 0 ? dispatch_argc : 1), !has_named_args && !pad_optional);
+        (uint32_t)(dispatch_argc > 0 ? dispatch_argc : 1), !has_named_args);
     if (!arg_roots.valid()) return ItemError;
     uint64_t* words = arg_roots.words();
     NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     uint64_t* borrow_homes[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    bool has_borrows = ast_type_func_has_var_parameter(direct_signature);
     if (has_borrows && !ast_direct_call_var_parameter_entries(node,
             direct_signature, borrowed, borrow_args)) {
         log_error("interp: unsupported direct `var` argument layout");
@@ -2802,7 +2794,6 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         for (AstNode* a = node->argument; a; a = a->next, i++) {
             words[i] = borrow_args[i] && !borrowed[i] ? ITEM_NULL : eval_expr(f, a).item;
         }
-        for (; i < dispatch_argc; i++) words[i] = ITEM_MISSING_ARGUMENT;
     }
 
     Item callee_item = fn_slot.get();
