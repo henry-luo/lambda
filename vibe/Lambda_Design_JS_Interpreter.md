@@ -2500,6 +2500,22 @@ strictness and generator syntax, and call-time parameter effects precede the
 original callable's live prototype lookup. Qualification and limits:
 [jq optimization](<impl/JS_MVP_Lmd_Jq_Optimization (done).md>).
 
+*(v44, 2026-11-11, USER; D8.4.5)* The checked public instance-method slice
+also covers ordinary synchronous classic-script methods. The same dependency,
+class-site, parameter, metadata and compiled-subtree closure checks apply.
+Contained synchronous ordinary function expressions also pass that subtree
+proof; their captures are created by the compiled invocation.
+Ordinary bodies may use for-of/for-in through the shared iterator kernels;
+compound iteration heads retain their independent rejection.
+Classic-script arrows with simple parameters and no activation observations
+or captures may also promote, at script level or within one top-level wrapper.
+A capture-free arrow may be created by a generator or async wrapper; no
+wrapper state crosses into its compiled body. Dynamic scope in that wrapper
+still excludes promotion. The clone preserves inherited strict mode.
+Outer lexical captures, class sites, deeper wrappers and unsupported bodies
+retain their admission boundaries. Thresholds and the loop-handoff protocol
+stay unchanged. Qualification: [jq dispatch and AUTO tuning](impl/JS_Jq_Dispatch_And_Auto_Tuning.md).
+
 *(v14, 2026-09-22)* A promoted definition may read
 or write a direct non-computed named property of its ordinary `this`
 receiver. The existing call kernel installs that receiver; P2 appends its

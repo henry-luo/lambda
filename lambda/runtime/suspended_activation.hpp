@@ -6,6 +6,21 @@
 
 struct JsInterpEnv;
 struct JsInterpHostOps;
+struct MvpLmdProgram;
+
+// a closed MIR generator retains its resume state and traced iterator links.
+struct JsCompactGeneratorFrame {
+    MvpLmdProgram* program = NULL;
+    MvpLmdProgram* resume_program = NULL;
+    Item saved = {};
+    uint64_t scalar_home = 0;
+    Item pending = {};
+    uint64_t pending_scalar_home = 0;
+    Item parent = {}; // transient trampoline link, traced while a child is running
+    int pending_operation = 0;
+    uint8_t position = 0; // 0: start, 1: yielded, 2: delegate, 3: complete, 4: stackful delegate
+    bool delegates = false;
+};
 
 // The common durable part of generator and async execution. It owns exactly
 // the outliving activation edges; each state machine keeps its own semantic
@@ -22,9 +37,8 @@ struct JsSuspendedActivation : DurableActivation {
     const JsInterpHostOps* ast_host = NULL;
     JsInterpEnv* ast_function_env = NULL;
     JsInterpEnv* ast_body_env = NULL;
-    // Every body, of either tier, runs once on its own stackful activation,
-    // parked in place at each yield/await; the carrier owns it weakly (RA1,
-    // RA8). `body` is its entry.
+    // stackful bodies run once on their activation and park in place; compact
+    // MIR generators use the derived record's heap frame instead (D6.1.1v3).
     Activation* activation = NULL;
     ActivationEntry body = NULL;
     bool ast_initialized = false;
@@ -35,6 +49,7 @@ struct JsSuspendedActivation : DurableActivation {
 };
 
 struct JsGeneratorStateRecord : JsSuspendedActivation {
+    JsCompactGeneratorFrame* compact = NULL;
     bool done = false;
     bool started = false;
     bool executing = false;

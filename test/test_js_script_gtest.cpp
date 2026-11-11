@@ -1894,7 +1894,7 @@ TEST(JsInterpreter, ModuleClassMethodPromotionChecksAdmissionBoundaries) {
     for (int i = 1; i < 15; i++) {
         Item method = js_get_key_default(methods, (Item){.item = i2it(i)});
         ASSERT_EQ(get_type_id(method), LMD_TYPE_FUNC) << i;
-        EXPECT_EQ(js_fn_body_kind((JsFunction*)method.function), i == 13
+        EXPECT_EQ(js_fn_body_kind((JsFunction*)method.function), i == 8 || i == 13
             ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << i;
     }
     runtime_cleanup(&runtime);
@@ -1994,6 +1994,188 @@ TEST(JsInterpreter, AutoPromotesClassicGeneratorMethodsAndPreservesDelegation) {
         ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
         EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state == FN_PROMOTION_COMPILED,
             runtime.js_promotion_auto);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, ClassicPublicMethodsPromoteWithOwnedNestedClosures) {
+    for (const char* backend : {"auto", "ast"}) for (uint32_t threshold : {1u, 3u}) {
+        SCOPED_TRACE(backend);
+        SCOPED_TRACE(threshold);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {}; runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = threshold;
+        const char source[] = R"JS(
+            let offset=1;
+            class Cursor {
+                constructor(){this.value=4}
+                advance(value=2){this.value+=value+offset;return this.value}
+                make(value){const seed=this.value;return function nested(input){
+                    if(input<0)return nested(-input);return seed+value+input+offset}}
+                receiver(){return this}
+            }
+            const cursor=new Cursor(), method=cursor.advance, make=cursor.make, receiver=cursor.receiver;
+            const source=method.toString(), home=Object.getPrototypeOf(method);
+            let callbacks=[];
+            for(let i=0;i<3;i++){
+                if(cursor.advance()!==7+3*i||receiver()!==undefined)throw 'method semantics';
+                callbacks.push(make.call(cursor,i));
+            }
+            offset=10;gc();
+            if(callbacks[0](-2)!==19||callbacks[2](2)!==27)throw 'compiled closure ownership';
+            if(method.call({value:1},2)!==13)throw 'borrowed receiver';
+            cursor.advance=()=>99;if(cursor.advance()!==99||method!==Cursor.prototype.advance)throw 'shadow';
+            let constructible=true;try{new method()}catch(error){constructible=!(error instanceof TypeError)}
+            if(constructible||Object.hasOwn(method,'prototype')||method.name!=='advance'||method.length!==0||
+                method.toString()!==source||Object.getPrototypeOf(method)!==home)throw 'metadata';
+            [method,make,receiver];
+        )JS";
+        Item values = transpile_js_to_mir(&runtime, source, "classic-public-methods.js", NULL);
+        ASSERT_EQ(get_type_id(values), LMD_TYPE_ARRAY);
+        for (int i=0;i<3;i++) {
+            Item item = js_get_key_default(values, (Item){.item=i2it(i)});
+            ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+            auto* function = (JsFunction*)item.function;
+            EXPECT_EQ(js_fn_body_kind(function), runtime.js_promotion_auto
+                ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST);
+            EXPECT_NE(function->flags & JS_FUNC_FLAG_METHOD, 0u);
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, ClassicArrowsPromoteWithoutCapturingWrapperActivations) {
+    for (const char* backend : {"auto", "ast"}) for (uint32_t threshold : {1u, 3u}) {
+        SCOPED_TRACE(backend);
+        SCOPED_TRACE(threshold);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {}; runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = threshold;
+        const char source[] = R"JS(
+            let offset=0;
+            const compare=(a,b)=>a.key-b.key+offset;
+            function* factory(){yield (a,b)=>a.key-b.key+offset}
+            function strictFactory(){'use strict';return ()=>{
+                const o={};Object.defineProperty(o,'x',{value:1});
+                try{o.x=2}catch(error){return error instanceof TypeError}return false;
+            }}
+            const generated=factory().next().value, strict=strictFactory();
+            const source=compare.toString(), home=Object.getPrototypeOf(compare);
+            for(let i=0;i<3;i++){
+                const values=[{key:3},{key:1},{key:2}];values.sort(compare);
+                if(values[0].key!==1||generated({key:2},{key:1})!==1||!strict())throw 'arrow body';
+            }
+            gc();offset=7;
+            if(compare.call({key:100},{key:2},{key:1})!==8||generated({key:2},{key:1})!==8)throw 'live cells';
+            let constructible=true;try{new compare()}catch(error){constructible=!(error instanceof TypeError)}
+            if(constructible||Object.hasOwn(compare,'prototype')||compare.name!=='compare'||compare.length!==2||
+                compare.toString()!==source||Object.getPrototypeOf(compare)!==home)throw 'arrow metadata';
+            [compare,generated,strict];
+        )JS";
+        Item values = transpile_js_to_mir(&runtime, source, "classic-arrows.js", NULL);
+        ASSERT_EQ(get_type_id(values), LMD_TYPE_ARRAY);
+        for (int i=0;i<3;i++) {
+            Item item = js_get_key_default(values, (Item){.item=i2it(i)});
+            ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+            EXPECT_EQ(js_fn_body_kind((JsFunction*)item.function), runtime.js_promotion_auto
+                ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST);
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, ClassicPublicMethodsRejectDynamicEnclosingScopes) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {}; runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    const char source[] = R"JS(
+        var offset=3;let withMethod;
+        with({offset:11}){class Site{read(){return offset}}withMethod=new Site().read}
+        const evalMethod=(function(){eval('var hidden=13');class Site{read(){return hidden}}
+            return new Site().read})();
+        if(withMethod()!==11||evalMethod()!==13)throw 'dynamic method scope';
+        [withMethod,evalMethod];
+    )JS";
+    Item values = transpile_js_to_mir(&runtime, source, "classic-method-scope-boundaries.js", NULL);
+    ASSERT_EQ(get_type_id(values), LMD_TYPE_ARRAY);
+    for (int i=0;i<2;i++) {
+        Item item = js_get_key_default(values, (Item){.item=i2it(i)});
+        ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+        EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ClassicArrowAdmissionRetainsCaptureAndDynamicScopeBoundaries) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {}; runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    const char source[] = R"JS(
+        let global=3;
+        const captured=(value=>()=>value)(7), receiver=(()=>this),
+            observed=(function(){return ()=>arguments.length})(1),
+            target=(function(){return ()=>new.target})(),
+            evaluated=(function(){eval('var hidden=9');return ()=>hidden})(),
+            dynamic=(function(){with({global:11}){return ()=>global}})(),
+            deep=(()=>()=>()=>global)()();
+        class Site{read(){if(arguments.length)return null;return ()=>global}field=()=>global}
+        const site=new Site(), method=site.read(), field=site.field;
+        const functions=[captured,receiver,observed,target,evaluated,dynamic,deep,method,field];
+        for(const fn of functions)fn();
+        if(captured()!==7||observed()!==1||evaluated()!==9||dynamic()!==11)throw 'capture semantics';
+        functions;
+    )JS";
+    Item values = transpile_js_to_mir(&runtime, source, "classic-arrow-boundaries.js", NULL);
+    ASSERT_EQ(get_type_id(values), LMD_TYPE_ARRAY);
+    for (int i=0;i<9;i++) {
+        Item item = js_get_key_default(values, (Item){.item=i2it(i)});
+        ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+        EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP) << i;
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesOrdinaryIterationThroughSharedIteratorKernels) {
+    for (const char* backend : {"auto", "ast"}) for (uint32_t threshold : {1u, 3u}) {
+        SCOPED_TRACE(backend);
+        SCOPED_TRACE(threshold);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {}; runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = threshold;
+        const char source[] = R"JS(
+            let closed=0;
+            function first(values){for(const value of values)return value;return 0}
+            function total(values){let sum=0;for(let value of values)sum+=value;return sum}
+            function fields(object){let sum=0;for(const key in object)sum+=object[key];return sum}
+            const values={ [Symbol.iterator](){return {
+                next(){gc();return {value:5e-324,done:false}},
+                return(){closed++;gc();return {done:true}}
+            }}};
+            const object=Object.create({inherited:2},{own:{value:3,enumerable:true}});
+            for(let i=0;i<3;i++){
+                if(first(values)!==5e-324||total([1,2,3])!==6||fields(object)!==5)throw 'iteration';
+            }
+            if(closed!==3)throw 'iterator close';
+            [first,total,fields];
+        )JS";
+        Item values = transpile_js_to_mir(&runtime, source, "auto-ordinary-iteration.js", NULL);
+        ASSERT_EQ(get_type_id(values), LMD_TYPE_ARRAY);
+        for (int i=0;i<3;i++) {
+            Item item = js_get_key_default(values, (Item){.item=i2it(i)});
+            ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+            EXPECT_EQ(js_fn_body_kind((JsFunction*)item.function), runtime.js_promotion_auto
+                ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST);
+        }
         runtime_cleanup(&runtime);
     }
 }
@@ -2184,7 +2366,7 @@ TEST(JsInterpreter, ModuleClassMethodDefaultsRejectHiddenCapturesAndExcludedCall
         Item item = js_get_key_default(methods, (Item){.item=i2it(i)});
         ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC) << i;
         EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state,
-            FN_PROMOTION_PINNED_INTERP) << i;
+            i == 12 ? FN_PROMOTION_COMPILED : FN_PROMOTION_PINNED_INTERP) << i;
     }
     for (const char* name : {"ordinary", "ordinaryArrow"}) {
         auto* function = (JsFunction*)js_get_key_cstr(ns, name).function;
@@ -2310,7 +2492,8 @@ TEST(JsInterpreter, ModuleArrowsRejectActivationCapturesAndOtherUnapprovedShapes
     for (int i=0;i<2;i++) {
         Item item = js_get_key_default(values, (Item){.item=i2it(i)});
         ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
-        EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP);
+        EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state,
+            i == 0 ? FN_PROMOTION_COMPILED : FN_PROMOTION_PINNED_INTERP);
     }
     runtime_cleanup(&runtime);
 }
@@ -2558,7 +2741,8 @@ TEST(JsInterpreter, WrappedModuleFunctionsRejectUnapprovedCapturesAndWrites) {
         export const arrow=(function(){let local=1;return ()=>local})();
         export const catchBinding=(function(){try{throw 1}catch(value){return function(){return value}}})();
         export const objectMethod=({factory(){let local=1;return function(){return local}}}).factory();
-        class Site{method(){let local=1;return function(){return local}}}
+        // keep the owner in AST so this case still tests an existing AST capture.
+        class Site{method(){if(arguments.length)return null;let local=1;return function(){return local}}}
         export const method=new Site().method();
         for(const fn of [parameter,write,increment,compound,dependency,self,deep,receiver,nested,
             defaults,targetDefault,evalWrapper,evalArrow,arrow,catchBinding,objectMethod,method])fn();

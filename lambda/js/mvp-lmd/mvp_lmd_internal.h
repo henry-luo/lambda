@@ -146,6 +146,7 @@ struct LmdFunction {
     bool direct_args;
     bool reflected_entry;
     bool uses_process;
+    uint8_t compact_kind;
     LmdObjectPlan* shape_hint;
     LmdShapeSet shapes;
     unsigned returns;

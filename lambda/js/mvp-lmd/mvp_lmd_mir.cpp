@@ -89,6 +89,7 @@ struct LmdCompiler {
     MIR_reg_t eval_env;
     NameScope* eval_scope;
     bool parameter_initializer;
+    int compact_generator_kind;
 };
 struct LmdValue { MIR_reg_t reg; unsigned kind; bool literal = false; double number = 0; bool integer = false; LmdRange range;
     MIR_reg_t number_present = 0; };
@@ -1404,6 +1405,42 @@ static LmdFunction* direct_target(MvpLmdProgram* p, AstCallNode* call) {
         ? identifier_binding(p, (AstIdentNode*)call->callee) : NULL;
     return b && b->target && !b->target->ast->is_generator && !b->target->ast->is_async && !b->assigned && !b->target->captures && !b->target->lexical_receiver
         ? b->target : NULL;
+}
+static MvpLmdClass* property_receiver_class(MvpLmdProgram* p, AstNode* node, int depth = 0);
+
+static int predicted_method_classes(MvpLmdProgram* p, AstNode* receiver,
+        String* name, MvpLmdClass** classes, ShapeEntry** fields) {
+    int count = 0;
+    auto include = [&](MvpLmdClass* cls) {
+        if (!cls || cls->dynamic || count == 4) return;
+        for (int i = 0; i < count; i++) if (classes[i] == cls) return;
+        ShapeEntry* field = typemap_hash_lookup(&cls->prototype_shape, name->chars, name->len);
+        if (!field || field->type->type_id != LMD_TYPE_FUNC || (field->flags & JSPD_IS_ACCESSOR)) return;
+        classes[count] = cls; fields[count++] = field;
+    };
+    include(property_receiver_class(p, receiver));
+    LmdBinding* incoming = receiver && receiver->node_type == AST_NODE_IDENT
+        ? identifier_binding(p, (AstIdentNode*)receiver) : NULL;
+    if (!incoming || !incoming->entry->is_parameter || !incoming->owner || incoming->owner->complex_params)
+        return count;
+    int parameter = 0;
+    AstNode* formal = incoming->owner->ast->params;
+    for (; formal; formal = formal->next, parameter++) {
+        AstNode* name = js_ast_parameter_binding_identifier(formal);
+        if (name && identifier_binding(p, (AstIdentNode*)name) == incoming) break;
+    }
+    if (!formal) return count;
+    // caller provenance predicts guards only; unknown or escaping calls retain the generic miss.
+    const AstIndex* tree = &p->frontend->ast_index;
+    for (AstNodeId i = 0; count < 4 && i < tree->count; i++) {
+        if (tree->nodes[i]->node_type != AST_NODE_CALL_EXPR) continue;
+        AstCallNode* call = (AstCallNode*)tree->nodes[i];
+        if (direct_target(p, call) != incoming->owner) continue;
+        AstNode* argument = call->arguments;
+        for (int j = 0; argument && j < parameter; j++) argument = argument->next;
+        include(property_receiver_class(p, argument));
+    }
+    return count;
 }
 static unsigned binary_kind(Operator op, unsigned left, unsigned right, bool bigints = false) {
     if (op == OPERATOR_AND || op == OPERATOR_OR || op == OPERATOR_JS_NULLISH_COALESCE)
@@ -4833,13 +4870,22 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
     };
     if (callee && ref.spelling && repeated_execution(c) && !compact_property_dispatch(c)) {
         MvpLmdClass* classes[4]; ShapeEntry* fields[4]; int count = 0;
+        bool overflow = false;
         for (int i = 0; c->program->classes && i < c->program->classes->length; i++) {
             MvpLmdClass* cls = (MvpLmdClass*)c->program->classes->data[i];
             ShapeEntry* field = cls->dynamic ? NULL : typemap_hash_lookup(&cls->prototype_shape,
                 ref.spelling->chars, ref.spelling->len);
             if (!field || field->type->type_id != LMD_TYPE_FUNC || (field->flags & JSPD_IS_ACCESSOR)) continue;
-            if (count == 4) { count = 0; break; }
+            if (count == 4) { overflow = true; break; }
             classes[count] = cls; fields[count++] = field;
+        }
+        if (count > 1 || overflow) {
+            // apply the guard budget after source provenance, so unrelated classes cannot erase it.
+            AstNode* member = site && site->node_type == AST_NODE_CALL_EXPR ? ((AstCallNode*)site)->callee : site;
+            AstNode* receiver = member && (member->node_type == AST_NODE_MEMBER_EXPR || member->node_type == AST_NODE_INDEX_EXPR)
+                ? ((AstFieldNode*)member)->object : NULL;
+            int narrowed = predicted_method_classes(c->program, receiver, ref.spelling, classes, fields);
+            if (narrowed || overflow) count = narrowed;
         }
         if (count) {
             MIR_label_t miss = label(c), admitted = label(c);
@@ -6826,17 +6872,33 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         target = em_load_at(&c->em, callee.reg, offsetof(Function, ptr), MIR_T_I64, "entry");
         // source-node budgets miss generic dispatch growth; bound newly started entry inlines by emitted cost.
         if (!compact_property_dispatch(c) && ((member && method.spelling) || callback)) {
+            MvpLmdClass* predicted[4]; ShapeEntry* fields[4]; int predicted_count = 0;
+            auto method_candidate = [&](LmdFunction* candidate) {
+                if (!member || !named(method_candidate_name(c->program, candidate), method.spelling->chars)) return false;
+                if (!predicted_count) return true;
+                for (int i = 0; i < predicted_count; i++) if (candidate->home == predicted[i]) return true;
+                return false;
+            };
             int method_targets = 0;
-            if (member) for (int fi = 0; fi < c->program->functions->length; fi++) {
-                LmdFunction* candidate = (LmdFunction*)c->program->functions->data[fi];
-                if (named(method_candidate_name(c->program, candidate), method.spelling->chars)) method_targets++;
+            auto count_targets = [&]() {
+                method_targets = 0;
+                for (int fi = 0; fi < c->program->functions->length; fi++)
+                    if (method_candidate((LmdFunction*)c->program->functions->data[fi])) method_targets++;
+            };
+            if (member) {
+                count_targets();
+                if (method_targets > 1) {
+                    // keep the same source target set for property capture and guarded body expansion.
+                    predicted_count = predicted_method_classes(c->program,
+                        ((AstFieldNode*)n->callee)->object, method.spelling, predicted, fields);
+                    if (predicted_count) count_targets();
+                }
             }
             bool allocating_inlined = false;
             // without a narrow target set, speculative guards cost more than the ordinary call.
             for (int fi = 0; method_targets <= 4 && fi < c->program->functions->length; fi++) {
                 LmdFunction* candidate = (LmdFunction*)c->program->functions->data[fi];
-                if (candidate != callback && (!member || !method.spelling ||
-                        !named(method_candidate_name(c->program, candidate), method.spelling->chars))) continue;
+                if (candidate != callback && !method_candidate(candidate)) continue;
                 LmdInlineBody body = {};
                 // one allocating target per site; other classes keep the guarded call fallback.
                 // also bound total caller expansion to three ordinary statement-body budgets.
@@ -7306,6 +7368,12 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
     case AST_NODE_YIELD: {
         JsYieldNode* yield = (JsYieldNode*)n;
         LmdValue value = box(c, expression(c, yield->argument));
+        if (c->compact_generator_kind) {
+            MIR_reg_t parked = em_call_2(&c->em, "mvp_lmd_compact_generator_park", MIR_T_I64,
+                MIR_T_I64, reg(c, value.reg), MIR_T_I64, integer(c, yield->delegate ? 2 : 1), true);
+            check_error(c, parked);
+            return boxed(c, constant(c, ITEM_JS_UNDEFINED));
+        }
         bool async = c->function->ast->is_async;
         MIR_reg_t resumed = em_call_2(&c->em, async ? "js_gen_park" : "mvp_lmd_generator_park", MIR_T_I64,
             MIR_T_I64, reg(c, value.reg), MIR_T_I64,
@@ -9342,6 +9410,7 @@ static const LmdImport imports[] = {
     {"js_gen_throw_signal_value", (void*)js_gen_throw_signal_value, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_iterator_close_mode", (void*)mvp_lmd_iterator_close_mode, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_generator_park", (void*)mvp_lmd_generator_park, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
+    {"mvp_lmd_compact_generator_park", (void*)mvp_lmd_compact_generator_park, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"js_await_park", (void*)js_await_park, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_dynamic_import_value", (void*)mvp_lmd_dynamic_import_value, AUDIT(JIT_EFFECT_MAY_GC, ITEM,
         ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,SCALAR))},
@@ -9460,6 +9529,8 @@ static void emit_return(LmdCompiler* c, bool unentered = false) {
 }
 static bool compile_function(MvpLmdProgram* p, LmdFunction* f, uint32_t* instruction_count) {
     LmdCompiler c = {}; c.program = p; c.function = f;
+    f->compact_kind = mvp_lmd_generator_compact_kind(f->ast);
+    c.compact_generator_kind = f->compact_kind;
     c.em.ctx = p->mir; c.em.call_owner = &c; c.em.root_call_value = root_value;
     c.em.lookup_import_metadata = import_metadata; c.em.import_cache = p->import_cache;
     c.em.helper_results_skip_rehome = true;
@@ -10950,7 +11021,7 @@ static bool global_bindings_are_exposed(MvpLmdProgram* p) {
     return false;
 }
 // Constructor provenance narrows same-spelled method calls without changing their runtime ABI.
-static MvpLmdClass* property_receiver_class(MvpLmdProgram* p, AstNode* node, int depth = 0) {
+static MvpLmdClass* property_receiver_class(MvpLmdProgram* p, AstNode* node, int depth) {
     if (!node || depth == 16) return NULL;
     if (node->node_type == AST_NODE_ARRAY) return p->library ? &p->library->array : NULL;
     if (node->node_type == AST_NODE_NEW_EXPR)
@@ -12955,7 +13026,9 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     if (!js_function_source_span(script->source, script->source_length, definition, &text, &length)) return ItemError;
     StrBuf* source = strbuf_new();
     if (!source) return ItemError;
-    if (script->strict_mode || definition->node_type == AST_NODE_METHOD)
+    // a classic arrow can inherit strict mode from its wrapper without a local directive.
+    if (script->strict_mode || definition->node_type == AST_NODE_METHOD ||
+            (definition->vars && definition->vars->strict))
         strbuf_append_str(source, "'use strict';\n");
     // D8.2.4: clone only the checked body's resolved dependencies. Copying a
     // wide module scope made planning and the unused synthetic main quadratic.

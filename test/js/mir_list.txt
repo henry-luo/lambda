@@ -3,6 +3,7 @@
 # Also: regressions for MIR-only lowering, which mixed mode would otherwise
 # run on AST.
 collection_gc_retention
+compact_generator
 dynamic_string_no_name_id_exhaustion
 for_destructure_closure
 function_own_keys_foreign

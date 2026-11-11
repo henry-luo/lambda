@@ -943,6 +943,7 @@ extern "C" Item mvp_lmd_function_new(uint64_t code_id, MvpLmdProgram* p) {
     value->ptr = (fn_ptr)f->address;
     if (f->ast->is_generator || f->ast->is_async) {
         ((MvpLmdNativeCallable*)value)->state = f->address;
+        ((MvpLmdNativeCallable*)value)->compact_kind = f->compact_kind;
         value->ptr = f->ast->is_generator ? (fn_ptr)mvp_lmd_generator_call : (fn_ptr)mvp_lmd_async_call;
     }
     value->runtime_context = context;

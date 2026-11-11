@@ -20,6 +20,7 @@
 #include "lambda/runtime/transpiler.hpp"
 #include "lambda/runtime/gc/gc_heap.h"
 #include "lambda/runtime/lambda-root-frame.hpp"
+#include "lambda/runtime/suspended_activation.hpp"
 #include "lambda/jube/jube_registry.h"
 #include "lib/file.h"
 #include "lib/mem.h"
@@ -6576,6 +6577,49 @@ TEST_F(JsMvpLmd, GuardedMethodParametersAndReturns) {
     error("class A{f(x){const a=x;a=3;return a}}new A().f(1)", "TypeError");
     error("class A{f(x){let y=z;let z=x;return y}}new A().f(1)", "ReferenceError");
 }
+TEST_F(JsMvpLmd, ReceiverProvenanceKeepsMethodPredictionsPastFourClasses) {
+    boolean(R"JS(
+        class A {constructor(){this.value=7}apply(x){return this.value+x}}
+        class B {apply(x){return x}}
+        class C {apply(x){return x}}
+        class D {apply(x){return x}}
+        class E {apply(x){return x}}
+        function call(o){return o.apply(2)}
+        let a=new A();call(a)===9;
+    )JS");
+    char* mir = dump("temp/mvp_lmd_method_provenance.mir");
+    ASSERT_NE(mir, nullptr);
+    char* call = strstr(mir, "mvp_lmd_f7:\tfunc");
+    ASSERT_NE(call, nullptr);
+    EXPECT_NE(strstr(call, "\tcall\ttypemap_hash_lookup_key_"), nullptr);
+    mem_free(mir);
+    boolean(R"JS(
+        class A {constructor(){this.value=7}apply(x){return this.value+x}}
+        class B {apply(x){return x}}
+        class C {apply(x){return x}}
+        class D {apply(x){return x}}
+        class E {apply(x){return x}}
+        function call(o,x){return o.apply(x)}
+        let a=new A(),ok=call(a,2)===9;
+        a.apply=x=>20+x;ok=ok&&call(a,2)===22;delete a.apply;
+        A.prototype.apply=function(x){return this.value-x};ok=ok&&call(a,2)===5;
+        Object.defineProperty(A.prototype,'apply',{get(){gc();return function(x){return this.value*x}},configurable:true});
+        ok=ok&&call(a,2)===14;
+        Object.setPrototypeOf(a,new Proxy({apply(x){return this.value+100+x}},{}));
+        ok=ok&&call(a,2)===109&&call({value:3,apply:A.prototype.apply},2)===6;
+        ok;
+    )JS");
+    boolean(R"JS(
+        class A {apply(x){return x+1}}
+        class B {apply(x){return x}}
+        class C {apply(x){return x}}
+        class D {apply(x){return x}}
+        class E {apply(x){return x}}
+        let a=new A();
+        function call(){return a.apply((a.apply=x=>x+10,3))}
+        call()===4&&a.apply(3)===13;
+    )JS");
+}
 TEST_F(JsMvpLmd, RepeatedPropertyReadsKeepLivePrototypeAndNullableLanes) {
     boolean(R"JS(
         class Node { constructor() { this.child=null; } }
@@ -10961,6 +11005,28 @@ current=source();current.next=foreignNext;
 localNext.call(current).value===true;
 )JS", &host);
     EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsMvpLmd, CompactGeneratorDelegationDoesNotAllocateActivations) {
+    Item iterator = run(R"JS(
+function* chain(n){yield* (n ? chain(n-1) : [42])}
+const iterator=chain(2048);iterator.next();iterator;
+)JS");
+    RootFrame roots(1);
+    ASSERT_TRUE(roots.valid());
+    Rooted<Item> current(roots, iterator);
+    heap_gc_collect();
+    for (int depth = 0; depth <= 2048; depth++) {
+        ASSERT_EQ(get_type_id(current.get()), LMD_TYPE_MAP);
+        ASSERT_EQ(current.get().map->map_kind, MAP_KIND_GENERATOR);
+        auto* state = &((JsGeneratorMapCarrier*)current.get().map)->state;
+        ASSERT_NE(state->compact, nullptr);
+        EXPECT_EQ(state->activation, nullptr);
+        EXPECT_FALSE(state->executing);
+        EXPECT_TRUE(!state->compact->parent.item || state->compact->parent.item == ITEM_NULL);
+        ASSERT_EQ(get_type_id(state->compact->saved), LMD_TYPE_ARRAY);
+        current.set(state->compact->saved.array->items[0]);
+    }
 }
 
 TEST_F(JsMvpLmd, LazyGeneratorOwnsBorrowedReceiverScalar) {

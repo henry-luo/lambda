@@ -95,7 +95,7 @@ struct MvpLmdCallable : Function {
 static_assert(sizeof(MvpLmdCallable) == sizeof(Function) + 4 * sizeof(void*),
     "the optional home slot must fit the existing callable padding");
 typedef Item (*MvpLmdNativeEntry)(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
-struct MvpLmdNativeCallable : MvpLmdCallable { void* state; NameRef source_name; };
+struct MvpLmdNativeCallable : MvpLmdCallable { void* state; NameRef source_name; uint8_t compact_kind; };
 extern const TypeNominalExtension mvp_lmd_plain_extension;
 extern const TypeNominalExtension mvp_lmd_class_extension;
 // foreign storage already declares its owner; ordinary MVP shapes need no extra flag.
@@ -441,6 +441,8 @@ Item mvp_lmd_generator_delegate(MvpLmdProgram* program, Item value);
 Item mvp_lmd_generator_call_source(MvpLmdProgram* program, Item implementation,
     Item source, Item receiver, Item* arguments, uint64_t count);
 bool mvp_lmd_generator_lazy_parameters(const AstFuncNode* definition);
+int mvp_lmd_generator_compact_kind(const AstFuncNode* definition);
+extern "C" Item mvp_lmd_compact_generator_park(Item value, int64_t kind);
 Item mvp_lmd_iterator_get(MvpLmdProgram* program, Item source);
 Item mvp_lmd_iterator_method(MvpLmdProgram* program, Item source);
 Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item source,

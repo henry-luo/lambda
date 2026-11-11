@@ -7,6 +7,8 @@
 **Ledger series:** `RA#` (decisions), `RA-O#` (open items).
 **Evidence base:** the line references in §2 come from a code survey on 2026-10-04 against the working tree at `8e81166df`. LOC figures in §9 are estimates derived from identifier counts and region sizes, not measured diffs.
 
+**2026-11-11 amendment:** RA16 adds a compact MIR generator continuation for a closed suspension shape under D6.1.1v3. An iterative driver supports recursive delegation. The stackful design remains the fallback.
+
 ---
 
 ## 0. Summary
@@ -533,6 +535,27 @@ Unchanged and relied on: D6.1.3, D6.3.2, D7.2.2, D7.5.1, S7.11, S13.1–S13.2, K
 | RA13v2 | D6.1.1v2: a resident-byte budget replaces per-suspension count eviction; pressure and collections batch image compaction, resume restores in place, and abandoned recovery chains can be read from the image | user-authorized 2026-11-10; implementation and qualification in the jq optimization plan |
 | RA14 | One mapping per activation: 2 MB stack + 512 KB root + 512 KB number segments | implemented; size is RA-O5 |
 | RA15 | The GC root visitor walks the resume chain and strong activations only | implemented |
+| RA16 | A synchronous MIR generator whose only suspension is a final `yield` or `yield*` may return from JIT code and resume from a precisely traced compact heap frame; every other shape uses an activation | proof of concept, 2026-11-11 |
+
+### RA16 — Compact terminal generators (2026-11-11)
+
+**D6.1.1v3, D6.1.3, D8.4.4, D8.4.5.** jqjs creates hundreds of thousands of
+simultaneously unfinished generator instances. A native activation reserves a
+stack and side segments even when the only suspension is the final statement.
+The MIR admission accepts synchronous definitions with simple parameters, no
+earlier yield, and a final expression statement that is `yield` or `yield*`.
+Earlier statements run once in JIT code. At the final yield the JIT saves the
+value or delegate iterator record and returns. The carrier retains the
+callee, receiver, argument snapshot and captured environment; its compact
+frame holds the resume position and saved iterator/value. The GC traces that
+state precisely. Intrinsic `next`, `return` and `throw` delegation between
+compact generators uses a trampoline: transient traced parent links replace
+recursive native calls. Results unwind through the same observable protocol
+checks used by activations. Native stack use stays bounded across an intrinsic
+compact chain; the heap still holds one frame per unfinished generator.
+Opaque callback recursion can switch to an activation from the saved iterator
+record without replaying the JIT prelude. No native frame survives a compact
+yield. Definitions outside the admission use the existing activation backend.
 
 ### RA13v2 — Resident-page budgeting (2026-11-11)
 
