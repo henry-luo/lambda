@@ -15,7 +15,7 @@ const resultColumns = [
     'lambda_snapshot', 'browser_snapshot', 'lambda_signal', 'lambda_log',
     'lambda_output_log', 'lambda_load_ok', 'browser_http_status', 'browser_final_url',
     'browser_retry_after', 'lambda_attempt_utc', 'browser_attempt_utc',
-    'lambda_timeout_ms', 'browser_timeout_ms',
+    'lambda_timeout_ms', 'browser_timeout_ms', 'browser_log',
 ];
 
 function positiveInteger(value, name) {
@@ -178,7 +178,7 @@ async function runLambdaRender(page, outputPath, options, snapshotsDir) {
         outputLog: path.basename(outputLog), log: path.basename(engineLog)};
 }
 
-async function captureBrowser(browser, pageCase, outputPath, options) {
+async function captureBrowser(browser, pageCase, outputPath, options, diagnosticPath) {
     const start = process.hrtime.bigint();
     const deadline = Date.now() + options.navigationTimeoutMs;
     let tab;
@@ -187,8 +187,19 @@ async function captureBrowser(browser, pageCase, outputPath, options) {
     let finalUrl = '';
     let retryAfter = '';
     const documentResponses = [];
+    const pending = new Set();
+    const failedRequests = [];
+    const lifecycle = [];
+    let result;
     try {
         tab = await browser.newPage();
+        tab.on('request', (request) => pending.add(request));
+        tab.on('requestfinished', (request) => pending.delete(request));
+        tab.on('requestfailed', (request) => {
+            pending.delete(request);
+            if (failedRequests.length < 64) failedRequests.push({url: request.url(),
+                type: request.resourceType(), error: request.failure()?.errorText});
+        });
         // Script-initiated redirects can supersede goto's response. Keep the
         // main document's final response rather than accepting an earlier 200.
         tab.on('response', (response) => {
@@ -206,11 +217,15 @@ async function captureBrowser(browser, pageCase, outputPath, options) {
         let loading = false;
         const stopped = new Set();
         session.on('Page.frameStartedLoading', ({frameId}) => {
-            if (frameId === mainFrame) loading = true;
+            if (frameId === mainFrame) {
+                loading = true;
+                lifecycle.push({event: 'started', elapsedMs: elapsedMs(start)});
+            }
         });
         session.on('Page.frameStoppedLoading', ({frameId}) => {
             if (frameId !== mainFrame) return;
             loading = false;
+            lifecycle.push({event: 'stopped', elapsedMs: elapsedMs(start)});
             for (const resolve of stopped) resolve();
         });
         await tab.setViewport({...viewport, deviceScaleFactor: 1});
@@ -241,7 +256,7 @@ async function captureBrowser(browser, pageCase, outputPath, options) {
         retryAfter = response.headers()['retry-after'] || '';
         if (status < 200 || status >= 300) throw new Error(`HTTP ${status}`);
         await tab.screenshot({path: outputPath, type: 'png', timeout: options.navigationTimeoutMs});
-        return {ok: hasPng(outputPath), error: hasPng(outputPath) ? '' : 'invalid browser PNG',
+        result = {ok: hasPng(outputPath), error: hasPng(outputPath) ? '' : 'invalid browser PNG',
             elapsedMs: elapsedMs(start), timeoutMs: options.navigationTimeoutMs, status, finalUrl, retryAfter};
     } catch (error) {
         const documentResponse = documentResponses.at(-1);
@@ -250,12 +265,37 @@ async function captureBrowser(browser, pageCase, outputPath, options) {
             finalUrl = documentResponse.url();
             retryAfter = documentResponse.headers()['retry-after'] || '';
         }
-        return {ok: false, error: error.message, elapsedMs: elapsedMs(start),
+        result = {ok: false, error: error.message, elapsedMs: elapsedMs(start),
             timeoutMs: options.navigationTimeoutMs, status, finalUrl, retryAfter};
     } finally {
-        if (session) await session.detach().catch(() => {});
-        if (tab) await tab.close().catch(() => {});
+        try {
+            if (diagnosticPath) {
+                // Keep origin evidence without retaining cookies or authorization headers.
+                const headerNames = ['server', 'content-type', 'location', 'retry-after',
+                    'cf-mitigated', 'cf-ray', 'x-cache', 'x-sucuri-block'];
+                const responses = documentResponses.map((response) => ({
+                    url: response.url(), status: response.status(), remote: response.remoteAddress(),
+                    headers: Object.fromEntries(headerNames.filter((name) => name in response.headers())
+                        .map((name) => [name, response.headers()[name]])),
+                }));
+                const state = session ? await session.send('Runtime.evaluate', {
+                    expression: 'JSON.stringify({url:location.href,readyState:document.readyState,' +
+                        'title:document.title,text:document.body?.innerText.slice(0,4096)||""})',
+                    returnByValue: true, timeout: 1000,
+                }, {timeout: 1500}).catch(() => null) : null;
+                const documentState = state?.result?.value ? JSON.parse(state.result.value) : null;
+                fs.writeFileSync(diagnosticPath, JSON.stringify({label: pageCase.label, url: pageCase.url,
+                    attemptedUtc: new Date().toISOString(), ...result, responses, lifecycle, document: documentState,
+                    failedRequests, pendingRequests: [...pending].slice(0, 64)
+                        .map((request) => ({url: request.url(), type: request.resourceType()})),
+                }, null, 2) + '\n');
+            }
+        } finally {
+            if (session) await session.detach().catch(() => {});
+            if (tab) await tab.close().catch(() => {});
+        }
     }
+    return {...result, log: diagnosticPath ? path.basename(diagnosticPath) : ''};
 }
 
 function updateRow(row, tool, result) {
@@ -274,6 +314,7 @@ function updateRow(row, tool, result) {
         row.browser_http_status = result.status;
         row.browser_final_url = result.finalUrl;
         row.browser_retry_after = result.retryAfter;
+        row.browser_log = result.log;
     }
 }
 
@@ -334,7 +375,8 @@ async function main(args = process.argv.slice(2)) {
                     }
                     const result = tool === 'lambda'
                         ? await runLambdaRender(item.page, staged, options, snapshotsDir)
-                        : await captureBrowser(browser, item.page, staged, options);
+                        : await captureBrowser(browser, item.page, staged, options,
+                            path.join(snapshotsDir, `${item.page.label}-browser.json`));
                     updateRow(row, tool, result);
                     promoteSnapshot(staged, destination, result.ok);
                     persist();

@@ -3,6 +3,16 @@
 `pages.csv` is the shared URL list used by `test_radiant_online_view_gtest` and
 the snapshot capture script. Its columns are the case label, page URL, and
 whether the online-view smoke test expects linked resources.
+The online GTest discovers one `Loads_<label>` test per catalog row, so labels
+stay attached to their URLs when rows are removed or reordered. Generated
+labels can have gaps. For example, filter one case with
+`--gtest_filter=RadiantOnlineViewTest.Loads_lua_pil`.
+
+On 2026-11-12, 94 of the 95 unresolved URLs were removed using the existing
+Chromium headless-shell failures, leaving 1,067 pages. PIL remains because
+Chromium loads it. The removal audit and previous results are preserved under
+`snapshots/removed_pages-20261112.json` and
+`snapshots/removed_capture_results-20261112.csv`.
 
 From the repository root, run:
 
@@ -36,6 +46,11 @@ document-load completion and write a complete PNG before the new image is
 promoted to `-lambda.png`. Failed images use `.failed.png`; they are diagnostic
 artifacts. Chromium captures after the final main document loads, including
 script redirects, without waiting for recurring analytics requests to stop.
+Each Chromium attempt replaces its `-browser.json` diagnostic, referenced by the
+manifest's `browser_log` column. It records document responses, selected server
+headers, load events, failed/pending resources and a bounded visible-text
+excerpt. Cookie and authorization headers are omitted. This distinguishes an
+origin challenge or rejection from a page waiting on a resource.
 
 Focused capture checks use a local HTTP server and Puppeteer's headless shell:
 

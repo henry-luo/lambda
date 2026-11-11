@@ -21,7 +21,12 @@ let origin;
 before(async () => {
     server = http.createServer((request, response) => {
         if (request.url === '/denied') {
-            response.writeHead(403).end('denied');
+            response.writeHead(403, {'Set-Cookie': 'private=value', 'Server': 'local-origin'}).end('denied');
+        } else if (request.url === '/slow') {
+            response.setHeader('Content-Type', 'text/html');
+            response.end('<body>waiting<img src="/held-resource"></body>');
+        } else if (request.url === '/held-resource') {
+            setTimeout(() => response.end('image'), 1000);
         } else if (request.url === '/redirect') {
             response.setHeader('Content-Type', 'text/html');
             response.end('<script>location.replace("/denied")</script>');
@@ -57,10 +62,30 @@ test('loaded pages with recurring network traffic still produce a browser PNG', 
 
 test('an HTTP rejection cannot become a successful page snapshot', async () => {
     const output = path.join(scratch, 'denied.png');
+    const diagnosticPath = path.join(scratch, 'denied.json');
     const result = await captureBrowser(browser, {url: `${origin}/denied`}, output,
-        {navigationTimeoutMs: 2500});
+        {navigationTimeoutMs: 2500}, diagnosticPath);
     assert.equal(result.ok, false);
     assert.equal(result.status, 403);
+    assert.equal(fs.existsSync(output), false);
+    assert.equal(result.log, 'denied.json');
+    const diagnostic = JSON.parse(fs.readFileSync(diagnosticPath));
+    assert.equal(diagnostic.responses[0].status, 403);
+    assert.equal(diagnostic.responses[0].headers.server, 'local-origin');
+    assert.equal(diagnostic.document.text, 'denied');
+    assert.equal(fs.readFileSync(diagnosticPath, 'utf8').includes('private=value'), false);
+});
+
+test('navigation timeout diagnostics retain the pending resource without accepting an unloaded page', async () => {
+    const output = path.join(scratch, 'slow.png');
+    const diagnosticPath = path.join(scratch, 'slow.json');
+    const result = await captureBrowser(browser, {url: `${origin}/slow`}, output,
+        {navigationTimeoutMs: 250}, diagnosticPath);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 200);
+    const diagnostic = JSON.parse(fs.readFileSync(diagnosticPath));
+    assert.equal(diagnostic.document.readyState, 'interactive');
+    assert.equal(diagnostic.pendingRequests.some(({url}) => url.endsWith('/held-resource')), true);
     assert.equal(fs.existsSync(output), false);
 });
 
