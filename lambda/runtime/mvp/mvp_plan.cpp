@@ -407,7 +407,10 @@ bool mvp_index_key(LambdaMvpModule* m, AstNode* node, int depth) {
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         MvpFunction* function = mvp_function(m, ast_direct_call_function(call));
-        if (!function || function->imported || function->ast->captures || function->method_owner ||
+        // a Lambda `fn` is pure wherever it was compiled (S12.1.1v3), so a sibling
+        // a satellite reaches through its boxed entry qualifies on the same AST
+        // facts; only a JS export has no Lambda AST to check.
+        if (!function || function->js_export_name || function->ast->captures || function->method_owner ||
                 function->ast->is_async || function->ast->is_generator ||
                 lambda_type_func_is_proc(function->ast->type) || mvp_variadic_function(function) ||
                 mvp_function_binder_count(function) || mvp_call_argument_count(call) != function->abi.param_count)

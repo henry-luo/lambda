@@ -1679,6 +1679,13 @@ channel).
 
 *Remaining (needs a ruling):* whether a write error from a plain `pn` must escape a **discarded statement-position call in its caller**, rather than being available as the call's result. This separate caller-boundary policy is not decided by repairing the originating store.
 
+
+<a id="lr12-45"></a>**LR12-45 · A member place passed to a Lambda `pn` beside container parameters is snapshotted, so every write copies · OPEN (found 2026-11-11)**
+
+A `var` argument that is a member or index place (`f(s.layer, table)`) is borrowed in place only in a narrow shape. MVP requires an "exclusive place": pure argument expressions, exactly one `var` parameter, and no other parameter whose contract may hold a container (`exclusive_place` in `mvp_mir.cpp`). T0 snapshots the home whenever the callee has any plain container or untyped parameter (`ast_call_has_plain_container_parameter`, `snapshot_home` in `interp.cpp`). Outside that shape the leaf is captured (`cow_capture_value`), so the callee's first write copies it, on every call. S9.1.2/S9.1.3 require plain arguments to be snapshots; they do not require the place to be captured when no plain argument can alias it. Native `var` procedures already use the precise rule: capture only plain arguments that read a borrowed root or call a definition that might return one (**D7.6.3**, `var_alias_capture_mask`).
+
+*Evidence:* a probe passing `s.layer` to a module `pn into(var l, table)` copied the touched tile on each of 4 calls (JIT), while a bare binding stayed in place. `lambda.paint` therefore calls `radiant.paint_stroke` directly on `s.layer` (Lambda_Pkg_Paint PT7); `procart.watercolor`'s `brush_cells` walks its disc from scalars for the same reason (comment at its definition). *Fix direction:* apply the native rule to Lambda `pn` place borrows on both tiers. Not a semantics change: only performance is affected.
+
 ## 13. Schema validator (LR13)
 
 
