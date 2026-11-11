@@ -1885,13 +1885,30 @@ static bool script_scheduler_enqueue(JsScriptTaskCollection* collection,
 class DocumentCurrentScriptScope {
 public:
     DocumentCurrentScriptScope(Runtime* runtime, JsScriptTask* task)
-        : document(nullptr), previous(nullptr), previous_cursor(nullptr), active(false) {
+        : roots(2), pending_head(roots, ItemNull), moving_child(roots, ItemNull), document(nullptr), previous(nullptr),
+          previous_cursor(nullptr), head(nullptr), active(false), ready(true) {
         if (!runtime || !task || task->kind != JS_SCRIPT_TASK_CLASSIC) return;
         DomDocument* doc = (DomDocument*)runtime->dom_doc;
         DomElement* script = doc
             ? dom_find_element_for_source(doc->root, task->script_element) : nullptr;
         if (!doc || !script) return;
         document = doc;
+        if (task->parser_inserted && task->scheduling == JS_SCRIPT_SCHED_POST_DOM &&
+                !doc->js.current_script && script->parent && script->parent->is_element() &&
+                script->parent->as_element()->tag_id == MARKUP_NAME_HEAD && script->next_sibling) {
+            // parser-blocking head scripts must append before the unparsed head tail.
+            head = script->parent->as_element();
+            DomElement* fragment = dom_document_fragment_create(doc);
+            if (!fragment || !roots.valid()) { ready = false; return; }
+            pending_head.set(dom_wrap_element(fragment));
+            while (DomNode* next = script->next_sibling) {
+                moving_child.set(dom_wrap_element(next));
+                if (!dom_parser_move_child(fragment, next)) {
+                    ready = false;
+                    return;
+                }
+            }
+        }
         previous = dom_document_swap_current_script(document, script);
         previous_cursor = doc->js.write_cursor;
         doc->js.write_cursor = script;
@@ -1903,13 +1920,30 @@ public:
             dom_document_swap_current_script(document, previous);
             if (!previous) ((DomDocument*)document)->js.write_cursor = previous_cursor;
         }
+        if (head && pending_head.get().item != ItemNull.item) {
+            DomElement* fragment = (DomElement*)dom_unwrap_element(pending_head.get());
+            while (DomNode* next = fragment->first_child) {
+                moving_child.set(dom_wrap_element(next));
+                if (!dom_parser_move_child(head, next)) {
+                    log_error("script_parser_head: could not resume the pending head nodes");
+                    break;
+                }
+            }
+        }
     }
 
+    bool valid() const { return ready; }
+
 private:
+    RootFrame roots;
+    Rooted<Item> pending_head;
+    Rooted<Item> moving_child;
     void* document;
     void* previous;
     DomNode* previous_cursor;
+    DomElement* head;
     bool active;
+    bool ready;
 };
 
 static void script_task_report_load_failure(Runtime* runtime, JsScriptTask* task,
@@ -1990,6 +2024,7 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         uint64_t result_home = 0;
         Item result;
         DocumentCurrentScriptScope current_script(runtime, task);
+        if (!current_script.valid()) return false;
         if (task->kind == JS_SCRIPT_TASK_MODULE) {
             // each inline module owns a distinct record; URL resolution and
             // import.meta use the document snapshot behind its task label.

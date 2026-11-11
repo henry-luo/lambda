@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<body>
+<div id="result">pending</div>
+<script>
+// cookie-gated initialization must run when the viewer owns a cookie service.
+const descriptor = Object.getOwnPropertyDescriptor(Navigator.prototype, 'cookieEnabled');
+const enabled = navigator.cookieEnabled;
+let branded = false;
+try { descriptor.get.call({}); } catch (error) { branded = error instanceof TypeError; }
+navigator.cookieEnabled = false;
+document.getElementById('result').textContent =
+    enabled === true && navigator.cookieEnabled === true &&
+    descriptor.set === undefined && descriptor.enumerable && descriptor.configurable &&
+    !Object.prototype.hasOwnProperty.call(navigator, 'cookieEnabled') && branded
+        ? 'cookie initialization complete' : 'FAIL';
+</script>
+</body>
+</html>

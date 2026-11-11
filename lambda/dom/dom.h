@@ -47,6 +47,9 @@ void dom_set_document(void* dom_doc);
  */
 void* dom_get_document(void);
 
+// reports whether the active browsing context accepts cookie changes.
+bool dom_cookies_enabled(void);
+
 // Queue the iframe's load event after its navigated document is ready.
 void dom_iframe_navigation_complete(void* iframe);
 void dom_dispatch_pending_resource_loads();
@@ -193,6 +196,8 @@ bool dom_is_html_canvas_element(Item item);
 // detached DOM nodes must use these bridges so the view tree and the backing
 // Lambda Element stay in lockstep (D6.3.3).
 Item dom_append_child_bridge(void* parent, Item child);
+// Internal parser staging updates both trees without publishing a script mutation.
+bool dom_parser_move_child(void* parent, void* child);
 Item dom_remove_child_bridge(void* parent, Item child);
 bool dom_remove_backed_child(struct DomElement* parent, struct DomNode* child);
 Item dom_insert_before_bridge(void* parent, Item new_child, Item reference_child);
