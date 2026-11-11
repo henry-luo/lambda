@@ -582,7 +582,7 @@ procedure's bound is not covariance (S9.1.3v4).
   `stroke(var layer, …)` and `feed(var session, …)` call it on their own place
   (Lambda_Pkg_Paint PT7). A Lambda `pn` that receives a member place beside
   container parameters snapshots the leaf, so the in-place write must not pass
-  through such a hop.
+  through such a hop (LR12-45).
 - *Tests:* `test/lambda/proc/native_var_proc.ls` covers binding and place
   homes, snapshots, parity with the pure form, a typed binding and a
   rejected budget, on three tiers and under forced GC.
