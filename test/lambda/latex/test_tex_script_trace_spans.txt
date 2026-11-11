@@ -1,0 +1,22 @@
+{
+  issue: null,
+  spans: [{
+      value: "\\def\\x{A}",
+      start: 0,
+      end: 9,
+      first: 1,
+      last: 5
+    }],
+  next: [["B", 6, 19]]
+}
+{
+  issue: null,
+  spans: [{
+      value: "\\def\\m{(1,2)}",
+      start: 0,
+      end: 13,
+      first: 1,
+      last: 9
+    }],
+  next: [["(", 4, 7], ["1", 5, 8], [",", 6, 9], ["2", 7, 10], [")", 8, 11], ["C", 11, 16]]
+}

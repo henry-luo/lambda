@@ -1,0 +1,63 @@
+{
+  case: "main declaration",
+  issue: null,
+  script: "\\usepackage{xcolor}",
+  native: "\\usepackage{xcolor}",
+  matches: true
+}
+{
+  case: "main require",
+  issue: null,
+  script: "\\RequirePackage{xcolor}",
+  native: "\\RequirePackage{xcolor}",
+  matches: true
+}
+{
+  case: "macro name",
+  issue: null,
+  script: "\\def\\p{xcolor}\\usepackage{xcolor}",
+  native: "\\def\\p{xcolor}\\usepackage{xcolor}",
+  matches: true
+}
+{
+  case: "macro command",
+  issue: null,
+  script: "\\def\\load{\\RequirePackage{xcolor}}\\usepackage{xcolor}",
+  native: "\\def\\load{\\RequirePackage{xcolor}}\\usepackage{xcolor}",
+  matches: true
+}
+{
+  case: "options",
+  issue: null,
+  script: "\\RequirePackage[draft]{xcolor}",
+  native: "\\RequirePackage[draft]{xcolor}",
+  matches: true
+}
+{
+  case: "duplicate",
+  issue: null,
+  script: "\\usepackage{xcolor}\\usepackage{xcolor}",
+  native: "\\usepackage{xcolor}\\usepackage{xcolor}",
+  matches: true
+}
+{
+  case: "empty",
+  issue: null,
+  script: "\\usepackage{}",
+  native: "\\usepackage{}",
+  matches: true
+}
+{
+  case: "multiple",
+  issue: null,
+  script: "\\usepackage{xcolor,foo}",
+  native: "\\usepackage{xcolor,foo}",
+  matches: true
+}
+{
+  case: "local package",
+  issue: null,
+  script_has_declaration: true,
+  native_has_declaration: true,
+  script_echoes_foreign_require: false
+}

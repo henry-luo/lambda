@@ -1,0 +1,9 @@
+{
+  source: [11, 22, 33, 77, 44],
+  iteration: [11, 22, 33, 77, 44],
+  spread: [11, 22, 33, 77, 44],
+  nested: [11, 22, 33, 77, 44],
+  mixed: [1, 11, 22, 33],
+  override: 12,
+  expected: true
+}

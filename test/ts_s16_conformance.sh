@@ -568,4 +568,10 @@ run R "retired typed callable caret" 'type F = fn () int^error\n'
 run R "retired grouped error caret" 'fn f() int^(error | null) => 1\n'
 run A "broad callable outcome" 'type F = fn () int^\n'
 run A "union callable outcome" 'type F = fn () int | error\n'
+# S16.8.10: computed element tags use a bracket-delimited expression.
+run A "computed element variable" 'let t = "panel"; <[t]>\n' 'computed_tag'
+run A "computed element expression" '<[if (3 > 2) "yes" else "no"] id: 1, "x">\n' 'computed_tag'
+run A "nested computed elements" '<["outer"] <["inner"]>>\n' 'computed_tag'
+run R "empty computed element tag" '<[]>\n'
+run R "unterminated computed tag" '<["panel">\n'
 echo "pass=$pass fail=$fail"

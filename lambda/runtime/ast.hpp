@@ -21,6 +21,11 @@ extern "C" {
 #include "compiler_timing.hpp"
 #include "type_contract.hpp"
 
+typedef struct AstElementNode : AstMapNode {
+    AstNode *content;  // first content node
+    AstNode *tag_expr; // computed tag, or null for a literal name
+} AstElementNode;
+
 bool has_current_item_ref(AstNode* node);
 
 // S11.4.8v2: nested binder sites establish slots before reference admission.
@@ -312,6 +317,8 @@ static inline bool ast_node_originates_defect(AstNode* node) {
         return ((AstObjectLiteralNode*)node)->deferred_fields != 0;
     case AST_NODE_MAP:
         return ((AstMapNode*)node)->has_computed_key;
+    case AST_NODE_ELEMENT:
+        return ((AstElementNode*)node)->tag_expr != NULL;
     default:
         return false;
     }
@@ -1002,9 +1009,6 @@ static inline AstListNode* ast_binding_scope_block(const AstIndex* index,
     return NULL;
 }
 
-typedef struct AstElementNode : AstMapNode {
-    AstNode *content;  // first content node
-} AstElementNode;
 
 // ==================== String/Symbol Pattern AST Nodes ====================
 

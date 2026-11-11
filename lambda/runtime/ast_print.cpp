@@ -255,6 +255,10 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     case AST_NODE_ELEMENT: {
         log_debug("[elmt expr:%s]", type_name);
         AstElementNode* elmt_node = (AstElementNode*)node;
+        if (elmt_node->tag_expr) {
+            print_label(indent + 1, "computed tag:");
+            print_ast_node(script, elmt_node->tag_expr, indent + 1);
+        }
         AstNode *elmt_item = elmt_node->item;
         while (elmt_item) {
             print_label(indent + 1, "attr:");

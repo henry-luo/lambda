@@ -2200,6 +2200,20 @@ public-entry migration, formal ruling updates and full parity remain open;
 the earlier authorization blocker is removed.
 
 
+## Member access on a `file` binding — 2026-11-11
+
+**Status:** OPEN — semantics and cause unconfirmed. **Observed:** macOS debug
+`lambda.exe`, interpreter and JIT. **TeX-port blocker:** no; the script uses a
+different local name.
+
+A script containing `let file = {x: 1}; file.x` prints `file.x`, while
+`let keyword = {x: 1}; keyword.x` prints `1`; evaluating `file` itself prints
+the map. In the TeX prototype this caused a later map spread to fail when it
+used `file.state`. Reproduce with these two expressions through `lambda.exe`
+under each `LAMBDA_EXEC_BACKEND`. Determine whether `file.x` is intentionally
+a different syntactic form and whether accepting the binding requires a
+diagnostic or a member-access resolution change.
+
 ## Workspace-sync observation of member access on a `file` binding — 2026-11-11
 
 **Status:** OPEN — semantics and cause unconfirmed. This is independent evidence
@@ -2231,3 +2245,785 @@ The peer task changed neither the TeX modules nor their goldens; the mismatch
 is outside its sync-module paths and does not block the focused peer acceptance
 gates. This report does not assess the separately recorded package-echo selection
 fix. S1.8 and D10.2.2 remain the applicable input boundary.
+
+
+## JIT rejects dynamic stream map in TeX package loader — 2026-11-11
+
+**Status:** OPEN — cause unconfirmed. **Observed:** macOS debug `lambda.exe`,
+interpreter succeeds but JIT compilation reports E501, `unsupported
+representation conversion in mvp_*_start_package: any (0) from 1 to 8`.
+**TeX-port blocker:** no; the loader explicitly validates its dynamic stream
+value with `is map` before calling `stream.configure`. LR07-58 reports a
+similar conversion diagnostic, but a common cause is not established.
+
+To reproduce the failing case, copy `lmd/package/doc/latex/tex_engine/` to
+a temporary directory, and in `expansion.ls` replace the guarded
+`let configured = if (source_input is map) stream.configure(source_input,`
+call and its `else null` with the unguarded
+`let configured = stream.configure(source_input, ...)^;`, keeping its two
+remaining arguments unchanged. Import that copied expansion module and run
+`expansion.expand(stream.from_reader(reader.reader("x")), 100)^` with
+`LAMBDA_EXEC_BACKEND=jit`; compilation rejects the module before execution.
+The same module and input execute under `LAMBDA_EXEC_BACKEND=interp`. The
+guard validates the runtime boundary and remains in the shipped prototype;
+the unguarded case must remain visible until the compiler defect or the
+reason for rejecting it is established.
+
+
+## Computed element names needed by the script LaTeX digester — 2026-11-11
+
+**Status:** FIXED — the user selected `<[tag] ...>` and S16.8.10 now rules
+computed element tags. Both parser conformance suites and interpreter/JIT
+regression tests pass, including forced precise garbage collection. The script
+LaTeX digester can now construct arbitrary named nodes. **Dependent task
+blocked:** no for element construction; full LaTeX parity remains unfinished.
+
+The native LaTeX digester builds an element whose tag is the input command or
+environment name (for example `\\custom` produces `<custom ...>`). The script
+prototype can construct only its explicitly named literal tags and reports an
+unknown command as unsupported. Reproduce the missing general construction by
+running `let tag = "custom"; <[tag]>`: the current parser rejects it with E100,
+`expected an element tag` before the fix. S16.8.9v2 covers computed *attribute keys*, not tags;
+`vibe/Lambda_Pkg_Readability.md` RD-O1 records computed tags as needing a user
+ruling at the time. The user's requested full script TeX/LaTeX port needs a general
+construction operation that preserves element value, attribute, content and
+precise-rooting semantics. A computed-tag literal and a runtime constructor are
+possible designs; S16.8.10 adopts the computed-tag literal.
+
+
+## Decimal `trunc` narrowed through binary floating point — 2026-11-11
+
+**Status:** FIXED. **TeX-port blocker:** no after the fix; this defect blocked
+accurate 16-significant-digit expl3 floating-point evaluation.
+
+On interpreter and JIT, `let x = decimal("9999999999999999.9")^;
+[string(trunc(x)), type(trunc(x))]` returned `["1e+16", float]` instead of
+`["9999999999999999", decimal]`. Similarly, truncating decimal
+`-0.999999999999999999` returned `-1` instead of `-0`. The scalar `trunc`
+implementation converted its argument through binary double, losing decimal
+precision and sometimes rounding across an integer boundary.
+
+The fix uses the shared numeric rounding implementation and `decimal_trunc`,
+preserving decimal values and supporting vectors through the shared numeric
+vector path. `test/lambda/trunc_decimal_precision.ls` covers precision, signs,
+null, vectors and dynamic types; it passes on both backends with forced precise
+garbage collection and freed-memory poisoning. The existing `numeric_sys_func`,
+`vector_sys_func` and `typed_array_vectorized_math` goldens also pass on both
+backends. S7.1.1v3 covers null propagation and S7.10.5v3 covers sequence input
+and array output.
+
+
+## Expanded parenthesized command argument source mapping — 2026-11-11
+
+**Status:** OPEN — the source-provenance gap is confirmed; a complete mapping
+strategy remains to be designed. **Full script TeX-port blocker:** yes, for AST
+parity on expanded parenthesized arguments. The production native parser is
+unaffected; the experimental digester reports these cases as unsupported.
+
+Expand `\def\arg{(1,2)}\begin{document}\mystery\arg\end{document}` with
+`profile.expand_with_kernel` and `echo_definitions: true`, then compare
+`digest.digest(expanded).ast` to `parse(source, {type: "latex"})`. The native
+AST puts `(1,2)` in a `parenthesized` argument of `mystery`, mapped to the
+invocation; the expansion tokens point at the macro definition and have
+`direct: false`. A second reproduction is `\def\arg{1,2}\begin{document}
+\mystery(\arg)\end{document}`: only the contents are expanded, but native still
+recognizes a coordinate argument and records its expanded raw value. Using only
+original source slices misclassifies both examples as ordinary text and cannot
+produce the native argument descriptor. The script digester must retain enough
+invocation provenance and expanded text to reproduce native raw values and
+source offsets without violating S1.8 or precise source ownership. The staged
+port explicitly returns `latex-digest-unsupported` for these cases until then;
+its regression tests retain these reproductions.
+
+
+## Script spacing reconstruction lost separators and comment-adjacent whitespace — 2026-11-11
+
+**Status:** FIXED for the tested spacing and control-space forms in the
+experimental script digester. **Full TeX-port blocker:** no for these cases;
+full source-provenance and LaTeX parity remain open.
+
+With `\def\spaceout{\quad}\begin{document}A\spaceout B\end{document}`
+and `echo_definitions: true`, native parsing yields `"A"`, `quad`, `" B"`;
+the script digester previously yielded `"A"`, `quad`, `"B"`. The expanded
+`quad` token is not source-adjacent to the following letter: native TeX
+reconstruction inserts a separator to keep a control word and following ASCII
+letter distinct. This is not simply copied invocation whitespace: two spaces
+at the macro call still produce one separator, while following punctuation
+needs none. The digester now follows that reconstruction rule.
+
+The same investigation found that direct spacing commands and control spaces
+followed by a comment could lose whitespace around the comment. The shared
+source-gap scanner now retains that whitespace while matching native comment
+line-ending handling, including CRLF. The full script digester goldens pass
+interpreter and JIT, with native-AST comparisons for macro expansion, following
+letters, punctuation and groups, and LF/CRLF comments. The separate expanded
+parenthesized-argument source-mapping issue remains open.
+
+## Script TeX control-space primitive was unsupported — 2026-11-11
+
+**Status:** FIXED in the experimental script engine. **Full TeX-port blocker:**
+no for the tested control-space forms; full TeX and LaTeX parity remains open.
+
+Expanding `A\ B` with the script profile previously stopped with
+`tex-unsupported-primitive` for control space, although native TeX keeps the
+primitive in the expanded stream and native LaTeX parses it as a literal space.
+The primitive was recognized in the registry but lacked an execution branch.
+The script expansion step now preserves the control token, including `\let`
+aliases; the digester consumes a literal control space and recovers direct
+following whitespace from source. New TeX expansion token tests and
+`test/lambda/latex/test_tex_script_control_space.ls` cover direct, repeated,
+macro-expanded, and formatted cases. The staged expansion and digester
+goldens pass interpreter and JIT; the control-space AST cases match native in
+both backends.
+
+
+## Macro-generated inline formatting uses definition offset — 2026-11-11
+
+**Status:** FIXED for the tested inline-formatting cases. The stream records
+fresh main-file reads and synthetic formatting tokens carry the current read
+offset; source reconstruction for generic commands remains open separately.
+The production native parser is unaffected.
+
+Expand `\def\u{\textbf{Hi}}\begin{document}\u\end{document}` using
+`profile.expand_with_kernel` with `echo_definitions: true`, then compare
+`digest.digest(expanded).ast` against `parse(source, {type: "latex"})`. The
+script digester previously returned a formatting element whose source offset
+points at the command in the macro definition, whereas native reconstruction
+maps the expanded command to its invocation. The affected synthetic token has
+`direct: false` and retains its definition offset. The stream now records the
+last fresh main-file read without resetting it when tokens are pushed back or
+foreign files are read; the digester uses that position for synthetic inline
+formatting. `test_tex_script_provenance` compares nested and repeated macros,
+arguments, lookahead, case changes and non-ASCII text against native ASTs;
+`test_tex_script_provenance_package` compares offsets from a local package.
+The installed tests and existing TeX script suites pass interpreter and JIT,
+including focused forced-GC checks. Expanded parenthesized and foreign generic
+command source mappings remain open.
+
+
+## Script TeX underline and overline primitives were unsupported — 2026-11-11
+
+**Status:** FIXED for direct and tested macro-generated text underline, and
+tested math underline/overline forms. **Full TeX-port blocker:** no for the
+covered forms; generic source reconstruction remains open.
+
+The experimental profile stopped with `tex-unsupported-primitive` for
+`\underline{Hello}` and `$\overline{x}$`, although native TeX retains those
+primitives for the LaTeX digester. They were recognized in the primitive
+registry but lacked execution branches. The script engine now preserves the
+primitive tokens and aliases; the digester builds native-compatible text
+underline and math accent nodes. `test/lambda/latex/test_tex_script_underline`
+covers nesting, empty and spaced groups, math expressions, primitive aliases,
+and macro-generated formatting cases. Expansion and digester goldens pass
+interpreter and JIT, and supported ASTs
+match native parsing on both backends.
+
+
+## Empty TeX macro argument inserts a null token — 2026-11-11
+
+**Status:** FIXED for tested empty required and optional macro arguments.
+**Full script TeX-port blocker:** no for those forms. Native TeX is unaffected.
+
+Before the fix, expanding `\def\a#1{[#1]}\a{}` in the script engine failed with
+E201, `map literal spread requires a map-like value or element`. The macro
+substitution comprehension places a conditional around `*args[t.value]`; an
+empty argument becomes a null item, which `stored_tokens` then tries to spread
+as a map. A standalone reproduction is `let a = [[]]; [for (t in [0]) if
+(true) *a[t] else t]`, which produces `[null]` on the observed interpreter.
+The fix spreads the selected token array outside the conditional so that the
+empty argument contributes zero tokens. The expression's behavior is consistent
+with collapsed list values under S2.5.5v2; no runtime defect is asserted. Both
+TeX and expl3 macro substitutions use this shared helper. The installed
+`test_tex_script_provenance` covers empty, repeated and mixed arguments in both
+backends; existing TeX and expl3 goldens also pass.
+
+## TeX case shifting retains direct source flags — 2026-11-11
+
+**Status:** FIXED for the tested case-shift source mappings. **Full script
+TeX-port blocker:** no for those forms. Native TeX is unaffected.
+
+For `\begin{document}\uppercase{\textbf{Hi}}\end{document}`, the native
+AST reports the `textbf` source offset at the last main-file token read by
+the case operation, while the script previously used the command's original
+position. Native `case_shift` backs up a stored copy of the scanned token list,
+and `copy_stored` clears direct-source flags; the script shifted the list and
+pushed it without clearing them. The fix stores the resulting tokens before
+pushing them, preserving TeX token values and category codes while marking their
+source as synthetic. The stream also tracks the main-file read position used
+for synthetic formatting tokens.
+`test_tex_script_provenance` compares upper and lower case, nested formatting
+and zero mappings to native in both backends.
+
+
+## Script LaTeX profile cannot load lmdnotes counter declaration — 2026-11-11
+
+**Status:** FIXED for counter expansion in the local-package fixture. The
+fixture's synthesized class declaration still blocks script AST digestion in
+the separate source-mapping issue below; the native production path remains
+available.
+
+Run `profile.expand_with_kernel` with the source from
+`test/lambda/latex/fixtures/local_packages/document.tex`, authorized local
+snapshots of `lmdreport.cls` and `lmdnotes.sty`, and an empty bundled snapshot.
+The script result previously stopped at `newcounter` in `lmdnotes.sty`; see
+`../lambda-input/temp/expl3-script/provenance-existing-fixture.out`. The script
+engine now implements register-backed declarations, global set/add/step,
+child resets, `value` and the tested counter formats. The installed
+`test_tex_script_counters` passes interpreter and JIT and compares with native
+and pdfLaTeX, keeping input LI-014's two intentional native divergences visible.
+`test_tex_script_counters_fixture` confirms expansion reaches both exercise
+numbers; AST digestion still reports the class source-mapping issue.
+`refstepcounter` currently implements numeric step/reset only; reference-label
+state remains unfinished.
+
+
+## Foreign generic command offsets use package positions — 2026-11-11
+
+**Status:** OPEN — foreign-source argument mapping is unimplemented.
+**Full script TeX-port blocker:** yes, when loaded package files emit generic
+commands. Native production parsing is unaffected.
+
+A local package containing `\mystery{Package}` and loaded by
+`\usepackage{foreign-output}\begin{document}Hi\end{document}` produces
+a native `<mystery>` whose `source_offset` and required-argument boundaries
+map to main-file offset 27. The staged script expansion/digestion instead
+returned the package-file command and group offsets 54, 62 and 71. Reproduce
+with `../lambda-input/temp/expl3-script/provenance-foreign.ls` and its captured
+local files under `../lambda-input/temp/expl3-provenance/`; evidence is in
+`provenance-foreign-generic.out` there. The command tokens are direct relative
+to their package file but their emitted bytes are synthetic relative to the
+main document. The staged digester now reports foreign generic commands as
+unsupported until reconstructed output spans and main-file offset mapping are
+available. This is related to the expanded parenthesized-argument issue.
+
+
+## Script TeX writes bypass terminal line buffering — 2026-11-11
+
+**Status:** FIXED for terminal writes and `\showtokens` in the script engine.
+Output-file streams remain separately OPEN below.
+
+Previously `\immediate\write16{}` recorded an empty message, while native
+TeX flushes no line. With `\newlinechar=64\immediate\write16{A@B}`, native
+records `A` and `B` separately while the script recorded `A@B`. The cause was
+that `write_message` directly appended `token_text` instead of honoring
+`newlinechar` and native flush rules. The script now buffers terminal output,
+only splitting newly printed text using the current newline character; writes
+and `\showtokens` flush around their output. The installed
+`test_tex_script_message_pending` compares empty writes, line breaks, changes to
+`newlinechar`, and interleaved message/write/show operations against native in
+interpreter and JIT. The earlier reproduction is in
+`../lambda-input/temp/expl3-script/message-old-interp.out`.
+
+
+## Script TeX message primitive is unsupported — 2026-11-11
+
+**Status:** FIXED for terminal output and string diagnostic codes; structured
+native diagnostic metadata remains separately OPEN. **Full script TeX-port
+blocker:** this primitive no longer blocks the tested message cases.
+
+Previously `\message{hello}` returned `tex-unsupported-primitive`, while native
+`parse("\\message{hello}", {type:"tex"})` appended `hello` to its messages.
+The registered `\errmessage` primitive also had no execution branch. Both now
+expand their arguments and use the shared terminal buffer, including native
+spacing and flush behavior; `\errmessage` adds `tex-errmessage` to script
+diagnostic codes. Installed native comparisons cover multiple messages, empty
+messages, macro and counter expansion, newline changes, Unicode, and error
+lines; they pass in interpreter and JIT. Forced-GC tests pass both tiers.
+Structured diagnostics and output-stream state remain separately OPEN.
+
+
+## Echoed TeX source spans lose token sequence boundaries — 2026-11-11
+
+**Status:** FIXED for sequence-boundary retention. The general reconstruction
+and source map remain OPEN; native production parsing is unaffected.
+
+`\def\x{A}% comment\nB` emits an echoed `source-span` followed by `B`.
+The original reader tokens have consecutive sequence numbers, but the span
+only retains byte offsets and drops its first and last sequence. Native output
+reconstruction uses those sequence boundaries to preserve intervening source
+bytes; without them, the script cannot correctly tell whether the comment and
+newline belong in the reconstructed output. `stream.end_trace` computed the
+boundaries but did not return them. It now returns the first and last sequence,
+and echoed definition spans retain them. The installed stream and trace-span
+tests cover adjacent comments, lookahead, and macro output in interpreter and
+JIT; forced-GC tests also pass. Evidence is in
+`../lambda-input/temp/expl3-script/trace-span-interp.out`.
+
+
+## Script TeX output does not retain emission origins for all tokens — 2026-11-11
+
+**Status:** OPEN — the general emitted-output provenance contract is incomplete.
+**Full script TeX-port blocker:** yes, for native-compatible reconstructed
+source offsets. Native production parsing is unaffected.
+
+For `\def\m{\quad}\begin{document}A\m B\end{document}`, native
+reconstruction inserts a space between the expanded control word and `B`. Its
+separator is mapped to the main-file read position recorded at emission. The
+script's direct `B` output token has no emission-position field; synthetic
+class declaration tokens also have no recorded main-file origin. Existing
+`read_offset` covers selected synthetic tokens processed by `step`, not all
+emission paths. A temporary reconstruction prototype therefore reports
+`tex-reconstruct-missing-origin` at this separator rather than guessing.
+Evidence: `../lambda-input/temp/expl3-script/reconstruct-tests-interp.out` and
+`counter-fixture-prefix.out` in the same directory. Native `emit_token` and
+`emit_text` record `last_main_offset` per output item; the script needs the
+same contract, including output emitted after lookahead or by package helpers.
+
+
+## Foreign RequirePackage declaration is echoed instead of synthesized — 2026-11-11
+
+**Status:** FIXED for selecting the echoed or synthesized declaration.
+Reconstructed source gaps and full offset mapping remain separately OPEN.
+Native production parsing is unaffected.
+
+In `test/lambda/latex/fixtures/local_packages/document.tex`, the captured
+`lmdnotes.sty` contains `\RequirePackage{xcolor}`. Native input emits the
+synthesized declaration `\usepackage{xcolor}`, while the script emits the
+foreign direct `RequirePackage` token and its package-file arguments. Previously the
+script's `latex_usepackage` emitted original tokens whenever the plan had no
+local loads, without checking whether a main-file source echo was valid. Native
+`do_usepackage` uses `echo_finish`, which rejects foreign source reads, and
+otherwise emits a synthesized declaration. The script now traces and validates
+the echo, synthesizing the declaration when tracing fails. Installed native
+comparisons cover direct and macro-generated commands and names, options,
+duplicates, empty names, and the local-package fixture; they pass interpreter
+and JIT, as do focused forced-GC checks. The original reproduction is in
+`../lambda-input/temp/expl3-script/reconstruct-fixture-interp.out`.
+
+## Echoed package declarations lose their consumed source gap — 2026-11-11
+
+**Status:** OPEN — the script emits the declaration's explicit tokens but
+omits whitespace consumed by its optional-version lookahead. **Full script
+TeX-port blocker:** yes, for native reconstructed text and offset parity.
+Native production parsing is unaffected.
+
+In `test/lambda/latex/fixtures/local_packages/document.tex`, native output
+preserves the newline after the direct main-file `\usepackage{amsmath}` before
+a subsequently synthesized declaration. The script emits the command and its
+argument tokens, while `optional_argument` consumes the following newline;
+the resulting output items no longer contain that source gap. Native
+`echo_finish` emits one source span extending through the consumed bytes.
+A temporary reconstruction with matching empty adapter configuration shows the
+missing newline in `../lambda-input/temp/expl3-script/reconstruct-fixture-aligned.out`.
+The same prototype also lacks the raw trailing source after `\end{document}`;
+that trailing-source behavior needs to be carried into reconstruction.
+
+
+## Script scantokens pseudo-source is unavailable to reconstruction — 2026-11-11
+
+**Status:** FIXED for pseudo-source retention. General reconstructed output
+and source mapping remain OPEN. Native production parsing is unaffected.
+
+For `\begin{document}\scantokens{\textbf{Hi}}\end{document}`, native
+expanded text contains `\textbf {Hi}` while a temporary script reconstruction
+emits `\textbf{Hi}`. Native converts the scanned token list to a pseudo-file,
+registers it in the engine's source list, and preserves the skipped space between
+adjacent direct pseudo-file tokens. The script previously created its reader with file id -1 and did not retain the
+source, preventing reconstruction from reading the gap. It now registers a
+unique source for each `\scantokens` reader. Installed tests cover multiple and
+nested calls and Unicode byte offsets; both backends and forced-GC checks pass.
+The experimental reconstruction now matches native for this case and all 29
+provenance text cases in interpreter and JIT. Evidence:
+`../lambda-input/temp/expl3-script/reconstruct-scan-probe.out` and
+`reconstruct-provenance-fixed-interp.out`.
+
+
+## Map spread loses lookup for an embedded-NUL key — 2026-11-11
+
+**Status:** FIXED in Lambda runtime source and verified with an isolated debug
+executable. The existing shared executable was not overwritten.
+
+Previously `k = chr(0)`, `m = map([k, 12])`, `n = {*:m}` gave `m[k] == 12`
+but `n[k] == null`; `for (k, v in m)` also yielded null for that value. VMap
+iteration and spread reified a length-bearing key as a symbol and then called
+`vmap_get_by_str`, which derives the length with `strlen`. The shared
+`vmap_get_by_symbol` now preserves embedded-NUL keys through length-aware
+lookup while retaining the existing synthetic numeric-key path for ordinary
+names (S8.3.1, S2.3.1). Installed `test/lambda/vmap_embedded_nul` covers leading and internal
+NUL, iteration, direct and nested spreads, ordinary keys and numeric-key
+projections. It passes interpreter and JIT with forced GC and freed-memory
+poisoning; seven existing VMap/map suites pass both backends. The isolated
+reconstruction prototype also now matches native on the NUL diagnostic cases.
+Evidence: `../lambda-input/temp/expl3-script/nul-map-fix/`.
+
+
+## CLI result output truncates at embedded NUL — 2026-11-11
+
+**Status:** OPEN — result display truncates. **Full script TeX-port blocker:**
+not for evaluation itself; it prevents reliable CLI inspection and golden
+output when a TeX result contains character code zero.
+
+Run a script containing `"before"; "a" ++ chr(0) ++ "b"; "after"` in either
+interpreter or JIT. The process exits successfully but stdout contains only
+`"beforea`, with the remaining result missing. A separate numeric inspection
+confirms the string has length 3, character codes 0 and 98 at its last two
+positions, and compares equal to itself. The CLI result path in
+`lambda/main.cpp` prints the length-bearing result buffer using `printf("%s", ...)`,
+which truncates at a NUL; whether the item formatter should escape that NUL in
+the textual representation also needs verification. Evidence:
+`../lambda-input/temp/expl3-script/nul-print-interp.out`, `nul-print-jit.out`,
+and `nul-print-check.out`. This is independent of the TeX engine.
+
+
+## Script TeX inputlineno quantity is unsupported — 2026-11-11
+
+**Status:** FIXED for the tested physical, pseudo-file, and local-package lines.
+Structured diagnostic line metadata remains separately OPEN. Native production
+parsing is unaffected.
+
+Previously `Line 1\n\the\inputlineno/\number\inputlineno` stopped with
+`tex-unsupported-primitive`, while native emitted `2/2`. The reader now tracks
+physical lines per reader, and both `\the` and numeric scans read the active
+reader's line number. Installed native comparisons cover CRLF, blank/comment
+lines, signed scans, macro calls, multiline expansion, nested `\scantokens`,
+and a local package returning to the main file. They pass interpreter and JIT,
+as do affected regression and forced-GC checks. Original evidence:
+`../lambda-input/temp/expl3-script/inputlineno-probe.out`.
+
+
+## Script TeX character primitive is unsupported — 2026-11-11
+
+**Status:** PARTIALLY FIXED — scalar values and invalid-range diagnostics are
+implemented; surrogate code points remain explicitly unsupported. **Full script
+TeX-port blocker:** yes, for surrogate values. Native parsing is unaffected.
+
+Previously `\char65\char36` returned `tex-unsupported-primitive` for `char`,
+while native reconstructed `A\$`. The script now scans and emits character
+tokens with native categories, keeps the main-read position, and reports
+`tex-bad-char` for numbers outside the native range. Installed tests cover
+ASCII, Unicode scalars, zero, invalid ranges, registers, aliases, numeric forms,
+macros, and special characters in interpreter and JIT; forced-GC checks pass.
+Surrogate code points are explicitly rejected with `char surrogate`: native
+retains such tokens while Lambda strings cannot encode them. The regression
+test keeps this limit visible. Evidence:
+`../lambda-input/temp/expl3-script/char-complete-interp.out`.
+
+
+## Script TeX stops after an extra closing brace — 2026-11-11
+
+**Status:** OPEN — script error recovery differs from native. **Full script
+TeX-port blocker:** yes, for malformed documents where native continues after a
+diagnostic. Native production parsing is unaffected.
+
+Expand `A}B`: the script stops with `tex-extra-brace` after emitting `A`.
+Native reports the same diagnostic and continues, producing `A}B ` (including
+the reader's final space). The script treats this diagnostic as a terminal
+`issue`; native `handle_right_brace` emits the extra token after reporting it.
+Evidence: `../lambda-input/temp/expl3-script/brace-recovery-probe.out`.
+The same difference occurs for an extra `\endgroup` and mismatched group
+types. A staged fix matches native output and diagnostic codes on seven cases,
+but the existing `test_tex_script_expansion.txt` explicitly expects a terminal
+`tex-extra-endgroup` for `{\endgroup}`. The supplied checkout instructions
+require preserving reference results; the staged change is not installed and
+that failing comparison remains visible in
+`../lambda-input/temp/expl3-script/group-recovery-existing-test.out`. Structured
+diagnostic metadata remains a separate OPEN issue.
+
+
+## Script digester rejects active-character definition targets — 2026-11-11
+
+**Status:** OPEN — echoed definitions of active characters lack a digester
+branch. **Full script TeX-port blocker:** yes, for documents defining active
+characters when definition echo is enabled. Native parsing is unaffected.
+
+For `\def~{XYZ}\begin{document}A~B\end{document}`, expansion succeeds, but
+script digestion returns `latex-digest-unsupported` for `definition target`.
+Native LaTeX retains the definition and expands the document text to `AXYZB`.
+The staged active-token text fix does not handle definition targets. Evidence:
+`../lambda-input/temp/expl3-script/active-digest-interp.out`.
+
+
+## Script LaTeX digester rejects emitted active characters — 2026-11-11
+
+**Status:** PARTIALLY FIXED — ordinary emitted active text is supported;
+active characters that reconstruct to LaTeX syntax remain explicitly unsupported.
+**Full script TeX-port blocker:** yes for those syntax characters. Native parsing
+is unaffected.
+
+Previously `\begin{document}A~B\end{document}` produced
+`latex-digest-unsupported` for an active token while native produced paragraph
+text `A~B`. The script now accepts emitted active text and accounts for active
+letters after spacing commands. Installed native-AST tests cover tildes,
+macros, custom active punctuation and letters, and spacing in interpreter and
+JIT; forced-GC checks pass. Active `%`, `$`, and other syntax characters are
+explicitly rejected because treating them as plain text produces an incorrect
+AST; `active-syntax-probe.out` in `../lambda-input/temp/expl3-script/` shows
+the native error. Active definition targets remain separately OPEN.
+
+
+## Script math digester lacks common style commands — 2026-11-11
+
+**Status:** FIXED for the tested style-command arguments and `\in` symbol.
+Broader math support and general reconstruction remain OPEN. Native parsing is
+unaffected.
+
+Previously the local-package fixture reached `latex-digest-unsupported` for
+`math command mathbb`. The script now emits native-compatible `style_command`
+nodes for 12 common style commands and handles `\in`. Sixteen installed
+native-AST comparisons cover braced, unbraced, nested, and scripted arguments
+in interpreter and JIT; forced-GC checks pass. An isolated reconstruction and
+reparse of the fixture now matches native AST content and mapped offsets in
+both tiers, while root diagnostics/package metadata remain separately OPEN.
+Evidence: `../lambda-input/temp/expl3-script/reparse-fixture-remapped.out`.
+
+
+## Script math digester rejects repeated scripts — 2026-11-11
+
+**Status:** OPEN — repeated scripts are not represented by the script math
+digester. **Full script TeX-port blocker:** yes for native AST parity on these
+expressions. Native parsing is unaffected.
+
+For `\begin{document}$x^2^3$\end{document}`, the script reports
+`latex-digest-unsupported` for `repeated math script`; native produces a
+superscript group containing `23`. The existing `test_tex_script_digest`
+golden records this case as pending. Evidence:
+`../lambda-input/temp/expl3-script/reparse-digest-v2-interp.out`. This remains
+a visible unsupported case; no reference result has been altered.
+
+
+## Script digester rejects bracket text after unknown environment start — 2026-11-11
+
+**Status:** OPEN — the generic environment guard rejects a leading bracket.
+**Full script TeX-port blocker:** yes for documents using this syntax. Native
+parsing is unaffected.
+
+For `\begin{document}\begin{strange}[x]Hello\end{strange}\end{document}`,
+the script reports `latex-digest-unsupported` for `environment options`;
+native places `[x]Hello` in the `strange` environment's body. The existing
+`test_tex_script_digest` golden records this case as pending. Evidence:
+`../lambda-input/temp/expl3-script/reparse-digest-v2-interp.out`. This remains
+a visible unsupported case; no reference result has been altered.
+
+
+## Script digester rejects leading bracket text in document — 2026-11-11
+
+**Status:** FIXED for the document environment; generic environment brackets
+remain separately OPEN. Native parsing is unaffected.
+
+Previously `\begin{document}[A]\end{document}` returned
+`latex-digest-unsupported` for `environment options`, while native treated
+`[A]` as body text. The script now applies the option guard only to other
+environments. Installed native comparisons cover direct, repeated, nested,
+followed-by-group and macro-generated brackets in interpreter and JIT. The
+full existing digest golden passes both tiers, and the reconstructed-path corpus
+now matches 101 native ASTs with two explicitly unsupported cases. Original
+evidence: `../lambda-input/temp/expl3-script/document-bracket-probe.out`.
+
+
+## Experimental reconstructed-text digestion drops NUL characters — 2026-11-11
+
+**Status:** FIXED in the isolated reconstruction prototype using the VMap
+embedded-NUL key fix; general reconstruction remains uninstalled and OPEN.
+**Full script TeX-port blocker:** yes, before that path can produce native ASTs
+for documents containing character code zero. Production parsing is unaffected.
+
+The prototype reconstructs `\begin{document}\char-1\end{document}` and
+retokenizes the resulting text with the TeX reader. Native LaTeX digestion
+retains the emitted NUL character, while the TeX reader's default category
+for NUL ignores it; both `tex-bad-char` metadata and a successful prototype
+AST are then present, but AST equality is false. The installed direct-token
+script digester matches native on this example. Evidence:
+`../lambda-input/temp/expl3-script/reparse-diagnostics-interp.out`. The
+prototype must use LaTeX digester lexical semantics or explicitly reject cases
+it cannot preserve; it must not be connected to production in its current form.
+
+
+The tokenizer's explicit NUL category now survives the corrected map spread,
+and the prototype matches native ASTs for invalid `\char` and mixed supported
+diagnostics in interpreter and JIT with the isolated fixed executable. Evidence:
+`../lambda-input/temp/expl3-script/nul-map-fix/reparse-diagnostics-interp.out`.
+
+
+## Synthesized class declaration has no source span — 2026-11-11
+
+**Status:** OPEN — expanded-output reconstruction is missing. **Full script
+TeX-port blocker:** yes, for the existing local-class document fixture.
+The native production parser is unaffected.
+
+With the staged counter implementation, `profile.expand_with_kernel`
+completes expansion of `test/lambda/latex/fixtures/local_packages/document.tex`
+with authorized `lmdreport.cls` and `lmdnotes.sty` snapshots. Digestion stops
+with `latex-digest-unsupported`, `declaration source mapping`. The class
+loader emits a synthesized `\documentclass{article}` whose tokens have no
+source file, span, or main-file read offset; `group_raw` therefore cannot
+construct the native declaration's argument descriptor. Reproduce with
+`../lambda-input/temp/expl3-script/counter-fixture-prefix.ls`; the observed
+tokens and issue are in `counter-fixture-prefix.out`. The general output
+reconstruction and source-segment mapping must cover generated declarations
+as well as foreign generic commands and expanded parenthesized arguments.
+
+
+## Generic argument end offsets ignore reconstructed segment boundaries — 2026-11-11
+
+**Status:** FIXED for the tested direct-argument boundaries. The native
+production path is unaffected; general expanded-output reconstruction remains
+open.
+
+In `\begin{document}\newcounter{p}\newcounter{c}[p]\stepcounter{p}\arabic{c}\end{document}`,
+the direct `stepcounter` argument ends at source offset 62, but native maps
+its reconstructed-output boundary to offset 71, the next synthesized token's
+main-file read position. The script previously returned 62. An empty macro
+between a direct command argument and the next direct token produces the same
+class of mismatch: reconstruction maps the boundary to the next nonadjacent
+source segment. Evidence and native AST comparisons are in
+`../lambda-input/temp/expl3-script/counter-ast-detail.out` and
+`counter-boundary-probe.out`. The digester maps a boundary to the next
+synthetic token's read offset, or to the next nonadjacent direct token's
+position, and keeps the original end for adjacent direct segments. The installed
+`test_tex_script_counters` covers direct, empty-expansion, synthetic,
+parenthesized and optional boundaries in both backends. More general
+expanded-output source reconstruction remains open.
+
+
+## Script digester omits native TeX diagnostic metadata — 2026-11-11
+
+**Status:** OPEN — metadata representation and propagation are incomplete.
+**Full script TeX-port blocker:** yes, for AST parity when TeX reports
+diagnostics. Native production parsing is unaffected.
+
+For `\begin{document}\newcounter{n}\setcounter{n}{1\relax A}\arabic{n}\end{document}`,
+native LaTeX parsing attaches `tex_diagnostics` containing a
+`latex-counter-value` diagnostic and a `tex_packages` attribute to the root
+element. The staged script expansion records the diagnostic code in its
+state, but `digest.digest` returns an AST without those attributes; full AST
+equality fails even when the document children agree. Reproduce using
+`../lambda-input/temp/expl3-script/counter-relax-detail.ls`; the output is
+recorded in `counter-relax-detail.out`. The script engine currently keeps only
+string diagnostic codes in several paths, so reproducing native structured
+messages and source positions requires a general diagnostic representation
+and mapping rather than adding empty attributes.
+
+For clean documents that loaded local packages, the script digester now attaches
+`tex_diagnostics: []` and the ordered local `tex_packages` list. The installed
+`test_tex_script_package_metadata` compares a real package fixture and a document
+without packages against native in interpreter and JIT, and focused forced-GC
+checks pass. The experimental reconstructed path now achieves full native AST
+equality on the real local-class fixture when diagnostics are empty. Structured
+diagnostics and their file/line/offset metadata remain OPEN for other codes.
+
+The script now also records complete native-compatible `tex-errmessage` entries
+for messages up to 511 UTF-8 bytes without NUL, including main-file,
+`\scantokens`, and local-package source locations. The digester attaches them
+only when every diagnostic has a complete record. Installed tests compare
+messages, offsets, filenames, lines, and ASTs in interpreter and JIT, with
+forced-GC checks. Mixed diagnostic codes and oversized messages remain visibly
+incomplete in `test_tex_script_errmessage_diagnostics`; see
+`../lambda-input/temp/expl3-script/errmessage-structured-qualified-interp.out`.
+
+Out-of-range `\char` now also records the native `tex-bad-char` message and
+location. Installed comparisons cover negative and oversized values, multiple
+errors, and mixed `tex-bad-char`/`tex-errmessage` ASTs; both backends and
+forced-GC checks pass. Other diagnostic types remain OPEN.
+
+
+## Script TeX output streams are unsupported — 2026-11-11
+
+**Status:** FIXED for the existing native input engine's modeled stream behavior.
+Both engines discard written file contents; actual filesystem output is not
+implemented by this compatibility model.
+
+Previously `\immediate\openout0=unused.txt \immediate\write0{secret}`
+stopped with `tex-unsupported-primitive` for `openout`. The script now scans
+filenames, tracks the 16 output stream slots, implements `openout` and
+`closeout` (including their immediate and aliased forms), and suppresses
+terminal output for writes to open streams. The installed
+`test_tex_script_output_stream` compares 12 stream, grouping, number-wrapping,
+filename, and terminal-buffer cases with native in interpreter and JIT. Focused
+forced-GC tests pass in both backends. The original reproduction is in
+`../lambda-input/temp/expl3-script/stream-output-probe.out`.
+
+## Script class and counter echoes omit consumed source bytes — 2026-11-11
+
+**Status:** OPEN — the installed script emits the explicit tokens of direct
+main-file class and counter declarations, but does not retain native echo spans.
+**Full script TeX-port blocker:** yes, for native-compatible reconstructed ASTs
+and source offsets. Native production parsing is unaffected. S1.8 and D10.2.2
+cover the data and input boundary.
+
+In an isolated reconstruction prototype, `\documentclass{article}` followed
+by a newline, comment or spaces produces a different AST from native because
+optional-version lookahead consumed the gap. `\newcounter{n}` followed by a
+newline similarly loses bytes consumed by optional-parent lookahead. The native
+`echo_finish` emits the traced source span, including these consumed bytes.
+The prototype also explicitly reports missing origins for macro-generated
+`\stepcounter`, `\setcounter`, and `\chardef` output. Evidence, including
+interpreter/JIT parity: `../lambda-input/temp/expl3-script/reparse-origin-interp.out`
+and `reparse-origin-jit.out` in the same directory. These findings extend the
+separately recorded package-gap and emission-origin issues; the prototype is
+not installed as a production path.
+
+## Reconstructed LaTeX comments can start an empty paragraph — 2026-11-11
+
+**Status:** OPEN — the isolated script reconstruction and reparse prototype
+cannot yet represent every comment preserved in emitted TeX source. **Full
+script TeX-port blocker:** yes, for native-compatible ASTs. Native production
+parsing is unaffected. S1.8 and D10.2.2 apply to the data and input boundary.
+
+For `\documentclass{article}%x` followed by a newline and
+`\begin{document}A\end{document}`, the native AST contains an empty paragraph
+between the class declaration and document. The experimental reparse feeds
+reconstructed bytes to the TeX reader, which discards `%x` and its line ending
+and therefore silently omitted that paragraph. The prototype now explicitly
+reports `latex-digest-unsupported` / `preserved comment` when skipped reader
+gaps contain `%`; this conservative guard can reject cases whose AST would
+otherwise match. Native examples in document content and command arguments are
+recorded in `../lambda-input/temp/expl3-script/native-comment-tests.out`; the
+original mismatch and guarded outcomes are in `reparse-origin-v2-interp.out`
+and `reparse-origin-tests-guard-v2-interp.out` in that directory. Interpreter
+and JIT agree on the focused outcome. A LaTeX-source-aware comment representation
+is needed before this guard can be removed.
+
+## Script LaTeX declarations omit trailing optional groups — 2026-11-11
+
+**Status:** FIXED for adjacent brace and bracket groups on declarations.
+Native production parsing is unaffected. S1.8 and D10.2.2 apply to the input
+boundary; the broader script TeX migration remains incomplete.
+
+For `\documentclass[11pt]{article}[2020/01/01]` followed by a document, native
+places the trailing optional group in `documentclass.argument_groups` and a
+`brack_group` child; the isolated reconstruction and script digest instead
+emit it as paragraph text. Reproduced in both execution backends by
+`../lambda-input/temp/expl3-script/reparse-origin-more.ls`, with results in
+`reparse-origin-more-interp.out` and `reparse-origin-more-jit.out` beside it.
+The declaration parsing branch in `lmd/package/doc/latex/tex_engine/digest.ls`
+reads only the initial optional and required groups; the trailing group needs
+native-compatible general argument handling.
+
+The script digester now extends declarations through adjacent required and
+optional groups, retaining group descriptors and native argument packing;
+whitespace and parentheses end the declaration's group sequence. New
+`test/lambda/latex/test_tex_script_declaration_groups.ls/.txt` compares ten
+cases with the native AST. The new test and existing digest and provenance
+goldens pass interpreter and JIT; the declaration suite also passes against
+the installed package in both tiers. The separate reconstructed-comment
+limitation and general emission provenance remain OPEN.
+
+## Script LaTeX environment recognition ignores command-to-brace spaces — 2026-11-11
+
+**Status:** PARTIALLY FIXED — ordinary whitespace between environment commands
+and braces now follows native parsing; comment gaps and other malformed or
+unmatched cases can still be explicitly unsupported. **Full script TeX-port
+blocker:** yes, for remaining AST parity. Native production parsing is
+unaffected. S1.8 and D10.2.2 govern the data and input boundary.
+
+Reproduction `\begin {document}\begin {quote}A\end {quote}\end {document}`
+produces nested `document` and `quote` nodes in the experimental reconstructed
+script AST, but four paragraph nodes in native parsing. The script digester's
+`blocks` branch recognizes a control token followed by a group without checking
+the raw gap. Both backends reproduce the difference in
+`../lambda-input/temp/expl3-script/reparse-environment-origin-interp.out` and
+`reparse-environment-origin-jit.out`. The same audit found that macro-generated
+`\end{quote}` and `\end{document}` are rejected by the prototype as missing
+emission origins, consistent with the separately recorded general provenance
+issue. Macro-generated starts and an unmatched math definition in the test
+produce native parse errors, so those cases are not evidence of script parity.
+
+
+
+The script digester now preserves whitespace before a spaced environment
+argument as paragraph content, rather than treating the command as a boundary.
+`test/lambda/latex/test_tex_script_environment_gaps.ls/.txt` covers spaces,
+tabs, newlines, nesting, ordinary adjacent environments, and an unclosed
+environment. The installed suite and existing digest, provenance and declaration
+goldens pass interpreter and JIT. Unsupported comment gaps and unmatched
+endings remain visible, and the separate general provenance issue remains OPEN.

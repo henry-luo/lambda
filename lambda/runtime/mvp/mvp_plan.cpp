@@ -1254,7 +1254,8 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
     if (n->node_type == AST_NODE_EXPR_STMT)
         return mvp_value_contract(m, ((AstExprStmtNode*)n)->expression, depth + 1, dense_arrays);
     if (ast_is_explicit_type_value(n)) return &TYPE_TYPE;
-    if (n->node_type == AST_NODE_ELEMENT && is_file_element_type((TypeElmt*)n->type))
+    if (n->node_type == AST_NODE_ELEMENT &&
+            (((AstElementNode*)n)->tag_expr || is_file_element_type((TypeElmt*)n->type)))
         return lambda_type_union_normalized(m->tp->pool, n->type, &TYPE_ERROR);
     if (n->node_type == AST_NODE_IF_EXPR) {
         AstIfNode* branch = (AstIfNode*)n;

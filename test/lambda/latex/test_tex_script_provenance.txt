@@ -1,0 +1,174 @@
+"argument:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"arguments after text:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"nested macro:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"nested formatting:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"repeated macro:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"unicode before call:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"delimited argument:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"parameter macro:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"direct outer synthetic inner:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"conditional:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"expandafter:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"optional parameter:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"futurelet lookahead:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"aftergroup:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"nested argument lookahead:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"argument formatting repeated:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"case shift:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"scantokens:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"computed control sequence:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"empty macro argument:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"multiple nested macros:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"empty substitution only:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"empty and nonempty arguments:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"repeated empty argument:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"empty optional argument:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"explicit empty optional:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"lowercase origin:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"case control nested:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"case zero mapping:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}

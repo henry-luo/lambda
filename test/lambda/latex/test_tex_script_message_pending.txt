@@ -1,0 +1,136 @@
+{
+  name: "single",
+  issue: null,
+  script: ["hello"],
+  native: ["hello"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "successive",
+  issue: null,
+  script: ["A B"],
+  native: ["A B"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "write",
+  issue: null,
+  script: ["A", "B", "C"],
+  native: ["A", "B", "C"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "empty",
+  issue: null,
+  script: ["A "],
+  native: ["A "],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "write empty",
+  issue: null,
+  script: ["A", "B"],
+  native: ["A", "B"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "newline",
+  issue: null,
+  script: ["A", "", "B", "C"],
+  native: ["A", "", "B", "C"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "changed newline",
+  issue: null,
+  script: ["A@B C", "D"],
+  native: ["A@B C", "D"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "error",
+  issue: null,
+  script: ["A", "! bad.", "B"],
+  native: ["A", "! bad.", "B"],
+  matches: true,
+  diagnostics: ["tex-errmessage"]
+}
+{
+  name: "show",
+  issue: null,
+  script: ["A", "> B.", "C"],
+  native: ["A", "> B.", "C"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "expand",
+  issue: null,
+  script: ["Hi: 3"],
+  native: ["Hi: 3"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "write only empty",
+  issue: null,
+  script: [],
+  native: [],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "write newline",
+  issue: null,
+  script: ["A", "B"],
+  native: ["A", "B"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "leading newline",
+  issue: null,
+  script: ["", "A"],
+  native: ["", "A"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "newline as separator",
+  issue: null,
+  script: ["A", "B"],
+  native: ["A", "B"],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "show newline",
+  issue: null,
+  script: ["A", "> B", "C."],
+  native: ["A", "> B", "C."],
+  matches: true,
+  diagnostics: []
+}
+{
+  name: "error newline",
+  issue: null,
+  script: ["! A", "B."],
+  native: ["! A", "B."],
+  matches: true,
+  diagnostics: ["tex-errmessage"]
+}
+{
+  name: "unicode",
+  issue: null,
+  script: ["λ", "漢"],
+  native: ["λ", "漢"],
+  matches: true,
+  diagnostics: []
+}

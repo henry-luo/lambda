@@ -1,0 +1,287 @@
+"function:"
+{
+  text: "AA",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"two parameters:"
+{
+  text: "A/B",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"token list:"
+{
+  text: "Hello world",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"expanded token list:"
+{
+  text: "\\def\\word{A}\\def\\word{B}A",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"unexpanded token list:"
+{
+  text: "\\def\\word{A}\\def\\word{B}B",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"local assignment:"
+{
+  text: "{B}A",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"global assignment:"
+{
+  text: "{}B",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"constant:"
+{
+  text: "ready now",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"clear:"
+{
+  text: "[]",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"global declaration:"
+{
+  text: "{}Y",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"syntax restoration:"
+{
+  text: "8/12/10",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"syntax scoped:"
+{
+  text: "{11}8",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"syntax nested restore:"
+{
+  text: "{8}118",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"expanded use:"
+{
+  text: "A",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"protected function:"
+{
+  text: "\\edef\\x{\\safe:}A",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"unsupported operation:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "seq_pop_left:NN",
+  matches_native: null
+}
+"duplicate declaration:"
+{
+  text: "",
+  issue: "expl3-already-defined",
+  unsupported: null,
+  matches_native: null
+}
+"undefined token list:"
+{
+  text: "",
+  issue: "expl3-undefined-variable",
+  unsupported: null,
+  matches_native: null
+}
+"custom syntax restoration:"
+{
+  text: "12",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"local function:"
+{
+  text: "{B}A",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"global clear:"
+{
+  text: "{}[]",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"noexpand with token use:"
+{
+  text: "\\edef\\x{\\noexpand\\tl_use:N\\noexpand\\l_test_tl}A",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"integer expression:"
+{
+  text: "3/4/20",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"global syntax setting:"
+{
+  text: "{}118",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"script expl3 package:"
+{
+  text: "A",
+  issue: null,
+  unsupported: null,
+  packages: [["expl3", "script"]]
+}
+"script expl3 duplicate:"
+{
+  text: "X ",
+  issue: null,
+  unsupported: null,
+  packages: [["expl3", "script"]]
+}
+"script expl3 package option:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "expl3 package options",
+  packages: []
+}
+"local expl3 package:"
+{
+  text: "[Q]/OK/8",
+  issue: null,
+  unsupported: null,
+  packages: [["sample", "local"]]
+}
+"package keeps enclosing syntax:"
+{
+  text: "11/[Q]8",
+  issue: null,
+  unsupported: null,
+  packages: [["sample", "local"]]
+}
+"nested expl3 packages:"
+{
+  text: "O/I/8",
+  issue: null,
+  unsupported: null,
+  packages: [["outer", "local"], ["inner", "local"]]
+}
+"unsupported package operation:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "seq_pop_left:NN",
+  packages: [["unsupported", "local"]]
+}
+"document command mandatory:"
+{
+  text: "\\NewDocumentCommand\\foo{m}{[#1]}[A] ",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"document command optional:"
+{
+  text: "\\NewDocumentCommand\\foo{O{Z}}{[#1]}[Z]/[X] ",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"document command two arguments:"
+{
+  text: "\\NewDocumentCommand\\foo{m m}{#1/#2}A/B ",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"document command mixed:"
+{
+  text: "\\NewDocumentCommand\\foo{O{D} m}{#1/#2}D/X/Q/Y ",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"document command scoped:"
+{
+  text: "{\\NewDocumentCommand\\foo{m}{[#1]}[X]}OK",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"document command unsupported spec:"
+{
+  text: "",
+  issue: "latex-unsupported-document-argument",
+  unsupported: "s",
+  matches_native: null
+}
+"expl3 package document commands:"
+{
+  text: "Hello, World!/Hello, Friend!/AA ",
+  issue: null,
+  unsupported: null,
+  packages: [["sample", "local"]]
+}
+"project expl3 fixture loads:"
+{
+  text: "",
+  issue: null,
+  unsupported: null,
+  packages: [["lmdexpl", "local"]]
+}
+"integer with macro arguments:"
+{
+  text: "9",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"integer expression error:"
+{
+  text: "",
+  issue: "tex-arith-overflow",
+  unsupported: null,
+  matches_native: null
+}

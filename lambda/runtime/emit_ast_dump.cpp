@@ -584,8 +584,9 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_ELEMENT:
         case AST_NODE_ELMT_TYPE: {
             AstElementNode* elmt = (AstElementNode*)node;
-            // the tag lives on the element's type, not on the node
-            if (node->type && node->type->type_id == LMD_TYPE_ELEMENT) {
+            if (node->node_type == AST_NODE_ELEMENT && elmt->tag_expr) {
+                emit_lambda_dump_field(source, "tag_expr", elmt->tag_expr, indent + 1);
+            } else if (node->type && node->type->type_id == LMD_TYPE_ELEMENT) {
                 emit_dump_strview_field("name", ((TypeElmt*)node->type)->name);
             }
             emit_lambda_dump_list(source, "item", elmt->item, indent + 1);

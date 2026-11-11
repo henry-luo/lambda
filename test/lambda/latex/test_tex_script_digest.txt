@@ -1,0 +1,721 @@
+"document:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"paragraphs:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"nested inline:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"plain text:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown command:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"inline math:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"newline and Unicode:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"space before break:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"source comment:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"definition echo pending:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: false
+}
+"headings:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"formatted heading:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"class options:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"declarations:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"command whitespace:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"inline groups:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"nested environments:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"display math:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"math spaces:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"math superscript:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"math scripts:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"repeated math scripts pending:"
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "repeated math script",
+  complete: null,
+  matches_native: null
+}
+"adjacent math atoms:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"math commands:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"scripted math command:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"parenthesized math:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"bracketed math:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"list environment:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"nested lists:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"labeled items:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"heading variants:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"formatted title:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"echoed definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed command AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed optional command AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed prefixed definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed environment AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed parameter definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed multiline definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed delimited definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed multiline environment AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed commented definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed blank-line definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"robust definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"unknown no argument:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown starred:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown nested argument:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown empty argument:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown multiple arguments:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown optional argument:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"text underline:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown environment:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"nested unknown environments:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown environment option pending:"
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "environment options",
+  complete: null,
+  matches_native: null
+}
+"unknown whitespace before group:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown comment before group:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown mixed arguments:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown nested multiple arguments:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"robust starred definition AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"unknown comment between arguments:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown multiple comments in arguments:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown nested optional brackets:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown formatted optional argument:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unknown optional comment:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"echoed document command AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"echoed optional document command AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"parenthesized command arguments:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"nested parenthesized command argument:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"coordinate chains:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"parenthesized prose:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"spaced parenthesized prose:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"empty parentheses before argument:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"parenthesis comment between groups:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"unclosed parentheses:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"non-coordinate parentheses before comment:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"coordinate comment:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"coordinate control:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"formatted parentheses:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"coordinate form feed:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"coordinate vertical tab:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"expanded parenthesis mapping pending:"
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "parenthesized command source mapping",
+  incomplete: false,
+  matches_native: null
+}
+"expanded coordinate mapping pending:"
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "parenthesized command source mapping",
+  incomplete: false,
+  matches_native: null
+}
+"expanded parenthesis with argument mapping pending:"
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "parenthesized command source mapping",
+  incomplete: false,
+  matches_native: null
+}
+"literal escapes:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"spacing commands:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"spacing and empty groups:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"row separator:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"escaped and spacing inside formatting:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"escaped control followed by space:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"expanded literal escape AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"expanded spacing command AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"expanded row separator AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"expanded control symbol spacing AST:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"expanded spacing followed by punctuation:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"expanded spacing followed by group:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"expanded spacing followed by extra spaces:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"direct spacing before expanded letter:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"spacing followed by comment:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"spacing followed by whitespace and comment:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"spacing followed by multiple whitespace:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"spacing around indented comment:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"spacing around CRLF comment:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}
+"spacing around consecutive comments:"
+{
+  issue: null,
+  unsupported: null,
+  incomplete: false,
+  matches_native: true
+}

@@ -1693,6 +1693,7 @@ extern "C" {
     Item map_literal_put(Item owner, Item key, Item value);
     Item map_literal_spread(Item owner, Item source);
     Element* elmt_literal_begin(struct TypeElmt* type);
+    Item elmt_dynamic_begin(Item tag);
     // one COW-kind policy for runtime capture and direct MIR (D5.4.1).
     static inline bool cow_type_is_container(TypeId type) {
         switch (type) {

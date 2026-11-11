@@ -1034,6 +1034,21 @@ have been removed; use `lambda.doc.math.math`.
 
 The latex package renders a parsed LaTeX document as HTML. Parse with `latex.parse_file(path)` or `latex.parse_source(text, base)`. Every LaTeX parse first runs Lambda's TeX expansion engine (**D10.2.2**): document macros, `.sty`/`.cls` files beside the document, bundled programming packages such as `etoolbox`, `xkeyval` and expl3, and Lambda's own bindings for `physics`, the `mathtools` macros, `xspace`, `csvsimple`, `unicode-math`'s alphabets and the configuration macros of `tocloft`, `authblk`, `titling`, `minitoc`, `glossaries`, `nomencl` and `acronym` run as TeX, while Radiant keeps layout. A bare `input(path, 'latex')` also expands, but without the package's adapter registry, so parse through the package when you render. The package covers the `article`, `book` and `report` document classes and profiles of the common others (KOMA-Script, memoir, the AMS classes, IEEEtran, llncs, elsarticle, revtex, acmart, `letter` and `exam`), sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
 
+The experimental `lambda.doc.latex.tex_engine.profile.expand_with_kernel`
+accepts `script_expl3: true` to try the hand-ported Lambda Script expl3 core.
+It currently supports expl3 syntax transitions, basic control-sequence
+definitions, token lists, integer expressions, sequences with comparator-based
+sorting, ASCII text case conversion, and a bounded expandable `\fp_eval:n`,
+with TeX token identity and scope. The floating-point subset supports decimal
+arithmetic, parentheses, `sqrt`, `abs` and ties-to-even `round` to 16
+significant digits; it reports unsupported functions and numeric bounds.
+Case conversion reports unsupported Unicode and reference-option cases.
+Script-backed expl3 package selection, `\ProvidesExplPackage`, nested
+package syntax restoration, and document commands with mandatory arguments and
+one leading defaulted optional argument are supported. Unimplemented operations
+report an issue; this is not the complete expl3 package or the production LaTeX
+input path. TeX remains data under S1.8 and D10.2.2.
+
 Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D9.3.1–D9.3.4**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D10.2.2**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
 
 The bounded `biblatex` profile reads multiple local `.bib` resources, supports ten common entry types, six built-in citation/bibliography styles, source-order citation commands, `\nocite`, filtered and scoped `\printbibliography`, and English/German/French strings. It handles common BibTeX strings and inheritance, creates internal citation links, and reports missing or unsupported requests with source locations (**D9.1.2, S12.4.1, S7.4.1–S7.4.4**). `backend=biber` selects this local profile; no Biber process or arbitrary style file is run. See [Phase 2 behavior and boundaries](../vibe/latex/Lambda_Design_BibTeX_CSL.md#21-the-built-in-biblatex-and-natbib-profile).

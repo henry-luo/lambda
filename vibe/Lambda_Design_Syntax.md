@@ -3392,6 +3392,19 @@ are resolved first. Member names and computed keys keep their ordinary data
 read behavior. This resolves the policy question in LR02-35.
 Implementation and qualification: [unresolved names](<impl/Lambda_Impl_Unresolved_Names (done).md>).
 
+### 7.33 Computed element tags (decided 2026-11-11)
+
+The user selected `<[expr] …>` for a tag supplied by data. S16.8.10 specifies
+one evaluation before attributes and content, the S8.2.2v6 name domain, error
+propagation, ordinary element content and `file` behavior. The value is a data
+name; it does not perform lexical object-type or namespace-prefix resolution.
+This enables the Lambda Script TeX digester to construct arbitrary command and
+environment nodes without serializing and reparsing Mark data. The existing
+computed attribute-key rule S16.8.9v2 is unchanged. The production and
+reference grammars, interpreter and JIT implement the ruling. The regression
+suite covers error ordering, dynamic fields, ordinary element types, virtual
+files and forced precise garbage collection on both execution tiers.
+
 ## Appendix S — Superseded Rulings
 
 Text that once stated a ruling and no longer does. It is kept for the

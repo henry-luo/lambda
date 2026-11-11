@@ -4385,8 +4385,23 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
     if (!type) return ItemError;
 
     Scratch acc(f);
+    if (node->tag_expr) {
+        // root the computed name until the runtime shape and element are allocated.
+        Scratch tag(f);
+        tag.set(eval_expr(f, node->tag_expr));
+        if (interp_frame_pending(f)) return ItemNull;
+        if (item_is_error(tag.get())) {
+            interp_signal(f, EvalSignal::RETURNED, tag.get());
+            return tag.get();
+        }
+        acc.set(elmt_dynamic_begin(tag.get()));
+        if (item_is_error(acc.get())) {
+            interp_signal(f, EvalSignal::RETURNED, acc.get());
+            return acc.get();
+        }
+    }
     if (node->has_computed_key) {
-        acc.set(interp_ptr_item(elmt_literal_begin(type)));
+        if (!node->tag_expr) acc.set(interp_ptr_item(elmt_literal_begin(type)));
         if (get_type_id(acc.get()) == LMD_TYPE_ERROR || !acc.get().item) {
             interp_signal(f, EvalSignal::RETURNED, ItemError);
             return ItemError;
@@ -4451,7 +4466,7 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
     }
 
 #ifdef LAMBDA_NO_FILE_IO
-    if (is_file_element_type(type)) {
+    if (is_file_element_type((TypeElmt*)acc.get().element->type)) {
         log_error("interp-profile: file output elements are excluded");
         return ItemError;
     }

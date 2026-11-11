@@ -1,0 +1,116 @@
+"uppercase:"
+{
+  text: "HELLO, WORLD!",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"lowercase:"
+{
+  text: "hello, world!",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"macro expansion:"
+{
+  text: "PRE MIXEDPOST",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"formatting:"
+{
+  text: "A \\textbf{BOLD} Z",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"protected function:"
+{
+  text: "A[WORD]Z",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"groups:"
+{
+  text: "A{B}C",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"reference key:"
+{
+  text: "A \\ref{label} B",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"math is preserved:"
+{
+  text: "A $x^2$ B",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"parenthesized math:"
+{
+  text: "A \\(x+y\\) Z",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"expanded definition preserves math macro:"
+{
+  text: "A$z$B",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"sequence input:"
+{
+  text: "ABC,DEF",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"unknown control:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "text case control unknown",
+  matches_native: null
+}
+"unicode pending:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "Unicode text case",
+  matches_native: null
+}
+"reference options pending:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "text case reference options",
+  matches_native: null
+}
+"project fixture case conversion:"
+{
+  text: "Hello, World!/AA/13/apple, kiwi, pear/HELLO, WORLD/expl3 ready",
+  issue: null,
+  unsupported: null
+}
+"reference star pending:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "text case reference options",
+  matches_native: null
+}
+"case conversion AST:"
+{
+  issue: null,
+  matches_native: true
+}

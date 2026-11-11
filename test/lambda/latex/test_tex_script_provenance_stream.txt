@@ -1,0 +1,19 @@
+[{
+    event: "initial",
+    offset: 0
+  }, {
+    event: "main a",
+    offset: 0
+  }, {
+    event: "main space",
+    offset: 1
+  }, {
+    event: "main b",
+    offset: 2
+  }, {
+    event: "pushed back a",
+    offset: 2
+  }, {
+    event: "foreign z",
+    offset: 2
+  }]

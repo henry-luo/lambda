@@ -6116,15 +6116,30 @@ static MirValue map_literal(MvpCompiler* c, AstMapNode* node, TypeMap* destinati
 }
 
 static MirValue element_literal(MvpCompiler* c, AstElementNode* node) {
+    MvpErrorTarget failure = {};
+    MIR_reg_t owner = 0;
+    if (node->tag_expr) {
+        // evaluate and root the tag before any attribute or content expression.
+        MirValue tag = convert(c, expression(c, node->tag_expr), VALUE_REP_ITEM);
+        check_item_result(c, tag.reg, &failure);
+        MIR_reg_t dynamic = em_call_1(&c->em, "elmt_dynamic_begin", MIR_T_I64,
+            MIR_T_I64, reg(c, tag.reg), true);
+        check_item_result(c, dynamic, &failure);
+        owner = convert(c, value(c, dynamic, LMD_TYPE_ELEMENT, VALUE_REP_ITEM, node->type),
+            VALUE_REP_RAW_GC_POINTER).reg;
+        value(c, owner, LMD_TYPE_ELEMENT, VALUE_REP_RAW_GC_POINTER, node->type);
+    }
     MvpLiteralFields fields = prepare_literal_fields(c, node, node->has_computed_key);
     int count = fields.count;
     MirValue* staged = fields.values;
     MIR_reg_t* keys = fields.keys;
-    // the descriptor belongs to this module; passing it directly avoids a foreign type-list index.
-    MIR_reg_t descriptor = em_load_const(&c->em, em_add_const(&c->em, node->type), MIR_T_P);
-    MIR_reg_t owner = em_call_1(&c->em, "elmt_literal_begin", MIR_T_P,
-        MIR_T_P, reg(c, descriptor), true);
-    value(c, owner, LMD_TYPE_ELEMENT, VALUE_REP_RAW_GC_POINTER, node->type);
+    if (!node->tag_expr) {
+        // the descriptor belongs to this module; its type-list index is not portable.
+        MIR_reg_t descriptor = em_load_const(&c->em, em_add_const(&c->em, node->type), MIR_T_P);
+        owner = em_call_1(&c->em, "elmt_literal_begin", MIR_T_P,
+            MIR_T_P, reg(c, descriptor), true);
+        value(c, owner, LMD_TYPE_ELEMENT, VALUE_REP_RAW_GC_POINTER, node->type);
+    }
     if (keys) fill_dynamic_literal_fields(c, node, owner, staged, keys);
     else if (count) {
         MIR_op_t* members = (MIR_op_t*)mem_alloc(count * sizeof(MIR_op_t), MEM_CAT_TEMP);
@@ -6135,8 +6150,7 @@ static MirValue element_literal(MvpCompiler* c, AstElementNode* node) {
         mem_free(members);
     }
     dispose_literal_fields(fields);
-    bool file_destination = is_file_element_type((TypeElmt*)node->type);
-    MvpErrorTarget failure = {};
+    bool file_destination = node->tag_expr || is_file_element_type((TypeElmt*)node->type);
     if (file_destination)
         // the evaluated format selects the output builder after attributes.
         em_call_void_1(&c->em, "elmt_content_begin", MIR_T_P, reg(c, owner), true);

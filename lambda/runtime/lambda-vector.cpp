@@ -2433,8 +2433,6 @@ Item fn_math_pow(Item item_a, Item item_b) {
 // cbrt(vec) - element-wise cube root
 DEFINE_MATH_UNARY(fn_math_cbrt, cbrt, NULL)
 
-// trunc(vec) - element-wise truncation toward zero
-DEFINE_MATH_UNARY(fn_trunc, trunc, NULL)
 #undef DEFINE_MATH_UNARY
 
 // item_to_bool: coerce an item to a boolean for any()/all() reductions

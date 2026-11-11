@@ -1,0 +1,388 @@
+"new/set/step:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{3}\\stepcounter{n}4/4\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"group global:"
+{
+  text: "\\begin{document}\\newcounter{n}{\\setcounter{n}{3}}3\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"child reset:"
+{
+  text: "\\begin{document}\\newcounter{p}\\newcounter{c}[p]\\setcounter{c}{8}\\stepcounter{p}0\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"nested reset:"
+{
+  text: "\\begin{document}\\newcounter{p}\\newcounter{c}[p]\\newcounter{d}[c]\\setcounter{d}{8}\\stepcounter{p}0\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"mixed format:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{4}4/iv/IV/d/D/\\S\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"counter expression:"
+{
+  text: "\\begin{document}\\newcounter{a}\\newcounter{b}\\setcounter{a}{9}\\setcounter{b}{\\numexpr\\value{a}+2\\relax}11\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"add and refstep:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{-3}\\addtocounter{n}{5}\\refstepcounter{n}3\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"unknown counter:"
+{
+  text: "\\begin{document}\\setcounter{missing}{2}\\arabic{missing}\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"existing c@ register:"
+{
+  text: "\\begin{document}7\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"defined the macro:"
+{
+  text: "\\begin{document}\\newcounter{x}\\setcounter{x}{12}12\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"negative globaldefs:"
+{
+  text: "\\begin{document}\\newcounter{n}{\\setcounter{n}{4}}\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"duplicate declaration:"
+{
+  text: "\\begin{document}\\newcounter{n}\\newcounter{n}0\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"expanded counter name:"
+{
+  text: "\\begin{document}\\def\\cn{nn}4\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"late declared child:"
+{
+  text: "\\begin{document}\\newcounter{c}[p]\\newcounter{p}\\setcounter{c}{7}\\stepcounter{p}0\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"low level shared register:"
+{
+  text: "\\begin{document}\\newcounter{n}9\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"zero formats:"
+{
+  text: "\\begin{document}\\newcounter{n}/\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"symbol variants:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{2}\\dag/\\setcounter{n}{3}\\ddag/\\setcounter{n}{6}\\textbardbl/\\setcounter{n}{7}** /\\setcounter{n}{8}\\dag\\dag/\\setcounter{n}{9}\\ddag\\ddag\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"after newcount:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{3}11/3\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"implicit expression, native LI-014:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{\\numexpr1+2}3\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: false
+}
+"value as register:"
+{
+  text: "\\begin{document}\\newcounter{a}\\newcounter{b}\\setcounter{a}{7}\\setcounter{b}{\\value{a}}7\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"expanded parent name:"
+{
+  text: "\\begin{document}\\def\\parentname{parent}\\newcounter{parent}\\setcounter{child}{4}\\stepcounter{parent}0\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"own format in parent name:"
+{
+  text: "\\begin{document}0\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"symbol without endline:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{7}**/\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"nested implicit expressions, native LI-014:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{\\numexpr\\numexpr1+2+3}6\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: false
+}
+"macro step of main counter:"
+{
+  text: "\\begin{document}\\newcounter{n}\\def\\advanceit{\\stepcounter{n}}\\stepcounter{n}1\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"macro sets main counter:"
+{
+  text: "\\begin{document}\\newcounter{n}\\def\\setit{\\setcounter{n}{8}}\\setcounter{n}{8}8\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"macro unknown empty value:"
+{
+  text: "\\begin{document}\\def\\setit{\\setcounter{missing}{}}\\setcounter{missing}\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"trailing numeric material:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{1+2}+21\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"duplicate with parent:"
+{
+  text: "\\begin{document}\\newcounter{n}\\newcounter{n}[n]\\stepcounter{n}1\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"counter control sequence defined:"
+{
+  text: "\\begin{document}\\newcounter{n}yes\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"counter aliases share register:"
+{
+  text: "\\begin{document}\\newcounter{n}17\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"exhausted count allocation:"
+{
+  text: "\\begin{document}\\newcounter{n}\\setcounter{n}{3}3\\end{document}",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"duplicate:"
+{
+  issue: null,
+  script: ["latex-counter-defined"],
+  native: ["latex-counter-defined"]
+}
+"alpha zero:"
+{
+  issue: null,
+  script: ["latex-counter-too-large"],
+  native: ["latex-counter-too-large"]
+}
+"symbol range:"
+{
+  issue: null,
+  script: ["latex-counter-too-large"],
+  native: ["latex-counter-too-large"]
+}
+"numeric trailing:"
+{
+  issue: null,
+  script: ["latex-counter-value"],
+  native: ["latex-counter-value"]
+}
+"exhausted allocation:"
+{
+  issue: null,
+  script: ["tex-no-room"],
+  native: ["tex-no-room"]
+}
+"explicit relax then token:"
+{
+  issue: null,
+  script: ["latex-counter-value"],
+  native: ["latex-counter-value"]
+}
+"expression relax then token:"
+{
+  issue: null,
+  script: ["latex-counter-value"],
+  native: ["latex-counter-value"]
+}
+"direct counter AST:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"parent and step AST:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"commented counter AST:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"counter before document AST:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"argument before empty expansion:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"argument before nonempty expansion:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"argument before direct text:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"empty macro then text:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"empty macro then punctuation:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"macro formatting follows:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"second argument boundary:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"optional argument boundary:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"parenthesis argument boundary:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"adjacent direct then empty:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"source whitespace before expansion:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"multiple empty expansions:"
+{
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"relax trailing token, diagnostic metadata pending:"
+{
+  issue: null,
+  script_diagnostics: ["latex-counter-value"],
+  native_diagnostics: ["latex-counter-value"],
+  children_match: true,
+  full_ast_match: false
+}
+"expression trailing token, diagnostic metadata pending:"
+{
+  issue: null,
+  script_diagnostics: ["latex-counter-value"],
+  native_diagnostics: ["latex-counter-value"],
+  children_match: true,
+  full_ast_match: false
+}
+"pdfLaTeX reference:"
+{
+  issue: null,
+  unsupported: null,
+  messages: ["LCOUNTER-ONE=4/iv/IV/d/D/8", "LCOUNTER-TWO=5/0/5", "LCOUNTER-THREE=12"]
+}
+"cyclic reset bounded:"
+{
+  issue: "tex-capacity"
+}

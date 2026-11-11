@@ -27,10 +27,10 @@ fn byte_count(s, i, end, total = 0) any^ => if (i >= end) total
 pub fn reader(source, file_id = 0) => {source: source, file_id: file_id, next_line: 0, line: "", position: 0,
     line_start: 0, line_end: 0, line_next: 0, loaded: false, eol_done: false,
     next_byte: 0, line_byte: 0, position_byte: 0,
-    state: "new", endline: 13, catcodes: {}}
+    state: "new", endline: 13, catcodes: {}, origin: "local", end_input: false, seq: 0, line_no: 0}
 
 fn load_line(r) any^ {
-    if (r.next_line >= len(r.source)) null
+    if ((r.end_input and r.loaded) or r.next_line >= len(r.source)) null
     else {
         let end = line_end(r.source, r.next_line);
         let trimmed = trim_end(r.source, r.next_line, end);
@@ -39,7 +39,7 @@ fn load_line(r) any^ {
             line_start: r.next_line, line_end: trimmed, line_next: next,
             line_byte: r.next_byte, position_byte: 0,
             next_byte: r.next_byte + byte_count(r.source, r.next_line, next),
-            next_line: next, loaded: true, eol_done: false, state: "new"}
+            next_line: next, loaded: true, eol_done: false, state: "new", line_no: r.line_no + 1}
     }
 }
 
@@ -71,7 +71,8 @@ fn word(r, pos, parts) any^ {
 
 fn token(kind, value, cat, start, end) =>
     {kind: kind, value: value, cat: cat, start: start, end: end}
-fn done(r, t) => {reader: r, token: if (t == null) null else {*:t, file: r.file_id}}
+fn done(r, t) => if (t == null) {reader: r, token: null}
+    else {reader: {*:r, seq: r.seq + 1}, token: {*:t, file: r.file_id, direct: true, seq: r.seq + 1}}
 
 // Return one token so callers can change category codes between reads.
 pub fn next(r) any^ {

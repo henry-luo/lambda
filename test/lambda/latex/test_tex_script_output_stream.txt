@@ -1,0 +1,96 @@
+{
+  case: "open, close",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}
+{
+  case: "unopened",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}
+{
+  case: "independent",
+  issue: null,
+  unsupported: null,
+  script: ["one", "three"],
+  native: ["one", "three"],
+  matches: true
+}
+{
+  case: "close by wrapped number",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}
+{
+  case: "open by wrapped number",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}
+{
+  case: "negative stream",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}
+{
+  case: "global scope",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}
+{
+  case: "buffer retained",
+  issue: null,
+  unsupported: null,
+  script: ["A B"],
+  native: ["A B"],
+  matches: true
+}
+{
+  case: "expanded contents",
+  issue: null,
+  unsupported: null,
+  script: ["A"],
+  native: ["A"],
+  matches: true
+}
+{
+  case: "aliased commands",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}
+{
+  case: "expanded filename",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}
+{
+  case: "quoted filename",
+  issue: null,
+  unsupported: null,
+  script: ["visible"],
+  native: ["visible"],
+  matches: true
+}

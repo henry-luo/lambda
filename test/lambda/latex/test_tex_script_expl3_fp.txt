@@ -1,0 +1,90 @@
+"basic:"
+{
+  text: "1.4142",
+  issue: null,
+  unsupported: null
+}
+"expanded macro:"
+{
+  text: "1.414213562373095",
+  issue: null,
+  unsupported: null
+}
+"edef:"
+{
+  text: "0.3333333333333333",
+  issue: null,
+  unsupported: null
+}
+"unsupported:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "fp sin"
+}
+"zero:"
+{
+  text: "",
+  issue: "expl3-fp-division-by-zero",
+  unsupported: null
+}
+"full fixture:"
+{
+  text: "Hello, World!/AA/13/apple, kiwi, pear/HELLO, WORLD/expl3 ready/1.4142",
+  issue: null,
+  unsupported: null
+}
+"precision:"
+{
+  text: "10000000000000000/0.3/0.9999999999999999",
+  issue: null,
+  unsupported: null
+}
+"rounding ties:"
+{
+  text: "2/4/-2/1200",
+  issue: null,
+  unsupported: null
+}
+"signed zero:"
+{
+  text: "-0/-0",
+  issue: null,
+  unsupported: null
+}
+"nested expandable primitive:"
+{
+  text: "2",
+  issue: null,
+  unsupported: null
+}
+"fractional round places unsupported:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "fp round"
+}
+"literal precision bound:"
+{
+  text: "",
+  issue: "expl3-fp-range",
+  unsupported: null
+}
+"exponent bound:"
+{
+  text: "",
+  issue: "expl3-fp-range",
+  unsupported: null
+}
+"domain:"
+{
+  text: "",
+  issue: "expl3-fp-domain",
+  unsupported: null
+}
+"protected token unsupported:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "fp expression token"
+}

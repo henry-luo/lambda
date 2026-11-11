@@ -1,0 +1,13 @@
+['panel', "region", 7, "hello", 'child']
+true
+['section', symbol.empty, 'a.b']
+'inner'
+'yes'
+['aside', 3]
+["computed element tag must evaluate to string or symbol", "computed element tag must evaluate to string or symbol", "computed element tag must evaluate to string or symbol"]
+["tag-failure"]
+[true]
+'captured'
+[true, false]
+[100, 'node1', 'node100', 100]
+[true, "PDF file content requires strings, binaries, maps, null, or lists of them"]

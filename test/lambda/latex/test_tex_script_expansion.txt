@@ -177,10 +177,10 @@
   text: "A",
   issue: "tex-incomplete-if"
 }
-"unsupported conditional:"
+"dimension conditional:"
 {
-  text: "",
-  issue: "tex-unsupported-primitive"
+  text: "T",
+  issue: null
 }
 "let retains meaning:"
 {
@@ -278,7 +278,7 @@
   issue: null
 }
 "unsupported primitive name:"
-["tex-unsupported-primitive", "dimen"]
+["tex-unsupported-primitive", "setbox"]
 "count register:"
 {
   text: "17",
@@ -554,3 +554,762 @@
   text: "",
   issue: "tex-bad-unless"
 }
+"dimension units:"
+{
+  text: "72.26999pt,28.45274pt,2.84526pt",
+  issue: null
+}
+"dimension rounding:"
+{
+  text: "0.33333pt,16383.99998pt",
+  issue: null
+}
+"dimension arithmetic:"
+{
+  text: "1.875pt",
+  issue: null
+}
+"dimension scaled value:"
+{
+  text: "100,0.00153pt",
+  issue: null
+}
+"dimension register factors:"
+{
+  text: "-1.875pt",
+  issue: null
+}
+"dimension local and global:"
+{
+  text: "{2.0pt}{}3.0pt",
+  issue: null
+}
+"dimension alias:"
+{
+  text: "6.0pt,6.0pt",
+  issue: null
+}
+"dimension sign comparison:"
+{
+  text: "TT",
+  issue: null
+}
+"dimension overflow:"
+{
+  text: "",
+  issue: "tex-dimension-too-large"
+}
+"dimension missing unit:"
+{
+  text: "",
+  issue: "tex-illegal-unit"
+}
+"dimension rounding reference:"
+{
+  text: "0.00002pt,1.12346pt",
+  issue: null
+}
+"dimension fractional units:"
+{
+  text: "42.67912pt,0.0pt",
+  issue: null
+}
+"negative dimension factor:"
+{
+  text: "-1.875pt",
+  issue: null
+}
+"empty box tests:"
+{
+  text: "Vhv",
+  issue: null
+}
+"negated empty box:"
+{
+  text: "Y",
+  issue: null
+}
+"box register range:"
+{
+  text: "",
+  issue: "tex-bad-register"
+}
+"glue orders:"
+{
+  text: "2.0pt plus 1.0fill minus 3.0fill",
+  issue: null
+}
+"glue scaling:"
+{
+  text: "-1.0pt plus -1.5fil minus -2.0pt",
+  issue: null
+}
+"glue copied negative:"
+{
+  text: "-1.0pt plus -2.0fil minus -3.0pt",
+  issue: null
+}
+"glue scoped:"
+{
+  text: "{2.0pt}{}3.0pt",
+  issue: null
+}
+"glue alias:"
+{
+  text: "3.0pt plus 1.0fil",
+  issue: null
+}
+"math glue:"
+{
+  text: "3.0mu plus 2.0fill",
+  issue: null
+}
+"glue division by zero:"
+{
+  text: "",
+  issue: "tex-arith-overflow"
+}
+"glue overflow:"
+{
+  text: "",
+  issue: "tex-arith-overflow"
+}
+"default character codes:"
+{
+  text: "999,1000,29025,28721,0,-1",
+  issue: null
+}
+"character codes scoped:"
+{
+  text: "{333}{}444",
+  issue: null
+}
+"math and delimiter assignment:"
+{
+  text: "1234,-1",
+  issue: null
+}
+"character code range:"
+{
+  text: "",
+  issue: "tex-bad-character-code"
+}
+"integer parameter scope:"
+{
+  text: "{30}{}40",
+  issue: null
+}
+"true dimension magnification:"
+{
+  text: "0.75pt,1.5pt",
+  issue: null
+}
+"dimension expression precedence:"
+{
+  text: "7.0pt,9.0pt",
+  issue: null
+}
+"dimension expression rounding:"
+{
+  text: "0.00003pt,-0.00003pt",
+  issue: null
+}
+"dimension expression as integer:"
+{
+  text: "65537",
+  issue: null
+}
+"glue expression orders:"
+{
+  text: "3.0pt plus 3.0fill",
+  issue: null
+}
+"math glue expression:"
+{
+  text: "6.0mu plus 4.0fil",
+  issue: null
+}
+"glue expression assignment:"
+{
+  text: "2.0pt plus 2.0fil",
+  issue: null
+}
+"glue expression rounding:"
+{
+  text: "0.00003pt plus 0.00003pt",
+  issue: null
+}
+"expression divide by zero:"
+{
+  text: "",
+  issue: "tex-arith-overflow"
+}
+"dimension expression overflow:"
+{
+  text: "",
+  issue: "tex-arith-overflow"
+}
+"pdf checksum:"
+{
+  text: "900150983CD24FB0D6963F7D28E17F72",
+  issue: null
+}
+"pdf checksum file unsupported:"
+["tex-unsupported-primitive", "pdfmdfivesum file"]
+"captured file queries:"
+{
+  text: "3,900150983CD24FB0D6963F7D28E17F72,D:20000101120000Z",
+  issue: null,
+  resource_count: 1,
+  resource_bytes: 3
+}
+"captured empty and unicode files:"
+{
+  text: "0,2",
+  issue: null,
+  resource_count: 2,
+  resource_bytes: 2
+}
+"missing captured file:"
+{
+  text: "[][][]",
+  issue: null,
+  resource_count: 0,
+  resource_bytes: 0
+}
+"captured path restrictions:"
+{
+  text: "[][]",
+  issue: null,
+  resource_count: 0,
+  resource_bytes: 0
+}
+"unavailable file source:"
+["tex-unsupported-primitive", "pdffilesize"]
+"fixed creation date:"
+{
+  text: "D:20000101120000Z",
+  issue: null
+}
+"captured binary checksum:"
+{
+  text: "2,D07D34EFAC6328007AD67C7E0A985E00",
+  issue: null,
+  resource_count: 1,
+  resource_bytes: 2
+}
+"invalid captured resource:"
+{
+  text: "",
+  issue: "tex-resource-invalid",
+  resource_count: 0,
+  resource_bytes: 0
+}
+"captured file budget:"
+{
+  issue: "tex-budget",
+  resource_count: 128,
+  resource_bytes: 128
+}
+"font parameter growth:"
+{
+  text: "0.00008pt,0.0pt",
+  issue: null,
+  diagnostics: ["tex-font-params"],
+  font_memory: 114
+}
+"font identity and reuse:"
+{
+  text: "Y,select font cmr10",
+  issue: null,
+  diagnostics: [],
+  font_memory: 14
+}
+"font scaled metrics:"
+{
+  text: "20.0pt",
+  issue: null,
+  diagnostics: [],
+  font_memory: 14
+}
+"font selection scope:"
+{
+  text: "{0.0pt}10.0pt",
+  issue: null,
+  diagnostics: [],
+  font_memory: 14
+}
+"font parameter global storage:"
+{
+  text: "{}2.0pt",
+  issue: null,
+  diagnostics: [],
+  font_memory: 14
+}
+"font definition scoped:"
+{
+  text: "{}Y",
+  issue: null,
+  diagnostics: [],
+  font_memory: 14
+}
+"font capacity:"
+{
+  text: "",
+  issue: "tex-capacity",
+  diagnostics: [],
+  font_memory: 14
+}
+"font standard metrics:"
+{
+  text: "3.33333pt,10.0pt",
+  issue: null,
+  diagnostics: [],
+  font_memory: 14
+}
+"font selected afterassignment:"
+{
+  text: "XY",
+  issue: null,
+  diagnostics: [],
+  font_memory: 14
+}
+"font names:"
+{
+  text: "Y",
+  issue: null,
+  diagnostics: [],
+  font_memory: 14
+}
+"input extension and positions:"
+{
+  text: "AéXB",
+  issue: null,
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "chapter.tex", "local"]],
+  positions: [["A", 0, 0, 1], ["é", 2, 0, 2], ["X", 2, 2, 3], ["B", 0, 16, 17]]
+}
+"input exact before extension:"
+{
+  text: "X",
+  issue: null,
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "chapter", "local"]],
+  positions: [["X", 2, 0, 1]]
+}
+"nested inputs and definitions:"
+{
+  text: "BB",
+  issue: null,
+  diagnostics: [],
+  resource_count: 2,
+  sources: [[0, "main.tex", "local"], [2, "a", "local"], [3, "b", "local"]],
+  positions: [["B", 3, 8, 9], ["B", 3, 8, 9]]
+}
+"reopened input identity:"
+{
+  text: "XX",
+  issue: null,
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "a", "local"]],
+  positions: [["X", 2, 0, 1], ["X", 2, 0, 1]]
+}
+"bundled input scope:"
+{
+  text: "B",
+  issue: null,
+  diagnostics: [],
+  resource_count: 0,
+  sources: [[0, "main.tex", "bundled"], [2, "same", "bundled"]],
+  positions: [["B", 2, 0, 1]]
+}
+"local input scope:"
+{
+  text: "L",
+  issue: null,
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "same", "local"]],
+  positions: [["L", 2, 0, 1]]
+}
+"endinput nested:"
+{
+  text: "RABZ",
+  issue: null,
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "early", "local"]],
+  positions: [["R", 0, 0, 1], ["A", 2, 0, 1], ["B", 2, 11, 12], ["Z", 0, 14, 15]]
+}
+"endinput root:"
+{
+  text: "AB",
+  issue: null,
+  diagnostics: [],
+  resource_count: 0,
+  sources: [[0, "main.tex", "local"]],
+  positions: [["A", 0, 0, 1], ["B", 0, 11, 12]]
+}
+"input eof hook:"
+{
+  text: "XZ",
+  issue: null,
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "a", "local"]],
+  positions: [["X", 2, 0, 1], ["Z", 0, 10, 11]]
+}
+"missing input:"
+{
+  text: "AB",
+  issue: null,
+  diagnostics: ["tex-file-not-found"],
+  resource_count: 0,
+  sources: [[0, "main.tex", "local"]],
+  positions: [["A", 0, 0, 1], ["B", 0, 16, 17]]
+}
+"outside input:"
+{
+  text: "AB",
+  issue: null,
+  diagnostics: ["tex-file-outside"],
+  resource_count: 0,
+  sources: [[0, "main.tex", "local"]],
+  positions: [["A", 0, 0, 1], ["B", 0, 15, 16]]
+}
+"recursive input budget:"
+{
+  text: "",
+  issue: "tex-budget",
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "a", "local"]],
+  positions: []
+}
+"input shares category codes:"
+{
+  text: "Y",
+  issue: null,
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "cats", "local"]],
+  positions: [["Y", 0, 21, 22]]
+}
+"nested bundled origin:"
+{
+  text: "B",
+  issue: null,
+  diagnostics: [],
+  resource_count: 0,
+  sources: [[0, "main.tex", "bundled"], [2, "outer", "bundled"], [3, "inner", "bundled"]],
+  positions: [["B", 3, 0, 1]]
+}
+"local cannot read bundled:"
+{
+  text: "",
+  issue: null,
+  diagnostics: ["tex-file-not-found"],
+  resource_count: 0,
+  sources: [[0, "main.tex", "local"]],
+  positions: []
+}
+"quoted input name:"
+{
+  text: "Y",
+  issue: null,
+  diagnostics: [],
+  resource_count: 1,
+  sources: [[0, "main.tex", "local"], [2, "with space", "local"]],
+  positions: [["Y", 2, 0, 1]]
+}
+"input provider unavailable:"
+["tex-unsupported-primitive", "input"]
+"integer parameter defaults:"
+{
+  text: "0,1,2000",
+  issue: null
+}
+"dimension parameter arithmetic:"
+{
+  text: "4.0pt",
+  issue: null
+}
+"glue parameter arithmetic:"
+{
+  text: "3.0pt plus 1.0fill",
+  issue: null
+}
+"token parameters:"
+{
+  text: "AB",
+  issue: null
+}
+"positive globaldefs:"
+{
+  text: "{}A,2.0pt",
+  issue: null
+}
+"negative globaldefs:"
+{
+  text: "{}Y",
+  issue: null
+}
+"latex newif:"
+{
+  text: "ABC",
+  issue: null,
+  unsupported: null
+}
+"latex newif scope:"
+{
+  text: "{A}B",
+  issue: null,
+  unsupported: null
+}
+"latex constructor:"
+{
+  text: "Ysection{Title}",
+  issue: null,
+  unsupported: null
+}
+"latex primitive explicitly unsupported:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "documentclass"
+}
+"latex newcommand arguments:"
+{
+  text: "left/right",
+  issue: null,
+  diagnostics: []
+}
+"latex optional argument:"
+{
+  text: "Hi World/A,Hi Sam/B",
+  issue: null,
+  diagnostics: []
+}
+"latex nested optional group:"
+{
+  text: "(a]b)",
+  issue: null,
+  diagnostics: []
+}
+"latex renew and provide:"
+{
+  text: "C",
+  issue: null,
+  diagnostics: []
+}
+"latex duplicate definition:"
+{
+  text: "A",
+  issue: null,
+  diagnostics: ["latex-already-defined"]
+}
+"latex missing renewal:"
+{
+  text: "A",
+  issue: null,
+  diagnostics: ["latex-undefined"]
+}
+"latex starred short argument:"
+{
+  text: "",
+  issue: "tex-runaway-argument",
+  diagnostics: []
+}
+"latex long argument:"
+{
+  text: "aparb",
+  issue: null,
+  diagnostics: []
+}
+"latex robust definition:"
+{
+  text: "macro:->\\x ",
+  issue: null,
+  diagnostics: []
+}
+"latex optional macro identity:"
+{
+  text: "Y",
+  issue: null,
+  diagnostics: []
+}
+"latex macro identity with tex def:"
+{
+  text: "Y",
+  issue: null,
+  diagnostics: []
+}
+"latex custom environment:"
+{
+  text: "<A>X</>",
+  issue: null,
+  diagnostics: [],
+  trailing: null
+}
+"latex environment optional:"
+{
+  text: "(D)X!,(Z)Y!",
+  issue: null,
+  diagnostics: [],
+  trailing: null
+}
+"latex environment scope:"
+{
+  text: "XYZ",
+  issue: null,
+  diagnostics: [],
+  trailing: null
+}
+"latex passthrough environment:"
+{
+  text: "begin{quote}Hiend{quote}",
+  issue: null,
+  diagnostics: [],
+  trailing: null
+}
+"latex environment mismatch:"
+{
+  text: "begin{a}Xend{b}Yend{a}",
+  issue: null,
+  diagnostics: ["latex-env-mismatch"],
+  trailing: null
+}
+"latex environment expanded name:"
+{
+  text: "AXB",
+  issue: null,
+  diagnostics: [],
+  trailing: null
+}
+"latex document tail:"
+{
+  text: "begin{document}Xend{document}",
+  issue: null,
+  diagnostics: [],
+  trailing: "%keep\n\\unexpanded{tail}"
+}
+"latex environment aftergroup:"
+{
+  text: " AXBZ",
+  issue: null,
+  diagnostics: [],
+  trailing: null
+}
+"latex nested environments:"
+{
+  text: "AXBYbZa",
+  issue: null,
+  diagnostics: [],
+  trailing: null
+}
+"latex renew environment:"
+{
+  text: "CXD",
+  issue: null,
+  diagnostics: [],
+  trailing: null
+}
+"latex duplicate environment:"
+{
+  text: "AXB",
+  issue: null,
+  diagnostics: ["latex-already-defined"],
+  trailing: null
+}
+"latex undefined renewal:"
+{
+  text: "AXB",
+  issue: null,
+  diagnostics: ["latex-undefined"],
+  trailing: null
+}
+"latex unterminated environment argument:"
+{
+  text: "",
+  issue: "tex-runaway-argument",
+  diagnostics: [],
+  trailing: null
+}
+"latex document hooks:"
+{
+  text: "begin{document}ABXCDend{document}",
+  issue: null,
+  diagnostics: [],
+  trailing: "TAIL"
+}
+"latex late begin hook:"
+{
+  text: "begin{document}ABCend{document}",
+  issue: null,
+  diagnostics: [],
+  trailing: ""
+}
+"latex hook definition:"
+{
+  text: "begin{document}Yend{document}",
+  issue: null,
+  diagnostics: [],
+  trailing: ""
+}
+"math definition scope:"
+{
+  text: "$B$A",
+  issue: null,
+  unsupported: null
+}
+"math mode conditionals:"
+{
+  text: "H$MI$H$$MD$$",
+  issue: null,
+  unsupported: null
+}
+"math hooks:"
+{
+  text: "$Ax$$$By$$",
+  issue: null,
+  unsupported: null
+}
+"math global assignment:"
+{
+  text: "$$B",
+  issue: null,
+  unsupported: null
+}
+"latex math delimiter scope:"
+{
+  text: "(B)A",
+  issue: null,
+  unsupported: null
+}
+"display missing second shift:"
+{
+  text: "$$a$X",
+  issue: null,
+  diagnostics: ["tex-display-math"]
+}
+"latex display delimiters:"
+{
+  text: "[MI]N",
+  issue: null,
+  unsupported: null
+}
+"nested math display mode:"
+{
+  text: "$$A(B)C$$",
+  issue: null,
+  unsupported: null
+}
+"control space token:"
+[["char", "A"], ["control", " "], ["char", "B"]]
+"control space alias:"
+[["char", "A"], ["control", "sp"], ["char", "B"]]
+"macro control space:"
+[["char", "A"], ["control", " "], ["char", "B"]]

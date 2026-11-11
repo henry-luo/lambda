@@ -1,0 +1,16 @@
+"local package:"
+{
+  issue: null,
+  matches_native: true,
+  script_packages: ["script_provenance"],
+  native_packages: ["script_provenance"],
+  script_diagnostics: [],
+  native_diagnostics: []
+}
+"no package:"
+{
+  issue: null,
+  matches_native: true,
+  diagnostics: null,
+  packages: null
+}

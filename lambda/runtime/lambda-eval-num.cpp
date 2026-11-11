@@ -915,6 +915,7 @@ enum NumericVectorUnaryOp {
     NUMERIC_VECTOR_ROUND,
     NUMERIC_VECTOR_FLOOR,
     NUMERIC_VECTOR_CEIL,
+    NUMERIC_VECTOR_TRUNC,
 };
 
 static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
@@ -947,6 +948,7 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
         case NUMERIC_VECTOR_ROUND: value = round(value); break;
         case NUMERIC_VECTOR_FLOOR: value = floor(value); break;
         case NUMERIC_VECTOR_CEIL: value = ceil(value); break;
+        case NUMERIC_VECTOR_TRUNC: value = trunc(value); break;
         }
         rooted_result.get()->float_items[i] = value;
     }
@@ -1203,6 +1205,8 @@ static Item fn_numeric_rounding(Item item, NumericVectorUnaryOp vector_op,
 DEFINE_NUMERIC_ROUNDING(round, NUMERIC_VECTOR_ROUND, round, decimal_round)
 DEFINE_NUMERIC_ROUNDING(floor, NUMERIC_VECTOR_FLOOR, floor, decimal_floor)
 DEFINE_NUMERIC_ROUNDING(ceil, NUMERIC_VECTOR_CEIL, ceil, decimal_ceil)
+// keep decimal truncation in the decimal domain instead of narrowing through double.
+DEFINE_NUMERIC_ROUNDING(trunc, NUMERIC_VECTOR_TRUNC, trunc, decimal_trunc)
 #undef DEFINE_NUMERIC_ROUNDING
 
 static Item numeric_extreme_pair(Item left, Item right, bool minimum, bool* valid) {

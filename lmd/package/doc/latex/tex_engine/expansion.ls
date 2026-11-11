@@ -2,12 +2,32 @@
 import stream: .stream
 import reader: .reader
 import primitives: .primitives
+import expl3: .expl3
+import fp: .fp
+import dimension: .dimension
+import glue: .glue
+import pdfstrings: .pdfstrings
+import md5: .md5
+import utf8: lambda.io.utf8
 
-fn result(input, definitions, groups, output, count, issue = null) =>
+fn result(input, definitions, groups, output, count, issue = null, options = null) =>
     {input: input, definitions: definitions, groups: groups, output: output,
-        conditions: [], counts: {}, toks: {}, lowercase: {}, uppercase: {},
-        parameters: {endlinechar: input.reader.endline, escapechar: 92}, after_assignment: null, token_text_scan: false,
-        messages: [], expansions: count, issue: issue}
+        latex: options.latex == true, script_expl3: options.script_expl3 == true, expl_syntax: null, adapters: if (options.adapters == null) [] else options.adapters,
+        chaptered: if (options.chaptered == null) [] else options.chaptered, packages: [], class_options: "",
+        in_document: false, begin_hooks: [], end_hooks: [], package_frames: [],
+        counter_resets: [], engine_counters: [], output_streams: [],
+        current_package: null, current_options: null, current_is_class: false, option_decls: [], pass_options: [],
+        math_depth: 0, display_math: false, main_file: input.reader.file_id,
+        echo_definitions: options.echo_definitions == true, echo_incomplete: false,
+        conditions: [], counts: {}, dimens: {}, skips: {}, muskips: {}, boxes: {}, toks: {}, lowercase: {}, uppercase: {}, code_tables: {sfcode: {}, mathcode: {}, delcode: {}},
+        parameters: {endlinechar: input.reader.endline, escapechar: 92, mag: 1000, tolerance: 10000,
+            newlinechar: if (options.latex == true) -1 else 0}, after_assignment: null, token_text_scan: false,
+        resources: options.resources, resources_seen: {}, resource_ids: {}, resource_count: 0, resource_bytes: 0,
+        sources: [{id: input.reader.file_id, name: if (options.source_name == null) "<input>" else options.source_name,
+            origin: if (input.reader.origin == "bundled") "bundled" else "local", data: input.reader.source}],
+        fonts: [{name: "nullfont", size: 0, param_base: 0, param_count: 7, params: {}}],
+        font_memory: 7, current_font: 0, diagnostics: [], diagnostic_records: [],
+        messages: [], terminal_line: "", expansions: count, issue: issue}
 fn fail(st, code) => {*:st, issue: code}
 fn unsupported(st, name) => {*:st, issue: "tex-unsupported-primitive", unsupported: name}
 fn charcat(t, cat) => t != null and t.kind == "char" and t.cat == cat
@@ -16,10 +36,11 @@ fn key(t) => if (t.kind == "active") "active:" ++ t.value else "control:" ++ t.v
 fn conditional_name(name) => contains(["if", "ifcat", "ifnum", "ifdim", "ifodd", "ifvmode", "ifhmode", "ifmmode",
     "ifinner", "ifvoid", "ifhbox", "ifvbox", "ifx", "ifeof", "iftrue", "iffalse", "ifcase", "ifdefined",
     "ifcsname", "iffontchar", "ifpdfprimitive", "ifincsname"], name)
-fn builtin(name) => primitives.exists(name)
+fn builtin(st, name) => primitives.exists(name) or (st.latex and primitives.latex_exists(name)) or
+    (st.script_expl3 and expl3.exists(name))
 fn meaning(st, t) any^ => if (not is_control(t)) {kind: "char", value: t.value, cat: t.cat}
     else if (st.definitions[key(t)] != null) st.definitions[key(t)]
-    else if (t.kind == "control" and builtin(t.value)) {kind: "primitive", name: t.value}
+    else if (t.kind == "control" and builtin(st, t.value)) {kind: "primitive", name: t.value}
     else {kind: "undefined"}
 fn primitive(st, t) any^ => if (is_control(t) and meaning(st, t).kind == "primitive") meaning(st, t).name else null
 fn nonspace(input) any^ {
@@ -139,7 +160,7 @@ fn match_prefix(input, prefix, index = 0) any^ {
 }
 
 fn collect_args(input, delimiters, brace_delim, long_ok, args = []) any^ {
-    if (len(args) == len(delimiters)) {input: input, args: args, issue: null}
+    if (len(args) >= len(delimiters)) {input: input, args: args, issue: null}
     else {
         let arg = stream.delimited(input, delimiters[len(args)], long_ok,
             brace_delim and len(args) + 1 == len(delimiters));
@@ -148,8 +169,11 @@ fn collect_args(input, delimiters, brace_delim, long_ok, args = []) any^ {
     }
 }
 
+fn stored_tokens(tokens) => [for (t in tokens) {*:t, direct: false}]
+
+// spread after selecting the token array so an empty argument contributes nothing.
 fn substitute(body, args) => [for (t in body)
-    if (t.kind == "parameter") *args[t.value] else t]
+    *(if (t.kind == "parameter") args[t.value] else [t])]
 
 fn expand_macro(st, macro, budget) any^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
@@ -157,9 +181,13 @@ fn expand_macro(st, macro, budget) any^ {
         let matched = match_prefix(st.input, macro.prefix);
         if (matched.issue != null) fail({*:st, input: matched.input}, matched.issue)
         else {
-            let args = collect_args(matched.input, macro.delimiters, macro.brace_delim, macro.long_ok);
-            if (args.issue != null) fail({*:st, input: args.input}, args.issue)
-            else {*:st, input: stream.push(args.input, substitute(macro.body, args.args)),
+            let optional = if (macro.optional == true) latex_optional(matched.input)^
+                else {input: matched.input, present: false, tokens: [], issue: null};
+            let initial = if (macro.optional == true) [if (optional.present) optional.tokens else macro.optional_default] else [];
+            let args = collect_args(optional.input, macro.delimiters, macro.brace_delim, macro.long_ok, initial);
+            if (optional.issue != null) fail({*:st, input: optional.input}, optional.issue)
+            else if (args.issue != null) fail({*:st, input: args.input}, args.issue)
+            else {*:st, input: stream.push(args.input, stored_tokens(substitute(macro.body, args.args))),
                 expansions: st.expansions + 1}
         }
     }
@@ -196,35 +224,61 @@ fn prefixed(st, global, long_ok, protected_flag, budget) any^ {
     let t = read.token;
     let advanced = {*:st, input: read.stream};
     let cmd = primitive(st, t);
+    let apply_global = effective_global(st, global)^;
     if (cmd == null and (not is_control(t) or
-        (meaning(st, t).kind != "register" and meaning(st, t).kind != "token-register")))
+        (meaning(st, t).kind != "register" and meaning(st, t).kind != "dimension-register" and meaning(st, t).kind != "glue-register" and meaning(st, t).kind != "font" and meaning(st, t).kind != "token-register")))
         fail(advanced, "tex-bad-prefix")
     else if (cmd == "global") prefixed(advanced, true, long_ok, protected_flag, budget)
     else if (cmd == "long") prefixed(advanced, global, true, protected_flag, budget)
     else if (cmd == "protected") prefixed(advanced, global, long_ok, true, budget)
-    else if (contains(["def", "gdef", "edef", "xdef"], cmd))
-        define(advanced, global or cmd == "gdef" or cmd == "xdef", long_ok, protected_flag,
-            cmd == "edef" or cmd == "xdef", budget)
-    else if (cmd == "let" and not long_ok and not protected_flag) assign_let(advanced, global)
-    else if (cmd == "futurelet" and not long_ok and not protected_flag) assign_futurelet(advanced, global)
-    else if (cmd == "count" and not long_ok and not protected_flag) assign_count(advanced, global, budget, null)
-    else if (cmd == "countdef" and not long_ok and not protected_flag) assign_countdef(advanced, global, budget)
+    else if (contains(["def", "gdef", "edef", "xdef"], cmd)) {
+        let assigned = define(advanced, effective_global(st, global or cmd == "gdef" or cmd == "xdef")^, long_ok, protected_flag,
+            cmd == "edef" or cmd == "xdef", budget)^;
+        {*:assigned, prefixed_definition: true}
+    }
+    else if (cmd == "let" and not long_ok and not protected_flag) assign_let(advanced, apply_global)
+    else if (cmd == "futurelet" and not long_ok and not protected_flag) assign_futurelet(advanced, apply_global)
+    else if (cmd == "font" and not long_ok and not protected_flag) define_font(advanced, apply_global, budget)
+    else if (cmd == "fontdimen" and not long_ok and not protected_flag) assign_font_dimen(advanced, budget)
+    else if (cmd == "nullfont" and not long_ok and not protected_flag) select_font(advanced, apply_global, 0)
+    else if (cmd == "count" and not long_ok and not protected_flag) assign_count(advanced, apply_global, budget, null)
+    else if (cmd == "countdef" and not long_ok and not protected_flag) assign_countdef(advanced, apply_global, budget)
+    else if (cmd == "dimen" and not long_ok and not protected_flag) assign_dimen(advanced, apply_global, budget, null)
+    else if (cmd == "dimendef" and not long_ok and not protected_flag) assign_dimendef(advanced, apply_global, budget)
+    else if ((cmd == "skip" or cmd == "muskip") and not long_ok and not protected_flag)
+        assign_glue(advanced, apply_global, budget, null, cmd == "muskip")
+    else if ((cmd == "skipdef" or cmd == "muskipdef") and not long_ok and not protected_flag)
+        assign_gluedef(advanced, apply_global, budget, cmd == "muskipdef")
     else if (contains(["advance", "multiply", "divide"], cmd) and not long_ok and not protected_flag)
-        arithmetic(advanced, global, budget, cmd)
+        arithmetic(advanced, apply_global, budget, cmd)
     else if ((cmd == "chardef" or cmd == "mathchardef") and not long_ok and not protected_flag)
-        assign_chardef(advanced, global, budget, cmd == "mathchardef")
-    else if (cmd == "toks" and not long_ok and not protected_flag) assign_toks(advanced, global, budget, null)
-    else if (cmd == "everyeof" and not long_ok and not protected_flag) assign_toks(advanced, global, budget, -1)
-    else if (cmd == "toksdef" and not long_ok and not protected_flag) assign_toksdef(advanced, global, budget)
+        assign_chardef(advanced, apply_global, budget, cmd == "mathchardef")
+    else if (cmd == "toks" and not long_ok and not protected_flag) assign_toks(advanced, apply_global, budget, null)
+    else if (cmd == "everyeof" and not long_ok and not protected_flag) assign_toks(advanced, apply_global, budget, -1)
+    else if (cmd == "toksdef" and not long_ok and not protected_flag) assign_toksdef(advanced, apply_global, budget)
+    else if (meaning(st, t).kind == "font" and not long_ok and not protected_flag)
+        select_font(advanced, apply_global, meaning(st, t).index)
     else if (meaning(st, t).kind == "register" and not long_ok and not protected_flag)
-        assign_count(advanced, global, budget, meaning(st, t).index)
+        assign_count(advanced, apply_global, budget, meaning(st, t).index)
+    else if (meaning(st, t).kind == "dimension-register" and not long_ok and not protected_flag)
+        assign_dimen(advanced, apply_global, budget, meaning(st, t).index)
+    else if (meaning(st, t).kind == "glue-register" and not long_ok and not protected_flag)
+        assign_glue(advanced, apply_global, budget, meaning(st, t).index, meaning(st, t).mu)
     else if (meaning(st, t).kind == "token-register" and not long_ok and not protected_flag)
-        assign_toks(advanced, global, budget, meaning(st, t).index)
-    else if (cmd == "catcode" and not long_ok and not protected_flag) assign_catcode(advanced, global, budget)
+        assign_toks(advanced, apply_global, budget, meaning(st, t).index)
+    else if (cmd == "catcode" and not long_ok and not protected_flag) assign_catcode(advanced, apply_global, budget)
+    else if (contains(["sfcode", "mathcode", "delcode"], cmd) and not long_ok and not protected_flag)
+        assign_extra_code(advanced, apply_global, budget, cmd)
     else if ((cmd == "lccode" or cmd == "uccode") and not long_ok and not protected_flag)
-        assign_case_code(advanced, global, budget, cmd == "uccode")
-    else if ((cmd == "endlinechar" or cmd == "escapechar") and not long_ok and not protected_flag)
-        assign_parameter(advanced, global, budget, cmd)
+        assign_case_code(advanced, apply_global, budget, cmd == "uccode")
+    else if (primitives.parameter_kind(cmd) == "int" and not long_ok and not protected_flag)
+        assign_parameter(advanced, apply_global, budget, cmd)
+    else if (primitives.parameter_kind(cmd) == "dimen" and not long_ok and not protected_flag)
+        assign_dimen(advanced, apply_global, budget, "param:" ++ cmd)
+    else if (contains(["glue", "mu"], primitives.parameter_kind(cmd)) and not long_ok and not protected_flag)
+        assign_glue(advanced, apply_global, budget, "param:" ++ cmd, primitives.parameter_kind(cmd) == "mu")
+    else if (primitives.parameter_kind(cmd) == "toks" and not long_ok and not protected_flag)
+        assign_toks(advanced, apply_global, budget, parameter_index(cmd))
     else fail(advanced, "tex-bad-prefix")
 }
 
@@ -235,7 +289,8 @@ fn noexpand(st, budget) any^ {
         let existing = if (is_control(read.token)) meaning(st, read.token) else null;
         let cmd = primitive(st, read.token);
         let unexpandable = is_control(read.token) and (existing.kind == "relax" or existing.kind == "char" or
-            (cmd != null and not primitives.expandable(cmd)));
+            (cmd != null and not primitives.expandable(cmd) and not (st.latex and primitives.latex_expandable(cmd)) and
+                not (st.script_expl3 and expl3.expandable(cmd))));
         let marked = if (is_control(read.token) and not unexpandable)
             {*:read.token, noexpand: true} else read.token;
         {*:st, input: if (marked == null) read.stream else stream.push(read.stream, [marked]),
@@ -244,7 +299,8 @@ fn noexpand(st, budget) any^ {
 }
 
 fn expandable(st, t) any^ => is_control(t) and t.noexpand != true and
-    (meaning(st, t).kind == "macro" or (primitive(st, t) != null and primitives.expandable(primitive(st, t))))
+    (meaning(st, t).kind == "macro" or (primitive(st, t) != null and (primitives.expandable(primitive(st, t)) or (st.latex and primitives.latex_expandable(primitive(st, t))) or
+        (st.script_expl3 and expl3.expandable(primitive(st, t))))))
 
 fn expand_one(st, t, budget) any^ {
     if (not expandable(st, t)) {*:st, input: stream.push(st.input, [t])}
@@ -259,11 +315,52 @@ fn expand_one(st, t, budget) any^ {
         token_primitive(st, primitive(st, t), budget)
     else if (primitive(st, t) == "expanded") expanded_primitive(st, budget)
     else if (primitive(st, t) == "pdfstrcmp") strcmp_primitive(st, budget)
+    else if (contains(["pdfescapestring", "pdfescapename", "pdfescapehex", "pdfunescapehex", "pdfmdfivesum"], primitive(st, t)))
+        pdf_string_primitive(st, primitive(st, t), budget)
     else if (primitive(st, t) == "eTeXrevision") constant_primitive(st, budget, ".6")
+    else if (primitive(st, t) == "input") input_primitive(st, budget)
+    else if (primitive(st, t) == "endinput") endinput_primitive(st, budget)
+    else if (primitive(st, t) == "pdfcreationdate") constant_primitive(st, budget, "D:20000101120000Z")
+    else if (primitive(st, t) == "pdffilesize" or primitive(st, t) == "pdffilemoddate")
+        pdf_file_primitive(st, primitive(st, t), budget)
+    else if (st.latex and contains(["arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value"], primitive(st, t)))
+        latex_counter_format(st, t, primitive(st, t), budget)
+    else if (st.script_expl3 and primitive(st, t) == "tl_use:N") expl3_tl_use(st, budget)
+    else if (st.script_expl3 and primitive(st, t) == "int_eval:n") expl3_int_eval(st, budget)
+    else if (st.script_expl3 and primitive(st, t) == "fp_eval:n") expl3_fp_eval(st, budget)
+    else if (st.script_expl3 and contains(["seq_use:Nn", "seq_count:N"], primitive(st, t)))
+        expl3_seq_expand(st, primitive(st, t), budget)
+    else if (st.script_expl3 and expl3.string_compare(primitive(st, t)))
+        expl3_str_compare(st, primitive(st, t), budget)
+    else if (st.script_expl3 and expl3.text_case(primitive(st, t)))
+        expl3_text_case(st, primitive(st, t), budget)
+    else if (st.latex and primitive(st, t) == "lambda@xspace") latex_xspace(st, budget)
+    else if (st.latex and (primitive(st, t) == "@ifpackagewith" or primitive(st, t) == "@ifclasswith"))
+        if (st.expansions >= budget) fail(st, "tex-budget") else
+            latex_if_package_with({*:st, expansions: st.expansions + 1}, primitive(st, t) == "@ifclasswith", budget)
     else if (primitive(st, t) == "unless") unless_conditional(st, budget)
     else if (conditional_name(primitive(st, t)) or contains(["fi", "else", "or"], primitive(st, t)))
         condition(st, primitive(st, t), budget)
     else unsupported(st, primitive(st, t))
+}
+
+fn xspace_exception(token) any^ {
+    if (token == null) true
+    else if (token.kind == "char") charcat(token, 1) or charcat(token, 2) or charcat(token, 10) or
+        (len(token.value) == 1 and ord(token.value) < 128 and index_of(",.'/?;:!~-)", token.value) != null)
+    else if (token.kind == "active") token.value == "~"
+    else token.kind == "control" and contains(["/", " ", "space", "@sptoken", "@xobeysp", "footnote",
+        "footnotemark", "bgroup", "egroup"], token.value)
+}
+
+fn latex_xspace(st, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let read = stream.next(st.input)^;
+        let space = {kind: "char", value: " ", cat: 10, start: -1, end: -1};
+        let pending = if (read.token == null) [] else [*(if (xspace_exception(read.token)^) [] else [space]), read.token];
+        {*:st, input: stream.push(read.stream, pending), expansions: st.expansions + 1}
+    }
 }
 
 fn expand_after(st, budget) any^ {
@@ -318,7 +415,7 @@ fn csname(st, budget) any^ {
             let token = {kind: "control", value: scanned.name, cat: null, start: -1, end: -1};
             let k = key(token);
             {*:scanned.state, input: stream.push(scanned.state.input, [token]),
-                definitions: if ((scanned.state.definitions[k] == null and not builtin(scanned.name)) or
+                definitions: if ((scanned.state.definitions[k] == null and not builtin(scanned.state, scanned.name)) or
                     scanned.state.definitions[k].kind == "undefined")
                     set_definition(scanned.state.definitions, k, {kind: "primitive", name: "relax"})
                     else scanned.state.definitions}
@@ -376,6 +473,11 @@ fn character_number(st, negative, budget) any^ {
     }
 }
 
+fn input_line_number(st) any^ {
+    let active = stream.active_reader(st.input)^;
+    if (active == null or active.line_no == null) 0 else active.line_no
+}
+
 fn scan_number(st, budget) any^ {
     let start = signs(st, budget);
     let t = start.token;
@@ -387,14 +489,32 @@ fn scan_number(st, budget) any^ {
         let value = count_value(index.state, index.value);
         {state: index.state, value: if (start.negative) -value else value}
     }
+    else if (primitive(start.state, t) == "dimen" or (is_control(t) and meaning(start.state, t).kind == "dimension-register")) {
+        let index = if (primitive(start.state, t) == "dimen") scan_register(start.state, budget)^
+            else {state: start.state, value: meaning(start.state, t).index};
+        let value = dimen_value(index.state, index.value);
+        {state: index.state, value: if (start.negative) -value else value}
+    }
+    else if (primitives.parameter_kind(primitive(start.state, t)) == "dimen") {
+        let value = dimen_value(start.state, "param:" ++ primitive(start.state, t));
+        {state: start.state, value: if (start.negative) -value else value}
+    }
+    else if (primitives.parameter_kind(primitive(start.state, t)) == "glue") {
+        let value = glue_value(start.state, "param:" ++ primitive(start.state, t), false).width;
+        {state: start.state, value: if (start.negative) -value else value}
+    }
     else if (is_control(t) and (meaning(start.state, t).kind == "chardef" or
         meaning(start.state, t).kind == "mathchardef")) {
         let value = meaning(start.state, t).value;
         {state: start.state, value: if (start.negative) -value else value}
     }
-    else if (contains(["endlinechar", "escapechar"], primitive(start.state, t))) {
-        let value = start.state.parameters[primitive(start.state, t)];
+    else if (primitives.parameter_kind(primitive(start.state, t)) == "int") {
+        let value = parameter_value(start.state, primitive(start.state, t));
         {state: start.state, value: if (start.negative) -value else value}
+    }
+    else if (primitive(start.state, t) == "inputlineno") {
+        let line = input_line_number(start.state)^;
+        {state: start.state, value: if (start.negative) -line else line}
     }
     else if (primitive(start.state, t) == "eTeXversion")
         {state: start.state, value: if (start.negative) -2 else 2}
@@ -407,7 +527,19 @@ fn scan_number(st, budget) any^ {
         let expression = scan_expression(start.state, budget)^;
         {state: expression.state, value: if (start.negative) -expression.value else expression.value}
     }
-    else if (contains(["catcode", "lccode", "uccode"], primitive(start.state, t))) {
+    else if (primitive(start.state, t) == "fontdimen") {
+        let value = font_dimen(start.state, budget)^;
+        {state: value.state, value: if (start.negative) -value.value else value.value}
+    }
+    else if (primitive(start.state, t) == "dimexpr") {
+        let expression = scan_expression(start.state, budget, "dimen")^;
+        {state: expression.state, value: if (start.negative) -expression.value else expression.value}
+    }
+    else if (contains(["gluestretch", "glueshrink", "gluestretchorder", "glueshrinkorder"], primitive(start.state, t))) {
+        let part = glue_quantity(start.state, primitive(start.state, t), budget)^;
+        {state: part.state, value: if (start.negative) -part.value else part.value}
+    }
+    else if (contains(["catcode", "lccode", "uccode", "sfcode", "mathcode", "delcode"], primitive(start.state, t))) {
         let code = code_quantity(start.state, primitive(start.state, t), budget)^;
         {state: code.state, value: if (start.negative) -code.value else code.value}
     }
@@ -418,23 +550,27 @@ fn scan_number(st, budget) any^ {
     else digits(start.state, t, 10, start.negative, budget)
 }
 
+let COUNT_REGISTER_LIMIT = 32768
+
 fn scan_register(st, budget) any^ {
     let value = scan_number(st, budget)^;
     if (value.state.issue != null) value
-    else if (value.value < 0 or value.value >= 32768) {state: fail(value.state, "tex-bad-register"), value: 0}
+    else if (value.value < 0 or value.value >= COUNT_REGISTER_LIMIT) {state: fail(value.state, "tex-bad-register"), value: 0}
     else value
 }
 
-fn expression_factor(st, budget) any^ {
+fn expression_factor(st, budget, level = "int") any^ {
     let first = expanded_nonspace(st, budget)^;
     if (first.state.issue != null) {state: first.state, value: 0}
     else if (other(first.token, "(")) {
-        let nested = expression_sum(first.state, budget)^;
+        let nested = expression_sum(first.state, budget, level)^;
         let close = expanded_nonspace(nested.state, budget)^;
         if (nested.state.issue != null) nested
         else if (not other(close.token, ")")) {state: fail(put_back(close.state, close.token), "tex-missing-paren"), value: 0}
         else {state: close.state, value: nested.value}
     }
+    else if (level == "dimen") scan_dimen(put_back(first.state, first.token), budget)
+    else if (level == "glue" or level == "mu") scan_glue(put_back(first.state, first.token), budget, level == "mu")
     else scan_number(put_back(first.state, first.token), budget)
 }
 
@@ -453,59 +589,95 @@ fn rounded_fraction(st, numerator, denominator) any^ {
     }
 }
 
-fn expression_term_tail(st, value, budget) any^ {
+fn expression_scaled(st, value, level, numerator, denominator) any^ {
+    if (level == "glue" or level == "mu") {
+        let width = rounded_fraction(st, value.width * numerator, denominator)^;
+        let stretch = rounded_fraction(width.state, value.stretch * numerator, denominator)^;
+        let shrink = rounded_fraction(stretch.state, value.shrink * numerator, denominator)^;
+        let result = {width: width.value, stretch: stretch.value,
+            stretch_order: if (stretch.value == 0) 0 else value.stretch_order,
+            shrink: shrink.value, shrink_order: if (shrink.value == 0) 0 else value.shrink_order};
+        if (width.state.issue != null) {state: width.state, value: result}
+        else if (stretch.state.issue != null) {state: stretch.state, value: result}
+        else if (shrink.state.issue != null) {state: shrink.state, value: result}
+        else if (not glue.valid(result)) {state: fail(shrink.state, "tex-arith-overflow"), value: result}
+        else {state: shrink.state, value: result}
+    }
+    else {
+        let result = rounded_fraction(st, value * numerator, denominator)^;
+        if (result.state.issue == null and level == "dimen" and abs(result.value) >= 1073741824)
+            {state: fail(result.state, "tex-arith-overflow"), value: 0}
+        else result
+    }
+}
+
+fn expression_added(st, a, b, level, subtract) any^ {
+    if (level == "glue" or level == "mu") {
+        let result = glue.add(a, if (subtract) glue.negate(b) else b)^;
+        if (glue.valid(result)) {state: st, value: result}
+        else {state: fail(st, "tex-arith-overflow"), value: result}
+    }
+    else {
+        let result = checked_integer(st, if (subtract) a - b else a + b)^;
+        if (result.state.issue == null and level == "dimen" and abs(result.value) >= 1073741824)
+            {state: fail(result.state, "tex-arith-overflow"), value: 0}
+        else result
+    }
+}
+
+fn expression_term_tail(st, value, budget, level) any^ {
     let op = expanded_nonspace(st, budget)^;
-    if (op.state.issue != null) {state: op.state, value: 0}
+    if (op.state.issue != null) {state: op.state, value: value}
     else if (other(op.token, "*") or other(op.token, "/")) {
-        let right = expression_factor(op.state, budget)^;
+        let right = expression_factor(op.state, budget, "int")^;
         if (right.state.issue != null) right
         else if (other(op.token, "/")) {
-            let result = rounded_fraction(right.state, value, right.value)^;
-            if (result.state.issue != null) result else expression_term_tail(result.state, result.value, budget)
+            let result = expression_scaled(right.state, value, level, 1, right.value)^;
+            if (result.state.issue != null) result else expression_term_tail(result.state, result.value, budget, level)
         } else {
             let next = expanded_nonspace(right.state, budget)^;
             if (other(next.token, "/")) {
-                let denominator = expression_factor(next.state, budget)^;
+                let denominator = expression_factor(next.state, budget, "int")^;
                 if (denominator.state.issue != null) denominator
                 else {
-                    let scaled = rounded_fraction(denominator.state, value * right.value, denominator.value)^;
-                    if (scaled.state.issue != null) scaled else expression_term_tail(scaled.state, scaled.value, budget)
+                    let scaled = expression_scaled(denominator.state, value, level, right.value, denominator.value)^;
+                    if (scaled.state.issue != null) scaled else expression_term_tail(scaled.state, scaled.value, budget, level)
                 }
             } else {
-                let product = checked_integer(put_back(next.state, next.token), value * right.value)^;
-                if (product.state.issue != null) product else expression_term_tail(product.state, product.value, budget)
+                let product = expression_scaled(put_back(next.state, next.token), value, level, right.value, 1)^;
+                if (product.state.issue != null) product else expression_term_tail(product.state, product.value, budget, level)
             }
         }
     }
     else {state: put_back(op.state, op.token), value: value}
 }
 
-fn expression_term(st, budget) any^ {
-    let first = expression_factor(st, budget)^;
-    if (first.state.issue != null) first else expression_term_tail(first.state, first.value, budget)
+fn expression_term(st, budget, level) any^ {
+    let first = expression_factor(st, budget, level)^;
+    if (first.state.issue != null) first else expression_term_tail(first.state, first.value, budget, level)
 }
 
-fn expression_sum_tail(st, value, budget) any^ {
+fn expression_sum_tail(st, value, budget, level) any^ {
     let op = expanded_nonspace(st, budget)^;
-    if (op.state.issue != null) {state: op.state, value: 0}
+    if (op.state.issue != null) {state: op.state, value: value}
     else if (other(op.token, "+") or other(op.token, "-")) {
-        let right = expression_term(op.state, budget)^;
+        let right = expression_term(op.state, budget, level)^;
         if (right.state.issue != null) right
         else {
-            let sum = checked_integer(right.state, if (other(op.token, "+")) value + right.value else value - right.value)^;
-            if (sum.state.issue != null) sum else expression_sum_tail(sum.state, sum.value, budget)
+            let sum = expression_added(right.state, value, right.value, level, other(op.token, "-"))^;
+            if (sum.state.issue != null) sum else expression_sum_tail(sum.state, sum.value, budget, level)
         }
     }
     else {state: put_back(op.state, op.token), value: value}
 }
 
-fn expression_sum(st, budget) any^ {
-    let first = expression_term(st, budget)^;
-    if (first.state.issue != null) first else expression_sum_tail(first.state, first.value, budget)
+fn expression_sum(st, budget, level) any^ {
+    let first = expression_term(st, budget, level)^;
+    if (first.state.issue != null) first else expression_sum_tail(first.state, first.value, budget, level)
 }
 
-fn scan_expression(st, budget) any^ {
-    let result = expression_sum(st, budget)^;
+fn scan_expression(st, budget, level = "int") any^ {
+    let result = expression_sum(st, budget, level)^;
     if (result.state.issue != null) result
     else {
         let end = expanded_nonspace(result.state, budget)^;
@@ -516,6 +688,22 @@ fn scan_expression(st, budget) any^ {
 
 fn count_value(st, index) => if (st.counts[string(index)] == null) 0 else st.counts[string(index)]
 fn set_count(counts, index, value) => {*:counts, *:map([string(index), value])}
+fn save_count(st, index, value, global) any^ =>
+    {*:st, counts: set_count(st.counts, index, value),
+        groups: if (global) [for (scope in st.groups)
+            {*:scope, counts: set_count(scope.counts, index, value)}] else st.groups}
+fn dimen_value(st, index) => if (st.dimens[string(index)] == null) 0 else st.dimens[string(index)]
+fn parameter_value(st, name) any^ {
+    let assigned = st.parameters[name];
+    if (assigned != null) assigned
+    else if (name == "hangafter" or name == "day" or name == "month") 1
+    else if (name == "maxdeadcycles") 25 else if (name == "time") 720
+    else if (name == "year") 2000 else 0
+}
+fn effective_global(st, explicit) any^ => if (parameter_value(st, "globaldefs") > 0) true
+    else if (parameter_value(st, "globaldefs") < 0) false else explicit
+fn parameter_index(name) => if (name == "everyeof") -1 else "param:" ++ name
+
 fn toks_value(st, index) => if (st.toks[string(index)] == null) [] else st.toks[string(index)]
 fn set_toks(values, index, value) => {*:values, *:map([string(index), value])}
 
@@ -524,6 +712,374 @@ fn optional_equals(st, budget) any^ {
     if (other(next.token, "=")) next.state else put_back(next.state, next.token)
 }
 
+fn word_tail(st, word, position, consumed, budget) any^ {
+    if (position == len(word)) {state: st, found: true}
+    else {
+        let read = expanded_next(st, budget)^;
+        if (read.state.issue != null) {state: read.state, found: false}
+        else if (read.token != null and read.token.kind == "char" and contains([11, 12], read.token.cat) and
+            lower(read.token.value) == slice(word, position, position + 1))
+            word_tail(read.state, word, position + 1, [*consumed, read.token], budget)
+        else {state: {*:read.state, input: stream.push(read.state.input,
+            if (read.token == null) consumed else [*consumed, read.token])}, found: false}
+    }
+}
+
+fn scan_word(st, word, budget) any^ {
+    let first = expanded_nonspace(st, budget)^;
+    if (first.state.issue != null) {state: first.state, found: false}
+    else if (first.token != null and first.token.kind == "char" and contains([11, 12], first.token.cat) and
+        lower(first.token.value) == slice(word, 0, 1))
+        word_tail(first.state, word, 1, [first.token], budget)
+    else {state: put_back(first.state, first.token), found: false}
+}
+
+fn fraction_digits(st, budget, values = []) any^ {
+    let read = expanded_next(st, budget)^;
+    let n = if (charcat(read.token, 12)) digit(read.token, 10) else null;
+    if (read.state.issue != null) {state: read.state, value: 0}
+    else if (n == null) {state: if (charcat(read.token, 10)) read.state else put_back(read.state, read.token),
+        value: dimension.round_decimal(values)}
+    else fraction_digits(read.state, budget, if (len(values) < 17) [*values, n] else values)
+}
+
+fn dimension_unit(st, budget, names = ["pt", "in", "pc", "cm", "mm", "bp", "dd", "cc", "nd", "nc", "sp"], index = 0) any^ {
+    if (index >= len(names)) {state: fail(st, "tex-illegal-unit"), name: null}
+    else {
+        let word = scan_word(st, names[index], budget)^;
+        if (word.state.issue != null or word.found) {state: word.state, name: if (word.found) names[index] else null}
+        else dimension_unit(word.state, budget, names, index + 1)
+    }
+}
+
+fn dimension_finish(st, whole, fraction, negative, budget, infinite, mu) any^ {
+    let next = expanded_nonspace(st, budget)^;
+    let cmd = primitive(next.state, next.token);
+    let m = if (is_control(next.token)) meaning(next.state, next.token) else null;
+    if (next.state.issue != null) {state: next.state, value: 0}
+    else if (cmd == "dimen" or m.kind == "dimension-register" or primitives.parameter_kind(cmd) == "dimen") {
+        let index = if (cmd == "dimen") scan_register(next.state, budget)^
+            else {state: next.state, value: if (m.kind == "dimension-register") m.index else "param:" ++ cmd};
+        let value = dimen_value(index.state, index.value);
+        let magnitude = whole * value + (abs(value) * fraction div 65536) * if (value < 0) -1 else 1;
+        if (abs(magnitude) >= 1073741824) {state: fail(index.state, "tex-dimension-too-large"), value: 0}
+        else {state: index.state, value: if (negative) -magnitude else magnitude, order: 0}
+    }
+    else {
+        let available = put_back(next.state, next.token);
+        let fil = if (infinite) scan_word(available, "fil", budget)^ else {state: available, found: false};
+        if (fil.found) {
+            let first = scan_word(fil.state, "l", budget)^;
+            let second = if (first.found) scan_word(first.state, "l", budget)^ else first;
+            let order = if (not first.found) 1 else if (not second.found) 2 else 3;
+            let amount = whole * 65536 + fraction;
+            if (amount >= 1073741824) {state: fail(second.state, "tex-dimension-too-large"), value: 0, order: 0}
+            else {state: second.state, value: if (negative) -amount else amount, order: order}
+        }
+        else {
+        let true_word = if (mu) {state: fil.state, found: false} else scan_word(fil.state, "true", budget)^;
+        let found = if (mu) {
+            let word = scan_word(true_word.state, "mu", budget)^;
+            {state: if (word.found) word.state else fail(word.state, "tex-illegal-unit"), name: "pt"}
+        } else dimension_unit(true_word.state, budget)^;
+        if (found.state.issue != null) {state: found.state, value: 0}
+        else {
+            let mag = if (true_word.found and found.state.parameters.mag > 0 and found.state.parameters.mag <= 32768)
+                found.state.parameters.mag else 1000;
+            let adjusted_whole = whole * 1000 div mag;
+            let adjusted_fraction = (1000 * fraction + 65536 * ((whole * 1000) % mag)) div mag;
+            let base_whole = adjusted_whole + adjusted_fraction div 65536;
+            let base_fraction = adjusted_fraction % 65536;
+            let ratio = dimension.unit(found.name);
+            let scaled = if (found.name == "sp") base_whole
+                else (base_whole * ratio[0] div ratio[1]) * 65536 +
+                    (ratio[0] * base_fraction + 65536 * ((base_whole * ratio[0]) % ratio[1])) div ratio[1];
+            let after = expanded_next(found.state, budget)^;
+            let end = if (charcat(after.token, 10)) after.state else put_back(after.state, after.token);
+            if (scaled >= 1073741824) {state: fail(end, "tex-dimension-too-large"), value: 0}
+            else {state: end, value: if (negative) -scaled else scaled, order: 0}
+        }
+        }
+    }
+}
+
+fn dimen_digits(st, token, budget, value = 0) any^ {
+    let n = digit(token, 10);
+    if (n == null) {state: st, value: value, token: token}
+    else if (value * 10 + n > 2147483647)
+        {state: fail(st, "tex-number-too-big"), value: 0, token: null}
+    else {
+        let read = expanded_next(st, budget)^;
+        if (read.state.issue != null) {state: read.state, value: 0, token: null}
+        else dimen_digits(read.state, read.token, budget, value * 10 + n)
+    }
+}
+
+fn scan_dimen(st, budget, infinite = false, mu = false) any^ {
+    let start = signs(st, budget)^;
+    let cmd = primitive(start.state, start.token);
+    let m = if (is_control(start.token)) meaning(start.state, start.token) else null;
+    if (start.state.issue != null) {state: start.state, value: 0}
+    else if (cmd == "dimen" or m.kind == "dimension-register") {
+        let index = if (cmd == "dimen") scan_register(start.state, budget)^ else {state: start.state, value: m.index};
+        let value = dimen_value(index.state, index.value);
+        {state: index.state, value: if (start.negative) -value else value, order: 0}
+    }
+    else if (primitives.parameter_kind(cmd) == "dimen") {
+        let value = dimen_value(start.state, "param:" ++ cmd);
+        {state: start.state, value: if (start.negative) -value else value, order: 0}
+    }
+    else if (cmd == "fontdimen") {
+        let value = font_dimen(start.state, budget)^;
+        {state: value.state, value: if (start.negative) -value.value else value.value, order: 0}
+    }
+    else if (cmd == "dimexpr") {
+        let value = scan_expression(start.state, budget, "dimen")^;
+        {state: value.state, value: if (start.negative) -value.value else value.value, order: 0}
+    }
+    else if (cmd == "gluestretch" or cmd == "glueshrink") {
+        let value = glue_quantity(start.state, cmd, budget)^;
+        {state: value.state, value: if (start.negative) -value.value else value.value, order: 0}
+    }
+    else {
+        let decimal_start = other(start.token, ".") or other(start.token, ",");
+        let first_digit = digit(start.token, 10);
+        let literal = decimal_start or first_digit != null;
+        let whole_scan = if (decimal_start) {state: start.state, value: 0, token: start.token}
+            else if (literal) dimen_digits(start.state, start.token, budget)^
+            else {
+                let scanned = scan_number(put_back(start.state, start.token), budget)^;
+                {state: scanned.state, value: scanned.value, token: null}
+            };
+        if (whole_scan.state.issue != null) {state: whole_scan.state, value: 0}
+        else {
+            let fraction = if (literal and (other(whole_scan.token, ".") or other(whole_scan.token, ",")))
+                fraction_digits(whole_scan.state, budget)^
+                else {state: if (charcat(whole_scan.token, 10)) whole_scan.state
+                    else put_back(whole_scan.state, whole_scan.token), value: 0};
+            if (fraction.state.issue != null) fraction
+            else dimension_finish(fraction.state, abs(whole_scan.value), fraction.value,
+                start.negative != (whole_scan.value < 0), budget, infinite, mu)
+        }
+    }
+}
+
+fn save_dimen(st, index, value, global) any^ =>
+    {*:st, dimens: set_count(st.dimens, index, value),
+        groups: if (global) [for (scope in st.groups)
+            {*:scope, dimens: set_count(scope.dimens, index, value)}] else st.groups}
+
+fn assign_dimen(st, global, budget, fixed_index) any^ {
+    let index = if (fixed_index == null) scan_register(st, budget)^ else {state: st, value: fixed_index};
+    if (index.state.issue != null) index.state
+    else {
+        let value = scan_dimen(optional_equals(index.state, budget), budget)^;
+        if (value.state.issue != null) value.state else save_dimen(value.state, index.value, value.value, global)
+    }
+}
+
+fn assign_dimendef(st, global, budget) any^ {
+    let target = nonspace(st.input);
+    if (not is_control(target.token)) fail({*:st, input: target.stream}, "tex-missing-cs")
+    else {
+        let cleared = assign_meaning({*:st, input: target.stream}, key(target.token), {kind: "primitive", name: "relax"}, global)^;
+        let index = scan_register(optional_equals(cleared, budget), budget)^;
+        if (index.state.issue != null) index.state
+        else assign_meaning(index.state, key(target.token), {kind: "dimension-register", index: index.value}, global)
+    }
+}
+
+fn glue_value(st, index, mu) any^ {
+    let table = if (mu) st.muskips else st.skips;
+    if (table[string(index)] == null) glue.zero() else table[string(index)]
+}
+
+fn save_glue(st, index, value, global, mu) any^ {
+    if (mu) {*:st, muskips: set_count(st.muskips, index, value),
+        groups: if (global) [for (scope in st.groups)
+            {*:scope, muskips: set_count(scope.muskips, index, value)}] else st.groups}
+    else {*:st, skips: set_count(st.skips, index, value),
+        groups: if (global) [for (scope in st.groups)
+            {*:scope, skips: set_count(scope.skips, index, value)}] else st.groups}
+}
+
+fn scan_glue(st, budget, mu) any^ {
+    let start = signs(st, budget)^;
+    let cmd = primitive(start.state, start.token);
+    let m = if (is_control(start.token)) meaning(start.state, start.token) else null;
+    let kind = primitives.parameter_kind(cmd);
+    let is_register = cmd == "skip" or cmd == "muskip" or m.kind == "glue-register" or kind == "glue" or kind == "mu";
+    let register_mu = if (m.kind == "glue-register") m.mu else cmd == "muskip" or kind == "mu";
+    if (start.state.issue != null) {state: start.state, value: glue.zero()}
+    else if (contains(["glueexpr", "muexpr", "gluetomu", "mutoglue"], cmd)) {
+        let source_mu = cmd == "muexpr" or cmd == "gluetomu";
+        let value = if (cmd == "glueexpr" or cmd == "muexpr")
+            scan_expression(start.state, budget, if (cmd == "muexpr") "mu" else "glue")^
+            else scan_glue(start.state, budget, cmd == "mutoglue")^;
+        if (source_mu != mu) {state: fail(value.state, "tex-mu-error"), value: value.value}
+        else {state: value.state, value: if (start.negative) glue.negate(value.value) else value.value}
+    }
+    else if (is_register) {
+        let index = if (m.kind == "glue-register") {state: start.state, value: m.index}
+            else if (kind == "glue" or kind == "mu") {state: start.state, value: "param:" ++ cmd}
+            else scan_register(start.state, budget)^;
+        let value = glue_value(index.state, index.value, register_mu);
+        if (register_mu != mu) {state: fail(index.state, "tex-mu-error"), value: value}
+        else {state: index.state, value: if (start.negative) glue.negate(value) else value}
+    }
+    else {
+        let tokens = [*(if (start.negative) text_tokens("-") else []),
+            *(if (start.token == null) [] else [start.token])];
+        let width = scan_dimen({*:start.state, input: stream.push(start.state.input, tokens)}, budget, false, mu)^;
+        if (width.state.issue != null) {state: width.state, value: glue.zero()}
+        else {
+            let plus = scan_word(width.state, "plus", budget)^;
+            let stretch = if (plus.found) scan_dimen(plus.state, budget, true, mu)^
+                else {state: plus.state, value: 0, order: 0};
+            if (stretch.state.issue != null) {state: stretch.state, value: glue.zero()}
+            else {
+                let minus = scan_word(stretch.state, "minus", budget)^;
+                let shrink = if (minus.found) scan_dimen(minus.state, budget, true, mu)^
+                    else {state: minus.state, value: 0, order: 0};
+                {state: shrink.state, value: {width: width.value, stretch: stretch.value,
+                    stretch_order: stretch.order, shrink: shrink.value, shrink_order: shrink.order}}
+            }
+        }
+    }
+}
+
+fn glue_quantity(st, name, budget) any^ {
+    let scanned = scan_glue(st, budget, false)^;
+    {state: scanned.state, value: if (name == "gluestretch") scanned.value.stretch
+        else if (name == "glueshrink") scanned.value.shrink
+        else if (name == "gluestretchorder") scanned.value.stretch_order else scanned.value.shrink_order}
+}
+
+fn assign_glue(st, global, budget, fixed_index, mu) any^ {
+    let index = if (fixed_index == null) scan_register(st, budget)^ else {state: st, value: fixed_index};
+    if (index.state.issue != null) index.state
+    else {
+        let value = scan_glue(optional_equals(index.state, budget), budget, mu)^;
+        if (value.state.issue != null) value.state else save_glue(value.state, index.value, value.value, global, mu)
+    }
+}
+
+fn assign_gluedef(st, global, budget, mu) any^ {
+    let target = nonspace(st.input);
+    if (not is_control(target.token)) fail({*:st, input: target.stream}, "tex-missing-cs")
+    else {
+        let cleared = assign_meaning({*:st, input: target.stream}, key(target.token), {kind: "primitive", name: "relax"}, global)^;
+        let index = scan_register(optional_equals(cleared, budget), budget)^;
+        if (index.state.issue != null) index.state
+        else assign_meaning(index.state, key(target.token), {kind: "glue-register", index: index.value, mu: mu}, global)
+    }
+}
+
+fn scan_filename_tail(st, budget, quoted, chars) any^ {
+    let read = expanded_next(st, budget)^;
+    let t = read.token;
+    if (read.state.issue != null) {state: read.state, name: ""}
+    else if (t == null) {state: read.state, name: join(chars, "")}
+    else if (t.kind != "char" or (charcat(t, 10) and not quoted))
+        {state: if (charcat(t, 10)) read.state else put_back(read.state, t), name: join(chars, "")}
+    else if (t.value == "\"") scan_filename_tail(read.state, budget, not quoted, chars)
+    else scan_filename_tail(read.state, budget, quoted, [*chars, t.value])
+}
+
+fn scan_filename(st, budget) any^ {
+    let first = expanded_nonspace(st, budget)^;
+    if (first.state.issue != null) {state: first.state, name: ""}
+    else if (charcat(first.token, 1)) {
+        let contents = expanded_text(put_back(first.state, first.token), budget)^;
+        {state: contents.state, name: replace(token_text(contents.state, contents.tokens), "\"", "")^}
+    }
+    else scan_filename_tail(put_back(first.state, first.token), budget, false, [])
+}
+
+fn font_metrics(size) any^ => map([for (i, v in [0, 218453, 109226, 72818, 282168, 655360, 72818],
+    part in [string(i + 1), v * size div 655360]) part])
+
+fn define_font(st, global, budget) any^ {
+    let target = nonspace(st.input);
+    if (not is_control(target.token)) fail({*:st, input: target.stream}, "tex-missing-cs")
+    else {
+        let cleared = assign_meaning({*:st, input: target.stream}, key(target.token), {kind: "primitive", name: "relax"}, global)^;
+        let name = scan_filename(optional_equals(cleared, budget), budget)^;
+        let at = scan_word(name.state, "at", budget)^;
+        let scaled = if (at.found) {state: at.state, found: false} else scan_word(at.state, "scaled", budget)^;
+        let quantity = if (at.found) scan_dimen(at.state, budget)^
+            else if (scaled.found) scan_number(scaled.state, budget)^ else {state: scaled.state, value: 1000};
+        if (quantity.state.issue != null) quantity.state
+        else {
+            let size = if (at.found) quantity.value else 655360 * quantity.value div 1000;
+            if ((at.found and (size <= 0 or size >= 134217728)) or
+                (scaled.found and (quantity.value <= 0 or quantity.value > 32768)))
+                fail(quantity.state, "tex-improper-at")
+            else {
+                let found = [for (i, entry in quantity.state.fonts where i > 0 and entry.name == name.name and entry.size == size) i];
+                let index = if (len(found) > 0) found[0] else len(quantity.state.fonts);
+                let current = if (len(found) > 0) quantity.state else {*:quantity.state,
+                    fonts: [*quantity.state.fonts, {name: name.name, size: size, param_base: quantity.state.font_memory,
+                        param_count: 7, params: font_metrics(size)}], font_memory: quantity.state.font_memory + 7};
+                assign_meaning(current, key(target.token), {kind: "font", index: index}, global)
+            }
+        }
+    }
+}
+
+fn scan_font_ident(st, budget) any^ {
+    let read = expanded_nonspace(st, budget)^;
+    let cmd = primitive(read.state, read.token);
+    let m = if (is_control(read.token)) meaning(read.state, read.token) else null;
+    if (read.state.issue != null) {state: read.state, value: 0}
+    else if (m.kind == "font") {state: read.state, value: m.index}
+    else if (cmd == "nullfont") {state: read.state, value: 0}
+    else if (cmd == "font") {state: read.state, value: read.state.current_font}
+    else {state: fail(put_back(read.state, read.token), "tex-missing-font"), value: 0}
+}
+
+fn font_dimen_index(st, budget) any^ {
+    let n = scan_number(st, budget)^;
+    let selected = if (n.state.issue == null) scan_font_ident(n.state, budget)^ else {state: n.state, value: 0};
+    if (selected.state.issue != null) {state: selected.state, font_index: 0, param: n.value, valid: false}
+    else {
+        let entry = selected.state.fonts[selected.value];
+        let grow = n.value > entry.param_count and n.value > 0 and selected.value == len(selected.state.fonts) - 1;
+        if (grow and entry.param_base + n.value > 8000000)
+            {state: fail(selected.state, "tex-capacity"), font_index: selected.value, param: n.value, valid: false}
+        else if (n.value <= 0 or (n.value > entry.param_count and not grow))
+            {state: {*:selected.state, diagnostics: [*selected.state.diagnostics, "tex-font-params"]},
+                font_index: selected.value, param: n.value, valid: false}
+        else {
+            let current = if (grow) {*:selected.state,
+                fonts: [for (i, x in selected.state.fonts) if (i == selected.value) {*:x, param_count: n.value} else x],
+                font_memory: entry.param_base + n.value} else selected.state;
+            {state: current, font_index: selected.value, param: n.value, valid: true}
+        }
+    }
+}
+
+fn font_dimen(st, budget) any^ {
+    let target = font_dimen_index(st, budget)^;
+    let entry = target.state.fonts[target.font_index];
+    let value = if (target.valid) entry.params[string(target.param)] else null;
+    {state: target.state, value: if (value == null) 0 else value}
+}
+
+fn assign_font_dimen(st, budget) any^ {
+    let target = font_dimen_index(st, budget)^;
+    if (target.state.issue != null) target.state
+    else {
+        let value = scan_dimen(optional_equals(target.state, budget), budget)^;
+        if (value.state.issue != null or not target.valid) value.state
+        else {*:value.state, fonts: [for (i, entry in value.state.fonts)
+            if (i == target.font_index) {*:entry, params: set_count(entry.params, target.param, value.value)} else entry]}
+    }
+}
+
+fn select_font(st, global, index) any^ => {*:st, current_font: index,
+    groups: if (global) [for (scope in st.groups) {*:scope, current_font: index}] else st.groups}
+
 fn assign_count(st, global, budget, fixed_index) any^ {
     let index = if (fixed_index == null) scan_register(st, budget)^ else {state: st, value: fixed_index};
     if (index.state.issue != null) index.state
@@ -531,47 +1087,59 @@ fn assign_count(st, global, budget, fixed_index) any^ {
         let before = optional_equals(index.state, budget)^;
         let value = scan_number(before, budget)^;
         if (value.state.issue != null) value.state
-        else {*:value.state, counts: set_count(value.state.counts, index.value, value.value),
-            groups: if (global) [for (scope in value.state.groups)
-                {*:scope, counts: set_count(scope.counts, index.value, value.value)}] else value.state.groups}
+        else save_count(value.state, index.value, value.value, global)
     }
 }
 
-fn keyword_tail(st, word, position, consumed, budget) any^ {
-    if (position == len(word)) st
+fn optional_by(st, budget) any^ => scan_word(st, "by", budget).state
+
+fn arithmetic_glue(st, global, budget, operation, fixed_index, mu) any^ {
+    let index = if (fixed_index == null) scan_register(st, budget)^ else {state: st, value: fixed_index};
+    if (index.state.issue != null) index.state
     else {
-        let read = expanded_next(st, budget)^;
-        if (read.state.issue != null) read.state
-        else if (read.token != null and read.token.kind == "char" and contains([11, 12], read.token.cat) and
-            lower(read.token.value) == slice(word, position, position + 1))
-            keyword_tail(read.state, word, position + 1, [*consumed, read.token], budget)
-        else {*:read.state, input: stream.push(read.state.input,
-            if (read.token == null) consumed else [*consumed, read.token])}
+        let before = optional_by(index.state, budget)^;
+        let previous = glue_value(before, index.value, mu);
+        if (operation == "advance") {
+            let operand = scan_glue(before, budget, mu)^;
+            let sum = glue.add(previous, operand.value)^;
+            if (operand.state.issue != null) operand.state
+            else if (not glue.valid(sum)) fail(operand.state, "tex-arith-overflow")
+            else save_glue(operand.state, index.value, sum, global, mu)
+        }
+        else {
+            let factor = scan_number(before, budget)^;
+            if (factor.state.issue != null) factor.state
+            else if (operation == "divide" and factor.value == 0) fail(factor.state, "tex-arith-overflow")
+            else {
+                let scaled = glue.scale(previous, factor.value, operation == "divide")^;
+                if (not glue.valid(scaled)) fail(factor.state, "tex-arith-overflow")
+                else save_glue(factor.state, index.value, scaled, global, mu)
+            }
+        }
     }
-}
-
-fn optional_by(st, budget) any^ {
-    let first = expanded_nonspace(st, budget)^;
-    if (first.state.issue != null) first.state
-    else if (first.token != null and first.token.kind == "char" and contains([11, 12], first.token.cat) and lower(first.token.value) == "b")
-        keyword_tail(first.state, "by", 1, [first.token], budget)
-    else put_back(first.state, first.token)
 }
 
 fn arithmetic(st, global, budget, operation) any^ {
     let target = expanded_nonspace(st, budget)^;
     let cmd = primitive(target.state, target.token);
     let resolved = if (is_control(target.token)) meaning(target.state, target.token) else null;
+    let kind = primitives.parameter_kind(cmd);
+    let is_dimen = cmd == "dimen" or resolved.kind == "dimension-register" or kind == "dimen";
     if (target.state.issue != null) target.state
-    else if (cmd != "count" and resolved.kind != "register") unsupported(target.state, operation)
+    else if (cmd == "skip" or cmd == "muskip" or resolved.kind == "glue-register" or kind == "glue" or kind == "mu")
+        arithmetic_glue(target.state, global, budget, operation,
+            if (resolved.kind == "glue-register") resolved.index else if (kind == "glue" or kind == "mu") "param:" ++ cmd else null,
+            if (resolved.kind == "glue-register") resolved.mu else cmd == "muskip" or kind == "mu")
+    else if (cmd != "count" and resolved.kind != "register" and not is_dimen and kind != "int") unsupported(target.state, operation)
     else {
-        let index = if (cmd == "count") scan_register(target.state, budget)^
-            else {state: target.state, value: resolved.index};
+        let index = if (cmd == "count" or cmd == "dimen") scan_register(target.state, budget)^
+            else {state: target.state, value: if (kind == "dimen") "param:" ++ cmd else resolved.index};
         if (index.state.issue != null) index.state
         else {
             let before = optional_by(index.state, budget)^;
-            let operand = scan_number(before, budget)^;
-            let previous = count_value(operand.state, index.value);
+            let operand = if (is_dimen and operation == "advance") scan_dimen(before, budget)^ else scan_number(before, budget)^;
+            let previous = if (kind == "int") parameter_value(operand.state, cmd)
+                else if (is_dimen) dimen_value(operand.state, index.value) else count_value(operand.state, index.value);
             if (operand.state.issue != null) operand.state
             else if (operation == "divide" and operand.value == 0) fail(operand.state, "tex-arith-overflow")
             else {
@@ -581,9 +1149,10 @@ fn arithmetic(st, global, budget, operation) any^ {
                     else abs(previous) div abs(operand.value);
                 let checked = checked_integer(operand.state, value)^;
                 if (checked.state.issue != null) checked.state
-                else {*:checked.state, counts: set_count(checked.state.counts, index.value, value),
-                    groups: if (global) [for (scope in checked.state.groups)
-                        {*:scope, counts: set_count(scope.counts, index.value, value)}] else checked.state.groups}
+                else if (is_dimen and abs(value) >= 1073741824) fail(checked.state, "tex-arith-overflow")
+                else if (kind == "int") save_parameter(checked.state, global, cmd, value)
+                else if (is_dimen) save_dimen(checked.state, index.value, value, global)
+                else save_count(checked.state, index.value, value, global)
             }
         }
     }
@@ -629,10 +1198,11 @@ fn assign_toks(st, global, budget, fixed_index) any^ {
             let value = stream.argument(stream.push(current.input, [first.token]), true)^;
             let read = {*:current, input: value.stream};
             if (value.error != null) fail(read, value.error)
-            else save_toks(read, index.value, [for (t in value.tokens) {*:t, noexpand: false}], global)
+            else save_toks(read, index.value, [for (t in value.tokens) {*:t, noexpand: false, direct: false}], global)
         }
-        else if (primitive(current, first.token) == "toks" or primitive(current, first.token) == "everyeof" or m.kind == "token-register") {
-            let from = if (primitive(current, first.token) == "everyeof") {state: current, value: -1}
+        else if (primitive(current, first.token) == "toks" or primitives.parameter_kind(primitive(current, first.token)) == "toks" or m.kind == "token-register") {
+            let from = if (primitives.parameter_kind(primitive(current, first.token)) == "toks")
+                    {state: current, value: parameter_index(primitive(current, first.token))}
                 else if (m.kind == "token-register") {state: current, value: m.index}
                 else scan_register(current, budget)^;
             if (from.state.issue != null) from.state
@@ -671,9 +1241,39 @@ fn expand_the(st, budget) any^ {
             if (index.state.issue != null) index.state
             else {*:index.state, input: stream.push(index.state.input, text_tokens(string(count_value(index.state, index.value))))}
         }
-        else if (contains(["endlinechar", "escapechar"], primitive(read.state, read.token)))
+        else if (primitive(read.state, read.token) == "fontdimen") {
+            let value = font_dimen(read.state, budget)^;
+            if (value.state.issue != null) value.state
+            else {*:value.state, input: stream.push(value.state.input, text_tokens(dimension.format(value.value)))}
+        }
+        else if (primitive(read.state, read.token) == "dimen" or m.kind == "dimension-register") {
+            let index = if (m.kind == "dimension-register") {state: read.state, value: m.index}
+                else scan_register(read.state, budget)^;
+            if (index.state.issue != null) index.state
+            else {*:index.state, input: stream.push(index.state.input,
+                text_tokens(dimension.format(dimen_value(index.state, index.value))))}
+        }
+        else if (primitive(read.state, read.token) == "skip" or primitive(read.state, read.token) == "muskip" or m.kind == "glue-register") {
+            let mu = if (m.kind == "glue-register") m.mu else primitive(read.state, read.token) == "muskip";
+            let index = if (m.kind == "glue-register") {state: read.state, value: m.index}
+                else scan_register(read.state, budget)^;
+            if (index.state.issue != null) index.state
+            else {*:index.state, input: stream.push(index.state.input,
+                text_tokens(glue.format(glue_value(index.state, index.value, mu), mu)))}
+        }
+        else if (primitives.parameter_kind(primitive(read.state, read.token)) == "int")
             {*:read.state, input: stream.push(read.state.input,
-                text_tokens(string(read.state.parameters[primitive(read.state, read.token)])))}
+                text_tokens(string(parameter_value(read.state, primitive(read.state, read.token)))))}
+        else if (primitives.parameter_kind(primitive(read.state, read.token)) == "dimen")
+            {*:read.state, input: stream.push(read.state.input,
+                text_tokens(dimension.format(dimen_value(read.state, "param:" ++ primitive(read.state, read.token)))))}
+        else if (contains(["glue", "mu"], primitives.parameter_kind(primitive(read.state, read.token)))) {
+            let name = primitive(read.state, read.token);
+            let mu = primitives.parameter_kind(name) == "mu";
+            {*:read.state, input: stream.push(read.state.input, text_tokens(glue.format(glue_value(read.state, "param:" ++ name, mu), mu)))}
+        }
+        else if (primitive(read.state, read.token) == "inputlineno")
+            {*:read.state, input: stream.push(read.state.input, text_tokens(string(input_line_number(read.state)^)))}
         else if (primitive(read.state, read.token) == "eTeXversion")
             {*:read.state, input: stream.push(read.state.input, text_tokens("2"))}
         else if (primitive(read.state, read.token) == "numexpr") {
@@ -681,18 +1281,34 @@ fn expand_the(st, budget) any^ {
             if (value.state.issue != null) value.state
             else {*:value.state, input: stream.push(value.state.input, text_tokens(string(value.value)))}
         }
+        else if (contains(["dimexpr", "glueexpr", "muexpr"], primitive(read.state, read.token))) {
+            let name = primitive(read.state, read.token);
+            let level = if (name == "dimexpr") "dimen" else if (name == "glueexpr") "glue" else "mu";
+            let value = scan_expression(read.state, budget, level)^;
+            if (value.state.issue != null) value.state
+            else {*:value.state, input: stream.push(value.state.input,
+                text_tokens(if (level == "dimen") dimension.format(value.value) else glue.format(value.value, level == "mu")))}
+        }
+        else if (contains(["gluestretch", "glueshrink", "gluestretchorder", "glueshrinkorder"], primitive(read.state, read.token))) {
+            let name = primitive(read.state, read.token);
+            let value = glue_quantity(read.state, name, budget)^;
+            if (value.state.issue != null) value.state
+            else {*:value.state, input: stream.push(value.state.input,
+                text_tokens(if (name == "gluestretch" or name == "glueshrink") dimension.format(value.value) else string(value.value)))}
+        }
         else if (contains(["currentgrouplevel", "currentiflevel"], primitive(read.state, read.token))) {
             let value = if (primitive(read.state, read.token) == "currentgrouplevel") len(read.state.groups)
                 else len(read.state.conditions);
             {*:read.state, input: stream.push(read.state.input, text_tokens(string(value)))}
         }
-        else if (contains(["catcode", "lccode", "uccode"], primitive(read.state, read.token))) {
+        else if (contains(["catcode", "lccode", "uccode", "sfcode", "mathcode", "delcode"], primitive(read.state, read.token))) {
             let code = code_quantity(read.state, primitive(read.state, read.token), budget)^;
             if (code.state.issue != null) code.state
             else {*:code.state, input: stream.push(code.state.input, text_tokens(string(code.value)))}
         }
-        else if (primitive(read.state, read.token) == "toks" or primitive(read.state, read.token) == "everyeof" or m.kind == "token-register") {
-            let index = if (primitive(read.state, read.token) == "everyeof") {state: read.state, value: -1}
+        else if (primitive(read.state, read.token) == "toks" or primitives.parameter_kind(primitive(read.state, read.token)) == "toks" or m.kind == "token-register") {
+            let index = if (primitives.parameter_kind(primitive(read.state, read.token)) == "toks")
+                    {state: read.state, value: parameter_index(primitive(read.state, read.token))}
                 else if (m.kind == "token-register") {state: read.state, value: m.index}
                 else scan_register(read.state, budget)^;
             if (index.state.issue != null) index.state
@@ -759,9 +1375,11 @@ fn token_primitive(st, name, budget) any^ {
                 let scanned = token_text(opening.state, text.tokens)^;
                 if (len(text.stream.levels) >= 6000) fail({*:opening.state, input: text.stream}, "tex-capacity")
                 else {
-                    let child = {*:reader.reader(scanned, -1), catcodes: text.stream.reader.catcodes,
+                    let id = next_source_id(opening.state)^;
+                    let child = {*:reader.reader(scanned, id), catcodes: text.stream.reader.catcodes,
                         endline: text.stream.reader.endline};
-                    {*:opening.state, input: stream.push_reader(text.stream, child)}
+                    {*:opening.state, input: stream.push_reader(text.stream, child),
+                        sources: [*opening.state.sources, {id: id, name: "\\scantokens", origin: "local", data: scanned}]}
                 }
             } else {
                 let tokens = if (name == "detokenize") text_tokens(token_text(opening.state, text.tokens))
@@ -788,6 +1406,124 @@ fn expanded_text(st, budget) any^ {
     else if (not charcat(opening.token, 1))
         {state: fail(put_back(opening.state, opening.token), "tex-missing-brace"), tokens: []}
     else definition_tokens(opening.state, budget)
+}
+
+fn pdf_string_primitive(st, name, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let current = {*:st, expansions: st.expansions + 1};
+        let keyword = if (name == "pdfmdfivesum") scan_word(current, "file", budget)^ else {state: current, found: false};
+        if (keyword.found) pdf_file_primitive(keyword.state, "pdfmdfivesum file", budget, true)
+        else {
+            let scanned = expanded_text(keyword.state, budget)^;
+            if (scanned.state.issue != null) scanned.state
+            else {
+                let text = token_text(scanned.state, scanned.tokens)^;
+                let result = if (name == "pdfescapestring") pdfstrings.escape_string(text)^
+                    else if (name == "pdfescapename") pdfstrings.escape_name(text)^
+                    else if (name == "pdfescapehex") pdfstrings.escape_hex(text)^
+                    else if (name == "pdfmdfivesum") md5.digest(text)^ else pdfstrings.unescape_hex(text)^;
+                {*:scanned.state, input: stream.push(scanned.state.input, text_tokens(result))}
+            }
+        }
+    }
+}
+
+fn next_source_id(st) any^ => max(len(st.sources) + abs(st.input.reader.file_id) + 1,
+    max([0, *[for (source in st.sources) source.id]]) + 1)
+
+// The caller supplies captured, authorized bytes; this module does not open paths.
+fn captured_resource(st, name, requested_scope = null) any^ {
+    let cleaned = replace(name, "\"", "")^;
+    let active = stream.active_reader(st.input)^;
+    let scope = if (requested_scope != null) requested_scope else if (active.origin == "bundled") "bundled" else "local";
+    if (st.resources == null) {state: st, available: false, found: false, data: null}
+    else if (not (st.resources is map) or (st.resources[scope] != null and not (st.resources[scope] is map)))
+        {state: fail(st, "tex-resource-invalid"), available: true, found: false, data: null}
+    else if (st.resources[scope] == null) {state: st, available: false, found: false, data: null}
+    else if (cleaned == "" or starts_with(cleaned, "/") or contains(cleaned, ".."))
+        {state: st, available: true, found: false, data: null}
+    else {
+        let entry = st.resources[scope][cleaned];
+        if (entry == null) {state: st, available: true, found: false, data: null}
+        else if (not (entry.data is string or entry.data is binary))
+            {state: fail(st, "tex-resource-invalid"), available: true, found: false, data: null}
+        else {
+            let bytes = binary(entry.data)^;
+            let resource_key = scope ++ ":" ++ cleaned;
+            let seen = st.resources_seen[resource_key] != null;
+            let next_count = st.resource_count + if (seen or scope == "bundled") 0 else 1;
+            let next_bytes = st.resource_bytes + if (seen or scope == "bundled") 0 else len(bytes);
+            if (next_count > 128 or next_bytes > 16777216 or (scope == "bundled" and len(bytes) > 16777216))
+                {state: fail(st, "tex-budget"), available: true, found: false, data: null}
+            else {
+                let existing = st.resource_ids[resource_key];
+                let id = if (existing != null) existing else next_source_id(st)^;
+                let sources = if (existing != null) st.sources else [*st.sources,
+                    {id: id, name: cleaned, origin: scope, data: bytes}];
+                {state: {*:st, resources_seen: {*:st.resources_seen, *:map([resource_key, true])},
+                    resource_ids: {*:st.resource_ids, *:map([resource_key, id])}, sources: sources,
+                    resource_count: next_count, resource_bytes: next_bytes},
+                    available: true, found: true, data: bytes, id: id, origin: scope}
+            }
+        }
+    }
+}
+
+fn push_resource_reader(fetched) any^ {
+    let decoded = utf8.decode(fetched.data) ^ { null };
+    if (decoded == null) fail(fetched.state, "tex-invalid-utf8")
+    else if (len(fetched.state.input.levels) >= 6000) fail(fetched.state, "tex-capacity")
+    else {
+        let child = {*:reader.reader(decoded, fetched.id), origin: fetched.origin,
+            catcodes: fetched.state.input.reader.catcodes, endline: fetched.state.input.reader.endline};
+        {*:fetched.state, input: stream.push_reader(fetched.state.input, child)}
+    }
+}
+
+fn input_primitive(st, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let current = {*:st, expansions: st.expansions + 1};
+        let name = scan_filename(current, budget)^;
+        if (name.state.issue != null) name.state
+        else {
+            let exact = captured_resource(name.state, name.name)^;
+            let selected = if (exact.available and not exact.found and exact.state.issue == null)
+                captured_resource(exact.state, name.name ++ ".tex")^ else exact;
+            if (selected.state.issue != null) selected.state
+            else if (not selected.available) unsupported(selected.state, "input")
+            else if (not selected.found) {*:selected.state,
+                diagnostics: [*selected.state.diagnostics, if (starts_with(name.name, "/") or contains(name.name, ".."))
+                    "tex-file-outside" else "tex-file-not-found"]}
+            else push_resource_reader(selected)
+        }
+    }
+}
+
+fn endinput_primitive(st, budget) any^ =>
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {*:st, input: stream.end_input(st.input), expansions: st.expansions + 1}
+
+fn pdf_file_primitive(st, name, budget, counted = false) any^ {
+    if (not counted and st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let current = if (counted) st else {*:st, expansions: st.expansions + 1};
+        let text = expanded_text(current, budget)^;
+        if (text.state.issue != null) text.state
+        else {
+            let fetched = captured_resource(text.state, token_text(text.state, text.tokens))^;
+            if (fetched.state.issue != null) fetched.state
+            else if (not fetched.available) unsupported(fetched.state, name)
+            else {
+                let rendered = if (not fetched.found) ""
+                    else if (name == "pdffilesize") string(len(fetched.data))
+                    else if (name == "pdffilemoddate") "D:20000101120000Z"
+                    else md5.digest(fetched.data)^;
+                {*:fetched.state, input: stream.push(fetched.state.input, text_tokens(rendered))}
+            }
+        }
+    }
 }
 
 fn constant_primitive(st, budget, value) any^ {
@@ -835,8 +1571,12 @@ fn print_meaning(st, t) any^ {
     let m = meaning(st, t)^;
     if (m.kind == "undefined") "undefined"
     else if (m.kind == "primitive") escape(st) ++ m.name
+    else if (m.kind == "constructor") escape(st) ++ m.name
     else if (m.kind == "register") escape(st) ++ "count" ++ string(m.index)
     else if (m.kind == "token-register") escape(st) ++ "toks" ++ string(m.index)
+    else if (m.kind == "font") "select font " ++ st.fonts[m.index].name ++
+        (if (m.index > 0 and st.fonts[m.index].size != 655360)
+            " at " ++ dimension.format(st.fonts[m.index].size) else "")
     else if (m.kind == "chardef" or m.kind == "mathchardef")
         escape(st) ++ (if (m.kind == "chardef") "char\"" else "mathchar\"") ++ hexadecimal(m.value)
     else if (m.kind == "char") {
@@ -855,13 +1595,89 @@ fn print_meaning(st, t) any^ {
     else "undefined"
 }
 
+// terminal output is buffered until a line break or a flushing TeX command.
+fn terminal_flush(st) any^ => if (st.terminal_line == "") st
+    else {*:st, messages: [*st.messages, st.terminal_line], terminal_line: ""}
+fn terminal_print(st, text) any^ {
+    let newline = parameter_value(st, "newlinechar")^;
+    if (newline < 0 or newline >= 128) {*:st, terminal_line: st.terminal_line ++ text}
+    else {
+        let parts = split(text, chr(newline))^;
+        if (len(parts) <= 1) {*:st, terminal_line: st.terminal_line ++ text}
+        else {*:st, messages: [*st.messages, st.terminal_line ++ parts[0], *slice(parts, 1, len(parts) - 1)^],
+            terminal_line: parts[len(parts) - 1]}
+    }
+}
+// preserve native diagnostic locations when the active source is known.
+fn record_diagnostic(st, code, message) any^ {
+    let active = stream.active_reader(st.input)^;
+    let found = if (active == null) [] else [for (source in st.sources where source.id == active.file_id) source];
+    let main = active != null and active.file_id == st.main_file;
+    let foreign = active != null and not main and len(found) > 0;
+    let bytes = binary(message)^;
+    // native diagnostic formatting truncates long or NUL-containing messages.
+    let exact_message = len(bytes) <= 511 and not any([for (byte in bytes) byte == 0]);
+    let known = active != null and (main or foreign) and exact_message;
+    let record = {code: code, message: message, offset: st.input.last_main_offset,
+        *:if (foreign) {file: found[0].name} else {},
+        *:if (active != null and active.line_no > 0) {line: active.line_no} else {}};
+    {*:st, diagnostics: [*st.diagnostics, code],
+        diagnostic_records: if (known) [*st.diagnostic_records, record] else st.diagnostic_records}
+}
+
+fn terminal_message(st, budget, is_error) any^ {
+    let text = expanded_text(st, budget)^;
+    if (text.state.issue != null) text.state
+    else {
+        let message_text = token_text(text.state, text.tokens)^;
+        if (is_error) {
+            let diagnosed = record_diagnostic(text.state, "tex-errmessage", message_text)^;
+            terminal_flush(terminal_print(terminal_flush(diagnosed)^, "! " ++ message_text ++ ".")^)
+        }
+        else terminal_print(text.state, (if (text.state.terminal_line == "") "" else " ") ++ message_text)
+    }
+}
+fn emit_character(st, budget) any^ {
+    let scanned = scan_number(st, budget)^;
+    if (scanned.state.issue != null) scanned.state
+    else {
+        let invalid = scanned.value < 0 or scanned.value > 1114111;
+        let code = if (invalid) 0 else scanned.value;
+        let current = if (invalid) record_diagnostic(scanned.state, "tex-bad-char",
+            "Bad character code (" ++ string(scanned.value) ++ ")")^ else scanned.state;
+        // native TeX can retain surrogate tokens that Lambda strings cannot represent.
+        if (code >= 55296 and code <= 57343) unsupported(current, "char surrogate")
+        else {
+            let category = if ((code >= 65 and code <= 90) or (code >= 97 and code <= 122)) 11 else 12;
+            let token = {kind: "char", value: chr(code), cat: category, start: -1, end: -1,
+                read_offset: current.input.last_main_offset, read_file: current.main_file};
+            {*:current, output: [*current.output, token]}
+        }
+    }
+}
+
 fn write_message(st, budget) any^ {
     let destination = scan_number(st, budget)^;
     if (destination.state.issue != null) destination.state
     else {
         let text = expanded_text(destination.state, budget)^;
         if (text.state.issue != null) text.state
-        else {*:text.state, messages: [*text.state.messages, token_text(text.state, text.tokens)]}
+        else if (destination.value >= 0 and destination.value <= 15 and contains(text.state.output_streams, destination.value)) text.state
+        else terminal_flush(terminal_print(terminal_flush(text.state)^, token_text(text.state, text.tokens)^)^)
+    }
+}
+
+// native input models open streams but does not retain written files.
+fn output_stream(st, budget, opening) any^ {
+    let scanned = scan_number(st, budget)^;
+    if (scanned.state.issue != null) scanned.state
+    else {
+        let slot = ((scanned.value % 16) + 16) % 16;
+        let filename = if (opening) scan_filename(optional_equals(scanned.state, budget), budget)^
+            else {state: scanned.state};
+        if (filename.state.issue != null) filename.state
+        else {*:filename.state, output_streams: [*[for (item in filename.state.output_streams where item != slot) item],
+            *(if (opening) [slot] else [])]}
     }
 }
 
@@ -873,7 +1689,7 @@ fn show_tokens(st, budget) any^ {
         let body = stream.argument(stream.push(opening.state.input, [opening.token]), true)^;
         let current = {*:opening.state, input: body.stream};
         if (body.error != null) fail(current, body.error)
-        else {*:current, messages: [*current.messages, "> " ++ token_text(current, body.tokens) ++ "."]}
+        else terminal_flush(terminal_print(terminal_flush(current)^, "> " ++ token_text(current, body.tokens)^ ++ ".")^)
     }
 }
 
@@ -881,22 +1697,23 @@ fn immediate(st, budget) any^ {
     let read = expanded_next(st, budget);
     if (read.state.issue != null) read.state
     else if (primitive(read.state, read.token) == "write") write_message(read.state, budget)
+    else if (primitive(read.state, read.token) == "openout") output_stream(read.state, budget, true)
+    else if (primitive(read.state, read.token) == "closeout") output_stream(read.state, budget, false)
     else put_back(read.state, read.token)
 }
 
 fn set_codes(input, codes) any^ => stream.configure(input, codes, input.reader.endline)
 fn set_code(codes, code, value) => {*:codes, *:map([chr(code), value])}
 
+fn save_parameter(st, global, name, value) any^ => {*:st,
+    input: if (name == "endlinechar") stream.configure(st.input, st.input.reader.catcodes, value) else st.input,
+    parameters: {*:st.parameters, *:map([name, value])},
+    groups: if (global) [for (scope in st.groups)
+        {*:scope, parameters: {*:scope.parameters, *:map([name, value])}}] else st.groups}
+
 fn assign_parameter(st, global, budget, name) any^ {
-    let before = optional_equals(st, budget)^;
-    let value = scan_number(before, budget)^;
-    if (value.state.issue != null) value.state
-    else {*:value.state,
-        input: if (name == "endlinechar") stream.configure(value.state.input,
-            value.state.input.reader.catcodes, value.value) else value.state.input,
-        parameters: {*:value.state.parameters, *:map([name, value.value])},
-        groups: if (global) [for (scope in value.state.groups)
-            {*:scope, parameters: {*:scope.parameters, *:map([name, value.value])}}] else value.state.groups}
+    let value = scan_number(optional_equals(st, budget), budget)^;
+    if (value.state.issue != null) value.state else save_parameter(value.state, global, name, value.value)
 }
 
 fn assign_catcode(st, global, budget) any^ {
@@ -915,6 +1732,356 @@ fn assign_catcode(st, global, budget) any^ {
                 groups: if (global) [for (scope in value.state.groups)
                     {*:scope, catcodes: set_code(scope.catcodes, character.value, value.value)}]
                     else value.state.groups}
+        }
+    }
+}
+
+// Syntax settings and their saved values follow ordinary TeX group scope.
+fn expl3_syntax(st, on) any^ {
+    let saved = st.expl_syntax;
+    if (on) {
+        let previous = if (saved != null and saved.active == true) saved else {
+            active: true, codes: expl3.save_codes(st.input.reader.catcodes),
+            endline: st.parameters.endlinechar};
+        let global = effective_global(st, false)^;
+        let configured = {*:st, expl_syntax: previous,
+            input: set_codes(st.input, expl3.syntax_codes(st.input.reader.catcodes)),
+            groups: if (global) [for (scope in st.groups)
+                {*:scope, expl_syntax: previous, catcodes: expl3.syntax_codes(scope.catcodes)}] else st.groups};
+        save_parameter(configured, global, "endlinechar", 32)
+    }
+    else if (saved == null or saved.active != true) st
+    else {
+        let global = effective_global(st, false)^;
+        let configured = {*:st, expl_syntax: null,
+            input: set_codes(st.input, {*:st.input.reader.catcodes, *:saved.codes}),
+            groups: if (global) [for (scope in st.groups)
+                {*:scope, expl_syntax: null, catcodes: {*:scope.catcodes, *:saved.codes}}] else st.groups};
+        save_parameter(configured, global, "endlinechar", saved.endline)
+    }
+}
+
+fn expl3_cs_define(st, name, budget) any^ {
+    let target = nonspace(st.input)^;
+    let current = {*:st, input: target.stream};
+    if (not is_control(target.token)) fail(current, "tex-missing-cs")
+    else if (expl3.fresh(name) and not latex_definable(meaning(st, target.token)))
+        fail(current, "expl3-already-defined")
+    else define({*:st, input: stream.push(target.stream, [target.token])},
+        effective_global(st, expl3.global(name))^, true, expl3.protected(name), false, budget)
+}
+
+fn expl3_tl_assign(st, name, budget) any^ {
+    let target = nonspace(st.input)^;
+    let current = {*:st, input: target.stream};
+    if (not is_control(target.token)) fail(current, "tex-missing-cs")
+    else if (expl3.fresh(name) and not latex_definable(meaning(st, target.token)))
+        fail(current, "expl3-already-defined")
+    else {
+        let scanned = if (expl3.no_argument(name)) {state: current, tokens: []}
+            else if (expl3.expanded_argument(name)) expanded_text(current, budget)^
+            else {
+                let argument = stream.argument(current.input, true)^;
+                {state: if (argument.error != null) fail({*:current, input: argument.stream}, argument.error)
+                    else {*:current, input: argument.stream}, tokens: argument.tokens}
+            };
+        if (scanned.state.issue != null) scanned.state
+        else assign_meaning(scanned.state, key(target.token), expl3.token_list(stored_tokens(scanned.tokens)),
+            effective_global(scanned.state, expl3.global(name))^)
+    }
+}
+
+fn expl3_tl_use(st, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let target = nonspace(st.input)^;
+        let current = {*:st, input: target.stream, expansions: st.expansions + 1};
+        if (not is_control(target.token)) fail(current, "tex-missing-cs")
+        else if (meaning(st, target.token).kind == "undefined") fail(current, "expl3-undefined-variable")
+        else {*:current, input: stream.push(current.input, [target.token])}
+    }
+}
+
+// Sequence meanings retain their TeX token representation as well as their items.
+fn expl3_seq_body(items, index = 0, output = [control_token("s__seq")]) any^ {
+    if (index >= len(items)) output
+    else {
+        let opener = brace_token(true);
+        let closer = brace_token(false);
+        expl3_seq_body(items, index + 1,
+            [*output, control_token("__seq_item:n"), opener, *items[index], closer])
+    }
+}
+
+fn expl3_seq_value(items) any^ => {*:expl3.token_list(expl3_seq_body(items)^), seq_items: items}
+
+fn expl3_seq_assign(st, name) any^ {
+    let target = nonspace(st.input)^;
+    let current = {*:st, input: target.stream};
+    if (not is_control(target.token)) fail(current, "tex-missing-cs")
+    else if (expl3.fresh(name) and not latex_definable(meaning(st, target.token)))
+        fail(current, "expl3-already-defined")
+    else {
+        let arg = if (expl3.sequence_empty_assignment(name)) {stream: target.stream, tokens: [], error: null}
+            else stream.argument(target.stream, true)^;
+        let advanced = {*:current, input: arg.stream};
+        let old = meaning(advanced, target.token);
+        if (arg.error != null) fail(advanced, arg.error)
+        else if (not expl3.sequence_empty_assignment(name) and not expl3.sequence_from_clist(name) and
+                not (old.seq_items is array)) fail(advanced, "expl3-invalid-sequence")
+        else {
+            let items = if (expl3.sequence_empty_assignment(name)) []
+                else if (expl3.sequence_from_clist(name)) expl3.from_clist(arg.tokens)^
+                else if (expl3.sequence_put_left(name)) [arg.tokens, *old.seq_items]
+                else [*old.seq_items, arg.tokens];
+            assign_meaning(advanced, key(target.token), expl3_seq_value(items)^,
+                effective_global(advanced, expl3.global(name))^)
+        }
+    }
+}
+
+fn expl3_seq_join(items, separator, index = 0, output = []) any^ {
+    if (index >= len(items)) output
+    else expl3_seq_join(items, separator, index + 1,
+        [*output, *(if (index == 0) [] else separator), *items[index]])
+}
+
+fn expl3_seq_expand(st, name, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let target = nonspace(st.input)^;
+        let current = {*:st, input: target.stream, expansions: st.expansions + 1};
+        if (not is_control(target.token)) fail(current, "tex-missing-cs")
+        else {
+            let value = meaning(current, target.token);
+            if (not (value.seq_items is array)) fail(current, "expl3-invalid-sequence")
+            else if (name == "seq_count:N")
+                {*:current, input: stream.push(current.input, text_tokens(string(len(value.seq_items))))}
+            else {
+                let separator = stream.argument(current.input, true)^;
+                let advanced = {*:current, input: separator.stream};
+                if (separator.error != null) fail(advanced, separator.error)
+                else {
+                    let tokens = expl3_seq_join(value.seq_items, separator.tokens)^;
+                    let result = if (advanced.token_text_scan) [for (t in tokens)
+                        {*:t, noexpand: is_control(t), direct_toks: true}] else stored_tokens(tokens);
+                    {*:advanced, input: stream.push(advanced.input, result)}
+                }
+            }
+        }
+    }
+}
+
+// The n arguments compare token strings without expanding their control sequences.
+fn expl3_compare_text(st, tokens) any^ => join([for (t in tokens)
+    if (charcat(t, 6)) t.value else write_token(st, t)], "")
+
+fn expl3_str_compare(st, name, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let left = stream.argument(st.input, true)^;
+        let relation = nonspace(left.stream)^;
+        let right = stream.argument(relation.stream, true)^;
+        let yes = if (name == "str_compare:nNnF") {stream: right.stream, tokens: [], error: null}
+            else stream.argument(right.stream, true)^;
+        let no = if (name == "str_compare:nNnT") {stream: yes.stream, tokens: [], error: null}
+            else stream.argument(yes.stream, true)^;
+        let current = {*:st, input: no.stream, expansions: st.expansions + 1};
+        if (left.error != null) fail(current, left.error)
+        else if (right.error != null) fail(current, right.error)
+        else if (yes.error != null) fail(current, yes.error)
+        else if (no.error != null) fail(current, no.error)
+        else if (not (other(relation.token, "<") or other(relation.token, "=") or other(relation.token, ">")))
+            fail(current, "tex-missing-relation")
+        else {
+            let a = expl3_compare_text(current, left.tokens)^;
+            let b = expl3_compare_text(current, right.tokens)^;
+            let matched = if (relation.token.value == "<") a < b
+                else if (relation.token.value == ">") a > b else a == b;
+            {*:current, input: stream.push(current.input, if (matched) yes.tokens else no.tokens)}
+        }
+    }
+}
+
+// Execute the supplied TeX comparator with the same grouped state and token stream.
+fn expl3_sort_run(st, budget) any^ {
+    if (st.issue != null or st.expl_sort_done == true) st
+    else if (st.finished == true) fail(st, "expl3-sort-incomplete")
+    else expl3_sort_run(step(st, budget), budget)
+}
+
+fn expl3_sort_compare(st, comparator, a, b, budget) any^ {
+    if (st.expansions >= budget) {state: fail(st, "tex-budget"), swap: false}
+    else {
+        let boundary = {kind: "expl3-sort-end"};
+        let input = stream.push(st.input, [*stored_tokens(substitute(comparator, [a, b])), boundary]);
+        let running = {*:st, input: input, expl_sort_active: true, expl_sort_result: null,
+            expl_sort_done: false, expansions: st.expansions + 1};
+        let checked = expl3_sort_run(running, budget)^;
+        let result = checked.expl_sort_result;
+        let restored = {*:checked, expl_sort_active: st.expl_sort_active,
+            expl_sort_result: st.expl_sort_result, expl_sort_done: st.expl_sort_done};
+        if (restored.issue != null) {state: restored, swap: false}
+        else if (result == null) {state: fail(restored, "expl3-sort-no-return"), swap: false}
+        else {state: restored, swap: result == "swap"}
+    }
+}
+
+// Merge adjacent runs from their ends, preserving TeX's comparator order.
+fn expl3_sort_merge(st, comparator, left, right, budget, i, j, suffix = []) any^ {
+    if (i < 0) {state: st, items: [*slice(right, 0, j + 1)^, *suffix]}
+    else if (j < 0) {state: st, items: [*slice(left, 0, i + 1)^, *suffix]}
+    else {
+        let compared = expl3_sort_compare(st, comparator, left[i], right[j], budget)^;
+        if (compared.state.issue != null) {state: compared.state, items: suffix}
+        else if (compared.swap)
+            expl3_sort_merge(compared.state, comparator, left, right, budget, i - 1, j, [left[i], *suffix])
+        else expl3_sort_merge(compared.state, comparator, left, right, budget, i, j - 1, [right[j], *suffix])
+    }
+}
+
+fn expl3_sort_pass(st, comparator, items, budget, width, index = 0, output = []) any^ {
+    if (index >= len(items)) {state: st, items: output}
+    else {
+        let middle = min(index + width, len(items));
+        let end = min(index + 2 * width, len(items));
+        let left = slice(items, index, middle)^;
+        let right = slice(items, middle, end)^;
+        let merged = expl3_sort_merge(st, comparator, left, right, budget,
+            len(left) - 1, len(right) - 1)^;
+        if (merged.state.issue != null) merged
+        else expl3_sort_pass(merged.state, comparator, items, budget, width, end, [*output, *merged.items])
+    }
+}
+
+fn expl3_sort_items(st, comparator, items, budget, width = 1) any^ {
+    if (width >= len(items)) {state: st, items: items}
+    else {
+        let pass = expl3_sort_pass(st, comparator, items, budget, width)^;
+        if (pass.state.issue != null) pass
+        else expl3_sort_items(pass.state, comparator, pass.items, budget, width * 2)
+    }
+}
+
+fn expl3_seq_sort(st, name, budget) any^ {
+    let target = nonspace(st.input)^;
+    let code = stream.argument(target.stream, true)^;
+    let current = {*:st, input: code.stream};
+    if (not is_control(target.token)) fail(current, "tex-missing-cs")
+    else if (code.error != null) fail(current, code.error)
+    else {
+        let value = meaning(current, target.token);
+        let comparator = body_params(code.tokens, 2)^;
+        if (not (value.seq_items is array)) fail(current, "expl3-invalid-sequence")
+        else if (comparator.issue != null) fail(current, comparator.issue)
+        else {
+            let grouped = begin_group(current, null, true)^;
+            let sorted = expl3_sort_items(grouped, comparator.tokens, value.seq_items, budget)^;
+            if (sorted.state.issue != null) sorted.state
+            else {
+                let ended = end_group(sorted.state, null, true)^;
+                if (ended.issue != null) ended
+                else assign_meaning(ended, key(target.token), expl3_seq_value(sorted.items)^,
+                    effective_global(ended, expl3.global(name))^)
+            }
+        }
+    }
+}
+
+// Case conversion expands ordinary macros but leaves math and reference keys intact.
+fn expl3_case_scan(st, budget, uppercase, mode = null, output = []) any^ {
+    let read = if (mode == null) expanded_next(st, budget, true)^
+        else {let raw = stream.next(st.input)^; {state: {*:st, input: raw.stream}, token: raw.token}};
+    let t = read.token;
+    let current = read.state;
+    if (current.issue != null) {state: current, tokens: output}
+    else if (t == null) {state: fail(current, "expl3-case-incomplete"), tokens: output}
+    else if (t.kind == "expl3-case-end")
+        if (mode != null) {state: fail(current, "expl3-case-incomplete-math"), tokens: output}
+        else {state: current, tokens: output}
+    else if (mode == "dollar")
+        expl3_case_scan(current, budget, uppercase, if (charcat(t, 3)) null else mode, [*output, t])
+    else if (mode == "paren" or mode == "bracket")
+        expl3_case_scan(current, budget, uppercase,
+            if (is_control(t) and t.value == (if (mode == "paren") ")" else "]")) null else mode, [*output, t])
+    else if (charcat(t, 3)) expl3_case_scan(current, budget, uppercase, "dollar", [*output, t])
+    else if (is_control(t) and (t.value == "(" or t.value == "["))
+        expl3_case_scan(current, budget, uppercase, if (t.value == "(") "paren" else "bracket", [*output, t])
+    else if (is_control(t) and expl3.case_opaque(t.value)) {
+        let arg = stream.raw_argument(current.input)^;
+        let advanced = {*:current, input: arg.stream};
+        if (arg.error != null or any([for (token in arg.raw) token.kind == "expl3-case-end"]))
+            {state: fail(advanced, "expl3-case-missing-argument"), tokens: output}
+        else if (len(arg.raw) > 0 and arg.raw[0].kind == "char" and
+                (arg.raw[0].value == "[" or arg.raw[0].value == "*"))
+            {state: unsupported(advanced, "text case reference options"), tokens: output}
+        else expl3_case_scan(advanced, budget, uppercase, null, [*output, t, *arg.raw])
+    }
+    else if (is_control(t)) {
+        let resolved = meaning(current, t);
+        if (resolved.kind == "undefined") {state: unsupported(current, "text case control " ++ t.value), tokens: output}
+        else if (resolved.kind == "char" or resolved.kind == "chardef" or resolved.kind == "mathchardef")
+            {state: unsupported(current, "text case character meaning"), tokens: output}
+        else expl3_case_scan(current, budget, uppercase, null, [*output, t])
+    }
+    else if (t.kind == "char" and ord(t.value) >= 128)
+        {state: unsupported(current, "Unicode text case"), tokens: output}
+    else if (t.kind == "char")
+        expl3_case_scan(current, budget, uppercase, null,
+            [*output, {*:t, value: if (uppercase) upper(t.value) else lower(t.value), direct: false}])
+    else {state: unsupported(current, "text case token"), tokens: output}
+}
+
+fn expl3_text_case(st, name, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let arg = stream.argument(st.input, true)^;
+        let current = {*:st, input: arg.stream, expansions: st.expansions + 1};
+        if (arg.error != null) fail(current, arg.error)
+        else {
+            let boundary = {kind: "expl3-case-end"};
+            let queued = {*:current, input: stream.push(current.input, [*arg.tokens, boundary])};
+            let converted = expl3_case_scan(queued, budget, name == "text_uppercase:n")^;
+            if (converted.state.issue != null) converted.state
+            else {
+                let tokens = if (converted.state.token_text_scan) [for (t in converted.tokens)
+                    {*:t, noexpand: is_control(t), direct_toks: true}] else stored_tokens(converted.tokens);
+                {*:converted.state, input: stream.push(converted.state.input, tokens)}
+            }
+        }
+    }
+}
+
+// expand the TeX argument as tokens before evaluating the bounded decimal grammar.
+fn expl3_fp_eval(st, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let arg = expanded_text({*:st, expansions: st.expansions + 1}, budget)^;
+        if (arg.state.issue != null) arg.state
+        else if (len([for (t in arg.tokens where t.kind != "char") t]) > 0)
+            unsupported(arg.state, "fp expression token")
+        else {
+            let expression = join([for (t in arg.tokens) t.value], "");
+            let result = fp.evaluate(expression)^;
+            if (result.issue == "expl3-fp-unsupported") unsupported(arg.state, "fp " ++ result.unsupported)
+            else if (result.issue != null) fail(arg.state, result.issue)
+            else {*:arg.state, input: stream.push(arg.state.input, text_tokens(result.value))}
+        }
+    }
+}
+
+// The expl3 integer expression has TeX's number-expression arithmetic and rounding.
+fn expl3_int_eval(st, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let arg = stream.argument(st.input, true)^;
+        let current = {*:st, input: arg.stream, expansions: st.expansions + 1};
+        if (arg.error != null) fail(current, arg.error)
+        else {
+            let scoped = {*:current, input: stream.push(current.input, [*arg.tokens, control_token("relax")])};
+            let result = scan_expression(scoped, budget)^;
+            if (result.state.issue != null) result.state
+            else {*:result.state, input: stream.push(result.state.input, text_tokens(string(result.value)))}
         }
     }
 }
@@ -948,6 +2115,35 @@ fn case_code(st, t, upper_case) any^ {
     else 0
 }
 
+fn set_extra_code(tables, name, code, value) any^ =>
+    {*:tables, *:map([name, set_code(tables[name], code, value)])}
+
+fn assign_extra_code(st, global, budget, name) any^ {
+    let character = scan_number(st, budget)^;
+    if (character.state.issue != null) character.state
+    else {
+        let value = scan_number(optional_equals(character.state, budget), budget)^;
+        let limit = if (name == "sfcode") 32767 else if (name == "mathcode") 32768 else 16777215;
+        if (value.state.issue != null) value.state
+        else if (character.value < 0 or character.value > 1114111 or value.value > limit or
+            (name != "delcode" and value.value < 0)) fail(value.state, "tex-bad-character-code")
+        else {*:value.state, code_tables: set_extra_code(value.state.code_tables, name, character.value, value.value),
+            groups: if (global) [for (scope in value.state.groups)
+                {*:scope, code_tables: set_extra_code(scope.code_tables, name, character.value, value.value)}]
+                else value.state.groups}
+    }
+}
+
+fn extra_code(st, name, code) any^ {
+    let assigned = st.code_tables[name][chr(code)];
+    if (assigned != null) assigned
+    else if (name == "sfcode") if (code >= 65 and code <= 90) 999 else 1000
+    else if (name == "delcode") if (code == 46) 0 else -1
+    else if ((code >= 65 and code <= 90) or (code >= 97 and code <= 122)) 28928 + code
+    else if (code >= 48 and code <= 57) 28672 + code
+    else code
+}
+
 fn code_quantity(st, name, budget) any^ {
     let code = scan_number(st, budget)^;
     if (code.state.issue != null) code
@@ -955,7 +2151,8 @@ fn code_quantity(st, name, budget) any^ {
     else {
         let c = chr(code.value);
         {state: code.state, value: if (name == "catcode") reader.catcode(c, code.state.input.reader.catcodes)
-            else case_code(code.state, {value: c}, name == "uccode")}
+            else if (name == "lccode" or name == "uccode") case_code(code.state, {value: c}, name == "uccode")
+            else extra_code(code.state, name, code.value)}
     }
 }
 
@@ -969,7 +2166,7 @@ fn shift_case(st, budget, upper_case) any^ {
             let shifted = [for (t in text.tokens)
                 if (t.kind == "char" and case_code(opening.state, t, upper_case) != 0)
                     {*:t, value: chr(case_code(opening.state, t, upper_case))} else t];
-            {*:opening.state, input: stream.push(text.stream, shifted)}
+            {*:opening.state, input: stream.push(text.stream, stored_tokens(shifted))}
         }
     }
 }
@@ -1025,7 +2222,7 @@ fn begin_conditional(st, truth, negate = false) any^ {
 }
 
 fn numeric_conditional(st, name, budget, negate) any^ {
-    let left = scan_number(st, budget)^;
+    let left = if (name == "ifdim") scan_dimen(st, budget)^ else scan_number(st, budget)^;
     if (left.state.issue != null) left.state
     else if (name == "ifodd") begin_conditional(left.state, (left.value % 2) != 0, negate)
     else {
@@ -1033,11 +2230,23 @@ fn numeric_conditional(st, name, budget, negate) any^ {
         if (not (other(relation.token, "<") or other(relation.token, "=") or other(relation.token, ">")))
             fail(put_back(relation.state, relation.token), "tex-missing-relation")
         else {
-            let right = scan_number(relation.state, budget)^;
+            let right = if (name == "ifdim") scan_dimen(relation.state, budget)^ else scan_number(relation.state, budget)^;
             if (right.state.issue != null) right.state
             else begin_conditional(right.state, if (relation.token.value == "<") left.value < right.value
                 else if (relation.token.value == ">") left.value > right.value else left.value == right.value, negate)
         }
+    }
+}
+
+fn box_conditional(st, name, budget, negate) any^ {
+    let index = scan_register(st, budget)^;
+    if (index.state.issue != null) index.state
+    else {
+        let box = index.state.boxes[string(index.value)];
+        let matched = if (name == "ifvoid") box == null
+            else if (name == "ifhbox") box != null and box.kind == "horizontal"
+            else box != null and box.kind == "vertical";
+        begin_conditional(index.state, matched, negate)
     }
 }
 
@@ -1056,13 +2265,15 @@ fn delimiters_equal(a, b, index = 0) any^ {
 fn meanings_equal(a, b) any^ {
     if (a.kind != b.kind) false
     else if (a.kind == "undefined" or a.kind == "relax") true
-    else if (a.kind == "primitive") a.name == b.name
+    else if (a.kind == "primitive" or a.kind == "constructor") a.name == b.name
     else if (a.kind == "char") a.value == b.value and a.cat == b.cat
-    else if (a.kind == "register") a.index == b.index
+    else if (a.kind == "register" or a.kind == "dimension-register" or a.kind == "font") a.index == b.index
+    else if (a.kind == "glue-register") a.index == b.index and a.mu == b.mu
     else if (a.kind == "token-register") a.index == b.index
     else if (a.kind == "chardef" or a.kind == "mathchardef") a.value == b.value
     else if (a.kind == "macro") a.count == b.count and a.long_ok == b.long_ok and a.protected_flag == b.protected_flag and
-        a.brace_delim == b.brace_delim and tokens_equal(a.prefix, b.prefix) and
+        a.brace_delim == b.brace_delim and (a.optional == true) == (b.optional == true) and
+        (a.optional != true or tokens_equal(a.optional_default, b.optional_default)) and tokens_equal(a.prefix, b.prefix) and
         delimiters_equal(a.delimiters, b.delimiters) and tokens_equal(a.body, b.body)
     else false
 }
@@ -1095,8 +2306,12 @@ fn condition(st, name, budget, negate = false) any^ {
         let current = {*:st, expansions: st.expansions + 1};
         let depth = len(st.conditions);
         if (name == "iftrue" or name == "iffalse") begin_conditional(current, name == "iftrue", negate)
-        else if (name == "ifnum" or name == "ifodd") numeric_conditional(current, name, budget, negate)
+        else if (contains(["ifvmode", "ifhmode", "ifmmode", "ifinner"], name))
+            begin_conditional(current, if (name == "ifvmode") false else if (name == "ifhmode") st.math_depth == 0
+                else if (name == "ifmmode") st.math_depth > 0 else st.math_depth > 0 and not st.display_math, negate)
+        else if (name == "ifnum" or name == "ifodd" or name == "ifdim") numeric_conditional(current, name, budget, negate)
         else if (name == "ifcase") case_conditional(current, budget)
+        else if (contains(["ifvoid", "ifhbox", "ifvbox"], name)) box_conditional(current, name, budget, negate)
         else if (name == "if" or name == "ifcat") {
             let a = expanded_next(current, budget)^;
             let b = expanded_next(a.state, budget)^;
@@ -1164,9 +2379,9 @@ fn save_after_assignment(st) any^ {
 }
 
 fn begin_group(st, token, explicit) any^ =>
-    {*:st, groups: [*st.groups, {definitions: st.definitions, counts: st.counts, toks: st.toks,
-        lowercase: st.lowercase, uppercase: st.uppercase, parameters: st.parameters,
-        catcodes: st.input.reader.catcodes, explicit: explicit, aftergroup: []}],
+    {*:st, groups: [*st.groups, {definitions: st.definitions, counts: st.counts, dimens: st.dimens, skips: st.skips, muskips: st.muskips, toks: st.toks,
+        lowercase: st.lowercase, uppercase: st.uppercase, code_tables: st.code_tables, current_font: st.current_font, parameters: st.parameters,
+        catcodes: st.input.reader.catcodes, expl_syntax: st.expl_syntax, explicit: explicit, aftergroup: []}],
         output: if (token == null) st.output else [*st.output, token]}
 
 fn save_aftergroup(st) any^ {
@@ -1176,64 +2391,1115 @@ fn save_aftergroup(st) any^ {
     if (read.token == null) fail(current, "tex-runaway-aftergroup")
     else if (depth == 0) current
     else {*:current, groups: [for (index, scope in st.groups)
-        if (index == depth - 1) {*:scope, aftergroup: [*scope.aftergroup, read.token]} else scope]}
+        if (index == depth - 1) {*:scope, aftergroup: [*scope.aftergroup, {*:read.token, direct: false}]} else scope]}
 }
 
-fn end_group(st, token, explicit) any^ {
+fn end_group(st, token, explicit, environment = false, math = false) any^ {
     let depth = len(st.groups);
-    if (depth == 0 or st.groups[depth - 1].explicit != explicit)
+    if (depth == 0 or st.groups[depth - 1].explicit != explicit or
+        ((st.groups[depth - 1].environment != null) != environment) or
+        ((st.groups[depth - 1].math == true) != math))
         fail(st, if (explicit) "tex-extra-endgroup" else "tex-extra-brace")
     else {
         let scope = st.groups[depth - 1];
         let restored = {*:stream.configure(st.input, scope.catcodes, scope.parameters.endlinechar),
             everyeof: if (scope.toks["-1"] == null) [] else scope.toks["-1"]};
-        {*:st, definitions: scope.definitions, counts: scope.counts, toks: scope.toks,
-            lowercase: scope.lowercase, uppercase: scope.uppercase, parameters: scope.parameters,
+        {*:st, expl_syntax: scope.expl_syntax, definitions: scope.definitions, counts: scope.counts, dimens: scope.dimens, skips: scope.skips, muskips: scope.muskips, toks: scope.toks,
+            lowercase: scope.lowercase, uppercase: scope.uppercase, code_tables: scope.code_tables, current_font: scope.current_font, parameters: scope.parameters,
             input: stream.push(restored, scope.aftergroup), groups: slice(st.groups, 0, depth - 1),
             output: if (token == null) st.output else [*st.output, token]}
     }
 }
 
+fn math_shift_token(st, token) any^ => charcat(token, 3) or
+    (is_control(token) and meaning(st, token).kind == "char" and meaning(st, token).cat == 3)
+
+fn begin_math(st, token, display, second = null, run_hook = false) any^ {
+    let opened = begin_group(st, token, true)^;
+    let depth = len(opened.groups);
+    let math_groups = [for (i, group in opened.groups)
+        if (i == depth - 1) {*:group, math: true, display: display} else group];
+    let hook = if (run_hook) opened.toks[parameter_index(if (display) "everydisplay" else "everymath")] else null;
+    {*:opened, groups: math_groups, math_depth: st.math_depth + 1,
+        display_math: if (run_hook) display else st.display_math,
+        output: if (second == null) opened.output else [*opened.output, second],
+        input: if (hook == null) opened.input else stream.push(opened.input, hook)}
+}
+
+fn finish_math(st, token, second = null, reset_display = true) any^ {
+    let ended = end_group(st, null, true, false, true)^;
+    if (ended.issue != null) ended else {*:ended, math_depth: if (st.math_depth > 0) st.math_depth - 1 else 0,
+        display_math: if (reset_display) false else st.display_math,
+        output: [*ended.output, token, *(if (second == null) [] else [second])]}
+}
+
+fn math_shift(st, token) any^ {
+    let depth = len(st.groups);
+    let closing = depth > 0 and st.groups[depth - 1].math == true;
+    let scan = if ((closing and st.groups[depth - 1].display == true) or (not closing and st.math_depth == 0))
+        stream.next(st.input)^ else null;
+    let is_second = scan != null and scan.token != null and math_shift_token(st, scan.token)^;
+    let input = if (scan == null) st.input else if (is_second or scan.token == null) scan.stream
+        else stream.push(scan.stream, [scan.token]);
+    let current = {*:st, input: input};
+    if (closing) {
+        let diagnosed = if (st.groups[depth - 1].display == true and scan != null and scan.token != null and not is_second)
+            {*:current, diagnostics: [*current.diagnostics, "tex-display-math"]} else current;
+        finish_math(diagnosed, token, if (is_second) scan.token else null)
+    }
+    else begin_math(current, token, is_second, if (is_second) scan.token else null, true)
+}
+
+fn latex_math_switch(st, token, cmd) any^ {
+    if (cmd == "(" or cmd == "[") begin_math(st, token, false, null, false)
+    else {
+        let depth = len(st.groups);
+        if (depth > 0 and st.groups[depth - 1].math == true) finish_math(st, token, null, false)
+        else {*:st, output: [*st.output, token]}
+    }
+}
+
+fn control_token(name) => {kind: "control", value: name, cat: null, start: -1, end: -1}
+fn brace_token(opening) => {kind: "char", value: if (opening) "{" else "}",
+    cat: if (opening) 1 else 2, start: -1, end: -1}
+
+fn latex_optional(input) any^ {
+    let scanned = stream.optional_argument(input)^;
+    {input: scanned.stream, present: scanned.present, tokens: scanned.tokens, raw: scanned.raw, issue: scanned.error}
+}
+
+fn decimal_prefix(text, position, value = 0) any^ {
+    if (position >= len(text)) value
+    else {
+        let c = slice(text, position, position + 1)^;
+        let n = index_of("0123456789", c);
+        if (n == null) value else decimal_prefix(text, position + 1, min(10, value * 10 + n))
+    }
+}
+
+fn latex_arg_count(tokens) any^ {
+    let text = trim(join([for (t in tokens) t.value], ""));
+    let negative = starts_with(text, "-");
+    let signed = negative or starts_with(text, "+");
+    let value = decimal_prefix(text, if (signed) 1 else 0)^;
+    if (negative) -value else value
+}
+
+fn latex_macro(nargs, starred, protected_flag, optional, default_tokens, body) any^ =>
+    {kind: "macro", count: nargs, prefix: [], delimiters: if (nargs == 0) [] else [for (i in 1 to nargs) []],
+        brace_delim: false, long_ok: not starred, protected_flag: protected_flag,
+        optional: optional, optional_default: default_tokens, body: body}
+
+fn latex_definable(m) => m.kind == "undefined" or m.kind == "relax" or (m.kind == "primitive" and m.name == "relax")
+
+fn latex_newcommand(st, name) any^ {
+    let star = nonspace(st.input);
+    let starred = other(star.token, "*");
+    let remaining = if (starred) star.stream else if (star.token == null) star.stream else stream.push(star.stream, [star.token]);
+    let target = stream.argument(remaining, true)^;
+    let controls = [for (t in target.tokens where (is_control(t) ^ { false })) t];
+    let current = {*:st, input: target.stream};
+    if (target.error != null) fail(current, target.error)
+    else if (len(controls) == 0) fail(current, "latex-missing-cs")
+    else {
+        let count = latex_optional(target.stream)^;
+        let default_arg = latex_optional(count.input)^;
+        let body = stream.argument(default_arg.input, true)^;
+        let advanced = {*:current, input: body.stream};
+        if (count.issue != null) fail(advanced, count.issue)
+        else if (default_arg.issue != null) fail(advanced, default_arg.issue)
+        else if (body.error != null) fail(advanced, body.error)
+        else {
+            let raw_count = if (count.present) latex_arg_count(count.tokens)^ else 0;
+            let nargs = if (raw_count < 0 or raw_count > 9) 0 else raw_count;
+            let noted = if (raw_count < 0 or raw_count > 9) {*:advanced,
+                diagnostics: [*advanced.diagnostics, "latex-bad-arg-count"]} else advanced;
+            let parsed = body_params(body.tokens, nargs)^;
+            let old = meaning(noted, controls[0]);
+            let definable = latex_definable(old);
+            if (parsed.issue != null) fail(noted, parsed.issue)
+            else if (name == "newcommand" and not definable)
+                {*:noted, diagnostics: [*noted.diagnostics, "latex-already-defined"]}
+            else if (name == "providecommand" and not definable) noted
+            else {
+                let ready = if (name == "renewcommand" and definable)
+                    {*:noted, diagnostics: [*noted.diagnostics, "latex-undefined"]} else noted;
+                let macro = latex_macro(nargs, starred, name == "DeclareRobustCommand", default_arg.present,
+                    default_arg.tokens, parsed.tokens)^;
+                assign_meaning(ready, key(controls[0]), macro, false)
+            }
+        }
+    }
+}
+
+// The first xparse subset supports mandatory arguments and one leading default.
+fn document_signature(input, count = 0, optional = false, defaults = []) any^ {
+    let read = nonspace(input)^;
+    let t = read.token;
+    if (t == null) {issue: null, count: count, optional: optional, defaults: defaults}
+    else if (t.kind == "char" and t.value == "m")
+        if (count >= 9) {issue: "latex-document-argument-count"}
+        else document_signature(read.stream, count + 1, optional, defaults)
+    else if (t.kind == "char" and t.value == "O" and count == 0 and not optional) {
+        let opening = nonspace(read.stream)^;
+        if (not charcat(opening.token, 1)) {issue: "latex-document-argument-default"}
+        else {
+            let value = stream.argument(stream.push(opening.stream, [opening.token]), true)^;
+            if (value.error != null) {issue: value.error}
+            else document_signature(value.stream, 1, true, value.tokens)
+        }
+    }
+    else {issue: "latex-unsupported-document-argument", unsupported: if (t == null) null else t.value}
+}
+
+fn latex_document_command(st, name) any^ {
+    let target = stream.argument(st.input, true)^;
+    let signature = stream.argument(target.stream, true)^;
+    let body = stream.argument(signature.stream, true)^;
+    let current = {*:st, input: body.stream};
+    if (target.error != null) fail(current, target.error)
+    else if (signature.error != null) fail(current, signature.error)
+    else if (body.error != null) fail(current, body.error)
+    else if (len(target.tokens) != 1 or not is_control(target.tokens[0])) fail(current, "latex-missing-cs")
+    else {
+        let spec = document_signature(stream.push(stream.from_reader(reader.reader("")), signature.tokens))^;
+        let old = meaning(current, target.tokens[0]);
+        let definable = latex_definable(old);
+        if (name == "ProvideDocumentCommand" and not definable) current
+        else if (name == "NewDocumentCommand" and not definable) fail(current, "latex-already-defined")
+        else if (name == "RenewDocumentCommand" and definable) fail(current, "latex-undefined")
+        else if (spec.issue != null) {*:current, issue: spec.issue, unsupported: spec.unsupported}
+        else {
+            let parsed = body_params(body.tokens, spec.count)^;
+            if (parsed.issue != null) fail(current, parsed.issue)
+            else {
+                let macro = latex_macro(spec.count, false, true, spec.optional, spec.defaults, parsed.tokens)^;
+                assign_meaning(current, key(target.tokens[0]), macro, effective_global(current, false)^)
+            }
+        }
+    }
+}
+
+fn expand_argument_name(st, tokens, budget) any^ {
+    // plain characters need no re-reading, which also preserves source tracing.
+    if (not any([for (token in tokens) token.kind != "char"]))
+        {state: st, name: token_text(st, tokens)^}
+    else {
+        let opener = brace_token(true);
+        let closer = brace_token(false);
+        let wrapped = {*:st, input: stream.push(st.input, [opener, *tokens, closer])};
+        let scanned = expanded_text(wrapped, budget)^;
+        {state: scanned.state, name: token_text(scanned.state, scanned.tokens)}
+    }
+}
+
+// counters use TeX count registers so \value and low-level assignments share state.
+fn latex_counter_name(st, budget) any^ {
+    let arg = stream.raw_argument(st.input)^;
+    let current = {*:st, input: arg.stream};
+    if (arg.error != null) {state: fail(current, arg.error), name: "", raw: arg.raw}
+    else {
+        let named = expand_argument_name(current, arg.tokens, budget)^;
+        {state: named.state, name: named.name, raw: arg.raw}
+    }
+}
+fn counter_key(name) => "control:c@" ++ name
+fn counter_meaning(st, name) any^ => meaning(st, control_token("c@" ++ name))
+fn begin_main_trace(st, original) any^ =>
+    if (original.direct == true and original.file == st.main_file)
+        {*:st, input: stream.begin_trace(st.input, original, st.main_file)^} else st
+fn end_main_trace(st, original) any^ {
+    if (original.direct != true or original.file != st.main_file) {state: st, echo: false}
+    else {
+        let traced = stream.end_trace(st.input)^;
+        {state: {*:st, input: traced.stream}, echo: traced.valid}
+    }
+}
+fn counter_diagnostic(st, code) => {*:st, diagnostics: [*st.diagnostics, code]}
+fn counter_command_tokens(name, command, value = null) any^ {
+    let opener = brace_token(true);
+    let closer = brace_token(false);
+    [control_token(command), opener, *text_tokens(name), closer,
+        *(if (value == null) [] else [opener, *value, closer])]
+}
+fn latex_newcounter(st, original, budget) any^ {
+    let traced = begin_main_trace(st, original)^;
+    let named = latex_counter_name(traced, budget)^;
+    let opt = latex_optional(named.state.input)^;
+    let current = {*:named.state, input: opt.input};
+    if (current.issue != null) current
+    else if (opt.issue != null) fail(current, opt.issue)
+    else {
+        let existing = counter_meaning(current, named.name)^;
+        if (existing.kind == "register") {
+            let closed = end_main_trace(current, original)^;
+            let emitted = if (closed.echo) {*:closed.state, output: [*closed.state.output, original, *named.raw, *opt.raw]} else closed.state;
+            counter_diagnostic(emitted, "latex-counter-defined")
+        }
+        else {
+            let next = count_value(current, 10) + 1;
+            let exhausted = next >= count_value(current, 20);
+            // the native allocator reserves the final register when allocation fails.
+            let index = if (exhausted) COUNT_REGISTER_LIMIT - 1 else next;
+            let allocated = if (exhausted) counter_diagnostic(current, "tex-no-room")
+                else save_count(current, 10, index, true)^;
+            let registered = assign_meaning(allocated, counter_key(named.name), {kind: "register", index: index}, true)^;
+            let body = counter_command_tokens(named.name, "arabic")^;
+            let formatted = assign_meaning(registered, "control:the" ++ named.name,
+                latex_macro(0, false, false, false, [], body)^, true)^;
+            let parent = if (opt.present) expand_argument_name(formatted, opt.tokens, budget)^
+                else {state: formatted, name: ""};
+            let closed = end_main_trace(parent.state, original)^;
+            let emitted = if (closed.echo) {*:closed.state, output: [*closed.state.output, original, *named.raw, *opt.raw]} else closed.state;
+            if (emitted.issue != null) emitted
+            else {*:emitted, counter_resets: if (opt.present)
+                [*emitted.counter_resets, {parent: parent.name, child: named.name}] else emitted.counter_resets,
+                engine_counters: if (closed.echo) emitted.engine_counters else [*emitted.engine_counters, named.name]}
+        }
+    }
+}
+fn reset_counter_children(st, parent, index = 0, depth = 0) any^ {
+    if (st.issue != null or index >= len(st.counter_resets)) st
+    else if (depth > len(st.counter_resets)) fail(st, "tex-capacity")
+    else {
+        let entry = st.counter_resets[index];
+        let found = counter_meaning(st, entry.child)^;
+        let reset = if (entry.parent == parent and found.kind == "register")
+            reset_counter_children(save_count(st, found.index, 0, true)^, entry.child, 0, depth + 1)^ else st;
+        reset_counter_children(reset, parent, index + 1, depth)
+    }
+}
+// the argument boundary must survive nested numeric expressions and lookahead.
+fn latex_counter_value(st, tokens, budget) any^ {
+    let boundary = {kind: "counter-value-end"};
+    let scoped = {*:st, input: stream.push(st.input, [*stored_tokens(tokens), boundary])};
+    let value = scan_number(scoped, budget)^;
+    if (value.state.issue != null) value
+    else {
+        let end = expanded_nonspace(value.state, budget)^;
+        let after = if (primitive(end.state, end.token) == "relax") expanded_nonspace(end.state, budget)^ else end;
+        if (after.state.issue != null) {state: after.state, value: value.value}
+        else if (after.token != null and after.token.kind == "counter-value-end") {state: after.state, value: value.value}
+        else {state: counter_diagnostic(put_back(after.state, after.token), "latex-counter-value"), value: value.value}
+    }
+}
+fn latex_counter_command(st, original, command, budget) any^ {
+    let traced = begin_main_trace(st, original)^;
+    let named = latex_counter_name(traced, budget)^;
+    let has_value = command == "setcounter" or command == "addtocounter";
+    let arg = if (has_value) stream.raw_argument(named.state.input)^
+        else {stream: named.state.input, tokens: [], raw: [], error: null};
+    let current = {*:named.state, input: arg.stream};
+    if (current.issue != null) current
+    else if (arg.error != null) fail(current, arg.error)
+    else {
+        let closed = end_main_trace(current, original)^;
+        let found = counter_meaning(closed.state, named.name)^;
+        let value = if (found.kind == "register" and has_value) latex_counter_value(closed.state, arg.tokens, budget)^
+            else {state: closed.state, value: 0};
+        let previous = if (found.kind == "register") count_value(value.state, found.index) else 0;
+        let next = if (command == "setcounter") value.value else if (command == "addtocounter") previous + value.value else previous + 1;
+        let updated = if (value.state.issue != null or found.kind != "register") value.state
+            else if (next > 2147483647 or next < -2147483647) fail(value.state, "tex-arith-overflow")
+            else save_count(value.state, found.index, next, true)^;
+        let stepped = if (found.kind == "register" and (command == "stepcounter" or command == "refstepcounter"))
+            reset_counter_children(updated, named.name)^ else updated;
+        let raw = [*named.raw, *arg.raw];
+        let echo = closed.echo;
+        if (stepped.issue != null) stepped
+        else if (echo) {*:stepped, output: [*stepped.output, original, *raw]}
+        else if (contains(stepped.engine_counters, named.name)) stepped
+        else {*:stepped, output: [*stepped.output,
+            *counter_command_tokens(named.name, command, if (has_value and len(arg.tokens) > 0)
+                if (found.kind == "register") text_tokens(string(next)) else arg.tokens else null)]}
+    }
+}
+fn counter_symbol(value) => if (value == 1) "*" else if (value == 2) "\\dag"
+    else if (value == 3) "\\ddag" else if (value == 4) "\\S" else if (value == 5) "\\P"
+    else if (value == 6) "\\textbardbl" else if (value == 7) "**"
+    else if (value == 8) "\\dag\\dag" else if (value == 9) "\\ddag\\ddag" else ""
+fn latex_counter_format(st, original, command, budget) any^ {
+    if (st.expansions >= budget) fail(st, "tex-budget")
+    else {
+        let current = {*:st, expansions: st.expansions + 1};
+        let named = latex_counter_name(current, budget)^;
+        if (named.state.issue != null) named.state
+        else {
+            let found = counter_meaning(named.state, named.name)^;
+            if (found.kind != "register") {*:named.state, input: stream.push(named.state.input,
+                [{*:original, noexpand: true}, *named.raw])}
+            else if (command == "value") {*:named.state, input: stream.push(named.state.input,
+                [control_token("c@" ++ named.name)])}
+            else {
+                let value = count_value(named.state, found.index);
+                let valid = if (command == "alph" or command == "Alph") value >= 1 and value <= 26
+                    else if (command == "fnsymbol") value >= 1 and value <= 9 else true;
+                let text = if (command == "arabic") string(value) else if (command == "roman") roman(value)^
+                    else if (command == "Roman") upper(roman(value)^)
+                    else if (command == "alph") if (valid) chr(96 + value) else ""
+                    else if (command == "Alph") if (valid) chr(64 + value) else "" else "";
+                let checked = if (valid) named.state else counter_diagnostic(named.state, "latex-counter-too-large");
+                if (command != "fnsymbol") {*:checked, input: stream.push(checked.input, text_tokens(text))}
+                else if (not valid) checked
+                else if (len(checked.input.levels) >= 6000) fail(checked, "tex-capacity")
+                else {
+                    // symbol text is re-tokenized with the current catcodes and endline rule.
+                    let child = {*:reader.reader(counter_symbol(value), -1), catcodes: checked.input.reader.catcodes,
+                        endline: checked.input.reader.endline};
+                    {*:checked, input: stream.push_reader(checked.input, child)}
+                }
+            }
+        }
+    }
+}
+
+fn latex_newenvironment(st, mode, budget) any^ {
+    let star = nonspace(st.input);
+    let starred = other(star.token, "*");
+    let remaining = if (starred) star.stream else if (star.token == null) star.stream else stream.push(star.stream, [star.token]);
+    let env_name = stream.argument(remaining, true)^;
+    let current = {*:st, input: env_name.stream};
+    if (env_name.error != null) fail(current, env_name.error)
+    else {
+        let named = expand_argument_name(current, env_name.tokens, budget)^;
+        let count = latex_optional(named.state.input)^;
+        let default_arg = latex_optional(count.input)^;
+        let before = stream.argument(default_arg.input, true)^;
+        let after = stream.argument(before.stream, true)^;
+        let advanced = {*:named.state, input: after.stream};
+        if (named.state.issue != null) named.state
+        else if (count.issue != null) fail(advanced, count.issue)
+        else if (default_arg.issue != null) fail(advanced, default_arg.issue)
+        else if (before.error != null) fail(advanced, before.error)
+        else if (after.error != null) fail(advanced, after.error)
+        else {
+            let raw_count = if (count.present) latex_arg_count(count.tokens)^ else 0;
+            let nargs = if (raw_count < 0 or raw_count > 9) 0 else raw_count;
+            let first = body_params(before.tokens, nargs)^;
+            let final_body = body_params(after.tokens, 0)^;
+            let old = meaning(advanced, control_token(named.name));
+            let definable = latex_definable(old);
+            if (first.issue != null) fail(advanced, first.issue)
+            else if (final_body.issue != null) fail(advanced, final_body.issue)
+            else if (mode == "newenvironment" and not definable)
+                {*:advanced, diagnostics: [*advanced.diagnostics, "latex-already-defined"]}
+            else {
+                let ready = if (mode == "renewenvironment" and definable)
+                    {*:advanced, diagnostics: [*advanced.diagnostics, "latex-undefined"]} else advanced;
+                let begin_macro = latex_macro(nargs, starred, false, default_arg.present, default_arg.tokens, first.tokens)^;
+                let end_macro = latex_macro(0, starred, false, false, [], final_body.tokens)^;
+                let added = assign_meaning(ready, "control:" ++ named.name, begin_macro, false)^;
+                assign_meaning(added, "control:end" ++ named.name, end_macro, false)
+            }
+        }
+    }
+}
+
+fn begin_environment(st, name, passthrough) any^ {
+    let opened = begin_group(st, null, true)^;
+    let final_index = len(opened.groups) - 1;
+    {*:opened, groups: [for (i, scope in opened.groups)
+        if (i == final_index) {*:scope, environment: name, passthrough: passthrough} else scope]}
+}
+
+fn latex_document_hook(st, is_begin) any^ {
+    let code = stream.argument(st.input, true)^;
+    let current = {*:st, input: code.stream};
+    if (code.error != null) fail(current, code.error)
+    else if (is_begin and st.in_document) {*:current, input: stream.push(current.input, code.tokens)}
+    else if (is_begin) {*:current, begin_hooks: [*st.begin_hooks, *stored_tokens(code.tokens)]}
+    else {*:current, end_hooks: [*st.end_hooks, *stored_tokens(code.tokens)]}
+}
+
+fn latex_begin(st, original, budget) any^ {
+    let argument = stream.raw_argument(st.input)^;
+    let current = {*:st, input: argument.stream};
+    if (argument.error != null) fail(current, argument.error)
+    else {
+        let named = expand_argument_name(current, argument.tokens, budget)^;
+        if (named.state.issue != null) named.state
+        else {
+            let m = meaning(named.state, control_token(named.name));
+            let custom = named.name != "document" and m.kind == "macro";
+            let opened = begin_environment(named.state, named.name, not custom)^;
+            if (custom) {
+                let current_env = latex_macro(0, false, false, false, [], text_tokens(named.name))^;
+                let with_name = assign_meaning(opened, "control:@currenvir", current_env, false)^;
+                {*:with_name, input: stream.push(with_name.input, [control_token(named.name)])}
+            }
+            else {
+                let passed = {*:opened, output: [*opened.output, original, *argument.raw]};
+                if (named.name != "document") passed
+                else {*:passed, in_document: true, begin_hooks: [], input: stream.push(passed.input, st.begin_hooks)}
+            }
+        }
+    }
+}
+
+fn latex_end(st, original, budget) any^ {
+    let argument = stream.raw_argument(st.input)^;
+    let current = {*:st, input: argument.stream};
+    if (argument.error != null) fail(current, argument.error)
+    else {
+        let named = expand_argument_name(current, argument.tokens, budget)^;
+        let depth = len(named.state.groups);
+        if (named.state.issue != null) named.state
+        else if (named.name == "document") {
+            let close = {kind: "document-close", original: original, raw: argument.raw};
+            {*:named.state, end_hooks: [], input: stream.push(named.state.input, [*named.state.end_hooks, close])}
+        }
+        else if (depth == 0 or named.state.groups[depth - 1].environment != named.name)
+            {*:named.state, output: [*named.state.output, original, *argument.raw],
+                diagnostics: [*named.state.diagnostics, "latex-env-mismatch"]}
+        else if (named.state.groups[depth - 1].passthrough) {
+            let ended = end_group(named.state, null, true, true)^;
+            {*:ended, output: [*ended.output, original, *argument.raw]}
+        }
+        else {*:named.state, input: stream.push(named.state.input,
+            [control_token("end" ++ named.name), {kind: "env-close", value: named.name}])}
+    }
+}
+
+fn define_text_macro(st, name, value) any^ {
+    let macro = latex_macro(0, false, false, false, [], text_tokens(value))^;
+    assign_meaning(st, "control:" ++ name, macro, true)
+}
+
+fn record_package(st, name, opts, is_class, kind) map^ {
+    let recorded = {*:st, packages: [*st.packages, {name: name, options: opts, is_class: is_class, kind: kind}]};
+    if (kind == "unknown") recorded
+    else {
+        let ext = if (is_class) ".cls" else ".sty";
+        let version = define_text_macro(recorded, "ver@" ++ name ++ ext, "")^;
+        let with_options = define_text_macro(version, "opt@" ++ name ++ ext, opts)^;
+        let current = meaning(with_options, control_token("@filelist"));
+        let prior = if (current.kind == "macro") token_text(with_options, current.body)^ else "";
+        define_text_macro(with_options, "@filelist", prior ++ (if (prior == "") "" else ",") ++ name ++ ext)
+    }
+}
+
+fn probe_resource(st, name, scope) any^ {
+    if (st.resources == null) {state: st, available: false, found: false}
+    else if (not (st.resources is map) or (st.resources[scope] != null and not (st.resources[scope] is map)))
+        {state: fail(st, "tex-resource-invalid"), available: true, found: false}
+    else if (st.resources[scope] == null) {state: st, available: false, found: false}
+    else if (name == "" or starts_with(name, "/") or contains(name, "..")) {state: st, available: true, found: false}
+    else {state: st, available: true, found: st.resources[scope][name] != null}
+}
+
+fn package_loaded(st, name, is_class) any^ =>
+    any([for (entry in st.packages) entry.name == name and entry.is_class == is_class])
+
+fn package_plan(st, names, opts, index = 0, loads = [], passthrough = []) any^ {
+    if (st.issue != null or index >= len(names)) {state: st, loads: loads, passthrough: passthrough}
+    else {
+        let name = names[index];
+        if (st.script_expl3 and name == "expl3") {
+            if (opts != "") {state: unsupported(st, "expl3 package options"), loads: loads, passthrough: passthrough}
+            else {
+                let ready = if (package_loaded(st, name, false)) st else record_package(st, name, opts, false, "script")^;
+                package_plan(ready, names, opts, index + 1, loads, passthrough)
+            }
+        }
+        else if (package_loaded(st, name, false))
+            package_plan(st, names, opts, index + 1, loads, [*passthrough, name])
+        else {
+            let bundled = probe_resource(st, name ++ ".sty", "bundled")^;
+            let adapter = contains(st.adapters, name);
+            if (bundled.state.issue != null) {state: bundled.state, loads: loads, passthrough: passthrough}
+            else if (not bundled.available) {state: unsupported(st, "usepackage"), loads: loads, passthrough: passthrough}
+            else if (bundled.found) package_plan(st, names, opts, index + 1,
+                [*loads, {kind: "package-load", name: name, options: opts, scope: "bundled", is_class: false}],
+                if (adapter) [*passthrough, name] else passthrough)
+            else if (adapter) {
+                let recorded = record_package(st, name, opts, false, "adapter")^;
+                package_plan(recorded, names, opts, index + 1, loads, [*passthrough, name])
+            }
+            else {
+                let local = probe_resource(st, name ++ ".sty", "local")^;
+                if (local.state.issue != null) {state: local.state, loads: loads, passthrough: passthrough}
+                else if (not local.available) {state: unsupported(st, "usepackage"), loads: loads, passthrough: passthrough}
+                else if (local.found) package_plan(st, names, opts, index + 1,
+                    [*loads, {kind: "package-load", name: name, options: opts, scope: "local", is_class: false}], passthrough)
+                else {
+                    let recorded = record_package(st, name, opts, false, "unknown")^;
+                    package_plan(recorded, names, opts, index + 1, loads, [*passthrough, name])
+                }
+            }
+        }
+    }
+}
+
+fn declaration_tokens(name, opts, names) any^ {
+    let opener = brace_token(true);
+    let closer = brace_token(false);
+    [control_token(name), *(if (opts == "") [] else text_tokens("[" ++ opts ++ "]")),
+        opener, *text_tokens(join(names, ",")), closer]
+}
+
+fn latex_usepackage(st, original, budget) any^ {
+    let traced = begin_main_trace(st, original)^;
+    let opt = latex_optional(traced.input)^;
+    let name_arg = stream.raw_argument(opt.input)^;
+    let named = expand_argument_name({*:st, input: name_arg.stream}, name_arg.tokens, budget)^;
+    let version_arg = latex_optional(named.state.input)^;
+    let current = {*:named.state, input: version_arg.input};
+    if (opt.issue != null) fail(current, opt.issue)
+    else if (name_arg.error != null) fail(current, name_arg.error)
+    else if (named.state.issue != null) named.state
+    else if (version_arg.issue != null) fail(current, version_arg.issue)
+    else {
+        let opts = if (primitive(st, original) == "RequirePackageWithOptions" and st.current_options != null)
+            st.current_options else if (opt.present) token_text(current, opt.tokens)^ else "";
+        let names = [for (part in (split(named.name, ",") ^ { [] }) where ((trim(part) != "") ^ { false })) trim(part)];
+        let planned = package_plan(current, names, opts)^;
+        if (planned.state.issue != null) planned.state
+        else {
+            let closed = end_main_trace(planned.state, original)^;
+            let passed = if (len(planned.loads) == 0 and closed.echo)
+                [original, *opt.raw, *name_arg.raw, *version_arg.raw]
+                else if (len(planned.passthrough) > 0)
+                    declaration_tokens("usepackage", opts, planned.passthrough)^
+                else [];
+            {*:closed.state, output: [*closed.state.output, *passed],
+                input: stream.push(closed.state.input, planned.loads)}
+        }
+    }
+}
+
+fn start_package(st, request, budget) any^ {
+    if (not request.is_class and package_loaded(st, request.name, false)) st
+    else {
+        let suffix = if (request.is_class) ".cls" else ".sty";
+        let fetched = captured_resource(st, request.name ++ suffix, request.scope)^;
+        if (fetched.state.issue != null) fetched.state
+        else if (not fetched.available) unsupported(fetched.state, "package resource")
+        else if (not fetched.found) {*:fetched.state, diagnostics: [*fetched.state.diagnostics, "tex-file-not-found"]}
+        else if (len(fetched.state.input.levels) >= 6000) fail(fetched.state, "tex-capacity")
+        else {
+            let decoded = utf8.decode(fetched.data) ^ { null };
+            if (decoded == null) fail(fetched.state, "tex-invalid-utf8")
+            else {
+                let saved_at = reader.catcode("@", fetched.state.input.reader.catcodes);
+                let marked = {*:fetched.state, sources: [for (source in fetched.state.sources)
+                    if (source.id == fetched.id) {*:source, package: true} else source]};
+                let passed = [for (entry in marked.pass_options where entry.name == request.name) entry.options];
+                let options = join([for (entry in [request.options, *passed] where entry != "") entry], ",");
+                let recorded = record_package(marked, request.name, options, request.is_class,
+                    if (request.scope == "bundled") "adapter" else "local")^;
+                let frame = {name: request.name, is_class: request.is_class, saved_at: saved_at,
+                    expl_was_active: fetched.state.expl_syntax != null and fetched.state.expl_syntax.active == true,
+                    previous_name: st.current_package, previous_options: st.current_options,
+                    previous_is_class: st.current_is_class, end_hook: []};
+                let source_input = recorded.input;
+                let configured = if (source_input is map) stream.configure(source_input,
+                    set_code(source_input.reader.catcodes, 64, 11), source_input.reader.endline)^ else null;
+                if (configured != null) {
+                let child = {*:reader.reader(decoded, fetched.id), origin: request.scope,
+                    catcodes: configured.reader.catcodes, endline: configured.reader.endline};
+                let with_close = stream.push(configured, [{kind: "package-end"}]);
+                let with_reader = stream.push_reader(with_close, child);
+                let opener = brace_token(true);
+                let closer = brace_token(false);
+                let prefix = [control_token("@pushfilename"), control_token("xdef"), control_token("@currname"),
+                    opener, *text_tokens(request.name), closer, control_token("gdef"), control_token("@currext"),
+                    opener, *text_tokens(if (request.is_class) "cls" else "sty"), closer];
+                {*:recorded, input: stream.push(with_reader, prefix), package_frames: [*st.package_frames, frame],
+                    current_package: request.name, current_options: options, current_is_class: request.is_class}
+                } else fail(recorded, "tex-resource-invalid")
+            }
+        }
+    }
+}
+
+fn finish_package(st) any^ {
+    let depth = len(st.package_frames);
+    if (depth == 0) st
+    else {
+        let frame = st.package_frames[depth - 1];
+        let active = st.expl_syntax != null and st.expl_syntax.active == true;
+        let adjusted = if (st.script_expl3 and active != frame.expl_was_active)
+            expl3_syntax(st, frame.expl_was_active)^ else st;
+        let restored = {*:adjusted, input: stream.configure(adjusted.input, set_code(adjusted.input.reader.catcodes, 64, frame.saved_at),
+                adjusted.input.reader.endline), package_frames: slice(adjusted.package_frames, 0, depth - 1),
+            current_package: frame.previous_name, current_options: frame.previous_options, current_is_class: frame.previous_is_class};
+        let with_name = define_text_macro(restored, "@currname", if (frame.previous_name == null) "" else frame.previous_name)^;
+        define_text_macro(with_name, "@currext", if (frame.previous_name == null) "" else if (frame.previous_is_class) "cls" else "sty")
+    }
+}
+
+fn package_end_hook(st) any^ {
+    let code = stream.argument(st.input, true)^;
+    let current = {*:st, input: code.stream};
+    let depth = len(st.package_frames);
+    if (code.error != null) fail(current, code.error)
+    else if (depth == 0) {*:current, input: stream.push(current.input, code.tokens)}
+    else {*:current, package_frames: [for (i, frame in st.package_frames)
+        if (i == depth - 1) {*:frame, end_hook: [*frame.end_hook, *stored_tokens(code.tokens)]} else frame]}
+}
+
+fn finish_package_hook(st) any^ {
+    let depth = len(st.package_frames);
+    if (depth == 0) st
+    else {
+        let frame = st.package_frames[depth - 1];
+        let cleared = {*:st, package_frames: [for (i, entry in st.package_frames)
+            if (i == depth - 1) {*:entry, end_hook: []} else entry]};
+        {*:cleared, input: stream.push(cleared.input,
+            [*frame.end_hook, control_token("@popfilename"), {kind: "package-pop"}])}
+    }
+}
+
+fn latex_provides(st, cmd, budget) any^ {
+    let arg = stream.argument(st.input, true)^;
+    let named = expand_argument_name({*:st, input: arg.stream}, arg.tokens, budget)^;
+    let info = latex_optional(named.state.input)^;
+    let current = {*:named.state, input: info.input};
+    if (arg.error != null) fail(current, arg.error)
+    else if (named.state.issue != null) named.state
+    else if (info.issue != null) fail(current, info.issue)
+    else {
+        let suffix = if (cmd == "ProvidesPackage") ".sty" else if (cmd == "ProvidesClass") ".cls" else "";
+        define_text_macro(current, "ver@" ++ named.name ++ suffix,
+            if (info.present) token_text(current, info.tokens)^ else "")
+    }
+}
+
+// Expl3 package declarations enable their syntax for the rest of the file.
+fn latex_provides_expl(st, cmd, budget) any^ {
+    let name = stream.argument(st.input, true)^;
+    let date_arg = stream.argument(name.stream, true)^;
+    let version = stream.argument(date_arg.stream, true)^;
+    let description = stream.argument(version.stream, true)^;
+    let current = {*:st, input: description.stream};
+    if (name.error != null) fail(current, name.error)
+    else if (date_arg.error != null) fail(current, date_arg.error)
+    else if (version.error != null) fail(current, version.error)
+    else if (description.error != null) fail(current, description.error)
+    else {
+        let named = expand_argument_name(current, name.tokens, budget)^;
+        let dated = expand_argument_name(named.state, date_arg.tokens, budget)^;
+        let numbered = expand_argument_name(dated.state, version.tokens, budget)^;
+        let described = expand_argument_name(numbered.state, description.tokens, budget)^;
+        if (described.state.issue != null) described.state
+        else {
+            let suffix = if (cmd == "ProvidesExplPackage") ".sty" else if (cmd == "ProvidesExplClass") ".cls" else "";
+            let prefix = if (numbered.name == "" or starts_with(numbered.name, "v")) "" else "v";
+            let value = dated.name ++ " " ++ prefix ++ numbered.name ++ " " ++ described.name;
+            let defined = define_text_macro(described.state, "ver@" ++ named.name ++ suffix, value)^;
+            expl3_syntax(defined, true)
+        }
+    }
+}
+
+fn option_list(value) any^ =>
+    [for (part in (split(value, ",") ^ { [] }) where ((trim(part) != "") ^ { false })) trim(part)]
+
+fn option_name(st) => if (st.current_package == null) "" else st.current_package
+
+fn find_option(st, name) any^ {
+    let matches = [for (entry in st.option_decls where entry.package == option_name(st) and entry.name == name) entry];
+    if (len(matches) == 0) null else matches[0]
+}
+
+fn option_code(name, code) any^ {
+    let opener = brace_token(true);
+    let closer = brace_token(false);
+    [control_token("def"), control_token("CurrentOption"), opener, *text_tokens(name), closer, *code]
+}
+
+fn execute_option_list(st, names, unknown, index = 0, tokens = []) any^ {
+    if (index >= len(names)) {*:st, input: stream.push(st.input, tokens)}
+    else {
+        let name = names[index];
+        let declared = find_option(st, name)^;
+        let fallback = if (unknown) find_option(st, "*")^ else null;
+        let selected = if (declared != null) declared else fallback;
+        let next = if (unknown and selected == null and not st.current_is_class)
+            {*:st, diagnostics: [*st.diagnostics, "latex-unknown-option"]} else st;
+        let added = if (selected == null) [] else option_code(name, selected.code)^;
+        execute_option_list(next, names, unknown, index + 1, [*tokens, *added])
+    }
+}
+
+fn latex_declare_option(st, budget) any^ {
+    let star = nonspace(st.input);
+    let starred = other(star.token, "*");
+    let remaining = if (starred) star.stream else if (star.token == null) star.stream else stream.push(star.stream, [star.token]);
+    let name_arg = if (starred) {stream: remaining, tokens: [], error: null} else stream.argument(remaining, true)^;
+    let named = if (starred) {state: {*:st, input: name_arg.stream}, name: "*"}
+        else expand_argument_name({*:st, input: name_arg.stream}, name_arg.tokens, budget)^;
+    let code = stream.argument(named.state.input, true)^;
+    let current = {*:named.state, input: code.stream};
+    if (name_arg.error != null) fail(current, name_arg.error)
+    else if (named.state.issue != null) named.state
+    else if (code.error != null) fail(current, code.error)
+    else {*:current, option_decls: [*current.option_decls,
+        {package: option_name(current), name: named.name, code: stored_tokens(code.tokens)}]}
+}
+
+fn latex_execute_options(st, budget) any^ {
+    let arg = stream.argument(st.input, true)^;
+    let named = expand_argument_name({*:st, input: arg.stream}, arg.tokens, budget)^;
+    if (arg.error != null) fail(named.state, arg.error)
+    else if (named.state.issue != null) named.state
+    else execute_option_list(named.state, option_list(named.name)^, false)
+}
+
+fn option_declaration_tokens(entries, index = 0, tokens = []) any^ {
+    if (index >= len(entries)) tokens
+    else option_declaration_tokens(entries, index + 1,
+        [*tokens, *option_code(entries[index].name, entries[index].code)^])
+}
+
+fn latex_process_options(st) any^ {
+    let star = nonspace(st.input);
+    let starred = other(star.token, "*");
+    let remaining = if (starred) star.stream else if (star.token == null) star.stream else stream.push(star.stream, [star.token]);
+    let current = {*:st, input: remaining};
+    let local = option_list(if (st.current_options == null) "" else st.current_options)^;
+    let global = if (st.current_is_class) [] else option_list(st.class_options)^;
+    let chosen = [for (entry in st.option_decls where entry.package == option_name(current) and entry.name != "*" and
+        ((contains(local, entry.name) ^ { false }) or (contains(global, entry.name) ^ { false }))) entry];
+    let global_given = [for (name in global where find_option(current, name)^ != null) name];
+    let local_rest = if (starred) local else [for (name in local where find_option(current, name)^ == null) name];
+    if (starred) execute_option_list(current, [*global_given, *local_rest], true)
+    else execute_option_list(current, local_rest, true, 0, option_declaration_tokens(chosen)^)
+}
+
+fn latex_pass_options(st, budget) any^ {
+    let first = stream.argument(st.input, true)^;
+    let options = expand_argument_name({*:st, input: first.stream}, first.tokens, budget)^;
+    let second = stream.argument(options.state.input, true)^;
+    let names = expand_argument_name({*:options.state, input: second.stream}, second.tokens, budget)^;
+    if (first.error != null) fail(names.state, first.error)
+    else if (options.state.issue != null) options.state
+    else if (second.error != null) fail(names.state, second.error)
+    else if (names.state.issue != null) names.state
+    else {*:names.state, pass_options: [*names.state.pass_options,
+        *[for (name in option_list(names.name)^) {name: name, options: options.name}]]}
+}
+
+fn latex_if_package_with(st, is_class, budget) any^ {
+    let first = stream.argument(st.input, true)^;
+    let name = expand_argument_name({*:st, input: first.stream}, first.tokens, budget)^;
+    let second = stream.argument(name.state.input, true)^;
+    let options = expand_argument_name({*:name.state, input: second.stream}, second.tokens, budget)^;
+    let yes = stream.argument(options.state.input, true)^;
+    let no = stream.argument(yes.stream, true)^;
+    let current = {*:options.state, input: no.stream};
+    if (first.error != null) fail(current, first.error)
+    else if (name.state.issue != null) name.state
+    else if (second.error != null) fail(current, second.error)
+    else if (options.state.issue != null) options.state
+    else if (yes.error != null) fail(current, yes.error)
+    else if (no.error != null) fail(current, no.error)
+    else {
+        let matches = [for (entry in current.packages where entry.name == name.name and entry.is_class == is_class) entry];
+        let requested = option_list(options.name)^;
+        let available = if (len(matches) == 0) [] else option_list(matches[0].options)^;
+        let missing = [for (item in requested where not (contains(available, item) ^ { false })) item];
+        {*:current, input: stream.push(current.input, if (len(matches) > 0 and len(missing) == 0) yes.tokens else no.tokens)}
+    }
+}
+
+fn latex_if_file_exists(st, include, budget) any^ {
+    let arg = stream.argument(st.input, true)^;
+    let name = expand_argument_name({*:st, input: arg.stream}, arg.tokens, budget)^;
+    let yes = stream.argument(name.state.input, true)^;
+    let no = stream.argument(yes.stream, true)^;
+    let current = {*:name.state, input: no.stream};
+    if (arg.error != null) fail(current, arg.error)
+    else if (name.state.issue != null) name.state
+    else if (yes.error != null) fail(current, yes.error)
+    else if (no.error != null) fail(current, no.error)
+    else {
+        let exact = probe_resource(current, name.name, "local")^;
+        let alternate = if (exact.available and not exact.found and exact.state.issue == null)
+            probe_resource(exact.state, name.name ++ ".tex", "local")^ else exact;
+        let chosen = if (exact.found) name.name else name.name ++ ".tex";
+        if (alternate.state.issue != null) alternate.state
+        else if (not alternate.available) unsupported(current, if (include) "InputIfFileExists" else "IfFileExists")
+        else if (not alternate.found) {*:current, input: stream.push(current.input, no.tokens)}
+        else if (not include) {*:current, input: stream.push(current.input, yes.tokens)}
+        else {
+            let fetched = captured_resource(current, chosen, "local")^;
+            if (fetched.state.issue != null) fetched.state
+            else {
+                let opened = push_resource_reader(fetched)^;
+                if (opened.issue != null) opened else {*:opened, input: stream.push(opened.input, yes.tokens)}
+            }
+        }
+    }
+}
+
+fn halve_parameters(tokens, index = 0, out = []) any^ {
+    if (index >= len(tokens)) out
+    else {
+        let paired = charcat(tokens[index], 6) and index + 1 < len(tokens) and charcat(tokens[index + 1], 6);
+        halve_parameters(tokens, index + if (paired) 2 else 1, [*out, tokens[index]])
+    }
+}
+
+fn latex_ifnextchar(st, star) any^ {
+    let wanted = if (star) {stream: st.input, tokens: [], error: null} else stream.argument(st.input, true)^;
+    let yes = stream.argument(wanted.stream, true)^;
+    let no = stream.argument(yes.stream, true)^;
+    let following = nonspace(no.stream);
+    let current = {*:st, input: following.stream};
+    if (wanted.error != null) fail(current, wanted.error)
+    else if (yes.error != null) fail(current, yes.error)
+    else if (no.error != null) fail(current, no.error)
+    else {
+        let matched = if (star) other(following.token, "*")
+            else if (len(wanted.tokens) == 0 or following.token == null) false
+            else if (wanted.tokens[0].kind == "char" and following.token.kind == "char")
+                stream.same_token(wanted.tokens[0], following.token)
+            else meanings_equal(meaning(current, wanted.tokens[0]), meaning(current, following.token))^;
+        let rest = if (following.token == null or (star and matched)) current.input
+            else stream.push(current.input, [following.token]);
+        let branch = halve_parameters(if (matched) yes.tokens else no.tokens)^;
+        {*:current, input: stream.push(rest, stored_tokens(branch))}
+    }
+}
+
+fn latex_needs_format(st) any^ {
+    let arg = stream.argument(st.input, true)^;
+    let version_arg = latex_optional(arg.stream)^;
+    let current = {*:st, input: version_arg.input};
+    if (arg.error != null) fail(current, arg.error)
+    else if (version_arg.issue != null) fail(current, version_arg.issue) else current
+}
+
+fn latex_documentclass(st, original, budget, cmd) any^ {
+    let opt = latex_optional(st.input)^;
+    let name_arg = stream.raw_argument(opt.input)^;
+    let named = expand_argument_name({*:st, input: name_arg.stream}, name_arg.tokens, budget)^;
+    let version_arg = latex_optional(named.state.input)^;
+    let current = {*:named.state, input: version_arg.input};
+    if (opt.issue != null) fail(current, opt.issue)
+    else if (name_arg.error != null) fail(current, name_arg.error)
+    else if (named.state.issue != null) named.state
+    else if (version_arg.issue != null) fail(current, version_arg.issue)
+    else {
+        let opts = if (cmd == "LoadClassWithOptions" and current.current_options != null) current.current_options
+            else if (opt.present) token_text(current, opt.tokens)^ else "";
+        let initial = if (cmd == "documentclass")
+            define_text_macro({*:current, class_options: opts}, "@classoptionslist", opts)^ else current;
+        let adapter = contains(initial.adapters, named.name);
+        let local = if (adapter) {state: initial, available: true, found: false}
+            else probe_resource(initial, named.name ++ ".cls", "local")^;
+        if (local.state.issue != null) local.state
+        else if (not local.available) unsupported(initial, cmd)
+        else if (local.found) {*:initial, input: stream.push(initial.input,
+            [{kind: "package-load", name: named.name, options: opts, scope: "local", is_class: true}])}
+        else {
+            let recorded = record_package(initial, named.name, opts, true, if (adapter) "adapter" else "unknown")^;
+            let with_chapter = if (contains(recorded.chaptered, named.name))
+                assign_meaning(recorded, "control:chapter", {kind: "constructor", name: "chapter"}, true)^
+                else recorded;
+            let passed = if (cmd == "documentclass") [original, *opt.raw, *name_arg.raw, *version_arg.raw]
+                else declaration_tokens("documentclass", opts, [named.name])^;
+            {*:with_chapter, output: [*with_chapter.output, *passed]}
+        }
+    }
+}
+
+fn latex_newif(st) any^ {
+    let target = nonspace(st.input);
+    let current = {*:st, input: target.stream};
+    if (not is_control(target.token) or target.token.kind != "control" or
+        not starts_with(target.token.value, "if") or len(target.token.value) < 3)
+        fail(current, "latex-newif")
+    else {
+        let base = slice(target.token.value, 2, len(target.token.value))^;
+        let false_cond = assign_meaning(current, key(target.token), {kind: "primitive", name: "iffalse"}, false)^;
+        let yes = {kind: "macro", count: 0, prefix: [], delimiters: [], brace_delim: false,
+            long_ok: false, protected_flag: false,
+            body: [control_token("let"), target.token, control_token("iftrue")]};
+        let no = {*:yes, body: [control_token("let"), target.token, control_token("iffalse")]};
+        let yes_state = assign_meaning(false_cond, "control:" ++ base ++ "true", yes, false)^;
+        assign_meaning(yes_state, "control:" ++ base ++ "false", no, false)
+    }
+}
+
+fn latex_constructor(st) any^ {
+    let target = nonspace(st.input);
+    let current = {*:st, input: target.stream};
+    if (not is_control(target.token)) fail(current, "tex-missing-cs")
+    else assign_meaning(current, key(target.token), {kind: "constructor", name: target.token.value}, true)
+}
+
+fn finish_definition_echo(st, after, tracing, emit) any^ {
+    if (not tracing) after
+    else {
+        let traced = stream.end_trace(after.input)^;
+        let finished = {*:after, input: traced.stream};
+        if (after.issue != null or not emit) finished
+        else if (not traced.valid) {*:finished, echo_incomplete: true}
+        else {
+            let found = [for (source in finished.sources where source.id == traced.file) source];
+            if (len(found) == 0) {*:finished, echo_incomplete: true}
+            else {
+                let bytes = binary(found[0].data)^;
+                if (traced.start < 0 or traced.end < traced.start or traced.end > len(bytes))
+                    {*:finished, echo_incomplete: true}
+                else {
+                    let raw = utf8.decode(slice(bytes, traced.start, traced.end)^) ^ { null };
+                    if (raw == null) {*:finished, echo_incomplete: true}
+                    else {*:finished, output: [*finished.output, {kind: "source-span", value: raw,
+                        file: traced.file, start: traced.start, end: traced.end, seq: traced.first_seq,
+                        last_seq: traced.last_seq, catcodes: st.input.reader.catcodes}]}
+                }
+            }
+        }
+    }
+}
+
+fn echo_definition(st, token, cmd, budget) any^ {
+    let tracing = st.echo_definitions and token.direct == true and token.file == st.main_file;
+    let current = if (tracing) {*:st, input: stream.begin_trace(st.input, token, st.main_file)^} else st;
+    let after = if (contains(["def", "gdef", "edef", "xdef"], cmd))
+            after_assignment(current, define(current, effective_global(st, cmd == "gdef" or cmd == "xdef")^,
+                false, false, cmd == "edef" or cmd == "xdef", budget)^)^
+        else if (contains(["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand"], cmd))
+            latex_newcommand(current, cmd)^
+        else if (contains(["NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand"], cmd))
+            latex_document_command(current, cmd)^
+        else latex_newenvironment(current, cmd, budget)^;
+    finish_definition_echo(st, after, tracing, true)
+}
+
+fn echo_prefixed(st, token, cmd, budget) any^ {
+    let tracing = st.echo_definitions and token.direct == true and token.file == st.main_file;
+    let input = if (tracing) stream.begin_trace(st.input, token, st.main_file)^ else st.input;
+    let current = {*:st, input: input, prefixed_definition: false};
+    let after = after_assignment(current, prefixed(current, cmd == "global", cmd == "long", cmd == "protected", budget)^)^;
+    finish_definition_echo(st, after, tracing, after.prefixed_definition == true)
+}
+
+fn direct_package_token(st, token) any^ => token.direct == true and
+    any([for (source in st.sources) source.id == token.file and source.package == true])
+
 fn step(st, budget) any^ {
     let read = stream.next(st.input);
-    let t = read.token;
+    let raw = read.token;
+    // keep the current main-file position when processing a non-main token.
+    let t = if (raw != null and contains(["char", "control", "active"], raw.kind) and
+            (raw.direct != true or raw.file != st.main_file))
+        {*:raw, read_offset: read.stream.last_main_offset, read_file: st.main_file} else raw;
     let current = {*:st, input: read.stream};
     let cmd = primitive(st, t);
     let resolved = if (is_control(t)) meaning(st, t) else null;
+    let assignment_global = effective_global(st, false)^;
     if (t == null) if (len(st.conditions) > 0) fail(current, "tex-incomplete-if") else {*:current, finished: true}
+    else if ((charcat(t, 10) or (is_control(t) and t.value == "par")) and direct_package_token(st, t)) current
+    else if (t.kind == "expl3-sort-end") {*:current, expl_sort_done: true}
+    else if (t.kind == "counter-value-end") current
+    else if (t.kind == "env-close") end_group(current, null, true, true)
+    else if (t.kind == "package-load") start_package(current, t, budget)
+    else if (t.kind == "package-end") finish_package_hook(current)
+    else if (t.kind == "package-pop") finish_package(current)
+    else if (t.kind == "document-close") {*:current, output: [*current.output, t.original, *t.raw],
+        trailing_source: stream.root_tail(current.input), finished: true}
     else if (t.noexpand == true) {*:current, output: [*st.output, {*:t, noexpand: false}]}
     else if (expandable(current, t)) expand_one(current, t, budget)
-    else if (contains(["def", "gdef", "edef", "xdef"], cmd))
-        after_assignment(current, define(current, cmd == "gdef" or cmd == "xdef", false, false, cmd == "edef" or cmd == "xdef", budget))
-    else if (cmd == "let") after_assignment(current, assign_let(current, false))
-    else if (cmd == "futurelet") after_assignment(current, assign_futurelet(current, false))
-    else if (cmd == "catcode") after_assignment(current, assign_catcode(current, false, budget))
+    else if (contains([" ", "underline", "overline"], cmd)) {*:current, output: [*st.output, t]}
+    else if (contains(["def", "gdef", "edef", "xdef"], cmd)) echo_definition(current, t, cmd, budget)
+    else if (cmd == "let") after_assignment(current, assign_let(current, assignment_global))
+    else if (cmd == "futurelet") after_assignment(current, assign_futurelet(current, assignment_global))
+    else if (cmd == "catcode") after_assignment(current, assign_catcode(current, assignment_global, budget))
     else if (cmd == "lccode" or cmd == "uccode")
-        after_assignment(current, assign_case_code(current, false, budget, cmd == "uccode"))
-    else if (cmd == "endlinechar" or cmd == "escapechar")
-        after_assignment(current, assign_parameter(current, false, budget, cmd))
+        after_assignment(current, assign_case_code(current, assignment_global, budget, cmd == "uccode"))
+    else if (contains(["sfcode", "mathcode", "delcode"], cmd))
+        after_assignment(current, assign_extra_code(current, assignment_global, budget, cmd))
+    else if (primitives.parameter_kind(cmd) == "int") after_assignment(current, assign_parameter(current, assignment_global, budget, cmd))
+    else if (primitives.parameter_kind(cmd) == "dimen") after_assignment(current, assign_dimen(current, assignment_global, budget, "param:" ++ cmd))
+    else if (contains(["glue", "mu"], primitives.parameter_kind(cmd)))
+        after_assignment(current, assign_glue(current, assignment_global, budget, "param:" ++ cmd, primitives.parameter_kind(cmd) == "mu"))
+    else if (primitives.parameter_kind(cmd) == "toks")
+        after_assignment(current, assign_toks(current, assignment_global, budget, parameter_index(cmd)))
     else if (cmd == "uppercase" or cmd == "lowercase") shift_case(current, budget, cmd == "uppercase")
-    else if (cmd == "count") after_assignment(current, assign_count(current, false, budget, null))
-    else if (cmd == "countdef") after_assignment(current, assign_countdef(current, false, budget))
+    else if (st.script_expl3 and (cmd == "ExplSyntaxOn" or cmd == "ExplSyntaxOff"))
+        after_assignment(current, expl3_syntax(current, cmd == "ExplSyntaxOn"))
+    else if (st.script_expl3 and contains(["ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile"], cmd))
+        latex_provides_expl(current, cmd, budget)
+    else if (st.script_expl3 and expl3.cs_definition(cmd))
+        after_assignment(current, expl3_cs_define(current, cmd, budget))
+    else if (st.script_expl3 and expl3.token_assignment(cmd))
+        after_assignment(current, expl3_tl_assign(current, cmd, budget))
+    else if (st.script_expl3 and expl3.sequence_assignment(cmd))
+        after_assignment(current, expl3_seq_assign(current, cmd))
+    else if (st.script_expl3 and expl3.sequence_sort(cmd))
+        after_assignment(current, expl3_seq_sort(current, cmd, budget))
+    else if (st.script_expl3 and expl3.sort_return(cmd))
+        if (not st.expl_sort_active) fail(current, "expl3-sort-return-outside")
+        else if (st.expl_sort_result != null) fail(current, "expl3-sort-return-multiple")
+        else {*:current, expl_sort_result: if (cmd == "sort_return_swapped:") "swap" else "same"}
+    else if (st.latex and cmd == "newcounter") latex_newcounter(current, t, budget)
+    else if (st.latex and contains(["setcounter", "addtocounter", "stepcounter", "refstepcounter"], cmd))
+        latex_counter_command(current, t, cmd, budget)
+    else if (st.latex and contains(["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand",
+        "newenvironment", "renewenvironment", "NewDocumentCommand", "RenewDocumentCommand",
+        "ProvideDocumentCommand", "DeclareDocumentCommand"], cmd)) echo_definition(current, t, cmd, budget)
+    else if (st.latex and (cmd == "AtBeginDocument" or cmd == "AtEndDocument"))
+        latex_document_hook(current, cmd == "AtBeginDocument")
+    else if (st.latex and contains(["usepackage", "RequirePackage", "RequirePackageWithOptions"], cmd))
+        latex_usepackage(current, t, budget)
+    else if (st.latex and cmd == "DeclareOption") latex_declare_option(current, budget)
+    else if (st.latex and cmd == "ExecuteOptions") latex_execute_options(current, budget)
+    else if (st.latex and cmd == "ProcessOptions") latex_process_options(current)
+    else if (st.latex and (cmd == "PassOptionsToPackage" or cmd == "PassOptionsToClass")) latex_pass_options(current, budget)
+    else if (st.latex and (cmd == "AtEndOfPackage" or cmd == "AtEndOfClass")) package_end_hook(current)
+    else if (st.latex and contains(["ProvidesPackage", "ProvidesClass", "ProvidesFile"], cmd))
+        latex_provides(current, cmd, budget)
+    else if (st.latex and (cmd == "IfFileExists" or cmd == "InputIfFileExists"))
+        latex_if_file_exists(current, cmd == "InputIfFileExists", budget)
+    else if (st.latex and contains(["(", ")", "[", "]"], cmd)) latex_math_switch(current, t, cmd)
+    else if (st.latex and contains(["@ifnextchar", "kernel@ifnextchar", "@ifstar"], cmd))
+        latex_ifnextchar(current, cmd == "@ifstar")
+    else if (st.latex and cmd == "NeedsTeXFormat") latex_needs_format(current)
+    else if (st.latex and contains(["documentclass", "LoadClass", "LoadClassWithOptions"], cmd))
+        latex_documentclass(current, t, budget, cmd)
+    else if (st.latex and cmd == "begin") latex_begin(current, t, budget)
+    else if (st.latex and cmd == "end") latex_end(current, t, budget)
+    else if (cmd == "newif" and st.latex) latex_newif(current)
+    else if (cmd == "lambdaconstructor" and st.latex) latex_constructor(current)
+    else if (cmd == "font") after_assignment(current, define_font(current, assignment_global, budget))
+    else if (cmd == "fontdimen") after_assignment(current, assign_font_dimen(current, budget))
+    else if (cmd == "nullfont") after_assignment(current, select_font(current, assignment_global, 0))
+    else if (cmd == "count") after_assignment(current, assign_count(current, assignment_global, budget, null))
+    else if (cmd == "countdef") after_assignment(current, assign_countdef(current, assignment_global, budget))
+    else if (cmd == "dimen") after_assignment(current, assign_dimen(current, assignment_global, budget, null))
+    else if (cmd == "dimendef") after_assignment(current, assign_dimendef(current, assignment_global, budget))
+    else if (cmd == "skip" or cmd == "muskip") after_assignment(current, assign_glue(current, assignment_global, budget, null, cmd == "muskip"))
+    else if (cmd == "skipdef" or cmd == "muskipdef") after_assignment(current, assign_gluedef(current, assignment_global, budget, cmd == "muskipdef"))
     else if (contains(["advance", "multiply", "divide"], cmd))
-        after_assignment(current, arithmetic(current, false, budget, cmd))
+        after_assignment(current, arithmetic(current, assignment_global, budget, cmd))
     else if (cmd == "chardef" or cmd == "mathchardef")
-        after_assignment(current, assign_chardef(current, false, budget, cmd == "mathchardef"))
-    else if (cmd == "toks") after_assignment(current, assign_toks(current, false, budget, null))
-    else if (cmd == "everyeof") after_assignment(current, assign_toks(current, false, budget, -1))
-    else if (cmd == "toksdef") after_assignment(current, assign_toksdef(current, false, budget))
-    else if (resolved.kind == "register") after_assignment(current, assign_count(current, false, budget, resolved.index))
-    else if (resolved.kind == "token-register") after_assignment(current, assign_toks(current, false, budget, resolved.index))
+        after_assignment(current, assign_chardef(current, assignment_global, budget, cmd == "mathchardef"))
+    else if (cmd == "toks") after_assignment(current, assign_toks(current, assignment_global, budget, null))
+    else if (cmd == "everyeof") after_assignment(current, assign_toks(current, assignment_global, budget, -1))
+    else if (cmd == "toksdef") after_assignment(current, assign_toksdef(current, assignment_global, budget))
+    else if (resolved.kind == "font") after_assignment(current, select_font(current, assignment_global, resolved.index))
+    else if (resolved.kind == "register") after_assignment(current, assign_count(current, assignment_global, budget, resolved.index))
+    else if (resolved.kind == "dimension-register") after_assignment(current, assign_dimen(current, assignment_global, budget, resolved.index))
+    else if (resolved.kind == "glue-register") after_assignment(current, assign_glue(current, assignment_global, budget, resolved.index, resolved.mu))
+    else if (resolved.kind == "token-register") after_assignment(current, assign_toks(current, assignment_global, budget, resolved.index))
     else if (cmd == "immediate") immediate(current, budget)
+    else if (cmd == "message" or cmd == "errmessage") terminal_message(current, budget, cmd == "errmessage")
+    else if (cmd == "char") emit_character(current, budget)
     else if (cmd == "write") write_message(current, budget)
+    else if (cmd == "openout" or cmd == "closeout") output_stream(current, budget, cmd == "openout")
     else if (cmd == "showtokens") show_tokens(current, budget)
-    else if (cmd == "end") if (len(st.conditions) > 0) fail(current, "tex-incomplete-if") else {*:current, finished: true}
+    else if (cmd == "end" or (cmd == "@@end" and st.latex))
+        if (len(st.conditions) > 0) fail(current, "tex-incomplete-if") else {*:current, finished: true}
     else if (cmd == "afterassignment") save_after_assignment(current)
     else if (cmd == "aftergroup") save_aftergroup(current)
     else if (cmd == "begingroup") begin_group(current, null, true)
     else if (cmd == "endgroup") end_group(current, null, true)
-    else if (cmd == "global" or cmd == "long" or cmd == "protected")
-        after_assignment(current, prefixed(current, cmd == "global", cmd == "long", cmd == "protected", budget))
+    else if (cmd == "global" or cmd == "long" or cmd == "protected") echo_prefixed(current, t, cmd, budget)
+    else if (resolved.kind == "constructor") {*:current, output: [*st.output, t]}
     else if (resolved.kind == "relax" or cmd == "relax") current
     else if (resolved.kind == "char") {*:current, input: stream.push(current.input,
         [{kind: "char", value: resolved.value, cat: resolved.cat, start: t.start, end: t.end}])}
@@ -1241,15 +3507,50 @@ fn step(st, budget) any^ {
         {kind: "char", value: chr(resolved.value), cat: 12, start: t.start, end: t.end}]}
     else if (cmd == "par") {*:current, output: [*st.output, t]}
     else if (cmd != null) unsupported(current, cmd)
+    else if (st.script_expl3 and is_control(t) and index_of(t.value, ":") != null)
+        unsupported(current, t.value)
+    else if (charcat(t, 3)) math_shift(current, t)
     else if (charcat(t, 1)) begin_group(current, t, false)
     else if (charcat(t, 2)) end_group(current, t, false)
     else {*:current, output: [*st.output, t]}
 }
 
 fn run(st, budget) any^ {
-    if (st.issue != null or st.finished == true) st
+    if (st.issue != null or st.finished == true) terminal_flush(st)
     else run(step(st, budget), budget)
 }
 
-pub fn expand(input, budget = 20000000) any^ =>
-    run(result(input, {}, [], [], 0), budget)
+pub fn expand(input, budget = 20000000, options = null) any^ =>
+    run(result(input, {}, [], [], 0, null, options), budget)
+
+// The opt-in script profile replaces the kernel's full-package bootstrap.
+pub fn enable_script_expl3(st) any^ {
+    let enabled = {*:st, script_expl3: true};
+    let names = ["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile"];
+    enable_expl_primitives(enabled, names)
+}
+
+fn enable_expl_primitives(st, names, index = 0) any^ {
+    if (index >= len(names)) st
+    else {
+        let name = names[index];
+        let next = assign_meaning(st, "control:" ++ name, {kind: "primitive", name: name}, true)^;
+        enable_expl_primitives(next, names, index + 1)
+    }
+}
+
+// Continue from a completed preload while retaining its definitions and scoped values.
+pub fn resume(st, source, name = "<input>", budget = 20000000) any^ {
+    if (st.issue != null) st
+    else if (len(st.groups) != 0 or len(st.conditions) != 0) fail(st, "tex-incomplete-preload")
+    else {
+        let id = next_source_id(st)^;
+        let next_reader = {*:reader.reader(source, id), origin: "local",
+            catcodes: st.input.reader.catcodes, endline: parameter_value(st, "endlinechar")};
+        let next_input = {*:stream.from_reader(next_reader), everyeof: st.input.everyeof};
+        let resumed = {*:st, input: next_input, finished: false, output: [], messages: [], terminal_line: "", expansions: 0,
+            main_file: id, echo_incomplete: false,
+            sources: [*st.sources, {id: id, name: name, origin: "local", data: source}]};
+        run(resumed, budget)
+    }
+}

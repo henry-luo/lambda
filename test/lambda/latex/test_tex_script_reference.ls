@@ -9,4 +9,12 @@ fn fixture(name) any^ {
     else ["== " ++ name ++ " ==", *[for (line in report.messages where ((starts_with(line, "LT:")) ^ { false })) line]]
 }
 
-join([for (name in ["expansion", "etex", "tokens"], line in fixture(name)^) line], "\n")
+fn pdf_fixture() any^ {
+    let source = input("test/latex/fixtures/tex_engine/pdfstrings.tex", "text")^;
+    let report = expansion.expand(stream.from_reader(reader.reader(source)), 1000000, {resources: {local: {}}})^;
+    if (report.issue != null) ["ERROR: " ++ report.issue]
+    else ["== pdfstrings ==", *[for (line in report.messages where ((starts_with(line, "LT:")) ^ { false })) line]]
+}
+
+join([*[for (name in ["expansion", "etex", "tokens", "conditionals", "registers"], line in fixture(name)^) line],
+    *pdf_fixture()^], "\n")

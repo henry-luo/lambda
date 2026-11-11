@@ -1,0 +1,30 @@
+// S16.8.10: computed names evaluate before fields and construct ordinary elements.
+let tag = "panel";
+let key = "role";
+let attrs = {role: "main", id: 7};
+let first = <[tag] *:attrs, [key]: "region", "hello" <child "world">>;
+[name(first), first.role, first.id, first[0], name(first[1])];
+first == <panel role: "region", id: 7, "hello" <child "world">>;
+[name(<['section']>), name(<[""]>), name(<["a.b"]>)];
+name((<["outer"] <["inner"]>>)[0]);
+name(<[if (3 > 2) "yes" else "no"]>);
+fn create(t) any^ => <[t] id: 3, "body">;
+[name(create("aside")^), (create("aside")^).id];
+[create(123) ^ { ^.message }, create(null) ^ { ^.message }, create([1]) ^ { ^.message }];
+fn fail_tag() any^ => error("tag-failure");
+fn fail_attr() any^ => error("attribute-failure");
+fn bad_order() any^ => <[fail_tag()] field: fail_attr()>;
+[bad_order() ^ { ^.message }];
+fn valid_with_bad_value() any^ => <["node"] field: fail_attr()>;
+[(valid_with_bad_value()^).field is error];
+fn make_closure(t) => () any^ => <[t]>;
+let closure = make_closure("captured");
+name(closure()^);
+type Panel = <panel>;
+[first is Panel, (<["other"]>) is Panel];
+let many = [for (i in 1 to 100) <["node" ++ string(i)] n: i>];
+[len(many), name(many[0]), name(many[99]), many[99].n];
+let file_tag = "file";
+let dynamic_file_error = (<[file_tag] format: 'pdf', "before" 42>) ^ { ^.message };
+let static_file_error = (<file format: 'pdf', "before" 42>) ^ { ^.message };
+[dynamic_file_error == static_file_error, dynamic_file_error]

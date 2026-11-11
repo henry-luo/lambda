@@ -1122,13 +1122,23 @@ static LambdaParseValue parse_element_into(LambdaRdParser* parser, ParserGrowBuf
     LambdaToken first = parser->current;
     LambdaToken tag = {0};
     parser_advance(parser);
-    if (!token_is_element_name(parser->current.kind)) {
-        return parser_fail(parser, error_expected_element_tag, LAMBDA_TOK_IDENTIFIER);
+    bool computed_tag = parser->current.kind == LAMBDA_TOK_LBRACKET;
+    if (computed_tag) {
+        tag = parser->current;
+        parser_advance(parser);
+        LambdaParseValue tag_value;
+        if (!parser_parse_delimited_expression_value(parser, 0, &tag_value)) return 0;
+        if (!parser_expect(parser, LAMBDA_TOK_RBRACKET)) return 0;
+        if (!parser_push_child(parser, children, tag_value)) return 0;
+    } else {
+        if (!token_is_element_name(parser->current.kind)) {
+            return parser_fail(parser, error_expected_element_tag, LAMBDA_TOK_IDENTIFIER);
+        }
+        tag = parser->current;
+        parser_advance(parser);
+        if (!parser_extend_element_name(parser, &tag,
+                error_expected_namespace_segment)) return 0;
     }
-    tag = parser->current;
-    parser_advance(parser);
-    if (!parser_extend_element_name(parser, &tag,
-            error_expected_namespace_segment)) return 0;
     for (;;) {
         if (!element_attribute_starts(parser)) break;
         bool computed_key = parser->current.kind == LAMBDA_TOK_LBRACKET;
@@ -1190,8 +1200,9 @@ static LambdaParseValue parse_element_into(LambdaRdParser* parser, ParserGrowBuf
     }
     if (!parser_expect(parser, LAMBDA_TOK_GT)) return 0;
     SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
-    return parser_reduce_token(parser, LAMBDA_REDUCE_ELEMENT, LAMBDA_REDUCTION_FORM_TOKEN, span, tag,
-        parser_children(children), children->count);
+    return parser_reduce_token(parser, LAMBDA_REDUCE_ELEMENT,
+        computed_tag ? LAMBDA_REDUCTION_FORM_COMPUTED_ELEMENT_TAG : LAMBDA_REDUCTION_FORM_TOKEN,
+        span, tag, parser_children(children), children->count);
 }
 
 static LambdaParseValue parse_element(LambdaRdParser* parser) {

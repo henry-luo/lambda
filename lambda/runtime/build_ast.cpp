@@ -7420,6 +7420,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         return;
     case AST_NODE_ELEMENT: {
         AstElementNode* element = (AstElementNode*)node;
+        validate_enforcing_calls_in_expression(tp, element->tag_expr, true, return_acknowledgment);
         validate_enforcing_calls_in_list(tp, element->item, false, return_acknowledgment);
         // S7.8.1: ordinary element content retains an error in its inferred
         // Item slot, including when the content has only one expression.
@@ -7692,6 +7693,8 @@ static bool ast_reads_binding(AstNode* node, String* name) {
     case AST_NODE_ARRAY:
     case AST_NODE_MAP:
     case AST_NODE_ELEMENT: {
+        if (node->node_type == AST_NODE_ELEMENT &&
+                ast_reads_binding(((AstElementNode*)node)->tag_expr, name)) return true;
         for (AstNode* item = ((AstArrayNode*)node)->item; item; item = item->next) {
             if (ast_reads_binding(item, name)) return true;
         }
@@ -7783,7 +7786,10 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
         case AST_NODE_LIST:
         case AST_NODE_ARRAY:
         case AST_NODE_MAP:
+            scan_invalidated_bindings(state, ((AstArrayNode*)node)->item);
+            break;
         case AST_NODE_ELEMENT:
+            scan_invalidated_bindings(state, ((AstElementNode*)node)->tag_expr);
             scan_invalidated_bindings(state, ((AstArrayNode*)node)->item);
             break;
         case AST_NODE_PRIMARY:
@@ -8351,8 +8357,10 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
             walk_lambda_ast(item, visitor, data, descend_functions);
         }
         // element content is a separate edge after the resolver splits attributes.
-        if (node->node_type == AST_NODE_ELEMENT)
+        if (node->node_type == AST_NODE_ELEMENT) {
+            walk_lambda_ast(((AstElementNode*)node)->tag_expr, visitor, data, descend_functions);
             walk_lambda_ast(((AstElementNode*)node)->content, visitor, data, descend_functions);
+        }
         else if (node->node_type == AST_NODE_OBJECT_LITERAL)
             walk_lambda_ast(((AstObjectLiteralNode*)node)->content, visitor, data, descend_functions);
         break;
@@ -8735,6 +8743,7 @@ static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
         direct_bind_rewrite_node(bind, ((AstArrayNode*)node)->item, node);
         break;
     case AST_NODE_ELEMENT:
+        direct_bind_rewrite_node(bind, ((AstElementNode*)node)->tag_expr, node);
         direct_bind_rewrite_node(bind, ((AstMapNode*)node)->item, node);
         if (node->node_type == AST_NODE_ELEMENT) {
             direct_bind_rewrite_node(bind, ((AstElementNode*)node)->content, node);
@@ -11705,8 +11714,8 @@ static const size_t ELEMENT_SYNTAX_SIZE =
 // LSF_ELEMENT holds its raw child list (attributes, then content) in `item`
 // and its canonical tag name in the tail.
 static AstNode* build_element_syntax(Transpiler* tp, SourceSpan span,
-        SourceSpan tag_span, AstNode* children) {
-    StrView tag = source_span_text(tp, tag_span);
+        SourceSpan tag_span, AstNode* children, AstNode* tag_expr) {
+    StrView tag = tag_expr ? StrView{"", 0} : source_span_text(tp, tag_span);
     if (tag.length >= 2 && tag.str[0] == '\'' &&
             tag.str[tag.length - 1] == '\'') {
         tag.str++;
@@ -11738,6 +11747,7 @@ static AstNode* build_element_syntax(Transpiler* tp, SourceSpan span,
     AstElementNode* node = (AstElementNode*)alloc_syntax_node(tp,
         AST_NODE_ELEMENT, span, ELEMENT_SYNTAX_SIZE, LSF_ELEMENT, 1);
     node->item = children;
+    node->tag_expr = tag_expr;
     syntax_tail((AstNode*)node, ELEMENT_SYNTAX_SIZE)[0] =
         name_pool_create_strview(tp->name_pool, tag);
     return (AstNode*)node;
@@ -11750,7 +11760,7 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
     node->item = NULL;
     StrView tag = {name->chars, (size_t)name->len};
     NameEntry* type_entry = NULL;
-    TypeObject* object_type = lookup_object_type_for_tag(tp, tag, &type_entry);
+    TypeObject* object_type = node->tag_expr ? NULL : lookup_object_type_for_tag(tp, tag, &type_entry);
     if (object_type) {
         // Object-typed tags are object literals, not ordinary elements; keep
         // this decision shared with other element construction so `is Type` sees the same
@@ -11768,14 +11778,14 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
     type->name = (StrView){name->chars, name->len};
     node->type = (Type*)type;
     StrView local_tag = {};
-    type->ns = lambda_namespace_qualify(tp, tag, &local_tag);
+    type->ns = node->tag_expr ? NULL : lambda_namespace_qualify(tp, tag, &local_tag);
     if (type->ns) {
         String* local = name_pool_create_strview(tp->name_pool, local_tag);
         type->name = {local->chars, local->len};
         type->name_id = name_ref_id(local);
     }
     resolve_qualified_literal_keys(tp, children);
-    bool has_computed_key = ast_map_items_require_runtime_shape(tp, children);
+    bool has_computed_key = node->tag_expr || ast_map_items_require_runtime_shape(tp, children);
 
     AstNode* prev = NULL;
     ShapeEntry* prev_shape = NULL;
@@ -17455,11 +17465,13 @@ static AstNode* syntax_reduce(LambdaSyntaxSink* sink,
     }
     case LAMBDA_REDUCE_ELEMENT: {
         AstNode* children = NULL;
-        for (uint32_t i = 0; i < reduction->child_count; i++) {
+        bool computed = reduction->form == LAMBDA_REDUCTION_FORM_COMPUTED_ELEMENT_TAG;
+        AstNode* tag_expr = computed ? syntax_child(reduction, 0) : NULL;
+        for (uint32_t i = computed ? 1 : 0; i < reduction->child_count; i++) {
             children = syntax_append(sink, children, syntax_child(reduction, i));
         }
         return build_element_syntax(tp, span, reduction->detail_token.span,
-            children);
+            children, tag_expr);
     }
     case LAMBDA_REDUCE_LET:
         if (reduction->form == LAMBDA_REDUCTION_FORM_DECOMPOSE &&
@@ -19148,6 +19160,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_map(tp, (AstMapNode*)node);
         break;
     case LSF_ELEMENT:
+        resolve_walk(r, ((AstElementNode*)node)->tag_expr);
         resolve_walk_chain(r, ((AstElementNode*)node)->item);
         resolve_diagnostics(r, node);
         resolve_element(tp, (AstElementNode*)node);

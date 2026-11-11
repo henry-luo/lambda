@@ -946,6 +946,19 @@ let input_el = <input type: "range", [attribute]: "Volume">
 input_el[attribute]  // "Volume"
 ```
 
+An element tag can also be computed from a string or symbol:
+
+```lambda
+let tag = "article"
+let attrs = {id: "intro"}
+let node = <[tag] *:attrs, "Hello">
+name(node)  // 'article'
+```
+
+The tag expression runs once before attributes and content. It creates an
+ordinary element; a computed tag does not select a lexical object type or
+resolve a namespace prefix (S16.8.10).
+
 The boundary comma before element content is unchanged. In an attribute list,
 `[expression]: value` defines an attribute; after the boundary comma,
 `[expression]` is array content unless it is followed by `:` (S16.8.9,

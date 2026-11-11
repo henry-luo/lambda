@@ -1,0 +1,128 @@
+{
+  case: "blackboard",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "bold",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "roman",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "italic",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "sans",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "sans italic",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "typewriter",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "calligraphic",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "fraktur",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "script",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "normal",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "boldsymbol",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "unbraced",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "nested",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "scripted",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "membership",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}

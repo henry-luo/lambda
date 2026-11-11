@@ -14,3 +14,19 @@
 [["control", "par", null]]
 "injected input:"
 ["A", "Z"]
+"direct source trace:"
+[true, 7, 0, 5]
+"lookahead source trace:"
+[true, 0, 4, "B"]
+"foreign source trace:"
+[false]
+"older token source trace:"
+[false]
+"different active file trace:"
+[false]
+"long source trace:"
+[true]
+"expired lookahead trace:"
+[false]
+"source trace sequence boundaries:"
+[1, 3, 1, 2]

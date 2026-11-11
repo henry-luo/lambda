@@ -1,0 +1,52 @@
+{
+  case: "leading bracket",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "multiple brackets",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "nested content",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "followed by group",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "macro result",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "ordinary environment still pending",
+  issue: "latex-digest-unsupported",
+  unsupported: "environment options",
+  matches: null,
+  script: null,
+  native: <latex_document
+    <document source_offset: 0,
+      <strange source_offset: 16,
+        <paragraph
+          "[x]Hello">>>>
+}

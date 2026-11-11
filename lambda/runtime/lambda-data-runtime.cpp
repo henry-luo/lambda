@@ -1,6 +1,7 @@
 #include "lib/utf.h"
 
 #include "transpiler.hpp"
+#include "vmap-runtime.hpp"
 #include "type_contract.hpp"
 #include "lambda/core/lambda-decimal.hpp"
 #include "lambda-error.h"
@@ -3881,7 +3882,7 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
             // VMap projects integer positions to synthetic names; its legacy reader
             // decodes those names, while qualified names retain the complete key.
             if (type_id == LMD_TYPE_VMAP && !symbol_lambda_namespace(key_sym))
-                return vmap_get_by_str(data.vmap, key_sym->chars);
+                return vmap_get_by_symbol(data.vmap, key_sym);
             return fn_index(data, {.item = y2it(key_sym)});
         }
         return ItemNull;

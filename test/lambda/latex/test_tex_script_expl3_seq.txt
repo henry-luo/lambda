@@ -1,0 +1,172 @@
+"sequence from comma list:"
+{
+  text: "a, b, c",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"empty and grouped entries:"
+{
+  text: "5/a|b,c| x ||d",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"empty sequence:"
+{
+  text: "[]/0",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"local push:"
+{
+  text: "{a,b}/a",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"global push:"
+{
+  text: "{}b,a",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"global list and clear:"
+{
+  text: "{}a,b{}[]",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"token preservation:"
+{
+  text: "B",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"ascending sort:"
+{
+  text: "a,b,c",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"descending sort:"
+{
+  text: "c|b|a",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"stable sort:"
+{
+  text: "c,a,b",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"sort group scope:"
+{
+  text: "O",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"comparison order:"
+{
+  text: "[e/d][c/b][e/c][d/c][e/a][d/a][c/a][b/a]a,b,c,d,e",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"unexpanded string comparison:"
+{
+  text: "Y",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"string comparison variants:"
+{
+  text: "TF",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"invalid sequence:"
+{
+  text: "",
+  issue: "expl3-invalid-sequence",
+  unsupported: null,
+  matches_native: null
+}
+"duplicate sequence:"
+{
+  text: "",
+  issue: "expl3-already-defined",
+  unsupported: null,
+  matches_native: null
+}
+"missing sort return:"
+{
+  text: "",
+  issue: "expl3-sort-no-return",
+  unsupported: null,
+  matches_native: null
+}
+"duplicate sort return:"
+{
+  text: "",
+  issue: "expl3-sort-return-multiple",
+  unsupported: null,
+  matches_native: null
+}
+"project expl3 fixture:"
+{
+  text: "Hello, World!/Hello, Jane!/AA/13/apple, kiwi, pear/expl3 ready",
+  issue: null,
+  unsupported: null
+}
+"comparison order across lengths:"
+[[2, null, true], [3, null, true], [4, null, true], [5, null, true], [6, null, true], [7, null, true], [8, null, true], [9, null, true]]
+"fixture floating point:"
+{
+  issue: null,
+  unsupported: null
+}
+"fixture case conversion:"
+{
+  issue: null,
+  unsupported: null
+}
+"separator token preservation:"
+{
+  text: "xBy",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"global sort:"
+{
+  text: "{}a,b",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"sequence aliases copy values:"
+{
+  text: "A/A,B",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}
+"nested sorting:"
+{
+  text: "a,b/y,x",
+  issue: null,
+  unsupported: null,
+  matches_native: true
+}

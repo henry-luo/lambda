@@ -1,0 +1,72 @@
+{
+  case: "first line",
+  issue: null,
+  unsupported: null,
+  script: ["L:1/1"],
+  native: ["L:1/1"],
+  matches: true
+}
+{
+  case: "multiple lines",
+  issue: null,
+  unsupported: null,
+  script: ["A:1", "B:2", "D:4"],
+  native: ["A:1", "B:2", "D:4"],
+  matches: true
+}
+{
+  case: "CRLF",
+  issue: null,
+  unsupported: null,
+  script: ["A:1", "B:2"],
+  native: ["A:1", "B:2"],
+  matches: true
+}
+{
+  case: "line after blank",
+  issue: null,
+  unsupported: null,
+  script: ["L:3"],
+  native: ["L:3"],
+  matches: true
+}
+{
+  case: "signed scan",
+  issue: null,
+  unsupported: null,
+  script: ["N:-1"],
+  native: ["N:-1"],
+  matches: true
+}
+{
+  case: "macro call",
+  issue: null,
+  unsupported: null,
+  script: ["M:2"],
+  native: ["M:2"],
+  matches: true
+}
+{
+  case: "multiline expansion",
+  issue: null,
+  unsupported: null,
+  script: ["A 2Z"],
+  native: ["A 2Z"],
+  matches: true
+}
+{
+  case: "scantokens",
+  issue: null,
+  unsupported: null,
+  script: ["BEFORE:1", "INNER:1", "AFTER:2"],
+  native: ["BEFORE:1", "INNER:1", "AFTER:2"],
+  matches: true
+}
+"local package:"
+{
+  issue: null,
+  unsupported: null,
+  script: ["MAIN: 1", "PACKAGE-FIRST: 1", "PACKAGE-THIRD: 3", "MAIN-AFTER: 3"],
+  native: ["MAIN: 1", "PACKAGE-FIRST: 1", "PACKAGE-THIRD: 3", "MAIN-AFTER: 3"],
+  matches: true
+}

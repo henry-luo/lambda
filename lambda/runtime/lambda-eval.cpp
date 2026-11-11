@@ -5,6 +5,7 @@
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
+#include "vmap-runtime.hpp"
 #include "heap_api.h"
 #include "lambda/runtime/gc/gc_heap.h"
 #include "lambda/core/lambda-decimal.hpp"
@@ -15888,6 +15889,25 @@ Element* elmt_literal_begin(TypeElmt* type) {
     return elmt_with_type(type);
 }
 
+// computed tags share the runtime shape tree and the ordinary element allocator.
+Item elmt_dynamic_begin(Item tag) {
+    if (!is_text_type_id(get_type_id(tag))) {
+        return runtime_error_itemf(ERR_TYPE_MISMATCH,
+            "computed element tag must evaluate to string or symbol");
+    }
+    RootFrame roots(1);
+    Rooted<Item> rooted_tag(roots, tag);
+    if (!runtime_shape_tree()) {
+        return runtime_error_itemf(ERR_OUT_OF_MEMORY, "computed element shape allocation failed");
+    }
+    TypeElmt* type = runtime_shape_tree_element_root(rooted_tag.get().get_chars(),
+        rooted_tag.get().get_len(), NULL);
+    if (!type) return runtime_error_itemf(ERR_OUT_OF_MEMORY, "computed element tag allocation failed");
+    Element* element = elmt_with_type(type);
+    if (!element) return runtime_error_itemf(ERR_OUT_OF_MEMORY, "computed element allocation failed");
+    return (Item){.element = element};
+}
+
 Item map_literal_put(Item owner, Item key, Item value) {
     if (!is_text_type_id(get_type_id(key))) {
         return runtime_error_itemf(ERR_TYPE_MISMATCH,
@@ -15926,7 +15946,7 @@ Item map_literal_spread(Item owner, Item source) {
             // item_keys reifies VMap text keys as Symbols, while HashMap VMaps
             // retain String keys. Re-enter through the VMap name seam so a
             // spread does not turn every reified field into null.
-            rooted_value.set(vmap_get_by_str(rooted_source.get().vmap, symbol->chars));
+            rooted_value.set(vmap_get_by_symbol(rooted_source.get().vmap, symbol));
         } else {
             rooted_value.set(fn_index(rooted_source.get(), rooted_key.get()));
         }

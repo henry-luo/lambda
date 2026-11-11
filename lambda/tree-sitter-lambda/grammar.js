@@ -721,7 +721,7 @@ module.exports = grammar({
     // or where it disambiguates the tag (`<svg, .rect>` vs the maximal-munch
     // qualified tag `<svg .rect>`). Content juxtaposes after that: `<div "s">`.
     element: $ => seq('<',
-      field('tag', choice($.dotted_name, $._data_name)),
+      field('tag', choice($.dotted_name, $._data_name, $.computed_tag)),
       optional(choice(
         // Attributes, then content only behind a REQUIRED boundary comma. The
         // comma is also what settles a greedy attribute value: `<div a: x (y)>`
@@ -733,6 +733,8 @@ module.exports = grammar({
       )),
       '>',
     ),
+
+    computed_tag: $ => seq('[', $._expr, ']'),
 
     _attr_list: $ => seq($.attr, repeat(seq(',', $.attr))),
 

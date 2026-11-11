@@ -39,6 +39,7 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
     } while (0)
     switch (node->node_type) {
     case AST_NODE_ELEMENT:
+        V(((AstElementNode*)node)->tag_expr);
         VLIST(((AstElementNode*)node)->item);
         VLIST(((AstElementNode*)node)->content);
         break;
@@ -1512,6 +1513,8 @@ static uint32_t plan_need(AstNode* node) {
             return 1 + acc.best;
         }
         uint32_t best = plan_computed_field_need(element->item);
+        uint32_t tag_need = element->tag_expr ? 2 + plan_need(element->tag_expr) : 0;
+        if (tag_need > best) best = tag_need;
         uint32_t content_need = 1 + plan_need(element->content);
         return content_need > best ? content_need : best;
     }

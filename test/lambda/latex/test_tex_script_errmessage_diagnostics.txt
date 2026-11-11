@@ -1,0 +1,229 @@
+{
+  case: "simple",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 32,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 32,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "multiline",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 33,
+      line: 2
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 33,
+      line: 2
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "expanded",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "oops",
+      offset: 42,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "oops",
+      offset: 42,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "two errors",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "one",
+      offset: 31,
+      line: 1
+    }, {
+      code: "tex-errmessage",
+      message: "two",
+      offset: 48,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "one",
+      offset: 31,
+      line: 1
+    }, {
+      code: "tex-errmessage",
+      message: "two",
+      offset: 48,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "unicode message",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "λ漢",
+      offset: 33,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "λ漢",
+      offset: 33,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "no endline",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 46,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 46,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "pseudo file",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "pseudo",
+      offset: 47,
+      file: "\\scantokens",
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "pseudo",
+      offset: 47,
+      file: "\\scantokens",
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "mixed diagnostic pending",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 70,
+      line: 1
+    }],
+  native_records: [{
+      code: "latex-counter-value",
+      message: "counter value has trailing material",
+      offset: 54,
+      line: 1
+    }, {
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 70,
+      line: 1
+    }],
+  records_match: false,
+  digest_issue: null,
+  ast_match: false
+}
+{
+  case: "long message pending",
+  issue: null,
+  records: [],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      offset: 540,
+      line: 1
+    }],
+  records_match: false,
+  digest_issue: null,
+  ast_match: false
+}
+{
+  case: "empty message",
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "",
+      offset: 28,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "",
+      offset: 28,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+"local package:"
+{
+  issue: null,
+  records: [{
+      code: "tex-errmessage",
+      message: "package failure",
+      offset: 26,
+      file: "script_error.sty",
+      line: 2
+    }],
+  native_records: [{
+      code: "tex-errmessage",
+      message: "package failure",
+      offset: 26,
+      file: "script_error.sty",
+      line: 2
+    }],
+  records_match: true,
+  root_records: [{
+      code: "tex-errmessage",
+      message: "package failure",
+      offset: 26,
+      file: "script_error.sty",
+      line: 2
+    }],
+  ast_match: false
+}

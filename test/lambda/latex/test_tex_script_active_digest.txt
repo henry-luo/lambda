@@ -1,0 +1,92 @@
+{
+  case: "tilde",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "repeated",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "nested",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "macro",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "defined active",
+  issue: "latex-digest-unsupported",
+  unsupported: "definition target",
+  matches: null,
+  script: null,
+  native: <latex_document
+    <paragraph
+      <def source_offset: 0, argument_groups: []>
+      "~"
+      <curly_group
+        "XYZ">>
+    <document source_offset: 10,
+      <paragraph
+        "AXYZB">>>
+}
+{
+  case: "active punctuation",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "active letter",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "active after word",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "active control word",
+  issue: null,
+  unsupported: null,
+  matches: true,
+  script: null,
+  native: null
+}
+{
+  case: "active percent pending",
+  issue: "latex-digest-unsupported",
+  unsupported: "active syntax character",
+  native_is_error: true
+}
+{
+  case: "active math shift pending",
+  issue: "latex-digest-unsupported",
+  unsupported: "active syntax character",
+  native_is_error: true
+}

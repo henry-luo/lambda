@@ -5,6 +5,7 @@
 #include "../lambda.hpp"
 #include "lambda/core/lambda-decimal.hpp"
 #include "lambda-number-runtime.hpp"
+#include "vmap-runtime.hpp"
 #include "lambda-error.h"
 #include "lib/memtrack.h"
 #include "../lambda-data.hpp"
@@ -612,6 +613,19 @@ Item vmap_get_by_str(VMap* vm, const char* key) {
 }
 
 // get value from VMap by Item key (used by map_get / fn_member dispatch)
+// iteration keys carry lengths even when their spelling contains NUL.
+Item vmap_get_by_symbol(VMap* vm, Symbol* symbol) {
+    if (!vm || !symbol) return ItemNull;
+    if (!memchr(symbol->chars, 0, symbol->len)) return vmap_get_by_str(vm, symbol->chars);
+    RootFrame roots(2);
+    Rooted<Item> rooted_vmap(roots, (Item){.vmap = vm});
+    Rooted<Item> rooted_symbol(roots, (Item){.item = y2it(symbol)});
+    Symbol* name = rooted_symbol.get().get_safe_symbol();
+    String* text = heap_create_name(name->chars, name->len);
+    if (!text) return ItemError;
+    return vmap_get_by_item(rooted_vmap.get().vmap, (Item){.item = s2it(text)});
+}
+
 Item vmap_get_by_item(VMap* vm, Item key) {
     if (!vm) return ItemNull;
     Item host_result = ItemNull;

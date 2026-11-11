@@ -1913,6 +1913,7 @@ JitImport jit_runtime_imports[] = {
     {"output_content_is_virtual", FPTR(output_content_is_virtual)},
     {"fn_call_emit", FPTR(fn_call_emit)},
     {"elmt_literal_begin", FPTR(elmt_literal_begin)},
+    {"elmt_dynamic_begin", FPTR(elmt_dynamic_begin)},
     {"elmt_fill", FPTR(elmt_fill)},
     {"elmt_get", FPTR(elmt_get)},
     {"object", FPTR(object)},

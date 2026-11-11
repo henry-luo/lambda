@@ -1,0 +1,87 @@
+"underline:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"nested underline:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"empty underline:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"underline with whitespace:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"math underline:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"expanded underline source mapping:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"math overline:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"math underline expression:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"math underline ungrouped:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"expanded bold source mapping:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"text overline:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"tex accents:"
+{
+  issue: null,
+  tokens: [["control", "underline"], ["char", "{"], ["char", "x"], ["char", "}"], ["control", "overline"], ["char", "{"], ["char", "y"], ["char", "}"]]
+}
+"tex accent alias:"
+{
+  issue: null,
+  tokens: [["control", "a"], ["char", "{"], ["char", "x"], ["char", "}"]]
+}

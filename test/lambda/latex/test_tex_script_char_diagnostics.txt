@@ -1,0 +1,115 @@
+{
+  case: "negative",
+  issue: null,
+  records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (-1)",
+      offset: 23,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (-1)",
+      offset: 23,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "too large",
+  issue: null,
+  records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (1114112)",
+      offset: 28,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (1114112)",
+      offset: 28,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "line two",
+  issue: null,
+  records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (-42)",
+      offset: 25,
+      line: 2
+    }],
+  native_records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (-42)",
+      offset: 25,
+      line: 2
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "two errors",
+  issue: null,
+  records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (-1)",
+      offset: 23,
+      line: 1
+    }, {
+      code: "tex-bad-char",
+      message: "Bad character code (1114112)",
+      offset: 35,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (-1)",
+      offset: 23,
+      line: 1
+    }, {
+      code: "tex-bad-char",
+      message: "Bad character code (1114112)",
+      offset: 35,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}
+{
+  case: "mixed supported",
+  issue: null,
+  records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (-1)",
+      offset: 23,
+      line: 1
+    }, {
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 38,
+      line: 1
+    }],
+  native_records: [{
+      code: "tex-bad-char",
+      message: "Bad character code (-1)",
+      offset: 23,
+      line: 1
+    }, {
+      code: "tex-errmessage",
+      message: "bad",
+      offset: 38,
+      line: 1
+    }],
+  records_match: true,
+  digest_issue: null,
+  ast_match: true
+}

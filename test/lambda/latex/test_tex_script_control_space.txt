@@ -1,0 +1,42 @@
+"control space:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"control space with following spaces:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"macro-expanded control space:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"control space in formatting:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"control space before comment:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}
+"control space before CRLF comment:"
+{
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
+}

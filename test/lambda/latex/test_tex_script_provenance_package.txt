@@ -1,0 +1,14 @@
+"foreign formatting:"
+{
+  issue: null,
+  count: 3,
+  native_offsets: [["textit", 31], ["textbf", 67], ["textbf", 83]],
+  script_offsets: [["textit", 31], ["textbf", 67], ["textbf", 83]],
+  matches_native: true
+}
+"foreign generic source mapping pending:"
+{
+  native_offsets: [27],
+  issue: "latex-digest-unsupported",
+  unsupported: "command source mapping"
+}

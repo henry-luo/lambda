@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 88.0.0 (2026-11-04)
+**Spec version:** 88.1.0 (2026-11-11)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2917,6 +2917,16 @@ below by its section.
   spread-holding literal does. `(expr): val` is rejected: grouping parens
   must stay inert (S16.4.1v4). The keyed for-splice `{for … [k]: v}` is not
   ruled. (Revised 2026-11-04, v2.) [Design_Syntax §7.26]
+
+- **S16.8.10** **Computed element tags: `<[expr] …>`.** An element
+  literal may compute its tag with a bracketed expression. Evaluate that
+  expression once before its attributes and content; it must yield a string
+  or symbol (S8.2.2v6), and any other value is an error. An error result
+  propagates. The resulting ordinary element uses that name as data, with
+  the same attribute and content rules as an element literal (S2.3.1v2,
+  S2.6.1v2–S2.6.5, S16.9.3); a computed `file` tag retains S2.6.6v3.
+  A computed name does not resolve a lexical object type or namespace prefix.
+  (Ruled 2026-11-11.) [Design_Syntax §7.33]
 
 ### S16.9 Declarations, elements, paths
 

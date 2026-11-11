@@ -1,0 +1,443 @@
+"kernel constructors:"
+{
+  text: "textbf{Hello} Yes",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"kernel makeatletter:"
+{
+  text: "Y12",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"kernel document macro:"
+{
+  text: "Hello world ",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"latex command unsupported:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "usepackage",
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"failed preload:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "setbox",
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"]]
+}
+"packaged kernel:"
+{
+  text: "textbf{Hi} ",
+  issue: null,
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "direct.tex", "local"]]
+}
+"packaged newcommand:"
+{
+  text: "left/right ",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"packaged environment:"
+{
+  text: "<A>X! ",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"article document:"
+{
+  text: "documentclass[12pt]{article}begin{document}Hi textbf{there}end{document}",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"chaptered class:"
+{
+  text: "documentclass{book}chapter{Intro} ",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"class metadata:"
+{
+  packages: [{
+      name: "book",
+      options: "12pt",
+      is_class: true,
+      kind: "adapter"
+    }],
+  class_options: "12pt",
+  text: "documentclass[12pt]{book}Y",
+  issue: null
+}
+"unknown captured class:"
+{
+  packages: [{
+      name: "mystery",
+      options: "",
+      is_class: true,
+      kind: "unknown"
+    }],
+  issue: null
+}
+"uncaptured unknown class:"
+["tex-unsupported-primitive", "documentclass"]
+"empty local class:"
+[null, null, [{
+      name: "mystery",
+      options: "",
+      is_class: true,
+      kind: "local"
+    }]]
+"packaged document hooks:"
+{
+  text: "begin{document}AXBend{document}",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  sources: [[0, "<lambda-kernel>", "bundled"], [2, "main.tex", "local"]]
+}
+"local package:"
+{
+  text: "documentclass{article}begin{document}P/Eend{document}",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "article",
+      options: "",
+      is_class: true,
+      kind: "adapter"
+    }, {
+      name: "sample",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["sample.sty", "local"]]
+}
+"nested packages:"
+{
+  text: "O/I",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "outer",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }, {
+      name: "inner",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["outer.sty", "local"], ["inner.sty", "local"]]
+}
+"package at code scope:"
+{
+  text: "V/12",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "sample",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["sample.sty", "local"]]
+}
+"adapter and local packages:"
+{
+  text: "usepackage{geometry,mystery}C",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "geometry",
+      options: "",
+      is_class: false,
+      kind: "adapter"
+    }, {
+      name: "mystery",
+      options: "",
+      is_class: false,
+      kind: "unknown"
+    }, {
+      name: "custom",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["custom.sty", "local"]]
+}
+"bundled package precedence:"
+{
+  text: "B",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "chosen",
+      options: "",
+      is_class: false,
+      kind: "adapter"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["chosen.sty", "bundled"]]
+}
+"duplicate package:"
+{
+  text: "usepackage{sample}A",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "sample",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["sample.sty", "local"]]
+}
+"package hooks and metadata:"
+{
+  text: "Y/Ebegin{document}BDZend{document}",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "outer",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }, {
+      name: "inner",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["outer.sty", "local"], ["inner.sty", "local"]]
+}
+"package macro spaces:"
+{
+  text: "A BR A BS ",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "sample",
+      options: "",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["sample.sty", "local"]]
+}
+"uncaptured packages:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "usepackage",
+  diagnostics: [],
+  packages: [],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"]]
+}
+"package options:"
+{
+  text: "documentclass[a]{article}ABA[q][z]",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "article",
+      options: "a",
+      is_class: true,
+      kind: "adapter"
+    }, {
+      name: "opts",
+      options: "b,q,z",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["opts.sty", "local"]]
+}
+"starred package options:"
+{
+  text: "documentclass[a]{article}AB[q]",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "article",
+      options: "a",
+      is_class: true,
+      kind: "adapter"
+    }, {
+      name: "opts",
+      options: "b,q",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["opts.sty", "local"]]
+}
+"unknown package option:"
+{
+  text: "X ",
+  issue: null,
+  unsupported: null,
+  diagnostics: ["latex-unknown-option"],
+  packages: [{
+      name: "opts",
+      options: "z",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["opts.sty", "local"]]
+}
+"local class with options:"
+{
+  text: "documentclass[wide]{book}begin{document}W/Eend{document}",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "custom",
+      options: "wide",
+      is_class: true,
+      kind: "local"
+    }, {
+      name: "book",
+      options: "wide",
+      is_class: true,
+      kind: "adapter"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["custom.cls", "local"]]
+}
+"package option queries:"
+{
+  text: "documentclass[a,b]{article}TYTT",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [{
+      name: "article",
+      options: "a,b",
+      is_class: true,
+      kind: "adapter"
+    }, {
+      name: "opts",
+      options: "x,y",
+      is_class: false,
+      kind: "local"
+    }],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["opts.sty", "local"]]
+}
+"captured file probes:"
+{
+  text: "YYBI Z ",
+  issue: null,
+  unsupported: null,
+  diagnostics: [],
+  packages: [],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"], ["a.tex", "local"]]
+}
+"uncaptured file probes:"
+{
+  text: "",
+  issue: "tex-unsupported-primitive",
+  unsupported: "IfFileExists",
+  diagnostics: [],
+  packages: [],
+  sources: [["<lambda-kernel>", "bundled"], ["main.tex", "local"]]
+}
+"definition source echo:"
+{
+  text: "\\def\\x{A}A",
+  matches_native: true,
+  incomplete: false,
+  issue: null,
+  spans: [[0, 9]]
+}
+"newcommand source echo:"
+{
+  text: "\\newcommand{\\hi}[1]{Hello #1}Hello Bob ",
+  matches_native: true,
+  incomplete: false,
+  issue: null,
+  spans: [[0, 29]]
+}
+"foreign expansion source echo:"
+{
+  text: "\\def\\x{A}A",
+  matches_native: true,
+  incomplete: true,
+  issue: null,
+  spans: [[0, 9]]
+}
+"prefixed source echo:"
+{
+  text: "\\global\\def\\x{A}A",
+  matches_native: true,
+  incomplete: false,
+  issue: null,
+  spans: [[0, 16]]
+}
+"prefixed assignment is not echoed:"
+{
+  text: "3",
+  matches_native: true,
+  incomplete: false,
+  issue: null,
+  spans: []
+}
+"next character and star:"
+{
+  text: "Yx/Nz/S/Nq",
+  issue: null,
+  matches_native: true
+}
+"next character meanings:"
+{
+  text: "Yx",
+  issue: null,
+  matches_native: true
+}
+"star branch parameter marks:"
+{
+  text: "#",
+  issue: null,
+  matches_native: true
+}
+"xspace punctuation:"
+{
+  text: "X word/X,/X{Y}",
+  issue: null,
+  matches_native: true
+}
+"expandable xspace:"
+{
+  text: "X word",
+  matches_native: true,
+  incomplete: true,
+  issue: null,
+  spans: []
+}
