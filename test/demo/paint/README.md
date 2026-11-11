@@ -17,6 +17,9 @@ repaints just the pixels a stroke touched.
   Blender smears the paint under it. Type a path to any version 3 `.myb` file and press
   **Import .myb** to add it to the palette; settings this engine does not render are listed in the
   status line.
+- **Tips and paper:** Chalk, Flat and Speckle use bitmap tips. Chalk and Charcoal read the paper's
+  grain, so the **Paper** menu (Smooth, Cold press, Rough, Canvas) changes how they deposit. A saved
+  painting remembers its paper.
 - **Size and opacity** belong to the selected brush; `[` and `]` resize it.
 - **Colour:** the swatches, the H, S and V sliders, or the picker.
 - **Pen:** pressure, tilt and the eraser end work with a macOS tablet. A mouse paints at full
@@ -34,7 +37,8 @@ demo.
 ## Tests
 
 - `test/ui/paint/demo.json` replays the app: a brush stroke, undo and redo, a pen stroke with
-  pressure samples, the pen's eraser end, the picker, size keys, zoom, saving, exporting and
+  pressure samples, the pen's eraser end, the picker, size keys, zoom, paper choice and a grained
+  chalk stroke, saving, exporting and
   reopening a painting, clear, `.myb` import, and region-only repaints checked against full
   renders (`RADIANT_DAMAGE_VERIFY=1`).
   Run it with `./test/test_ui_automation_gtest.exe --suite paint`, or directly with

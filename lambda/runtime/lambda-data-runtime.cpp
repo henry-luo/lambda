@@ -1971,6 +1971,27 @@ void array_push_capture(Array* arr, Item item) {
     array_push(arr, item);
 }
 
+// S9.3.1 (LR12-47): a native that places an item of one of its arguments into
+// its result captures it, as a literal does. `reverse(a)` and `a` then share
+// each item as two observers, and a write through either one detaches it.
+void array_push_verbatim_capture(Array* arr, Item item) {
+    cow_capture_value(item);
+    array_push_verbatim(arr, item);
+}
+
+// S9.3.1 (LR12-47): capture items [start, end) that a bulk copy placed in `arr`
+// from another owner. Only an Item or a pointer lane can hold a container.
+void array_capture_items(Array* arr, int64_t start, int64_t end) {
+    if (!arr) return;
+    if (array_has_native_lane(arr)) {
+        LaneStorageKind kind = array_native_lane_kind(arr);
+        if (kind != LANE_STORAGE_POINTER && kind != LANE_STORAGE_ITEM) return;
+        for (int64_t i = start; i < end; i++) cow_capture_value(array_native_lane_read(arr, i));
+        return;
+    }
+    for (int64_t i = start; i < end; i++) cow_capture_value(arr->items[i]);
+}
+
 uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
     TypeId type_id = get_type_id(key);
     switch (type_id) {

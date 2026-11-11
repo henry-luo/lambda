@@ -199,6 +199,28 @@ TEST(ProcartTests, KeyedNoiseIsExactAcrossTiers) {
     test_pure_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]));
 }
 
+// D8.3.1: admission must include the checked operations the walker implements.
+TEST(InterpreterAdmissionTests, CheckedSubscriptsAcrossTiers) {
+    const char* functional[] = {"test/lambda/subscript_selection",
+        "test/lambda/image_gif_disposal", "test/lambda/docbook/docbook_article",
+        "test/lambda/editor/photos_tone"};
+    test_pure_fixtures_across_tiers(functional, sizeof(functional) / sizeof(functional[0]));
+    const char* procedural[] = {"interp_checked_subscripts", "proc_ndim_index_write",
+        "subscript_last_scope", "image_raster_snapshots", "object_method_write"};
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/eps/vector.ls",
+            "test/lambda/eps/vector.txt", true, tier);
+        for (const char* name : procedural) {
+            char script[256], golden[256];
+            snprintf(script, sizeof(script), "test/lambda/proc/%s.ls", name);
+            snprintf(golden, sizeof(golden), "test/lambda/proc/%s.txt", name);
+            test_lambda_script_against_file(script, golden, true, tier);
+        }
+    }
+}
+
 // Reuse the package/demo fixture shape for both procedural expansion gates.
 static void test_procart_fixtures_across_tiers(const char* const* fixtures,
         size_t fixture_count, const char* demo) {
@@ -308,6 +330,7 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsMatchGoldens) {
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/lambda/paint/proc",
     "test/lambda/archive",
     "test/lambda/ime",
     "test/lambda/docbook/proc",
@@ -803,8 +826,8 @@ static const TierParityFixture kTune27TierParity[] = {
     // S8.2.4v3 (LR07-32..36): type keys step lists and drop null matches,
     // positional selections gather; a run-time-typed key read element 0 on the
     // JIT only, and `last` there resolved against an outer container.
-    {"test/lambda/subscript_selection.ls", "test/lambda/subscript_selection.txt", "AST_NODE_INDEX_EXPR"},
-    {"test/lambda/proc/subscript_last_scope.ls", "test/lambda/proc/subscript_last_scope.txt", "AST_NODE_INDEX_ASSIGN_STAM"},
+    {"test/lambda/subscript_selection.ls", "test/lambda/subscript_selection.txt"},
+    {"test/lambda/proc/subscript_last_scope.ls", "test/lambda/proc/subscript_last_scope.txt"},
     // S10.1.1v2 (LR07-37): `|`, `&`, `!` are the type operators only and never
     // collapse to a value; `1 | 2` and `int | null` had been `[]` on both tiers.
     {"test/lambda/type_set_operators_expr.ls", "test/lambda/type_set_operators_expr.txt"},

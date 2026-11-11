@@ -1,0 +1,16 @@
+{
+  binding_painted: 2,
+  snapshot_painted: 0,
+  rect: [4, 4, 86, 46],
+  work_positive: true,
+  painted: true,
+  snapshot_alpha: 0,
+  same_as_pure: true,
+  second_batch_darker: true,
+  place_painted: 2,
+  place_name: "study",
+  place_strokes: 1,
+  typed_painted: 2,
+  over_budget_error: true,
+  over_budget_unchanged: true
+}

@@ -239,7 +239,7 @@ typedef struct JubeFuncDef {
     const char* name;        // script-visible name within the module namespace
     const char* signature;   // Lambda type syntax, `fn`/`pn`-prefixed — parsed at registration (§6.2)
     fn_ptr      func;        // implementation, default (boxed) convention
-    uint32_t    flags;       // JUBE_FN_METHOD_ELIGIBLE | JUBE_FN_VARARGS | ... (purity is NOT a flag — it's in the signature)
+    uint32_t    flags;       // JUBE_FN_METHOD_ELIGIBLE | JUBE_FN_VARARGS | JUBE_FN_READS_ARGS (D7.6.5) (purity is NOT a flag — it's in the signature)
     // optional typed fast path (§6.5); NULL/absent for most functions
     const char* native_signature;  // e.g. "(f64, f64) -> f64"
     fn_ptr      native_func;
@@ -452,6 +452,9 @@ Per-function, declared in the descriptor (P6):
 1. **Default — direct boxed**: fixed arity, `Item fn(Item a, Item b, ...)` (what the transpiler emits for sys funcs today). Zero new machinery.
 2. **Varargs boxed** (`JUBE_FN_VARARGS`): `Item fn(int argc, Item* argv)` for arity −1 functions.
 3. **Typed fast path** (optional): `native_signature` + `native_func` — e.g. `"(f64, f64) -> f64"` — lets inference-proven call sites bypass boxing entirely (exactly today's `native_c_name` mechanism for `sin`/`fabs`, generalized). Only worth declaring for hot leaf functions.
+4. **`var` procedure** (D7.6.3, Sys_Func RF7): a `pn` signature names its `var` positions (`"pn(var layer: map, dabs: any, options: map|null) -> map"`), and the native signature takes the caller's home at each of them (`"Item fn_radiant_paint_stroke(Item* layer, Item dabs, Item options)"`). The type after `var` is a bound (S9.1.3v4). Registration fails closed: it drops the function and logs an error for `var` in an `fn` signature, on a variadic function, with more than five arguments, without a `native_func`, or where the native slot is not `Item*`. The native follows the D7.6.4 write order and keeps neither the home address nor a data pointer after it returns.
+
+**Argument retention** (D7.6.5, Sys_Func RF8). Without a flag, a caller assumes a native may keep its arguments, so the compiler captures every container it passes. `JUBE_FN_READS_ARGS` promises that the function keeps no reference to an argument or to a part of one and returns neither (`radiant.paint_present`: fresh pixels from a layer). Callers then pass containers as borrows. Do not set it on a function whose result shares any part of an argument, such as a layer that keeps the input's untouched tiles. Registration rejects it with `var` positions.
 
 ### 6.6 Registration and namespacing
 

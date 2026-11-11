@@ -45,9 +45,8 @@ EXCLUDED_HEADER = """# T0 interpreter — exclusion list (LAMBDA_EXEC_BACKEND=in
 # `node:none` means the pre-scan never ran: the script does not compile on
 # either tier, or its whole import cone was rejected before it was reached.
 #
-# `node:AST_NODE_PROC` is usually the task-backed boundary rather than the `pn`
-# spelling: suspension-capable bodies need a MIR satellite and are therefore
-# unsupported under the strict T0 pin (D8.3.1).
+# Suspending procedures execute as T0 task activations (D8.3.2). An excluded
+# node identifies another unsupported shape, not the procedure's task color.
 #
 # format: <script>\tnode:<first unsupported kind>
 """

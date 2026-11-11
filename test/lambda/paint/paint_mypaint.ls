@@ -12,9 +12,9 @@ check("default-brush", base.kind == 'mypaint' and base.compiled.base_radius > 7.
 let line = [[10, 32, 1.0], [150, 32, 1.0]]
 let d = paint.dabs(base, ink, line)^
 check("distance-spacing", d.count >= 36 and d.count <= 38 and len(d.table) == d.count * 34)
-let painted = paint.stroke(blank, base, ink, line)^
+let painted = paint.stroke_step(blank, base, ink, line)^
 check("full-pressure-paints", paint.pixel(painted.layer, 80, 32)^[3] == 255)
-let feather = paint.stroke(blank, base, ink, [[10, 32, 0.0], [150, 32, 0.0]])^
+let feather = paint.stroke_step(blank, base, ink, [[10, 32, 0.0], [150, 32, 0.0]])^
 check("zero-pressure-paints-nothing", paint.pixel(feather.layer, 80, 32)^[3] == 0)
 
 // dabs_per_second paints while the pen rests: 0.5 s at 20 dabs per second
@@ -29,14 +29,14 @@ let lively = paint.brush({kind: 'mypaint', settings: {
     offset_by_random: 0.3, radius_by_random: 0.2, slow_tracking: 1.0}})^
 let first = paint.stroke_step(blank, lively, ink, [path[0], path[1], path[2]])^
 let second = paint.stroke_step(blank, lively, ink, [path[3], path[4]], first)^
-let whole = paint.stroke(blank, lively, ink, path)^
+let whole = paint.stroke_step(blank, lively, ink, path)^
 check("split-equals-whole", second.layer == whole.layer)
-check("keyed-randomness-repeats", paint.stroke(blank, lively, ink, path)^.layer == whole.layer)
+check("keyed-randomness-repeats", paint.stroke_step(blank, lively, ink, path)^.layer == whole.layer)
 check("pressure-sizes-dabs", paint.dabs(lively, ink, [[10, 20, 1.0], [140, 20, 1.0]])^.count <
     paint.dabs(lively, ink, [[10, 20, 0.1], [140, 20, 0.1]])^.count)
 
 // smudge carries the canvas colour along the stroke; its buckets travel with the continuation
-let red = paint.stroke(blank, paint.brush({size: 40.0, hardness: 1.0})^, [1.0, 0.0, 0.0], [[60, 32], [100, 32]])^.layer
+let red = paint.stroke_step(blank, paint.brush({size: 40.0, hardness: 1.0})^, [1.0, 0.0, 0.0], [[60, 32], [100, 32]])^.layer
 let smear = paint.brush({kind: 'mypaint', settings: {smudge: 1.0, smudge_length: 0.0, opaque_multiply: 1.0}})^
 let smeared = paint.stroke_step(red, smear, [0.0, 0.0, 1.0], [[70, 32, 1.0], [90, 32, 1.0]])^
 let px = paint.pixel(smeared.layer, 80, 32)^
@@ -56,7 +56,7 @@ let myb = {version: 3, comment: "", settings: {
 let imported = paint.brush_from_myb(myb)^
 check("myb-import", imported.brush.kind == 'mypaint' and imported.ignored == ["snap_to_pixel"] and
     imported.brush.compiled.base_radius > 4.48 and imported.brush.compiled.base_radius < 4.49)
-check("myb-paints", paint.pixel(paint.stroke(blank, imported.brush, ink, line)^.layer, 80, 32)^[3] > 200)
+check("myb-paints", paint.pixel(paint.stroke_step(blank, imported.brush, ink, line)^.layer, 80, 32)^[3] > 200)
 
 check("unrendered-setting", match (paint.brush({kind: 'mypaint', settings: {snap_to_pixel: 1.0}}) ^ { ^ }) { case error: true default: false })
 check("descending-curve", match (paint.brush({kind: 'mypaint', settings: {opaque: {base: 1.0,

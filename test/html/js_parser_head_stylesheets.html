@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<script id="first">
+var checks = [];
+function check(value) { checks.push(!!value); }
+check(document.head.lastElementChild === document.currentScript);
+check(document.getElementById('later-style') === null);
+var removedHeadNodes = 0;
+new MutationObserver(function(records) {
+    records.forEach(function(record) { removedHeadNodes += record.removedNodes.length; });
+}).observe(document.head, {childList:true});
+var link = document.createElement('link');
+link.rel = 'stylesheet';
+check(link.getAttribute('rel') === 'stylesheet');
+link.setAttribute('rel', 'alternate');
+check(link.rel === 'alternate');
+link.rel = 'stylesheet';
+document.head.appendChild(link);
+var style = document.createElement('style');
+style.id = 'inserted-style';
+style.textContent = '#sample { color: blue; font-size: 40px; }';
+document.head.appendChild(style);
+document.write('<style id="written-style">#sample { color: green; }</style>');
+</script>
+<style id="later-style">#sample { color: rgb(169,68,66); font-size:30px; }</style>
+<script id="second">
+check(document.getElementById('later-style') !== null);
+check(document.head.lastElementChild === document.currentScript);
+check(document.getElementById('after-second') === null);
+check(document.getElementById('inserted-style').compareDocumentPosition(document.getElementById('later-style')) === 4);
+</script>
+<meta id="after-second" name="test" content="resumed">
+</head>
+<body>
+<div id="sample">Heading</div>
+<div id="result">pending</div>
+<script>
+check(document.getElementById('after-second') !== null);
+check(document.getElementById('written-style') !== null);
+check(removedHeadNodes === 0);
+document.getElementById('result').textContent = checks.every(Boolean) ? 'head parser order complete' : 'FAIL ' + checks.join(',');
+</script>
+</body>
+</html>

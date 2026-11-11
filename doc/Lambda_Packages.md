@@ -2650,7 +2650,7 @@ P7's general drawing vocabulary is unchanged by this stand-alone profile.
 *Computer-Generated Watercolor* (SIGGRAPH 1997). Unlike the rest of the package it
 is mostly procedural: a sheet changes in place every time step, so `stamp`,
 `wet_sheet`, `dry`, `step`, `render` and `swatches` are `pn`s that take the sheet as
-a `var` argument (**S9.1.3v3**). Pigments, the paper and stroke trails are pure
+a `var` argument (**S9.1.3v4**). Pigments, the paper and stroke trails are pure
 (**S12.1.1v3**).
 
 ```lambda
@@ -4852,15 +4852,16 @@ import paint: lambda.paint
 
 let canvas = paint.layer(640, 480)^
 let ink = paint.brush({size: 12.0, hardness: 0.7, spacing: 0.15})^
-let result = paint.stroke(canvas, ink, [0.1, 0.2, 0.6], [[40, 60, 0.3], [200, 90, 0.9], [360, 70, 0.5]])^
+let result = paint.stroke_step(canvas, ink, [0.1, 0.2, 0.6], [[40, 60, 0.3], [200, 90, 0.9], [360, 70, 0.5]])^
 let pixels = paint.present(result.layer)^          // (480, 640, 4) u8 sRGB
 ```
 
 **Layers.** A layer is a map whose `tiles` hold one 64 × 64 tile per grid cell. An `rgba`
 tile is an `f32` `(64, 64, 4)` array of premultiplied colour, in linear light by default
 (`blend_space: 'srgb'` keeps encoded values). A `coverage` tile is a `(64, 64)` array of
-`f32` or `u8` samples. An untouched tile is `null`. Edits return new layers that share
-every untouched tile, so keeping an old layer value is a cheap undo snapshot.
+`f32` or `u8` samples. An untouched tile is `null`. Functions return new layers that share
+every untouched tile, so keeping an old layer value is a cheap undo snapshot. The procedures
+`stroke` and `feed` write a layer in place instead (see below).
 `from_pixels`, `import_pixels`, `present` and `pixel` move samples in and out.
 
 **Brushes and strokes.** `brush(options)` builds a brush. Kind `'round'`, the default, is a
@@ -4880,6 +4881,9 @@ simple dab brush:
 | `erase` | Removes paint instead of adding it |
 | `lock_alpha` | Recolours without adding coverage |
 | `blend` | `'normal'`, `'multiply'`, `'screen'`, `'overlay'`, `'darken'`, `'lighten'` or `'add'` |
+| `tip` | A bitmap tip: an `(h, w)` coverage array that fills the dab's ellipse box in place of the procedural falloff |
+| `grain` | In [0, 1]: how far the stroke's paper texture modulates coverage; the dab reaches paper peaks fully and valleys by `1 - grain` |
+| `angle_jitter` | Up to this many degrees of rotation per dab, so a bitmap tip does not repeat visibly; keyed by dab position, so a split stroke still equals the whole |
 
 Kind `'mypaint'` follows libmypaint's brush model. Its `settings` map libmypaint setting names
 to a number or to `{base, inputs}`, where each input (`pressure`, `speed1`, `random`,
@@ -4893,12 +4897,19 @@ repeating a stroke repeats its dabs.
 
 ```lambda
 let pencil = paint.brush_from_myb(input("pencil.myb", 'json'))^
-let line = paint.stroke(canvas, pencil.brush, [0.2, 0.2, 0.2], samples)^
+let line = paint.stroke_step(canvas, pencil.brush, [0.2, 0.2, 0.2], samples)^
 ```
 
 `brush_from_myb(data, options)` turns a parsed version 3 `.myb` file into `{brush, ignored}`.
 `ignored` names the settings the file changes but the engine does not render yet. The stroke
 colour replaces `color_h`, `color_s` and `color_v`.
+
+Both kinds take `tip` and `grain`. `paint.tip(kind, {size, seed})` builds a tip: `'chalk'` (a
+grainy disc), `'flat'` (a wide bar for a flat or calligraphic brush) or `'speckle'` (scattered
+grains). `paint.paper(kind, {size, seed})` builds a tileable paper height field in [0, 1]:
+`'smooth'`, `'cold_press'`, `'rough'` or `'canvas'`. Pass it to a stroke as
+`stroke(layer, brush, colour, points, {paper})` or `stroke_step(..., previous, {paper})`; without
+paper, grain has no effect. Equal kinds, sizes and seeds give equal planes.
 
 Points are pen samples `[x, y, pressure, tilt_x, tilt_y, twist, time]`. Only `x` and `y` are
 required. Tilt and twist are in W3C degrees, and time is in seconds; a sample without one
@@ -4918,6 +4929,23 @@ stroke. Its result carries:
 - `bounds`: the pixels the stroke so far may have changed;
 - `work`: the candidate pixels charged so far, bounded at 128 million per stroke.
 
+**In-place strokes.** `stroke(var layer, brush, colour, points, options)` is a procedure
+(`pn`). It paints a whole stroke into the layer and returns `{rect, work}`, with the pixels
+`stroke_step` gives from `null`. A build-up stroke writes the layer's tiles through
+`radiant.paint_stroke`, which copies a tile only while it is shared (**D7.6.3**, **D7.6.4**). A
+value of the layer kept before the stroke keeps its pixels (**S9.1.2**). A wash stroke
+composites its coverage over the layer as it was, so it always produces a new layer. A
+function cannot call a procedure (**S12.1.1v3**), so pure code uses `stroke_step`.
+
+```lambda
+pn main() {
+    var canvas = paint.layer(640, 480)^
+    let ink = paint.brush({size: 12.0, hardness: 0.7})^
+    let r = paint.stroke(canvas, ink, [0.1, 0.2, 0.6], [[40, 60, 0.3], [200, 90, 0.9]])^   // {rect, work}
+    return paint.present(canvas)^
+}
+```
+
 `dabs(brush, colour, points)` exposes the engine's dab table: 34 `f32` columns per dab.
 Unknown options are errors (**S17.8.1**).
 
@@ -4930,23 +4958,35 @@ progress, the rectangle still to be shown, and stroke-level undo and redo:
 ```lambda
 var s = paint.session(1200, 800)^                      // {paper: [r, g, b], history_budget}
 s = paint.begin(s, evt.pointerId, brush, [0.1, 0.2, 0.5])^
-s = paint.feed(s, evt.pointerId, paint.in_layer(dom.pointer_samples(evt), box, s))^
-let f = paint.frame(s)^                                // {session, rect, pixels}
+paint.feed(s, evt.pointerId, paint.in_layer(dom.pointer_samples(evt), box, s))^   // in place: {rect, work}
+let f = paint.frame(s)^                                // in place: {rect, pixels}
 if (f.rect != null) dom.set_canvas_pixels_rect(canvas, f.pixels, f.rect)^
-s = paint.end(f.session, evt.pointerId)^               // one undo entry
+s = paint.end(s, evt.pointerId)^                       // one undo entry
 ```
 
+- `feed(var session, pointer, samples)` is a procedure that continues the stroke in place and
+  returns the batch's `{rect, work}`. Its first batch copies the tiles it touches, which the
+  stroke's undo entry keeps; later batches write those tiles in place while nothing else holds
+  the session. Placing the session into another container between batches, such as a view
+  state rebuilt as `{*: st, ps: s}`, shares it (**S9.3.1**), so the next batch copies its tiles
+  again. Keep it in place instead: pass `st.ps` to `feed` and `frame`, and update other fields
+  with member writes such as `st.token = 0`. Compute the samples first, since a plain argument
+  that reads `st` keeps the borrow a snapshot.
 - `in_layer(samples, box, session, pressure)` moves pen samples from viewport CSS pixels into
   layer pixels for a canvas shown in `box` (`dom.bounding_box`). A non-null `pressure` replaces
   each sample's pressure; a demo might pass 1.0 for a mouse.
-- `frame` returns the dirty rectangle as `(h, w, 4)` sRGB `u8` samples over the paper, and
-  `null`s when nothing changed. A new session's first frame is the whole canvas.
+- `frame(var session)` is a procedure that returns the dirty rectangle as `(h, w, 4)` sRGB `u8`
+  samples over the paper, `{rect, pixels}`, and clears it in place; both are `null` when nothing
+  changed. A new session's first frame is the whole canvas.
 - `undo`, `redo`, `can_undo`, `can_redo`, `clear`, `cancel(s, pointer)` and `mark(s, rect)`
   (present again) complete the history. A history entry keeps the previous layer, whose
   untouched tiles are shared. Entries are dropped oldest first once the tiles they keep exceed
   `history_budget` bytes (256 MiB by default); the newest entry always stays. `undo` during a
   stroke cancels it.
 - `color_at(s, x, y)` is the sRGB colour shown at a layer pixel, for a colour picker.
+- `session(w, h, {texture})` and `with_texture(s, texture)` set the paper texture that every
+  stroke's grain reads: an `(h, w)` height array, or a spec `{kind, seed, size}` that
+  `paint.paper` builds. A painting file keeps a spec and rebuilds the texture when opened.
 - One stroke paints at a time: `begin` from another pointer first ends the stroke in progress.
 
 [`lambda demo paint`](../test/demo/paint/README.md) is built on this session.

@@ -21,7 +21,7 @@
 ## Sync implementation runtime findings — 2026-11-11
 
 The local-repository follow-up fixed and archived [LR07-68](#lr07-68),
-[LR12-45](#lr12-45) and [LR12-46](#lr12-46), with the final **7,458/7,458**
+[LR12-45](#lr12-45), [LR12-46](#lr12-46) and [LR12-47](#lr12-47), with the final **7,458/7,458**
 baseline and tier/GC evidence. The general builtin dynamic-call adapter gap
 [LR07-69](#lr07-69) remains open; it is independent of the direct APIs used by sync.
 
@@ -34,6 +34,31 @@ resolved and archived with reductions, fixes and qualification evidence.
 The separate timeout/cleanup crash [LR01-24](#lr01-24) remains open. The
 workspace member-access observation below retains its original probe; its
 semantics and cause remain unconfirmed. Those two earlier archived records add no live issues.
+## System-function results alias their arguments — 2026-11-11
+
+<a id="lr12-47"></a>
+
+**LR12-47 — FIXED:** system functions and `++` that place an argument's items
+into their result now capture them (S9.3.1), so a write through the argument or
+through the result no longer reaches the other, on either tier. See
+[cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-47>).
+
+## Place borrows and the watercolor timeout — 2026-11-11
+
+<a id="lr12-45"></a>
+
+**LR12-45 — RESOLVED:** a member place passed to a Lambda `pn` beside container
+arguments is now borrowed in place on both tiers unless a plain argument may
+alias it, and MVP no longer captures a binding passed to a forwarding wrapper
+or left untyped by a native `var` call. See
+[cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-45>).
+
+<a id="lr12-46"></a>
+
+**LR12-46 — RESOLVED:** the `proc_procart_watercolor_sim` timeout (recorded
+here as LR12-45 by another session on the same day, renumbered because that ID
+was already in use) came from promoted functions copying the whole cells array
+on each store. See [cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-46>).
 
 ## Radiant integration layout-host selection — 2026-11-11
 
@@ -1420,6 +1445,35 @@ adding a per-crypto ABI exception. The sync implementation calls native APIs
 directly and does not depend on this missing general adapter. No runtime fix,
 golden reinterpretation or formal-spec change is claimed for LR07-69.
 
+<a id="lr07-70"></a>**LR07-70 · Existing JIT/T0 differences block interpreter census refresh · OPEN (2026-11-11)**
+
+The checked-subscript repair passes all 2,216 interpreter goldens, but
+`make interp-sweep ARGS='--jobs 3 --timeout 30'` reports 1,543 matches and six
+differences in its 1,549-row corpus. It refuses list regeneration. Five
+differences reproduce unchanged on the saved original host present at starting
+checkout `8b4fbd521`
+(SHA256 `ee2abf8ce1b8d11639ca210a7618b75d89255546d65200666f7a35ecc40b01fe`):
+
+| Fixture under `test/lambda/` | Interpreter | Eager JIT |
+|---|---|---|
+| `js_array_props_tail_bridge.ls` | golden, final boolean `true` | final boolean `false` |
+| `last_defect_receiver.ls` | golden | compile exit 1 |
+| `ledger_optional_fields.ls` | golden | signal 11 |
+| `proc/interp_var_writeback.ls` | golden | compile exit 1 |
+| `proc/proc_fill_bool_inferred_read.ls` | golden | compile exit 1 |
+
+The sixth row, `conc/proc_handler_fault_after_wait.ls`, differs in the bounded
+sweep but matches in the subsequent isolated before/after probe; its cause is
+unconfirmed. Both probe tiers print `error308` and exit zero in isolation.
+
+Reproduce each stable row with `LAMBDA_EXEC_BACKEND=jit ./lambda.exe <path>`;
+use `run <path>` for `proc/` rows. Repeat with `interp`. Evidence:
+`temp/sweep_full.tsv`, `temp/interp-e501/sweep.log`, and
+`temp/interp-e501/sweep-divergences.json`. Source causes and introducing commits
+remain unconfirmed. These differences violate tier parity (S1.6, D8.3.1),
+block census regeneration, and do not block the interpreter E501 repair.
+The failing oracles and all three generated coverage lists are preserved.
+
 ## 8. Memory management & GC (LR08)
 
 
@@ -1729,6 +1783,7 @@ channel).
 *Fixed 2026-11-03 (direct writes, S7.1.3v3 / S7.7.6v2):* the setter already returned a rich E302, but both tiers could discard it in a procedure without a declared error return. T0 now establishes the store boundary for unannotated roots as well. MIR's raw positional fallback arms route the setter's error through that boundary before statement-result discard. The original `pn main() { var b = [1]; b[5] = 2; print("unreachable") }` reports E302, exits one and never prints the marker on interp/jit/auto. Native-result transport no longer blocks this fix (D7.1.3). `proc/ledger_index_write_error` checks recovery, native int/float results, unchanged snapshots, skipped tails and inner-block containment; the original main is a negative regression. See [implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
 
 *Remaining (needs a ruling):* whether a write error from a plain `pn` must escape a **discarded statement-position call in its caller**, rather than being available as the call's result. This separate caller-boundary policy is not decided by repairing the originating store.
+
 
 ## 13. Schema validator (LR13)
 

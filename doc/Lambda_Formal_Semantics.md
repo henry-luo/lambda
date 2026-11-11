@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 88.1.0 (2026-11-11)
+**Spec version:** 89.0.0 (2026-11-11)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1576,7 +1576,7 @@ Design_Procedural §4–§5]
 - **S9.1.2** Binding, assignment, and construction copy, observably, for
   every container kind. Implementation is COW; **sharing must be
   unobservable** — a verifiable property, not a convention.
-- **S9.1.3v3*** `var` parameters (`pn f(var a: T)`) are explicit inout
+- **S9.1.3v4*** `var` parameters (`pn f(var a: T)`) are explicit inout
   borrows; `fn` has no `var` parameters. Compile checks: arguments must be
   `var`; **exclusivity** (writer-vs-writer only: the same `var` or overlapping
   paths cannot feed two `var` params; plain params snapshot before any
@@ -1586,7 +1586,11 @@ Design_Procedural §4–§5]
   in S9.1.4v2; it does not authorize arbitrary mutable aliases. Writable
   member/index places, including scalar places, are valid inout arguments:
   replacements and partial writes before an error reach the caller's place,
-  while ordinary copies remain snapshots. [USER 2026-11-03; CW33v2]
+  while ordinary copies remain snapshots. A system procedure's `var`
+  parameter declares a **bound**: the argument's declared type `T` must
+  conform to it, and the procedure keeps the value in `T`. This is
+  invariance at `T`. [USER 2026-11-03; CW33v2; USER 2026-11-11, Sys_Func
+  RF7]
 - **S9.1.4v2*** **Capture permissions follow the callable's colour.** An
   `fn` closure captures immutable snapshots: neither rebinding a captured
   name nor writing through it is permitted. A **non-escaping nested `pn`**
@@ -1630,10 +1634,12 @@ Design_Procedural §4–§5]
 
 ### S9.2 Covariance, borrows, and views
 
-- **S9.2.1** *Covariance where values copy, invariance where they're
+- **S9.2.1v2** *Covariance where values copy, invariance where they're
   borrowed*: `int[] <: any[]` holds for `is`, reads, value params, and
   assignment (which copies — the covariant-array hole cannot arise); passing
-  `var xs: int[]` to `pn f(var a: any[])` is a compile error. [C12]
+  `var xs: int[]` to `pn f(var a: any[])` is a compile error. A system
+  procedure's bound is not covariance: the procedure keeps the value in the
+  argument's type, so the hole cannot arise (S9.1.3v4). [C12; Sys_Func RF7]
 - **S9.2.2v2*** Read views are first-class values with snapshot semantics (a
   zero-copy slice observably behaves as a copy taken at creation).
   Write-through views are **borrows, never values** — legal only in
@@ -3243,6 +3249,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S12.1.4v4 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`; local-state body admission is now covered by `test/lambda/fn_local_colour_poly.ls` (2026-11-02). **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.1.1) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
 | S2.5.3v3, S2.5.4v3, S12.1.2v3 | **Fn-local control and M1 handler integration, 2026-11-03.** Functional fallthrough collects normal values; procedural normal results replace earlier results, including null. No-result declarations, assignments and statement loops leave the accumulator unchanged. M1 handlers contribute their ordinary success/recovery result under S7.6.1v9. [Procedural design §2.4](../vibe/Lambda_Design_Procedural.md#24-return-and-block-results), [M1 qualification](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>). |
 | S9.1.3v3, S9.2.2v2 | Place-home publication and numeric-row/view snapshots implemented 2026-11-03 on both tiers; baseline 8,718/8,718. Scalar/nullable/import/error/GC and AUTO-promotion regressions: `vibe/impl/Lambda_Impl_Place_Borrow_Views (done).md`; LR12-10/LR12-14 archived. Broader borrowing checks keep their existing status. |
+| S9.1.3v4, S9.2.1v2 | Bounded `var` parameters of host-module procedures are checked on every tier (2026-11-11): mutable root, exclusivity, place-copy analysis and bound conformance, plus a run-time kind check of each published value. `test/lambda/proc/native_var_proc.ls` and `NegativeScriptTest.SemanticError_NativeVarArguments` cover them. |
 | S12.4.1v3, S12.4.2–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S12.4.4v4 | Scoped SQLite transactions, return admission and statement autocommit ruled 2026-11-03; not implemented. Document `open` early-exit parity is also incomplete. See `vibe/impl/Lambda_Impl_RDB_Write.md`. |
 | S12.4.1v3, S14.3.1v3 (archive input) | Implemented 2026-10-08: ZIP32/ZIP64 input captures immutable bytes and the validated index; member decompression, CRC checking, and parsing occur only on content access. Filesystem Velmt/VArray views retain Input-owned snapshots, parse/error caches, and shared nested budgets. Phase 2 ZIP output is also implemented. Phase 3 native 7z/tar/RAR/RAR5 input is implemented (2026-10-15), with 29/29 native archive regressions and 24/24 new tier/forced-GC goldens verified. Working record: `vibe/Lambda_IO_Zip.md`; verification: `vibe/impl/Lambda_Impl_IO_Zip.md`. |
@@ -3439,7 +3446,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S7.6.1v9, S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v4 | TE-16.2 | `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Syntax.md` |
 | S2.5.3v3, S2.5.4v3, S12.1.2v3; S7.6.1v9, S7.6.7v5 | Design_Procedural §2.4; TE-16.1 | `Lambda_Design_Procedural.md`, `Lambda_Design_Type_Error_Handling.md` |
 | S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3), §4.4 and §12 (S8.2.5–S8.2.6) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
-| S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md`, `Lambda_Typed_Array.md` (S9.3.2) |
+| S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14; Sys_Func RF7 (S9.1.3v4, S9.2.1v2) | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md`, `Lambda_Typed_Array.md` (S9.3.2), `Lambda_Design_Sys_Func.md` (RF7) |
 | S1.4v2, S2.5.3v3, S7.4.6v3, S7.6.1v9; S9.1.3v2–S9.1.4v2, S9.1.7v2; S12.1.2v3–S12.1.3v2; S16.4.3v4, S16.6.5v2, S16.6.7v3–S16.6.9v2 | Local imperative fn; confined shared pn captures (USER, 2026-11-02) | `Lambda_Design_Procedural.md` §2, §4–§6; `Lambda_Design_Syntax.md` §7.31; `Lambda_Design_Type_Error_Handling.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md`, `Lambda_Typed_Array.md` (S10.2.4) |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20, TE-23 (S11.4.12); OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21, SP24 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md` |

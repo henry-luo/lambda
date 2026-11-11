@@ -3168,6 +3168,16 @@ TEST_F(NegativeScriptTest, SemanticError_ImmutableInteriorAssignment) {
         "cannot mutate through immutable binding");
 }
 
+// D7.6.3 / S9.1.3v4: native `var` procedures run the Lambda pn borrow checks.
+TEST_F(NegativeScriptTest, SemanticError_NativeVarArguments) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/native_var_immutable.ls", true,
+        "must be a mutable `var` binding");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/native_var_not_place.ls", true,
+        "must be a local `var` binding or a member/index place of one");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/native_var_bound.ls", true,
+        "must conform to map, got int");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_ImmutablePipeBorrow) {
     const char* tiers[] = {"jit", "interp"};
     for (const char* tier : tiers) {

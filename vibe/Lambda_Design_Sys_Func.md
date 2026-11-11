@@ -1,6 +1,9 @@
 # Lambda System Function Return-Value Convention
 
-- **Status:** design proposal — return-value convention
+- **Status:** design proposal — return-value convention; RF7 (native
+  procedures with `var` parameters) RATIFIED by USER 2026-11-11 as D7.6.3*,
+  D7.6.4*, S9.1.3v4 and S9.2.1v2; RF8 (natives that only read their
+  arguments) RATIFIED by USER 2026-11-11 as D7.6.5*
 - **Date:** 2026-08-05
 - **Scope:** Lambda system functions and procedures that search, select,
   transform, or mutate collections and strings
@@ -399,6 +402,312 @@ result:
 - a future removed-members API would be zero-to-many and therefore return `[]`
   when nothing was removed.
 
+### RF7 — Native procedures with `var` parameters (RATIFIED, USER 2026-11-11)
+
+**Status:** ratified by USER on 2026-11-11 for paint M1h
+(`Lambda_Pkg_Paint.md` PT7), with option (a) of RF7-Q1. Formal text:
+D7.6.3* and D7.6.4* (design spec 66.1.0), S9.1.3v4 and S9.2.1v2 (semantics
+spec 89.0.0). Not implemented yet.
+
+**Problem.** PT7 ruled that native paint kernels write in place through a
+`var` borrow: `paint.stroke(var layer, …)`, `paint.feed(var session, …)`,
+`paint.wet_step(var sheet, …)`. Today no general native form exists:
+
+- Only three natives mutate a `var` argument: `push`, `splice` and map `set`
+  (`SYSPROC_PUSH`, `SYSPROC_SPLICE`, `SYSPROC_VMAP_SET`). Each one is an enum
+  special case in `build_ast.cpp`, `interp.cpp` and `mvp_mir.cpp`. Each takes
+  the owner by value and returns a replacement owner, and the caller writes
+  that back (Model A above).
+- `SysFuncInfo` has no parameter list. `resolve_sys_func_value` builds a
+  `TypeFunc` with no params, so the call validator's `var` arm
+  (`lambda_ast_validate_call_arguments`) never runs for a sys func.
+- The Jube signature scans (`build_ast.cpp`, `jube_signature_*`) skip a
+  `var` marker silently, so a host `pn(var x: map)` is accepted today with
+  value semantics. The write would be lost.
+- The only home transport is `Context::mir_var_homes` plus
+  `LAMBDA_DYNAMIC_CALL_BORROWED`. It serves Lambda callees only. CW33
+  schedules the cells for deletion when the pointer ABI lands.
+- Current idiom: a `pn` wraps a functional native and rebinds
+  (`image.write_region`). The native sees a shared value and forks every
+  level it touches, on every call. PT7 rules this out for live painting: a
+  forked 1-megapixel, 12-plane wet sheet is about 48 MB per step.
+
+**The form.** A native procedure joins the existing `var` protocol
+(S9.1.3v3, D5.4.6). Only the delivery of the home is new.
+
+1. **Registration names the `var` positions.**
+   - Every row carries a `var_mask` bitmask and optional `var_bounds` on
+     `SysFuncInfo` (a new `ValueRep` would ripple through every switch over
+     that enum). Built-in rows can set them; host-module rows get them from
+     the signature.
+   - A host-module function spells it in both signatures:
+     `"pn(var layer: map, dabs: any, options: map|null) -> map"` and
+     `"Item fn_radiant_paint_stroke(Item* layer, Item dabs, Item options)"`.
+   - Registration rejects: `var` in an `fn` signature (S12.1.1v3); `var` on
+     a variadic position; `var` on an async native, which completes after it
+     returns, when the home is gone (CW33 found the same limit for a
+     suspending callee); and a `var` position whose native type is not
+     `Item*`. The Jube
+     scans must parse `var`, never skip it.
+2. **The call uses the Lambda `pn` checks.** The sys func gets the parameter
+   list that its signature declares. Then `lambda_ast_validate_call_arguments`
+   applies the S9.1.3v3 checks unchanged: a mutable root, writer
+   exclusivity, the place-copy analysis
+   (`direct_note_place_copy_var_borrow`) and the type rule (RF7-Q1). There is
+   no first-class reference to such a procedure, so a dynamic call stays
+   rejected (S12.3.2, D7.2.2).
+3. **The native entry receives `Item*` per `var` position.** It is the
+   address of the caller-owned, rooted home of D5.4.6: the T0 frame slot or
+   place leaf, or the MVP deferred `argument_span` slot that
+   `em_publish_var_home` writes. The home is always a boxed `Item`, also for
+   a typed binding: the caller boxes the binding into the home and reloads it
+   after the call, as the boxed `_b` edge does for typed `var` positions
+   (D7.3.4; CW33 "typed half on the boxed edges"). The address is not a value. The caller never roots it, boxes it
+   or puts it in a value span; the argument descriptor carries a pointer rep
+   so the emitter neither roots nor spills it (CW33 blocker 2). The return
+   value is the expression result, not the write-back value (D7.6.2).
+4. **The callee writes in a fixed order** (PT7 steps 2–4, generalized):
+   1. Check every argument and reserve every resource (for paint, the work
+      budget) before the first write.
+   2. Read `*home`. Un-share one level at a time down to the storage that
+      the call writes. Copy a level only when its shared bit is set (D5.4.1,
+      D5.4.2).
+   3. Store each replacement before the next allocation point: the root into
+      the home, a child into its unique parent. The value stays rooted, and
+      an error exit publishes a well-formed value.
+   4. Take data-zone pointers after the last allocation point. Lend them for
+      the work of the call only (D5.4.4, D5.5.2). A call back into Lambda code
+      counts as an allocation point.
+   5. Keep the kind of the value: change members, never the container kind,
+      the element kind or the map shape (RF7-Q1). A write that changes the
+      kind is outside this form.
+   6. Return. Keep neither the home address nor any data-zone pointer.
+5. **The caller writes back on every return, also on an error** (D5.4.6).
+   T0 reuses `interp_borrow_place_leaf` and `publish_places`. MVP reuses the
+   `direct_call` borrow machinery: home publish, post-call reload,
+   `write_place`, and the array-witness refresh. `mvp_parameter_storage_stable`
+   answers false for a native callee, because its proof reads the callee's
+   AST.
+6. **Effects.** A `var` native is MAY_GC, because un-sharing allocates. A
+   native `var` call ends the facts of place handles on that place, as a
+   Lambda `var` call does (D5.4.4 invalidation table). The write scan
+   (`ast_body_may_write_entry`) now counts every root argument of a non-pure
+   sys call as a write. With `var` positions known, it can count only those.
+   This is a later optimization.
+7. **`push`, `splice` and map `set` stay outside the form.** They are its
+   precedent, not instances. They change the kind of an untyped place: `push`
+   widens an `ArrayNum` lane (`pn_push_cow`), and `set` adds a key, which
+   changes the map shape. Step 4.5 forbids both. To stay safe on a typed
+   place, their lowerings pass the place's declared contract to the native
+   (`lambda_array_push_checked`), which the general form does not carry. They
+   also skip the write-back on an error, which is observably the same,
+   because they fail before the place changes value. Their lowerings stay as
+   they are. A general kind-changing form would need the declared contract in
+   the ABI; nothing needs it yet.
+
+**Partial writes.** Step 4.1 makes "a failed call leaves the place
+unchanged" the normal case. If a native still fails after its first write,
+the home holds a well-formed value, and the partial writes reach the caller,
+as S9.1.3v3 permits. PT7's stronger promise is a paint-engine property: the
+engine charges its whole budget first.
+
+**RF7-Q1 — the type rule (USER 2026-11-11: option (a)).** S9.1.3v3 makes `var` parameters
+invariant (S9.2.1): the argument's declared type must equal the parameter's.
+A host module cannot name a package or user type. `procart.watercolor`
+declares `var s: Sheet`, so M3's `paint.wet_step(var sheet)` cannot match
+any type that Radiant can register. Options:
+
+| Option | Rule | Cost |
+|---|---|---|
+| **(a) Bounded parameter** (recommended) | The registered type is a bound. The argument's declared type `T` must conform to it, and the native keeps the value in `T` (step 4.5). This is invariance at `T`, as for a generic `pn f<T: map>(var x: T)`. For a typed binding, the caller checks the published value's kind before it reloads it: the type tag, the element kind of an `ArrayNum`, and the shape of a map. A mismatch is a defect error. | A semantics addition, S9.1.3v4. A few compares per typed `var` argument. |
+| (b) Exact invariance | Natives declare untyped `var` positions. A typed caller copies into an untyped `var` and back. | The copy shares the value, so the native forks it every call. This defeats PT7 for M3. |
+| (c) Registered nominal types | A host module registers the package types it accepts. | Radiant would depend on package types. This breaks the D9.1.1v4 ownership split. Rejected. |
+
+Precedent for (a): `push(var xs: int[], v)` already accepts any array
+place and keeps the place's declared contract by checking `v` against it
+before the write. S9.2.1 forbids covariant `var` passing because a callee
+could store a value outside `T` (the covariant-array hole). Under (a) the
+native cannot: step 4.5 and the caller's check close the hole.
+
+Why check in all builds under (a): MVP reloads a typed binding with its raw
+descriptor. A native that broke the type would corrupt memory without a
+trace, and Jube modules can come from outside the runtime. The check costs a
+few compares per call.
+
+Proposed semantics text for (a), as a sentence added to S9.1.3 (S9.1.3v4):
+*"A system procedure's `var` parameter declares a bound: the argument's
+declared type `T` must conform to it, and the procedure keeps the value in
+`T`. This is invariance at `T`."* S9.2.1 then gains a cross-reference
+(S9.2.1v2): its compile error applies to a `pn` written in Lambda; a system
+procedure's bound is not covariance (S9.1.3v4).
+
+**Alternatives for the native ABI (rejected):**
+
+- *Owner in, replacement out* (Model A, as for `push`): it supports one `var`
+  position only, and the replacement uses up the result channel, which
+  D7.6.2 keeps separate.
+- *The `Context::mir_var_homes` cells*: a side channel that CW33 schedules
+  for deletion. Both tiers would fill it for natives, and natives would
+  read context state.
+- *Raw `Container**` or lane homes*: these belong to the native direct
+  entries of Lambda functions (CW33 full stage). A public sys func uses
+  boxed Items at the boundary (D7.6.1).
+- *The rebinding wrapper*: forks every touched level on every call (see
+  Problem).
+
+**As implemented (2026-11-11, M1h).**
+
+- *Registration:* `jube_signature_var_params` (`build_ast.cpp`) parses `var`
+  in both signatures and fails closed.
+- *Checks:* `validate_native_var_arguments` shares `validate_var_argument_root`
+  with the Lambda `pn` validator and applies the bound with
+  `lambda_static_boundary_relation`. It also sets
+  `AstCallNode::var_alias_capture_mask`: plain arguments that read a borrowed
+  root, or call a definition that might return one, are marked shared before
+  the borrow.
+- *T0:* `interp_call_native_var_proc` (`interp.cpp`) evaluates arguments and
+  place keys in source order (`interp_eval_place_keys` is shared with
+  `interp_borrow_place_leaf`), then borrows. It passes home addresses in a C
+  stack array that is never rooted, and writes back after
+  `lambda_var_home_check_kind`.
+- *MVP:* `native_var_call` (`mvp_mir.cpp`) uses `place_path`,
+  `prepare_place_owner`, `cow_path_borrow_keys`, slots of the rooted argument
+  span as homes, and `write_place`/`publish_place` for the write-back.
+  `jit_import_get_metadata` classifies the `var` positions of a dynamic
+  import as `JIT_VALUE_RAW_NON_GC_POINTER`. This is the fix for CW33's
+  blocker 2: the emitter never roots the address.
+- *Kind check:* the caller checks every native home, typed or not, because
+  D7.6.4 step 5 binds every native.
+- *First kernel:* `radiant.paint_stroke` (`radiant_paint_adapter.cpp`) shares
+  its batch reader and renderer with `radiant.paint_dabs`. `lambda.paint`'s
+  `stroke(var layer, …)` and `feed(var session, …)` call it on their own place
+  (Lambda_Pkg_Paint PT7). A Lambda `pn` call now uses the same alias mask:
+  it borrows a member place in place unless a plain argument may alias it
+  (LR12-45, fixed 2026-11-11).
+- *Tests:* `test/lambda/proc/native_var_proc.ls` covers binding and place
+  homes, snapshots, parity with the pure form, a typed binding and a
+  rejected budget, on three tiers and under forced GC.
+  `NegativeScriptTest.SemanticError_NativeVarArguments` covers the static
+  rejections.
+- *Known residue:* the JIT tier marks a bare binding shared when it passes
+  the binding to an unaudited import, as a capture. The next in-place write
+  then copies the touched levels. Place arguments (`s.layer`) and the T0
+  tier are not affected. Borrow metadata for Jube functions would remove
+  this.
+
+**Implementation map** (survey 2026-11-11; not normative):
+`sys_func_registry.h` (`SysFuncArgDesc`, `SysFuncInfo`), `value_rep.h`;
+the Jube scans and `register_jube_sys_funcs` in `build_ast.cpp`;
+`resolve_sys_func_value` and the push/splice arm (`build_ast.cpp`); T0
+`eval_call` borrow and publish (`interp.cpp`) and the planner caps
+(`interp_plan.cpp`, Item-only and arity ≤ 5); MVP `direct_call` and
+`mutate_collection` (`mvp_mir.cpp`), plan admission and effects
+(`mvp_plan.cpp`); JIT import metadata (`jit_import_*`).
+
+**Formal text as proposed** (entered unchanged into
+`doc/Lambda_Formal_Design.md` §D7.6 on 2026-11-11, with the S9.1.3 citation
+updated to S9.1.3v4):
+
+> - **D7.6.3* — A native procedure can take `var` parameters.** A system
+>   procedure or a host-module `pn` can declare `var` positions. Registration
+>   rejects a `var` position in an `fn`, on a variadic position, or on an
+>   async procedure. A call uses the checks of S9.1.3 and the
+>   caller-owned home of D5.4.6. The native entry receives the address of each
+>   home as an `Item*`. This address is not a value: the caller does not root
+>   it, box it or put it in a value span. A typed binding goes through a boxed
+>   home, and the caller checks the kind of the published value before it
+>   reloads it. The caller writes back each home on every return, also on an
+>   error result. A dynamic call to such a procedure stays rejected (D7.2.2).
+>   `push`, `splice` and map `set` keep their own lowering, because they can
+>   change the kind of an untyped place. [Sys_Func RF7; PT7]
+> - **D7.6.4* — A native procedure writes through its home in a fixed
+>   order.** The native must do these steps:
+>   1. Check the arguments and reserve the resources before the first write.
+>   2. Un-share one level at a time, down to the storage that it writes
+>      (D5.4.1, D5.4.2).
+>   3. Store each replacement in the home, or in its unique parent, before
+>      the next allocation point.
+>   4. Take data-zone pointers after the last allocation point, and lend
+>      them for the work of the call only (D5.4.4, D5.5.2). A call into
+>      Lambda code is an allocation point.
+>   5. Keep the kind of the value. Change members, never the container kind,
+>      the element kind or the map shape.
+>
+>   The native keeps neither the home address nor a data-zone pointer after
+>   it returns. Its return value is the expression result, not the write-back
+>   value (D7.6.2). [Sys_Func RF7]
+
+Ratification (2026-11-11): design spec 66.0.0 → 66.1.0 (rulings added
+compatibly); semantics spec 88.0.0 → 89.0.0 (S9.1.3 and S9.2.1 revised in
+place); Appendix A rows added to both; Appendix C rows point at RF7.
+
+### RF8 — Native functions that only read their arguments (RATIFIED, USER 2026-11-11)
+
+**Problem.** Lambda keeps plain values as snapshots (S9.1.2). A native that
+returns a container holding part of its argument creates a second observer, so
+a later write through the caller's binding must not show through the result.
+MVP guarantees this by capturing every container it passes to a system or host
+function. The registry records nothing about argument retention, so a native
+that only reads its argument pays the same capture. In `lambda demo paint`,
+`radiant.paint_present` reads the layer once per frame; the capture marked the
+layer shared, and the next batch of the stroke copied every tile it touched
+(Lambda_Pkg_Paint PT7).
+
+**Form.** A host-module function can carry `JUBE_FN_READS_ARGS`. The flag
+promises that the function keeps no reference to an argument or to a part of
+one, and that its result contains neither. `SysFuncInfo::reads_args` records
+it. Two consumers honour it:
+- MVP's system-call lowering reads a binding argument without capturing it.
+- The parameter retention scan does not count the call as keeping an argument,
+  so a Lambda function that only passes its parameter to such a native does
+  not look as if it retains it.
+
+**Trust.** This is an audit promise by the module author, not a proof. The
+codebase otherwise narrows by proof; the user chose the flag over a store-side
+change to all natives (below). A wrong flag lets a later write through the
+caller's binding show through the result. Registration rejects the flag on a
+procedure with `var` positions, because those write.
+
+**Alternative considered.** A store-side rule: the natives' result builders
+mark the argument elements they insert (S9.3.1), after which neither tier
+captures native arguments. It needs an audit of every native that copies
+elements into its result, and part of the storing code (`array_set`) belongs to
+lambda-input, so the flag was chosen for read-only natives.
+
+**LR12-47 (later the same day).** The store-side rule was then applied to the
+built-in kernels to fix LR12-47. Their results shared argument items, so a
+write through either the argument or the result reached the other, on both
+tiers in the result direction. The kernels capture each item they place
+(`array_push_verbatim_capture`, `array_capture_items`); `array_set` and
+`array_copy_owned_items` stay untouched. MVP still captures container arguments
+to every native without the flag, as D7.6.5 says; for the built-ins that
+capture is now redundant, and removing it would need a revised ruling.
+
+**As implemented (2026-11-11).** `lambda/jube/jube.h` (`JUBE_FN_READS_ARGS`),
+`sys_func_registry.h` (`reads_args`), the Jube registration in `build_ast.cpp`,
+`cow_param_retention_scan_node`, and the generic system-call lowering in
+`mvp_mir.cpp`. Flagged: `radiant.paint_present`, `paint_sample`,
+`paint_tiles_encode`, `paint_tiles_decode`. Not flagged: `paint_dabs`,
+`paint_wash` and `paint_import`, whose results share the input's tiles, and
+`paint_stroke`. Two refinements landed with it: a final callee keeps a bare
+argument only if it retains its parameter as a root, and a pure `fn` callee
+cannot make a reentry that writes the caller's root (S12.1.1v3). With all three,
+the demo replay writes 38 of 57 tiles in place on AUTO, as on T0.
+
+**Formal text** (design spec 67.2.0):
+
+> - **D7.6.5\* — A native function can declare that it only reads its
+>   arguments.** A host-module function registered with `JUBE_FN_READS_ARGS`
+>   keeps no reference to an argument or to a part of one, and its result
+>   contains neither. Its callers pass container arguments as borrows: the
+>   compiler does not capture them, and the parameter retention analysis does
+>   not count the call as keeping an argument (S9.1.2). The module author makes
+>   this promise; the runtime does not check it. A function that keeps or
+>   returns any part of an argument, for example a layer that shares the
+>   argument's tiles, must not carry the flag. Registration rejects the flag on
+>   a procedure with `var` positions, which write. Without the flag a native is
+>   assumed to keep its arguments. [Sys_Func RF8; USER 2026-11-11]
+
 ---
 
 ## 5. Cross-language convention
@@ -549,6 +858,9 @@ semantics' "cannot be mistaken for success" test.
 6. Tests should cover the three-way distinction for every collection API:
    non-empty success, empty/absent success, and invalid/error.
 7. Raw `-1` helpers (`fn_index_of_raw`, `fn_last_index_of_raw`) are adapter-only surface for C/JavaScript compatibility. Public wrappers must guard error operands first and normalize the negative sentinel to `null`; no Lambda-surface path may call a `_raw` helper directly.
+8. (RF7, D7.6.3.) A native procedure that writes a `var` argument in place
+   declares the position at registration and receives the caller's home as
+   `Item*`; it never returns the replacement owner as its result.
 
 ---
 
@@ -567,6 +879,11 @@ Before registering a collection-related sys func, answer:
 7. Does COW require a distinct internal owner-returning helper?
 8. Can any failure result be mistaken for a valid empty or absent result?
 9. Does the contract smuggle an in-band sentinel — `-1` for absence, `0` or `-1` for "unlimited", an unchanged input for failure? RF3A and the named-option rule of formal-semantics §7.4 forbid all three.
+10. (RF7, D7.6.3–D7.6.4.) If it writes an argument in place: is that position a
+    registered `var` position, is the procedure a `pn` that is not async,
+    and does it follow the RF7 write order (check first, un-share level by
+    level, store replacements before the next allocation, pointers after the
+    last allocation, keep the type)?
 
 If those answers are explicit, `null`, `[]`, and `error` retain one meaning each
 throughout Lambda's system-function surface.

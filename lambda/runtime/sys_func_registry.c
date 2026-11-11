@@ -2613,6 +2613,7 @@ JitImport jit_runtime_imports[] = {
     {"cow_place_leaf", FPTR(cow_place_leaf)},
     {"cow_place_leaf_keys", FPTR(cow_place_leaf_keys)},
     {"cow_path_borrow_keys", FPTR(cow_path_borrow_keys)},
+    {"lambda_var_home_check_kind", FPTR(lambda_var_home_check_kind)},
     {"cow_path_index", FPTR(cow_path_index)},
     {"cow_path_set_keys", FPTR(cow_path_set_keys)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},

@@ -753,6 +753,13 @@ typedef struct AstCallNode : AstNode {
     // S7.7.3: deferred parameter admission adds an error to this call's
     // outcome, independently of the callee's declared return contract.
     bool parameter_admission_may_fail;
+    // D7.6.3 / S9.1.3v4: plain argument positions of a call with `var`
+    // arguments whose values may share storage with a borrowed root. A native
+    // procedure marks them shared before the borrow; a Lambda `pn` borrows its
+    // places in place only when the mask is empty (LR12-45). The mask is
+    // meaningful only when var_alias_proven is set.
+    uint16_t var_alias_capture_mask;
+    bool var_alias_proven;
     // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
     // colour must be checked at run time; 0 when statically resolved.
     uint32_t fn_colour_guard;
@@ -1486,6 +1493,10 @@ typedef struct AstFuncNode : AstNode {
     // live-in locals of a T0 activation. They arrive from another binding's
     // ownership, so each is snapshot-marked at entry like a written param.
     bool is_loop_continuation;
+    // S9.1.2: the parameter retention and return facts are final; set once the
+    // defining module is fully built (lambda_ast_decide_cow_borrows), so a
+    // caller in another module may rely on them.
+    bool cow_param_effects_final;
     Type* declared_return_type;
 } AstFuncNode;
 

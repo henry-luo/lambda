@@ -32,7 +32,7 @@
     "selector": "#paint"
    },
    "attribute": "data-brushes",
-   "equals": "7"
+   "equals": "10"
   },
   {
    "type": "assert_attribute",
@@ -41,6 +41,14 @@
    },
    "attribute": "data-undo",
    "equals": "0"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-paper",
+   "equals": "cold_press"
   },
   {
    "type": "click",
@@ -570,6 +578,70 @@
    "max_b": 70
   },
   {
+   "type": "select_option",
+   "target": {
+    "selector": "#paper"
+   },
+   "value": "rough"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-paper",
+   "equals": "rough"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-brush='7']"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-brush",
+   "equals": "Chalk"
+  },
+  {
+   "type": "pointer_drag",
+   "pointerType": "mouse",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 600,
+    "offset_y": 120
+   },
+   "dx": 200,
+   "dy": 0,
+   "steps": 8
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-undo",
+   "equals": "5"
+  },
+  {
+   "type": "assert_pixel",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 700,
+    "offset_y": 120
+   },
+   "min_r": 180,
+   "max_g": 170,
+   "max_b": 170
+  },
+  {
    "type": "type",
    "target": {
     "selector": "#file-path"
@@ -620,7 +692,7 @@
     "selector": "#paint"
    },
    "attribute": "data-undo",
-   "equals": "5"
+   "equals": "6"
   },
   {
    "type": "assert_pixel",
@@ -661,6 +733,14 @@
     "selector": "#status"
    },
    "contains": "Opened"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-paper",
+   "equals": "rough"
   },
   {
    "type": "assert_pixel",
@@ -704,7 +784,7 @@
     "selector": "#paint"
    },
    "attribute": "data-brushes",
-   "equals": "8"
+   "equals": "11"
   },
   {
    "type": "assert_attribute",

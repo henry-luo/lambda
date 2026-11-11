@@ -686,6 +686,8 @@ static bool array_concat_native_lane(Item left, Item right, Item* joined) {
         }
     }
     result = rooted_result.get();
+    // S9.3.1 (LR12-47): the joined lane shares every operand item.
+    array_capture_items(result, 0, result->length);
     lambda_array_install_rep_cert({.array = result}, cert);
     if (!lambda_array_rep_proves_cert({.array = result}, cert, true)) {
         lambda_array_clear_rep_cert({.array = result});
@@ -757,6 +759,8 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
         // Source tail pointers cannot survive after either operand dies.
         array_copy_owned_items(result, 0, la->items, la->length);
         array_copy_owned_items(result, la->length, ra->items, ra->length);
+        // S9.3.1 (LR12-47): the result shares every operand item.
+        array_capture_items(result, 0, total_len);
         return array_concat_inherit_cert({.array = rooted_result.get()},
                                          rooted_left.get(), rooted_right.get());
     }
@@ -782,6 +786,8 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
         array_set(rooted_result.get(), i, item_at(rooted_left.get(), i));
     for (int64_t i = 0; i < right_len; i++)
         array_set(rooted_result.get(), left_len + i, item_at(rooted_right.get(), i));
+    // S9.3.1 (LR12-47): the result shares every operand item.
+    array_capture_items(rooted_result.get(), 0, total_len);
     return {.array = rooted_result.get()};
 }
 
@@ -804,13 +810,14 @@ static bool join_operand_is_scalar(TypeId type_id) {
 // itself. The destination stays rooted across the reads, which may box a wide
 // scalar out of a packed lane.
 static void join_push_operand(Array* out, Item value, bool is_sequence) {
-    if (!is_sequence) { array_push_verbatim(out, value); return; }
+    // S9.3.1 (LR12-47): the result shares the operand or its items.
+    if (!is_sequence) { array_push_verbatim_capture(out, value); return; }
     RootFrame roots(2);
     Rooted<Array*> rooted_out(roots, out);
     Rooted<Item> rooted_value(roots, value);
     int64_t count = fn_seq_count(rooted_value.get());
     for (int64_t i = 0; i < count; i++) {
-        array_push_verbatim(rooted_out.get(), item_at(rooted_value.get(), i));
+        array_push_verbatim_capture(rooted_out.get(), item_at(rooted_value.get(), i));
     }
 }
 
@@ -853,6 +860,9 @@ Item fn_join_consume_open_array(Item left, Item right) {
     right_array = rooted_right.get().array;
     array_copy_owned_items(left_array, left_array->length,
         right_array->items, right_length);
+    // S9.3.1 (LR12-47): the right operand still holds the appended items.
+    // The consumed left operand has no other observer, so only these are marked.
+    array_capture_items(left_array, left_array->length, left_array->length + right_length);
     left_array->length += right_length;
     return rooted_left.get();
 }
@@ -926,6 +936,9 @@ Item fn_join_fresh_array_item(Item left, Item element) {
     la = rooted_left.get().array;
     array_copy_owned_items(result.get(), 0, la->items, la->length);
     result.get()->length = la->length;
+    // S9.3.1 (LR12-47): the left operand still holds its items. The literal's
+    // item was captured where the literal was compiled.
+    array_capture_items(result.get(), 0, la->length);
     array_push(result.get(), rooted_element.get());
     return {.array = result.get()};
 }
@@ -979,8 +992,10 @@ Item fn_join(Item left, Item right) {
     bool left_seq = join_operand_is_sequence(left_type);
     bool right_seq = join_operand_is_sequence(right_type);
     if (left_seq || right_seq) {
-        if (left_type == LMD_TYPE_NULL) return right;   // null is the identity
-        if (right_type == LMD_TYPE_NULL) return left;
+        // null is the identity; the result is the other operand itself, a
+        // second observer of it (S9.3.1, LR12-47)
+        if (left_type == LMD_TYPE_NULL) return cow_capture_value(right);
+        if (right_type == LMD_TYPE_NULL) return cow_capture_value(left);
         if (!(left_seq || join_operand_is_scalar(left_type)) ||
                 !(right_seq || join_operand_is_scalar(right_type))) {
             return runtime_error_itemf(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
@@ -13857,6 +13872,34 @@ static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
         rooted_current.set(rooted_child.get());
     }
     return rooted_current.get();
+}
+
+// D7.6.4 step 2: a native writes a level in place only when nothing else can
+// observe it; a shared, static or immortal container needs a copy first.
+bool cow_item_is_unique(Item value) {
+    Container* container = cow_item_container(value);
+    return container && !container->is_static && !container->is_immortal &&
+        (container->cow_state & COW_STATE_SHARED) == 0;
+}
+
+// D7.6.3: before a typed place reloads a native procedure's home, the caller
+// checks that the value kept its kind (D7.6.4 step 5): the container kind, an
+// ArrayNum's element kind (the map_kind byte) and a map's or element's shape.
+// A changed kind is a defect of the native; the place keeps its old value.
+Item lambda_var_home_check_kind(Item before, Item after, const char* procedure) {
+    TypeId kind = get_type_id(before);
+    bool kept = get_type_id(after) == kind;
+    if (kept && kind == LMD_TYPE_ARRAY_NUM) {
+        kept = ((Container*)(uintptr_t)before.item)->map_kind ==
+            ((Container*)(uintptr_t)after.item)->map_kind;
+    } else if (kept && (kind == LMD_TYPE_MAP || kind == LMD_TYPE_ELEMENT)) {
+        kept = ((Map*)(uintptr_t)before.item)->type == ((Map*)(uintptr_t)after.item)->type;
+    }
+    if (kept) return after;
+    log_error("var-home: native procedure '%s' changed the kind of a typed var argument",
+        procedure ? procedure : "<native>");
+    return runtime_error_item(ERR_TYPE_MISMATCH,
+        "a native procedure changed the kind of a typed var argument", NULL);
 }
 
 Item cow_path_borrow_home(Item owner, Item path) {

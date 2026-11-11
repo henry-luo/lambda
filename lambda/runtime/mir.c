@@ -125,9 +125,16 @@ bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
         // descriptor-backed modules use the same fixed Item ABI as their
         // exported system-function rows. Keep effects conservative, but let
         // metadata and address lookup recognize the same symbols (D7.6.1).
-        if (!find_dynamic_sys_func_import(name)) return false;
+        const SysFuncInfo* info = find_dynamic_sys_func_info(name);
+        if (!info) return false;
         metadata->ret_class = JIT_VALUE_BOXED_ITEM;
         metadata->flags |= JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_DYNAMIC);
+        // D7.6.3: a `var` position carries the address of a caller-owned home.
+        // It is not a value, so the emitter must never root or rescan it.
+        for (int i = 0; info->var_mask && i < info->arg_count && i < 8; i++) {
+            metadata->arg_classes |= JIT_ARG_CLASS(i, sysfunc_arg_is_var(info, i)
+                ? JIT_VALUE_RAW_NON_GC_POINTER : JIT_VALUE_BOXED_ITEM);
+        }
         return true;
     }
     *metadata = found->metadata;

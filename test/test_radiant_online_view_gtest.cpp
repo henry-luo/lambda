@@ -40,11 +40,110 @@ static_assert(ONLINE_VIEW_DEFAULT_TIMEOUT_SECONDS >
                   RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS,
               "online parent timeout must outlive the script watchdog");
 
+#define ONLINE_VIEW_PAGES_PATH "test/online/pages.csv"
+#define ONLINE_VIEW_CASE_CAPACITY 2048
+#define ONLINE_VIEW_LABEL_CAPACITY 128
+#define ONLINE_VIEW_URL_CAPACITY 2048
+
 struct RadiantOnlineViewCase {
-    const char* label;
-    const char* url;
+    char label[ONLINE_VIEW_LABEL_CAPACITY];
+    char url[ONLINE_VIEW_URL_CAPACITY];
     bool expect_linked_resources;
 };
+
+static RadiantOnlineViewCase g_online_view_cases[ONLINE_VIEW_CASE_CAPACITY];
+
+static bool online_view_read_csv_field(char** cursor, char* output, size_t capacity,
+                                       bool has_following_field) {
+    char* position = *cursor;
+    size_t length = 0;
+    bool quoted = *position == '"';
+    bool closed_quote = !quoted;
+    if (quoted) position++;
+
+    while (*position) {
+        if (quoted && *position == '"') {
+            if (position[1] == '"') {
+                if (length + 1 >= capacity) return false;
+                output[length++] = '"';
+                position += 2;
+            } else {
+                closed_quote = true;
+                position++;
+                break;
+            }
+        } else if (!quoted && *position == ',') {
+            break;
+        } else {
+            if (length + 1 >= capacity) return false;
+            output[length++] = *position++;
+        }
+    }
+
+    if (!closed_quote || length == 0) return false;
+    output[length] = '\0';
+    if (has_following_field) {
+        if (*position != ',') return false;
+        *cursor = position + 1;
+    } else {
+        if (*position != '\0') return false;
+        *cursor = position;
+    }
+    return true;
+}
+
+static size_t online_view_load_cases() {
+    FILE* file = fopen(ONLINE_VIEW_PAGES_PATH, "r");
+    if (!file) return 0;
+
+    char line[4096];
+    if (!fgets(line, sizeof(line), file)) {
+        fclose(file);
+        return 0;
+    }
+
+    size_t count = 0;
+    while (fgets(line, sizeof(line), file)) {
+        size_t length = strlen(line);
+        while (length && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
+            line[--length] = '\0';
+        }
+        if (length == 0) continue;
+        if (count >= ONLINE_VIEW_CASE_CAPACITY) {
+            fclose(file);
+            return 0;
+        }
+
+        char linked_resources[16];
+        char* cursor = line;
+        RadiantOnlineViewCase* view_case = &g_online_view_cases[count];
+        if (!online_view_read_csv_field(&cursor, view_case->label,
+                                        sizeof(view_case->label), true) ||
+            !online_view_read_csv_field(&cursor, view_case->url,
+                                        sizeof(view_case->url), true) ||
+            !online_view_read_csv_field(&cursor, linked_resources,
+                                        sizeof(linked_resources), false)) {
+            fclose(file);
+            return 0;
+        }
+        if (strcmp(linked_resources, "true") == 0) {
+            view_case->expect_linked_resources = true;
+        } else if (strcmp(linked_resources, "false") == 0) {
+            view_case->expect_linked_resources = false;
+        } else {
+            fclose(file);
+            return 0;
+        }
+        count++;
+    }
+
+    bool read_failed = ferror(file) != 0;
+    fclose(file);
+    return read_failed ? 0 : count;
+}
+
+static const size_t k_saas_landing_expansion_count = 700;
+static const size_t g_online_view_case_count = online_view_load_cases();
 
 struct RadiantOnlineViewBuffer {
     char* data;
@@ -70,487 +169,7 @@ struct RadiantOnlineViewResult {
     RadiantOnlineViewBuffer output;
 };
 
-// Radiant online view tests are real-world browser-compatibility smoke tests.
-// The long-term goal is that `lambda view URL` can stably load arbitrary online
-// pages like a browser: download the top-level document and linked resources,
-// parse HTML/CSS/JS, execute supported JS, gracefully ignore or degrade
-// unsupported JS/DOM/CSS features, perform layout, load images and fonts,
-// render, and shut down without crashes, hangs, swallowed runtime errors, or
-// memtrack leaks. URLs in this table should accumulate over time; a page that
-// exposes a crash, leak, timeout, resource error, parser error, script error,
-// layout failure, render failure, or shutdown issue should drive a Radiant or
-// runtime fix rather than being removed from coverage.
-static const RadiantOnlineViewCase g_online_view_cases[] = {
-    {"example", "https://example.com/", false},
-    {"wikipedia", "https://www.wikipedia.org/", true},
-    {"google", "https://www.google.com/", true},
-    {"reactos", "https://reactos.org/", true},
-    {"firefox", "https://www.firefox.com/en-US/", true},
-    {"wikipedia_main_page", "https://en.wikipedia.org/wiki/Main_Page", true},
-    {"apache_foundation", "https://www.apache.org/foundation/", true},
-    {"perl", "https://www.perl.org/", true},
-    {"ruby_lang", "https://www.ruby-lang.org/en/", true},
-    {"curl", "https://curl.se/", true},
-    {"openssl", "https://www.openssl.org/", true},
-    {"nginx", "https://nginx.org/", true},
-    {"apache", "https://www.apache.org/", true},
-    {"libpng", "https://www.libpng.org/pub/png/", false},
-    {"lua", "https://www.lua.org/", true},
-    {"zlib", "https://www.zlib.net/", false},
-    {"example_org", "https://example.org/", false},
-    {"iana_reserved", "https://www.iana.org/domains/reserved", false},
-    {"netlib", "https://www.netlib.org/", false},
-    {"sqlite", "https://www.sqlite.org/index.html", true},
-    {"scheme", "https://www.scheme.org/", false},
-    {"mercurial_scm", "https://www.mercurial-scm.org/", true},
-    {"subversion", "https://subversion.apache.org/", true},
-    {"busybox", "https://www.busybox.net/", false},
-    {"musl_libc", "https://www.musl-libc.org/", false},
-    {"linux_from_scratch", "https://www.linuxfromscratch.org/", true},
-    {"example_net", "https://example.net/", false},
-    {"curl_manpage", "https://curl.se/docs/manpage.html", true},
-    {"curl_sslcerts", "https://curl.se/docs/sslcerts.html", true},
-    {"nginx_core_module", "https://nginx.org/en/docs/http/ngx_http_core_module.html", true},
-    {"curl_faq", "https://curl.se/docs/faq.html", true},
-    {"sqlite_datatypes", "https://www.sqlite.org/datatype3.html", true},
-    {"tomcat_docs", "https://tomcat.apache.org/tomcat-10.1-doc/", true},
-    {"ant_manual", "https://ant.apache.org/manual/", true},
-    {"curl_docs", "https://curl.se/docs/", true},
-    {"curl_libcurl", "https://curl.se/libcurl/", true},
-    {"nginx_docs", "https://nginx.org/en/docs/", true},
-    {"apache_httpd_docs", "https://httpd.apache.org/docs/", true},
-    {"apache_apr", "https://apr.apache.org/", true},
-    {"apache_tomcat", "https://tomcat.apache.org/", true},
-    {"apache_ant", "https://ant.apache.org/", true},
-    {"apache_maven", "https://maven.apache.org/", true},
-    {"openssl_docs", "https://www.openssl.org/docs/", true},
-    {"maven_guides", "https://maven.apache.org/guides/", true},
-    {"lua_pil", "https://www.lua.org/pil/contents.html", false},
-    {"sqlite_docs", "https://www.sqlite.org/docs.html", true},
-    {"sqlite_lang", "https://www.sqlite.org/lang.html", true},
-    {"sqlite_cli", "https://www.sqlite.org/cli.html", true},
-    {"zlib_manual", "https://www.zlib.net/manual.html", false},
-    {"libpng_intro", "https://www.libpng.org/pub/png/pngintro.html", false},
-    {"sqlite_pragma", "https://www.sqlite.org/pragma.html", true},
-    {"busybox_about", "https://www.busybox.net/about.html", false},
-    {"netlib_lapack", "https://www.netlib.org/lapack/", false},
-    {"netlib_blas", "https://www.netlib.org/blas/", false},
-    {"iana_about", "https://www.iana.org/about", true},
-    {"iana_numbers", "https://www.iana.org/numbers", false},
-    {"openstd_c", "https://www.open-std.org/jtc1/sc22/wg14/", false},
-    {"openstd_cpp", "https://www.open-std.org/jtc1/sc22/wg21/", false},
-    {"tcl_lang", "https://tcl.apache.org/", true}, // legacy Tcl Developer Xchange endpoints time out
-    {"cpan", "https://www.cpan.org/", true},
-    {"pcre", "https://www.pcre.org/", false},
-    {"sqlite_capi_intro", "https://www.sqlite.org/c3ref/intro.html", true},
-    {"sqlite_result_codes", "https://www.sqlite.org/rescode.html", true},
-    {"cairographics", "https://www.cairographics.org/", true},
-    {"httpd_home", "https://httpd.apache.org/", true},
-    {"x_org", "https://www.x.org/wiki/", false},
-    {"gnu_home", "https://www.gnu.org/", true},
-    {"python", "https://www.python.org/", true},
-    {"kernel", "https://www.kernel.org/", true},
-    // www.w3.org serves a Cloudflare challenge to noninteractive clients;
-    // retain standards coverage through the project's public GitHub organization.
-    {"w3c", "https://github.com/w3c", true},
-    {"iana_home", "https://www.iana.org/", true},
-    {"debian", "https://www.debian.org/", true},
-    {"freebsd", "https://www.freebsd.org/", true},
-    {"postgresql", "https://www.postgresql.org/", true},
-    {"rust_lang", "https://www.rust-lang.org/", true},
-    {"php", "https://www.php.net/", true},
-    {"openbsd", "https://www.openbsd.org/", true},
-    {"vim", "https://www.vim.org/", true},
-    {"r_project", "https://www.r-project.org/", true},
-    {"cmake", "https://cmake.org/", true},
-    {"llvm", "https://llvm.org/", true},
-    {"rfc_editor", "https://www.rfc-editor.org/", true},
-    {"unicode", "https://www.unicode.org/", true},
-    {"git_scm", "https://git-scm.com/", true},
-    {"valgrind", "https://www.valgrind.org/", true},
-    {"gnuplot", "http://www.gnuplot.info/", true},
-    {"gnu_bash", "https://www.gnu.org/software/bash/", true},
-    {"gnu_make", "https://www.gnu.org/software/make/", true},
-    {"gnu_coreutils", "https://www.gnu.org/software/coreutils/", true},
-    {"gnu_grep", "https://www.gnu.org/software/grep/", true},
-    {"gnu_sed", "https://www.gnu.org/software/sed/", true},
-    {"gnu_gawk", "https://www.gnu.org/software/gawk/", true},
-    {"gnu_gdb", "https://www.gnu.org/software/gdb/", true},
-    {"lua_manual", "https://www.lua.org/manual/5.4/", true},
-    {"musl_manual", "https://www.musl-libc.org/manual.html", false},
-    {"tcpdump", "https://www.tcpdump.org/", false},
-    {"libressl", "https://www.libressl.org/", false},
-    {"freedesktop", "https://gitlab.freedesktop.org/freedesktop/", false},
-    {"httpd_24_docs", "https://httpd.apache.org/docs/2.4/", true},
-    {"apr_generated_docs", "https://apr.apache.org/docs/apr/1.7/", true},
-    {"iana_protocols", "https://www.iana.org/protocols", true},
-    {"rfc_ascii_20", "https://www.rfc-editor.org/rfc/rfc20.html", false},
-    {"rfc_ipv4_791", "https://www.rfc-editor.org/rfc/rfc791.html", false},
-    {"rfc_tcp_793", "https://www.rfc-editor.org/rfc/rfc793.html", false},
-    {"rfc_uri_3986", "https://www.rfc-editor.org/rfc/rfc3986.html", false},
-    {"rfc_tls13_8446", "https://www.rfc-editor.org/rfc/rfc8446.html", false},
-    {"w3c_html52", "https://html.spec.whatwg.org/multipage/", true},
-    {"w3c_css_cascade", "https://drafts.csswg.org/css-cascade-5/", true},
-    {"w3c_css_flexbox", "https://drafts.csswg.org/css-flexbox-1/", true},
-    {"w3c_wcag22", "https://www.a11yproject.com/checklist/", true},
-    {"w3c_xml", "https://www.xml.com/", true},
-    {"python_docs", "https://docs.python.org/3/", true},
-    {"python_tutorial", "https://docs.python.org/3/tutorial/", true},
-    {"python_library", "https://docs.python.org/3/library/index.html", true},
-    {"python_whatsnew", "https://docs.python.org/3/whatsnew/3.13.html", true},
-    {"python_capi", "https://docs.python.org/3/c-api/index.html", true},
-    {"postgres_docs", "https://www.postgresql.org/docs/current/", true},
-    {"postgres_sql_select", "https://www.postgresql.org/docs/current/sql-select.html", true},
-    {"postgres_datatypes", "https://www.postgresql.org/docs/current/datatype.html", true},
-    {"sqlite_quickstart", "https://www.sqlite.org/quickstart.html", true},
-    {"sqlite_json1", "https://www.sqlite.org/json1.html", true},
-    {"sqlite_select", "https://www.sqlite.org/lang_select.html", true},
-    {"curl_libcurl_tutorial", "https://curl.se/libcurl/c/libcurl-tutorial.html", true},
-    {"curl_easy_setopt", "https://curl.se/libcurl/c/curl_easy_setopt.html", true},
-    {"curl_easy_perform", "https://curl.se/libcurl/c/curl_easy_perform.html", true},
-    {"nginx_beginners", "https://nginx.org/en/docs/beginners_guide.html", true},
-    {"nginx_https", "https://nginx.org/en/docs/http/configuring_https_servers.html", true},
-    {"httpd_getting_started", "https://httpd.apache.org/docs/2.4/getting-started.html", true},
-    {"httpd_core", "https://httpd.apache.org/docs/2.4/mod/core.html", true},
-    {"cmake_help", "https://cmake.org/cmake/help/latest/", true},
-    {"cmake_add_executable", "https://cmake.org/cmake/help/latest/command/add_executable.html", true},
-    {"llvm_getting_started", "https://llvm.org/docs/GettingStarted.html", true},
-    {"llvm_langref", "https://llvm.org/docs/LangRef.html", true},
-    {"gcc_manual", "https://gcc.gnu.org/onlinedocs/gcc/", true},
-    {"gcc_option_summary", "https://gcc.gnu.org/onlinedocs/gcc/Option-Summary.html", true},
-    {"gnu_emacs", "https://www.gnu.org/software/emacs/", true},
-    {"gnu_gcc", "https://www.gnu.org/software/gcc/", true},
-    {"gnu_libc", "https://www.gnu.org/software/libc/", true},
-    {"gnu_guile", "https://www.gnu.org/software/guile/", true},
-    {"git_docs_git", "https://git-scm.com/docs/git", true},
-    {"git_book_v2", "https://git-scm.com/book/en/v2", true},
-    {"kernel_docs", "https://www.kernel.org/doc/html/latest/", true},
-    {"kernel_process_docs", "https://www.kernel.org/doc/html/latest/process/", true},
-    {"man7_ls", "https://man7.org/linux/man-pages/man1/ls.1.html", true},
-    {"man7_open", "https://man7.org/linux/man-pages/man2/open.2.html", true},
-    {"openbsd_man_ls", "https://man.openbsd.org/ls", true},
-    {"rust_book", "https://doc.rust-lang.org/book/", true},
-    {"rust_std", "https://doc.rust-lang.org/std/", true},
-    {"go_doc", "https://go.dev/doc/", true},
-    {"go_spec", "https://go.dev/ref/spec", true},
-    {"php_manual", "https://www.php.net/manual/en/", true},
-    {"mdn_html", "https://developer.mozilla.org/en-US/docs/Web/HTML", true},
-    {"mdn_css", "https://developer.mozilla.org/en-US/docs/Web/CSS", true},
-    {"mdn_js_reference", "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference", true},
-    {"whatwg_html", "https://html.spec.whatwg.org/multipage/", true},
-    {"whatwg_dom", "https://dom.spec.whatwg.org/", true},
-    {"whatwg_fetch", "https://fetch.spec.whatwg.org/", true},
-    {"tc39_ecma262", "https://tc39.es/ecma262/", true},
-    {"tc39_ecma402", "https://tc39.es/ecma402/", true},
-    {"nodejs_api", "https://nodejs.org/api/", true},
-    {"nodejs_fs", "https://nodejs.org/api/fs.html", true},
-    {"typescript_docs", "https://www.typescriptlang.org/docs/", true},
-    {"typescript_handbook", "https://www.typescriptlang.org/docs/handbook/intro.html", true},
-    {"go_effective", "https://go.dev/doc/effective_go", true},
-    {"go_pkg_std", "https://pkg.go.dev/std", true},
-    {"rust_cargo_book", "https://doc.rust-lang.org/cargo/", true},
-    {"rust_reference", "https://doc.rust-lang.org/reference/", true},
-    {"boost_docs", "https://www.boost.org/doc/libs/", true},
-    {"eigen_docs", "https://eigen.tuxfamily.org/dox/", true},
-    {"qt_docs", "https://doc.qt.io/qt-6/", true},
-    {"gtk_docs", "https://docs.gtk.org/gtk4/", true},
-    {"webkit", "https://webkit.org/", true},
-    {"mesa3d", "https://www.mesa3d.org/", true},
-    {"ninja_manual", "https://ninja-build.org/manual.html", false},
-    {"meson_docs", "https://mesonbuild.com/", true},
-    {"bazel_docs", "https://bazel.build/docs", true},
-    {"clang_docs", "https://clang.llvm.org/docs/", true},
-    {"lld_docs", "https://lld.llvm.org/", true},
-    {"gdb_docs", "https://sourceware.org/gdb/documentation/", true},
-    {"binutils_docs", "https://sourceware.org/binutils/docs/", true},
-    {"gitlab_docs", "https://docs.gitlab.com/", true},
-    {"github_docs", "https://docs.github.com/en", true},
-    {"docker_docs", "https://docs.docker.com/", true},
-    {"kubernetes_docs", "https://kubernetes.io/docs/home/", true},
-    {"prometheus_docs", "https://prometheus.io/docs/introduction/overview/", true},
-    {"grafana_docs", "https://grafana.com/docs/", true},
-    {"terraform_docs", "https://developer.hashicorp.com/terraform/docs", true},
-    {"ansible_docs", "https://docs.ansible.com/ansible/latest/index.html", true},
-    {"cmake_buildsystem", "https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html", true},
-    {"python_pep8", "https://peps.python.org/pep-0008/", true},
-    {"python_pep3333", "https://peps.python.org/pep-3333/", true},
-    {"java_jls", "https://docs.oracle.com/javase/specs/jls/se21/html/index.html", true},
-    {"java_api", "https://docs.oracle.com/en/java/javase/21/docs/api/index.html", true},
-    {"kotlin_docs", "https://kotlinlang.org/docs/home.html", true},
-    {"scala_docs", "https://docs.scala-lang.org/", true},
-    {"clojure", "https://clojure.org/", true},
-    {"erlang_docs", "https://www.erlang.org/doc/", true},
-    {"elixir_docs", "https://hexdocs.pm/elixir/", true},
-    {"ocaml_docs", "https://ocaml.org/docs", true},
-    {"haskell_docs", "https://www.haskell.org/documentation/", true},
-    {"racket_docs", "https://docs.racket-lang.org/", true},
-    {"w3c_css_snapshot", "https://drafts.csswg.org/", true},
-    {"w3c_webgpu", "https://gpuweb.github.io/gpuweb/", true},
-    {"w3c_websockets", "https://websockets.spec.whatwg.org/", true},
-    {"w3c_wai_aria", "https://w3c.github.io/aria/", true},
-    {"chromium_docs", "https://www.chromium.org/developers/", true},
-    {"v8_docs", "https://v8.dev/docs", true},
-    {"webkit_blog", "https://webkit.org/blog/", true},
-    {"servo_docs", "https://servo.org/", true},
-    {"electron_docs", "https://www.electronjs.org/docs/latest/", true},
-    {"deno_docs", "https://docs.deno.com/", true},
-    {"bun_docs", "https://bun.sh/docs", true},
-    {"npm_docs", "https://docs.npmjs.com/", true},
-    {"yarn_docs", "https://yarnpkg.com/getting-started", true},
-    {"pnpm_docs", "https://pnpm.io/", true},
-    {"vite_docs", "https://vite.dev/guide/", true},
-    {"webpack_docs", "https://webpack.js.org/concepts/", true},
-    {"rollup_docs", "https://rollupjs.org/introduction/", true},
-    {"eslint_docs", "https://eslint.org/docs/latest/", true},
-    {"prettier_docs", "https://prettier.io/docs/", true},
-    {"react_docs", "https://react.dev/learn", true},
-    {"vue_docs", "https://vuejs.org/guide/introduction.html", true},
-    {"svelte_docs", "https://svelte.dev/docs", true},
-    {"angular_docs", "https://angular.dev/overview", true},
-    {"solid_docs", "https://docs.solidjs.com/", true},
-    {"nextjs_docs", "https://nextjs.org/docs", true},
-    {"nuxt_docs", "https://nuxt.com/docs/getting-started/introduction", true},
-    {"astro_docs", "https://docs.astro.build/en/getting-started/", true},
-    {"remix_docs", "https://remix.run/docs/en/main", true},
-    {"tailwind_docs", "https://tailwindcss.com/docs", true},
-    {"bootstrap_docs", "https://getbootstrap.com/docs/5.3/getting-started/introduction/", true},
-    {"bulma_docs", "https://bulma.io/documentation/", true},
-    {"material_ui_docs", "https://mui.com/material-ui/getting-started/", true},
-    {"ant_design_docs", "https://ant.design/docs/react/introduce", true},
-    {"chakra_docs", "https://chakra-ui.com/docs/get-started/installation", true},
-    {"cloudflare_docs", "https://developers.cloudflare.com/", true},
-    {"aws_docs", "https://docs.aws.amazon.com/", true},
-    {"azure_docs", "https://learn.microsoft.com/en-us/azure/", true},
-    {"gcp_docs", "https://cloud.google.com/docs", true},
-    {"digitalocean_docs", "https://docs.digitalocean.com/", true},
-    {"supabase_docs", "https://supabase.com/docs", true},
-    {"firebase_docs", "https://firebase.google.com/docs", true},
-    {"vercel_docs", "https://vercel.com/docs", true},
-    {"netlify_docs", "https://docs.netlify.com/", true},
-    {"nginx_unit_docs", "https://unit.nginx.org/", true},
-    {"redis_docs", "https://redis.io/docs/latest/", true},
-    {"mongodb_docs", "https://www.mongodb.com/docs/", true},
-    {"mysql_docs", "https://dev.mysql.com/doc/", true},
-    {"mariadb_docs", "https://mariadb.com/kb/en/documentation/", true},
-    {"duckdb_docs", "https://duckdb.org/docs/", true},
-    {"grafana_loki_docs", "https://grafana.com/docs/loki/latest/", true},
-    {"cern_www_project", "http://info.cern.ch/hypertext/WWW/TheProject.html", false},
-    {"w3c_www_history", "https://info.cern.ch/hypertext/WWW/TheProject.html", false},
-    {"web_dev", "https://web.dev/", true},
-    {"chrome_developers", "https://developer.chrome.com/docs/", true},
-    {"webassembly", "https://webassembly.org/", true},
-    {"emscripten_docs", "https://emscripten.org/docs/", true},
-    {"wasm_core_spec", "https://webassembly.github.io/spec/core/", true},
-    {"wasi_docs", "https://wasi.dev/", true},
-    {"wasmtime_docs", "https://docs.wasmtime.dev/", true},
-    {"mlir_docs", "https://mlir.llvm.org/docs/", true},
-    {"zig_docs", "https://ziglang.org/documentation/master/", true},
-    {"nim_docs", "https://nim-lang.org/documentation.html", true},
-    {"crystal_docs", "https://crystal-lang.org/reference/latest/", true},
-    {"dart_docs", "https://dart.dev/guides", true},
-    {"flutter_docs", "https://docs.flutter.dev/", true},
-    {"ruby_docs", "https://docs.ruby-lang.org/en/master/", true},
-    {"rails_guides", "https://guides.rubyonrails.org/", true},
-    {"django_docs", "https://docs.djangoproject.com/en/stable/", true},
-    {"flask_docs", "https://flask.palletsprojects.com/en/stable/", true},
-    {"fastapi_docs", "https://fastapi.tiangolo.com/", true},
-    {"sqlalchemy_docs", "https://docs.sqlalchemy.org/en/20/", true},
-    {"pandas_docs", "https://pandas.pydata.org/docs/", true},
-    {"numpy_docs", "https://numpy.org/doc/stable/", true},
-    {"scipy_docs", "https://docs.scipy.org/doc/scipy/", true},
-    {"matplotlib_docs", "https://matplotlib.org/stable/", true},
-    {"jupyter_docs", "https://docs.jupyter.org/en/latest/", true},
-    {"pytorch_docs", "https://pytorch.org/docs/stable/index.html", true},
-    {"tensorflow_guide", "https://www.tensorflow.org/guide", true},
-    {"sklearn_docs", "https://scikit-learn.org/stable/", true},
-    {"huggingface_docs", "https://huggingface.co/docs", true},
-    {"opencv_docs", "https://docs.opencv.org/4.x/", true},
-    {"ffmpeg_docs", "https://ffmpeg.org/documentation.html", true},
-    {"imagemagick_docs", "https://imagemagick.org/script/command-line-processing.php", true},
-    {"blender_manual", "https://docs.blender.org/manual/en/latest/", true},
-    {"godot_docs", "https://docs.godotengine.org/en/stable/", true},
-    {"unity_manual", "https://docs.unity3d.com/Manual/index.html", true},
-    {"unreal_docs", "https://dev.epicgames.com/documentation/en-us/unreal-engine", true},
-    {"pygame_docs", "https://www.pygame.org/docs/", true},
-    {"mdn_canvas", "https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API", true},
-    {"caniuse", "https://caniuse.com/", true},
-    {"css_tricks_flexbox", "https://css-tricks.com/snippets/css/a-guide-to-flexbox/", true},
-    {"ietf_datatracker", "https://datatracker.ietf.org/", true},
-    {"cve_mitre", "https://cve.mitre.org/", true},
-    {"nvd_nist", "https://nvd.nist.gov/", true},
-    {"owasp_top_ten", "https://owasp.org/www-project-top-ten/", true},
-    {"letsencrypt_docs", "https://letsencrypt.org/docs/", true},
-    {"certbot_docs", "https://eff-certbot.readthedocs.io/en/stable/", true},
-    {"tor_support", "https://support.torproject.org/", true},
-    {"wireshark_docs", "https://www.wireshark.org/docs/", true},
-    {"nmap_book", "https://nmap.org/book/man.html", true},
-    {"rsync_samba", "https://rsync.samba.org/", true},
-    {"samba_docs", "https://www.samba.org/samba/docs/", true},
-    {"systemd_docs", "https://systemd.io/", true},
-    {"archwiki_main", "https://wiki.archlinux.org/title/Main_page", true},
-    {"gentoo_wiki_main", "https://wiki.gentoo.org/wiki/Main_Page", true},
-    {"ubuntu_docs", "https://documentation.ubuntu.com/", true},
-    {"redhat_docs", "https://docs.redhat.com/", true},
-    {"fedora_docs", "https://docs.fedoraproject.org/en-US/docs/", true},
-    {"alpine_wiki_main", "https://wiki.alpinelinux.org/wiki/Main_Page", true},
-    {"nixos_manual", "https://nixos.org/manual/nixos/stable/", true},
-    {"homebrew_docs", "https://docs.brew.sh/", true},
-    {"macports_guide", "https://guide.macports.org/", true},
-    {"freebsd_handbook", "https://docs.freebsd.org/en/books/handbook/", true},
-    {"openbsd_faq", "https://www.openbsd.org/faq/", true},
-    {"netbsd_docs", "https://www.netbsd.org/docs/", true},
-    {"qemu_docs", "https://www.qemu.org/docs/master/", true},
-    {"virtualbox_manual", "https://www.virtualbox.org/manual/", true},
-    {"podman_docs", "https://docs.podman.io/en/latest/", true},
-    {"helm_docs", "https://helm.sh/docs/", true},
-    {"envoy_docs", "https://www.envoyproxy.io/docs/envoy/latest/", true},
-    {"openjdk_docs", "https://openjdk.org/projects/jdk/", true},
-    {"eclipse_help", "https://help.eclipse.org/latest/index.jsp", true},
-    {"jetbrains_idea_help", "https://www.jetbrains.com/help/idea/getting-started.html", true},
-    {"gradle_docs", "https://docs.gradle.org/current/userguide/userguide.html", true},
-    {"maven_pom_ref", "https://maven.apache.org/pom.html", true},
-    {"spring_framework_docs", "https://docs.spring.io/spring-framework/reference/", true},
-    {"quarkus_guides", "https://quarkus.io/guides/", true},
-    {"micronaut_docs", "https://docs.micronaut.io/latest/guide/", true},
-    {"llvm_doxygen", "https://llvm.org/doxygen/", true},
-    {"clang_tidy_docs", "https://clang.llvm.org/extra/clang-tidy/", true},
-    {"cppreference", "https://en.cppreference.com/w/", true},
-    {"cplusplus_ref", "https://cplusplus.com/reference/", true},
-    {"iso_cpp", "https://isocpp.org/", true},
-    {"boost_asio_docs", "https://www.boost.org/doc/libs/release/doc/html/boost_asio.html", true},
-    {"qt_qml_docs", "https://doc.qt.io/qt-6/qmlapplications.html", true},
-    {"gnome_developer_docs", "https://developer.gnome.org/documentation/", true},
-    {"kde_develop_docs", "https://develop.kde.org/docs/", true},
-    {"freedesktop_specs", "https://specifications.freedesktop.org/", true},
-    {"wayland_docs", "https://wayland.freedesktop.org/docs/html/", true},
-    {"xiph", "https://xiph.org/", true},
-    {"matroska_specs", "https://www.matroska.org/technical/diagram.html", true},
-    {"w3c_svg2", "https://svgwg.org/svg2-draft/", true},
-    {"w3c_uievents", "https://w3c.github.io/uievents/", true},
-    {"whatwg_encoding", "https://encoding.spec.whatwg.org/", true},
-    {"webgl_spec", "https://registry.khronos.org/webgl/specs/latest/1.0/", true},
-    // The monolithic reference is 40 MB and exceeds a smoke test's document budget.
-    {"vulkan_spec", "https://registry.khronos.org/vulkan/specs/latest/html/", true},
-    {"opengl_wiki", "https://docs.gl/", true},
-    {"mdn_webgl", "https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API", true},
-    {"w3c_selectors4", "https://drafts.csswg.org/selectors-4/", true},
-    {"w3c_css_grid", "https://drafts.csswg.org/css-grid-2/", true},
-    {"w3c_css_color", "https://drafts.csswg.org/css-color-4/", true},
-    {"nasa", "https://www.nasa.gov/", true},
-    {"noaa", "https://www.noaa.gov/", true},
-    {"usgs", "https://www.usgs.gov/", true},
-    {"nist", "https://www.nist.gov/", true},
-    {"loc", "https://www.loc.gov/", true},
-    {"archive_org", "https://archive.org/", true},
-    {"openstreetmap_wiki", "https://wiki.openstreetmap.org/wiki/Main_Page", true},
-    {"wiktionary_main", "https://en.wiktionary.org/wiki/Wiktionary:Main_Page", true},
-    {"wikibooks_main", "https://en.wikibooks.org/wiki/Main_Page", true},
-    {"wikidata_main", "https://www.wikidata.org/wiki/Wikidata:Main_Page", true},
-    {"crates_io", "https://crates.io/", true},
-    {"pypi", "https://pypi.org/", true},
-    {"rubygems", "https://rubygems.org/", true},
-    {"packagist", "https://packagist.org/", true},
-    {"nuget", "https://www.nuget.org/", true},
-    {"maven_central", "https://central.sonatype.com/", true},
-    {"pkgx_docs", "https://docs.pkgx.sh/", true},
-    {"conda_forge_docs", "https://conda-forge.org/docs/", true},
-    {"clickhouse_docs", "https://clickhouse.com/docs/", true},
-    {"elastic_docs", "https://www.elastic.co/docs", true},
-    {"opensearch_docs", "https://docs.opensearch.org/latest/", true},
-    {"cassandra_docs", "https://cassandra.apache.org/doc/latest/", true},
-    {"cockroach_docs", "https://www.cockroachlabs.com/docs/stable/", true},
-    {"influx_docs", "https://docs.influxdata.com/", true},
-    {"sphinx_docs", "https://www.sphinx-doc.org/en/master/", true},
-    {"mkdocs_docs", "https://www.mkdocs.org/", true},
-    {"docusaurus_docs", "https://docusaurus.io/docs", true},
-    {"hugo_docs", "https://gohugo.io/documentation/", true},
-    {"jekyll_docs", "https://jekyllrb.com/docs/", true},
-    {"wordpress_docs", "https://wordpress.org/documentation/", true},
-    {"drupal_docs", "https://www.drupal.org/docs", true},
-    {"joomla_docs", "https://docs.joomla.org/Main_Page", true},
-    {"latex_project_docs", "https://www.latex-project.org/help/documentation/", true},
-    {"tex_live_docs", "https://tug.org/texlive/doc.html", true},
-    {"pandoc_manual", "https://pandoc.org/MANUAL.html", true},
-    {"commonmark_spec", "https://spec.commonmark.org/0.31.2/", true},
-    {"asciidoctor_docs", "https://docs.asciidoctor.org/asciidoc/latest/", true},
-    {"pulumi_docs", "https://www.pulumi.com/docs/", true},
-    {"openapi_spec", "https://spec.openapis.org/oas/latest.html", true},
-    {"json_schema_docs", "https://json-schema.org/learn/getting-started-step-by-step", true},
-    {"yaml_spec", "https://yaml.org/spec/1.2.2/", true},
-    {"toml_spec", "https://toml.io/en/v1.0.0", true},
-    {"protobuf_docs", "https://protobuf.dev/overview/", true},
-    {"grpc_docs", "https://grpc.io/docs/", true},
-    {"flatbuffers_docs", "https://flatbuffers.dev/", true},
-    {"capnproto_docs", "https://capnproto.org/", true},
-    {"apache_arrow_docs", "https://arrow.apache.org/docs/", true},
-    {"parquet_docs", "https://parquet.apache.org/docs/", true},
-    {"orc_docs", "https://orc.apache.org/docs/", true},
-    {"kafka_docs", "https://kafka.apache.org/documentation/", true},
-    {"pulsar_docs", "https://pulsar.apache.org/docs/", true},
-    {"rabbitmq_docs", "https://www.rabbitmq.com/docs", true},
-    {"nats_docs", "https://docs.nats.io/", true},
-    {"zeromq_docs", "https://zeromq.org/get-started/", true},
-    {"istio_docs", "https://istio.io/latest/docs/", true},
-    {"linkerd_docs", "https://linkerd.io/2.16/overview/", true},
-    {"consul_docs", "https://developer.hashicorp.com/consul/docs", true},
-    {"vault_docs", "https://developer.hashicorp.com/vault/docs", true},
-    {"nomad_docs", "https://developer.hashicorp.com/nomad/docs", true},
-    {"opentelemetry_docs", "https://opentelemetry.io/docs/", true},
-    {"jaeger_docs", "https://www.jaegertracing.io/docs/latest/", true},
-    {"minio_docs", "https://min.io/docs/minio/linux/index.html", true},
-    {"ceph_docs", "https://docs.ceph.com/en/latest/", true},
-    {"gluster_docs", "https://docs.gluster.org/en/latest/", true},
-    {"openzfs_docs", "https://openzfs.github.io/openzfs-docs/", true},
-    {"btrfs_docs", "https://btrfs.readthedocs.io/en/latest/", true},
-    {"llvm_libc_docs", "https://libc.llvm.org/", true},
-    {"freetype_docs", "https://freetype.org/freetype2/docs/", true},
-    {"harfbuzz_docs", "https://harfbuzz.github.io/", true},
-    {"pango_docs", "https://docs.gtk.org/Pango/", true},
-    {"libjpeg_turbo_docs", "https://libjpeg-turbo.org/Documentation/Documentation", true},
-    {"zstd_docs", "https://facebook.github.io/zstd/", true},
-    {"brotli_repo", "https://github.com/google/brotli", true},
-    {"libxml2_docs", "https://gnome.pages.gitlab.gnome.org/libxml2/", true},
-    {"libxslt_docs", "https://gnome.pages.gitlab.gnome.org/libxslt/", true},
-    {"swift_docs", "https://www.swift.org/documentation/", true},
-    {"julia_docs", "https://docs.julialang.org/en/v1/", true},
-    {"dlang_docs", "https://dlang.org/documentation.html", true},
-    {"fortran_docs", "https://fortran-lang.org/learn/", true},
-    {"ada_docs", "https://learn.adacore.com/", true},
-    {"elm_docs", "https://guide.elm-lang.org/", true},
-    {"fsharp_docs", "https://learn.microsoft.com/en-us/dotnet/fsharp/", true},
-    {"raku_docs", "https://docs.raku.org/", true},
-    {"gleam_docs", "https://gleam.run/documentation/", true},
-    {"rescript_docs", "https://rescript-lang.org/docs/manual/latest/introduction", true},
-    {"reason_docs", "https://reasonml.github.io/docs/en/what-and-why", true},
-    {"roc_docs", "https://www.roc-lang.org/", true},
-    {"odin_docs", "https://odin-lang.org/docs/", true},
-    {"vlang_docs", "https://docs.vlang.io/", true},
-    {"pip_docs", "https://pip.pypa.io/en/stable/", true},
-    {"poetry_docs", "https://python-poetry.org/docs/", true},
-    {"uv_docs", "https://docs.astral.sh/uv/", true},
-    {"setuptools_docs", "https://setuptools.pypa.io/en/latest/", true},
-    {"sphinx_theme_docs", "https://pydata-sphinx-theme.readthedocs.io/en/stable/", true},
-    {"readthedocs_docs", "https://docs.readthedocs.com/platform/stable/", true},
-    {"home_assistant_docs", "https://www.home-assistant.io/docs/", true},
-    {"esp_idf_docs", "https://docs.espressif.com/projects/esp-idf/en/latest/esp32/", true},
-    {"zephyr_docs", "https://docs.zephyrproject.org/latest/", true},
-    {"arduino_docs", "https://docs.arduino.cc/", true},
-    {"raspberry_pi_docs", "https://www.raspberrypi.com/documentation/", true},
-    {"ros_docs", "https://docs.ros.org/en/rolling/", true},
-    {"opencv_tutorials", "https://docs.opencv.org/4.x/d9/df8/tutorial_root.html", true},
-    {"threejs_docs", "https://threejs.org/docs/", true},
-    {"d3_docs", "https://d3js.org/getting-started", true},
-    {"chartjs_docs", "https://www.chartjs.org/docs/latest/", true},
-    {"leaflet_docs", "https://leafletjs.com/reference.html", true},
-    {"mapbox_docs", "https://docs.mapbox.com/", true},
-    {"openlayers_docs", "https://openlayers.org/doc/", true},
-    {"qgis_docs", "https://docs.qgis.org/latest/en/docs/", true},
-    // Keep the large, ordered landing-page expansion separate for review.
-#include "radiant_online_urls_700.inc"
-};
-
-static const size_t k_saas_landing_expansion_count = 700;
-
+// The shared CSV inventory drives both this smoke test and local snapshot capture.
 static const char* online_view_normalized_site_start(const char* start,
                                                      const char* end) {
     const char* previous_dot = NULL;
@@ -967,7 +586,7 @@ static void online_view_expect_case(size_t index) {
     const char* lambda_exe = online_view_lambda_exe();
     ASSERT_TRUE(online_view_file_readable(lambda_exe)) << "online renderer not found";
     ASSERT_TRUE(online_view_file_executable(lambda_exe)) << "online renderer is not executable";
-    ASSERT_LT(index, sizeof(g_online_view_cases) / sizeof(g_online_view_cases[0]));
+    ASSERT_LT(index, g_online_view_case_count);
 
     RadiantOnlineViewResult result;
     const RadiantOnlineViewCase* view_case = &g_online_view_cases[index];
@@ -1052,7 +671,7 @@ static void online_view_expect_case_range(size_t first, size_t past_end) {
 }
 
 TEST(RadiantOnlineViewTest, GeneratedSaasLandingUrlsStayDiverse) {
-    const size_t total = sizeof(g_online_view_cases) / sizeof(g_online_view_cases[0]);
+    const size_t total = g_online_view_case_count;
     ASSERT_GE(total, k_saas_landing_expansion_count);
     const size_t first = total - k_saas_landing_expansion_count;
     for (size_t index = first; index < total; index++) {

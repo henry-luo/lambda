@@ -207,7 +207,7 @@ fn dab_row(cb, c, s) {
         bucket: clamp(1.0 * floor(v.smudge_bucket), 0.0, 255.0), dh: clamp(v.change_color_h, -1.0, 1.0),
         dl: clamp(v.change_color_l, -1.0, 1.0), dhsl_s: clamp(v.change_color_hsl_s, -1.0, 1.0),
         dv: clamp(v.change_color_v, -1.0, 1.0), dhsv_s: clamp(v.change_color_hsv_s, -1.0, 1.0),
-        tip: -1.0, grain: c.grain, profile: 0.0, blend: c.blend})
+        tip: c.tip, grain: c.grain, profile: 0.0, blend: c.blend})
 }
 
 // emits the dabs of one move (libmypaint stroke_to's loop) and returns {state, rows}.

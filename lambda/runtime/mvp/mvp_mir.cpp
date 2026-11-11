@@ -4737,16 +4737,12 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
     // pure builtin allocations cannot mutate an earlier actual; its precise root still survives GC.
     for (int n = 0; n < provided || n < f->abi.param_count; n++)
         pure_arguments &= mvp_pure_key(actuals[n], 0, true);
-    // a single borrow with pure scalar siblings cannot retain an ancestor or
-    // change the selected place while later arguments are evaluated (S9.1.3).
-    bool exclusive_place = pure_arguments;
-    int var_count = 0;
-    for (AstNamedNode* p = f->ast->param; p; p = (AstNamedNode*)p->next) {
-        TypeParam* type = lambda_type_param(p->type);
-        if (type && type->is_var_param) var_count++;
-        else exclusive_place &= !ast_type_may_be_container(mvp_contract(p));
-    }
-    exclusive_place &= var_count == 1;
+    // pure arguments cannot change a selected place while later arguments are
+    // evaluated, and an empty alias mask proves that no plain argument reads a
+    // borrowed root or calls something that might return part of one, so its
+    // snapshot cannot share the leaf (S9.1.3, LR12-45).
+    bool exclusive_place = pure_arguments && call && call->var_alias_proven &&
+        !call->var_alias_capture_mask;
     int i = 0;
     for (; i < f->abi.param_count; param = (AstNamedNode*)param->next, i++) {
         AstNode* arg = actuals[i];
@@ -4811,12 +4807,16 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
             mvp_parameter_borrowable(c->module, param);
         // snapshot elision needs no physical layout proof. An unchanged
         // boundary and the shared effects suffice for a nonretaining reader.
+        // a pure `fn` writes nothing, and whatever it reenters is pure too
+        // (S12.1.1v3), so reentry through it cannot change the caller's root.
+        bool reentry_writes = f->abi.effects.may_reenter && lambda_type_func_is_proc(f->ast->type);
         bool observes_parameter = pure_arguments && source && param->entry &&
             !lambda_type_param(param->type)->is_var_param &&
-            // a retained projection captures its own child. Without reentry,
-            // that boundary suffices; a whole-root escape still needs capture.
+            // a retained projection captures its own child. Without a reentry
+            // that writes, that boundary suffices; a whole-root escape still
+            // needs capture.
             !param->entry->cow_param_mutated && (!param->entry->cow_param_retained ||
-                (!param->entry->cow_param_root_retained && !f->abi.effects.may_reenter)) &&
+                (!param->entry->cow_param_root_retained && !reentry_writes)) &&
             mvp_boundary_proven(source->contract, mvp_contract(param));
         // a confined callee copies at entry. Pure actuals and absence of a
         // simultaneous var borrow preserve the argument-evaluation snapshot.
@@ -5152,6 +5152,92 @@ static MIR_reg_t collection_mutation_call(MvpCompiler* c, SysFunc fn, MIR_reg_t 
         MIR_T_I64, reg(c, args[0].reg), MIR_T_I64, reg(c, args[1].reg), true);
 }
 
+// D7.6.3: a native `var` procedure. Plain arguments and place keys run in source
+// order; plain values that may share storage with a place are marked shared
+// (S9.1.3v4). Each `var` argument then gets a caller-owned home in the rooted
+// argument span (D5.4.6): a binding's value, or a place's leaf after its root
+// and spine are prepared. The import receives the home addresses, which its
+// metadata classifies as raw non-GC pointers, so they are never rooted. Every
+// home is written back on every return, after the kind check (D7.6.4 step 5).
+static MirValue native_var_call(MvpCompiler* c, AstCallNode* node, SysFuncInfo* info) {
+    int count = mvp_call_argument_count(node);
+    MirValue values[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    MvpPlace places[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    for (int i = 0; i < count; i++) {
+        AstNode* arg = mvp_call_argument(node, i);
+        if (!sysfunc_arg_is_var(info, i)) {
+            values[i] = convert(c, expression(c, arg), VALUE_REP_ITEM);
+            continue;
+        }
+        places[i] = place_path(c, arg);
+        if (!places[i].root) {
+            mvp_reject(c->module, (AstNode*)node, "native var argument requires a resolved place");
+            return null_value(c);
+        }
+    }
+    for (int i = 0; i < count; i++) {
+        if (!(node->var_alias_capture_mask & (1u << i))) continue;
+        values[i] = value(c, em_call_1(&c->em, cow_import("cow_capture_value", "cow_capture_value_profiled"),
+            MIR_T_I64, MIR_T_I64, reg(c, values[i].reg), true), LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
+    }
+    MIR_reg_t outcome = em_new_reg(&c->em, "native_var_outcome", MIR_T_I64);
+    MIR_label_t finished = label(c);
+    MIR_reg_t span = argument_span(c, count);
+    MIR_reg_t homes[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    MIR_reg_t before[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    for (int i = 0; i < count; i++) {
+        if (!sysfunc_arg_is_var(info, i)) continue;
+        MIR_reg_t leaf;
+        if (places[i].count) {
+            MIR_reg_t prepared = prepare_place_owner(c, places[i].root);
+            MIR_reg_t keys = place_keys_span(c, &places[i]);
+            leaf = em_call_3(&c->em, "cow_path_borrow_keys", MIR_T_I64,
+                MIR_T_I64, reg(c, prepared), MIR_T_P, reg(c, keys),
+                MIR_T_I64, imm(c, places[i].count), true);
+            release_argument_span(c, keys, places[i].count);
+            // a failed borrow is the call's value; no place has changed yet.
+            MIR_label_t borrowed = label(c);
+            branch(c, MIR_BNE, borrowed, reg(c, operation(c, MIR_URSH, reg(c, leaf), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
+            move(c, outcome, reg(c, leaf)); jump(c, finished); mark(c, borrowed);
+        } else {
+            leaf = convert(c, read_binding(c, places[i].root, mvp_call_argument(node, i), false),
+                VALUE_REP_ITEM).reg;
+        }
+        homes[i] = operation(c, MIR_ADD, reg(c, span), imm(c, i * sizeof(Item)));
+        em_store_at(&c->em, homes[i], 0, MIR_T_I64, leaf);
+        before[i] = leaf;
+    }
+    MIR_type_t types[LAMBDA_MAX_FUNCTION_ARGS]; MIR_op_t ops[LAMBDA_MAX_FUNCTION_ARGS];
+    for (int i = 0; i < count; i++) {
+        types[i] = MIR_T_I64;
+        ops[i] = reg(c, sysfunc_arg_is_var(info, i) ? homes[i] : values[i].reg);
+    }
+    move(c, outcome, reg(c, em_call_with_args(&c->em, info->c_func_name, MIR_T_I64,
+        count, types, ops, true)));
+    for (int i = 0; i < count; i++) {
+        if (!sysfunc_arg_is_var(info, i)) continue;
+        MIR_reg_t updated = em_load_at(&c->em, homes[i], 0, MIR_T_I64, "var_reloaded");
+        MIR_reg_t checked = em_call_3(&c->em, "lambda_var_home_check_kind", MIR_T_I64,
+            MIR_T_I64, reg(c, before[i]), MIR_T_I64, reg(c, updated),
+            MIR_T_P, imm(c, (intptr_t)info->name), true);
+        MIR_label_t kept = label(c), done = label(c);
+        branch(c, MIR_BNE, kept, reg(c, operation(c, MIR_URSH, reg(c, checked), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
+        move(c, outcome, reg(c, checked)); jump(c, done);
+        mark(c, kept);
+        // an in-place write already reached the installed leaf or binding.
+        branch(c, MIR_BEQ, done, reg(c, checked), reg(c, before[i]));
+        if (places[i].count)
+            write_place(c, places[i], value(c, checked, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY), (AstNode*)node);
+        else publish_place(c, places[i].root, checked);
+        mark(c, done);
+    }
+    mark(c, finished);
+    release_argument_span(c, span, count);
+    Type* contract = mvp_value_contract(c->module, node);
+    if (node->propagate) contract = lambda_type_union_normalized(c->module->tp->pool, contract, &TYPE_ERROR);
+    return value(c, outcome, contract->type_id, VALUE_REP_ITEM, contract, node);
+}
+
 static MirValue mutate_collection(MvpCompiler* c, AstCallNode* node, SysFuncInfo* info) {
     MvpPlace place = place_path(c, mvp_call_argument(node, 0));
     if (!place.root) {
@@ -5396,6 +5482,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
         return value(c, em_select_tasks(&c->em, node), LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
     if (info->fn == SYSPROC_PUSH || info->fn == SYSPROC_SPLICE || info->fn == SYSPROC_VMAP_SET)
         return mutate_collection(c, node, info);
+    if (info->var_mask) return native_var_call(c, node, info);
     if (info->fn == SYSFUNC_ORD) {
         AstFieldNode* index = mvp_string_index(c->module, mvp_call_argument(node, 0), 0, true);
         if (index) return string_character(c, index, true);
@@ -5738,7 +5825,13 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
     }
     MirValue arguments[LAMBDA_MAX_FUNCTION_ARGS];
     int i = 0;
-    for (; i < mvp_call_argument_count(node); i++) arguments[i] = expression(c, mvp_call_argument(node, i));
+    for (; i < mvp_call_argument_count(node); i++) {
+        AstNode* arg = mvp_call_argument(node, i);
+        // D7.6.5: a function that only reads its arguments keeps no second
+        // observer, so a binding passes as a borrow instead of being captured.
+        MvpBinding* borrowed = info->reads_args ? mvp_local_binding(c->module, arg) : NULL;
+        arguments[i] = borrowed ? read_binding(c, borrowed, arg, false) : expression(c, arg);
+    }
     MIR_label_t slice_done = NULL;
     MIR_reg_t slice_result = 0;
     if (info->fn == SYSFUNC_SLICE && i == 3 && result_rep == VALUE_REP_ITEM) {

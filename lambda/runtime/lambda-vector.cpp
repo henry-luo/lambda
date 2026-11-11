@@ -164,6 +164,8 @@ static Array* vector_to_plain_array(Item item, int64_t len) {
     for (int64_t i = 0; i < len; i++) {
         Item value = vector_get(rooted_source.get(), i);
         result = rooted_result.get();
+        // S9.3.1 (LR12-47): the result shares the item with the source.
+        cow_capture_value(value);
         // rehome wide scalars into the result-owned tail (D2.4.2).
         array_set(result, i, value);
     }
@@ -1909,6 +1911,8 @@ Item fn_fill(Item n_item, Item value) {
         Rooted<Item> rooted_value(roots, value);
         Rooted<Array*> rooted_result(roots, array());
         for (int64_t i = 0; i < n; i++) array_push(rooted_result.get(), rooted_value.get());
+        // S9.3.1 (LR12-47): every slot shares an item of the list argument.
+        array_capture_items(rooted_result.get(), 0, rooted_result.get()->length);
         return seq_finish_array({ .array = rooted_result.get() });
     }
     if (n == 0) {
@@ -1931,6 +1935,8 @@ Item fn_fill(Item n_item, Item value) {
         result->type_id = LMD_TYPE_ARRAY;
         result->length = n;  result->extra = 0;  result->capacity = n;
         result->items = (Item*)(result + 1);
+        // S9.3.1 (LR12-47): every slot shares the argument.
+        cow_capture_value(value);
         for (int64_t i = 0; i < n; i++) {
             result->items[i] = value;
         }
@@ -2634,7 +2640,7 @@ static Item vector_select_items(Item source, int64_t start, int64_t end, bool re
     Rooted<Array*> rooted_result(roots, array());
     for (int64_t k = 0; k < end - start; k++) {
         Item value = vector_get(rooted_source.get(), reversed ? end - 1 - k : start + k);
-        array_push_verbatim(rooted_result.get(), value);
+        array_push_verbatim_capture(rooted_result.get(), value);
     }
     return array_transform_finish(rooted_source.get(), {.array = rooted_result.get()});
 }
@@ -2896,7 +2902,9 @@ Item fn_reduce(Item collection, Item func_item) {
 
     int64_t len = vector_length(rooted_collection.get());
     if (len <= 0) return ItemNull;  // empty collection
-    if (len == 1) return vector_get(rooted_collection.get(), 0);  // single element
+    // S9.3.1 (LR12-47): the result can be an item of the collection, or what
+    // the callback returned of its parameters, so it is captured.
+    if (len == 1) return cow_capture_value(vector_get(rooted_collection.get(), 0));
 
     uint64_t* accumulator_home = lambda_side_number_alloc();
     if (!accumulator_home) {
@@ -2912,7 +2920,7 @@ Item fn_reduce(Item collection, Item func_item) {
         rooted_acc.set(acc);
         if (get_type_id(acc) == LMD_TYPE_ERROR) return acc;  // propagate error
     }
-    return rooted_acc.get();
+    return cow_capture_value(rooted_acc.get());
 }
 
 // unique(vec) - remove duplicates
@@ -2978,7 +2986,7 @@ Item fn_unique(Item item) {
             }
         }
         if (!found) {
-            array_push_verbatim(result, elem);
+            array_push_verbatim_capture(result, elem);
         }
     }
     return seq_finish_array(array_transform_finish(rooted_source.get(),
@@ -3036,7 +3044,7 @@ static Item vector_keep_by_membership(Item source, Item other, bool keep_members
         Bool present = fn_in(rooted_elem.get(), rooted_other.get());
         if (present >= BOOL_ERROR) return ItemError;
         if ((present == BOOL_TRUE) == keep_members) {
-            array_push_verbatim(rooted_result.get(), rooted_elem.get());
+            array_push_verbatim_capture(rooted_result.get(), rooted_elem.get());
         }
     }
     return seq_finish_array({ .array = rooted_result.get() });
@@ -5500,8 +5508,8 @@ Item fn_zip(Item a, Item b) {
         rooted_pair.set(pair);
         rooted_left.set(vector_get(rooted_a.get(), i));
         rooted_right.set(vector_get(rooted_b.get(), i));
-        array_push_verbatim((Array*)rooted_pair.get(), rooted_left.get());
-        array_push_verbatim((Array*)rooted_pair.get(), rooted_right.get());
+        array_push_verbatim_capture((Array*)rooted_pair.get(), rooted_left.get());
+        array_push_verbatim_capture((Array*)rooted_pair.get(), rooted_right.get());
         array_push_verbatim((Array*)rooted_result.get(), { .array = rooted_pair.get() });
         rooted_pair.set((List*)NULL);
         rooted_left.set(ItemNull);

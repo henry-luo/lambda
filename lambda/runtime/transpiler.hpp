@@ -208,8 +208,6 @@ void write_var_name_for_script(StrBuf *strbuf, AstNode *node, const Script* impo
 // Shared AST/MIR helpers.
 // The entry fn_map_set writes for `name` (a repeated literal key's first).
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
-// The entry a member read resolves (a repeated literal key's last, S1.6).
-ShapeEntry* find_shape_read_field_by_name(TypeMap* map_type, const char* name, int name_len);
 // Object literals carry only the supplied named fields.  Construction must
 // align each value with its declared ShapeEntry so omitted fields can run their
 // declared defaults instead of being shifted into a later storage lane.

@@ -17,7 +17,7 @@ let line = [[20, 50], [120, 50]]
 let d = paint.dabs(hard, red, line)^
 check("dab-spacing", d.count == 51 and len(d.table) == 51 * 34)
 
-let painted = paint.stroke(blank, hard, red, line)^
+let painted = paint.stroke_step(blank, hard, red, line)^
 check("paints", paint.pixel(painted.layer, 70, 50)^ == [255, 0, 0, 255])
 check("outside", paint.pixel(painted.layer, 70, 70)^[3] == 0)
 check("rect", painted.rect == [15, 45, 125, 55])
@@ -29,24 +29,24 @@ let path = [[20, 50, 0.2], [55.5, 50.2, 0.9], [90.25, 51.0, 0.4], [120, 50, 1.0]
 let soft = paint.brush({size: 12.0, hardness: 0.4, flow: 0.6, spacing: 0.17})^
 let first = paint.stroke_step(blank, soft, red, [path[0], path[1]])^
 let second = paint.stroke_step(blank, soft, red, [path[2], path[3]], first)^
-let whole = paint.stroke(blank, soft, red, path)^
+let whole = paint.stroke_step(blank, soft, red, path)^
 check("split-equals-whole", second.layer == whole.layer and second.bounds == whole.rect)
 check("earlier-state-intact", first.layer != second.layer)
 
 // wash composites the stroke once: retracing never exceeds the stroke opacity
 let retrace = [[20, 50], [40, 50], [20, 50], [40, 50]]
 let wash = paint.brush({size: 16.0, hardness: 0.5, opacity: 0.5, mode: 'wash'})^
-let washed = paint.stroke(blank, wash, red, retrace)^
+let washed = paint.stroke_step(blank, wash, red, retrace)^
 let wash_alpha = paint.pixel(washed.layer, 30, 50)^[3]
 check("wash-caps-at-opacity", wash_alpha >= 120 and wash_alpha <= 128)
-let built = paint.stroke(blank, paint.brush({size: 16.0, hardness: 0.5, opacity: 0.5})^, red, retrace)^
+let built = paint.stroke_step(blank, paint.brush({size: 16.0, hardness: 0.5, opacity: 0.5})^, red, retrace)^
 check("buildup-compounds", paint.pixel(built.layer, 30, 50)^[3] > 200)
 let wash_first = paint.stroke_step(blank, wash, red, [retrace[0], retrace[1]])^
 let wash_rest = paint.stroke_step(blank, wash, red, [retrace[2], retrace[3]], wash_first)^
 check("wash-split-equals-whole", wash_rest.layer == washed.layer)
 
 let eraser = paint.brush({size: 14.0, hardness: 1.0, aa: 0.0, erase: true})^
-let erased = paint.stroke(painted.layer, eraser, red, [[60, 50], [80, 50]])^
+let erased = paint.stroke_step(painted.layer, eraser, red, [[60, 50], [80, 50]])^
 check("erase", paint.pixel(erased.layer, 70, 50)^[3] == 0 and paint.pixel(erased.layer, 40, 50)^[3] == 255)
 
 // opaque sRGB samples survive import into linear light and presentation
@@ -55,7 +55,7 @@ check("pixels-round-trip", paint.present(paint.from_pixels(pixels)^)^ == pixels)
 check("background", paint.present(blank, {rect: [0, 0, 1, 1], background: [1.0, 1.0, 1.0, 1.0]})^[0, 0] == [255, 255, 255, 255])
 
 check("unknown-option", match (paint.brush({sise: 3}) ^ { ^ }) { case error: true default: false })
-check("bad-colour", match (paint.stroke(blank, hard, [2.0, 0.0, 0.0], line) ^ { ^ }) { case error: true default: false })
+check("bad-colour", match (paint.stroke_step(blank, hard, [2.0, 0.0, 0.0], line) ^ { ^ }) { case error: true default: false })
 check("continuation-mismatch", match (paint.stroke_step(blank, wash, red, [[1, 1]], first) ^ { ^ }) { case error: true default: false })
 check("empty-batch", match (paint.stroke_step(blank, soft, red, [], first) ^ { ^ }) { case error: true default: false })
 check("work-budget", match (strokes.render(blank, d.table, d.count, 10) ^ { ^ }) { case error: true default: false })

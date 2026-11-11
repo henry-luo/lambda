@@ -407,7 +407,10 @@ bool mvp_index_key(LambdaMvpModule* m, AstNode* node, int depth) {
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         MvpFunction* function = mvp_function(m, ast_direct_call_function(call));
-        if (!function || function->imported || function->ast->captures || function->method_owner ||
+        // a Lambda `fn` is pure wherever it was compiled (S12.1.1v3), so a sibling
+        // a satellite reaches through its boxed entry qualifies on the same AST
+        // facts; only a JS export has no Lambda AST to check.
+        if (!function || function->js_export_name || function->ast->captures || function->method_owner ||
                 function->ast->is_async || function->ast->is_generator ||
                 lambda_type_func_is_proc(function->ast->type) || mvp_variadic_function(function) ||
                 mvp_function_binder_count(function) || mvp_call_argument_count(call) != function->abi.param_count)
@@ -626,6 +629,16 @@ static bool binding_var_borrow_scan(LambdaMvpModule* m, MvpBinding* binding,
                 return true;
             }
         }
+        // D7.6.3: a native `var` procedure borrows its places as a Lambda pn does,
+        // so storage proofs see it. It never changes the owner's kind or stores
+        // an error: the caller's kind check rejects the first and the second is
+        // the call's outcome (D7.6.4 step 5). An open-contract query, which asks
+        // whether the binding must widen to `any`, therefore skips it.
+        SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC && !open_only
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+        for (int j = 0; sys && sys->var_mask && j < mvp_call_argument_count(call); j++)
+            if (sysfunc_arg_is_var(sys, j) &&
+                    mvp_place_root(m, mvp_call_argument(call, j)) == binding) return true;
         // a projected var argument can invalidate the root's transitive proof.
         for (int j = 0; j < mvp_call_argument_count(call) && param; j++, param = (AstNamedNode*)param->next) {
             AstNode* arg = mvp_call_argument(call, j);
@@ -3466,6 +3479,10 @@ static bool admitted_call(LambdaMvpModule* m, AstCallNode* call, bool task_launc
     SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
     if (!info || (info->fn != SYSPROC_PRINT && count > LAMBDA_MAX_FUNCTION_ARGS))
         return mvp_reject(m, call, "unsupported builtin argument count");
+    // D7.6.3: each `var` home is a local binding or a place rooted at one.
+    for (int j = 0; info->var_mask && j < count; j++)
+        if (sysfunc_arg_is_var(info, j) && !mvp_place_root(m, mvp_call_argument(call, j)))
+            return mvp_reject(m, call, "native var arguments require a local place");
     switch (info->fn) {
     case SYSPROC_PRINT: case SYSPROC_SELECT:
         return true;

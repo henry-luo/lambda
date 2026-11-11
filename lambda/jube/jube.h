@@ -83,6 +83,12 @@ typedef enum JubeFuncFlags {
     JUBE_FN_NONE = 0,
     JUBE_FN_METHOD_ELIGIBLE = 1u << 0,
     JUBE_FN_VARARGS = 1u << 1,
+    // D7.6.5: the function only reads its arguments. It keeps no reference to
+    // an argument or to a part of one, and its result contains neither, so a
+    // caller passes container arguments without marking them shared. The
+    // module author promises this; a wrong flag lets a later write through the
+    // caller's binding show through the result.
+    JUBE_FN_READS_ARGS = 1u << 2,
 } JubeFuncFlags;
 
 // Modules classify only the JavaScript-observable shapes they consume. The

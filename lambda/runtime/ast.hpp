@@ -504,6 +504,20 @@ static inline bool ast_declared_type_is_map(Type* declared) {
         lambda_type_nonnull_map_contract(semantic));
 }
 
+// the entry a member read resolves (a repeated literal key's last, S1.6)
+ShapeEntry* find_shape_read_field_by_name(TypeMap* map_type, const char* name, int name_len);
+
+// explicit receiver fields share the same binding as bare method fields
+static inline ShapeEntry* ast_object_member_field(TypeObject* owner,
+        AstNode* object, AstNode* key) {
+    object = ast_unwrap_primary_to_leaf(object);
+    key = ast_unwrap_primary_to_leaf(key);
+    if (!owner || !object || object->node_type != AST_NODE_CURRENT_ITEM ||
+            !key || key->node_type != AST_NODE_IDENT) return NULL;
+    String* name = ((AstIdentNode*)key)->name;
+    return find_shape_read_field_by_name((TypeMap*)owner, name->chars, name->len);
+}
+
 // Object fields take precedence over methods at member lookup time. Keep the
 // same table walk available to both T0 admission and execution so a callable
 // field cannot be mistaken for a bound method.
@@ -546,17 +560,6 @@ static inline bool ast_declared_type_is_open_item(Type* declared) {
         (right && right->type_id == LMD_TYPE_ANY);
 }
 
-// a plain container argument may snapshot an ancestor of a borrowed place.
-// scalar-only siblings cannot alias its storage, so the home may reuse the leaf.
-static inline bool ast_call_has_plain_container_parameter(const TypeFunc* signature) {
-    for (const TypeParam* param = signature ? signature->param : NULL;
-            param; param = param->next) {
-        if (!param->is_var_param && (!param->full_type ||
-                ast_type_may_be_container(param->full_type))) return true;
-    }
-    return false;
-}
-
 // `arg_nodes` (optional) receives the resolved argument node for each `var`
 // parameter, so a caller can tell a PLACE borrow (`f(var m.rows[i])`, CW25)
 // from a bare-binding borrow. A place has no NameEntry of its own, so its
@@ -568,14 +571,17 @@ static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
     AstFuncNode* target = ast_direct_call_function(call);
     if (!target || !signature || !entries || signature->is_variadic ||
             signature->param_count < 0 ||
-            signature->param_count > LAMBDA_MAX_FUNCTION_ARGS ||
-            signature->required_param_count != signature->param_count) {
+            signature->param_count > LAMBDA_MAX_FUNCTION_ARGS) {
         return false;
     }
 
     int source_count = 0;
     for (AstNode* arg = call->argument; arg; arg = arg->next) source_count++;
-    if (source_count + (call->pipe_inject ? 1 : 0) != signature->param_count) return false;
+    // an omitted optional parameter takes its default in the callee frame,
+    // as for any direct call; only `var` positions need a caller place.
+    int supplied = source_count + (call->pipe_inject ? 1 : 0);
+    if (supplied < signature->required_param_count ||
+            supplied > signature->param_count) return false;
 
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     ast_resolve_call_arguments(call, target, source_count, resolved);
@@ -585,7 +591,8 @@ static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
         if (arg_nodes) arg_nodes[index] = NULL;
         if (!param || !param->is_var_param) continue;
         AstNode* argument = ast_unwrap_primary(resolved[index]);
-        if (!argument) return false;
+        // an omitted `var` argument has no caller place to borrow
+        if (!argument || ast_is_omitted_argument(argument)) return false;
         if (arg_nodes) arg_nodes[index] = argument;
         if (argument->node_type != AST_NODE_IDENT) {
             // CW25: a member/index path is a place borrow. Only shapes the

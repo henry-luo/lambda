@@ -806,9 +806,8 @@ static bool interp_constrained_type_matches(InterpFrame* f,
     TypeConstrained* constrained, Scratch& subject);
 
 // Multi-axis ArrayNum operations use one stack-local coordinate buffer. The
-// admitted syntax permits only scalar coordinates, but each expression still
-// finishes before the next one so a future supported leaf cannot borrow an
-// unrooted Item across a safepoint.
+// each expression is decoded before the next runs, so no coordinate Item
+// survives unrooted across a later expression's safepoint.
 static bool interp_eval_ndim_indices(InterpFrame* f, AstNode* first,
         int64_t* indices, int* count) {
     *count = 0;
@@ -1928,6 +1927,8 @@ static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
 
     if (sysfunc_params_reject_error(info)) {
         for (int i = 0; i < argc; i++) {
+            // a `var` position carries a home address, not a value (D7.6.3)
+            if (sysfunc_arg_is_var(info, i)) continue;
             // S11.4.3 (LR12-25, LR12-36): the call's value is the rejected
             // error; it never returns from this activation (S7.7.3)
             if (item_is_error(args[i])) return args[i];
@@ -2097,6 +2098,32 @@ public:
     InterpLastIndexGuard& operator=(const InterpLastIndexGuard&) = delete;
 };
 
+// evaluate a place's keys once, in source order, into a rooted plain array.
+// `owner` is the root's value; `last` in a key reads the container it indexes.
+// The caller checks interp_frame_pending: a raising key leaves the path partial.
+static bool interp_eval_place_keys(InterpFrame* f, const AstCowPath* place,
+        Item owner, Scratch* path_slot) {
+    path_slot->set(interp_ptr_item(array_plain()));
+    // the key count is static: size the rooted array once, not per push
+    if (!array_reserve_append_slots((Array*)(uintptr_t)path_slot->get().item,
+            place->count)) return false;
+    Scratch key_owner(f);
+    key_owner.set(owner);
+    for (int seg = 0; seg < place->count; seg++) {
+        InterpLastIndexGuard last_scope(f->st, key_owner.home());
+        Scratch key_slot(f);
+        key_slot.set(interp_eval_cow_path_key(f, place->segment[seg],
+            place->is_member[seg]));
+        if (interp_frame_pending(f)) return true;
+        Array* keys = (Array*)(uintptr_t)path_slot->get().item;
+        if (!keys) return false;
+        array_push_verbatim(keys, key_slot.get());
+        if (seg + 1 < place->count)
+            key_owner.set(cow_path_index(key_owner.get(), key_slot.get()));
+    }
+    return true;
+}
+
 // prepare a rooted place descriptor for a builtin writer or an inout home.
 // user calls retain its keys and publish replacements after the callee returns.
 static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
@@ -2121,26 +2148,10 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
     interp_write_binding(f, root_entry, root_slot.get());
 
     Scratch path_slot(f);
-    path_slot.set(interp_ptr_item(array_plain()));
-    // the key count is static: size the rooted array once, not per push
-    if (!array_reserve_append_slots((Array*)(uintptr_t)path_slot.get().item,
-            place.count)) return false;
-    Scratch key_owner(f);
-    key_owner.set(root_slot.get());
-    for (int seg = 0; seg < place.count; seg++) {
-        InterpLastIndexGuard last_scope(f->st, key_owner.home());
-        Scratch key_slot(f);
-        key_slot.set(interp_eval_cow_path_key(f, place.segment[seg],
-            place.is_member[seg]));
-        if (interp_frame_pending(f)) {
-            *leaf = ItemNull;
-            return true;
-        }
-        Array* keys = (Array*)(uintptr_t)path_slot.get().item;
-        if (!keys) return false;
-        array_push_verbatim(keys, key_slot.get());
-        if (seg + 1 < place.count)
-            key_owner.set(cow_path_index(key_owner.get(), key_slot.get()));
+    if (!interp_eval_place_keys(f, &place, root_slot.get(), &path_slot)) return false;
+    if (interp_frame_pending(f)) {
+        *leaf = ItemNull;
+        return true;
     }
     if (saved_path) *saved_path = path_slot.get();
     if (saved_root) *saved_root = root_entry;
@@ -2149,6 +2160,128 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
                        : snapshot_home ? cow_path_borrow_home(root_slot.get(), path_slot.get())
                                     : cow_path_borrow(root_slot.get(), path_slot.get());
     return true;
+}
+
+// D7.6.3: call a native `var` procedure. Plain arguments and place keys run in
+// source order. Plain values that may share storage with a place are marked
+// shared, so they stay snapshots (S9.1.3v4). Each `var` argument then gets a
+// caller-owned rooted home (D5.4.6): a binding's current value, or a place's
+// leaf after its root and spine are prepared. The native receives the home
+// addresses, never rooted as values. Every home is written back on every
+// return, also on an error result, after the kind check (D7.6.4 step 5).
+static Item interp_call_native_var_proc(InterpFrame* f, AstCallNode* node,
+        SysFuncInfo* sinfo, int argc, const Item* injected) {
+    if (argc > 5) {
+        log_error("interp: native var procedure '%s' arity %d exceeds the dispatch table",
+            sinfo->name ? sinfo->name : "<null>", argc);
+        return ItemError;
+    }
+    RootSpan homes((size_t)(argc > 0 ? argc : 1));   // plain values and var homes
+    RootSpan paths((size_t)(argc > 0 ? argc : 1));
+    RootSpan before((size_t)(argc > 0 ? argc : 1));
+    if (!homes.valid() || !paths.valid() || !before.valid()) return ItemError;
+    NameEntry* roots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    bool is_place[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    int i = 0;
+    if (injected) homes.items()[i++] = *injected;
+    for (AstNode* a = node->argument; a && i < argc; a = a->next, i++) {
+        if (!sysfunc_arg_is_var(sinfo, i)) {
+            homes.items()[i] = eval_expr(f, a);
+            if (interp_frame_pending(f)) return ItemNull;
+            continue;
+        }
+        AstNode* arg = ast_unwrap_primary(a);
+        if (arg && arg->node_type == AST_NODE_IDENT) {
+            roots[i] = ((AstIdentNode*)arg)->entry;
+            continue;
+        }
+        AstCowPath place = {};
+        if (!ast_collect_cow_path(&place, arg) || place.count == 0 || !place.root ||
+                place.root->node_type != AST_NODE_IDENT) {
+            log_error("interp: native var procedure '%s': argument %d is not a place",
+                sinfo->name, i + 1);
+            return ItemError;
+        }
+        roots[i] = ((AstIdentNode*)place.root)->entry;
+        is_place[i] = true;
+        Scratch path_slot(f);
+        if (!interp_eval_place_keys(f, &place, interp_read_binding(f, roots[i]),
+                &path_slot)) return ItemError;
+        if (interp_frame_pending(f)) return ItemNull;
+        paths.items()[i] = path_slot.get();
+    }
+    for (int n = 0; n < argc; n++) {
+        if (node->var_alias_capture_mask & (1u << n)) cow_capture_value(homes.items()[n]);
+    }
+    for (int n = 0; n < argc; n++) {
+        NameEntry* entry = roots[n];
+        if (!entry) continue;
+        if (is_place[n]) {
+            // detach and install the root and spine; the leaf becomes the home.
+            homes.items()[n] = interp_read_binding(f, entry);
+            if (!is_container_type_id(get_type_id(homes.items()[n]))) {
+                return runtime_error_item(ERR_TYPE_MISMATCH,
+                    "a var place must start at a container", NULL);
+            }
+            Item private_root = cow_prepare_write(homes.items()[n]);
+            if (item_is_error(private_root)) return private_root;
+            if (private_root.item != homes.items()[n].item) {
+                homes.items()[n] = private_root;
+                interp_write_binding(f, entry, private_root);
+            }
+            Item leaf = cow_path_borrow(homes.items()[n], paths.items()[n]);
+            if (item_is_error(leaf)) return leaf;
+            homes.items()[n] = leaf;
+        } else {
+            homes.items()[n] = interp_read_binding(f, entry);
+            if (entry->is_var_param && entry->storage_assigned &&
+                    (uint32_t)entry->slot < 32 &&
+                    (f->var_marked_mask & (1u << entry->slot))) {
+                // LR12-10: a re-borrow of a `var` parameter this frame has
+                // shared detaches first, as for a Lambda callee.
+                Item prepared = cow_prepare_write(homes.items()[n]);
+                if (item_is_error(prepared)) return prepared;
+                homes.items()[n] = prepared;
+                interp_write_binding(f, entry, prepared);
+                f->var_marked_mask &= ~(1u << entry->slot);
+            }
+        }
+        before.items()[n] = homes.items()[n];
+    }
+    // the C stack holds the call words: home addresses must never be scanned.
+    Item words[5];
+    for (int n = 0; n < argc; n++) {
+        words[n] = roots[n] ? (Item){.item = (uint64_t)(uintptr_t)&homes.words()[n]}
+                            : homes.items()[n];
+    }
+    Item result = eval_sys_call(f, sinfo, words, argc, node->type);
+    RootSpan outcome(1);
+    if (!outcome.valid()) return ItemError;
+    outcome.items()[0] = result;
+    for (int n = 0; n < argc; n++) {
+        NameEntry* entry = roots[n];
+        if (!entry) continue;
+        Item updated = lambda_var_home_check_kind(before.items()[n], homes.items()[n],
+            sinfo->name);
+        if (item_is_error(updated)) {
+            outcome.items()[0] = updated;
+            continue;
+        }
+        // an in-place write already reached the installed leaf or binding.
+        if (updated.item == before.items()[n].item) continue;
+        if (is_place[n]) {
+            Item root = interp_read_binding(f, entry);
+            Item replaced = cow_path_set(root, paths.items()[n], updated);
+            if (item_is_error(replaced)) {
+                outcome.items()[0] = replaced;
+                continue;
+            }
+            interp_write_binding(f, entry, replaced);
+        } else {
+            interp_write_binding(f, entry, updated);
+        }
+    }
+    return outcome.items()[0];
 }
 
 // LR03-13: a call through a declared function-type contract crosses that
@@ -2428,6 +2561,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
 #endif
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* sinfo = ((AstSysFuncNode*)callee)->fn_info;
+        if (sinfo && sinfo->var_mask)
+            return interp_call_native_var_proc(f, node, sinfo, argc, injected);
         AstNode* owner_arg = !injected ? ast_unwrap_primary(node->argument) : NULL;
         NameEntry* owner_entry = owner_arg && owner_arg->node_type == AST_NODE_IDENT
             ? ((AstIdentNode*)owner_arg)->entry : NULL;
@@ -2689,7 +2824,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         RootSpan place_values((size_t)dispatch_argc);
         RootSpan place_paths((size_t)dispatch_argc);
         NameEntry* place_roots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        bool snapshot_home = ast_call_has_plain_container_parameter(direct_signature);
+        // LR12-45: a place borrows in place unless a plain argument may alias it
+        bool snapshot_home = !node->var_alias_proven || node->var_alias_capture_mask != 0;
         if (!place_values.valid() || !place_paths.valid()) return ItemError;
         // homes and evaluated keys belong to the caller, never movable field buffers.
         auto publish_places = [&](Item result) {
@@ -5718,6 +5854,43 @@ static __attribute__((noinline)) Item interp_eval_index_nd(InterpFrame* f,
     return fn_index_nd((Item){.item = *object_home}, ndim, indices);
 }
 
+// bare and explicit receiver fields share assignment admission and publication
+static Item exec_binding_assign(InterpFrame* f, AstAssignStamNode* assign,
+        NameEntry* target = NULL) {
+    Item value = eval_expr(f, assign->value);
+    if (interp_frame_pending(f)) return ItemNull;
+    AstNode* rhs = ast_unwrap_primary(assign->value);
+    bool fresh_rhs_error = item_is_error(value) && rhs &&
+        rhs->node_type != AST_NODE_CURRENT_ERROR &&
+        rhs->node_type != AST_NODE_CURRENT_ITEM;
+    if (!target) target = assign->target_entry;
+    if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
+        target = ((AstIdentNode*)assign->left)->entry;
+    }
+    if (!target) {
+        log_error("interp: assignment target has no binding");
+        return ItemError;
+    }
+    value = interp_snapshot_binding_alias(f, assign->value, target,
+        target->declared_type, value);
+    // S7.7.4: the runtime report names the binding, in MIR's spelling
+    LambdaBoundary boundary = {"declared assignment binding", NULL, NULL, NULL, 0};
+    if (target->declared_type && target->name) {
+        boundary = (LambdaBoundary){NULL, interp_format_named_boundary,
+            target->name, "assignment to", 0};
+    }
+    if (!assign->interp_boundary_proven)
+        value = interp_coerce_declared_binding(f, value, target->declared_type,
+            &boundary, target->interp_boundary);
+    // S7.7.4v2: publish the new outcome even when validation failed.
+    interp_write_binding(f, target, value);
+    AstNode* body = f->fn ? ast_unwrap_primary(f->fn->body) : NULL;
+    // A direct assignment body is the function result in MIR. Other
+    // assignment statements complete as null so a handler's `x = ^`
+    // consumes its caught error instead of re-propagating it.
+    return fresh_rhs_error || body == (AstNode*)assign ? value : ItemNull;
+}
+
 // `obj.field = v` / `arr[i] = v` and their nested-path forms.
 static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, AstNode* node) {
     // `obj.field = v` / `arr[i] = v` where the target root is a plain
@@ -5727,6 +5900,10 @@ static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, Ast
     // Nested paths use cow_path_set below, which detaches and relinks the
     // complete owner spine before its replacement root is published.
     AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+    NameEntry* method_field = interp_method_store_entry(&f->module->ast_index, node);
+    if (method_field && f->method_self && f->st->contexts &&
+            f->st->contexts->item == f->method_self)
+        return exec_binding_assign(f, ca, method_field);
     AstCowPath path = ca->interp_place ? ca->interp_place->path : AstCowPath{};
     bool has_path = ca->interp_place || ast_collect_cow_path(&path, ca->object);
     NameEntry* root = ca->interp_place ? ca->interp_place->root : has_path && path.root &&
@@ -5802,13 +5979,17 @@ static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, Ast
         interp_note_var_param_marked(f, ca->value);
     }
 
+    // S7.2.2: writes bind `last` to their own owner, as reads do. Reload
+    // after key evaluation because a key call can replace the same binding.
+    Scratch owner(f);
+    owner.set(interp_read_binding(f, root));
+    InterpLastIndexGuard last_scope(f->st, owner.home());
     if (ca->key && ca->key->next) {
         int64_t indices[AST_COW_PATH_MAX] = {};
         int ndim = 0;
         if (!interp_eval_ndim_indices(f, ca->key, indices, &ndim)) {
             return interp_frame_pending(f) ? ItemNull : ItemError;
         }
-        Scratch owner(f);
         owner.set(interp_read_store_owner(f, root, ca));
         if (item_is_error(owner.get())) return owner.get();
         if (get_type_id(owner.get()) != LMD_TYPE_ARRAY_NUM) {
@@ -5826,9 +6007,14 @@ static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, Ast
             interp_write_binding(f, root, replacement);
             return ItemNull;
         }
+        // the raw N-D setter mutates in place; detach shared snapshots first
+        owner.set(cow_prepare_write(owner.get()));
+        if (item_is_error(owner.get())) return owner.get();
         Item write_result = array_num_set_nd(owner.get().array_num, ndim, indices,
             value_slot.get());
-        return item_is_error(write_result) ? write_result : ItemNull;
+        if (item_is_error(write_result)) return write_result;
+        interp_write_binding(f, root, owner.get());
+        return ItemNull;
     }
 
     Scratch key_slot(f);
@@ -5836,7 +6022,6 @@ static __attribute__((noinline)) Item exec_place_assign_body(InterpFrame* f, Ast
         node->node_type == AST_NODE_MEMBER_ASSIGN_STAM));
     if (interp_frame_pending(f)) return ItemNull;
 
-    Scratch owner(f);
     owner.set(interp_read_store_owner(f, root, ca));
     if (item_is_error(owner.get())) return owner.get();
 
@@ -6416,41 +6601,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         }
         return ItemNull;
     }
-    case AST_NODE_ASSIGN_STAM: {
-        AstAssignStamNode* assign = (AstAssignStamNode*)node;
-        Item value = eval_expr(f, assign->value);
-        if (interp_frame_pending(f)) return ItemNull;
-        AstNode* rhs = ast_unwrap_primary(assign->value);
-        bool fresh_rhs_error = item_is_error(value) && rhs &&
-            rhs->node_type != AST_NODE_CURRENT_ERROR &&
-            rhs->node_type != AST_NODE_CURRENT_ITEM;
-        NameEntry* target = assign->target_entry;
-        if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
-            target = ((AstIdentNode*)assign->left)->entry;
-        }
-        if (!target) {
-            log_error("interp: assignment target has no binding");
-            return ItemError;
-        }
-        value = interp_snapshot_binding_alias(f, assign->value, target,
-            target->declared_type, value);
-        // S7.7.4: the runtime report names the binding, in MIR's spelling
-        LambdaBoundary boundary = {"declared assignment binding", NULL, NULL, NULL, 0};
-        if (target->declared_type && assign->target) {
-            boundary = (LambdaBoundary){NULL, interp_format_named_boundary,
-                assign->target, "assignment to", 0};
-        }
-        if (!assign->interp_boundary_proven)
-            value = interp_coerce_declared_binding(f, value, target->declared_type,
-                &boundary, target->interp_boundary);
-        // S7.7.4v2: publish the new outcome even when validation failed.
-        interp_write_binding(f, target, value);
-        AstNode* body = f->fn ? ast_unwrap_primary(f->fn->body) : NULL;
-        // A direct assignment body is the function result in MIR. Other
-        // assignment statements complete as null so a handler's `x = ^`
-        // consumes its caught error instead of re-propagating it.
-        return fresh_rhs_error || body == node ? value : ItemNull;
-    }
+    case AST_NODE_ASSIGN_STAM:
+        return exec_binding_assign(f, (AstAssignStamNode*)node);
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM: {
         return exec_place_assign(f, node);

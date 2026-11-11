@@ -22,7 +22,11 @@ button[aria-disabled="true"] { opacity: 0.45; }
 .swatches { display: grid; grid-template-columns: repeat(8, 14px); gap: 3px; }
 .swatch { width: 14px; height: 14px; padding: 0; border-radius: 3px; border: 1px solid #00000055; }
 .zoom { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
-.import input, .file input { width: 170px; font: inherit; color: #e8e8ed; background: #1f1f22; border: 1px solid #48484f;
+.paper select { font: inherit; color: #e8e8ed; background: #1f1f22; border: 1px solid #48484f; border-radius: 6px;
+  padding: 3px 6px; }
+.import input { width: 120px; }
+.file input { width: 160px; }
+.import input, .file input { font: inherit; color: #e8e8ed; background: #1f1f22; border: 1px solid #48484f;
   border-radius: 6px; padding: 4px 6px; }
 .stage { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; background: #3a3a3f; cursor: crosshair; }
 .stage.tool-hand { cursor: grab; }

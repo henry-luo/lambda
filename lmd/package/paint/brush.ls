@@ -4,6 +4,7 @@
 import layer: lambda.paint.layer
 import dynamics: lambda.paint.dynamics
 import table: lambda.paint.table
+import surface: lambda.paint.surface
 
 pub let PROFILES = ['mypaint', 'linear']
 pub let MODES = ['buildup', 'wash']
@@ -22,9 +23,12 @@ fn pick(value, fallback) => if (value == null) fallback else value
 //   shape the ellipse; aa: anti-aliased rim width; profile: 'mypaint' or 'linear' falloff;
 //   mode: 'buildup' composites every dab, 'wash' accumulates coverage and composites once;
 //   erase: remove paint instead of adding it; lock_alpha: recolour without adding coverage;
-//   blend: one of table.BLENDS.
+//   blend: one of table.BLENDS; angle_jitter: up to this many degrees of per-dab rotation, so a
+//   bitmap tip does not repeat visibly (keyed by dab position, so split strokes still match).
 // mypaint options: settings, a map of libmypaint setting names to a number or to
 //   {base, inputs: {input: [[x, y], ...]}}; blend; seed for the keyed randomness.
+// both kinds: tip, an (h, w) coverage plane (surface.tip) that replaces the procedural dab
+//   shape; grain in [0, 1], how much the paper texture of a stroke modulates coverage.
 pub fn brush(options = {}) map^ {
     if (not (options is map)) raise error("paint: brush options must be a map")
     else if (options.kind != null and not text_in(options.kind, KINDS)) raise error("paint: brush kind must be 'round' or 'mypaint'")
@@ -34,23 +38,32 @@ pub fn brush(options = {}) map^ {
 
 fn round(options) map^ {
     let o = layer.checked(options, ["kind", "size", "hardness", "spacing", "flow", "opacity", "aspect", "angle",
-        "aa", "profile", "mode", "erase", "lock_alpha", "blend"])^
+        "aa", "profile", "mode", "erase", "lock_alpha", "blend", "tip", "grain", "angle_jitter"])^
     let b = {kind: 'round', size: float(pick(o.size, 20.0)), hardness: float(pick(o.hardness, 0.8)),
         spacing: float(pick(o.spacing, 0.2)), flow: float(pick(o.flow, 1.0)), opacity: float(pick(o.opacity, 1.0)),
         aspect: float(pick(o.aspect, 1.0)), angle: float(pick(o.angle, 0.0)), aa: float(pick(o.aa, 1.0)),
         profile: symbol(string(pick(o.profile, 'mypaint'))), mode: symbol(string(pick(o.mode, 'buildup'))),
-        erase: pick(o.erase, false), lock_alpha: float(pick(o.lock_alpha, 0.0)), blend: symbol(string(pick(o.blend, 'normal')))}
+        erase: pick(o.erase, false), lock_alpha: float(pick(o.lock_alpha, 0.0)), blend: symbol(string(pick(o.blend, 'normal'))),
+        tip: o.tip, grain: float(pick(o.grain, 0.0)), angle_jitter: float(pick(o.angle_jitter, 0.0))}
     if (not number_in(b.size, 0.5, 16384.0)) raise error("paint: brush size must be in [0.5, 16384]")
     else if (not number_in(b.hardness, 0.0, 1.0) or not number_in(b.flow, 0.0, 1.0) or not number_in(b.opacity, 0.0, 1.0)
         or not number_in(b.lock_alpha, 0.0, 1.0)) raise error("paint: brush hardness, flow, opacity and lock_alpha must be in [0, 1]")
     else if (not number_in(b.spacing, 0.01, 2.0)) raise error("paint: brush spacing must be in [0.01, 2]")
     else if (not number_in(b.aspect, 1.0, 100.0)) raise error("paint: brush aspect must be in [1, 100]")
     else if (not number_in(b.angle, -360.0, 360.0)) raise error("paint: brush angle must be in [-360, 360] degrees")
+    else if (not number_in(b.angle_jitter, 0.0, 180.0)) raise error("paint: brush angle_jitter must be in [0, 180] degrees")
     else if (not number_in(b.aa, 0.0, 8.0)) raise error("paint: brush aa must be in [0, 8]")
     else if (not text_in(b.profile, PROFILES)) raise error("paint: brush profile must be 'mypaint' or 'linear'")
     else if (not text_in(b.mode, MODES)) raise error("paint: brush mode must be 'buildup' or 'wash'")
     else if (not text_in(b.blend, table.BLENDS)) raise error("paint: unknown brush blend mode")
     else if (not (b.erase is bool)) raise error("paint: brush erase must be a bool")
+    else surfaced(b)^
+}
+
+// tip and grain are shared by both kinds.
+fn surfaced(b) map^ {
+    if (b.tip != null and not surface.plane_ok(b.tip)) raise error("paint: brush tip must be an (h, w) coverage array of at most 4096 x 4096")
+    else if (not number_in(b.grain, 0.0, 1.0)) raise error("paint: brush grain must be in [0, 1]")
     else b
 }
 
@@ -68,7 +81,7 @@ fn normalize(spec) map => if (numeric(spec)) ({base: float(spec), inputs: {}})
     else ({base: float(spec.base), inputs: if (spec.inputs == null) ({}) else spec.inputs})
 
 fn mypaint(options) map^ {
-    let o = layer.checked(options, ["kind", "settings", "blend", "seed"])^
+    let o = layer.checked(options, ["kind", "settings", "blend", "seed", "tip", "grain"])^
     let settings = if (o.settings == null) ({}) else o.settings
     if (not (settings is map)) raise error("paint: mypaint brush settings must be a map")
     else if (not all([for (name, spec in settings) supported(name)]))
@@ -79,8 +92,8 @@ fn mypaint(options) map^ {
     else if (o.seed != null and not (o.seed is int)) raise error("paint: brush seed must be an int")
     else {
         let normalized = map([for (name, spec in settings, v in [string(name), normalize(spec)]) v]);
-        {kind: 'mypaint', mode: 'buildup', settings: normalized, blend: symbol(string(pick(o.blend, 'normal'))),
-         seed: pick(o.seed, 1), compiled: dynamics.compile(normalized)}
+        surfaced({kind: 'mypaint', mode: 'buildup', settings: normalized, blend: symbol(string(pick(o.blend, 'normal'))),
+         seed: pick(o.seed, 1), compiled: dynamics.compile(normalized), tip: o.tip, grain: float(pick(o.grain, 0.0))})^
     }
 }
 
@@ -97,7 +110,7 @@ pub fn adjust(b, changes) map^ {
             inputs: if (s.radius_logarithmic == null) ({}) else s.radius_logarithmic.inputs}})
         let opaque = if (c.opacity == null) ({}) else ({opaque: {base: float(c.opacity),
             inputs: if (s.opaque == null) ({}) else s.opaque.inputs}})
-        brush({kind: 'mypaint', settings: {*: s, *: radius, *: opaque}, blend: b.blend, seed: b.seed})^
+        brush({kind: 'mypaint', settings: {*: s, *: radius, *: opaque}, blend: b.blend, seed: b.seed, tip: b.tip, grain: b.grain})^
     }
     else brush({*: b, size: pick(c.size, b.size), opacity: pick(c.opacity, b.opacity)})^
 }

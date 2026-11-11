@@ -314,6 +314,8 @@ bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info);
 // source order. Pure rows therefore share T0's positional Item ABI; procedural
 // rows remain excluded because a piped receiver has no COW write-back channel.
 bool interp_named_sys_args_supported(const AstNode* callee);
+// a direct `~.field` method store resolves to the bare field's binding
+NameEntry* interp_method_store_entry(const AstIndex* index, AstNode* node);
 // the P3 pass-manager entry evaluates pure literal subtrees in CONST mode and
 // publish only immediate results into the indexed AST fact table.
 bool interp_const_fold_script(Transpiler* tp);
