@@ -108,7 +108,9 @@ async function main() {
     fs.mkdirSync(path.dirname(resultFile), { recursive: true });
     fs.writeFileSync(resultFile, '');
     const { RadiantLayoutTester } = require('./layout/test_radiant_layout.js');
+    // the integration gate uses the Lambda host already selected for this workspace.
     const tester = new RadiantLayoutTester({ engine: 'radiant', tolerance: 5.5,
+        radiantExe: path.resolve('lambda.exe'),
         baselineOnly: true, batchSize: 100, batchSizeExplicit: true,
         maxConcurrency: jobs, maxConcurrencyExplicit: true, globalConcurrency: jobs,
         json: true, emitJson: false });

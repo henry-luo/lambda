@@ -18,6 +18,14 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Radiant integration layout-host selection — 2026-11-11
+
+<a id="lr12-44"></a>
+
+**LR12-44 — RESOLVED:** the user-approved Lambda layout/snapshot host selection
+repair is applied. See [cause, patch and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-44>).
+Radiant RI-010 retains the ten independent layout comparisons.
+
 ## Numeric conversion and recursive type follow-up — 2026-11-03
 
 The user adopted **S4.1.6 / S11.4.12v2**. `int()` now returns an int with

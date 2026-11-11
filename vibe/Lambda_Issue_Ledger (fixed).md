@@ -4050,3 +4050,34 @@ the JIT; T0 prints it, and `5 is U` is `true` on both tiers. Emitting the
 alias's value recursed through its own arm; type equality was not involved.
 
 </details>
+
+## Radiant integration layout-host selection — 2026-11-11
+
+<a id="lr12-44"></a>
+
+**LR12-44 — Lambda layout/snapshot adapters omit their explicit executable · RESOLVED, 2026-11-11.**
+Authority: **D9.1.1v4 / D9.1.3v2**. Lambda owns these integration adapters;
+the shared native layout harness may default to Radiant's standalone host.
+
+The reported Layout Page Suite Snapshot (51/52) and Layout Baseline Tests
+(20/5,936) fail because `test/run_radiant_checks.js` and
+`test/run_layout_baseline.js` launch the default `radiant.exe` inside temporary
+workspaces that provision only `lambda.exe`. The captured errors are `spawn
+.../radiant.exe ENOENT`; no layout comparison runs for those batches. The
+input-events category uses its own executable and retains 20 passes / 12 skips.
+
+The concrete two-site fix explicitly selects the existing workspace Lambda host.
+Its review patch and full isolated qualification are at
+`../../radiant/temp/radiant-failed-20261111/lambda-runner-fix.patch` and
+`../../radiant/vibe/Radiant_Impl_Failed_Test_Repairs.md`. The page snapshot passes
+51/51; the combined layout inventory executes all 5,936 cases with 5,621 passing,
+293 partial, 10 failing and 12 skipped. The ten residual comparisons are recorded
+in Radiant RI-010; no reference, threshold or case selection was changed.
+
+**Blocks:** the Lambda-owned layout/snapshot gates. **Pending:** user approval
+to apply the two-file patch, because this task began in Radiant under its
+explicit prohibition on editing Lambda implementation/tests/build files.
+Only this owner issue record is added before approval. Native replay-summary
+output is independently repaired and passes the exact UI/view inventories.
+
+**Resolution:** the user explicitly approved the scoped two-file repair. Both adapters now select the existing workspace Lambda host. The normal page snapshot passes 51/51 and all 5,936 combined layout cases execute; the same ten remaining comparisons are tracked as Radiant RI-010. The required native/static/dynamic owner gate and reported UI/view inventories pass with their existing skips. No reference, baseline score, tolerance or fixture selection was changed. The implementation and pinned receipt are in `../../radiant/vibe/Radiant_Impl_Failed_Test_Repairs.md` and `../../radiant/temp/radiant-failed-20261111/verification-summary.json`. The pending-approval paragraph above records the original stopping condition; authorization has now been received and the source repair is applied.
