@@ -82,6 +82,7 @@ async function layout(report) {
 async function snapshot() {
     const workspace = layoutWorkspace('snapshot');
     const measured = await run(process.execPath, [path.join(ROOT, 'test/layout/test_radiant_layout.js'),
+        '--exe', path.resolve(workspace, 'lambda.exe'),
         '--engine', 'lambda-css', '-c', 'page', '--json', '-j', String(checkJobs(5))], { cwd: workspace });
     const checked = await run(process.execPath, ['test/layout/layout_suite_snapshot.js',
         '--check', 'page'], { input: measured.output });
