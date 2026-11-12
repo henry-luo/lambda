@@ -107,7 +107,9 @@ function main(args = process.argv.slice(2)) {
     const PNG = pngLibrary(root);
     const snapshots = path.join(__dirname, 'snapshots');
     const manifest = new Map(readCsvObjects(path.join(snapshots, 'capture_results.csv')).map((row) => [row.label, row]));
-    const auditPath = path.join(snapshots, 'visual_comparison_review_round2.json');
+    const annotations = path.join(__dirname, 'review_annotations.json');
+    const auditPath = fs.existsSync(annotations) ? annotations
+        : path.join(snapshots, 'visual_comparison_review_round2.json');
     const reviewAudit = fs.existsSync(auditPath) ? JSON.parse(fs.readFileSync(auditPath, 'utf8')) : null;
     const manualMajor = new Map((reviewAudit?.reviews || [])
         .filter((review) => review.manual_major_remaining)

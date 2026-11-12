@@ -1,0 +1,51 @@
+{
+  "reviewed_at": "2026-11-12T05:53:31.791Z",
+  "interpretation": "Manual major visual omissions retained independently of coarse image thresholds; root causes remain unconfirmed unless recorded in the issue ledgers.",
+  "reviews": [
+    {
+      "label": "saas_landing_365",
+      "url": "https://supabase.com/customers",
+      "manual_major_remaining": "Customer stories and cards remain absent after the theme repair."
+    },
+    {
+      "label": "saas_landing_505",
+      "url": "https://cofounder.co/",
+      "manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent."
+    },
+    {
+      "label": "saas_landing_677",
+      "url": "https://pitch.com/",
+      "manual_major_remaining": "Pitch remains almost blank despite a low mean error against its mostly white reference."
+    },
+    {
+      "label": "cmake",
+      "url": "https://cmake.org/",
+      "manual_major_remaining": "Natural video geometry is repaired; the selected snapshot still lacks the poster/video pixels. Direct poster URL responds HTTP200; ready-state/finite-frame cause is not yet isolated."
+    },
+    {
+      "label": "saas_landing_121",
+      "url": "https://banky.io/",
+      "manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent."
+    },
+    {
+      "label": "saas_landing_473",
+      "url": "https://www.popcorn.space/",
+      "manual_major_remaining": "Hero heading, copy, actions and device imagery remain absent; the mostly light reference hides this from the coarse score."
+    },
+    {
+      "label": "saas_landing_134",
+      "url": "https://cequence.io/",
+      "manual_major_remaining": "The main hero heading, copy and action remain absent despite the correct illustration and background."
+    },
+    {
+      "label": "saas_landing_399",
+      "url": "https://missiveapp.com/customers",
+      "manual_major_remaining": "The large customer quotation, logo and portrait in the right card remain absent."
+    },
+    {
+      "label": "saas_landing_432",
+      "url": "https://nightwatch.laravel.com/",
+      "manual_major_remaining": "The neutral background palette is repaired, but the main hero heading, copy and actions remain absent."
+    }
+  ]
+}
