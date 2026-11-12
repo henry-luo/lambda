@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 
-from split_paths import resolve_split_paths, thorvg_openmp_archives, use_input_scripts
+from split_paths import optional_library_available, resolve_split_paths, thorvg_openmp_archives, use_input_scripts
 use_input_scripts()
 from build_config import load_build_config
 
@@ -111,7 +111,8 @@ def main():
         for dependency in platform_libraries(target, platform_name == 'macos'):
             library = external.get(dependency)
             if library:
-                if dependency in visited_external or library.get('link') != 'static':
+                if (dependency in visited_external or library.get('link') != 'static' or
+                        not optional_library_available(library)):
                     continue
                 visited_external.add(dependency)
                 archive = library.get('lib', '')

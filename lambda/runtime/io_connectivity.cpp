@@ -26,7 +26,9 @@ static char connectivity_brand;
 static const Item ItemTrue = {.item=b2it(BOOL_TRUE)};
 static const Item ItemFalse = {.item=b2it(BOOL_FALSE)};
 static const int FRAME_MAX = 262144;
+#ifdef LAMBDA_HAVE_RTC
 static const int QUEUE_MAX = 2097152;
+#endif
 struct PeerMessage { PeerMessage* next; int size; char bytes[1]; };
 struct Connectivity {
     Item handle;

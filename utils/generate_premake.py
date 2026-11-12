@@ -18,7 +18,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from split_paths import resolve_split_paths, sibling_roots, thorvg_openmp_archives, use_input_scripts
+from split_paths import optional_library_available, resolve_split_paths, sibling_roots, thorvg_openmp_archives, use_input_scripts
 use_input_scripts()
 from build_config import load_build_config, resolve_source_sets
 
@@ -1377,19 +1377,10 @@ class PremakeGenerator:
                 continue
             info = self.external_libraries.get(library)
             # Feature-probed sources must not pull an absent optional archive into the link.
-            if info and info.get('optional') and not self._optional_library_available(info):
+            if info and not optional_library_available(info):
                 continue
             resolved.append(library)
         return resolved
-
-    def _optional_library_available(self, library: Dict[str, Any]) -> bool:
-        if not library.get('optional'):
-            return True
-        lib_path = library.get('lib', '')
-        if lib_path.startswith('-l'):
-            include_path = library.get('include', '')
-            return bool(include_path) and Path(include_path, 'fribidi', 'fribidi.h').is_file()
-        return bool(lib_path) and Path(lib_path).is_file()
 
     def _external_library_for_target(self, target: Dict[str, Any], name: str) -> Dict[str, Any]:
         """Apply a target-local link override without changing executable linkage."""
@@ -3678,7 +3669,7 @@ class PremakeGenerator:
         dependencies = [d for d in dependencies
                          if d not in self.external_libraries or
                          not self.external_libraries[d].get('optional') or
-                         self._optional_library_available(self.external_libraries[d])]
+                         optional_library_available(self.external_libraries[d])]
         release_excluded_libraries = self._release_excluded_libraries()
 
         # NOTE: dev_libraries (ginac, cln, gmp, criterion, catch2) are NOT included

@@ -746,7 +746,8 @@ prepare-release:
 	@bash utils/prepare_release.sh
 
 build-release:
-	@$(MAKE) clean-all
+	# The optional WebRTC installation lives under build/ but is not rebuilt by make.
+	@$(MAKE) clean-all KEEP_CONNECTIVITY=1
 	@$(MAKE) build-release-compile
 
 build-release-compile:
@@ -1507,7 +1508,10 @@ generate-grammar-typescript: $(TS_PARSER_C)
 clean-all: clean-premake clean-test
 	@echo "Removing all build directories..."
 	@rm -f $(LAMBDA_EXE)
-	@rm -rf $(BUILD_DIR)
+	@if [ "$(KEEP_CONNECTIVITY)" = 1 ] && [ -d "$(BUILD_DIR)/deps/connectivity" ]; then \
+		find "$(BUILD_DIR)" -mindepth 1 -maxdepth 1 ! -name deps -exec rm -rf {} +; \
+		find "$(BUILD_DIR)/deps" -mindepth 1 -maxdepth 1 ! -name connectivity -exec rm -rf {} +; \
+	else rm -rf "$(BUILD_DIR)"; fi
 	@rm -rf $(BUILD_DEBUG_DIR)
 	@rm -rf $(BUILD_RELEASE_DIR)
 	@rm -rf $(BUILD_WINDOWS_DIR)

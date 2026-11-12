@@ -17,6 +17,17 @@ PATH_FIELDS = frozenset({
 })
 
 
+def optional_library_available(library):
+    """Match feature-probed source dependencies to the static link closure."""
+    if not library.get('optional'):
+        return True
+    lib_path = library.get('lib', '')
+    if lib_path.startswith('-l'):
+        include_path = library.get('include', '')
+        return bool(include_path) and Path(include_path, 'fribidi', 'fribidi.h').is_file()
+    return bool(lib_path) and Path(lib_path).is_file()
+
+
 def sibling_roots():
     root = Path(__file__).resolve().parent.parent
     return (Path(os.environ.get('LAMBDA_INPUT_ROOT', root.parent / 'lambda-input')).resolve(),
