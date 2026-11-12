@@ -1,5 +1,5 @@
 {
- "name": "Paint demo: brush, pen pressure, eraser end, picker, undo and redo, zoom, painting files and .myb import (PT10, PT12)",
+ "name": "Paint demo: brush, pen pressure, eraser end, picker, undo and redo, zoom, painting files, the .myb import, and an oil canvas with mixing, drying, lighting and bristles (PT10, PT12, M2)",
  "html": "test/demo/paint/paint.ls",
  "viewport": {
   "width": 1400,
@@ -32,7 +32,7 @@
     "selector": "#paint"
    },
    "attribute": "data-brushes",
-   "equals": "10"
+   "equals": "12"
   },
   {
    "type": "assert_attribute",
@@ -784,7 +784,7 @@
     "selector": "#paint"
    },
    "attribute": "data-brushes",
-   "equals": "11"
+   "equals": "13"
   },
   {
    "type": "assert_attribute",
@@ -793,6 +793,307 @@
    },
    "attribute": "data-brush",
    "equals": "charcoal"
+  },
+  {
+   "type": "select_option",
+   "target": {
+    "selector": "#medium"
+   },
+   "value": "pigment"
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-medium",
+   "equals": "pigment"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-lit",
+   "equals": "true"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-undo",
+   "equals": "0"
+  },
+  {
+   "type": "assert_pixel",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 440,
+    "offset_y": 300
+   },
+   "min_r": 245,
+   "min_g": 245,
+   "min_b": 245
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-brush='11']"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-brush",
+   "equals": "Oil"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-color='#f1c40f']"
+   }
+  },
+  {
+   "type": "pointer_drag",
+   "pointerType": "mouse",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 100,
+    "offset_y": 420
+   },
+   "dx": 240,
+   "dy": 0,
+   "steps": 10
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-color='#2980b9']"
+   }
+  },
+  {
+   "type": "pointer_drag",
+   "pointerType": "mouse",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 220,
+    "offset_y": 420
+   },
+   "dx": 240,
+   "dy": 0,
+   "steps": 10
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-undo",
+   "equals": "2"
+  },
+  {
+   "type": "assert_pixel",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 150,
+    "offset_y": 420
+   },
+   "min_r": 220,
+   "min_g": 170,
+   "max_b": 80
+  },
+  {
+   "type": "assert_pixel",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 290,
+    "offset_y": 420
+   },
+   "max_r": 100,
+   "min_g": 120,
+   "max_b": 100
+  },
+  {
+   "type": "assert_pixel",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 420,
+    "offset_y": 420
+   },
+   "max_r": 80,
+   "min_g": 100,
+   "min_b": 160
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "#action-dry"
+   }
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": "#status"
+   },
+   "contains": "Dried"
+  },
+  {
+   "type": "assert_pixel",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 290,
+    "offset_y": 420
+   },
+   "max_r": 100,
+   "min_g": 120,
+   "max_b": 100
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "#action-light"
+   }
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-lit",
+   "equals": "false"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-brush='10']"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-brush",
+   "equals": "Bristle"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-color='#c0392b']"
+   }
+  },
+  {
+   "type": "pointer_drag",
+   "pointerType": "mouse",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 100,
+    "offset_y": 560
+   },
+   "dx": 500,
+   "dy": 0,
+   "steps": 20
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-undo",
+   "equals": "3"
+  },
+  {
+   "type": "assert_pixel",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 130,
+    "offset_y": 560
+   },
+   "min_r": 160,
+   "max_g": 90,
+   "max_b": 80
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#file-path"
+   },
+   "text": "temp/paint_demo_replay/oil.painting",
+   "clear": true
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "#action-export"
+   }
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": "#status"
+   },
+   "contains": "Exported"
+  },
+  {
+   "type": "select_option",
+   "target": {
+    "selector": "#medium"
+   },
+   "value": "pixel"
+  },
+  {
+   "type": "advance_time",
+   "ms": 16
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#paint"
+   },
+   "attribute": "data-medium",
+   "equals": "pixel"
+  },
+  {
+   "type": "assert_pixel",
+   "target": {
+    "selector": "#canvas",
+    "offset_x": 290,
+    "offset_y": 420
+   },
+   "min_r": 245,
+   "min_g": 245,
+   "min_b": 245
   }
  ]
 }

@@ -207,7 +207,7 @@ fn dab_row(cb, c, s) {
         bucket: clamp(1.0 * floor(v.smudge_bucket), 0.0, 255.0), dh: clamp(v.change_color_h, -1.0, 1.0),
         dl: clamp(v.change_color_l, -1.0, 1.0), dhsl_s: clamp(v.change_color_hsl_s, -1.0, 1.0),
         dv: clamp(v.change_color_v, -1.0, 1.0), dhsv_s: clamp(v.change_color_hsv_s, -1.0, 1.0),
-        tip: c.tip, grain: c.grain, profile: 0.0, blend: c.blend})
+        tip: c.tip, grain: c.grain, profile: 0.0, blend: c.blend, pigment: c.pigment, amount: c.amount, thickness: c.thickness})
 }
 
 // emits the dabs of one move (libmypaint stroke_to's loop) and returns {state, rows}.
@@ -243,7 +243,8 @@ fn walk(cb, c, s, samples, i, rows) map^ =>
 fn stamped(points, first) => [for (i, p in points) sample(p, SAMPLE_INTERVAL * (first + i))]
 
 // dabs(compiled, ink, points, carry, key) -> {table, count, carry}. `ink` is {color: [r, g, b, a]
-// in the layer's space, grain, blend}; `carry` is the previous batch's carry or null.
+// in the layer's space, grain, blend}, plus pigment, amount and thickness on a pigment layer;
+// `carry` is the previous batch's carry or null.
 pub fn dabs(cb, ink, points, carry, key) map^ {
     let samples = stamped(points, if (carry == null) 0 else carry.seen)
     let s0 = if (carry == null) begin(cb, samples[0], key) else carry

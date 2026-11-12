@@ -4826,9 +4826,10 @@ See [the profile and acceptance cases](../vibe/Lambda_Pkg_Pptx.md) and
 
 `lambda.paint` paints with brushes on tiled typed-array layers. A Radiant-native engine
 renders the per-pixel work, so painting is available in `lambda.exe` and
-`lambda-headless` but not in `lambda-cli` (**D9.2.2**). It provides layers, round and
-libmypaint-model brushes, MyPaint brush import, smudge and blend modes, strokes with
-continuations, and presentation. Design:
+`lambda-headless` but not in `lambda-cli` (**D9.2.2**). It provides layers in a pixel medium
+and an oil-like pigment medium, round, libmypaint-model and bristle brushes, MyPaint brush
+import, smudge and blend modes, strokes with continuations, and presentation with impasto
+lighting. Design:
 [Lambda_Pkg_Paint.md](../vibe/Lambda_Pkg_Paint.md). Progress:
 [implementation record](../vibe/impl/Lambda_Impl_Paint.md).
 
@@ -4914,6 +4915,46 @@ stroke. Its result carries:
 - `bounds`: the pixels the stroke so far may have changed;
 - `work`: the candidate pixels charged so far, bounded at 128 million per stroke.
 
+**Pigment layers.** `layer(w, h, {format: 'pigment', paper})` is a wet paint film over the
+sRGB `paper` colour (white by default). Each tile is an `f32` `(64, 64, 11)` array holding the
+film's Kubelka–Munk absorption and scattering per colour band, its thickness, the paper's
+reflectance and the dried relief. On a pigment layer a stroke's colour becomes a pigment,
+`pigment(colour)` (`{K, S}`), and brushes take two more options:
+
+| Option | Meaning |
+|---|---|
+| `amount` | Pigment load per unit coverage (1); a small amount gives a thin film the paper shows through |
+| `thickness` | Paint body per unit coverage, which becomes relief (equal to `amount` by default) |
+
+Wet paint mixes by concentration, so blue over wet yellow is green, and the order does not
+matter. `dried(layer)` folds the wet film into the paper and keeps its appearance; strokes over
+dried paint lie over it instead of mixing. `dry_layer(var layer)` does the same in place.
+`present(layer, {lighting: paint.lighting({azimuth, elevation, relief, diffuse, specular,
+shininess})})` lights the paint's relief; a flat film keeps its colour. Wash mode, lock alpha,
+colorize, posterize, blend modes, colour shifts and `background` are rgba-only and are errors
+on a pigment layer.
+
+**Bristle brushes.** `brush({kind: 'bristle', ...})` draws one trail per hair, on either
+medium. The hairs are spread across the brush, which turns with the stroke direction and
+widens with pressure. Each hair lags by its stiffness, spends its paint load along the trail,
+so a long stroke thins out, and can pick up the paint it crosses. The options are `size`,
+`spacing`, `opacity`, `flow`, `aa`, `erase` and `grain` as for round brushes, plus:
+
+| Option | Meaning |
+|---|---|
+| `count` | Number of hairs (24) |
+| `spread` | How far across the brush they reach, in radii (1) |
+| `width` | Each trail's width in pixels |
+| `stiffness`, `stiffness_jitter` | How far a hair lags behind the brush, in [0, 0.99], and its variation |
+| `load`, `load_jitter` | The paint each hair starts with, and its variation |
+| `depletion` | Load spent per pixel of trail at full strength |
+| `pickup` | In [0, 1]: how much of the paint under a hair it takes into its ink |
+| `pressure_spread` | How far pen pressure widens the brush |
+| `seed` | Hair placement; equal seeds paint equal strokes |
+
+A bristle stroke's continuation carries each hair's state in `bristles`, so a split stroke
+equals the whole.
+
 **In-place strokes.** `stroke(var layer, brush, colour, points, options)` is a procedure
 (`pn`). It paints a whole stroke into the layer and returns `{rect, work}`, with the pixels
 `stroke_step` gives from `null`. A build-up stroke writes the layer's tiles through
@@ -4973,6 +5014,10 @@ s = paint.end(s, evt.pointerId)^                       // one undo entry
   stroke's grain reads: an `(h, w)` height array, or a spec `{kind, seed, size}` that
   `paint.paper` builds. A painting file keeps a spec and rebuilds the texture when opened.
 - One stroke paints at a time: `begin` from another pointer first ends the stroke in progress.
+- `session(w, h, {medium: 'pigment', lighting})` paints on a pigment layer over the paper.
+  `lighting` takes `paint.lighting` options, or `false` for flat colour; a light is on by
+  default. Wet strokes mix until `dry(var session)` sets them. `with_lighting(s, lighting)`
+  changes the light, and a painting file keeps the pigment layer.
 
 [`lambda demo paint`](../test/demo/paint/README.md) is built on this session.
 

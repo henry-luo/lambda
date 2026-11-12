@@ -18,6 +18,26 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## MVP handler lanes and a demo refusal — 2026-11-12
+
+<a id="lr12-48"></a>
+
+**LR12-48 — FIXED:** a `pn` binding of `(string(x.f) == "a") ^ { false }` over an
+untyped read failed MVP admission ("unsupported representation conversion …
+any from 1 to 5"), so the whole module fell off the JIT. The emitter typed the
+handler's pass-through arm from the lowered operand, which had decayed to `any`,
+while the planner had already given the binding the bool lane. See
+[cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-48>).
+
+<a id="lr12-49"></a>
+
+**LR12-49 — FIXED:** `let color = model.hex(st.color)^` in the paint presenter's
+`sync` lost its inferred string contract when MVP discharged the call's error.
+The direct-call path now retains the call AST, so the emitted success value
+agrees with the planned binding lane (**S7.6.3v3, D2.3.4–D2.3.5**). The demo
+passes 64/64 assertions on AUTO and JIT; AUTO publishes `sync`'s satellite.
+See [cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-49>).
+
 ## Online JavaScript shape memory — 2026-11-11
 
 <a id="lr03-46"></a>
