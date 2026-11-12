@@ -46,20 +46,24 @@ pub fn create(space, entry, profile, encoding, raw) any^ {
         endpoint:protocol.start(replica)^,session:opened,disk_hash:hash(raw,'sha256')^,
         opened:true,prepared:null,export_id:null}
 }
-pub fn public_state(record) any^ => {version:1,id:record.id,entry:record.entry,format:record.format,
-    origin:record.origin,live:core.snapshot(record.endpoint.replica)^,versions:sort(record.session.versions,(saved)=>saved.id)^}
+pub fn public_state(record) any^ => if (record.history == null)
+    {version:1,id:record.id,entry:record.entry,format:record.format,origin:record.origin,
+        live:core.snapshot(record.endpoint.replica)^,versions:sort(record.session.versions,(saved)=>saved.id)^}
+    else {version:2,id:record.id,entry:record.entry,format:record.format,origin:record.origin,
+        live:core.snapshot(record.endpoint.replica)^,history:record.history}
 
 pub fn validate_public(value, space) any^ {
-    v.fields(value,["version","id","entry","format","origin","live","versions"])^
-    if (value.version != 1 or not v.id(value.entry)^ or value.id != id(space,value.entry)^ or
-        not (value.versions is array) or len(value.versions) == 0 or
-        len(unique([for (saved in value.versions) saved.id])) != len(value.versions))
+    v.record(value,["version","id","entry","format","origin","live"],["versions","history"])^
+    let versions = if (value.versions == null) [value.origin] else value.versions
+    if (not contains([1,2],value.version)^ or not v.id(value.entry)^ or value.id != id(space,value.entry)^ or
+        not (versions is array) or len(versions) == 0 or
+        len(unique([for (saved in versions) saved.id])) != len(versions))
         raise error("sync document: invalid public state")
     let replica = core.restore(value.live)^
     if (replica.document != value.id or not contains(['text','mark'],replica.profile)^)
         raise error("sync document: wrong document identity/profile")
     conversion.validate(replica.profile,value.format)^
-    for (saved in [value.origin,*value.versions]) {
+    for (saved in [value.origin,*versions]) {
         session.validate_version(saved)^
         conversion.verify_raw(saved.replica,value.format,saved.raw)^
         if (not core.dominates(replica.clock,saved.frontier)^) raise error("sync document: version exceeds live frontier")
@@ -96,7 +100,9 @@ pub fn merge_public(record, incoming, space) any^ {
         merged = session.receive_version(merged,incoming.versions[index])^
         index = index+1
     }
-    return {*:record,endpoint:protocol.replace_replica(record.endpoint,merged.live)^,session:merged}
+    return {*:record,endpoint:protocol.replace_replica(record.endpoint,merged.live)^,session:merged,
+        *:if (incoming.history == null) {} else {history:sort(unique([
+            *if (record.history == null) [] else record.history,*incoming.history]))^}}
 }
 pub fn compact(record) any^ {
     let endpoint = protocol.compact(record.endpoint)^

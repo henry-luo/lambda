@@ -1,7 +1,7 @@
 # Durable cloud synchronization
 
 This native profile adds encrypted object-storage publication, periodic HTTP
-fallback, cloud-only restoration and permanent history to the [peer agent](PEER.md).
+fallback, cloud-only restoration and configurable saved history to the [peer agent](PEER.md).
 It uses the existing local repository, content IDs and merge-safe checkpoints.
 Direct peer receipt, cloud durability and filesystem installation remain distinct.
 Policy is Lambda Script (S12.1.1v3, D9.3.4); existing native HTTP/crypto/SQLite
@@ -13,8 +13,7 @@ The deployment consists of a private S3-compatible bucket and one HTTP function.
 `cloud_function.handle` is the application handler. Each invocation authenticates
 its request and reads durable state from the bucket. It does not wait for an
 update, sleep, use a server-side polling loop, retain an application session or
-hold a WebSocket. Clients poll periodically. The bucket retains all published
-content and history; function memory and local function files are disposable.
+hold a WebSocket. Clients poll periodically. The bucket retains content and history according to explicit policy; function memory and local function files are disposable.
 
 [HTTP adapter and deployment](../../../deploy/sync_cloud/README.md) provides a
 one-request process interface, a function-URL event wrapper and a local/container
@@ -34,11 +33,11 @@ The service receives `LAMBDA_CLOUD_STORAGE`, a private JSON environment value:
 
 An optional `session_token` supports temporary S3 signing credentials. Endpoints
 use path-style bucket requests and have no trailing slash or base path. The
-service principal needs GetObject/PutObject/HeadObject for the selected bucket's
-`spaces/` prefix. Do not grant clients the service credentials. No client or
-function purge/delete route exists. Bucket lifecycle rules must not expire live
-objects, receipts, control records or publications. Storage administrator changes
-and infrastructure loss are outside the protocol's permanent-storage assumption.
+service principal needs GetObject/PutObject/HeadObject/DeleteObject for the selected bucket's
+`spaces/` prefix. Do not grant clients the service credentials. Clients never receive DELETE capabilities. Owner-authorized maintenance
+allows the function to delete only retired physical storage generations. Bucket lifecycle rules must not expire live
+objects, receipts, control records or publications. Recovery from storage administrator changes or infrastructure loss requires
+remaining authenticated bytes and an explicit catalog backup.
 
 HTTPS verification stays enabled and signed requests never follow redirects.
 Loopback HTTP is permitted only for explicit local tests. Other S3 dialects and
@@ -135,11 +134,11 @@ receives repository encryption keys, wrapping keys or decrypted checkpoints.
    digest, clock and dependency commitment. The function cannot inspect plaintext;
    the authorized checkpoint writer explicitly attests its encrypted graph.
 5. A bounded `stage` validates at most 64 immutable dependency keys and stores a
-   server-only immutable receipt. Permanent objects let unchanged receipts be reused.
+   server-only immutable receipt. Receipts may be reused within their physical storage epoch.
    Clients cannot upload a receipt through an object capability.
 6. `commit` checks up to 128 receipts, verifies their combined dependency commitment,
-   stores the immutable signed publication, then conditionally replaces only that
-   device's head. The signed sequence and previous-publication digest preserve
+   stores the immutable signed publication, then conditionally replaces the per-space catalog containing that
+   device's head. Publication and maintenance share this same CAS fence. The signed sequence and previous-publication digest preserve
    per-device history. A stale head returns a conflict; it is never overwritten.
 7. Only a complete discoverable publication advances durable local cloud coverage.
    The local journal records provider-specific positions, covered clocks and
@@ -150,23 +149,26 @@ Object paths are beneath `spaces/<SHA256(space)>/`:
 | Key | Contents |
 |---|---|
 | `control` | Signed owner/membership control, conditionally replaced |
-| `objects/<repository-id>` | Authenticated encrypted chunks, manifests, document states and snapshots/checkpoints |
-| `bundles/<ciphertext-hash>` | Encrypted merge-safe workspace, document roots and inventory |
+| `catalog` | Conditional per-space heads, epoch, reservations and maintenance cursor |
+| `catalogs/<digest>`, `catalog-required` | Immutable recovery backup and fail-closed protocol marker |
+| `objects/[<epoch>/]<repository-id>` | Authenticated encrypted chunks, manifests, document states and snapshots/checkpoints |
+| `bundles/[<epoch>/]<ciphertext-hash>` | Encrypted merge-safe workspace, document roots and inventory |
 | `receipts/<digest>` | Immutable server-validated dependency list |
 | `publications/<digest>` | Immutable signed publication, including previous-publication link |
-| `heads/<device-id>` | Conditional discoverable per-device publication head |
+| `heads/<device-id>` | Legacy upgrade input; the catalog is authoritative in this profile |
 
 Files retain their stable IDs across rename/move. Existing content-defined chunks
 and immutable identities deduplicate saved versions. This profile publishes
 signed checkpoint streams; it does not claim to implement original-authored
 transaction relay or replace the existing checkpoint-authority grant.
 
-Bundle version 2 includes [durable live-document roots](DOCUMENTS.md). Their
+Bundle version 3 includes [durable live-document roots](DOCUMENTS.md). Their
 accepted CRDT edits replicate independently of saved file bytes. Document state
 and its attachment/saved-version dependencies must validate before cloud coverage
 is recorded. Root identity is checked as well as edit clocks; a new saved version
-can require publication even when its live frontier is unchanged. Version-1
-workspace-only bundles remain readable by the new adapter.
+can require publication even when its live frontier is unchanged. Version-1/2
+bundles remain readable by the new adapter. Version 3 also carries
+retirement and deferred-history availability metadata.
 `status` accepts an optional `cloud` configuration for provider-specific local
 coverage. Its top-level `cloud_saved`, synchronization results and the combined
 owner all include pending document roots as well as workspace progress.
@@ -205,7 +207,7 @@ local peer trust. There is no immediate global cutoff, key rotation, partial
 sharing or independent security-audit claim in this profile (D11.2.1–D11.2.4).
 
 Cloud durability relies on the qualified storage backend's acknowledged writes
-and permanent retention. It does not upgrade the local repository's separate
+and correct retention fencing. It does not upgrade the local repository's separate
 [power-loss qualification](LOCAL_REPOSITORY.md#objects-and-encryption).
 
 ## Bounds and verification
@@ -213,8 +215,9 @@ and permanent retention. It does not upgrade the local repository's separate
 Function requests are at most 128 KiB; responses at most 1 MiB. Objects and
 checkpoint envelopes are bounded to 8 MiB; each publication references at most
 8,191 repository objects plus its bundle. Existing file/codec/repository limits
-apply. Upload restarts operate at object granularity. Large histories beyond one
-bounded checkpoint need a future paged profile; they are never silently truncated.
+apply. Upload restarts operate at object granularity. Saved history has paged
+ancestry; aggregate publication inventories and individual
+endpoints retain these bounds and are never silently truncated.
 
 Focused fixtures are `sync_cloud_crypto`, `sync_cloud_protocol` and
 `sync_cloud_repository`. The [process gate](../../../test/sync_cloud/test_cloud.py)
@@ -230,3 +233,20 @@ The adapter follows [S3 SigV4 header authentication](https://docs.aws.amazon.com
 and [PutObject checksums](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html).
 HMAC vectors follow [RFC 4231](https://www.rfc-editor.org/rfc/rfc4231.html);
 the SigV4 golden also matches an independent Python HMAC/hash calculation.
+
+## Retention, cache and catalog recovery
+
+[Maintenance](MAINTENANCE.md) defines configuration, pins, grace, bounded
+`maintenance_*` actions, explicit scheduled `maintenance_tick` calls and
+`cache_*` eviction/hydration actions. Permanent retention remains the default.
+Every cut copies retained roots into a fresh physical epoch before allowing old
+key deletion; clients still use one stateless HTTP function and periodic polling.
+
+Pull captures all heads from one catalog version and returns its immutable
+`catalog_backup` ID, persisted by clients per provider. If the catalog disappears,
+the service rejects normal operations. Owner-only `catalog_recover` with
+`snapshot` restores a selected validated backup; destructive maintenance stays
+disabled until an inventory audit. Latest-backup discovery/audit tooling is not
+implemented. Stop/drain old function invocations and upgrade all writers before
+enabling retention; legacy untracked stores also require that audit. Active
+upload reservations require their writer to finish or explicitly cancel.

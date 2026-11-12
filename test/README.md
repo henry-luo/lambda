@@ -541,6 +541,26 @@ Debugging: `./log.txt` holds the runtime trace, debug builds dump JIT'd MIR to `
 
 ## 7. Common single-test commands
 
+### Sync history and maintenance
+
+`./test/test_lambda_gtest.exe --gtest_filter='*sync_*'` includes the six new
+retention policy/repository/history/cloud/offline/GC fixtures and their goldens.
+Loopback listener fixtures need local network permission. Select execution with
+`LAMBDA_EXEC_BACKEND=auto`, `interp` or `jit`.
+`python3 test/sync_retention/test_stress.py` reuses the existing exact-golden
+300-second GC/poison runner with the small retention storage case added; ordinary
+fixture deadlines are unchanged. The optional large `--full` stress profile
+remains unqualified as recorded under LR01-24.
+
+`python3 test/sync_retention/test_retention.py` uses independent native clients,
+an isolated real S3 backend and one-request function children. Supply
+`LAMBDA_CLOUD_TEST_STORAGE_FILE` as described in
+[the deployment guide](../deploy/sync_cloud/README.md). It exercises authorized
+old-key deletion, offline return, cache hydration, lost cut responses, a killed
+SQL/filesystem prune step and scheduled bounded maintenance. It never uses a
+production repository. Helpers named `_*.ls` are process drivers, not discovered
+golden fixtures. API/bounds: [maintenance](../lmd/package/sync/MAINTENANCE.md).
+
 ```bash
 # Lambda script golden (full name: AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/<name>)
 ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*proc_array_view_admission'

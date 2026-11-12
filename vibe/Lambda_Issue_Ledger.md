@@ -35,6 +35,54 @@ The separate timeout/cleanup crash [LR01-24](#lr01-24) remains open. The
 workspace member-access observation below retains its original probe; its
 semantics and cause remain unconfirmed. Those two earlier archived records add no live issues.
 
+## Retention integration findings — 2026-11-12
+
+<a id="sync-retention-safety"></a>
+
+**Status:** FIXED in the script integration; no new native-runtime defect is
+claimed. Specification boundaries remain S12.1.1v3, S12.4.4v4 and D11.1.2.
+The [retention implementation record](<impl/Lambda_Impl_Sync_Retention (done).md>) carries
+qualification and bounded scope. Findings and reproductions:
+
+- A partial workspace checkpoint after retirement still held the old replica.
+  Rechecking its dependencies against the new retired set rejected offline return.
+  Validate changed accepted replicas, retaining partial-frame progress. The
+  four-device retention process gate merges unsaved edits after base purge.
+- Equal-frontier concurrent saves could bind different timestamps to one saved
+  ID. New IDs bind timestamp and unique persisted intent (`lambda-save-2`);
+  history tests require distinct valid endpoints and complete ancestry heads.
+- Opening a deferred SQLite scope did not acquire writer ownership before file
+  deletion. A real pending head write now acquires the lock before effects;
+  cursor commit follows deletion. The process gate pauses after one removal,
+  rejects another writer, kills the first process and resumes the exact plan.
+- Unindexed recovery state and rolled-back cache eviction could lose dependency
+  provenance. Reachability now traverses each recovery state's own retention
+  context; locator rebuild quarantines orphans; verified durable cache intent
+  reconstructs missing-chunk availability. Offline/repository/process fixtures
+  cover orphan snapshots, resumed pruning and cache recovery.
+- Missing publication catalogs could otherwise recreate epoch zero. A durable
+  protocol marker and signed bootstrap profile now fail closed. Immutable
+  catalog backups allow explicit owner recovery with dependency validation;
+  destructive maintenance remains audit-blocked. `sync_retention_cloud.ls`
+  removes the catalog, requires rejection, restores its known backup, and
+  requires the audit barrier. No automatic disaster audit is claimed.
+
+Qualification residue: the concurrent aggregate baseline passed 7,542/7,543;
+`latex_test_tex_script_digest` returned status 124 at its 60-second deadline.
+Its focused default-deadline retry passed in 58.7 seconds. Concurrent LaTeX
+sources are outside this sync change; no timeout/golden/source was adjusted.
+A final JIT document peer exchange also exited by SIGKILL (`82-sync`, no native
+diagnostic) during that aggregate run. Kernel diagnostics did not identify a
+Lambda memory kill; resource contention is only a hypothesis. The isolated
+process retry passed all 18 checks without code/deadline changes. Its late-stage
+observed process-tree peak was about 5.2 GiB; that does not establish the original
+kill cause. Evidence and exact identities remain in
+`temp/sync-retention/final/`; preserve the failed run as qualification residue,
+not a fixed runtime bug or a claim of production workload capacity.
+
+Existing [LR01-24](#lr01-24) and sibling LI-015 remain open and separate.
+No owner source or native test timeout was changed to pass these checks.
+
 ## Durable document integration findings — 2026-11-12
 
 <a id="sync-document-coverage"></a>

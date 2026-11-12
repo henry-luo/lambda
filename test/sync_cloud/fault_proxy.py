@@ -5,7 +5,7 @@ import threading
 import urllib.request
 
 
-def start(target, decode, marker):
+def start(target, decode, marker, kind="commit"):
     class Proxy(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -15,7 +15,7 @@ def start(target, decode, marker):
             request=urllib.request.Request(target,data=raw,headers={'content-type':'application/json'})
             with urllib.request.urlopen(request,timeout=90) as response:
                 body=response.read()
-            if decode(raw)['body']['kind']=='commit' and not marker.exists() and decode(body).get('ok'):
+            if decode(raw)['body']['kind']==kind and not marker.exists() and decode(body).get('ok'):
                 marker.write_text('publication committed; response deliberately dropped')
                 self.close_connection=True
                 self.connection.shutdown(socket.SHUT_RDWR)

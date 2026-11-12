@@ -8,12 +8,16 @@ import s3: .s3
 import schema: .cloud_schema
 import codec: .codec
 import cli: .cli
+import transport: .cloud_transport
+import maintenance: .cloud_maintenance
+import runner: .maintenance_runner
+import cache: .cache
 pn execute(request, wrapping_key, environment) any^ {
     if (request.action == "bootstrap") {
         let credentials = identity.load(request.directory,wrapping_key)^
         let members = [credentials.device,*[for (path in request.members) codec.decode(input(path,'text')^,16384)^]]
         let control = schema.signed(credentials.seed,"lambda-cloud-control-1",{version:1,space:credentials.space,
-            owner:credentials.device,generation:1,members:[for (device in members) {device:device,active:true}]})^
+            owner:credentials.device,generation:1,storage:"catalog-1",members:[for (device in members) {device:device,active:true}]})^
         let storage = parse(environment.LAMBDA_CLOUD_STORAGE,'json')^
         service.bootstrap(s3.adapter(storage),control)^
         return {authority:credentials.device.id,space:credentials.space}
@@ -36,6 +40,32 @@ pn execute(request, wrapping_key, environment) any^ {
     if (request.action == "history") {
         let credentials = identity.load(request.directory,wrapping_key)^
         return cloud.history(credentials,request.cloud,request.actor,request.start,request.limit or 32)^
+    }
+    if (request.action == "catalog_recover") {
+        let credentials = identity.load(request.directory,wrapping_key)^
+        return transport.call(request.cloud,credentials,"recover_catalog",{snapshot:request.snapshot})^
+    }
+    if (request.action == "cancel_publication") {
+        let agent = peer.open_agent(request.directory,wrapping_key)^
+        return transport.call(request.cloud,agent.credentials,"cancel_publication",{})^
+    }
+    if (starts_with(request.action,"cache_")^) {
+        let agent = peer.open_agent(request.directory,wrapping_key)^
+        if (request.action == "cache_plan") { return cache.plan(agent.handle,agent.credentials,request.cloud,request.limit or 64)^ }
+        if (request.action == "cache_step") { return cache.step(agent.handle,request.cloud,request.id,request.budget or 16)^ }
+        if (request.action == "cache_hydrate") { return cache.hydrate(agent.handle,agent.credentials,request.cloud,request.budget or 64)^ }
+        if (request.action == "cache_cancel") { return cache.cancel(agent.handle,agent.credentials,request.cloud)^ }
+    }
+    if (starts_with(request.action,"maintenance_")^) {
+        let agent = peer.open_agent(request.directory,wrapping_key)^
+        let action = request.action
+        if (action == "maintenance_tick") { return runner.tick(agent.handle,agent.credentials,request.cloud,
+            request.at or now().unix,request.options or runner.defaults)^ }
+        if (action == "maintenance_prepare") { return maintenance.prepare(agent.handle,agent.credentials,request.cloud)^ }
+        if (action == "maintenance_step") { return maintenance.step(agent.handle,agent.credentials,request.cloud,request.budget or 32)^ }
+        if (action == "maintenance_abort") { return maintenance.abort(agent.handle,agent.credentials,request.cloud)^ }
+        if (action == "maintenance_status") { return maintenance.status(agent.handle,request.cloud)^ }
+        if (action == "maintenance_prune" or action == "maintenance_reap") { return maintenance.prune(agent.credentials,request.cloud,request.id,request.budget or 32,action == "maintenance_reap")^ }
     }
     if (request.action == "status") { return agent.status(request.directory,wrapping_key,request.cloud)^ }
     raise error("sync cloud: unknown action")

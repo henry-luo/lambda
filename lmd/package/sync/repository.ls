@@ -7,7 +7,7 @@ import codec: .codec
 import chunks: .chunks
 import blob: .blob
 import v: .schema
-let kinds = ["chunk","manifest","state","snapshot","checkpoint","document"]
+let kinds = ["chunk","manifest","state","snapshot","checkpoint","document","version","history","retention","maintenance","cache"]
 
 pub pn access(path, keys, action) any^ {
     open tx = (sqlite.existing(path)^) { return action(tx,{*:keys,objects:path ++ ".objects"}) }
@@ -34,6 +34,10 @@ fn authenticated(keys, record) any^ {
     return bytes
 }
 fn decode(keys, record) any^ => codec.decode(authenticated(keys,record)^)^
+pub fn validate_record(keys, record) any^ {
+    authenticated(keys,record)^
+    return true
+}
 
 fn filename(id) any^ {
     if (not (id is binary) or len(id) != 32) raise error("sync repository: invalid object ID")
@@ -51,6 +55,7 @@ pn read_record(keys, id) any^ {
 pub pn record(keys, id) any^ {
     return read_record(keys,id)^.record
 }
+pub pn present(keys, id) any^ { return disk.inspect(keys.objects,filename(id)^)^ != null }
 pub pn get(tx, keys, id, kind=null) any^ {
     let stored = read_record(keys,id)^
     if (kind != null and stored.record.kind != kind) raise error("sync repository: object kind mismatch")
@@ -146,27 +151,40 @@ pub pn content(tx, keys, bytes, config=chunks.default_profile) any^ {
     return blob.reference(manifest,len(bytes),digest)^
 }
 
-pub pn payload(tx, keys, reference) any^ {
+pn content_manifest(tx, keys, reference) any^ {
     v.descriptor(reference)^
     let manifest = get(tx,keys,reference.manifest,"manifest")^
     v.fields(manifest,["version","profile","size","hash","chunks"])^
     chunks.profile(manifest.profile)^
     if (manifest.version != 1 or manifest.size != reference.size or manifest.hash != reference.hash or
         manifest.size > 8388608 or not (manifest.chunks is array)) raise error("sync repository: invalid manifest")
-    var bytes = binary([])^
-    var i = 0
-    while (i < len(manifest.chunks)^) {
-        let descriptor = manifest.chunks[i]
-        let piece = get(tx,keys,descriptor.id,"chunk")^
-        if (not (piece is binary) or len(piece) != descriptor.size or len(piece) == 0 or
-            len(piece) > manifest.profile.maximum or len(bytes)+len(piece) > manifest.size)
-            raise error("sync repository: invalid chunk")
-        bytes = bytes ++ piece
-        i = i+1
+    for (descriptor in manifest.chunks) {
+        v.fields(descriptor,["id","size"])^
+        if (not (descriptor.id is binary) or len(descriptor.id)^ != 32 or not v.natural(descriptor.size)^ or
+            descriptor.size < 1 or descriptor.size > manifest.profile.maximum) raise error("sync repository: invalid chunk descriptor")
     }
-    if (not blob.verify(reference,bytes)^) raise error("sync repository: reconstructed content mismatch")
-    return bytes
+    if (sum([0,*[for (descriptor in manifest.chunks) descriptor.size]]) != manifest.size)
+        raise error("sync repository: manifest length mismatch")
+    return manifest
 }
+pub pn availability(tx, keys, reference, evicted=[]) any^ {
+    let manifest = content_manifest(tx,keys,reference)^
+    var bytes = binary([])^
+    var missing = []
+    for (descriptor in manifest.chunks) {
+        if (not present(keys,descriptor.id)^ and contains(evicted,descriptor.id)^) {
+            missing = [*missing,descriptor.id]
+        } else {
+            let piece = get(tx,keys,descriptor.id,"chunk")^
+            if (not (piece is binary) or len(piece) != descriptor.size) raise error("sync repository: invalid chunk")
+            bytes = bytes ++ piece
+        }
+    }
+    if (len(missing) == 0 and not blob.verify(reference,bytes)^)
+        raise error("sync repository: reconstructed content mismatch")
+    return {complete:len(missing) == 0,missing:missing,bytes:if (len(missing) == 0) bytes else null}
+}
+pub pn payload(tx, keys, reference) any^ { return availability(tx,keys,reference)^.bytes }
 
 pub pn inventory(tx) any^ {
     return [for (row in sqlite.query(tx,"SELECT id FROM objects ORDER BY id")^) row[0]]
@@ -178,7 +196,7 @@ pub pn export_objects(tx, keys, ids) any^ {
     var i = 0
     while (i < len(ids)) {
         let record = record(keys,ids[i])^
-        if (record.kind == "state") raise error("sync repository: private local state cannot be exported")
+        if (contains(["state","maintenance"],record.kind)^) raise error("sync repository: private local state cannot be exported")
         decode(keys,record)^
         records = [*records,record]
         i = i+1
@@ -191,11 +209,23 @@ pub pn import_objects(tx, keys, records) any^ {
     var i = 0
     while (i < len(records)) {
         let record = records[i]
-        if (record.kind == "state") raise error("sync repository: private local state cannot be imported")
+        if (contains(["state","maintenance"],record.kind)^) raise error("sync repository: private local state cannot be imported")
         decode(keys,record)^
         persist_record(tx,keys,record)^
         i = i+1
     }
+    return true
+}
+
+// synchronous removal stays inside the caller's SQLite writer scope; retry after a crash is idempotent.
+pub pn remove_object(tx, keys, id) any^ {
+    let path = filename(id)^
+    let observed = disk.inspect(keys.objects,path)^
+    if (observed != null) {
+        read_record(keys,id)^
+        disk.erase(keys.objects,path,observed.token)^
+    }
+    sqlite.execute(tx,"DELETE FROM objects WHERE id = ?",[id])^
     return true
 }
 
@@ -230,7 +260,7 @@ pub pn recover(tx, keys) any^ {
     let indexed = inventory(tx)^
     return [for (item in records(keys)^ where not contains(indexed,item.id)^) {id:item.id,kind:item.kind}]
 }
-pub pn verify(tx, keys) any^ {
+pub pn verify(tx, keys, evicted=[], removing=[]) any^ {
     let stored = records(keys)^
     let ids = inventory(tx)^
     var i = 0
@@ -239,13 +269,17 @@ pub pn verify(tx, keys) any^ {
         let indexed = sqlite.query(tx,"SELECT kind, box FROM objects WHERE id = ?",[item.id])^
         if (len(indexed) != 0 and (indexed[0][0] != item.kind or indexed[0][1] != item.box))
             raise error("sync repository: locator index mismatch")
-        if (item.kind == "manifest") {
+        if (item.kind == "manifest" and not contains(removing,item.id)^) {
             let value = decode(keys,item)^
-            payload(tx,keys,blob.reference(item.id,value.size,value.hash)^)^
+            availability(tx,keys,blob.reference(item.id,value.size,value.hash)^,evicted)^
         }
         i = i+1
     }
-    if (any([for (id in ids) not any([for (item in stored) item.id == id])])) raise error("sync repository: indexed object missing")
+    if (any([for (id in ids where not contains([*removing,*evicted],id)^) not any([for (item in stored) item.id == id])])) raise error("sync repository: indexed object missing")
     load(tx,keys)^
-    return {objects:len(stored),unindexed:len(stored)-len(ids),verified:true}
+    let stored_ids = [for (item in stored) item.id]
+    let missing = [for (id in evicted where not contains(stored_ids,id)^) id]
+    return {objects:len(stored),unindexed:len([for (id in stored_ids where not contains(ids,id)^) id]),
+        verified:true,data_complete:len(missing) == 0,evicted:len(missing),
+        pending_removal:len([for (id in ids where contains(removing,id)^ and not contains(stored_ids,id)^) id])}
 }

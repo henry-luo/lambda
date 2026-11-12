@@ -15,6 +15,8 @@ The [cloud adapter](CLOUD.md) adds object publication, periodic HTTP fallback
 and fresh-device recovery. The [document host](DOCUMENTS.md) persists unsaved
 sessions and links exact-frontier saves to workspace revisions. Native filesystem
 watchers and UI bindings follow separately.
+[History and maintenance](MAINTENANCE.md) adds retention, fenced cleanup and
+independent verified-copy cache eviction.
 
 ## Start a repository
 
@@ -80,9 +82,9 @@ key material and must not be serialized, logged or shared as application state.
 | `read_content(handle, reference)` | Authenticate chunks and reconstruct exact file bytes. |
 | `snapshot(handle, label)` | Pin a saved workspace snapshot in local state. |
 | `restore(handle, snapshot, destination)` | Restore a snapshot into a separate empty directory; refuse competing unresolved file heads. |
-| `verify(handle)` | Authenticate physical objects, check locators, reconstruct all manifests, and validate current workspace/snapshot dependencies. |
+| `verify(handle)` | Authenticate physical objects, locators and dependencies; distinguish explicit deferred cold chunks from damage and report `data_complete`. |
 | `recover(handle)` | List authenticated unindexed objects and validated local-state candidates; never advance a live head automatically. |
-| `rebuild_index(handle)` | Rebuild the SQLite object locator table from authenticated immutable files and verify it transactionally. |
+| `rebuild_index(handle)` | Rebuild locators from authenticated immutable files, quarantine unindexed recovery roots and verify transactionally. |
 
 An idle scan or installation does not create a file revision. Installation is a
 separate effect from repository publication. A save captures its chosen document
@@ -105,6 +107,7 @@ The format is independent of SQLite and cloud locations:
 ```text
 LRP1 (4 bytes) | kind (1 byte) | logical ID (32 bytes) | encrypted envelope
 kind: 0 chunk, 1 manifest, 2 private state, 3 snapshot, 4 checkpoint, 5 document
+      6 version, 7 history page, 8 retention, 9 private maintenance job, 10 cache metadata
 encrypted envelope: LGC1 | random nonce (12) | GCM tag (16) | ciphertext
 ```
 
@@ -128,7 +131,8 @@ retried. Existing SQLite barriers qualify transaction/process-restart behavior;
 ACK is invented by these APIs. Lost head state requires selecting a recovery
 candidate; rebuilding locators alone does not infer the latest intended head.
 
-History and immutable files are retained permanently in this milestone. Verification
+Permanent history is the default; explicit [maintenance](MAINTENANCE.md) can
+retire saved payloads and prune unreachable files. Verification
 authenticates old private state objects without replaying every old editor or
 installation state. Private states are excluded from object exchange; portable
 file/revision history remains represented by workspace checkpoints and manifests.
@@ -195,6 +199,7 @@ Native calls use their qualified spelling. The existing
 through builtin reference values.
 
 Keys/enrollment, remote trust, file-link isolation, key recovery/rotation, browser
-execution, physical pruning and production performance are separate milestones.
+execution and production performance are separate milestones. Fenced physical
+pruning is available through explicit maintenance APIs.
 
 Implementation and qualification: [completed local milestone](<../../../vibe/impl/Lambda_Impl_Sync_Local_Repository (done).md>).

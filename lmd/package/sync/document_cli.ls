@@ -47,7 +47,11 @@ pub pn execute(request, wrapping_key) any^ {
         return {bytes:if (bytes == null) 0 else len(bytes),digest:hash(bytes,'sha256')^}
     }
     if (action == "versions") {
-        return model.get(local.status(handle)^.state,document)^.session.versions
+        if (request.cursor == null and request.limit == null and request.root == null) {
+            return model.get(local.status(handle)^.state,document)^.session.versions
+        }
+        return host.versions(handle,document,request.cursor or 0,request.limit or 32,
+            if (request.root == null) null else hex.unhex(request.root)^)^
     }
     raise error("sync document: unknown editor action")
 }

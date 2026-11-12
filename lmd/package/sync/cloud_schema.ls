@@ -9,10 +9,17 @@ import core: .core
 pub fn digest(value) any^ => hex.hex(codec.digest(value)^)^
 pub fn id(value) => value is string and len(value) == 64 and hex.hex_valid(value) and lower(value) == value
 pub fn prefix(space) any^ => "spaces/" ++ hex.hex(hash(space,'sha256')^)^ ++ "/"
-pub fn data_key(key) bool^ => key is string and
-    (starts_with(key,"objects/") or starts_with(key,"bundles/")) and id(slice(key,index_of(key,"/")+1,len(key)))
+pub fn data_key(key) bool^ {
+    if (not (key is string)) { return false }
+    let parts = split(key,"/")^
+    if (not contains([2,3],len(parts))^ or not contains(["objects","bundles"],parts[0])^) { return false }
+    if (not id(parts[len(parts)-1])) { return false }
+    if (len(parts) == 2) { return true }
+    return len(parts[1])^ > 0 and len(parts[1])^ <= 9 and parts[1][0] != "0" and
+        all([for (ch in split(parts[1],"")^) contains("0123456789",ch)^])
+}
 pub fn readable(key) bool^ => data_key(key)^ or (key is string and
-    (starts_with(key,"receipts/") or starts_with(key,"publications/")) and id(slice(key,index_of(key,"/")+1,len(key))))
+    (starts_with(key,"receipts/") or starts_with(key,"publications/") or starts_with(key,"catalogs/")) and id(slice(key,index_of(key,"/")+1,len(key))))
 pub fn signed(seed, domain, body) any^ => {body:body,signature:crypto.sign(seed,codec.encode([domain,body])^)^}
 pub fn verify(envelope, domain, public_key) any^ {
     v.fields(envelope,["body","signature"])^
@@ -22,7 +29,8 @@ pub fn verify(envelope, domain, public_key) any^ {
 }
 pub fn control(value, expected) any^ {
     let body = value.body
-    v.fields(body,["version","space","owner","generation","members"])^
+    v.record(body,["version","space","owner","generation","members"],["storage"])^
+    if (body.storage != null and body.storage != "catalog-1") raise error("sync cloud: unsupported storage protocol")
     identity.validate_device(body.owner)^
     verify(value,"lambda-cloud-control-1",body.owner.public_key)^
     if (body.version != 1 or not v.actor(body.space)^ or body.owner.id != expected or

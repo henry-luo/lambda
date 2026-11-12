@@ -9,9 +9,10 @@ import v: .schema
 import workspace: .workspace
 import protocol: .protocol
 import documents: .document_state
+import cloud: .cloud
 
-fn cloud_saved(current) any^ => protocol.status(current.endpoint)^.cloud and
-    all([for (record in documents.all(current)^) documents.coverage(record)^.cloud])
+fn cloud_saved(current) any^ => any([for (provider in (if (current.cloud_objects == null) [] else current.cloud_objects))
+    cloud.covered(current,provider.provider)^])
 
 pub pn device(directory, wrapping_key) any^ {
     if (disk.inspect(directory,"device.sqlite")^ != null) raise error("sync agent: device already exists")

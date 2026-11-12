@@ -5,6 +5,7 @@ import codec: .codec
 import p: .protocol
 import w: .workspace
 import tree: .workspace_tree
+import command_model: .workspace_commands
 
 pub fn leaf(path) any^ {
     let pieces = split(path,"/")^
@@ -79,7 +80,7 @@ pub fn correspondence(base, captured, hints) any^ {
 }
 
 // each command emits one event, so IDs can be assigned before bounded groups run.
-pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[]) any^ {
+pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], saved_at=null) any^ {
     let base_view = w.read(endpoint.replica)^
     var members = []
     var commands = []
@@ -123,7 +124,7 @@ pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[]) an
         }
         i = i+1
     }
-    return {endpoint:apply_groups(endpoint,actor,commands)^,members:members}
+    return {endpoint:apply_groups(endpoint,actor,command_model.stamp(commands,saved_at)^)^,members:members}
 }
 
 pub fn export_members(entries) any^ => sort([for (entry in entries where entry.visible)

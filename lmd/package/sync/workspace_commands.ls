@@ -26,11 +26,11 @@ pub fn execute(replica, actor, commands) any^ {
         let events = tree.events(result)^
         var event = null
         if (command.kind == 'create') {
-            v.record(command,["kind","type","parent","name"],["content","document","as"])^
+            v.record(command,["kind","type","parent","name"],["content","document","as","saved_at"])^
             let id = c.next_id(result,actor)
             event = {action:'create',type:command.type,parent:resolve(command.parent,aliases)^,name:command.name,
-                revision:if (command.type == 'file') rules.revision(result.document,result.epoch,id,[],command.content,command.document)^ else null}
-            if (command.type == 'dir' and (command.content != null or command.document != null))
+                revision:if (command.type == 'file') rules.revision(result.document,result.epoch,id,[],command.content,command.document,command.saved_at)^ else null}
+            if (command.type == 'dir' and (command.content != null or command.document != null or command.saved_at != null))
                 raise error("sync workspace: directory cannot contain a file revision")
             if (command.as != null) {
                 if (not v.actor(command.as)^ or v.lookup(aliases,command.as)^ != null) raise error("sync workspace: duplicate or invalid alias")
@@ -54,9 +54,9 @@ pub fn execute(replica, actor, commands) any^ {
                 let ids = if (command.deletions == null) [for (deleted in tree.deletions(events,entry)^) deleted.id] else command.deletions
                 event = {action:'restore',entry:entry,deletions:sort(ids)^}
             } else if (command.kind == 'publish') {
-                v.record(command,["kind","entry","content"],["parents","document"])^
+                v.record(command,["kind","entry","content"],["parents","document","saved_at"])^
                 let parents = if (command.parents == null) [for (head in tree.heads(events,entry)^) head.id] else command.parents
-                event = {action:'publish',entry:entry,revision:rules.revision(result.document,result.epoch,entry,parents,command.content,command.document)^}
+                event = {action:'publish',entry:entry,revision:rules.revision(result.document,result.epoch,entry,parents,command.content,command.document,command.saved_at)^}
             }
         }
         rules.shape(event)^
@@ -64,4 +64,11 @@ pub fn execute(replica, actor, commands) any^ {
         i = i+1
     }
     return result
+}
+
+// native capture supplies wall time as retention metadata; Lamport order remains separate.
+pub fn stamp(commands, milliseconds) any^ {
+    if (milliseconds == null) { return commands }
+    return [for (command in commands) if ((command.kind == 'create' and command.type == 'file') or command.kind == 'publish')
+        {*:command,saved_at:if (command.saved_at == null) milliseconds else command.saved_at} else command]
 }

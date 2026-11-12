@@ -122,11 +122,14 @@ silently reloads over unsaved edits.
 The private encrypted local state holds endpoints, sessions, request receipts,
 import bases, review records and save intents. Shared immutable `document`
 objects hold compact live checkpoints, the initialization identity and retained
-saved versions. They are repository object kind 5; existing kind codes are stable.
+history page references. Document roots remain repository object kind 5; saved
+endpoints/pages use new kinds 6/7. Existing kind codes are stable.
+[History and maintenance](MAINTENANCE.md) describes bounded listing, timestamps,
+retention and explicit hydration of cold saved chunks.
 Saved workspace revisions point to both export bytes and their exact document
 checkpoint. Current and saved attachment roots must reconstruct before commit/ACK.
 
-Peer offers version 2 include a bounded document catalog. New/mismatched saved
+Peer offers version 3 include a bounded document catalog. New/mismatched saved
 histories transfer an authenticated immutable root through existing fragments.
 Peers with the same saved history use `protocol.next` atomic deltas and same-epoch
 checkpoint frames after compaction. Device-signed `lambda-document-relay-1`
@@ -136,22 +139,23 @@ it is not an original-author-signature relay or a finer document-sharing grant.
 Outgoing document state stays pinned during a connection. Each accepted group or
 frame commits before reply; callbacks recheck current peer grants.
 
-Cloud bundle version 2 binds document root IDs into the already signed encrypted
+Cloud bundle version 3 binds document root IDs into the already signed encrypted
 publication and its complete immutable dependency inventory. Pull installs and
 validates roots before recording document coverage. The function API stays
-stateless and polling stays periodic. Readers accept legacy version-1 bundles;
-older readers do not gain version-2 support automatically. Peers without the
+stateless and polling stays periodic. Readers accept legacy version-1/2 bundles;
+older readers require upgrading before joining this profile. Peers without the
 document extension require an explicit upgrade for live-document exchange.
 
 The inherited profile limits apply: at most 64 tracked documents, bounded 8 MiB
 repository/checkpoint envelopes and file captures, 1,024 operations per atomic
-editor group, and bounded peer frames. Roots with changed saved history must fit
-one bounded immutable object; there is no silent truncation. Array/LCS indexes
+editor group, and bounded peer frames. Saved history uses immutable DAG pages, while live roots and each endpoint must
+fit one bounded immutable object. There is no silent truncation. Array/LCS indexes
 are the reference algorithms, without a production performance claim.
-Compaction is logical reduction; physical objects and saved versions remain
-permanently retained. Epoch retirement, destructive retention, browsers, UI
-bindings, traversal, finer grants/key lifecycle and hosted/physical-device
-qualification remain separate work. No native CRDT engine is added.
+Same-epoch compaction retains merge anchors; explicit retention can retire
+intermediate saved endpoints and reclaim unreachable payloads. Metadata epoch
+retirement, browsers, UI bindings, traversal, finer grants/key lifecycle and
+hosted/physical-device qualification remain separate work. No native CRDT engine
+is added.
 
 Acceptance: [document fixtures](../../../test/lambda/proc/sync_document_repository.ls),
 [save races](../../../test/lambda/proc/sync_document_races.ls),

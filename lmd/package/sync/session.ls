@@ -3,6 +3,7 @@ import c: .core
 import text: .text
 import mark: .mark
 import codec: .codec
+import v: .schema
 
 pub fn value(replica) any^ => if (replica.profile == 'text') text.read(replica)^ else mark.value(replica)^
 
@@ -16,6 +17,10 @@ fn version(replica, raw, projected, parents) any^ {
 
 fn remember(versions, saved) =>
     if (any([for (item in versions) item.id == saved.id])) versions else [*versions,saved]
+
+fn append_version(session, saved) any^ => {*:session,versions:remember(session.versions,saved),
+    *:if (session.saved_heads == null) {} else {saved_heads:sort(unique([
+        *[for (id in session.saved_heads where not contains(saved.parents,id)^) id],saved.id]))^}}
 
 pub fn start(replica, raw=null) any^ {
     let initial = version(replica,if (raw == null) encoded(replica)^ else raw,value(replica)^,[])^
@@ -87,15 +92,15 @@ pub fn import_external(session, import_id, actor, base_id, raw, parsed:any) any^
     let external_value = if (session.live.profile == 'text') parsed else mark.normalize(parsed)^
     let saved = version(branch,raw,external_value,[session.base.id])^
     let imported = {*:record,status:if (conflict) 'conflict' else 'merged',branch:branch,version:saved.id}
-    return {*:session,live:merged,base:saved,disk:external_value,
-        versions:remember(session.versions,saved),imports:[*session.imports,imported],
+    return {*:append_version(session,saved)^,live:merged,base:saved,disk:external_value,
+        imports:[*session.imports,imported],
         conflicts:if (conflict) [*session.conflicts,{kind:'external-overlap',import_id:import_id,
             base:session.base,live_before:session.live,branch:branch,raw:raw}] else session.conflicts,
         notices:if (conflict) [*session.notices,"Concurrent external edits need review; both inputs are retained."]
             else if (unsaved) [*session.notices,"External changes merged; your unsaved edits are retained."] else session.notices}
 }
 
-pub fn heads(session) any^ => [for (saved in session.versions where
+pub fn heads(session) any^ => if (session.saved_heads != null) session.saved_heads else [for (saved in session.versions where
     not any([for (other in session.versions) contains(other.parents,saved.id)^])) saved.id]
 
 pub fn prepare_save(session, raw=null) any^ {
@@ -105,7 +110,15 @@ pub fn prepare_save(session, raw=null) any^ {
 
 pub fn validate_version(saved) any^ {
     let restored = c.restore(saved)^
-    if (saved.id != codec.digest([saved.digest,saved.raw,saved.parents])^ or
+    let metadata = saved.save_metadata
+    if (metadata != null) {
+        v.fields(metadata,["at","actor"])^
+        if (not (metadata.at is number) or metadata.at < 0 or floor(metadata.at) != metadata.at or not v.actor(metadata.actor)^)
+            raise error("sync: invalid save metadata")
+    }
+    let identity = if (metadata == null) [saved.digest,saved.raw,saved.parents]
+        else ["lambda-save-2",saved.digest,saved.raw,saved.parents,metadata]
+    if (saved.id != codec.digest(identity)^ or
         not (saved.parents is array) or len(unique(saved.parents)) != len(saved.parents) or
         codec.digest(value(restored)^)^ != codec.digest(saved.value)^) raise error("sync: corrupt saved version")
     return true
@@ -118,7 +131,7 @@ pub fn commit_save(session, prepared) any^ {
     if (not c.dominates(session.live.clock,prepared.saved.frontier)^)
         raise error("sync: save frontier exceeds live state")
     c.merge(session.live,prepared.saved.replica)^
-    return {*:session,base:prepared.saved,disk:prepared.saved.value,versions:remember(session.versions,prepared.saved)}
+    return {*:append_version(session,prepared.saved)^,base:prepared.saved,disk:prepared.saved.value}
 }
 
 pub fn save(session) any^ => commit_save(session,prepare_save(session)^)^
@@ -126,7 +139,7 @@ pub fn save(session) any^ => commit_save(session,prepare_save(session)^)^
 // received saved revisions do not overwrite this device's materialized disk base.
 pub fn receive_version(session, saved) any^ {
     validate_version(saved)^
-    return {*:session,live:c.merge(session.live,saved.replica)^,versions:remember(session.versions,saved)}
+    return {*:append_version(session,saved)^,live:c.merge(session.live,saved.replica)^}
 }
 
 // only the host's verified disk readback advances the local materialized base.
@@ -155,4 +168,14 @@ pub fn compact(session) => {*:session,live:c.compact(session.live),imports:[for 
 pub fn retain(session, ids) any^ {
     let protected = [session.base.id,*ids,*[for (conflict in session.conflicts) conflict.base.id]]
     return {*:session,versions:[for (saved in session.versions where contains(protected,saved.id)^) saved]}
+}
+
+// procedural hosts provide a stable intent identity and wall time; retries reuse the persisted result.
+pub fn stamp_version(saved, milliseconds, actor) any^ {
+    validate_version(saved)^
+    let metadata = {at:milliseconds,actor:actor}
+    let stamped = {*:saved,save_metadata:metadata,
+        id:codec.digest(["lambda-save-2",saved.digest,saved.raw,saved.parents,metadata])^}
+    validate_version(stamped)^
+    return stamped
 }

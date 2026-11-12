@@ -73,6 +73,7 @@ pub pn serve_connection(socket, handle, credentials, authorize=null) any^ {
         channel = incoming.session
         if (incoming.value == {kind:'done',body:null}) {
             channel = send_record(socket,channel,{ok:true,body:true})^
+            local.release_staging(handle,outgoing.ids)^
             return {peer:channel.peer.id,received:local.status(handle)^.state.endpoint.replica.clock}
         }
         let result = exchange.request(handle,credentials,channel.peer,outgoing,pending,incoming.value) ^ { ^ }
@@ -117,6 +118,8 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
         }
         index = index+len(page.value)^
     }
+    local.register_retention(handle,remote.retention)^
+    local.register_cache(handle,remote.cache)^
     index = 0
     while (index < remote.frames) {
         let response = request(socket,channel,'frame',{index:index})^
@@ -145,6 +148,10 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
         }
         index = index+len(page)
     }
+    let retirement = request(socket,channel,'retention_root',outgoing.summary.retention)^
+    channel = retirement.session
+    let availability = request(socket,channel,'cache_root',outgoing.summary.cache)^
+    channel = availability.session
     var accepted = []
     for (packet in outgoing.frames) {
         let response = request(socket,channel,'put_frame',{packet:packet,proof:outgoing.proof})^
@@ -156,6 +163,7 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
     let pushed_documents = push_documents(socket,channel,handle,credentials,outgoing.documents)^
     channel = pushed_documents.session
     let ended = request(socket,channel,'done',null)^
+    local.release_staging(handle,available)^
     return {peer:channel.peer.id,downloaded:downloaded,uploaded:uploaded,
         frontier:outgoing.summary.clock,replicated:true,cloud_saved:false,
         document_packets:pulled_documents.packets+pushed_documents.packets,

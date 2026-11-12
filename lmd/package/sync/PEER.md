@@ -140,7 +140,7 @@ its existing protocol frames, a portable object inventory and a checkpoint proof
 The connection pins that offer; repository edits after it require a subsequent
 exchange. Read-only private state and recovery journals never enter the inventory.
 
-Offer version 2 also pins a [live-document catalog](DOCUMENTS.md). Unsaved Text
+Offer version 3 also pins a [live-document catalog](DOCUMENTS.md). Unsaved Text
 and Mark edits use atomic protocol deltas; compacted prefixes use checkpoint
 frames. New document/saved-history roots use the existing immutable object
 fragments. Historical document objects are excluded from the bulk peer inventory
@@ -202,3 +202,15 @@ hosted-provider qualification remains environment-specific. This adapter preserv
 transport-independent CRDT/repository formats for those integrations.
 
 Implementation and qualification: [completed native peer milestone](<../../../vibe/impl/Lambda_Impl_Sync_Peer (done).md>).
+
+## Retention interoperability
+
+Offers include authenticated retirement and deferred-cache metadata, alongside
+the document catalog. Import retirement before admitting checkpoints; partial
+frames keep the existing branch until a complete accepted replica is available.
+Expired payloads do not re-enter shared inventory when an old device reconnects.
+Retained ancestry/CRDT anchors still merge its pending changes. A peer may relay
+deferred historical chunks; live/base/pending data must remain available locally.
+Hydrate cold chunks from their verified cloud provider before restoring them.
+See [maintenance](MAINTENANCE.md). Older offers remain readable, but all writers
+and the cloud handler must upgrade before enabling retention (D11.1.2, D11.2.3).

@@ -1705,6 +1705,38 @@ Acceptance cases:
 
 ### 12.3 Efficiency and maintenance
 
+The native reference implementation now supplies paged immutable saved endpoints,
+calendar retention, explicit pins, retirement manifests, resumable local pruning
+and independent verified-copy cache eviction. Selection remains pure Lambda
+Script (S12.1.1v3, D9.3.4); the existing procedural/native boundary performs IO
+(S12.4.4v4, D11.1.2). See the [maintenance API](../lmd/package/sync/MAINTENANCE.md)
+and [implementation record](<impl/Lambda_Impl_Sync_Retention (done).md>).
+
+New save IDs bind authored time and unique intent; new raw file revisions bind
+optional authored time without changing legacy hashes. First local arrival is
+recorded separately. Independent compact saved endpoints avoid requiring an
+expired delta base. Full ancestry headers, namespace operations and same-epoch
+CRDT anchors remain; metadata epoch retirement is a separate phase.
+
+One conditional cloud catalog serializes all device-head publication and owner
+maintenance. The key holder copies retained roots to a fresh physical epoch,
+then signs a cut covering frozen heads and cache reservations. Only old-epoch
+keys can be deleted. Active uploads reserve their keys before capabilities are
+issued; their writer must finish/cancel before a cut. A private function can
+execute bounded committed deletion steps; periodic owner-client ticks perform
+semantic selection/copy. No persistent cloud service is required.
+
+A missing catalog fails closed. Immutable logical catalog backups permit
+owner-selected recovery after validating signatures and required dependencies;
+recovery/legacy upgrades keep destructive maintenance disabled pending an audited
+inventory. Latest-backup discovery and the audit tool remain unimplemented.
+All writers/old handler invocations must upgrade/drain before retention starts.
+Local pruning obtains a real SQL writer lock before external deletion and commits
+its cursor afterward. Recovery quarantines unindexed objects and preserves their
+own reachability context. Explicit deferred chunk metadata distinguishes cache
+absence from damaged data; hydration authenticates bytes before releasing pins.
+
+
 Measure and tune chunk sizing, encrypted reuse, physical packing, and locator
 indexes on real workloads. Shared change indexes, aggressive metadata compaction,
 and long polling remain measured options. Implement retention and garbage

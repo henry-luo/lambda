@@ -21,6 +21,10 @@ pn write(path, key, bytes, expected) any^ {
         return {written:true,etag:token}
     }
 }
-pub fn adapter(path) => {get:pn (key)=> { return read(path,key)^ },head:pn (key)=> { return read(path,key)^ },
+pn erase(path, key) any^ {
+    open tx = (sqlite.existing(path)^) { sqlite.execute(tx,"DELETE FROM objects WHERE key = ?",[key])^ }
+    return true
+}
+pub fn adapter(path) => {erase:pn (key)=> { return erase(path,key)^ },get:pn (key)=> { return read(path,key)^ },head:pn (key)=> { return read(path,key)^ },
     write:pn (key,bytes,expected)=> { return write(path,key,bytes,expected)^ },
     capability:(method,key,headers)=> {url:"https://store.invalid/" ++ key,headers:headers}}

@@ -1,5 +1,9 @@
 // repository-side effects; the caller commits the returned state in the same head transaction.
 import model: .document_state
+import history: .history
+import maintenance: .maintenance_state
+import reach: .reachability
+import cache_state: .cache_state
 import conversion: .document_format
 import core: .core
 import protocol: .protocol
@@ -13,29 +17,35 @@ import v: .schema
 import utf8: lambda.io.utf8
 
 pub fn roots(current) => [for (record in model.all(current)) {id:record.id,object:record.export_id}]
-pub pn dependencies(tx, keys, record) any^ {
-    let replicas = [record.endpoint.replica,*[for (saved in record.session.versions) saved.replica],
+pub pn dependencies(tx, keys, record, cached=[]) any^ {
+    let replicas = [record.endpoint.replica,record.origin.replica,
         record.session.base.replica,*if (record.prepared == null) [] else [record.prepared.saved.replica]]
     for (replica in replicas) {
         for (reference in blob.required(replica)^) { repo.payload(tx,keys,reference)^ }
+    }
+    for (saved in record.session.versions) {
+        for (reference in blob.required(saved.replica)^) { repo.availability(tx,keys,reference,cached)^ }
     }
     return true
 }
 pub pn flush(tx, keys, current) any^ {
     var updated = current
+    var observed_headers = []
     if (len(model.all(current))^ > 64) raise error("sync document: document count limit")
-    for (record in model.all(current)) {
+    for (original in model.all(current)) {
+        let record = history.flush(tx,keys,original,now().unix)^
+        observed_headers = [*observed_headers,*history.headers(tx,keys,record.history)^.entries]
         model.validate(record,keys.space)^
-        dependencies(tx,keys,record)^
+        dependencies(tx,keys,record,reach.cache_ids(current))^
         for (saved in [record.origin,*record.session.versions]) {
             repo.store_object(tx,keys,"checkpoint",protocol.checkpoint(saved.replica))^
         }
         let stored_id = repo.store_object(tx,keys,"document",model.public_state(record)^)^
         let endpoint = protocol.durable(record.endpoint,'local',record.endpoint.replica.clock,
             [for (reference in blob.required(record.endpoint.replica)^) reference.manifest])^
-        updated = model.replace(updated,{*:record,endpoint:endpoint,export_id:stored_id})^
+        updated = model.replace(updated,history.pack({*:record,endpoint:endpoint,export_id:stored_id}))^
     }
-    return updated
+    return cache_state.recover(tx,keys,maintenance.observe(updated,observed_headers,now().unix)^)^
 }
 pub pn install_roots(tx, keys, current, roots) any^ {
     if (not (roots is array) or len(roots) > 64 or len(unique([for (root in roots) root.id])) != len(roots))
@@ -43,12 +53,12 @@ pub pn install_roots(tx, keys, current, roots) any^ {
     var updated = current
     for (root in roots) {
         v.fields(root,["id","object"])^
-        let value = repo.get(tx,keys,root.object,"document")^
+        let value = history.expand_public(tx,keys,repo.get(tx,keys,root.object,"document")^,history.retired(current))^
         if (value.id != root.id) raise error("sync document: root identity mismatch")
         if (workspace.entry(current.endpoint.replica,value.entry)^.type != 'file')
             raise error("sync document: document target must be a file")
         let record = model.merge_public(v.lookup(model.all(updated),root.id)^,value,keys.space)^
-        dependencies(tx,keys,record)^
+        dependencies(tx,keys,record,reach.cache_ids(current))^
         updated = model.replace(updated,record)^
     }
     return updated
@@ -105,4 +115,12 @@ pub pn refresh(tx, keys, current, actor) any^ {
         updated = model.replace(updated,next)^
     }
     return updated
+}
+
+pub pn expand(tx, keys, current) any^ {
+    var expanded = current
+    for (record in model.all(current)) {
+        expanded = model.replace(expanded,history.expand(tx,keys,record,history.retired(current))^)^
+    }
+    return expanded
 }

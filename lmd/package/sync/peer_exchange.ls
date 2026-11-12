@@ -7,6 +7,7 @@ import codec: .codec
 import v: .schema
 import crypto: lambda.io.crypto
 import document_state: .document_state
+import maintenance: .maintenance_state
 import document_exchange: .document_exchange
 
 pub let page_size = 64
@@ -20,13 +21,13 @@ pub pn offer(handle, credentials) any^ {
         signature:crypto.sign(credentials.seed,auth.checkpoint_bytes(frames[0],digest)^)^}
     let ids = local.inventory(handle,false)^
     let documents = document_state.all(stored)
-    return {frames:frames,proof:proof,ids:ids,documents:documents,summary:{version:2,space:credentials.space,
+    return {frames:frames,proof:proof,ids:ids,documents:documents,summary:{version:3,space:credentials.space,
         digest:digest,clock:current.replica.clock,objects:len(ids),frames:len(frames),
-        documents:document_exchange.catalog(documents)^}}
+        documents:document_exchange.catalog(documents)^,retention:maintenance.get(stored).manifest,cache:stored.cache_root}}
 }
 pub fn summary(value, space) any^ {
-    v.record(value,["version","space","digest","clock","objects","frames"],["documents"])^
-    if (not contains([1,2],value.version)^ or value.space != space or not (value.digest is binary) or len(value.digest)^ != 32 or
+    v.record(value,["version","space","digest","clock","objects","frames"],["documents","retention","cache"])^
+    if (not contains([1,2,3],value.version)^ or value.space != space or not (value.digest is binary) or len(value.digest)^ != 32 or
         not v.natural(value.objects)^ or value.objects > 100000 or not v.natural(value.frames)^ or
         value.frames < 1 or value.frames > 8192) raise error("sync peer: invalid offer")
     v.clock(value.clock)^
@@ -118,6 +119,14 @@ pub pn request(handle, credentials, peer, outgoing, pending, command) any^ {
     }
     if (command.kind == 'put_object') {
         return {body:true,pending:import_fragment(handle,pending,body)^}
+    }
+    if (command.kind == 'cache_root') {
+        local.register_cache(handle,body)^
+        return {body:true,pending:pending}
+    }
+    if (command.kind == 'retention_root') {
+        local.register_retention(handle,body)^
+        return {body:true,pending:pending}
     }
     if (command.kind == 'put_frame') {
         let applied = receive_frame(handle,credentials,peer,body)^

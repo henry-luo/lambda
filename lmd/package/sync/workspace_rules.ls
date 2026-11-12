@@ -20,24 +20,27 @@ pub fn document(value) any^ {
     return true
 }
 
-pub fn revision(workspace, epoch, file, parents, content, document=null) any^ {
-    let body = {workspace:workspace,epoch:epoch,file:file,parents:sort(parents)^,content:content,document:document}
+pub fn revision(workspace, epoch, file, parents, content, document=null, saved_at=null) any^ {
+    let body = {workspace:workspace,epoch:epoch,file:file,parents:sort(parents)^,content:content,document:document,
+        *:if (saved_at == null) {} else {saved_at:saved_at}}
     let result = {id:codec.digest(["lambda-file-revision-1",body])^,*:body}
     validate_revision(result)^
     return result
 }
 
 pub fn validate_revision(value) any^ {
-    v.fields(value,["id","workspace","epoch","file","parents","content","document"])^
+    v.record(value,["id","workspace","epoch","file","parents","content","document"],["saved_at"])^
     if (not digest(value.id) or not v.actor(value.workspace)^ or not v.natural(value.epoch)^ or
         not v.id(value.file)^ or not (value.parents is array) or
         value.parents != sort(unique(value.parents))^ or not all([for (parent in value.parents) digest(parent)]))
         raise error("sync workspace: invalid file revision")
+    if (contains(value,"saved_at")^ and (not (value.saved_at is number) or value.saved_at < 0 or floor(value.saved_at) != value.saved_at))
+        raise error("sync workspace: invalid save timestamp")
     v.descriptor(value.content)^
     if (value.content.kind != 'blob') raise error("sync workspace: revision requires immutable content")
     document(value.document)^
     if (value.id != codec.digest(["lambda-file-revision-1",{workspace:value.workspace,epoch:value.epoch,file:value.file,parents:value.parents,
-        content:value.content,document:value.document}])^) raise error("sync workspace: revision digest mismatch")
+        content:value.content,document:value.document,*:if (value.saved_at == null) {} else {saved_at:value.saved_at}}])^) raise error("sync workspace: revision digest mismatch")
     return true
 }
 

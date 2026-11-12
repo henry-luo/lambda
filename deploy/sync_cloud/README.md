@@ -64,7 +64,29 @@ python3 test/sync_cloud/test_cloud.py
 ```
 
 The test owns its function hosts, proxy and client children. It never starts or
-modifies a production bucket and does not receive permission to delete remote
-objects. Each run uses a distinct space prefix; retained test objects require
+modifies a production bucket. Each run uses a distinct space prefix; retained test objects require
 operator cleanup after qualification. Test secrets stay in the operator config
 and child environment; ordinary test clients receive no storage credentials.
+
+## Authorized maintenance
+
+The storage adapter now requires bounded `erase(key)` (S3 DeleteObject) in
+addition to reads, conditional writes and capabilities. Public clients never
+receive DELETE capabilities. Selection/copy/cut requires the owner's key holder;
+`cloud_function.maintain(store,space,budget=32,reap=false)` is an optional private
+scheduler entry that executes only an already committed deletion plan. Bind it
+to deployment authority, never the public HTTP route (D11.2.1–D11.2.4).
+
+[Maintenance and recovery](../../lmd/package/sync/MAINTENANCE.md) documents
+client scheduling, epoch fences, immutable catalog backups and fail-closed
+recovery. Drain old handler invocations and upgrade writers before enabling
+retention. Destructive maintenance on legacy/recovered catalogs requires an
+inventory audit; that audit tool is outside this phase.
+
+The additional isolated-backend gate explicitly tests authorized old-key deletion,
+cache reservations and crash recovery:
+
+```sh
+LAMBDA_CLOUD_TEST_STORAGE_FILE="$PWD/temp/cloud-test-storage.json" \
+python3 test/sync_retention/test_retention.py
+```

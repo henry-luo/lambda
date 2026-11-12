@@ -22,6 +22,8 @@ HTTP function, periodic fallback, durable coverage and cloud-only snapshot recov
 The [durable document host](DOCUMENTS.md) adds persistent unsaved sessions,
 incremental authenticated document exchange, exact-frontier file saves and a
 headless editor API.
+[History and maintenance](MAINTENANCE.md) adds paged saved endpoints, permanent or
+calendar retention, pins, resumable local/cloud pruning and verified-copy cache eviction.
 Package distribution/imports follow D1.7 and D9.3.4.
 
 ## Run the examples
@@ -91,6 +93,12 @@ preserve atomic groups on recovery and relay paths.
 | `lambda.sync.position` | Stable cursor gaps and affinity through deleted anchors |
 | `lambda.sync.presence` | Receiver-local leases with replay-resistant counters |
 | `lambda.sync.blob` | Immutable descriptors, integrity checks, availability and retained roots |
+| `lambda.sync.history` | Immutable saved endpoints/DAG pages, legacy expansion and bounded listing |
+| `lambda.sync.retention_policy`, `lambda.sync.retention` | Permanent defaults and pure calendar/DST selection |
+| `lambda.sync.maintenance`, `lambda.sync.maintenance_cli` | Policy, pins, retirement plans, local prune and file restore |
+| `lambda.sync.cloud_catalog`, `lambda.sync.cloud_maintenance_function` | Conditional publication fence, storage epochs and owner-authorized cloud cleanup |
+| `lambda.sync.cloud_maintenance`, `lambda.sync.maintenance_runner` | Resumable key-holder copy/cut and scheduled bounded work |
+| `lambda.sync.cache`, `lambda.sync.cache_state`, `lambda.sync.reachability` | Verified-copy eviction, hydration and protected graph roots |
 | `lambda.sync.session` | External imports, exact-frontier save preparation/commit, saved parents, conflict/dirty state and retention selection |
 | `lambda.sync.store` | Validated endpoint/session persistence bundles and fresh-writer restore |
 | `lambda.sync.workspace` | `start`, `transact`, `have`, `read`, `entry`, `path`, `content`, `payload`, `document`, retained `roots` |
@@ -268,10 +276,10 @@ recovery; it does not silently replay them into a new schema.
 
 This reference implementation uses array-based indexes and quadratic LCS.
 Arbitrary Mark subtree reparenting, rich-text span intent beyond explicit Mark trees,
-namespace adapter completion, browser execution, physical GC, UI bindings,
+namespace adapter completion, browser execution, metadata epoch retirement, UI bindings,
 Internet traversal and hosted-cloud qualification remain separate work. The
 [native document host](DOCUMENTS.md) supplies headless editor integration. The local repository stores
-encrypted objects and retains history permanently; its limits and host qualification
+encrypted objects with configurable saved history; its limits and host qualification
 are documented [separately](LOCAL_REPOSITORY.md). Native ZIP
 capture/output is reused through its existing public API. No native
 CRDT runtime, upstream wire compatibility, transferred formal proof, or production

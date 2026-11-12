@@ -14,6 +14,9 @@ import v: .schema
 import utf8: lambda.io.utf8
 import filesystem: .filesystem
 import mark: .mark
+import history: .history
+import blob: .blob
+import reach: .reachability
 
 fn actor(handle, current) any^ => handle.writer ++ ":doc:" ++ string(current.serial+1)^
 pub pn status(handle, document) any^ {
@@ -70,7 +73,9 @@ pub pn apply_edits(handle, document, commands, resolve=false, request_id=null) a
         let selected = if (resolve) {*:next,session:session.resolve(next.session,next.endpoint.replica)^} else next
         let remembered = model.record_request(selected,'edit',request_id,
             {fingerprint:fingerprint,frontier:edited.endpoint.replica.clock})^
-        return {*:model.replace(current,remembered)^,serial:current.serial+1}
+        let used = [for (reference in blob.required(remembered.endpoint.replica)^) reference.manifest]
+        return {*:model.replace(current,remembered)^,serial:current.serial+1,
+            staged_objects:[for (id in reach.staged(current) where not contains(used,id)^) id]}
     })^
     return status(handle,document)^
 }
@@ -95,9 +100,12 @@ pub pn restore_version(handle, document, version) any^ {
     return apply_edits(handle,document,[command],true)^
 }
 pub pn attachment(handle, bytes, media_type="application/octet-stream") any^ {
-    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
-        return {*:repo.content(tx,k,if (bytes is string) binary(bytes)^ else bytes)^,media_type:media_type}
+    let result = local.mutate(handle,pn (tx,k,current)=> {
+        let reference = {*:repo.content(tx,k,if (bytes is string) binary(bytes)^ else bytes)^,media_type:media_type}
+        return {*:current,last_attachment:reference,staged_objects:unique([
+            *if (current.staged_objects == null) [] else current.staged_objects,reference.manifest])}
     })^
+    return result.state.last_attachment
 }
 
 // preparation is durable before disk effects; retries install this exact captured frontier.
@@ -115,7 +123,9 @@ pub pn prepare_save(handle, document, request_id=null) any^ {
         let path = workspace.path(current.endpoint.replica,record.entry)^
         let captured = disk.capture(current.root,path,8388608)^
         if (hash(captured.bytes,'sha256')^ != record.disk_hash) raise error("sync document: external write during save preparation")
-        let prepared = session.prepare_save(record.session,conversion.export_raw(record.endpoint.replica,record.format)^)^
+        let captured_save = session.prepare_save(record.session,conversion.export_raw(record.endpoint.replica,record.format)^)^
+        let prepared = {*:captured_save,saved:session.stamp_version(captured_save.saved,now().unix,
+            actor(handle,current)^ ++ ":save:" ++ uuid()^)^}
         return model.replace(current,{*:record,prepared:{*:prepared,path:path,expected:captured.token,
             expected_hash:record.disk_hash,installed:false,request_id:request_id}})^
     })^
@@ -175,7 +185,8 @@ pub pn commit_save(handle, document) any^ {
         repo.store_object(tx,k,"checkpoint",protocol.checkpoint(intent.saved.replica))^
         // reconcile the captured disk branch once, attaching the exact CRDT frontier to its revision.
         let reconciled = filesystem.reconciled(current,filesystem.capture(tx,k,current)^,
-            actor(handle,current)^,[{id:record.entry,document:link}])^
+            actor(handle,current)^,[{id:record.entry,document:link}],
+            if (intent.saved.save_metadata == null) now().unix else intent.saved.save_metadata.at)^
         if (reconciled.review != null) raise error("sync document: workspace save needs review; intent retained")
         let saved = session.commit_save(record.session,intent)^
         let completed = model.record_request({*:record,session:saved,disk_hash:hash(readback.bytes,'sha256')^,prepared:null},
@@ -191,4 +202,16 @@ pub pn save(handle, document, request_id=null) any^ {
     let prepared = prepare_save(handle,document,request_id)^
     if (prepared.completed == true) { return status(handle,document)^ }
     return commit_save(handle,document)^
+}
+
+// callers pin the returned root when traversing multiple pages across concurrent saves.
+pub pn versions(handle, document, cursor=0, limit=32, expected_root=null) any^ {
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+        let current = repo.load(tx,k)^.state
+        let record = model.get(current,document)^
+        let page = history.page(tx,k,record,history.retired(current),cursor,limit)^
+        if (expected_root != null and page.root != expected_root)
+            raise error("sync history: history changed; restart paging")
+        return page
+    })^
 }

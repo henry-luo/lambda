@@ -97,8 +97,14 @@ pub fn presign(config, method, key, headers, timestamp) any^ {
     let sig = signature(config,method,target.path,query,all_headers,amztime,"UNSIGNED-PAYLOAD")^
     return {url:config.endpoint ++ target.path ++ "?" ++ query_string({*:query,'X-Amz-Signature':sig}),headers:headers}
 }
+pub pn erase(config, key) any^ {
+    let response = request(config,"DELETE",key)^
+    if (not response.ok and response.status != 404) raise error("sync s3: delete rejected")
+    return true
+}
 // consumers depend on this small contract, rather than S3 request conventions.
 pub fn adapter(config) { return {
+    erase:pn (key)=> { return erase(config,key)^ },
     get:pn (key)=> { return get(config,key)^ },
     head:pn (key)=> { return head(config,key)^ },
     write:pn (key,bytes,expected)=> { return write(config,key,bytes,expected)^ },
