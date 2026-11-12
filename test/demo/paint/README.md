@@ -20,11 +20,15 @@ repaints just the pixels a stroke touched.
 - **Tips and paper:** Chalk, Flat and Speckle use bitmap tips. Chalk and Charcoal read the paper's
   grain, so the **Paper** menu (Smooth, Cold press, Rough, Canvas) changes how they deposit. A saved
   painting remembers its paper.
-- **Oil and bristles:** the **Medium** menu starts a fresh canvas of Pixel paint or Oil, a wet
+- **Oil and bristles:** the **Medium** menu starts a fresh canvas of Pixel paint, Oil or Watercolor. Oil is a wet
   pigment film over the paper. On Oil, wet strokes mix by concentration (blue over yellow is
   green), **Dry** sets the paint so new strokes glaze over it, and **Light** shows the paint's
   relief under a light or flat colour. **Bristle** paints a trail per hair that thins as its paint
-  runs out, and **Oil** is a round brush with body; both work on either medium.
+  runs out, and **Oil** is a round brush with body.
+- **Watercolor:** select a pigment in the **Pigment** menu; the sheet carries the paint in water
+  and advances after a stroke. **Dry** settles the sheet and sets the pigment so later strokes
+  glaze over it. The standard colour picker controls pixel and oil strokes; watercolor uses the
+  selected pigment. Wet sheets do not yet save in `.painting` files, but PNG export includes them.
 - **Size and opacity** belong to the selected brush; `[` and `]` resize it.
 - **Colour:** the swatches, the H, S and V sliders, or the picker.
 - **Pen:** pressure, tilt and the eraser end work with a macOS tablet. A mouse paints at full
@@ -49,6 +53,8 @@ demo.
   (`RADIANT_DAMAGE_VERIFY=1`).
   Run it with `./test/test_ui_automation_gtest.exe --suite paint`, or directly with
   `RADIANT_DAMAGE_VERIFY=1 ./lambda.exe view test/demo/paint/paint.ls --headless --event-file test/ui/paint/demo.json`.
+- `test/ui/paint/watercolor.json` checks watercolor pigment selection, dab and bristle strokes,
+  undo/redo and direct drying at the demo's full canvas size.
 - `test/lambda/paint/paint_session.ls` covers the session API the app uses.
 
 Simulated pen batches (`event_sim`'s `samples`) should span no more time than the gap to the next

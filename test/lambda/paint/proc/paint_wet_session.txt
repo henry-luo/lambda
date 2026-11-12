@@ -1,0 +1,13 @@
+{
+  initial: true,
+  feed: true,
+  snapshot: true,
+  changed: true,
+  undo: true,
+  redo: true,
+  simulated: true,
+  dry: true,
+  clear: true,
+  cancel: true,
+  invalid: true
+}

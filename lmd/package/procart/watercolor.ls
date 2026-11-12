@@ -94,9 +94,12 @@ pub type Sheet = {width:int,height:int,scale:float,
 // constants were tuned at 2 display pixels per cell (Washes SCALE_REF); diffusion scales as 1/s^2,
 // kernels and the velocity clamp as 1/s, with the explicit-scheme stability caps. The clamp never
 // exceeds 1.5, so a step moves water at most 0.45 cells, which the advection stencil relies on.
-pub fn sheet(width: int, height: int, seed: int, scale: float = 2.5, wetness: float = 0.0) map^ {
-    if (width < 8 or height < 8 or width * height > MAX_CELLS)
-        raise error("procart.watercolor: a sheet needs 8 x 8 to " ++ string(MAX_CELLS) ++ " cells")
+pub fn sheet_bounded(width: int, height: int, seed: int, scale: float, wetness: float, max_cells: int, planes: int = PLANES) map^ {
+    if (max_cells < 64 or max_cells > 1000000 or width < 8 or height < 8 or width > max_cells div height)
+        raise error("procart.watercolor: a sheet needs 8 x 8 to " ++ string(max_cells) ++ " cells")
+    // Bound total storage to the existing one-million-cell, 21-plane native sheet budget.
+    else if (planes < 2 or planes > 1000000 * PLANES or width * height > (1000000 * PLANES) div planes)
+        raise error("procart.watercolor: sheet storage exceeds the native sheet budget")
     else {
         let s = scale / 2.0
         let n = width * height
@@ -105,10 +108,14 @@ pub fn sheet(width: int, height: int, seed: int, scale: float = 2.5, wetness: fl
          wet_diffusion:fmin(0.2, 0.1 / (s * s)),pigment_diffusion:fmin(0.2, 0.045 / (s * s)),
          edge_kernel:imax(1, int(round(4.0 / s))),edge_kernel_large:imax(1, int(round(20.0 / s))),
          velocity_clamp:fmin(1.5, 1.0 / s),
-         cells:[*paper(width, height, seed)^, *fill(n, water)^, *fill(n * (PLANES - 2), 0.0)^],
+         cells:[*paper(width, height, seed)^, *fill(n, water)^, *fill(n * (planes - 2), 0.0)^],
          x0:0,x1:-1,y0:0,y1:-1,steps:0,since_shrink:0,wet_cells:if (water > 0.04) n else 0}
     }
 }
+
+// The reference keeps its original work bound; native paint can choose a larger bounded window.
+pub fn sheet(width: int, height: int, seed: int, scale: float = 2.5, wetness: float = 0.0) map^ =>
+    sheet_bounded(width, height, seed, scale, wetness, MAX_CELLS)^
 
 // a fresh sheet on the same paper: no water or pigment beyond the given wetness.
 pub fn blank(s, wetness: float = 0.0) map^ {
@@ -136,7 +143,7 @@ pub fn trail(x0: float, y0: float, x1: float, y1: float, radius: float, flow: fl
 // also re-suspends deposited pigment; a blot removes pigment from both layers (Washes applyStamp).
 // The disc is walked here from scalars, so the member-place var borrow (s.cells) has only scalar
 // siblings and is borrowed in place (LR12-45).
-pn brush_cells(var c: float[], n: int, w: int, h: int, cx: float, cy: float, r: float, kind: int, channel: int,
+pn brush_cells(var c: float[], n: int, w: int, h: int, cx: float, cy: float, r: float, kind: int, channel: int, pigments: int,
         amount: float, wet_gain: float, pressure_gain: float, lift: float) {
     let g = (SUSPENDED + channel) * n, wet = WET * n, pressure = PRESSURE * n
     let x0 = imax(0, int(floor(cx - r))), x1 = imin(w - 1, int(ceil(cx + r)))
@@ -156,9 +163,9 @@ pn brush_cells(var c: float[], n: int, w: int, h: int, cx: float, cy: float, r: 
                 let f2 = f * f
                 if (kind == 2) {
                     var p: int = 0
-                    while (p < 3) {
+                    while (p < pigments) {
                         c[(SUSPENDED + p) * n + i] = c[(SUSPENDED + p) * n + i] * (1.0 - 0.22 * f2)
-                        c[(DEPOSITED + p) * n + i] = c[(DEPOSITED + p) * n + i] * (1.0 - 0.22 * f2)
+                        c[(SUSPENDED + pigments + p) * n + i] = c[(SUSPENDED + pigments + p) * n + i] * (1.0 - 0.22 * f2)
                         p = p + 1
                     }
                 } else {
@@ -167,12 +174,12 @@ pn brush_cells(var c: float[], n: int, w: int, h: int, cx: float, cy: float, r: 
                         if (next > 1.0) { c[g + i] = 1.0 } else { c[g + i] = next }
                     } else {
                         var p: int = 0
-                        while (p < 3) {
-                            let di = c[(DEPOSITED + p) * n + i]
+                        while (p < pigments) {
+                            let di = c[(SUSPENDED + pigments + p) * n + i]
                             if (di >= 0.001) {
                                 let moved = di * lift * f2
                                 let next = c[(SUSPENDED + p) * n + i] + moved
-                                c[(DEPOSITED + p) * n + i] = di - moved
+                                c[(SUSPENDED + pigments + p) * n + i] = di - moved
                                 if (next > 1.0) { c[(SUSPENDED + p) * n + i] = 1.0 } else { c[(SUSPENDED + p) * n + i] = next }
                             }
                             p = p + 1
@@ -213,13 +220,20 @@ pn expand(var s: Sheet, cx: float, cy: float, r: float) {
 
 // brush = {kind:"pigment"|"water"|"lift", x, y, radius (cells), strength, channel (pigment only)}.
 // The loads scale the paint and water each stamp carries (Washes paintLoad / waterLoad).
-pub pn stamp(var s: Sheet, brush, paint_load: float = 1.0, water_load: float = 1.0) {
+pub pn stamp_many(var s: Sheet, brush, pigments: int, paint_load: float = 1.0, water_load: float = 1.0) {
+    if (pigments < 1 or pigments > 4096 or len(s.cells) != (12 + 3 * pigments) * s.width * s.height) {
+        raise error("procart.watercolor: stamp pigment count does not match the sheet")
+    }
     let r = float(brush.radius), cx = float(brush.x), cy = float(brush.y)
     let kind = if (brush.kind == "pigment") 0 else if (brush.kind == "water") 1 else 2
-    let channel = if (kind == 0) imax(0, imin(2, int(brush.channel))) else 0
+    let channel = if (kind == 0) imax(0, imin(pigments - 1, int(brush.channel))) else 0
     expand(s, cx, cy, r)^
-    brush_cells(s.cells, s.width * s.height, s.width, s.height, cx, cy, r, kind, channel, float(brush.strength) * paint_load,
+    brush_cells(s.cells, s.width * s.height, s.width, s.height, cx, cy, r, kind, channel, pigments, float(brush.strength) * paint_load,
         (if (kind == 0) 0.45 else 0.55) * water_load, 0.18 * water_load, fmin(1.0, 0.18 * water_load))
+}
+
+pub pn stamp(var s: Sheet, brush, paint_load: float = 1.0, water_load: float = 1.0) {
+    stamp_many(s, brush, 3, paint_load, water_load)^
 }
 
 // a uniform wash of clear water, as when the whole sheet is wetted for wet-in-wet work.

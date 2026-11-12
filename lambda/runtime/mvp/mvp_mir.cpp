@@ -5003,6 +5003,15 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
         if (recursive) abi.effects.may_gc = abi.effects.may_return_error = false;
         result = em_call_direct(&c->em, f->name, f->target, &abi, call_count, types, ops, &options);
     }
+    bool projected_writeback = false;
+    for (int n = 0; n < i; n++) projected_writeback |= borrowed[n] && places[n].root && !dense_call;
+    if (projected_writeback && result.normal.maybe_pending) {
+        // A projected var write-back can collect: resolve the return pair first,
+        // so its successful Item remains precisely rooted through publication (D5.4.4, D6.2.1).
+        result.normal = em_finish_direct_call_normal(&c->em, result, MIR_PENDING_REASON_ROOT_OR_SPILL);
+    }
+    if (projected_writeback && result.error.reg && result.error.value_class == JIT_VALUE_BOXED_ITEM)
+        root_value(c, result.error.reg, JIT_VALUE_BOXED_ITEM);
     param = f->ast->param;
     for (int n = 0; n < i; n++, param = (AstNamedNode*)param->next) if (borrowed[n] && !dense_call) {
         MirValue updated = value(c, inlined ? ops[n].u.reg :

@@ -1,0 +1,14 @@
+{
+  parity: true,
+  f32_parity: true,
+  long_parity: true,
+  live_stamp: true,
+  bounded: true,
+  split: true,
+  snapshot: true,
+  unchanged: true,
+  failed: true,
+  bounds: true,
+  steps: true,
+  wet_count: true
+}

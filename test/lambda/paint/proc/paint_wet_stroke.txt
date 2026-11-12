@@ -1,0 +1,12 @@
+{
+  pigment: true,
+  water: true,
+  pressure: true,
+  other: true,
+  split: true,
+  lanes: true,
+  snapshot: true,
+  bounds: true,
+  mypaint: true,
+  invalid: true
+}

@@ -1,0 +1,9 @@
+{
+  empty: true,
+  painted: true,
+  crop: true,
+  lanes: true,
+  pure: true,
+  transfer: true,
+  invalid: true
+}

@@ -7,6 +7,8 @@ import layers: lambda.paint.layer
 import strokes: lambda.paint.stroke
 import surface: lambda.paint.surface
 import media: lambda.paint.media
+import wet: lambda.paint.wet
+import watercolor: lambda.procart.watercolor
 import radiant
 
 // bytes of forked tiles the undo history may keep; the oldest entries are dropped first.
@@ -39,6 +41,9 @@ fn cost(l, r) int {
     }
 }
 
+// A wet history entry retains a dense float64 sheet as well as any forked layer tiles.
+fn history_cost(l, sheet, r) int^ => cost(l, r) + (if (sheet == null) 0 else 8 * len(sheet.cells)^)
+
 // the newest entries whose cost fits the budget; the newest entry always stays.
 fn trimmed(entries, budget) {
     let n = len(entries)
@@ -48,6 +53,11 @@ fn trimmed(entries, budget) {
 }
 
 fn checked_color(color) array^ => strokes.in_space(color, 'srgb')^
+
+fn wet_pigment_ok(p) bool => (p is map and (p.density is float or p.density is int)) ^ { false }
+fn wet_adsorption_ok(p) bool => (wet_pigment_ok(p) and p.density >= 0.0 and
+    (p.staining is int or p.staining is float) and p.staining > 0.0 and
+    (p.granulation is int or p.granulation is float) and p.granulation >= 0.0 and p.granulation <= 1.0) ^ { false }
 
 // a paper texture option: null, an (h, w) height plane, or a spec {kind, seed, size} that
 // surface.paper builds. A spec is kept so a painting file can rebuild the texture.
@@ -69,22 +79,33 @@ fn texture_of(t) map^ {
 // or 'pigment' (a wet film over the paper, PE8); lighting, for a pigment session the impasto
 // light (media.lighting options, or false for none; the default light otherwise).
 pub fn session(width: int, height: int, options = {}) map^ {
-    let o = layers.checked(options, ["paper", "texture", "blend_space", "history_budget", "medium", "lighting"])^
+    let o = layers.checked(options, ["paper", "texture", "blend_space", "history_budget", "medium", "lighting", "pigments", "wet_seed"])^
     let surfaced = texture_of(o.texture)^
     let paper = if (o.paper == null) ([1.0, 1.0, 1.0]) else o.paper
     let budget = if (o.history_budget == null) HISTORY_BUDGET else o.history_budget
     let checked = checked_color(paper)^
     let medium = if (o.medium == null) "pixel" else string(o.medium)
+    let pigments = if (o.pigments == null) watercolor.CLASSIC else o.pigments
     if (len(paper) != 3) raise error("paint: session paper must be an sRGB [r, g, b] colour")
     else if (not (budget is int) or budget < 0) raise error("paint: history_budget must be a non-negative int")
-    else if (not (medium in ["pixel", "pigment"])) raise error("paint: session medium must be 'pixel' or 'pigment'")
+    else if (not (medium in ["pixel", "pigment", "watercolor"])) raise error("paint: unknown session medium")
+    else if (medium != "watercolor" and (o.pigments != null or o.wet_seed != null))
+        raise error("paint: wet pigments and seed need a watercolor session")
+    else if (medium == "watercolor" and o.lighting != null and o.lighting != false)
+        raise error("paint: watercolor sessions do not support relief lighting")
+    else if (medium == "watercolor" and not (pigments is array and all([for (p in pigments) wet_adsorption_ok(p)])))
+        raise error("paint: watercolor pigments need density, staining and granulation")
     else {
-        let pigmented = medium == "pigment"
+        let wet_medium = medium == "watercolor"
+        let pigmented = medium == "pigment" or wet_medium
+        let checked_pigments = if (wet_medium) media.table(pigments)^ else null
+        let sheet = if (wet_medium) wet.sheet(width, height, if (o.wet_seed == null) 1 else o.wet_seed, 2.5, 0.0, len(pigments)^)^ else null
         let l = if (pigmented) layers.layer(width, height, {format: 'pigment', paper: paper})^
             else layers.layer(width, height, {blend_space: if (o.blend_space == null) 'linear' else o.blend_space})^
-        let light = if (not pigmented or o.lighting == false) null else media.lighting(if (o.lighting == true) null else o.lighting)^;
+        let light = if (not pigmented or wet_medium or o.lighting == false) null else media.lighting(if (o.lighting == true) null else o.lighting)^;
         {layer: l, paper: [checked[0], checked[1], checked[2]], texture: surfaced.texture, texture_spec: surfaced.spec,
-         budget: budget, undo: [], redo: [], active: null, dirty: whole(l), lighting: light}
+         budget: budget, undo: [], redo: [], active: null, dirty: whole(l), lighting: light,
+         *:if (wet_medium) ({wet:sheet, wet_initial:sheet, wet_pigments:pigments, wet_index:0, wet_water:0.45}) else ({})}
     }
 }
 
@@ -95,7 +116,7 @@ pub fn end(s, pointer) map^ {
     if (a == null or a.pointer != pointer) s
     else if (a.cont == null or a.cont.bounds == null) ({*: s, active: null})
     else {
-        let entry = {layer: a.source, rect: a.cont.bounds, cost: cost(a.source, a.cont.bounds)};
+        let entry = {layer: a.source, wet:a.source_wet, rect: a.cont.bounds, cost: history_cost(a.source, a.source_wet, a.cont.bounds)^};
         {*: s, active: null, undo: trimmed([*s.undo, entry], s.budget), redo: []}
     }
 }
@@ -105,7 +126,7 @@ pub fn end(s, pointer) map^ {
 pub fn begin(s, pointer, b, color) map^ {
     let free = if (s.active == null) s else end(s, s.active.pointer)^
     let checked = strokes.in_space(color, 'srgb')^;
-    {*: free, active: {pointer: pointer, brush: b, color: color, source: free.layer, cont: null}}
+    {*: free, active: {pointer: pointer, brush: b, color: color, source: free.layer, source_wet:free.wet, cont: null}}
 }
 
 // feed(var session, pointer, samples) -> {rect, work} (PT7 in-place form): continues the stroke
@@ -116,6 +137,14 @@ pub pn feed(var s, pointer, samples) map^ {
     if (s.active == null or s.active.pointer != pointer) { raise error("paint: no stroke in progress for this pointer") }
     if (len(samples) == 0) { return {rect: null, work: 0} }
     let previous = s.active.cont
+    if (s.wet != null) {
+        let spent = if (previous == null) 0 else previous.work
+        let next = wet.stroke(s.wet, s.active.brush, s.active.color, samples, s.wet_index, s.wet_water, previous, {paper:s.texture})^
+        s.active.cont = next
+        let r = clipped(s.layer, next.rect)
+        s.dirty = union(s.dirty, r)^
+        return {rect:r, work:next.work - spent}
+    }
     let p = strokes.batch(s.layer.blend_space, s.layer.format, s.active.brush, s.active.color, samples, previous, s.texture)^
     if (strokes.washes(s.active.brush)^) {
         let w = strokes.wash(s.active.source, s.active.brush, s.active.color, p, previous)^
@@ -141,7 +170,7 @@ pub fn cancel(s, pointer) map^ {
     if (a == null or a.pointer != pointer) s
     else {
         let painted = if (a.cont == null) null else clipped(a.source, a.cont.bounds);
-        {*: s, layer: a.source, active: null, dirty: union(s.dirty, painted)}
+        {*: s, layer: a.source, *:if (s.wet == null) ({}) else ({wet:a.source_wet}), active: null, dirty: union(s.dirty, painted)}
     }
 }
 
@@ -162,8 +191,8 @@ pub fn undo(s) map^ {
     else {
         let n = len(s.undo)^
         let entry = s.undo[n - 1];
-        {*: s, layer: entry.layer, undo: [for (i in 0 to (n - 2) where n > 1) s.undo[i]],
-         redo: [*s.redo, {layer: s.layer, rect: entry.rect, cost: entry.cost}],
+        {*: s, layer: entry.layer, *:if (s.wet == null) ({}) else ({wet:entry.wet}), undo: [for (i in 0 to (n - 2) where n > 1) s.undo[i]],
+         redo: [*s.redo, {layer: s.layer, wet:s.wet, rect: entry.rect, cost: entry.cost}],
          dirty: union(s.dirty, clipped(entry.layer, entry.rect))}
     }
 }
@@ -174,8 +203,8 @@ pub fn redo(s) map^ {
     else {
         let n = len(s.redo)^
         let entry = s.redo[n - 1];
-        {*: s, layer: entry.layer, redo: [for (i in 0 to (n - 2) where n > 1) s.redo[i]],
-         undo: trimmed([*s.undo, {layer: s.layer, rect: entry.rect, cost: entry.cost}], s.budget),
+        {*: s, layer: entry.layer, *:if (s.wet == null) ({}) else ({wet:entry.wet}), redo: [for (i in 0 to (n - 2) where n > 1) s.redo[i]],
+         undo: trimmed([*s.undo, {layer: s.layer, wet:s.wet, rect: entry.rect, cost: entry.cost}], s.budget),
          dirty: union(s.dirty, clipped(entry.layer, entry.rect))}
     }
 }
@@ -185,7 +214,8 @@ pub fn clear(s) map^ {
     let free = if (s.active == null) s else end(s, s.active.pointer)^
     let blank = layers.blank_like(free.layer)^
     let rect = whole(free.layer);
-    {*: free, layer: blank, undo: trimmed([*free.undo, {layer: free.layer, rect: rect, cost: cost(free.layer, rect)}],
+    {*: free, layer: blank, *:if (free.wet == null) ({}) else ({wet:free.wet_initial}),
+     undo: trimmed([*free.undo, {layer: free.layer, wet:free.wet, rect: rect, cost: history_cost(free.layer, free.wet, rect)^}],
         free.budget), redo: [], dirty: rect}
 }
 
@@ -202,7 +232,8 @@ pub fn shown(s, rect) map^ => if (layers.pigmented(s.layer)) ({rect: rect, light
 // with_lighting(session, lighting) -> the session under another light (media.lighting options,
 // or false for none); every pixel is presented again.
 pub fn with_lighting(s, lighting) map^ {
-    if (not layers.pigmented(s.layer)) raise error("paint: only a pigment session is lit")
+    if (s.wet != null) raise error("paint: watercolor sessions do not support relief lighting")
+    else if (not layers.pigmented(s.layer)) raise error("paint: only a pigment session is lit")
     else ({*: s, lighting: if (lighting == false) null else media.lighting(if (lighting == true) null else lighting)^,
            dirty: whole(s.layer)})
 }
@@ -215,9 +246,10 @@ pub fn with_lighting(s, lighting) map^ {
 pub pn frame(var s) map^ {
     let lit = s.lighting != null
     let r = clipped(s.layer, if (s.dirty == null or not lit) s.dirty else ([s.dirty[0] - 1, s.dirty[1] - 1, s.dirty[2] + 1, s.dirty[3] + 1]))
-    s.dirty = null
     if ((r == null)^) { return {rect: null, pixels: null} }
-    return {rect: r, pixels: layers.present(s.layer, shown(s, r)^)^}
+    let pixels = if (s.wet == null) layers.present(s.layer, shown(s, r)^)^ else wet.present(s.wet, s.layer, s.wet_pigments, r)^
+    s.dirty = null
+    return {rect: r, pixels:pixels}
 }
 
 // dry(var session) -> {rect, work} (PT7 in-place form): folds the pigment layer's wet film into
@@ -226,13 +258,40 @@ pub pn frame(var s) map^ {
 pub pn dry(var s) map^ {
     if (s.active != null) { s = end(s, s.active.pointer)^ }
     if ((not layers.pigmented(s.layer))^) { return {rect: null, work: 0} }
+    if (s.wet != null) {
+        // Complete both owners on local COW snapshots before committing either to the session.
+        var sheet = s.wet
+        var layer = s.layer
+        let stepped = wet.dry(sheet, s.wet_pigments)^
+        let moved = wet.deposit(layer, sheet, s.wet_pigments)^
+        let folded = radiant.paint_dry(layer, {})^
+        s.wet = sheet
+        s.layer = layer
+        s.dirty = whole(layer)^
+        return {rect:whole(layer)^, work:stepped.work + moved.work + folded.work}
+    }
     return radiant.paint_dry(s.layer, {})^
 }
 
 // color_at(session, x, y) -> the sRGB [r, g, b] in [0, 1] shown at a layer pixel (paint over paper).
 pub fn color_at(s, x: int, y: int) array^ {
-    let px = layers.present(s.layer, shown(s, [x, y, x + 1, y + 1])^)^[0, 0];
+    let r = [x, y, x + 1, y + 1]
+    let px = (if (s.wet == null) layers.present(s.layer, shown(s, r)^)^ else wet.present(s.wet, s.layer, s.wet_pigments, r)^) [0, 0];
     [px[0] / 255.0, px[1] / 255.0, px[2] / 255.0]
+}
+
+// Select an existing sheet pigment and the water load for subsequent strokes.
+pub fn select_wet(s, pigment: int, water: float) map^ =>
+    if (s.wet == null or s.active != null or pigment < 0 or pigment >= len(s.wet_pigments)^ or water < 0.0 or water > 64.0)
+        raise error("paint: wet selection needs an idle watercolor session, pigment and water in range")
+    else ({*:s, wet_index:pigment, wet_water:water})
+
+// Advance live watercolor; simulation changes the dirty area but adds no stroke history entry.
+pub pn step_wet(var s, settings = watercolor.SETTINGS, steps: int = 1) map^ {
+    if (s.wet == null) { raise error("paint: wet stepping needs a watercolor session") }
+    let result = wet.step(s.wet, watercolor.adsorption(s.wet_pigments), settings, steps)^
+    s.dirty = union(s.dirty, clipped(s.layer, result.rect))^
+    return result
 }
 
 // in_layer(samples, box, s, pressure) -> pen samples moved from viewport CSS pixels into layer

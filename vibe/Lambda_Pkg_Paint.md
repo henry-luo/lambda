@@ -6,6 +6,8 @@
 >
 > **Scope:** end-to-end painting in Lambda: brushes, strokes, canvases, media, interactive stroke-by-stroke painting, and automated conversion of a raster or vector image into a painted image. The per-pixel kernels form a small native engine in the Radiant project, specified by the companion [Radiant Paint Engine proposal](../../radiant/vibe/Radiant_Design_Paint_Engine.md) (ledger PE#). Out of scope: pixel-filter effect collections (the G'MIC approach), neural style transfer and other learned models, 3D painting, vector drawing (`lambda.editor.draw`), and full MyPaint or Krita application parity.
 >
+> **M3 continuation:** the native wet step, dry deposit and Lambda `var` bridge are implemented for f32 and float64 sheets (**D3.2.1**, **D7.6.4**). Round, MyPaint and bristle strokes write pigment and water; a watercolor session presents, steps and keeps sheet snapshots. The procart watercolor demo uses the native step. Paint demo integration, live-sheet file storage and remaining qualification are in the implementation record; M3 is not yet closed.
+>
 > **Spec linkage:** **D9.1.1v4 / D9.1.3v2** (Radiant depends on lambda-input, never on the Lambda runtime); **D9.2.1v2 / D9.2.2** (headless profiles); **D9.3.1–D9.3.4** (packages and the `lambda.*` root); **S17.2.1, D7.6.1–D7.6.2** (system functions); **D3.2.1, S11.1.1v3, S11.4.1v5** (typed arrays and their contracts); **S9.1.2, S9.2.2v2, S9.1.3v3, D5.4.6** (value semantics, views and `var` borrows); **S12.1.1v3** (`fn`/`pn`); **S13.1.3v2** (tasks and workers); **D5.5.2, D6.3.3** (Radiant borrows; native rooting); **S7.4.5v2, S17.8.1** (errors and options); **S5.4.3** (element equality). This proposal changes no formal ruling.
 >
 > **Authority:** package design ledger PT1–PT17 and open items PT-O2, PT-O4–PT-O6, PT-O8 and PT-O11. PT-O1, PT-O3, PT-O7, PT-O9 and PT-O10 are resolved, and their superseded wording is in [Appendix S](#appendix-s-superseded-rulings). Painting is a new area, so it gets its own series ([Doc Convention §4](../doc/Doc_Convention.md#4-working-design-docs-vibe)). Engine decisions are PE# in the Radiant record. Where this record and a formal ruling disagree, the ruling wins.
@@ -99,7 +101,7 @@ A stroke is an element:
 | Paper texture | `f32[h, w]` height, tiled across the canvas |
 | Pigment table | `f32[M, 2B]`: absorption K and scattering S per band |
 | Bristle state | `f32[B, G]`: per-bristle offset, length and paint load |
-| Wet sheet | `f32[P, h, w]`: planar planes over an active window |
+| Wet sheet | `f32[P, h, w]` or `float[P, h, w]`: planar planes over an active window |
 | Smudge state | `f32[K, 4]`: premultiplied bucket colour and alpha (libmypaint's recentness field arrives with `smudge_length_log`) |
 | Analysis fields | `f32[H, W]` or `f32[H, W, k]` (luminance, orientation, coherence, error); region labels as `i32[H, W]` |
 
@@ -121,7 +123,7 @@ A layer is a map `{width, height, tile: 64, format, blend_space, tiles}`. `tiles
 
 `blend_space` is `'linear'` (linear light, the default) or `'srgb'` (sRGB-encoded values, as libmypaint blends by default and as the current `lambda.image` brush does). See PT-O5.
 
-The **wet sheet** is the one dense structure. Its stencils read neighbours across what would be tile borders on every sub-step, so it is a dense `f32[P, h, w]` over a bounded active window that grows and shrinks with activity. When it dries it deposits pigment into the `pigment` layer's tiles. This keeps the layout and active-region tracking that `procart.watercolor` has already proven.
+The **wet sheet** is the one dense structure. Its stencils read neighbours across what would be tile borders on every sub-step, so it is a dense `f32[P, h, w]` or `float[P, h, w]` over a bounded active window that grows and shrinks with activity. When it dries it deposits pigment into the `pigment` layer's tiles. This keeps the layout and active-region tracking that `procart.watercolor` has already proven. For M pigments the layout has `12 + 3M` planes: eight fixed planes, M suspended, M deposited, M pigment scratch and four shared blur planes. Three pigments give the reference's 21 planes. The float64 lane lets its existing `float[]` stamps and native steps share one buffer: a float write to an f32 array can widen it under **S9.2.1**, so converting on every frame would defeat in-place stepping. Both lanes use the same kernel and are compared against the reference.
 
 ### PT5 — Three media, two tip models (USER, 2026-11-09)
 

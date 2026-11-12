@@ -10,6 +10,7 @@ import sessions: lambda.paint.session
 import paintings: lambda.paint.painting
 import surfaces: lambda.paint.surface
 import media: lambda.paint.media
+import wet: lambda.paint.wet
 import radiant
 
 pub fn capabilities() map^ => radiant.paint_capabilities()
@@ -25,6 +26,20 @@ pub fn painted_tiles(l) int^ => layers.painted_tiles(l)^
 // light for presenting a pigment layer, and drying, which folds the wet film into the paper.
 pub fn pigment(color) map^ => media.pigment(color)^
 pub fn lighting(options = {}) map^ => media.lighting(options)^
+pub fn wet_layout(pigments: int) map^ => wet.layout(pigments)^
+pub fn wet_sheet(width: int, height: int, seed: int, scale: float = 2.5, wetness: float = 0.0, pigments: int = 3) map^ =>
+    wet.sheet(width, height, seed, scale, wetness, pigments)^
+pub fn wet_from_reference(s) map^ => wet.from_reference(s)^
+pub fn wet_present(s, layer, pigments, rect = null, encode = 'srgb') array^ => wet.present(s, layer, pigments, rect, encode)^
+pub pn wet_stroke(var s, b, color, points, pigment: int, water: float, previous = null, options = {}) map^ {
+    return wet.stroke(s, b, color, points, pigment, water, previous, options)^
+}
+pub pn wet_step(var s, adsorption, settings, steps: int = 1) map^ {
+    return wet.step(s, adsorption, settings, steps)^
+}
+pub pn wet_deposit(var layer, var s, pigments, rect = null) map^ {
+    return wet.deposit(layer, s, pigments, rect)^
+}
 pub fn dried(l, options = {}) map^ => radiant.paint_dried(l, options)^.layer
 pub pn dry_layer(var l, options = {}) map^ {
     return radiant.paint_dry(l, options)^
@@ -50,6 +65,10 @@ pub fn adjust_brush(b, changes) map^ => brushes.adjust(b, changes)^
 
 // interactive sessions (PT10): begin, feed and end a stroke per pointer; frame presents the dirty rect.
 pub fn session(width: int, height: int, options = {}) map^ => sessions.session(width, height, options)^
+pub fn select_wet(s, pigment: int, water: float) map^ => sessions.select_wet(s, pigment, water)^
+pub pn step_wet(var s, settings, steps: int = 1) map^ {
+    return sessions.step_wet(s, settings, steps)^
+}
 pub fn begin(s, pointer, b, color) map^ => sessions.begin(s, pointer, b, color)^
 // feed continues the stroke in place: {rect, work} (PT7).
 pub pn feed(var s, pointer, samples) map^ {

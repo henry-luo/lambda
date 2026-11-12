@@ -1,0 +1,9 @@
+{
+  reject: true,
+  rejected_unchanged: true,
+  deposited: true,
+  cleared: true,
+  once: true,
+  snapshot: true,
+  bounds: true
+}

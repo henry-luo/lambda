@@ -3,6 +3,7 @@
 
 import os
 import json
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -50,6 +51,21 @@ class SplitPathsTest(unittest.TestCase):
             self.assertEqual(logical_project_path(input_root / 'lib/log.h', root), Path('lib/log.h'))
             self.assertEqual(logical_project_path(radiant_root / 'radiant/view.hpp', root),
                              Path('radiant/view.hpp'))
+
+    def test_nested_owner_test_sources_use_the_selected_root(self):
+        root = Path(__file__).resolve().parent.parent
+        (root / 'temp').mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root / 'temp') as scratch:
+            radiant = Path(scratch) / 'radiant-owner'
+            (radiant / 'test').mkdir(parents=True)
+            (radiant / 'test/test_nested_owner_gtest.cpp').touch()
+            with patch.dict(os.environ, {'RADIANT_ROOT': str(radiant)}):
+                mapped = resolve_split_paths({'source': 'test_nested_owner_gtest.cpp',
+                                              'additional_sources': ['radiant/dom_range.cpp']})
+            self.assertEqual((root / mapped['source']).resolve(),
+                             radiant / 'test/test_nested_owner_gtest.cpp')
+            self.assertEqual((root / mapped['additional_sources'][0]).resolve(),
+                             radiant / 'radiant/dom_range.cpp')
 
 
 if __name__ == '__main__':

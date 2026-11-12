@@ -4856,6 +4856,46 @@ every untouched tile, so keeping an old layer value is a cheap undo snapshot. Th
 `stroke` and `feed` write a layer in place instead (see below).
 `from_pixels`, `import_pixels`, `present` and `pixel` move samples in and out.
 
+**Wet sheets.** `wet_sheet(width, height, seed, scale, wetness, pigments)` creates a watercolor
+sheet compatible with `lambda.procart.watercolor`. `wet_from_reference(sheet)` accepts
+an existing sheet, and `wet_step(var sheet, adsorption, settings, steps)` advances it in
+place. The `adsorption` and `settings` arguments use the watercolor package's tables and
+settings. Both dense f32 and float64 sheets are supported; snapshots retain their prior
+values (**S9.1.2**, **D7.6.4**). `wet_deposit(var layer, var sheet, pigments, rect)`
+transfers dry deposited pigment into a matching pigment layer's film and clears the transferred
+sheet cells. Call `dry_layer` to fold that film into the substrate before a later glaze.
+The transfer rejects wet pigment before writing either value. `wet_layout(pigments)`
+returns the plane count and the suspended, deposited and scratch offsets; the optional
+`pigments` argument to `wet_sheet` selects 1–4,096 pigments and defaults to three.
+The adsorption and pigment tables must have one row per pigment. Passing `null` for
+`rect` selects the full sheet. `wet_sheet` permits up to 1,000,000 cells, subject to a
+total storage budget of 21,000,000 samples; the procedural watercolor reference retains
+its 250,000-cell default and three-pigment layout. For a variable-pigment sheet, use
+`lambda.procart.watercolor.stamp_many(var sheet, brush, pigments)` to add pigment, clear
+water or a blot; the reference's `blank`, `stamp`, `step`, `dry`, `render` and `measure`
+use its fixed three-pigment layout. `wet_stroke(var sheet, brush, color, points, pigment,
+water, previous, options)` applies round, MyPaint and bristle strokes to the selected pigment
+plane. Water is a per-dab load in `[0, 64]`; the colour's alpha controls opacity, while
+the pigment index selects the sheet channel. The optional continuation makes split batches
+match a whole stroke. `options.paper` supplies a grain plane. Bristle pickup mixes the
+selected sheet pigment and water into the bristle; other pigments remain on the sheet.
+Wash mode, erasing, smudge and recolouring effects are not supported on wet sheets. The wet step and transfer
+report work scaled by pigment count.
+`wet_present(sheet, layer, pigments, rect, encode)` presents suspended and deposited pigment
+over the matching three-band pigment layer without modifying either value. It mixes the wet
+sheet and the layer's film using the same Kubelka–Munk calculation as `present`; `rect` is an
+optional half-open pixel rectangle and `encode` is `'srgb'` by default.
+
+```lambda
+import paint: lambda.paint
+import wc: lambda.procart.watercolor
+let Sheet = wc.Sheet
+pn main() {
+    var sheet: Sheet = paint.wet_sheet(512, 512, 7, 2.5, 0.0, 4)^
+    wc.stamp_many(sheet, {kind: "pigment", channel: 3, x: 200.0, y: 200.0, radius: 8.0, strength: 0.7}, 4)^
+}
+```
+
 **Brushes and strokes.** `brush(options)` builds a brush. Kind `'round'`, the default, is a
 simple dab brush:
 
@@ -5024,6 +5064,13 @@ s = paint.end(s, evt.pointerId)^                       // one undo entry
   `lighting` takes `paint.lighting` options, or `false` for flat colour; a light is on by
   default. Wet strokes mix until `dry(var session)` sets them. `with_lighting(s, lighting)`
   changes the light, and a painting file keeps the pigment layer.
+- `session(w, h, {medium: 'watercolor', pigments, wet_seed})` adds a wet sheet over a
+  pigment layer. The pigment table defaults to `lambda.procart.watercolor.CLASSIC` and also
+  supplies each pigment's density, staining and granulation. Use `select_wet(s, index, water)`
+  before a stroke, and `step_wet(var s, settings, steps)` to advance the sheet. Frames, undo,
+  redo, cancellation, clear, `color_at`, and PNG export include the sheet. `dry(var s)` settles
+  and transfers its pigment without advancing flow. History budgets include the dense sheet
+  snapshot (**S9.1.2**). Saving a live watercolor session as `.painting` is not yet supported.
 
 [`lambda demo paint`](../test/demo/paint/README.md) is built on this session.
 

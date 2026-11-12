@@ -140,7 +140,7 @@ pub fn dabs(b, color, points, carry = null, space = 'linear', m = {}) map^ =>
 // a bristle brush's starting state (bristle layout v1, PE10): count bristles spread across the
 // brush, placed and varied by keyed randomness from the brush seed and the stroke's first point
 // (PT8), each carrying `ink` (a linear colour on rgba, paint per unit coverage on pigment).
-fn bristle_state(b, start, ink) array^ {
+pub fn bristle_state(b, start, ink) array^ {
     let key = stroke_key(b, start)^
     let n = b.count
     let u = (j: int, k: int) => rng.unit(rng.at(key, j * 4 + k))
@@ -157,7 +157,7 @@ pub fn render(l, rows_table, rows: int, options = {}) map^ =>
     if (rows == 0) ({layer: l, rect: null, work: 0, smudge: options.smudge})
     else radiant.paint_dabs(l, rows_table, {budget: if (options.budget == null) BUDGET else options.budget, *: options})^
 
-fn union(a, b) => if (a == null) b else if (b == null) a
+pub fn union(a, b) => if (a == null) b else if (b == null) a
     else [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
 
 fn same_stroke(previous, source, b, color) bool =>

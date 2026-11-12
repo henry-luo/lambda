@@ -5,6 +5,7 @@
 import layers: lambda.paint.layer
 import strokes: lambda.paint.stroke
 import sessions: lambda.paint.session
+import wet: lambda.paint.wet
 import radiant
 
 pub let MIMETYPE = "application/x-lambda-painting"
@@ -23,7 +24,8 @@ pub fn png(pixels) binary^ {
 
 // the session's paint flattened over its paper as (h, w, 4) sRGB u8 pixels, as the session shows
 // it (a pigment layer under the session's light).
-pub fn flattened(s) array^ => layers.present(s.layer, sessions.shown(s, null)^)^
+pub fn flattened(s) array^ => if (s.wet == null) layers.present(s.layer, sessions.shown(s, null)^)^
+    else wet.present(s.wet, s.layer, s.wet_pigments)^
 
 // image rasters hold at most this many pixels; a larger painting gets a scaled preview
 let PREVIEW_PIXELS = 16000000
@@ -51,7 +53,8 @@ fn layer_doc(id, l) element => if (layers.pigmented(l))
         blend_space: string(l.blend_space), tile: l.tile, tiles: "layers/" ++ id ++ ".tiles">)
 
 // document(session) -> the <painting> element of painting.mark.
-pub fn document(s) element^ {
+pub fn document(s) element^ => if (s.wet != null) raise error("paint: saving a live watercolor sheet is not supported")
+    else {
     let l = s.layer
     let t = thumbnail_size(l.width, l.height)
     let p = preview_size(l.width, l.height)
