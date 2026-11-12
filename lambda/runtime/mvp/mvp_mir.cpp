@@ -5056,7 +5056,9 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
                 lambda_type_union_normalized(c->module->tp->pool, result_contract, &TYPE_ERROR));
         if (dense_call && !f->abi.effects.may_return_error && normal.rep == VALUE_REP_ITEM)
             normal.semantic_contract = &TYPE_ANY_NO_ERROR;
-        return propagated_value(c, normal, NULL);
+        // an untyped callee's Item ABI still has the call's inferred success
+        // contract; retain it and its provenance when discharging the error.
+        return propagated_value(c, normal, call);
     }
     if (discard) {
         em_apply_value_demand(&c->em, result.normal, MIR_VALUE_DISCARD);

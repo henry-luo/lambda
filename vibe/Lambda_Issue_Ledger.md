@@ -31,17 +31,12 @@ while the planner had already given the binding the bool lane. See
 
 <a id="lr12-49"></a>
 
-**LR12-49 — OPEN:** on AUTO and JIT, MVP refuses the `lambda demo paint`
-presenter's `sync` (`test/demo/paint/mod_present.ls`) with "unsupported
-representation conversion in _sync_b_…: any (0) from 1 to 8" (a boxed Item of
-unknown type into a raw GC pointer); provenance is not reported ("byte 0"). The
-function stays on T0, so behaviour is correct and only speed is lost. The
-refusal is in replay logs from 2026-11-11, before M2, and with the LR12-48 fix
-reverted; it is unrelated to the paint package changes. Cause not yet
-investigated. Authority: **D8.3.1** (a refused promotion stays on T0). Repro:
-`RADIANT_DAMAGE_VERIFY=1 ./lambda.exe view test/demo/paint/paint.ls --headless
---event-file test/ui/paint/demo.json` and grep the log for `_sync`. **Does not
-block** anything.
+**LR12-49 — FIXED:** `let color = model.hex(st.color)^` in the paint presenter's
+`sync` lost its inferred string contract when MVP discharged the call's error.
+The direct-call path now retains the call AST, so the emitted success value
+agrees with the planned binding lane (**S7.6.3v3, D2.3.4–D2.3.5**). The demo
+passes 64/64 assertions on AUTO and JIT; AUTO publishes `sync`'s satellite.
+See [cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-49>).
 
 ## Online JavaScript shape memory — 2026-11-11
 

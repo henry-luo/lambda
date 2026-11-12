@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **285 anchored records**, preserving fixed, resolved,
+This archive contains **287 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -4192,4 +4192,44 @@ Authority: **S7.6.1v9** (a handler's pass-through arm), **D8.3.1** (the planner 
 *Fix.* The emitter's handler takes the pass arm from the operand's static contract, which it already computed for the protected outcome (`mvp_mir.cpp`, `AST_NODE_HANDLER_EXPR`), so its value agrees with the lane the planner chose. A static contract is sound for the value it describes, so this only removes the disagreement.
 
 *Evidence.* `test/lambda/proc/handler_static_contract.ls` (string and length comparisons under handlers in a `pn` over element reads) agrees on interp, JIT and auto. Before the fix the same shape failed admission (`temp/mvp_repro2.ls`, `temp/mvp_repro4.ls`); after it the paint goldens pass on all three tiers and under forced GC. Gates are listed in `vibe/impl/Lambda_Impl_Paint.md`, 2026-11-12.
+
+## MVP propagated call contracts — 2026-11-12
+
+<a id="lr12-49"></a>
+
+**LR12-49 — The paint presenter's `sync` refuses JIT compilation · FIXED, 2026-11-12.**
+Authority: **S7.6.3v3** (propagation yields the error-free success type),
+**D2.3.4–D2.3.5** (semantic contracts, provenance and carrier conversion),
+**D8.3.1** (AUTO promotion).
+
+*Defect.* On AUTO and JIT, `test/demo/paint/mod_present.ls` failed MVP admission
+with "unsupported representation conversion in _sync_b_…: any (0) from 1 to 8"
+at byte 0. The demo continued on T0, with only a speed cost. It predates paint
+M2 and LR12-48. Reproduction: `RADIANT_DAMAGE_VERIFY=1 ./lambda.exe view
+test/demo/paint/paint.ls --headless --event-file test/ui/paint/demo.json`.
+
+*Cause.* The trigger is `let color = model.hex(st.color)^`. The planner uses
+the call AST's inferred string success type and gives `color` a native pointer
+lane. The emitter's `direct_call` propagation path passed NULL to
+`propagated_value`, which therefore had only the untyped callee's generic Item
+contract. After error discharge it produced an unknown boxed value, and the
+binding's pointer conversion correctly failed closed. Passing NULL also lost
+the source location. A local untyped `fn` followed by an inferred `let` and a
+defensive caret reproduces this without imports or DOM calls.
+
+*Fix.* `direct_call` passes the retained call AST to the existing propagation
+helper. That helper uses the inferred success contract and source provenance,
+as ordinary expression propagation already does. No conversion rule, demo
+code, fallback policy or formal ruling changes.
+
+*Evidence.* The new `proc/propagated_inferred_call.ls` golden fails eager JIT
+with the original executable and passes on interp, AUTO and JIT after the fix,
+also with every-allocation GC and poisoning. It covers string, float and array
+results, allocation lifetime, and an argument error skipping later writes.
+The eager MVP emission gate includes it under normal, seeded and
+every-allocation GC. Four focused emission methods pass. The original
+presenter imports under eager JIT, and the demo replay passes 64/64 assertions
+on AUTO and JIT with damage verification. AUTO logs confirm `sync`'s satellite
+is compiled and published. Aggregate qualification is recorded in
+`vibe/impl/Lambda_Impl_Paint.md`; raw evidence is under `temp/lr12-49/`.
 
