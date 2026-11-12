@@ -1,5 +1,6 @@
 import m: .mod_model
 import f: .mod_formula
+import formula_common: .mod_formula_common
 import window: .mod_window
 import conditional: .mod_conditional
 import layout: .mod_grid_layout
@@ -60,15 +61,6 @@ pub fn toolbar(st) {
         ribbon.group("Zoom",[ribbon.row([tool("zoom-out","Zoom Out","shrink_font",false,false,"home-large"),
             tool("zoom-reset","100%","autofit",false,false,"home-large"),tool("zoom-in","Zoom In","grow_font",false,false,"home-large")])])>
 }
-// integer pieces avoid the general numeric formatter's significant-digit rounding.
-fn fixed(value,places=2) any^ => {
-    let scale=10**places
-    let rounded=int(round(abs(value)*scale))
-    let whole=int(floor(rounded/scale))
-    let fraction=string(rounded%scale);
-    (if (value<0) "-" else "") ++ string(whole) ++
-        (if (places==0) "" else "." ++ join(fill(max(0,places-len(fraction)),"0"),"") ++ fraction)
-}
 fn trim_decimal(text) any^ => if (ends_with(text,"0")) trim_decimal(slice(text,0,len(text)-1))
     else if (ends_with(text,".")) slice(text,0,len(text)-1) else text
 // Excel's 1900 calendar includes a fictitious leap day at serial 60.
@@ -94,10 +86,10 @@ pub fn formatted(value,style) any^ => if (value is bool) (if (value) "TRUE" else
     else if (style.format=="time") excel_time(value)^
     else if (style.format=="datetime" or style.format=="datetime1904")
         excel_date(value+0.5/86400,style.format=="datetime1904")^ ++ " " ++ excel_time(value)^
-    else if (style.format=="currency") "$" ++ fixed(value)
-    else if (style.format=="percent") fixed(value*100,1) ++ "%"
-    else if (style.format=="number") fixed(value)
-    else if (value==floor(value)) string(int(value)) else trim_decimal(fixed(value,6))
+    else if (style.format=="currency") "$" ++ formula_common.fixed(value)
+    else if (style.format=="percent") formula_common.fixed(value*100,1) ++ "%"
+    else if (style.format=="number") formula_common.fixed(value)
+    else if (value==floor(value)) string(int(value)) else trim_decimal(formula_common.fixed(value,6))
 // Default cell declarations live in CSS; keep a stable shape for empty cells.
 fn cell_style(style,zoom) => (if (style.fill) "background-color:" ++ style.fill ++ ";" else "") ++
     (if (style.color) "color:" ++ style.color ++ ";" else "") ++

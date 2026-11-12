@@ -39,3 +39,13 @@ pub fn greater(a,b) => if (a is string and b is string) lower(a)>lower(b) else a
 pub fn less_equal(a,b) => not greater(a,b)
 pub fn greater_equal(a,b) => not less(a,b)
 
+
+// Shared fixed-point formatting keeps cell and TEXT rounding consistent.
+pub fn fixed(value,places=2) any^ {
+    let scale=10**places
+    let rounded=int(round(abs(value)*scale))
+    let whole=int(floor(rounded/scale))
+    let fraction=string(rounded%scale);
+    (if (value<0) "-" else "") ++ string(whole) ++
+        (if (places==0) "" else "." ++ join(fill(max(0,places-len(fraction)),"0"),"") ++ fraction)
+}

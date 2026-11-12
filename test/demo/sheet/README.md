@@ -45,14 +45,14 @@ Function names are case-insensitive. The supported functions are:
 
 | Category | Functions |
 |---|---|
-| Aggregation and criteria | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT`, `SUMSQ`, `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MINIFS`, `MAXIFS` |
+| Aggregation and criteria | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT`, `SUMSQ`, `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MINIFS`, `MAXIFS`, `SUBTOTAL` |
 | Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `PI`, `EXP`, `LN`, `LOG`, `LOG10`, `SIN`, `COS`, `TAN`, `ASIN`, `ACOS`, `ATAN`, `ATAN2`, `DEGREES`, `RADIANS`, `QUOTIENT`, `EVEN`, `ODD`, `MROUND`, `FACT`, `COMBIN`, `CEILING.MATH`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `SQRTPI`, `SINH`, `COSH`, `TANH`, `GCD`, `LCM` |
-| Statistics | `STDEV`, `STDEV.S`, `STDEVP`, `STDEV.P`, `VAR`, `VAR.S`, `VARP`, `VAR.P`, `LARGE`, `SMALL`, `PERCENTILE`, `PERCENTILE.INC`, `QUARTILE`, `QUARTILE.INC`, `RANK`, `RANK.EQ`, `RANK.AVG`, `PERCENTILE.EXC`, `QUARTILE.EXC`, `SLOPE`, `INTERCEPT`, `FORECAST`, `FORECAST.LINEAR`, `CORREL`, `PEARSON`, `RSQ`, `COVAR`, `COVARIANCE.P`, `COVARIANCE.S`, `STEYX`, `GEOMEAN`, `HARMEAN` |
-| Finance | `PMT`, `PV`, `FV`, `NPER`, `NPV`, `SLN`, `SYD` |
-| Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE`, `TEXTJOIN`, `EXACT`, `VALUE`, `REPT`, `CLEAN`, `REPLACE`, `SUBSTITUTE`, `FIND`, `SEARCH` |
-| Dates and times | `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND`, `NETWORKDAYS`, `NETWORKDAYS.INTL`, `WORKDAY`, `WORKDAY.INTL` |
-| Logic and errors | `IF`, `IFS`, `CHOOSE`, `SWITCH`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA` |
-| Lookup | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `XMATCH` |
+| Statistics | `STDEV`, `STDEV.S`, `STDEVP`, `STDEV.P`, `VAR`, `VAR.S`, `VARP`, `VAR.P`, `LARGE`, `SMALL`, `PERCENTILE`, `PERCENTILE.INC`, `QUARTILE`, `QUARTILE.INC`, `RANK`, `RANK.EQ`, `RANK.AVG`, `PERCENTILE.EXC`, `QUARTILE.EXC`, `SLOPE`, `INTERCEPT`, `FORECAST`, `FORECAST.LINEAR`, `CORREL`, `PEARSON`, `RSQ`, `MODE`, `MODE.SNGL`, `COVAR`, `COVARIANCE.P`, `COVARIANCE.S`, `STEYX`, `GEOMEAN`, `HARMEAN` |
+| Finance | `PMT`, `PV`, `FV`, `NPER`, `NPV`, `IRR`, `XNPV`, `XIRR`, `RATE`, `SLN`, `SYD` |
+| Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE`, `TEXTJOIN`, `EXACT`, `VALUE`, `REPT`, `CLEAN`, `REPLACE`, `SUBSTITUTE`, `FIND`, `SEARCH`, `PROPER`, `TEXT`, `TEXTBEFORE`, `TEXTAFTER` |
+| Dates and times | `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND`, `NETWORKDAYS`, `NETWORKDAYS.INTL`, `WORKDAY`, `WORKDAY.INTL`, `DATEDIF`, `YEARFRAC`, `WEEKNUM`, `ISOWEEKNUM` |
+| Logic and errors | `IF`, `IFS`, `CHOOSE`, `SWITCH`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA`, `LET` |
+| Lookup | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `XMATCH`, `LOOKUP`, `ROW`, `COLUMN`, `ADDRESS`, `INDIRECT`, `OFFSET` |
 
 For example, `=SUMIFS(Sales!B1:B20,Sales!A1:A20,"East")` and
 `=XLOOKUP(A1,'Annual Plan'!A1:A10,'Annual Plan'!B1:B10,"missing")` combine
@@ -70,10 +70,19 @@ and `~` wildcard characters. Multiple criteria ranges must match in shape.
 or `HH:MM:SS`; imported 1900 and 1904 date systems are preserved. Workday
 functions accept holiday ranges and Excel weekend numbers or Monday-first masks.
 Paired statistics ignore nonnumeric pairs and return scalar results. Rounding
-digits are bounded to -15 through 15. External-workbook references, named and
+digits are bounded to -15 through 15. `TEXT` accepts the date masks `yyyy-mm-dd`,
+`yyyy/mm/dd`, `mm/dd/yyyy`, `dd/mm/yyyy`, and numeric masks using `0` or `#,##0`, fixed
+decimal places, an optional `$` prefix and an optional `%` suffix. `INDIRECT`
+accepts A1-style references; `LOOKUP` supports its vector form. `LET` supports
+up to seven name/value pairs. `SUBTOTAL` excludes directly nested subtotals and
+ignores hidden rows for function numbers 101–111; filters are not implemented.
+`IRR`, `XIRR` and `RATE` use bounded numerical iteration and can return `#NUM!`
+when the calculation does not converge. External-workbook references, named and
 structured references, full-column/row references, array/spill formulas,
 custom formats, and the full Excel coercion and error rules are not supported.
-Invalid expressions, missing references, division by zero, unknown functions and
+`TODAY`, `NOW`, random functions, `AGGREGATE`, Excel `LAMBDA` and dynamic-array
+functions such as `FILTER` and `UNIQUE` are not yet implemented. Invalid expressions,
+missing references, division by zero, unknown functions and
 circular dependencies produce cell errors.
 
 Every edit recalculates the active sheet. A leading apostrophe forces a cell to
@@ -145,7 +154,7 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_xlsx_layout_test*:*sheet_conditional_formula_test*:*sheet_split_panes_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_common_new_test*:*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_xlsx_layout_test*:*sheet_conditional_formula_test*:*sheet_split_panes_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \

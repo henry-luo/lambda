@@ -64,3 +64,12 @@ pub fn xlookup(key,lookup,returns,if_not_found=null,match_mode=0,search_mode=1) 
         }
     }
 }
+
+// LOOKUP uses the last matching entry in an ascending vector.
+pub fn lookup(key,lookup_vector,result_vector=null) any^ {
+    let result=if (result_vector==null) lookup_vector else result_vector;
+    if (not vector(lookup_vector) or not vector(result) or len(lookup_vector.values)!=len(result.values)) raise error("#VALUE!") else {
+        let candidates=[for (i,value in lookup_vector.values where ((comparable(key,value) and not c.greater(value,key)) ^ { false })) i];
+        if (len(candidates)==0) raise error("#N/A") else result.values[candidates[last]]
+    }
+}

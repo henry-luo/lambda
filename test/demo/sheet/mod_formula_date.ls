@@ -176,3 +176,126 @@ pub fn workday_intl(date1904,start,days,weekend=1,holidays=[]) any^ {
     }
 }
 pub fn workday(date1904,start,days,holidays=[]) any^ => workday_intl(date1904,start,days,1,holidays)^
+
+// Calendar differences use workbook serials so both Excel date systems remain valid.
+pub fn datedif(date1904,start,finish,unit) any^ {
+    let a=checked_day(start,date1904)^
+    let b=checked_day(finish,date1904)^
+    let first=datetime_for(a,date1904)^
+    let finish_parts=datetime_for(b,date1904)^
+    let months=(finish_parts.year-first.year)*12+finish_parts.month-first.month-(if (finish_parts.day<first.day) 1 else 0)
+    let mode=upper(c.text(unit)^);
+    if (a>b) raise error("#NUM!")
+    else if (mode=="D") b-a
+    else if (mode=="M") months
+    else if (mode=="Y") months div 12
+    else if (mode=="YM") months%12
+    else if (mode=="MD") {
+        let base=if (finish_parts.day>=first.day) serial_for(finish_parts.year,finish_parts.month,first.day,date1904)^
+            else serial_for(finish_parts.year,finish_parts.month-1,first.day,date1904)^;
+        b-base
+    }
+    else if (mode=="YD") {
+        let base=serial_for(finish_parts.year-(if (finish_parts.month<first.month or (finish_parts.month==first.month and finish_parts.day<first.day)) 1 else 0),first.month,first.day,date1904)^;
+        b-base
+    }
+    else raise error("#NUM!")
+}
+pub fn weeknum(date1904,serial,kind=1) any^ {
+    let day=checked_day(serial,date1904)^
+    let mode=trunc(c.numeric(kind)^)
+    let parts=datetime_for(day,date1904)^;
+    if (mode==21) isoweeknum(date1904,day)^
+    else if (not contains([1,2,11,12,13,14,15,16,17],mode)) raise error("#NUM!")
+    else {
+        let first=serial_for(parts.year,1,1,date1904)^
+        let weekday_mode=if (mode==2) 11 else mode
+        let offset=weekday(date1904,first,weekday_mode)^-1;
+        floor((day-first+offset)/7)+1
+    }
+}
+pub fn isoweeknum(date1904,serial) any^ {
+    let day=checked_day(serial,date1904)^
+    let thursday=day+4-weekday(date1904,day,2)^
+    let parts=datetime_for(thursday,date1904)^
+    let jan4=serial_for(parts.year,1,4,date1904)^
+    let first=jan4-weekday(date1904,jan4,2)^+1;
+    floor((day-first)/7)+1
+}
+
+// Day-count bases follow Excel's US/European 30/360 and actual-day conventions.
+fn leap_year(year,date1904) => (year%4==0 and (year%100!=0 or year%400==0)) or (year==1900 and not date1904)
+fn february_end(parts,date1904) any^ => parts.month==2 and parts.day==(if (leap_year(parts.year^,date1904)) 29 else 28)
+fn contains_leap_day(a,b,year,date1904) any^ => if (not leap_year(year,date1904)) false else {
+    let day=serial_for(year,2,29,date1904)^;
+    day>=a and day<=b
+}
+pub fn yearfrac(date1904,start,finish,basis=0) any^ {
+    let start_day=checked_day(start,date1904)^
+    let end_day=checked_day(finish,date1904)^
+    let mode=trunc(c.numeric(if (basis==null) 0 else basis)^)
+    let a=min(start_day,end_day)
+    let b=max(start_day,end_day)
+    let first=datetime_for(a,date1904)^
+    let finish_parts=datetime_for(b,date1904)^;
+    if (mode<0 or mode>4) raise error("#NUM!")
+    else if (a==b) 0
+    else if (mode==2 or mode==3) (b-a)/(if (mode==2) 360.0 else 365.0)
+    else if (mode==0 or mode==4) {
+        let feb1=february_end(first,date1904)
+        let feb2=february_end(finish_parts,date1904)
+        let d1=if (first.day==31 or (mode==0 and feb1)) 30 else first.day
+        let d2=if (finish_parts.day==31 and (mode==4 or first.day>=30)) 30
+            else if (mode==0 and feb1 and feb2) 30 else finish_parts.day;
+        (360*(finish_parts.year-first.year)+30*(finish_parts.month-first.month)+d2-d1)/360.0
+    } else {
+        let short_span=first.year==finish_parts.year or (first.year+1==finish_parts.year and
+            (first.month>finish_parts.month or (first.month==finish_parts.month and first.day>=finish_parts.day)))
+        let leap=if (first.year==finish_parts.year) leap_year(first.year,date1904) else
+            contains_leap_day(a,b,first.year,date1904)^ or contains_leap_day(a,b,finish_parts.year,date1904)^
+        let years=finish_parts.year-first.year+1
+        let average=if (short_span) (if (leap) 366 else 365) else
+            sum([for (year in first.year to finish_parts.year) if (leap_year(year,date1904)) 366 else 365])/years;
+        (b-a)/average
+    }
+}
+
+fn comma_groups(digits) any^ => if (len(digits)<=3) digits else
+    comma_groups(slice(digits,0,len(digits)-3))^ ++ "," ++ slice(digits,len(digits)-3)
+fn grouped_number(value,places) any^ {
+    let formatted=c.fixed(value,places)^
+    let negative=starts_with(formatted,"-")
+    let unsigned=if (negative) slice(formatted,1) else formatted
+    let pieces=split(unsigned,".")^;
+    (if (negative) "-" else "") ++ comma_groups(pieces[0])^ ++
+        (if (len(pieces)==2) "." ++ pieces[1] else "")
+}
+// TEXT admits an explicit numeric/date subset and rejects unsupported masks.
+pub fn text(date1904,input,pattern) any^ {
+    let value=c.numeric(input)^
+    let fmt=c.text(pattern)^
+    let code=lower(fmt);
+    if (contains(["yyyy-mm-dd","yyyy/mm/dd","mm/dd/yyyy","dd/mm/yyyy"],code)) {
+        let parts=datetime_for(value,date1904)^
+        let mm=(if (parts.month<10) "0" else "") ++ string(parts.month)
+        let dd=(if (parts.day<10) "0" else "") ++ string(parts.day)
+        let yyyy=string(parts.year);
+        if (code=="yyyy-mm-dd") yyyy ++ "-" ++ mm ++ "-" ++ dd
+        else if (code=="yyyy/mm/dd") yyyy ++ "/" ++ mm ++ "/" ++ dd
+        else if (code=="mm/dd/yyyy") mm ++ "/" ++ dd ++ "/" ++ yyyy
+        else dd ++ "/" ++ mm ++ "/" ++ yyyy
+    } else {
+        let percent=ends_with(fmt,"%")
+        let currency=starts_with(fmt,"$")
+        let mask=slice(fmt,if (currency) 1 else 0,len(fmt)-(if (percent) 1 else 0))
+        let pieces=split(mask,".")^
+        let digits=if (len(pieces)==2) pieces[1] else ""
+        let grouped=pieces[0]=="#,##0";
+        if (len(pieces)>2 or not (pieces[0]=="0" or grouped) or len(digits)>10 or
+            (len(pieces)==2 and digits=="") or not all([for (ch in ((split(digits,"")) ^ { [] })) ch=="0"])) raise error("#VALUE!")
+        else {
+            let amount=value*(if (percent) 100 else 1);
+            (if (currency) "$" else "") ++ (if (grouped) grouped_number(amount,len(digits))^ else c.fixed(amount,len(digits))^) ++ (if (percent) "%" else "")
+        }
+    }
+}

@@ -65,3 +65,46 @@ pub fn textjoin(...) any^ {
     let result=join([for (item in values where not skip or (item!=null and item!="")) c.text(item)^],separator);
     if (len(result)>32767) raise error("#VALUE!") else result
 }
+
+// Excel starts a new word after any non-alphanumeric character.
+pub fn proper(input) any^ {
+    let value=c.text(input)^
+    let chars=(split(lower(value),"")) ^ { [] };
+    join([for (i,ch in chars) if (i==0 or not alphanumeric(chars[i-1])) upper(ch) else ch],"")
+}
+fn alphanumeric(ch) => (ch>="a" and ch<="z") or (ch>="0" and ch<="9") or (ch>="A" and ch<="Z")
+// Search non-overlapping delimiter occurrences in the requested direction.
+fn delimiter_positions(value,delimiter,at=0) any^ {
+    let found=index_of(slice(value,at),delimiter);
+    if (found==null) [] else {
+        let index=at+found;
+        [index,*delimiter_positions(value,delimiter,index+len(delimiter))^]
+    }
+}
+fn text_side(input,delim,instance,match_mode,match_end,if_not_found,before) any^ {
+    let value=c.text(input)^
+    let delimiter=c.text(delim)^
+    let n=trunc(c.numeric(if (instance==null) 1 else instance)^)
+    let mode=trunc(c.numeric(if (match_mode==null) 0 else match_mode)^)
+    let end=trunc(c.numeric(if (match_end==null) 0 else match_end)^);
+    if (n==0 or not contains([0,1],mode) or not contains([0,1],end)) raise error("#VALUE!")
+    else if (delimiter=="") {
+        let index=if (n>0) 0 else len(value);
+        if (before) slice(value,0,index) else slice(value,index)
+    }
+    else {
+        let positions=delimiter_positions(if (mode==1) lower(value) else value,if (mode==1) lower(delimiter) else delimiter)^
+        let locations=if (end==1) (if (n>0) [*positions,len(value)] else [0,*positions]) else positions
+        let index=if (n>0) n-1 else len(locations)+n;
+        if (index<0 or index>=len(locations)) (if (if_not_found==null) raise error("#N/A") else if_not_found)
+        else {
+            let at=locations[index]
+            let width=if (end==1 and ((n>0 and index==len(locations)-1) or (n<0 and index==0))) 0 else len(delimiter);
+            if (before) slice(value,0,at) else slice(value,at+width)
+        }
+    }
+}
+pub fn textbefore(input,delimiter,instance=1,match_mode=0,match_end=0,if_not_found=null) any^ =>
+    text_side(input,delimiter,instance,match_mode,match_end,if_not_found,true)^
+pub fn textafter(input,delimiter,instance=1,match_mode=0,match_end=0,if_not_found=null) any^ =>
+    text_side(input,delimiter,instance,match_mode,match_end,if_not_found,false)^

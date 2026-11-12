@@ -21,6 +21,17 @@ fn divide(a,b) any^ {
 fn power(a,b) any^ => c.numeric(a)^ ** c.numeric(b)^
 fn concat_operator(a,b) any^ => c.text(a)^ ++ c.text(b)^
 
+fn xl_subtotal(resolve,code,refs) any^ {
+    let mode=trunc(c.numeric(code)^)
+    let base=if (mode>=101 and mode<=111) mode-100 else mode
+    if (base<1 or base>11) raise error("#VALUE!") else {
+        let groups=[for (ref in refs) call(resolve,[ref,mode>=101])^]
+        let values=[for (group in groups,value in group) value]
+        let target=[xl_average,xl_count,xl_counta,xl_max,xl_min,xl_product,stats.stdev_s,stats.stdev_p,xl_sum,stats.var_s,stats.var_p][base-1];
+        // Preserve reference semantics when forwarding filtered cells to the aggregate.
+        call(target,[{kind:"range",rows:len(values),cols:1,values:values}])^
+    }
+}
 fn xl_sum(...) any^ => sum(c.numbers(varg())^)
 fn xl_product(...) any^ {
     let values=c.numbers(varg())^;
@@ -91,6 +102,45 @@ fn xl_iserror(first) { let result=call(first,[]) ^ { ^ }; result is error }
 fn xl_isna(first) { let result=call(first,[]) ^ { ^ }; result is error and result.message=="#N/A" }
 // Range values retain their two-dimensional shape for lookup functions.
 fn is_range(value) => value is map and value.kind=="range"
+// Reference coordinates are retained independently of their calculated values.
+fn xl_row(context,reference=null) any^ => if (reference==null) context.row+1
+    else if (reference is map and (reference.kind=="cellref" or reference.kind=="range")) reference.row+1
+    else raise error("#VALUE!")
+fn xl_column(context,reference=null) any^ => if (reference==null) context.col+1
+    else if (reference is map and (reference.kind=="cellref" or reference.kind=="range")) reference.col+1
+    else raise error("#VALUE!")
+fn xl_indirect(resolve,input,a1=true) any^ {
+    let mode=c.truth(if (a1==null) true else if (a1 is map and a1.kind=="cellref") a1.value else a1)^;
+    if (not mode) raise error("#REF!") else call(resolve,[c.text(if (input is map and input.kind=="cellref") input.value else input)^])^
+}
+fn xl_offset(resolve,reference,rows,cols,height=null,width=null) any^ {
+    let r=trunc(c.numeric(if (rows is map and rows.kind=="cellref") rows.value else rows)^)
+    let c=trunc(c.numeric(if (cols is map and cols.kind=="cellref") cols.value else cols)^);
+    if (not (reference is map) or not contains(["cellref","range"],reference.kind)) raise error("#VALUE!") else {
+        let h=if (height==null) (if (reference.kind=="range") reference.rows else 1) else trunc(c.numeric(if (height is map and height.kind=="cellref") height.value else height)^)
+        let w=if (width==null) (if (reference.kind=="range") reference.cols else 1) else trunc(c.numeric(if (width is map and width.kind=="cellref") width.value else width)^)
+        let row=reference.row+r
+        let col=reference.col+c;
+        if (h<1 or w<1 or row<0 or col<0 or row+h>1048576 or col+w>16384) raise error("#REF!")
+        else call(resolve,[{title:reference.title,row:row,col:col,rows:h,cols:w}])^
+    }
+}
+fn xl_address(context,row,column,absolute=1,a1=true,sheet_name=null) any^ {
+    let r=trunc(c.numeric(row)^)
+    let col=trunc(c.numeric(column)^)
+    let mode=trunc(c.numeric(if (absolute==null) 1 else absolute)^)
+    let style=c.truth(if (a1==null) true else a1)^;
+    if (r<1 or r>1048576 or col<1 or col>16384 or mode<1 or mode>4) raise error("#VALUE!") else {
+        let row_abs=mode==1 or mode==2
+        let col_abs=mode==1 or mode==3
+        let suffix=if (style) (if (col_abs) "$" else "") ++ call(context.column_name,[col-1])^ ++
+            (if (row_abs) "$" else "") ++ string(r)
+            else "R" ++ (if (row_abs) string(r) else "[" ++ string(r) ++ "]") ++
+                "C" ++ (if (col_abs) string(col) else "[" ++ string(col) ++ "]")
+        let prefix=if (sheet_name==null or sheet_name=="") "" else "'" ++ replace(c.text(sheet_name)^,"'","''") ++ "'!";
+        prefix ++ suffix
+    }
+}
 fn xl_rows(value) => if (is_range(value)) value.rows else 1
 fn xl_columns(value) => if (is_range(value)) value.cols else 1
 fn xl_index(table,row,column=1) any^ {
@@ -143,6 +193,7 @@ fn xl_sumproduct(...) any^ {
         if (items[i] is number) items[i] else 0],0,1)^])
 }
 // Branch arguments are zero-argument closures; only the selected one executes.
+fn xl_let(run) any^ => call(run,[])^
 fn xl_if(condition,yes,no) any^ {
     let result=call(if (c.truth(condition)^) yes else no,[])^;
     if (result==null) 0 else result
@@ -183,6 +234,7 @@ fn xl_ifna(first,fallback) any^ {
 // S12.3.1 limits dynamic calls to 16 arguments; report spreadsheet errors before dispatch.
 let MAX_ARGS=16
 pub let FUNCTIONS={
+    SUBTOTAL:{target:xl_subtotal,min:2,max:MAX_ARGS,lazy:"subtotal"},
     SUM:{references:true,target:xl_sum,min:1,max:MAX_ARGS}, PRODUCT:{references:true,target:xl_product,min:1,max:MAX_ARGS},
     AVERAGE:{references:true,target:xl_average,min:1,max:MAX_ARGS}, MIN:{references:true,target:xl_min,min:1,max:MAX_ARGS}, MAX:{references:true,target:xl_max,min:1,max:MAX_ARGS},
     COUNT:{references:true,target:xl_count,min:1,max:MAX_ARGS}, COUNTA:{target:xl_counta,min:1,max:MAX_ARGS}, COUNTBLANK:{target:xl_countblank,min:1,max:1},
@@ -216,19 +268,25 @@ pub let FUNCTIONS={
     ['COVARIANCE.S']:{target:stats.covariance_s,min:2,max:2}, STEYX:{target:stats.steyx,min:2,max:2},
     ['PERCENTILE.EXC']:{target:stats.percentile_exc,min:2,max:2}, ['QUARTILE.EXC']:{target:stats.quartile_exc,min:2,max:2},
     ['RANK.AVG']:{target:stats.rank_avg,min:2,max:3}, GEOMEAN:{references:true,target:stats.geomean,min:1,max:MAX_ARGS},
-    HARMEAN:{references:true,target:stats.harmean,min:1,max:MAX_ARGS}, SLN:{target:finance.sln,min:3,max:3}, SYD:{target:finance.syd,min:4,max:4},
+    HARMEAN:{references:true,target:stats.harmean,min:1,max:MAX_ARGS},
+    MODE:{references:true,target:stats.mode,min:1,max:MAX_ARGS}, ['MODE.SNGL']:{references:true,target:stats.mode,min:1,max:MAX_ARGS}, SLN:{target:finance.sln,min:3,max:3}, SYD:{target:finance.syd,min:4,max:4},
     PMT:{target:finance.pmt,min:3,max:5}, PV:{target:finance.pv,min:3,max:5}, FV:{target:finance.fv,min:3,max:5},
-    NPER:{target:finance.nper,min:3,max:5}, NPV:{references:true,target:finance.npv,min:2,max:MAX_ARGS}, ROUND:{target:xl_round,min:2,max:2}, ROUNDUP:{target:xl_roundup,min:2,max:2},
+    NPER:{target:finance.nper,min:3,max:5}, RATE:{target:finance.rate,min:3,max:6}, IRR:{target:finance.irr,min:1,max:2},
+    XNPV:{target:finance.xnpv,min:3,max:3}, XIRR:{target:finance.xirr,min:2,max:3}, NPV:{references:true,target:finance.npv,min:2,max:MAX_ARGS}, ROUND:{target:xl_round,min:2,max:2}, ROUNDUP:{target:xl_roundup,min:2,max:2},
     ROUNDDOWN:{target:xl_rounddown,min:2,max:2}, LEN:{target:xl_len,min:1,max:1}, UPPER:{target:xl_upper,min:1,max:1},
     LOWER:{target:xl_lower,min:1,max:1}, TRIM:{target:xl_trim,min:1,max:1}, LEFT:{target:xl_left,min:1,max:2},
     RIGHT:{target:xl_right,min:1,max:2}, MID:{target:xl_mid,min:3,max:3}, CONCAT:{target:xl_concat,min:1,max:MAX_ARGS},
     CONCATENATE:{target:xl_concat,min:1,max:MAX_ARGS}, TEXTJOIN:{target:txt.textjoin,min:3,max:MAX_ARGS},
     EXACT:{target:txt.exact,min:2,max:2}, VALUE:{target:txt.value,min:1,max:1}, REPT:{target:txt.rept,min:2,max:2},
-    CLEAN:{target:txt.clean,min:1,max:1}, REPLACE:{target:txt.replace_text,min:4,max:4}, SUBSTITUTE:{target:txt.substitute,min:3,max:4},
+    CLEAN:{target:txt.clean,min:1,max:1}, PROPER:{target:txt.proper,min:1,max:1},
+    TEXTBEFORE:{target:txt.textbefore,min:2,max:6}, TEXTAFTER:{target:txt.textafter,min:2,max:6}, REPLACE:{target:txt.replace_text,min:4,max:4}, SUBSTITUTE:{target:txt.substitute,min:3,max:4},
     FIND:{target:txt.find_text,min:2,max:3}, SEARCH:{target:txt.search,min:2,max:3}, AND:{target:xl_and,min:1,max:MAX_ARGS}, OR:{target:xl_or,min:1,max:MAX_ARGS},
     NOT:{target:xl_not,min:1,max:1}, TRUE:{target:xl_true,min:0,max:0}, FALSE:{target:xl_false,min:0,max:0},
+    INDIRECT:{target:xl_indirect,min:1,max:2,reference_resolver:true}, OFFSET:{target:xl_offset,min:3,max:5,reference_resolver:true},
+    ADDRESS:{target:xl_address,min:2,max:5,reference_context:true},
+    ROW:{target:xl_row,min:0,max:1,reference_context:true,references:true}, COLUMN:{target:xl_column,min:0,max:1,reference_context:true,references:true},
     ROWS:{target:xl_rows,min:1,max:1}, COLUMNS:{target:xl_columns,min:1,max:1},
-    XLOOKUP:{target:lookup.xlookup,min:3,max:6,lazy:"xlookup"}, XMATCH:{target:lookup.xmatch,min:2,max:4},
+    LOOKUP:{target:lookup.lookup,min:2,max:3}, XLOOKUP:{target:lookup.xlookup,min:3,max:6,lazy:"xlookup"}, XMATCH:{target:lookup.xmatch,min:2,max:4},
     INDEX:{target:xl_index,min:2,max:3}, MATCH:{target:xl_match,min:2,max:3}, VLOOKUP:{target:xl_vlookup,min:3,max:4}, HLOOKUP:{target:xl_hlookup,min:3,max:4},
     COUNTIF:{target:criteria.countif,min:2,max:2}, SUMIF:{target:criteria.sumif,min:2,max:3},
     AVERAGEIF:{target:criteria.averageif,min:2,max:3}, COUNTIFS:{target:criteria.countifs,min:2,max:MAX_ARGS},
@@ -236,13 +294,15 @@ pub let FUNCTIONS={
     MINIFS:{target:criteria.minifs,min:3,max:MAX_ARGS}, MAXIFS:{target:criteria.maxifs,min:3,max:MAX_ARGS}, SUMPRODUCT:{references:true,target:xl_sumproduct,min:1,max:MAX_ARGS},
     NETWORKDAYS:{target:dates.networkdays,min:2,max:3,date_context:true}, ['NETWORKDAYS.INTL']:{target:dates.networkdays_intl,min:2,max:4,date_context:true},
     WORKDAY:{target:dates.workday,min:2,max:3,date_context:true}, ['WORKDAY.INTL']:{target:dates.workday_intl,min:2,max:4,date_context:true},
-    DATE:{target:dates.date_value,min:3,max:3,date_context:true}, YEAR:{target:dates.year,min:1,max:1,date_context:true},
+    TEXT:{target:dates.text,min:2,max:2,date_context:true}, DATE:{target:dates.date_value,min:3,max:3,date_context:true}, YEAR:{target:dates.year,min:1,max:1,date_context:true},
     MONTH:{target:dates.month,min:1,max:1,date_context:true}, DAY:{target:dates.day,min:1,max:1,date_context:true},
-    WEEKDAY:{target:dates.weekday,min:1,max:2,date_context:true}, EDATE:{target:dates.edate,min:2,max:2,date_context:true},
+    WEEKDAY:{target:dates.weekday,min:1,max:2,date_context:true},
+    WEEKNUM:{target:dates.weeknum,min:1,max:2,date_context:true}, ISOWEEKNUM:{target:dates.isoweeknum,min:1,max:1,date_context:true},
+    DATEDIF:{target:dates.datedif,min:3,max:3,date_context:true}, YEARFRAC:{target:dates.yearfrac,min:2,max:3,date_context:true}, EDATE:{target:dates.edate,min:2,max:2,date_context:true},
     EOMONTH:{target:dates.eomonth,min:2,max:2,date_context:true}, DAYS:{target:dates.days,min:2,max:2},
     DATEVALUE:{target:dates.datevalue,min:1,max:1,date_context:true}, TIMEVALUE:{target:dates.timevalue,min:1,max:1},
     TIME:{target:dates.time_value,min:3,max:3}, HOUR:{target:dates.hour,min:1,max:1}, MINUTE:{target:dates.minute,min:1,max:1}, SECOND:{target:dates.second,min:1,max:1},
-    IF:{target:xl_if,min:2,max:3,lazy:"if"}, IFS:{target:xl_ifs,min:2,max:MAX_ARGS,lazy:"thunks"},
+    LET:{target:xl_let,min:3,max:MAX_ARGS,lazy:"let"}, IF:{target:xl_if,min:2,max:3,lazy:"if"}, IFS:{target:xl_ifs,min:2,max:MAX_ARGS,lazy:"thunks"},
     CHOOSE:{target:xl_choose,min:2,max:MAX_ARGS,lazy:"selector"}, SWITCH:{target:xl_switch,min:3,max:MAX_ARGS,lazy:"selector"}, IFERROR:{target:xl_iferror,min:2,max:2,lazy:"iferror"},
     IFNA:{target:xl_ifna,min:2,max:2,lazy:"iferror"}, NA:{target:xl_na,min:0,max:0},
     ISNUMBER:{target:xl_isnumber,min:1,max:1}, ISTEXT:{target:xl_istext,min:1,max:1}, ISBLANK:{references:true,target:xl_isblank,min:1,max:1},

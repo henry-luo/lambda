@@ -106,3 +106,13 @@ pub fn harmean(...) any^ {
     if (len(values)==0 or any([for (v in values) v<=0])) raise error("#NUM!")
     else len(values)/sum([for (v in values) 1/v])
 }
+
+// MODE selects the first encountered value among equally frequent modes.
+pub fn mode(...) any^ {
+    let values=c.numbers(varg())^
+    let groups=[for (v in values group by v as item into members) {value:item,count:len(members)}];
+    if (len(groups)==0) raise error("#N/A") else {
+        let largest=max([for (group in groups) group.count]);
+        if (largest<2) raise error("#N/A") else [for (group in groups where group.count==largest) group.value][0]
+    }
+}

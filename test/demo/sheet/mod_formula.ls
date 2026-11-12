@@ -30,8 +30,8 @@ fn reference(sheet,key,path) any^ {
     let p=position(key)^
     if (p.row>=sheet.rows or p.col>=sheet.cols) raise error("#REF!") else {
         let source=cell(sheet,p.row,p.col)
-        let computed=value(sheet,p.row,p.col,path)^;
-        {kind:"cellref",value:computed,blank:source==null or source.raw==""}
+        let computed=if (sheet.reference_only==true) null else value(sheet,p.row,p.col,path)^;
+        {kind:"cellref",value:computed,blank:source==null or source.raw=="",row:p.row,col:p.col,title:sheet.title}
     }
 }
 fn range_value(sheet,start,end,path) any^ {
@@ -41,8 +41,8 @@ fn range_value(sheet,start,end,path) any^ {
     else {
         let rows=abs(a.row-b.row)+1
         let cols=abs(a.col-b.col)+1;
-        if (rows*cols>1000000) raise error("#VALUE!") else {kind:"range",rows:rows,cols:cols,
-            values:[for (r in min(a.row,b.row) to max(a.row,b.row), c in min(a.col,b.col) to max(a.col,b.col)) value(sheet,r,c,path)^]}
+        if (rows*cols>1000000) raise error("#VALUE!") else {kind:"range",rows:rows,cols:cols,row:min(a.row,b.row),col:min(a.col,b.col),title:sheet.title,
+            values:if (sheet.reference_only==true) [] else [for (r in min(a.row,b.row) to max(a.row,b.row), c in min(a.col,b.col) to max(a.col,b.col)) value(sheet,r,c,path)^]}
     }
 }
 // A compiled reference resolves against the current workbook without storing it in saved cells.
@@ -74,7 +74,8 @@ fn translated_reference(key,offset) any^ {
     }
 }
 fn reference_plan(key,title=null) => (sheet,path) any^ =>
-    reference(target_sheet(sheet,title)^,translated_reference(key,sheet.conditional_offset)^,path)^
+    if (title==null and sheet.formula_bindings[key]!=null) sheet.formula_bindings[key].value
+    else reference(target_sheet(sheet,title)^,translated_reference(key,sheet.conditional_offset)^,path)^
 fn range_plan(start,end,title=null) => (sheet,path) any^ =>
     range_value(target_sheet(sheet,title)^,translated_reference(start,sheet.conditional_offset)^,
         translated_reference(end,sheet.conditional_offset)^,path)^
@@ -85,6 +86,22 @@ fn invoke(name,plans,sheet,path) any^ {
     let entry=ops.FUNCTIONS[resolved];
     if (entry==null) raise error("#NAME?")
     else if (len(plans)<entry.min or len(plans)>entry.max) raise error("#VALUE!")
+    else if (entry.lazy=="subtotal") {
+        let code=scalar(call(plans[0],[sheet,path])^)
+        let refs=[for (i,plan in plans where i>0) call(plan,[{*:sheet,reference_only:true},path])^]
+        let resolver=(ref,skip_hidden) any^ => subtotal_values(sheet,path,ref,skip_hidden)^;
+        call(entry.target,[resolver,code,refs])^
+    }
+    else if (entry.reference_resolver==true) {
+        let args=[for (i,plan in plans) call(plan,[if (resolved=="OFFSET" and i==0) {*:sheet,reference_only:true} else sheet,path])^]
+        let resolver=(descriptor) any^ => resolve_reference(sheet,path,descriptor)^;
+        call(entry.target,[resolver,*args])^
+    }
+    else if (entry.reference_context==true) {
+        let args=[for (plan in plans) call(plan,[if (entry.references==true) {*:sheet,reference_only:true} else sheet,path])^];
+        call(entry.target,[{row:sheet.formula_row,col:sheet.formula_col,column_name:column},
+            *[for (arg in args) if (entry.references==true) arg else scalar(arg)]])^
+    }
     else if (entry.lazy=="if") {
         let condition=scalar(call(plans[0],[sheet,path])^)
         let yes=thunk(plans[1],sheet,path)
@@ -108,6 +125,39 @@ fn invoke(name,plans,sheet,path) any^ {
         let args=[for (plan in plans) call(plan,[sheet,path])^];
         let normalized=if (entry.references==true) args else [for (arg in args) scalar(arg)];
         call(entry.target,if (entry.date_context==true) [sheet.date1904==true,*normalized] else normalized)^
+    }
+}
+// Nested subtotals are excluded even when their rows are visible.
+fn subtotal_values(sheet,path,ref,skip_hidden) any^ {
+    if (not (ref is map) or not contains(["cellref","range"],ref.kind)) raise error("#VALUE!") else {
+        let target=target_sheet(sheet,ref.title)^
+        let rows=if (ref.kind=="range") ref.rows else 1
+        let cols=if (ref.kind=="range") ref.cols else 1;
+        [for (r in ref.row to ref.row+rows-1, c in ref.col to ref.col+cols-1
+            where not (skip_hidden and contains(target.hidden_rows or [],r)^) and
+                not starts_with(upper(trim(cell(target,r,c).raw or "")),"=SUBTOTAL(")^) value(target,r,c,path)^]
+    }
+}
+// Only cell/range references are accepted from INDIRECT; arbitrary text is never run as code.
+fn resolve_reference(sheet,path,descriptor) any^ {
+    if (descriptor is string) {
+        let t=tokens(descriptor)^
+        let qualified=len(t)>=3 and t[1]=="!"
+        let title=if (qualified) (if (t[0] is map) t[0].sheet else t[0]) else null
+        let at=if (qualified) 2 else 0
+        let start=t[at]
+        let has_range=t[at+1]==":";
+        if (not (start is string) or (has_range and not (t[at+2] is string)) or len(t)!=(at+(if (has_range) 3 else 1))) raise error("#REF!") else {
+            let first=position(start)^
+            let target=target_sheet(sheet,title)^;
+            if (has_range) range_value(target,start,t[at+2],path)^ else reference(target,start,path)^
+        }
+    } else {
+        let target=target_sheet(sheet,descriptor.title)^
+        let first=address(descriptor.row,descriptor.col)^
+        let final=address(descriptor.row+descriptor.rows-1,descriptor.col+descriptor.cols-1)^;
+        if (descriptor.rows==1 and descriptor.cols==1) reference(target,first,path)^
+        else range_value(target,first,final,path)^
     }
 }
 fn call_plan(name,plans) => (sheet,path) any^ => invoke(name,plans,sheet,path)^
@@ -167,6 +217,35 @@ fn arguments(t,at,depth,args=[],after_comma=false) map^ {
         else raise error("#VALUE!")
     }
 }
+// LET bindings are lexical formula values; nested cells start with a fresh scope.
+fn let_run(bindings,body,sheet,path,index=0) any^ {
+    if (index>=len(bindings)) call(body,[sheet,path])^ else {
+        let binding=bindings[index]
+        let value=call(binding.plan,[sheet,path])^
+        let context={*:sheet,formula_bindings:{*:(sheet.formula_bindings or {}),*:map([binding.name,{value:value}])}};
+        let_run(bindings,body,context,path,index+1)^
+    }
+}
+fn let_plan(bindings,body) => (sheet,path) any^ => {
+    let run=() any^ => let_run(bindings,body,sheet,path)^;
+    call(ops.FUNCTIONS.LET.target,[run])^
+}
+fn let_arguments(t,at,depth,bindings=[]) map^ {
+    let name=t[at]
+    let valid=name is string and letter(slice(name,0,1)) and not contains(["TRUE","FALSE"],name) and
+        ((position(name) ^ {null})==null);
+    if (len(bindings)>=7 or not valid or t[at+1]!=",") raise error("#VALUE!") else {
+        let value=expression(t,at+2,depth+1)^
+        let next=value.at+1
+        let all_bindings=[*bindings,{name:name,plan:value.plan}];
+        if (t[value.at]!=",") raise error("#VALUE!")
+        else if (t[next+1]==",") let_arguments(t,next,depth+1,all_bindings)^
+        else {
+            let body=expression(t,next,depth+1)^;
+            if (t[body.at]!=")") raise error("#VALUE!") else {plan:let_plan(all_bindings,body.plan),at:body.at+1}
+        }
+    }
+}
 fn primary(t,at,depth) map^ {
     if (depth>64 or at>=len(t)) raise error("#VALUE!")
     else if (t[at]=="+" or t[at]=="-") {
@@ -188,6 +267,7 @@ fn primary(t,at,depth) map^ {
         }
     }
     else if (t[at] is map) {plan:constant_plan(t[at].literal),at:at+1}
+    else if (contains(["LET","_XLFN.LET"],t[at]) and t[at+1]=="(") let_arguments(t,at+2,depth+1)^
     else if (t[at+1]=="(") {
         let args=arguments(t,at+2,depth+1)^;
         {plan:call_plan(t[at],args.plans),at:args.at}
@@ -255,7 +335,7 @@ fn evaluate(sheet,raw,path) any^ {
 // The formula remains a parsed call plan; no spreadsheet text becomes Lambda source.
 pub fn conditional(sheet,formula,anchor,row,col) any^ {
     let source=if (starts_with(formula,"=")) formula else "=" ++ formula
-    let context={*:sheet,conditional_offset:{row:row-anchor.row,col:col-anchor.col}};
+    let context={*:sheet,formula_row:row,formula_col:col,conditional_offset:{row:row-anchor.row,col:col-anchor.col}};
     evaluate(context,source,[])^
 }
 pub fn value(sheet,row,col,path=[]) any^ {
@@ -263,7 +343,7 @@ pub fn value(sheet,row,col,path=[]) any^ {
     let raw = cell(sheet,row,col).raw or ""
     if (contains(path,key) or len(path)>64) raise error("#CYCLE!")
     else if (starts_with(raw,"=")) {
-        let result = evaluate({*:sheet,conditional_offset:null},raw,[*path,key]) ^ { ^ };
+        let result = evaluate({*:sheet,conditional_offset:null,formula_bindings:null,formula_row:row,formula_col:col},raw,[*path,key]) ^ { ^ };
         // Saved XLSX results are a display fallback until the workbook is edited.
         if (result is error and cell(sheet,row,col).has_cached==true and
             (result.message=="#NAME?" or result.message=="#VALUE!" or result.message=="#REF!")) cell(sheet,row,col).cached
