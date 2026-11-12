@@ -2262,6 +2262,16 @@ extern "C" Item dom_cssom_stylesheet_rule_at(Item sheet_item, Item index_item) {
 // HTMLStyleElement .sheet
 // =============================================================================
 
+static CssStylesheet* cssom_element_sheet(DomElement* elem) {
+    DomDocument* doc = elem ? elem->doc : nullptr;
+    if (!doc) return nullptr;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        CssStylesheet* sheet = doc->stylesheets[i];
+        if (sheet && sheet->owner_element == elem && !sheet->is_import_child) return sheet;
+    }
+    return nullptr;
+}
+
 extern "C" Item dom_cssom_get_element_sheet(Item elem_item) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
@@ -2275,23 +2285,37 @@ extern "C" Item dom_cssom_get_element_sheet(Item elem_item) {
     DomDocument* doc = elem->doc;
     if (!doc) return ItemNull;
 
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        CssStylesheet* sheet = doc->stylesheets[i];
-        if (sheet && sheet->owner_element == elem) {
-            return dom_cssom_wrap_stylesheet(sheet);
-        }
-    }
+    CssStylesheet* sheet = cssom_element_sheet(elem);
+    if (sheet) return dom_cssom_wrap_stylesheet(sheet);
 
     // Linked sheets are parsed before script execution; only a <style> can
     // need a lazy synchronization after its text-tree mutation.
     if (!is_inline_style || !radiant_sync_inline_stylesheet(elem)) return ItemNull;
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        CssStylesheet* sheet = doc->stylesheets[i];
-        if (sheet && sheet->owner_element == elem) {
-            return dom_cssom_wrap_stylesheet(sheet);
-        }
+    return dom_cssom_wrap_stylesheet(cssom_element_sheet(elem));
+}
+
+extern "C" void dom_cssom_owner_attribute_changed(void* element, const char* name) {
+    DomElement* owner = (DomElement*)element;
+    if (!owner || !owner->tag_name || !name) return;
+    bool link = str_icmp_cstr(owner->tag_name, "link") == 0;
+    bool media = str_icmp_cstr(name, "media") == 0;
+    bool disabled = link && str_icmp_cstr(name, "disabled") == 0;
+    if ((!link && str_icmp_cstr(owner->tag_name, "style") != 0) || (!media && !disabled)) return;
+    CssStylesheet* sheet = cssom_element_sheet(owner);
+    if (!sheet) return; // pending links retain their state in the reflected attributes.
+    if (media) {
+        const char* query = owner->get_attribute("media");
+        if ((!query && !sheet->media) || (query && sheet->media && !strcmp(query, sheet->media))) return;
+        char* retained = query ? pool_strdup(owner->doc->document_pool, query) : nullptr;
+        if (query && !retained) return;
+        sheet->media = retained;
+    } else {
+        bool flag = owner->has_attribute("disabled");
+        if (sheet->disabled == flag) return;
+        sheet->disabled = flag;
     }
-    return ItemNull;
+    css_stylesheet_mark_changed(sheet);
+    style_epoch_mark_global_change(owner->doc);
 }
 
 // =============================================================================

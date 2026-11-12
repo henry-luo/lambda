@@ -4296,6 +4296,33 @@ TEST_F(StyleEpochTest, CustomPropertyLookupRetainsCascadeAndMutationAcrossLargeE
     EXPECT_EQ(dom_element_lookup_custom_property(child, "entry-017", &owner), nullptr);
 }
 
+TEST_F(StyleEpochTest, DocumentElementMutationRetainsRootBelowDocumentProxy) {
+    DomElement* child = append("child");
+    install_stylesheet(":root { --surface: 10px; } "
+        ":root[data-theme=light] { --surface: 600px; } "
+        ".shiki:has(> [data-wrapped=true]) .code-content { overflow-wrap:anywhere; }");
+    radiant_recascade_document(&doc);
+    const CssValue* initial = dom_element_lookup_custom_property(child, "--surface", nullptr);
+    ASSERT_NE(initial, nullptr);
+    EXPECT_DOUBLE_EQ(initial->data.length.value, 10.0);
+
+    DomElement* document_proxy = authored_element("#document");
+    ASSERT_NE(document_proxy, nullptr);
+    ASSERT_TRUE(document_proxy->append_child(document_root));
+    doc.js.doc_node = document_proxy;
+    ASSERT_TRUE(document_root->set_attribute("data-theme", "light"));
+    doc.mutation_epoch++;
+    doc.style_content_epoch++;
+    doc.js.mutation_records[0] = {1, DOM_JS_MUTATION_ATTRIBUTE,
+        document_root, document_proxy, 0, 0, DOM_JS_MUTATION_ATTRIBUTE_LOCAL,
+        CSS_PROPERTY_UNKNOWN, true};
+    doc.js.mutation_record_count = doc.js.mutation_count = 1;
+    ASSERT_TRUE(radiant_apply_load_mutation_cascade(&doc, nullptr));
+    const CssValue* updated = dom_element_lookup_custom_property(child, "--surface", nullptr);
+    ASSERT_NE(updated, nullptr);
+    EXPECT_DOUBLE_EQ(updated->data.length.value, 600.0);
+}
+
 TEST_F(StyleEpochTest, OverlappingMutationRootsCascadeTheFinalTreeOnce) {
     DomElement* child = append("child");
     DomElement* grandchild = authored_element("grandchild");
