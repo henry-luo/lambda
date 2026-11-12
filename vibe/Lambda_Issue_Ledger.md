@@ -34,6 +34,33 @@ resolved and archived with reductions, fixes and qualification evidence.
 The separate timeout/cleanup crash [LR01-24](#lr01-24) remains open. The
 workspace member-access observation below retains its original probe; its
 semantics and cause remain unconfirmed. Those two earlier archived records add no live issues.
+
+## Durable document integration findings — 2026-11-12
+
+<a id="sync-document-coverage"></a>
+
+**Status:** FIXED in the new script host; no new core-runtime defect is claimed.
+During integration, using the protocol's causal-clock status as whole-document
+durability would report an empty Text document as covered before its root was
+published. A newly saved version can also change shared metadata without changing
+the live edit clock. The protocol status is a causal-frontier predicate; the host
+must supply publication evidence (D11.1.2, S12.1.1v3).
+
+`document_state.coverage` therefore requires a receipt for the current immutable
+document root in addition to the causal frontier. Local persistence records the
+root before reply; peer ACK and verified cloud publication retain their separate
+root receipts. An empty-document regression in `sync_document_repository.ls`
+requires local coverage and rejects premature peer/cloud coverage.
+Agent-level status also combines workspace and document receipts;
+`sync_document_coverage.ls` supplies workspace-only evidence, requires the overall
+flag to remain false, then admits the document root and verifies that a later live
+edit invalidates it. Configured cloud status checks its selected provider. Existing
+same-epoch CRDT semantics are unchanged. The
+[document implementation record](<impl/Lambda_Impl_Sync_Documents (done).md>) holds final
+verification, source identities and remaining scope. The first sandboxed sync
+sweep's listener failures were environmental (`cannot bind the listener`);
+the loopback-enabled sweep passed without changing fixtures or the runtime.
+
 ## System-function results alias their arguments — 2026-11-11
 
 <a id="lr12-47"></a>
@@ -648,6 +675,35 @@ The CRDT qualification reruns the unchanged stress fixtures with the existing
 goldens. That distinguishes the stress budget from protocol correctness; it
 does not fix or close this timeout-path issue. Progress:
 [CRDT protocol implementation](<impl/Lambda_Impl_Sync_Protocol (done).md>).
+
+2026-11-12 document integration follow-up: the unchanged normal baseline passes
+7,507/7,507, but every-allocation GC makes `sync_document_admission.ls` exceed
+the ordinary 60-second batch budget. The following four fixtures then fail with
+`nested open transactions are not supported`. A smaller normal-GC reproduction
+opens SQLite, loops until a one-second batch alarm, then runs a new SQLite-open
+fixture: statuses are **124, 1**; the control fixture alone returns **0**.
+This confirms that the interrupted SQLite scope remains observable after this
+abandon path. It does not establish the cause of the earlier segmentation fault
+or a complete safe cancellation fix. Native `test-batch` still jumps over normal
+scope exits; `io_sqlite.cpp::current_scope` reads task attachments, and
+`write_set.cpp::fn_open_begin` rejects the surviving scope.
+
+Evidence: `temp/sync-documents/initial-60s-final-stress-auto.log`,
+`_timeout_cpu_scope.ls`, `_scope_control.ls`, `timeout-sqlite.{stdout,stderr}`,
+`scope-control.stdout`. No harness, ordinary deadline or native runtime code was
+changed. The document qualification uses the existing 300-second stress budget
+above, with unchanged fixture goldens, complete batch markers and process-exit
+checks in `test/sync_documents/test_stress.py`; the ordinary 60-second suite
+remains a separate gate. LR01-24 stays **OPEN**. S12.4.4v4 and D6.4.3 apply.
+
+The admission workflow also exceeds the existing 300-second forced-GC budget;
+`large-300s-admission.{stdout,stderr}` preserves its 124 marker and cleanup
+diagnostics. The brief `admission-gc.sample.txt` shows collection/mark-stack work,
+not evidence that the protocol failed to converge. The exact cost/retention cause
+is unconfirmed. The full workflow stress profile is **unqualified**, available
+as `test_stress.py --full`; focused persistence/export GC cases and the unchanged
+full normal workflow gates are reported separately. No failure is reclassified
+as a passing stress result.
 
 ## 2. Parsing & AST construction (LR02)
 
@@ -3082,3 +3138,41 @@ tabs, newlines, nesting, ordinary adjacent environments, and an unclosed
 environment. The installed suite and existing digest, provenance and declaration
 goldens pass interpreter and JIT. Unsupported comment gaps and unmatched
 endings remain visible, and the separate general provenance issue remains OPEN.
+
+## Cloud-sync isolated-host baseline qualification — 2026-11-12
+
+**Status:** OPEN qualification residue; this report establishes no new shared
+root cause. The cloud phase changes only Lambda Script, tests, deployment plumbing
+and docs. Its isolated worktree starts at `dc186e3d52`; native execution uses the
+unchanged copied main-checkout host. D6.3.3 / D11.1.2 remain applicable.
+
+The broad script golden gate is **2,279/2,284**, with five failures:
+`binary_js_bridge`, `image_io_formats`, `input_markdown_emoji`,
+`vmap_embedded_nul` and `latex_test_tex_script_expl3`. Rechecking those same five
+from the main checkout with the identical executable passes the first three;
+the VMap embedded-NUL and TeX package-echo mismatches reproduce there. The first
+three therefore depend on the isolated checkout's resources/runtime environment;
+the exact resource differences remain unconfirmed. No affected engine, input
+source, golden or test harness was modified to mask these results. The VMap and
+TeX findings have their earlier reports; this is evidence for the existing host,
+not a requalification of their later source fixes.
+
+The selected sync scope separately passes **51/51** fixtures on interpreter,
+AUTO and JIT, plus **9/9** focused every-allocation GC/poison cases per tier.
+The additional combined cloud/peer process-exit stall was reported separately as
+input **LI-016**. Its 2026-11-12 owner fix removes quadratic context-list unlinking;
+the rebuilt host passes the full 17-case gate on interpreter, AUTO and JIT with
+that case mandatory and the original deadline unchanged. Original failed receipts
+remain available. Existing LI-015 still limits concurrent administrative writes.
+
+Fresh native follow-up (2026-11-12): `make test-lambda-baseline` completes all forty
+suites at **7,493/7,494**. Only the existing TeX/expl3 package golden mismatch
+remains; the VMap case passes with the rebuilt host. This does not attribute the
+earlier VMap source fix to the context-list change. Current identities and
+qualification are in the [completed cloud implementation record](<impl/Lambda_Impl_Sync_Cloud (done).md>).
+
+Evidence in the Lambda checkout:
+`temp/sync-cloud/worktree/temp/sync-cloud/script-baseline.log`,
+`baseline-failure-excerpts.log`, `main-recheck.log`, `sync-normal-*.log` and
+`focused-stress-*.log`. Native host SHA and script input identities are preserved
+in the cloud implementation record. Main-checkout merge state was left untouched.

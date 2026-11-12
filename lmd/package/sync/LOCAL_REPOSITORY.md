@@ -11,8 +11,10 @@ This is the local milestone of [the sync design](../../../vibe/Lambda_Design_Dat
 It does not deploy a network service. A trusted host supplies keys and authenticated
 message admission; it can call scans periodically. The [native peer adapter](PEER.md)
 now supplies explicit pairing, authenticated LAN transport and periodic retry.
-Native filesystem watchers, cloud publication, periodic HTTP fallback and editor
-bindings follow separately.
+The [cloud adapter](CLOUD.md) adds object publication, periodic HTTP fallback
+and fresh-device recovery. The [document host](DOCUMENTS.md) persists unsaved
+sessions and links exact-frontier saves to workspace revisions. Native filesystem
+watchers and UI bindings follow separately.
 
 ## Start a repository
 
@@ -62,6 +64,10 @@ key material and must not be serialized, logged or shared as application state.
 | `open_repository(path, key, space)` | Authenticate and validate existing state; return a fresh writer handle. |
 | `status(handle)` | Read the committed local state without advancing it. |
 | `acknowledge(handle, peer, frontier)` | Validate and persist a peer's accepted causal frontier; this does not mark it cloud-saved. |
+| `record_cloud(handle, provider, actor, sequence, publication, captured, objects?, documents?)` | Record host-verified workspace/document coverage and per-provider progress after validating dependencies. |
+| `register_documents(handle, roots)` | Validate imported shared document objects and merge their sessions without overwriting the local disk base. |
+| `record_cloud_control(handle, provider, generation, digest)` | Retain observed signed-control position; reject rollback/forks. |
+| `register_snapshots(handle, ids)` | Verify imported named snapshot objects and retain their roots locally. |
 | `scan(handle)` | Capture the whole tree, reconcile from the accepted disk baseline, and commit content before the new head. |
 | `transact(handle, commands)` | Apply existing workspace commands; referenced content must already be available. |
 | `publish(handle, entry, bytes, document?)` | Store file bytes and publish a saved revision, preserving observed competing parents. |
@@ -98,7 +104,7 @@ The format is independent of SQLite and cloud locations:
 
 ```text
 LRP1 (4 bytes) | kind (1 byte) | logical ID (32 bytes) | encrypted envelope
-kind: 0 chunk, 1 manifest, 2 private state, 3 snapshot, 4 checkpoint
+kind: 0 chunk, 1 manifest, 2 private state, 3 snapshot, 4 checkpoint, 5 document
 encrypted envelope: LGC1 | random nonce (12) | GCM tag (16) | ciphertext
 ```
 

@@ -65,14 +65,14 @@ fn hints(previous, captured) any^ {
     return result
 }
 
-pub fn reconciled(current, captured, actor) any^ {
+pub fn reconciled(current, captured, actor, documents=[]) any^ {
     if (current.installation != null) raise error("sync filesystem: installation must finish before scanning")
-    if (current.review == null and captured.id == current.base.capture and
+    if (len(documents) == 0 and current.review == null and captured.id == current.base.capture and
         [for (member in current.disk) {path:member.path,type:member.type,identity:member.identity,
             token:member.token,content:member.content}] == captured.members) { return current }
     let associated = cap.correspondence(current.base,captured,hints(current.disk,captured.members)^)^
     let known = [for (member in associated) {*:member,original_path:v.lookup(current.base.members,member.id)^.path}]
-    let imported:any^ = cap.import_branch(p.start(current.base.checkpoint.replica,w.model)^,actor,captured,known)
+    let imported:any^ = cap.import_branch(p.start(current.base.checkpoint.replica,w.model)^,actor,captured,known,documents)
     if (imported is error) {
         return {*:current,serial:current.serial+1,review:{capture:captured,reason:imported.message}}
     }

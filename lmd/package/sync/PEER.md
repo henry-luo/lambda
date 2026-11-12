@@ -4,7 +4,8 @@ The native LAN profile connects independent local repositories over real sockets
 It transfers missing encrypted objects and merges signed workspace checkpoints,
 then materializes files through the existing installation journal. Devices retain
 their own SQLite databases, accepted disk baselines, actor identities, snapshots
-and offline changes. A connected peer does not require Internet access.
+and offline changes. A connected peer does not require Internet access. The [cloud adapter](CLOUD.md)
+adds long-term object storage and periodic HTTP fallback around this transport.
 
 Policy, pairing, session framing, transfer scheduling and orchestration are Lambda
 Script (S12.1.1v3, D9.3.4). C++ supplies raw public-key operations and the existing
@@ -139,6 +140,13 @@ its existing protocol frames, a portable object inventory and a checkpoint proof
 The connection pins that offer; repository edits after it require a subsequent
 exchange. Read-only private state and recovery journals never enter the inventory.
 
+Offer version 2 also pins a [live-document catalog](DOCUMENTS.md). Unsaved Text
+and Mark edits use atomic protocol deltas; compacted prefixes use checkpoint
+frames. New document/saved-history roots use the existing immutable object
+fragments. Historical document objects are excluded from the bulk peer inventory
+so an ordinary edit need not transfer a full document snapshot. The shared
+full-space writer grant authorizes signed relay attestations for these deltas.
+
 The client pulls inventory pages and missing object fragments, commits verified
 objects, then receives the signed checkpoint frames. The final frame cannot apply
 references whose dependencies are absent. It then offers its merged state back to
@@ -188,8 +196,9 @@ public application state. Secure memory erasure in the script heap is not claime
 
 The qualified host is macOS native CLI. Internet traversal, WebRTC/ICE, automatic
 mDNS discovery, browsers, partial/read-only space grants, file-only shares, key
-rotation, OS-vault integration, S3 publication, polling fallback, editor UI and
-retention reclamation remain subsequent milestones. This adapter preserves the
+rotation, OS-vault integration, editor UI and retention reclamation remain subsequent
+milestones. S3 publication/polling is implemented in the separate cloud adapter;
+hosted-provider qualification remains environment-specific. This adapter preserves the
 transport-independent CRDT/repository formats for those integrations.
 
 Implementation and qualification: [completed native peer milestone](<../../../vibe/impl/Lambda_Impl_Sync_Peer (done).md>).

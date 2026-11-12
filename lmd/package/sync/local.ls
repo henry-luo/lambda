@@ -14,6 +14,8 @@ import v: .schema
 import codec: .codec
 import tree: .workspace_tree
 import blob: .blob
+import documents: .documents
+import document_state: .document_state
 
 fn actor(handle, current) any^ => handle.writer ++ ":" ++ string(current.serial+1)^
 
@@ -24,6 +26,7 @@ fn validate(current, space) any^ {
     p.validate_endpoint(current.endpoint)^
     cap.validate_base(current.base)^
     if (current.endpoint.replica.document != space) raise error("sync local: wrong workspace")
+    for (record in document_state.all(current)) { document_state.validate(record,space)^ }
     return true
 }
 pn replica_dependencies(tx, keys, replica, seen=[], depth=0) any^ {
@@ -84,12 +87,12 @@ pub pn status(handle) any^ {
     })^
 }
 
-pn mutate(handle, operation) any^ {
+pub pn mutate(handle, operation) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let loaded = repo.load(tx,k)^
         validate(loaded.state,k.space)^
         let updated = operation(tx,k,loaded.state)
-        let next = updated^
+        let next = documents.flush(tx,k,updated^)^
         validate(next,k.space)^
         if (next == loaded.state) { return loaded }
         return repo.commit_head(tx,k,loaded.generation,{*:next,previous:loaded.id})^
@@ -101,7 +104,7 @@ pub pn scan(handle) any^ {
         let captured = fs.capture(tx,k,current)^
         let updated = fs.reconciled(current,captured,actor(handle,current)^)^
         dependencies(tx,k,updated.endpoint)^
-        return updated
+        return documents.refresh(tx,k,updated,actor(handle,updated)^)^
     })^
 }
 
@@ -148,7 +151,10 @@ pub pn prepare_install(handle) any^ {
     })^
 }
 pub pn install_step(handle) any^ {
-    return mutate(handle,pn (tx,k,current)=> { return install.step(tx,k,current)^ })^
+    return mutate(handle,pn (tx,k,current)=> {
+        let updated = install.step(tx,k,current)^
+        return if (updated.installation != null) updated else documents.refresh(tx,k,updated,actor(handle,updated)^)^
+    })^
 }
 pub pn materialize(handle, max_steps=1000) any^ {
     if (not v.natural(max_steps)^ or max_steps > 100000) raise error("sync local: invalid installation budget")
@@ -162,9 +168,10 @@ pub pn materialize(handle, max_steps=1000) any^ {
     return result
 }
 
-pub pn inventory(handle) any^ {
+pub pn inventory(handle, include_documents=true) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
-        return [for (row in sqlite.query(tx,"SELECT id FROM objects WHERE kind != 'state' ORDER BY id")^) row[0]]
+        return [for (row in sqlite.query(tx,"SELECT id, kind FROM objects WHERE kind != 'state' ORDER BY id")^
+            where include_documents or row[1] != "document") row[0]]
     })^
 }
 pub pn export_objects(handle, ids) any^ {
@@ -248,6 +255,11 @@ pub pn verify(handle) any^ {
         let loaded = repo.load(tx,k)^
         validate(loaded.state,k.space)^
         dependencies(tx,k,loaded.state.endpoint)^
+        for (record in document_state.all(loaded.state)^) {
+            documents.dependencies(tx,k,record)^
+            let exported = repo.get(tx,k,record.export_id,"document")^
+            if (exported != document_state.public_state(record)^) raise error("sync local: document root mismatch")
+        }
         if (loaded.state.previous != null) { repo.record(k,loaded.state.previous)^ }
         let snapshots = sqlite.query(tx,"SELECT id FROM objects WHERE kind = 'snapshot'")^
         var i = 0
@@ -281,10 +293,64 @@ pub pn recover(handle) any^ {
                 let candidate = repo.get(tx,k,item.id,"state")^
                 validate(candidate,k.space)^
                 dependencies(tx,k,candidate.endpoint)^
+                for (record in document_state.all(candidate)^) { documents.dependencies(tx,k,record)^ }
                 candidates = [*candidates,item.id]
             }
             i = i+1
         }
         return {objects:found,candidates:candidates,advanced_head:false}
+    })^
+}
+
+// only the cloud adapter calls this after verifying a complete discoverable publication.
+pub pn record_cloud(handle, provider, actor, sequence, publication, captured, objects=[], document_roots=[]) any^ {
+    if (not v.actor(provider)^ or not v.actor(actor)^ or not v.natural(sequence)^ or sequence < 1 or
+        not v.actor(publication)^) raise error("sync local: invalid cloud progress")
+    return mutate(handle,pn (tx,k,current)=> {
+        let replica = c.restore(captured)^
+        replica_dependencies(tx,k,replica)^
+        let available = [*[for (item in blob.required(replica)^) item.manifest],*blob.checkpoints(replica)^]
+        let endpoint = p.record_durable(current.endpoint,'cloud',captured,available)^
+        let old = if (current.cloud_sources == null) [] else current.cloud_sources
+        let previous = [for (item in old where item.provider == provider and item.actor == actor) item]
+        if (len(previous) != 0 and (previous[0].sequence > sequence or
+            (previous[0].sequence == sequence and previous[0].publication != publication)))
+            raise error("sync local: cloud publication rollback/fork")
+        let old_objects = if (current.cloud_objects == null) [] else current.cloud_objects
+        let known = [for (item in old_objects where item.provider == provider) item]
+        let next = {*:current,endpoint:endpoint,
+            cloud_objects:[*[for (item in old_objects where item.provider != provider) item],
+                {provider:provider,ids:unique([*objects,*if (len(known) == 0) [] else known[0].ids])}],cloud_sources:[*[for (item in old where
+            item.provider != provider or item.actor != actor) item],
+            {provider:provider,actor:actor,sequence:sequence,publication:publication,clock:replica.clock,documents:document_roots}]}
+        return documents.record_cloud(tx,k,next,document_roots,provider)^
+    })^
+}
+
+pub pn register_documents(handle, roots) any^ {
+    return mutate(handle,pn (tx,k,current)=> { return documents.install_roots(tx,k,current,roots)^ })^
+}
+
+pub pn register_snapshots(handle, ids) any^ {
+    return mutate(handle,pn (tx,k,current)=> {
+        for (id in ids) {
+            let saved = repo.get(tx,k,id,"snapshot")^
+            replica_dependencies(tx,k,c.restore(saved.workspace)^)^
+        }
+        return {*:current,snapshots:unique([*current.snapshots,*ids])}
+    })^
+}
+
+pub pn record_cloud_control(handle, provider, generation, digest) any^ {
+    if (not v.actor(provider)^ or not v.actor(digest)^ or not v.natural(generation)^ or generation < 1)
+        raise error("sync local: invalid cloud control")
+    return mutate(handle,pn (tx,k,current)=> {
+        let old = if (current.cloud_controls == null) [] else current.cloud_controls
+        let seen = [for (item in old where item.provider == provider) item]
+        if (len(seen) > 0 and (generation < seen[0].generation or
+            (generation == seen[0].generation and digest != seen[0].digest)))
+            raise error("sync local: cloud control rollback/fork")
+        return {*:current,cloud_controls:[*[for (item in old where item.provider != provider) item],
+            {provider:provider,generation:generation,digest:digest}]}
     })^
 }

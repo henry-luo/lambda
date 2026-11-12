@@ -1,0 +1,6 @@
+**
+!lmd
+!lmd/**
+!deploy
+!deploy/sync_cloud
+!deploy/sync_cloud/http_host.py

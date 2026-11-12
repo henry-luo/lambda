@@ -6,25 +6,31 @@ import auth: .auth
 import codec: .codec
 import v: .schema
 import crypto: lambda.io.crypto
+import document_state: .document_state
+import document_exchange: .document_exchange
 
 pub let page_size = 64
 pub let fragment_size = 32768
 pub pn offer(handle, credentials) any^ {
-    let current = local.status(handle)^.state.endpoint
+    let stored = local.status(handle)^.state
+    let current = stored.endpoint
     let frames = protocol.frames(current.replica,workspace.model,65536)^
     let digest = frames[0].body.checkpoint
     let proof = {id:digest,kind:'checkpoint',actor:credentials.device.id,
         signature:crypto.sign(credentials.seed,auth.checkpoint_bytes(frames[0],digest)^)^}
-    let ids = local.inventory(handle)^
-    return {frames:frames,proof:proof,ids:ids,summary:{version:1,space:credentials.space,
-        digest:digest,clock:current.replica.clock,objects:len(ids),frames:len(frames)}}
+    let ids = local.inventory(handle,false)^
+    let documents = document_state.all(stored)
+    return {frames:frames,proof:proof,ids:ids,documents:documents,summary:{version:2,space:credentials.space,
+        digest:digest,clock:current.replica.clock,objects:len(ids),frames:len(frames),
+        documents:document_exchange.catalog(documents)^}}
 }
 pub fn summary(value, space) any^ {
-    v.fields(value,["version","space","digest","clock","objects","frames"])^
-    if (value.version != 1 or value.space != space or not (value.digest is binary) or len(value.digest)^ != 32 or
+    v.record(value,["version","space","digest","clock","objects","frames"],["documents"])^
+    if (not contains([1,2],value.version)^ or value.space != space or not (value.digest is binary) or len(value.digest)^ != 32 or
         not v.natural(value.objects)^ or value.objects > 100000 or not v.natural(value.frames)^ or
         value.frames < 1 or value.frames > 8192) raise error("sync peer: invalid offer")
     v.clock(value.clock)^
+    document_exchange.validate_catalog(if (value.documents == null) [] else value.documents)^
     return true
 }
 pub fn object_id(id) any^ {
@@ -96,7 +102,8 @@ pub pn request(handle, credentials, peer, outgoing, pending, command) any^ {
     }
     if (command.kind == 'object') {
         v.fields(body,["id","offset"])^
-        if (not contains(outgoing.ids,body.id)^) raise error("sync peer: unadvertised object")
+        if (not contains([*outgoing.ids,*[for (record in outgoing.documents) record.export_id]],body.id)^)
+            raise error("sync peer: unadvertised object")
         return {body:fragment(body.id,object_text(handle,body.id)^,body.offset)^,pending:pending}
     }
     if (command.kind == 'frame') {
@@ -119,6 +126,28 @@ pub pn request(handle, credentials, peer, outgoing, pending, command) any^ {
     if (command.kind == 'ack') {
         local.acknowledge(handle,peer.id,body)^
         return {body:local.status(handle)^.state.endpoint.replica.clock,pending:pending}
+    }
+    if (command.kind == 'document_need') {
+        return {body:document_exchange.need(handle,body)^,pending:pending}
+    }
+    if (command.kind == 'document_pull') {
+        v.fields(body,["id","have","index"])^
+        let record = v.lookup(outgoing.documents,body.id)^
+        if (record == null) raise error("sync document: unadvertised document")
+        return {body:document_exchange.reply(record,credentials,body.have,body.index)^,pending:pending}
+    }
+    if (command.kind == 'document_packet') {
+        return {body:document_exchange.receive_packet(handle,credentials,peer,body)^,pending:pending}
+    }
+    if (command.kind == 'document_root') {
+        local.register_documents(handle,[body])^
+        let record = document_state.get(local.status(handle)^.state,body.id)^
+        return {body:protocol.have(record.endpoint.replica,record.endpoint.schema)^,pending:pending}
+    }
+    if (command.kind == 'document_ack') {
+        v.fields(body,["id","clock","object"])^
+        document_exchange.acknowledge(handle,body.id,peer.id,body.clock,body.object)^
+        return {body:true,pending:pending}
     }
     raise error("sync peer: unsupported request")
 }

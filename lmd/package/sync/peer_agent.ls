@@ -7,6 +7,11 @@ import crypto: lambda.io.crypto
 import ws: lambda.io.websocket
 import v: .schema
 import workspace: .workspace
+import protocol: .protocol
+import documents: .document_state
+
+fn cloud_saved(current) any^ => protocol.status(current.endpoint)^.cloud and
+    all([for (record in documents.all(current)^) documents.coverage(record)^.cloud])
 
 pub pn device(directory, wrapping_key) any^ {
     if (disk.inspect(directory,"device.sqlite")^ != null) raise error("sync agent: device already exists")
@@ -52,9 +57,9 @@ pub pn status(directory, wrapping_key) any^ {
         frontier:current.endpoint.replica.clock,replicated:current.endpoint.peers,
         review:current.review != null,installation:current.installation != null,
         conflicts:workspace.read(current.endpoint.replica)^.conflicts,
-        cloud_saved:false}
+        cloud_saved:cloud_saved(current)^}
 }
-pn materialize(handle) any^ {
+pub pn materialize(handle) any^ {
     let current = local.status(handle)^
     let entries = workspace.read(current.state.endpoint.replica)^.entries
     // content alternatives and retained external captures require an explicit resolution.
@@ -62,7 +67,7 @@ pn materialize(handle) any^ {
         len(entry.heads)^ != 1])) { return current }
     return local.materialize(handle)^
 }
-pn current_member(directory, wrapping_key, original, id) any^ {
+pub pn current_member(directory, wrapping_key, original, id) any^ {
     let current = identity.load(directory,wrapping_key)^
     if (current.space != original.space or current.device != original.device)
         raise error("sync agent: local identity/space changed")
@@ -74,7 +79,8 @@ pub pn sync(directory, wrapping_key, url, expected) any^ {
         pn (id)=> { return current_member(directory,wrapping_key,agent.credentials,id)^ })^
     let installed = materialize(agent.handle)^
     return {*:result,review:installed.state.review != null,installation:installed.state.installation != null,
-        conflicts:workspace.read(installed.state.endpoint.replica)^.conflicts}
+        conflicts:workspace.read(installed.state.endpoint.replica)^.conflicts,
+        cloud_saved:cloud_saved(installed.state)^}
 }
 pub pn serve(directory, wrapping_key, port, bind="127.0.0.1", max_sessions=0, ready=null) any^ {
     let listener = peer.listener(port,bind)^

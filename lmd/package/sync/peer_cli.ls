@@ -2,12 +2,9 @@
 import agent: .peer_agent
 import identity: .peer_identity
 import codec: .codec
-import hex: lambda.security.tuf.metadata
+import cli: .cli
 
-pn main() {
-    let environment = sys.proc.self.env#
-    let request = input(environment.LAMBDA_SYNC_REQUEST,'json')^
-    let key = hex.unhex(environment.LAMBDA_SYNC_KEY)^
+pn execute(request, key, environment) any^ {
     let directory = request.directory
     let action = request.action
     if (action == "device") { return agent.device(directory,key)^ }
@@ -39,3 +36,4 @@ pn main() {
     }
     raise error("sync agent: unknown action")
 }
+pn main() { return cli.invoke(execute)^ }

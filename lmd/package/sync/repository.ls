@@ -7,7 +7,7 @@ import codec: .codec
 import chunks: .chunks
 import blob: .blob
 import v: .schema
-let kinds = ["chunk","manifest","state","snapshot","checkpoint"]
+let kinds = ["chunk","manifest","state","snapshot","checkpoint","document"]
 
 pub pn access(path, keys, action) any^ {
     open tx = (sqlite.existing(path)^) { return action(tx,{*:keys,objects:path ++ ".objects"}) }

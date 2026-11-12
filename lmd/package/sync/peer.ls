@@ -7,6 +7,9 @@ import local: .local
 import core: .core
 import codec: .codec
 import v: .schema
+import documents: .document_exchange
+import document_state: .document_state
+import protocol: .protocol
 
 pn plain_receive(socket) any^ {
     let frame = ws.receive(socket,15000)^
@@ -109,18 +112,7 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
         exchange.object_ids(page.value)^
         if (len(page.value)^ == 0 or index+len(page.value)^ > remote.objects) raise error("sync peer: truncated inventory")
         for (id in page.value where not contains(available,id)^) {
-            var pending = null
-            var position = 0
-            var complete = false
-            while (not complete) {
-                let received = request(socket,channel,'object',{id:id,offset:position})^
-                channel = received.session
-                if (received.value.id != id or received.value.offset != position)
-                    raise error("sync peer: object response mismatch")
-                pending = exchange.import_fragment(handle,pending,received.value)^
-                complete = pending == null
-                position = position+len(received.value.text)^
-            }
+            channel = download_object(socket,channel,handle,id)^
             downloaded = downloaded+1
         }
         index = index+len(page.value)^
@@ -134,6 +126,8 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
         exchange.receive_frame(handle,credentials,channel.peer,response.value)^
         index = index+1
     }
+    let pulled_documents = pull_documents(socket,channel,handle,credentials,remote.documents)^
+    channel = pulled_documents.session
     // the server's ACK records the exact pinned channel whose dependencies have committed here.
     let ack = request(socket,channel,'ack',remote.clock)^
     channel = ack.session
@@ -146,14 +140,7 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
         exchange.object_ids(missing.value)^
         for (id in missing.value) {
             if (not contains(page,id)^) raise error("sync peer: requested unadvertised object")
-            let text = exchange.object_text(handle,id)^
-            var position = 0
-            while (position < len(text)) {
-                let fragment = exchange.fragment(id,text,position)^
-                let sent = request(socket,channel,'put_object',fragment)^
-                channel = sent.session
-                position = position+len(fragment.text)^
-            }
+            channel = upload_object(socket,channel,handle,id)^
             uploaded = uploaded+1
         }
         index = index+len(page)
@@ -166,9 +153,108 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
     }
     if (not core.dominates(accepted,outgoing.summary.clock)^) raise error("sync peer: incomplete peer acknowledgment")
     local.acknowledge(handle,channel.peer.id,outgoing.summary.clock)^
+    let pushed_documents = push_documents(socket,channel,handle,credentials,outgoing.documents)^
+    channel = pushed_documents.session
     let ended = request(socket,channel,'done',null)^
     return {peer:channel.peer.id,downloaded:downloaded,uploaded:uploaded,
-        frontier:outgoing.summary.clock,replicated:true,cloud_saved:false}
+        frontier:outgoing.summary.clock,replicated:true,cloud_saved:false,
+        document_packets:pulled_documents.packets+pushed_documents.packets,
+        document_roots:pulled_documents.roots+pushed_documents.roots}
+}
+
+pn download_object(socket, channel, handle, id) any^ {
+    var active = channel
+    var pending = null
+    var position = 0
+    var complete = false
+    while (not complete) {
+        let received = request(socket,active,'object',{id:id,offset:position})^
+        active = received.session
+        if (received.value.id != id or received.value.offset != position)
+            raise error("sync peer: object response mismatch")
+        pending = exchange.import_fragment(handle,pending,received.value)^
+        complete = pending == null
+        position = position+len(received.value.text)^
+    }
+    return active
+}
+pn upload_object(socket, channel, handle, id) any^ {
+    var active = channel
+    let text = exchange.object_text(handle,id)^
+    var position = 0
+    while (position < len(text)) {
+        let fragment = exchange.fragment(id,text,position)^
+        let sent = request(socket,active,'put_object',fragment)^
+        active = sent.session
+        position = position+len(fragment.text)^
+    }
+    return active
+}
+pn pull_documents(socket, channel, handle, credentials, catalog) any^ {
+    var active = channel
+    var packets = 0
+    var roots = 0
+    let selected = if (catalog == null) [] else catalog
+    for (remote in selected) {
+        let needed = documents.need(handle,remote)^
+        if (needed.root) {
+            active = download_object(socket,active,handle,remote.object)^
+            local.register_documents(handle,[{id:remote.id,object:remote.object}])^
+            roots = roots+1
+        } else {
+            var have = needed.have
+            var index = 0
+            var rounds = 0
+            while (not core.dominates(have.body.clock,remote.have.body.clock)^) {
+                if (rounds >= 8192) raise error("sync document: pull round budget")
+                let response = request(socket,active,'document_pull',{id:remote.id,have:have,index:index})^
+                active = response.session
+                have = documents.receive_packet(handle,credentials,active.peer,response.value)^
+                let packet = response.value.body.packet
+                index = if (packet.kind == 'checkpoint_frame') packet.body.index+1 else 0
+                packets = packets+1
+                rounds = rounds+1
+            }
+        }
+        let ack = request(socket,active,'document_ack',{id:remote.id,clock:remote.have.body.clock,object:remote.object})^
+        active = ack.session
+    }
+    return {session:active,packets:packets,roots:roots}
+}
+pn push_documents(socket, channel, handle, credentials, records) any^ {
+    var active = channel
+    var packets = 0
+    var roots = 0
+    for (record in records) {
+        let remote = request(socket,active,'document_need',documents.descriptor(record)^)^
+        active = remote.session
+        var have = remote.value.have
+        if (remote.value.root) {
+            active = upload_object(socket,active,handle,record.export_id)^
+            let registered = request(socket,active,'document_root',{id:record.id,object:record.export_id})^
+            active = registered.session
+            have = registered.value
+            roots = roots+1
+        } else {
+            var index = 0
+            var rounds = 0
+            while (not core.dominates(have.body.clock,record.endpoint.replica.clock)^) {
+                if (rounds >= 8192) raise error("sync document: push round budget")
+                let envelope = documents.reply(record,credentials,have,index)^
+                let sent = request(socket,active,'document_packet',envelope)^
+                active = sent.session
+                have = sent.value
+                let packet = envelope.body.packet
+                index = if (packet.kind == 'checkpoint_frame') packet.body.index+1 else 0
+                packets = packets+1
+                rounds = rounds+1
+            }
+        }
+        if (not core.dominates(have.body.clock,record.endpoint.replica.clock)^)
+            raise error("sync document: incomplete document acknowledgment")
+        documents.acknowledge(handle,record.id,active.peer.id,record.endpoint.replica.clock,record.export_id)^
+    }
+    return {session:active,packets:packets,roots:roots}
 }
 
 pub pn listener(port, bind="127.0.0.1") any^ {

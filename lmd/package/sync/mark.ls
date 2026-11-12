@@ -179,13 +179,13 @@ pub fn child(replica, key, requested_owner=c.root) any^ {
     return cells[0].value.id
 }
 
-fn project_value(replica, descriptor) any^ =>
-    if (descriptor.kind == 'node') value_at(replica,descriptor.id)^
+fn project_value(replica, descriptor, native=false) any^ =>
+    if (descriptor.kind == 'node') value_at(replica,descriptor.id,native)^
     else if (descriptor.kind == 'scalar') descriptor.value
     else if (descriptor.kind == 'blob') descriptor
     else raise error("sync: absent value")
 
-fn project_fields(replica, owner) any^ {
+fn project_fields(replica, owner, native=false) any^ {
     let names = keys(replica,owner)^
     var result = {}
     var i = 0
@@ -194,7 +194,7 @@ fn project_fields(replica, owner) any^ {
         let cells = c.field(replica,owner,key)^
         if (len(cells) > 1) raise error("sync: unresolved field conflict")
         if (len(cells) == 1 and cells[0].value.kind != 'absent') {
-            result = {*:result,[key]:project_value(replica,cells[0].value)^}
+            result = {*:result,[key]:project_value(replica,cells[0].value,native)^}
         }
         i = i+1
     }
@@ -218,23 +218,27 @@ fn normalized_content(children) any^ {
     return result
 }
 
-pub fn value_at(replica, owner) any^ {
+pub fn value_at(replica, owner, native=false) any^ {
     let item = c.node(replica,owner)^
     if (item == null) raise error("sync: unknown Mark node")
     if (item.kind == 'text') { return text.read(replica,owner)^ }
-    if (item.kind == 'map') { return project_fields(replica,owner)^ }
+    if (item.kind == 'map') { return project_fields(replica,owner,native)^ }
     if (item.kind == 'scalar' or item.kind == 'document') {
         let entries = c.field(replica,owner,"value")
         if (len(entries) != 1) raise error("sync: unresolved field conflict")
-        return project_value(replica,entries[0].value)^
+        return project_value(replica,entries[0].value,native)^
     }
-    let children = [for (atom in c.sequence(replica,owner,'items')^) project_value(replica,atom.value)^]
+    let children = [for (atom in c.sequence(replica,owner,'items')^) project_value(replica,atom.value,native)^]
     if (item.kind == 'array') { return children }
-    // an inspection model, not a native-element export/format adapter.
-    return {kind:'element',tag:tag_name(replica,owner)^,attributes:project_fields(replica,owner)^,children:normalized_content(children)^}
+    let attrs = project_fields(replica,owner,native)^
+    let tag = tag_name(replica,owner)^
+    if (native) { return <[tag] *:attrs, *children> }
+    return {kind:'element',tag:tag,attributes:attrs,children:normalized_content(children)^}
 }
 
 pub fn value(replica) any^ => value_at(replica,c.root)^
+// construct elements from node kinds, never by interpreting user map field names.
+pub fn export_value(replica) any^ => value_at(replica,c.root,true)^
 
 fn descendants(replica, owner) any^ {
     let refs = [*[for (cell in replica.cells where cell.node == owner and cell.value.kind == 'node') cell.value.id],

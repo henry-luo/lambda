@@ -1578,6 +1578,14 @@ Its explicit full-space writer/checkpoint grants and host-supplied wrapping keys
 do not qualify file-only sharing, account recovery, Internet traversal, cloud
 publication, OS key-vault integration or the remaining §12.1 deployment gates.
 
+The [cloud implementation](<impl/Lambda_Impl_Sync_Cloud (done).md>) adds the S3-compatible
+adapter, immutable encrypted checkpoint publications, conditional per-device heads,
+a stateless HTTP-function handler and periodic fallback. The current bounded
+profile retains all objects and signed publication chains permanently. It uses
+explicit checkpoint attestation; original transaction-signature relay remains
+separate. [API, publication/recovery rules and bounds](../lmd/package/sync/CLOUD.md)
+distinguish local S3/process qualification from actual hosted-cloud deployment.
+
 Deliver a space with enrollment, regular files/directories, durable journaling,
 direct peer transfer, object-store publication, periodic fallback, conflict
 copies, and recovery. Include local/cloud revision objects and offline changeset
@@ -1627,6 +1635,16 @@ Acceptance cases:
     a missing root or failed scan never publishes mass deletion.
 
 ### 12.2 Collaborative documents
+
+The [native document integration](<impl/Lambda_Impl_Sync_Documents (done).md>) connects
+the existing CRDT core to encrypted session persistence, authenticated peer
+deltas/checkpoint recovery and periodic cloud fallback. Its
+[headless host/API](../lmd/package/sync/DOCUMENTS.md) separates unsaved live state
+from saved file revisions, journals exact-frontier saves, imports external edits,
+retains saved endpoints through same-epoch compaction and verifies attachments.
+The implementation record states the qualification results and bounded native
+scope; UI/browser and hosted/physical-device gates remain separate. Policy follows
+S12.1.1v3; effects and transaction ownership follow D11.1.2 and S12.4.4v4.
 
 Deliver the Lambda Script CRDT core, with native/browser interoperability where
 browser execution is qualified, both Text and Mark-oriented editing profiles,

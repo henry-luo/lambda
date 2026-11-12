@@ -79,7 +79,7 @@ pub fn correspondence(base, captured, hints) any^ {
 }
 
 // each command emits one event, so IDs can be assigned before bounded groups run.
-pub fn import_branch(endpoint, actor, captured, old_members=[]) any^ {
+pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[]) any^ {
     let base_view = w.read(endpoint.replica)^
     var members = []
     var commands = []
@@ -103,8 +103,9 @@ pub fn import_branch(endpoint, actor, captured, old_members=[]) any^ {
             }
             let changed = member.type == 'file' and
                 (old.content.hash != member.content.hash or old.content.size != member.content.size)
-            if (changed) {
-                commands = [*commands,{kind:'publish',entry:id,content:member.content}]
+            let linked = v.lookup(documents,id)^
+            if (changed or linked != null) {
+                commands = [*commands,{kind:'publish',entry:id,content:member.content,document:linked.document}]
             } else if (member.type == 'file') {
                 reference = old.content
             }

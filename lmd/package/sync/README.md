@@ -17,6 +17,11 @@ journals and recovery in Lambda Script, using narrow native crypto/disk APIs.
 The [authenticated native peer adapter](PEER.md) connects independent agents on
 LAN/reachable IPv4 endpoints, with encrypted enrollment, signed device sessions,
 missing-object exchange, signed workspace checkpoints and periodic retry.
+The [cloud adapter](CLOUD.md) adds immutable object-storage publication, a stateless
+HTTP function, periodic fallback, durable coverage and cloud-only snapshot recovery.
+The [durable document host](DOCUMENTS.md) adds persistent unsaved sessions,
+incremental authenticated document exchange, exact-frontier file saves and a
+headless editor API.
 Package distribution/imports follow D1.7 and D9.3.4.
 
 ## Run the examples
@@ -75,6 +80,13 @@ preserve atomic groups on recovery and relay paths.
 | `lambda.sync.sequence` | RGA adapters and LCS correspondence |
 | `lambda.sync.text` | Unicode `read`, `insert`, `remove`, `splice`, `replace`, guarded external `reconcile` |
 | `lambda.sync.mark` | Stable containers, fields, child text, root replacement, tag/order edits, blob fields and explicit conflict resolution |
+| `lambda.sync.document_format` | Text/JSON/XML/Mark open/save conversion and checked native-element export |
+| `lambda.sync.document_state` | Shared document snapshots, private session boundaries, request receipts and root-aware coverage |
+| `lambda.sync.documents` | Transactional document roots, attachment dependencies and disk-base refresh |
+| `lambda.sync.document_host` | Durable editor open/edit/status/save, external imports, retained-version restore and compaction |
+| `lambda.sync.document_exchange` | Bounded catalogs, signed relay deltas, checkpoint recovery and document acknowledgments |
+| `lambda.sync.document_cli` | Headless editor command; see [API and limits](DOCUMENTS.md) |
+| `lambda.sync.cli` | Common public-request/private-key command envelope |
 | `lambda.sync.change` | Atomic command execution, operation groups, pinned compensating undo |
 | `lambda.sync.position` | Stable cursor gaps and affinity through deleted anchors |
 | `lambda.sync.presence` | Receiver-local leases with replay-resistant counters |
@@ -92,6 +104,14 @@ preserve atomic groups on recovery and relay paths.
 | `lambda.sync.peer` | Native listener, mutually authenticated connections, requests and bidirectional exchange |
 | `lambda.sync.peer_agent` | Device/space setup, enrollment, current-grant checks, serve/sync/watch and status |
 | `lambda.sync.peer_cli` | Runnable JSON-request CLI; see [peer setup and limits](PEER.md) |
+| `lambda.sync.s3` | Provider-specific SigV4, conditional writes and scoped expiring capabilities |
+| `lambda.sync.cloud_schema` | Signed owner control, request/publication validation and dependency commitments |
+| `lambda.sync.cloud_function` | Stateless authorization, receipts, conditional publication and membership |
+| `lambda.sync.cloud_transport` | Signed finite HTTP requests and direct ciphertext transfers |
+| `lambda.sync.cloud_bundle` | Encrypted merge-safe workspace/document bundles and checkpoint import |
+| `lambda.sync.cloud` | Pull/publish, provider coverage, immutable publication history and recovery |
+| `lambda.sync.cloud_agent` | P2P-first scheduling, combined native owner and periodic HTTP fallback |
+| `lambda.sync.cloud_cli`, `lambda.sync.cloud_function_cli` | Client/operator and one-invocation function process entries |
 
 Pure APIs return immutable values. The ZIP `save` procedure performs explicit
 filesystem output. Fallible calls use ordinary errors and postfix
@@ -248,8 +268,9 @@ recovery; it does not silently replay them into a new schema.
 
 This reference implementation uses array-based indexes and quadratic LCS.
 Arbitrary Mark subtree reparenting, rich-text span intent beyond explicit Mark trees,
-namespace adapter completion, browser execution, physical GC, and deployed
-editor, Internet-traversal and cloud adapters remain separate work. The local repository stores
+namespace adapter completion, browser execution, physical GC, UI bindings,
+Internet traversal and hosted-cloud qualification remain separate work. The
+[native document host](DOCUMENTS.md) supplies headless editor integration. The local repository stores
 encrypted objects and retains history permanently; its limits and host qualification
 are documented [separately](LOCAL_REPOSITORY.md). Native ZIP
 capture/output is reused through its existing public API. No native

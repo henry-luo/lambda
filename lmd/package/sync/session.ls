@@ -17,8 +17,8 @@ fn version(replica, raw, projected, parents) any^ {
 fn remember(versions, saved) =>
     if (any([for (item in versions) item.id == saved.id])) versions else [*versions,saved]
 
-pub fn start(replica) any^ {
-    let initial = version(replica,encoded(replica)^,value(replica)^,[])^
+pub fn start(replica, raw=null) any^ {
+    let initial = version(replica,if (raw == null) encoded(replica)^ else raw,value(replica)^,[])^
     return {live:replica,base:initial,disk:initial.value,versions:[initial],imports:[],notices:[],conflicts:[],deleted:false}
 }
 
@@ -98,9 +98,9 @@ pub fn import_external(session, import_id, actor, base_id, raw, parsed:any) any^
 pub fn heads(session) any^ => [for (saved in session.versions where
     not any([for (other in session.versions) contains(other.parents,saved.id)^])) saved.id]
 
-pub fn prepare_save(session) any^ {
+pub fn prepare_save(session, raw=null) any^ {
     if (session.deleted or len(session.conflicts) > 0) raise error("sync: resolve external conflicts before saving")
-    return {base_id:session.base.id,saved:version(session.live,encoded(session.live)^,value(session.live)^,heads(session)^)^}
+    return {base_id:session.base.id,saved:version(session.live,if (raw == null) encoded(session.live)^ else raw,value(session.live)^,heads(session)^)^}
 }
 
 pub fn validate_version(saved) any^ {
@@ -127,6 +127,12 @@ pub fn save(session) any^ => commit_save(session,prepare_save(session)^)^
 pub fn receive_version(session, saved) any^ {
     validate_version(saved)^
     return {*:session,live:c.merge(session.live,saved.replica)^,versions:remember(session.versions,saved)}
+}
+
+// only the host's verified disk readback advances the local materialized base.
+pub fn adopt_disk(session, saved) any^ {
+    let updated = receive_version(session,saved)^
+    return {*:updated,base:saved,disk:saved.value}
 }
 
 pub fn resolve(session, replica) any^ {
