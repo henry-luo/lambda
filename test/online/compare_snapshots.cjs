@@ -68,34 +68,38 @@ function compareImages(left, right) {
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g,
     (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
 
-function reviewHtml(rows, output, snapshots) {
+function reviewHtml(rows, output, snapshots, generatedAt) {
     const image = (file) => escapeHtml(path.relative(output, path.join(snapshots, file)));
+    const severityCounts = Object.fromEntries(['critical', 'high', 'low'].map((severity) =>
+        [severity, rows.filter((row) => row.severity === severity).length]));
     return `<!doctype html><meta charset="utf-8"><title>Online snapshot comparison</title>
 <style>body{font:16px system-ui;margin:24px;background:#eee}article{background:white;padding:12px;margin:16px 0}
 .pair{display:flex;gap:12px}.pair a{width:50%}img{width:100%;border:1px solid #aaa}h2{font-size:18px}
-input{padding:8px;width:360px}.hidden{display:none}small{display:block}</style>
-<h1>Online snapshot comparison</h1><p>${rows.length} catalog pages. Coarse 120 × 80 RGB averages suppress fine text noise.
+input{padding:8px;width:360px}.hidden{display:none}small{display:block}.severity{font-weight:700;padding:2px 7px;border-radius:4px}
+.critical{background:#8b0000;color:white}.high{background:#b54708;color:white}.low{background:#e5e7eb;color:#222}</style>
+<h1>Online snapshot comparison</h1><p>Generated ${escapeHtml(generatedAt)}. ${rows.length} catalog pages, ordered by severity: ${severityCounts.critical} critical, ${severityCounts.high} high and ${severityCounts.low} low. Critical means the comparison is blocked by a capture or image problem; high means an automated major difference or a major omission retained in visual review; low means below the major triage threshold. Coarse 120 × 80 RGB averages suppress fine text noise.
 Major candidate: mean channel error ≥12% and changed area ≥35% (RGB distance &gt;12%),
 or a nearly uniform image against content with mean error ≥2% and changed area ≥12%.
-These are review candidates, not conformance failures. Live content, animation, consent and capture dates can differ.</p>
-<input id="filter" placeholder="Filter label or URL"><label><input id="major" type="checkbox" style="width:auto"> Major candidates only</label>
-${rows.map((row) => `<article data-search="${escapeHtml(row.label + ' ' + row.url)}" data-major="${row.major_candidate}">
-<h2>${escapeHtml(row.label)} — ${row.status === 'compared' ?
+These are review candidates, not confirmed engine defects. Live content, animation, consent and capture dates can differ.</p>
+<input id="filter" placeholder="Filter label or URL"><label><input id="high" type="checkbox" style="width:auto"> Critical and high severity only</label>
+${rows.map((row) => `<article data-search="${escapeHtml(row.label + ' ' + row.url)}" data-severity="${row.severity}">
+<h2><span class="severity ${row.severity}">${row.severity.toUpperCase()}</span> ${escapeHtml(row.label)} — ${row.status === 'compared' ?
     `${(row.mean_error * 100).toFixed(1)}% mean error; ${(row.changed_area * 100).toFixed(1)}% area${row.major_candidate ? ' · MAJOR CANDIDATE' : ''}` : escapeHtml(row.status)}</h2>
 <a href="${escapeHtml(row.url)}">${escapeHtml(row.url)}</a><small>${escapeHtml(row.error)}</small>
+${row.severity_reason ? `<small>${escapeHtml(row.severity_reason)}</small>` : ''}
 <small>Lambda ${row.lambda_width || '?'} × ${row.lambda_height || '?'} · ${escapeHtml(row.lambda_attempt_utc || 'capture date not recorded')}
  / Chromium ${row.browser_width || '?'} × ${row.browser_height || '?'} · ${escapeHtml(row.browser_attempt_utc || 'capture date not recorded')}</small>
 ${row.status === 'compared' ? `<div class="pair"><a href="${image(row.lambda_snapshot)}">Lambda<img loading="lazy" src="${image(row.lambda_snapshot)}"></a>
 <a href="${image(row.browser_snapshot)}">Chromium<img loading="lazy" src="${image(row.browser_snapshot)}"></a></div>` : ''}</article>`).join('\n')}
 <script>function filter(){for(const a of document.querySelectorAll('article'))a.classList.toggle('hidden',
 !a.dataset.search.toLowerCase().includes(document.querySelector('#filter').value.toLowerCase())||
-(document.querySelector('#major').checked&&a.dataset.major!=='true'))}
-document.querySelector('#filter').oninput=filter;document.querySelector('#major').onchange=filter;</script>`;
+(document.querySelector('#high').checked&&a.dataset.severity==='low'))}
+document.querySelector('#filter').oninput=filter;document.querySelector('#high').onchange=filter;</script>`;
 }
 
 function main(args = process.argv.slice(2)) {
     const root = path.resolve(__dirname, '../..');
-    let output = path.join(root, 'temp/online-visual/comparison');
+    let output = path.join(root, 'test/online/comparison');
     for (const arg of args) {
         if (arg.startsWith('--output=')) output = path.resolve(arg.slice(9));
         else throw new Error(`unknown option: ${arg}`);
@@ -103,6 +107,11 @@ function main(args = process.argv.slice(2)) {
     const PNG = pngLibrary(root);
     const snapshots = path.join(__dirname, 'snapshots');
     const manifest = new Map(readCsvObjects(path.join(snapshots, 'capture_results.csv')).map((row) => [row.label, row]));
+    const auditPath = path.join(snapshots, 'visual_comparison_review_round2.json');
+    const reviewAudit = fs.existsSync(auditPath) ? JSON.parse(fs.readFileSync(auditPath, 'utf8')) : null;
+    const manualMajor = new Map((reviewAudit?.reviews || [])
+        .filter((review) => review.manual_major_remaining)
+        .map((review) => [review.label, review.manual_major_remaining]));
     const rows = readPageCatalog(path.join(__dirname, 'pages.csv')).map((page) => {
         const capture = manifest.get(page.label);
         const row = {label: page.label, url: page.url, status: 'compared', error: '',
@@ -118,15 +127,36 @@ function main(args = process.argv.slice(2)) {
                 browser_width: right.width, browser_height: right.height};
         } catch (error) { return {...row, status: 'image_error', error: error.message}; }
     });
-    rows.sort((a, b) => (b.mean_error || 0) - (a.mean_error || 0));
+    for (const row of rows) {
+        row.manual_major_remaining = manualMajor.get(row.label) || '';
+        if (row.status !== 'compared' || row.dimensions_match === false) {
+            row.severity = 'critical';
+            row.severity_reason = row.dimensions_match === false ? 'Image dimensions differ.' : 'A complete image comparison is unavailable.';
+        } else if (row.major_candidate || row.manual_major_remaining) {
+            row.severity = 'high';
+            row.severity_reason = row.manual_major_remaining || 'Automated broad-difference threshold reached.';
+        } else {
+            row.severity = 'low';
+            row.severity_reason = 'Below the major triage threshold.';
+        }
+    }
+    const severityRank = {critical: 0, high: 1, low: 2};
+    rows.sort((a, b) => severityRank[a.severity] - severityRank[b.severity] ||
+        (b.mean_error || 0) - (a.mean_error || 0) ||
+        (b.changed_area || 0) - (a.changed_area || 0) || a.label.localeCompare(b.label));
     fs.mkdirSync(output, {recursive: true});
+    const generatedAt = new Date().toISOString();
     const summary = {catalog: rows.length, compared: rows.filter((r) => r.status === 'compared').length,
+        generated_at: generatedAt,
         major_candidates: rows.filter((r) => r.major_candidate).length,
+        manual_major_omissions: rows.filter((r) => r.manual_major_remaining && !r.major_candidate).length,
+        severity: Object.fromEntries(['critical', 'high', 'low'].map((severity) =>
+            [severity, rows.filter((r) => r.severity === severity).length])),
         unavailable: rows.filter((r) => r.status !== 'compared').length,
         dimension_mismatches: rows.filter((r) => r.dimensions_match === false).length};
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({summary, rows}, null, 2) + '\n');
     fs.writeFileSync(path.join(output, 'results.csv'), serializeCsv([...new Set(rows.flatMap(Object.keys))], rows));
-    fs.writeFileSync(path.join(output, 'index.html'), reviewHtml(rows, output, snapshots));
+    fs.writeFileSync(path.join(output, 'index.html'), reviewHtml(rows, output, snapshots, generatedAt));
     process.stdout.write(JSON.stringify(summary) + '\n');
 }
 
