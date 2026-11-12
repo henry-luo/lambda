@@ -1,0 +1,31 @@
+{
+  "name": "Sheet dynamic arrays, spill references and recalculation",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {"width": 1440, "height": 900},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"wait", "ms":100},
+    {"type":"click", "target":{"selector":"#cell-F14"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"type", "target":{"selector":"#cell-editor"}, "text":"=SEQUENCE(2,2)", "clear":true},
+    {"type":"key_press", "key":"Enter"},
+    {"type":"assert_text", "target":{"selector":"#cell-F14"}, "contains":"1"},
+    {"type":"assert_text", "target":{"selector":"#cell-G14"}, "contains":"2"},
+    {"type":"assert_text", "target":{"selector":"#cell-F15"}, "contains":"3"},
+    {"type":"assert_text", "target":{"selector":"#cell-G15"}, "contains":"4"},
+    {"type":"click", "target":{"selector":"#cell-G14"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"assert_text", "target":{"selector":"#status"}, "contains":"Cannot change part of a spilled array"},
+    {"type":"click", "target":{"selector":"#cell-H14"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"type", "target":{"selector":"#cell-editor"}, "text":"=SUM(F14#)", "clear":true},
+    {"type":"key_press", "key":"Enter"},
+    {"type":"assert_text", "target":{"selector":"#cell-H14"}, "contains":"10"},
+    {"type":"click", "target":{"selector":"#cell-F14"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"type", "target":{"selector":"#cell-editor"}, "text":"=SEQUENCE(2,2,2)", "clear":true},
+    {"type":"key_press", "key":"Enter"},
+    {"type":"assert_text", "target":{"selector":"#cell-G15"}, "contains":"5"},
+    {"type":"assert_text", "target":{"selector":"#cell-H14"}, "contains":"14"}
+  ]
+}

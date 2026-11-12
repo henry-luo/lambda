@@ -1,6 +1,9 @@
 import m: .mod_model
 import f: .mod_formula
+import formula_common: .mod_formula_common
 import window: .mod_window
+import conditional: .mod_conditional
+import layout: .mod_grid_layout
 import virtual: lambda.ui.core.virtual_grid
 import grid_view: lambda.ui.core.virtual_grid_view
 import ribbon: lambda.ui.workspace.ribbon
@@ -13,6 +16,7 @@ let OFFICE_THEME = workspace_theme.variables({primary:"#217346",text:"#1d1d1f",t
     border:"#dce3dd",background:"#f5f7f5",surface:"#ffffff",font_family:"-apple-system, 'Helvetica Neue', Arial, sans-serif"})^
 
 let EMPTY_CELL_STYLE={}
+fn suffix(st) => st.pane_suffix or ""
 
 pub fn button(id,label,graphic=null,pressed=false,disabled=false,cls="") => <button id:id,type:"button",class:"tool " ++ cls,
     'data-action':id,title:label,'aria-label':label,'aria-pressed':string(pressed),*:if (disabled) {disabled:""} else {},
@@ -57,15 +61,6 @@ pub fn toolbar(st) {
         ribbon.group("Zoom",[ribbon.row([tool("zoom-out","Zoom Out","shrink_font",false,false,"home-large"),
             tool("zoom-reset","100%","autofit",false,false,"home-large"),tool("zoom-in","Zoom In","grow_font",false,false,"home-large")])])>
 }
-// integer pieces avoid the general numeric formatter's significant-digit rounding.
-fn fixed(value,places=2) any^ => {
-    let scale=10**places
-    let rounded=int(round(abs(value)*scale))
-    let whole=int(floor(rounded/scale))
-    let fraction=string(rounded%scale);
-    (if (value<0) "-" else "") ++ string(whole) ++
-        (if (places==0) "" else "." ++ join(fill(max(0,places-len(fraction)),"0"),"") ++ fraction)
-}
 fn trim_decimal(text) any^ => if (ends_with(text,"0")) trim_decimal(slice(text,0,len(text)-1))
     else if (ends_with(text,".")) slice(text,0,len(text)-1) else text
 // Excel's 1900 calendar includes a fictitious leap day at serial 60.
@@ -79,13 +74,22 @@ fn excel_date(value,date1904) any^ {
         slice(rendered,2,len(rendered)-1)
     }
 }
+fn two_digits(value) => (if (value<10) "0" else "") ++ string(value)
+// A spreadsheet time is the fractional part of a day, rounded to seconds.
+fn excel_time(value) any^ {
+    let seconds=int(floor((value-floor(value))*86400+0.5))%86400;
+    two_digits(seconds div 3600) ++ ":" ++ two_digits((seconds div 60)%60) ++ ":" ++ two_digits(seconds%60)
+}
 pub fn formatted(value,style) any^ => if (value is bool) (if (value) "TRUE" else "FALSE")
     else if (not (value is number)) string(value)
     else if (style.format=="date" or style.format=="date1904") excel_date(value,style.format=="date1904")^
-    else if (style.format=="currency") "$" ++ fixed(value)
-    else if (style.format=="percent") fixed(value*100,1) ++ "%"
-    else if (style.format=="number") fixed(value)
-    else if (value==floor(value)) string(int(value)) else trim_decimal(fixed(value,6))
+    else if (style.format=="time") excel_time(value)^
+    else if (style.format=="datetime" or style.format=="datetime1904")
+        excel_date(value+0.5/86400,style.format=="datetime1904")^ ++ " " ++ excel_time(value)^
+    else if (style.format=="currency") "$" ++ formula_common.fixed(value)
+    else if (style.format=="percent") formula_common.fixed(value*100,1) ++ "%"
+    else if (style.format=="number") formula_common.fixed(value)
+    else if (value==floor(value)) string(int(value)) else trim_decimal(formula_common.fixed(value,6))
 // Default cell declarations live in CSS; keep a stable shape for empty cells.
 fn cell_style(style,zoom) => (if (style.fill) "background-color:" ++ style.fill ++ ";" else "") ++
     (if (style.color) "color:" ++ style.color ++ ";" else "") ++
@@ -95,40 +99,44 @@ fn cell_style(style,zoom) => (if (style.fill) "background-color:" ++ style.fill 
     (if (style.underline) "text-decoration:underline;" else "") ++
     (if (style.align) "text-align:" ++ style.align ++ ";" else "") ++
     (if (style.wrap) "white-space:normal;" else "") ++ (if (style.border) "border:1px solid #6d8275;" else "")
-fn cell_view(st,sheet,row,col,bounds) {
+fn cell_view(st,sheet,row,col,bounds,fragment=null,sticky="") any^ {
     // A visible cell uses the same address for lookup, identity and accessibility.
     let address=f.address(row,col)
-    let cell=f.indexed_cell(sheet,address)
+    let source=if (fragment==null) {row:row,col:col,rows:1,cols:1} else fragment
+    let source_address=f.address(source.row,source.col)
+    let cell=f.indexed_cell(sheet,source_address)
     let raw=cell.raw or ""
-    let computed=st.cache.values[address]
+    let computed=st.cache.values[source_address]
     let value=if (computed==null) "" else computed
-    let style=cell.style or EMPTY_CELL_STYLE
-    let active=st.row==row and st.col==col
+    let style=conditional.style(sheet,source.row,source.col,value,cell.style or EMPTY_CELL_STYLE)^
+    let active=st.row==source.row and st.col==source.col
     let selected=virtual.contains(bounds,row,col)
     let corner=row==bounds.bottom and col==bounds.right and not st.editing
     let formula=starts_with(raw,"=")
     // Empty sparse cells have no text to format or spill into the next cell.
-    let text=if (st.formulas and formula) raw else if (value=="") "" else formatted(value,style)
-    let cell_css=if (cell.style==null) "" else cell_style(style,st.zoom)
+    // Only the anchor fragment paints content when a merge crosses a pane or window boundary.
+    let text=if (fragment!=null and fragment.show==false) "" else if (st.formulas and formula) raw else if (value=="") "" else formatted(value,style)
+    let cell_css=sticky ++ (if (len(style)==0) "" else cell_style(style,st.zoom))
     let spill=text!="" and not (value is number) and not formula and not style.wrap and (f.cell(sheet,row,col+1).raw or "")=="";
-    <td id:"cell-" ++ address,role:"gridcell",'aria-colindex':string(col+1),'data-row':string(row),'data-col':string(col),'data-raw':raw,
+    <td id:"cell-" ++ address ++ suffix(st),role:"gridcell",'aria-colindex':string(col+1),'data-row':string(source.row),'data-col':string(source.col),'data-raw':raw,
+        *:if (source.rows>1) {rowspan:string(source.rows)} else {},*:if (source.cols>1) {colspan:string(source.cols)} else {},
         'aria-selected':string(selected),'aria-label':address ++ (if (text!="") ": " ++ text else ""),
         class:trim((if (active) "active " else "") ++ (if (selected) "selected " else "") ++ (if (corner) "selection-corner " else "") ++
             (if (value is number) "numeric " else "") ++ (if (starts_with(string(value),"#")) "cell-error" else "")),
         style:cell_css,
         if (text!="") <span class:if (spill) "cell-text spill" else "cell-text",text> else null;
         if (formula) <span class:"formula-indicator",title:raw> else null;
-        if (corner) <button id:"selection-handle",type:"button",tabindex:"-1",'data-selection-handle':"true",
+        if (corner and suffix(st)=="") <button id:"selection-handle",type:"button",tabindex:"-1",'data-selection-handle':"true",
             'aria-label':"Drag to extend selection",title:"Drag to extend selection"> else null;
-        if (active and st.editing) <input id:"cell-editor",'aria-label':"Edit " ++ address,value:st.draft,autocomplete:"off",spellcheck:"false"> else null>
+        if (active and st.editing and suffix(st)=="") <input id:"cell-editor",'aria-label':"Edit " ++ address,value:st.draft,autocomplete:"off",spellcheck:"false"> else null>
 }
-fn grid_row(st,sheet,bounds,r,cells) => <tr id:"row-" ++ string(r+1),'aria-rowindex':string(r+1),
+fn grid_row(st,sheet,bounds,r,cells,sticky="") => <tr id:"row-" ++ string(r+1) ++ suffix(st),'aria-rowindex':string(r+1),
     class:if (sheet.row_heights[string(r)]!=null or m.resizing(st,"row",r)) "sized-row" else "",
     style:"height:" ++ string(m.used_dimension(st,"row",r)*st.zoom) ++ "px;--row-size:" ++ string(m.used_dimension(st,"row",r)*st.zoom) ++ "px;",
-    <th role:"rowheader",'data-rowheader':string(r),class:if (r>=bounds.top and r<=bounds.bottom) "heading-selected" else "",string(r+1);
+    <th style:sticky,role:"rowheader",'data-rowheader':string(r),class:if (r>=bounds.top and r<=bounds.bottom) "heading-selected" else "",string(r+1);
         resize_handle(st,"row",r)>;
     *cells>
-fn grid(st,viewport) any^ {
+fn ordinary_grid(st,viewport) any^ {
     let sheet=m.indexed(st)
     let bounds=m.bounds(st)
     let axes=window.axes(st)^
@@ -138,18 +146,18 @@ fn grid(st,viewport) any^ {
     let left=cols.before>0
     let right=cols.after>0
     let body=grid_view.body(rows,cols,(r,cells) => grid_row(st,sheet,bounds,r,cells),
-        (r,c) => cell_view(st,sheet,r,c,bounds))^;
-    <div id:"grid-scroll",class:if (st.grid) "grid-scroll" else "grid-scroll hide-grid",
-        <table id:"sheet-grid",role:"grid",tabindex:"0",'aria-label':sheet.title ++ " spreadsheet",'aria-rowcount':string(sheet.rows),'aria-colcount':string(sheet.cols),
+        (r,c) any^ => cell_view(st,sheet,r,c,bounds)^)^;
+    <div id:"grid-scroll" ++ suffix(st),'data-sheet-pane':st.pane_name or "",class:if (st.grid) "grid-scroll" else "grid-scroll hide-grid",
+        <table id:"sheet-grid" ++ suffix(st),class:"sheet-grid",role:"grid",tabindex:"0",'aria-label':sheet.title ++ " spreadsheet",'aria-rowcount':string(sheet.rows),'aria-colcount':string(sheet.cols),
             *:if (st.row>=rows.first and st.row<rows.last and st.col>=cols.first and st.col<cols.last)
-                {'aria-activedescendant':"cell-" ++ f.address(st.row,st.col)} else {},
+                {'aria-activedescendant':"cell-" ++ f.address(st.row,st.col) ++ suffix(st)} else {},
             'data-first-row':string(rows.first),'data-last-row':string(rows.last),
             'data-first-column':string(cols.first),'data-last-column':string(cols.last),
             style:"width:" ++ string(44+virtual.extent(axes.columns)^) ++ "px;font-size:" ++ string(12*st.zoom) ++ "px;",
             <colgroup <col style:"width:44px">;
                 if (left) <col style:"width:" ++ string(cols.before) ++ "px"> else null;
                 if (cols.first<cols.last) for (c in cols.first to (cols.last-1))
-                    <col id:"column-" ++ f.column(c),style:"width:" ++ string(m.used_dimension(st,"column",c)*st.zoom) ++ "px"> else null;
+                    <col id:"column-" ++ f.column(c) ++ suffix(st),style:"width:" ++ string(m.used_dimension(st,"column",c)*st.zoom) ++ "px"> else null;
                 if (right) <col style:"width:" ++ string(cols.after) ++ "px"> else null>
             <thead <tr <th class:"corner",'data-select':"all",title:"Select all cells">;
                 if (left) <th class:"grid-gap",'aria-hidden':"true"> else null;
@@ -160,10 +168,104 @@ fn grid(st,viewport) any^ {
             body>>
 }
 
+// Build only frozen prefixes and the current scroll windows; gaps retain geometry.
+fn layout_cell(st,sheet,bounds,axes,rows,cols,r,c,rf,cf) any^ {
+    let fragment=layout.fragment(sheet,r,c,if (rf) rows.fixed_first else rows.scroll_first,
+        if (rf) rows.fixed_end else rows.scroll_end,if (cf) cols.fixed_first else cols.scroll_first,
+        if (cf) cols.fixed_end else cols.scroll_end)^;
+    if (not fragment.render) null else cell_view(st,sheet,r,c,bounds,fragment,layout.sticky(rf,cf,r,c,axes)^)^
+}
+fn layout_row(st,sheet,bounds,axes,rows,cols,r,rf) any^ {
+    let cells=[*[for (c in cols.fixed) layout_cell(st,sheet,bounds,axes,rows,cols,r,c,rf,true)^],
+        if (cols.gap>0) <td class:"grid-gap",'aria-hidden':"true"> else null,
+        *[for (c in cols.scroll) layout_cell(st,sheet,bounds,axes,rows,cols,r,c,rf,false)^],
+        if (cols.after>0) <td class:"grid-gap",'aria-hidden':"true"> else null]
+    let head=if (rf) "position:sticky;left:0;top:" ++ string(26+virtual.offset(axes.rows,r)^) ++ "px;z-index:7;" else "";
+    grid_row(st,sheet,bounds,r,cells,head)
+}
+fn column_header(st,bounds,axes,c,fixed) any^ =>
+    <th role:"columnheader",'data-column':string(c),'aria-colindex':string(c+1),
+        style:if (fixed) "position:sticky;left:" ++ string(44+virtual.offset(axes.columns,c)^) ++ "px;z-index:6;" else "",
+        class:if (c>=bounds.left and c<=bounds.right) "heading-selected" else "",f.column(c);resize_handle(st,"column",c)>
+fn layout_grid(st,viewport) any^ {
+    let sheet=m.indexed(st)
+    let bounds=m.bounds(st)
+    let axes=window.axes(st)^
+    let visible=window.visible(axes,viewport)^
+    let frozen=sheet.frozen or {rows:0,cols:0}
+    let rows=layout.segments(sheet,"row",axes.rows,visible.rows,frozen.rows)^
+    let cols=layout.segments(sheet,"column",axes.columns,visible.columns,frozen.cols)^
+    let span=1+len(cols.fixed)+len(cols.scroll)+(if (cols.gap>0) 1 else 0)+(if (cols.after>0) 1 else 0);
+    <div id:"grid-scroll" ++ suffix(st),'data-sheet-pane':st.pane_name or "",class:if (st.grid) "grid-scroll" else "grid-scroll hide-grid",
+        <table id:"sheet-grid" ++ suffix(st),class:"sheet-grid",role:"grid",tabindex:"0",'aria-label':sheet.title ++ " spreadsheet",'aria-rowcount':string(sheet.rows),'aria-colcount':string(sheet.cols),
+            *:if ((contains(rows.fixed,st.row) or contains(rows.scroll,st.row)) and
+                (contains(cols.fixed,st.col) or contains(cols.scroll,st.col)))
+                {'aria-activedescendant':"cell-" ++ f.address(st.row,st.col) ++ suffix(st)} else {},
+            'data-first-row':string(visible.rows.first),'data-last-row':string(visible.rows.last),
+            'data-first-column':string(visible.columns.first),'data-last-column':string(visible.columns.last),
+            style:"width:" ++ string(44+virtual.extent(axes.columns)^) ++ "px;font-size:" ++ string(12*st.zoom) ++ "px;",
+            <colgroup <col style:"width:44px">;
+                for (c in cols.fixed) <col id:"column-" ++ f.column(c) ++ suffix(st),style:"width:" ++ string(m.used_dimension(st,"column",c)*st.zoom) ++ "px">;
+                if (cols.gap>0) <col style:"width:" ++ string(cols.gap) ++ "px"> else null;
+                for (c in cols.scroll) <col id:"column-" ++ f.column(c) ++ suffix(st),style:"width:" ++ string(m.used_dimension(st,"column",c)*st.zoom) ++ "px">;
+                if (cols.after>0) <col style:"width:" ++ string(cols.after) ++ "px"> else null>
+            <thead <tr <th class:"corner",'data-select':"all",title:"Select all cells">;
+                for (c in cols.fixed) column_header(st,bounds,axes,c,true)^;
+                if (cols.gap>0) <th class:"grid-gap",'aria-hidden':"true"> else null;
+                for (c in cols.scroll) column_header(st,bounds,axes,c,false)^;
+                if (cols.after>0) <th class:"grid-gap",'aria-hidden':"true"> else null>>
+            <tbody
+                for (r in rows.fixed) layout_row(st,sheet,bounds,axes,rows,cols,r,true)^;
+                if (rows.gap>0) <tr class:"grid-spacer",'aria-hidden':"true",<td colspan:string(span),style:"height:" ++ string(rows.gap) ++ "px">> else null;
+                for (r in rows.scroll) layout_row(st,sheet,bounds,axes,rows,cols,r,false)^;
+                if (rows.after>0) <tr class:"grid-spacer",'aria-hidden':"true",<td colspan:string(span),style:"height:" ++ string(rows.after) ++ "px">> else null>>>
+}
+fn grid_content(st,viewport) any^ {
+    let sheet=m.current(st);
+    if (len(sheet.merges or [])==0 and len(sheet.hidden_rows or [])==0 and len(sheet.hidden_columns or [])==0 and
+        (sheet.frozen==null or (sheet.frozen.rows==0 and sheet.frozen.cols==0))) ordinary_grid(st,viewport)^
+    else layout_grid(st,viewport)^
+}
+
+fn split_divider(st,axis,location,value) {
+    let views=st.split_views
+    let extent=if (axis=="x") (views.topLeft.width or 0)+(views.topRight.width or 0)+6
+        else (views.topLeft.height or 0)+(views.bottomLeft.height or 0)+6;
+    <div id:"split-divider-" ++ axis ++ "-" ++ location,
+        class:"split-divider split-divider-" ++ axis,role:"separator",tabindex:"0",'data-split-resize':axis,
+        'aria-label':if (axis=="x") "Resize vertical split" else "Resize horizontal split",
+        'aria-orientation':if (axis=="x") "vertical" else "horizontal",'aria-valuemin':"50",
+        'aria-valuemax':string(round(max(value,extent-56))),'aria-valuenow':string(round(value))>
+}
+fn split_pane(st,name,extra) any^ {
+    let active=name==st.pane_active
+    let viewport=st.split_views[name] or {x:0.0,y:0.0,width:0.0,height:0.0}
+    let pane_state={*:st,pane_name:name,pane_suffix:if (active) "" else "--" ++ name};
+    <div class:"split-pane " ++ extra,grid_content(pane_state,viewport)^>
+}
+fn grid(st,viewport) any^ {
+    let split=m.current(st).split;
+    if (split==null) grid_content(st,viewport)^ else {
+        let x=if (st.split_drag!=null and st.split_drag.axis=="x") st.split_drag.value else split.x/15
+        let y=if (st.split_drag!=null and st.split_drag.axis=="y") st.split_drag.value else split.y/15;
+        <div class:"split-frame",style:"--split-width:" ++ string(x) ++ "px;",'data-split-x':string(split.x),'data-split-y':string(split.y),
+            <div class:"split-row " ++ (if (split.y>0) "split-top" else "split-whole"),
+                style:if (split.y>0) "height:" ++ string(y) ++ "px;" else "",
+                split_pane(st,"topLeft",if (split.x>0) "split-left" else "split-whole")^;
+                if (split.x>0) split_divider(st,"x","top",x) else null;
+                if (split.x>0) split_pane(st,"topRight","split-right")^ else null>
+            if (split.y>0) split_divider(st,"y","middle",y) else null;
+            if (split.y>0) <div class:"split-row split-bottom",
+                split_pane(st,"bottomLeft",if (split.x>0) "split-left" else "split-whole")^;
+                if (split.x>0) split_divider(st,"x","bottom",x) else null;
+                if (split.x>0) split_pane(st,"bottomRight","split-right")^ else null> else null>
+    }
+}
+
 fn resize_handle(st,axis,index) {
     let label=(if (axis=="column") "column " ++ f.column(index) else "row " ++ string(index+1))
     let limits=m.dimension_limits(axis);
-    <span id:"resize-" ++ axis ++ "-" ++ string(index),class:axis ++ "-resizer",role:"separator",tabindex:"0",
+    <span id:"resize-" ++ axis ++ "-" ++ string(index) ++ suffix(st),class:axis ++ "-resizer",role:"separator",tabindex:"0",
         'data-sheet-resize':axis,'data-index':string(index),'aria-label':"Resize " ++ label,title:"Drag to resize " ++ label,
         'aria-orientation':if (axis=="column") "vertical" else "horizontal",
         'aria-valuemin':string(limits.min),'aria-valuemax':string(limits.max),'aria-valuenow':string(m.used_dimension(st,axis,index))>

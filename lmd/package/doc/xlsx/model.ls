@@ -35,6 +35,14 @@ fn position(text) map^ {
         else {row:row,col:col}
     }
 }
+// Worksheet ranges are stored as zero-based inclusive rectangles.
+fn rectangle(ref) map^ {
+    let parts=split(ref or "",":")^
+    let a=position(parts[0])^
+    let b=position(if (len(parts)==1) parts[0] else parts[1])^;
+    if (len(parts)>2 or a.row>b.row or a.col>b.col) raise fail("invalid-package","Invalid worksheet range " ++ (ref or ""))
+    else {top:a.row,left:a.col,bottom:b.row,right:b.col}
+}
 // Concatenate rich text runs; phonetic annotations are not displayed text.
 fn text(node) any^ => join([for (part in children(node,null))
     if (part.tag=="t") xml.tree_text(part) else if (part.tag=="r") xml.tree_text(child(part,"t")) else ""],"")
@@ -50,19 +58,47 @@ fn color(node) any^ {
         "#" ++ lower(slice(argb,len(argb)-6)) else null
 }
 fn on(node) any^ => node!=null and not contains(["0","false","off"],lower(attr(node,"val") or "1"))
+// Ignore quoted literals, escapes and color/locale brackets when classifying formats.
+fn format_tokens(code,at=0,quoted=false) any^ {
+    if (at>=len(code)) "" else {
+        let ch=slice(code,at,at+1);
+        if (ch=="\"") format_tokens(code,at+1,not quoted)^
+        else if (quoted) format_tokens(code,at+1,true)^
+        else if (ch=="\\" or ch=="_" or ch=="*") format_tokens(code,at+2,false)^
+        else if (ch=="[") {
+            let tail=slice(code,at+1)
+            let end=index_of(tail,"]");
+            if (end==null) "" else {
+                let bracket=slice(tail,0,end)
+                let token=if (bracket=="h" or bracket=="hh" or bracket=="m" or bracket=="mm" or bracket=="s" or bracket=="ss") "h" else "";
+                token ++ format_tokens(code,at+end+2,false)^
+            }
+        }
+        else (if (contains("ymdhs",ch)) ch else "") ++ format_tokens(code,at+1,false)^
+    }
+}
+fn on_attr(node,key) any^ => contains(["1","true","on"],lower(attr(node,key) or "0"))
 fn number_format(id,custom,date1904) any^ {
-    let code=lower(custom or "");
-    if (id>=14 and id<=17) (if (date1904) "date1904" else "date")
+    let code=lower(custom or "")
+    let tokens=if (len(code)>512) "" else format_tokens(code)^
+    let has_time=contains(tokens,"h") or contains(tokens,"s")
+    let has_date=contains(tokens,"y") or contains(tokens,"d") or (contains(tokens,"m") and not has_time)
+    let date_format=if (date1904) "date1904" else "date"
+    let datetime_format=if (date1904) "datetime1904" else "datetime";
+    if (id==22 or (has_date and has_time)) datetime_format
+    else if ((id>=14 and id<=17) or has_date) date_format
+    else if ((id>=18 and id<=21) or (id>=45 and id<=47) or has_time) "time"
     else if (id==9 or id==10 or contains(code,"%")) "percent"
     else if (id>=5 and id<=8 or contains(code,"$") or contains(code,"€") or contains(code,"£")) "currency"
     else if (id>=1 and id<=4) "number" else "general"
 }
+
 fn style_context(pkg,date1904) map^ {
     let root_node=root(pkg,"styles")^;
-    if (root_node==null) {fonts:[],fills:[],xfs:[],formats:{},date1904:date1904}
+    if (root_node==null) {fonts:[],fills:[],xfs:[],dxfs:[],formats:{},date1904:date1904}
     else if (root_node.uri!=X or root_node.tag!="styleSheet") raise fail("invalid-package","Invalid styles")
     else {date1904:date1904,fonts:children(child(root_node,"fonts"),"font"),fills:children(child(root_node,"fills"),"fill"),
-        xfs:children(child(root_node,"cellXfs"),"xf"),
+        xfs:children(child(root_node,"cellXfs"),"xf"),dxfs:children(child(root_node,"dxfs"),"dxf"),
         formats:map([for (n in ((children(child(root_node,"numFmts"),"numFmt")) ^ { [] })) (attr(n,"numFmtId"),attr(n,"formatCode"))])}
 }
 fn style(ctx,id) any^ {
@@ -88,6 +124,51 @@ fn style(ctx,id) any^ {
      *:if (on(child(xf,"alignment")) and contains(["1","true"],lower(attr(align,"wrapText") or "0"))) {wrap:true} else {},
      *:if (format!="general") {format:format} else {}}
 }
+// Differential styles contain only properties overridden by a matching rule.
+fn differential(node) any^ {
+    let font=child(node,"font")
+    let fill=child(child(node,"fill"),"patternFill")
+    let foreground=color(child(fill,"fgColor"))
+    let font_color=color(child(font,"color"));
+    {*:if (child(font,"b")!=null) {bold:on(child(font,"b"))} else {},
+     *:if (child(font,"i")!=null) {italic:on(child(font,"i"))} else {},
+     *:if (child(font,"u")!=null) {underline:on(child(font,"u"))} else {},
+     *:if (font_color!=null) {color:font_color} else {},
+     *:if (foreground!=null) {fill:foreground} else {}}
+}
+fn condition(block,rule,styles) any^ {
+    let kind=attr(rule,"type")
+    let op=if (kind=="cellIs") attr(rule,"operator") else kind
+    let formulas=[for (formula in children(rule,"formula")) xml.tree_text(formula)]
+    let values=if (kind=="cellIs") [for (formula in formulas) float(formula) ^ {null}]
+        else if (contains(["containsText","notContainsText","beginsWith","endsWith"],kind)) [attr(rule,"text")] else []
+    let refs=[for (ref in ((split(attr(block,"sqref") or ""," ")) ^ { [] }) where ref!="") ref]
+    let style_index=as_int(attr(rule,"dxfId"),-1)
+    let dxf=if (style_index>=0 and style_index<len(styles.dxfs)) styles.dxfs[style_index] else null
+    let diff=if (dxf==null) {} else differential(dxf)^
+    let font=child(dxf,"font")
+    let fill=child(child(dxf,"fill"),"patternFill")
+    let partial=any([for (item in ((children(dxf,null)) ^ { [] })) not contains(["font","fill"],item.tag)]) or
+        any([for (item in ((children(font,null)) ^ { [] })) not contains(["b","i","u","color"],item.tag)]) or
+        (child(font,"color")!=null and color(child(font,"color"))==null) or
+        (child(dxf,"fill")!=null and (fill==null or color(child(fill,"fgColor"))==null))
+    let numeric=kind=="cellIs" and contains(["equal","notEqual","greaterThan","greaterThanOrEqual",
+        "lessThan","lessThanOrEqual","between","notBetween"],op) and
+        len(formulas)==(if (op=="between" or op=="notBetween") 2 else 1) and
+        all([for (formula in formulas) formula!="" and len(formula)<=512])
+    let expression_rule=kind=="expression" and len(formulas)==1 and formulas[0]!="" and len(formulas[0])<=512
+    let text_rule=contains(["containsText","notContainsText","beginsWith","endsWith"],kind) and values[0] is string
+    let blank_rule=contains(["containsBlanks","notContainsBlanks"],kind)
+    let supported=len(refs)>0 and (numeric or expression_rule or text_rule or blank_rule) and
+        style_index>=0 and style_index<len(styles.dxfs) and len(diff)>0;
+    if (not supported) null else {
+        let ranges=[for (ref in refs) rectangle(ref)^]
+        let anchor={row:ranges[0].top,col:ranges[0].left};
+        {ranges:ranges,anchor:anchor,
+        operator:op,values:if (numeric and not all([for (value in values) value is number])) [] else values,
+        *:if (expression_rule or (numeric and not all([for (value in values) value is number]))) {formulas:formulas} else {},priority:as_int(attr(rule,"priority"),0),
+        stop:on_attr(rule,"stopIfTrue")^,style:diff,partial:partial}}
+}
 fn cell(node,shared,styles,part) map^ {
     let pos=position(attr(node,"r"))^
     let typ=attr(node,"t") or "n"
@@ -100,7 +181,7 @@ fn cell(node,shared,styles,part) map^ {
         else if (typ=="n" and value!="") (float(value) ^ {raise fail("invalid-package","Invalid numeric cell",part)})
         else value;
     {*:pos,type:typ,value:result,raw_value:value,has_value:child(node,"v")!=null,formula:if (formula==null) null else xml.tree_text(formula),
-        formula_type:attr(formula,"t"),style:style(styles,attr(node,"s"))}
+        formula_type:attr(formula,"t"),formula_ref:attr(formula,"ref"),style:style(styles,attr(node,"s"))}
 }
 fn worksheet(pkg,entry,shared,styles) map^ {
     let rel=opc.by_id(pkg.relationships,xml.attr(entry,"id",R))
@@ -113,13 +194,42 @@ fn worksheet(pkg,entry,shared,styles) map^ {
             let data=child(root_node,"sheetData")
             let rows=children(data,"row")
             let cells=[for (row in rows,node in ((children(row,"c")) ^ { [] })) cell(node,shared,styles,rel.target)^]
+            let cols=children(child(root_node,"cols"),"col")
+            let sheet_view=child(child(root_node,"sheetViews"),"sheetView")
+            let pane=child(sheet_view,"pane")
+            let frozen=if (contains(["frozen","frozenSplit"],attr(pane,"state")))
+                {rows:as_int(attr(pane,"ySplit"),0),cols:as_int(attr(pane,"xSplit"),0)} else null
+            // Split positions are twentieths of a point; frozen positions count cells.
+            let split_info=if (pane!=null and frozen==null and (attr(pane,"state")==null or attr(pane,"state")=="split")) {
+                let x=as_real(attr(pane,"xSplit"),0.0)
+                let y=as_real(attr(pane,"ySplit"),0.0)
+                let top_left=position(attr(pane,"topLeftCell") or "A1")^
+                let active=attr(pane,"activePane") or "topLeft"
+                let selected=[for (item in ((children(sheet_view,"selection")) ^ { [] }) where
+                    (((attr(item,"pane") or "topLeft")==active and attr(item,"activeCell")!=null) ^ {false})) item][0]
+                let selection=if (selected!=null) position(attr(selected,"activeCell"))^ else
+                    {row:if (y==0 or starts_with(active,"bottom")) top_left.row else 0,
+                        col:if (x==0 or ends_with(active,"Right")) top_left.col else 0};
+                {x:x,y:y,top_left:top_left,active:active,selection:selection}
+            } else null
+            let split=if (split_info!=null and (split_info.x!=0 or split_info.y!=0)) split_info else null
+            let merges=[for (merge in ((children(child(root_node,"mergeCells"),"mergeCell")) ^ { [] })) rectangle(attr(merge,"ref"))^]
+            let blocks=children(root_node,"conditionalFormatting")
+            let rules=[for (block in blocks, rule in ((children(block,"cfRule")) ^ { [] })) condition(block,rule,styles)^]
             let warnings=[
-                if (child(root_node,"mergeCells")!=null) issue("merged-cells",rel.target,"Merged cells are not preserved"),
                 if (child(root_node,"drawing")!=null) issue("drawing",rel.target,"Charts and drawings are not imported"),
+                if (child(root_node,"sheetProtection")!=null) issue("sheet-protection",rel.target,"Worksheet protection is not enforced"),
+                if (pane!=null and frozen==null and split_info==null) issue("split-panes",rel.target,"Unknown pane state is not preserved"),
+                if (any([for (rule in rules) rule==null or rule.partial==true]))
+                    issue("conditional-formatting",rel.target,"Some conditional formatting rules are not supported"),
                 if (any([for (c in cells) c.formula!=null])) issue("formula-recalculation",rel.target,"Formula evaluation depends on the consuming application"),
                 if (any([for (c in cells) c.formula_type!=null and c.formula_type!="normal"])) issue("formula-type",rel.target,"Shared and array formulas are not expanded")];
-            {title:name,part:rel.target,cells:cells,
-             column_widths:[for (col in ((children(child(root_node,"cols"),"col")) ^ { [] }))
+            {title:name,part:rel.target,cells:cells,merges:merges,frozen:frozen,split:split,
+             conditional_rules:sort([for (rule in rules where rule!=null) rule],{by:(rule)=>rule.priority}),
+             hidden_rows:[for (row in rows where on_attr(row,"hidden")^) as_int(attr(row,"r"),1)-1],
+             hidden_columns:[for (col in cols where on_attr(col,"hidden")^)
+                {min:as_int(attr(col,"min"),1)-1,max:as_int(attr(col,"max"),1)-1}],
+             column_widths:[for (col in cols)
                 {min:as_int(attr(col,"min"),1)-1,max:as_int(attr(col,"max"),1)-1,width:as_real(attr(col,"width"),0.0)}],
              row_heights:[for (row in rows where ((attr(row,"ht")!=null) ^ { false }))
                 {row:as_int(attr(row,"r"),1)-1,height:as_real(attr(row,"ht"),0.0)}],
@@ -139,7 +249,11 @@ pub fn read(source) map^ {
         let entries=children(child(book,"sheets"),"sheet")
         let sheets=[for (entry in entries) worksheet(pkg,entry,shared,styles)^];
         if (len(sheets)==0) raise fail("invalid-package","Workbook contains no worksheets",pkg.main)
-        else {title:pkg.metadata.title or "Imported workbook",sheets:sheets,metadata:pkg.metadata,
-            diagnostics:[for (sheet in sheets,warning in sheet.diagnostics) warning]}
+        else {title:pkg.metadata.title or "Imported workbook",date1904:date1904,sheets:sheets,metadata:pkg.metadata,
+            defined_names:[for (name in ((children(child(book,"definedNames"),"definedName")) ^ { [] }))
+                {name:attr(name,"name"),formula:xml.tree_text(name),scope:if (attr(name,"localSheetId")==null) null else as_int(attr(name,"localSheetId"),-1)}],
+            diagnostics:[for (warning in [if (child(book,"workbookProtection")!=null)
+                issue("workbook-protection",pkg.main,"Workbook structure protection is not enforced"),
+                *[for (sheet in sheets,warning in sheet.diagnostics) warning]] where warning!=null) warning]}
     }
 }

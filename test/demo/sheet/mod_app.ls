@@ -5,7 +5,9 @@ import f: .mod_formula
 import files: .mod_io
 
 pub pn focus(owner) { dom.request_frame(dom.get_element_by_id(dom.root_node(owner),"sheet"),"sheet_focus") }
-pub fn begin_edit(st,text=null) => {*:st,editing:true,draft:if (text==null) m.active(st).raw or "" else text}
+pub fn begin_edit(st,text=null) => if (st.cache.spill.spill_values[(f.address(st.row,st.col) ^ {null})]!=null)
+    {*:st,status:"Cannot change part of a spilled array"}
+    else {*:st,editing:true,draft:if (text==null) m.active(st).raw or "" else text}
 pub pn accept(st,owner) {
     let node=dom.get_element_by_id(dom.root_node(owner),if (st.editing) "cell-editor" else "formula-input")
     return m.set_value(st,dom.get_state(node,"value") or "")
@@ -43,12 +45,16 @@ pub pn command(st,id,owner) map^ {
             let imported=if (files.is_xlsx(path)^) files.import_xlsx(path)^ else null
             let book=if (imported!=null) files.restore(imported.book)^ else files.read(path)^
             let warnings=if (imported==null) 0 else len(imported.diagnostics)
-            return {*:m.select(m.initial(book)^,0,0),path:if (imported!=null) "" else path,
+            // A replacement workbook starts at its own origin, not the previous scroll offset.
+            dom.set_scroll_state(dom.get_element_by_id(dom.root_node(owner),"grid-scroll"),0.0,0.0)
+            let initial=m.initial(book)^
+            let positioned=if (book.sheets[0].split==null) m.select(initial,0,0) else initial;
+            return {*:positioned,path:if (imported!=null) "" else path,
                 status:"Opened " ++ path ++ (if (warnings>0) " (" ++ string(warnings) ++ " import warnings)" else "")}
         }
         if (st.dialog=="export") {
             if (files.is_xlsx(path)^) { return {*:st,status:"Export CSV to a .csv file; XLSX export is not supported",error:"XLSX export is not supported"} }
-            files.export_csv(m.current(st),path)^
+            files.export_csv(m.indexed(st),path)^
             return {*:st,dialog:"",status:"Exported " ++ path}
         }
         if (files.is_xlsx(path)^) { return {*:st,status:"Save as a .sheet.json file; XLSX export is not supported",error:"Save as a .sheet.json file; XLSX export is not supported"} }

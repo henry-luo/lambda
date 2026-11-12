@@ -5059,10 +5059,11 @@ let workbook = xlsx.convert("budget.xlsx")^
 workbook.sheets[0].cells
 ```
 
-`convert(source)` and `load(source)` return `{title, sheets, metadata,
-diagnostics}`. Each sheet has a title, part path, sparse zero-based cells, column
-width ranges, row heights and diagnostics. Cells expose their coordinates, XLSX
-type, typed value, raw value, formula and formula type, cached-value presence,
+`convert(source)` and `load(source)` return `{title, date1904, sheets, defined_names,
+metadata, diagnostics}`. Defined names retain their formula and optional worksheet scope. Each sheet has a title, part path, sparse zero-based cells, column
+width ranges, row heights, merged ranges, hidden dimensions, frozen prefixes,
+split-pane geometry and selection, conditional rules and diagnostics. Cells expose their coordinates, XLSX
+type, typed value, raw value, formula, formula type and range, cached-value presence,
 and the supported style projection. Rich shared/inline text is flattened. The
 reader accepts ordinary non-macro XLSX workbooks and rejects invalid or missing
 package parts. Diagnostics report selected unsupported features; their absence
@@ -5073,11 +5074,26 @@ editable workbook and opens it through **Open**. It supports at most 50 sheets,
 100,000 rows and 1,000 columns per sheet, plus its existing cell and operation
 limits. Imported text, numeric and boolean values, formula source, common
 font/fill/alignment and number styles, and row/column dimensions are retained
-where the demo supports them. Built-in date formats 14–17 display ISO dates
-using the workbook's 1900 or 1904 calendar. Common formulas recalculate in Sheet;
+where the demo supports them. Common built-in and custom date/time formats are
+classified and displayed as ISO dates and 24-hour times using the workbook's
+1900 or 1904 calendar; this normalizes presentation rather than reproducing the
+format code. Formulas retain that workbook date system and can reference other
+sheets. Sheet evaluates its supported dynamic-array functions, spills their
+results into the grid, and resolves inline and workbook-defined `LAMBDA` functions;
+the Sheet README specifies the bounded profile. Common formulas recalculate in Sheet;
 otherwise a saved XLSX result is shown until an edit invalidates imported caches.
+Sheet displays imported merged ranges, hidden dimensions, frozen prefixes and
+split panes with independently scrolling views. It applies formula-expression
+rules, numeric cell-comparison rules with constant or formula operands, text and
+blank conditional rules, and RGB differential font/fill styles, in priority
+order with `stopIfTrue`; these styles recalculate with cell values. Conditional
+formulas use the Sheet formula profile and dynamically dispatched calls
+(**S12.3.4v2**, **D7.2.2**). Rules outside Sheet's bounded grid are
+clipped with diagnostics.
 
-This is not a lossless XLSX editor. Merged cells, shared/array formula expansion,
-charts and drawings, arbitrary custom formats, time formats, theme colours and
-many Excel features are outside this profile. Sheet saves its conversion as
-`.sheet.json`, not XLSX; the separate chart exporter writes a limited XLSX table.
+This is not a lossless XLSX editor. Shared and legacy array formula expansion, charts and
+drawings, arbitrary custom format fidelity, theme colours and many conditional
+format types are outside this profile. Diagnostics identify unsupported
+conditional rules, protected sheets and workbook structures. Sheet can move
+imported split dividers by pointer or keyboard; creating or removing splits is
+not supported, and live scroll positions are transient. Sheet saves its conversion as `.sheet.json`, not XLSX; the separate chart exporter writes a limited XLSX table.

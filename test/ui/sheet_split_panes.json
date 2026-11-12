@@ -1,0 +1,229 @@
+{
+  "name": "Independent split panes and workbook editing",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/xlsx/split-panes.xlsx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('[data-sheet-pane]').length===4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-cell",
+      "equals": "F8"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const a=document.querySelector('[data-sheet-pane=topLeft]'),b=document.querySelector('[data-sheet-pane=bottomRight]');return a.clientWidth>50 && b.clientWidth>50 && a.clientHeight>50 && b.clientHeight>50 && b.scrollTop>0 && b.scrollLeft>0})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const a=document.querySelector('[data-sheet-pane=topLeft]'),b=document.querySelector('[data-sheet-pane=topRight]'),c=document.querySelector('[data-sheet-pane=bottomLeft]'),d=document.querySelector('[data-sheet-pane=bottomRight]');return a.scrollLeft===c.scrollLeft && b.scrollLeft===d.scrollLeft && a.scrollTop===b.scrollTop && c.scrollTop===d.scrollTop && a.scrollTop===0 && a.scrollLeft===0})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const a=document.querySelector('[data-sheet-pane=topLeft]').getBoundingClientRect();return a.width>395&&a.width<405&&a.height>295&&a.height<305})()"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.querySelector('[data-sheet-pane=topLeft]');p.scrollLeft=90;p.scrollTop=40;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const a=document.querySelector('[data-sheet-pane=topLeft]'),b=document.querySelector('[data-sheet-pane=topRight]'),c=document.querySelector('[data-sheet-pane=bottomLeft]'),d=document.querySelector('[data-sheet-pane=bottomRight]');return a.scrollLeft>0&&a.scrollTop>0&&c.scrollLeft===a.scrollLeft&&b.scrollTop===a.scrollTop&&d.scrollLeft!==a.scrollLeft&&d.scrollTop!==a.scrollTop})()"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.querySelector('[data-sheet-pane=topLeft]');p.scrollLeft=0;p.scrollTop=0;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-sheet-pane='topLeft'] td[data-row='1'][data-col='0']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('grid-scroll').getAttribute('data-sheet-pane')==='topLeft' && document.getElementById('sheet').getAttribute('data-cell')==='A2'"
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "Changed group",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"[data-sheet-pane='topLeft'] td[data-row='1'][data-col='0']\").textContent.includes('Changed group')"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.querySelector('[data-sheet-pane=bottomRight]');p.scrollLeft=0;p.scrollTop=0;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const a=document.querySelector(\"[data-sheet-pane='topLeft'] td[data-row='1'][data-col='0']\"),d=document.querySelector(\"[data-sheet-pane='bottomRight'] td[data-row='1'][data-col='0']\");return a&&d&&a.textContent.includes('Changed group')&&d.textContent.includes('Changed group')})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const all=Array.from(document.querySelectorAll('[id]')).map(e=>e.id);return new Set(all).size===all.length})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-sheet-pane='topLeft'] td[data-row='1'][data-col='0']"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "Scrolled edit",
+      "clear": true
+    },
+    {
+      "type": "script",
+      "js": "const p=document.querySelector('[data-sheet-pane=topLeft]');p.scrollTop=600;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "script",
+      "js": "const p=document.querySelector('[data-sheet-pane=topLeft]');p.scrollTop=0;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"[data-sheet-pane='topLeft'] td[data-row='1'][data-col='0']\").textContent.includes('Scrolled edit')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-discard"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/xlsx/split-columns.xlsx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const p=document.querySelectorAll('[data-sheet-pane]'),a=document.querySelector('[data-sheet-pane=topLeft]'),b=document.querySelector('[data-sheet-pane=topRight]');return p.length===2&&a&&b&&b.scrollLeft>0&&a.scrollLeft===0&&a.scrollTop>0&&a.scrollTop===b.scrollTop})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/xlsx/split-rows.xlsx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const p=document.querySelectorAll('[data-sheet-pane]'),a=document.querySelector('[data-sheet-pane=topLeft]'),b=document.querySelector('[data-sheet-pane=bottomLeft]');return p.length===2&&a&&b&&b.scrollTop>0&&a.scrollTop===0&&a.scrollLeft>0&&a.scrollLeft===b.scrollLeft})()"
+    }
+  ]
+}

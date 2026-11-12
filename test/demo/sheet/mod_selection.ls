@@ -7,7 +7,7 @@ import gesture: lambda.ui.core.virtual_grid_gesture
 
 fn port(owner) => dom.get_element_by_id(dom.root_node(owner),"grid-scroll")
 pub fn cell(target) {
-    let hit=dom.closest(target,"#sheet-grid td[data-row][data-col]")
+    let hit=dom.closest(target,".sheet-grid td[data-row][data-col]")
     if (hit==null) null else {row:int(dom.get_attribute(hit,"data-row")),col:int(dom.get_attribute(hit,"data-col"))}
 }
 pub pn begin(owner,st,evt) {
@@ -17,7 +17,7 @@ pub pn begin(owner,st,evt) {
     // the corner handle resizes the existing range from its top-left cell.
     let base=if (handle) {*:st,anchor:{row:bounds.top,col:bounds.left}} else st
     let next=m.select(base,hit.row,hit.col,handle or evt.shiftKey==true)
-    let gesture=capture.capture(port(owner),evt,dom.get_element_by_id(dom.root_node(owner),"sheet-grid"))
+    let gesture=capture.capture(dom.closest(evt.target,".grid-scroll"),evt,dom.closest(evt.target,".sheet-grid"))
     return {*:next,selection_click:true,selection_drag:{*:gesture,
         previous:{row:st.row,col:st.col,anchor:st.anchor}}}
 }
@@ -25,7 +25,7 @@ pub pn move(owner,st,x,y,final=false,edge_tick=false) {
     let root=dom.get_element_by_id(dom.root_node(owner),"sheet")
     let axes=if (edge_tick) window.axes(st)^ else null
     let update=gesture.move(root,port(owner),st.selection_drag,x,y,final,edge_tick,axes,
-        44,26,"#sheet-grid td[data-row][data-col]","sheet_drag_scroll")^
+        44,26,".sheet-grid td[data-row][data-col]","sheet_drag_scroll")^
     let next={*:st,selection_drag:update.gesture}
     if ((update.hit==null or (update.hit.row==st.row and update.hit.col==st.col))^) { return next }
     return m.select(next,update.hit.row,update.hit.col,true)
