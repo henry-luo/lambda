@@ -541,6 +541,22 @@ Debugging: `./log.txt` holds the runtime trace, debug builds dump JIT'd MIR to `
 
 ## 7. Common single-test commands
 
+### Sync discovery and connectivity
+
+`python3 test/sync_connectivity/test_goldens.py` reuses exact sync goldens and
+serializes shared fixture paths across tiers. `--gc` selects four focused
+RTC/signaling/binding/cancellation cases with the existing 300-second budget.
+`test_connectivity.py` runs private Bonjour discovery, large binary DataChannel
+transfer and interrupted-process recovery. `test_signaling.py` adds actual S3,
+fresh finite function invocations, withheld-answer fallback, direct recovery and
+process-instance replacement; supply `LAMBDA_CLOUD_TEST_STORAGE_FILE`.
+Select the tier with `LAMBDA_EXEC_BACKEND` and executable with `LAMBDA_SYNC_EXE`.
+The pinned dependency is prepared by `utils/prepare_sync_connectivity.py`.
+The full native sync golden set requires that prepared dependency; a function
+runtime that only serves HTTP/object storage can omit it.
+See [API and limits](../lmd/package/sync/CONNECTIVITY.md) and the
+[implementation record](<../vibe/impl/Lambda_Impl_Sync_Connectivity (done).md>).
+
 ### Sync recovery and scale
 
 `python3 test/sync_scale/test_goldens.py` runs every sync golden with exact output,

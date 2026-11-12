@@ -2112,6 +2112,31 @@ fails; callers must inspect before retrying. These APIs do not grant exclusive
 access against external writers. Repository capture limits are separate from the
 native mechanism's upper bound.
 
+#### lambda.io.rtc and lambda.io.discovery
+
+These trusted-host modules expose task-owned native connectivity mechanisms
+(D9.3.4, D11.1.2, S12.4.4v4). Bound security clients cannot acquire unbrokered
+channels or discovery resources (D11.2.1–D11.2.4).
+
+| Procedure | Contract |
+|---|---|
+| `rtc.capabilities()` | `{rtc,bonjour}` build/host availability. |
+| `rtc.create(options)` | Reliable ordered negotiated stream 0; options `stun` (up to four URLs), `bind` (optional native address). |
+| `rtc.description(channel,role,timeout_ms)` | One local `offer` or `answer`, including gathered candidates, at most 60,000 bytes. |
+| `rtc.remote(channel,sdp,role)` | Apply an explicit remote description. Authentication remains script policy. |
+| `rtc.send(channel,binary)`, `rtc.receive(channel,timeout_ms)` | Bounded binary messages; receive returns `{type:"binary",data}`. |
+| `rtc.status(channel)` | Open/closed/failure, queued/buffered bytes and binary-message byte counters. |
+| `rtc.close(channel)` | Idempotent release; no delivery acknowledgment is implied. |
+| `discovery.advertise(name,port)` | Confirm a Bonjour `_lambda-sync._tcp.local.` advertisement; return a task-owned handle. |
+| `discovery.browse(timeout_ms)` | At most 64 bounded `{name,host,port}` hints. |
+| `discovery.close(handle)` | Release an advertisement. |
+
+Timeouts are 1–60,000 ms. Frames are at most 256 KiB; received queues hold at most
+2 MiB / 64 messages. Native waits park tasks. Library callbacks use native data,
+and task cleanup joins them before releasing state. The initial native host is
+macOS, with optional pinned libdatachannel and native DNS-SD. See [setup, protocol
+and qualification](../lmd/package/sync/CONNECTIVITY.md).
+
 #### lambda.io.sqlite
 
 Import `lambda.io.sqlite` with an alias to execute one parameterized SQLite

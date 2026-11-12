@@ -1,5 +1,6 @@
 // native P2P adapter: transport waits are procedural; merge and admission reuse the protocol.
 import ws: lambda.io.websocket
+import wire: .peer_transport
 import session: .peer_session
 import exchange: .peer_exchange
 import identity: .peer_identity
@@ -12,11 +13,11 @@ import document_state: .document_state
 import protocol: .protocol
 
 pn plain_receive(socket) any^ {
-    let frame = ws.receive(socket,15000)^
+    let frame = wire.receive(socket,15000)^
     if (frame.type != "binary") raise error("sync peer: expected binary handshake")
     return codec.decode(frame.data,16384)^
 }
-pn plain_send(socket, value) any^ { ws.send(socket,binary(codec.encode(value)^)^)^ }
+pn plain_send(socket, value) any^ { wire.send(socket,binary(codec.encode(value)^)^)^ }
 pub pn handshake(socket, credentials, role, expected=null, authorize=null) any^ {
     let own = session.start(credentials,role)^
     var remote = null
@@ -45,11 +46,11 @@ pn authorized(channel) any^ {
 pn send_record(socket, channel, payload) any^ {
     authorized(channel)^
     let sealed = session.seal(channel,payload)^
-    ws.send(socket,sealed.bytes)^
+    wire.send(socket,sealed.bytes)^
     return sealed.session
 }
 pn read_record(socket, channel) any^ {
-    let frame = ws.receive(socket,30000)^
+    let frame = wire.receive(socket,30000)^
     if (frame.type != "binary") raise error("sync peer: connection ended before acknowledgment")
     let decoded = session.unseal(channel,frame.data)^
     authorized(channel)^
@@ -62,7 +63,7 @@ pub pn request(socket, channel, kind, body) any^ {
     if (response.value.ok != true) raise error("sync peer: remote request rejected")
     return {session:response.session,value:response.value.body}
 }
-pub pn serve_connection(socket, handle, credentials, authorize=null) any^ {
+pub pn serve_connection(socket, handle, credentials, authorize=null, observer=null) any^ {
     var channel = handshake(socket,credentials,'server',null,authorize)^
     local.scan(handle)^
     let outgoing = exchange.offer(handle,credentials)^
@@ -84,6 +85,7 @@ pub pn serve_connection(socket, handle, credentials, authorize=null) any^ {
         pending = result.pending
         channel = send_record(socket,channel,{ok:true,body:result.body})^
         requests = requests+1
+        if (observer != null) observer({direction:'serve',requests:requests,kind:incoming.value.kind})^
     }
     raise error("sync peer: connection request budget exhausted")
 }
@@ -93,11 +95,11 @@ pub pn synchronize(handle, credentials, url, expected, authorize=null) any^ {
     local.scan(handle)^
     let socket = ws.open(url,{protocols:[session.protocol],max_message_bytes:session.max_frame,timeout_ms:15000})^
     let result = exchange_connection(socket,handle,credentials,expected,authorize) ^ { ^ }
-    ws.close(socket) ^ { null }
+    wire.close(socket) ^ { null }
     if (result is error) raise result
     return result
 }
-pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
+pub pn exchange_connection(socket, handle, credentials, expected, authorize=null, observer=null) any^ {
     var channel = handshake(socket,credentials,'client',expected,authorize)^
     let head = request(socket,channel,'head',{})^
     channel = head.session
@@ -115,6 +117,7 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
         for (id in page.value where not contains(available,id)^) {
             channel = download_object(socket,channel,handle,id)^
             downloaded = downloaded+1
+            if (observer != null) observer({direction:'pull',downloaded:downloaded,uploaded:uploaded})^
         }
         index = index+len(page.value)^
     }
@@ -145,6 +148,7 @@ pn exchange_connection(socket, handle, credentials, expected, authorize) any^ {
             if (not contains(page,id)^) raise error("sync peer: requested unadvertised object")
             channel = upload_object(socket,channel,handle,id)^
             uploaded = uploaded+1
+            if (observer != null) observer({direction:'push',downloaded:downloaded,uploaded:uploaded})^
         }
         index = index+len(page)
     }
@@ -271,7 +275,7 @@ pub pn listener(port, bind="127.0.0.1") any^ {
 pub pn accept(listener, handle, credentials, timeout_ms=30000, authorize=null) any^ {
     let socket = ws.accept(listener,timeout_ms)^
     let result = serve_connection(socket,handle,credentials,authorize) ^ { ^ }
-    ws.close(socket) ^ { null }
+    wire.close(socket) ^ { null }
     if (result is error) raise result
     return result
 }

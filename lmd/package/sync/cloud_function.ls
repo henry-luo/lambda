@@ -8,6 +8,7 @@ import maintenance: .cloud_maintenance_function
 import receipts: .cloud_receipts
 import retirements: .cloud_retirements
 import audit: .cloud_audit_function
+import rendezvous: .rendezvous_function
 
 pub pn bootstrap(store, signed_control) any^ {
     let control = schema.control(signed_control,signed_control.body.owner.id)^
@@ -38,6 +39,9 @@ pub pn handle(store, request, milliseconds) any^ {
     let control = schema.control(signed_control,signed_control.body.owner.id)^
     let envelope = schema.authenticate(request,control,milliseconds)^
     let body = envelope.body
+    if (contains(["rendezvous_current","rendezvous_put","rendezvous_get"],envelope.kind)^) {
+        return rendezvous.handle(store,prefix,control,envelope,milliseconds)^
+    }
     if (contains(["backup_discover","audit_begin","audit_step","audit_status","audit_abort"],envelope.kind)^) {
         return audit.handle(store,prefix,control,envelope)^
     }

@@ -414,6 +414,10 @@ typedef enum SysFunc {
     SYSPROC_IO_DISK_READ_STREAM,
     SYSPROC_IO_DISK_WRITE_STREAM,
     SYSPROC_IO_CRYPTO_HASH_STREAM,
+    SYSPROC_IO_RTC_CAPABILITIES, SYSPROC_IO_RTC_CREATE, SYSPROC_IO_RTC_DESCRIPTION,
+    SYSPROC_IO_RTC_REMOTE, SYSPROC_IO_RTC_SEND, SYSPROC_IO_RTC_RECEIVE, SYSPROC_IO_RTC_CLOSE,
+    SYSPROC_IO_RTC_STATUS,
+    SYSPROC_IO_DISCOVERY_ADVERTISE, SYSPROC_IO_DISCOVERY_BROWSE, SYSPROC_IO_DISCOVERY_CLOSE,
 } SysFunc;
 
 #ifdef __cplusplus
@@ -1638,6 +1642,16 @@ extern "C" {
     Item pn_io_secret_set(Item service, Item account, Item value);
     Item pn_io_secret_delete(Item service, Item account);
     // lambda.io.loopback (D9.3.4; vibe/Lambda_Demo_Mail.md MG7)
+    Item pn_io_rtc_capabilities();
+    Item pn_io_rtc_create(Item options);
+    Item pn_io_rtc_description(Item handle, Item role, Item timeout);
+    Item pn_io_rtc_remote(Item handle, Item sdp, Item role);
+    Item pn_io_rtc_send(Item handle, Item bytes);
+    Item pn_io_rtc_receive(Item handle, Item timeout);
+    Item pn_io_rtc_close(Item handle);
+    Item pn_io_rtc_status(Item handle);
+    Item pn_io_discovery_advertise(Item name, Item port);
+    Item pn_io_discovery_browse(Item timeout);
     Item pn_io_websocket_open1(Item url);
     Item pn_io_websocket_open2(Item url, Item options);
     Item pn_io_websocket_send(Item connection, Item data);

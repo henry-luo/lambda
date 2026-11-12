@@ -6,6 +6,9 @@ then materializes files through the existing installation journal. Devices retai
 their own SQLite databases, accepted disk baselines, actor identities, snapshots
 and offline changes. A connected peer does not require Internet access. The [cloud adapter](CLOUD.md)
 adds long-term object storage and periodic HTTP fallback around this transport.
+The [connectivity agent](CONNECTIVITY.md) adds automatic private LAN discovery,
+finite signed signaling and a native WebRTC DataChannel carrier for this same
+application protocol. Its qualification is separate from physical cross-NAT use.
 
 Policy, pairing, session framing, transfer scheduling and orchestration are Lambda
 Script (S12.1.1v3, D9.3.4). C++ supplies raw public-key operations and the existing
@@ -194,10 +197,11 @@ Low-level callers of `peer.handshake`/`accept`/`synchronize` supply an equivalen
 `authorize(peer_id)` callback when their grant set may change. Session keys and private credentials are not serializable
 public application state. Secure memory erasure in the script heap is not claimed.
 
-The qualified host is macOS native CLI. Internet traversal, WebRTC/ICE, automatic
-mDNS discovery, browsers, partial/read-only space grants, file-only shares, key
-rotation, OS-vault integration, editor UI and retention reclamation remain subsequent
-milestones. S3 publication/polling is implemented in the separate cloud adapter;
+The qualified host is macOS native CLI. Native WebRTC/ICE and automatic Bonjour
+discovery are implemented in the connectivity profile; physical cross-NAT,
+browser and other-OS qualification remains separate. Partial/read-only space
+grants, file-only shares, key rotation, OS-vault integration and editor UI remain
+subsequent milestones. S3 publication/polling is implemented in the cloud adapter;
 hosted-provider qualification remains environment-specific. This adapter preserves the
 transport-independent CRDT/repository formats for those integrations.
 

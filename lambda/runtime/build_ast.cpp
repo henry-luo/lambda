@@ -3697,6 +3697,8 @@ static const struct { const char* path; const char* module; } io_leaf_modules[] 
     {"lambda.io.sqlite", "io_sqlite"},
     {"lambda.io.rdb", "io_rdb"},
     {"lambda.io.websocket", "io_websocket"},
+    {"lambda.io.rtc", "io_rtc"},
+    {"lambda.io.discovery", "io_discovery"},
     {"lambda.io.crypto", "io_crypto"},
     {"lambda.io.disk", "io_disk"},
 };

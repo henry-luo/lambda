@@ -269,19 +269,27 @@ with explicit IPv4 binding, signed ephemeral device authentication and encrypted
 application records. This limits new C++ to native mechanisms (D11.1.2); pairing,
 framing and exchange policy stay in Lambda Script (S12.1.1v3).
 [Peer API and protocol](../lmd/package/sync/PEER.md) define its bounds and explicit
-checkpoint-authority grants. It supports direct LAN/reachable addresses, not
-Internet traversal, browser hosting or automatic discovery.
+checkpoint-authority grants. This compatibility transport uses explicit
+LAN/reachable addresses.
 
-The proposed common native/browser transport is WebRTC DataChannels, using
+The selected native connectivity profile adds private Bonjour discovery,
+signed expiring HTTP rendezvous and WebRTC DataChannels. Its script agent reuses
+the existing authenticated peer exchange, with bounded establishment attempts,
+periodic cloud fallback and retry. See [connectivity API and
+qualification](../lmd/package/sync/CONNECTIVITY.md). Native mechanisms remain at
+the central IO boundary (D11.1.2); script policy follows S12.1.1v3 and task
+ownership follows S12.4.4v4. Cross-NAT/physical-device, browser and hosted-provider
+qualification must be recorded separately from local independent-process checks.
+
+The common native/browser transport design uses WebRTC DataChannels, using
 ICE/STUN for connectivity establishment. Reliable channels carry update batches
 and requested file content; disposable presence can use a separate channel.
 Application authentication binds the negotiated connection to an authorized
 device identity. Encrypted transport alone does not establish group membership.
 
-For a native-only product, QUIC with TLS is an alternative. Choose one initial
-peer transport after the native/browser integration prototype; do not build two
-complete stacks as a prerequisite. QUIC alone does not supply discovery or NAT
-traversal.
+QUIC with TLS remains an alternative for a future native-only transport decision.
+Do not build a second new stack as a prerequisite. QUIC alone does not supply
+discovery or NAT traversal.
 
 Signaling uses finite HTTP exchanges or a local connection established by the
 native agents. An ordinary HTTP function is not a UDP STUN server. Use a
@@ -290,6 +298,12 @@ path leads to polling fallback. The selected fallback does not require TURN.
 [ICE](https://www.rfc-editor.org/rfc/rfc8445) and
 [WebRTC DataChannels](https://www.rfc-editor.org/rfc/rfc8831) define the relevant
 connectivity and data transport mechanisms.
+
+The native HTTP rendezvous uses conditional fixed slots per author/recipient,
+with signatures, encrypted payloads, finite TTLs and retained sequence fences.
+Offers bind both process instances; answers also bind the exact offer digest and
+attempt ID. Neither discovery nor SDP grants membership. Continue the enrolled
+device handshake and current-member checks on the established data channel.
 
 ### 4.3 Connection lifecycle
 
@@ -1729,7 +1743,7 @@ semantic selection/copy. No persistent cloud service is required.
 A missing catalog fails closed. Immutable logical catalog backups permit
 owner-selected recovery after validating signatures and required dependencies;
 recovery/legacy upgrades keep destructive maintenance disabled pending an audited
-inventory. Latest-backup discovery and the audit tool remain unimplemented.
+inventory. The recovery/scale profile below implements discovery and owner audits.
 All writers/old handler invocations must upgrade/drain before retention starts.
 Local pruning obtains a real SQL writer lock before external deletion and commits
 its cursor afterward. Recovery quarantines unindexed objects and preserves their

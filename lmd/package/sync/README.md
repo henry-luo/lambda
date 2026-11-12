@@ -5,6 +5,9 @@ Script. It supports Text and Mark-oriented documents, bounded delta exchange,
 authenticated checkpoint recovery, atomic editing, saved history and restart.
 Workspace transactions add stable file/directory identities, cycle-safe moves,
 saved revision heads and ZIP-backed namespaces.
+The [native connectivity agent](CONNECTIVITY.md) adds private Bonjour discovery,
+finite HTTP signaling, authenticated DataChannels and periodic fallback, while
+retaining the same replication formats.
 The [v1 protocol contract](../../../vibe/Lambda_Design_CRDT_Protocol.md) defines
 its formats, invariants and limits; the broader
 [data-sync design](../../../vibe/Lambda_Design_Data_Sync.md) defines integration.

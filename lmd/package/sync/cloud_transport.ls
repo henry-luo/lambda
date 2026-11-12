@@ -10,11 +10,13 @@ fn endpoint(url) any^ {
         any([for (c in ["@","#","\r","\n"]) contains(url,c)])) raise error("sync cloud: HTTPS endpoint required")
     return true
 }
-pub pn call(config, credentials, kind, body) any^ {
+pub pn call(config, credentials, kind, body, timeout_seconds=30) any^ {
     endpoint(config.url)^
+    if (not (timeout_seconds is int) or timeout_seconds < 1 or timeout_seconds > 30)
+        raise error("sync cloud: invalid request timeout")
     let signed = schema.request(credentials,kind,body,now().unix,hex.hex(crypto.key()^)^)^
     let response = io.fetch(config.url,{method:"POST",body:codec.encode(signed)^,
-        headers:{'content-type':"application/json"},timeout:30,max_bytes:1048576,follow_redirects:false})^
+        headers:{'content-type':"application/json"},timeout:timeout_seconds,max_bytes:1048576,follow_redirects:false})^
     if (not response.ok) raise error("sync cloud: function request rejected")
     let reply = codec.decode(response.body,1048576)^
     if (reply.ok != true) raise error("sync cloud: function request rejected")

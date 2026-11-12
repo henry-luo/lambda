@@ -93,6 +93,14 @@ python3 test/sync_retention/test_retention.py
 
 ## Paged inventories and discovery
 
+Automatic peer [connectivity](../../lmd/package/sync/CONNECTIVITY.md) adds finite
+`rendezvous_current`, `rendezvous_put` and `rendezvous_get` requests to the same
+function. They use conditional slots under `spaces/<space>/rendezvous/`, gated
+by current cloud membership. Preserve current slot objects as sequence fences;
+only noncurrent provider versions are eligible for an independent lifecycle rule.
+This signaling path needs no WebSocket host or API gateway. STUN remains a
+separately configured UDP facility.
+
 The provider adapter also implements `enumerate(prefix,cursor,limit)` returning
 `{entries:[{key,etag,size}],next}`. Cursors are opaque and scoped to a prefix;
 results must be ordered, bounded and parsed strictly. The S3 adapter uses

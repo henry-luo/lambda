@@ -138,7 +138,8 @@
     "lambda/mir",
     "lib/re2",
     "lib/font/woff2/include",
-    "${input_root}/build/deps/thorvg/include"
+    "${input_root}/build/deps/thorvg/include",
+    "build/deps/connectivity/include"
   ],
   "libraries": [
     {
@@ -383,6 +384,34 @@
       "include": "/opt/homebrew/opt/openssl@3/include",
       "lib": "/opt/homebrew/opt/openssl@3/lib/libcrypto.a",
       "link": "static"
+    },
+    {
+      "name": "sync-datachannel",
+      "lib": "build/deps/connectivity/lib/libdatachannel.a",
+      "include": "build/deps/connectivity/include",
+      "link": "static",
+      "optional": true
+    },
+    {
+      "name": "sync-juice",
+      "lib": "build/deps/connectivity/lib/libjuice.a",
+      "include": "",
+      "link": "static",
+      "optional": true
+    },
+    {
+      "name": "sync-usrsctp",
+      "lib": "build/deps/connectivity/lib/libusrsctp.a",
+      "include": "",
+      "link": "static",
+      "optional": true
+    },
+    {
+      "name": "sync-ssl",
+      "lib": "/opt/homebrew/opt/openssl@3/lib/libssl.a",
+      "include": "",
+      "link": "static",
+      "optional": true
     }
   ],
   "dev_libraries": [
@@ -608,7 +637,12 @@
         "re2",
         "mpdec",
         "libuv",
-        "pthread"
+        "pthread",
+        "sync-datachannel",
+        "sync-juice",
+        "sync-usrsctp",
+        "sync-ssl",
+        "openssl-crypto"
       ],
       "defines": [
         "UTF8PROC_STATIC"
@@ -747,7 +781,12 @@
         "libuv",
         "pthread",
         "ThorVG",
-        "glfw"
+        "glfw",
+        "sync-datachannel",
+        "sync-juice",
+        "sync-usrsctp",
+        "sync-ssl",
+        "openssl-crypto"
       ],
       "target_name": "lambda-static",
       "target_prefix": "",
@@ -1334,6 +1373,7 @@
         "lambda/core/physics_scene.cpp",
         "lambda/runtime/io_mail.cpp",
         "lambda/runtime/io_websocket.cpp",
+        "lambda/runtime/io_connectivity.cpp",
         "lambda/io/mcp*.cpp",
         "lambda/runtime/io_grep.cpp",
         "lambda/runtime/io_text_search.cpp"
@@ -1782,6 +1822,13 @@
           "include": "/clang64/include",
           "lib": "/clang64/lib/libcrypto.a",
           "link": "static"
+        },
+        {
+          "name": "sync-ssl",
+          "lib": "/clang64/lib/libssl.a",
+          "include": "",
+          "link": "static",
+          "optional": true
         }
       ],
       "dev_libraries": [

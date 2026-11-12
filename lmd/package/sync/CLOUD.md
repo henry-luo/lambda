@@ -4,6 +4,10 @@ This native profile adds encrypted object-storage publication, periodic HTTP
 fallback, cloud-only restoration and configurable saved history to the [peer agent](PEER.md).
 It uses the existing local repository, content IDs and merge-safe checkpoints.
 Direct peer receipt, cloud durability and filesystem installation remain distinct.
+The [connectivity profile](CONNECTIVITY.md) reuses this service for three finite
+`rendezvous_*` operations: signed expiring presence and encrypted offer/answer
+slots. Storage uses scoped conditional GET/PUT; no persistent cloud connection
+or additional API gateway is required. Signaling grants no repository authority.
 Policy is Lambda Script (S12.1.1v3, D9.3.4); existing native HTTP/crypto/SQLite
 mechanisms cross D11.1.2. No new C++ or language semantics are required.
 

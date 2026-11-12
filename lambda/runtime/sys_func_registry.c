@@ -1472,6 +1472,30 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_LOOPBACK_ACCEPT, "io_loopback_accept", 3, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_loopback_accept", PROFILE_NETWORK_FPTR(pn_io_loopback_accept), NULL, NULL, false, 0, true},
 
+    {SYSPROC_IO_RTC_CAPABILITIES, "io_rtc_capabilities", 0, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_capabilities", PROFILE_NETWORK_FPTR(pn_io_rtc_capabilities), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RTC_CREATE, "io_rtc_create", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_create", PROFILE_NETWORK_FPTR(pn_io_rtc_create), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RTC_DESCRIPTION, "io_rtc_description", 3, &TYPE_STRING, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_description", PROFILE_NETWORK_FPTR(pn_io_rtc_description), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RTC_REMOTE, "io_rtc_remote", 3, &TYPE_BOOL, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_remote", PROFILE_NETWORK_FPTR(pn_io_rtc_remote), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RTC_SEND, "io_rtc_send", 2, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_send", PROFILE_NETWORK_FPTR(pn_io_rtc_send), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RTC_RECEIVE, "io_rtc_receive", 2, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_receive", PROFILE_NETWORK_FPTR(pn_io_rtc_receive), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RTC_CLOSE, "io_rtc_close", 1, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_close", PROFILE_NETWORK_FPTR(pn_io_rtc_close), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_DISCOVERY_ADVERTISE, "io_discovery_advertise", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_discovery_advertise", PROFILE_NETWORK_FPTR(pn_io_discovery_advertise), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_DISCOVERY_BROWSE, "io_discovery_browse", 1, &TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_discovery_browse", PROFILE_NETWORK_FPTR(pn_io_discovery_browse), NULL, NULL, false, 0, true},
+
+    {SYSPROC_IO_DISCOVERY_CLOSE, "io_discovery_close", 1, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_close", PROFILE_NETWORK_FPTR(pn_io_rtc_close), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RTC_STATUS, "io_rtc_status", 1, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rtc_status", PROFILE_NETWORK_FPTR(pn_io_rtc_status), NULL, NULL, false, 0, true},
+
     // task-aware WS/WSS IO, imported only as lambda.io.websocket (D9.3.4).
     {SYSPROC_IO_WEBSOCKET_OPEN, "io_websocket_open", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_websocket_open1", PROFILE_NETWORK_FPTR(pn_io_websocket_open1), NULL, NULL, false, 0, true},
@@ -4092,7 +4116,11 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
         "from", "to", NULL};
     static const char* const websocket_options[] = {"timeout_ms", "max_message_bytes", "ca_file", "origin", "protocols", NULL};
     static const char* const websocket_listen_options[] = {"origins", "protocols", "max_message_bytes", "bind", NULL};
+    static const char* const rtc_options[] = {"stun", "bind", NULL};
     switch (fn) {
+    case SYSPROC_IO_RTC_CREATE:
+        if (options_arg_index) *options_arg_index = 0;
+        return rtc_options;
     case SYSPROC_IO_CRYPTO_HASH_STREAM:
         if (options_arg_index) *options_arg_index = 0;
         return hash_stream_options;
