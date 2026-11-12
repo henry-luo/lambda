@@ -1,0 +1,231 @@
+{
+  "date": "2026-11-12",
+  "notes": "Successful open and sampled text/navigation checks do not prove visual or feature fidelity. Hidden slide playback was separately observed to show a hidden slide.",
+  "files": [
+    {
+      "file": "mit-group-transform.pptx",
+      "package": "ok",
+      "slides": 2,
+      "source_text_runs": 16,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-shape": 14,
+        "unsupported-group-transform": 3
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 6
+    },
+    {
+      "file": "mit-theme-colors.pptx",
+      "package": "ok",
+      "slides": 1,
+      "source_text_runs": 9,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-background": 1
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 4
+    },
+    {
+      "file": "mit-gradient-fill.pptx",
+      "package": "ok",
+      "slides": 1,
+      "source_text_runs": 4,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-gradient": 1,
+        "unsupported-background": 1
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 4
+    },
+    {
+      "file": "mit-preset-geometry.pptx",
+      "package": "ok",
+      "slides": 1,
+      "source_text_runs": 4,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-shape": 2,
+        "unsupported-background": 1
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 4
+    },
+    {
+      "file": "mit-custgeom.pptx",
+      "package": "ok",
+      "slides": 1,
+      "source_text_runs": 0,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 3
+    },
+    {
+      "file": "mit-rotation-flip.pptx",
+      "package": "ok",
+      "slides": 1,
+      "source_text_runs": 0,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 3
+    },
+    {
+      "file": "mit-table-merge-encoding.pptx",
+      "package": "ok",
+      "slides": 5,
+      "source_text_runs": 50,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-table-merge": 5
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 4
+    },
+    {
+      "file": "mit-smartart-families.pptx",
+      "package": "ok",
+      "slides": 4,
+      "source_text_runs": 0,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-graphic": 4
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 4
+    },
+    {
+      "file": "mit-chart-series-shapes.pptx",
+      "package": "ok",
+      "slides": 8,
+      "source_text_runs": 0,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-chart": 8
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 4
+    },
+    {
+      "file": "mit-math-omml.pptx",
+      "package": "ok",
+      "slides": 1,
+      "source_text_runs": 0,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 3
+    },
+    {
+      "file": "mit-av-media.pptx",
+      "package": "ok",
+      "slides": 2,
+      "source_text_runs": 0,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-animation": 2
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 4
+    },
+    {
+      "file": "mit-model3d.pptx",
+      "package": "ok",
+      "slides": 1,
+      "source_text_runs": 0,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 3
+    },
+    {
+      "file": "mit-slide-transition.pptx",
+      "package": "ok",
+      "slides": 6,
+      "source_text_runs": 6,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-transition": 4
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 6
+    },
+    {
+      "file": "mit-slide-animation-rich.pptx",
+      "package": "ok",
+      "slides": 1,
+      "source_text_runs": 4,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-animation": 1
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 4
+    },
+    {
+      "file": "mit-slide-jump-link.pptx",
+      "package": "ok",
+      "slides": 3,
+      "source_text_runs": 4,
+      "missing_source_runs": 0,
+      "diagnostics": {
+        "unsupported-link": 3
+      },
+      "slides_ui": "ok",
+      "ui_assertions": 6
+    },
+    {
+      "file": "cc0-aspect-4-3-5slides.pptx",
+      "package": "ok",
+      "slides": 5,
+      "source_text_runs": 10,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 6
+    },
+    {
+      "file": "cc0-with-hidden-slide.pptx",
+      "package": "ok",
+      "slides": 3,
+      "source_text_runs": 6,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 6
+    },
+    {
+      "file": "cc0-with-table.pptx",
+      "package": "ok",
+      "slides": 2,
+      "source_text_runs": 27,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 7
+    },
+    {
+      "file": "cc0-with-chart.pptx",
+      "package": "ok",
+      "slides": 2,
+      "source_text_runs": 3,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 7
+    },
+    {
+      "file": "cc0-1mb.pptx",
+      "package": "ok",
+      "slides": 5,
+      "source_text_runs": 5,
+      "missing_source_runs": 0,
+      "diagnostics": {},
+      "slides_ui": "ok",
+      "ui_assertions": 8
+    }
+  ]
+}

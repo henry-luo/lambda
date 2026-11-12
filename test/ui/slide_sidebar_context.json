@@ -53,7 +53,7 @@
       "target": {
         "selector": "#home-menu [role=menuitem]"
       },
-      "equals": 6
+      "equals": 7
     },
     {
       "type": "assert_script",
@@ -681,6 +681,16 @@
       "type": "assert_focus",
       "target": {
         "selector": "#slide-context-duplicate-slide"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#slide-context-toggle-slide-hidden"
       }
     },
     {

@@ -3,7 +3,7 @@ import sampler: .sample
 import clock: .clock
 import transitions: .transitions
 
-pub fn initial_state(plan, options = {}) => {slide: c.value(options.start_slide,0), cue: -1, time_ms: 0.0,
+pub fn initial_state(plan, options = {}) => {slide: c.value(options.start_slide,c.first_visible(plan)), cue: -1, time_ms: 0.0,
     phase: 'waiting', paused: false, anchor_ms: 0.0, anchor_time: 0.0,
     triggered:[], outgoing_triggered:[], generation: 0, outgoing: -1, reduced_motion: c.value(options.reduced_motion, false),
     autoplay: false, timed: false, after_ms: null, wait_ms: 0.0, playback_rate: 1.0,
@@ -36,26 +36,27 @@ fn enter(plan, ps, now_ms) any^ {
 
 fn advance(plan, ps, now_ms) any^ {
     let scene = plan.slides[ps.slide]
+    let target = c.visible_index(plan,ps.slide)
     if (ps.phase == 'cue') {*: ps, time_ms: scene.cues[ps.cue].duration_ms, phase: 'waiting', paused: false}
     else if (ps.phase == 'transition') enter(plan, {*: ps, phase: 'waiting', time_ms: 0.0, outgoing: -1}, now_ms)
     else if (ps.cue + 1 < len(scene.cues)) begin_cue(plan, ps, ps.cue + 1, now_ms)
-    else if (ps.slide + 1 >= len(plan.slides)) ps
+    else if (target < 0) ps
     else {
-        let next = activate(plan, ps, ps.slide + 1, false)
+        let next = activate(plan, ps, target, false)
         let destination = plan.slides[next.slide]
         if (ps.reduced_motion or not transitions.animated(destination)) enter(plan, next, now_ms)
         else {*: next, phase: 'transition', outgoing: ps.slide, outgoing_triggered:c.value(ps.triggered,[]), anchor_ms: now_ms, anchor_time: 0.0}
     }
 }
 
-fn finished(plan, ps) any^ => ps.phase == 'waiting' and ps.slide == len(plan.slides) - 1 and
+fn finished(plan, ps) any^ => ps.phase == 'waiting' and c.visible_index(plan,ps.slide)<0 and
     ps.cue == len(plan.slides[ps.slide].cues) - 1
 
 fn settle(plan, ps, now_ms) any^ {
     let entered = if (ps.phase == 'waiting') enter(plan, ps, now_ms) else ps
     let scene = plan.slides[entered.slide]
     let timed = entered.phase == 'waiting' and entered.cue == len(scene.cues)-1 and
-        scene.advance_after != null and entered.slide+1 < len(plan.slides) and
+        scene.advance_after != null and c.visible_index(plan,entered.slide)>=0 and
         not any([for (entry in ((c.value(entered.triggered,[])) ^ { [] })) not entry.done]);
     if (entered.phase != 'waiting') entered
     else if (finished(plan,entered)) {*:entered,autoplay:false,timed:false}
@@ -135,7 +136,7 @@ pub fn reduce(plan, ps, event) map^ {
     }
     else if (command == "activate") settle(plan, ps, now_ms)
     else if (command == "play") {
-        let current = if (finished(plan, ps)) activate(plan, ps, 0, false) else ps
+        let current = if (finished(plan, ps)) activate(plan, ps, c.first_visible(plan), false) else ps
         let playing = {*: current, autoplay: true}
         if (current.paused and (current.phase != 'waiting' or current.autoplay or current.timed)) resume(anchor_triggers(playing,now_ms), now_ms)
         else if (current.autoplay or current.timed or current.phase != 'waiting') playing
@@ -148,15 +149,18 @@ pub fn reduce(plan, ps, event) map^ {
             let previous = ps.cue - 1
             {*: ps, cue: previous, time_ms: if (previous >= 0) plan.slides[ps.slide].cues[previous].duration_ms else 0.0,
                 phase: 'waiting', triggered:[], outgoing_triggered:[], paused: false, autoplay: false, timed:false,after_ms:null,wait_ms:0.0,generation: ps.generation + 1}
-        } else settle(plan,activate(plan,stop_autoplay(ps),ps.slide-1,true),now_ms)
+        } else {
+            let previous = c.visible_index(plan,ps.slide,false);
+            if (previous<0) stop_autoplay(ps) else settle(plan,activate(plan,stop_autoplay(ps),previous,true),now_ms)
+        }
     } else if (command == "stop") {*:ps,paused:true,autoplay:false,timed:false,generation:ps.generation+1}
     else if (command == "pause") {
         let current = tick(plan, ps, now_ms)
         {*: current, paused: true}
     } else if (command == "resume") resume(anchor_triggers(ps,now_ms), now_ms)
     else if (command == "restart" or command == "home" or command == "restart-slide")
-        settle(plan,activate(plan,stop_autoplay(ps),if (command == "restart-slide") ps.slide else 0,false),now_ms)
-    else if (command == "end") activate(plan, stop_autoplay(ps), len(plan.slides) - 1, true)
+        settle(plan,activate(plan,stop_autoplay(ps),if (command == "restart-slide") ps.slide else c.first_visible(plan),false),now_ms)
+    else if (command == "end") activate(plan, stop_autoplay(ps), c.last_visible(plan), true)
     else if (command == "jump") {
         let address = sampler.address(plan, {slide: event.slide})^
         settle(plan,activate(plan,stop_autoplay(ps),address.slide,false),now_ms)

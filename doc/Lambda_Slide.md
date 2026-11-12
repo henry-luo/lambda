@@ -164,7 +164,7 @@ dom.dispatch(player_node, {type: "slide_command", bubbles: false,
 | Element | Attributes and behavior |
 |---|---|
 | `presentation` | `id`, `title`, `width`, `height`, `theme`, default `master`, `base_uri`; presenter defaults `autostart`, `reduced_motion`, `autoplay_dwell_ms`. Defaults to 1280 × 720. |
-| `slide` | `id`, `title`, `background`, `layout`, `theme`, `master`, `transition`, `transition_duration`, `direction`, `transition_variant`, `transition_sound`, `advance_on_click`, `advance_after`. |
+| `slide` | `id`, `title`, `background`, `layout`, `theme`, `master`, `hidden`, `transition`, `transition_duration`, `direction`, `transition_variant`, `transition_sound`, `advance_on_click`, `advance_after`. |
 | `master` | Reusable slide attributes and objects; requires `id`; optional `extends` selects a parent master. |
 | `layout` | Named object bounds; requires `id` and one or more `placeholder` children. |
 | `placeholder` | Layout slot with `role`, `x`, `y`, `width`, `height`, in logical slide units. |
@@ -175,6 +175,11 @@ dom.dispatch(player_node, {type: "slide_command", bubbles: false,
 | `group` | Nested slide objects with local coordinates. |
 | `notes` | Rich speaker content excluded from the audience canvas; shown in the presenter console and included in `handout`. |
 | `cue` | `id`, `start: 'entry'/'click'/'with-previous'/'after-previous'`, optional `trigger` object ID; contains effects, `parallel`, or `sequence`. |
+
+`hidden: true` retains a slide in the deck and handout while sequential playback,
+autoplay, the next-slide preview and the deck clock skip it. A direct jump or
+explicit start can still show it. If every slide is hidden, playback starts on the
+first slide so that the deck remains addressable (D9.3.4).
 
 Common object attributes are `id`, `x`, `y`, `width`, `height`, `rotation`, `scale`,
 `opacity`, `role`, `class`, `style`, `morph_id`, and `metadata`. Optional

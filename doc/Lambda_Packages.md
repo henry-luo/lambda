@@ -1691,7 +1691,8 @@ levels; inherited and direct bold, italic, underline, strike, superscript and
 subscript; tabs and breaks; simple lists with numbering starts, continuation
 and nesting, including lists with hidden markers; tables with grid spans and
 vertical merges; hyperlinks and simple bookmarks; embedded raster images;
-and clustered column charts rendered from their cached category/series values.
+and cached clustered-column, numeric scatter/bubble and simple pie charts. Scatter,
+bubble and pie charts are partial approximations and report diagnostics.
 Charts reuse `lambda.chart.chart` for SVG layout (D9.3.4), retain explicit RGB
 series colors and titles, and contribute a data table to extracted text.
 Paragraph-relative column anchors support left/right square wrapping,
@@ -4804,11 +4805,14 @@ non-placeholder decorations, paragraph/run formatting, character and decimal
 list markers, simple rectangles/ellipses/lines, numeric custom paths (including
 holes and Bézier curves), linear and point-focus radial gradients with alpha,
 stretched picture fills and opaque-endpoint duotone image effects. Raster images
-and bounded crops, ordinary table cells, groups, cached clustered-column charts
-and speaker notes are also retained. DrawingML colors support ordered shade/tint,
+and bounded crops, validated rectangular table merges, groups, cached clustered-column,
+numeric scatter/bubble and simple pie charts, and speaker notes are also retained.
+SmartArt can use its saved drawing as a group of slide objects; it remains a partial
+visual import, not an editable SmartArt diagram. DrawingML colors support ordered shade/tint,
 hue/saturation/luminance and alpha modifiers.
-Layout/master content is materialized as editable objects. SmartArt, arbitrary
-guide-based shape geometry, complex table merging/styles, nonuniform text scaling,
+Layout/master content is materialized as editable objects. Hidden slides remain
+in the editable deck and are skipped during sequential playback. Arbitrary
+guide-based shape geometry, malformed table merges and theme table styles, nonuniform text scaling,
 tiled or noncircular gradients, pattern fills, advanced effects, OLE/media, animation timing, transitions
 and exact PowerPoint text fitting remain partial or unsupported and can produce
 warnings. PPTX writing is outside this profile.

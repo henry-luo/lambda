@@ -52,6 +52,7 @@ pub fn slide_context(st) {
     let prefix = "slide-context-"
     let end = len(st.plan.slides)-1;
     [item("add-slide","New Slide","blank_page",false,prefix),*slide_items(end==0,prefix),
+        item("toggle-slide-hidden",if (st.plan.slides[st.index].hidden) "Show Slide" else "Hide Slide",null,false,prefix),
         <div class:"home-menu-separator",role:"separator">,
         item("slide-up","Move Up","up",st.index==0,prefix),
         item("slide-down","Move Down","down",st.index==end,prefix),

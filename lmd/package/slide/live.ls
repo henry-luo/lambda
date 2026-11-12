@@ -24,7 +24,8 @@ fn event_owner(target, options) any^ {
 
 fn tree(plan, options) {
     let key = instance(options)
-    let controls = has_controls(options);
+    let controls = has_controls(options)
+    let start = player.initial_state(plan,options).slide;
     // focus eligibility reads HTML attributes as text, including tabindex.
     <div class: "slide-player", id: key, tabindex: "0", role: "region", ["aria-label"]: plan.title,
         ["data-slide-duration"]: c.fmt(clock.timeline(plan, options).duration_ms),
@@ -32,7 +33,7 @@ fn tree(plan, options) {
         style: (if (c.value(options.fit_viewport, false)) "" else "width:" ++ c.px(c.value(options.width, plan.width)) ++ ";") ++
             html.ui_style(plan),
         *[<div class: "slide-workspace", *[
-            <div class: "slide-audience", *[html.stage(plan, {slide: c.value(options.start_slide,0), cue: -1, time_ms: 0.0}, options),
+            <div class: "slide-audience", *[html.stage(plan, {slide: start, cue: -1, time_ms: 0.0}, options),
                 <div class: "slide-blackout", ["data-slide-tool"]: "blackout", ["aria-hidden"]: "true">,
                 <div class: "slide-pointer", ["aria-hidden"]: "true">,
                 presenter.overview_tree(plan)]>, presenter.console_tree(key)]>,
@@ -50,7 +51,7 @@ fn tree(plan, options) {
                     min: "0.5", max: "4", step: "0.25", value: "1", ["aria-label"]: "Playback speed">
                 <span class: "slide-speed-value", "1×">
             >;
-            <span class: "slide-status", ["aria-live"]: "polite", string(c.value(options.start_slide,0)+1) ++ " / " ++ string(len(plan.slides))>;
+            <span class: "slide-status", ["aria-live"]: "polite", string(start+1) ++ " / " ++ string(len(plan.slides))>;
             *presenter.toolbar(plan, key)>;
             if (controls) toolbar.button("toolbar","Hide toolbar","data-slide-tool",{},"slide-toolbar-hide") else null;
             <span class:"slide-tooltip",'aria-hidden':"true">
@@ -279,13 +280,13 @@ pn sync_console(owner, plan, index, key) {
     }
     for (node in dom.child_nodes(notes)) show(node, dom.get_attribute(node, "id") == note_id)
     let canvas = dom.query_selector(owner, ".slide-preview-canvas")
-    let next = index + 1
-    if ((next < len(plan.slides))^) ensure_layer(owner, plan, next, key ++ "-preview", canvas, true)^
+    let next = c.visible_index(plan,index)
+    if (next >= 0) ensure_layer(owner, plan, next, key ++ "-preview", canvas, true)^
     for (node in dom.child_nodes(canvas)) show(node, dom.get_attribute(node, "id") == layer_id(key ++ "-preview", next))
-    show(dom.query_selector(owner, ".slide-preview-stage"), next < len(plan.slides), "block", false)^
-    show(dom.query_selector(owner, ".slide-preview-end"), next >= len(plan.slides))^
+    show(dom.query_selector(owner, ".slide-preview-stage"), next >= 0, "block", false)^
+    show(dom.query_selector(owner, ".slide-preview-end"), next < 0)^
     set_text(dom.query_selector(owner, ".slide-preview-title"),
-        if (next < len(plan.slides)) "Next: " ++ string(next + 1) ++ ". " ++ presenter.title(plan.slides[next]) else "Next slide")
+        if (next >= 0) "Next: " ++ string(next + 1) ++ ". " ++ presenter.title(plan.slides[next]) else "Next slide")
 }
 
 pn update_timer(owner, tools, now_ms) {
@@ -554,7 +555,7 @@ view <slide_document> {
 on load(evt) {
     fit_document(evt.target, ~.plan, ~.options)^
     sync_fullscreen(dom.get_element_by_id(evt.target, instance(~.options)))
-    let first = ~.plan.slides[c.value(~.options.start_slide,0)]
+    let first = ~.plan.slides[player.initial_state(~.plan,~.options).slide]
     // authored entry timing/sound also needs a bootstrap when no host sends activate.
     if ((c.value(~.options.autostart, false) or first.advance_after != null or first.transition_sound != null)^) {
         let owner = dom.get_element_by_id(evt.target, instance(~.options))

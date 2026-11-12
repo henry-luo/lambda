@@ -1,0 +1,206 @@
+{
+  "description": "Feature-distinct unmodified PPTX samples",
+  "pptx_ts_revision": "d82bef42c9af1cd1dcadf5132092181557366396",
+  "files": [
+    {
+      "file": "mit-group-transform.pptx",
+      "feature": "nested groups and nonuniform transforms",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/group-transform.pptx",
+      "sha256": "492fa2a2b69ee5f9b6dc171242c93c0ebd0c4055209f21e779eb9bc318f4481d",
+      "bytes": 45469,
+      "slides_in_package": 2,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-theme-colors.pptx",
+      "feature": "theme colors and modifiers",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/theme-colors.pptx",
+      "sha256": "b7430f562b8b836f54b84f2c846c7f80dc03677d79884aa7722203d66c775cc2",
+      "bytes": 705014,
+      "slides_in_package": 1,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-gradient-fill.pptx",
+      "feature": "gradient fills",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/gradient-fill.pptx",
+      "sha256": "773498a81723eed35ac03271f5051c842af84888e802291473e1a8872ac88994",
+      "bytes": 704559,
+      "slides_in_package": 1,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-preset-geometry.pptx",
+      "feature": "preset shape geometry",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/preset-geometry.pptx",
+      "sha256": "4a0db4be724bd436865b81f073b53dbd464a8d9eb05d820977821e57b3f743b5",
+      "bytes": 704329,
+      "slides_in_package": 1,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-custgeom.pptx",
+      "feature": "custom geometry",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/custgeom.pptx",
+      "sha256": "d52da9c162f5a700f8e3a225f054e823682f201d83dabe38fc27c2e500d7451d",
+      "bytes": 36056,
+      "slides_in_package": 1,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-rotation-flip.pptx",
+      "feature": "rotation and flips",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/rotation-flip.pptx",
+      "sha256": "e8c0ca04154f6365813aee28d0fa8556cea5e1429af060d6061dd02db5ff1a85",
+      "bytes": 33725,
+      "slides_in_package": 1,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-table-merge-encoding.pptx",
+      "feature": "merged table cells",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/table-merge-encoding.pptx",
+      "sha256": "c2756f8f042c92c8a05236e4c426846f4d344c07d51f54665983b786e27a9132",
+      "bytes": 39880,
+      "slides_in_package": 5,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-smartart-families.pptx",
+      "feature": "SmartArt diagrams",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/smartart-families.pptx",
+      "sha256": "5da5cfe0594970bc5029f1bbb1778d1b2a11894b0e178bdd476626d3acc20c25",
+      "bytes": 75109,
+      "slides_in_package": 4,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-chart-series-shapes.pptx",
+      "feature": "scatter, bubble and pie chart caches",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/chart-series-shapes.pptx",
+      "sha256": "ab5fea0f0a13c2833ef7b376643b019b02b4a7c35001c5f3f96ac6e55d0a15ca",
+      "bytes": 144042,
+      "slides_in_package": 8,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-math-omml.pptx",
+      "feature": "native mathematical equations",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/math-omml.pptx",
+      "sha256": "d88cb77b480d3c84a16307cbe503e9ee64f5fa8bdfee6d7b5a7167847d1cb8e6",
+      "bytes": 34322,
+      "slides_in_package": 1,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-av-media.pptx",
+      "feature": "embedded audio and video",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/av-media.pptx",
+      "sha256": "39aafb02e448a860136c20c46daf89d446d1d34140de1c533b1fe537dee6f0af",
+      "bytes": 55275,
+      "slides_in_package": 2,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-model3d.pptx",
+      "feature": "embedded 3D object with fallback",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/model3d.pptx",
+      "sha256": "884b12975c2dfa93c1d2dcd6f10b1ade5a47214ed706d71a271d50816a59fd24",
+      "bytes": 44234,
+      "slides_in_package": 1,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-slide-transition.pptx",
+      "feature": "slide transitions",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/slide-transition.pptx",
+      "sha256": "243a579025c1b61c9b86060ba252759d74e545a7a5589feab95729b2b8b64013",
+      "bytes": 38491,
+      "slides_in_package": 6,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-slide-animation-rich.pptx",
+      "feature": "object animation timing",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/slide-animation-rich.pptx",
+      "sha256": "b78a6009d72cf871c76b9a5364822135f9786344e92bbb618f3f68a0d3e79fea",
+      "bytes": 34372,
+      "slides_in_package": 1,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "mit-slide-jump-link.pptx",
+      "feature": "internal slide hyperlinks",
+      "url": "https://raw.githubusercontent.com/shbernal/pptx-ts/d82bef42c9af1cd1dcadf5132092181557366396/test/read/fixtures/slide-jump-link.pptx",
+      "sha256": "1a16c04c8a805f839d37758d40bc557594f496197d6f5b69b2b7af500d3ae6ba",
+      "bytes": 34923,
+      "slides_in_package": 3,
+      "license": "MIT",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "cc0-aspect-4-3-5slides.pptx",
+      "feature": "4:3 slide size",
+      "url": "https://loremfile.dev/pptx/aspect-4-3-5slides.pptx",
+      "sha256": "3600a45fc45524f7e40b358b2ff026ea8874846114ae523fc1432052126356d4",
+      "bytes": 32862,
+      "slides_in_package": 5,
+      "license": "CC0-1.0",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "cc0-with-hidden-slide.pptx",
+      "feature": "hidden slide",
+      "url": "https://loremfile.dev/pptx/with-hidden-slide.pptx",
+      "sha256": "a5aaeb2db2b211bc31c687a3fad72aa0607c08240c25626d3b7f036ea7bc2f5f",
+      "bytes": 30681,
+      "slides_in_package": 3,
+      "license": "CC0-1.0",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "cc0-with-table.pptx",
+      "feature": "native data table",
+      "url": "https://loremfile.dev/pptx/with-table.pptx",
+      "sha256": "2c83500235a01b97787901078f5e3386ca00a063cb940efceaf3768526f5c8a6",
+      "bytes": 29727,
+      "slides_in_package": 2,
+      "license": "CC0-1.0",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "cc0-with-chart.pptx",
+      "feature": "native column chart and workbook",
+      "url": "https://loremfile.dev/pptx/with-chart.pptx",
+      "sha256": "bde236c43e2b6857fd7a3820597999464320426376fa41c8edeac5bea775d0cd",
+      "bytes": 35731,
+      "slides_in_package": 2,
+      "license": "CC0-1.0",
+      "publisher_checksum_verified": true
+    },
+    {
+      "file": "cc0-1mb.pptx",
+      "feature": "embedded images and speaker notes",
+      "url": "https://loremfile.dev/pptx/1mb.pptx",
+      "sha256": "a4604de2925c140890f78dae6cdb8dde6ed09edd436c40c158817f9fb8740386",
+      "bytes": 1028118,
+      "slides_in_package": 5,
+      "license": "CC0-1.0",
+      "publisher_checksum_verified": true
+    }
+  ]
+}
