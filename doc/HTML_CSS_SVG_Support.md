@@ -122,7 +122,7 @@ Elements with special behaviour:
 |---|---|---|
 | `<script>` | ✅ | Inline and external (file and http), `defer`, `async` and `type="module"`, with `DOMContentLoaded`, `document.readyState`, `load` and timers. Scripts run under `lambda layout` and `lambda render` as well as `lambda view`, so the output reflects the DOM they build. No Web Workers; `WebSocket` is an inert stub. The JavaScript and DOM surface is in [JS_DOM_Support.md](JS_DOM_Support.md). |
 | `<style>`, `<link rel="stylesheet">`, `<base href>` | ✅ | See [§5](#5-cascade-inheritance-and-custom-properties). |
-| `<meta name="viewport">` | ◐ | Parsed width/height can override the layout viewport. Mobile scaling and the complete viewport metadata algorithm remain unverified. |
+| `<meta name="viewport">` | ◐ | Width/height and scale hints are parsed. Desktop layout retains the host's CSS viewport. Mobile adaptation and the complete viewport metadata algorithm remain unverified. |
 | `<input>`: `text`, `password`, `email`, `url`, `search`, `tel`, `number` | ✅ | In `lambda view`: caret, selection, undo, IME and password masking, all native. |
 | `<input>`: `checkbox`, `radio`, `range`, `submit`, `reset`, `button`, `hidden` | ✅ | `accent-color` is honoured. |
 | `<input>`: `color`, `date`, `time`, `month`, `week`, `datetime-local` | ◐ | Laid out at browser sizes but drawn as plain text boxes; no native pickers. |

@@ -7581,6 +7581,7 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
                                            const char* attr_value) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name || !attr_value) return;
+    dom_cssom_owner_attribute_changed(elem, attr_name);
     dom_aria_clear_direct_ref(elem, attr_name);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
@@ -7630,6 +7631,7 @@ extern "C" void dom_after_remove_attribute(void* elem_ptr,
                                               const char* attr_name) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name) return;
+    dom_cssom_owner_attribute_changed(elem, attr_name);
     dom_aria_clear_direct_ref(elem, attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
@@ -7649,6 +7651,7 @@ extern "C" void dom_after_toggle_attribute_remove(void* elem_ptr,
                                                      const char* attr_name) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name) return;
+    dom_cssom_owner_attribute_changed(elem, attr_name);
     // toggleAttribute historically only ran the select reset side effect for
     // removing "multiple"; keep the moved dispatch behavior-compatible.
     if (_is_tag(elem, "select") && str_icmp_cstr(attr_name, "multiple") == 0) {
@@ -8612,7 +8615,7 @@ extern "C" bool dom_focus_first_invalid_form_control(void* form_ptr) {
     X(CANVAS, "canvas") X(IMG, "img") X(SCRIPT, "script") X(IFRAME, "iframe") \
     X(EMBED, "embed") X(SOURCE, "source") X(TRACK, "track") X(AUDIO, "audio") \
     X(VIDEO, "video") X(A, "a") X(AREA, "area") X(LINK, "link") \
-    X(BASE, "base") X(LABEL, "label") X(OUTPUT, "output") X(META, "meta")
+    X(BASE, "base") X(LABEL, "label") X(OUTPUT, "output") X(META, "meta") X(STYLE, "style")
 
 enum {
 #define JS_DOM_TAG_BIT_ENUM(name, text) DOM_TAG_##name##_INDEX,
@@ -8678,7 +8681,7 @@ typedef enum JsDomReflectKind {
 // specific row first.
 #define JS_DOM_REFLECTED_ATTRS(X) \
     X("disabled", "disabled", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON | DOM_TAG_SELECT | \
-        DOM_TAG_TEXTAREA | DOM_TAG_FIELDSET | DOM_TAG_OPTION | DOM_TAG_OPTGROUP) \
+        DOM_TAG_TEXTAREA | DOM_TAG_FIELDSET | DOM_TAG_OPTION | DOM_TAG_OPTGROUP | DOM_TAG_LINK) \
     X("required", "required", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_SELECT | DOM_TAG_TEXTAREA) \
     X("multiple", "multiple", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_SELECT) \
     X("readOnly", "readonly", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_TEXTAREA) \
@@ -8706,6 +8709,7 @@ typedef enum JsDomReflectKind {
     X("href", "href", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK | DOM_TAG_BASE) \
     /* stylesheet discovery reads the reflected content attribute. */ \
     X("rel", "rel", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK) \
+    X("media", "media", STR, 0, DOM_TAG_LINK | DOM_TAG_STYLE) \
     X("alt", "alt", STR, 0, DOM_TAG_IMG) \
     X("dir", "dir", STR, 0, DOM_TAG_ANY) \
     X("lang", "lang", STR, 0, DOM_TAG_ANY) \
@@ -9855,6 +9859,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     if (prop_id == JS_DOM_PROP_DISABLED &&
         (_is_tag(elem, "style") || _is_tag(elem, "link"))) {
+        if (_is_tag(elem, "link")) return (Item){.item = b2it(elem->has_attribute("disabled"))};
         Item sheet = dom_cssom_get_element_sheet(elem_item);
         Item disabled = dom_cssom_stylesheet_get_disabled(sheet);
         return disabled.item == ITEM_NULL ? (Item){.item = ITEM_FALSE} : disabled;
@@ -10609,8 +10614,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     }
 
     if (prop_id == JS_DOM_PROP_DISABLED &&
-        (_is_tag(elem, "style") || _is_tag(elem, "link"))) {
-        // LinkStyle.disabled toggles its associated sheet, not an attribute.
+        _is_tag(elem, "style")) {
+        // HTMLStyleElement.disabled toggles its associated sheet, not an attribute.
         Item sheet = dom_cssom_get_element_sheet(elem_item);
         dom_cssom_stylesheet_set_disabled(sheet, js_is_truthy(value));
         return value;
@@ -11202,6 +11207,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             }
             // IDL writes are attribute writes too: refresh the engine's constraint mirrors
             dom_reinit_behavior_if_constraint_attr(elem, attr);
+            dom_cssom_owner_attribute_changed(elem, attr);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
@@ -11252,6 +11258,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         if (_is_string_reflected(elem, prop, &string_attr) ||
             _is_write_reflected(elem, prop, &string_attr)) {
             dom_element_set_attribute_ns(elem, "", string_attr, dom_to_attr_cstr(value));
+            dom_cssom_owner_attribute_changed(elem, string_attr);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
@@ -13760,6 +13767,7 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     if (!attr_name) return ItemNull;
     const char* old_value = elem->get_attribute(attr_name);
     elem->remove_attribute(attr_name);
+    dom_cssom_owner_attribute_changed(elem, attr_name);
     dom_aria_clear_direct_ref(elem, attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);

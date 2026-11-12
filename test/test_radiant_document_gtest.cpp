@@ -6045,6 +6045,37 @@ TEST_F(RadiantDocumentTest, InlineSizeQueriesSettleGeneratedBlockExtent) {
     }
 }
 
+TEST_F(RadiantDocumentTest, StylesheetOwnerMediaAndPendingDisabledRetainTheirAttributes) {
+    DomElement* result = load_script_source(R"HTML(<!doctype html>
+        <style>#result{width:40px}</style>
+        <style id="theme" media="not all">#result{width:73px}</style>
+        <div id="result"></div><script>
+        var target=document.getElementById('result');
+        var theme=document.getElementById('theme');
+        var notes=[];
+        var pending=document.createElement('link');
+        pending.disabled=true;
+        notes.push(pending.disabled===true && pending.hasAttribute('disabled'));
+        pending.disabled=false;
+        notes.push(pending.disabled===false && !pending.hasAttribute('disabled'));
+        var sheet=theme.sheet;
+        notes.push(!!sheet && theme.media==='not all' && getComputedStyle(target).width==='40px');
+        theme.media='all';
+        notes.push(theme.getAttribute('media')==='all' && getComputedStyle(target).width==='73px');
+        theme.media='not all';
+        notes.push(getComputedStyle(target).width==='40px');
+        theme.setAttribute('media','all');
+        notes.push(getComputedStyle(target).width==='73px');
+        theme.removeAttribute('media');
+        notes.push(theme.media==='' && getComputedStyle(target).width==='73px');
+        notes.push(theme.sheet===sheet);
+        target.setAttribute('data-observed',notes.join('|'));
+        </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-observed"),
+        "true|true|true|true|true|true|true|true");
+}
+
 TEST_F(RadiantDocumentTest, LiveRemoteImageHonorsDocumentResourcePolicy) {
     ASSERT_NE(load_script_source("<div id='result'></div>"), nullptr);
     document->resource_policy = INPUT_RESOURCE_LOCAL_ONLY;

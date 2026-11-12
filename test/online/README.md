@@ -58,5 +58,63 @@ Focused capture checks use a local HTTP server and Puppeteer's headless shell:
 node --test test/online/capture_snapshots.test.cjs
 ```
 
+Compare every available image pair and create a ranked review report:
+
+```sh
+node test/online/compare_snapshots.cjs
+node --test test/online/compare_snapshots.test.cjs
+```
+
+The comparison writes HTML, JSON and CSV to `temp/online-visual/comparison/`.
+It uses `pngjs` from the installed render-test corpus (or the root dependencies).
+The report averages images into 120 × 80 color cells to rank broad differences
+without fine glyph noise. A mean channel error of at least 12% across at least
+35% changed cells marks a review candidate. A nearly uniform image against
+content also qualifies at 2% mean error and 12% changed cells. These thresholds guide inspection;
+they do not certify fidelity. Missing captures, dimensions and capture dates
+remain explicit. Live content, theme state, animations and consent dialogs can
+produce large differences that need diagnosis before any engine change.
+
+The 2026-11-12 review compared all 1,066 available pairs (PIL still has no
+Lambda capture), refreshed 250 Lambda images, and leaves 204 major review
+candidates. It repaired initially disabled linked sheets and grid declarations
+that prevented actual flex items from being sized (Radiant RI-020/RI-021).
+Downloaded-sheet media selection improved, with remaining behavior tracked as
+RI-022. Missing media regions remain RI-023; application script admission and
+full shadow-tree rendering remain Lambda JS13-L1/JS13-L2. The per-page audit is
+in `snapshots/visual_comparison_review.json`; the final HTML/JSON/CSV report is
+in `temp/online-visual/final/`. Aggregate score changes include live-content and
+capture changes; the confirmed repairs have separate pristine-source controls.
+Native checks pass 74 cases and the online tools pass 14 cases. The Radiant
+integration gate has 8,163 passes, 299 partials, 20 skips and one existing
+forced-GC iframe failure, reproduced with current unmodified Radiant sources
+and recorded as Lambda JS03-L2.
+
+The second review inspected all 204 remaining candidates and refreshed all 204
+Lambda captures successfully, with another refresh of the 63 video-containing
+cases after the poster-sizing repair. It fixed multi-token stylesheet relations
+(RI-024), live stylesheet media/disabled state (RI-022), dropped root theme
+mutations (JS13-L3), remote image/poster discovery and video intrinsic sizing
+(RI-025), transparent background resets (RI-026), and desktop viewport selection
+(RI-027). The final comparison still covers all 1,066 pairs, with no dimension
+mismatches or changes to Chromium references, URLs, deadlines or thresholds.
+
+Automated major candidates fall from 204 to 186. Visual inspection retains five
+additional cases whose low scores hide major omissions: Supabase customers,
+Pitch, Cofounder, Banky and CMake. The audited review queue therefore has 191
+remaining cases; 13 clear this round's major review. These are review candidates,
+not 191 confirmed engine defects. The per-page evidence and explicit unknown
+causes are in `snapshots/visual_comparison_review_round2.json`; the full report
+and before/after examples are `temp/online-visual-round2/final/index.html` and
+`temp/online-visual-round2/repairs.html`. Investigation coverage includes 204
+authored documents, 203 successful browser diagnostics plus one navigation
+context error, render logs for all 204 and 23 focused native layout summaries.
+
+The 118 focused native/host checks and 14 online-tool checks pass. The final
+Radiant gate retains 8,163 passes, 299 partials, 20 skips and the existing
+JS03-L2 iframe failure. All 56 CSS images baseline cases pass, including video
+size containment. Remaining application execution, selected-frame media and
+composed Shadow DOM limitations stay explicit in the owning ledgers.
+
 `test_page_load_gtest` writes its local fixture timing and memory measurements
 to `page_load_metrics.csv` in this directory.

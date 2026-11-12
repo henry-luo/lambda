@@ -26,6 +26,30 @@ take an `L` suffix (`JS05-L1`) so the two numbering spaces cannot collide.
 
 ## 3. Value model, memory & GC interop (JS03)
 
+### JS03-L2 — iframe load crashes under forced collection in current-source host — **OPEN**
+
+Found 2026-11-12 during the online visual comparison gate. Precise ownership
+must follow **D6.3.3 / D6.4.1**. Cause is **unconfirmed**; this does not block
+the selected major visual repairs, but the aggregate Radiant gate remains red.
+
+`test/test_ui_automation_gtest.exe
+--gtest_filter=UIAutomation/UIAutomationTest.RunTest/dom_iframe_retire`
+fails two of six assertions. The fixture forces collection on every allocation
+and poisons freed memory. Its parent loads an embedded Markdown document and
+then removes the iframe from a Lambda callback. The rebuilt host reports
+`execute_document_scripts: recovered from crash in JS JIT code` before the
+embedded document is available. No renderer assertion or test expectation was
+weakened.
+
+The saved older executable passes 3/3, but predates the current committed source.
+A separate current-source control replaces every changed Radiant object with
+its `git show HEAD` source while retaining the same runtime/adapter/input
+objects. Both that control and the repaired host fail 3/3, so the issue predates
+the native repairs in this round. Evidence: `temp/online-visual/pristine-build.py`,
+`pristine-build.log`, `iframe-pristine-{0,1,2}.log`, `iframe-after-{0,1,2}.log`
+and `iframe-direct-after.log`. The other aggregate outcomes were 8,163 passing,
+299 partial and 20 skipped cases.
+
 ### JS03-L1 — durable JS native state retains raw wide-scalar `Item`s — **OPEN**
 
 **Found:** 2026-09-14 during LR08-4's post-fix ownership audit.
@@ -462,6 +486,84 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
+
+### JS13-L3 — Root theme mutation is dropped below a Document proxy — **FIXED**
+
+Found 2026-11-12. DOM/host ownership follows **D9.1.1v4 / D9.1.3v2**;
+snapshot state follows **D10.1.7**. This blocks correct theme updates on the
+Supabase online pages, without requiring a new rendering feature.
+
+Confirmed root cause: `dom_js_record_cascade_root` promotes an attribute edit to
+its parent when structural selectors exist. The element-shaped Document proxy
+is the HTML root's DOM parent, but is outside the rendered root. The subsequent
+connection check drops the edit, while incremental reconciliation still reports
+success. An unrelated `.shiki:has(> [data-wrapped=true]) .code-content` rule is
+enough to trigger it. A 159-check CSS reduction leaves four rules: root color
+variables, a light-theme attribute rule, the unrelated structural rule and the
+body background. Static light attributes work; setting them from script fails.
+
+`StyleEpochTest.DocumentElementMutationRetainsRootBelowDocumentProxy` reproduces
+the lost inherited value (10px instead of 600px). The fix selects a parent only
+if it belongs to the rendered tree; it preserves the Document proxy and DOM
+parent relationships. The regression fails before and passes after repair;
+all 38 StyleEpoch tests pass. Supabase's home capture now selects light and
+its mean color error drops from 89% to 2.4%. The customer page also selects
+light but still lacks its main content; clearing a coarse threshold does not
+qualify that separate behavior. The aggregate Radiant gate retains only the
+previously reproduced JS03-L2 iframe failure. Evidence:
+`temp/online-visual-round2/theme-min-rules.json`, `supabase-full-output.log`,
+`test-theme-before.log`, and the original/focused browser/native captures.
+
+### JS13-L2 — ShadowRoot APIs do not provide full composed-tree rendering — **PARTIAL**
+
+Observed 2026-11-12 in the online comparison. Native/runtime boundaries follow
+**D9.1.1v4 / D9.1.3v2**. This is a major missing rendering feature outside the
+user-authorized bug/incomplete-existing-feature milestone; it is not an online
+capture blocker and is not implemented in this round.
+
+`lambda/dom/dom.cpp::dom_core_attach_shadow` creates a stable fragment-backed
+root and exposes host/mode/focus behavior. Its source explicitly states that
+Radiant does not yet render a full shadow tree. WebAssembly.org's
+`dark-mode-toggle.min.mjs` constructs its controls and stylesheet in
+`this.attachShadow({mode:"open"})`. Supporting that API object does not qualify
+its composed layout, shadow-scoped CSS or control rendering. The downloaded
+module and page are retained under `temp/online-visual/`; the module is also in
+the normal resource cache. This does not establish Shadow DOM as the cause of
+every remaining blank page or of that site's remaining theme mismatch.
+
+### JS13-L1 — snapshot script admission can leave the whole document hidden — **OPEN**
+
+Found 2026-11-12. Browser execution belongs to **D8.4**; finite snapshot time
+belongs to **D10.1.7**. This limits full application-page fidelity, but does not
+block unrelated CSS/layout repairs. No admission limit was raised for matching.
+
+`lambda.exe render https://payloadcms.com/ -o temp/online-visual/payload.png
+-vw 1200 -vh 800` completes with a white image. Its authored CSS sets
+`html { opacity:0 }` until application code installs `data-theme`. The log shows
+three async bundles of 201,060, 241,382 and 248,319 bytes skipped by
+`JS_PRELAYOUT_DEFER_BUDGET_BYTES` (128 KiB) in
+`lambda/module/radiant/script_runner.cpp`. Skipped tasks are not later executed
+for this one-shot snapshot. Source and total admission limits also exist;
+large framework pages cannot be treated as fully executed merely because the
+document loader and PNG encoder return success.
+
+The immediate hidden-root condition and script admission decisions are confirmed.
+Whether admitting the complete application would encounter other unsupported
+APIs is unconfirmed. Forcing opacity/theme, removing application scripts, or
+advancing arbitrary wall-clock animation would conceal the missing execution.
+Evidence: `temp/online-visual/payloadcms.com.html`, downloaded CSS in that
+directory, `payload-tree.json` (root opacity zero), and
+`probes/saas_landing_313-lambda.log`. Many Framer/app pages also have large visual
+differences, but a shared cause has not been established for every page.
+
+Second-review qualification: after the root theme and media repairs, visual
+inspection still finds major missing content on Supabase customers, Pitch,
+Cofounder and Banky even though their mostly white or restored-background
+captures fall below the coarse threshold. These cases remain in the audited
+queue. Their individual render logs, authored sources and browser diagnostics
+are preserved in `temp/online-visual-round2/` and
+`test/online/snapshots/visual_comparison_review_round2.json`. This does not
+establish script admission as the shared cause of all four omissions.
 
 ### JS13 known issues
 

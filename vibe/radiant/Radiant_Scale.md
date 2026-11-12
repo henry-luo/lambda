@@ -158,6 +158,11 @@ density. The legacy CLI spelling `--pixel-ratio` and the font library's
 `FontContextConfig::pixel_ratio` remain adapter vocabulary at their public
 boundaries, not document/layout state.
 
+Desktop layout uses the host's CSS viewport for its root, media queries and
+viewport units (RI-027, native ownership under D9.1.1v4/D9.1.3v2). Parsed numeric
+mobile viewport hints remain metadata; they do not independently shrink or
+enlarge that desktop viewport. Mobile adaptation remains unqualified.
+
 ### RSC8 — Conversion functions are centralized and typed
 
 Conversions belong to narrow APIs, conceptually:
