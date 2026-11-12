@@ -659,5 +659,7 @@ int main(void) {
     int result = lta_main(1, 50, 10, 10, 5);
     int ok = verify_result(result, 1);
     printf(ok == 1 ? "Havlak: PASS\n" : "Havlak: FAIL\n");
+    /* the Lambda driver also emits the computed kernel result. */
+    printf("%d\n", result);
     return ok != 1;
 }

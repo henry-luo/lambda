@@ -974,7 +974,7 @@ TEST(LambdaScriptCache, MvpNativeHandlersJoinScopedChildren) {
     template_host_session_close(mounted);
 }
 
-TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
+TEST(LambdaScriptCache, AutoCachesSupportedImportConeAndViewsAfterEagerRun) {
     const char* identity = "test/lambda/auto_cache_root.ls";
     const char* source =
         "import .script_cache_auto_child\n"
@@ -988,14 +988,17 @@ TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
     input_script_cache_get_stats(cache, &before);
 
     LambdaTestNativeCompiler compiler;
-    // A prior eager image must not occupy AUTO's fallback image key.
+    // D8.3.1: a prior eager image must not change AUTO's initial T0 selection.
     compiler.select(LAMBDA_TIER_JIT);
     Runtime eager = {};
     runtime_init(&eager);
     Input* eager_output = run_script_mir(&eager, source, (char*)identity, true);
     ASSERT_NE(eager_output, nullptr);
     EXPECT_EQ(it2i(eager_output->root), 42);
+    ASSERT_NE(((Script*)eager.scripts->data[0])->jit_context, nullptr);
     runtime_cleanup(&eager);
+    InputScriptCacheStats before_auto = {};
+    input_script_cache_get_stats(cache, &before_auto);
 
     compiler.select(LAMBDA_TIER_AUTO);
     Runtime first = {};
@@ -1006,11 +1009,16 @@ TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
     ASSERT_NE(first.scripts, nullptr);
     Script* first_root = (Script*)first.scripts->data[0];
     ASSERT_TRUE(first_root->cache_owned_template);
+    // views/edits are now supported by T0; this fixture no longer requests fallback.
+    EXPECT_TRUE(first_root->interp_supported);
+    EXPECT_FALSE(first_root->cache_mir_artifact);
+    EXPECT_EQ(first_root->jit_context, nullptr);
     ASSERT_NE(first_root->direct_imports, nullptr);
     Script* first_dependency = (Script*)first_root->direct_imports->data[0];
     ASSERT_NE(first_dependency->cache_template, nullptr);
     const Script* first_dependency_image = first_dependency->cache_template;
-    EXPECT_TRUE(first_dependency_image->cache_mir_artifact);
+    EXPECT_FALSE(first_dependency_image->cache_mir_artifact);
+    EXPECT_TRUE(first_dependency_image->interp_supported);
     runtime_cleanup(&first);
 
     Runtime second = {};
@@ -1028,7 +1036,9 @@ TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
     EXPECT_GE(after.mir_builds, before.mir_builds + 2);
-    EXPECT_GE(after.mir_hits, before.mir_hits + 1);
+    EXPECT_GE(after.ast_builds, before_auto.ast_builds + 1);
+    EXPECT_GE(after.ast_hits, before_auto.ast_hits + 1);
+    EXPECT_EQ(after.mir_hits, before_auto.mir_hits);
 }
 
 TEST(LambdaScriptCache, MapsLogicalUnitsToDenseModuleSlabs) {
@@ -1102,6 +1112,42 @@ TEST(LambdaScriptCache, ReusesInterpreterAstTemplateAcrossFreshRuntimes) {
     EXPECT_GE(after.ast_builds, before.ast_builds + 1);
     EXPECT_GE(after.ast_hits, before.ast_hits + 1);
     EXPECT_GE(after.module_hits, before.module_hits + 1);
+}
+
+TEST(LambdaScriptCache, DisabledMirReuseDoesNotConsumeRetainedAstClaim) {
+    const char* identity = "<lambda-cache-disabled-mir-retained-ast>";
+    const char* source = "40 + 2";
+    LambdaTestNativeCompiler compiler(LAMBDA_TIER_INTERP);
+    Runtime first = {};
+    runtime_init(&first);
+    Input* interpreted = run_script_mir(&first, source, (char*)identity, true);
+    ASSERT_NE(interpreted, nullptr);
+    ASSERT_EQ(it2i(interpreted->root), 42);
+    Script* ast_template = (Script*)first.scripts->data[0];
+    ASSERT_TRUE(ast_template->cache_owned_template);
+    runtime_cleanup(&first);
+
+    compiler.select(LAMBDA_TIER_JIT);
+    Runtime eager = {};
+    runtime_init(&eager);
+    eager.mir_cache_disabled = true;
+    // LR01-21: this used to recurse indefinitely on the unrelated READY AST claim.
+    Input* compiled = run_script_mir(&eager, source, (char*)identity, true);
+    ASSERT_NE(compiled, nullptr);
+    EXPECT_EQ(it2i(compiled->root), 42);
+    Script* eager_script = (Script*)eager.scripts->data[0];
+    EXPECT_NE(eager_script->jit_context, nullptr);
+    EXPECT_FALSE(eager_script->cache_owned_template);
+    runtime_cleanup(&eager);
+
+    compiler.select(LAMBDA_TIER_INTERP);
+    Runtime last = {};
+    runtime_init(&last);
+    Input* reused = run_script_mir(&last, source, (char*)identity, true);
+    ASSERT_NE(reused, nullptr);
+    EXPECT_EQ(it2i(reused->root), 42);
+    EXPECT_EQ(((Script*)last.scripts->data[0])->cache_template, ast_template);
+    runtime_cleanup(&last);
 }
 
 TEST(LambdaScriptCache, ReusesInterpreterAstImportConeAcrossFreshRuntimes) {
@@ -4216,7 +4262,7 @@ static const char* kSharedModuleStressChartBar =
     "[{category: 'A', amount: 2}, {category: 'B', amount: 5}]}, mark: "
     "{type: \"bar\"}, encoding: {x: {field: 'category', type: 'nominal'}, "
     "y: {field: 'amount', type: 'quantitative'}}})\n"
-    "len(format(chart.render_spec(spec), 'xml'))\n";
+    "len(format(chart.render_spec(spec), 'xml'))^\n";
 
 static const char* kSharedModuleStressChartLine =
     "import vega: lambda.chart.vega\n"
@@ -4225,18 +4271,18 @@ static const char* kSharedModuleStressChartLine =
     "[{x: 0, y: 3}, {x: 1, y: 7}, {x: 2, y: 4}]}, mark: {type: \"line\"}, "
     "encoding: {x: {field: 'x', type: 'quantitative'}, y: {field: 'y', "
     "type: 'quantitative'}}})\n"
-    "len(format(chart.render_spec(spec), 'xml'))\n";
+    "len(format(chart.render_spec(spec), 'xml'))^\n";
 
 static const char* kSharedModuleStressPdfPageCount =
     "import pdf: lambda.doc.pdf.pdf\n"
     "let doc = input('test/input/test.pdf', 'pdf') ^ { null }\n"
-    "pdf.pdf_page_count(doc)\n";
+    "pdf.pdf_page_count(doc)^\n";
 
 static const char* kSharedModuleStressPdfContent =
     "import resolve: lambda.doc.pdf.resolve\n"
     "let doc = input('test/input/test.pdf', 'pdf') ^ { null }\n"
     "let page = resolve.page_at(doc, 0)\n"
-    "len(resolve.page_content_bytes(doc, page))\n";
+    "len(resolve.page_content_bytes(doc, page))^\n";
 
 static SharedModuleStressCase shared_module_stress_cases[] = {
     {"chart-bar", kSharedModuleStressChartBar, NULL},

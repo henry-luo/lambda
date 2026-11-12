@@ -77,6 +77,64 @@ protected:
 
 // ==================== Phase 1: Basic Validation Tests ====================
 
+TEST_F(ValidatorFeaturesTest, BinaryUnionKeepsMembersBeyondThirtyTwo) {
+    Type* string_type = create_primitive_type(LMD_TYPE_STRING);
+    Type* root = create_primitive_type(LMD_TYPE_INT);
+    // right nesting puts the only matching arm after the former flattening cap.
+    for (int i = 0; i < 64; i++) {
+        TypeBinary* branch = (TypeBinary*)pool_calloc(pool, sizeof(TypeBinary));
+        branch->type_id = LMD_TYPE_TYPE;
+        branch->kind = TYPE_KIND_BINARY;
+        branch->op = OPERATOR_UNION;
+        branch->left = string_type;
+        branch->right = root;
+        root = branch;
+    }
+    Item accepted = {.item = i2it(42)};
+    Item rejected = {.item = b2it(true)};
+    for (int mode = 0; mode < 2; mode++) {
+        validator->set_fast_mode(mode != 0);
+        ASSERT_TRUE(validate_against_type(validator, accepted.to_const(), root)->valid);
+        EXPECT_FALSE(validate_against_type(validator, rejected.to_const(), root)->valid);
+    }
+}
+
+TEST_F(ValidatorFeaturesTest, DiagnosticPathKeepsEverySegment) {
+    PathSegment* path = nullptr;
+    StringBuf* expected = stringbuf_new(pool);
+    for (int i = 0; i < 160; i++) {
+        PathSegment* segment = (PathSegment*)pool_calloc(pool, sizeof(PathSegment));
+        segment->type = PATH_INDEX;
+        segment->data.index = i;
+        segment->next = path;
+        path = segment;
+        stringbuf_append_format(expected, "[%d]", i);
+    }
+    String* formatted = format_validation_path(path, pool);
+    ASSERT_NE(formatted, nullptr);
+    EXPECT_STREQ(formatted->chars, expected->str->chars);
+    StringBuf* printed = stringbuf_new(pool);
+    print_validation_path(path, printed);
+    EXPECT_STREQ(printed->str->chars, expected->str->chars);
+}
+
+TEST_F(ValidatorFeaturesTest, DiagnosticDistinguishesPresentNullFromMissingActual) {
+    Type* expected = create_primitive_type(LMD_TYPE_INT);
+    Item actual = {.item = ITEM_NULL};
+    ValidationError* supplied = create_validation_error_ex(VALID_ERROR_TYPE_MISMATCH,
+        "wrong value", nullptr, expected, actual.to_const(), pool);
+    ValidationError* absent = create_validation_error(VALID_ERROR_TYPE_MISMATCH,
+        "no value supplied", nullptr, pool);
+    ASSERT_NE(supplied, nullptr);
+    ASSERT_NE(absent, nullptr);
+    EXPECT_NE(strstr(format_error_with_context(supplied, pool)->chars, "Actual: null"), nullptr);
+    EXPECT_EQ(strstr(format_error_with_context(absent, pool)->chars, "Actual:"), nullptr);
+    Item zero = {.item = i2it(0)};
+    supplied = create_validation_error_ex(VALID_ERROR_TYPE_MISMATCH,
+        "zero is present", nullptr, expected, zero.to_const(), pool);
+    EXPECT_NE(strstr(format_error_with_context(supplied, pool)->chars, "Actual: int"), nullptr);
+}
+
 TEST_F(ValidatorFeaturesTest, ValidatePrimitiveString) {
     // Create string type
     Type* string_type = create_primitive_type(LMD_TYPE_STRING);

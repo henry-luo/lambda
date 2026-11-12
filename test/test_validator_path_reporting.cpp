@@ -59,6 +59,14 @@ public:
 // TEST SUITE 1: Flat Structure Path Reporting
 // ============================================================================
 
+TEST(ValidatorPathReporting, QuietCliKeepsTheReportWithoutDebugProgress) {
+    auto output = ValidatorTestHelper::runValidator(
+        "-s test/input/negative/person_schema.ls -f json test/input/negative/missing_required.json");
+    EXPECT_TRUE(ValidatorTestHelper::outputContains(output, "MISSING_FIELD"));
+    EXPECT_FALSE(ValidatorTestHelper::outputContains(output, "Starting validation"));
+    EXPECT_FALSE(ValidatorTestHelper::outputContains(output, "Validation options:"));
+}
+
 TEST(ValidatorPathReporting, FlatStructure_TypeMismatch) {
     // Test type mismatches in flat structure show correct field paths
     std::string output = ValidatorTestHelper::runValidator(

@@ -1351,7 +1351,7 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
                 domain = common_union_field_contract(m, receiver, ((AstIdentNode*)key)->name);
         }
         if (!domain) return &TYPE_ANY;
-        Type* normal = optional || ((AstFieldNode*)n)->optional
+        Type* normal = optional || (field && field->is_optional) || ((AstFieldNode*)n)->optional
             ? lambda_type_nullable_normalized(m->tp->pool, domain) : domain;
         // a record/error receiver still proves its field's successful domain;
         // keep the error arm rather than widening every scalar read to any.

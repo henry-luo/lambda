@@ -2305,6 +2305,20 @@ struct InterpCallSiteScope {
     ~InterpCallSiteScope() { frame->call_site = saved; }
 };
 
+static void interp_capture_call_argument(InterpFrame* f, AstNode* source, Item value) {
+    if (!interp_frame_pending(f) && ast_expr_insertion_needs_capture(source)) {
+        // later actuals can mutate this owner before the callee admits its parameters.
+        cow_capture_value(value);
+        interp_note_var_param_marked(f, source);
+    }
+}
+
+static Item interp_call_argument(InterpFrame* f, AstNode* source, bool snapshot) {
+    Item value = eval_expr(f, source);
+    if (snapshot) interp_capture_call_argument(f, source, value);
+    return value;
+}
+
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         List* output_destination = nullptr, bool* emitted = nullptr) {
     InterpCallSiteScope call_site(f, node);
@@ -2322,6 +2336,10 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
     TypeFunc* direct_signature = direct_fn && ((AstNode*)direct_fn)->type &&
             ((AstNode*)direct_fn)->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)((AstNode*)direct_fn)->type : NULL;
+    AstIdentNode* imported_ident = callee && callee->node_type == AST_NODE_IDENT
+        ? (AstIdentNode*)callee : NULL;
+    bool cross_lang_js_call = imported_ident && imported_ident->entry &&
+        lambda_import_is_js(imported_ident->entry->import);
     if (f->st->mode != EvalMode::RUNTIME) {
         SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
             ? ((AstSysFuncNode*)callee)->fn_info : NULL;
@@ -2367,7 +2385,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             if (receiver_slot) {
                 words[i] = injected->item;
             } else if (value_node) {
-                words[i] = eval_expr(f, value_node).item;
+                TypeParam* type_param = parameter ? lambda_type_param(parameter->type) : NULL;
+                words[i] = interp_call_argument(f, value_node,
+                    !type_param || !type_param->is_var_param).item;
             } else {
                 TypeParam* type_param = parameter ? lambda_type_param(parameter->type) : NULL;
                 words[i] = type_param && type_param->default_value
@@ -2749,7 +2769,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                 words[index++] = ITEM_MISSING_ARGUMENT;
                 continue;
             }
-            words[index++] = eval_expr(f, argument).item;
+            words[index++] = interp_call_argument(f, argument, true).item;
             if (interp_frame_pending(f)) return ItemNull;
         }
         List args = {};
@@ -2784,22 +2804,23 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         ast_resolve_call_arguments(node, direct_fn, source_argc, resolved_args);
         for (i = 0; i < dispatch_argc; i++) {
             words[i] = injected && !i ? injected->item : borrow_args[i] && !borrowed[i] ? ITEM_NULL :
-                resolved_args[i] ? eval_expr(f, resolved_args[i]).item :
+                resolved_args[i] ? interp_call_argument(f, resolved_args[i],
+                    !cross_lang_js_call && !borrow_args[i]).item :
                 ITEM_MISSING_ARGUMENT;
             if (interp_frame_pending(f)) return ItemNull;
         }
     } else {
         if (injected) words[i++] = injected->item;
         for (AstNode* a = node->argument; a; a = a->next, i++) {
-            words[i] = borrow_args[i] && !borrowed[i] ? ITEM_NULL : eval_expr(f, a).item;
+            words[i] = borrow_args[i] && !borrowed[i] ? ITEM_NULL :
+                interp_call_argument(f, a, !cross_lang_js_call && !borrow_args[i]).item;
+            if (interp_frame_pending(f)) return ItemNull;
         }
     }
 
     Item callee_item = fn_slot.get();
     if (get_type_id(callee_item) != LMD_TYPE_FUNC) {
-        log_error("interp: call target is not a function (type %d)",
-            (int)get_type_id(callee_item));
-        return ItemError;
+        return lambda_non_callable_error();
     }
     Function* fn = (Function*)(uintptr_t)callee_item.item;
     if (node->fn_colour_guard) {
@@ -2809,10 +2830,6 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             dispatch_argc, node->fn_colour_guard);
         if (item_is_error(refused)) return refused;
     }
-    AstIdentNode* imported_ident = callee && callee->node_type == AST_NODE_IDENT
-        ? (AstIdentNode*)callee : NULL;
-    bool cross_lang_js_call = imported_ident && imported_ident->entry &&
-        lambda_import_is_js(imported_ident->entry->import);
     if (cross_lang_js_call) {
         if (injected || has_named_args) {
             log_error("interp: JavaScript imports require positional arguments");
@@ -2859,6 +2876,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             if (!entry) continue;
             uint64_t* home = interp_borrow_home(f, entry);
             if (home) {
+                // a later actual can reborrow and replace this root; the home,
+                // rather than its earlier evaluated word, is authoritative.
+                words[index] = *home;
                 // CW33: pass the ADDRESS of the caller's binding home. The
                 // callee prologue prepares through it unconditionally (a
                 // byte-test no-op when unique), which deletes the caller-side
@@ -3830,13 +3850,22 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         AstNode* target = ast_unwrap_primary(node->right);
         Item piped = left.get();
         if (target && target->node_type == AST_NODE_CALL_EXPR) {
-            return eval_call(f, (AstCallNode*)target, &piped);
+            AstCallNode* call = (AstCallNode*)target;
+            AstNode* callee = ast_unwrap_primary(call->function);
+            TypeFunc* signature = lambda_type_func_signature(callee ? callee->type : NULL);
+            if ((!callee || callee->node_type != AST_NODE_SYS_FUNC) &&
+                    (!signature || !signature->param || !signature->param->is_var_param)) {
+                // only the pipe node retains this first actual's source expression.
+                interp_capture_call_argument(f, node->left, piped);
+            }
+            return eval_call(f, call, &piped);
         }
         if (target && target->node_type == AST_NODE_SYS_FUNC) {
             return eval_sys_call(f, ((AstSysFuncNode*)target)->fn_info, &piped, 1,
                 node->type);
         }
         // A first-class callable on the right: apply it to the piped value.
+        interp_capture_call_argument(f, node->left, piped);
         Item callee = eval_expr(f, node->right);
         if (interp_frame_pending(f)) return callee;
         if (get_type_id(callee) != LMD_TYPE_FUNC) {
@@ -7330,26 +7359,9 @@ static bool interp_parameter_rejects_error(const AstNamedNode* parameter,
         !lambda_type_accepts_error(parameter->declared_type);
 }
 
-// Keep T0's deferred parameter diagnostics at the call boundary, matching the
-// MIR wrapper. The generic declaration label used here before made the same
-// rejected argument report different provenance by execution tier.
-static void interp_format_parameter_label(const LambdaBoundary* boundary,
-        char* out, size_t capacity) {
-    const AstFuncNode* fn_node = (const AstFuncNode*)boundary->subject;
-    const char* fallback_name = (const char*)boundary->owner;
-    StrBuf* function_name = strbuf_new_cap(96);
-    if (function_name && fn_node) {
-        write_fn_name(function_name, (AstFuncNode*)fn_node, NULL);
-    }
-    const char* display_name = function_name && function_name->str
-        ? function_name->str : (fallback_name ? fallback_name : "<anonymous>");
-    snprintf(out, capacity, "argument %d of %s", boundary->index + 1, display_name);
-    if (function_name) strbuf_free(function_name);
-}
-
 static LambdaBoundary interp_parameter_boundary(InterpFrame* f, const AstFuncNode* fn_node,
         const char* fallback_name, int index) {
-    LambdaBoundary boundary = {NULL, interp_format_parameter_label, fn_node,
+    LambdaBoundary boundary = {NULL, lambda_format_parameter_label, fn_node,
         fallback_name, index};
     InterpFrame* caller = f ? f->caller : NULL;
     if (caller) interp_locate_boundary(&boundary, caller,

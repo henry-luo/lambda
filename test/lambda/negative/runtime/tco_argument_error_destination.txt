@@ -1,1 +1,1 @@
-error[E201]: type check at argument 1 of _result_113 failed: expected string, got int 1
+error[E201]: type check at argument 1 of result failed: expected string, got int 1

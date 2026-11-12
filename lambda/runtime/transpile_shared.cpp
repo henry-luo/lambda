@@ -6,10 +6,21 @@
 
 #include "transpiler.hpp"
 #include "ast_build.hpp"
+#include "../lambda.hpp"
 #include "lib/log.h"
 #include <string.h>
 
 extern Type TYPE_ANY, TYPE_INT;
+
+void lambda_format_parameter_label(const LambdaBoundary* boundary,
+        char* out, size_t capacity) {
+    const AstFuncNode* function = (const AstFuncNode*)boundary->subject;
+    const char* fallback = (const char*)boundary->owner;
+    // diagnostics name the source callable, never its generated MIR identity.
+    const char* name = function && function->name ? function->name->chars :
+        fallback ? fallback : "<anonymous>";
+    snprintf(out, capacity, "argument %d of %s", boundary->index + 1, name);
+}
 
 
 

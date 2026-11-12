@@ -70,6 +70,8 @@ enum MapContractRelation {
     MAP_CONTRACT_STORAGE_COMPATIBLE,
     MAP_CONTRACT_NEEDS_REIFICATION,
     MAP_CONTRACT_UNION_MEMBER_PROVEN,
+    MAP_CONTRACT_UNION_SEMANTIC_PROVEN,
+    MAP_CONTRACT_UNION_MEMBER_UNPROVEN,
 };
 
 // One resolver for declared homogeneous arrays, inferred homogeneous arrays,

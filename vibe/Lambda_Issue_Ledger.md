@@ -126,7 +126,7 @@ socket-enabled rerun. See
 
 ## Type-operator precedence follow-up — 2026-11-03
 
-The user adopted **S10.1.1v5**: ordinary expressions now use the type-pattern precedence `to` > `&` > `!` > `|`. The production C parser has distinct binding powers for these operators. **LR02-37 remains open pending focused qualification; no tests were run in this change.**
+The user adopted **S10.1.1v5**: ordinary expressions now use the type-pattern precedence `to` > `&` > `!` > `|`. The production C parser has distinct binding powers for these operators. The current three-tier/GC qualification is recorded in [resolved LR02-37](<Lambda_Issue_Ledger (fixed).md#lr02-37>).
 
 ## Names, containment and matrix-row follow-up — 2026-10-31
 
@@ -272,7 +272,7 @@ the fixed issue ledger: LR01-12 (`g_template_registry` is now owned by
 consumer now have fail-closed coverage), and LR12-9 (S9.1.2/S9.1.3/S9.3.1 COW
 capture is unconditional; the escape hatch is retired). The root-witness
 level-2 corpus sweep reports zero violations, and the COW fixtures pass under
-forced GC and poison mode on JIT. LR13-8 (validator success-path work) remains active.
+forced GC and poison mode on JIT. [LR13-8](<Lambda_Issue_Ledger (fixed).md#lr13-8>) received a separate stable-shape semantic cache in the 2026-11-12 follow-up.
 [LR12-6](<Lambda_Issue_Ledger (fixed).md#lr12-6>) closed on 2026-10-29.
 
 The same pass also moved the stale RESOLVED records LR09-30, LR08-12, and
@@ -581,21 +581,8 @@ and are not free to reorder.
 ---
 
 
-<a id="lr01-21"></a>**LR01-21 · Disabling MIR reuse can recurse on a retained AST hit · OPEN (found 2026-11-03)**
+<a id="lr01-21"></a>LR01-21 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr01-21>).
 
-Reproduced on the error-handling branch over `f7ce32b36`: running the complete
-`test_io_terminal_gtest.exe` with `LAMBDA_DISABLE_MIR_CACHE=1` exhausts the
-native stack in `load_script`; normal caching passes all ten cases. An earlier
-interpreter import leaves an AST artifact. A later forced-JIT import skips
-AST lookup (`lambda/runtime/runner.cpp:2224`) but selects an AST build claim
-because MIR reuse is disabled (`:2266`). The READY claim retries the same
-lookup (`:2291`) indefinitely. These selection conditions are unchanged from
-the pre-rework `0452aaabc` source. The claim and hit paths must agree on the
-artifact kind without changing the requested execution tier (D8.3.2,
-D8.5.1). This is separate from error-union admission. Bounded LLDB trace and
-source comparison: `temp/error-handling/m8-terminal-no-cache-stack.log` and
-`m8-cache-retry-root-review.json`; qualification record:
-[type/error implementation](<impl/Lambda_Impl_Type_Error_Handling (done).md>).
 
 <a id="lr01-22"></a>**LR01-22 · Experimental Lambda MIR MVP needs the new error rules · OPEN (2026-11-03)**
 
@@ -614,24 +601,7 @@ Evidence: `temp/error-handling-merge-20261103T054805Z/latest-mvp-frontend.json`
 and `final-source-audit.json`.
 [Production qualification](<impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
 
-<a id="lr01-23"></a>**LR01-23 · AUTO fallback cache test expects a MIR import image · OPEN (2026-11-10)**
-
-`LambdaScriptCache.AutoFallbackCachesMirImportConeAndViews` computes the expected
-42 but fails its `cache_mir_artifact` and MIR-hit assertions: the dependency has
-an AST image and the second run adds no MIR cache hit. This reproduces both on
-the helper-retirement candidate and with all six changed runtime implementation
-objects restored from `fd07a893f`, under identical current headers, sibling
-archives and test code. It predates these helper deletions. Whether the defect
-is a stale tier-specific expectation or missing native-image reuse is not yet
-established; preserve the assertions pending that investigation (D8.3.1,
-D8.3.5, D8.5.1). It does not block the dead-helper audit.
-
-Reproduce from the Lambda checkout with
-`DYLD_LIBRARY_PATH="$PWD/modules/node-core" ./temp/mvp_helper_retirement/test-runtime.exe --gtest_filter=LambdaScriptCache.AutoFallbackCachesMirImportConeAndViews`.
-The private-path loader override is only needed for this temporary executable.
-Evidence: `temp/mvp_helper_retirement/cache-current.log`,
-`control/cache-test.log`, `control/summary.json`; the causal control retains the
-pre-cleanup helpers, and neither test oracle nor cache policy was changed.
+<a id="lr01-23"></a>LR01-23 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr01-23>).
 
 
 ## 2. Parsing & AST construction (LR02)
@@ -643,24 +613,10 @@ lockstep with the transpiler's vectorized-comparison codegen ([LR07](#7-mir-dire
 *Residue:* the `ARRAY_NUM` third outcome the doc described is no longer produced
 here, so the lockstep surface is narrower than documented but still real.
 
-<a id="lr02-2"></a>**LR02-2 · No-`else` `if` still widens mixed joins to `ANY` · PARTIAL**
-`infer_if_result_type` (`build_ast.cpp:4124`) now contributes `TYPE_NULL` for a
-missing else arm, runs numeric joins through `lambda_numeric_classify`, and
-builds a real `TYPE_KIND_BINARY` union when one arm diverges.
-*Residue:* plain mixed non-numeric joins still fall to `set_type_any(tp,
-ANY_JOIN)` (`:4146`), with an in-code comment saying they "remain open until
-recursive return inference and boxed-carrier handling are resolved together."
+<a id="lr02-2"></a>LR02-2 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr02-2>).
 
-<a id="lr02-3"></a>**LR02-3 · Undeclared global function returns stay `TYPE_ANY` · PARTIAL**
-`function_type->returned = &TYPE_ANY` is still forced for undeclared returns
-(`build_ast.cpp:8398`, `:8466`).
-*Residue reframed:* this is now a deliberate stable forward-ABI carrier —
-`function_type->inferred_return` *does* narrow from the completed body
-(`:8393`–`:8395`) and MIR consumes it. The remaining gap is that the public
-carrier stays `ANY`, so any consumer reading `returned` rather than
-`inferred_return` loses the precision. Cross-link: TIG1 in
-[Type-infer impl progress] — "consumers reading `node->type` instead of the
-representation oracle" is the same defect class.
+
+<a id="lr02-3"></a>LR02-3 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr02-3>).
 
 
 <a id="lr02-6"></a>**LR02-6 · Object literal routing · OPEN (note)**
@@ -760,8 +716,8 @@ every use fails to parse.
 <a id="lr02-36"></a>**LR02-36 · A quoted-path `import` without an alias is silently ignored · OPEN (found 2026-10-07, std test triage)**
 `import './circular_import.ls'` at the top of a script neither imports nor errors: the quoted-module branch at `lambda/runtime/build_ast.cpp:13179` only acts when `node->alias` is set, so the script runs as if the line were absent (it printed `42`). S16.9.8 gives the relative form `import .circular_import`, which does detect the cycle (E217, now asserted by `NegativeScriptTest.SelfImportIsCircularE217`). The unaliased quoted form should be rejected or resolved, not dropped.
 
-<a id="lr02-37"></a>**LR02-37 · The C expression parser gave `|`, `&`, `!` and `to` one binding power · OPEN (S10.1.1v5 implemented 2026-11-03; qualification pending)**
-`infix_bp` previously mapped all four operators to `LAMBDA_BP_SET`, left-associative (`lambda/runtime/parser/lambda_parser.c`). That made `type T = "a" | "b" & "c"` admit `"a"`, while the same expression in `let x = ...` denoted `none`; `let r = 5 | 1 to 3` also failed at run time. **S10.1.1v5** adopts the reference grammar and type-pattern order, `to` > `&` > `!` > `|`, left-associative. The C parser now has separate binding powers, so both contexts group the first example as `"a" | ("b" & "c")`, and the range expression as `5 | (1 to 3)`. The previous reproducers have not yet been rerun.
+<a id="lr02-37"></a>LR02-37 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr02-37>).
+
 
 ## 3. Value & type model (LR03)
 
@@ -826,16 +782,8 @@ contracts now behave the same way; before, a curried call typed as a
 function and crashed a map literal instead.
 *Implemented 2026-09-27, both tiers, placement unruled:* a call whose callee is a binding or parameter declared with a function-type contract checks its result against that contract's return where the call is made (`ast_call_contract_return`, `ast.hpp`; T0 `interp_check_contract_return`, the JIT before its unbox). The failure is the call's value (E201 "function return"), as S7.7.3's call-site contagion is. A direct callee's own declared return governs instead, and a contract with a binder or an open return is not checked. The JIT reads such a call as a boxed join (TE-17 I3). The alternative placement, at admission, is not built. Fixture `test/lambda/contract_return_check.ls`.
 
-<a id="lr03-17"></a>**LR03-17 · A repeated key in a map literal keeps both entries; a write updates the first, a read takes the last · OPEN (found 2026-09-25)**
-```
-pn main() {
-    var d = {a: 1, a: 2, b: 3}
-    d.a = 5
-    print([d.a, len(d)])   // [2, 3] on both tiers
-    print(d)               // {a: 5, a: 2, b: 3}
-}
-```
-Reads resolve a repeated key to its last entry (`_map_get_keyed`, the checker's member oracle, fixture `map_duplicate_key_lookup.ls`), but `fn_map_set` updates the first matching entry, so a write is invisible to the next read. `len`, printing and iteration all count both entries. The runtime comment beside the spread walk assumes map keys are unique except through a spread. No S# ruling covers a repeated literal key: collapsing it at construction (one key, first position, last value) and rejecting it are both open. The tiers agree since [LR07-25](<Lambda_Issue_Ledger (fixed).md#lr07-25>).
+<a id="lr03-17"></a>LR03-17 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr03-17>).
+
 
 <a id="lr03-33"></a>**LR03-33 · Container patterns and function types compare by kind under `==` (S5.5.2, S2.1.1v4) · OPEN (found 2026-09-26, while fixing LR03-29)**
 `lambda_type_repr_equal` compares a map, element, bracket-pattern or function type by kind alone. So `{a: int} == {b: string}`, `<p> == <div>`, `[int] == [string]` and `fn (x: int) int == fn (x: string) int` are all `true`. The cause is `type(x)`: S2.1.1v4 has it name the kind, but for an element it returns the element's own tagged shape, kept for `name(type(e))` (074321c54a), and for a named map alias its TypeMap. Nothing tells that shape from a declared pattern of the same kind, and structural comparison would make `type(<p>) == element` `false`, which about 70 library and fixture lines rely on (`type(c) == element`). The same split shows under `is`: `<div> is type(<p>)` is `false`, because the shape is tested as the pattern `<p>`, while `type(<p>) == element` is `true`. A fix has `type(x)` of a structural element or map return the kind, keeps the tag elsewhere for `name()`, and then compares patterns structurally. Function types also wait on S11.1.4v2's pending variance. Related, and unruled: `type()` names `datetime` for a date value, so `type(t'2025-01-01') == date` is `false`; S2.1.1v4 does not say whether `type()` names the `date`/`time` sub-kind, as it names `list` and `range`.
@@ -847,8 +795,10 @@ With `type P { a: int, b: string }`, `<P a: 1, b: "x", extra: 5>` prints `<P a: 
 ---
 
 
-<a id="lr03-41"></a>**LR03-41 · A derived type that redeclares an inherited field fails with E209, reported at 1:1 · OPEN, needs a ruling (found 2026-10-07, std test triage)**
-`type Animal { name: string, sound: string = "..." }` then `type Dog : Animal { sound: string = "woof" }` is rejected with `error[E209]: duplicate definition of 'sound' in the same scope`, located at line 1 column 1 rather than at the redeclaration. S2.1.3v2 (and OB7) say only that attributes "merge", so whether a derived type may override an inherited field's default needs a ruling; the location is wrong either way. Parked tests: `test/std/core/statements/_type_declarations.ls`, `test/std/boundary/_object_limits.ls` (their pending goldens assume the override is allowed).
+<a id="lr03-41"></a>**LR03-41 · Inherited-default override policy · PARTIAL, location fixed 2026-11-12; policy needs a ruling (found 2026-10-07, std test triage)**
+**Original report (location now fixed):** `type Animal { name: string, sound: string = "..." }` then `type Dog : Animal { sound: string = "woof" }` is rejected with `error[E209]: duplicate definition of 'sound' in the same scope`, located at line 1 column 1 rather than at the redeclaration. S2.1.3v2 (and OB7) say only that attributes "merge", so whether a derived type may override an inherited field's default needs a ruling; the location is wrong either way. Parked tests: `test/std/core/statements/_type_declarations.ls`, `test/std/boundary/_object_limits.ls` (their pending goldens assume the override is allowed).
+
+**Location fixed (S7.4.4):** synthetic scope entries now retain the written field's source span. `negative/semantic/inherited_field_location.ls` reports line 7, column 5 on interp/AUTO/JIT. The inherited-default policy remains unresolved; no override behavior or parked golden is changed. [Qualification](<impl/Lambda_Impl_Ledger_Ruled_Followup (done).md>).
 
 
 
@@ -1011,14 +961,7 @@ reported case. [Qualification](<impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>).
 
 
 
-<a id="lr07-29"></a>**LR07-29 · Negative fixtures report different diagnostics per tier · OPEN (found 2026-09-25)**
-Of the 159 negative fixtures, 11 fail differently on the two tiers. All of them fail on both tiers except `stack_overflow.ls` ([LR10-11](<Lambda_Issue_Ledger (fixed).md#lr10-11>)).
-- **Different boundary names for the same E201.** "argument 1 of _takes3_317" (T0) against "typed array call argument" (JIT) in `array_count_resized_binding`; "typed array element assignment" against "typed array representation fallback" in `nullable_array_reject_null` and `type_enforcement_array_write`; "argument 1 of" against "parameter 'value' of" in `type_enforce_static_float_to_int_parameter`; a declaration-level check (`validator at .cells`) against a field-level one in `typed_literal_required_array_null` and `typed_literal_required_dynamic_null`.
-- **Calling a non-function.** T0 prints only "Error: Script execution failed"; the JIT prints `error[E212]: fn_call2: cannot call non-function value` (`test_call_nonfunc`, `test_deep_call_stack`, `sysfunc_shadow_not_callable`).
-- **An imported module's parse error is printed twice by T0** (`import_parse_error_driver`).
-
-Both tiers also leak internal names: `_takes3_317`, `fn_call2`, "representation fallback". The negative gtests check only an exit status and a substring, and no harness compares these fixtures' `.txt` files, which have drifted (`Error[E201]` against `error[E201]`).
-
+<a id="lr07-29"></a>LR07-29 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-29>).
 
 
 <a id="lr07-40"></a>**LR07-40 · Unknown argument names are dropped; duplicate slots are diagnosed (S12.3.2) · PARTIAL (found 2026-09-26, while fixing LR07-19)**
@@ -1043,148 +986,22 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 
 
 
-<a id="lr07-53"></a>**LR07-53 · Full MIR loses a nonnumeric recursive array replacement · OPEN**
-
-Reproduced 2026-11-09 at `14f48f209` plus the MVP parity changes, using
-the frozen release `temp/mvp_untyped_tuning_20261109/starting-release.exe`
-(SHA256 `e45cec36fef54f4ebb1d2833fbde9d99dbc79f4c8b6be926630025f5cfb5ad70`).
-`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=production <exe> run
-test/lambda/mvp/mir_mvp_untyped_snapshots.ls --no-log` prints `[0, [99]]`
-for the recursive string replacement; **S9.1.2 / S12.2.1v3 / D4.3.1** require
-`["changed", [99]]`. MVP returns the required result. Full fails identically
-under normal, forced and seeded GC; the input array snapshot stays unchanged.
-`mir_param_scalar_snapshot` / `mir_confined_scalar_snapshot` are relevant
-source anchors; the exact Full codegen cause is not yet confirmed. This does
-not block MVP tuning or its benchmark comparisons. The permanent golden is
-unchanged to keep the Full failure visible. Evidence:
-`temp/mvp_untyped_tuning_20261109/p6-focused-units.log`; implementation context:
-[MVP tuning checkpoint](impl/Lambda_Impl_MIR_MVP_Language_Parity_and_Untyped.md#1091-untyped-release-tuning-2026-11-09).
-
-Additional reproduction, 2026-11-09 at `84f18b39b`: an inferred local
-`var values = fill(2, 0)` passed to `pn replace_owner(var values) {
-values = ["changed"] }` remains `[0, 0]` in Full MIR; MVP publishes
-`["changed"]` as required by **S9.1.3v2 / S12.2.1v3 / D4.3.1**. This case is
-nonrecursive, so the defect is broader than the original recursive example;
-whether the internal cause is identical remains unconfirmed. The permanent
-fixture/golden is `test/lambda/mvp/mir_mvp_inferred_primitive_loops.ls`.
-Frozen P26 release SHA256
-`39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`
-reproduces the difference before this continuation's changes, and P29 Full
-has the same result. Evidence: `temp/mvp_untyped_tuning_p27/` files
-`mir_mvp_inferred_primitive_loops-p26-production.log` and the corresponding
-MVP/P29 logs. The expected result remains unchanged. This does not block MVP
-tuning or benchmark comparison.
-
-<a id="lr07-54"></a>**LR07-54 · Full MIR accepts a projected string as a writable map · OPEN**
-
-Reproduced 2026-11-09 at `84f18b39b`, on both frozen P26 Full (SHA256
-`39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`)
-and current P81 Full. Run `LAMBDA_EXEC_BACKEND=jit
-LAMBDA_MIR_COMPILER=production <exe> run
-test/lambda/mvp/mir_mvp_inferred_record_paths.ls --no-log`. For
-`{children: ["0123456789abcdefg"]}`, `owner.children[0].value = 3`
-returns a normal result, so the fifth printed line is `false` instead of
-the golden's `true`. Invalid writes must return Error (**S7.1.3v3 /
-D4.3.1**). P81 Full fails under normal, forced and seeded GC; MVP passes
-all three modes. A lost Item tag in the inferred projection path is a
-suspected cause, not yet confirmed in Full. Evidence:
-`temp/mvp_untyped_tuning_goal/p81-fixture-full-control.json` and
-`p81-corrected-fixture-units-2.log`. This does not block MVP tuning. The
-MVP fixture and its Error oracle are retained unchanged; Full correctness
-is not claimed for this case.
-
-Additional reproduction, 2026-11-10 on frozen P26 and P86 Full:
-`test/lambda/mvp/mir_mvp_nested_primitive_stores.ls` preserves the rows on
-negative/NaN/fractional keys and a non-container child, but reports normal
-results instead of Errors on its last two lines. MVP passes the unchanged
-golden under normal/forced/seeded GC. Evidence:
-`temp/mvp_untyped_tuning_goal/p86-nested-full-control.log` and
-`p86-focused-units-2.log`. Whether the rejected indexed-store outcome has
-the same cause as the original projected-map defect is unconfirmed
-(**S7.1.3v3 / S7.7.3**).
-
-<a id="lr07-55"></a>**LR07-55 · Full MIR replaces the outer borrowed owner on a different-owner recursive edge · OPEN**
-
-The same P26/P81 Full controls reproduce this with
-`test/lambda/mvp/mir_mvp_borrowed_tail.ls`: `child_tail(tree, 2)` returns 17,
-but the unchanged `tree.child.child.value` then reads null. Full prints
-`[17, null]`; the required golden is `[17, 17]` (**D5.4.6 / S9.1.3v2 /
-S12.2.1v3**). MVP retains the outer tree under normal, forced and seeded GC;
-Full fails all three. The recursive call passes a local `child` var rather
-than the enclosing var parameter. Incorrect borrow-home forwarding or
-publication is suspected; an identical cause to LR07-53 is unconfirmed.
-Evidence and frozen P26 SHA are as in LR07-54. This does not block MVP
-tuning. The immutable golden remains the MVP acceptance oracle, and Full's
-observed failure remains recorded separately.
-
-<a id="lr07-56"></a>**LR07-56 · Full MIR plain argument observes a later argument's write · OPEN**
-
-Reproduced 2026-11-10 on frozen P26 Full (SHA256
-`39edeb116459fadca1ed71b97461c96a86ef4714a8ea331bdb4227d8d0d19ef7`)
-and current P92 Full. Run `LAMBDA_EXEC_BACKEND=jit
-LAMBDA_MIR_COMPILER=production <exe> run
-test/lambda/mvp/mir_mvp_projection_call_snapshots.ls --no-log`. The last
-call, `earlier(owner, change(owner))`, must keep the first plain argument's
-40-valued snapshot while the second argument writes 60 to the caller's
-owner (**S9.1.2 / S9.1.3v3**). Full prints `[60, 60]`; the unchanged golden
-requires `[40, 60]`. The first four projection/whole-root/local-write/alias
-cases pass both compilers. P92 MVP passes all five under normal, forced and
-seeded GC. The Full call-site capture/evaluation-order interaction is a
-suspected cause, not yet confirmed. Evidence:
-`temp/mvp_untyped_tuning_goal/p92-projection-full-control.log` and
-`p92-focused-units-2.log`. This does not block MVP tuning. The permanent
-MVP oracle is retained; no Full correctness pass is claimed.
-
-<a id="lr07-57"></a>**LR07-57 · MVP MIR-shape assertions disagree with current emission · OPEN (2026-11-10)**
-
-`test_implicit_tail_and_split_observations` expects `lambda_map_set_checked` in
-`updated_box`; `test_guarded_recursive_arrays` expects generic `fn_index` and
-checked-array-store calls in the guarded `place_queen` fallback. The selected
-calls do not appear in current MIR. Both assertions fail identically on the
-saved pre-cleanup executable (SHA256
-`21884b40fcb5392a1747838d91e27628064afb1599a9c1a998f3d95308ff903b`) and the
-helper-retirement release. The expected helpers remain implemented/registered;
-these are not unresolved deleted imports. Whether each oracle should follow
-newer lowering or exposes an optimization defect remains unconfirmed
-(D4.3.1, D7.3.1–D7.3.3). Do not weaken the assertions without tracing the
-relevant guarded path and checking its semantic fallback.
-
-Reproduce with `LAMBDA_TEST_EXE=<candidate> python3 -m unittest test_lambda_mir_mvp.LambdaMirMvpTests.test_implicit_tail_and_split_observations test_lambda_mir_mvp.LambdaMirMvpTests.test_guarded_recursive_arrays`
-from `test/benchmark`. Evidence: `temp/mvp_helper_retirement/tco-final-units.log`
-and `tco-oracle-control-2.log`; the saved pre-cleanup executable is
-`previous-root.exe` in that directory. This does not block dead-helper removal.
-
-The optimization-coverage audit at `cf0caf5c7` runs all 56 Python methods that
-inspect MVP MIR against the installed debug CLI (identity below, LR07-60).
-**47 pass and nine fail.** Besides the two original methods, failures are
-`test_immutable_indirect_keys`, `test_propagation_outcomes`,
-`test_batch_record_and_decimal_paths`, `test_fallible_inline_and_bool_count`,
-`test_nullable_numeric_cast_emission`, `test_modular_array_update` and
-`test_single_use_string_constructor`. These fail structural assertions; where
-semantic/GC checks precede the assertion, they complete successfully. Later
-assertions in the failed method are not qualified. Whether each mismatch is
-a stale oracle or a missed optimization remains unconfirmed. Source lines,
-assertions and raw MIR are preserved in
-`temp/mvp_optimization_coverage/python-emission.log`; the complete review is
-`coverage-report.md` there. No assertion is changed or skipped.
+<a id="lr07-53"></a>LR07-53 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-53>).
 
 
-<a id="lr07-58"></a>**LR07-58 · MVP rejects the u32 regression fixture during representation conversion · OPEN (2026-11-10)**
+<a id="lr07-54"></a>LR07-54 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-54>).
 
-`test/lambda/mvp/mir_mvp_u32.ls:10:23` fails with E501:
-`unsupported representation conversion in mvp_6_main: any (0) from 1 to 8`.
-The failure reproduces on the helper-retirement release and the saved
-pre-cleanup executable (SHA256
-`21884b40fcb5392a1747838d91e27628064afb1599a9c1a998f3d95308ff903b`), under
-normal, forced/poisoned and seeded GC, for both default and explicit MVP.
-This is a compiler admission/lowering failure, not a missing runtime import;
-its cause is not established. Retain the fixture and golden (D4.3.1, D8.2.5).
 
-Reproduce with `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/lambda/mvp/mir_mvp_u32.ls`.
-Evidence: `temp/mvp_helper_retirement/affected-goldens.log` and
-`affected-goldens-control.log`. This predates and does not block dead-helper
-retirement. The encompassing `test_benchmark_expansion_semantics` reports eight
-subcase failures from this single fixture.
+<a id="lr07-55"></a>LR07-55 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-55>).
+
+
+<a id="lr07-56"></a>LR07-56 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-56>).
+
+
+<a id="lr07-57"></a>LR07-57 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-57>).
+
+
+<a id="lr07-58"></a>LR07-58 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-58>).
 
 
 <a id="lr07-59"></a>**LR07-59 · Three execution-profile tests retain Full MIR emission expectations · FIXED (2026-11-10)**
@@ -1224,163 +1041,11 @@ safepoints, including COW site attribution (D6.3.2–D6.3.3). No Full helper or
 profiling event is restored.
 
 
-<a id="lr07-60"></a>**LR07-60 · MIR optimization gates are not fully migrated to MVP · PARTIAL (2026-11-10)**
-
-At clean `cf0caf5c7`, private test controllers built from current source run
-against the installed debug `lambda.exe`, SHA256
-`c6f6766f9e28aacec482d5762b90a4b22be885c21f2ee1eddf37b053a385a3aa`.
-The engine is not rebuilt for this read-only audit. Lambda emission fixtures
-pass **2/279**, Lambda size ratchets **0/12**, optimization contracts **31/55**
-(mixed T0/JS/JIT population), and selected MVP Python emission methods **47/56**.
-Authority: D8.6.1 (optimization regression checks), D6.3 (precise-root safety).
-
-Of 277 emission failures, 270 first fail because the sidecar selects a retired
-`_<name>_#` function, while the artifact contains `mvp_<id>_<name>`; the matcher
-in `test/test_mir_check_helpers.hpp:984` substitutes digits only. Five fail
-instruction assertions and two fail execution/compilation (LR07-61/LR07-63).
-Twenty-three sidecars positively require retired helpers. All 12 Lambda size
-probes retain old selectors or budgets: seven selector failures, four budget
-failures and the LR07-61 crash. These are not useful MVP regression gates until
-their native/fallback intent and costs are reviewed, not merely renamed.
-
-There is also a false-green optimization assertion:
-`LambdaOptProfile.MultiSourceParameterAvoidsWrongShapeGuard` passes at
-`test/test_lambda_opt_gtest.cpp:903`, although its TSV contains no
-`field_attempt` rows. `exec_profile_sum_prefix` returns zero when the retired
-`_print_node_`/`_expression_precedence_` prefixes do not exist, satisfying both
-ceilings. Require an active instrumentation/body control before crediting zero.
-The planned-effect rejection test at line 250 sets
-`LAMBDA_TEST_GC_PLAN_CLAIM`, but no MVP/runtime source reads that knob; it exits
-0 rather than exercising rejection. MVP still verifies emitted effects at
-`mvp_mir.cpp:8725`; the test no longer injects a contradictory plan.
-
-The current 142-method `test/benchmark/test_lambda_mir_mvp.py` is not invoked by
-the build configuration, Makefile, `.github` workflows or `utils`. Its benchmark
-golden method executes typed `*2.ls` variants only; the manifest verifies both
-variants' files exist, not that every untyped kernel is executed. Existing
-erased/untyped kernels give selective coverage. Register a bounded MVP unit
-selection and review typed/untyped mirror and cost-budget coverage. Do not mask
-the failed checks or weaken their semantic controls (S9.1.2–S9.1.3).
-
-Reproduction, exact selectors, raw JSON/logs, passed-family map and controller
-hashes: `temp/mvp_optimization_coverage/coverage-report.md` and
-`final-summary.json`. No baseline, complete GC sweep or timing campaign ran.
-LR07-57/LR07-59 retain the earlier assertion findings; naming failures do not
-explain all counter failures or the implementation defects below.
+<a id="lr07-60"></a>LR07-60 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-60>).
 
 
-Migration update (2026-11-10): explicit MVP selectors, exact callee checks
-independent of ABI prototype suffixes, current helper paths, profiler controls
-and new region fixtures are implemented. The missing-counter false pass now
-requires real emitted bodies and executed member calls. The planned-effect
-claim reaches MVP's verifier and rejects, with successful empty/unmatched-name
-controls (D6.3.2). The 57-method Python selection is registered in the normal
-Lambda gate and correctly reports failures.
+<a id="lr07-61"></a>LR07-61 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-61>).
 
-On private release SHA256
-`15b99367361d4a2f7482c7ded6f2966cf4958721348afc4a5f70c5f55efd1ac1`,
-new fixture/matcher/ABI/parity checks pass 10/10, all 17 Lambda size/frame probes
-pass (plus config), optimization contracts pass 46/56, and selected Python
-methods pass 54/57. The full emission controller passes 97/294: 87/284 fixture
-cases, including all five new fixtures, and 10 other checks. The older 279
-fixtures now pass 82 instead of two; 197 contracts still need further MVP path
-review or missing-optimization work. These failures are retained, not skipped.
-The seven JS budget probe objects remain unchanged; seven selected JS matcher
-regressions pass. MVP cost budgets are a reviewed compiler baseline migration,
-not a claim that Full emission size was preserved (D8.6.1).
-
-The remaining ten optimization contracts cover the immutable consumer crash,
-numeric borrowed-store work, recursive union admission/cache work, string tail
-copying/hyphen appends, checked-tail frame reuse, read-only length roots,
-nullable packed construction and redundant stable-length loads. Three Python
-checks retain missed propagation boxing, conditional modular and string-fusion
-contracts. See the checkpoint above and `temp/mvp_emission_test_update/` for
-exact reports, reviewed budget deltas, source/binary identities and the remaining
-fixture inventory. No baseline or benchmark timing campaign was run.
-
-Follow-up qualification (2026-11-10, base `c2f1d2426` plus the recorded working
-diff): 148 of those 197 emission failures are resolved. The final private
-release controller passes **530/579**, comprising **235/284** MIR contracts,
-**284/284** semantic goldens and 11 other checks. The goldens are now mandatory;
-12 formerly absent files are supplied. All 284 also pass under each forced and
-seeded poison-GC mode. Named-register sequence matching retries ambiguous
-prefixes without leaking bindings or relaxing adjacency. Eight shared JS
-capture controls pass. Lambda size/frame ratchets remain 18/18 with unchanged
-budgets; optimization contracts remain 46/56 with the same ten failures.
-No new whole emission fixture fails. Remaining 49 MIR contracts stay red.
-
-The nullable-scalar conversion, wide-result publication, recursive-array effect
-classification and stale nullable/nested/borrowed record proofs are fixed by
-root cause. Unannotated record mutation succeeds, snapshots remain unchanged,
-and later typed crossings reject invalid data (D3.4.5, S11.4.10). The new record
-controls fail on the preceding host and pass on the fixed host. Current release
-SHA256 is `cb1fac1e77f2b7ac74163f3be0c0b1734446c9289148deca629a738af11ee8ef`.
-See [the follow-up implementation/qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-fixture-follow-up-2026-11-10)
-and `temp/mvp_fixture_followup/record-identities.json`. The shared executable and
-sibling/vendor source remain unchanged; no baseline or timing campaign ran.
-
-Remaining-49 qualification (2026-11-10, base `dced21367`): all 49 retained
-emission failures are resolved. Private release SHA256
-`6bd984ed27c89b1971094c0878fabfdf0c0074857c932f8a22d0208ff16e860c`
-passes **582/582** controller checks: **285/285** emission contracts,
-**285/285** semantic goldens and 12 other checks. Both forced/poisoned and
-seeded/poisoned GC modes pass all 285 goldens. Lambda size/frame checks pass
-18/18 after three reviewed zero-slack budget updates (D8.6.1); shared JS
-capture controls pass 8/8. Native lanes, bounds/record proofs, nullable packed
-construction, scalarization, private builders and safe self-tail reuse are
-implemented rather than accepting generic paths as native witnesses.
-
-Optimization contracts improve to **51/56**, with no new failures. Retained
-failures are LR07-62, one checked borrowed numeric store, 213 recursive union
-admissions (ceiling below 40), 198 open-union cache hits (required above 200)
-and 19,275 hyphen appends (LR07-64). Their assertions remain intact. The current
-release implementation and receipts are in
-[the remaining-49 checkpoint](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-49-contracts-2026-11-10)
-and `temp/mvp_remaining49/complete-*.json`. Python aggregate checks were not
-rerun; this is unit-only qualification, with no baseline or timing campaign.
-The shared executable and sibling/vendor source remain unchanged.
-
-Final-five GTest qualification (2026-11-10, base `b3463551a` plus qualified
-diff): optimization contracts now pass **56/56** and the complete emission
-controller passes **588/588** (288 emission contracts, 288 goldens, 12 other
-checks). Both poison-GC modes pass all 288 goldens and all five repaired
-optimization units. The original 582 cases remain present and pass. Lambda
-emission/frame ratchets pass 18/18 after one reviewed zero-slack budget update
-(D8.6.1). LR07-62 and LR07-64 are resolved on private release SHA256
-`104fdc33ddc9cdefd42b39bb52b37b9c118903b417ed001913fd5e921eba9e83`.
-The remaining cache unit used an impossible Full-era hit lower bound; it now
-pins exact valid-crossing accounting, a 201-admission cap and the existing
-four-miss/no-map-cache/malformed-child controls. Other optimization ceilings
-remain unchanged. See [implementation/qualification](impl/Lambda_Impl_MVP_Optimization_Tests.md#final-five-optimization-units-2026-11-10)
-and `temp/mvp_opt_remaining5/qualified-*.json`. Keep LR07-60 partial for the
-unrerun Python aggregate and other unqualified configurations; the GTest
-emission/optimization gates are green. No baseline or timing campaign ran.
-
-<a id="lr07-61"></a>**LR07-61 · Native MVP wide-scalar tail-forward fixture traps · PARTIAL (2026-11-10)**
-
-On the exact installed debug CLI identified in LR07-60,
-`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=mvp LAMBDA_DISABLE_MIR_CACHE=1
-./lambda.exe test/mir/lambda/scalar_home_tail_forward.ls --no-log` terminates
-with signal 5 on **3/3 isolated runs**. The same script under `interp` succeeds
-3/3. It recursively adds `1i64` and forwards the scalar companion through a tail
-edge. It must return normally while respecting result/home lifetime
-(D6.2.1, D7.4.2). Both the emission and ratchet probes are blocked. No cause,
-owning code defect or regression-introducing commit is established. No vendor
-change or workaround is made. Evidence:
-`temp/mvp_optimization_coverage/isolated-exit-rechecks.json` and the emission/
-ratchet JSON/logs in the same directory. The engine was not rebuilt in this audit.
-
-
-Qualification correction (2026-11-10): the earlier release check credited
-exit zero and a passing size probe, but its value output was malformed.
-`runtime_publish_result` retained a transient pending wide Item without resolving
-its companion. It now resolves that pair before publication (D6.2.1). The
-fixture's new golden requires `5`; native JIT, MIR interpreter and both poison-GC
-modes pass on the release identified above. The size/frame ratchet still passes.
-The unchanged installed debug executable is not evidence about this fix;
-a rebuilt debug host is not qualified here. Keep that residue explicit.
-See [implementation/receipts](impl/Lambda_Impl_MVP_Optimization_Tests.md#remaining-fixture-follow-up-2026-11-10)
-and `temp/mvp_fixture_followup/record-backend-parity.json`.
 
 <a id="lr07-62"></a>LR07-62 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-62>).
 
@@ -1388,51 +1053,11 @@ and `temp/mvp_fixture_followup/record-backend-parity.json`.
 
 <a id="lr07-64"></a>LR07-64 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-64>).
 
-<a id="lr07-65"></a>**LR07-65 · T0 snapshots a plain argument after a later argument mutates its owner · OPEN (2026-11-10)**
+<a id="lr07-65"></a>LR07-65 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-65>).
 
-The new `test/mir/lambda/mvp_call_ownership.ls` calls
-`observe(values, change(values))` with `values = [3]`; `change` writes `9`.
-S9.1.3v3 requires the plain argument's snapshot before a later borrow mutation.
-The correct final line is `[3, 9]`. The rebuilt release JIT matches that golden
-under normal, forced/poisoned and seeded GC; its interpreter prints `[9, 9]`.
-The installed debug interpreter has the same mismatch. Both tiers exit zero,
-so exit status alone would hide it. The other four new fixture goldens match
-the release interpreter. Cause and regression provenance are unconfirmed.
 
-Reproduce: `LAMBDA_EXEC_BACKEND=interp <host> run test/mir/lambda/mvp_call_ownership.ls --no-log`.
-Evidence: `temp/mvp_emission_test_update/new-t0-controls.json`,
-`new-fixture-probes.json` and `final-python.json`. The release identity is in
-the LR07-60 migration update. Keep the expected result and report the T0 defect;
-it does not block MVP JIT emission tests (S9.1.2–S9.1.3v3).
+<a id="lr07-66"></a>LR07-66 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-66>).
 
-<a id="lr07-66"></a>**LR07-66 · Existing JIT/T0 differences block interpreter census refresh · OPEN (2026-11-11)**
-
-The checked-subscript repair passes all 2,216 interpreter goldens, but
-`make interp-sweep ARGS='--jobs 3 --timeout 30'` reports 1,543 matches and six
-differences in its 1,549-row corpus. It refuses list regeneration. Five
-differences reproduce unchanged on the saved original host present at starting
-checkout `8b4fbd521`
-(SHA256 `ee2abf8ce1b8d11639ca210a7618b75d89255546d65200666f7a35ecc40b01fe`):
-
-| Fixture under `test/lambda/` | Interpreter | Eager JIT |
-|---|---|---|
-| `js_array_props_tail_bridge.ls` | golden, final boolean `true` | final boolean `false` |
-| `last_defect_receiver.ls` | golden | compile exit 1 |
-| `ledger_optional_fields.ls` | golden | signal 11 |
-| `proc/interp_var_writeback.ls` | golden | compile exit 1 |
-| `proc/proc_fill_bool_inferred_read.ls` | golden | compile exit 1 |
-
-The sixth row, `conc/proc_handler_fault_after_wait.ls`, differs in the bounded
-sweep but matches in the subsequent isolated before/after probe; its cause is
-unconfirmed. Both probe tiers print `error308` and exit zero in isolation.
-
-Reproduce each stable row with `LAMBDA_EXEC_BACKEND=jit ./lambda.exe <path>`;
-use `run <path>` for `proc/` rows. Repeat with `interp`. Evidence:
-`temp/sweep_full.tsv`, `temp/interp-e501/sweep.log`, and
-`temp/interp-e501/sweep-divergences.json`. Source causes and introducing commits
-remain unconfirmed. These differences violate tier parity (S1.6, D8.3.1),
-block census regeneration, and do not block the interpreter E501 repair.
-The failing oracles and all three generated coverage lists are preserved.
 
 ## 8. Memory management & GC (LR08)
 
@@ -1755,11 +1380,8 @@ The schema root type is chosen by raw text-scanning of the schema source plus a
 hard-coded filename map, with fixed `char cwd_path[1024]`-class path buffers
 that truncate (`ast_validate.cpp:324`ff).
 
-<a id="lr13-4"></a>**LR13-4 · Hard-coded caps with silent truncation · OPEN**
-`MAX_UNION_TYPES = 32` silently drops members of larger unions
-(`validate_pattern.cpp:478`–`482`); the reporting path array is `[100]`
-(`error_reporting.cpp`); `type_info[]` is assumed size 32 so any `TypeId ≥ 32`
-renders `"unknown"` (`validate_helpers.cpp`).
+<a id="lr13-4"></a>LR13-4 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr13-4>).
+
 
 <a id="lr13-5"></a>**LR13-5 · Unenforced options · OPEN**
 `strict_mode`, `allow_unknown_fields` / `--allow-unknown`, and
@@ -1774,37 +1396,16 @@ the fixed-length array check is commented out; warning merging exists
 `item.type_id() == type->type_id` (`:431`–`436`); `format_type_name` returns the
 literal `"unknown"` (`error_reporting.cpp:341`–`344`).
 
-<a id="lr13-8"></a>**LR13-8 · Repeated successful validation of an unproven union member · PARTIAL (re-scoped 2026-09-14)**
-*Resolved portion:* Tune27 removed the measured hot-path regression. A plain
-unary `T[]` crossing now certifies its admitted carrier instead of re-walking
-the whole array; a map whose trusted layout proves a union arm returns through
-`runtime_union_map_rep_proves_cached` (`lambda-eval.cpp:10693`–`:10728`). The
-current release evidence reports 6,615,034 cache hits from 6,615,040
-`prettier_ast` union admissions, and the accepted-path validator cost is gone
-from the former hot rows. `tune27_array_contract_union.ls` passes on interpreter,
-auto, and eager JIT.
+<a id="lr13-8"></a>LR13-8 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr13-8>).
 
-*Residue:* the memo records `MAP_CONTRACT_UNION_MEMBER_PROVEN` only. When a
-dynamic/foreign map has no physical-layout proof but the schema validator still
-accepts it, `runtime_union_map_rep_proves_cached` returns false without
-recording that result; `runtime_type_admit_value` then reaches
-`lambda_type_matches` (`:10842`), which invokes
-`runtime_validate_value_against_type` (`:1665`). The first deep validation is
-required by **D4.2.3**; subsequent crossings of that unchanged accepted value
-still revalidate it. **S11.4.1v3** permits reuse, and **D4.2.5** defines the
-physical-proof condition. The remaining work is a sound negative-proof or
-post-validation certificate for stable untrusted shapes, with invalidation on
-shape transition. [Tune27 M1/T27-1](impl/Lambda_Impl_Tune27 (done).md) records
-why this residue was not measurable on the frozen benchmark rows.
 
-<a id="lr13-7"></a>**LR13-7 · `printf`/emoji output in production paths · OPEN**
-Contrary to CLAUDE.md rule 4, `ast_validate.cpp` has 59 direct `printf` calls
-and `error_reporting.cpp` 6, writing to stdout with emoji rather than through
-`log_*`. Also `error->actual.item` truthiness treats a `0`/null actual as
-"absent", which can misreport a legitimately-null value.
+<a id="lr13-7"></a>LR13-7 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr13-7>).
+
 
 <a id="lr13-9"></a>**LR13-9 · The validator test surface is not a baseline gate · PARTIALLY RESOLVED 2026-09-05 (found 2026-09-03)**
 Filed as LR12-1, an ID the `fetch_response_to_item` record already held; renumbered 2026-09-25 into the validator family.
+
+**2026-11-12 closure recheck (D9.1.1v4, D9.4.6):** current validator hosts are statically linked. The generator omitted Lambda's Radiant adapter from their dependency closure; that archive is now included, with a generator regression. Registered validator checks complete (102 passed, six skipped), and additional native features/input checks pass 61/61 and 14/14. The legacy target also retains 87 disabled cases, and the validator remains outside the ordinary baseline: this record stays PARTIAL for coverage rather than claiming the historical DSO startup failure persists. [Qualification](<impl/Lambda_Impl_Ledger_Ruled_Followup (done).md>).
 
 The hosted `lambda-runtime-full` DSO resolves `ItemNull` and `g_lambda_home`
 from its executable host. Every test target that links that DSO now compiles

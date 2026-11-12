@@ -484,6 +484,7 @@ String* format_error_with_context(ValidationError* error, Pool* pool);
  * Format validation path
  */
 String* format_validation_path(PathSegment* path, Pool* pool);
+void print_validation_path(PathSegment* path, StringBuf* output);
 
 /**
  * Format type name
