@@ -21,7 +21,8 @@ fn valid_dimensions(sheet,axis) {
     }])
 }
 fn valid_sheet(s) any^ => s is map and s.title is string and s.rows is int and s.cols is int and
-    s.rows>=1 and s.rows<=m.MAX_ROWS and s.cols>=1 and s.cols<=m.MAX_COLUMNS and s.cells is array and
+    s.rows>=1 and s.rows<=m.MAX_ROWS and s.cols>=1 and s.cols<=m.MAX_COLUMNS and
+    (s.date1904==null or s.date1904 is bool) and s.cells is array and
     all([for (c in s.cells) valid_cell(c,s)]) and
     len(unique([for (c in s.cells) f.address(c.row,c.col)]))==len(s.cells) and
     valid_dimensions(s,"column") and valid_dimensions(s,"row")

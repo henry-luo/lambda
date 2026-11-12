@@ -5059,7 +5059,7 @@ let workbook = xlsx.convert("budget.xlsx")^
 workbook.sheets[0].cells
 ```
 
-`convert(source)` and `load(source)` return `{title, sheets, metadata,
+`convert(source)` and `load(source)` return `{title, date1904, sheets, metadata,
 diagnostics}`. Each sheet has a title, part path, sparse zero-based cells, column
 width ranges, row heights and diagnostics. Cells expose their coordinates, XLSX
 type, typed value, raw value, formula and formula type, cached-value presence,
@@ -5074,7 +5074,8 @@ editable workbook and opens it through **Open**. It supports at most 50 sheets,
 limits. Imported text, numeric and boolean values, formula source, common
 font/fill/alignment and number styles, and row/column dimensions are retained
 where the demo supports them. Built-in date formats 14–17 display ISO dates
-using the workbook's 1900 or 1904 calendar. Common formulas recalculate in Sheet;
+using the workbook's 1900 or 1904 calendar; formulas retain that workbook date
+system and can reference other sheets. Common formulas recalculate in Sheet;
 otherwise a saved XLSX result is shown until an edit invalidates imported caches.
 
 This is not a lossless XLSX editor. Merged cells, shared/array formula expansion,

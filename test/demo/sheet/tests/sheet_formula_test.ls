@@ -49,7 +49,7 @@ let result=(expr) any^ => f.display(m.current(m.set_value(m.select(data,2,0),exp
  result("=VLOOKUP(20,A1:B2,2,TRUE)")==20,
  result("=VLOOKUP(99,A1:B2,2,FALSE)")=="#N/A",
  result("=COUNTIF(A1:B2,\">=20\")")==3,
- result("=COUNTIF(A1:B2,\"*\")")=="#VALUE!",
+ result("=COUNTIF(A1:B2,\"*\")")==0,
  result("=SUMIF(A1:A2,\">=20\",B1:B2)")==40,
  result("=SUMPRODUCT(A1:A2,B1:B2)")==1400,
  result("=IF(A1<20,\"yes\",\"no\")")=="yes",

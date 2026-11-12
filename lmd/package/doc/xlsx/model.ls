@@ -139,7 +139,7 @@ pub fn read(source) map^ {
         let entries=children(child(book,"sheets"),"sheet")
         let sheets=[for (entry in entries) worksheet(pkg,entry,shared,styles)^];
         if (len(sheets)==0) raise fail("invalid-package","Workbook contains no worksheets",pkg.main)
-        else {title:pkg.metadata.title or "Imported workbook",sheets:sheets,metadata:pkg.metadata,
+        else {title:pkg.metadata.title or "Imported workbook",date1904:date1904,sheets:sheets,metadata:pkg.metadata,
             diagnostics:[for (sheet in sheets,warning in sheet.diagnostics) warning]}
     }
 }

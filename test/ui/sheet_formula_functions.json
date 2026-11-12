@@ -22,6 +22,16 @@
     {"type":"assert_text", "target":{"selector":"#cell-B14"}, "contains":"0"},
     {"type":"assert_text", "target":{"selector":"#cell-C14"}, "contains":"yes"},
     {"type":"click", "target":{"selector":"#undo"}},
-    {"type":"assert_text", "target":{"selector":"#cell-B14"}, "contains":"44000"}
+    {"type":"assert_text", "target":{"selector":"#cell-B14"}, "contains":"44000"},
+    {"type":"click", "target":{"selector":"#cell-C14"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"type", "target":{"selector":"#cell-editor"}, "text":"=XLOOKUP(42500,C5:C10,D5:D10,\"missing\")", "clear":true},
+    {"type":"key_press", "key":"Enter"},
+    {"type":"assert_text", "target":{"selector":"#cell-C14"}, "contains":"44000"},
+    {"type":"click", "target":{"selector":"#cell-D14"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"type", "target":{"selector":"#cell-editor"}, "text":"=COUNTIF(A5:A10,\"*ing\")", "clear":true},
+    {"type":"key_press", "key":"Enter"},
+    {"type":"assert_text", "target":{"selector":"#cell-D14"}, "contains":"2"}
   ]
 }

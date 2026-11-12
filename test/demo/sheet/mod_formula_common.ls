@@ -1,0 +1,41 @@
+// Shared spreadsheet value coercion and comparisons.
+pub fn numeric(value) any^ {
+    if (value is number) value
+    else if (value is bool) (if (value) 1 else 0)
+    else if (value==null or value=="") 0
+    else if (value is string) (float(value) ^ {raise error("#VALUE!")})
+    else raise error("#VALUE!")
+}
+pub fn truth(value) any^ {
+    if (value is bool) value else if (value is number) value!=0
+    else if (value==null or value=="") false
+    else if (value is string and upper(value)=="TRUE") true
+    else if (value is string and upper(value)=="FALSE") false
+    else raise error("#VALUE!")
+}
+pub fn text(value) any^ => if (value==null) "" else if (value is bool) (if (value) "TRUE" else "FALSE") else string(value)
+pub fn range_values(arg) => if (arg is map and arg.kind=="range") arg.values else if (arg is array) arg
+    else if (arg is map and arg.kind=="cellref") [arg.value] else [arg]
+pub fn flatten(args) => [for (arg in args, value in ((range_values(arg)) ^ { [] })) value]
+// Excel aggregates ignore text and booleans in references but coerce direct arguments.
+pub fn argument_numbers(arg,ignore_text) any^ {
+    if (arg is map or arg is array) [for (value in ((range_values(arg)) ^ { [] }) where value is number) value]
+    else if (arg is number) [arg]
+    else if (arg is bool) [if (arg) 1 else 0]
+    else if (arg is string) {
+        let converted=float(arg) ^ { ^ };
+        if (converted is error) (if (ignore_text) [] else raise error("#VALUE!")) else [converted]
+    }
+    else []
+}
+pub fn numbers(args,ignore_text=false) any^ {
+    let parts=[for (arg in args) argument_numbers(arg,ignore_text)^];
+    [for (part in parts,value in part) value]
+}
+pub fn equal(a,b) => if (a is string and b is string) lower(a)==lower(b) else a==b
+pub fn not_equal(a,b) => not equal(a,b)
+pub fn less(a,b) => if (a is string and b is string) lower(a)<lower(b) else a<b
+pub fn greater(a,b) => if (a is string and b is string) lower(a)>lower(b) else a>b
+pub fn less_equal(a,b) => not greater(a,b)
+pub fn greater_equal(a,b) => not less(a,b)
+

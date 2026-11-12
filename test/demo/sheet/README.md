@@ -36,36 +36,43 @@ Ctrl/Cmd-C/X/V and Ctrl/Cmd-B/I/U work on the grid.
 
 Formulas support numbers (including scientific notation), quoted text, `TRUE` and
 `FALSE`, cell references, absolute-reference spelling (`$A$1`), rectangular
-ranges, parentheses, unary signs, `+`, `-`, `*`, `/`, `^`, postfix `%`, text
-concatenation `&`, and comparisons `=`, `<>`, `<`, `<=`, `>` and `>=`.
+ranges, and references to other worksheets such as `Sales!A1` and
+`'Annual Plan'!A1:B4`. Parentheses, unary signs, `+`, `-`, `*`, `/`, `^`,
+postfix `%`, text concatenation `&`, and comparisons `=`, `<>`, `<`, `<=`, `>`
+and `>=` are supported. Operators of equal precedence evaluate left to right,
+as in [Excel](https://support.microsoft.com/en-us/excel/calculation-operators-and-precedence-in-excel).
 Function names are case-insensitive. The supported functions are:
 
 | Category | Functions |
 |---|---|
-| Aggregation | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT` |
-| Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN` |
-| Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE` |
-| Logic and errors | `IF`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA` |
-| Lookup and conditions | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `COUNTIF`, `SUMIF` |
+| Aggregation and criteria | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT`, `SUMSQ`, `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MINIFS`, `MAXIFS` |
+| Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `PI`, `EXP`, `LN`, `LOG`, `LOG10`, `SIN`, `COS`, `TAN`, `ASIN`, `ACOS`, `ATAN`, `ATAN2`, `DEGREES`, `RADIANS`, `QUOTIENT`, `EVEN`, `ODD`, `MROUND`, `FACT`, `COMBIN` |
+| Statistics | `STDEV`, `STDEV.S`, `STDEVP`, `STDEV.P`, `VAR`, `VAR.S`, `VARP`, `VAR.P`, `LARGE`, `SMALL`, `PERCENTILE`, `PERCENTILE.INC`, `QUARTILE`, `QUARTILE.INC`, `RANK`, `RANK.EQ` |
+| Finance | `PMT`, `PV`, `FV`, `NPER`, `NPV` |
+| Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE`, `TEXTJOIN`, `EXACT`, `VALUE`, `REPT`, `CLEAN`, `REPLACE`, `SUBSTITUTE`, `FIND`, `SEARCH` |
+| Dates and times | `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND` |
+| Logic and errors | `IF`, `IFS`, `CHOOSE`, `SWITCH`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA` |
+| Lookup | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `XMATCH` |
 
-For example, `=IF(C5>0,ROUND(C5/3,2),0)` and
-`=IFERROR(VLOOKUP(A1,C1:D10,2,FALSE),0)` combine functions and references.
-Formula parsing builds a graph of callable Lambda closures. Each operator and
-Excel function resolves to a pure Lambda function and is applied with
-`call(f, args)` (**S12.3.4v2**, **D7.2.2**); formula text is never executed as
-Lambda source. `IF`, `IFERROR`, and `IFNA` evaluate only the needed branch.
+For example, `=SUMIFS(Sales!B1:B20,Sales!A1:A20,"East")` and
+`=XLOOKUP(A1,'Annual Plan'!A1:A10,'Annual Plan'!B1:B10,"missing")` combine
+functions and references. Formula parsing builds a graph of callable Lambda
+closures. Each operator and Excel function resolves to a pure Lambda function
+and is applied with `call(f, args)` (**S12.3.4v2**, **D7.2.2**); formula text
+is never executed as Lambda source. Conditional functions evaluate only the
+needed result branch.
 
-This is a bounded Excel subset. Lookup approximate matches expect sorted input;
-`MATCH` accepts one-dimensional ranges and `INDEX` selects a single cell.
-`COUNTIF` and `SUMIF` support literal and numeric comparison criteria; wildcard
-criteria return `#VALUE!`, and `SUMIF` range shapes must match. `ISBLANK` also
-treats empty strings as blank. Rounding digits are bounded to -15 through 15.
-Custom formatting, array/spill formulas, cross-sheet references and the full Excel coercion and
-error rules are not supported. Invalid expressions, missing references, division
-by zero, unknown functions and circular dependencies produce cell errors.
-See Microsoft's [VLOOKUP guide](https://support.microsoft.com/en-us/excel/functions/vlookup-function)
-and [wildcard guide](https://support.microsoft.com/en-us/excel/using-wildcard-characters-in-searches)
-for the corresponding Excel behavior.
+This is a bounded Excel subset. Approximate and binary lookups require sorted
+input; `MATCH`, `XMATCH`, and `XLOOKUP` accept one-dimensional ranges, and
+`INDEX` and `XLOOKUP` return single cells. Criteria support the Excel `*`, `?`,
+and `~` wildcard characters. Multiple criteria ranges must match in shape.
+`DATEVALUE` accepts ISO `YYYY-MM-DD`, and `TIMEVALUE` accepts 24-hour `HH:MM`
+or `HH:MM:SS`; imported 1900 and 1904 date systems are preserved. Rounding
+digits are bounded to -15 through 15. External-workbook references, named and
+structured references, full-column/row references, array/spill formulas,
+custom formats, and the full Excel coercion and error rules are not supported.
+Invalid expressions, missing references, division by zero, unknown functions and
+circular dependencies produce cell errors.
 
 Every edit recalculates the active sheet. A leading apostrophe forces a cell to
 remain text.
@@ -87,8 +94,8 @@ quoted fields. New, Open and Studio example offer
 Save/Discard/Cancel when the workbook has unsaved changes.
 
 This first milestone covers an editable desktop spreadsheet. CSV import,
-cross-sheet references, formula reference
-translation during copy/sort, charts, filters, merged cells and drag fill remain
+formula reference translation during copy/sort, charts, filters, merged cells
+and drag fill remain
 future work. Clipboard and sorting retain formula source text.
 The default grid is 60 × 20; loaded workbooks support at most 100,000 rows,
 1,000 columns and 50 worksheets. The grid generates only visible rows and
@@ -115,7 +122,7 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \

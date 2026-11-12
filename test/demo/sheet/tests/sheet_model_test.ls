@@ -17,7 +17,7 @@ let data=m.paste(m.select(st,0,0),"10\t20\n30\t40")
 let result=(expr)any^ =>f.display(m.current(m.set_value(m.select(data,2,0),expr)),2,0)
 result("=1+2*3")==7
 result("=(1+2)*3")==9
-result("=2^3^2")==512
+result("=2^3^2")==64
 result("=50%*20")==10
 result("=SUM(A1:B2)")==100
 result("=AVERAGE(A1:B2)")==25

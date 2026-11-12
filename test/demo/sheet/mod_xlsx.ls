@@ -21,7 +21,7 @@ fn dimension_sizes(sheet,axis) any^ {
             {key:string(row.row),value:max(27,min(500,round(row.height*4/3)))}];
     map([for (entry in entries) (entry.key,entry.value)])
 }
-fn sheet(src) map^ {
+fn sheet(src,date1904) map^ {
     let invalid=[for (cell in src.cells where cell.row>=m.MAX_ROWS or cell.col>=m.MAX_COLUMNS or len(raw(cell)^)>32767) cell];
     if (len(invalid)>0) raise error("Sheet: XLSX contains a cell outside the supported grid or text limit")
     else {
@@ -31,12 +31,13 @@ fn sheet(src) map^ {
         let cols=max([20,*[for (cell in src.cells) cell.col+1],*[for (col in src.column_widths) min(m.MAX_COLUMNS,col.max+1)]])
         let cells=[for (cell in src.cells) {row:cell.row,col:cell.col,raw:raw(cell)^,style:cell.style,
             *:if (cell.formula!=null and cell.has_value) {cached:cell.value,has_cached:true} else {}}];
-        {title:src.title,rows:rows,cols:cols,cells:cells,column_widths:column_widths,row_heights:row_heights}
+        {title:src.title,rows:rows,cols:cols,cells:cells,column_widths:column_widths,row_heights:row_heights,
+            *:if (date1904) {date1904:true} else {}}
     }
 }
 pub fn convert(source) map^ {
     let result=xlsx.convert(source)^
     if (len(result.sheets)>50) raise error("Sheet: XLSX exceeds the 50 worksheet limit")
-    else {book:{format:"lambda-sheet",version:1,title:result.title,sheets:[for (src in result.sheets) sheet(src)^]},
+    else {book:{format:"lambda-sheet",version:1,title:result.title,sheets:[for (src in result.sheets) sheet(src,result.date1904)^]},
         diagnostics:result.diagnostics}
 }

@@ -9,20 +9,23 @@ pub fn empty_sheet(title="Sheet1") => {title:title,rows:60,cols:20,cells:[]}
 pub fn blank() => {format:"lambda-sheet",version:1,title:"Untitled workbook",sheets:[empty_sheet()]}
 pub fn current(st) => st.book.sheets[st.sheet]
 // The cache belongs to the active workbook revision, never the saved file.
-pub fn prepare(sheet) {
-    let index=map([for (cell in sheet.cells) *[f.address(cell.row,cell.col),cell]])
-    let indexed={*:sheet,cell_index:index};
-    {cells:index,values:map([for (cell in sheet.cells) *[f.address(cell.row,cell.col),f.display(indexed,cell.row,cell.col)]])}
+pub fn prepare(sheet,book=null) {
+    let index=f.index_cells(sheet)
+    // Only cross-sheet formulas need indices for other worksheets.
+    let cross=any([for (cell in sheet.cells where ((starts_with(cell.raw,"=") and contains(cell.raw,"!")) ^ {false})) true])
+    let indexes=if (book==null or not cross) {} else map([for (other in book.sheets) *[other.title,f.index_cells(other)]])
+    let indexed={*:sheet,cell_index:index,workbook:book,workbook_indices:indexes};
+    {cells:index,indices:indexes,values:map([for (cell in sheet.cells) *[f.address(cell.row,cell.col),f.display(indexed,cell.row,cell.col)]])}
 }
 pub fn initial(book=null) {
     let initial_book=book or sample();
-    refresh_stats({book:initial_book,saved:initial_book,sheet:0,row:4,col:4,anchor:{row:4,col:4},cache:prepare(initial_book.sheets[0]),
+    refresh_stats({book:initial_book,saved:initial_book,sheet:0,row:4,col:4,anchor:{row:4,col:4},cache:prepare(initial_book.sheets[0],initial_book),
         viewport:{x:0.0,y:0.0,width:0.0,height:0.0},geometry_key:null,geometry:null,
         has_cached_results:has_cached_results(initial_book),undo:[],redo:[],tab:"Home",editing:false,draft:"",dialog:"",path:"",dialog_path:"",error:null,pending:null,status:"Ready",grid:true,formulas:false,zoom:1.0,
         selection_drag:null,selection_click:false,resize_drag:null})
 }
-pub fn indexed(st) => {*:current(st),cell_index:st.cache.cells}
-pub fn activate(st,index) => if (index==st.sheet) st else refresh_stats({*:st,sheet:index,cache:prepare(st.book.sheets[index])})
+pub fn indexed(st) => {*:current(st),cell_index:st.cache.cells,workbook:st.book,workbook_indices:st.cache.indices}
+pub fn activate(st,index) => if (index==st.sheet) st else refresh_stats({*:st,sheet:index,cache:prepare(st.book.sheets[index],st.book)})
 pub fn dimension_property(axis) => if (axis=="column") "column_widths" else "row_heights"
 pub fn dimension_limits(axis) => if (axis=="column") {min:40,max:1000} else {min:27,max:500}
 pub fn default_dimension(axis,index) => if (axis=="column") (if (index==0) 220 else if (index==1) 150 else 124)
@@ -65,7 +68,7 @@ fn invalidate_imported_results(book) => {*:book,sheets:[for (sheet in book.sheet
 pub fn change(st,book,status="Ready") => if (book==st.book) {*:st,editing:false} else {
     let hist = shared_history.snapshot_record({past:st.undo,future:st.redo},st.book,100,true)
     let next=if (st.has_cached_results) invalidate_imported_results(book) else book;
-    refresh_stats({*:st,book:next,has_cached_results:false,cache:prepare(next.sheets[st.sheet]),undo:hist.past,redo:hist.future,editing:false,status:status})
+    refresh_stats({*:st,book:next,has_cached_results:false,cache:prepare(next.sheets[st.sheet],next),undo:hist.past,redo:hist.future,editing:false,status:status})
 }
 fn replace_sheet(st,sheet,status="Ready") => change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) sheet else s]},status)
 pub fn set_cells(st,cells,status="Ready") => replace_sheet(st,{*:current(st),cells:cells},status)
@@ -95,14 +98,14 @@ pub fn history(st,redo=false) any^ {
         let sheet=min(st.sheet,len(step.value.sheets)-1)
         let rows=step.value.sheets[sheet].rows
         let cols=step.value.sheets[sheet].cols;
-        refresh_stats({*:st,book:step.value,has_cached_results:has_cached_results(step.value),sheet:sheet,cache:prepare(step.value.sheets[sheet]),row:min(st.row,rows-1),col:min(st.col,cols-1),
+        refresh_stats({*:st,book:step.value,has_cached_results:has_cached_results(step.value),sheet:sheet,cache:prepare(step.value.sheets[sheet],step.value),row:min(st.row,rows-1),col:min(st.col,cols-1),
             anchor:{row:min(st.anchor.row,rows-1),col:min(st.anchor.col,cols-1)},editing:false,
             undo:step.history.past,redo:step.history.future,status:if (redo) "Redone" else "Undone"})
     }
 }
 pub fn add_sheet(st) any^ {
     let title = "Sheet" ++ string(len(st.book.sheets)+1)
-    let next = change(st,{*:st.book,sheets:[*st.book.sheets,empty_sheet(title)]},"Sheet added");
+    let next = change(st,{*:st.book,sheets:[*st.book.sheets,{*:empty_sheet(title),*:if (current(st).date1904==true) {date1904:true} else {}}]},"Sheet added");
     select(activate(next,len(st.book.sheets))^,0,0)
 }
 pub fn paste(st,text) {
@@ -134,7 +137,7 @@ fn refresh_stats(st) => {*:st,selection_stats:calculate_stats(st)}
 pub fn stats(st) => st.selection_stats
 fn sum_start(sheet,row,col) any^ => if (row<0 or not (f.display(sheet,row,col) is number)) row+1 else sum_start(sheet,row-1,col)
 pub fn autosum(st) any^ {
-    let start=sum_start(current(st),st.row-1,st.col)
+    let start=sum_start(indexed(st),st.row-1,st.col)
     if (start==st.row) {*:st,status:"Select an empty cell below a column of numbers"}
     else set_value(st,"=SUM(" ++ f.address(start,st.col) ++ ":" ++ f.address(st.row-1,st.col) ++ ")")
 }

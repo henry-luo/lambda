@@ -20,6 +20,7 @@ pub fn position(text) map^ {
     }
 }
 // A prepared sheet supplies an address index so visible cells and references avoid scans.
+pub fn index_cells(sheet) => map([for (cell in sheet.cells) *[address(cell.row,cell.col),cell]])
 pub fn indexed_cell(sheet,key) => sheet.cell_index[key]
 pub fn cell(sheet,row,col) any^ => if (sheet.cell_index!=null) indexed_cell(sheet,address(row,col)^)
     else [for (c in sheet.cells where c.row==row and c.col==col) c][0]
@@ -27,7 +28,11 @@ pub fn cell(sheet,row,col) any^ => if (sheet.cell_index!=null) indexed_cell(shee
 // Cells and ranges stay deferred until the compiled closure is called.
 fn reference(sheet,key,path) any^ {
     let p=position(key)^
-    if (p.row>=sheet.rows or p.col>=sheet.cols) raise error("#REF!") else value(sheet,p.row,p.col,path)^
+    if (p.row>=sheet.rows or p.col>=sheet.cols) raise error("#REF!") else {
+        let source=cell(sheet,p.row,p.col)
+        let computed=value(sheet,p.row,p.col,path)^;
+        {kind:"cellref",value:computed,blank:source==null or source.raw==""}
+    }
 }
 fn range_value(sheet,start,end,path) any^ {
     let a=position(start)^
@@ -40,13 +45,28 @@ fn range_value(sheet,start,end,path) any^ {
             values:[for (r in min(a.row,b.row) to max(a.row,b.row), c in min(a.col,b.col) to max(a.col,b.col)) value(sheet,r,c,path)^]}
     }
 }
+// A compiled reference resolves against the current workbook without storing it in saved cells.
+fn target_sheet(sheet,title) any^ {
+    if (title==null or lower(title)==lower(sheet.title or "")) sheet
+    else if (sheet.workbook==null) raise error("#REF!")
+    else {
+        let matches=[for (other in sheet.workbook.sheets where ((lower(other.title)==lower(title)) ^ {false})) other];
+        if (len(matches)!=1) raise error("#REF!") else {
+            let target=matches[0]
+            let existing=sheet.workbook_indices[target.title];
+            {*:target,workbook:sheet.workbook,workbook_indices:sheet.workbook_indices,
+                cell_index:if (existing==null) index_cells(target) else existing}
+        }
+    }
+}
 fn constant_plan(v) => (sheet,path) => v
-fn reference_plan(key) => (sheet,path) any^ => {kind:"cellref",value:reference(sheet,key,path)^}
-fn range_plan(start,end) => (sheet,path) any^ => range_value(sheet,start,end,path)^
+fn reference_plan(key,title=null) => (sheet,path) any^ => reference(target_sheet(sheet,title)^,key,path)^
+fn range_plan(start,end,title=null) => (sheet,path) any^ => range_value(target_sheet(sheet,title)^,start,end,path)^
 fn thunk(plan,sheet,path) => () any^ => call(plan,[sheet,path])^
 fn scalar(value) => if (value is map and value.kind=="cellref") value.value else value
 fn invoke(name,plans,sheet,path) any^ {
-    let entry=ops.FUNCTIONS[name];
+    let resolved=if (starts_with(name,"_XLFN.")) slice(name,6) else name
+    let entry=ops.FUNCTIONS[resolved];
     if (entry==null) raise error("#NAME?")
     else if (len(plans)<entry.min or len(plans)>entry.max) raise error("#VALUE!")
     else if (entry.lazy=="if") {
@@ -58,9 +78,20 @@ fn invoke(name,plans,sheet,path) any^ {
     else if (entry.lazy=="iferror")
         call(entry.target,[thunk(plans[0],sheet,path),thunk(plans[1],sheet,path)])^
     else if (entry.lazy=="inspect") call(entry.target,[thunk(plans[0],sheet,path)])^
+    else if (entry.lazy=="thunks") call(entry.target,[for (plan in plans) thunk(plan,sheet,path)])^
+    else if (entry.lazy=="selector") {
+        let first=scalar(call(plans[0],[sheet,path])^)
+        let args=[first,*[for (i,plan in plans where i>0) thunk(plan,sheet,path)]];
+        call(entry.target,args)^
+    }
+    else if (entry.lazy=="xlookup") {
+        let args=[for (i,plan in plans) if (i==3) thunk(plan,sheet,path) else scalar(call(plan,[sheet,path])^)];
+        call(entry.target,args)^
+    }
     else {
         let args=[for (plan in plans) call(plan,[sheet,path])^];
-        call(entry.target,if (entry.references==true) args else [for (arg in args) scalar(arg)])^
+        let normalized=if (entry.references==true) args else [for (arg in args) scalar(arg)];
+        call(entry.target,if (entry.date_context==true) [sheet.date1904==true,*normalized] else normalized)^
     }
 }
 fn call_plan(name,plans) => (sheet,path) any^ => invoke(name,plans,sheet,path)^
@@ -68,7 +99,7 @@ fn call_plan(name,plans) => (sheet,path) any^ => invoke(name,plans,sheet,path)^
 fn digits_end(source,at) any^ => if (at<len(source) and digit(slice(source,at,at+1))) digits_end(source,at+1)^ else at
 fn word_end(source,at,numeric) any^ => if (at>=len(source)) at else {
     let ch=slice(source,at,at+1);
-    if (digit(ch) or (if (numeric) ch=="." else letter(ch) or ch=="$" or ch=="_")) word_end(source,at+1,numeric)^
+    if (digit(ch) or (if (numeric) ch=="." else letter(ch) or ch=="$" or ch=="_" or ch==".")) word_end(source,at+1,numeric)^
     else if (numeric and upper(ch)=="E") {
         let sign=if (contains(["+","-"],slice(source,at+1,at+2))) 1 else 0
         let first=at+1+sign
@@ -76,13 +107,13 @@ fn word_end(source,at,numeric) any^ => if (at>=len(source)) at else {
         if (end==first) at else end
     } else at
 }
-fn quoted(source,at,text="") map^ {
+fn quoted(source,at,delimiter,text="") map^ {
     if (at>=len(source)) raise error("#VALUE!") else {
         let ch=slice(source,at,at+1);
-        if (ch=="\"") {
-            if (slice(source,at+1,at+2)=="\"") quoted(source,at+2,text ++ "\"")^
+        if (ch==delimiter) {
+            if (slice(source,at+1,at+2)==delimiter) quoted(source,at+2,delimiter,text ++ delimiter)^
             else {value:text,at:at+1}
-        } else quoted(source,at+1,text ++ ch)^
+        } else quoted(source,at+1,delimiter,text ++ ch)^
     }
 }
 fn tokens(source,at=0) array^ {
@@ -93,12 +124,16 @@ fn tokens(source,at=0) array^ {
         let pair=slice(source,at,at+2);
         if (contains(" \n\t\r",ch)) tokens(source,at+1)^
         else if (ch=="\"") {
-            let result=quoted(source,at+1)^;
+            let result=quoted(source,at+1,"\"")^;
             [{literal:result.value},*tokens(source,result.at)^]
         }
+        else if (ch=="'") {
+            let result=quoted(source,at+1,"'")^;
+            [{sheet:result.value},*tokens(source,result.at)^]
+        }
         else if (contains(["<=",">=","<>"],pair)) [pair,*tokens(source,at+2)^]
-        else if (contains("+-*/^%():,=<> &",ch)) [ch,*tokens(source,at+1)^]
-        else if (digit(ch) or ch=="." or letter(ch) or ch=="$") {
+        else if (contains("+-*/^%():,=<> &!",ch)) [ch,*tokens(source,at+1)^]
+        else if (digit(ch) or ch=="." or letter(ch) or ch=="$" or ch=="_") {
             let end=word_end(source,at+1,digit(ch) or ch==".");
             [upper(slice(source,at,end)),*tokens(source,end)^]
         }
@@ -106,11 +141,12 @@ fn tokens(source,at=0) array^ {
     }
 }
 // Each parser production constructs closures; execution needs no formula AST walker.
-fn arguments(t,at,depth,args=[]) map^ {
-    if (t[at]==")") {plans:args,at:at+1}
+fn arguments(t,at,depth,args=[],after_comma=false) map^ {
+    if (t[at]==")") {plans:if (after_comma) [*args,constant_plan(null)] else args,at:at+1}
+    else if (t[at]==",") arguments(t,at+1,depth,[*args,constant_plan(null)],true)^
     else {
         let part=expression(t,at,depth+1)^
-        if (t[part.at]==",") arguments(t,part.at+1,depth,[*args,part.plan])^
+        if (t[part.at]==",") arguments(t,part.at+1,depth,[*args,part.plan],true)^
         else if (t[part.at]==")") {plans:[*args,part.plan],at:part.at+1}
         else raise error("#VALUE!")
     }
@@ -124,6 +160,16 @@ fn primary(t,at,depth) map^ {
     else if (t[at]=="(") {
         let part=expression(t,at+1,depth+1)^;
         if (t[part.at]!=")") raise error("#VALUE!") else {*:part,at:part.at+1}
+    }
+    else if (t[at+1]=="!") {
+        let title=if (t[at] is map) t[at].sheet else t[at]
+        let start=t[at+2]
+        let end=if (t[at+3]==":") t[at+4] else null;
+        if (title==null or start==null or (t[at+3]==":" and end==null)) raise error("#REF!") else {
+            let checked_start=position(start)^
+            let checked_end=if (end!=null) position(end)^ else null;
+            {plan:if (end==null) reference_plan(start,title) else range_plan(start,end,title),at:at+(if (end==null) 3 else 5)}
+        }
     }
     else if (t[at] is map) {plan:constant_plan(t[at].literal),at:at+1}
     else if (t[at+1]=="(") {
@@ -148,14 +194,15 @@ fn primary(t,at,depth) map^ {
 fn percent_tail(t,left,depth) map^ => if (depth>64) raise error("#VALUE!")
     else if (t[left.at]=="%") percent_tail(t,{plan:call_plan("%",[left.plan]),at:left.at+1},depth+1)^
     else left
-fn power(t,at,depth) map^ {
-    let left=percent_tail(t,primary(t,at,depth+1)^,depth+1)^
-    if (t[left.at]=="^") {
-        let right=power(t,left.at+1,depth+1)^;
-        {plan:call_plan("^",[left.plan,right.plan]),at:right.at}
+// Excel evaluates operators of equal precedence from left to right.
+fn power_tail(t,left,depth) map^ {
+    if (depth>64) raise error("#VALUE!")
+    else if (t[left.at]!="^") left else {
+        let right=percent_tail(t,primary(t,left.at+1,depth+1)^,depth+1)^;
+        power_tail(t,{plan:call_plan("^",[left.plan,right.plan]),at:right.at},depth+1)^
     }
-    else left
 }
+fn power(t,at,depth) map^ => power_tail(t,percent_tail(t,primary(t,at,depth+1)^,depth+1)^,depth+1)^
 fn product_tail(t,left,depth) map^ {
     let op=t[left.at]
     if (op!="*" and op!="/") left
@@ -190,7 +237,7 @@ fn evaluate(sheet,raw,path) any^ {
     }
 }
 pub fn value(sheet,row,col,path=[]) any^ {
-    let key = address(row,col)
+    let key = lower(sheet.title or "") ++ "!" ++ address(row,col)
     let raw = cell(sheet,row,col).raw or ""
     if (contains(path,key) or len(path)>64) raise error("#CYCLE!")
     else if (starts_with(raw,"=")) {

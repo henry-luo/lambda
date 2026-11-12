@@ -48,7 +48,7 @@ pub pn command(st,id,owner) map^ {
         }
         if (st.dialog=="export") {
             if (files.is_xlsx(path)^) { return {*:st,status:"Export CSV to a .csv file; XLSX export is not supported",error:"XLSX export is not supported"} }
-            files.export_csv(m.current(st),path)^
+            files.export_csv(m.indexed(st),path)^
             return {*:st,dialog:"",status:"Exported " ++ path}
         }
         if (files.is_xlsx(path)^) { return {*:st,status:"Save as a .sheet.json file; XLSX export is not supported",error:"Save as a .sheet.json file; XLSX export is not supported"} }
