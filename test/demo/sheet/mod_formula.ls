@@ -120,16 +120,23 @@ fn sum_tail(sheet,t,left,path,depth) map^ {
     }
 }
 fn expression(sheet,t,at,path,depth) map^ => sum_tail(sheet,t,product(sheet,t,at,path,depth+1)^,path,depth+1)^
+fn evaluate(sheet,raw,path) any^ {
+    let t = tokens(slice(raw,1))^
+    let result = expression(sheet,t,0,path,0)^
+    if (result.at!=len(t) or result.value is array) raise error("#VALUE!")
+    else if (result.value is nan or result.value is inf or result.value == -inf) raise error("#NUM!")
+    else result.value
+}
 pub fn value(sheet,row,col,path=[]) any^ {
     let key = address(row,col)
     let raw = cell(sheet,row,col).raw or ""
     if (contains(path,key) or len(path)>64) raise error("#CYCLE!")
     else if (starts_with(raw,"=")) {
-        let t = tokens(slice(raw,1))^
-        let result = expression(sheet,t,0,[*path,key],0)^
-        if (result.at!=len(t) or result.value is array) raise error("#VALUE!")
-        else if (result.value is nan or result.value is inf or result.value == -inf) raise error("#NUM!")
-        else result.value
+        let result = evaluate(sheet,raw,[*path,key]) ^ { ^ };
+        // Saved XLSX results are a display fallback until the workbook is edited.
+        if (result is error and cell(sheet,row,col).has_cached==true and
+            (result.message=="#NAME?" or result.message=="#VALUE!" or result.message=="#REF!")) cell(sheet,row,col).cached
+        else if (result is error) raise result else result
     }
     else if (starts_with(raw,"'")) slice(raw,1)
     else if (trim(raw)=="") ""

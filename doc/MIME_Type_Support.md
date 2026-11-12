@@ -45,7 +45,7 @@ runtime, not merely opening a read-only preview.
 | **Java properties** — `text/x-java-properties`, `application/x-java-properties` | ✅ | ✅ | ◐ property preview | — |
 | **SQLite** — `application/x-sqlite3` | ✅ database input/API | ◐ database writes use SQLite APIs | — | ◐ query/transaction APIs |
 | **Mark** — `text/x-mark`, `application/x-mark`; `.mark` | ✅ | ✅ | ✅ | — |
-| **XLSX** — `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | ◐ ZIP package inspection; no workbook reader | ◐ chart/spreadsheet export | ◐ package inspection | — |
+| **XLSX** — `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | ◐ `lambda.doc.xlsx` workbook import | ◐ chart spreadsheet export | ◐ Sheet demo import | ◐ edit imported workbook; save as `.sheet.json` |
 | **ZIP / JAR / WAR** — `application/zip`, `application/java-archive` | ✅ archive tree | ✅ ZIP writer | ◐ file-browser inspection | — |
 | **7z** — `application/x-7z-compressed` | ✅ archive tree | — no 7z writer | ◐ file-browser inspection | — |
 | **TAR and compressed TAR** — `application/x-tar`; `.tgz`, `.tbz2`, `.txz`, `.tzst` | ✅ archive tree | — no TAR writer | ◐ file-browser inspection | — |

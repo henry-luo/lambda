@@ -50,12 +50,23 @@ division by zero, unknown functions and circular dependencies produce cell error
 Formula source is parsed as spreadsheet expressions; it is never executed as
 Lambda code. A leading apostrophe forces a cell to remain text.
 
-Save and Open use editable `.sheet.json` workbooks, preserving formulas, cell
-styles, row heights, column widths and every worksheet. Writes are atomic. Export CSV writes the active
-sheet's calculated values with quoted fields. New, Open and Studio example offer
+Open accepts `.xlsx` and editable `.sheet.json` workbooks. XLSX imports include multiple
+worksheets, values, formula source, common cell styles and dimensions. Built-in
+Excel date formats 14–17 display as ISO dates using the workbook’s 1900 or 1904
+calendar. Open reports import warnings in the status bar. Unsupported formulas
+show their saved XLSX result when available; any edit invalidates all imported
+formula results, after which Sheet shows its calculation errors for formulas it
+cannot evaluate. Shared and array formulas, merged cells, drawings, many styles,
+custom date/time formats and Excel formula semantics are not fully supported.
+
+Save writes an editable `.sheet.json` workbook, preserving the supported formulas,
+cell styles, row heights, column widths and worksheets. XLSX import does not enable
+XLSX export, and the save dialog does not overwrite an `.xlsx` file with JSON.
+Writes are atomic. Export CSV writes the active sheet’s calculated values with
+quoted fields. New, Open and Studio example offer
 Save/Discard/Cancel when the workbook has unsaved changes.
 
-This first milestone covers an editable desktop spreadsheet. XLSX/CSV import,
+This first milestone covers an editable desktop spreadsheet. CSV import,
 cross-sheet references, formula reference
 translation during copy/sort, charts, filters, merged cells and drag fill remain
 future work. Clipboard and sorting retain formula source text.
@@ -95,6 +106,7 @@ Verification:
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_handle.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_files.json
+./lambda.exe demo sheet --headless --event-file test/ui/sheet_xlsx.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_resize.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_virtual_grid.json
