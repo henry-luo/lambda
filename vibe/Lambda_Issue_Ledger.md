@@ -5202,3 +5202,28 @@ sequence. Reproduction and results:
 `../lambda-input/temp/expl3-script/seq-api-before.ls/.out`. A port must retain
 TeX meaning comparison, expandable/protected behavior, group scope, token
 identity and source mapping.
+
+## Failed AST-dump cleanup after a rejected view initializer — 2026-11-12
+
+<a id="lr02-38"></a>**LR02-38 · Failed `--emit-ast-dump` retains native system allocations · OPEN**
+
+**Observed:** on Lambda `3ffe3477a` plus the sync demo, this standalone fixture
+under `temp/sync-demo/invalid-view.ls` reproduces the shutdown report:
+
+```lambda
+fn failing() any^ => raise error("invalid initializer")
+view <sample_app> state st:failing()^, worker:null { <body> }
+apply(<sample_app>)
+```
+
+Run `./lambda.exe --no-log --emit-ast-dump temp/sync-demo/invalid-view.ls`.
+AST construction correctly fails, but memtrack then reports **four system
+allocations / 441 bytes** still live. The original imported sync-window variant
+reported four allocations / 543 bytes. Ordinary script execution diagnoses
+E208/E228; the AST-dump path only prints the generic construction failure before
+the leak report. Expected: release inspection/diagnostic resources on failure.
+
+Production front end: **D8.1.1**. The allocation owner and cause are
+**unconfirmed**. This does not block valid sync demo execution or qualification;
+no compiler workaround or diagnostic suppression was added. Evidence:
+`temp/sync-demo/invalid-view.log`, `invalid-view-run.log`, `ui-ast.log`.

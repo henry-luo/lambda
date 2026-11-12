@@ -10,7 +10,8 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 gate.AREA = ROOT / "temp/sync-connectivity" / ("gc" if "--gc" in sys.argv else "goldens") / gate.TIER
 gate.GC = ["test/lambda/proc/sync_rtc.ls", "test/lambda/proc/sync_rendezvous.ls",
-           "test/lambda/proc/sync_connectivity_protocol.ls", "test/lambda/proc/sync_stream_cancel.ls"]
+           "test/lambda/proc/sync_connectivity_protocol.ls", "test/lambda/proc/sync_stream_cancel.ls",
+           "test/lambda/proc/sync_pairing.ls", "test/lambda/proc/sync_agent_recovery.ls"]
 
 if __name__ == "__main__":
     # Existing repository goldens use shared fixed fixture paths across tiers.

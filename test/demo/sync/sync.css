@@ -1,0 +1,32 @@
+body { margin:0; background:#f3f6fa; color:#233349; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:15px; }
+#sync-demo { max-width:720px; margin:0 auto; padding:28px 28px 20px; }
+header { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; }
+.brand { display:flex; align-items:center; gap:10px; font-size:18px; font-weight:650; }
+.sync-mark { width:32px; height:32px; color:#2469d5; }
+.badge { color:#64748b; font-size:12px; border:1px solid #d5deea; border-radius:20px; padding:5px 10px; }
+.card { background:white; border:1px solid #e0e6ee; border-radius:20px; padding:36px; box-shadow:0 12px 40px #213a5c0a; }
+.hero { display:flex; align-items:center; justify-content:center; width:72px; height:72px; background:#edf4ff; border-radius:20px; margin-bottom:24px; }
+.hero .sync-mark { width:48px; height:48px; }
+h1 { font-size:28px; line-height:1.25; margin:0 0 12px; letter-spacing:-0.5px; }
+p { line-height:1.6; }
+.description { color:#68788b; margin:0 0 24px; }
+.setup { max-width:440px; }
+.field { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; font-size:13px; font-weight:600; }
+input { width:100%; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:9px; padding:12px 14px; font:inherit; font-size:16px; background:white; color:#233349; }
+input:focus { outline:2px solid #84b4ff; border-color:#2469d5; }
+.actions { display:flex; flex-wrap:wrap; gap:10px; margin:24px 0 8px; }
+button { border-radius:9px; padding:11px 16px; font:inherit; font-size:14px; font-weight:600; cursor:pointer; border:1px solid #d5deea; background:#fff; color:#334155; }
+button.primary { background:#2469d5; border-color:#2469d5; color:#fff; }
+button:hover { background:#f0f5ff; }
+button.primary:hover { background:#1d58b4; }
+.identity { display:flex; align-items:center; gap:14px; color:#68788b; margin:18px 0; }
+.identity strong { color:#233349; }
+#pairing-code { padding:18px 12px; background:#f1f5fb; border:1px solid #dce6f4; border-radius:12px; font-family:monospace; font-size:24px; letter-spacing:1px; text-align:center; user-select:text; }
+.caption,.footnote { color:#7b8999; font-size:12px; }
+footer { border-top:1px solid #edf0f4; margin-top:28px; padding-top:20px; display:flex; flex-direction:column; gap:8px; color:#8a96a5; font-size:12px; }
+footer code { color:#53657b; font-size:13px; overflow-wrap:anywhere; }
+.footnote { text-align:center; margin-top:20px; }
+#sync-error { color:#ad3c31; background:#fff3f0; padding:12px 14px; border-radius:8px; font-size:14px; }
+.waiting { display:flex; align-items:center; gap:10px; color:#68788b; margin:30px 0; }
+.pulse { width:9px; height:9px; border-radius:50%; background:#2469d5; }
+@media (max-width:520px) { #sync-demo { padding:18px 14px; } .card { padding:24px 20px; } h1 { font-size:24px; } #pairing-code { font-size:18px; letter-spacing:0; } }

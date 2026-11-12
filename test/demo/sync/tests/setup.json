@@ -1,0 +1,128 @@
+{
+  "name": "Sync: first-run form, user ID, pairing navigation and validation",
+  "html": "test/demo/sync/sync.ls",
+  "viewport": {
+    "width": 880,
+    "height": 720
+  },
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sync-demo"
+      },
+      "attribute": "data-mode",
+      "equals": "setup",
+      "assert_timeout": 10000
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#user-id"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "button[data-action=create]"
+      },
+      "count": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/sync-demo/setup.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-action=create]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sync-demo"
+      },
+      "attribute": "data-mode",
+      "equals": "error",
+      "assert_timeout": 10000
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#sync-error"
+      },
+      "equals": "Enter a user ID of 1 to 128 characters."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-action=setup]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#user-id"
+      },
+      "text": "lan-demo",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-action=show-join]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sync-demo"
+      },
+      "attribute": "data-mode",
+      "equals": "join"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#pair-code"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#user-id"
+      },
+      "equals": "lan-demo"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/sync-demo/join.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button[data-action=back]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sync-demo"
+      },
+      "attribute": "data-mode",
+      "equals": "setup"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#pair-code"
+      },
+      "count": 0
+    }
+  ]
+}

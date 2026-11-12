@@ -541,11 +541,21 @@ Debugging: `./log.txt` holds the runtime trace, debug builds dump JIT'd MIR to `
 
 ## 7. Common single-test commands
 
+### Sync demo
+
+`lambda demo sync` opens the [LAN sync demo](demo/sync/README.md).
+`python3 test/demo/sync/test_sync.py` checks real automatic pairing, external
+file sync, offline moves, restart without pairing and spent-code rejection.
+`RadiantViewTest.SyncDemoFirstRunAndPairingForm` checks first-run UI and validation
+under forced/poisoned GC with isolated paths and no Keychain writes.
+The `sync_pairing` and `sync_agent_recovery` procedural goldens pin protocol
+rejections and unfinished-install startup recovery.
+
 ### Sync discovery and connectivity
 
 `python3 test/sync_connectivity/test_goldens.py` reuses exact sync goldens and
-serializes shared fixture paths across tiers. `--gc` selects four focused
-RTC/signaling/binding/cancellation cases with the existing 300-second budget.
+serializes shared fixture paths across tiers. `--gc` selects six focused
+RTC/signaling/binding/cancellation/pairing/restart cases with the existing 300-second budget.
 `test_connectivity.py` runs private Bonjour discovery, large binary DataChannel
 transfer and interrupted-process recovery. `test_signaling.py` adds actual S3,
 fresh finite function invocations, withheld-answer fallback, direct recovery and

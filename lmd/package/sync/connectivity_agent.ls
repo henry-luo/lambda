@@ -26,6 +26,7 @@ fn options(value) any^ {
 }
 pn report(options, current) any^ {
     if (options.status != null) output(format(current,'json')^,options.status,{format:'text',atomic:true})^
+    if (options.observer != null) options.observer(current)^
     return current
 }
 pn coverage(handle, config) any^ {
@@ -33,7 +34,7 @@ pn coverage(handle, config) any^ {
 }
 pn authorized(directory, key, credentials, id) any^ { return agent.current_member(directory,key,credentials,id)^ }
 pn exchange(directory, key, pending, options, current, config) any^ {
-    let opened = agent.open_agent(directory,key)^
+    let opened = agent.resume_agent(directory,key)^
     let socket = wire.channel(pending.handle)
     let authorize = pn (id)=> { return authorized(directory,key,opened.credentials,id)^ }
     let observe = pn (progress)=> { report(options,{*:current,phase:'syncing',connected:true,
@@ -84,14 +85,14 @@ pn advance(credentials, config, pending) any^ {
     return {pending:selected,ready:status.open}
 }
 
-pub pn run(directory, key, config=null, settings={}) any^ {
+pub pn run(directory, key, config=null, settings={}, observer=null) any^ {
     let selected = options(settings)^
-    let initial = agent.open_agent(directory,key)^
+    let initial = agent.resume_agent(directory,key)^
     local.scan(initial.handle)^
     let listener = peer.listener(selected.port,selected.bind)^
     let advertisement = if (selected.mdns) connectivity.advertise(initial.credentials,listener.port) ^ { ^ } else null
     let advertised = if (advertisement is error) false else advertisement != null
-    let diagnostics = {*:selected,advertising:advertised,
+    let diagnostics = {*:selected,observer:observer,advertising:advertised,
         discovery_error:if (advertisement is error) advertisement.code else null}
     let worker = start(loop,[listener,directory,key,config,diagnostics])
     let result: any^ = wait(worker)
@@ -120,7 +121,7 @@ pn loop(listener, directory, key, config, options) any^ {
         fallback_reason:null,error_code:null,cloud_saved:false,progress:null,capabilities:capabilities}
     while (options.rounds == 0 or count < options.rounds) {
         if (options.stop_after > 0 and current.sessions >= options.stop_after) { break }
-        let opened = agent.open_agent(directory,key)^
+        let opened = agent.resume_agent(directory,key)^
         if (pending == null) local.scan(opened.handle)^
         let credentials = opened.credentials
         current = {*:current,cloud_saved:coverage(opened.handle,config)^}
@@ -240,6 +241,6 @@ pn loop(listener, directory, key, config, options) any^ {
         count = count+1
     }
     if (pending != null) rtc.close(pending.handle)^
-    let final = agent.open_agent(directory,key)^
+    let final = agent.resume_agent(directory,key)^
     return report(options,{*:current,phase:'stopped',cloud_saved:coverage(final.handle,config)^})^
 }

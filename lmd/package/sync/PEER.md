@@ -16,6 +16,9 @@ task-owned WebSocket transport (D11.1.2, S13.1.2v2). Bound security clients cann
 acquire the new unbrokered listener; this is a trusted native CLI host profile
 under D11.2.1–D11.2.4.
 
+For a first LAN trial, [`lambda demo sync`](../../../test/demo/sync/README.md)
+provides a window, automatic one-time-code enrollment and `~/lambda-sync`.
+
 ## Run the agent
 
 Each device needs an existing working folder and a separate private agent
@@ -220,7 +223,7 @@ See [maintenance](MAINTENANCE.md). Older offers remain readable, but all writers
 and the cloud handler must upgrade before enabling retention (D11.1.2, D11.2.3).
 
 The large-file profile uses manifest v2, paged descriptors and authenticated raw
-chunk objects. Upgrade all participating clients before using it. The agent scans
+chunk objects. Upgrade all participating clients before using it. The agent resumes an interrupted installation, then scans
 once before publishing listener readiness and reuses exact unchanged-file
 observations on subsequent scans. Connection deadlines remain unchanged; bulk
 installation streams chunks through the native atomic writer (D11.1.2).

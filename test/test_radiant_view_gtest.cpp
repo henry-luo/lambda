@@ -504,6 +504,7 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
         EXPECT_EQ(result.exit_code, strcmp(name, "unknown-demo") == 0 ? 1 : 0) << output;
         EXPECT_NE(strstr(output, "Usage: lambda demo [name] [view options]"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/tetris/tetris.ls"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/sync/sync.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/marble-drop/marble-drop.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/sentence-game/sentence-game.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/scene3d/index.html"), nullptr) << output;
@@ -517,6 +518,27 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
         if (strcmp(name, "unknown-demo") == 0) EXPECT_NE(strstr(output, "unknown demo 'unknown-demo'"), nullptr) << output;
         shell_result_free(&result);
     }
+}
+
+TEST(RadiantViewTest, SyncDemoFirstRunAndPairingForm) {
+    RadiantViewLaunch launch = {};
+    launch.label = "sync_demo_setup"; launch.page = "sync"; launch.command = "demo";
+    launch.event_path = "test/demo/sync/tests/setup.json";
+    ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+    char profile[1200], folder[1200];
+    snprintf(profile, sizeof(profile), "%s/temp/profile", launch.cwd);
+    snprintf(folder, sizeof(folder), "%s/temp/files", launch.cwd);
+    const ShellEnvEntry env[] = {
+        {"SYNC_DEMO_ROOT", profile}, {"SYNC_DEMO_DIR", folder},
+        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"}, {nullptr, nullptr},
+    };
+    launch.env = env;
+    test_radiant_view_launch(&launch);
+    EXPECT_EQ(launch.result.exit_code, 0) << (launch.result.stdout_buf ? launch.result.stdout_buf : "");
+    EXPECT_TRUE(test_radiant_view_file_contains(launch.event_result, "\"result\":\"PASS\""));
+    // first-run validation never opens a vault entry or creates a repository.
+    EXPECT_FALSE(file_exists(profile));
+    shell_result_free(&launch.result);
 }
 
 TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {

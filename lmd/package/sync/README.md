@@ -31,6 +31,10 @@ Streamed large files, paged cloud inventories, owner-audited recovery and retain
 ciphertext reuse are described in [CLOUD.md](CLOUD.md#audited-recovery-and-reusable-storage).
 Package distribution/imports follow D1.7 and D9.3.4.
 
+For an interactive LAN test, run `./lambda.exe demo sync` on two Macs. The
+[Sync demo](../../../test/demo/sync/README.md) handles user ID, one-time pairing,
+keys and automatic synchronization of `~/lambda-sync`.
+
 ## Run the examples
 
 ```sh

@@ -6,6 +6,10 @@ It reuses the existing repository, CRDT, enrollment and application handshake.
 Discovery grants no access. Policy remains Lambda Script (S12.1.1v3, D9.3.4);
 native mechanisms use the central IO boundary (D11.1.2, D11.2.1–D11.2.4).
 
+For a simple LAN trial, use [`lambda demo sync`](../../../test/demo/sync/README.md).
+It creates `~/lambda-sync`, pairs devices with a user ID and one-time code, and
+remembers the pairing for later launches.
+
 ## Prepare and run
 
 On the initial macOS profile, prepare the optional static WebRTC dependency:
@@ -48,7 +52,7 @@ profile. Neither signaling nor document fallback keeps a cloud WebSocket open.
 
 CLI actions are `capabilities`, `discover` (optional `timeout_ms`, default 1000),
 and `run`. Programmatic entry points are `connectivity_agent.run(directory,key,
-config=null,settings={})` and the discovery/signaling helpers in `connectivity`.
+config=null,settings={},observer=null)` and the discovery/signaling helpers in `connectivity`.
 
 ## Schedule and status
 
@@ -76,6 +80,11 @@ at most once per second, in pages of at most eight members. Outstanding negotiat
 uses finite requests with two-second client timeouts. The attempt deadline is
 checked across gathering and answer/connection waits; in-flight HTTP and local
 IO have their own bounds. It is not a hard real-time scheduling guarantee.
+
+An optional `observer(status)` procedure receives the same public progress as
+the status file, allowing a document-owned UI without polling files
+(S12.4.4v4, S13.1.2v2). On startup the agent resumes any unfinished installation
+before scanning. A blocked installation preserves its capture and requires review.
 
 Status reports `phase`, `connected`, last selected `transport`, `peer`, attempts,
 successful sessions, retries, fallback reason, error code, cloud coverage,

@@ -50,6 +50,19 @@ pub pn open_agent(directory, wrapping_key) any^ {
     let handle = local.open_repository(directory ++ "/repo.sqlite",credentials.secret,credentials.space)^
     return {handle:handle,credentials:credentials}
 }
+// resume a durable install before scanning; a raced install keeps its recovery capture.
+pub pn resume_agent(directory, wrapping_key) any^ {
+    let opened = open_agent(directory,wrapping_key)^
+    var pending = local.status(opened.handle)^
+    while (pending.state.installation != null) {
+        let resumed = materialize(opened.handle)^
+        if (resumed.state.installation != null and
+            (resumed.state.installation.blocked != null or resumed.id == pending.id))
+            raise error("Sync needs review of an interrupted installation. Local files and recovery versions are preserved.")
+        pending = resumed
+    }
+    return opened
+}
 pub pn status(directory, wrapping_key) any^ {
     let agent = open_agent(directory,wrapping_key)^
     let current = local.status(agent.handle)^.state
@@ -75,7 +88,7 @@ pub pn current_member(directory, wrapping_key, original, id) any^ {
     return identity.member(current,id)^
 }
 pub pn sync(directory, wrapping_key, url, expected) any^ {
-    let agent = open_agent(directory,wrapping_key)^
+    let agent = resume_agent(directory,wrapping_key)^
     let result = peer.synchronize(agent.handle,agent.credentials,url,expected,
         pn (id)=> { return current_member(directory,wrapping_key,agent.credentials,id)^ })^
     let installed = materialize(agent.handle)^
@@ -85,7 +98,7 @@ pub pn sync(directory, wrapping_key, url, expected) any^ {
 }
 pub pn serve(directory, wrapping_key, port, bind="127.0.0.1", max_sessions=0, ready=null) any^ {
     // capture the initial working tree before advertising a ready listener or starting peer deadlines.
-    let prepared = open_agent(directory,wrapping_key)^
+    let prepared = resume_agent(directory,wrapping_key)^
     local.scan(prepared.handle)^
     let listener = peer.listener(port,bind)^
     if (ready != null) output(string(listener.port),ready,{format:'text',atomic:true})^

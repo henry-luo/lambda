@@ -30,17 +30,20 @@ pub pn query(config, credentials, kind, actors) any^ {
     }
     return result
 }
+// DNS-SD is untrusted input; only a bounded DNS host name can enter a URL.
+pub fn hint_url(hint) any^ {
+    if (not (hint.port is int) or hint.port < 1 or hint.port > 65535 or
+        not (hint.host is string) or len(hint.host)^ == 0 or len(hint.host)^ > 255 or
+        not all([for (ch in split(hint.host,"")^) contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-",ch)^])) { return null }
+    return "ws://" ++ hint.host ++ ":" ++ string(hint.port) ++ "/sync"
+}
 pub pn discover(credentials, timeout_ms=1000) any^ {
     let hints = discovery.browse(timeout_ms)^
     var result = []
     for (member in credentials.members) {
         let name = rv.lan_name(credentials,member.id)^
-        for (hint in hints where hint.name == name) {
-            // DNS-SD is untrusted input; only a DNS host name can enter this URL.
-            if (hint.port > 0 and hint.port <= 65535 and hint.host is string and len(hint.host)^ <= 255 and
-                all([for (ch in split(hint.host,"")^) contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-",ch)^])) {
-                result = [*result,{peer:member.id,url:"ws://" ++ hint.host ++ ":" ++ string(hint.port) ++ "/sync"}]
-            }
+        for (hint in hints where hint.name == name and hint_url(hint)^ != null) {
+            result = [*result,{peer:member.id,url:hint_url(hint)^}]
         }
     }
     return unique(result)

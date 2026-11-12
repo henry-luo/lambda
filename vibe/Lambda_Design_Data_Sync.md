@@ -262,6 +262,14 @@ read a space.
 
 A public DHT is unnecessary for the selected private-group audience.
 
+The native LAN demo is available as `lambda demo sync`, with `~/lambda-sync`
+as its default working folder. First-use UI asks for a user ID. The first device
+displays a one-use, two-minute pairing code; the second proves possession of that
+code before encrypted enrollment grants access. Matching public IDs alone never
+authorize a peer (D11.2.3). Subsequent launches reuse saved device grants and
+reconnect automatically. A production authenticated account flow can replace the
+demo bootstrap. See the [demo flow and limits](../test/demo/sync/README.md).
+
 ### 4.2 Transport choice
 
 The first implemented native LAN profile uses the existing WebSocket transport
