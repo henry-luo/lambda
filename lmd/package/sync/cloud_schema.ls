@@ -18,8 +18,13 @@ pub fn data_key(key) bool^ {
     return len(parts[1])^ > 0 and len(parts[1])^ <= 9 and parts[1][0] != "0" and
         all([for (ch in split(parts[1],"")^) contains("0123456789",ch)^])
 }
+pub fn storage_epoch(key) any^ {
+    let parts = split(key,"/")^
+    return if (len(parts)^ == 2) 0 else if (len(parts)^ == 3) int(parts[1])^ else -1
+}
 pub fn readable(key) bool^ => data_key(key)^ or (key is string and
-    (starts_with(key,"receipts/") or starts_with(key,"publications/") or starts_with(key,"catalogs/")) and id(slice(key,index_of(key,"/")+1,len(key))))
+    (starts_with(key,"receipts/") or starts_with(key,"publications/") or starts_with(key,"catalogs/") or
+     starts_with(key,"pages/")) and id(slice(key,index_of(key,"/")+1,len(key))))
 pub fn signed(seed, domain, body) any^ => {body:body,signature:crypto.sign(seed,codec.encode([domain,body])^)^}
 pub fn verify(envelope, domain, public_key) any^ {
     v.fields(envelope,["body","signature"])^
@@ -30,7 +35,7 @@ pub fn verify(envelope, domain, public_key) any^ {
 pub fn control(value, expected) any^ {
     let body = value.body
     v.record(body,["version","space","owner","generation","members"],["storage"])^
-    if (body.storage != null and body.storage != "catalog-1") raise error("sync cloud: unsupported storage protocol")
+    if (body.storage != null and not contains(["catalog-1","catalog-2"],body.storage)^) raise error("sync cloud: unsupported storage protocol")
     identity.validate_device(body.owner)^
     verify(value,"lambda-cloud-control-1",body.owner.public_key)^
     if (body.version != 1 or not v.actor(body.space)^ or body.owner.id != expected or
@@ -64,7 +69,7 @@ pub fn publication(value, control) any^ {
     v.fields(body,["version","space","actor","sequence","previous","clock","bundle","inventory","dependencies","receipts"])^
     let device = member(control,body.actor,false)^
     verify(value,"lambda-cloud-publication-1",device.public_key)^
-    if (body.version != 1 or body.space != control.space or not v.natural(body.sequence)^ or body.sequence < 1 or
+    if (not contains([1,2],body.version)^ or body.space != control.space or not v.natural(body.sequence)^ or body.sequence < 1 or
         (body.previous != null and not id(body.previous)) or not id(body.dependencies) or not id(body.inventory) or
         not (body.receipts is array) or len(body.receipts) < 1 or len(body.receipts) > 128 or
         not all([for (item in body.receipts) id(item)]) or len(unique(body.receipts)) != len(body.receipts))
@@ -89,3 +94,15 @@ pub fn authenticate(request, control, milliseconds) any^ {
     return body
 }
 pub fn dependency_digest(keys) any^ => digest(sort(unique(keys)))^
+pub fn catalog_heads(value) any^ => sort([for (entry in value.heads)
+    {actor:entry.actor,sequence:entry.publication.body.sequence,publication:digest(entry.publication)^}],(entry)=>entry.actor)^
+pub fn maintenance_checkpoint(value, control) any^ {
+    let body = verify(value,"lambda-cloud-maintenance-1",control.owner.public_key)^
+    v.fields(body,["version","epoch","covered","publication"])^
+    if (body.version != 1 or not v.natural(body.epoch)^ or body.epoch < 1 or not (body.covered is array))
+        raise error("sync cloud: invalid maintenance checkpoint")
+    let published = publication(body.publication,control)^
+    if (published.actor != control.owner.id or storage_epoch(published.bundle.key)^ != body.epoch)
+        raise error("sync cloud: wrong maintenance authority/epoch")
+    return body
+}

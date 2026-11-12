@@ -6,6 +6,7 @@
 #include "re2_wrapper.hpp"
 #include "lib/arraylist.h"
 #include "lib/file.h"
+#include "lib/digest.h"
 #include "lib/utf.h"
 #include <errno.h>
 #include <string.h>
@@ -80,6 +81,74 @@ bool bound(Item limit, int64_t maximum, int64_t* out) {
     // Lambda int is immediate; get_int64() dereferences the distinct wide scalar home.
     *out = it2i(limit); return *out >= 0 && *out <= maximum;
 }
+struct DiskStream {
+    FILE* source = nullptr;
+    FileAtomicWriter* writer = nullptr;
+    DigestCtx* digest = nullptr;
+    char* buffer = nullptr;
+    ~DiskStream() {
+        if (source) fclose(source);
+        file_anchor_write_abort(writer);
+        digest_ctx_free(digest);
+        mem_free(buffer);
+    }
+};
+bool stream_matches(DiskAnchor* disk, FILE* source, const FileRevision& before) {
+    FileRevision held = file_revision_stream(source), named;
+    return file_revision_equal(&held, &before) && file_anchor_validate(disk->anchor) &&
+        file_anchor_stat(disk->anchor, disk->relative, &named) && file_revision_equal(&named, &before);
+}
+Item stream_result(Item state, Item source, const uint8_t* hash) {
+    RootFrame roots(4);
+    Rooted<Item> held_state(roots, state), held_source(roots, source);
+    Rooted<Binary*> digest(roots, heap_binary_from_bytes((const char*)hash, 32));
+    static const char* names[] = {"source", "state", "hash"};
+    static const TypeId types[] = {LMD_TYPE_ANY, LMD_TYPE_ANY, LMD_TYPE_BINARY};
+    Rooted<Map*> result(roots, map_alloc_for_type(runtime_result_shape(names, types, 3), 0));
+    if (!digest.get() || !result.get()) return ItemError;
+    Item values[] = {held_source.get(), held_state.get(), (Item){.item = x2it(digest.get())}};
+    map_fill_items(result.get(), values, 3);
+    return (Item){.map = result.get()};
+}
+Item hash_producer(DiskStream* stream, Item producer, Item initial, int64_t size) {
+    RootFrame roots(5);
+    Rooted<Item> callback(roots, producer), state(roots, initial), part(roots, ItemNull), bytes(roots, ItemNull);
+    int64_t written = 0;
+    while (true) {
+        if (lambda_task_cancel_requested(lambda_task_running()))
+            return io_fs_error(ERR_CANCELLED, "io.stream: cancelled");
+        part.set(fn_call1((Function*)(uintptr_t)callback.get().item, state.get()));
+        if (get_type_id(part.get()) == LMD_TYPE_ERROR) return part.get();
+        if (get_type_id(part.get()) != LMD_TYPE_MAP)
+            return io_fs_error(ERR_TYPE_MISMATCH, "io.stream: producer must return {bytes, state, done}");
+        IoFsOptionMap fields = {"io.stream producer", SYSPROC_IO_DISK_WRITE_STREAM,
+            lambda_attr_shape(LMD_TYPE_MAP, part.get().map), lambda_attr_data(LMD_TYPE_MAP, part.get().map)};
+        Item done = io_fs_option_get(&fields, "done");
+        bytes.set(io_fs_option_get(&fields, "bytes"));
+        if (get_type_id(done) != LMD_TYPE_BOOL)
+            return io_fs_error(ERR_TYPE_MISMATCH, "io.stream: producer done must be Boolean");
+        if (it2b(done)) {
+            if (written != size || get_type_id(bytes.get()) != LMD_TYPE_NULL)
+                return io_fs_error(ERR_INVALID_STATE, "io.stream: incomplete or nonempty final block");
+            state.set(io_fs_option_get(&fields, "state"));
+            break;
+        }
+        if (get_type_id(bytes.get()) != LMD_TYPE_BINARY || bytes.get().get_len() < 1 ||
+                bytes.get().get_len() > 1048576 || bytes.get().get_len() > size - written)
+            return io_fs_error(ERR_INVALID_STATE, "io.stream: invalid block or length overrun");
+        Binary* payload = bytes.get().get_safe_binary();
+        if (!digest_update(stream->digest, binary_data(payload), binary_length(payload)) ||
+                (stream->writer && !file_anchor_write_chunk(stream->writer, binary_data(payload), binary_length(payload))))
+            return io_fs_error(ERR_IO_ERROR, "io.stream: staged write failed (%d)", errno);
+        written += (int64_t)binary_length(payload);
+        state.set(io_fs_option_get(&fields, "state"));
+    }
+    uint8_t digest[32];
+    if (!digest_finalize(stream->digest, digest, sizeof(digest)))
+        return io_fs_error(ERR_IO_ERROR, "io.stream: digest failed");
+    return stream_result(state.get(), ItemNull, digest);
+}
+
 }
 
 extern "C" Item pn_io_disk_inspect(Item root, Item relative) {
@@ -166,4 +235,114 @@ extern "C" Item pn_io_disk_directory(Item root, Item relative) {
     FileAnchor* directory = file_anchor_directory(disk.anchor, disk.relative, true, FILE_ANCHOR_FULL_SYNC);
     if (!directory) return io_fs_error(ERR_IO_ERROR, "io.disk.directory: creation or sync failed (%d)", errno);
     file_anchor_close(directory); return ItemNull;
+}
+
+extern "C" Item pn_io_disk_read_stream(Item root, Item relative, Item options, Item consumer) {
+    RootFrame roots(9);
+    Rooted<Item> held_root(roots, root), held_relative(roots, relative), held_options(roots, options);
+    Rooted<Item> callback(roots, consumer), state(roots, ItemNull), block(roots, ItemNull), outcome(roots, ItemNull);
+    DiskAnchor disk; DiskStream stream; Item error = ItemNull;
+    if (!disk_open(held_root.get(), held_relative.get(), &disk, &error)) return error;
+    IoFsOptionMap opts;
+    int64_t block_bytes = 65536, maximum = 268435456;
+    if (!io_fs_options_open(held_options.get(), "io.disk.read_stream", SYSPROC_IO_DISK_READ_STREAM, &opts, &error) ||
+            !io_fs_option_count(&opts, "block_bytes", &block_bytes, &error) ||
+            !io_fs_option_count(&opts, "max_bytes", &maximum, &error)) return error;
+    if (block_bytes < 1 || block_bytes > 1048576 || maximum < 0 || maximum > INT64_C(68719476736) ||
+            get_type_id(callback.get()) != LMD_TYPE_FUNC)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.disk.read_stream: invalid bounds or consumer");
+    state.set(io_fs_option_get(&opts, "state"));
+    Item token = io_fs_option_get(&opts, "token");
+    stream.source = file_anchor_open_read(disk.anchor, disk.relative);
+    if (!stream.source) return io_fs_error(ERR_IO_ERROR, "io.disk.read_stream: cannot open source (%d)", errno);
+    FileRevision before = file_revision_stream(stream.source);
+    if (!before.stat.is_file || before.stat.size < 0 || before.stat.size > maximum ||
+            (get_type_id(token) != LMD_TYPE_NULL && !matches(token, before)) ||
+            !stream_matches(&disk, stream.source, before))
+        return io_fs_error(ERR_INVALID_STATE, "io.disk.read_stream: source changed or exceeds limit");
+    stream.digest = digest_ctx_new(DIGEST_SHA256);
+    stream.buffer = (char*)mem_alloc((size_t)block_bytes, MEM_CAT_EVAL);
+    if (!stream.digest || !stream.buffer) return ItemError;
+    int64_t remaining = before.stat.size;
+    while (remaining > 0) {
+        if (lambda_task_cancel_requested(lambda_task_running()))
+            return io_fs_error(ERR_CANCELLED, "io.disk.read_stream: cancelled");
+        size_t count = (size_t)(remaining < block_bytes ? remaining : block_bytes);
+        if (fread(stream.buffer, 1, count, stream.source) != count || ferror(stream.source) ||
+                !digest_update(stream.digest, stream.buffer, count))
+            return io_fs_error(ERR_IO_ERROR, "io.disk.read_stream: incomplete read (%d)", errno);
+        Binary* bytes = heap_binary_from_bytes(stream.buffer, count);
+        if (!bytes) return ItemError;
+        block.set((Item){.item = x2it(bytes)});
+        outcome.set(fn_call2((Function*)(uintptr_t)callback.get().item, state.get(), block.get()));
+        if (get_type_id(outcome.get()) == LMD_TYPE_ERROR) return outcome.get();
+        state.set(outcome.get());
+        // callbacks can park or alter the filesystem; accept no substituted revision.
+        if (!stream_matches(&disk, stream.source, before))
+            return io_fs_error(ERR_INVALID_STATE, "io.disk.read_stream: source changed during capture");
+        remaining -= (int64_t)count;
+    }
+    uint8_t digest[32];
+    if (!stream_matches(&disk, stream.source, before) || !digest_finalize(stream.digest, digest, sizeof(digest)))
+        return io_fs_error(ERR_IO_ERROR, "io.disk.read_stream: final validation failed");
+    outcome.set(disk_row(disk.relative, before));
+    return stream_result(state.get(), outcome.get(), digest);
+}
+
+extern "C" Item pn_io_disk_write_stream(Item root, Item relative, Item options, Item producer) {
+    RootFrame roots(9);
+    Rooted<Item> held_root(roots, root), held_relative(roots, relative), held_options(roots, options);
+    Rooted<Item> callback(roots, producer), state(roots, ItemNull), part(roots, ItemNull), bytes(roots, ItemNull);
+    Rooted<Item> expected_hash(roots, ItemNull);
+    DiskAnchor disk; DiskStream stream; Item error = ItemNull;
+    if (!disk_open(held_root.get(), held_relative.get(), &disk, &error)) return error;
+    IoFsOptionMap opts;
+    int64_t size = -1;
+    if (!io_fs_options_open(held_options.get(), "io.disk.write_stream", SYSPROC_IO_DISK_WRITE_STREAM, &opts, &error) ||
+            !io_fs_option_count(&opts, "size", &size, &error)) return error;
+    expected_hash.set(io_fs_option_get(&opts, "hash"));
+    if (size < 0 || size > INT64_C(68719476736) || get_type_id(callback.get()) != LMD_TYPE_FUNC ||
+            get_type_id(expected_hash.get()) != LMD_TYPE_BINARY || expected_hash.get().get_len() != 32)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.disk.write_stream: expected size, SHA256 and producer");
+    state.set(io_fs_option_get(&opts, "state"));
+    Item token = io_fs_option_get(&opts, "expected");
+    FileRevision revision; FileRevision* old = nullptr;
+    if (get_type_id(token) != LMD_TYPE_NULL) {
+        if (!file_anchor_stat(disk.anchor, disk.relative, &revision) || !matches(token, revision))
+            return io_fs_error(ERR_INVALID_STATE, "io.disk.write_stream: stale destination");
+        old = &revision;
+    }
+    stream.writer = file_anchor_write_begin(disk.anchor, disk.relative, old);
+    stream.digest = digest_ctx_new(DIGEST_SHA256);
+    if (!stream.writer || !stream.digest)
+        return io_fs_error(ERR_IO_ERROR, "io.disk.write_stream: cannot stage destination (%d)", errno);
+    part.set(hash_producer(&stream, callback.get(), state.get(), size));
+    if (get_type_id(part.get()) == LMD_TYPE_ERROR) return part.get();
+    IoFsOptionMap result = {"io.disk.write_stream", SYSPROC_IO_DISK_WRITE_STREAM,
+        lambda_attr_shape(LMD_TYPE_MAP, part.get().map), lambda_attr_data(LMD_TYPE_MAP, part.get().map)};
+    bytes.set(io_fs_option_get(&result, "hash"));
+    if (memcmp(binary_data(bytes.get().get_safe_binary()), binary_data(expected_hash.get().get_safe_binary()), 32))
+        return io_fs_error(ERR_INVALID_STATE, "io.disk.write_stream: content digest mismatch");
+    // commit consumes the stage on every result; the scope aborts only unpublished stages.
+    FileAtomicWriter* writer = stream.writer; stream.writer = nullptr;
+    int status = file_anchor_write_commit(writer);
+    if (status != 0) return io_fs_error(ERR_IO_ERROR, status > 0
+        ? "io.disk.write_stream: published; durability uncertain" : "io.disk.write_stream: publication failed (%d)", errno);
+    return part.get();
+}
+
+extern "C" Item pn_io_crypto_hash_stream(Item options, Item producer) {
+    RootFrame roots(3);
+    Rooted<Item> held_options(roots, options), callback(roots, producer), state(roots, ItemNull);
+    IoFsOptionMap opts; Item error = ItemNull;
+    int64_t size = -1;
+    if (!io_fs_options_open(held_options.get(), "io.crypto.hash_stream", SYSPROC_IO_CRYPTO_HASH_STREAM, &opts, &error) ||
+            !io_fs_option_count(&opts, "size", &size, &error)) return error;
+    if (size < 0 || size > INT64_C(68719476736) || get_type_id(callback.get()) != LMD_TYPE_FUNC)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.crypto.hash_stream: expected size and producer");
+    state.set(io_fs_option_get(&opts, "state"));
+    DiskStream stream;
+    stream.digest = digest_ctx_new(DIGEST_SHA256);
+    if (!stream.digest) return ItemError;
+    return hash_producer(&stream, callback.get(), state.get(), size);
 }

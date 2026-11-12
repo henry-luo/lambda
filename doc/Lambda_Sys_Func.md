@@ -2094,6 +2094,24 @@ D11.1.2. They expose mechanisms; repository policy remains Lambda Script.
   unbrokered use under a bound security client fail closed.
 
 See [local repository API, formats and limits](../lmd/package/sync/LOCAL_REPOSITORY.md).
+Streaming procedures keep policy in scripts (S12.1.1v3) and use the same native
+IO/grant boundary (D11.1.2, D11.2.1–D11.2.4):
+
+| Procedure | Contract |
+|---|---|
+| `disk.read_stream(root, relative, options, consumer)` | Calls `pn(state, bytes)` for positive binary blocks; returns `{source, state, hash}` with observed metadata and SHA256. Options: `state`, optional `token`, `block_bytes` (default 65,536, maximum 1 MiB), `max_bytes` (default 256 MiB). |
+| `disk.write_stream(root, relative, options, producer)` | Options require `size`, 32-byte SHA256 `hash`, initial `state`, and optional `expected` observation token. Producer returns `{bytes, state, done}`; final `done:true` requires `bytes:null`. Exact length/hash precede atomic publication. Null expected token is create-only. |
+| `crypto.hash_stream(options, producer)` | Same producer contract, `size` and `state`; returns `{source:null, state, hash}` without file publication. |
+
+Native streaming size bounds are 0–64 GiB. Each producer block is 1 byte–1 MiB.
+Consumer/producer procedures can suspend. The native scope roots callback state,
+checks cancellation, closes held files, and aborts unpublished stages on error.
+Reads revalidate held and named source revisions after callbacks. Writes preserve
+the existing uncertain-durability result if publication succeeds but its barrier
+fails; callers must inspect before retrying. These APIs do not grant exclusive
+access against external writers. Repository capture limits are separate from the
+native mechanism's upper bound.
+
 #### lambda.io.sqlite
 
 Import `lambda.io.sqlite` with an alias to execute one parameterized SQLite

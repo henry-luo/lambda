@@ -97,11 +97,14 @@ Power-loss durability retains the local repository's existing qualification limi
 ## Cloud maintenance and scheduling
 
 Every publication uses one conditional per-space catalog. The owner pulls all
-admitted heads, selects retained roots and copies them into a fresh physical
-storage epoch. A signed cut covers the frozen heads and all cache reservations.
-Only that cut permits bounded deletion of old-epoch keys. Delayed uploads and
-deletes can name old keys but cannot affect the new epoch. Immutable logical IDs
-remain unchanged. Old-key reaping can repeat after a delayed PUT recreates garbage.
+admitted heads and selects retained roots. Legacy v1 copies every object into a
+fresh physical generation. Catalog v2 retains active immutable paths and copies
+only unpublished data; an audited upgrade copies the retained graph once. A
+signed cut covers frozen heads and cache reservations. Immutable deletion jobs
+bind exact old and keep roots, and later publications cannot re-admit retired
+physical paths. Delayed uploads/deletes and old job retries cannot affect newer
+or continuously retained copies. Logical content IDs remain unchanged. Aborted
+and interrupted allocation generations are never reused.
 
 `cloud_cli.ls` supplies `maintenance_prepare`, `maintenance_step` (`budget`),
 `maintenance_status`, `maintenance_abort`, `maintenance_prune` and
@@ -128,8 +131,9 @@ publication/cut saves an immutable `catalogs/<digest>` backup; pull returns its
 ID and clients persist it per provider. Owner-only `catalog_recover` takes an
 explicit `snapshot` digest, validates signatures and existing dependencies, and
 restores a missing pointer. It keeps destructive maintenance disabled pending an
-inventory audit. Automated latest-backup discovery and that audit tool are not
-implemented. A backup whose required bytes were already purged cannot restore
+inventory audit. Bounded candidate discovery and the owner audit workflow are documented in
+[CLOUD.md](CLOUD.md#audited-recovery-and-reusable-storage). No automatic latest-backup
+selection is performed. A backup whose required bytes were already purged cannot restore
 them. Keep service metadata and backup references with disaster-recovery records.
 
 ## Independent local cache
@@ -151,14 +155,18 @@ writer/checkpoint trust remains the existing profile (D11.2.1–D11.2.4).
 
 ## Bounds
 
-This is a bounded reference implementation. Envelopes/captures remain 8 MiB;
-cloud bundles contain at most 8,191 repository objects. Catalog key tracking is
-bounded to 32,768, local prune candidates to 8,192 and history traversal to 65,536
-pages. Ancestry, arrival and retirement metadata remain retained under existing
-envelope bounds; this phase does not implement metadata epoch retirement or
-unlimited histories. Cloud epoch replacement copies retained bytes again;
-packing, throughput/cost tuning, fine sharing/key rotation, browser/GUI wiring
-and hosted deployment qualification remain separate work.
+This is a bounded reference implementation. Envelopes remain 8 MiB; streamed
+file captures default to 256 MiB each and 1 GiB per scan. Legacy cloud bundles
+contain at most 8,191 objects and catalogs 32,768 keys. Catalog v2 has paged
+registries/receipts and at most 65,536 object paths per publication. Local prune
+candidates remain bounded to 8,192 and history traversal to 65,536 pages.
+Ancestry, arrival and retirement metadata remain retained under existing envelope
+bounds; this phase does not implement metadata epoch retirement or
+unlimited histories. Catalog v2 retains active ciphertext paths across cuts; only
+the audit upgrade requires a complete fresh copy. Packing, broader throughput
+tuning, fine sharing/key rotation, browser/GUI wiring and hosted deployment
+qualification remain separate work.
 
 Implementation, exact qualification and residue:
-[completed retention milestone](<../../../vibe/impl/Lambda_Impl_Sync_Retention (done).md>).
+[retention milestone](<../../../vibe/impl/Lambda_Impl_Sync_Retention (done).md>) and
+[recovery/scale milestone](<../../../vibe/impl/Lambda_Impl_Sync_Recovery_Scale (done).md>).

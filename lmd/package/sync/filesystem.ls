@@ -7,7 +7,33 @@ import w: .workspace
 import p: .protocol
 import rules: .workspace_rules
 
-pn walk(tx, keys, root, prefix, result, config, depth=0) any^ {
+pub let default_limits = {file_bytes:268435456,scan_bytes:1073741824}
+pub fn limits(current) any^ {
+    let value = if (current.capture_limits == null) default_limits else current.capture_limits
+    v.fields(value,["file_bytes","scan_bytes"])^
+    if (not v.natural(value.file_bytes)^ or not v.natural(value.scan_bytes)^ or
+        value.file_bytes > 68719476736 or value.scan_bytes < value.file_bytes)
+        raise error("sync filesystem: invalid capture limits")
+    return value
+}
+pub pn capture_file(tx, keys, root, path, config, maximum, token=null) any^ {
+    let observed = disk.inspect(root,path)^
+    if (observed == null or observed.kind != 'file' or observed.size > maximum or
+        (token != null and observed.token != token)) raise error("sync filesystem: capture changed or exceeds limit")
+    if (observed.size <= 8388608) {
+        let item = disk.capture(root,path,8388608)^
+        if (item.token != observed.token) raise error("sync filesystem: file changed during capture")
+        return {*:item,content:repo.content(tx,keys,item.bytes,config)^}
+    }
+    let item = repo.content_file(tx,keys,root,path,config,maximum,observed.token)^
+    return {*:item.source,content:item.content}
+}
+pub pn observe(root, path, maximum=268435456) any^ {
+    let item = disk.read_stream(root,path,{max_bytes:maximum},pn (acc,bytes)=> { return null })^
+    return {*:item.source,hash:item.hash}
+}
+pub fn matches(reference, observation) bool^ => reference.size == observation.size and reference.hash == observation.hash
+pn walk(tx, keys, root, prefix, result, config, bounds, previous, depth=0) any^ {
     if (depth > 128) raise error("sync filesystem: depth limit")
     let before = disk.inspect(root,prefix)^
     if (before.kind != 'dir') raise error("sync filesystem: missing directory")
@@ -22,17 +48,25 @@ pn walk(tx, keys, root, prefix, result, config, depth=0) any^ {
         var reference = null
         var token = child.token
         if (child.kind == 'file') {
-            if (child.size > 8388608 or child.size > 67108864-captured.bytes)
+            if (child.size > bounds.file_bytes or child.size > bounds.scan_bytes-captured.bytes)
                 raise error("sync filesystem: capture byte limit")
-            let item = disk.capture(root,path,8388608)^
-            if (item.token != child.token) raise error("sync filesystem: file changed during scan")
-            reference = repo.content(tx,keys,item.bytes,config)^
-            token = item.token
+            let old = previous[path]
+            // an exact inode/revision observation reuses the previously authenticated content reference.
+            if (old != null and old.type == 'file' and old.identity == child.identity and old.token == child.token) {
+                reference = old.content
+                let after = disk.inspect(root,path)^
+                if (after == null or after.identity != child.identity or after.token != child.token)
+                    raise error("sync filesystem: cached file observation changed")
+            } else {
+                let item = capture_file(tx,keys,root,path,config,bounds.file_bytes,child.token)^
+                reference = item.content
+                token = item.token
+            }
             captured = {*:captured,bytes:captured.bytes+reference.size}
         }
         captured = {*:captured,members:[*captured.members,
             {path:path,type:child.kind,identity:child.identity,token:token,content:reference}]}
-        if (child.kind == 'dir') { captured = walk(tx,keys,root,path,captured,config,depth+1)^ }
+        if (child.kind == 'dir') { captured = walk(tx,keys,root,path,captured,config,bounds,previous,depth+1)^ }
         i = i+1
     }
     if (disk.inspect(root,prefix)^.token != before.token) raise error("sync filesystem: directory changed during scan")
@@ -43,7 +77,7 @@ pub pn capture(tx, keys, current) any^ {
     let root = disk.inspect(current.root,"")^
     if (root.kind != 'dir' or root.identity != current.root_identity)
         raise error("sync filesystem: working root missing or replaced")
-    let result = walk(tx,keys,current.root,"",{members:[],bytes:0},current.chunker)^
+    let result = walk(tx,keys,current.root,"",{members:[],bytes:0},current.chunker,limits(current)^,map([for (member in current.disk) (member.path,member)]))^
     let members = sort(result.members,(member)=>member.path)^
     if (len(unique([for (member in members) lower(member.path)^])) != len(members))
         raise error("sync filesystem: ambiguous portable path spelling")

@@ -233,12 +233,12 @@ pub pn restore_file(handle, entry, id) any^ {
         }
         let payload = repo.availability(tx,k,revision.content,reach.cache_ids(current))^
         if (not payload.complete) raise error("sync cache: hydrate retained history before restoring")
-        return {document:null,bytes:payload.bytes}
+        return {document:null,content:revision.content}
     })^
     if (selected.document != null) {
         editor.restore_version(handle,selected.document,selected.version)^
         return editor.save(handle,selected.document)^
     }
-    local.publish(handle,entry,selected.bytes)^
+    local.transact(handle,[{kind:'publish',entry:entry,content:selected.content}])^
     return local.materialize(handle)^
 }

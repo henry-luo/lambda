@@ -210,12 +210,53 @@ Cloud durability relies on the qualified storage backend's acknowledged writes
 and correct retention fencing. It does not upgrade the local repository's separate
 [power-loss qualification](LOCAL_REPOSITORY.md#objects-and-encryption).
 
+## Audited recovery and reusable storage
+
+New spaces default to `storage_protocol:"catalog-2"` at bootstrap.
+An explicit `"catalog-1"` remains available for legacy qualification. Existing v1
+spaces remain readable; an owner audit upgrades them. Physical object paths are
+recorded separately from logical content IDs in private encrypted locator pages.
+A maintenance cut retains registered immutable copies at their existing paths,
+copying only unpublished data. Immutable retirement jobs bind old and keep roots;
+old workers cannot delete an object that a later publication re-admits, because
+retired physical paths cannot be re-admitted. Generation allocations are monotonic,
+including aborted jobs and claims interrupted before catalog activation.
+
+After a missing catalog, `backup_discover` returns bounded candidate metadata
+(`cursor`, `limit` 1–16). The owner chooses an authenticated backup ID and calls
+`catalog_recover` with `snapshot`; replacing an existing unaudited candidate also
+requires its exact `expected` ETag. Discovery does not determine the latest backup
+or recover lost keys. A rollback seen by a surviving client remains an error.
+
+The owner runs `audit_begin`, then bounded `audit_scan` calls (budget 1–64) until
+discovery completes, then `audit_step` (budget 1–8) until verification completes.
+Each step persists its cursor; reopening the CLI resumes it. If the service began
+an audit before the local record was saved, another `audit_begin` adopts that
+frozen job and restarts client verification. `audit_status` reports local progress,
+bad-object count and up to 32 sample paths. `audit_abort` leaves cleanup disabled
+and permits a fresh inventory after explicit repair.
+
+The client uses observed ETags in signed conditional GETs, validates object MACs,
+content IDs and bundle proofs, then re-reads every committed dependency and checks
+the local retained graph. Failed/missing/changed data cannot yield an attestation.
+`audit_prepare` attaches the signed report to a replacement cut; continue with
+`maintenance_step`, then bounded `maintenance_prune`. This audit cut copies the
+retained graph once into a fresh generation and enables subsequent reuse/pruning.
+Unknown unpublished bytes remain quarantined. After the cut completes,
+`audit_abort` clears its finished local audit record. Listing is bounded discovery, not a
+transactional bucket snapshot or proof that a selected backup is globally latest.
+The function sees encrypted data; only the owner client can authorize promotion
+(D11.2.1–D11.2.4).
+
 ## Bounds and verification
 
 Function requests are at most 128 KiB; responses at most 1 MiB. Objects and
 checkpoint envelopes are bounded to 8 MiB; each publication references at most
-8,191 repository objects plus its bundle. Existing file/codec/repository limits
-apply. Upload restarts operate at object granularity. Saved history has paged
+8,191 repository objects plus its bundle in legacy catalog v1. Catalog v2 uses
+immutable 64-entry/32-child metadata pages and signed receipt roots, with up to
+65,536 repository object paths plus the bundle per publication. Individual
+workspace/checkpoint envelopes still have the 8 MiB bound. File contents use
+streamed chunk manifests; existing codec/repository metadata limits apply. Upload restarts operate at object granularity. Saved history has paged
 ancestry; aggregate publication inventories and individual
 endpoints retain these bounds and are never silently truncated.
 

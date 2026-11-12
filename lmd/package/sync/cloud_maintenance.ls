@@ -13,6 +13,7 @@ import retention: .maintenance_state
 import codec: .codec
 import v: .schema
 import hex: lambda.security.tuf.metadata
+import inventory_pages: .cloud_inventory
 
 fn jobs(current) => if (current.cloud_jobs == null) [] else current.cloud_jobs
 pn save_job(handle, provider, job) any^ {
@@ -30,21 +31,27 @@ pub pn status(handle, config) any^ {
         return if (selected == null) null else repo.get(tx,k,selected.object,"maintenance")^
     })^
 }
-pub pn prepare(handle, credentials, config) any^ {
+pub pn prepare(handle, credentials, config, audit=null) any^ {
     if (credentials.device.id != config.authority) raise error("sync cloud: owner maintenance key required")
     if (status(handle,config)^ != null) raise error("sync cloud: resume or abort the existing maintenance job")
-    var hydrated = cache.hydrate(handle,credentials,config,128)^
-    while (hydrated.remaining > 0) { hydrated = cache.hydrate(handle,credentials,config,128)^ }
+    if (local.status(handle)^.state.cache_job != null) raise error("sync cloud: finish/cancel the pending cache job first")
+    let observed = transport.call(config,credentials,"pull",{})^
+    let control = schema.control(observed.control,config.authority)^
+    if (control.space != credentials.space) raise error("sync cloud: wrong control space")
+    if (observed.protocol != 2 or audit != null) {
+        var hydrated = cache.hydrate(handle,credentials,config,128)^
+        while (hydrated.remaining > 0) { hydrated = cache.hydrate(handle,credentials,config,128)^ }
+    }
     let remote = cloud.pull(handle,credentials,config)^
-    if (remote.maintenance_allowed == false) raise error("sync cloud: audited inventory required after catalog recovery/upgrade")
-    if (remote.phase != 'open') raise error("sync cloud: existing maintenance must finish or abort")
+    if (remote.maintenance_allowed == false and audit == null) raise error("sync cloud: audited inventory required after catalog recovery/upgrade")
+    if (remote.phase != (if (audit == null) 'open' else 'audit')) raise error("sync cloud: existing maintenance must finish or abort")
     if (len(remote.pending_publications)^ > 0) raise error("sync cloud: a writer must resume/cancel its pending publication")
-    let epoch = (remote.epoch or 0)+1
+    let epoch = remote.next_epoch or ((remote.epoch or 0)+1)
     // outstanding cache reservations are explicit shared roots, including otherwise retired endpoints.
     let have = local.inventory(handle)^
     let pinned = unique([for (pin in remote.pins) for (id in pin.objects) hex.unhex(id)^])
     for (id in pinned where not contains(have,id)^) {
-        let record = codec.decode(transport.read(config,credentials,bundle.object_key(id,epoch-1)^)^)^
+        let record = codec.decode(transport.read(config,credentials,pin_key(remote,id)^)^)^
         if (record.id != id) raise error("sync cloud: cache reservation object mismatch")
         local.import_objects(handle,[record])^
     }
@@ -53,6 +60,7 @@ pub pn prepare(handle, credentials, config) any^ {
         return sort(unique([*reach.roots(tx,k,current,false)^,
             *reach.closure(tx,k,pinned,retention.get(current)^)^]))^
     })^
+    if (remote.protocol == 2) { return prepare_paged(handle,credentials,config,remote,selected,audit)^ }
     let captured = bundle.capture(handle,credentials,epoch,selected)^
     let current = local.status(handle)^.state
     let plan = {version:1,epoch:epoch,heads:handler.heads({heads:remote.heads})^,
@@ -82,10 +90,11 @@ pub pn step(handle, credentials, config, budget=32) any^ {
     }
     let remote = transport.call(config,credentials,"pull",{})^
     schema.control(remote.control,config.authority)^
-    if ((remote.maintenance == null or remote.maintenance.id != job.id) and remote.catalog_etag != job.expected) {
+    if ((remote.maintenance == null or remote.maintenance.id != job.id) and (remote.catalog_etag != job.expected or (remote.next_epoch != null and remote.next_epoch != job.plan.epoch))) {
         clear_job(handle,config)^
         return {id:job.id,replan:true,committed:false,next:0,total:len(job.payload.ids)^}
     }
+    if (job.protocol == 2) { return step_paged(handle,credentials,config,job,budget)^ }
     let started = transport.call(config,credentials,"maint_begin",{expected:job.expected,plan:job.plan})^
     if (not started.started) raise error("sync cloud: catalog changed before maintenance; replan")
     let end = min(len(job.payload.ids)^,job.next+budget)
@@ -129,6 +138,86 @@ pub pn step(handle, credentials, config, budget=32) any^ {
     cloud.pull(handle,credentials,config)^
     local.release_staging(handle,job.payload.ids)^
     return {id:job.id,next:len(job.payload.ids)^,total:len(job.payload.ids)^,committed:true,epoch:job.plan.epoch}
+}
+pub fn pin_keys(remote) any^ => unique([for (pin in remote.pins) for (key in
+    (if (pin.keys == null) [for (id in pin.objects) catalog.data_key("objects",id,remote.epoch or 0)^] else pin.keys)) key])
+pub fn pin_key(remote, id) any^ {
+    let found = [for (key in pin_keys(remote)^ where ends_with(key,"/" ++ hex.hex(id)^)^) key]
+    if (len(found)^ == 0) raise error("sync cloud: pinned physical copy unavailable")
+    return found[0]
+}
+pn prepare_paged(handle, credentials, config, remote, selected, audit) any^ {
+    let epoch = remote.next_epoch or ((remote.epoch or 0)+1)
+    let previous = local.cloud_locations(handle,cloud.provider(config)^,selected)^
+    let locations = [for (entry in previous) {id:entry.id,key:if (audit != null or entry.key == null)
+        bundle.object_key(entry.id,epoch)^ else entry.key}]
+    let extra = if (audit != null) [] else [for (key in pin_keys(remote)^ where
+        not any([for (entry in locations) entry.key == key])) key]
+    let captured = bundle.capture(handle,credentials,epoch,selected,{root:null,locations:locations})^
+    let current = local.status(handle)^.state
+    let plan = {version:1,epoch:epoch,heads:handler.heads({heads:remote.heads})^,
+        fingerprint:codec.digest([captured.payload,uuid()^,retention.get(current)^.generation,current.snapshots])^}
+    let job = {version:1,protocol:2,id:schema.digest(plan)^,plan:plan,expected:remote.catalog_etag,
+        payload:captured.payload,key:null,bytes:null,next:0,extra_keys:extra,audit:audit,copied:0,
+        retention_generation:retention.get(current)^.generation,snapshots:current.snapshots}
+    save_job(handle,cloud.provider(config)^,job)^
+    return {id:job.id,objects:len(selected)^,epoch:epoch,next:0,
+        copy_objects:len([for (entry in locations where catalog.epoch(entry.key)^ == epoch) entry])^}
+}
+fn begin_request(job) => {expected:job.expected,plan:job.plan,
+    *:if (job.audit == null) {} else {audit:job.audit.id,attestation:job.audit.attestation}}
+pn step_paged(handle, credentials, config, job, budget) any^ {
+    let started = transport.call(config,credentials,"maint_begin",begin_request(job)^)^
+    if (started.replan == true) {
+        clear_job(handle,config)^
+        return {id:job.id,replan:true,committed:false,next:0,total:len(job.payload.ids)^}
+    }
+    if (not started.started) raise error("sync cloud: changed catalog; replan maintenance")
+    var task = job
+    if (not started.committed) {
+        let end = min(len(task.payload.ids)^,task.next+budget)
+        var copied = task.copied
+        for (entry in slice(task.payload.locations,task.next,end)^) {
+            if (catalog.epoch(entry.key)^ == task.plan.epoch) {
+                let encoded = codec.encode(local.export_objects(handle,[entry.id])^[0])^
+                let stored = transport.ensure(config,credentials,transport.descriptor(entry.key,encoded)^,encoded)^
+                if (stored.existing != null) {
+                    let existing = if (stored.existing.ok) codec.decode(stored.existing.body)^ else null
+                    if (existing == null or existing.id != entry.id) raise error("sync cloud: replacement copy unavailable")
+                    local.import_objects(handle,[existing])^
+                }
+                if (stored.uploaded) { copied = copied+1 }
+            }
+        }
+        if (end < len(task.payload.ids)^) {
+            save_job(handle,cloud.provider(config)^,{*:task,next:end,copied:copied})^
+            return {id:task.id,next:end,total:len(task.payload.ids)^,committed:false,copied:copied}
+        }
+        let objects = inventory_pages.stage(config,credentials,[*[for (entry in task.payload.locations) entry.key],*task.extra_keys],task.plan.epoch)^
+        if (task.bytes == null) {
+            let sealed = bundle.reseal(credentials,task.payload,if (objects == null) null else objects.root,task.plan.epoch)^
+            task = {*:task,*:sealed,next:end,copied:copied}
+            // persist the exact bundle before a network effect so a lost cut response cannot change it.
+            save_job(handle,cloud.provider(config)^,task)^
+        }
+        let stored = transport.ensure(config,credentials,transport.descriptor(task.key,task.bytes)^,task.bytes)^
+        if (stored.existing != null and (not stored.existing.ok or hash(stored.existing.body,'sha256')^ != hash(task.bytes,'sha256')^))
+            raise error("sync cloud: replacement bundle mismatch")
+        let bundle_receipt = inventory_pages.stage(config,credentials,[task.key],task.plan.epoch)^
+        let combined = inventory_pages.merge(config,credentials,[bundle_receipt,objects],task.plan.epoch)^
+        let publication = schema.signed(credentials.seed,"lambda-cloud-publication-1",{version:2,space:credentials.space,
+            actor:credentials.device.id,sequence:1,previous:null,clock:task.payload.saved.frontier,
+            bundle:transport.descriptor(task.key,task.bytes)^,inventory:schema.digest(task.payload.inventory)^,
+            dependencies:combined.id,receipts:[combined.id]})^
+        let checkpoint = schema.signed(credentials.seed,"lambda-cloud-maintenance-1",
+            {version:1,epoch:task.plan.epoch,covered:task.plan.heads,publication:publication})^
+        let result = transport.call(config,credentials,"maint_commit",{id:task.id,checkpoint:checkpoint})^
+        if (not result.committed) raise error("sync cloud: maintenance cut contention; retry")
+    }
+    clear_job(handle,config)^
+    cloud.pull(handle,credentials,config)^
+    local.release_staging(handle,task.payload.ids)^
+    return {id:task.id,next:len(task.payload.ids)^,total:len(task.payload.ids)^,committed:true,epoch:task.plan.epoch,copied:task.copied}
 }
 pub pn abort(handle, credentials, config) any^ {
     let job = status(handle,config)^

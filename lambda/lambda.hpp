@@ -411,6 +411,9 @@ typedef enum SysFunc {
     SYSFUNC_IO_CRYPTO_PUBLIC,
     SYSFUNC_IO_CRYPTO_SIGN,
     SYSFUNC_IO_CRYPTO_AGREE,
+    SYSPROC_IO_DISK_READ_STREAM,
+    SYSPROC_IO_DISK_WRITE_STREAM,
+    SYSPROC_IO_CRYPTO_HASH_STREAM,
 } SysFunc;
 
 #ifdef __cplusplus
@@ -1462,6 +1465,9 @@ extern "C" {
     Item pn_io_disk_entries(Item root, Item relative, Item limit);
     Item pn_io_disk_capture(Item root, Item relative, Item limit);
     Item pn_io_disk_install(Item root, Item relative, Item bytes, Item expected);
+    Item pn_io_crypto_hash_stream(Item options, Item producer);
+    Item pn_io_disk_read_stream(Item root, Item relative, Item options, Item consumer);
+    Item pn_io_disk_write_stream(Item root, Item relative, Item options, Item producer);
     Item pn_io_disk_erase(Item root, Item relative, Item expected);
     Item pn_io_disk_directory(Item root, Item relative);
     Item pn_io_disk_resolve(Item root);

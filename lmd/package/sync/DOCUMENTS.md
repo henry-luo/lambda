@@ -171,3 +171,10 @@ defect remains [LR01-24](../../../vibe/Lambda_Issue_Ledger.md#lr01-24).
 `--full` also attempts the large workflow goldens; that forced-GC profile remains
 unqualified because admission exceeds the 300-second budget on the recorded host.
 Those complete workflows remain in the normal all-tier functional gate.
+
+Large opaque file/blob payloads use streamed raw chunks and paged manifests in
+the native repository profile; they remain immutable references in document
+CRDTs. This does not raise the 8 MiB editor/text/checkpoint envelope bound. The
+[repository guide](LOCAL_REPOSITORY.md#streamed-files-and-private-location-pages)
+describes exact-byte installation and the qualified large-file workload
+(S12.1.1v3, D11.1.2).

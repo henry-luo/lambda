@@ -35,6 +35,59 @@ The separate timeout/cleanup crash [LR01-24](#lr01-24) remains open. The
 workspace member-access observation below retains its original probe; its
 semantics and cause remain unconfirmed. Those two earlier archived records add no live issues.
 
+## Recovery/scale integration findings — 2026-11-12
+
+<a id="sync-recovery-scale-safety"></a>
+
+**Status:** FIXED for the named script integration defects; qualification residue
+is retained below. The [implementation record](<impl/Lambda_Impl_Sync_Recovery_Scale (done).md>)
+records the selected bounded profile (S12.1.1v3, S12.4.4v4, D11.1.2).
+
+The new reuse protocol initially chose a cancelled maintenance job's physical
+storage generation again. Its uploaded keys remained in the registry: an open
+publication could reference those future keys, or the next deletion job could
+stop because a candidate used its current generation. Reproduction:
+`sync_reuse_fencing.ls` aborts generation 1 after upload, starts a new cut, and
+replays old requests. Allocation now advances `next_epoch` even on abort;
+publication rejects abandoned generations. The next cut skips to generation 2
+and can reclaim the abandoned keys. Later cuts/reapers cannot affect retained
+old copies or newly uploaded paths. This is a new script integration fix;
+the committed legacy profile already filtered future keys from its old-key list.
+
+The existing scheduled client could also treat an aborted job as a committed
+cut, then repeatedly try to prune it. It now returns to selection after seeing
+its job's explicit abort. The real-S3 recovery gate covers this transition on
+AUTO, interpreter and JIT with unchanged deadlines. No lease-based
+cancellation or automatic release of another writer's pending uploads is added.
+
+A release 16 MiB capture/external-edit/restore workflow exposed excessive typed
+codec allocation: about 5.88 GB maximum RSS / 10.34 GB peak footprint before the
+fix. Native hash streaming alone used about 59.8 MB maximum RSS, and incremental
+script chunking about 76.8 MB. Per-scalar Mark parsing and text-encoded chunk
+payloads repeatedly created Input-owned values; D5.1.1–D5.1.3 deliberately keep
+those outside GC. Batch scalar validation preserves canonical wire bytes, and
+new streamed `chunk_raw` objects use raw plaintext and raw domain contexts.
+The revised JIT workflow passed exact restores with about 489 MB peak footprint;
+interpreter passed with about 298 MB. Final source/binary identities and all-tier
+qualification are recorded in the implementation record. This is a confirmed package hot
+path fix; the cause of the earlier concurrent JIT document SIGKILL remains
+unconfirmed. No native/vendor lifetime change or general SIGKILL fix is claimed.
+
+The large interpreter peer test also exposed a pre-existing scheduling problem:
+initial server capture ran after handshake, consuming a peer's fixed deadline.
+The agent now captures before advertising readiness; subsequent scans reuse only
+exact unchanged inode/revision observations. Deadlines are unchanged.
+
+Aggregate verification returned 7,573/7,574. `eps_fonts`
+(`test/lambda/eps/fonts.ls`) returned script status 1 in its baseline batch;
+three isolated GTest retries passed with unchanged fixture, golden and deadline.
+Cause is unconfirmed; no EPS/input/runtime fix or complete aggregate pass is
+claimed. This observation does not block the sync milestone. Evidence:
+`temp/sync-recovery-scale/baseline.log`, `eps-fonts-retry*.log` and final
+source/binary identities. All 70 sync goldens and five focused GC/poison cases
+pass on every tier; real-S3 recovery and retention/cache/crash gates also pass.
+
+
 ## Retention integration findings — 2026-11-12
 
 <a id="sync-retention-safety"></a>

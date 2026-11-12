@@ -13,6 +13,13 @@ import hex: lambda.security.tuf.metadata
 import sqlite: lambda.io.sqlite
 import metadata: .cache_state
 
+fn pin_request(id, ids, locations, protocol) any^ => {id:id,objects:[for (object_id in ids) hex.hex(object_id)^],
+    *:if (protocol != 2) {} else {keys:[for (entry in locations) entry.key]}}
+pub fn physical_key(pin, id, epoch, fallback=null) any^ {
+    let keys = if (pin == null or pin.keys == null) [] else
+        [for (key in pin.keys where ends_with(key,"/" ++ hex.hex(id)^)^) key]
+    return if (len(keys)^ > 0) keys[0] else if (fallback != null) fallback else bundle.object_key(id,epoch)^
+}
 pub pn plan(handle, credentials, config, limit=64) any^ {
     if (not v.natural(limit)^ or limit < 1 or limit > 128) raise error("sync cache: invalid eviction budget")
     let selected = repo.access(handle.path,handle.keys,pn (tx,k)=> {
@@ -20,7 +27,7 @@ pub pn plan(handle, credentials, config, limit=64) any^ {
         if (current.cache_job != null) raise error("sync cache: resume the existing eviction")
         let protected = reach.hot(tx,k,current)^
         let retained = reach.roots(tx,k,current,false)^
-        return take([for (row in sqlite.query(tx,"SELECT id FROM objects WHERE kind = 'chunk' ORDER BY id")^
+        return take([for (row in sqlite.query(tx,"SELECT id FROM objects WHERE kind IN ('chunk', 'chunk_raw') ORDER BY id")^
             where contains(retained,row[0])^ and not contains(protected,row[0])^) row[0]],limit)
     })^
     if (len(selected)^ == 0) { return {id:null,objects:[],complete:true} }
@@ -31,12 +38,17 @@ pub pn plan(handle, credentials, config, limit=64) any^ {
         if (current.cache_job != null) raise error("sync cache: another eviction was admitted")
         return {*:current,cache_job:job}
     })^
-    let pin = transport.call(config,credentials,"cache_pin",{id:id,objects:[for (object_id in selected) hex.hex(object_id)^]})^
+    let remote = transport.call(config,credentials,"pull",{})^
+    let control = schema.control(remote.control,config.authority)^
+    if (control.space != credentials.space) raise error("sync cache: wrong provider space")
+    let locations = [for (entry in local.cloud_locations(handle,cloud.provider(config)^,selected)^)
+        {id:entry.id,key:if (entry.key == null) bundle.object_key(entry.id,remote.epoch or 0)^ else entry.key}]
+    let pin = transport.call(config,credentials,"cache_pin",pin_request(id,selected,locations,remote.protocol)^)^
     if (not pin.reserved) raise error("sync cache: remote reservation contention; retry")
     // authenticate actual remote bytes, rather than treating an existence check as a verified copy.
     for (object_id in selected) {
-        let record = codec.decode(transport.read(config,credentials,bundle.object_key(object_id,pin.epoch)^)^)^
-        if (record.id != object_id or record.kind != "chunk") raise error("sync cache: wrong remote copy")
+        let record = codec.decode(transport.read(config,credentials,physical_key({keys:[for (entry in locations where entry.id == object_id) entry.key]},object_id,pin.epoch)^)^)^
+        if (record.id != object_id or not repo.is_chunk(record.kind)^) raise error("sync cache: wrong remote copy")
         repo.validate_record(handle.keys,record)^
     }
     local.mutate(handle,pn (tx,k,current)=> {
@@ -59,7 +71,7 @@ pub pn step(handle, config, id, budget=16) any^ {
         for (offset in range(job.next,end,1)) {
             let target = job.objects[offset]
             if (contains(protected,target)^) raise error("sync cache: chunk became protected; hydrate/cancel or replan")
-            if (repo.present(k,target)^ and repo.record(k,target)^.kind != "chunk")
+            if (repo.present(k,target)^ and not repo.is_chunk(repo.record(k,target)^.kind)^)
                 raise error("sync cache: metadata eviction is forbidden")
             evicted = [*[for (entry in evicted where entry.id != target) entry],{id:target,pin:id,provider:job.provider,owner:job.owner}]
         }
@@ -83,11 +95,17 @@ pub pn hydrate(handle, credentials, config, budget=64) any^ {
     let control = schema.control(remote.control,config.authority)^
     if (control.space != credentials.space) raise error("sync cache: wrong provider space")
     let epoch = remote.epoch or 0
+    let known = if (remote.protocol == 2) local.cloud_locations(handle,provider,[for (entry in selected) entry.id])^ else []
+    let unresolved = [for (entry in selected where v.lookup(known,entry.id)^.key == null and
+        v.lookup(remote.pins,entry.pin)^.keys == null) entry.id]
+    let discovered = if (remote.protocol == 2 and len(unresolved)^ > 0)
+        cloud.resolve_locations(credentials,config,remote,unresolved)^ else []
     var restored = []
     for (entry in selected) {
         let pin = v.lookup(remote.pins,entry.pin)^
-        let record = codec.decode(transport.read(config,credentials,bundle.object_key(entry.id,epoch)^)^)^
-        if (record.id != entry.id or record.kind != "chunk")
+        let key = if (v.lookup(known,entry.id)^.key != null) v.lookup(known,entry.id)^.key else v.lookup(discovered,entry.id)^.key
+        let record = codec.decode(transport.read(config,credentials,physical_key(pin,entry.id,epoch,key)^)^)^
+        if (record.id != entry.id or not repo.is_chunk(record.kind)^)
             raise error("sync cache: durable reservation missing; local metadata retained for recovery")
         repo.validate_record(handle.keys,record)^
         local.import_objects(handle,[record])^

@@ -32,8 +32,9 @@ pub fn prepare(current) any^ {
 }
 
 pn hold(tx, keys, current, operation, observed, reason) any^ {
-    let captured = if (observed != null and observed.kind == 'file') disk.capture(current.root,operation.path,8388608)^ else null
-    let reference = if (captured == null) null else repo.content(tx,keys,captured.bytes,current.chunker)^
+    let captured = if (observed != null and observed.kind == 'file')
+        fs.capture_file(tx,keys,current.root,operation.path,current.chunker,fs.limits(current)^.file_bytes,observed.token)^ else null
+    let reference = if (captured == null) null else captured.content
     let recovery = {path:operation.path,content:reference,observed:observed,reason:reason}
     return {*:current,installation:{*:current.installation,blocked:recovery,
         recoveries:unique([*current.installation.recoveries,recovery])}}
@@ -67,19 +68,18 @@ pub pn step(tx, keys, current) any^ {
         action = disk.directory(current.root,operation.path)
         done = not (action is error)
     } else if (operation.kind == 'write') {
-        let bytes = repo.payload(tx,keys,operation.content)^
-        let captured = if (observed == null or observed.kind != 'file') null else disk.capture(current.root,operation.path,8388608)^
-        if (captured != null and blob.verify(operation.content,captured.bytes)^) { done = true }
+        let captured = if (observed == null or observed.kind != 'file') null else fs.observe(current.root,operation.path,fs.limits(current)^.file_bytes)^
+        if (captured != null and fs.matches(operation.content,captured)^) { done = true }
         else {
             if ((observed != null and (captured == null or operation.expected == null or
-                operation.expected.type != 'file' or not blob.verify(operation.expected.content,captured.bytes)^)) or
+                operation.expected.type != 'file' or not fs.matches(operation.expected.content,captured)^)) or
                 (observed == null and operation.expected != null)) {
                 return hold(tx,keys,current,operation,observed,"external change before write")^
             }
-            action = disk.install(current.root,operation.path,bytes,if (captured == null) null else captured.token)
+            action = repo.install_content(tx,keys,operation.content,current.root,operation.path,if (captured == null) null else captured.token)
             if (not (action is error)) {
-                let readback = disk.capture(current.root,operation.path,8388608)^
-                if (not blob.verify(operation.content,readback.bytes)^) {
+                let readback = fs.observe(current.root,operation.path,fs.limits(current)^.file_bytes)^
+                if (not fs.matches(operation.content,readback)^) {
                     return hold(tx,keys,current,operation,readback,"external change after write")^
                 }
                 done = true
@@ -91,8 +91,8 @@ pub pn step(tx, keys, current) any^ {
             return hold(tx,keys,current,operation,observed,"external replacement before removal")^
         } else {
             if (observed.kind == 'file') {
-                let captured = disk.capture(current.root,operation.path,8388608)^
-                if (not blob.verify(operation.expected.content,captured.bytes)^) {
+                let captured = fs.observe(current.root,operation.path,fs.limits(current)^.file_bytes)^
+                if (not fs.matches(operation.expected.content,captured)^) {
                     return hold(tx,keys,current,operation,observed,"external change before removal")^
                 }
             } else if (len(disk.entries(current.root,operation.path,10000)^) != 0) {

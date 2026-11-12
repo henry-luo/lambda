@@ -1,5 +1,6 @@
 // S3 is one storage adapter; version tokens stay opaque and redirects stay disabled.
 import hex: lambda.security.tuf.metadata
+import xml: lambda.doc.xml
 
 pub fn hmac(key, message) any^ {
     let raw = binary(key)^
@@ -48,17 +49,18 @@ pub fn signed(config, method, path, query, headers, timestamp, payload) any^ {
 }
 fn address(config, key) any^ {
     validate(config)^
-    if (not safe(key,"abcdefghijklmnopqrstuvwxyz0123456789/-")^ or
+    if (key != "" and (not safe(key,"abcdefghijklmnopqrstuvwxyz0123456789/-")^ or
         starts_with(key,"/") or ends_with(key,"/") or contains(key,"//"))
+        )
         raise error("sync s3: invalid repository key")
     return {host:slice(config.endpoint,index_of(config.endpoint,"://")+3,len(config.endpoint)),
         path:"/" ++ config.bucket ++ "/" ++ key}
 }
-pub pn request(config, method, key, bytes=null, conditions={}) any^ {
+pub pn request(config, method, key, bytes=null, conditions={}, query={}) any^ {
     let target = address(config,key)^
-    let headers = signed(config,method,target.path,{},
+    let headers = signed(config,method,target.path,query,
         {host:target.host,*:conditions},stamp(now().unix)^,hex.hex(hash(bytes,'sha256')^)^)^
-    return io.fetch(config.endpoint ++ target.path,{method:method,body:bytes,
+    return io.fetch(config.endpoint ++ target.path ++ (if (len(query)^ == 0) "" else "?" ++ query_string(query)),{method:method,body:bytes,
         headers:headers,timeout:30,max_bytes:8388608,follow_redirects:false})^
 }
 fn result(response) any^ {
@@ -102,8 +104,40 @@ pub pn erase(config, key) any^ {
     if (not response.ok and response.status != 404) raise error("sync s3: delete rejected")
     return true
 }
+fn field(node, tag) any^ => xml.tree_text(xml.child(node,tag)^)^
+pub fn listing(bytes, prefix, cursor=null, limit=64) any^ {
+    let parsed = xml.root(parse(bytes,{type:'xml',flavor:'strict'})^)^
+    let root = xml.tree(parsed)^
+    if (root.tag != "ListBucketResult" or
+        not contains(["","http://s3.amazonaws.com/doc/2006-03-01/"],root.uri)^ or
+        field(root,"Prefix")^ != prefix or not contains(["true","false"],field(root,"IsTruncated")^)^)
+        raise error("sync s3: invalid listing response")
+    let entries = [for (node in xml.children(root,"Contents")^)
+        {key:field(node,"Key")^,etag:field(node,"ETag")^,size:int(field(node,"Size")^)^}]
+    if (len(entries)^ > limit or not all([for (entry in entries)
+        starts_with(entry.key,prefix)^ and entry.size >= 0 and entry.etag != ""]) or
+        entries != sort(entries,(entry)=>entry.key)^ or
+        len(unique([for (entry in entries) entry.key]))^ != len(entries)^)
+        raise error("sync s3: invalid listing entries")
+    let more = field(root,"IsTruncated")^ == "true"
+    let next = if (more) field(root,"NextContinuationToken")^ else null
+    if (more and (next == "" or next == cursor)) raise error("sync s3: missing or repeated continuation")
+    return {entries:entries,next:next}
+}
+fn listing_query(prefix, cursor, limit) => {'list-type':"2",prefix:prefix,'max-keys':string(limit),
+    *:if (cursor == null) {} else {'continuation-token':cursor}}
+pub pn enumerate(config, prefix, cursor=null, limit=64) any^ {
+    if (not (limit is int) or limit < 1 or limit > 128 or
+        not safe(prefix,"abcdefghijklmnopqrstuvwxyz0123456789/-")^ or
+        (cursor != null and not (cursor is string))) raise error("sync s3: invalid listing request")
+    let query = listing_query(prefix,cursor,limit)^
+    let response = request(config,"GET","",null,{},query)^
+    if (not response.ok) raise error("sync s3: listing rejected")
+    return listing(response.body,prefix,cursor,limit)^
+}
 // consumers depend on this small contract, rather than S3 request conventions.
 pub fn adapter(config) { return {
+    enumerate:pn (prefix,cursor,limit)=> { return enumerate(config,prefix,cursor,limit)^ },
     erase:pn (key)=> { return erase(config,key)^ },
     get:pn (key)=> { return get(config,key)^ },
     head:pn (key)=> { return head(config,key)^ },

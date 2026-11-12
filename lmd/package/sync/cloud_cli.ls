@@ -12,12 +12,13 @@ import transport: .cloud_transport
 import maintenance: .cloud_maintenance
 import runner: .maintenance_runner
 import cache: .cache
+import audit: .cloud_audit
 pn execute(request, wrapping_key, environment) any^ {
     if (request.action == "bootstrap") {
         let credentials = identity.load(request.directory,wrapping_key)^
         let members = [credentials.device,*[for (path in request.members) codec.decode(input(path,'text')^,16384)^]]
         let control = schema.signed(credentials.seed,"lambda-cloud-control-1",{version:1,space:credentials.space,
-            owner:credentials.device,generation:1,storage:"catalog-1",members:[for (device in members) {device:device,active:true}]})^
+            owner:credentials.device,generation:1,storage:request.storage_protocol or "catalog-2",members:[for (device in members) {device:device,active:true}]})^
         let storage = parse(environment.LAMBDA_CLOUD_STORAGE,'json')^
         service.bootstrap(s3.adapter(storage),control)^
         return {authority:credentials.device.id,space:credentials.space}
@@ -41,9 +42,22 @@ pn execute(request, wrapping_key, environment) any^ {
         let credentials = identity.load(request.directory,wrapping_key)^
         return cloud.history(credentials,request.cloud,request.actor,request.start,request.limit or 32)^
     }
+    if (request.action == "backup_discover") {
+        let credentials = identity.load(request.directory,wrapping_key)^
+        return transport.call(request.cloud,credentials,"backup_discover",{cursor:request.cursor,limit:request.limit or 4})^
+    }
+    if (starts_with(request.action,"audit_")^) {
+        let opened = peer.open_agent(request.directory,wrapping_key)^
+        if (request.action == "audit_begin") { return audit.begin(opened.handle,opened.credentials,request.cloud)^ }
+        if (request.action == "audit_scan") { return audit.scan(opened.handle,opened.credentials,request.cloud,request.budget or 32)^ }
+        if (request.action == "audit_step") { return audit.step(opened.handle,opened.credentials,request.cloud,request.budget or 8)^ }
+        if (request.action == "audit_status") { return audit.status(opened.handle,request.cloud)^ }
+        if (request.action == "audit_prepare") { return audit.prepare(opened.handle,opened.credentials,request.cloud)^ }
+        if (request.action == "audit_abort") { return audit.abort(opened.handle,opened.credentials,request.cloud)^ }
+    }
     if (request.action == "catalog_recover") {
         let credentials = identity.load(request.directory,wrapping_key)^
-        return transport.call(request.cloud,credentials,"recover_catalog",{snapshot:request.snapshot})^
+        return transport.call(request.cloud,credentials,"recover_catalog",{snapshot:request.snapshot,expected:request.expected})^
     }
     if (request.action == "cancel_publication") {
         let agent = peer.open_agent(request.directory,wrapping_key)^

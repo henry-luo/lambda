@@ -5,6 +5,9 @@ import v: .schema
 import core: .core
 import catalog: .cloud_catalog
 import maintenance: .cloud_maintenance_function
+import receipts: .cloud_receipts
+import retirements: .cloud_retirements
+import audit: .cloud_audit_function
 
 pub pn bootstrap(store, signed_control) any^ {
     let control = schema.control(signed_control,signed_control.body.owner.id)^
@@ -20,6 +23,7 @@ pn head(store, prefix, control, actor) any^ {
     let found = catalog.head(catalog.load(store,prefix,control)^.value,actor)^
     return if (found == null) null else {publication:found.publication,etag:found.etag,at:found.at}
 }
+fn read_headers(etags, index) => if (etags == null) {} else {'if-match':etags[index]}
 fn batch(items) any^ {
     if (not (items is array) or len(items) < 1 or len(items) > 64) raise error("sync cloud: batch limit")
     return true
@@ -34,6 +38,9 @@ pub pn handle(store, request, milliseconds) any^ {
     let control = schema.control(signed_control,signed_control.body.owner.id)^
     let envelope = schema.authenticate(request,control,milliseconds)^
     let body = envelope.body
+    if (contains(["backup_discover","audit_begin","audit_step","audit_status","audit_abort"],envelope.kind)^) {
+        return audit.handle(store,prefix,control,envelope)^
+    }
     if (envelope.kind == "pull") {
         v.fields(body,[])^
         let captured = catalog.load(store,prefix,control)^
@@ -49,20 +56,29 @@ pub pn handle(store, request, milliseconds) any^ {
         return {control:signed_control,control_etag:record.etag,heads:heads,
             epoch:captured.value.epoch,catalog_etag:captured.etag,phase:captured.value.phase,
             catalog_backup:captured.value.backup,maintenance_allowed:not captured.value.legacy,
+            protocol:captured.value.version,
+            next_epoch:catalog.available_epoch(store,prefix,captured.value)^,
+            audit:audit.summary(captured.value)^,
             checkpoint:captured.value.checkpoint,
-            maintenance:if (captured.value.maintenance == null) null else {
+            maintenance:if (captured.value.version == 2) retirements.summary(store,prefix,captured.value.maintenance)^
+                else if (captured.value.maintenance == null) null else {
                 id:captured.value.maintenance.id,committed:captured.value.maintenance.committed,aborted:captured.value.maintenance.aborted == true,
                 next:captured.value.maintenance.next,total:len(captured.value.maintenance.old_keys)^},
             pins:captured.value.pins,pending_publications:[for (entry in captured.value.uploads)
-                {actor:entry.id,objects:len(entry.keys)^}]}
+                {actor:entry.id,objects:catalog.upload_count(entry)^}]}
     }
     if (envelope.kind == "read") {
-        v.fields(body,["keys"])^
+        v.record(body,["keys"],["etags"])^
         batch(body.keys)^
+        if (body.etags != null and (not (body.etags is array) or len(body.etags)^ != len(body.keys)^ or
+            not all([for (tag in body.etags) tag is string and len(tag)^ > 0 and len(tag)^ <= 256 and
+                not contains(tag,"\r")^ and not contains(tag,"\n")^])))
+            raise error("sync cloud: invalid observed ETags")
         var result = []
-        for (key in body.keys) {
+        for (index in 0 to (len(body.keys)^-1)) {
+            let key = body.keys[index]
             if (not schema.readable(key)^) raise error("sync cloud: read scope rejected")
-            result = [*result,{key:key,capability:store.capability("GET",prefix ++ key,{})^}]
+            result = [*result,{key:key,capability:store.capability("GET",prefix ++ key,read_headers(body.etags,index)^)^}]
         }
         return result
     }
@@ -88,6 +104,14 @@ pub pn handle(store, request, milliseconds) any^ {
         for (key in ordered) {
             if (not schema.data_key(key)^) raise error("sync cloud: dependency scope rejected")
         }
+        let captured = catalog.load(store,prefix,control)^
+        if (captured.value.version == 2) {
+            for (key in ordered) {
+                catalog.referenceable(store,prefix,captured.value,key,envelope.actor == control.owner.id)^
+                if (store.head(prefix ++ key)^ == null) raise error("sync cloud: missing dependency")
+            }
+            return receipts.stage(store,prefix,ordered,catalog.target_epoch(captured.value)^)^
+        }
         catalog.reserve(store,prefix,control,ordered,envelope.actor == control.owner.id,envelope.actor)^
         let receipt = {version:1,keys:ordered}
         let id = schema.digest(receipt)^
@@ -100,6 +124,13 @@ pub pn handle(store, request, milliseconds) any^ {
         }
         else if (codec.decode(existing.body)^ != receipt) raise error("sync cloud: receipt collision")
         return {id:id}
+    }
+    if (envelope.kind == "stage_merge") {
+        v.fields(body,["receipts"])^
+        let captured = catalog.load(store,prefix,control)^
+        if (captured.value.version != 2 or (captured.value.phase != 'open' and envelope.actor != control.owner.id))
+            raise error("sync cloud: paged publication unavailable")
+        return receipts.merge(store,prefix,body.receipts,catalog.target_epoch(captured.value)^)^
     }
     if (envelope.kind == "commit") {
         v.fields(body,["publication","expected"])^
@@ -117,6 +148,10 @@ pub pn handle(store, request, milliseconds) any^ {
             body.expected != (if (current == null) null else current.etag))
             { return {published:false,head:current} }
         var dependencies = []
+        if (next.version == 2) {
+            if (captured.value.version != 2) raise error("sync cloud: upgrade the publication catalog first")
+            receipts.publication(store,prefix,next,captured.value.epoch)^
+        } else {
         for (id in next.receipts) {
             let found = store.get(prefix ++ "receipts/" ++ id)^
             if (found == null) raise error("sync cloud: missing receipt")
@@ -127,6 +162,7 @@ pub pn handle(store, request, milliseconds) any^ {
         if (schema.dependency_digest(dependencies)^ != next.dependencies or
             not contains(dependencies,next.bundle.key)^) raise error("sync cloud: incomplete publication")
         for (key in dependencies) { catalog.writable(captured.value,key)^ }
+        }
         catalog.immutable(store,prefix ++ "publications/" ++ digest,body.publication)^
         // membership is re-read immediately before admission; no immediate revocation fence is claimed.
         let latest = store.get(prefix ++ "control")^

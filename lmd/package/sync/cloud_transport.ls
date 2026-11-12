@@ -32,6 +32,19 @@ pub pn read(config, credentials, key) any^ {
     if (not response.ok) raise error("sync cloud: missing/unavailable object")
     return response.body
 }
+fn read_request(keys, etags) => {keys:keys,*:if (etags == null) {} else {etags:etags}}
+pub pn read_many(config, credentials, keys, etags=null) any^ {
+    if (len(keys)^ == 0) { return [] }
+    let offers = call(config,credentials,"read",read_request(keys,etags)^)^
+    if ([for (offer in offers) offer.key] != keys) raise error("sync cloud: read descriptors mismatch")
+    var records = []
+    for (offer in offers) {
+        let response = transfer(offer.capability,"GET")^
+        if (not response.ok) raise error("sync cloud: unavailable object")
+        records = [*records,{key:offer.key,bytes:response.body}]
+    }
+    return records
+}
 pub fn descriptor(key, bytes) any^ => {key:key,bytes:len(binary(bytes)^),checksum:s3.checksum(bytes)^}
 pub pn ensure(config, credentials, descriptor, bytes) any^ {
     let offered = call(config,credentials,"upload",{objects:[descriptor]})^[0]

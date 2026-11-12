@@ -4,20 +4,18 @@ import schema: .cloud_schema
 import codec: .codec
 import core: .core
 import v: .schema
+import retirements: .cloud_retirements
+import receipts: .cloud_receipts
+import audit_helpers: .cloud_audit_function
 
-pub fn heads(value) any^ => sort([for (entry in value.heads)
-    {actor:entry.actor,sequence:entry.publication.body.sequence,publication:schema.digest(entry.publication)^}],(entry)=>entry.actor)^
-pub fn checkpoint(value, control) any^ {
-    let body = schema.verify(value,"lambda-cloud-maintenance-1",control.owner.public_key)^
-    v.fields(body,["version","epoch","covered","publication"] )^
-    if (body.version != 1 or not v.natural(body.epoch)^ or body.epoch < 1 or not (body.covered is array))
-        raise error("sync cloud: invalid maintenance checkpoint")
-    let publication = schema.publication(body.publication,control)^
-    if (publication.actor != control.owner.id or catalog.epoch(publication.bundle.key)^ != body.epoch)
-        raise error("sync cloud: wrong maintenance authority/epoch")
-    return body
-}
+pub fn heads(value) any^ => schema.catalog_heads(value)^
+pub fn checkpoint(value, control) any^ => schema.maintenance_checkpoint(value,control)^
 pn dependencies(store, prefix, publication) any^ {
+    if (publication.version == 2) {
+        receipts.publication(store,prefix,publication,catalog.epoch(publication.bundle.key)^)^
+        if (store.head(prefix ++ publication.bundle.key)^ == null) raise error("sync cloud: missing backup bundle")
+        return []
+    }
     var keys = []
     for (id in publication.receipts) {
         let found = store.get(prefix ++ "receipts/" ++ id)^
@@ -35,23 +33,27 @@ pn dependencies(store, prefix, publication) any^ {
     }
     return ordered
 }
+fn pin_record(id, actor, objects, keys) any^ => {id:id,actor:actor,objects:sort(unique(objects))^,
+    *:if (keys == null) {} else {keys:sort(unique(keys))^}}
 pub pn handle(store, prefix, control, envelope, milliseconds) any^ {
     let kind = envelope.kind
     let body = envelope.body
     if (kind == "recover_catalog") {
-        v.fields(body,["snapshot"])^
-        if (envelope.actor != control.owner.id or not schema.id(body.snapshot)^ or store.get(prefix ++ "catalog")^ != null)
-            raise error("sync cloud: owner-selected recovery requires a missing catalog")
+        v.record(body,["snapshot"],["expected"])^
+        let previous = store.get(prefix ++ "catalog")^
+        if (envelope.actor != control.owner.id or not schema.id(body.snapshot)^)
+            raise error("sync cloud: owner-selected recovery required")
+        if (previous != null) {
+            let state_before = catalog.normalize(codec.decode(previous.body)^)^
+            if (not state_before.legacy or state_before.phase != 'open' or body.expected != previous.etag)
+                raise error("sync cloud: replacing a recovery candidate requires its exact unaudited catalog")
+        } else if (body.expected != null) { raise error("sync cloud: stale recovery pointer") }
         let stored = store.get(prefix ++ "catalogs/" ++ body.snapshot)^
         if (stored == null) raise error("sync cloud: catalog backup missing")
         let candidate = codec.decode(stored.body)^
-        if (schema.digest(candidate)^ != body.snapshot or candidate.version != 1 or candidate.phase != 'open')
-            raise error("sync cloud: invalid catalog backup")
+        audit_helpers.backup(candidate,body.snapshot,control)^
         let cut = if (candidate.checkpoint == null) null else checkpoint(candidate.checkpoint,control)^
-        if (cut != null) {
-            if (cut.epoch != candidate.epoch) raise error("sync cloud: backup epoch mismatch")
-            dependencies(store,prefix,schema.publication(cut.publication,control)^)^
-        } else if (candidate.epoch != 0) { raise error("sync cloud: backup checkpoint missing") }
+        if (cut != null) { dependencies(store,prefix,schema.publication(cut.publication,control)^)^ }
         for (head in candidate.heads) {
             let publication = schema.publication(head.publication,control)^
             let covered = if (cut == null) [] else [for (entry in cut.covered where entry.actor == head.actor) entry]
@@ -60,12 +62,15 @@ pub pn handle(store, prefix, control, envelope, milliseconds) any^ {
                 dependencies(store,prefix,publication)^
             }
         }
-        let recovered = {*:candidate,backup:body.snapshot,legacy:true}
-        let result = store.write(prefix ++ "catalog",codec.encode(recovered)^,null)^
+        let recovered = {*:catalog.normalize(candidate)^,backup:body.snapshot,legacy:true}
+        let result = store.write(prefix ++ "catalog",codec.encode(recovered)^,if (previous == null) null else previous.etag)^
         return {recovered:result.written,maintenance_allowed:false,epoch:candidate.epoch}
     }
     let current = catalog.load(store,prefix,control)^
     let value = current.value
+    if (value.version == 2 and contains(["maint_begin","maint_abort","maint_commit","maint_prune","maint_reap"],kind)^) {
+        return retirements.handle(store,prefix,control,current,envelope,milliseconds)^
+    }
     if (kind == "cancel_publication") {
         v.fields(body,[])^
         if (value.phase != 'open') raise error("sync cloud: finish/abort maintenance before cancelling publication")
@@ -74,18 +79,25 @@ pub pn handle(store, prefix, control, envelope, milliseconds) any^ {
         return {cancelled:changed.written}
     }
     if (kind == "cache_pin") {
-        v.fields(body,["id","objects"])^
+        v.record(body,["id","objects"],["keys"])^
         if (value.phase != 'open' or not schema.id(body.id)^ or not (body.objects is array) or
             len(body.objects)^ < 1 or len(body.objects)^ > 128 or not all([for (id in body.objects) schema.id(id)^]))
             raise error("sync cloud: invalid cache reservation")
         let old = v.lookup(value.pins,body.id)^
-        let pin = {id:body.id,actor:envelope.actor,objects:sort(unique(body.objects))^}
+        let keys = if (value.version == 1) null else if (body.keys == null)
+            [for (id in body.objects) catalog.data_key("objects",id,value.epoch)^] else body.keys
+        if (keys != null and (not (keys is array) or len(keys)^ != len(body.objects)^ or
+            not all([for (index in 0 to (len(keys)^-1)) schema.data_key(keys[index])^ and
+                starts_with(keys[index],"objects/")^ and ends_with(keys[index],"/" ++ body.objects[index])^])))
+            raise error("sync cloud: invalid reserved physical keys")
+        let pin = pin_record(body.id,envelope.actor,body.objects,keys)^
         if (old != null) {
             if (old != pin) raise error("sync cloud: reservation ID reused")
             return {reserved:true,id:body.id,epoch:value.epoch}
         }
-        for (id in pin.objects) {
-            if (store.head(prefix ++ catalog.data_key("objects",id,value.epoch)^)^ == null)
+        let physical = if (pin.keys == null) [for (id in pin.objects) catalog.data_key("objects",id,value.epoch)^] else pin.keys
+        for (key in physical) {
+            if (store.head(prefix ++ key)^ == null or (value.version == 2 and not catalog.referenceable(store,prefix,value,key)^))
                 raise error("sync cloud: cache copy unavailable")
         }
         let changed = catalog.write(store,prefix,current,{*:value,pins:[*value.pins,pin]})^
@@ -162,6 +174,7 @@ pub pn handle(store, prefix, control, envelope, milliseconds) any^ {
         if (selected.epoch != value.epoch+1 or selected.covered != plan.plan.heads)
             raise error("sync cloud: checkpoint does not cover the frozen catalog")
         let publication = schema.publication(selected.publication,control)^
+        if (publication.version != 1) raise error("sync cloud: audited upgrade required for paged maintenance")
         for (entry in value.heads) {
             if (not core.dominates(publication.clock,entry.publication.body.clock)^)
                 raise error("sync cloud: maintenance loses a published frontier")

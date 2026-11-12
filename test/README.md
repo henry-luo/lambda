@@ -541,6 +541,19 @@ Debugging: `./log.txt` holds the runtime trace, debug builds dump JIT'd MIR to `
 
 ## 7. Common single-test commands
 
+### Sync recovery and scale
+
+`python3 test/sync_scale/test_goldens.py` runs every sync golden with exact output,
+normal exit, batch markers and the unchanged 60-second deadline. Select `auto`,
+`interp` or `jit` with `LAMBDA_EXEC_BACKEND`. `--gc` selects five focused streaming,
+audit and retention fixtures with the existing 300-second GC/poison budget.
+`test/sync_scale/test_recovery_scale.py` exercises real isolated S3, native peer
+transfer above 8 MiB, missing-catalog recovery, interrupted verification, changed
+ETags, repeated retained-copy reuse and an offline returning device. Supply the
+protected store config through `LAMBDA_CLOUD_TEST_STORAGE_FILE`. It owns/reaps its
+client/function processes; the operator owns the separate S3 backend. Qualification
+and capacity evidence live in [the implementation plan](<../vibe/impl/Lambda_Impl_Sync_Recovery_Scale (done).md>).
+
 ### Sync history and maintenance
 
 `./test/test_lambda_gtest.exe --gtest_filter='*sync_*'` includes the six new

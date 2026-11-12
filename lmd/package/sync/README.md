@@ -24,6 +24,8 @@ incremental authenticated document exchange, exact-frontier file saves and a
 headless editor API.
 [History and maintenance](MAINTENANCE.md) adds paged saved endpoints, permanent or
 calendar retention, pins, resumable local/cloud pruning and verified-copy cache eviction.
+Streamed large files, paged cloud inventories, owner-audited recovery and retained
+ciphertext reuse are described in [CLOUD.md](CLOUD.md#audited-recovery-and-reusable-storage).
 Package distribution/imports follow D1.7 and D9.3.4.
 
 ## Run the examples

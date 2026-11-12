@@ -186,8 +186,8 @@ simultaneously visible to external applications.
 
 The first host qualification is macOS native CLI. File anchors fail closed on
 unsupported platforms or with a bound security client lacking the broker operation.
-Limits include 10,000 scan entries, 128 directory levels, 8 MiB per file/physical
-object, 64 MiB captured bytes per scan, 100,000 physical objects per repository
+Limits include 10,000 scan entries, 128 directory levels, 256 MiB per captured
+file, 8 MiB per physical object, 1 GiB captured bytes per scan, 100,000 physical objects per repository
 enumeration, and the existing 8 MiB typed-codec/16 MiB SQLite statement bounds.
 File metadata beyond names, kinds and payload bytes
 (permissions, xattrs, hard links, sparse extents and symlinks) is not synchronized.
@@ -203,3 +203,37 @@ execution and production performance are separate milestones. Fenced physical
 pruning is available through explicit maintenance APIs.
 
 Implementation and qualification: [completed local milestone](<../../../vibe/impl/Lambda_Impl_Sync_Local_Repository (done).md>).
+
+## Streamed files and private location pages
+
+Files above 8 MiB use manifest v2 with encrypted `file_page` objects, each holding
+up to 256 chunk descriptors. New streamed chunks use appended object kind
+`chunk_raw`: raw binary plaintext, SHA256/HMAC identity and a separate raw-binary
+cryptographic context (`lambda-repository-chunk-raw-1:` + UTF-8 space + fixed
+32-byte digest/ID). Existing kind numbers, legacy chunk plaintext and contexts
+remain readable. All participating clients must support this profile before
+large-file publication. Incremental Gear32 chunking preserves boundaries
+across read blocks. Verification, installation, snapshot restore and saved-file
+restore consume bounded chunks and verify the complete SHA256 before publishing;
+`read_content` still rejects whole-payload reads above 8 MiB. Ordinary small files
+keep manifest v1. External source/destination substitution aborts unpublished
+work. These are native IO mechanisms under D11.1.2; chunking and repository policy
+remain scripts (S12.1.1v3).
+
+Cloud v2 physical location indexes use encrypted private `locator` objects. They
+are retained by local reachability, validated by `verify`, and excluded from peer
+and cloud shared inventories. Local index rebuilding still treats authenticated
+immutable object files as the source of truth.
+
+An unchanged file can reuse its captured content reference only when path, type,
+held-file identity and full revision token match; the scan rechecks the named
+observation. It still counts the file against scan limits. A changed token triggers
+capture. A peer listener captures its initial tree before advertising readiness,
+so file discovery does not consume the connection's handshake deadline.
+
+The typed codec batches scalar portability checks into one Mark parse per value.
+Its wire version, canonical bytes, scalar types and map ordering are unchanged.
+This avoids one immortal Input allocation per scalar under D5.1.1–D5.1.3; raw
+chunks also avoid text formatting/parsing in the payload hot path. Input arena
+lifetime itself is unchanged, and arbitrary long-running metadata workloads still
+need separate capacity qualification.

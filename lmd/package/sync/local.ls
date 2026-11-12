@@ -4,6 +4,7 @@ import disk: lambda.io.disk
 import paths: lambda.io.path
 import repo: .repository
 import chunks: .chunks
+import locations: .location_index
 import cap: .workspace_capture
 import fs: .filesystem
 import install: .installation
@@ -41,7 +42,7 @@ pn replica_dependencies(tx, keys, replica, seen=[], depth=0, retired=[], source=
     var i = 0
     if (replica.profile == 'workspace') {
         let heads = maintenance.live_revisions(replica)^
-        for (revision in maintenance.revisions(replica)^ where contains(heads,revision.id)^) { repo.payload(tx,keys,revision.content)^ }
+        for (revision in maintenance.revisions(replica)^ where contains(heads,revision.id)^) { repo.availability(tx,keys,revision.content)^ }
     }
     while (i < len(roots.contents)^) { repo.availability(tx,keys,roots.contents[i],cached)^; i = i+1 }
     i = 0
@@ -184,7 +185,7 @@ pub pn materialize(handle, max_steps=1000) any^ {
 pub pn inventory(handle, include_documents=true) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let current = repo.load(tx,k)^.state
-        let rows = sqlite.query(tx,"SELECT id, kind FROM objects WHERE kind NOT IN ('state', 'maintenance') ORDER BY id")^
+        let rows = sqlite.query(tx,"SELECT id, kind FROM objects WHERE kind NOT IN ('state', 'maintenance', 'locator') ORDER BY id")^
         let selected = if (maintenance.get(current).manifest == null) [for (row in rows) row[0]]
             else reach.roots(tx,k,current,false)^
         return [for (row in rows where contains(selected,row[0])^ and (include_documents or row[1] != "document")) row[0]]
@@ -274,7 +275,7 @@ pub pn restore(handle, snapshot, destination) any^ {
         while (i < len(desired)) {
             let member = desired[i]
             if (member.type == 'dir') { disk.directory(target,member.path)^ }
-            else { disk.install(target,member.path,repo.payload(tx,k,member.content)^,null)^ }
+            else { repo.install_content(tx,k,member.content,target,member.path)^ }
             i = i+1
         }
         return {snapshot:snapshot,entries:len(desired),destination:target}
@@ -292,6 +293,7 @@ pub pn verify(handle) any^ {
             else plan.objects
         let checked = repo.verify(tx,k,reach.cache_ids(loaded.state),pending)^
         validate(loaded.state,k.space)^
+        locations.verify(tx,k,loaded.state)^
         dependencies(tx,k,loaded.state.endpoint,maintenance.get(loaded.state).revisions,"workspace",reach.cache_ids(loaded.state))^
         for (record in document_state.all(loaded.state)^) {
             documents.dependencies(tx,k,record,reach.cache_ids(loaded.state))^
@@ -349,7 +351,7 @@ pub pn recover(handle) any^ {
 }
 
 // only the cloud adapter calls this after verifying a complete discoverable publication.
-pub pn record_cloud(handle, provider, actor, sequence, publication, captured, objects=[], document_roots=[]) any^ {
+pub pn record_cloud(handle, provider, actor, sequence, publication, captured, objects=[], document_roots=[], physical=[]) any^ {
     if (not v.actor(provider)^ or not v.actor(actor)^ or not v.natural(sequence)^ or sequence < 1 or
         not v.actor(publication)^) raise error("sync local: invalid cloud progress")
     return mutate(handle,pn (tx,k,current)=> {
@@ -368,8 +370,26 @@ pub pn record_cloud(handle, provider, actor, sequence, publication, captured, ob
             cloud_objects:[*[for (item in old_objects where item.provider != provider) item],
                 {provider:provider,ids:unique([*objects,*if (len(known) == 0) [] else known[0].ids])}],cloud_sources:[*[for (item in old where
             item.provider != provider or item.actor != actor) item],
-            {provider:provider,actor:actor,sequence:sequence,publication:publication,clock:replica.clock,documents:document_roots}]}
-        return documents.record_cloud(tx,k,next,document_roots,provider)^
+            {provider:provider,actor:actor,sequence:sequence,publication:publication,clock:replica.clock,documents:document_roots,inventory:codec.digest(sort(objects)^)^}]}
+        let located = if (len(physical)^ == 0) next else locations.update(tx,k,next,provider,physical)^
+        return documents.record_cloud(tx,k,located,document_roots,provider)^
+    })^
+}
+pub pn cloud_locations(handle, provider, ids) any^ {
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+        let current = repo.load(tx,k)^.state
+        return [for (id in ids) {id:id,key:locations.lookup(tx,k,current,provider,id)^}]
+    })^
+}
+pub pn incoming_hot_chunks(handle, saved, document_roots=[]) any^ {
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+        let heads = maintenance.live_revisions(saved.replica)^
+        var contents = [for (revision in maintenance.revisions(saved.replica)^ where contains(heads,revision.id)^) revision.content]
+        for (root in document_roots) {
+            let value = repo.get(tx,k,root.object,"document")^
+            contents = [*contents,*blob.required(value.live.replica)^,*blob.required(value.origin.replica)^]
+        }
+        return unique([for (reference in contents) for (chunk in repo.content_manifest(tx,k,reference)^.chunks) chunk.id])
     })^
 }
 
@@ -448,7 +468,7 @@ pub pn shared_inventory(handle) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let current = repo.load(tx,k)^.state
         return if (maintenance.get(current).manifest == null and current.cache_root == null)
-            [for (row in sqlite.query(tx,"SELECT id FROM objects WHERE kind NOT IN ('state', 'maintenance') ORDER BY id")^) row[0]]
+            [for (row in sqlite.query(tx,"SELECT id FROM objects WHERE kind NOT IN ('state', 'maintenance', 'locator') ORDER BY id")^) row[0]]
             else reach.roots(tx,k,current,false)^
     })^
 }

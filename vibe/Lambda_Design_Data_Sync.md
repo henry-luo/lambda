@@ -1737,6 +1737,46 @@ own reachability context. Explicit deferred chunk metadata distinguishes cache
 absence from damaged data; hydration authenticates bytes before releasing pins.
 
 
+#### Recovery and scale profile
+
+The native recovery/scale profile keeps one conditional catalog while paging physical-key
+inventories and dependency receipts. Immutable ordered pages bind child hashes,
+ranges and counts; bounded cursors name the exact root. New publications bind a
+service-validated receipt tree and its publication epoch instead of listing every
+receipt in one control record. Small legacy formats remain readable.
+
+Retained ciphertext can keep its existing physical key across maintenance cuts.
+Only registered active keys can enter a new dependency receipt. New uploads and
+explicit restorations of retired content use fresh epoch paths. A committed
+immutable deletion job binds frozen old roots and exact keep roots; it can delete
+only the difference. No future publication can re-admit its retired paths. The
+catalog epoch serializes admission and cuts, while per-key retirement fences
+physical deletion. Allocate storage generations monotonically even when a job
+is aborted; never reuse a cancelled upload namespace in a later maintenance job.
+A separate high-water record and create-only generation claims survive catalog
+recovery. Claim collisions consume a generation and force replanning. This
+preserves §10.4 without recopying every retained object.
+
+Recovery discovery enumerates the scoped provider namespace with bounded opaque
+continuations ([S3-compatible ListObjectsV2](https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html)).
+Listing is not a globally consistent or authenticated repository snapshot. An
+owner audits chosen signed heads/checkpoints, authenticates encrypted graphs,
+records missing/corrupt dependencies and quarantines uncommitted objects. Freeze
+publication before promoting the audit. A recovered/legacy profile performs its
+first audited copy into fresh physical paths; it does not guess that unknown old
+keys are safe to reuse or delete. Preserve recorded client observations and never
+infer the latest committed backup from a timestamp or lexical digest ordering.
+Drain old handlers/writers before protocol upgrade.
+
+Large native files use bounded streaming reads and atomic staged writes over the
+existing held-directory APIs (D11.1.2). CDC and chunk-manifest policy remain Lambda
+Script (S12.1.1v3); native callbacks preserve precise roots and scope ownership
+(S12.4.4v4). Revalidate source revision/binding across callbacks. Validate exact
+length and SHA256 before destination publication; failure/cancellation removes
+unpublished stages. Chunk pages permit file manifests larger than one flat chunk
+list. Small files retain their existing representation. None of this authorizes
+removing offline CRDT identities, namespace history or retained merge anchors.
+
 Measure and tune chunk sizing, encrypted reuse, physical packing, and locator
 indexes on real workloads. Shared change indexes, aggressive metadata compaction,
 and long polling remain measured options. Implement retention and garbage
@@ -1807,6 +1847,13 @@ or implemented as a hidden waiting loop behind periodic pulls.
 
 Names and encodings here illustrate the proposal; they are not public API or
 language syntax commitments.
+
+Streamed manifest-v2 files use authenticated raw-binary chunk objects with a
+separate domain context. Payload storage does not round-trip through text. The
+typed metadata codec preserves its canonical wire bytes but batches scalar Mark
+validation, avoiding one retained Input per scalar (D5.1.1–D5.1.3). Exact unchanged
+file observations can reuse prior content references; changed identity/revision
+forces capture. Initial peer capture precedes listener readiness.
 
 ### A.1 Object layout
 

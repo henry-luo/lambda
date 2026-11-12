@@ -36,6 +36,7 @@ def decode(data):
 
 
 def cloud(name,action,success=True,script=CLI,**fields):
+    if action=='bootstrap':fields.setdefault('storage_protocol',os.environ.get('LAMBDA_CLOUD_TEST_STORAGE_PROTOCOL','catalog-1'))
     result=AREA/(str(peer.counter+1)+'-result.json')
     previous=os.environ.get('LAMBDA_CLOUD_RESULT')
     os.environ['LAMBDA_CLOUD_RESULT']=str(result)

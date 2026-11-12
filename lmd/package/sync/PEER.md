@@ -214,3 +214,9 @@ deferred historical chunks; live/base/pending data must remain available locally
 Hydrate cold chunks from their verified cloud provider before restoring them.
 See [maintenance](MAINTENANCE.md). Older offers remain readable, but all writers
 and the cloud handler must upgrade before enabling retention (D11.1.2, D11.2.3).
+
+The large-file profile uses manifest v2, paged descriptors and authenticated raw
+chunk objects. Upgrade all participating clients before using it. The agent scans
+once before publishing listener readiness and reuses exact unchanged-file
+observations on subsequent scans. Connection deadlines remain unchanged; bulk
+installation streams chunks through the native atomic writer (D11.1.2).

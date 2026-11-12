@@ -7,7 +7,7 @@ import codec: .codec
 import chunks: .chunks
 import blob: .blob
 import v: .schema
-let kinds = ["chunk","manifest","state","snapshot","checkpoint","document","version","history","retention","maintenance","cache"]
+let kinds = ["chunk","manifest","state","snapshot","checkpoint","document","version","history","retention","maintenance","cache","file_page","locator","chunk_raw"]
 
 pub pn access(path, keys, action) any^ {
     open tx = (sqlite.existing(path)^) { return action(tx,{*:keys,objects:path ++ ".objects"}) }
@@ -20,7 +20,9 @@ pub fn keys(secret, space, path=null) any^ {
         encryption:crypto.mac(secret,"lambda-repository-1:encryption:" ++ space)^,
         identity:crypto.mac(secret,"lambda-repository-1:identity:" ++ space)^}
 }
-fn context(keys, kind, id) any^ => codec.encode(["lambda-repository-1",keys.space,kind,id])^
+fn context(keys, kind, id) any^ => if (kind == "chunk_raw")
+    binary("lambda-repository-chunk-raw-1:")^ ++ binary(keys.space)^ ++ id
+    else codec.encode(["lambda-repository-1",keys.space,kind,id])^
 pub fn object_id(keys, kind, digest) any^ => crypto.mac(keys.identity,context(keys,kind,digest)^)^
 pub fn identity(keys, kind, value) any^ => object_id(keys,kind,codec.digest(value)^)^
 
@@ -33,7 +35,10 @@ fn authenticated(keys, record) any^ {
     if (object_id(keys,record.kind,hash(bytes,'sha256')^)^ != record.id) raise error("sync repository: object identity mismatch")
     return bytes
 }
-fn decode(keys, record) any^ => codec.decode(authenticated(keys,record)^)^
+pub fn is_chunk(kind) => kind == "chunk" or kind == "chunk_raw"
+fn object_plaintext(kind, value) any^ => if (kind == "chunk_raw") binary(value)^ else codec.encode(value)^
+fn decode(keys, record) any^ => if (record.kind == "chunk_raw") authenticated(keys,record)^ else
+    codec.decode(authenticated(keys,record)^)^
 pub fn validate_record(keys, record) any^ {
     authenticated(keys,record)^
     return true
@@ -59,7 +64,7 @@ pub pn present(keys, id) any^ { return disk.inspect(keys.objects,filename(id)^)^
 pub pn get(tx, keys, id, kind=null) any^ {
     let stored = read_record(keys,id)^
     if (kind != null and stored.record.kind != kind) raise error("sync repository: object kind mismatch")
-    return codec.decode(stored.plaintext)^
+    return if (stored.record.kind == "chunk_raw") stored.plaintext else codec.decode(stored.plaintext)^
 }
 
 pn index_record(tx, chosen) any^ {
@@ -88,7 +93,7 @@ pn persist_record(tx, keys, proposed) any^ {
 }
 
 pub pn store_object(tx, keys, kind, value) any^ {
-    let plaintext = codec.encode(value)^
+    let plaintext = object_plaintext(kind,value)^
     let id = object_id(keys,kind,hash(plaintext,'sha256')^)^
     if (disk.inspect(keys.objects,filename(id)^)^ != null) {
         let stored = read_record(keys,id)^
@@ -136,55 +141,132 @@ pub pn commit_head(tx, keys, generation, current) any^ {
     return {generation:generation+1,id:id,state:current}
 }
 
+pn store_chunks(tx, keys, pieces, kind="chunk") any^ {
+    return [for (piece in pieces) {id:store_object(tx,keys,kind,piece)^,size:len(piece)^}]
+}
 pub pn content(tx, keys, bytes, config=chunks.default_profile) any^ {
     if (bytes != null and not (bytes is binary)) raise error("sync repository: expected binary content")
-    let pieces = chunks.split(bytes,config)^
-    var references = []
-    var i = 0
-    while (i < len(pieces)) {
-        let piece = pieces[i]
-        references = [*references,{id:store_object(tx,keys,"chunk",piece)^,size:len(piece)}]
-        i = i+1
-    }
+    let references = store_chunks(tx,keys,chunks.split(bytes,config)^)^
     let digest = hash(bytes,'sha256')^
     let manifest = store_object(tx,keys,"manifest",{version:1,profile:config,size:len(bytes),hash:digest,chunks:references})^
     return blob.reference(manifest,len(bytes),digest)^
 }
-
-pn content_manifest(tx, keys, reference) any^ {
-    v.descriptor(reference)^
-    let manifest = get(tx,keys,reference.manifest,"manifest")^
-    v.fields(manifest,["version","profile","size","hash","chunks"])^
-    chunks.profile(manifest.profile)^
-    if (manifest.version != 1 or manifest.size != reference.size or manifest.hash != reference.hash or
-        manifest.size > 8388608 or not (manifest.chunks is array)) raise error("sync repository: invalid manifest")
-    for (descriptor in manifest.chunks) {
+pn stream_chunks(tx, keys, acc, bytes, final=false) any^ {
+    let fed = chunks.feed(acc.chunker,bytes,final)^
+    var pending = [*acc.pending,*store_chunks(tx,keys,fed.pieces,"chunk_raw")^]
+    var pages = acc.pages
+    while (len(pending)^ >= 256 or (final and len(pending)^ > 0)) {
+        let selected = take(pending,256)
+        let id = store_object(tx,keys,"file_page",{version:1,chunks:selected})^
+        pages = [*pages,{id:id,count:len(selected)^,size:sum([for (item in selected) item.size])}]
+        pending = slice(pending,len(selected)^)^
+    }
+    return {chunker:fed.state,pending:pending,pages:pages}
+}
+pub pn content_file(tx, keys, root, path, config=chunks.default_profile, maximum=268435456, token=null) any^ {
+    let initial = {chunker:chunks.start(config)^,pending:[],pages:[]}
+    let captured = disk.read_stream(root,path,{state:initial,max_bytes:maximum,token:token},
+        pn (acc,bytes)=> { return stream_chunks(tx,keys,acc,bytes)^ })^
+    let complete = stream_chunks(tx,keys,captured.state,null,true)^
+    let manifest = store_object(tx,keys,"manifest",{version:2,profile:config,size:captured.source.size,
+        hash:captured.hash,pages:complete.pages})^
+    return {source:captured.source,content:blob.reference(manifest,captured.source.size,captured.hash)^}
+}
+fn validate_chunks(entries, maximum=1048576) any^ {
+    if (not (entries is array)) raise error("sync repository: expected chunk descriptors")
+    for (descriptor in entries) {
         v.fields(descriptor,["id","size"])^
         if (not (descriptor.id is binary) or len(descriptor.id)^ != 32 or not v.natural(descriptor.size)^ or
-            descriptor.size < 1 or descriptor.size > manifest.profile.maximum) raise error("sync repository: invalid chunk descriptor")
+            descriptor.size < 1 or descriptor.size > maximum) raise error("sync repository: invalid chunk descriptor")
     }
-    if (sum([0,*[for (descriptor in manifest.chunks) descriptor.size]]) != manifest.size)
+    return true
+}
+pub fn content_links(kind, value) any^ {
+    if (kind == "file_page") {
+        v.fields(value,["version","chunks"])^
+        if (value.version != 1 or len(value.chunks)^ < 1 or len(value.chunks)^ > 256)
+            raise error("sync repository: invalid chunk page")
+        validate_chunks(value.chunks)^
+        return [for (chunk in value.chunks) chunk.id]
+    }
+    v.record(value,["version","profile","size","hash"],["chunks","pages"])^
+    chunks.profile(value.profile)^
+    if (value.version == 1) {
+        v.fields(value,["version","profile","size","hash","chunks"])^
+        validate_chunks(value.chunks,value.profile.maximum)^
+        return [for (chunk in value.chunks) chunk.id]
+    }
+    if (value.version != 2 or not (value.pages is array)) raise error("sync repository: invalid manifest version")
+    v.fields(value,["version","profile","size","hash","pages"])^
+    for (page in value.pages) {
+        v.fields(page,["id","count","size"])^
+        if (not (page.id is binary) or len(page.id)^ != 32 or not v.natural(page.count)^ or
+            page.count < 1 or page.count > 256 or not v.natural(page.size)^ or page.size < 1)
+            raise error("sync repository: invalid chunk page reference")
+    }
+    return [for (page in value.pages) page.id]
+}
+pub pn content_manifest(tx, keys, reference) any^ {
+    v.descriptor(reference)^
+    let manifest = get(tx,keys,reference.manifest,"manifest")^
+    content_links("manifest",manifest)^
+    if (manifest.size != reference.size or manifest.hash != reference.hash)
+        raise error("sync repository: manifest binding mismatch")
+    var descriptors = if (manifest.version == 1) manifest.chunks else []
+    if (manifest.version == 2) {
+        for (page in manifest.pages) {
+            let value = get(tx,keys,page.id,"file_page")^
+            content_links("file_page",value)^
+            if (len(value.chunks)^ != page.count or sum([for (item in value.chunks) item.size]) != page.size)
+                raise error("sync repository: chunk page binding mismatch")
+            descriptors = [*descriptors,*value.chunks]
+        }
+    }
+    validate_chunks(descriptors,manifest.profile.maximum)^
+    if (sum([0,*[for (descriptor in descriptors) descriptor.size]]) != manifest.size)
         raise error("sync repository: manifest length mismatch")
-    return manifest
+    return {*:manifest,chunks:descriptors}
+}
+pn content_chunk(tx, keys, id) any^ {
+    let stored = read_record(keys,id)^
+    if (not is_chunk(stored.record.kind)^) raise error("sync repository: expected chunk object")
+    return if (stored.record.kind == "chunk_raw") stored.plaintext else codec.decode(stored.plaintext)^
+}
+pn content_next(tx, keys, descriptors, acc) any^ {
+    if (acc.next == len(descriptors)^) { return {bytes:null,state:acc,done:true} }
+    let descriptor = descriptors[acc.next]
+    let bytes = content_chunk(tx,keys,descriptor.id)^
+    if (not (bytes is binary) or len(bytes)^ != descriptor.size) raise error("sync repository: invalid chunk")
+    return {bytes:bytes,state:{next:acc.next+1,
+        bytes:if (acc.collect) acc.bytes ++ bytes else null,collect:acc.collect},done:false}
 }
 pub pn availability(tx, keys, reference, evicted=[]) any^ {
     let manifest = content_manifest(tx,keys,reference)^
-    var bytes = binary([])^
-    var missing = []
-    for (descriptor in manifest.chunks) {
-        if (not present(keys,descriptor.id)^ and contains(evicted,descriptor.id)^) {
-            missing = [*missing,descriptor.id]
-        } else {
-            let piece = get(tx,keys,descriptor.id,"chunk")^
-            if (not (piece is binary) or len(piece) != descriptor.size) raise error("sync repository: invalid chunk")
-            bytes = bytes ++ piece
+    let missing = [for (descriptor in manifest.chunks where
+        not present(keys,descriptor.id)^ and contains(evicted,descriptor.id)^) descriptor.id]
+    if (len(missing)^ > 0) {
+        for (descriptor in manifest.chunks where not contains(missing,descriptor.id)^) {
+            let bytes = content_chunk(tx,keys,descriptor.id)^
+            if (not (bytes is binary) or len(bytes)^ != descriptor.size) raise error("sync repository: invalid chunk")
         }
+        return {complete:false,missing:missing,bytes:null}
     }
-    if (len(missing) == 0 and not blob.verify(reference,bytes)^)
-        raise error("sync repository: reconstructed content mismatch")
-    return {complete:len(missing) == 0,missing:missing,bytes:if (len(missing) == 0) bytes else null}
+    let checked = crypto.hash_stream({size:reference.size,state:{next:0,bytes:binary([])^,collect:reference.size <= 8388608}},
+        pn (acc)=> { return content_next(tx,keys,manifest.chunks,acc)^ })^
+    if (checked.hash != reference.hash) raise error("sync repository: reconstructed content mismatch")
+    return {complete:true,missing:[],bytes:checked.state.bytes}
 }
-pub pn payload(tx, keys, reference) any^ { return availability(tx,keys,reference)^.bytes }
+pub pn payload(tx, keys, reference) any^ {
+    if (reference.size > 8388608) raise error("sync repository: use streaming content installation for large files")
+    return availability(tx,keys,reference)^.bytes
+}
+pub pn install_content(tx, keys, reference, root, path, expected=null) any^ {
+    if (reference.size <= 8388608) { return disk.install(root,path,payload(tx,keys,reference)^,expected)^ }
+    let manifest = content_manifest(tx,keys,reference)^
+    disk.write_stream(root,path,{size:reference.size,hash:reference.hash,expected:expected,
+        state:{next:0,bytes:null,collect:false}},pn (acc)=> { return content_next(tx,keys,manifest.chunks,acc)^ })^
+    return null
+}
 
 pub pn inventory(tx) any^ {
     return [for (row in sqlite.query(tx,"SELECT id FROM objects ORDER BY id")^) row[0]]
@@ -196,7 +278,7 @@ pub pn export_objects(tx, keys, ids) any^ {
     var i = 0
     while (i < len(ids)) {
         let record = record(keys,ids[i])^
-        if (contains(["state","maintenance"],record.kind)^) raise error("sync repository: private local state cannot be exported")
+        if (contains(["state","maintenance","locator"],record.kind)^) raise error("sync repository: private local state cannot be exported")
         decode(keys,record)^
         records = [*records,record]
         i = i+1
@@ -209,7 +291,7 @@ pub pn import_objects(tx, keys, records) any^ {
     var i = 0
     while (i < len(records)) {
         let record = records[i]
-        if (contains(["state","maintenance"],record.kind)^) raise error("sync repository: private local state cannot be imported")
+        if (contains(["state","maintenance","locator"],record.kind)^) raise error("sync repository: private local state cannot be imported")
         decode(keys,record)^
         persist_record(tx,keys,record)^
         i = i+1

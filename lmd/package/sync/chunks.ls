@@ -16,23 +16,33 @@ pub fn profile(value) any^ {
     return value
 }
 
-pub fn split(bytes, config=default_profile) any^ {
+pub fn start(config=default_profile) any^ {
     profile(config)^
-    if (bytes != null and not (bytes is binary)) raise error("sync chunks: expected binary")
+    return {profile:config,tail:binary([])^,fingerprint:0}
+}
+pub fn feed(acc, bytes, final=false) any^ {
+    let config = profile(acc.profile)^
+    if ((bytes != null and not (bytes is binary)) or
+        (acc.tail != null and not (acc.tail is binary)) or len(acc.tail)^ >= config.maximum or
+        not (acc.fingerprint is int) or acc.fingerprint < 0 or acc.fingerprint >= 4294967296)
+        raise error("sync chunks: invalid stream state or binary")
+    let combined = acc.tail ++ bytes
     var result = []
     var start = 0
-    var index = 0
-    var fingerprint = 0
-    while (index < len(bytes)) {
-        fingerprint = (fingerprint*2+gear[bytes[index]]) % 4294967296
+    var index = len(acc.tail)^
+    var fingerprint = acc.fingerprint
+    while (index < len(combined)^) {
+        fingerprint = (fingerprint*2+gear[combined[index]]) % 4294967296
         index = index+1
         let count = index-start
         if (count >= config.maximum or (count >= config.minimum and band(fingerprint,config.target-1)^ == 0)) {
-            result = [*result,slice(bytes,start,index)^]
+            result = [*result,slice(combined,start,index)^]
             start = index
             fingerprint = 0
         }
     }
-    if (start < len(bytes)) { result = [*result,slice(bytes,start,len(bytes))^] }
-    return result
+    var tail = slice(combined,start,len(combined)^)^
+    if (final and len(tail)^ > 0) { result = [*result,tail]; tail = binary([])^; fingerprint = 0 }
+    return {pieces:result,state:{profile:config,tail:tail,fingerprint:fingerprint}}
 }
+pub fn split(bytes, config=default_profile) any^ => feed(start(config)^,bytes,true)^.pieces

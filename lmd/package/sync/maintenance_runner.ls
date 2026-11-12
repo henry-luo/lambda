@@ -56,6 +56,10 @@ pub pn tick(handle, credentials, config, milliseconds, options=defaults) any^ {
     }
     if (task.stage == 'copy' or task.stage == 'cloud-prune') {
         let server_state = transport.call(config,credentials,"pull",{})^
+        if (server_state.maintenance != null and server_state.maintenance.id == task.job and server_state.maintenance.aborted == true) {
+            schedule(handle,{*:task,stage:'select'})^
+            return {phase:'replan'}
+        }
         if (server_state.maintenance == null or server_state.maintenance.id != task.job or not server_state.maintenance.committed)
             raise error("sync maintenance: recover or abort the cloud job before continuing")
         cloud.pull(handle,credentials,config)^

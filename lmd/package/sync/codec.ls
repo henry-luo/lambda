@@ -22,13 +22,68 @@ fn unsigned64(payload) any^ {
     return result
 }
 
-fn scalar_decode(tag, literal) any^ {
-    let decoded = parse(literal,'mark')^
-    if (not (decoded is array) or len(decoded) != 1) raise error("sync codec: invalid scalar literal")
-    let value = decoded[0]
+fn scalar_value(tag, value) any^ {
     let restored = if (contains(sized,tag)) casts[tag](value)^ else value
     if (string(type(restored)) != tag) raise error("sync codec: scalar type mismatch")
     return restored
+}
+fn scalar_values(value, depth=0) any^ {
+    if (depth > 128) raise error("sync codec: nesting limit")
+    if (value is string) { return [] }
+    if (value is array) { return [for (item in value) *scalar_values(item,depth+1)^] }
+    if (value is map) { return [for (key at value) *[*scalar_values(key,depth+1)^,*scalar_values(value[key],depth+1)^]] }
+    let tag = string(type(value))
+    if (not contains(scalars,tag)^) raise error("sync codec: unsupported value type")
+    return if (tag == "u64") [] else [value]
+}
+fn validate_scalars(value) any^ {
+    let originals = scalar_values(value)^
+    // one parsed document per value avoids one retained Input arena per scalar.
+    let decoded = parse(format(originals,'mark')^,'mark')^
+    if (not (decoded is array) or len(decoded)^ != len(originals)^)
+        raise error("sync codec: scalar is not losslessly portable")
+    for (index in 0 to (len(originals)^-1)) {
+        if (scalar_value(string(type(originals[index])),decoded[index])^ != originals[index])
+            raise error("sync codec: scalar is not losslessly portable")
+    }
+    return true
+}
+fn scalar_tuples(tuple, depth=0) any^ {
+    if (depth > 128) raise error("sync codec: nesting limit")
+    if (not (tuple is array) or len(tuple)^ != 2 or not (tuple[0] is string))
+        raise error("sync codec: invalid typed tuple")
+    let tag = tuple[0]
+    if (tag == "array" or tag == "map") {
+        if (not (tuple[1] is array)) raise error("sync codec: invalid container")
+        if (tag == "array") { return [for (item in tuple[1]) *scalar_tuples(item,depth+1)^] }
+        var result = []
+        var index = 0
+        while (index < len(tuple[1])^) {
+            let pair = tuple[1][index]
+            if (not (pair is array) or len(pair)^ != 2) raise error("sync codec: invalid map entry")
+            result = [*result,*scalar_tuples(pair[0],depth+1)^,*scalar_tuples(pair[1],depth+1)^]
+            index = index+1
+        }
+        return result
+    }
+    if (tag == "string" or tag == "u64") { return [] }
+    if (not contains(scalars,tag)^ or not (tuple[1] is string)) raise error("sync codec: unknown type")
+    return [tuple]
+}
+fn decoded_scalars(tuple) any^ {
+    let selected = scalar_tuples(tuple)^
+    let values = parse("[" ++ join([for (item in selected) item[1]],",")^ ++ "]",'mark')^
+    if (not (values is array) or len(values)^ != len(selected)^) raise error("sync codec: invalid scalar literal")
+    var result = {}
+    var index = 0
+    while (index < len(selected)^) {
+        let parsed = values[index]
+        if (not (parsed is array) or len(parsed)^ != 1) raise error("sync codec: invalid scalar literal")
+        let item = selected[index]
+        result = {*:result,[item[0] ++ ":" ++ item[1]]:scalar_value(item[0],parsed[0])^}
+        index = index+1
+    }
+    return result
 }
 
 fn pack(value, depth) any^ {
@@ -42,12 +97,10 @@ fn pack(value, depth) any^ {
     if (tag == "u64") { return [tag,string(value)] }
     if (not contains(scalars,tag)) raise error("sync codec: unsupported value type")
     let literal = format([value],'mark')^
-    let decoded = scalar_decode(tag,literal)^
-    if (decoded != value) raise error("sync codec: scalar is not losslessly portable")
     return [tag,literal]
 }
 
-fn unpack(tuple, depth) any^ {
+fn unpack(tuple, depth, decoded) any^ {
     if (depth > 128) raise error("sync codec: nesting limit")
     if (not (tuple is array) or len(tuple) != 2 or not (tuple[0] is string))
         raise error("sync codec: invalid typed tuple")
@@ -60,7 +113,7 @@ fn unpack(tuple, depth) any^ {
     }
     if (tag == "array") {
         if (not (payload is array)) raise error("sync codec: invalid array")
-        return [for (item in payload) unpack(item,depth+1)^]
+        return [for (item in payload) unpack(item,depth+1,decoded)^]
     }
     if (tag == "map") {
         if (not (payload is array)) raise error("sync codec: invalid map")
@@ -69,19 +122,22 @@ fn unpack(tuple, depth) any^ {
         while (i < len(payload)^) {
             let pair = payload[i]
             if (not (pair is array) or len(pair)^ != 2) raise error("sync codec: invalid map entry")
-            let key = unpack(pair[0],depth+1)^
+            let key = unpack(pair[0],depth+1,decoded)^
             if (not (key is string or key is symbol) or contains(result,key)^)
                 raise error("sync codec: invalid or duplicate map key")
-            result = {*:result,[key]:unpack(pair[1],depth+1)^}
+            result = {*:result,[key]:unpack(pair[1],depth+1,decoded)^}
             i = i+1
         }
         return result
     }
     if (not contains(scalars,tag)^ or not (payload is string)) raise error("sync codec: unknown type")
-    return scalar_decode(tag,payload)^
+    return decoded[tag ++ ":" ++ payload]
 }
 
-pub fn encode(value) any^ => format([version,pack(value,0)^],{type:'json',compact:true})^
+pub fn encode(value) any^ {
+    validate_scalars(value)^
+    return format([version,pack(value,0)^],{type:'json',compact:true})^
+}
 
 fn preflight(encoded) any^ {
     var depth = 0
@@ -115,7 +171,7 @@ pub fn decode(encoded, max_bytes=8388608) any^ {
     let envelope = parse(encoded,'json')^
     if (not (envelope is array) or len(envelope) != 2 or envelope[0] != version)
         raise error("sync codec: incompatible encoding")
-    let value = unpack(envelope[1],0)^
+    let value = unpack(envelope[1],0,decoded_scalars(envelope[1])^)^
     let canonical = encode(value)^
     if ((if (encoded is binary) binary(canonical)^ else canonical) != encoded) raise error("sync codec: noncanonical encoding")
     return value

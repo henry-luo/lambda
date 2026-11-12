@@ -84,6 +84,9 @@ pub pn sync(directory, wrapping_key, url, expected) any^ {
         cloud_saved:cloud_saved(installed.state)^}
 }
 pub pn serve(directory, wrapping_key, port, bind="127.0.0.1", max_sessions=0, ready=null) any^ {
+    // capture the initial working tree before advertising a ready listener or starting peer deadlines.
+    let prepared = open_agent(directory,wrapping_key)^
+    local.scan(prepared.handle)^
     let listener = peer.listener(port,bind)^
     if (ready != null) output(string(listener.port),ready,{format:'text',atomic:true})^
     var completed = 0

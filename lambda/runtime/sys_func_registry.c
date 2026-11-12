@@ -853,6 +853,12 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_disk_directory", PROFILE_FILE_IO_FPTR(pn_io_disk_directory), NULL, NULL, false, 0},
     {SYSPROC_IO_DISK_RESOLVE, "io_disk_resolve", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_disk_resolve", PROFILE_FILE_IO_FPTR(pn_io_disk_resolve), NULL, NULL, false, 0},
+    {SYSPROC_IO_CRYPTO_HASH_STREAM, "io_crypto_hash_stream", 2, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_crypto_hash_stream", PROFILE_FILE_IO_FPTR(pn_io_crypto_hash_stream), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_READ_STREAM, "io_disk_read_stream", 4, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_read_stream", PROFILE_FILE_IO_FPTR(pn_io_disk_read_stream), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_WRITE_STREAM, "io_disk_write_stream", 4, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_write_stream", PROFILE_FILE_IO_FPTR(pn_io_disk_write_stream), NULL, NULL, false, 0},
 
     {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
@@ -4076,6 +4082,9 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
         "progress", "progress_ms", NULL};
     static const char* const fetch_options[] = {"method", "body", "headers", "timeout", "user_agent",
         "follow_redirects", "verify_tls", "max_bytes", "to", "resume", "progress", "progress_ms", NULL};
+    static const char* const disk_read_options[] = {"state", "token", "block_bytes", "max_bytes", NULL};
+    static const char* const hash_stream_options[] = {"state", "size", NULL};
+    static const char* const disk_write_options[] = {"state", "expected", "size", "hash", NULL};
     static const char* const physics_options[] = {"steps", "sample_every", "bodies", "commands", NULL};
     static const char* const mail_open_options[] = {"user", "password", "token", "pin", "timeout", "tls", NULL};
     static const char* const mail_command_options[] = {"to", NULL};
@@ -4084,6 +4093,15 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
     static const char* const websocket_options[] = {"timeout_ms", "max_message_bytes", "ca_file", "origin", "protocols", NULL};
     static const char* const websocket_listen_options[] = {"origins", "protocols", "max_message_bytes", "bind", NULL};
     switch (fn) {
+    case SYSPROC_IO_CRYPTO_HASH_STREAM:
+        if (options_arg_index) *options_arg_index = 0;
+        return hash_stream_options;
+    case SYSPROC_IO_DISK_READ_STREAM:
+        if (options_arg_index) *options_arg_index = 2;
+        return disk_read_options;
+    case SYSPROC_IO_DISK_WRITE_STREAM:
+        if (options_arg_index) *options_arg_index = 2;
+        return disk_write_options;
     case SYSPROC_IO_WEBSOCKET_LISTEN:
         if (options_arg_index) *options_arg_index = 1;
         return websocket_listen_options;

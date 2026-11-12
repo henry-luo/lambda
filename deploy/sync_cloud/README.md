@@ -81,7 +81,7 @@ to deployment authority, never the public HTTP route (D11.2.1–D11.2.4).
 client scheduling, epoch fences, immutable catalog backups and fail-closed
 recovery. Drain old handler invocations and upgrade writers before enabling
 retention. Destructive maintenance on legacy/recovered catalogs requires an
-inventory audit; that audit tool is outside this phase.
+inventory audit; the owner workflow is documented in the linked cloud guide.
 
 The additional isolated-backend gate explicitly tests authorized old-key deletion,
 cache reservations and crash recovery:
@@ -90,3 +90,19 @@ cache reservations and crash recovery:
 LAMBDA_CLOUD_TEST_STORAGE_FILE="$PWD/temp/cloud-test-storage.json" \
 python3 test/sync_retention/test_retention.py
 ```
+
+## Paged inventories and discovery
+
+The provider adapter also implements `enumerate(prefix,cursor,limit)` returning
+`{entries:[{key,etag,size}],next}`. Cursors are opaque and scoped to a prefix;
+results must be ordered, bounded and parsed strictly. The S3 adapter uses
+[ListObjectsV2](https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html).
+Grant the function ListBucket over its service prefixes in addition to scoped
+GetObject/PutObject/DeleteObject. Clients receive finite signed conditional GET
+capabilities, including `If-Match` during audits; no public listing or DELETE
+capability is issued. Qualify listing, ETags, conditional writes and signing on
+each provider. A list result is not a cross-request transactional snapshot.
+
+`test/sync_scale/test_recovery_scale.py` adds large peer/cloud transfers, missing
+catalog discovery, ETag mutation rejection, audited recovery, repeated no-copy
+cuts and offline return. It requires the same isolated test-store configuration.

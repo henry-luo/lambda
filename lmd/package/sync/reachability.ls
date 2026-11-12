@@ -7,6 +7,7 @@ import blob: .blob
 import core: .core
 import v: .schema
 import cache_state: .cache_state
+import locations: .location_index
 
 pub let cache_ids = cache_state.ids
 
@@ -32,8 +33,8 @@ pub pn closure(tx, keys, roots, retention, evicted=[], depth=0) any^ {
         let record = repo.record(keys,id)^
         let value = repo.get(tx,keys,id,record.kind)^
         var children = []
-        if (record.kind == "manifest") {
-            children = [for (chunk in value.chunks) chunk.id]
+        if (record.kind == "manifest" or record.kind == "file_page") {
+            children = repo.content_links(record.kind,value)^
         } else if (record.kind == "checkpoint") {
             core.validate(value)^
             children = replica_roots(keys,value,retention.revisions)^
@@ -55,6 +56,8 @@ pub pn closure(tx, keys, roots, retention, evicted=[], depth=0) any^ {
                     for (id in replica_roots(keys,saved.replica)^) id]]
         } else if (record.kind == "maintenance") {
             children = value.payload.ids
+        } else if (record.kind == "locator") {
+            children = locations.links(keys,value)^
         } else if (record.kind == "cache") {
             children = []
         } else if (record.kind == "retention") {
@@ -64,7 +67,7 @@ pub pn closure(tx, keys, roots, retention, evicted=[], depth=0) any^ {
             let remote = cache_ids(value)
             allowed_remote = unique([*allowed_remote,*remote])
             children = closure(tx,keys,state_roots(tx,keys,value,true)^,retention_state.get(value),remote,depth+1)^
-        } else if (record.kind != "chunk") {
+        } else if (not repo.is_chunk(record.kind)^) {
             raise error("sync maintenance: unsupported reachable object kind")
         }
         seen = [*seen,id]
@@ -80,6 +83,7 @@ pn state_roots(tx, keys, current, include_private=true) any^ {
     if (retention.manifest != null) { roots = [*roots,retention.manifest] }
     if (current.cache_root != null) { roots = [*roots,current.cache_root] }
     if (include_private) {
+        roots = [*roots,*[for (entry in locations.roots(current) where entry.root != null) locations.physical_id(keys,entry.root)^]]
         roots = [*roots,*staged(current),*if (current.recovery_pins == null) [] else current.recovery_pins]
         // disk/import/installation bases stay local pins even when shared history expires.
         roots = [*roots,*replica_roots(keys,current.base.checkpoint.replica,retention.revisions)^,
