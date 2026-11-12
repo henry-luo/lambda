@@ -65,7 +65,12 @@ node test/online/compare_snapshots.cjs
 node --test test/online/compare_snapshots.test.cjs
 ```
 
-The comparison writes HTML, JSON and CSV to `temp/online-visual/comparison/`.
+The comparison writes the report and its JSON/CSV data to
+`test/online/comparison/`. Rows are ordered by severity: capture or image
+problems first, then automated major differences and omissions retained in
+visual review, followed by pages below the major triage threshold. The report
+uses `snapshots/visual_comparison_review_round2.json` for manually retained
+major omissions.
 It uses `pngjs` from the installed render-test corpus (or the root dependencies).
 The report averages images into 120 × 80 color cells to rank broad differences
 without fine glyph noise. A mean channel error of at least 12% across at least
@@ -104,8 +109,9 @@ additional cases whose low scores hide major omissions: Supabase customers,
 Pitch, Cofounder, Banky and CMake. The audited review queue therefore has 191
 remaining cases; 13 clear this round's major review. These are review candidates,
 not 191 confirmed engine defects. The per-page evidence and explicit unknown
-causes are in `snapshots/visual_comparison_review_round2.json`; the full report
-and before/after examples are `temp/online-visual-round2/final/index.html` and
+causes are in `snapshots/visual_comparison_review_round2.json`; the latest full
+report is `comparison/index.html`, with its sorted data in `comparison/results.json`
+and `comparison/results.csv`. Before/after examples remain in
 `temp/online-visual-round2/repairs.html`. Investigation coverage includes 204
 authored documents, 203 successful browser diagnostics plus one navigation
 context error, render logs for all 204 and 23 focused native layout summaries.
