@@ -103,3 +103,76 @@ pub fn timevalue(input) any^ {
         }
     }
 }
+
+// Weekend masks are Monday-first, matching Excel's seven-character convention.
+fn weekend_mask(weekend) any^ {
+    if (weekend==null) "0000011"
+    else if (weekend is string) {
+        if (len(weekend)!=7 or not all([for (ch in ((split(weekend,"")) ^ { [] })) ch=="0" or ch=="1"])) raise error("#VALUE!")
+        else weekend
+    } else {
+        let n=trunc(c.numeric(weekend)^)
+        let masks=["0000011","1000001","1100000","0110000","0011000","0001100","0000110"]
+        let singles=["0000001","1000000","0100000","0010000","0001000","0000100","0000010"];
+        if (n>=1 and n<=7) masks[n-1] else if (n>=11 and n<=17) singles[n-11] else raise error("#NUM!")
+    }
+}
+fn holiday_days(holidays,date1904) any^ {
+    let values=c.range_values(holidays)
+    let numbers=sort([for (v in values where v is number) floor(v)]);
+    if (any([for (v in numbers) v<0 or v>(if (date1904) 2957003 else 2958465)])) raise error("#NUM!")
+    else [for (i,v in numbers where i==0 or numbers[i-1]!=v) v]
+}
+fn is_workday(day,date1904,mask) any^ {
+    let weekday_index=weekday(date1904,day,2)^-1;
+    slice(mask,weekday_index,weekday_index+1)=="0"
+}
+fn workdays_between(first,end_day,date1904,mask,holidays) any^ {
+    let count=end_day-first+1
+    let per_week=len([for (ch in ((split(mask,"")) ^ { [] }) where ch=="0") ch])
+    let weeks=count div 7
+    let remainder=count%7
+    let regular=weeks*per_week+len([for (i in 0 to 6 where i<remainder and is_workday(first+i,date1904,mask)^) i])
+    let excluded=len([for (day in holidays where day>=first and day<=end_day and is_workday(day,date1904,mask)^) day]);
+    regular-excluded
+}
+fn checked_day(value,date1904) any^ {
+    let day=floor(c.numeric(value)^)
+    let checked=datetime_for(day,date1904)^;
+    day
+}
+pub fn networkdays_intl(date1904,start,finish,weekend=1,holidays=[]) any^ {
+    let a=checked_day(start,date1904)^
+    let b=checked_day(finish,date1904)^
+    let mask=weekend_mask(weekend)^
+    let excluded=holiday_days(holidays,date1904)^;
+    (if (a<=b) 1 else -1)*workdays_between(min(a,b),max(a,b),date1904,mask,excluded)^
+}
+pub fn networkdays(date1904,start,finish,holidays=[]) any^ => networkdays_intl(date1904,start,finish,1,holidays)^
+// Binary search prevents long workday offsets from iterating over every date.
+fn workday_search(start,direction,wanted,low,high,date1904,mask,holidays) any^ {
+    if (low>=high) start+direction*low else {
+        let mid=(low+high) div 2
+        let end=start+direction*mid
+        let first=if (direction>0) start+1 else end
+        let end_day=if (direction>0) end else start-1
+        let count=workdays_between(first,end_day,date1904,mask,holidays)^;
+        if (count>=wanted) workday_search(start,direction,wanted,low,mid,date1904,mask,holidays)^
+        else workday_search(start,direction,wanted,mid+1,high,date1904,mask,holidays)^
+    }
+}
+pub fn workday_intl(date1904,start,days,weekend=1,holidays=[]) any^ {
+    let first=checked_day(start,date1904)^
+    let offset=trunc(c.numeric(days)^)
+    let mask=weekend_mask(weekend)^
+    let excluded=holiday_days(holidays,date1904)^
+    let direction=if (offset<0) -1 else 1
+    let bound=if (direction>0) (if (date1904) 2957003 else 2958465)-first else first;
+    if (mask=="1111111") raise error("#VALUE!") else if (offset==0) first else if (bound==0) raise error("#NUM!") else {
+        let end_day=first+direction*bound
+        let available=workdays_between(if (direction>0) first+1 else end_day,if (direction>0) end_day else first-1,date1904,mask,excluded)^;
+        if (available<abs(offset)) raise error("#NUM!")
+        else workday_search(first,direction,abs(offset),1,bound,date1904,mask,excluded)^
+    }
+}
+pub fn workday(date1904,start,days,holidays=[]) any^ => workday_intl(date1904,start,days,1,holidays)^

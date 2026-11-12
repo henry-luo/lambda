@@ -17,6 +17,7 @@
     {"type":"assert_text", "target":{"selector":"#cell-F2"}, "contains":"2024-01-01"},
     {"type":"assert_text", "target":{"selector":"#cell-G2"}, "contains":"14.5"},
     {"type":"assert_text", "target":{"selector":"#cell-H2"}, "contains":"2024"},
+    {"type":"assert_text", "target":{"selector":"#cell-I2"}, "contains":"20"},
     {"type":"assert_text", "target":{"selector":"#cell-H3"}, "contains":"Second worksheet"},
     {"type":"click", "target":{"selector":"#sheet-tab-1"}},
     {"type":"assert_text", "target":{"selector":"#cell-A1"}, "contains":"Second worksheet"},

@@ -48,3 +48,34 @@ pub fn combin(total,chosen) any^ {
     if (n<0 or k<0 or k>n) raise error("#NUM!") else round(combinations(n,min(k,n-k),1,1.0)^)
 }
 pub fn sumsq(...) any^ { let values=c.numbers(varg())^; sum([for (n in values) n*n]) }
+
+// The mode reverses rounding for negative numbers only.
+fn multiple_round(value,significance,mode,up) any^ {
+    let n=c.numeric(value)^
+    let m=abs(c.numeric(significance)^)
+    let reverse=c.numeric(mode)^!=0;
+    if (m==0) 0 else {
+        let toward_up=if (n<0 and reverse) not up else up;
+        (if (toward_up) ceil(n/m) else floor(n/m))*m
+    }
+}
+pub fn ceiling_math(value,significance=1,mode=0) any^ => multiple_round(value,significance,mode,true)^
+pub fn floor_math(value,significance=1,mode=0) any^ => multiple_round(value,significance,mode,false)^
+pub fn ceiling_precise(value,significance=1) any^ => multiple_round(value,significance,0,true)^
+pub fn floor_precise(value,significance=1) any^ => multiple_round(value,significance,0,false)^
+pub fn sqrtpi(value) any^ { let n=c.numeric(value)^; if (n<0) raise error("#NUM!") else sqrt(n*math.pi) }
+pub fn sinh(value) any^ { let n=c.numeric(value)^; (math.exp(n)-math.exp(-n))/2 }
+pub fn cosh(value) any^ { let n=c.numeric(value)^; (math.exp(n)+math.exp(-n))/2 }
+pub fn tanh(value) any^ { let n=c.numeric(value)^; if (n>350) 1 else if (n< -350) -1 else { let x=math.exp(2*n); (x-1)/(x+1) } }
+fn gcd_pair(a,b) any^ => if (b==0) a else gcd_pair(b,a%b)^
+fn integer_values(args) any^ {
+    let values=c.numbers(args)^;
+    if (any([for (v in values) v<0 or v>9007199254740991])) raise error("#NUM!") else [for (v in values) trunc(v)]
+}
+fn gcd_loop(values,i,result) any^ => if (i>=len(values)) result else gcd_loop(values,i+1,gcd_pair(result,values[i])^)^
+fn lcm_loop(values,i,result) any^ {
+    if (i>=len(values)) result else if (result==0 or values[i]==0) lcm_loop(values,i+1,0)^
+    else { let next=result/gcd_pair(result,values[i])^*values[i]; if (next>9007199254740991) raise error("#NUM!") else lcm_loop(values,i+1,next)^ }
+}
+pub fn gcd(...) any^ { let v=integer_values(varg())^; if (len(v)==0) raise error("#VALUE!") else gcd_loop(v,1,v[0])^ }
+pub fn lcm(...) any^ { let v=integer_values(varg())^; if (len(v)==0) raise error("#VALUE!") else lcm_loop(v,1,v[0])^ }

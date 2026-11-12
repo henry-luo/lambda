@@ -32,6 +32,16 @@
     {"type":"key_press", "key":"F2"},
     {"type":"type", "target":{"selector":"#cell-editor"}, "text":"=COUNTIF(A5:A10,\"*ing\")", "clear":true},
     {"type":"key_press", "key":"Enter"},
-    {"type":"assert_text", "target":{"selector":"#cell-D14"}, "contains":"2"}
+    {"type":"assert_text", "target":{"selector":"#cell-D14"}, "contains":"2"},
+    {"type":"click", "target":{"selector":"#cell-E14"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"type", "target":{"selector":"#cell-editor"}, "text":"=WORKDAY(DATE(2024,1,1),5)", "clear":true},
+    {"type":"key_press", "key":"Enter"},
+    {"type":"assert_text", "target":{"selector":"#cell-E14"}, "contains":"45299"},
+    {"type":"click", "target":{"selector":"#cell-F14"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"type", "target":{"selector":"#cell-editor"}, "text":"=CEILING.MATH(-5.5,2,1)", "clear":true},
+    {"type":"key_press", "key":"Enter"},
+    {"type":"assert_text", "target":{"selector":"#cell-F14"}, "contains":"-6"}
   ]
 }

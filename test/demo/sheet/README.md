@@ -46,11 +46,11 @@ Function names are case-insensitive. The supported functions are:
 | Category | Functions |
 |---|---|
 | Aggregation and criteria | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT`, `SUMSQ`, `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MINIFS`, `MAXIFS` |
-| Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `PI`, `EXP`, `LN`, `LOG`, `LOG10`, `SIN`, `COS`, `TAN`, `ASIN`, `ACOS`, `ATAN`, `ATAN2`, `DEGREES`, `RADIANS`, `QUOTIENT`, `EVEN`, `ODD`, `MROUND`, `FACT`, `COMBIN` |
-| Statistics | `STDEV`, `STDEV.S`, `STDEVP`, `STDEV.P`, `VAR`, `VAR.S`, `VARP`, `VAR.P`, `LARGE`, `SMALL`, `PERCENTILE`, `PERCENTILE.INC`, `QUARTILE`, `QUARTILE.INC`, `RANK`, `RANK.EQ` |
-| Finance | `PMT`, `PV`, `FV`, `NPER`, `NPV` |
+| Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `PI`, `EXP`, `LN`, `LOG`, `LOG10`, `SIN`, `COS`, `TAN`, `ASIN`, `ACOS`, `ATAN`, `ATAN2`, `DEGREES`, `RADIANS`, `QUOTIENT`, `EVEN`, `ODD`, `MROUND`, `FACT`, `COMBIN`, `CEILING.MATH`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `SQRTPI`, `SINH`, `COSH`, `TANH`, `GCD`, `LCM` |
+| Statistics | `STDEV`, `STDEV.S`, `STDEVP`, `STDEV.P`, `VAR`, `VAR.S`, `VARP`, `VAR.P`, `LARGE`, `SMALL`, `PERCENTILE`, `PERCENTILE.INC`, `QUARTILE`, `QUARTILE.INC`, `RANK`, `RANK.EQ`, `RANK.AVG`, `PERCENTILE.EXC`, `QUARTILE.EXC`, `SLOPE`, `INTERCEPT`, `FORECAST`, `FORECAST.LINEAR`, `CORREL`, `PEARSON`, `RSQ`, `COVAR`, `COVARIANCE.P`, `COVARIANCE.S`, `STEYX`, `GEOMEAN`, `HARMEAN` |
+| Finance | `PMT`, `PV`, `FV`, `NPER`, `NPV`, `SLN`, `SYD` |
 | Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE`, `TEXTJOIN`, `EXACT`, `VALUE`, `REPT`, `CLEAN`, `REPLACE`, `SUBSTITUTE`, `FIND`, `SEARCH` |
-| Dates and times | `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND` |
+| Dates and times | `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND`, `NETWORKDAYS`, `NETWORKDAYS.INTL`, `WORKDAY`, `WORKDAY.INTL` |
 | Logic and errors | `IF`, `IFS`, `CHOOSE`, `SWITCH`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA` |
 | Lookup | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `XMATCH` |
 
@@ -67,7 +67,9 @@ input; `MATCH`, `XMATCH`, and `XLOOKUP` accept one-dimensional ranges, and
 `INDEX` and `XLOOKUP` return single cells. Criteria support the Excel `*`, `?`,
 and `~` wildcard characters. Multiple criteria ranges must match in shape.
 `DATEVALUE` accepts ISO `YYYY-MM-DD`, and `TIMEVALUE` accepts 24-hour `HH:MM`
-or `HH:MM:SS`; imported 1900 and 1904 date systems are preserved. Rounding
+or `HH:MM:SS`; imported 1900 and 1904 date systems are preserved. Workday
+functions accept holiday ranges and Excel weekend numbers or Monday-first masks.
+Paired statistics ignore nonnumeric pairs and return scalar results. Rounding
 digits are bounded to -15 through 15. External-workbook references, named and
 structured references, full-column/row references, array/spill formulas,
 custom formats, and the full Excel coercion and error rules are not supported.
@@ -122,7 +124,7 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \

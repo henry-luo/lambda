@@ -47,3 +47,15 @@ pub fn npv(rate,...) any^ {
     let values=c.numbers(varg())^;
     if (r<= -1) raise error("#NUM!") else sum([for (i,value in values) value/((1+r)**(i+1))])
 }
+
+pub fn sln(cost,salvage,life) any^ {
+    let base=c.numeric(cost)^-c.numeric(salvage)^
+    let n=c.numeric(life)^;
+    if (n==0) raise error("#DIV/0!") else base/n
+}
+pub fn syd(cost,salvage,life,period) any^ {
+    let base=c.numeric(cost)^-c.numeric(salvage)^
+    let n=c.numeric(life)^
+    let p=c.numeric(period)^;
+    if (n<=0 or p<1 or p>n) raise error("#NUM!") else base*(n-p+1)*2/(n*(n+1))
+}
