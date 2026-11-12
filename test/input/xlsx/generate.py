@@ -76,3 +76,37 @@ with ZipFile(HERE / 'layout-hidden-anchor.xlsx', 'w', ZIP_DEFLATED) as archive:
         info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
         info.compress_type = ZIP_DEFLATED
         archive.writestr(info, body.encode())
+
+# Formula rules use one range anchor; relative and absolute components shift per cell.
+formula_files = dict(layout_files)
+formula_files['xl/worksheets/sales.xml'] = f'''<worksheet xmlns="{X}"><sheetData><row r="1"><c r="E1"><v>10</v></c></row><row r="2"><c r="B2"><v>15</v></c><c r="C2"><v>1</v></c><c r="D2"><v>15</v></c><c r="E2"><v>20</v></c></row><row r="3"><c r="B3"><v>5</v></c><c r="C3"><v>1</v></c><c r="D3"><v>5</v></c><c r="E3"><v>3</v></c></row><row r="4"><c r="B4"><v>20</v></c><c r="C4"><v>1</v></c><c r="D4"><v>20</v></c></row></sheetData><conditionalFormatting sqref="C2:C4"><cfRule type="expression" dxfId="0" priority="1"><formula>$B2&gt;$E$1</formula></cfRule></conditionalFormatting><conditionalFormatting sqref="D2:D4"><cfRule type="cellIs" dxfId="1" priority="2" operator="greaterThan"><formula>$E1</formula></cfRule></conditionalFormatting></worksheet>'''
+with ZipFile(HERE / 'conditional-formulas.xlsx', 'w', ZIP_DEFLATED) as archive:
+    for name, body in formula_files.items():
+        info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, body.encode())
+
+# Split pane coordinates are twips, and topLeftCell anchors the lower/right view.
+split_files = dict(layout_files)
+split_files['xl/worksheets/sales.xml'] = split_files['xl/worksheets/sales.xml'].replace(
+    '<pane xSplit="1" ySplit="1" topLeftCell="B2" state="frozen"/>',
+    '<pane xSplit="6000" ySplit="4500" topLeftCell="E7" activePane="bottomRight" state="split"/><selection pane="bottomRight" activeCell="F8" sqref="F8"/>')
+with ZipFile(HERE / 'split-panes.xlsx', 'w', ZIP_DEFLATED) as archive:
+    for name, body in split_files.items():
+        info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, body.encode())
+
+# Single-axis split variants exercise two panes and active-pane normalization.
+for filename, pane in [
+    ('split-columns.xlsx', '<pane xSplit="6000" topLeftCell="E7" activePane="topRight" state="split"/>'),
+    ('split-rows.xlsx', '<pane ySplit="4500" topLeftCell="E7" activePane="bottomLeft" state="split"/>'),
+]:
+    axis_files = dict(layout_files)
+    axis_files['xl/worksheets/sales.xml'] = axis_files['xl/worksheets/sales.xml'].replace(
+        '<pane xSplit="1" ySplit="1" topLeftCell="B2" state="frozen"/>', pane)
+    with ZipFile(HERE / filename, 'w', ZIP_DEFLATED) as archive:
+        for name, body in axis_files.items():
+            info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+            info.compress_type = ZIP_DEFLATED
+            archive.writestr(info, body.encode())

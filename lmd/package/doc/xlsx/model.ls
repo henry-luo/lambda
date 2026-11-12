@@ -154,15 +154,20 @@ fn condition(block,rule,styles) any^ {
         (child(dxf,"fill")!=null and (fill==null or color(child(fill,"fgColor"))==null))
     let numeric=kind=="cellIs" and contains(["equal","notEqual","greaterThan","greaterThanOrEqual",
         "lessThan","lessThanOrEqual","between","notBetween"],op) and
-        len(values)==(if (op=="between" or op=="notBetween") 2 else 1) and all([for (value in values) value is number])
+        len(formulas)==(if (op=="between" or op=="notBetween") 2 else 1) and
+        all([for (formula in formulas) formula!="" and len(formula)<=512])
+    let expression_rule=kind=="expression" and len(formulas)==1 and formulas[0]!="" and len(formulas[0])<=512
     let text_rule=contains(["containsText","notContainsText","beginsWith","endsWith"],kind) and values[0] is string
     let blank_rule=contains(["containsBlanks","notContainsBlanks"],kind)
-    let supported=len(refs)>0 and (numeric or text_rule or blank_rule) and
+    let supported=len(refs)>0 and (numeric or expression_rule or text_rule or blank_rule) and
         style_index>=0 and style_index<len(styles.dxfs) and len(diff)>0;
     if (not supported) null else {
-        ranges:[for (ref in refs) rectangle(ref)^],
-        operator:op,values:values,priority:as_int(attr(rule,"priority"),0),
-        stop:on_attr(rule,"stopIfTrue")^,style:diff,partial:partial}
+        let ranges=[for (ref in refs) rectangle(ref)^]
+        let anchor={row:ranges[0].top,col:ranges[0].left};
+        {ranges:ranges,anchor:anchor,
+        operator:op,values:if (numeric and not all([for (value in values) value is number])) [] else values,
+        *:if (expression_rule or (numeric and not all([for (value in values) value is number]))) {formulas:formulas} else {},priority:as_int(attr(rule,"priority"),0),
+        stop:on_attr(rule,"stopIfTrue")^,style:diff,partial:partial}}
 }
 fn cell(node,shared,styles,part) map^ {
     let pos=position(attr(node,"r"))^
@@ -190,21 +195,36 @@ fn worksheet(pkg,entry,shared,styles) map^ {
             let rows=children(data,"row")
             let cells=[for (row in rows,node in ((children(row,"c")) ^ { [] })) cell(node,shared,styles,rel.target)^]
             let cols=children(child(root_node,"cols"),"col")
-            let pane=child(child(child(root_node,"sheetViews"),"sheetView"),"pane")
+            let sheet_view=child(child(root_node,"sheetViews"),"sheetView")
+            let pane=child(sheet_view,"pane")
             let frozen=if (contains(["frozen","frozenSplit"],attr(pane,"state")))
                 {rows:as_int(attr(pane,"ySplit"),0),cols:as_int(attr(pane,"xSplit"),0)} else null
+            // Split positions are twentieths of a point; frozen positions count cells.
+            let split_info=if (pane!=null and frozen==null and (attr(pane,"state")==null or attr(pane,"state")=="split")) {
+                let x=as_real(attr(pane,"xSplit"),0.0)
+                let y=as_real(attr(pane,"ySplit"),0.0)
+                let top_left=position(attr(pane,"topLeftCell") or "A1")^
+                let active=attr(pane,"activePane") or "topLeft"
+                let selected=[for (item in ((children(sheet_view,"selection")) ^ { [] }) where
+                    (((attr(item,"pane") or "topLeft")==active and attr(item,"activeCell")!=null) ^ {false})) item][0]
+                let selection=if (selected!=null) position(attr(selected,"activeCell"))^ else
+                    {row:if (y==0 or starts_with(active,"bottom")) top_left.row else 0,
+                        col:if (x==0 or ends_with(active,"Right")) top_left.col else 0};
+                {x:x,y:y,top_left:top_left,active:active,selection:selection}
+            } else null
+            let split=if (split_info!=null and (split_info.x!=0 or split_info.y!=0)) split_info else null
             let merges=[for (merge in ((children(child(root_node,"mergeCells"),"mergeCell")) ^ { [] })) rectangle(attr(merge,"ref"))^]
             let blocks=children(root_node,"conditionalFormatting")
             let rules=[for (block in blocks, rule in ((children(block,"cfRule")) ^ { [] })) condition(block,rule,styles)^]
             let warnings=[
                 if (child(root_node,"drawing")!=null) issue("drawing",rel.target,"Charts and drawings are not imported"),
                 if (child(root_node,"sheetProtection")!=null) issue("sheet-protection",rel.target,"Worksheet protection is not enforced"),
-                if (pane!=null and frozen==null) issue("split-panes",rel.target,"Split panes are not preserved"),
+                if (pane!=null and frozen==null and split_info==null) issue("split-panes",rel.target,"Unknown pane state is not preserved"),
                 if (any([for (rule in rules) rule==null or rule.partial==true]))
                     issue("conditional-formatting",rel.target,"Some conditional formatting rules are not supported"),
                 if (any([for (c in cells) c.formula!=null])) issue("formula-recalculation",rel.target,"Formula evaluation depends on the consuming application"),
                 if (any([for (c in cells) c.formula_type!=null and c.formula_type!="normal"])) issue("formula-type",rel.target,"Shared and array formulas are not expanded")];
-            {title:name,part:rel.target,cells:cells,merges:merges,frozen:frozen,
+            {title:name,part:rel.target,cells:cells,merges:merges,frozen:frozen,split:split,
              conditional_rules:sort([for (rule in rules where rule!=null) rule],{by:(rule)=>rule.priority}),
              hidden_rows:[for (row in rows where on_attr(row,"hidden")^) as_int(attr(row,"r"),1)-1],
              hidden_columns:[for (col in cols where on_attr(col,"hidden")^)

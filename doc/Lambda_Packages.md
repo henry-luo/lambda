@@ -5062,7 +5062,7 @@ workbook.sheets[0].cells
 `convert(source)` and `load(source)` return `{title, date1904, sheets, metadata,
 diagnostics}`. Each sheet has a title, part path, sparse zero-based cells, column
 width ranges, row heights, merged ranges, hidden dimensions, frozen prefixes,
-conditional rules and diagnostics. Cells expose their coordinates, XLSX
+split-pane geometry and selection, conditional rules and diagnostics. Cells expose their coordinates, XLSX
 type, typed value, raw value, formula and formula type, cached-value presence,
 and the supported style projection. Rich shared/inline text is flattened. The
 reader accepts ordinary non-macro XLSX workbooks and rejects invalid or missing
@@ -5080,14 +5080,18 @@ classified and displayed as ISO dates and 24-hour times using the workbook's
 format code. Formulas retain that workbook date system and can reference other
 sheets. Common formulas recalculate in Sheet;
 otherwise a saved XLSX result is shown until an edit invalidates imported caches.
-Sheet displays imported merged ranges, hidden dimensions and frozen prefixes.
-It applies numeric cell-comparison rules with constant operands, text and blank
-conditional rules, and RGB differential font/fill styles, in priority order
-with `stopIfTrue`; these styles recalculate with cell values. Rules outside Sheet's bounded grid are
+Sheet displays imported merged ranges, hidden dimensions, frozen prefixes and
+split panes with independently scrolling views. It applies formula-expression
+rules, numeric cell-comparison rules with constant or formula operands, text and
+blank conditional rules, and RGB differential font/fill styles, in priority
+order with `stopIfTrue`; these styles recalculate with cell values. Conditional
+formulas use the Sheet formula profile and dynamically dispatched calls
+(**S12.3.4v2**, **D7.2.2**). Rules outside Sheet's bounded grid are
 clipped with diagnostics.
 
 This is not a lossless XLSX editor. Shared/array formula expansion, charts and
 drawings, arbitrary custom format fidelity, theme colours and many conditional
 format types are outside this profile. Diagnostics identify unsupported
-conditional rules, split panes, protected sheets and workbook structures. Sheet
-saves its conversion as `.sheet.json`, not XLSX; the separate chart exporter writes a limited XLSX table.
+conditional rules, protected sheets and workbook structures. Sheet can move
+imported split dividers by pointer or keyboard; creating or removing splits is
+not supported, and live scroll positions are transient. Sheet saves its conversion as `.sheet.json`, not XLSX; the separate chart exporter writes a limited XLSX table.

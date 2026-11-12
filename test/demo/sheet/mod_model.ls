@@ -7,6 +7,12 @@ pub let MAX_COLUMNS=1000
 pub let MAX_MATERIALIZED_CELLS=1000000
 pub fn empty_sheet(title="Sheet1") => {title:title,rows:60,cols:20,cells:[]}
 pub fn blank() => {format:"lambda-sheet",version:1,title:"Untitled workbook",sheets:[empty_sheet()]}
+// Pane names correspond to the independently scrollable row/column quadrants.
+pub fn split_names(split) => if (split==null) [] else
+    [for (pane in ["topLeft",if (split.x>0) "topRight" else null,if (split.y>0) "bottomLeft" else null,
+        if (split.x>0 and split.y>0) "bottomRight" else null] where pane!=null) pane]
+pub fn active_pane(split) => if (split==null) "" else if ((contains(split_names(split),split.active)) ^ {false}) split.active
+    else if (split.x>0 and split.y>0) "bottomRight" else if (split.x>0) "topRight" else "bottomLeft"
 pub fn current(st) => st.book.sheets[st.sheet]
 // The cache belongs to the active workbook revision, never the saved file.
 pub fn prepare(sheet,book=null) {
@@ -17,15 +23,23 @@ pub fn prepare(sheet,book=null) {
     let indexed={*:sheet,cell_index:index,workbook:book,workbook_indices:indexes};
     {cells:index,indices:indexes,values:map([for (cell in sheet.cells) *[f.address(cell.row,cell.col),f.display(indexed,cell.row,cell.col)]])}
 }
-pub fn initial(book=null) {
-    let initial_book=book or sample();
-    refresh_stats({book:initial_book,saved:initial_book,sheet:0,row:4,col:4,anchor:{row:4,col:4},cache:prepare(initial_book.sheets[0],initial_book),
+pub fn initial(book=null) any^ {
+    let initial_book=book or sample()
+    let split=initial_book.sheets[0].split
+    let initial_cell=if (split==null) {row:4,col:4} else split.selection or split.top_left
+    let initial_state=refresh_stats({book:initial_book,saved:initial_book,sheet:0,row:initial_cell.row,col:initial_cell.col,anchor:initial_cell,
+        pane_active:active_pane(split),split_views:{},split_ready:false,split_drag:null,cache:prepare(initial_book.sheets[0],initial_book),
         viewport:{x:0.0,y:0.0,width:0.0,height:0.0},geometry_key:null,geometry:null,
         has_cached_results:has_cached_results(initial_book),undo:[],redo:[],tab:"Home",editing:false,draft:"",dialog:"",path:"",dialog_path:"",error:null,pending:null,status:"Ready",grid:true,formulas:false,zoom:1.0,
-        selection_drag:null,selection_click:false,resize_drag:null})
+        selection_drag:null,selection_click:false,resize_drag:null})^;
+    if (split==null) initial_state else select(initial_state,initial_cell.row,initial_cell.col)
 }
 pub fn indexed(st) => {*:current(st),cell_index:st.cache.cells,workbook:st.book,workbook_indices:st.cache.indices}
-pub fn activate(st,index) => if (index==st.sheet) st else refresh_stats({*:st,sheet:index,cache:prepare(st.book.sheets[index],st.book)})
+pub fn activate(st,index) => if (index==st.sheet) st else {
+    let split=st.book.sheets[index].split;
+    refresh_stats({*:st,sheet:index,pane_active:active_pane(split),split_views:{},split_ready:false,
+        cache:prepare(st.book.sheets[index],st.book)})
+}
 pub fn dimension_property(axis) => if (axis=="column") "column_widths" else "row_heights"
 pub fn dimension_limits(axis) => if (axis=="column") {min:40,max:1000} else {min:27,max:500}
 pub fn default_dimension(axis,index) => if (axis=="column") (if (index==0) 220 else if (index==1) 150 else 124)

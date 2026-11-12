@@ -31,6 +31,8 @@ fn clipped(src) => any([for (rule in src.conditional_rules, rect in rule.ranges)
 fn sheet(src,date1904) map^ {
     let invalid=[for (cell in src.cells where cell.row>=m.MAX_ROWS or cell.col>=m.MAX_COLUMNS or len(raw(cell)^)>32767) cell];
     if (len(invalid)>0 or any([for (rect in src.merges) rect.bottom>=m.MAX_ROWS or rect.right>=m.MAX_COLUMNS]) or
+        (src.split!=null and (src.split.x<0 or src.split.y<0 or src.split.top_left.row>=m.MAX_ROWS or src.split.top_left.col>=m.MAX_COLUMNS or
+            src.split.selection.row>=m.MAX_ROWS or src.split.selection.col>=m.MAX_COLUMNS)) or
         (src.frozen!=null and (src.frozen.rows<0 or src.frozen.rows>m.MAX_ROWS or src.frozen.cols<0 or src.frozen.cols>m.MAX_COLUMNS)))
         raise error("Sheet: XLSX contains a cell or layout outside the supported grid or text limit")
     else {
@@ -39,14 +41,14 @@ fn sheet(src,date1904) map^ {
         let rows=max([60,*[for (cell in src.cells) cell.row+1],*[for (row in src.row_heights) min(m.MAX_ROWS,row.row+1)],
             *[for (rect in src.merges) min(m.MAX_ROWS,rect.bottom+1)],
             *[for (rule in src.conditional_rules, rect in rule.ranges) min(m.MAX_ROWS,rect.bottom+1)],*[for (row in src.hidden_rows) min(m.MAX_ROWS,row+1)],
-            if (src.frozen==null) 0 else src.frozen.rows])
+            if (src.frozen==null) 0 else src.frozen.rows,if (src.split==null) 0 else max(src.split.top_left.row,src.split.selection.row)+1])
         let cols=max([20,*[for (cell in src.cells) cell.col+1],*[for (col in src.column_widths) min(m.MAX_COLUMNS,col.max+1)],
             *[for (rect in src.merges) min(m.MAX_COLUMNS,rect.right+1)],
-            *[for (rule in src.conditional_rules, rect in rule.ranges) min(m.MAX_COLUMNS,rect.right+1)],if (src.frozen==null) 0 else src.frozen.cols])
+            *[for (rule in src.conditional_rules, rect in rule.ranges) min(m.MAX_COLUMNS,rect.right+1)],if (src.frozen==null) 0 else src.frozen.cols,if (src.split==null) 0 else max(src.split.top_left.col,src.split.selection.col)+1])
         let cells=[for (cell in src.cells) {row:cell.row,col:cell.col,raw:raw(cell)^,style:cell.style,
             *:if (cell.formula!=null and cell.has_value) {cached:cell.value,has_cached:true} else {}}];
         {title:src.title,rows:rows,cols:cols,cells:cells,column_widths:column_widths,row_heights:row_heights,
-            merges:src.merges,conditional_rules:clipped_rules(src),hidden_rows:[for (r in src.hidden_rows where r>=0 and r<rows) r],
+            merges:src.merges,split:src.split,conditional_rules:clipped_rules(src),hidden_rows:[for (r in src.hidden_rows where r>=0 and r<rows) r],
             hidden_columns:[for (span in src.hidden_columns where span.max>=0 and span.min<cols)
                 {min:max(0,span.min),max:min(cols-1,span.max)}],frozen:src.frozen,
             *:if (date1904) {date1904:true} else {}}

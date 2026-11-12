@@ -9,6 +9,7 @@ import v: .mod_view
 import overflow: lambda.ui.workspace.ribbon_overflow
 import selection: .mod_selection
 import sizing: .mod_resize
+import pane_resize: .mod_split_pane
 import window: .mod_window
 import virtual: lambda.ui.core.virtual_grid
 import focus: lambda.ui.core.focus
@@ -40,13 +41,62 @@ on resize(evt) {
     dom.request_frame_once(node(evt.target,"sheet")^,"sheet_grid_measure")
     return 'pass'
 }
+// Opposite panes share one axis, while the two split axes scroll independently.
 on scroll(evt) {
-    if (dom.get_attribute(evt.target,"id")=="grid-scroll")
+    let pane=dom.get_attribute(evt.target,"data-sheet-pane")
+    if ((pane!=null and pane!="")^) {
+        let split=m.current(st).split
+        let source=dom.scroll_state(evt.target)
+        for (name in m.split_names(split)^ where name!=pane) {
+            let other=dom.query_selector(node(evt.target,"sheet"),"[data-sheet-pane='" ++ name ++ "']")
+            if (other!=null) {
+                let before=dom.scroll_state(other)
+                let x=if (ends_with(name,"Left")==ends_with(pane,"Left")) source.x else before.x
+                let y=if (starts_with(name,"top")==starts_with(pane,"top")) source.y else before.y
+                if ((x!=before.x or y!=before.y)^) dom.set_scroll_state(other,float(x),float(y))
+            }
+        }
+        dom.request_frame_once(node(evt.target,"sheet")^,"sheet_grid_measure")
+    }
+    else if (dom.get_attribute(evt.target,"id")=="grid-scroll")
         dom.request_frame_once(node(evt.target,"sheet")^,"sheet_grid_measure")
     return 'pass'
 }
 on sheet_grid_measure(evt) {
     if (evt.event_phase!=2) { return 'pass' }
+    let split=m.current(st).split
+    if (split!=null) {
+        let root=node(evt.target,"sheet")^
+        let axes=window.axes(st)^
+        let names=m.split_names(split)
+        if (not st.split_ready) {
+            let initial_x=virtual.offset(axes.columns,split.top_left.col)^
+            let initial_y=virtual.offset(axes.rows,split.top_left.row)^
+            for (name in names) {
+                let port=dom.query_selector(root,"[data-sheet-pane='" ++ name ++ "']")
+                if (port!=null) dom.set_scroll_state(port,if (split.x==0 or ends_with(name,"Right")) initial_x else 0.0,
+                    if (split.y==0 or starts_with(name,"bottom")) initial_y else 0.0)
+            }
+            st={*:st,split_ready:true}
+            dom.request_frame_once(root,"sheet_grid_measure")
+            return 'handled'
+        }
+        let views=map([for (name in names,let port=dom.query_selector(root,"[data-sheet-pane='" ++ name ++ "']"),
+            let metrics=dom.scroll_metrics(port),let scroll=dom.scroll_state(port))
+            *[name,{x:float(scroll.x),y:float(scroll.y),width:float(metrics.client_width),height:float(metrics.client_height)}]])
+        let active_view=views[st.pane_active]
+        let visible=window.visible(axes,active_view)^
+        if ((st.editing and (st.row<visible.rows.first or st.row>=visible.rows.last or
+                st.col<visible.columns.first or st.col>=visible.columns.last))^) {
+            let editor=node(root,"cell-editor")
+            if (editor!=null) { st=m.set_value(st,dom.get_state(editor,"value") or "")^ }
+        }
+        let key=window.key(st)
+        if ((views!=st.split_views or st.geometry_key!=key or st.geometry==null)^) {
+            st={*:st,split_views:views,viewport:views[st.pane_active],geometry_key:key,geometry:axes}
+        }
+        return 'handled'
+    }
     let port=node(evt.target,"grid-scroll")^
     let metrics=dom.scroll_metrics(port)
     let scroll=dom.scroll_state(port)
@@ -69,6 +119,7 @@ on sheet_grid_measure(evt) {
     if (changed) { st={*:st,geometry_key:key,geometry:axes} }
     return 'handled'
 }
+
 on sheet_focus(evt) {
     if (evt.event_phase!=2) { return 'pass' }
     let port=node(evt.target,"grid-scroll")^
@@ -95,7 +146,16 @@ on sheet_focus(evt) {
     return 'handled'
 }
 on pointerdown(evt) {
-    if ((evt.button!=0 or st.dialog!="" or st.selection_drag!=null or st.resize_drag!=null)^) { return 'pass' }
+    if ((evt.button!=0 or st.dialog!="" or st.selection_drag!=null or st.resize_drag!=null or st.split_drag!=null)^) { return 'pass' }
+    let split_divider=pane_resize.control(evt.target)
+    if ((split_divider!=null)^) {
+        if ((st.editing or dom.focused(node(evt.target,"formula-input")))^) { st=app.accept(st,evt.target) }
+        st=pane_resize.begin(st,evt,split_divider)
+        return 'prevent-default'
+    }
+    let pane_node=dom.closest(evt.target,"[data-sheet-pane]")
+    let pane_name=if (pane_node==null) "" else dom.get_attribute(pane_node,"data-sheet-pane") or ""
+    if ((pane_name!="" and pane_name!=st.pane_active)^) { st={*:st,pane_active:pane_name} }
     let divider=sizing.control(evt.target)
     if ((divider==null and (dom.closest(evt.target,"#cell-editor")!=null or selection.cell(evt.target)==null))^) { return 'pass' }
     // commit the native draft before changing the active cell or preventing its blur.
@@ -108,6 +168,11 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
+    if ((st.split_drag!=null)^) {
+        if ((evt.pointerId!=st.split_drag.pointer)^) { return 'pass' }
+        st=pane_resize.move(st,evt.clientX,evt.clientY)
+        return 'prevent-default'
+    }
     if ((st.resize_drag!=null)^) {
         if ((evt.pointerId!=st.resize_drag.pointer)^) { return 'pass' }
         st=sizing.move(st,evt.clientX,evt.clientY)
@@ -125,6 +190,12 @@ on sheet_drag_scroll(evt) {
     return 'handled'
 }
 on pointerup(evt) {
+    if ((st.split_drag!=null)^) {
+        if ((evt.pointerId!=st.split_drag.pointer)^) { return 'pass' }
+        st=pane_resize.move(st,evt.clientX,evt.clientY)
+        st=pane_resize.finish(evt.target,st)^
+        return 'prevent-default'
+    }
     if ((st.resize_drag!=null)^) {
         if ((evt.pointerId!=st.resize_drag.pointer)^) { return 'pass' }
         st=sizing.move(st,evt.clientX,evt.clientY)
@@ -138,6 +209,11 @@ on pointerup(evt) {
     return 'prevent-default'
 }
 on pointercancel(evt) {
+    if ((st.split_drag!=null)^) {
+        if ((evt.pointerId!=st.split_drag.pointer)^) { return 'pass' }
+        st=pane_resize.finish(evt.target,st,true)^
+        return 'handled'
+    }
     if ((st.resize_drag!=null)^) {
         if ((evt.pointerId!=st.resize_drag.pointer)^) { return 'pass' }
         st=sizing.finish(evt.target,st,true)
@@ -149,6 +225,7 @@ on pointercancel(evt) {
     return 'handled'
 }
 on lostpointercapture(evt) {
+    if ((st.split_drag!=null and evt.pointerId==st.split_drag.pointer)^) { st=pane_resize.finish(evt.target,st,true)^ }
     if ((st.resize_drag!=null and evt.pointerId==st.resize_drag.pointer)^) { st=sizing.finish(evt.target,st,true) }
     if ((st.selection_drag!=null and evt.pointerId==st.selection_drag.pointer)^) { st=selection.finish(evt.target,st) }
     return 'pass'
@@ -158,7 +235,7 @@ on click(evt) {
     // gestures finish on pointerup; their compatibility click must not select a header or collapse the range.
     if ((st.selection_click)^) {
         st={*:st,selection_click:false}
-        if (dom.closest(evt.target,"#grid-scroll")!=null) { return 'prevent-default' }
+        if (dom.closest(evt.target,".grid-scroll")!=null) { return 'prevent-default' }
     }
     let group_trigger=dom.closest(evt.target,".ribbon-group-trigger")
     if ((group_trigger!=null and st.dialog=="")^) { overflow.toggle(group_trigger)^; return 'prevent-default' }
@@ -166,13 +243,20 @@ on click(evt) {
     let target=dom.closest(evt.target,"button,td,[data-column],[data-rowheader],[data-select]")
     if (target==null) { return 'pass' }
     if ((st.dialog!="" and dom.closest(target,"#file-dialog")==null)^) { return 'prevent-default' }
+    let pane_node=dom.closest(evt.target,"[data-sheet-pane]")
+    let pane_name=if (pane_node==null) "" else dom.get_attribute(pane_node,"data-sheet-pane") or ""
+    if ((pane_name!="" and pane_name!=st.pane_active)^) { st={*:st,pane_active:pane_name} }
     let id=dom.get_attribute(target,"data-action")
     let tab=dom.get_attribute(target,"data-tab")
     let sheet=dom.get_attribute(target,"data-sheet")
     let row=dom.get_attribute(target,"data-row")
     let col=dom.get_attribute(target,"data-col")
     if (tab!=null) { st={*:st,tab:tab} }
-    else if (sheet!=null) { st=m.select(m.activate(st,int(sheet))^,0,0) }
+    else if (sheet!=null) {
+        let next=m.activate(st,int(sheet))^
+        let split=m.current(next).split
+        st=if (split==null) m.select(next,0,0) else m.select(next,(split.selection or split.top_left).row,(split.selection or split.top_left).col)
+    }
     else if (row!=null and col!=null) {
         if (dom.closest(evt.target,"#cell-editor")!=null) { return 'pass' }
         st=m.select(st,int(row),int(col),evt.shiftKey==true)
@@ -226,6 +310,10 @@ on keydown(evt) {
     let key=string(evt.key)
     let id=dom.get_attribute(evt.target,"id")
     let primary=interaction.primary(evt)
+    if ((st.split_drag!=null)^) {
+        if ((key=="Escape")^) { st=pane_resize.finish(evt.target,st,true)^ }
+        return 'prevent-default'
+    }
     if ((st.resize_drag!=null)^) {
         if ((key=="Escape")^) { st=sizing.finish(evt.target,st,true) }
         return 'prevent-default'
@@ -247,6 +335,9 @@ on keydown(evt) {
         app.focus(evt.target)^
         return 'prevent-default'
     }
+    let pane_node=dom.closest(evt.target,"[data-sheet-pane]")
+    let pane_name=if (pane_node==null) "" else dom.get_attribute(pane_node,"data-sheet-pane") or ""
+    if ((pane_name!="" and pane_name!=st.pane_active)^) { st={*:st,pane_active:pane_name} }
     let divider=sizing.control(evt.target)
     if ((divider!=null and sizing.handles_key(divider,key))^) {
         st=sizing.keyboard(st,divider,key,if (evt.shiftKey) 1 else 8) ^ {{*:st,status:string(^.message)}}
@@ -268,6 +359,17 @@ on keydown(evt) {
         st=app.dispatch(st,"save",evt.target)
         app.focus(evt.target)^
         return 'prevent-default'
+    }
+    let split_divider=pane_resize.control(evt.target)
+    if ((split_divider!=null)^) {
+        let axis=dom.get_attribute(split_divider,"data-split-resize")
+        let relevant=if (axis=="x") ["ArrowLeft","ArrowRight","Home","End"] else ["ArrowUp","ArrowDown","Home","End"]
+        if ((key in relevant)^) {
+            let box=dom.bounding_box(dom.closest(split_divider,".split-frame"))
+            let maximum=max(50,(if (axis=="x") box.width else box.height)-56)
+            st=pane_resize.keyboard(st,axis,key,maximum)^
+            return 'prevent-default'
+        }
     }
     let field=dom.closest(evt.target,"input,select,textarea")!=null
     if (field and id!="cell-editor" and id!="formula-input") { return 'pass' }

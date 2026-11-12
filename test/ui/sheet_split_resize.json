@@ -1,0 +1,240 @@
+{
+  "name": "Move split dividers",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/xlsx/split-panes.xlsx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".split-frame"
+      },
+      "attribute": "data-split-x",
+      "equals": "6000"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#split-divider-x-top"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#split-divider-x-top",
+        "offset_x": 66
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('[data-sheet-pane=topLeft]').getBoundingClientRect().width>450"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#split-divider-x-top"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.querySelector('.split-frame').getAttribute('data-split-x'))>6750"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".split-frame"
+      },
+      "attribute": "data-split-x",
+      "equals": "6000"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#split-divider-y-middle"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#split-divider-y-middle",
+        "offset_y": 46
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#split-divider-y-middle"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.querySelector('.split-frame').getAttribute('data-split-y'))>5000"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#split-divider-x-top"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#split-divider-x-top"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.querySelector('.split-frame').getAttribute('data-split-x'))>6000"
+    },
+    {
+      "type": "script",
+      "js": "window.savedSplitX=document.querySelector('.split-frame').getAttribute('data-split-x');window.savedSplitY=document.querySelector('.split-frame').getAttribute('data-split-y')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sheet-formula-splits/roundtrip.sheet.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sheet-formula-splits/roundtrip.sheet.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.split-frame').getAttribute('data-split-x')===window.savedSplitX && document.querySelector('.split-frame').getAttribute('data-split-y')===window.savedSplitY"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const d=document.getElementById('split-divider-x-top');return d.getAttribute('role')==='separator'&&Number(d.getAttribute('aria-valuemin'))===50&&Number(d.getAttribute('aria-valuemax'))>=Number(d.getAttribute('aria-valuenow'))})()"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#split-divider-x-top"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#split-divider-x-top",
+        "offset_x": 45
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.split-frame').getAttribute('data-split-x')===window.savedSplitX"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    }
+  ]
+}

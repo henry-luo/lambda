@@ -45,7 +45,9 @@ pub pn command(st,id,owner) map^ {
             let warnings=if (imported==null) 0 else len(imported.diagnostics)
             // A replacement workbook starts at its own origin, not the previous scroll offset.
             dom.set_scroll_state(dom.get_element_by_id(dom.root_node(owner),"grid-scroll"),0.0,0.0)
-            return {*:m.select(m.initial(book)^,0,0),path:if (imported!=null) "" else path,
+            let initial=m.initial(book)^
+            let positioned=if (book.sheets[0].split==null) m.select(initial,0,0) else initial;
+            return {*:positioned,path:if (imported!=null) "" else path,
                 status:"Opened " ++ path ++ (if (warnings>0) " (" ++ string(warnings) ++ " import warnings)" else "")}
         }
         if (st.dialog=="export") {

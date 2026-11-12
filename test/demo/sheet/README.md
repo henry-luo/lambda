@@ -81,20 +81,29 @@ remain text.
 
 Open accepts `.xlsx` and editable `.sheet.json` workbooks. XLSX imports include
 multiple worksheets, values, formulas, common styles and dimensions, merged
-ranges, hidden rows and columns, and frozen row/column prefixes. Sheet displays
-merged cells across the visible grid and skips hidden dimensions during arrow
-navigation; their data remains available to formulas. Frozen prefixes remain
-visible while scrolling. Imported metadata survives `.sheet.json` save/restore.
+ranges, hidden rows and columns, frozen row/column prefixes, and split panes.
+Sheet displays merged cells across the visible grid and skips hidden dimensions
+during arrow navigation; their data remains available to formulas. Frozen
+prefixes remain visible while scrolling. Split panes have independent scroll
+positions, with matching axes synchronized; the saved starting cell and active
+pane are restored on open. Imported metadata survives `.sheet.json` save/restore.
 
-Conditional formatting supports numeric `cellIs` comparisons with constant
-operands, including between/not-between, case-insensitive plain-text
+Conditional formatting supports formula expressions, numeric `cellIs`
+comparisons with constant or formula operands, case-insensitive plain-text
 contains/starts/ends rules, blank and nonblank rules, and RGB font/fill
-differential styles. Rules use Excel priority and `stopIfTrue`, and update when cells recalculate.
-Formula-based rules, color scales, data bars, icon sets, theme colours and other
+differential styles. Relative and mixed references are adjusted from the first
+applied range; rules use Excel priority and `stopIfTrue`, and update when cells
+recalculate. Formulas use Sheet's bounded function and reference profile
+(**S12.3.4v2**, **D7.2.2**); an error or unsupported expression does not apply
+its rule. Colour scales, data bars, icon sets, theme colours and other
 differential styles remain unsupported and produce an import warning. Rules
-outside Sheet's grid are clipped with a warning. Imported split panes, shared and
-array formulas, charts, drawings, worksheet/workbook protection, and complete
-Excel number-format and formula fidelity remain outside this profile.
+outside Sheet's grid are clipped with a warning. Shared and array formulas,
+charts, drawings, worksheet/workbook protection, and complete Excel
+number-format and formula fidelity remain outside this profile. Imported split
+dividers can be dragged or moved with the arrow keys and are saved in
+`.sheet.json`; creating or removing splits is not yet supported. Current
+scrolling is transient and opening the workbook restores its saved starting
+positions.
 
 Built-in and common custom date/time formats display as ISO dates and 24-hour
 times using the workbook’s 1900 or 1904 calendar. Open reports import warnings
@@ -136,7 +145,7 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_xlsx_layout_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_xlsx_layout_test*:*sheet_conditional_formula_test*:*sheet_split_panes_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
@@ -155,6 +164,12 @@ Verification:
   --event-file test/ui/sheet_xlsx_external.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_xlsx_layout.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_conditional_formula.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_split_panes.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_split_resize.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_resize.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_virtual_grid.json

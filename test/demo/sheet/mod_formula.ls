@@ -60,8 +60,24 @@ fn target_sheet(sheet,title) any^ {
     }
 }
 fn constant_plan(v) => (sheet,path) => v
-fn reference_plan(key,title=null) => (sheet,path) any^ => reference(target_sheet(sheet,title)^,key,path)^
-fn range_plan(start,end,title=null) => (sheet,path) any^ => range_value(target_sheet(sheet,title)^,start,end,path)^
+// Conditional formatting translates only relative reference components from its anchor.
+fn translated_reference(key,offset) any^ {
+    if (offset==null) key else {
+        let position_value=position(key)^
+        let column_absolute=starts_with(key,"$")
+        let bare=if (column_absolute) slice(key,1) else key
+        let end=letters_end(bare)^
+        let row_absolute=starts_with(slice(bare,end),"$")
+        let row=position_value.row+(if (row_absolute) 0 else offset.row)
+        let col=position_value.col+(if (column_absolute) 0 else offset.col);
+        if (row<0 or row>=1048576 or col<0 or col>=16384) raise error("#REF!") else address(row,col)^
+    }
+}
+fn reference_plan(key,title=null) => (sheet,path) any^ =>
+    reference(target_sheet(sheet,title)^,translated_reference(key,sheet.conditional_offset)^,path)^
+fn range_plan(start,end,title=null) => (sheet,path) any^ =>
+    range_value(target_sheet(sheet,title)^,translated_reference(start,sheet.conditional_offset)^,
+        translated_reference(end,sheet.conditional_offset)^,path)^
 fn thunk(plan,sheet,path) => () any^ => call(plan,[sheet,path])^
 fn scalar(value) => if (value is map and value.kind=="cellref") value.value else value
 fn invoke(name,plans,sheet,path) any^ {
@@ -236,12 +252,18 @@ fn evaluate(sheet,raw,path) any^ {
         else calculated
     }
 }
+// The formula remains a parsed call plan; no spreadsheet text becomes Lambda source.
+pub fn conditional(sheet,formula,anchor,row,col) any^ {
+    let source=if (starts_with(formula,"=")) formula else "=" ++ formula
+    let context={*:sheet,conditional_offset:{row:row-anchor.row,col:col-anchor.col}};
+    evaluate(context,source,[])^
+}
 pub fn value(sheet,row,col,path=[]) any^ {
     let key = lower(sheet.title or "") ++ "!" ++ address(row,col)
     let raw = cell(sheet,row,col).raw or ""
     if (contains(path,key) or len(path)>64) raise error("#CYCLE!")
     else if (starts_with(raw,"=")) {
-        let result = evaluate(sheet,raw,[*path,key]) ^ { ^ };
+        let result = evaluate({*:sheet,conditional_offset:null},raw,[*path,key]) ^ { ^ };
         // Saved XLSX results are a display fallback until the workbook is edited.
         if (result is error and cell(sheet,row,col).has_cached==true and
             (result.message=="#NAME?" or result.message=="#VALUE!" or result.message=="#REF!")) cell(sheet,row,col).cached
