@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-#include "validator.hpp"
+#include "validator_internal.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../runtime/ast.hpp"
 #include "../lambda-data.hpp"
@@ -27,12 +27,6 @@
 
 // Forward declaration for suggest_corrections function
 List* suggest_corrections(ValidationError* error, Pool* pool);
-
-// Forward declarations for real transpiler functions from validator.cpp
-extern Transpiler* transpiler_create(Pool* pool);
-extern void transpiler_destroy(Transpiler* transpiler);
-extern AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source,
-    const char* source_path);
 
 // ==================== Validation Error System ====================
 // Note: ValidationResult and related structures now defined in validator.hpp
@@ -196,7 +190,7 @@ static ValidationResult* validate_lambda_file(const char* file_path, Pool* pool)
 // Enhanced AST-based validation function with full validation flow
 ValidationResult* run_ast_validation(const char* data_file, const char* schema_file,
                                     const char* input_format, ValidationOptions* options) {
-    printf("Lambda AST Validator v2.0\n");;
+    log_debug("validator-cli: Lambda AST Validator v2.0");
 
     // Check if this is a Lambda file or should use schema validation
     bool is_lambda_file = false;
@@ -210,7 +204,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
     }
 
     if (is_lambda_file) {
-        printf("Validating '%s' using AST-based validation\n", data_file);
+        log_debug("validator-cli: Validating '%s' using AST-based validation", data_file);
         if (schema_file) {
             printf("Note: Schema file '%s' ignored (AST validation uses built-in rules)\n", schema_file);
         }
@@ -218,21 +212,21 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             printf("Note: Input format '%s' ignored (AST validation is Lambda-specific)\n", input_format);
         }
     } else {
-        printf("Validating '%s' using schema-based validation\n", data_file);
+        log_debug("validator-cli: Validating '%s' using schema-based validation", data_file);
         if (input_format) {
-            printf("Format: %s, Schema: %s\n", input_format, schema_file);
+            log_debug("validator-cli: Format: %s, Schema: %s", input_format, schema_file);
         } else {
-            printf("Auto-detect format, Schema: %s\n", schema_file);
+            log_debug("validator-cli: Auto-detect format, Schema: %s", schema_file);
         }
     }
 
     // Print validation options if provided
     if (options) {
-        printf("Validation options:\n");
-        printf("  - Strict mode: %s\n", options->strict_mode ? "enabled" : "disabled");
-        printf("  - Max errors: %d\n", options->max_errors);
-        printf("  - Max depth: %d\n", options->max_depth);
-        printf("  - Allow unknown fields: %s\n", options->allow_unknown_fields ? "yes" : "no");
+        log_debug("validator-cli: Validation options:");
+        log_debug("validator-cli:   - Strict mode: %s", options->strict_mode ? "enabled" : "disabled");
+        log_debug("validator-cli:   - Max errors: %d", options->max_errors);
+        log_debug("validator-cli:   - Max depth: %d", options->max_depth);
+        log_debug("validator-cli:   - Allow unknown fields: %s", options->allow_unknown_fields ? "yes" : "no");
     }
 
     // Create memory pool for validation
@@ -246,11 +240,11 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
 
     if (is_lambda_file) {
         // Use AST-based validation for Lambda files
-        printf("Loading and parsing Lambda source...\n");
+        log_debug("validator-cli: Loading and parsing Lambda source...");
         validation_result = validate_lambda_file(data_file, pool);
     } else {
         // Use schema-based validation for other formats
-        printf("Loading schema and parsing data file...\n");
+        log_debug("validator-cli: Loading schema and parsing data file...");
 
         // acquire the executable schema source through the common cache.
         char* schema_contents = validator_load_lambda_source_from_cache(
@@ -388,7 +382,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             Input* input = input_from_url(url_string, type_string, nullptr, nullptr);
             if (input && input->root.item != ITEM_ERROR) {
                 data_item = input->root;
-                printf("Successfully parsed input file\n");
+                log_debug("validator-cli: Successfully parsed input file");
             } else {
                 printf("Error: Failed to parse input file\n");
             }
@@ -406,7 +400,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         }
 
         // Validate using schema
-        printf("Validating data against schema...\n");
+        log_debug("validator-cli: Validating data against schema...");
         validation_result = validate_document(validator, data_item, root_type);
 
         // Cleanup
@@ -458,7 +452,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
 ValidationResult* exec_validation(int argc, char* argv[]) {
     // Extract validation argument parsing logic from main() function
     // This allows tests to call validation directly without spawning new processes
-    printf("Starting validation with arguments\n");
+    log_debug("validator-cli: Starting validation with arguments");
     if (argc < 2) {
         printf("Error: No file specified for validation\n");
         printf("Usage: validate [-s <schema>] [-f <format>] [--strict] [--max-errors N] [--max-depth N] [--allow-unknown] <file> [files...]\n");
@@ -576,23 +570,23 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
         if (ext && strcmp(ext, ".ls") == 0) {
             // Lambda files use AST validation - no schema needed
             schema_file = nullptr;
-            printf("Using AST-based validation for Lambda file\n");
+            log_debug("validator-cli: Using AST-based validation for Lambda file");
         } else if (input_format && strcmp(input_format, "html") == 0) {
             schema_file = host_path_join(HOST_PATH_HOME, "package/doc/html5_schema.ls");
             schema_file_allocated = true;
-            printf("Using HTML5 schema for HTML input\n");
+            log_debug("validator-cli: Using HTML5 schema for HTML input");
         } else if (input_format && strcmp(input_format, "eml") == 0) {
             schema_file = host_path_join(HOST_PATH_HOME, "package/doc/eml_schema.ls");
             schema_file_allocated = true;
-            printf("Using EML schema for email input\n");
+            log_debug("validator-cli: Using EML schema for email input");
         } else if (input_format && strcmp(input_format, "ics") == 0) {
             schema_file = host_path_join(HOST_PATH_HOME, "package/doc/ics_schema.ls");
             schema_file_allocated = true;
-            printf("Using ICS schema for calendar input\n");
+            log_debug("validator-cli: Using ICS schema for calendar input");
         } else if (input_format && strcmp(input_format, "vcf") == 0) {
             schema_file = host_path_join(HOST_PATH_HOME, "package/doc/vcf_schema.ls");
             schema_file_allocated = true;
-            printf("Using VCF schema for vCard input\n");
+            log_debug("validator-cli: Using VCF schema for vCard input");
         } else if (input_format && (strcmp(input_format, "asciidoc") == 0 ||
                                  strcmp(input_format, "man") == 0 ||
                                  strcmp(input_format, "markdown") == 0 ||
@@ -601,11 +595,11 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
                                  wiki_format_flavor(input_format))) {
             schema_file = host_path_join(HOST_PATH_HOME, "package/doc/doc_schema.ls");
             schema_file_allocated = true;
-            printf("Using document schema for %s input\n", input_format);
+            log_debug("validator-cli: Using document schema for %s input", input_format);
         } else if (!input_format || strcmp(input_format, "lambda") == 0) {
             // Default to AST validation for Lambda format
             schema_file = nullptr;
-            printf("Using AST-based validation for Lambda format\n");
+            log_debug("validator-cli: Using AST-based validation for Lambda format");
         } else {
             // For other formats (json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text), require explicit schema
             printf("Error: Input format '%s' requires an explicit schema file. Use -s <schema_file> option.\n", input_format);
@@ -617,9 +611,9 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
 
     // Call the validation function and return the ValidationResult directly
     if (schema_file) {
-        printf("Starting validation of '%s' using schema '%s'...\n", data_file, schema_file);
+        log_debug("validator-cli: Starting validation of '%s' using schema '%s'...", data_file, schema_file);
     } else {
-        printf("Starting AST validation of '%s'...\n", data_file);
+        log_debug("validator-cli: Starting AST validation of '%s'...", data_file);
     }
 
     // Create validation options from parsed arguments
@@ -649,7 +643,7 @@ extern "C" ValidationResult* run_validation(const char *data_file, const char *s
         return nullptr;
     }
 
-    printf("Running validation for %s (schema: %s, format: %s)\n",
+    log_debug("validator-cli: Running validation for %s (schema: %s, format: %s)",
            data_file, schema_file ? schema_file : "auto", input_format ? input_format : "auto");
 
     // Use default validation options

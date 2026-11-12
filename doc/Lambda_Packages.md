@@ -90,6 +90,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `latex` | `lambda.doc.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `docx` | `lambda.doc.docx` | Library, bounded import and export profiles | Reads DOCX and writes editable Word packages from HTML elements (§15) | `lambda view report.docx`; `--archive` browses package parts |
 | `pptx` | `lambda.doc.pptx` | Library, initial editable import profile | Reads PowerPoint into slide elements, HTML handouts, text, metadata and diagnostics (§28) | `lambda view deck.pptx`; also `layout`, `render`, document-browser preview and Slides Open |
+| `xlsx` | `lambda.doc.xlsx` | Library, bounded workbook import | Reads spreadsheet values, formulas and basic styles into a semantic workbook (§31) | Sheet demo Open |
 | `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
 | `pdf` | `lambda.doc.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
@@ -1583,6 +1584,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
 | `pptx` | `test/lambda/pptx/`; reproducible synthetic and pinned independent documents in `test/input/pptx/`; `test/ui/pptx_player.json`, `slide_pptx_import.json` and `doc_viewer_pptx_pane.json` |
+| `xlsx` | `test/lambda/xlsx_import.ls`, `test/demo/sheet/tests/sheet_xlsx_test.ls`; synthetic fixtures in `test/input/xlsx/`; `test/ui/sheet_xlsx.json` |
 | `archive` | `test/lambda/archive/` (plan, pages, renderings and search, media and gallery engines over the local fixture site `site/`, service); the demo's model golden and replay in `test/demo/archive/tests/` |
 | `doc.readability` | `test/lambda/readability/` (API and Readability.js-checked pages); the Mozilla corpus by hand with `./lambda.exe run test/lambda/readability/_corpus.ls` |
 | `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
@@ -5043,3 +5045,39 @@ read or write them.
 
 `lambda.image`'s `paint_stroke`, `paint_stroke_step` and `retouch` use this brush, with the
 linear profile, for their stroke coverage.
+
+
+## 31. xlsx — Spreadsheet workbook import
+
+`lambda.doc.xlsx` is a shipped script package (**D9.3.4**) that reads a local
+`.xlsx` path or a ZIP root captured with `input(path, "zip")`. It uses the
+shared OPC reader and its relationship and archive admission rules (**D11.1.2**).
+
+```lambda
+import xlsx: lambda.doc.xlsx
+let workbook = xlsx.convert("budget.xlsx")^
+workbook.sheets[0].cells
+```
+
+`convert(source)` and `load(source)` return `{title, sheets, metadata,
+diagnostics}`. Each sheet has a title, part path, sparse zero-based cells, column
+width ranges, row heights and diagnostics. Cells expose their coordinates, XLSX
+type, typed value, raw value, formula and formula type, cached-value presence,
+and the supported style projection. Rich shared/inline text is flattened. The
+reader accepts ordinary non-macro XLSX workbooks and rejects invalid or missing
+package parts. Diagnostics report selected unsupported features; their absence
+does not guarantee a lossless import.
+
+The [Sheet demo](../test/demo/sheet/README.md) converts that model to its own
+editable workbook and opens it through **Open**. It supports at most 50 sheets,
+100,000 rows and 1,000 columns per sheet, plus its existing cell and operation
+limits. Imported text, numeric and boolean values, formula source, common
+font/fill/alignment and number styles, and row/column dimensions are retained
+where the demo supports them. Built-in date formats 14–17 display ISO dates
+using the workbook's 1900 or 1904 calendar. Common formulas recalculate in Sheet;
+otherwise a saved XLSX result is shown until an edit invalidates imported caches.
+
+This is not a lossless XLSX editor. Merged cells, shared/array formula expansion,
+charts and drawings, arbitrary custom formats, time formats, theme colours and
+many Excel features are outside this profile. Sheet saves its conversion as
+`.sheet.json`, not XLSX; the separate chart exporter writes a limited XLSX table.

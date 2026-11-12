@@ -18,7 +18,7 @@ pub fn initial(book=null) {
     let initial_book=book or sample();
     refresh_stats({book:initial_book,saved:initial_book,sheet:0,row:4,col:4,anchor:{row:4,col:4},cache:prepare(initial_book.sheets[0]),
         viewport:{x:0.0,y:0.0,width:0.0,height:0.0},geometry_key:null,geometry:null,
-        undo:[],redo:[],tab:"Home",editing:false,draft:"",dialog:"",path:"",dialog_path:"",error:null,pending:null,status:"Ready",grid:true,formulas:false,zoom:1.0,
+        has_cached_results:has_cached_results(initial_book),undo:[],redo:[],tab:"Home",editing:false,draft:"",dialog:"",path:"",dialog_path:"",error:null,pending:null,status:"Ready",grid:true,formulas:false,zoom:1.0,
         selection_drag:null,selection_click:false,resize_drag:null})
 }
 pub fn indexed(st) => {*:current(st),cell_index:st.cache.cells}
@@ -58,9 +58,14 @@ pub fn select(st,row,col,extend=false) {
     let c = max(0,min(current(st).cols-1,col));
     refresh_stats({*:st,row:r,col:c,anchor:if (extend) st.anchor else {row:r,col:c},editing:false,draft:"",status:"Ready"})
 }
+// Any edit can change a formula dependency, including a different worksheet.
+fn has_cached_results(book) => any([for (sheet in book.sheets,cell in sheet.cells) cell.has_cached==true])
+fn invalidate_imported_results(book) => {*:book,sheets:[for (sheet in book.sheets)
+    {*:sheet,cells:[for (cell in sheet.cells) if (cell.has_cached==true) {*:cell,has_cached:false,cached:null} else cell]}]}
 pub fn change(st,book,status="Ready") => if (book==st.book) {*:st,editing:false} else {
-    let hist = shared_history.snapshot_record({past:st.undo,future:st.redo},st.book,100,true);
-    refresh_stats({*:st,book:book,cache:prepare(book.sheets[st.sheet]),undo:hist.past,redo:hist.future,editing:false,status:status})
+    let hist = shared_history.snapshot_record({past:st.undo,future:st.redo},st.book,100,true)
+    let next=if (st.has_cached_results) invalidate_imported_results(book) else book;
+    refresh_stats({*:st,book:next,has_cached_results:false,cache:prepare(next.sheets[st.sheet]),undo:hist.past,redo:hist.future,editing:false,status:status})
 }
 fn replace_sheet(st,sheet,status="Ready") => change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) sheet else s]},status)
 pub fn set_cells(st,cells,status="Ready") => replace_sheet(st,{*:current(st),cells:cells},status)
@@ -90,7 +95,7 @@ pub fn history(st,redo=false) any^ {
         let sheet=min(st.sheet,len(step.value.sheets)-1)
         let rows=step.value.sheets[sheet].rows
         let cols=step.value.sheets[sheet].cols;
-        refresh_stats({*:st,book:step.value,sheet:sheet,cache:prepare(step.value.sheets[sheet]),row:min(st.row,rows-1),col:min(st.col,cols-1),
+        refresh_stats({*:st,book:step.value,has_cached_results:has_cached_results(step.value),sheet:sheet,cache:prepare(step.value.sheets[sheet]),row:min(st.row,rows-1),col:min(st.col,cols-1),
             anchor:{row:min(st.anchor.row,rows-1),col:min(st.anchor.col,cols-1)},editing:false,
             undo:step.history.past,redo:step.history.future,status:if (redo) "Redone" else "Undone"})
     }

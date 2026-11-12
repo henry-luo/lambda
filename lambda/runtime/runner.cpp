@@ -2405,9 +2405,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
         cache_artifact_rejected = true;
     }
-    InputScriptBuildKind build_kind = lambda_tier_selected() == LAMBDA_TIER_JIT &&
-        runtime->use_mir_direct && !runtime->mir_cache_disabled
-        ? INPUT_SCRIPT_BUILD_MIR : INPUT_SCRIPT_BUILD_AST;
+    bool builds_mir = selected_tier == LAMBDA_TIER_JIT && runtime->use_mir_direct;
+    InputScriptBuildKind build_kind = builds_mir ? INPUT_SCRIPT_BUILD_MIR : INPUT_SCRIPT_BUILD_AST;
     // A cache claim may wait for a prebuild worker that recursively loads one
     // of its imports. The registry lock protects this Runtime's short index
     // mutations only; holding it across that wait blocks the publisher at its
@@ -2416,7 +2415,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     pthread_mutex_unlock(&scripts_mutex);
 #endif
     LambdaScriptBuildClaim build_claim(raw_lease, build_kind,
-        cache_artifact_enabled);
+        // a disabled MIR producer cannot consume or complete an AST claim;
+        // READY on that unrelated artifact would retry this load forever.
+        cache_artifact_enabled && (!builds_mir || !runtime->mir_cache_disabled));
     if (build_claim.is_ready()) {
         // A waiter can observe READY only after the owner published between
         // this call's first lookup and claim. Retry that normal hit without
@@ -2524,7 +2525,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     // Print downgraded static warnings first (--static-warning relaxed mode);
     // they never fail the compile, so the script result follows below them.
-    if (transpiler.warnings && transpiler.warnings->length > 0) {
+    if (!runtime->ast_prebuild_only && transpiler.warnings && transpiler.warnings->length > 0) {
         fprintf(stderr, "\n");
         for (int i = 0; i < transpiler.warnings->length; i++) {
             LambdaError* warning = (LambdaError*)transpiler.warnings->data[i];
@@ -2539,7 +2540,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
 
     // Print structured errors if any
-    if (transpiler.errors && transpiler.errors->length > 0) {
+    // speculative prebuild failures are diagnosed by the importing execution;
+    // printing here would race it and report each parse error twice.
+    if (!runtime->ast_prebuild_only && transpiler.errors && transpiler.errors->length > 0) {
         fprintf(stderr, "\n");
         for (int i = 0; i < transpiler.errors->length; i++) {
             LambdaError* error = (LambdaError*)transpiler.errors->data[i];

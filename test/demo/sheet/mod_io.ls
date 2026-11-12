@@ -1,10 +1,11 @@
 import f: .mod_formula
 import m: .mod_model
+import xlsx: .mod_xlsx
 
 fn valid_style(style) any^ => style is map and all([for (key,value in style,let property=string(key))
     if (property in ["bold","italic","underline","wrap","border"]) value is bool
     else if (property=="size") value is int and value>=1 and value<=72
-    else if (property=="format") value in ["general","number","currency","percent"]
+    else if (property=="format") value in ["general","number","currency","percent","date","date1904"]
     else if (property=="align") value in ["left","center","right"]
     else if (property=="font") value in ["Arial","Helvetica Neue","Georgia","Courier New"]
     else if (property=="fill" or property=="color") value is string and (value=="transparent" or
@@ -29,7 +30,9 @@ pub fn restore(book) map^ {
         book.sheets is array and len(book.sheets)>0 and len(book.sheets)<=50 and all([for (s in book.sheets) valid_sheet(s)])) book
     else raise error("Sheet: invalid workbook; expected lambda-sheet version 1")
 }
-pub fn read(path) map^ => restore(input(path,'json')^)^
+pub fn is_xlsx(path) any^ => ends_with(lower(path),".xlsx")
+pub fn read(path) map^ => if (is_xlsx(path)^) restore(xlsx.convert(path)^.book)^ else restore(input(path,'json')^)^
+pub fn import_xlsx(path) map^ => xlsx.convert(path)^
 fn quoted(value) => "\"" ++ replace(if (value is number) (format(value,'json') ^ {string(value)}) else string(value),"\"","\"\"") ++ "\""
 pub fn csv(sheet) string^ {
     let used=[for (c in sheet.cells where c.raw!="") c]

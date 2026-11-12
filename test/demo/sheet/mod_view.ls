@@ -50,7 +50,7 @@ pub fn toolbar(st) {
         ribbon.group("Workbook",[ribbon.row([tool("insert-sheet","New Sheet","blank_page",false,false,"home-large","add-sheet"),tool("rename-sheet","Rename Sheet","edit_shape",false,false,"home-large")])]);
         ribbon.group("Rows",[ribbon.row([tool("add-rows","Add 10 Rows","insert_below",false,false,"home-large")])]);
         ribbon.group("Functions",[ribbon.row([tool("autosum","AutoSum","equation",false,false,"home-large"),
-            <span class:"ribbon-tip","SUM · AVERAGE · MIN · MAX · COUNT\nUse cell references and ranges, like =SUM(C5:E5)">])])>
+            <span class:"ribbon-tip","SUM · IF · VLOOKUP · ROUND · COUNTIF\nUse cell references and ranges, like =SUM(C5:E5)">])])>
     else <div class:"editor-ribbon",
         ribbon.group("Show",[ribbon.row([tool("gridlines","Gridlines","table_gridlines",st.grid,false,"home-large"),
             tool("show-formulas","Show Formulas","code",st.formulas,false,"home-large")])]);
@@ -68,7 +68,20 @@ fn fixed(value,places=2) any^ => {
 }
 fn trim_decimal(text) any^ => if (ends_with(text,"0")) trim_decimal(slice(text,0,len(text)-1))
     else if (ends_with(text,".")) slice(text,0,len(text)-1) else text
-pub fn formatted(value,style) any^ => if (not (value is number)) string(value)
+// Excel's 1900 calendar includes a fictitious leap day at serial 60.
+fn excel_date(value,date1904) any^ {
+    let days=int(floor(value));
+    if (not date1904 and days==60) "1900-02-29"
+    else {
+        let epoch=if (date1904) -2082844800000 else -2209075200000
+        let offset=if (not date1904 and days>60) days-1 else days
+        let rendered=string(date(datetime(epoch+offset*86400000)^)^);
+        slice(rendered,2,len(rendered)-1)
+    }
+}
+pub fn formatted(value,style) any^ => if (value is bool) (if (value) "TRUE" else "FALSE")
+    else if (not (value is number)) string(value)
+    else if (style.format=="date" or style.format=="date1904") excel_date(value,style.format=="date1904")^
     else if (style.format=="currency") "$" ++ fixed(value)
     else if (style.format=="percent") fixed(value*100,1) ++ "%"
     else if (style.format=="number") fixed(value)
@@ -160,8 +173,8 @@ pub fn dialog(st) any^ => if (st.dialog=="") null else workspace_dialog.modal(
         <h2 id:"dialog-title",{open:"Open workbook",save:"Save workbook",export:"Export CSV",rename:"Rename sheet",replace:"Unsaved changes"}[st.dialog]>,
         if (st.dialog=="replace") <p "Save your workbook before replacing it?"> else
             <label <span if (st.dialog=="rename") "Sheet name" else "File path">;
-                <input id:"file-path",value:if (st.dialog=="rename") m.current(st).title else st.dialog_path,'aria-label':if (st.dialog=="rename") "Sheet name" else "File path",placeholder:if (st.dialog=="export") "budget.csv" else "workbook.sheet.json">>,
-        <p class:"dialog-hint",if (st.dialog=="export") "Exports the active sheet’s calculated values as CSV." else if (st.dialog=="rename") "Give this worksheet a short, descriptive name." else if (st.dialog=="replace") "Your current edits have not been saved." else "Editable .sheet.json files preserve every sheet, formula and format.">,
+                <input id:"file-path",value:if (st.dialog=="rename") m.current(st).title else st.dialog_path,'aria-label':if (st.dialog=="rename") "Sheet name" else "File path",placeholder:if (st.dialog=="export") "budget.csv" else if (st.dialog=="open") "workbook.xlsx or workbook.sheet.json" else "workbook.sheet.json">>,
+        <p class:"dialog-hint",if (st.dialog=="export") "Exports the active sheet’s calculated values as CSV." else if (st.dialog=="rename") "Give this worksheet a short, descriptive name." else if (st.dialog=="replace") "Your current edits have not been saved." else if (st.dialog=="open") "Open an .xlsx or an editable .sheet.json workbook. XLSX imports save as .sheet.json." else "Editable .sheet.json files preserve every sheet, formula and format.">,
         if (st.error!=null) <p class:"dialog-error",role:"alert",st.error> else null,
         <div class:"dialog-actions",button("dialog-cancel","Cancel");
             if (st.dialog=="replace") button("dialog-discard","Discard changes") else null;

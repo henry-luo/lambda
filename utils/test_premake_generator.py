@@ -71,6 +71,8 @@ def expect_static_runtime_providers(module, platform_name: str) -> None:
             expected = f'lib{provider}.a'
             if expected not in generated:
                 fail(f"{platform_name} runtime host omitted static provider {provider}")
+        if 'lambda-runtime-full' in dependencies and 'liblambda-radiant-adapter-cpp.a' not in generated:
+            fail(f"{platform_name} validator host omitted its Lambda adapter provider")
         if option not in generated:
             fail(f"{platform_name} runtime test host omitted the D9.4.6 export allowlist")
     for dependencies in (["lambda-data"], ["lambda-rt"]):

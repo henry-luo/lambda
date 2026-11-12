@@ -65,7 +65,8 @@ pn markers_for_word(tables: HyphenTables, word: string, var cache: MarkerCache) 
         var cursor: int = span_start
         while (cursor < length + 2) {
             // virtual boundary dots avoid building a padded copy of each word.
-            let _admitted_code_63: int = if (cursor == 0 or cursor == length + 1) 46
+            // retain ord's possible error until the propagation boundary below.
+            let _admitted_code_63: int^ = if (cursor == 0 or cursor == length + 1) 46
                 else ord(lowered[cursor - 1])
             let code: int = _admitted_code_63^
             let child: int = trie_child(tables, node, code)^

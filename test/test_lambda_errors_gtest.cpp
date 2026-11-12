@@ -18,6 +18,7 @@
 #include "lambda/input/input.hpp"
 #include "lambda/io/mark_builder.hpp"
 #include "../lambda/validator/validator.hpp"
+#include "../lambda/validator/validator_internal.hpp"
 #include "lib/arraylist.h"
 #include "lib/memtrack.h"
 #include "lib/mempool.h"
@@ -37,6 +38,45 @@
 //==============================================================================
 // Type-contract metadata tests
 //==============================================================================
+
+TEST(LambdaAstMetadata, MixedResultInferencePreservesThePublicBoxedAbi) {
+    const char* source =
+        "type Node = {kind: string, value: int, child: Node?} | {kind: string, text: string, child: Node?}\n"
+        "fn leaf() Node => {kind: \"leaf\", text: \"seven\", child: null}\n"
+        "fn make(depth: int) Node => if (depth == 0) leaf() else {kind: \"branch\", value: 1, child: make(depth - 1)}\n"
+        "fn choose(flag: bool) => if (flag) \"yes\" else false\n"
+        "fn maybe(flag: bool) => if (flag) \"yes\";\n"
+        "[choose(true), maybe(false)]\n";
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Transpiler* tp = transpiler_create(pool);
+    ASSERT_NE(tp, nullptr);
+    AstNode* script = transpiler_build_ast(tp, source, "<ledger-inferred-results>");
+    ASSERT_NE(script, nullptr);
+    ASSERT_NE(tp->runtime, nullptr);
+    ASSERT_NE(tp->runtime->scripts, nullptr);
+    AstIndex* index = &((Script*)tp->runtime->scripts->data[0])->ast_index;
+    int checked = 0;
+    for (uint32_t i = 0; i < index->function_count; i++) {
+        AstFuncNode* function = (AstFuncNode*)index->functions[i].node;
+        if (!function || !function->name) continue;
+        TypeFunc* signature = (TypeFunc*)function->type;
+        if (!strcmp(function->name->chars, "choose")) {
+            EXPECT_EQ(signature->returned, &TYPE_ANY);
+            EXPECT_TRUE(lambda_type_is_union(signature->inferred_return));
+            EXPECT_FALSE(lambda_type_accepts_error(signature->inferred_return));
+            checked++;
+        } else if (!strcmp(function->name->chars, "maybe")) {
+            EXPECT_EQ(signature->returned, &TYPE_ANY);
+            EXPECT_NE(signature->inferred_return, &TYPE_ANY);
+            EXPECT_TRUE(lambda_type_accepts_null(signature->inferred_return));
+            checked++;
+        }
+    }
+    EXPECT_EQ(checked, 2);
+    transpiler_destroy(tp);
+    pool_destroy(pool);
+}
 
 TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
     Item value = {.item = i2it(7)};
@@ -1567,6 +1607,32 @@ protected:
 };
 
 // Syntax error tests
+TEST_F(NegativeScriptTest, InheritedFieldDiagnosticUsesTheWrittenField) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/inherited_field_location.ls", false,
+        "inherited_field_location.ls:7:5: error[E209]: duplicate definition of 'sound'");
+}
+
+TEST_F(NegativeScriptTest, ImportedParseErrorIsReportedOncePerTier) {
+    for (const char* tier : {"interp", "jit", "auto"}) {
+        ScriptResult result = run_lambda_script("test/lambda/negative/import_parse_error_driver.ls", false, tier);
+        EXPECT_NE(result.exit_code, 0);
+        const char* first = strstr(result.output.c_str(), "import_parse_error_bad.ls:3:1: error[E100]");
+        ASSERT_NE(first, nullptr) << result.output;
+        EXPECT_EQ(strstr(first + 1, "import_parse_error_bad.ls:3:1: error[E100]"), nullptr) << result.output;
+    }
+}
+
+TEST_F(NegativeScriptTest, RuntimeCallDiagnosticsUseSourceNamesOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_resized_binding.ls", true,
+        "type check at argument 1 of takes3 failed: expected int[3]");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sysfunc_shadow_not_callable.ls", false,
+        "error[E212]: cannot call non-function value");
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/typed_literal_required_dynamic_null.ls", true,
+        "typed_literal_required_dynamic_null.ls:8:9: error[E201]: type check at declaration 'c' failed: expected Cell, got map; validator at .k:");
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/typed_literal_required_array_null.ls", true,
+        "typed_literal_required_array_null.ls:10:9: error[E201]: type check at declaration 'g' failed: expected Grid, got map; validator at .cells:");
+}
+
 TEST_F(NegativeScriptTest, DuplicateLiteralKeys) {
     const struct { const char* path; int duplicates; } scripts[] = {
         {"test/lambda/negative/semantic/duplicate_map_keys.ls", 6},
@@ -2214,7 +2280,7 @@ TEST_F(NegativeScriptTest, TypeEnforcementRuntimeNegativeGoldensPinDiagnostics) 
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_map.ls",
         "error[E201]: type check at declaration 'person' failed: expected Person, got map; validator at .age: Expected type 'int', but got 'string'");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_parameter.ls",
-        "error[E201]: type check at argument 1 of _accept_0 failed: expected int, got string 'not an integer'");
+        "error[E201]: type check at argument 1 of accept failed: expected int, got string 'not an integer'");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_return.ls",
         "error[E201]: type check at function return failed: expected int, got string 'not an integer'");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_map_write.ls",

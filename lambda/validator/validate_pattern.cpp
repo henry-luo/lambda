@@ -9,6 +9,7 @@
 
 #include "validator_internal.hpp"
 #include "lambda/core/mark_reader.hpp"
+#include "lib/arraylist.h"
 
 // ==================== Forward Declarations ====================
 
@@ -533,34 +534,22 @@ ValidationResult* validate_against_union_type(
  * Flatten a binary type tree into an array of types.
  * For union types like A | B | C, this collects [A, B, C].
  */
-static void flatten_binary_type(TypeBinary* binary, Type** types, int* count, int max_count, Operator op) {
-    if (!binary || *count >= max_count) return;
-
-    // Check if left is also a binary type with same operator
-    if (binary->left && binary->left->kind == TYPE_KIND_BINARY) {
-        TypeBinary* left_binary = (TypeBinary*)binary->left;
-        if (left_binary->op == op) {
-            flatten_binary_type(left_binary, types, count, max_count, op);
-        } else {
-            // Different operator, treat as a single type
-            types[(*count)++] = binary->left;
-        }
-    } else if (binary->left) {
-        types[(*count)++] = binary->left;
+static bool collect_union_types(Type* root, ArrayList* types) {
+    ArrayList* pending = arraylist_new(16);
+    if (!pending) return false;
+    bool complete = arraylist_append(pending, root);
+    // an explicit worklist preserves arm order without a fixed cap or native recursion.
+    while (complete && pending->length) {
+        Type* type = (Type*)pending->data[--pending->length];
+        if (!type) continue;
+        if (lambda_type_is_union(type)) {
+            TypeBinary* binary = (TypeBinary*)type;
+            complete = arraylist_append(pending, binary->right) &&
+                arraylist_append(pending, binary->left);
+        } else complete = arraylist_append(types, type);
     }
-
-    // Check if right is also a binary type with same operator
-    if (binary->right && binary->right->kind == TYPE_KIND_BINARY) {
-        TypeBinary* right_binary = (TypeBinary*)binary->right;
-        if (right_binary->op == op) {
-            flatten_binary_type(right_binary, types, count, max_count, op);
-        } else {
-            // Different operator, treat as a single type
-            types[(*count)++] = binary->right;
-        }
-    } else if (binary->right) {
-        types[(*count)++] = binary->right;
-    }
+    arraylist_free(pending);
+    return complete;
 }
 
 ValidationResult* validate_binary_type(
@@ -592,22 +581,18 @@ ValidationResult* validate_binary_type(
 
     switch (type_binary->op) {
         case OPERATOR_UNION: {
-            // Flatten union type into array
-            const int MAX_UNION_TYPES = 32;
-            Type* union_types[MAX_UNION_TYPES];
-            int type_count = 0;
-
-            flatten_binary_type(type_binary, union_types, &type_count, MAX_UNION_TYPES, OPERATOR_UNION);
-
-            log_debug("[PATTERN] Union type flattened to %d types", type_count);
-
-            if (type_count == 0) {
-                if (validator->is_fast_mode()) return validation_verdict(false);
-                add_constraint_error(result, validator, "Empty union type");
-                return result;
+            ArrayList* types = arraylist_new(16);
+            bool complete = types && collect_union_types(type_binary, types);
+            ValidationResult* verdict;
+            if (complete) verdict = validate_against_union_type(validator, item,
+                (Type**)types->data, types->length);
+            else {
+                verdict = validator->is_fast_mode() ? validation_verdict(false) : result;
+                if (!validator->is_fast_mode())
+                    add_constraint_error(verdict, validator, "Cannot allocate complete union type traversal");
             }
-
-            return validate_against_union_type(validator, item, union_types, type_count);
+            if (types) arraylist_free(types);
+            return verdict;
         }
 
         case OPERATOR_INTERSECT:

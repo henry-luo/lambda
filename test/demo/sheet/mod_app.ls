@@ -40,13 +40,18 @@ pub pn command(st,id,owner) map^ {
             return {*:next,dialog:""}
         }
         if (st.dialog=="open") {
-            let book=files.read(path)^
-            return {*:m.select(m.initial(book)^,0,0),path:path,status:"Opened " ++ path}
+            let imported=if (files.is_xlsx(path)^) files.import_xlsx(path)^ else null
+            let book=if (imported!=null) files.restore(imported.book)^ else files.read(path)^
+            let warnings=if (imported==null) 0 else len(imported.diagnostics)
+            return {*:m.select(m.initial(book)^,0,0),path:if (imported!=null) "" else path,
+                status:"Opened " ++ path ++ (if (warnings>0) " (" ++ string(warnings) ++ " import warnings)" else "")}
         }
         if (st.dialog=="export") {
+            if (files.is_xlsx(path)^) { return {*:st,status:"Export CSV to a .csv file; XLSX export is not supported",error:"XLSX export is not supported"} }
             files.export_csv(m.current(st),path)^
             return {*:st,dialog:"",status:"Exported " ++ path}
         }
+        if (files.is_xlsx(path)^) { return {*:st,status:"Save as a .sheet.json file; XLSX export is not supported",error:"Save as a .sheet.json file; XLSX export is not supported"} }
         files.write(st.book,path)^
         let saved={*:st,saved:st.book,path:path,dialog:"",status:"Saved " ++ path}
         if (st.pending!=null) { return command({*:saved,pending:null},st.pending,owner)^ }

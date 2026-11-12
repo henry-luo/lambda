@@ -200,6 +200,8 @@ void write_fn_name_for_script_ex(StrBuf *strbuf, AstFuncNode* fn_node,
     const Script* import_script, const char* suffix);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);
+struct LambdaBoundary;
+void lambda_format_parameter_label(const LambdaBoundary* boundary, char* out, size_t capacity);
 void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import);
 // A module's pub variable, qualified by the dependency that defines it, so two
 // imported modules exporting one name stay distinct symbols (as functions do).

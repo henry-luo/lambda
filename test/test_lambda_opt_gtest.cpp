@@ -1484,6 +1484,18 @@ TEST(LambdaOptAdmission, OpenUnionMemberShapeCachesAdmissionProof) {
     EXPECT_NE(run.std_err.find("got int 42"), std::string::npos);
 }
 
+TEST(LambdaOptAdmission, ValidatedUntrustedUnionShapeReusesSemanticProof) {
+    FixtureRun run = run_source_fixture("ledger_union_shape",
+        "test/lambda/proc/ledger_union_shape_cache.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[40, true, 1, 1, 2, 1, true]\n");
+    ASSERT_TRUE(run.profile.has("union_map_deep_validations"));
+    EXPECT_GT(run.profile.get("union_map_semantic_cache_hits"), 30u);
+    // the first crossing and both malformed values still require real checks.
+    EXPECT_GT(run.profile.get("union_map_deep_validations"), 0u);
+    EXPECT_LT(run.profile.get("union_map_deep_validations"), 10u);
+}
+
 TEST(LambdaOptAdmission, SplitBuildsInferredStringLane) {
     FixtureRun run = run_source_fixture("split_string_lane",
         "test/lambda/proc/tune26_split_string_lane.ls", "jit");

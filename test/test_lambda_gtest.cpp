@@ -613,6 +613,16 @@ struct TierParityFixture {
     const char* interp_unsupported = nullptr;
 };
 static const TierParityFixture kTune27TierParity[] = {
+    {"test/lambda/proc/ledger_pipe_call_snapshot.ls", "test/lambda/proc/ledger_pipe_call_snapshot.txt", NULL},
+    {"test/lambda/proc/ledger_nested_borrow_arguments.ls", "test/lambda/proc/ledger_nested_borrow_arguments.txt", NULL},
+    // S1.6/S9.1.3v4: these formerly diverged only on explicit T0 or eager JIT.
+    {"test/mir/lambda/mvp_call_ownership.ls", "test/mir/lambda/mvp_call_ownership.txt"},
+    {"test/lambda/js_array_props_tail_bridge.ls", "test/lambda/js_array_props_tail_bridge.txt"},
+    {"test/lambda/last_defect_receiver.ls", "test/lambda/last_defect_receiver.txt"},
+    {"test/lambda/ledger_optional_fields.ls", "test/lambda/ledger_optional_fields.txt"},
+    {"test/lambda/proc/ledger_record_boundary_once.ls", "test/lambda/proc/ledger_record_boundary_once.txt"},
+    {"test/lambda/proc/interp_var_writeback.ls", "test/lambda/proc/interp_var_writeback.txt"},
+    {"test/lambda/proc/proc_fill_bool_inferred_read.ls", "test/lambda/proc/proc_fill_bool_inferred_read.txt"},
     // S12.1.2v3/S9.1.4v2: pure local control and escaping snapshots agree.
     {"test/lambda/fn_local_control.ls", "test/lambda/fn_local_control.txt"},
     {"test/lambda/fn_local_return_paths.ls", "test/lambda/fn_local_return_paths.txt"},
