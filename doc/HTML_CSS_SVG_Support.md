@@ -760,6 +760,28 @@ lambda render source.pdf --paged --import-pages 1,3-5 -o selected.pdf
 lambda view report.html --paged --book
 ```
 
+Lambda scripts can use the same physical-page controls through
+`radiant.export_document`:
+
+```lambda
+import radiant
+pn main() {
+    let html = input("report.html", 'text')^;
+    radiant.export_document(html, "selected.pdf",
+        {format:"pdf", pagination:true, pages:"none", export_pages:"2,4-6"})
+}
+```
+
+`pages` filters PNG/JPEG/SVG preview pages; it never filters PDF output.
+`export_pages` independently selects PDF sheets. Both accept `all`, `none`, or
+one-based physical indexes and inclusive ranges; duplicates merge in source
+order. `thumbnail_page:2` exports the original second sheet to PNG/JPEG/SVG,
+independently of `pages`, with `scale` controlling output density. All three keys
+require `pagination:true`; invalid types, ranges, page indexes and output-format
+combinations return a string error. The adapter calls the native parser and
+exporter under **D9.1.1v4 / D9.1.3v2** and retains selection bytes through layout
+callbacks under **D5.5.1 / D5.1.4**.
+
 | Output or option | Current behavior |
 |---|---|
 | Physical PDF sheets | One PDF page per committed physical sheet, in source order. CSS reference pixels map at 72/96 to PDF points. Paper size comes from page rules/native masters or fixed source boxes; absent a flow sheet size, the fallback is A4. Raster export density does not resize physical PDF sheets. |

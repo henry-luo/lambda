@@ -34,21 +34,41 @@ worksheets and extends the grid by ten rows. View toggles gridlines, displays
 formulas and changes zoom. Ctrl/Cmd-S opens Save; Ctrl/Cmd-Z/Y control history;
 Ctrl/Cmd-C/X/V and Ctrl/Cmd-B/I/U work on the grid.
 
-Formulas support numeric literals, cell references, absolute-reference spelling
-(`$A$1`), rectangular ranges, parentheses, unary signs, `+`, `-`, `*`, `/`, `^`,
-postfix `%`, and `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`. Examples:
+Formulas support numbers (including scientific notation), quoted text, `TRUE` and
+`FALSE`, cell references, absolute-reference spelling (`$A$1`), rectangular
+ranges, parentheses, unary signs, `+`, `-`, `*`, `/`, `^`, postfix `%`, text
+concatenation `&`, and comparisons `=`, `<>`, `<`, `<=`, `>` and `>=`.
+Function names are case-insensitive. The supported functions are:
 
-```text
-=SUM(C5:E5)
-=G5-F5
-=AVERAGE(C11:E11)
-=SUM(A1:B4, 10) / 2
-```
+| Category | Functions |
+|---|---|
+| Aggregation | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT` |
+| Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN` |
+| Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE` |
+| Logic and errors | `IF`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA` |
+| Lookup and conditions | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `COUNTIF`, `SUMIF` |
 
-Every edit recalculates from the workbook. Invalid expressions, missing references,
-division by zero, unknown functions and circular dependencies produce cell errors.
-Formula source is parsed as spreadsheet expressions; it is never executed as
-Lambda code. A leading apostrophe forces a cell to remain text.
+For example, `=IF(C5>0,ROUND(C5/3,2),0)` and
+`=IFERROR(VLOOKUP(A1,C1:D10,2,FALSE),0)` combine functions and references.
+Formula parsing builds a graph of callable Lambda closures. Each operator and
+Excel function resolves to a pure Lambda function and is applied with
+`call(f, args)` (**S12.3.4v2**, **D7.2.2**); formula text is never executed as
+Lambda source. `IF`, `IFERROR`, and `IFNA` evaluate only the needed branch.
+
+This is a bounded Excel subset. Lookup approximate matches expect sorted input;
+`MATCH` accepts one-dimensional ranges and `INDEX` selects a single cell.
+`COUNTIF` and `SUMIF` support literal and numeric comparison criteria; wildcard
+criteria return `#VALUE!`, and `SUMIF` range shapes must match. `ISBLANK` also
+treats empty strings as blank. Rounding digits are bounded to -15 through 15.
+Custom formatting, array/spill formulas, cross-sheet references and the full Excel coercion and
+error rules are not supported. Invalid expressions, missing references, division
+by zero, unknown functions and circular dependencies produce cell errors.
+See Microsoft's [VLOOKUP guide](https://support.microsoft.com/en-us/excel/functions/vlookup-function)
+and [wildcard guide](https://support.microsoft.com/en-us/excel/using-wildcard-characters-in-searches)
+for the corresponding Excel behavior.
+
+Every edit recalculates the active sheet. A leading apostrophe forces a cell to
+remain text.
 
 Open accepts `.xlsx` and editable `.sheet.json` workbooks. XLSX imports include multiple
 worksheets, values, formula source, common cell styles and dimensions. Built-in
@@ -76,7 +96,8 @@ columns plus a small overscan; selection and navigation use logical cell
 addresses across the whole sheet. Dragging at an edge scrolls the viewport.
 Copy, formatting, sorting and CSV export are limited to a rectangle of one
 million cells while those operations materialize their results. Formula source
-is limited to 512 characters and nested evaluation/dependencies to 64 levels.
+is limited to 512 characters, function calls to 16 arguments (**S12.3.1**),
+and nested evaluation/dependencies to 64 levels.
 
 The shell reuses Word's theme, header, buttons and status styles from
 `lambda.ui.workspace.office`. Word loads those same styles. Ribbon layout and controls use
@@ -94,11 +115,13 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_editor.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_formula_functions.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_ribbon.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \

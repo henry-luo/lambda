@@ -50,7 +50,7 @@ pub fn toolbar(st) {
         ribbon.group("Workbook",[ribbon.row([tool("insert-sheet","New Sheet","blank_page",false,false,"home-large","add-sheet"),tool("rename-sheet","Rename Sheet","edit_shape",false,false,"home-large")])]);
         ribbon.group("Rows",[ribbon.row([tool("add-rows","Add 10 Rows","insert_below",false,false,"home-large")])]);
         ribbon.group("Functions",[ribbon.row([tool("autosum","AutoSum","equation",false,false,"home-large"),
-            <span class:"ribbon-tip","SUM · AVERAGE · MIN · MAX · COUNT\nUse cell references and ranges, like =SUM(C5:E5)">])])>
+            <span class:"ribbon-tip","SUM · IF · VLOOKUP · ROUND · COUNTIF\nUse cell references and ranges, like =SUM(C5:E5)">])])>
     else <div class:"editor-ribbon",
         ribbon.group("Show",[ribbon.row([tool("gridlines","Gridlines","table_gridlines",st.grid,false,"home-large"),
             tool("show-formulas","Show Formulas","code",st.formulas,false,"home-large")])]);
@@ -79,7 +79,8 @@ fn excel_date(value,date1904) any^ {
         slice(rendered,2,len(rendered)-1)
     }
 }
-pub fn formatted(value,style) any^ => if (not (value is number)) string(value)
+pub fn formatted(value,style) any^ => if (value is bool) (if (value) "TRUE" else "FALSE")
+    else if (not (value is number)) string(value)
     else if (style.format=="date" or style.format=="date1904") excel_date(value,style.format=="date1904")^
     else if (style.format=="currency") "$" ++ fixed(value)
     else if (style.format=="percent") fixed(value*100,1) ++ "%"

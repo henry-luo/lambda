@@ -3172,6 +3172,41 @@ TEST(RenderOutputParity, PagedLambdaPreviewUsesTheSharedFileExportPath) {
     ASSERT_TRUE(render_document_fixture(script, pdf, "--paged --pages 2,5 --export-pages 2,5")); EXPECT_EQ(pdf_page_count(pdf), 2);
 }
 
+TEST(RenderOutputParity, PagedScriptExportSharesCliSelectionsAndPhysicalThumbnails) {
+    CommandResult script = run_command_capture(LAMBDA_EXE " --no-log run test/lambda/proc/paged_export.ls 2>&1");
+    ASSERT_EQ(script.exit_code, 0) << script.output;
+    EXPECT_NE(strstr(script.output, "[true, true, true, true, true, true, true, true]"), nullptr) << script.output;
+    EXPECT_EQ(pdf_page_count("temp/paged-export-api-all.pdf"), 3);
+    EXPECT_EQ(pdf_page_count("temp/paged-export-api-selected.pdf"), 2);
+    for (int i = 0; i < 16; i++) {
+        char destination[PATH_MAX];
+        snprintf(destination, sizeof(destination), "temp/paged-export-api-invalid-%d.bin", i);
+        expect_pngs_exactly_equal("temp/paged-export-api-thumbnail.png", destination);
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* fixture = "test/html/paged_export_api.html";
+    const struct { const char* name; const char* options; } controls[] = {
+        {"thumbnail", "--paged --pages none --thumbnail-page 2"},
+        {"density", "--paged --pages 1 --thumbnail-page 2 --scale 2"},
+        {"preview", "--paged --pages 2-3"}
+    };
+    for (const auto& control : controls) {
+        SCOPED_TRACE(control.name);
+        char expected[PATH_MAX], actual[PATH_MAX];
+        snprintf(expected, sizeof(expected), "temp/render_output_parity/api_%s.png", control.name);
+        snprintf(actual, sizeof(actual), "temp/paged-export-api-%s.png", control.name);
+        ASSERT_TRUE(render_document_fixture(fixture, expected, control.options));
+        expect_pngs_exactly_equal(expected, actual);
+    }
+    // independent text extraction verifies deduplication, order and actual selected content.
+    CommandResult text = run_command_capture("pdftotext temp/paged-export-api-selected.pdf - 2>&1");
+    ASSERT_EQ(text.exit_code, 0) << text.output;
+    const char* second = strstr(text.output, "Second");
+    const char* third = strstr(text.output, "Third");
+    ASSERT_NE(second, nullptr); ASSERT_NE(third, nullptr);
+    EXPECT_LT(second, third); EXPECT_EQ(strstr(text.output, "First"), nullptr);
+}
+
 TEST(RenderOutputParity, NormalPngMatchesForcedTiledPng) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";
