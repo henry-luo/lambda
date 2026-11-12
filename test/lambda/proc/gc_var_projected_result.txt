@@ -1,0 +1,8 @@
+{
+  snapshot: 1,
+  current: 4,
+  answer: 3,
+  nested: [4, 5],
+  real: true,
+  integer: true
+}

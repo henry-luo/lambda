@@ -108,11 +108,12 @@ def resolve_split_paths(config):
             if field == 'source' and not value.startswith('test/'):
                 # Test manifests historically spell paths relative to test/.
                 candidate = project_source_path('test/' + value, root, (input_root, radiant_root))
-                if candidate.is_file() and not candidate.is_relative_to(root):
+                if candidate.is_file() and candidate != root / 'test' / value:
                     return Path(os.path.relpath(candidate, root)).as_posix()
                 return value
             path = project_source_path(value, root, (input_root, radiant_root))
-            if not path.is_relative_to(root):
+            # An owner root can itself be inside the workspace, such as an isolated build under temp/.
+            if path != root / value:
                 return Path(os.path.relpath(path, root)).as_posix()
         return value
 

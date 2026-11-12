@@ -96,6 +96,8 @@ table = ('<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="Data"/><p:cN
          transform(60, 350, 500, 100, "p") + '<a:graphic><a:graphicData><a:tbl><a:tblPr/><a:tblGrid><a:gridCol w="2381250"/><a:gridCol w="2381250"/></a:tblGrid>' +
          ''.join('<a:tr h="476250">' + ''.join('<a:tc>' + body(t).replace('p:txBody', 'a:txBody') + '<a:tcPr/></a:tc>' for t in row) + '</a:tr>' for row in [["Quarter", "Revenue"], ["Q1", "$42m"]]) +
          '</a:tbl></a:graphicData></a:graphic></p:graphicFrame>')
+# A span with no matching continuation must keep both cells rather than drop data.
+save("inconsistent-table-merge.pptx", package(table.replace('<a:tc>', '<a:tc gridSpan="2">', 1)))
 group = ('<p:grpSp><p:nvGrpSpPr><p:cNvPr id="6" name="Group"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr>' +
          transform(700, 370, 160, 80, tail='<a:chOff x="95250" y="190500"/><a:chExt cx="762000" cy="381000"/>') + '</p:grpSpPr>' +
          shape(7, x=10, y=20, w=80, h=40, fill='<a:solidFill><a:schemeClr val="accent1"/></a:solidFill>') + '</p:grpSp>')

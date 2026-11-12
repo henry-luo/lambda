@@ -1,6 +1,7 @@
 // Convert saved PresentationML data into lambda.slide objects; no source becomes executable code (S1.8).
 import c: .common
 import package: .package
+import opc: lambda.doc.opc
 import text: .text
 import theme: lambda.doc.docx.theme
 import drawing: lambda.doc.docx.drawing
@@ -108,36 +109,93 @@ fn picture(node,bounds,id,ctx) map^ {
     let blip = c.descendants(node,"blip",c.A)[0]
     let desc = c.descendants(node,"cNvPr",c.P)[0]
     let attrs = placement(bounds,id,{name:c.attr(desc,"name"),description:c.attr(desc,"descr")})
-    let image = images.embedded(blip,ctx,bounds)^;
-    if (image.src==null) result([],image.diagnostics)
+    let image = images.embedded(blip,ctx,bounds)^
+    let media = len(c.descendants(node,"audioFile",c.A))+len(c.descendants(node,"videoFile",c.A))>0
+    let issues = image.diagnostics ++ if (media) [c.warning(ctx,"unsupported-media","Embedded audio or video is shown as its poster image")] else [];
+    if (image.src==null) result([],issues)
     else {
         let cropped = drawing.crop(node,bounds.width,bounds.height);
         result([if (cropped.value==null) <image *:attrs,src:image.src,fit:'fill',style:bounds.style>
             else <content *:attrs,style:bounds.style,<div style:cropped.value.box,
                 <img src:image.src,alt:c.value(c.attr(desc,"descr"),""),style:cropped.value.image>>>],
-            image.diagnostics ++ (if (cropped.unsupported) [c.warning(ctx,"unsupported-image-crop","Unsupported image crop was omitted")] else []))
+            issues ++ (if (cropped.unsupported) [c.warning(ctx,"unsupported-image-crop","Unsupported image crop was omitted")] else []))
     }
+}
+fn table_span(cell,key) => max(1,int(c.num(c.attr(cell,key),1.0)) ^ { 1 })
+fn table_span_valid(cell,key) any^ {
+    let value = c.attr(cell,key)
+    let parsed = int(value) ^ { null };
+    value==null or (parsed!=null and parsed>=1)
+}
+fn table_continuation(cell) any^ => c.truth(c.attr(cell,"hMerge")) or c.truth(c.attr(cell,"vMerge"))
+// Only collapse continuation cells when every saved grid position agrees with its anchor.
+fn table_merges_valid(rows,columns) {
+    let grid = [for (row in rows) c.children(row,"tc",c.A)]
+    let anchors = [for (r,cells in grid,col,cell in cells where ((not table_continuation(cell)) ^ { false }))
+        {row:r,col:col,rows:table_span(cell,"rowSpan"),cols:table_span(cell,"gridSpan")}];
+    all([for (cells in grid) len(cells)==columns and
+        all([for (cell in cells) ((table_span_valid(cell,"rowSpan") and table_span_valid(cell,"gridSpan")) ^ { false })])]) and
+    all([for (anchor in anchors) anchor.row+anchor.rows<=len(grid) and anchor.col+anchor.cols<=columns]) and
+    all([for (r,cells in grid,col,cell in cells) {
+        let owners = [for (anchor in anchors where r>=anchor.row and r<anchor.row+anchor.rows and
+            col>=anchor.col and col<anchor.col+anchor.cols) anchor]
+        let owner = owners[0];
+        len(owners)==1 and c.truth(c.attr(cell,"hMerge"))==(col>owner.col) and
+            c.truth(c.attr(cell,"vMerge"))==(r>owner.row)
+    }])
 }
 fn table(node,bounds,id,ctx) any^ {
     let columns = c.children(c.child(node,"tblGrid",c.A),"gridCol",c.A)
     let rows = c.children(node,"tr",c.A)
-    let merges = c.descendants(node,"tc",c.A)
-    let unsupported = any([for (cell in merges) c.truth(c.attr(cell,"hMerge")) or c.truth(c.attr(cell,"vMerge")) or
-        c.num(c.attr(cell,"gridSpan"),1.0)>1 or c.num(c.attr(cell,"rowSpan"),1.0)>1]);
+    let valid_merges = table_merges_valid(rows,len(columns));
     result([<content *:placement(bounds,id),<table style:"border-collapse:collapse;table-layout:fixed;width:100%;height:100%;color:#000000;font-size:24px;",
         <colgroup *[for (column in columns) <col style:"width:" ++ c.px(c.pixels(c.attr(column,"w"))) ++ ";">]>
         <tbody *[for (row in rows) <tr style:"height:" ++ c.px(c.pixels(c.attr(row,"h"))) ++ ";",
-            *[for (cell in ((c.children(row,"tc",c.A)) ^ { [] }),let props=c.child(cell,"tcPr",c.A))
-                <td style:"border:1px solid #cbd5e1;padding:0;" ++
+            *[for (cell in ((c.children(row,"tc",c.A)) ^ { [] }),let props=c.child(cell,"tcPr",c.A)
+                where ((not valid_merges or not table_continuation(cell)) ^ { false }))
+                <td *:(if (valid_merges) {*:if (table_span(cell,"gridSpan")>1) {colspan:table_span(cell,"gridSpan")} else {},
+                    *:if (table_span(cell,"rowSpan")>1) {rowspan:table_span(cell,"rowSpan")} else {}} else {}),
+                    style:"border:1px solid #cbd5e1;padding:0;" ++
                     c.css({background:theme.drawing_color(c.child(props,"solidFill",c.A),ctx.theme,null,true),
                         ["vertical-align"]:c.value({ctr:"middle",b:"bottom"}[c.attr(props,"anchor")],"top")}),
                     text.body([c.child(cell,"txBody",c.A)],[],ctx,false)>]>]>>>],
-        if (unsupported) [c.warning(ctx,"unsupported-table-merge","Merged table cells are shown as their saved grid cells")] else [])
+        if (not valid_merges) [c.warning(ctx,"unsupported-table-merge","An inconsistent table merge is shown as saved grid cells")] else [])
+}
+let diagram_ns = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+let diagram_drawing_ns = "http://schemas.microsoft.com/office/drawing/2008/diagram"
+// Saved SmartArt drawings use parallel shape vocabulary in a different namespace.
+fn diagram_shape_tree(node) any^ => if (node is map) {*:node,uri:if (node.uri==diagram_drawing_ns) c.P else node.uri,
+    children:[for (child in node.children) diagram_shape_tree(child)^]} else node
+fn diagram(node,bounds,id,ctx) map^ {
+    let ids = c.descendants(node,"relIds",diagram_ns)[0]
+    let data_rel = opc.by_id(ctx.relationships,c.attr(ids,"dm",c.R));
+    if (data_rel==null or data_rel.external or data_rel.type!=c.R ++ "/diagramData")
+        result([],[c.warning(ctx,"unsupported-graphic","SmartArt has no usable saved diagram data")])
+    else {
+        let data = package.xml(ctx.parts,data_rel.target)^;
+        let ext = c.descendants(data,"dataModelExt",diagram_drawing_ns)[0]
+        let drawing_rel = opc.by_id(ctx.relationships,c.attr(ext,"relId"));
+        if (drawing_rel==null or drawing_rel.external or drawing_rel.type!="http://schemas.microsoft.com/office/2007/relationships/diagramDrawing")
+            result([],[c.warning(ctx,"unsupported-graphic","SmartArt has no usable saved drawing")])
+        else {
+            let drawing = package.xml(ctx.parts,drawing_rel.target)^
+            let tree = c.child(drawing,"spTree",diagram_drawing_ns)
+            let relationships = opc.relationships(ctx.parts,drawing_rel.target,false,c.fail,c.uri)^
+            let normalized = diagram_shape_tree(tree)^
+            let converted = objects(c.children(normalized,null,c.P),{*:ctx,main:drawing_rel.target,relationships:relationships,
+                coordinates:{sx:1.0,sy:1.0,x:0.0,y:0.0}},id)^;
+            if (tree==null or len(converted.nodes)==0)
+                result([],[c.warning(ctx,"unsupported-graphic","SmartArt saved drawing is empty or unsupported")])
+            else result([<group *:placement(bounds,id),*converted.nodes>],
+                [c.warning(ctx,"partial-smartart","SmartArt uses its saved drawing and is not an editable diagram"),*converted.diagnostics])
+        }
+    }
 }
 fn graphic(node,bounds,id,ctx) map^ {
     let tbl = c.descendants(node,"tbl",c.A)[0]
     let chart = c.descendants(node,"chart","http://schemas.openxmlformats.org/drawingml/2006/chart")[0];
     if (tbl!=null) table(tbl,bounds,id,ctx)
+    else if (len(c.descendants(node,"relIds",diagram_ns))>0) diagram(node,bounds,id,ctx)
     else if (chart!=null) {
         let rendered = charts.read(ctx,chart,bounds.width,bounds.height)^;
         result([for (item in rendered.nodes) <content *:placement(bounds,id),item.svg>],
@@ -153,7 +211,12 @@ fn objects(items,ctx,prefix,depth=0) map^ {
         else if (node.uri==c.MC and node.tag=="AlternateContent") {
             let fallback = c.child(node,"Fallback",c.MC);
             if (fallback==null) result([],[c.warning(ctx,"unsupported-alternate-content","No supported compatibility fallback")])
-            else objects(c.children(fallback,null,null),ctx,id,depth+1)^
+            else {
+                let converted = objects(c.children(fallback,null,null),ctx,id,depth+1)^
+                let model = c.descendants(node,"model3d","http://schemas.microsoft.com/office/drawing/2017/model3d");
+                {*:converted,diagnostics:converted.diagnostics ++ if (len(model)>0)
+                    [c.warning(ctx,"unsupported-3d-model","An embedded 3D model is shown using its fallback picture")] else []}
+            }
         }
         else if (node.uri!=c.P or not (node.tag in ["sp","cxnSp","pic","graphicFrame","grpSp"]))
             result([],[c.warning(ctx,"unsupported-element","Unsupported slide element " ++ string(node.tag))])
@@ -213,6 +276,7 @@ pub fn build(pkg) map^ {
         let csld = c.child(ctx.root,"cSld")
         let speaker = notes(pkg,ctx)^;
         {node:<slide id:item.id,title:c.value(title,c.value(c.attr(csld,"name"),"Slide " ++ string(i+1))),background:bg.color,
+            *:if (c.attr(ctx.root,"show") in ["0","false"]) {hidden:true} else {},
             *[*[for (converted_part in converted) *converted_part.nodes],*speaker]>,
             diagnostics:[*[for (converted_part in converted) *converted_part.diagnostics],*bg.diagnostics,
                 *if (transition==null) [] else [c.warning(ctx,"unsupported-transition","The saved slide transition was omitted")],

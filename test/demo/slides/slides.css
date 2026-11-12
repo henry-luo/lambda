@@ -48,6 +48,7 @@ textarea { resize:none; line-height:1.45; }
 #thumbnails { overflow:auto; flex:1; min-height:0; min-width:0; padding:4px 8px 12px 12px; }
 .thumbnail { width:100%; display:block; position:relative; padding:6px 6px 8px 18px; border:1px solid transparent; background:transparent; margin-bottom:10px; }
 .thumbnail.current { background:#f5e6df; border-color:#d2917f; }
+.thumbnail[data-hidden=true] .thumb-number { text-decoration:line-through; }
 .thumbnail { cursor:grab; touch-action:none; }
 .thumbnail[data-slide-dragging=true] { opacity:.45; }
 .slide-drop-marker { display:none; position:absolute; left:12px; right:6px; height:3px; background:#c54c31; pointer-events:none; z-index:2; }

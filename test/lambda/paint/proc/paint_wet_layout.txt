@@ -1,0 +1,9 @@
+{
+  one: true,
+  four: true,
+  seven: true,
+  invalid: true,
+  storage: true,
+  budget: true,
+  stamps: true
+}

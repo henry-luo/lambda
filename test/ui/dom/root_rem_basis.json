@@ -1,0 +1,14 @@
+{
+  "name": "Root rem publication follows live variable and font changes",
+  "html": "test/ui/dom/root_rem_basis.html",
+  "events": [
+    {"type":"assert_pixel","x":156,"y":20,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_pixel","x":20,"y":45,"min_r":0,"max_r":0,"min_g":0,"max_g":0,"min_b":255,"max_b":255},
+    {"type":"click","target":{"selector":"#grow"}},
+    {"type":"assert_pixel","x":340,"y":40,"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0},
+    {"type":"assert_pixel","x":40,"y":100,"min_r":0,"max_r":0,"min_g":0,"max_g":0,"min_b":255,"max_b":255},
+    {"type":"click","target":{"selector":"#literal"}},
+    {"type":"assert_pixel","x":156,"y":20,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_pixel","x":20,"y":45,"min_r":0,"max_r":0,"min_g":0,"max_g":0,"min_b":255,"max_b":255}
+  ]
+}

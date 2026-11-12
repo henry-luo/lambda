@@ -1,0 +1,81 @@
+{
+  "reviewed_at": "2026-11-12T13:37:22.381Z",
+  "interpretation": "Manual major visual omissions retained independently of coarse image thresholds; root causes remain unconfirmed unless recorded in the issue ledgers.",
+  "reviews": [
+    {
+      "label": "saas_landing_365",
+      "url": "https://supabase.com/customers",
+      "manual_major_remaining": "Customer stories and cards remain absent after the theme repair."
+    },
+    {
+      "label": "saas_landing_505",
+      "url": "https://cofounder.co/",
+      "manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent."
+    },
+    {
+      "label": "saas_landing_677",
+      "url": "https://pitch.com/",
+      "manual_major_remaining": "Pitch remains almost blank despite a low mean error against its mostly white reference."
+    },
+    {
+      "label": "saas_landing_121",
+      "url": "https://banky.io/",
+      "manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent."
+    },
+    {
+      "label": "saas_landing_473",
+      "url": "https://www.popcorn.space/",
+      "manual_major_remaining": "Hero heading, copy, actions and device imagery remain absent; the mostly light reference hides this from the coarse score."
+    },
+    {
+      "label": "saas_landing_134",
+      "url": "https://cequence.io/",
+      "manual_major_remaining": "The main hero heading, copy and action remain absent despite the correct illustration and background."
+    },
+    {
+      "label": "saas_landing_399",
+      "url": "https://missiveapp.com/customers",
+      "manual_major_remaining": "The large customer quotation and logo in the right card remain absent; portraits now appear in the fresh capture."
+    },
+    {
+      "label": "saas_landing_432",
+      "url": "https://nightwatch.laravel.com/",
+      "manual_major_remaining": "The neutral background palette is repaired, but the main hero heading, copy and actions remain absent."
+    },
+    {
+      "label": "kotlin_docs",
+      "url": "https://kotlinlang.org/docs/home.html",
+      "manual_major_remaining": "The header, navigation and documentation content remain absent; the captured loading spinner prevents the uniform-image heuristic from retaining this major omission."
+    },
+    {
+      "label": "saas_landing_436",
+      "url": "https://www.craft.do/",
+      "manual_major_remaining": "Hero heading, button, spacing and product placement are restored after the flex sizing and CSS math-gap repairs. Large paper decorations still render without their authored URL-based image masks, an unsupported consumer recorded as RI-041."
+    },
+    {
+      "label": "saas_landing_679",
+      "url": "https://www.empathy.com/news-room",
+      "manual_major_remaining": "The main news portrait remains absent. The fresh layout falls below the automated changed-area threshold while this large media omission persists."
+    },
+    {
+      "label": "saas_landing_335",
+      "url": "https://www.mavenclinic.com/",
+      "manual_major_remaining": "The hero photograph now fills its region, but the main heading, copy and action remain absent; retained after visual review despite falling below the changed-area threshold."
+    },
+    {
+      "label": "maven_central",
+      "url": "https://central.sonatype.com/",
+      "manual_major_remaining": "The promotional panel now has the correct text/image sizing after RI-043/RI-044. The primary component-search input remains absent; retained as a major omission despite the low changed-area score."
+    },
+    {
+      "label": "saas_landing_087",
+      "url": "https://greenlistapp.com/",
+      "manual_major_remaining": "CSSOM rule retention restores the green palette and header, but the main hero heading, copy, action and illustrations remain absent; retained after visual review despite the low coarse score."
+    },
+    {
+      "label": "saas_landing_271",
+      "url": "https://www.pivotapp.ai/",
+      "manual_major_remaining": "The hero heading, copy, actions and cube illustration remain absent. The fresh gradient/logo region lowers the coarse score without restoring the primary hero; retained after visual review."
+    }
+  ]
+}

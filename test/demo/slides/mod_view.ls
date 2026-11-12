@@ -40,12 +40,13 @@ pub fn printout(st,deck) element^ {
         else child>
 }
 pub fn thumbnails(st) array^ => [for (i,scene in st.plan.slides) <div role:"button",tabindex:"0",class:if (i == st.index) "thumbnail current" else "thumbnail",
-    'data-slide':string(i),'data-slide-id':scene.id,'aria-current':string(i == st.index),'aria-label':"Slide " ++ string(i+1) ++ ": " ++ c.value(scene.source.title,scene.id),
+    'data-slide':string(i),'data-slide-id':scene.id,'data-hidden':string(scene.hidden),'aria-current':string(i == st.index),
+    'aria-label':"Slide " ++ string(i+1) ++ (if (scene.hidden) " (hidden): " else ": ") ++ c.value(scene.source.title,scene.id),
     <span class:"thumb-number",string(i+1)>
     <span class:"thumb-paper",style:"height:" ++ c.px(c.value(st.thumbnail_width,160.0)*st.plan.height/st.plan.width) ++ ";",
         <span class:"thumb-render",inert:"",'aria-hidden':"true",style:"transform:scale(" ++ c.fmt(c.value(st.thumbnail_width,160.0)/st.plan.width) ++ ");",
             canvas(st.plan,i,"thumb" ++ string(i))^>>
-    <span class:"thumb-caption",c.value(scene.source.title,scene.id)>>]
+    <span class:"thumb-caption",c.value(scene.source.title,scene.id) ++ (if (scene.hidden) " (hidden)" else "")>>]
 pub fn object_options(st) => [<option value:"","Select an object">,*[for (obj in m.scene(st).targets)
     <option value:obj.dom_key,string(obj.tag) ++ " · " ++ obj.id>]]
 pub fn inline_editor(obj,background) => <textarea id:"canvas-text",'aria-label':"Edit slide text",

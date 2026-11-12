@@ -6121,21 +6121,9 @@ static Type* infer_if_result_type(Transpiler* tp, AstNode* then_branch,
         return lambda_numeric_type_from_kind(numeric_join.result);
     }
     if (then_type_id != else_type_id) {
-        // Plain mixed joins remain open until recursive return inference and
-        // boxed-carrier handling are resolved together. A written `raise` is
-        // the exception: preserve its real error constituent.
-        bool has_divergence = then_contrib == &TYPE_ERROR ||
-            else_contrib == &TYPE_ERROR;
-        if (!has_divergence || then_type_id == LMD_TYPE_ANY ||
-                else_type_id == LMD_TYPE_ANY) {
-            return set_type_any(tp, ANY_JOIN);
-        }
-        TypeBinary* join = (TypeBinary*)alloc_type_kind(tp->pool,
-            TYPE_KIND_BINARY, sizeof(TypeBinary));
-        join->left = then_contrib;
-        join->right = else_contrib;
-        join->op = OPERATOR_UNION;
-        return (Type*)join;
+        // keep the semantic alternatives; the carrier planner independently
+        // selects a boxed join when the arms have different native lanes.
+        return lambda_type_union_normalized(tp->pool, then_contrib, else_contrib);
     }
     // one branch's nominal record cannot certify the other branch (S11.3.1v2)
     if (type_nominal_record(then_contrib) != type_nominal_record(else_contrib))
@@ -15552,8 +15540,7 @@ static void resolve_if(Transpiler* tp, AstIfNode* node) {
         node->type = &TYPE_ERROR;
         return;
     }
-    // Keep ordinary mixed joins widened through the shared rule so later
-    // boundary validation observes the same function return contracts.
+    // semantic alternatives and their boxed carrier are separate decisions.
     node->type = infer_if_result_type(tp, then_branch, else_branch);
     // S3.5: neither arm runs for an error condition, which contributes to the join.
     if (condition && lambda_type_has_proven_error(condition->type)) {
@@ -16000,7 +15987,9 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
         resolve_field(tp, (AstFieldNode*)node);
         break;
     case AST_NODE_IF_EXPR:
-        node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+        // a changed child can contain an error as data (for example in a map
+        // field). Recompute evaluated branch outcomes instead of promoting it.
+        resolve_if(tp, (AstIfNode*)node);
         break;
     default: break;
     }
@@ -18726,6 +18715,8 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
     AstNamedNode* field_ref = (AstNamedNode*)pool_calloc(tp->pool,
         sizeof(AstNamedNode));
     field_ref->node_type = AST_NODE_KEY_EXPR;
+    // the scope entry is synthetic, but duplicate-field diagnostics name the source declaration.
+    field_ref->source_span = field->source_span;
     field_ref->name = field->name;
     field_ref->type = shape->is_optional
         ? lambda_type_nullable_normalized(tp->pool, field_type) : field_type;

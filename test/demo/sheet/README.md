@@ -34,38 +34,123 @@ worksheets and extends the grid by ten rows. View toggles gridlines, displays
 formulas and changes zoom. Ctrl/Cmd-S opens Save; Ctrl/Cmd-Z/Y control history;
 Ctrl/Cmd-C/X/V and Ctrl/Cmd-B/I/U work on the grid.
 
-Formulas support numeric literals, cell references, absolute-reference spelling
-(`$A$1`), rectangular ranges, parentheses, unary signs, `+`, `-`, `*`, `/`, `^`,
-postfix `%`, and `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`. Examples:
+Formulas support numbers (including scientific notation), quoted text, `TRUE` and
+`FALSE`, cell references, absolute-reference spelling (`$A$1`), rectangular
+ranges, and references to other worksheets such as `Sales!A1` and
+`'Annual Plan'!A1:B4`. Parentheses, unary signs, `+`, `-`, `*`, `/`, `^`,
+postfix `%`, text concatenation `&`, and comparisons `=`, `<>`, `<`, `<=`, `>`
+and `>=` are supported. Operators of equal precedence evaluate left to right,
+as in [Excel](https://support.microsoft.com/en-us/excel/calculation-operators-and-precedence-in-excel).
+Function names are case-insensitive. The supported functions are:
 
-```text
-=SUM(C5:E5)
-=G5-F5
-=AVERAGE(C11:E11)
-=SUM(A1:B4, 10) / 2
-```
+| Category | Functions |
+|---|---|
+| Aggregation and criteria | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT`, `SUMSQ`, `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MINIFS`, `MAXIFS`, `SUBTOTAL`, `AGGREGATE` |
+| Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `PI`, `EXP`, `LN`, `LOG`, `LOG10`, `SIN`, `COS`, `TAN`, `ASIN`, `ACOS`, `ATAN`, `ATAN2`, `DEGREES`, `RADIANS`, `QUOTIENT`, `EVEN`, `ODD`, `MROUND`, `FACT`, `COMBIN`, `CEILING.MATH`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `SQRTPI`, `SINH`, `COSH`, `TANH`, `GCD`, `LCM` |
+| Statistics | `STDEV`, `STDEV.S`, `STDEVP`, `STDEV.P`, `VAR`, `VAR.S`, `VARP`, `VAR.P`, `LARGE`, `SMALL`, `PERCENTILE`, `PERCENTILE.INC`, `QUARTILE`, `QUARTILE.INC`, `RANK`, `RANK.EQ`, `RANK.AVG`, `PERCENTILE.EXC`, `QUARTILE.EXC`, `SLOPE`, `INTERCEPT`, `FORECAST`, `FORECAST.LINEAR`, `CORREL`, `PEARSON`, `RSQ`, `MODE`, `MODE.SNGL`, `COVAR`, `COVARIANCE.P`, `COVARIANCE.S`, `STEYX`, `GEOMEAN`, `HARMEAN` |
+| Finance | `PMT`, `PV`, `FV`, `NPER`, `NPV`, `IRR`, `XNPV`, `XIRR`, `RATE`, `SLN`, `SYD` |
+| Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE`, `TEXTJOIN`, `EXACT`, `VALUE`, `REPT`, `CLEAN`, `REPLACE`, `SUBSTITUTE`, `FIND`, `SEARCH`, `PROPER`, `TEXT`, `TEXTBEFORE`, `TEXTAFTER` |
+| Dates and times | `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND`, `NETWORKDAYS`, `NETWORKDAYS.INTL`, `WORKDAY`, `WORKDAY.INTL`, `DATEDIF`, `YEARFRAC`, `WEEKNUM`, `ISOWEEKNUM` |
+| Logic and errors | `IF`, `IFS`, `CHOOSE`, `SWITCH`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA`, `LET`, `LAMBDA` |
+| Dynamic arrays | `FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`, `TEXTSPLIT`, `TRANSPOSE` |
+| Lookup | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `XMATCH`, `LOOKUP`, `ROW`, `COLUMN`, `ADDRESS`, `INDIRECT`, `OFFSET` |
 
-Every edit recalculates from the workbook. Invalid expressions, missing references,
-division by zero, unknown functions and circular dependencies produce cell errors.
-Formula source is parsed as spreadsheet expressions; it is never executed as
-Lambda code. A leading apostrophe forces a cell to remain text.
+For example, `=SUMIFS(Sales!B1:B20,Sales!A1:A20,"East")` and
+`=XLOOKUP(A1,'Annual Plan'!A1:A10,'Annual Plan'!B1:B10,"missing")` combine
+functions and references. Formula parsing builds a graph of callable Lambda
+closures. Each operator and Excel function resolves to a pure Lambda function
+and is applied with `call(f, args)` (**S12.3.4v2**, **D7.2.2**); formula text
+is never executed as Lambda source. Conditional functions evaluate only the
+needed result branch.
 
-Save and Open use editable `.sheet.json` workbooks, preserving formulas, cell
-styles, row heights, column widths and every worksheet. Writes are atomic. Export CSV writes the active
-sheet's calculated values with quoted fields. New, Open and Studio example offer
+This is a bounded Excel subset. Approximate and binary lookups require sorted
+input; `MATCH`, `XMATCH`, and `XLOOKUP` accept one-dimensional ranges, and
+`INDEX` and `XLOOKUP` return single cells. Criteria support the Excel `*`, `?`,
+and `~` wildcard characters. Multiple criteria ranges must match in shape.
+`DATEVALUE` accepts ISO `YYYY-MM-DD`, and `TIMEVALUE` accepts 24-hour `HH:MM`
+or `HH:MM:SS`; imported 1900 and 1904 date systems are preserved. Workday
+functions accept holiday ranges and Excel weekend numbers or Monday-first masks.
+Paired statistics ignore nonnumeric pairs and return scalar results. Rounding
+digits are bounded to -15 through 15. `TEXT` accepts the date masks `yyyy-mm-dd`,
+`yyyy/mm/dd`, `mm/dd/yyyy`, `dd/mm/yyyy`, and numeric masks using `0` or `#,##0`, fixed
+decimal places, an optional `$` prefix and an optional `%` suffix. `INDIRECT`
+accepts A1-style references; `LOOKUP` supports its vector form. `LET` supports
+up to seven name/value pairs. `SUBTOTAL` excludes directly nested subtotals and
+ignores hidden rows for function numbers 101–111; filters are not implemented.
+`AGGREGATE` supports reference and array forms, all 19 function numbers and
+options 0–7; error suppression within computed arrays remains limited. `IRR`,
+`XIRR` and `RATE` use bounded numerical iteration and can return `#NUM!` when
+the calculation does not converge.
+
+Array results spill into neighboring cells, recalculate across worksheets, and
+can be referenced with `A1#`. A blocked spill shows `#SPILL!`; spill children
+cannot be edited independently. Operators broadcast scalar, row, and column
+operands. `TEXTSPLIT` accepts one text delimiter per axis, including
+case-insensitive matching. Inline `LAMBDA` values can be called immediately or
+bound by `LET`; workbook- and worksheet-scoped named `LAMBDA` definitions are
+read from XLSX and retained in `.sheet.json`. Function recursion and spill
+recalculation are bounded to 64 levels or passes.
+
+This profile does not yet support general named or structured references,
+external-workbook references, full-column/row references, array constants,
+multiple `TEXTSPLIT` delimiters, `SORTBY`, all array-valued built-in functions, legacy
+array-formula expansion, custom formats, or all Excel coercion and error rules.
+`TODAY`, `NOW` and random functions are not yet implemented. Invalid expressions,
+missing references, division by zero, unknown functions and circular dependencies
+produce cell errors.
+
+Every edit recalculates the active sheet. A leading apostrophe forces a cell to
+remain text.
+
+Open accepts `.xlsx` and editable `.sheet.json` workbooks. XLSX imports include
+multiple worksheets, values, formulas, common styles and dimensions, merged
+ranges, hidden rows and columns, frozen row/column prefixes, and split panes.
+Sheet displays merged cells across the visible grid and skips hidden dimensions
+during arrow navigation; their data remains available to formulas. Frozen
+prefixes remain visible while scrolling. Split panes have independent scroll
+positions, with matching axes synchronized; the saved starting cell and active
+pane are restored on open. Imported metadata survives `.sheet.json` save/restore.
+
+Conditional formatting supports formula expressions, numeric `cellIs`
+comparisons with constant or formula operands, case-insensitive plain-text
+contains/starts/ends rules, blank and nonblank rules, and RGB font/fill
+differential styles. Relative and mixed references are adjusted from the first
+applied range; rules use Excel priority and `stopIfTrue`, and update when cells
+recalculate. Formulas use Sheet's bounded function and reference profile
+(**S12.3.4v2**, **D7.2.2**); an error or unsupported expression does not apply
+its rule. Colour scales, data bars, icon sets, theme colours and other
+differential styles remain unsupported and produce an import warning. Rules
+outside Sheet's grid are clipped with a warning. Shared and legacy array formulas,
+charts, drawings, worksheet/workbook protection, and complete Excel
+number-format and formula fidelity remain outside this profile. Imported split
+dividers can be dragged or moved with the arrow keys and are saved in
+`.sheet.json`; creating or removing splits is not yet supported. Current
+scrolling is transient and opening the workbook restores its saved starting
+positions.
+
+Built-in and common custom date/time formats display as ISO dates and 24-hour
+times using the workbook’s 1900 or 1904 calendar. Open reports import warnings
+in the status bar. Unsupported formulas show their saved XLSX result when
+available; an edit invalidates imported formula results.
+
+Save writes an editable `.sheet.json` workbook, preserving the supported formulas,
+cell styles, row heights, column widths, imported layout and worksheets. XLSX
+import does not enable XLSX export, and the save dialog does not overwrite an `.xlsx` file with JSON.
+Writes are atomic. Export CSV writes the active sheet’s calculated values with
+quoted fields. New, Open and Studio example offer
 Save/Discard/Cancel when the workbook has unsaved changes.
 
-This first milestone covers an editable desktop spreadsheet. XLSX/CSV import,
-cross-sheet references, formula reference
-translation during copy/sort, charts, filters, merged cells and drag fill remain
-future work. Clipboard and sorting retain formula source text.
+This first milestone covers an editable desktop spreadsheet. CSV import,
+formula reference translation during copy/sort, charts, filters, creating or
+changing merged ranges and drag fill remain future work. Clipboard and sorting retain formula source text.
 The default grid is 60 × 20; loaded workbooks support at most 100,000 rows,
 1,000 columns and 50 worksheets. The grid generates only visible rows and
 columns plus a small overscan; selection and navigation use logical cell
 addresses across the whole sheet. Dragging at an edge scrolls the viewport.
 Copy, formatting, sorting and CSV export are limited to a rectangle of one
 million cells while those operations materialize their results. Formula source
-is limited to 512 characters and nested evaluation/dependencies to 64 levels.
+is limited to 512 characters, function calls to 16 arguments (**S12.3.1**),
+and nested evaluation/dependencies to 64 levels.
 
 The shell reuses Word's theme, header, buttons and status styles from
 `lambda.ui.workspace.office`. Word loads those same styles. Ribbon layout and controls use
@@ -83,11 +168,15 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_aggregate_test*:*sheet_array_functions_test*:*sheet_spill_test*:*sheet_lambda_function_test*:*sheet_dynamic_xlsx_test*:*sheet_formula_common_new_test*:*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_xlsx_layout_test*:*sheet_conditional_formula_test*:*sheet_split_panes_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_editor.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_formula_functions.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_dynamic_arrays.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_ribbon.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
@@ -95,6 +184,17 @@ Verification:
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_handle.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_files.json
+./lambda.exe demo sheet --headless --event-file test/ui/sheet_xlsx.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_xlsx_external.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_xlsx_layout.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_conditional_formula.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_split_panes.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_split_resize.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_resize.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_virtual_grid.json

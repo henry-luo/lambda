@@ -6045,6 +6045,37 @@ TEST_F(RadiantDocumentTest, InlineSizeQueriesSettleGeneratedBlockExtent) {
     }
 }
 
+TEST_F(RadiantDocumentTest, StylesheetOwnerMediaAndPendingDisabledRetainTheirAttributes) {
+    DomElement* result = load_script_source(R"HTML(<!doctype html>
+        <style>#result{width:40px}</style>
+        <style id="theme" media="not all">#result{width:73px}</style>
+        <div id="result"></div><script>
+        var target=document.getElementById('result');
+        var theme=document.getElementById('theme');
+        var notes=[];
+        var pending=document.createElement('link');
+        pending.disabled=true;
+        notes.push(pending.disabled===true && pending.hasAttribute('disabled'));
+        pending.disabled=false;
+        notes.push(pending.disabled===false && !pending.hasAttribute('disabled'));
+        var sheet=theme.sheet;
+        notes.push(!!sheet && theme.media==='not all' && getComputedStyle(target).width==='40px');
+        theme.media='all';
+        notes.push(theme.getAttribute('media')==='all' && getComputedStyle(target).width==='73px');
+        theme.media='not all';
+        notes.push(getComputedStyle(target).width==='40px');
+        theme.setAttribute('media','all');
+        notes.push(getComputedStyle(target).width==='73px');
+        theme.removeAttribute('media');
+        notes.push(theme.media==='' && getComputedStyle(target).width==='73px');
+        notes.push(theme.sheet===sheet);
+        target.setAttribute('data-observed',notes.join('|'));
+        </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-observed"),
+        "true|true|true|true|true|true|true|true");
+}
+
 TEST_F(RadiantDocumentTest, LiveRemoteImageHonorsDocumentResourcePolicy) {
     ASSERT_NE(load_script_source("<div id='result'></div>"), nullptr);
     document->resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
@@ -15018,6 +15049,40 @@ TEST_F(RadiantDocumentTest, CollapsedTableSpansGroupsAndOuterEdgesRetainGridGeom
         free_document(document);
         document = nullptr;
     }
+}
+
+TEST_F(RadiantDocumentTest, BoundaryFragmentsAreConsumedOncePerBox) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>table{border-collapse:collapse}"
+        "td{border:1px solid red;width:20px;height:10px}</style>"
+        "<table id=result><tr><td id=cell></td></tr></table>"
+        "<div style='columns:2;column-gap:0;width:100px;height:50px'>"
+        "<div id=fragment style='background:red'><div style='height:100px'></div></div></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    PaintList paint;
+    DisplayList list;
+    paint_list_init(&paint, nullptr);
+    dl_init(&list, nullptr);
+    RasterRenderContext raster = {};
+    raster.ui_context = lam::up(&ui);
+    raster.paint_list = lam::up(&paint);
+    raster.dl = lam::up(&list);
+    raster.raster_scale = 1.0f;
+    struct Case { const char* id; int commands; } cases[] = {{"cell", 4}, {"fragment", 2}};
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.id);
+        DomElement* element = dom_find_element_by_id(document->root, entry.id);
+        ASSERT_NE(element, nullptr);
+        dl_clear(&list);
+        for (int pass = 0; pass < 32; pass++) {
+            render_bound(&raster, lam::view_require_block(element));
+            EXPECT_TRUE(paint.empty());
+            EXPECT_EQ(list.item_count(), (pass + 1) * entry.commands);
+        }
+    }
+    dl_destroy(&list);
+    paint_list_destroy(&paint);
 }
 
 TEST_F(RadiantDocumentTest, IntrinsicTablesShareCollapsedBorderGeometry) {

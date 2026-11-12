@@ -907,5 +907,7 @@ int main(void) {
     printf("collisions=%d\n", collisions);
     ok = verify_result(collisions, 100);
     printf(ok == 1 ? "CD: PASS\n" : "CD: FAIL\n");
+    /* the Lambda driver also emits the computed kernel result. */
+    printf("%d\n", collisions);
     return ok != 1;
 }

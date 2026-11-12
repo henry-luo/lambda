@@ -153,4 +153,5 @@ void set_runtime_error(LambdaErrorCode code, const char* format, ...)
 struct Item;
 // shared rich value-error construction, preserving S7.4.4's diagnostic payload.
 Item runtime_error_item(LambdaErrorCode code, const char* message, LambdaError* cause);
+Item lambda_non_callable_error(void);
 #endif

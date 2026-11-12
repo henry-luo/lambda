@@ -6025,8 +6025,10 @@ static DomElement* dom_js_record_cascade_root(DomDocument* doc,
                dom_js_document_has_structural_css_dependency(doc)) {
         // A class/attribute change can alter a sibling selector's result. A
         // text change can flip :empty. Their parent contains that local closure.
-        // root edits have no containing element, so retain the root as their closure.
-        node = record->parent && record->parent->is_element() ?
+        // the element-shaped Document proxy is outside the rendered root;
+        // promoting a root edit to that proxy would discard its cascade below.
+        node = record->parent && record->parent->is_element() &&
+            dom_js_is_connected_to_document(doc, record->parent) ?
             record->parent : record->target;
     } else {
         node = record->target ? record->target : record->parent;

@@ -1,0 +1,21 @@
+{
+  "name": "Sheet displays imported Excel dates and times",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {"width": 1440, "height": 900},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"wait", "ms":100},
+    {"type":"click", "target":{"selector":"#open"}},
+    {"type":"type", "target":{"selector":"#file-path"}, "text":"test/input/xlsx/external/event-schedule.xlsx", "clear":true},
+    {"type":"click", "target":{"selector":"#dialog-confirm"}},
+    {"type":"assert_text", "target":{"selector":"#cell-A1"}, "contains":"Event"},
+    {"type":"assert_text", "target":{"selector":"#cell-B2"}, "contains":"2026-11-02"},
+    {"type":"assert_text", "target":{"selector":"#cell-C2"}, "contains":"09:00:00"},
+    {"type":"assert_text", "target":{"selector":"#cell-E2"}, "contains":"11:30:00"},
+    {"type":"click", "target":{"selector":"#open"}},
+    {"type":"type", "target":{"selector":"#file-path"}, "text":"test/input/xlsx/external/exceljs-1904.xlsx", "clear":true},
+    {"type":"click", "target":{"selector":"#dialog-confirm"}},
+    {"type":"assert_attribute", "target":{"selector":"#sheet"}, "attribute":"data-sheets", "equals":"3"},
+    {"type":"assert_text", "target":{"selector":"#cell-B4"}, "contains":"1904-01-01"}
+  ]
+}

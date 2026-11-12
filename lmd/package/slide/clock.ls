@@ -8,13 +8,13 @@ import transitions: .transitions
 // `cue` is the cue a segment plays, or for a dwell the cue completed before it
 fn segments(plan, index, reduced, dwell_ms) {
     let scene = plan.slides[index]
-    let transition = if (index == 0 or reduced or not transitions.animated(scene)) []
+    let transition = if (index == c.first_visible(plan) or reduced or not transitions.animated(scene)) []
         else [{kind: 'transition', cue: -1, ms: scene.transition_duration}]
     let cues = [for (j, cue in scene.cues) for (seg in [
         *(if (cue.start == 'click') [{kind: 'dwell', cue: j - 1, ms: dwell_ms}] else []),
         {kind: 'cue', cue: j, ms: if (reduced) 0.0 else cue.duration_ms}]) seg]
-    let hold = if (index + 1 < len(plan.slides)) [{kind: 'dwell', cue: len(scene.cues) - 1, ms: c.value(scene.advance_after,dwell_ms)}] else [];
-    [*transition, *cues, *hold]
+    let hold = if (c.visible_index(plan,index)>=0) [{kind: 'dwell', cue: len(scene.cues) - 1, ms: c.value(scene.advance_after,dwell_ms)}] else [];
+    if (scene.hidden and index!=c.first_visible(plan)) [] else [*transition, *cues, *hold]
 }
 
 fn total(segs) => sum([for (s in segs) s.ms])
@@ -46,7 +46,8 @@ pub fn position(plan, ps) float {
     let cue_end = [for (s in segs where s.kind == 'cue' and s.cue == ps.cue) s.start_ms + s.ms]
     let dwell = [for (s in segs where s.kind == 'dwell' and s.cue == ps.cue) s]
     let transition = [for (s in segs where s.kind == 'transition') s];
-    if (ps.phase == 'transition') start + ps.time_ms
+    if (plan.slides[ps.slide].hidden and ps.slide!=c.first_visible(plan)) start
+    else if (ps.phase == 'transition') start + ps.time_ms
     else if (ps.phase == 'cue') [for (s in segs where s.kind == 'cue' and s.cue == ps.cue) s.start_ms][0] + ps.time_ms
     else if ((ps.autoplay or ps.timed) and len(dwell) > 0) dwell[0].start_ms + ps.wait_ms
     else if (len(cue_end) > 0) cue_end[0]
@@ -59,8 +60,9 @@ pub fn seek(plan, ps, position_ms, now_ms) map^ {
     let checked = if (not c.finite(position_ms)) raise c.fail("player", "seek position must be finite")
     let line = timeline(plan, ps)
     let at = max(0.0, min(line.duration_ms, float(position_ms)))
-    let final_slide = len(plan.slides) - 1
-    let index = [for (i, s in line.slides where ((at >= s.start_ms and (at < s.end_ms or i == final_slide)) ^ { false })) i][0]
+    let final_slide = c.last_visible(plan)
+    let index = [for (i, s in line.slides where ((not (plan.slides[i].hidden and i!=c.first_visible(plan)) and
+        at >= s.start_ms and (at < s.end_ms or i == final_slide)) ^ { false })) i][0]
     let segs = laid_out(plan, index, ps.reduced_motion, ps.autoplay_dwell_ms, line.slides[index].start_ms)
     let cues = plan.slides[index].cues
     // a seek to the very end parks on the final build, as finished autoplay does
@@ -71,11 +73,11 @@ pub fn seek(plan, ps, position_ms, now_ms) map^ {
     let finished = len(found) == 0 and index == final_slide
     let base = {*: ps, slide: index, outgoing: -1, triggered:[],outgoing_triggered:[], generation: ps.generation + 1, anchor_ms: float(now_ms),
         autoplay: ps.autoplay and not finished,timed:false,after_ms:null};
-    if (seg.kind == 'transition') {*: base, cue: -1, phase: 'transition', outgoing: index - 1, time_ms: offset, anchor_time: offset}
+    if (seg.kind == 'transition') {*: base, cue: -1, phase: 'transition', outgoing: c.visible_index(plan,index,false), time_ms: offset, anchor_time: offset}
     else if (seg.kind == 'cue') {*: base, cue: seg.cue, phase: 'cue', time_ms: offset, anchor_time: offset}
     else {
         let delay = plan.slides[index].advance_after
-        let timed = delay != null and seg.cue == len(cues)-1 and index < final_slide;
+        let timed = delay != null and seg.cue == len(cues)-1 and c.visible_index(plan,index)>=0;
         {*:base,cue:seg.cue,phase:'waiting',time_ms:done_ms,wait_ms:offset,timed:timed,after_ms:delay,
             anchor_time:if (base.autoplay or timed) offset else done_ms}
     }

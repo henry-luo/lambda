@@ -18,6 +18,8 @@ picture fills and duotone pixels with source transparency. `unsupported-paint`
 keeps warnings for unknown path commands, unsupported gradient profiles and
 unimplemented image effects. `warnings` repeats master decorations across six
 slides to check grouping, occurrence counts and bounded disclosure behavior.
+`inconsistent-table-merge` checks that an invalid merged-cell grid retains both
+saved cells and emits a warning.
 
 `unsupported` keeps usable text while diagnosing a shape, graphic frame,
 transition and animation. `external-image` verifies that external media are

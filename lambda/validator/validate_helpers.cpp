@@ -51,8 +51,7 @@ void add_type_mismatch_error(
     if (!result) return;
     
     char error_msg[256];
-    const char* actual_type_name = (actual_type_id >= 0 && actual_type_id < 32)
-        ? type_info[actual_type_id].name : "unknown";
+    const char* actual_type_name = get_type_name(actual_type_id);
     snprintf(error_msg, sizeof(error_msg),
             "Expected type '%s', but got '%s'",
             expected_type_name, actual_type_name);
@@ -72,8 +71,7 @@ void add_type_mismatch_error_ex(
     if (!result) return;
     
     char error_msg[256];
-    const char* actual_type_name = (actual_item.type_id() >= 0 && actual_item.type_id() < 32)
-        ? type_info[actual_item.type_id()].name : "unknown";
+    const char* actual_type_name = get_type_name(actual_item.type_id());
     // a literal or range is named by its contract, not merely its carrier.
     char range_name[128];
     Type* expected = unwrap_type(expected_type);

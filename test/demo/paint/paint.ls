@@ -7,6 +7,7 @@ import resources: ~~.mod_resources
 import model: .mod_model
 import ui: .mod_ui
 import present: .mod_present
+import watercolor: lambda.procart.watercolor
 
 let BASE = url_resolve(resources.entry_uri()^, ".")
 let BRUSHES = model.palette(BASE)^
@@ -83,6 +84,14 @@ pn command(owner, st, action) any^ {
         let b = dom.bounding_box(present.node(owner, "stage"))
         return model.fit({*: st, ps: opened, stroke: null, drag: null, status: "Opened " ++ path}, b.width, b.height)
     }
+    if (action == "dry") {
+        if (model.medium(st) == "pixel") raise error("Paint: pixel paint is always dry")
+        // dries the session in place; the copy forks only the tiles the wet film covers
+        var ps = st.ps
+        paint.dry(ps)^
+        return {*: st, ps: ps, status: "Dried: new strokes glaze over the paint"}
+    }
+    if (action == "light") { return model.with_light(st)^ }
     if (action == "undo") { return {*: st, ps: paint.undo(st.ps)^, status: "Undone"} }
     if (action == "redo") { return {*: st, ps: paint.redo(st.ps)^, status: "Redone"} }
     if (action == "clear") { return {*: st, ps: paint.clear(st.ps)^, status: "Canvas cleared; undo brings it back"} }
@@ -121,12 +130,19 @@ on paint_frame(evt) {
     // the frame and the token update write the state in place: a rebuilt state would share the
     // paint session again, and the next batch would copy the stroke's tiles (PT7)
     session.token = 0
+    if ((session.ps.wet != null and (session.wet_needs_step or session.ps.wet.wet_cells > 0))^) {
+        paint.step_wet(session.ps, watercolor.SETTINGS, 1) ^ { session = failed(evt.target, session, ^.message); return 'handled' }
+        session.wet_needs_step = false
+    }
     let f = paint.frame(session.ps) ^ { return 'handled' }
     if (f.rect != null) {
         let canvas = present.node(evt.target, "canvas")
         // the first frame sizes the bitmap; later frames write only their rectangle
         if (f.rect == [0, 0, model.width(session), model.height(session)]) dom.set_canvas_pixels(canvas, f.pixels)^
         else dom.set_canvas_pixels_rect(canvas, f.pixels, f.rect)^
+    }
+    if ((session.ps.wet != null and session.ps.wet.wet_cells > 0)^) {
+        session.token = dom.request_frame(evt.target, "paint_frame")
     }
     return 'handled'
 }
@@ -149,9 +165,13 @@ on click(evt) {
     return 'handled'
 }
 on change(evt) {
-    if (dom.get_attribute(evt.target, "id") != "paper") { return 'pass' }
+    let id = dom.get_attribute(evt.target, "id")
+    if (id != "paper" and id != "medium" and id != "wet-pigment") { return 'pass' }
     let owner = owner_of(evt)
-    let next = model.with_paper(session, dom.get_state(evt.target, "value")) ^ { session = failed(owner, session, ^.message); return 'handled' }
+    let value = dom.get_state(evt.target, "value")
+    let chosen = if (id == "paper") model.with_paper(session, value) else if (id == "wet-pigment")
+        model.with_wet_pigment(session, int(value)^) else model.with_medium(session, value)
+    let next = chosen ^ { session = failed(owner, session, ^.message); return 'handled' }
     session = publish(owner, next)
     return 'handled'
 }
@@ -198,6 +218,7 @@ on pointerdown(evt) {
     session.ps = begun
     // feed paints the state's session in place (PT7)
     paint.feed(session.ps, evt.pointerId, pts) ^ { session = failed(owner, session, ^.message); return 'prevent-default' }
+    if ((session.ps.wet != null)^) { session.wet_needs_step = true }
     dom.set_pointer_capture(stage, evt.pointerId)
     session.stroke = {pointer: evt.pointerId, eraser: eraser}
     if ((session.token == 0)^) { session.token = dom.request_frame(owner, "paint_frame") }
@@ -217,6 +238,7 @@ on pointermove(evt) {
     // borrow of session.ps a snapshot (LR12-45)
     let pts = samples(owner, session, evt)
     paint.feed(session.ps, evt.pointerId, pts) ^ { return 'prevent-default' }
+    if ((session.ps.wet != null)^) { session.wet_needs_step = true }
     if ((session.token == 0)^) { session.token = dom.request_frame(owner, "paint_frame") }
     return 'prevent-default'
 }

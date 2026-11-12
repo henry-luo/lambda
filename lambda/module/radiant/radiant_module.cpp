@@ -4334,6 +4334,39 @@ RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, It
     bool paged = get_type_id(pagination) == LMD_TYPE_BOOL && it2b(pagination);
     if (pagination.item != ItemNull.item && get_type_id(pagination) != LMD_TYPE_BOOL)
         return radiant_string_item("render export: pagination must be boolean");
+    RenderPagedOptions paged_options = render_paged_options_default();
+    const char* selection_keys[] = {"pages", "export_pages"};
+    const char* selection_flags[] = {"--pages", "--export-pages"};
+    lam::Temp<char> selections[2];
+    bool has_page_options = false;
+    for (size_t i = 0; i < sizeof(selection_keys) / sizeof(selection_keys[0]); i++) {
+        Item value = radiant_obj_get(options.get(), selection_keys[i]);
+        if (value.item == ItemNull.item) continue;
+        if (get_type_id(value) != LMD_TYPE_STRING || memchr(value.get_chars(), 0, value.get_len()))
+            return radiant_string_item("render export: pages/export_pages must be page selection strings");
+        // retain selection bytes independently while layout calls back into Lambda.
+        selections[i].reset(mem_strdup(value.get_chars(), MEM_CAT_RENDER));
+        if (!selections[i]) return radiant_string_item("render export: page selection allocation failed");
+        const char* error = nullptr;
+        if (!render_paged_option_apply(&paged_options, selection_flags[i], selections[i].get(), &error))
+            return radiant_string_item("render export: invalid page selection; expected all, none, or 1,3-5");
+        has_page_options = true;
+    }
+    Item thumbnail = radiant_obj_get(options.get(), "thumbnail_page");
+    if (thumbnail.item != ItemNull.item) {
+        // fractional decimals must not round into a valid physical page index.
+        int64_t number = 0;
+        if (!lambda_item_to_int64_exact(thumbnail, &number) || number <= 0 || number > UINT32_MAX)
+            return radiant_string_item("render export: thumbnail_page must be a positive physical page number");
+        paged_options.thumbnail_page = (uint32_t)number; // INT_CAST_OK: validated one-based physical page index.
+        has_page_options = true;
+    }
+    if (has_page_options && !paged)
+        return radiant_string_item("render export: page options require pagination:true");
+    if (paged_options.export_pages && output_kind != RENDER_OUTPUT_PDF)
+        return radiant_string_item("render export: export_pages requires PDF output");
+    if (paged_options.thumbnail_page && output_kind == RENDER_OUTPUT_PDF)
+        return radiant_string_item("render export: thumbnail_page requires PNG, JPEG, or SVG output");
     Item source_format = radiant_obj_get(options.get(), "source_format");
     const char* syntax = get_type_id(source_format) == LMD_TYPE_STRING ? fn_to_cstr(source_format) : nullptr;
     if (source_format.item != ItemNull.item && (!syntax || (strcmp(syntax, "html") && strcmp(syntax, "xhtml"))))
@@ -4364,6 +4397,7 @@ RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, It
     target.device_scale = (float)device_scale;
     target.jpeg_quality = (int)quality; // INT_CAST_OK: validated JPEG encoder quality.
     target.paged = paged;
+    target.paged_options = lam::up(&paged_options);
     target.transparent_background = get_type_id(transparent) == LMD_TYPE_BOOL && it2b(transparent);
     int status = render_html_source_to_output_target(source.get(), &target, base_url.get(),
         get_type_id(local) == LMD_TYPE_BOOL && it2b(local), xhtml);
@@ -5540,6 +5574,29 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_paint_tiles_encode(Item layer)", (fn_ptr)fn_radiant_paint_tiles_encode},
     {"paint_tiles_decode", "fn(bytes: binary, layer: map) -> map", (fn_ptr)fn_radiant_paint_tiles_decode, JUBE_FN_READS_ARGS,
      "Item fn_radiant_paint_tiles_decode(Item bytes, Item layer)", (fn_ptr)fn_radiant_paint_tiles_decode},
+    // M2: pigment drying (PE8) and bristle trails (PE10), pure and in place (PT7)
+    {"paint_dried", "fn(layer: map, options: map|null) -> map", (fn_ptr)fn_radiant_paint_dried, JUBE_FN_NONE,
+     "Item fn_radiant_paint_dried(Item layer, Item options)", (fn_ptr)fn_radiant_paint_dried},
+    {"paint_dry", "pn(var layer: map, options: map|null) -> map", (fn_ptr)fn_radiant_paint_dry, JUBE_FN_NONE,
+     "Item fn_radiant_paint_dry(Item* layer, Item options)", (fn_ptr)fn_radiant_paint_dry},
+    {"paint_bristles", "fn(layer: map, path: any, state: any, options: map|null) -> map", (fn_ptr)fn_radiant_paint_bristles, JUBE_FN_NONE,
+     "Item fn_radiant_paint_bristles(Item layer, Item path, Item state, Item options)", (fn_ptr)fn_radiant_paint_bristles},
+    {"paint_bristle_stroke", "pn(var layer: map, path: any, state: any, options: map|null) -> map", (fn_ptr)fn_radiant_paint_bristle_stroke, JUBE_FN_NONE,
+     "Item fn_radiant_paint_bristle_stroke(Item* layer, Item path, Item state, Item options)", (fn_ptr)fn_radiant_paint_bristle_stroke},
+    {"paint_wet_cells", "fn(cells: any) -> any", (fn_ptr)fn_radiant_paint_wet_cells, JUBE_FN_READS_ARGS,
+     "Item fn_radiant_paint_wet_cells(Item cells)", (fn_ptr)fn_radiant_paint_wet_cells},
+    {"paint_wet_present", "fn(cells: any, layer: map, options: map) -> any", (fn_ptr)fn_radiant_paint_wet_present, JUBE_FN_READS_ARGS,
+     "Item fn_radiant_paint_wet_present(Item cells, Item layer, Item options)", (fn_ptr)fn_radiant_paint_wet_present},
+    {"paint_wet_layout", "fn(pigments: int) -> map", (fn_ptr)fn_radiant_paint_wet_layout, JUBE_FN_READS_ARGS,
+     "Item fn_radiant_paint_wet_layout(Item pigments)", (fn_ptr)fn_radiant_paint_wet_layout},
+    {"paint_wet_step", "pn(var cells: any, options: map) -> map", (fn_ptr)fn_radiant_paint_wet_step, JUBE_FN_NONE,
+     "Item fn_radiant_paint_wet_step(Item* cells, Item options)", (fn_ptr)fn_radiant_paint_wet_step},
+    {"paint_wet_dabs", "pn(var cells: any, dabs: any, options: map) -> map", (fn_ptr)fn_radiant_paint_wet_dabs, JUBE_FN_NONE,
+     "Item fn_radiant_paint_wet_dabs(Item* cells, Item dabs, Item options)", (fn_ptr)fn_radiant_paint_wet_dabs},
+    {"paint_wet_bristles", "pn(var cells: any, path: any, state: any, options: map) -> map", (fn_ptr)fn_radiant_paint_wet_bristles, JUBE_FN_NONE,
+     "Item fn_radiant_paint_wet_bristles(Item* cells, Item path, Item state, Item options)", (fn_ptr)fn_radiant_paint_wet_bristles},
+    {"paint_wet_deposit", "pn(var layer: map, var cells: any, options: map) -> map", (fn_ptr)fn_radiant_paint_wet_deposit, JUBE_FN_NONE,
+     "Item fn_radiant_paint_wet_deposit(Item* layer, Item* cells, Item options)", (fn_ptr)fn_radiant_paint_wet_deposit},
     {"graphemes", "fn(text: string) -> array|null", (fn_ptr)fn_radiant_graphemes, JUBE_FN_NONE,
      "Item fn_radiant_graphemes(Item text)", (fn_ptr)fn_radiant_graphemes},
     {"measure_html", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_html, JUBE_FN_NONE,

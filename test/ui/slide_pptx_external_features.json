@@ -1,0 +1,345 @@
+{
+  "name": "Slides: imported hidden slides, merged tables, SmartArt and cached charts",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/pptx/external/cc0-with-hidden-slide.pptx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#thumbnails [data-slide=\"1\"]"
+      },
+      "attribute": "data-hidden",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 300,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-command=previous]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 300,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#thumbnails [data-slide=\"1\"]"
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-context-toggle-slide-hidden"
+      },
+      "contains": "Show Slide"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-context-toggle-slide-hidden"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#thumbnails [data-slide=\"1\"]"
+      },
+      "attribute": "data-hidden",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 300,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/pptx/external/mit-table-merge-encoding.pptx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let t=document.querySelector('#slide-render table');return !!t && t.querySelector('td[colspan=\"2\"][rowspan=\"2\"]')!==null})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let t=document.querySelector('#slide-render table'),a=t.querySelector('td[rowspan=\"2\"]'),b=t.querySelector('tr:first-child td:last-child');return a.getBoundingClientRect().height>b.getBoundingClientRect().height*1.4})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/pptx/external/mit-smartart-families.pptx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render"
+      },
+      "contains": "org-root"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#thumbnails [data-slide=\"3\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render"
+      },
+      "contains": "pic-1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#import-warnings"
+      },
+      "contains": "Presentation import"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/pptx/external/mit-chart-series-shapes.pptx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "8"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#slide-render svg .marks.points circle').length===4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#thumbnails [data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#slide-render svg .marks.points circle').length===4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#thumbnails [data-slide=\"3\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#slide-render svg .marks.arcs path').length===4"
+    }
+  ]
+}

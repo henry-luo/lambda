@@ -1,0 +1,13 @@
+{
+  layer: ['pigment', 3, true, true],
+  blank_frame: [0, 0, 96, 64],
+  mixed: 'green',
+  patches: ['warm', 'blue'],
+  frames: [[18, 0, 62, 24], [19, 1, 61, 23], true],
+  dry: [true, true, true],
+  glaze: true,
+  undo: [true, true],
+  bristles: [true, true],
+  cleared: ['pigment', 0, true],
+  file: ['pigment', true, true, true]
+}

@@ -4,7 +4,7 @@ import theme: .theme
 import scene: .scene
 import transitions: .transitions
 
-let slide_attrs = ["id", "title", "background", "layout", "theme", "master", *transitions.attributes]
+let slide_attrs = ["id", "title", "background", "layout", "theme", "master", "hidden", *transitions.attributes]
 fn fields(node, excluded = []) any^ => map([for (key, value in node where (((key is symbol or key is string) and
     not contains(excluded, string(key))) ^ { false })) (string(key), value)])
 

@@ -1,0 +1,192 @@
+{
+  "name": "Paint watercolor: pigment selection, strokes, bristles, history, animation and dry (PT10, PE9)",
+  "html": "test/demo/paint/paint.ls",
+  "viewport": {
+    "width": 1400,
+    "height": 960
+  },
+  "event_interval_ms": 0,
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#medium"
+      },
+      "value": "watercolor"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#paint"
+      },
+      "attribute": "data-medium",
+      "equals": "watercolor"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#wet-pigment"
+      },
+      "value": "1"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#canvas",
+        "offset_x": 100,
+        "offset_y": 420
+      },
+      "dx": 240,
+      "dy": 0,
+      "steps": 5
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#paint"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#canvas",
+        "offset_x": 200,
+        "offset_y": 420
+      },
+      "max_b": 220
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-undo"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#paint"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#canvas",
+        "offset_x": 200,
+        "offset_y": 420
+      },
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-redo"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#canvas",
+        "offset_x": 200,
+        "offset_y": 420
+      },
+      "max_b": 220
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#wet-pigment"
+      },
+      "value": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-brush='10']"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#canvas",
+        "offset_x": 100,
+        "offset_y": 470
+      },
+      "dx": 240,
+      "dy": 0,
+      "steps": 5
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#paint"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#canvas",
+        "offset_x": 120,
+        "offset_y": 470
+      },
+      "max_r": 220
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#action-dry"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Dried"
+    }
+  ],
+  "env": [
+    {
+      "key": "RADIANT_DAMAGE_VERIFY",
+      "value": "1"
+    }
+  ]
+}

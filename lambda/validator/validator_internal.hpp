@@ -13,6 +13,11 @@
 
 #include "validator.hpp"
 
+// retained schema source frontend; its pool owns the lazy loader and imported types.
+Transpiler* transpiler_create(Pool* pool);
+void transpiler_destroy(Transpiler* transpiler);
+AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source, const char* source_path);
+
 // ==================== RAII Scope Guards ====================
 
 /**

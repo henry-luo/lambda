@@ -407,6 +407,7 @@ pub pn command(owner,st,action,base) any^ {
     if (action == "new") { return {*:m.commit_doc(st,m.starter(),0,"")^,base:base,path:"",import_warnings:[],transition_custom:null,status:"New presentation. Undo restores your previous deck."} }
     if (action == "add-slide" or action == "duplicate-slide") { return m.add_slide(st,action == "duplicate-slide")^ }
     if (action == "delete-slide") { return m.delete_slide(st)^ }
+    if (action == "toggle-slide-hidden") { return m.slide_properties(st,{hidden:not m.scene(st).hidden})^ }
     if (action == "slide-up" or action == "slide-down") { return m.move_slide(st,if (action == "slide-up") -1 else 1)^ }
     if (starts_with(action,"insert-")^) { return {*:m.add_object(st,slice(action,7))^,status:"Object inserted. Edit its content and appearance in Format."} }
     if (action == "copy") { return {*:st,clipboard:m.copy_object(st),status:"Object copied."} }
@@ -425,7 +426,7 @@ pub pn command(owner,st,action,base) any^ {
     if ((starts_with(action,"animate-") and obj != null)^) { return animations.choose(st,symbol(slice(action,8)),true)^ }
     if (action == "clear-animations") { return animations.remove(st,true)^ }
     if (action == "present" or action == "present-current") {
-        return start_show(owner,st,st.doc,if (action == "present-current") st.index else 0)^
+        return start_show(owner,st,st.doc,if (action == "present-current") st.index else slide.initial_state(st.plan).slide)^
     }
     if (action == "end-show") {
         let sound_error = dom.get_attribute(node(owner,"editor-show"),"data-slide-sound-error")

@@ -2736,16 +2736,16 @@ class PremakeGenerator:
                 additional_files = test.get('additional_files', [])
 
                 # Determine correct file path - use relative paths from project root
-                if source.startswith(("test/", "../")) or os.path.isabs(source):
+                # Owner paths may resolve inside the workspace (for example under temp/).
+                if source.startswith(("test/", "../")) or os.path.isabs(source) or os.path.isfile(source):
                     test_file_path = source
                 else:
                     test_file_path = f"test/{source}"
 
                 # Ensure path exists before adding to project
-                actual_path = source if source.startswith(("test/", "../")) or os.path.isabs(source) else f"test/{source}"
-                full_path = os.path.join(os.getcwd(), actual_path)
+                full_path = os.path.join(os.getcwd(), test_file_path)
                 if not os.path.exists(full_path):
-                    elog(f"Warning: Test file not found: {actual_path}")
+                    elog(f"Warning: Test file not found: {test_file_path}")
                     continue
 
                 test_disable_sanitizer = test.get('disable_sanitizer', False)

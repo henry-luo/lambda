@@ -2153,12 +2153,14 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     // resolve without prototype-chain lookup (matches what test code
     // typically does and the shim's previous direct-assignment behaviour).
     {
-        RootFrame roots(4);
+        RootFrame roots(6);
         Rooted<Item> clipboard_root(roots,
             dom_realm_new_object_of_class(JS_CLASS_CLIPBOARD));
         Rooted<Item> permissions_root(roots, ItemNull);
         Rooted<Item> service_worker_root(roots, ItemNull);
         Rooted<Item> navigator_root(roots, ItemNull);
+        Rooted<Item> ready_root(roots, ItemNull);
+        Rooted<Item> ready_descriptor(roots, ItemNull);
         // Brand and prototype must agree for instanceof on navigator.clipboard.
         attach_known_prototype(clipboard_root.get(), clipboard_proto_root.get());
         dom_realm_set_cstr(clipboard_root.get(), "writeText", dom_realm_get_cstr(clipboard_proto_root.get(), "writeText"));
@@ -2174,6 +2176,16 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
             js_service_worker_get_registrations);
         js_clipboard_set_method(service_worker_root.get(), "register",
             js_service_worker_register);
+        // ready waits for an active registration; this headless registry has
+        // none, so retain the same pending promise instead of resolving a stub.
+        ready_root.set(js_promise_create_pending());
+        if (ready_root.get().item == ItemNull.item) return;
+        ready_descriptor.set(js_object_create(ItemNull));
+        dom_realm_set_cstr(ready_descriptor.get(), "value", ready_root.get());
+        dom_realm_set_cstr(ready_descriptor.get(), "enumerable", (Item){.item = b2it(true)});
+        dom_realm_set_cstr(ready_descriptor.get(), "configurable", (Item){.item = b2it(true)});
+        if (item_is_error(dom_realm_define_property(service_worker_root.get(),
+                make_str("ready"), ready_descriptor.get()))) return;
 
         navigator_root.set(navigator_create(global_root.get(), clipboard_root.get(),
             permissions_root.get(), service_worker_root.get()));

@@ -19,6 +19,15 @@
 - **PNG previews through system functions (M1g).** `preview.png`, `thumbnail.png` and `export_png` use `lambda.sys.image_raster` and `lambda.sys.image_encode` directly, so `lambda.paint` keeps not importing `lambda.image` (PT13).
 - **Tip lists can be stacks (M1i).** A Lambda array literal of equal-size planes, such as `[tip]`, coalesces into one `(k, h, w)` numeric array, so `radiant.paint_dabs` accepts `tips` as a list of planes or as such a stack. Paper must be one `(h, w)` plane.
 - **Angle jitter is keyed by position (M1i).** A round brush's per-dab rotation comes from the dab's position, not its index, so a stroke split into batches still paints exactly the whole stroke.
+- **Pigment amount and thickness (M2a).** On a pigment layer the dab's `amount` scales the pigment it deposits (`tK += c·amount·K`, `tS += c·amount·S`) and `thickness` its paint body (`t += c·thickness`), per unit coverage `c = mask·opacity·flow`. With both equal this is PE8's deposit, and brushes default `thickness` to `amount`. The KM display reads only K/S = tK/tS and S·t = tS, so the thickness cancels there; only relief and lighting read `t`.
+- **Clean tiles keep the paper (M2a).** A pigment layer carries `bands` (3) and `substrate`, the paper's linear reflectance per band. The engine reads an empty tile as a clean film over it, and the bridge fills a fresh tile's substrate channels with it, so forking a null tile gives clean paper rather than black.
+- **Pigment smudge samples (M2a).** A bucket carries film (2B + 1 fields). Pickup samples the film under the footprint as rgba smudge samples colour; it does not remove film. A smudging dab moves the film toward the bucket's by `c·smudge` and deposits brush paint with the rest of its coverage. Resolved colours stay rgba-only until batched replay (PT16, M4).
+- **No recolouring on pigment (M2a).** Lock alpha, colorize, posterize, blend modes and colour shifts have no meaning for a film and are refused on pigment layers, as is wash mode; bristle paths refuse them too.
+- **Lighting is relative to flat (M2a).** Height is `relief·(h + t)`. Shade and highlight are measured against a flat normal, so a flat film keeps its exact KM colour. Normals read neighbouring pixels, so a lit session frame widens its rectangle by one pixel.
+- **Drying is explicit (M2a).** `paint_pigment_dry(rate)` composes `rate` of the film over the substrate. Partial drying is exact, because KM layers of one material compose. A session dries only on `paint.dry`, so strokes mix wet until then, as oil does.
+- **Bristle paths and state (M2b).** A bristle path is a dab table whose geometry and strength columns apply; tips, smudge and recolouring are refused, and the colour columns are not read. A bristle brush's dab table is its path, with each row facing the stroke direction. State layout v1 (PE10 note): `ox, oy, stiffness, width, load, x, y, placed`, then the ink, 3 fields on rgba and 2B + 1 on pigment. Trails draw without end caps, so joints do not double; rows run in path order and bristles by index, so a split path paints exactly the whole one. Pickup on pigment takes the canvas film's composition at the bristle's own paint body.
+- **Pigments from colours (M2d).** `paint.pigment(colour)` applies procart.watercolor's Washes inversion (K/S = (1 − R)²/2R at a scattering of 3) to linear reflectance; `media.ls` reuses `watercolor.pigment` rather than copying it. Every such pigment scatters at 3, so a thin film is a veil, not a clear glaze; a transparency parameter is open. A stroke on a pigment layer turns its colour into its one pigment-table row.
+- **One un-share routine (M2c).** `paint_stroke`, `paint_dry` and `paint_bristle_stroke` share `paint_unshare_touched` in the bridge (D7.6.4).
 - **Rectangle repaint uses presentation damage (M1d).** Radiant already repaints regions for paint-only writes (presentation damage). The canvas notes its placement while it is recorded, and a rectangle write marks the mapped region as presentation damage. A canvas drawn under a transform, a filter or an offscreen capture falls back to a full repaint.
 
 ## Milestone plan
@@ -38,10 +47,172 @@
 | M1g | `.painting` ZIP save and load (stored pixels, PT12) | **done** (uncommitted): `painting.ls` plus `radiant.paint_tiles_encode` and `radiant.paint_tiles_decode`; golden `proc/paint_painting.ls` (12 checks, three tiers and GC stress); demo Open, Save and Export PNG in `demo.json` (40/40) |
 | M1h | General `var`-parameter system procedures with in-place writes (PT7) | done 2026-11-11 (uncommitted): ruled as D7.6.3\*, D7.6.4\*, S9.1.3v4 (Sys_Func RF7, bounded `var` parameters); runtime on T0 and MVP; `radiant.paint_stroke`; `paint.stroke` and `paint.feed` are `var` procedures. The demo does not yet keep its session unshared between batches |
 | M1i | Bitmap tips and paper grain in brushes, strokes, sessions and painting files; tips and paper in the demo | **done** (uncommitted): `surface.ls`; golden `paint_surface.ls` (21 checks, three tiers and GC stress); demo replay 46/46 |
-| M2–M6 | As in [PT §6](../Lambda_Pkg_Paint.md#6-milestones-and-acceptance) | pending |
+| M2a | Engine pigment medium (PE8): `pigment` format with 3B + 2 channels, additive deposit from a pigment table, smudge in K/S space, KM display, impasto lighting (PE7 step 5), drying | **done** (uncommitted): `paint_pigment.cpp`; 8 new engine cases |
+| M2b | Engine bristle trails (PE10): per-bristle lag, depletion and pickup over `rgba` and `pigment` | **done** (uncommitted): `paint_bristle.cpp`; 5 new engine cases |
+| M2c | Bridge: `pigment` layers and pigment tables in `paint_dabs` and `paint_stroke`; lit `paint_present`; `paint_dry` and bristle calls in pure and in-place forms | **done** (uncommitted): `paint_dried`, `paint_dry`, `paint_bristles`, `paint_bristle_stroke` |
+| M2d | Package: `media.ls` pigments (procart's KM conversion), pigment layers, brush `amount` and `thickness`, `bristle` brush kind, lit presentation, sessions with a medium and drying, painting files with pigment layers | **done** (uncommitted) |
+| M2e | Tests and budgets: engine gtests (KM identities, drying, depletion), Lambda goldens on three tiers and under GC stress, release throughput (≥ 50 M pigment px/s) | **done**: goldens `paint_pigment` (19), `paint_bristle` (15), `proc/paint_pigment_session` (12 groups); pigment dab throughput 97 M px/s (release) |
+| M2f | Demo: media switch (pixel, oil), bristle brushes, Dry, lighting | **done** (uncommitted): replay 64/64 |
+| M3 | Native wet step and deposit, Lambda bridge and package, reference parity, watercolor demo, release budget | **partial**: generalized wet sheets, dabs, bristles, presentation and interactive watercolor sessions are implemented; full qualification, live-sheet file storage and the demo's independent mobile layout assertion remain |
+| M4–M6 | As in [PT §6](../Lambda_Pkg_Paint.md#6-milestones-and-acceptance) | pending |
 
 ## Checkpoint
 
+- **2026-11-12 — Wet presentation and sessions.** PE8's presenter now combines
+  a wet sheet's suspended/deposited pigment with the underlying pigment film
+  without changing either value (**D5.5.2**, **S9.1.2**). Both lanes, bounded
+  work, rectangles, invalid concentrations and dry-transfer continuity are
+  covered. A direct dry reuses the evaporation stage without moving paint.
+  Watercolor sessions now feed and present strokes, advance the simulation,
+  retain dense-sheet snapshots for undo/redo, clear and cancel, and dry both
+  owners; PNG export includes the wet sheet. Saving a live sheet in `.painting`
+  is rejected until its storage format is implemented. The paint demo now has
+  a watercolor medium and pigment menu and advances wet paint on frames. Its
+  new replay passes 9/9 on AUTO and forced JIT, including a release executable;
+  the existing pixel/oil replay
+  passes 64/64. All 40 native paint tests pass (two throughput tests disabled).
+  A forced-GC JIT failure exposed an unresolved Item/companion result across a
+  collecting projected `var` write-back. MIR now resolves and roots that pair
+  before publication (**D5.4.4**, **D6.2.1**); the minimized reproducer and
+  17 focused goldens pass on interp, AUTO and JIT with GC poisoning. The
+  Lambda baseline passes 7,464/7,464, including 2,344 runtime goldens. A later
+  validation-only change rejects unsupported watercolor lighting; its three
+  focused regression cases pass on all tiers under forced GC. Test262 passes
+  40,261/40,261, with 2,652 skipped and no regressions. Optimized standalone
+  512 x 512 full-sheet wet-step probes measured 6.67 ms f32 and 7.54 ms f64
+  per step (30 timed steps, this machine); their executable SHA-256 hashes are
+  `1747855290cca0391651d733b707399e61c5c824681e194462cc32208749c927` and
+  `83b3c946a1de8b59e030c774ee2be06e4d0dcd4804ed6f21645a23aaed1098fe`.
+  Evidence: `temp/paint_m3_present/`. **Next:** handle live-sheet file storage
+  and the independent mobile control assertion, and verify real interactive
+  frame cost; the solver probe and focused replay do not measure end-to-end
+  latency.
+- **2026-11-12 — Wet bristle trails.** PE10's existing segment traversal now
+  targets PE9 wet sheets as well as RGBA and pigment tiles. Wet bristles carry
+  the selected pigment and water, pick up those channels at their tips, deplete
+  and continue across batches; the shared wet-pixel helper also serves dabs.
+  Whole-call bounds, parameters and state are checked before either owner is
+  changed (**D5.5.2**, **D7.6.4**), and the bridge preserves sheet snapshots
+  (**S9.1.2**). The complete native paint suite passes 38/38 (two throughput
+  tests disabled). The new package golden checks split strokes, lanes, active
+  bounds, errors and snapshots; all 20 paint goldens pass on interpreter with
+  forced GC and poisoning. Eleven focused paint goldens pass on AUTO and JIT
+  with the same GC settings. The broader 20-case AUTO run timed out on the
+  surface fixture. Its final wet-stroke script finished successfully, but the
+  batch runner charged the nonzero batch exit to that last script; both wet
+  fixtures passed when rerun together and in the 11-case suite. The same
+  surface fixture also timed out alone on a release executable with forced GC.
+  A standalone prefix containing only its paper-generation checks exceeds 30
+  seconds under the same settings; one cold-press paper completes in about ten
+  seconds. The underlying cost is unconfirmed. The Lambda baseline passes 7,461/7,461, including
+  2,341 goldens. Test262 passes 40,261/40,261, with 2,652 skipped and no
+  regressions. Logs are in `temp/paint_m3_bristles/`. **Next:** investigate the
+  forced-GC surface timeout, implement wet-session history and presentation and
+  diagnose the independent mobile assertion with a browser control. Pickup
+  carries the selected pigment only; it does not pick up other channels.
+- **2026-11-12 — Wet dab strokes.** Added native PE9 wet dab deposition using the
+  shared PE4 masks and ordered PT7 stroke placement, exposed as
+  `paint.wet_stroke`. It validates a complete batch and its work budget before
+  preparing the sheet's `var` home (**D7.6.4**), retains value snapshots
+  (**S9.1.2**), and supports both numeric lanes and up to 4,096 pigments.
+  The center receives pigment by squared mask, water by mask, and pressure
+  using the reference pigment stamp's 0.18:0.45 ratio. Round and MyPaint rows
+  carry water; bristles, wash, erasing, smudge and recolouring are rejected.
+  A native test covers atomic failure, budget, lane parity and activity bounds.
+  Eight focused paint goldens pass on interp, AUTO and JIT under forced GC and
+  poisoning, including split strokes, snapshots and MyPaint. The isolated
+  Lambda baseline passes 7,458/7,458, including 2,338 goldens. Test262 passes
+  40,261/40,261, with 2,652 skipped and no regressions. Logs are in
+  `temp/paint_m3_dabs/`. **Next:**
+  add wet bristle trails by sharing the PE10 trail implementation, integrate
+  wet sheets with session history and presentation, and diagnose the separate
+  mobile replay assertion with an independent browser control.
+- **2026-11-12 — General wet layout implemented.** PE9's native step and dry
+  transfer now support 1–4,096 pigments using `12 + 3M` planes, exposed as
+  `paint.wet_layout`; `paint.wet_sheet` accepts the count. `wc.stamp_many`
+  shares the reference brush code for pigment, water and blot stamps, while
+  `wc.stamp` keeps its three-pigment contract. Shape mismatches, oversized
+  storage and count-scaled work are rejected before writes (**D3.2.1**,
+  **D7.6.4**). The three-pigment kernels produce byte-identical outputs to the
+  preceding version in six f32/float64 comparisons. The last-pigment activity,
+  drying and transfer cases pass; 4,096 pigments pass a boundary probe. The five
+  wet goldens pass on interp, AUTO and JIT with forced GC and poisoning,
+  including the final stamp snapshot assertion. The release archive passes
+  36/36 native paint tests and its 512 x 512 budget test (6.79 ms f32, 7.47 ms
+  float64 on this machine). The source-matched isolated Lambda baseline passes
+  7,457/7,457; Test262 passes 40,261/40,261, with 2,652 skipped and zero
+  regressions. The final stamp snapshot assertion was added after the baseline
+  and passes the separate tier/GC runs. `make test-premake-generator` and
+  `utils/test_split_paths.py` pass after fixing selected owner roots under the
+  workspace (**D9.1.1v4 / D9.1.3v2**). Evidence and pinned archive hash are in
+  `temp/paint_m3_general/`. RI-033 is in the Radiant fixed ledger. The native
+  and reference watercolor replays each pass 64/65 and fail the same mobile
+  control-position assertion; its owner is unconfirmed, so full demo replay
+  qualification remains open. `stamp_many` supplies the procedural reference
+  brush, but wet-medium dab tables and bristle trails are not connected to the
+  shared stroke pipeline or interactive paint session. **Next:** connect those
+  paths and diagnose the independent layout assertion with a browser control;
+  do not weaken it.
+- **2026-11-12 — General wet layout in progress.** The user asked to continue
+  M3. PE9's sheet now stages eight fixed planes, three planes per pigment and
+  four shared blur planes, with one to 4,096 pigments. The native step and
+  deposit use the same count and reject mismatched tables; the three-pigment
+  layout remains 21 planes. Staged native tests cover one, four and seven
+  pigments, last-pigment activity and deposit, and the previous three-pigment
+  output is byte-identical for both lanes at three tested sizes. The Lambda
+  bridge and package expose `wet_layout` and accept a pigment count. The
+  reference's brush helper now shares `stamp_many` across counts, including
+  water pickup and blotting; the existing three-pigment `stamp` delegates to it.
+  The `paint_wet_layout` fixture and all prior wet fixtures pass on interp,
+  AUTO and JIT under every-allocation GC; a 4,096-pigment boundary probe also
+  passes. An isolated baseline exposed two Lambda build-path defects when the
+  selected owner is under `temp/`: `split_paths.py` returned logical paths,
+  and `generate_premake.py` prefixed resolved test paths with `test/`. Both
+  have owner-local fixes and passing generator tests. **Next:** finish the
+  isolated milestone gates, release throughput and demo replay. The independent
+  mobile replay failure remains.
+- **2026-11-12 — M3 native integration.** `paint_wet_step` and dry transfer
+  support dense f32 and float64 sheets through shared kernels. Float64 is needed
+  because `procart.watercolor`'s `float[]` stamps can widen f32 storage under
+  **S9.2.1**. The bridge validates before preparing `var` homes (**D7.6.4**);
+  transfer preflights and unshares only touched destination tiles and clears
+  sheet deposits. `lambda.paint.wet` and the facade expose sheet, step and
+  transfer; the procart watercolor demo calls the batched native step.
+  `paint_wet_step` and `paint_wet_deposit` goldens pass on interp, AUTO and JIT
+  with every-allocation GC and poisoning; parity covers 80 steps and both lanes.
+  A two-tile transfer test checks partial rectangles and retained snapshots. A
+  512 x 512 public sheet is created and stepped successfully; the native sheet
+  constructor permits up to one million cells while the reference keeps its
+  original 250,000-cell default.
+  A row-oriented vertical blur is byte-identical to the former loop for three
+  tested sizes and both lanes. Against a pinned release archive, five alternating
+  30-step samples on a fully active 512 x 512, three-pigment sheet give medians
+  6.04 ms f32 and 6.98 ms float64 (8 ms target); the disabled owner test also
+  passes (6.30 and 7.75 ms). All 33 native paint tests pass. Evidence and
+  SHA-256 are under `temp/paint_m3/`. These are local measurements, not
+  cross-platform qualification.
+  The demo replay has 64/65 assertions: the mobile control-position assertion
+  fails identically with the original Lambda step on the same host. The failure's
+  owner is unconfirmed. `make test-lambda-baseline` passed 7,455/7,455 before
+  the final allocation-failure guard and two-tile fixture; those changes pass
+  focused checks on the final release binary. `make test262-baseline` passed
+  40,261/40,261, with 2,652 skipped and no regressions. The initial runs of
+  these two gates stopped in sibling builds (a missing Radiant object and an
+  input vendor build-directory conflict respectively); their retries passed.
+  **Next:** generalize the three-pigment layout described in PE9 and qualify
+  the mobile layout assertion; do not weaken the assertion.
+- **2026-11-12 — M3 started.** The user authorized changes in Radiant after the
+  missing engine was recorded as [RI-033](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-033--paint-engine-lacks-the-m3-wet-media-kernels).
+  The owner now has a three-pigment wet step over a caller-owned f32 21-plane
+  sheet (PE9, D5.5.2). The standalone paint suite passes 32/32; a focused
+  ten-step two-pigment comparison against `procart.watercolor` differs by at
+  most 1.2e-7 across all planes (`temp/paint_m3/`). The matching fixed-sheet
+  reference golden `paint/proc/paint_wet_reference` passes on all three tiers;
+  the native test checks five of its values and the wet-cell count. This is not
+  full parity or performance qualification. **Next:** implement wet-to-pigment deposit and
+  the Lambda adapter and package integration; the existing watercolor sheet is
+  float64 while the native sheet is f32, so preserve a reference path and handle
+  conversion once, not once per step. Run M3 parity, demo and release-budget gates.
 - **2026-11-09.** Design rulings recorded (in-place writes, `radiant/radiant/paint/`, `lambda-cli` without paint, CPU reference, ZIP container). Survey done: the build includes Radiant sources through `build_lambda_config.json` `source_dirs` and Radiant's `build_targets.json`; `alloc_ndim_arraynum` builds typed arrays; the existing brush serves stroke, stroke_step and retouch in `image_edit.cpp`; its goldens check relations rather than exact pixels. **Next:** write the M0a engine and its unit tests.
 - **2026-11-09, later.** M0a done; M0b and M0c written and type-checked.
   - **Blocker:** `lambda.exe` does not build at HEAD `1c2da4bfd`, for a reason unrelated to paint. Commit `4abce6d5e` ("lambda mvp") added an `output_destination` parameter to the forward declarations of `expression`, `statements` and `direct_call` in `lambda/runtime/mvp/mvp_mir.cpp`, but not to their definitions or callers, so the calls are ambiguous.
@@ -128,3 +299,20 @@
   - **Open (needs a ruling).** On AUTO, promoted `present` and `frame` still share the layer. `radiant.paint_present` only reads its arguments, but nothing says so: MVP captures every container passed to a system or host function, and the retention scan counts the call as keeping `l`, so `frame` captures `s.layer` too. Disabling promotion of just those two functions gives the T0 counts. The registry carries no argument-retention fact, and a result type cannot prove it (a returned array could be one of the layer's tiles). T0 does not copy only because it skips this protection, which is a defect: `reverse`, `take`, `slice` and `++` results see a later write to their argument's elements on T0 (LR12-47). The principled fix is store-side: the natives' result builders mark the argument elements they insert (S9.3.1), after which neither tier needs to capture native arguments.
 - **2026-11-11 — Read-only natives (D7.6.5).** The user chose a registration flag over a store-side change to all natives. `JUBE_FN_READS_ARGS` (`SysFuncInfo::reads_args`) promises that a host function keeps no part of its arguments and returns none; MVP passes binding arguments to it uncaptured, and the retention scan does not count the call. `radiant.paint_present`, `paint_sample`, `paint_tiles_encode` and `paint_tiles_decode` carry it. Two refinements were needed before AUTO matched T0: a final callee keeps a bare argument only if it retains its parameter as a root (`layer.present` keeps only `l.width` and `l.height` in a list), and a pure `fn` callee cannot make a reentry that writes the caller's root (S12.1.1v3), so MVP no longer captures a binding passed to an imported `fn` that keeps part of its parameter. The demo replay now writes 38 tiles in place and copies 19 on both T0 and AUTO (it copied all 57 before today). `proc/var_retained_import.ls` gained a part-retention case through a wrapper. LR12-47 (T0 passing native arguments uncaptured) stays open.
 - **2026-11-11 — LR12-47 fixed.** The built-in kernels now capture the argument items they place in a result (S9.3.1), which also fixed writes through the result reaching the argument on both tiers. The paint natives already marked the tiles they share. The demo replay is unchanged: 46/46 assertions, 38 tiles written in place and 19 copied on T0 and AUTO. Record: [fixed ledger](<../Lambda_Issue_Ledger (fixed).md#lr12-47>).
+- **2026-11-12 — M2 complete (uncommitted).** The user asked to proceed to M2 (pigment and bristle).
+  - **Engine (Radiant, `radiant/paint/`).** `paint_pigment.cpp` holds the pigment medium (PE8): deposit, film smudge, KM display with lighting (PE7 step 5) and `paint_pigment_dry`. `paint_bristle.cpp` holds the bristle trails (PE10). `paint.hpp` gains the `pigment` format, `bands` and `substrate` on `PaintTiles`, a pigment table on `PaintDabParams`, lighting on `PaintPresentParams`, and the bristle state layout. The rgba compositing step and the film deposit moved to `paint_internal.hpp`, so dabs and bristles share them. `test_paint_gtest` passes 30/30 (13 new) and `make lint` passes.
+  - **Bridge.** Pigment layers (`bands`, `substrate`, substrate-filled fresh tiles), the `pigments` option, smudge state of 2B + 1 fields, lit `paint_present`, and four new natives: `paint_dried`, `paint_dry(var)`, `paint_bristles` and `paint_bristle_stroke(var)`. The in-place forms share `paint_unshare_touched`. Capabilities report formats, bands and bristle limits.
+  - **Package.** `media.ls` (pigments, the pigment table, lighting), pigment layers in `layer.ls`, brush `amount` and `thickness` and the `bristle` kind in `brush.ls`, pigment and bristle batches in `stroke.ls`, the libmypaint rows' pigment fields in `dynamics.ls`, and sessions with `medium`, `lighting`, `dry` and `with_lighting`. Painting files keep a pigment layer's bands and substrate. The facade adds `pigment`, `lighting`, `dried`, `dry_layer`, `dry` and `with_lighting`.
+  - **Demo.** A Medium menu (Pixel, Oil), Dry and Light actions, and Bristle and Oil brushes. `test/ui/paint/demo.json` gains an oil scenario: yellow and blue mixing green, Dry, Light, a bristle stroke, export and switching back.
+  - **Acceptance.** Blue over yellow mixes toward green: in the engine, in `paint_pigment.ls` (with commuting deposit) and in the demo, where the overlap reads 59, 150, 54. The KM identity tests pass: clean film, white, black, pure absorber, R∞, drying and glazes. Bristle depletion is visible along a long stroke: the end of a 300-pixel trail carries under 40% of its start's coverage. The pigment budget is met: 97 M covered px/s at B = 3 in a release build, against 50 M.
+  - **JIT defect found and fixed (LR12-48).** `(string(ld.format) == "pigment") ^ { false }` in `painting.ls` failed MVP admission, which took the whole package off the JIT. The handler's pass arm now takes the operand's static contract, as the planner does. New golden: `proc/handler_static_contract.ls`.
+  - **Evidence.** The paint and image goldens (39 runs) pass on interp, JIT and AUTO, and also under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` with `LAMBDA_FUNC_JIT_THRESHOLD=2`. Gates: `test_lambda_gtest` 2,311/2,311; the JIT pass fails only its pre-existing 8; `test_interp_gtest` fails 3, all among yesterday's 10; `test_lambda_runtime_gtest` 332/332. The demo replay passes 64/64 on AUTO and interp. Its run under forced GC was stopped unfinished when the session wrapped up, so the extended replay is not yet verified under GC stress; the paint goldens are.
+  - **Open.** The rgba dab kernel covers about 117 M px/s in release, under the 200 M pixel-medium budget of §5. That budget belongs to M0, and this is its first measurement; the kernel's per-pixel mask is not vectorized (PE12). Interactive latency (M1) is still unmeasured. Every `pigment(colour)` scatters at 3, so thin films are veils, not clear glazes; a transparency parameter is open. Resolved colours for pigment layers wait for PT16. LR12-49 (MVP refuses the demo presenter's `sync`) predates M2.
+  - **Next:** M3, the native wet step (PE9) with parity against `procart.watercolor`.
+- **2026-11-12 — LR12-49: the presenter compiles and promotes.**
+  - **Cause.** `let color = model.hex(st.color)^` exposed a compiler-wide mismatch: MVP planned the inferred binding from the call AST's string success type, but `direct_call` discharged the error with a NULL source. `propagated_value` therefore saw only the untyped callee's generic Item contract. The unknown Item could not enter the planned native string pointer lane (S7.6.3v3, D2.3.4–D2.3.5). The NULL also explains the diagnostic's byte 0.
+  - **Fix.** Pass the call AST to the existing propagation helper. The demo and the conversion rules are unchanged. `proc/propagated_inferred_call.ls` reproduces the refusal without the DOM; it also checks float and array results, values held across allocation, and an argument error skipping later writes. The eager MVP emission gate runs it under normal, seeded and every-allocation GC.
+  - **Focused evidence.** The original executable passes the fixture on T0 and rejects eager JIT. After the fix it agrees on interp, AUTO and JIT, with and without every-allocation GC and poisoning (6/6). Four focused emission methods pass, including the existing propagation, logical-carrier and string-outcome cases. The original presenter imports under eager JIT. The demo replay passes 64/64 assertions on AUTO and JIT with damage verification, and AUTO logs confirm `sync`'s satellite is compiled and published.
+  - **Aggregate evidence.** `make test-lambda-baseline` passes 7,427/7,427 checks across 40 suites, including 2,312/2,312 goldens, 368/368 MIR GC stress cases and 66/66 MVP emission/ownership cases. `make test262-baseline` passes 40,261/40,261 admitted tests (2,652 excluded), with zero failures or regressions. The release executable also passes the new fixture on eager JIT, normally and under every-allocation GC with poisoning.
+  - **Limit.** The full demo replay with every-allocation GC and poisoning exceeded the investigation's 120-second budget during initialization. It remains unqualified under that stress setting; the focused fixture's stress runs pass. No performance measurement was made. Evidence: `temp/lr12-49/`; resolution: [LR12-49](<../Lambda_Issue_Ledger (fixed).md#lr12-49>).
+

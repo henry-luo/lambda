@@ -3,6 +3,7 @@
 // a time in a procedure, because every step updates the sheet in place (S12.1.1v3 / S9.1.3v3).
 import rng: lambda.procart.rng
 import wc: lambda.procart.watercolor
+import wet: lambda.paint.wet
 
 let Sheet = wc.Sheet
 
@@ -242,11 +243,7 @@ pub pn advance(st) map^ {
     let due = [for (item in slice(st.plan, st.cursor, len(st.plan)^)^ where item.frame <= st.frame) item]
     for (item in [*due, *st.pending]) { perform(sheet, item)^ }
     if (st.drag != null and not st.drag.moved) { wc.stamp(sheet, brush(st, st.drag.x, st.drag.y, FLOW_STRENGTH))^ }
-    var k: int = 0
-    while (k < STEPS_PER_FRAME) {
-        wc.step(sheet, adsorption^, settings(st))^
-        k = k + 1
-    }
+    wet.step(sheet, adsorption^, settings(st), STEPS_PER_FRAME)^
     wc.render(rgba, sheet, optics^, st.full or st.frame % 20 == 0, st.water)^
     let swatches = if (st.full or len(st.swatches) == 0) wc.swatches(pigments)^ else st.swatches
     let next = {*:st,sheet:sheet,rgba:rgba,cursor:st.cursor + len(due),frame:st.frame + 1,pending:[],full:false,swatches:swatches,

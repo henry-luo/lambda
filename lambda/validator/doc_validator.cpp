@@ -14,17 +14,11 @@
 #include "lib/memtrack.h"
 #include "../runtime/transpiler.hpp"
 #include "../runtime/ast_build.hpp"
-#include "validator.hpp"
+#include "validator_internal.hpp"
 #include "lambda/core/mark_reader.hpp"
 #include "../runtime/lambda-error.h"
 
 ArrayList* arraylist_new(size_t initial_capacity);
-
-// C++ function declarations (no extern "C" needed)
-Transpiler* transpiler_create(Pool* pool);
-void transpiler_destroy(Transpiler* transpiler);
-AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source,
-    const char* source_path);
 
 static void validator_schema_runtime_cleanup(void* owner) {
     runtime_cleanup_ast_prebuild_worker((Runtime*)owner);

@@ -27,7 +27,7 @@ concurrent unrelated changes were preserved. No staging or commits were performe
   existing file anchors and SQLite supply filesystem/transaction mechanisms.
 - Eleven new executable fixtures have goldens; one `mod_*` helper owns the
   explicitly trusted local exchange used in tests. No test harness was modified.
-- Fixed and archived LR07-68, LR12-45 and LR12-46 with root-cause evidence.
+- Fixed and archived LR07-68, LR12-51 and LR12-52 with root-cause evidence.
   LR07-69, the existing missing general dynamic builtin-call adapter, stays open.
   Direct native APIs are qualified; no per-crypto ABI exception was introduced.
 - Final Lambda baseline: **7,458/7,458**, all 40 suites; runtime **2,347/2,347**;

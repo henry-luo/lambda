@@ -71,7 +71,7 @@ def expect_static_runtime_providers(module, platform_name: str) -> None:
             expected = f'lib{provider}.a'
             if expected not in generated:
                 fail(f"{platform_name} runtime host omitted static provider {provider}")
-        if dependencies == ["lambda-runtime-full"] and 'liblambda-radiant-adapter-cpp.a' not in generated:
+        if "lambda-runtime-full" in dependencies and 'liblambda-radiant-adapter-cpp.a' not in generated:
             fail(f"{platform_name} validation host omitted the Lambda Radiant adapter")
         if option not in generated:
             fail(f"{platform_name} runtime test host omitted the D9.4.6 export allowlist")
@@ -410,6 +410,21 @@ def expect_owned_test_source_resolution(module) -> None:
             fail(f'test source {source} did not resolve to its owner: {actual}')
 
 
+def expect_nested_test_source_generation(module) -> None:
+    (ROOT / 'temp').mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=ROOT / 'temp') as scratch:
+        source = Path(scratch) / 'test' / 'test_nested_owner.cpp'
+        source.parent.mkdir()
+        source.touch()
+        relative = os.path.relpath(source, ROOT)
+        generator = linux_validation_generator(module)
+        captured = []
+        generator._generate_single_test = lambda *args: captured.append(args[1])
+        generator._generate_test_suite({'tests': [{'source': relative, 'binary': 'test_nested_owner.exe'}]})
+        if captured != [relative]:
+            fail(f'nested owner test source was not generated: {captured}')
+
+
 def expect_static_module_archive_profiles() -> None:
     spec = importlib.util.spec_from_file_location(
         "static_module_patcher", ROOT / "utils" / "patch_static_module_makefile.py")
@@ -668,6 +683,7 @@ def main() -> int:
     expect_safety_early_profiles(module)
     expect_cli_sibling_roots(module)
     expect_owned_test_source_resolution(module)
+    expect_nested_test_source_generation(module)
     expect_profile_isolated_archives(module)
     expect_static_runtime_providers(module, "macos")
     expect_static_runtime_providers(module, "linux")

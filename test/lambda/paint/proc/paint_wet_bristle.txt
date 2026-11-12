@@ -1,0 +1,9 @@
+{
+  painted: true,
+  other: true,
+  split: true,
+  lanes: true,
+  snapshot: true,
+  bounds: true,
+  invalid: true
+}

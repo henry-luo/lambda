@@ -35,6 +35,7 @@ MIR_EMISSION_METHODS = (
     'test_confined_array_snapshots',
     'test_snapshot_loop_lifetime',
     'test_propagation_outcomes',
+    'test_propagated_inferred_call',
     'test_string_outcome_appends',
     'test_owned_string_append_transfers',
     'test_unused_array_binders',
@@ -858,6 +859,11 @@ class LambdaMirMvpTests(unittest.TestCase):
         branches = [m for m in re.finditer(r"\tb(?:ge|gt|le|lt)\t", body)]
         self.assertTrue(branches)
         self.assertLess(last_alloca, branches[0].start())
+
+    def test_propagated_inferred_call(self):
+        # S7.6.3v3/D2.3.4: eager compilation must keep inferred success lanes
+        # for untyped calls, including defensive carets and rejected arguments.
+        self.check_gc_fixtures((ROOT / "test/lambda/proc/propagated_inferred_call.ls",))
 
     def test_propagation_outcomes(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_propagation.ls"

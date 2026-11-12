@@ -73,3 +73,7 @@ and publication. Field lookup is shared with MVP; nested bodies that replace
 
 These changes implement existing rulings. They change no language ruling,
 golden oracle, vendor source, or sibling project source.
+
+## Subsequent census resolution — 2026-11-12
+
+The later [LR07-70 follow-up](<Lambda_Impl_Ledger_Ruled_Followup (done).md>) repairs the five stable differences and qualifies the full census; the earlier observations above remain historical (S1.6, D8.3.1).

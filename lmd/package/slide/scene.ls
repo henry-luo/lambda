@@ -53,7 +53,7 @@ pub fn flatten_objects(objects) => [for (obj in objects) for (entry in [obj, *fl
 
 pub fn build(node, index, width, height, theme = 'light', layouts = {}, source_path = null) map^ {
     let path = c.value(source_path, "s" ++ string(index))
-    let checked_5 = c.attributes(node, ["id", "title", "background", "layout", "theme", *transitions.attributes], path)^;
+    let checked_5 = c.attributes(node, ["id", "title", "background", "layout", "theme", "hidden", *transitions.attributes], path)^;
     let checked_6 = c.numbers(node, ["transition_duration", "advance_after"], false, path)^;
     let checked_id = if (node.id != null and not c.text_id(node.id)) raise c.fail(path, "ID must be nonempty text")
     let layout_name = c.value(node.layout, 'blank')
@@ -69,6 +69,7 @@ pub fn build(node, index, width, height, theme = 'light', layouts = {}, source_p
     let checked_variant = if (not contains(transitions.descriptor(transition).variants,variant)) raise c.fail(path,"invalid transition variant")
     let checked_advance = if (node.advance_after != null and node.advance_after < 0.0) raise c.fail(path,"negative advance delay")
     let checked_click = if (node.advance_on_click != null and not (node.advance_on_click is bool)) raise c.fail(path,"advance_on_click must be bool")
+    let checked_hidden = if (node.hidden != null and not (node.hidden is bool)) raise c.fail(path,"hidden must be bool")
     let sound = node.transition_sound
     let checked_sound = if (sound != null and (not (sound is map) or not (sound.src is string) or trim(sound.src) == "" or not (sound.name is string)))
         raise c.fail(path,"transition_sound needs a name and nonempty src string")
@@ -84,5 +85,5 @@ pub fn build(node, index, width, height, theme = 'light', layouts = {}, source_p
     {id: c.node_id(node, path), index: index, objects: objects, targets: flat,
         source: node, palette: palette, notes: c.children(node, 'notes'), transition: transition,
         transition_duration: c.num(node, "transition_duration", 300.0), direction: direction, transition_variant:variant, transition_sound:sound,
-        advance_on_click:c.value(node.advance_on_click,true),advance_after:node.advance_after}
+        advance_on_click:c.value(node.advance_on_click,true),advance_after:node.advance_after,hidden:c.value(node.hidden,false)}
 }

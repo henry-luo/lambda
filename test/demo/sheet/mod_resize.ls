@@ -11,7 +11,7 @@ pub pn begin(owner,st,evt,divider) {
     let index=int(dom.get_attribute(divider,"data-index"))
     let box=dom.bounding_box(dom.parent_element(divider))
     let size=(if (axis=="column") box.width else box.height)/st.zoom
-    let gesture=capture.capture(port(owner),evt,divider)
+    let gesture=capture.capture(dom.closest(divider,".grid-scroll"),evt,divider)
     return {*:st,selection_click:true,resize_drag:{*:gesture,axis:axis,index:index,
         start:if (axis=="column") evt.clientX else evt.clientY,original:size,value:size}}
 }

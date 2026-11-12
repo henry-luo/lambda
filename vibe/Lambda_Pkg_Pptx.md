@@ -54,13 +54,29 @@ The core profile is partial. Numeric custom paths preserve straight, cubic and
 quadratic segments, closing paths and winding holes. Shape fills support solids,
 linear and point-focus circular gradients with alpha, stretched picture fills
 and duotone raster images with opaque endpoints. Guide expressions, arcs, tiled
-or noncircular gradients, pattern fills, SmartArt, advanced effects, embedded OLE/media, animation timing,
+or noncircular gradients, pattern fills, advanced effects, embedded OLE/media, animation timing,
 slide transitions and exact PowerPoint text fitting are diagnosed or outside
-the profile. Tables retain saved cell content; complex merging and theme table
-styles require further work. Native editor scaling can also shift table text paint
+the profile. SmartArt uses saved drawing shapes where available. Valid rectangular
+table merges are retained; inconsistent merge grids and theme table styles require
+further work. Native editor scaling can also shift table text paint
 relative to its otherwise valid cell geometry; exact PowerPoint appearance is
 not qualified. PPTX writing and PowerPoint-compatible round-trip
 layout are separate milestones.
+
+## External corpus follow-up — 2026-11-12
+
+The 20 licensed external decks exercise saved PowerPoint features against the
+package and Slides editor (D9.3.4 and D11.1.2). Rectangular table merges are
+validated against their continuation cells before conversion to HTML row and
+column spans; inconsistent grids retain their original cells and warn. SmartArt
+uses its related saved DrawingML drawing, lowered to ordinary slide objects with
+a partial-support warning. Numeric scatter/bubble and simple pie caches render
+through the shared chart package; nonnumeric scatter axes, multilevel categories,
+and detailed chart styling remain partial or unsupported. Hidden slide flags
+survive import and editing; sequential playback and its clock skip hidden slides,
+while explicit navigation can still select them. Media posters and 3D fallback
+images now report the omitted interactive content. Animation timing, slide
+transitions and PPTX writing remain outside this milestone.
 
 ## Completion record — 2026-10-27
 

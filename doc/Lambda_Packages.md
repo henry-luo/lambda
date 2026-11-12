@@ -90,6 +90,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `latex` | `lambda.doc.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `docx` | `lambda.doc.docx` | Library, bounded import and export profiles | Reads DOCX and writes editable Word packages from HTML elements (§15) | `lambda view report.docx`; `--archive` browses package parts |
 | `pptx` | `lambda.doc.pptx` | Library, initial editable import profile | Reads PowerPoint into slide elements, HTML handouts, text, metadata and diagnostics (§28) | `lambda view deck.pptx`; also `layout`, `render`, document-browser preview and Slides Open |
+| `xlsx` | `lambda.doc.xlsx` | Library, bounded workbook import | Reads spreadsheet values, formulas and basic styles into a semantic workbook (§31) | Sheet demo Open |
 | `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
 | `pdf` | `lambda.doc.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
@@ -1598,6 +1599,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
 | `pptx` | `test/lambda/pptx/`; reproducible synthetic and pinned independent documents in `test/input/pptx/`; `test/ui/pptx_player.json`, `slide_pptx_import.json` and `doc_viewer_pptx_pane.json` |
+| `xlsx` | `test/lambda/xlsx_import.ls`, `test/demo/sheet/tests/sheet_xlsx_test.ls`; synthetic fixtures in `test/input/xlsx/`; `test/ui/sheet_xlsx.json` |
 | `archive` | `test/lambda/archive/` (plan, pages, renderings and search, media and gallery engines over the local fixture site `site/`, service); the demo's model golden and replay in `test/demo/archive/tests/` |
 | `doc.readability` | `test/lambda/readability/` (API and Readability.js-checked pages); the Mozilla corpus by hand with `./lambda.exe run test/lambda/readability/_corpus.ls` |
 | `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
@@ -1704,7 +1706,8 @@ levels; inherited and direct bold, italic, underline, strike, superscript and
 subscript; tabs and breaks; simple lists with numbering starts, continuation
 and nesting, including lists with hidden markers; tables with grid spans and
 vertical merges; hyperlinks and simple bookmarks; embedded raster images;
-and clustered column charts rendered from their cached category/series values.
+and cached clustered-column, numeric scatter/bubble and simple pie charts. Scatter,
+bubble and pie charts are partial approximations and report diagnostics.
 Charts reuse `lambda.chart.chart` for SVG layout (D9.3.4), retain explicit RGB
 series colors and titles, and contribute a data table to extracted text.
 Paragraph-relative column anchors support left/right square wrapping,
@@ -4817,11 +4820,14 @@ non-placeholder decorations, paragraph/run formatting, character and decimal
 list markers, simple rectangles/ellipses/lines, numeric custom paths (including
 holes and Bézier curves), linear and point-focus radial gradients with alpha,
 stretched picture fills and opaque-endpoint duotone image effects. Raster images
-and bounded crops, ordinary table cells, groups, cached clustered-column charts
-and speaker notes are also retained. DrawingML colors support ordered shade/tint,
+and bounded crops, validated rectangular table merges, groups, cached clustered-column,
+numeric scatter/bubble and simple pie charts, and speaker notes are also retained.
+SmartArt can use its saved drawing as a group of slide objects; it remains a partial
+visual import, not an editable SmartArt diagram. DrawingML colors support ordered shade/tint,
 hue/saturation/luminance and alpha modifiers.
-Layout/master content is materialized as editable objects. SmartArt, arbitrary
-guide-based shape geometry, complex table merging/styles, nonuniform text scaling,
+Layout/master content is materialized as editable objects. Hidden slides remain
+in the editable deck and are skipped during sequential playback. Arbitrary
+guide-based shape geometry, malformed table merges and theme table styles, nonuniform text scaling,
 tiled or noncircular gradients, pattern fills, advanced effects, OLE/media, animation timing, transitions
 and exact PowerPoint text fitting remain partial or unsupported and can produce
 warnings. PPTX writing is outside this profile.
@@ -4841,9 +4847,10 @@ See [the profile and acceptance cases](../vibe/Lambda_Pkg_Pptx.md) and
 
 `lambda.paint` paints with brushes on tiled typed-array layers. A Radiant-native engine
 renders the per-pixel work, so painting is available in `lambda.exe` and
-`lambda-headless` but not in `lambda-cli` (**D9.2.2**). It provides layers, round and
-libmypaint-model brushes, MyPaint brush import, smudge and blend modes, strokes with
-continuations, and presentation. Design:
+`lambda-headless` but not in `lambda-cli` (**D9.2.2**). It provides layers in a pixel medium
+and an oil-like pigment medium, round, libmypaint-model and bristle brushes, MyPaint brush
+import, smudge and blend modes, strokes with continuations, and presentation with impasto
+lighting. Design:
 [Lambda_Pkg_Paint.md](../vibe/Lambda_Pkg_Paint.md). Progress:
 [implementation record](../vibe/impl/Lambda_Impl_Paint.md).
 
@@ -4863,6 +4870,46 @@ tile is an `f32` `(64, 64, 4)` array of premultiplied colour, in linear light by
 every untouched tile, so keeping an old layer value is a cheap undo snapshot. The procedures
 `stroke` and `feed` write a layer in place instead (see below).
 `from_pixels`, `import_pixels`, `present` and `pixel` move samples in and out.
+
+**Wet sheets.** `wet_sheet(width, height, seed, scale, wetness, pigments)` creates a watercolor
+sheet compatible with `lambda.procart.watercolor`. `wet_from_reference(sheet)` accepts
+an existing sheet, and `wet_step(var sheet, adsorption, settings, steps)` advances it in
+place. The `adsorption` and `settings` arguments use the watercolor package's tables and
+settings. Both dense f32 and float64 sheets are supported; snapshots retain their prior
+values (**S9.1.2**, **D7.6.4**). `wet_deposit(var layer, var sheet, pigments, rect)`
+transfers dry deposited pigment into a matching pigment layer's film and clears the transferred
+sheet cells. Call `dry_layer` to fold that film into the substrate before a later glaze.
+The transfer rejects wet pigment before writing either value. `wet_layout(pigments)`
+returns the plane count and the suspended, deposited and scratch offsets; the optional
+`pigments` argument to `wet_sheet` selects 1–4,096 pigments and defaults to three.
+The adsorption and pigment tables must have one row per pigment. Passing `null` for
+`rect` selects the full sheet. `wet_sheet` permits up to 1,000,000 cells, subject to a
+total storage budget of 21,000,000 samples; the procedural watercolor reference retains
+its 250,000-cell default and three-pigment layout. For a variable-pigment sheet, use
+`lambda.procart.watercolor.stamp_many(var sheet, brush, pigments)` to add pigment, clear
+water or a blot; the reference's `blank`, `stamp`, `step`, `dry`, `render` and `measure`
+use its fixed three-pigment layout. `wet_stroke(var sheet, brush, color, points, pigment,
+water, previous, options)` applies round, MyPaint and bristle strokes to the selected pigment
+plane. Water is a per-dab load in `[0, 64]`; the colour's alpha controls opacity, while
+the pigment index selects the sheet channel. The optional continuation makes split batches
+match a whole stroke. `options.paper` supplies a grain plane. Bristle pickup mixes the
+selected sheet pigment and water into the bristle; other pigments remain on the sheet.
+Wash mode, erasing, smudge and recolouring effects are not supported on wet sheets. The wet step and transfer
+report work scaled by pigment count.
+`wet_present(sheet, layer, pigments, rect, encode)` presents suspended and deposited pigment
+over the matching three-band pigment layer without modifying either value. It mixes the wet
+sheet and the layer's film using the same Kubelka–Munk calculation as `present`; `rect` is an
+optional half-open pixel rectangle and `encode` is `'srgb'` by default.
+
+```lambda
+import paint: lambda.paint
+import wc: lambda.procart.watercolor
+let Sheet = wc.Sheet
+pn main() {
+    var sheet: Sheet = paint.wet_sheet(512, 512, 7, 2.5, 0.0, 4)^
+    wc.stamp_many(sheet, {kind: "pigment", channel: 3, x: 200.0, y: 200.0, radius: 8.0, strength: 0.7}, 4)^
+}
+```
 
 **Brushes and strokes.** `brush(options)` builds a brush. Kind `'round'`, the default, is a
 simple dab brush:
@@ -4929,6 +4976,46 @@ stroke. Its result carries:
 - `bounds`: the pixels the stroke so far may have changed;
 - `work`: the candidate pixels charged so far, bounded at 128 million per stroke.
 
+**Pigment layers.** `layer(w, h, {format: 'pigment', paper})` is a wet paint film over the
+sRGB `paper` colour (white by default). Each tile is an `f32` `(64, 64, 11)` array holding the
+film's Kubelka–Munk absorption and scattering per colour band, its thickness, the paper's
+reflectance and the dried relief. On a pigment layer a stroke's colour becomes a pigment,
+`pigment(colour)` (`{K, S}`), and brushes take two more options:
+
+| Option | Meaning |
+|---|---|
+| `amount` | Pigment load per unit coverage (1); a small amount gives a thin film the paper shows through |
+| `thickness` | Paint body per unit coverage, which becomes relief (equal to `amount` by default) |
+
+Wet paint mixes by concentration, so blue over wet yellow is green, and the order does not
+matter. `dried(layer)` folds the wet film into the paper and keeps its appearance; strokes over
+dried paint lie over it instead of mixing. `dry_layer(var layer)` does the same in place.
+`present(layer, {lighting: paint.lighting({azimuth, elevation, relief, diffuse, specular,
+shininess})})` lights the paint's relief; a flat film keeps its colour. Wash mode, lock alpha,
+colorize, posterize, blend modes, colour shifts and `background` are rgba-only and are errors
+on a pigment layer.
+
+**Bristle brushes.** `brush({kind: 'bristle', ...})` draws one trail per hair, on either
+medium. The hairs are spread across the brush, which turns with the stroke direction and
+widens with pressure. Each hair lags by its stiffness, spends its paint load along the trail,
+so a long stroke thins out, and can pick up the paint it crosses. The options are `size`,
+`spacing`, `opacity`, `flow`, `aa`, `erase` and `grain` as for round brushes, plus:
+
+| Option | Meaning |
+|---|---|
+| `count` | Number of hairs (24) |
+| `spread` | How far across the brush they reach, in radii (1) |
+| `width` | Each trail's width in pixels |
+| `stiffness`, `stiffness_jitter` | How far a hair lags behind the brush, in [0, 0.99], and its variation |
+| `load`, `load_jitter` | The paint each hair starts with, and its variation |
+| `depletion` | Load spent per pixel of trail at full strength |
+| `pickup` | In [0, 1]: how much of the paint under a hair it takes into its ink |
+| `pressure_spread` | How far pen pressure widens the brush |
+| `seed` | Hair placement; equal seeds paint equal strokes |
+
+A bristle stroke's continuation carries each hair's state in `bristles`, so a split stroke
+equals the whole.
+
 **In-place strokes.** `stroke(var layer, brush, colour, points, options)` is a procedure
 (`pn`). It paints a whole stroke into the layer and returns `{rect, work}`, with the pixels
 `stroke_step` gives from `null`. A build-up stroke writes the layer's tiles through
@@ -4988,6 +5075,17 @@ s = paint.end(s, evt.pointerId)^                       // one undo entry
   stroke's grain reads: an `(h, w)` height array, or a spec `{kind, seed, size}` that
   `paint.paper` builds. A painting file keeps a spec and rebuilds the texture when opened.
 - One stroke paints at a time: `begin` from another pointer first ends the stroke in progress.
+- `session(w, h, {medium: 'pigment', lighting})` paints on a pigment layer over the paper.
+  `lighting` takes `paint.lighting` options, or `false` for flat colour; a light is on by
+  default. Wet strokes mix until `dry(var session)` sets them. `with_lighting(s, lighting)`
+  changes the light, and a painting file keeps the pigment layer.
+- `session(w, h, {medium: 'watercolor', pigments, wet_seed})` adds a wet sheet over a
+  pigment layer. The pigment table defaults to `lambda.procart.watercolor.CLASSIC` and also
+  supplies each pigment's density, staining and granulation. Use `select_wet(s, index, water)`
+  before a stroke, and `step_wet(var s, settings, steps)` to advance the sheet. Frames, undo,
+  redo, cancellation, clear, `color_at`, and PNG export include the sheet. `dry(var s)` settles
+  and transfers its pigment without advancing flow. History budgets include the dense sheet
+  snapshot (**S9.1.2**). Saving a live watercolor session as `.painting` is not yet supported.
 
 [`lambda demo paint`](../test/demo/paint/README.md) is built on this session.
 
@@ -5013,3 +5111,55 @@ read or write them.
 
 `lambda.image`'s `paint_stroke`, `paint_stroke_step` and `retouch` use this brush, with the
 linear profile, for their stroke coverage.
+
+
+## 31. xlsx — Spreadsheet workbook import
+
+`lambda.doc.xlsx` is a shipped script package (**D9.3.4**) that reads a local
+`.xlsx` path or a ZIP root captured with `input(path, "zip")`. It uses the
+shared OPC reader and its relationship and archive admission rules (**D11.1.2**).
+
+```lambda
+import xlsx: lambda.doc.xlsx
+let workbook = xlsx.convert("budget.xlsx")^
+workbook.sheets[0].cells
+```
+
+`convert(source)` and `load(source)` return `{title, date1904, sheets, defined_names,
+metadata, diagnostics}`. Defined names retain their formula and optional worksheet scope. Each sheet has a title, part path, sparse zero-based cells, column
+width ranges, row heights, merged ranges, hidden dimensions, frozen prefixes,
+split-pane geometry and selection, conditional rules and diagnostics. Cells expose their coordinates, XLSX
+type, typed value, raw value, formula, formula type and range, cached-value presence,
+and the supported style projection. Rich shared/inline text is flattened. The
+reader accepts ordinary non-macro XLSX workbooks and rejects invalid or missing
+package parts. Diagnostics report selected unsupported features; their absence
+does not guarantee a lossless import.
+
+The [Sheet demo](../test/demo/sheet/README.md) converts that model to its own
+editable workbook and opens it through **Open**. It supports at most 50 sheets,
+100,000 rows and 1,000 columns per sheet, plus its existing cell and operation
+limits. Imported text, numeric and boolean values, formula source, common
+font/fill/alignment and number styles, and row/column dimensions are retained
+where the demo supports them. Common built-in and custom date/time formats are
+classified and displayed as ISO dates and 24-hour times using the workbook's
+1900 or 1904 calendar; this normalizes presentation rather than reproducing the
+format code. Formulas retain that workbook date system and can reference other
+sheets. Sheet evaluates its supported dynamic-array functions, spills their
+results into the grid, and resolves inline and workbook-defined `LAMBDA` functions;
+the Sheet README specifies the bounded profile. Common formulas recalculate in Sheet;
+otherwise a saved XLSX result is shown until an edit invalidates imported caches.
+Sheet displays imported merged ranges, hidden dimensions, frozen prefixes and
+split panes with independently scrolling views. It applies formula-expression
+rules, numeric cell-comparison rules with constant or formula operands, text and
+blank conditional rules, and RGB differential font/fill styles, in priority
+order with `stopIfTrue`; these styles recalculate with cell values. Conditional
+formulas use the Sheet formula profile and dynamically dispatched calls
+(**S12.3.4v2**, **D7.2.2**). Rules outside Sheet's bounded grid are
+clipped with diagnostics.
+
+This is not a lossless XLSX editor. Shared and legacy array formula expansion, charts and
+drawings, arbitrary custom format fidelity, theme colours and many conditional
+format types are outside this profile. Diagnostics identify unsupported
+conditional rules, protected sheets and workbook structures. Sheet can move
+imported split dividers by pointer or keyboard; creating or removing splits is
+not supported, and live scroll positions are transient. Sheet saves its conversion as `.sheet.json`, not XLSX; the separate chart exporter writes a limited XLSX table.

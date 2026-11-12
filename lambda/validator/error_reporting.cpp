@@ -296,39 +296,7 @@ String* format_validation_path(PathSegment* path, Pool* pool) {
 
     StringBuf* sb = stringbuf_new(pool);
 
-    // Collect path segments in reverse order (path is stored backwards)
-    PathSegment* segments[100];
-    int count = 0;
-    PathSegment* current = path;
-    while (current && count < 100) {
-        segments[count++] = current;
-        current = current->next;
-    }
-
-    // Build path string from root to leaf
-    for (int i = count - 1; i >= 0; i--) {
-        PathSegment* seg = segments[i];
-        switch (seg->type) {
-            case PATH_FIELD:
-                stringbuf_append_format(sb, ".%.*s",
-                    (int)seg->data.field_name.length, seg->data.field_name.str);
-                break;
-            case PATH_INDEX:
-                stringbuf_append_format(sb, "[%ld]", seg->data.index);
-                break;
-            case PATH_ELEMENT:
-                stringbuf_append_format(sb, "<%.*s>",
-                    (int)seg->data.element_tag.length, seg->data.element_tag.str);
-                break;
-            case PATH_ATTRIBUTE:
-                stringbuf_append_format(sb, "@%.*s",
-                    (int)seg->data.attr_name.length, seg->data.attr_name.str);
-                break;
-            case PATH_UNION:
-                stringbuf_append_format(sb, "|%ld", seg->data.index);
-                break;
-        }
-    }
+    print_validation_path(path, sb);
 
     return stringbuf_to_string(sb);
 }
@@ -371,18 +339,19 @@ void print_validation_path(PathSegment* path, StringBuf* sb) {
         return;
     }
 
-    // Print path in reverse order
-    PathSegment* segments[100];
-    int count = 0;
-
+    ArrayList* segments = arraylist_new(16);
     PathSegment* current = path;
-    while (current && count < 100) {
-        segments[count++] = current;
+    // retain the whole path; a diagnostic must not silently lose its root.
+    while (segments && current && arraylist_append(segments, current)) {
         current = current->next;
     }
-
-    for (int i = count - 1; i >= 0; i--) {
-        PathSegment* segment = segments[i];
+    if (!segments || current) {
+        stringbuf_append_str(sb, "(path allocation failed)");
+        if (segments) arraylist_free(segments);
+        return;
+    }
+    for (int i = segments->length - 1; i >= 0; i--) {
+        PathSegment* segment = (PathSegment*)segments->data[i];
         switch (segment->type) {
             case PATH_FIELD:
                 stringbuf_append_format(sb, ".%.*s", (int)segment->data.field_name.length,
@@ -404,4 +373,5 @@ void print_validation_path(PathSegment* path, StringBuf* sb) {
                 break;
         }
     }
+    arraylist_free(segments);
 }

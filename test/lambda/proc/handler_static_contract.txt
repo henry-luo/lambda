@@ -1,0 +1,9 @@
+[{
+    pigmented: true,
+    wide: true,
+    label: "oil"
+  }, {
+    pigmented: false,
+    wide: false,
+    label: "pixel"
+  }]

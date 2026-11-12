@@ -164,6 +164,8 @@ Item dom_cssom_get_document_stylesheets(void);
  * @return Wrapped CSSStyleSheet Item, or ITEM_NULL
  */
 Item dom_cssom_get_element_sheet(Item elem);
+// Keep associated-sheet activation in sync with reflected/content attributes.
+void dom_cssom_owner_attribute_changed(void* element, const char* name);
 
 /** Neuter CSSOM native payloads before their document pool is destroyed. */
 void dom_cssom_invalidate_document(void* doc);

@@ -26,6 +26,30 @@ take an `L` suffix (`JS05-L1`) so the two numbering spaces cannot collide.
 
 ## 3. Value model, memory & GC interop (JS03)
 
+### JS03-L2 — iframe load crashes under forced collection in current-source host — **OPEN**
+
+Found 2026-11-12 during the online visual comparison gate. Precise ownership
+must follow **D6.3.3 / D6.4.1**. Cause is **unconfirmed**; this does not block
+the selected major visual repairs, but the aggregate Radiant gate remains red.
+
+`test/test_ui_automation_gtest.exe
+--gtest_filter=UIAutomation/UIAutomationTest.RunTest/dom_iframe_retire`
+fails two of six assertions. The fixture forces collection on every allocation
+and poisons freed memory. Its parent loads an embedded Markdown document and
+then removes the iframe from a Lambda callback. The rebuilt host reports
+`execute_document_scripts: recovered from crash in JS JIT code` before the
+embedded document is available. No renderer assertion or test expectation was
+weakened.
+
+The saved older executable passes 3/3, but predates the current committed source.
+A separate current-source control replaces every changed Radiant object with
+its `git show HEAD` source while retaining the same runtime/adapter/input
+objects. Both that control and the repaired host fail 3/3, so the issue predates
+the native repairs in this round. Evidence: `temp/online-visual/pristine-build.py`,
+`pristine-build.log`, `iframe-pristine-{0,1,2}.log`, `iframe-after-{0,1,2}.log`
+and `iframe-direct-after.log`. The other aggregate outcomes were 8,163 passing,
+299 partial and 20 skipped cases.
+
 ### JS03-L1 — durable JS native state retains raw wide-scalar `Item`s — **OPEN**
 
 **Found:** 2026-09-14 during LR08-4's post-fix ownership audit.
@@ -109,6 +133,42 @@ ownership. Add default-MIR and forced-GC regressions for both probes.
 3. **Module-var ceiling is a hard 2048.** `JS_MAX_MODULE_VARS` (`js_runtime_state.hpp:21`) is fixed; `js_set_module_var` silently drops out-of-range indices (`cpp:124`). A module with >2048 top-level bindings would lose writes rather than grow.
 4. **Sentinel values still exist.** `JS_DELETED_SENTINEL_VAL` no longer reuses the INT tag, but it remains a raw non-value `Item` in dense arrays; `ITEM_JS_TDZ` still reuses the UNDEFINED tag. Code that scans dense array items must preserve hole checks. The deleted-sentinel cleanup boundary is tracked in detail in JS06.
 5. **Batch reset is a long manual fan-out.** `js_batch_reset` (`js_runtime_state.cpp:271`) hand-enumerates ~30 per-subsystem reset calls; a new stateful module that forgets to register a reset leaks across test262 cases. `js_assert_batch_runtime_state_clear` catches only the capsule fields, not module-private statics.
+
+## 4. Expressions, references & operators (JS04)
+
+### JS04-L1 — Optional deletion throws in the AST interpreter — **RESOLVED**
+
+Found and fixed 2026-11-12. **D8.4.4** requires one semantic contract across
+AST/AUTO/MIR; **D8.4.3** also routes dynamic source through the AST. Precise
+receiver/key ownership remains **D6.3**. No design ruling changed.
+
+RFC Editor's Nuxt/Vue application replaced its home page with Error 500 and
+TypeError. LLDB isolates `delete i.props?.ref` in Vue's vnode handling
+(member span 274284..274296). The AST delete path used ordinary reference
+evaluation, coercing a nullish optional base and throwing before deletion.
+The same script already succeeds in MIR and Node. A minimal reproduction is
+`delete ({}).props?.ref`, which must return true. Earlier array-sort exceptions
+in the application are caught library feature probes, not this root cause.
+
+Delete now requests optional short-circuit information from reference
+evaluation and returns true before evaluating a skipped key or delete trap.
+Member reads, calls and optional deletion reuse one member-base helper,
+preserving grouping, receiver identity and ordinary assignment behavior.
+`optional_chain_delete.js` has 15 Node-checked golden results for null/undefined,
+continuations and calls, skipped computed keys, one-time base evaluation,
+real deletion, getter avoidance, Proxy traps, grouping, nonconfigurable and
+strict deletion, and an unresolved base. All pass in AST and MIR; seven
+short-circuit cases throw before repair in AST.
+
+All 574 AST baseline tests and 14 MIR optional/deletion/super neighbors pass,
+as do 630 JavaScript layout cases and both DOM UI integration fixtures.
+The live RFC Editor home page now retains its heading, search and RFC cards.
+Validation uses the compatible host with an exact copy of the current repaired
+js_interp.cpp; the main checkout's unrelated paint API mismatch remains.
+Evidence: `temp/online-visual-round6/{rfc-detail.log,delete-before-ast-output.log,
+delete-after-ast-output.log,delete-after-mir-output.log,js-baseline-ast-final.log,
+rfc-live.png}`. No framework code, expected failure, admission limit or capture
+deadline was changed.
 
 ## 5. Functions, closures & scope (JS05)
 
@@ -462,6 +522,170 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
+
+### JS13-L6 — Existing details elements lack their JavaScript interface — **FIXED**
+
+Found 2026-11-12. Native/runtime ownership follows **D9.1.1v4 / D9.1.3v2**.
+The native tag-interface registry omitted `details`, although native `open`
+reflection, summary activation and exclusive groups already existed. Join's
+company-page module checks `instanceof HTMLDetailsElement` in its language
+switcher before installing section-reveal observers, and raised ReferenceError.
+
+The registry now maps `details` to `HTMLDetailsElement`. The existing installer
+creates a distinct illegal constructor and its prototype under `HTMLElement`;
+parsed and created wrappers use that same registry. No generic-interface alias
+or page-specific branch is added. `test/ui/dom/details_interface` checks global
+identity, parsed/created branding, negative branding, prototype/constructor
+identity, string tag, illegal construction, native reflection, continuation
+pixels and summary activation: previous renderer 0/9, repaired renderer 9/9.
+The existing resource-interface control passes 5/5.
+
+Join's live startup exception disappears, but its main content remains hidden
+at the selected virtual frame. This is not a major-page clearance. In an
+archived read-only trace, its reveal attribute is set at virtual time zero;
+the authored opacity transition is a separate observation. Capture must not
+advance time merely to finish that transition (**D10.1.7**). Evidence:
+`temp/online-visual-round11/{ui-before.log,ui-final.log,join-live-after-lambda.log,join-no-geometry-results.log}`.
+
+### JS13-L7 — Initial geometry-observer sampling depends on a page geometry read — **FIXED**
+
+Found 2026-11-12. The shared DOM checkpoint follows **D9.1.1v4 / D9.1.3v2**;
+snapshot sampling retains the selected frame (**D10.1.7**).
+`observer_sample_geometry` skipped targets whose document had no view tree,
+before reaching the geometry operation that could establish the first layout.
+A standalone export has no later interactive runtime turn to recover the
+initial sample. A script observing a visible box styled with `opacity:0` never
+received its first intersection/resize callback unless something else queried
+geometry first.
+
+Sampling now calls the existing `dom_ensure_geometry_snapshot` checkpoint.
+Its host-driven loading/commit and reentry guards remain authoritative; the
+observer's sampling guard prevents recursive sampling during layout. No timer,
+threshold, admission limit or capture deadline changes. The standalone PNG
+regressions cover initial visible intersection, initial settled resize,
+initial offscreen notification and disconnect-before-delivery. With no page
+geometry reads, the previous renderer fails the first three; all four pass
+after the repair. The clip and CSSOM PNG suites reuse a common fixture runner
+with these tests, and retain their original pixel expectations.
+
+Qualification: 32 real CLI cases, seven DOM UI fixtures (50 assertions),
+574 AST baseline cases, 3,851 recorded static layout cases (six skips), 630
+JavaScript layout cases and five comparator tests pass. This repair is
+independently reduced; it is not assigned as Join's remaining visual cause.
+Evidence: `temp/online-visual-round11/{observers-before.log,cli-final.log,ui-final.log,js-baseline-ast.log,layout-static.log,layout-js.log}`.
+
+### JS13-L4 — Missing serviceWorker.ready aborts application startup — **FIXED**
+
+Found 2026-11-12. Native/runtime ownership follows **D9.1.1v4 / D9.1.3v2**;
+the published promise uses precise **D6.3** roots. The existing headless
+`navigator.serviceWorker` object installed register/getRegistrations but omitted
+`ready`. Greenlist's admitted 83KiB main bundle reads
+`navigator.serviceWorker.ready.then(...)` after ReactDOM.render and throws a
+TypeError. LLDB isolates that final uncaught member read; earlier exceptions
+are caught library feature probes. This source is identical in the current
+checkout and the compatible capture host before repair.
+
+The existing empty-registry profile now publishes one read-only pending promise,
+rooted along with its property descriptor until the navigator retains it.
+[Service Workers §3.4.2](https://w3c.github.io/ServiceWorker/#dom-serviceworkercontainer-ready)
+requires readiness to wait for a matching active registration. No registration
+or success value is fabricated. `test/ui/dom/service_worker_ready` checks the
+Promise, identity, read-only value, empty registration array and pending state
+after microtasks: all six assertions pass and the previous qualified host fails.
+The isolated real-bundle bootstrap no longer reaches its exception handler.
+Greenlist's live capture still lacks styling and hero content; that residual
+cause is unconfirmed and is not declared repaired by removing this exception.
+Evidence: `temp/online-visual-round5/{greenlist-lldb-python.log,greenlist-ready.json,ready-final-ui-result.json}`.
+
+### JS13-L5 — Service-worker execution and registration lifecycle — **FEATURE GAP**
+
+Observed 2026-11-12 while isolating JS13-L4. Ownership **D9.1.1v4 / D9.1.3v2**.
+The existing headless container returns an empty getRegistrations result and
+register resolves a placeholder object. It does not fetch/run worker scripts,
+persist registrations, activate workers or dispatch fetch events. JS13-L4 only
+completes empty-registry readiness; it does not qualify a full branded
+ServiceWorkerContainer IDL surface or that existing register placeholder.
+Implementing the worker subsystem is a major missing feature outside this
+online bug-fix round, not a blocker to unrelated layout or snapshot work.
+No remaining page omission is assigned to this gap without page-specific proof.
+
+### JS13-L3 — Root theme mutation is dropped below a Document proxy — **FIXED**
+
+Found 2026-11-12. DOM/host ownership follows **D9.1.1v4 / D9.1.3v2**;
+snapshot state follows **D10.1.7**. This blocks correct theme updates on the
+Supabase online pages, without requiring a new rendering feature.
+
+Confirmed root cause: `dom_js_record_cascade_root` promotes an attribute edit to
+its parent when structural selectors exist. The element-shaped Document proxy
+is the HTML root's DOM parent, but is outside the rendered root. The subsequent
+connection check drops the edit, while incremental reconciliation still reports
+success. An unrelated `.shiki:has(> [data-wrapped=true]) .code-content` rule is
+enough to trigger it. A 159-check CSS reduction leaves four rules: root color
+variables, a light-theme attribute rule, the unrelated structural rule and the
+body background. Static light attributes work; setting them from script fails.
+
+`StyleEpochTest.DocumentElementMutationRetainsRootBelowDocumentProxy` reproduces
+the lost inherited value (10px instead of 600px). The fix selects a parent only
+if it belongs to the rendered tree; it preserves the Document proxy and DOM
+parent relationships. The regression fails before and passes after repair;
+all 38 StyleEpoch tests pass. Supabase's home capture now selects light and
+its mean color error drops from 89% to 2.4%. The customer page also selects
+light but still lacks its main content; clearing a coarse threshold does not
+qualify that separate behavior. The aggregate Radiant gate retains only the
+previously reproduced JS03-L2 iframe failure. Evidence:
+`temp/online-visual-round2/theme-min-rules.json`, `supabase-full-output.log`,
+`test-theme-before.log`, and the original/focused browser/native captures.
+
+### JS13-L2 — ShadowRoot APIs do not provide full composed-tree rendering — **PARTIAL**
+
+Observed 2026-11-12 in the online comparison. Native/runtime boundaries follow
+**D9.1.1v4 / D9.1.3v2**. This is a major missing rendering feature outside the
+user-authorized bug/incomplete-existing-feature milestone; it is not an online
+capture blocker and is not implemented in this round.
+
+`lambda/dom/dom.cpp::dom_core_attach_shadow` creates a stable fragment-backed
+root and exposes host/mode/focus behavior. Its source explicitly states that
+Radiant does not yet render a full shadow tree. WebAssembly.org's
+`dark-mode-toggle.min.mjs` constructs its controls and stylesheet in
+`this.attachShadow({mode:"open"})`. Supporting that API object does not qualify
+its composed layout, shadow-scoped CSS or control rendering. The downloaded
+module and page are retained under `temp/online-visual/`; the module is also in
+the normal resource cache. This does not establish Shadow DOM as the cause of
+every remaining blank page or of that site's remaining theme mismatch.
+
+### JS13-L1 — snapshot script admission can leave the whole document hidden — **OPEN**
+
+Found 2026-11-12. Browser execution belongs to **D8.4**; finite snapshot time
+belongs to **D10.1.7**. This limits full application-page fidelity, but does not
+block unrelated CSS/layout repairs. No admission limit was raised for matching.
+
+`lambda.exe render https://payloadcms.com/ -o temp/online-visual/payload.png
+-vw 1200 -vh 800` completes with a white image. Its authored CSS sets
+`html { opacity:0 }` until application code installs `data-theme`. The log shows
+three async bundles of 201,060, 241,382 and 248,319 bytes skipped by
+`JS_PRELAYOUT_DEFER_BUDGET_BYTES` (128 KiB) in
+`lambda/module/radiant/script_runner.cpp`. Skipped tasks are not later executed
+for this one-shot snapshot. Source and total admission limits also exist;
+large framework pages cannot be treated as fully executed merely because the
+document loader and PNG encoder return success.
+
+The immediate hidden-root condition and script admission decisions are confirmed.
+Whether admitting the complete application would encounter other unsupported
+APIs is unconfirmed. Forcing opacity/theme, removing application scripts, or
+advancing arbitrary wall-clock animation would conceal the missing execution.
+Evidence: `temp/online-visual/payloadcms.com.html`, downloaded CSS in that
+directory, `payload-tree.json` (root opacity zero), and
+`probes/saas_landing_313-lambda.log`. Many Framer/app pages also have large visual
+differences, but a shared cause has not been established for every page.
+
+Second-review qualification: after the root theme and media repairs, visual
+inspection still finds major missing content on Supabase customers, Pitch,
+Cofounder and Banky even though their mostly white or restored-background
+captures fall below the coarse threshold. These cases remain in the audited
+queue. Their individual render logs, authored sources and browser diagnostics
+are preserved in `temp/online-visual-round2/` and
+`test/online/snapshots/visual_comparison_review_round2.json`. This does not
+establish script admission as the shared cause of all four omissions.
 
 ### JS13 known issues
 

@@ -13,6 +13,18 @@ pub fn instance_id(v) => v is string and len(v) > 0 and all([for (i in 0 to len(
     contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-", v[i])])
 pub fn fail(path, message) error => error("slide: " ++ path ++ ": " ++ message)
 
+// Hidden slides remain addressable, but sequential playback and its clock skip them.
+pub fn visible_index(plan,index,forward=true) int {
+    let candidates = [for (i,scene in plan.slides where not scene.hidden and (if (forward) i>index else i<index)) i];
+    if (len(candidates)==0) -1 else int(if (forward) candidates[0] else candidates[last]) ^ { -1 }
+}
+pub fn first_visible(plan) int { let index = visible_index(plan,-1); if (index<0) 0 else index }
+pub fn last_visible(plan) int {
+    let count = len(plan.slides) ^ { 0 }
+    let index = visible_index(plan,count,false);
+    if (index<0) 0 else index
+}
+
 pub fn attributes(node, allowed, path) bool^ {
     let invalid = [for (key, v in node where (((key is symbol or key is string) and not contains(allowed, string(key))) ^ { false })) string(key)]
     if (len(invalid) > 0) raise fail(path, "unsupported attribute " ++ invalid[0])

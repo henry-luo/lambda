@@ -2,9 +2,11 @@
 
 > **Status:** proposal, 2026-11-09, requested by the user after a research discussion of artistic-effect libraries (G'MIC, painty), Krita's brush engines and libmypaint. Before drafting, the user decided four points on 2026-11-09: the new engine **replaces** `lambda.image`'s native round-dab brush (PT13); the native media scope covers **dabs with smudge and blending, pigment mixing, wet media and bristle brushes** (PT5); interactive painting ships first as a **new `lambda demo paint` with pen pressure and tilt** (PT10); and automated conversion targets **oil/impasto, watercolor, pencil/ink sketch and impressionist dabs** (PT11). A second round on 2026-11-09 ruled that native kernels **write in place** through `var` borrows (PT7), placed the engine at **`radiant/radiant/paint/`** (PE2), and accepted that **`lambda-cli` has no paint engine** (PT15). The same round asked how a painting loads without replaying its strokes, whether replay can be batched, and whether the GPU can paint. The answers are PT12, PT16 and PT17. The user then ruled that the CPU engine is the pixel reference and that GPU output is accepted within tolerance (PT17). PT12, PT16 and the rest of PT17 remain proposals. Everything not marked USER is proposed.
 >
-> **Implementation:** the user asked to proceed on 2026-11-09 and chose a `.kra`-like ZIP container for painting files (PT12). M0 is implemented: the engine kernels, the `radiant.paint_*` bridge, the package core, and `lambda.image`'s brush running on `lambda.paint`. M1's engine and brush parts are implemented too: smudge, blend modes, tips and grain in the engine, and libmypaint dynamics with `.myb` import in the package (PT6). Both were committed on 2026-11-09. M1e, macOS pen capture with the W3C pen fields and `dom.pointer_samples` (PT10, PE6), is implemented. So is M1f, the interactive session API and the first `lambda demo paint` (PT10). M1g, saving and opening `.painting` files as stored pixels plus PNG export (PT12), is implemented too, and so are bitmap tips and paper grain (M1i). M1 still lacks the `var` procedures (M1h, which needs a D7.6 ruling), the latency measurement and the MyPaint parity captures. The [implementation record](impl/Lambda_Impl_Paint.md) has the evidence and the next steps.
+> **Implementation:** the user asked to proceed on 2026-11-09 and chose a `.kra`-like ZIP container for painting files (PT12). M0 is implemented: the engine kernels, the `radiant.paint_*` bridge, the package core, and `lambda.image`'s brush running on `lambda.paint`. M1's engine and brush parts are implemented too: smudge, blend modes, tips and grain in the engine, and libmypaint dynamics with `.myb` import in the package (PT6). Both were committed on 2026-11-09. M1e, macOS pen capture with the W3C pen fields and `dom.pointer_samples` (PT10, PE6), is implemented. So is M1f, the interactive session API and the first `lambda demo paint` (PT10). M1g, saving and opening `.painting` files as stored pixels plus PNG export (PT12), is implemented too, and so are bitmap tips and paper grain (M1i). M1h, the `var` procedures, landed on 2026-11-11. M1 still lacks the latency measurement and the MyPaint parity captures. M2 (pigment and bristle) was implemented on 2026-11-12, uncommitted: the pigment medium with KM mixing, drying and impasto lighting, and bristle tips over both media, in the engine, the bridge, the package and the demo. The [implementation record](impl/Lambda_Impl_Paint.md) has the evidence and the next steps.
 >
 > **Scope:** end-to-end painting in Lambda: brushes, strokes, canvases, media, interactive stroke-by-stroke painting, and automated conversion of a raster or vector image into a painted image. The per-pixel kernels form a small native engine in the Radiant project, specified by the companion [Radiant Paint Engine proposal](../../radiant/vibe/Radiant_Design_Paint_Engine.md) (ledger PE#). Out of scope: pixel-filter effect collections (the G'MIC approach), neural style transfer and other learned models, 3D painting, vector drawing (`lambda.editor.draw`), and full MyPaint or Krita application parity.
+>
+> **M3 continuation:** the native wet step, dry deposit and Lambda `var` bridge are implemented for f32 and float64 sheets (**D3.2.1**, **D7.6.4**). Round, MyPaint and bristle strokes write pigment and water; a watercolor session presents, steps and keeps sheet snapshots. The procart watercolor demo uses the native step. Paint demo integration, live-sheet file storage and remaining qualification are in the implementation record; M3 is not yet closed.
 >
 > **Spec linkage:** **D9.1.1v4 / D9.1.3v2** (Radiant depends on lambda-input, never on the Lambda runtime); **D9.2.1v2 / D9.2.2** (headless profiles); **D9.3.1–D9.3.4** (packages and the `lambda.*` root); **S17.2.1, D7.6.1–D7.6.2** (system functions); **D3.2.1, S11.1.1v3, S11.4.1v5** (typed arrays and their contracts); **S9.1.2, S9.2.2v2, S9.1.3v3, D5.4.6** (value semantics, views and `var` borrows); **S12.1.1v3** (`fn`/`pn`); **S13.1.3v2** (tasks and workers); **D5.5.2, D6.3.3** (Radiant borrows; native rooting); **S7.4.5v2, S17.8.1** (errors and options); **S5.4.3** (element equality). This proposal changes no formal ruling.
 >
@@ -99,7 +101,7 @@ A stroke is an element:
 | Paper texture | `f32[h, w]` height, tiled across the canvas |
 | Pigment table | `f32[M, 2B]`: absorption K and scattering S per band |
 | Bristle state | `f32[B, G]`: per-bristle offset, length and paint load |
-| Wet sheet | `f32[P, h, w]`: planar planes over an active window |
+| Wet sheet | `f32[P, h, w]` or `float[P, h, w]`: planar planes over an active window |
 | Smudge state | `f32[K, 4]`: premultiplied bucket colour and alpha (libmypaint's recentness field arrives with `smudge_length_log`) |
 | Analysis fields | `f32[H, W]` or `f32[H, W, k]` (luminance, orientation, coherence, error); region labels as `i32[H, W]` |
 
@@ -121,7 +123,7 @@ A layer is a map `{width, height, tile: 64, format, blend_space, tiles}`. `tiles
 
 `blend_space` is `'linear'` (linear light, the default) or `'srgb'` (sRGB-encoded values, as libmypaint blends by default and as the current `lambda.image` brush does). See PT-O5.
 
-The **wet sheet** is the one dense structure. Its stencils read neighbours across what would be tile borders on every sub-step, so it is a dense `f32[P, h, w]` over a bounded active window that grows and shrinks with activity. When it dries it deposits pigment into the `pigment` layer's tiles. This keeps the layout and active-region tracking that `procart.watercolor` has already proven.
+The **wet sheet** is the one dense structure. Its stencils read neighbours across what would be tile borders on every sub-step, so it is a dense `f32[P, h, w]` or `float[P, h, w]` over a bounded active window that grows and shrinks with activity. When it dries it deposits pigment into the `pigment` layer's tiles. This keeps the layout and active-region tracking that `procart.watercolor` has already proven. For M pigments the layout has `12 + 3M` planes: eight fixed planes, M suspended, M deposited, M pigment scratch and four shared blur planes. Three pigments give the reference's 21 planes. The float64 lane lets its existing `float[]` stamps and native steps share one buffer: a float write to an f32 array can widen it under **S9.2.1**, so converting on every frame would defeat in-place stepping. Both lanes use the same kernel and are compared against the reference.
 
 ### PT5 — Three media, two tip models (USER, 2026-11-09)
 
@@ -139,6 +141,16 @@ The user selected all four media capabilities. They factor into three media and 
 | **Bristle tip** | Many hairs, each tracing its own sub-path with its own paint load, depletion and pickup | Krita's bristle engine; Strassmann 1986 |
 
 Both tip models work with the pixel and pigment media. The wet medium receives water and pigment from dabs and bristle trails alike.
+
+*Implemented (M2, 2026-11-12).*
+- **Pigment layers.** `paint.layer(w, h, {format: 'pigment', paper})` is a clean film over the sRGB paper. `paint.pigment(colour)` gives the `{K, S}` whose opaque film shows the colour, using procart.watercolor's conversion.
+- **Pigment strokes.** On a pigment layer a stroke turns its colour into its pigment, and brushes take `amount` (pigment load) and `thickness` (body, default `amount`). Wet strokes mix by concentration, so blue over yellow is green.
+- **Drying and lighting.** `paint.dried(l)`, `paint.dry_layer(var l)` and the session's `paint.dry(var s)` fold the wet film into the paper, so later strokes glaze over it. `paint.lighting(options)` lights the relief when presenting, and a flat film keeps its colour.
+- **Bristle brushes.** `paint.brush({kind: 'bristle', ...})` draws one trail per hair, with keyed placement, lag, depletion and pickup, on either medium; the stroke's continuation carries the bristle state.
+- **Sessions and files.** `paint.session(w, h, {medium: 'pigment', lighting})` paints oil interactively, and painting files keep a pigment layer's bands and substrate.
+- **Demo.** `lambda demo paint` has a Medium menu (Pixel, Oil), Dry and Light actions, and Bristle and Oil brushes.
+
+Engine details are in PE8, PE10 and PE7's implementation notes, and decisions in the [implementation record](impl/Lambda_Impl_Paint.md).
 
 ### PT6 — Brushes follow libmypaint's model
 

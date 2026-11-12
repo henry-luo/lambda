@@ -24,6 +24,7 @@
 #include "lambda/jube/jube_registry.h"
 #include "lib/file.h"
 #include "lib/mem.h"
+#include "lib/arena.h"
 #include "lib/hashmap.h"
 #include "lib/strbuf.h"
 #include <math.h>
@@ -69,6 +70,41 @@ protected:
         runtime_init(&runtime);
     }
 };
+
+TEST_F(JsFormalMir, PrivateObjectGrowthAfterShapeBudgetDeclinesStaysLinear) {
+    ASSERT_EQ(run("var dictionary={},sibling={};true").item, ITEM_TRUE);
+    Input* tree = runtime_shape_tree();
+    ASSERT_NE(tree, nullptr);
+    ASSERT_GT(tree->shape_transition_shapes, 0u);
+    tree->shape_graph_budget = tree->shape_transition_shapes;
+    PoolStats before = {}, tree_before = {};
+    pool_get_detailed_stats(runtime.eval_context->pool, &before);
+    pool_get_detailed_stats(tree->pool, &tree_before);
+    gc_set_force_collect_interval(runtime.eval_context->heap->gc, 17);
+    EXPECT_EQ(run(R"JS(
+        for(let i=0;i<768;i++) {
+            dictionary['key'+i]={value:i};
+            if(i%64===0)gc();
+        }
+        function readLate(object){return object.late;}
+        let absent=readLate(dictionary)===undefined&&readLate(dictionary)===undefined;
+        dictionary.late=23;
+        let hidden=Symbol('kept');dictionary[hidden]=9;
+        Object.defineProperty(dictionary,'hidden',{value:17});
+        gc();
+        absent && readLate(dictionary)===23 && Object.keys(dictionary).length===769 && dictionary.key0.value===0 &&
+            dictionary.key767.value===767 && dictionary[hidden]===9 && dictionary.hidden===17 &&
+            !Object.getOwnPropertyDescriptor(dictionary,'hidden').enumerable &&
+            !sibling.hasOwnProperty('key0') && Object.getPrototypeOf(dictionary)===Object.prototype;
+    )JS").item, ITEM_TRUE);
+    EXPECT_GT(gc_get_forced_collection_count(runtime.eval_context->heap->gc), 0u);
+    gc_set_force_collect_interval(runtime.eval_context->heap->gc, 0);
+    PoolStats after = {}, tree_after = {};
+    pool_get_detailed_stats(runtime.eval_context->pool, &after);
+    pool_get_detailed_stats(tree->pool, &tree_after);
+    EXPECT_LT(after.cumulative_bytes - before.cumulative_bytes +
+        tree_after.cumulative_bytes - tree_before.cumulative_bytes, 4u * 1024u * 1024u);
+}
 
 TEST_F(JsFormalMir, StringEqualitySharesUtf16SemanticsAcrossEncodings) {
     ASSERT_FALSE(item_is_error(run("true")));
@@ -4353,6 +4389,28 @@ TEST_F(JsMvpLmd, PrimitiveWrapperIdentityAndStorage) {
     error("new BigInt(1)", "TypeError");
     error("'use strict';let s=new String('abc');s[0]='d'", "TypeError");
 }
+TEST_F(JsMvpLmd, LongStringWrappersDoNotRetainQuadraticShapePrefixes) {
+    boolean(R"JS(
+        class Text extends String {}
+        let text='a'.repeat(4096)+'\ud83d\ude00\ud800';
+        let boxed=new Text(text), other=Object(text);
+        let index=Object.getOwnPropertyDescriptor(boxed,'4097');
+        let length=Object.getOwnPropertyDescriptor(boxed,'length');
+        boxed.extra=7;
+        boxed instanceof Text && boxed instanceof String && boxed.valueOf()===text &&
+            boxed.length===4099 && boxed[4096]==='\ud83d' && boxed[4097]==='\ude00' &&
+            boxed[4098]==='\ud800' && index.enumerable && !index.writable && !index.configurable &&
+            !length.enumerable && !length.writable && !length.configurable &&
+            Object.keys(other).length===4099 && !other.hasOwnProperty('extra') &&
+            !Reflect.defineProperty(boxed,'0',{value:'b'}) && !Reflect.deleteProperty(boxed,'4098') &&
+            Reflect.ownKeys(other)[4099]==='length';
+    )JS");
+    Input* tree = (Input*)context_capsule(execution->owner_context, CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE);
+    ASSERT_NE(tree, nullptr);
+    // descriptor semantics alone also pass when thousands of copied prefixes consume hundreds of MB.
+    EXPECT_LT(arena_total_used(tree->arena), 16u * 1024u * 1024u);
+}
+
 TEST_F(JsMvpLmd, PrimitiveConstructorsAsValues) {
     boolean(R"JS(
         let text=String, number=Number, boolean=Boolean, integer=BigInt;

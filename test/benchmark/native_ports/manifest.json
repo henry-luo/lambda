@@ -1,7 +1,7 @@
 {
   "implementation": "direct-native-v1",
-  "registered_entries": 77,
-  "canonical_workloads": 71,
+  "registered_entries": 78,
+  "canonical_workloads": 72,
   "entries": {
     "r7rs/fib": {
       "java": "java/native/R7RS.java",
@@ -428,6 +428,11 @@
       "erlang": "erlang/native/jetstream.erl",
       "node_reference": "test/benchmark/jetstream/3d-raytrace.js",
       "repeats": 8
+    },
+    "text/spelling": {
+      "java": "java/native/Spelling.java",
+      "erlang": "erlang/native/spelling.erl",
+      "node_reference": "test/benchmark/text/spelling.js"
     }
   },
   "reference_sources_sha256": {
@@ -546,6 +551,8 @@
     "text/prettier_ast_preprocess.js": "3dd19f8805472a33d4a660c0f41be808a325c66f5a4b18bd987ae673cdb05029",
     "text/prettier_source.js": "b7552a1bc51a9c2dbe20293e21b8a3a1582a048a306d5cf62ff56e74f8746312",
     "text/text_search.js": "3778d1fc127bb2ea6105d78affd906f15f957bd5c31ff933b427fe3cd2b0a4af",
-    "text/three_way_merge.js": "68d15f68c376a722e50ad598990d33ad4cb0376625fb98480d441d3b333960c8"
+    "text/three_way_merge.js": "68d15f68c376a722e50ad598990d33ad4cb0376625fb98480d441d3b333960c8",
+    "text/spelling.js": "4e04ab46ca5ff9335e0d88316e884576fb1213eda3963833a3e720b8a1039f40",
+    "text/generate_spelling_fixture.py": "0d9d77a527cfa1400c4a565e6963d4174a18d22dba76e37a52304923a7318df3"
   }
 }

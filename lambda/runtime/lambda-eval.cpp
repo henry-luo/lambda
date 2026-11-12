@@ -256,6 +256,10 @@ Item runtime_error_item(LambdaErrorCode code, const char* message,
     return runtime_error_payload(create_runtime_error(code, message), cause);
 }
 
+Item lambda_non_callable_error(void) {
+    return runtime_error_item(ERR_INVALID_CALL, "cannot call non-function value", NULL);
+}
+
 static Item runtime_error_itemf(LambdaErrorCode code, const char* format, ...) {
     va_list args;
     va_start(args, format);
@@ -2059,8 +2063,7 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
     }
     int actual = (int)source_actual;
     if (!is_valid_function(fn)) {
-        return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
-            "cannot call non-function value");
+        return lambda_non_callable_error();
     }
     // A LambdaJS function begins with the common type id but has a distinct
     // layout. Validate this byte before reading Core Function metadata.
@@ -2228,17 +2231,16 @@ extern "C" Item pn_apply_args(Item callee, Item args_item) {
     return lambda_dynamic_apply(callee, args_item, true, "call");
 }
 
-static Item lambda_dynamic_public_non_function_error(Function* fn, const char* caller) {
+static Item lambda_dynamic_public_non_function_error(Function* fn) {
     if (is_valid_function(fn)) return ItemNull;
     // The result-home helper is invisible to Lambda code; retain the public
     // arity wrapper in a non-function diagnostic.
-    return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
-        "cannot call non-function value");
+    return lambda_non_callable_error();
 }
 
 
 Item fn_call1_into(Function* fn, Item a, uint64_t* result_home) {
-    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call1");
+    Item invalid = lambda_dynamic_public_non_function_error(fn);
     if (invalid.item != ITEM_NULL) return invalid;
     List args = {.length = 1, .items = &a};
     return lambda_dynamic_call(fn, &args, result_home,
@@ -2246,7 +2248,7 @@ Item fn_call1_into(Function* fn, Item a, uint64_t* result_home) {
 }
 
 Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home) {
-    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call2");
+    Item invalid = lambda_dynamic_public_non_function_error(fn);
     if (invalid.item != ITEM_NULL) return invalid;
     Item values[] = {a, b};
     List args = {.length = 2, .items = values};
@@ -2257,14 +2259,14 @@ Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home) {
 // T21-3b: the borrowed-call entry -- the caller has published the `var`
 // homes (CW33 cells) before calling; see LAMBDA_DYNAMIC_CALL_BORROWED.
 Item fn_call_borrowed_into(Function* fn, List* args, uint64_t* result_home) {
-    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call_borrowed");
+    Item invalid = lambda_dynamic_public_non_function_error(fn);
     if (invalid.item != ITEM_NULL) return invalid;
     return lambda_dynamic_call(fn, args, result_home, LAMBDA_DYNAMIC_CALL_BORROWED,
         "fn_call_borrowed_into");
 }
 
 Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home) {
-    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call3");
+    Item invalid = lambda_dynamic_public_non_function_error(fn);
     if (invalid.item != ITEM_NULL) return invalid;
     Item values[] = {a, b, c};
     List args = {.length = 3, .items = values};
@@ -11268,6 +11270,8 @@ typedef struct CowProfileCounters {
     uint64_t union_admit_calls;
     uint64_t union_map_rep_cache_hits;
     uint64_t union_map_rep_cache_misses;
+    uint64_t union_map_semantic_cache_hits;
+    uint64_t union_map_deep_validations;
     uint64_t map_admit_relation_cache_hits;
     uint64_t map_admit_relation_cache_misses;
     uint64_t map_admit_exact_shape_hits;
@@ -11508,6 +11512,10 @@ void cow_profile_dump(void) {
     strbuf_append_uint64(output, g_cow_profile.union_map_rep_cache_hits);
     strbuf_append_str(output, "\nunion_map_rep_cache_misses\t");
     strbuf_append_uint64(output, g_cow_profile.union_map_rep_cache_misses);
+    strbuf_append_str(output, "\nunion_map_semantic_cache_hits\t");
+    strbuf_append_uint64(output, g_cow_profile.union_map_semantic_cache_hits);
+    strbuf_append_str(output, "\nunion_map_deep_validations\t");
+    strbuf_append_uint64(output, g_cow_profile.union_map_deep_validations);
     strbuf_append_str(output, "\nmap_admit_calls\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_calls);
     strbuf_append_str(output, "\njs_realm_slot_reservations\t");
@@ -15191,74 +15199,86 @@ static MapContractRelation runtime_map_contract_relation_cached(
 // walking its fields would only re-establish an invariant maintained by every
 // map write.  Arms that need reification or contain an incompatible field stay
 // on the full validator path (D4.2.5, D7.3.2-D7.3.3).
-static bool runtime_union_map_has_exact_rep(TypeMap* candidate, Type* expected,
-        int depth = 0) {
-    expected = runtime_boundary_unwrap_type(expected);
-    if (!candidate || !expected || depth > 64) return false;
-    if (lambda_type_is_union(expected)) {
-        TypeBinary* binary = (TypeBinary*)expected;
-        return runtime_union_map_has_exact_rep(candidate, binary->left, depth + 1) ||
-            runtime_union_map_has_exact_rep(candidate, binary->right, depth + 1);
-    }
-    return expected->type_id == LMD_TYPE_MAP && expected != &TYPE_MAP &&
-        (candidate == (TypeMap*)expected || candidate->verified_contract == (TypeMap*)expected) &&
-        ((TypeMap*)expected)->is_trusted_contract;
-}
+enum UnionMapProofKind { UNION_MAP_EXACT_PROOF, UNION_MAP_STORAGE_PROOF, UNION_MAP_SEMANTIC_PROOF };
 
-static bool runtime_union_map_rep_proves(TypeMap* candidate, Type* expected,
-        int depth = 0) {
+static bool runtime_union_map_proves(TypeMap* candidate, Type* expected,
+        UnionMapProofKind proof, int depth = 0) {
     expected = runtime_boundary_unwrap_type(expected);
     if (!candidate || !expected || depth > 64) return false;
     if (lambda_type_is_union(expected)) {
         TypeBinary* binary = (TypeBinary*)expected;
-        return runtime_union_map_rep_proves(candidate, binary->left, depth + 1) ||
-            runtime_union_map_rep_proves(candidate, binary->right, depth + 1);
+        return runtime_union_map_proves(candidate, binary->left, proof, depth + 1) ||
+            runtime_union_map_proves(candidate, binary->right, proof, depth + 1);
     }
     if (expected->type_id != LMD_TYPE_MAP || expected == &TYPE_MAP ||
-            !((TypeMap*)expected)->is_trusted_contract) {
-        return false;
+            !((TypeMap*)expected)->is_trusted_contract) return false;
+    if (proof == UNION_MAP_EXACT_PROOF)
+        return candidate == (TypeMap*)expected || candidate->verified_contract == (TypeMap*)expected;
+    if (proof == UNION_MAP_STORAGE_PROOF) {
+        MapContractRelation relation = runtime_map_contract_relation_cached(candidate, (TypeMap*)expected);
+        return relation == MAP_CONTRACT_EXACT_TRUSTED || relation == MAP_CONTRACT_STORAGE_COMPATIBLE;
     }
-    MapContractRelation relation = runtime_map_contract_relation_cached(candidate,
-        (TypeMap*)expected);
-    return relation == MAP_CONTRACT_EXACT_TRUSTED ||
-        relation == MAP_CONTRACT_STORAGE_COMPATIBLE;
+    // This certificate is semantic only. Immutable scalar-field domains can
+    // preserve a completed union validation without claiming any arm's offsets.
+    // Mutable/erased nested layouts and value-dependent terms retain deep checks.
+    if (!typemap_is_shared_shape(candidate) || candidate->has_spread || candidate->js_meta ||
+            type_nominal_record(candidate) || type_nominal_record(expected)) return false;
+    FOR_EACH_MAP_FIELD((TypeMap*)expected, wanted) {
+        if (!wanted->name || wanted->ns || wanted->flags || wanted->accessor ||
+                wanted->key_kind != NAME_KEY_STRING) return false;
+        ShapeEntry* actual = typemap_hash_lookup(candidate, wanted->name->str, (int)wanted->name->length);
+        if (!actual) {
+            if (wanted->is_optional) continue;
+            return false;
+        }
+        if (actual->ns || actual->flags || actual->accessor ||
+                actual->key_kind != NAME_KEY_STRING || (actual->is_optional && !wanted->is_optional)) return false;
+        Type* domain = runtime_boundary_unwrap_type(actual->type);
+        bool scalar = domain && domain->type_id > LMD_TYPE_RAW_POINTER &&
+            domain->type_id < LMD_TYPE_CONTAINER && is_global_simple_type(domain);
+        if ((!scalar && domain != &TYPE_ANY) ||
+                !lambda_type_contract_is_subtype(domain, wanted->type)) return false;
+    }
+    return true;
 }
 
-static bool runtime_union_map_rep_proves_cached(TypeMap* candidate,
-        Type* expected) {
-    Heap* heap = context ? context->heap : NULL;
-    if (!heap) {
-        return runtime_union_map_has_exact_rep(candidate, expected) ||
-            runtime_union_map_rep_proves(candidate, expected);
-    }
+static LambdaMapContractCacheEntry* runtime_union_map_cache_entry(Heap* heap,
+        TypeMap* candidate, Type* expected, bool* found) {
     uint32_t base = runtime_map_contract_cache_base(candidate, expected);
-    LambdaMapContractCacheEntry* available = NULL;
     for (uint32_t probe = 0; probe < 8; probe++) {
         LambdaMapContractCacheEntry* entry = &heap->map_contract_cache[
             (base + probe) & (LAMBDA_MAP_CONTRACT_CACHE_CAPACITY - 1)];
         if (entry->candidate == candidate && entry->expected == expected) {
-            if (cow_profile_enabled()) g_cow_profile.union_map_rep_cache_hits++;
-            return entry->relation == MAP_CONTRACT_UNION_MEMBER_PROVEN;
+            *found = true;
+            return entry;
         }
-        if (!entry->candidate) {
-            available = entry;
-            break;
-        }
+        if (!entry->candidate) { *found = false; return entry; }
     }
+    *found = false;
+    return &heap->map_contract_cache[heap->map_contract_cache_next++ % LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
+}
 
-    if (cow_profile_enabled()) g_cow_profile.union_map_rep_cache_misses++;
-    bool proven = runtime_union_map_has_exact_rep(candidate, expected) ||
-        runtime_union_map_rep_proves(candidate, expected);
-    if (!proven) return false;
-    if (!available) {
-        uint32_t slot = heap->map_contract_cache_next++ %
-            LAMBDA_MAP_CONTRACT_CACHE_CAPACITY;
-        available = &heap->map_contract_cache[slot];
+static bool runtime_union_map_admission_proves_cached(TypeMap* candidate, Type* expected) {
+    Heap* heap = context ? context->heap : NULL;
+    // private descriptors can retag in place, so their identity cannot key a proof.
+    bool cacheable = heap && typemap_is_shared_shape(candidate);
+    bool found = false;
+    LambdaMapContractCacheEntry* entry = cacheable
+        ? runtime_union_map_cache_entry(heap, candidate, expected, &found) : NULL;
+    if (found) {
+        if (cow_profile_enabled()) g_cow_profile.union_map_rep_cache_hits++;
+        if (entry->relation == MAP_CONTRACT_UNION_SEMANTIC_PROVEN) {
+            if (cow_profile_enabled()) g_cow_profile.union_map_semantic_cache_hits++;
+            return true;
+        }
+        return entry->relation == MAP_CONTRACT_UNION_MEMBER_PROVEN;
     }
-    available->candidate = candidate;
-    available->expected = expected;
-    available->relation = MAP_CONTRACT_UNION_MEMBER_PROVEN;
-    return true;
+    if (cow_profile_enabled()) g_cow_profile.union_map_rep_cache_misses++;
+    bool proven = runtime_union_map_proves(candidate, expected, UNION_MAP_EXACT_PROOF) ||
+        runtime_union_map_proves(candidate, expected, UNION_MAP_STORAGE_PROOF);
+    if (entry) *entry = {candidate, expected, (uint8_t)(proven
+        ? MAP_CONTRACT_UNION_MEMBER_PROVEN : MAP_CONTRACT_UNION_MEMBER_UNPROVEN)};
+    return proven;
 }
 
 
@@ -15332,7 +15352,7 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, RuntimeType
             lambda_type_is_union(expected)) {
         TypeMap* candidate = (TypeMap*)value.map->type;
         if (candidate && typemap_ptr_is_plausible(candidate) &&
-                runtime_union_map_rep_proves_cached(candidate, expected)) {
+                runtime_union_map_admission_proves_cached(candidate, expected)) {
             *converted = value;
             return true;
         }
@@ -15453,7 +15473,19 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, RuntimeType
 
     // Preserve an already conforming union member rather than arbitrarily
     // re-representing it through an earlier union arm.
+    bool union_map_validation = !binder_dependent && get_type_id(value) == LMD_TYPE_MAP &&
+        value.map && lambda_type_is_union(expected);
+    if (union_map_validation && cow_profile_enabled()) g_cow_profile.union_map_deep_validations++;
     if (!binder_dependent && lambda_type_matches(value, expected)) {
+        if (union_map_validation && context && context->heap) {
+            TypeMap* candidate = (TypeMap*)value.map->type;
+            if (runtime_union_map_proves(candidate, expected, UNION_MAP_SEMANTIC_PROOF)) {
+                bool found = false;
+                LambdaMapContractCacheEntry* entry = runtime_union_map_cache_entry(
+                    context->heap, candidate, expected, &found);
+                *entry = {candidate, expected, MAP_CONTRACT_UNION_SEMANTIC_PROVEN};
+            }
+        }
         *converted = value;
         return true;
     }

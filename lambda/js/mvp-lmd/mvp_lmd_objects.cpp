@@ -475,8 +475,18 @@ Item mvp_lmd_read_named_data(Map* map, ShapeEntry* field) {
 
 bool mvp_lmd_store_named_data(Map* map, Item name, ShapeEntry* field,
         Item value, bool widen) {
+    if (get_type_id(value) == LMD_TYPE_ERROR) return false;
     void* previous = map->type;
-    if (!map_shape_set_resolved(map, name.get_string(), field, value, widen)) return false;
+    TypeMap* shape = (TypeMap*)map->type;
+    if (!field && map->is_heap && shape && !shape->js_meta && shape->is_private_clone &&
+            !typemap_verified_contract(shape) && !typemap_hash_lookup_key(shape, name.get_string())) {
+        // JS private shapes have one receiver; keep bounded-tree fallback growth linear (D3.4.3).
+        Input* owner = runtime_shape_tree();
+        if (!owner) return false;
+        int64_t length = shape->length;
+        map_put_heap(map, name.get_string(), value, owner);
+        if (((TypeMap*)map->type)->length != length + 1) return false;
+    } else if (!map_shape_set_resolved(map, name.get_string(), field, value, widen)) return false;
     // packed namespace writes also publish EventTarget IDL handlers to the listener list.
     js_note_event_handler_property_set(Item{.map = map}, name, value);
     if (field && map->type == previous && field->key_kind == NAME_KEY_STRING &&

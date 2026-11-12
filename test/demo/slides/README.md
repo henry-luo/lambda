@@ -129,6 +129,9 @@ An import creates an editable copy; Save writes `.slides` and keeps the original
 PPTX unchanged. Unsupported content produces a yellow warning above the canvas;
 a malformed package leaves the previous deck open. Imported raster images are
 embedded in the editable copy. `lambda view deck.pptx` opens the shared player.
+Hidden slides remain in the editor, are marked in the thumbnail list, and are
+skipped during sequential playback. Use the thumbnail context menu to hide or
+show a slide; Present from Here can explicitly open a hidden slide.
 The file dialog starts under `temp/slides/` and accepts another local path.
 Images authored with `<image>` resolve against the loaded deck's folder; Save
 records that resource base so Save As keeps those images working. **Export**
@@ -139,10 +142,11 @@ Editing an object on a master-based slide detaches that slide's composed content
 from its master; other slides and master definitions remain intact.
 
 The [PPTX package profile](../../../vibe/Lambda_Pkg_Pptx.md) describes supported
-text, placeholder inheritance, solid colors, shapes, images, groups, tables,
-cached column charts and notes. Animation timing, slide transitions, SmartArt,
-advanced fills/effects and exact PowerPoint text fitting remain partial or
-unsupported. `test/ui/slide_pptx_import.json` replays importing, editing,
+text, placeholder inheritance, solid colors, shapes, images, groups, merged tables,
+cached column, scatter, bubble and pie charts, and notes. Saved SmartArt drawings
+are imported as ordinary objects with a partial-support warning. Chart styling,
+animation timing, slide transitions, advanced fills/effects and exact PowerPoint
+text fitting remain partial or unsupported. `test/ui/slide_pptx_import.json` replays importing, editing,
 saving/reopening, warnings, failure preservation and cancellation.
 
 ## Animations

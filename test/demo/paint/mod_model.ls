@@ -2,6 +2,7 @@
 // function of the app state: the paint session, tools, brush palette, colour and the view.
 import paint: lambda.paint
 import color: lambda.color
+import watercolor: lambda.procart.watercolor
 
 // a new canvas's size; an opened painting keeps its own
 pub let WIDTH = 1200
@@ -23,6 +24,13 @@ let MYB = [{name: "Pencil", file: "pencil.myb"}, {name: "Ink", file: "ink.myb"},
 let TIPPED = [{name: "Chalk", tip: 'chalk', options: {size: 30.0, spacing: 0.15, grain: 0.7, angle_jitter: 180.0}},
     {name: "Flat", tip: 'flat', options: {size: 26.0, angle: 35.0, spacing: 0.08}},
     {name: "Speckle", tip: 'speckle', options: {size: 40.0, spacing: 0.35}}]
+// brushes for both media (M2): a bristle brush paints a trail per hair that thins as its load
+// runs out; Oil is a round brush with body. On an oil canvas every brush lays wet pigment.
+let MEDIA_BRUSHES = [{name: "Bristle", options: {kind: 'bristle', size: 28.0, count: 28, depletion: 0.0025, pickup: 0.15}},
+    {name: "Oil", options: {size: 26.0, hardness: 0.9, spacing: 0.1, amount: 1.2}}]
+// the canvas media: pixel paint (rgba) or oil (a wet pigment film over the paper, PE8)
+pub let MEDIA = [{kind: "pixel", label: "Pixel"}, {kind: "pigment", label: "Oil"}, {kind: "watercolor", label: "Watercolor"}]
+pub let WET_PIGMENTS = watercolor.CLASSIC
 pub let PAPERS = [{kind: "smooth", label: "Smooth"}, {kind: "cold_press", label: "Cold press"},
     {kind: "rough", label: "Rough"}, {kind: "canvas", label: "Canvas"}]
 // the paper's height-field tile, in pixels: small enough to build quickly at start-up
@@ -39,15 +47,16 @@ pub fn palette(base) array^ {
     let rounds = [for (r in ROUND) entry(r.name, paint.brush(r.options)^)]
     let mybs = [for (m in MYB) (let b = paint.brush_from_myb(input(url_resolve(base, "brushes/" ++ m.file), 'json')^)^.brush,
         entry(m.name, if (m.name == "Charcoal") paint.brush({kind: 'mypaint', settings: b.settings, grain: 0.6})^ else b))]
-    let tipped = [for (t in TIPPED) entry(t.name, paint.brush({*: t.options, tip: paint.tip(t.tip, {size: 64})^})^)];
-    [*rounds, *mybs, *tipped]
+    let tipped = [for (t in TIPPED) entry(t.name, paint.brush({*: t.options, tip: paint.tip(t.tip, {size: 64})^})^)]
+    let media = [for (m in MEDIA_BRUSHES) entry(m.name, paint.brush(m.options)^)];
+    [*rounds, *mybs, *tipped, *media]
 }
 
 pub fn initial(brushes) map^ => {ps: paint.session(WIDTH, HEIGHT, {texture: {kind: 'cold_press', size: PAPER_SIZE}})^,
     tool: "brush", brush: 0, brushes: brushes,
     eraser: entry("Eraser", paint.brush({size: 32.0, hardness: 0.7, erase: true})^),
     color: [0.11, 0.13, 0.3], zoom: 1.0, pan: {x: 0.0, y: 0.0}, token: 0, stroke: null, drag: null,
-    space: false, status: "Ready"}
+    space: false, wet_needs_step:false, status: "Ready"}
 
 // the palette entry the size and opacity controls edit.
 pub fn editing(st) => if (st.tool == "eraser") st.eraser else st.brushes[st.brush]
@@ -75,6 +84,29 @@ pub fn with_paper(st, kind) map^ {
     else ({*: st, ps: paint.with_texture(st.ps, if (kind == "smooth") null else ({kind: kind, size: PAPER_SIZE}))^,
         status: "Paper: " ++ label[0] ++ " (grained brushes such as Chalk show it)"})
 }
+
+// the canvas medium: "pigment" for an oil canvas, "pixel" otherwise.
+pub fn medium(st) => if (st.ps.wet != null) "watercolor" else if ((string(st.ps.layer.format) == "pigment") ^ { false }) "pigment" else "pixel"
+
+// a fresh canvas of another medium on the same paper; the old painting and its history go.
+pub fn with_medium(st, kind) map^ {
+    let label = [for (m in MEDIA where m.kind == kind) m.label]
+    if (len(label) == 0) raise error("Paint: unknown medium " ++ string(kind))
+    else if (kind == medium(st)) st
+    else ({*: st, stroke: null, wet_needs_step:false,
+        ps: paint.session(width(st), height(st), {medium: kind, paper: st.ps.paper, texture: st.ps.texture_spec})^,
+        status: if (kind == "pigment") "Oil: wet strokes mix; Dry sets them, Light shows the paint's relief"
+            else if (kind == "watercolor") "Watercolor: choose a pigment; water carries paint until Dry"
+            else "Pixel: strokes lay colour over colour"})
+}
+
+pub fn with_wet_pigment(st, index: int) map^ =>
+    ({*:st, ps:paint.select_wet(st.ps, index, st.ps.wet_water)^,
+      status:"Watercolor pigment: " ++ st.ps.wet_pigments[index].name})
+
+// the oil canvas under its light, or flat.
+pub fn with_light(st) map^ => ({*: st, ps: paint.with_lighting(st.ps, st.ps.lighting == null)^,
+    status: if (st.ps.lighting == null) "Light on: the paint's relief catches the light" else "Light off: flat colour"})
 
 pub fn with_color(st, rgb) => ({*: st, color: [for (v in rgb) clamp(float(v), 0.0, 1.0)]})
 

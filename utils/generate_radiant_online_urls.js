@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const {readPageCatalog, csvField} = require('./online_pages.cjs');
 
 const sourceRoot = 'https://saaslandingpage.com/';
 const sourceSitemap = `${sourceRoot}post-sitemap.xml`;
@@ -116,43 +117,9 @@ async function mapConcurrent(values, work) {
     return results;
 }
 
-function parseCsvLine(line) {
-    const fields = [];
-    let field = '';
-    let quoted = false;
-    for (let index = 0; index < line.length; index++) {
-        const character = line[index];
-        if (quoted && character === '"' && line[index + 1] === '"') {
-            field += '"';
-            index++;
-        } else if (character === '"') {
-            quoted = !quoted;
-        } else if (character === ',' && !quoted) {
-            fields.push(field);
-            field = '';
-        } else {
-            field += character;
-        }
-    }
-    if (quoted) throw new Error('unterminated quoted CSV field');
-    fields.push(field);
-    return fields;
-}
-
 function sourcePages(sourcePath) {
-    const lines = fs.readFileSync(sourcePath, 'utf8').trimEnd().split(/\r?\n/);
-    if (lines.length === 0 || parseCsvLine(lines[0]).join(',') !==
-            'label,url,expect_linked_resources') {
-        throw new Error(`${sourcePath} is not the online page CSV`);
-    }
-    return lines.slice(1).map((line) => {
-        const fields = parseCsvLine(line);
-        if (fields.length !== 3 || !fields[0] || !fields[1] ||
-                !['true', 'false'].includes(fields[2])) {
-            throw new Error(`${sourcePath} contains an invalid page row`);
-        }
-        return fields;
-    });
+    return readPageCatalog(sourcePath).map((page) =>
+        [page.label, page.url, page.expect_linked_resources]);
 }
 
 function sourceSeedUrls(sourcePath) {
@@ -160,11 +127,6 @@ function sourceSeedUrls(sourcePath) {
         .filter(([label]) => !label.startsWith('saas_landing_'))
         .map(([, value]) => canonicalUrl(value))
         .filter(Boolean);
-}
-
-function csvField(value) {
-    const text = String(value);
-    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function renderPages(basePages, urls) {

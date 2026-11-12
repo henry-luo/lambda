@@ -1,0 +1,8 @@
+{
+  first_count: true,
+  both_tiles: true,
+  pending: true,
+  snapshot: true,
+  first_unchanged: true,
+  second_cleared: true
+}

@@ -5,6 +5,7 @@
 import layers: lambda.paint.layer
 import strokes: lambda.paint.stroke
 import sessions: lambda.paint.session
+import wet: lambda.paint.wet
 import radiant
 
 pub let MIMETYPE = "application/x-lambda-painting"
@@ -21,10 +22,10 @@ pub fn png(pixels) binary^ {
     lambda.sys.image_encode(r, r, {format: 'png'})^
 }
 
-fn background(s) array^ => strokes.in_space([s.paper[0], s.paper[1], s.paper[2], 1.0], s.layer.blend_space)^
-
-// the session's paint flattened over its paper, as (h, w, 4) sRGB u8 pixels.
-pub fn flattened(s) array^ => layers.present(s.layer, {background: background(s)^})^
+// the session's paint flattened over its paper as (h, w, 4) sRGB u8 pixels, as the session shows
+// it (a pigment layer under the session's light).
+pub fn flattened(s) array^ => if (s.wet == null) layers.present(s.layer, sessions.shown(s, null)^)^
+    else wet.present(s.wet, s.layer, s.wet_pigments)^
 
 // image rasters hold at most this many pixels; a larger painting gets a scaled preview
 let PREVIEW_PIXELS = 16000000
@@ -44,11 +45,16 @@ fn thumbnail_size(w: int, h: int) array {
 fn assets_doc(s) element => if (s.texture_spec == null) (<assets>)
     else (<assets <paper kind: string(s.texture_spec.kind), seed: s.texture_spec.seed, size: s.texture_spec.size>>)
 
-fn layer_doc(id, l) element => <layer id: id, format: string(l.format), sample: string(l.sample),
-    blend_space: string(l.blend_space), tile: l.tile, tiles: "layers/" ++ id ++ ".tiles">
+// a pigment layer also records its bands and substrate, so its clean tiles decode to the same paper.
+fn layer_doc(id, l) element => if (layers.pigmented(l))
+    (<layer id: id, format: string(l.format), sample: string(l.sample), blend_space: string(l.blend_space), tile: l.tile,
+        bands: l.bands, substrate: l.substrate, tiles: "layers/" ++ id ++ ".tiles">)
+    else (<layer id: id, format: string(l.format), sample: string(l.sample),
+        blend_space: string(l.blend_space), tile: l.tile, tiles: "layers/" ++ id ++ ".tiles">)
 
 // document(session) -> the <painting> element of painting.mark.
-pub fn document(s) element^ {
+pub fn document(s) element^ => if (s.wet != null) raise error("paint: saving a live watercolor sheet is not supported")
+    else {
     let l = s.layer
     let t = thumbnail_size(l.width, l.height)
     let p = preview_size(l.width, l.height)
@@ -123,14 +129,16 @@ pub pn load(path, options = {}) map^ {
     let ld = found[0]
     let tiles = at_path(z, ld.tiles)^
     if (tiles == null) raise error("paint: missing layer tiles " ++ string(ld.tiles))
+    let pigmented = (string(ld.format) == "pigment") ^ { false }
     let blank = layers.layer(doc.width, doc.height, {format: ld.format, sample: ld.sample,
-        blend_space: ld.blend_space, tile: ld.tile})^
+        blend_space: ld.blend_space, tile: ld.tile, *: if (pigmented) ({substrate: ld.substrate}) else ({})})^
     let layer = radiant.paint_tiles_decode(input(tiles, 'binary')^, blank)^
     // a paper texture stored as a spec is rebuilt, so later strokes keep their grain
     let assets = [for (c in content(doc) ^ { [] } where (c is element and name(c) == 'assets') ^ { false }) c]
     let papers = if (len(assets) == 0) [] else [for (c in content(assets[0]) ^ { [] } where (c is element and name(c) == 'paper') ^ { false }) c]
     let texture = if (len(papers) == 0) null else ({kind: papers[0].kind, seed: papers[0].seed, size: papers[0].size})
-    let base = sessions.session(doc.width, doc.height, {paper: doc.paper, blend_space: ld.blend_space, texture: texture,
+    let base = sessions.session(doc.width, doc.height, {paper: doc.paper, texture: texture,
+        *: if (pigmented) ({medium: 'pigment'}) else ({blend_space: ld.blend_space}),
         *: if (o.history_budget == null) ({}) else ({history_budget: o.history_budget})})^
     return {*: base, layer: layer}
 }

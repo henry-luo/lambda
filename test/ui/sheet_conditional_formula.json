@@ -1,0 +1,19 @@
+{
+  "name": "Formula conditional formatting recalculates",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"wait", "ms":100},
+    {"type":"click", "target":{"selector":"#open"}},
+    {"type":"type", "target":{"selector":"#file-path"}, "text":"test/input/xlsx/conditional-formulas.xlsx", "clear":true},
+    {"type":"click", "target":{"selector":"#dialog-confirm"}},
+    {"type":"assert_script", "js":"document.getElementById('cell-C2').getAttribute('style').includes('background-color:#ffff00') && !document.getElementById('cell-C3').getAttribute('style').includes('background-color:#ffff00') && document.getElementById('cell-C4').getAttribute('style').includes('background-color:#ffff00')"},
+    {"type":"assert_script", "js":"document.getElementById('cell-D2').getAttribute('style').includes('font-style:italic') && !document.getElementById('cell-D3').getAttribute('style').includes('font-style:italic')"},
+    {"type":"click", "target":{"selector":"#cell-B3"}},
+    {"type":"key_press", "key":"F2"},
+    {"type":"type", "target":{"selector":"#cell-editor"}, "text":"25", "clear":true},
+    {"type":"key_press", "key":"Enter"},
+    {"type":"assert_script", "js":"document.getElementById('cell-C3').getAttribute('style').includes('background-color:#ffff00') && !document.getElementById('cell-D3').getAttribute('style').includes('font-style:italic')"}
+  ]
+}

@@ -138,7 +138,8 @@ pub fn poisson(k: u64, options) array^ {
 // --- one jittered point per square cell of side `cell` ---
 pub fn jitter(k: u64, options) array^ {
     let d = domain(options)^
-    let size: float = if (options.cell is number) float(options.cell) else 0.0
+    // the checked conversion can fail; propagate before the clean size binding.
+    let size: float = (if (options.cell is number) float(options.cell) else 0.0)^
     let amount: float = if (options.jitter == null) 1.0 else float(options.jitter);
     if (size <= 0.0) raise error("procart.sample.jitter: cell must be positive")
     else (let nx = cells(d.width, size), let ny = cells(d.height, size),

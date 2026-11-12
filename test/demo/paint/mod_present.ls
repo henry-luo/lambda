@@ -55,9 +55,28 @@ pn brushes(owner, st) {
 pn present_paper(owner, st) {
     let control = node(owner, "paper")
     let kind = model.paper_kind(st)
-    if (dom.get_state(control, "value") != kind) dom.set_state(control, "value", kind)
+    let indexes = [for (i, p in model.PAPERS where p.kind == kind) i]
+    if (len(indexes) > 0 and dom.selected_index(control) != indexes[0]) dom.set_selected_index(control, indexes[0])
     dom.set_attribute(owner, "data-paper", kind)
     return kind
+}
+
+// the medium menu and the light toggle follow the session.
+pn present_medium(owner, st) {
+    let control = node(owner, "medium")
+    let kind = model.medium(st)
+    let indexes = [for (i, m in model.MEDIA where m.kind == kind) i]
+    if (len(indexes) > 0 and dom.selected_index(control) != indexes[0]) dom.set_selected_index(control, indexes[0])
+    dom.set_attribute(owner, "data-medium", kind)
+    let lit = text(st.ps.lighting != null)^
+    dom.set_attribute(owner, "data-lit", lit)
+    dom.set_attribute(node(owner, "action-light"), "aria-pressed", lit)
+    dom.set_attribute(node(owner, "action-light"), "aria-disabled", text(kind != "pigment")^)
+    dom.set_attribute(node(owner, "action-dry"), "aria-disabled", text(kind == "pixel")^)
+    let wet = node(owner, "wet-pigment")
+    dom.set_attribute(wet, "aria-disabled", text(kind != "watercolor")^)
+    if (kind == "watercolor" and dom.selected_index(wet) != st.ps.wet_index)
+        dom.set_selected_index(wet, st.ps.wet_index)
 }
 
 pub pn sync(owner, st) {
@@ -71,6 +90,7 @@ pub pn sync(owner, st) {
     set_slider(owner, "sat", int(round(hsv.s * 100.0)), "")^
     set_slider(owner, "val", int(round(hsv.v * 100.0)), "")^
     let paper = present_paper(owner, st)^
+    present_medium(owner, st)^
     let color = model.hex(st.color)^
     dom.style_set_property(node(owner, "color-chip"), "background-color", color)
     dom.set_attribute(owner, "data-color", color)

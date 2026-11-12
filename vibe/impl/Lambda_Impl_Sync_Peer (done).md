@@ -48,7 +48,7 @@ The peer-sync commit excludes that unrelated work.
   lambda-data-runtime.cpp, lambda-eval.cpp and vmap.cpp. They were preserved
   and not rebuilt or qualified by this task. The peer inputs and tested executable
   remain unchanged; post_qualification_concurrent_edits records their hashes.
-- Fixed and archived **LR12-47**, the draft obsolete-membership overwrite.
+- Fixed and archived **LR12-53**, the draft obsolete-membership overwrite.
   Additional simultaneous administrative-writer qualification is **blocked on
   input LI-015**. Its failed receipts and `test_peer.py --contention` remain;
   no owner source edits, SQL lock tricks or uncertain-commit retries were added.

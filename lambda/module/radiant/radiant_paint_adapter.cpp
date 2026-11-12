@@ -4,6 +4,7 @@
 // are taken only after the call's last allocation point (D5.4.4).
 #include "radiant_dom_bridge.hpp"
 #include "radiant/paint/paint.hpp"
+#include "radiant/paint/paint_wet.hpp"
 #include "lambda/core/mark_reader.hpp"
 #include "../../runtime/value_builder.hpp"
 #include "../../runtime/lambda-error.h"
@@ -65,9 +66,14 @@ struct PaintLayerInfo {
     PaintFormat format = PAINT_FORMAT_RGBA;
     PaintElem elem = PAINT_ELEM_F32;
     ArrayNumElemType lane = ELEM_FLOAT32;
+    int32_t bands = 0;                       // pigment layers only
+    float substrate[PAINT_MAX_BANDS] = {};   // a clean pigment tile's reflectance per band
 };
 
-// layer = {width, height, tile, format: 'rgba'|'coverage', sample: 'f32'|'u8', tiles: [array|null]} (PT4)
+static bool paint_unit_list(const ItemReader& value, int count, float* out);
+
+// layer = {width, height, tile, format: 'rgba'|'coverage'|'pigment', sample: 'f32'|'u8', tiles: [array|null]}
+// (PT4); a pigment layer also has bands B and substrate, the clean paper's reflectance per band (PE8).
 static const char* paint_layer_read(Item layer, PaintLayerInfo* info) {
     if (!is_map_family_type_id(get_type_id(layer))) return "paint layer must be a map";
     MapReader map = MapReader::fromItem(layer);
@@ -77,7 +83,15 @@ static const char* paint_layer_read(Item layer, PaintLayerInfo* info) {
     ItemReader format = map.get("format"), sample = map.get("sample");
     if (paint_text_is(format, "rgba")) info->format = PAINT_FORMAT_RGBA;
     else if (paint_text_is(format, "coverage")) info->format = PAINT_FORMAT_COVERAGE;
-    else return "paint layer format must be 'rgba' or 'coverage'";
+    else if (paint_text_is(format, "pigment")) {
+        info->format = PAINT_FORMAT_PIGMENT;
+        int64_t bands;
+        if (!paint_integer(map.get("bands"), 1, PAINT_MAX_BANDS, &bands)) return "a pigment layer needs bands, an integer in [1, 8]";
+        info->bands = (int32_t)bands;
+        if (!paint_unit_list(map.get("substrate"), info->bands, info->substrate))
+            return "a pigment layer needs substrate, one reflectance in [0, 1] per band";
+    }
+    else return "paint layer format must be 'rgba', 'coverage' or 'pigment'";
     if (paint_text_is(sample, "f32")) { info->elem = PAINT_ELEM_F32; info->lane = ELEM_FLOAT32; }
     else if (paint_text_is(sample, "u8") && info->format == PAINT_FORMAT_COVERAGE) { info->elem = PAINT_ELEM_U8; info->lane = ELEM_UINT8; }
     else return "paint layer sample must be 'f32' (or 'u8' for coverage)";
@@ -90,9 +104,12 @@ static const char* paint_layer_read(Item layer, PaintLayerInfo* info) {
     return nullptr;
 }
 
-static int paint_layer_channels(const PaintLayerInfo* info) { return info->format == PAINT_FORMAT_RGBA ? 4 : 1; }
+static int paint_layer_channels(const PaintLayerInfo* info) {
+    return info->format == PAINT_FORMAT_RGBA ? 4 : info->format == PAINT_FORMAT_PIGMENT ? paint_pigment_channels(info->bands) : 1;
+}
 
-// A tile is a dense (tile, tile, 4) f32 array for rgba, or (tile, tile) for coverage.
+// A tile is a dense (tile, tile, 4) f32 array for rgba, (tile, tile, 3B + 2) for pigment, or
+// (tile, tile) for coverage.
 static bool paint_tile_view(Item tile, const PaintLayerInfo* info, PaintView* view) {
     memset(view, 0, sizeof(*view));
     view->elem = info->elem; view->width = (int32_t)info->tile; view->height = (int32_t)info->tile;
@@ -103,9 +120,9 @@ static bool paint_tile_view(Item tile, const PaintLayerInfo* info, PaintView* vi
     if (array->get_elem_type() != info->lane) return false;
     int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int rank = array_num_get_shape_strides(array, shape, strides);
-    int expected = info->format == PAINT_FORMAT_RGBA ? 3 : 2;
+    int expected = info->format == PAINT_FORMAT_COVERAGE ? 2 : 3;
     if (rank != expected || shape[0] != info->tile || shape[1] != info->tile) return false;
-    if (rank == 3 && (shape[2] != 4 || strides[2] != 1)) return false;
+    if (rank == 3 && (shape[2] != paint_layer_channels(info) || strides[2] != 1)) return false;
     if (strides[0] < 0 || strides[1] < 0) return false;
     view->data = array->data;
     view->row_stride = strides[0];
@@ -113,9 +130,16 @@ static bool paint_tile_view(Item tile, const PaintLayerInfo* info, PaintView* vi
     return true;
 }
 
+// a fresh tile: transparent rgba, zero coverage, or a clean pigment tile over the layer's substrate.
 static ArrayNum* paint_tile_new(const PaintLayerInfo* info) {
-    int64_t shape[3] = {info->tile, info->tile, 4};
-    return alloc_ndim_arraynum(info->lane, info->format == PAINT_FORMAT_RGBA ? 3 : 2, shape);
+    int channels = paint_layer_channels(info);
+    int64_t shape[3] = {info->tile, info->tile, channels};
+    ArrayNum* tile = alloc_ndim_arraynum(info->lane, info->format == PAINT_FORMAT_COVERAGE ? 2 : 3, shape);
+    if (tile && info->format == PAINT_FORMAT_PIGMENT)
+        for (int64_t k = 0; k < info->tile * info->tile; k++)
+            for (int32_t b = 0; b < info->bands; b++)
+                ((float*)tile->data)[k * channels + paint_pigment_r(info->bands) + b] = info->substrate[b];
+    return tile;
 }
 
 // copies a (possibly strided) source tile into a fresh dense one; no allocation happens between
@@ -160,7 +184,46 @@ static bool paint_views(Item tiles, const PaintLayerInfo* info, PaintView* views
     out->tiles_x = (int32_t)info->tiles_x; out->tiles_y = (int32_t)info->tiles_y;
     out->tile_size = (int32_t)info->tile;
     out->format = info->format; out->elem = info->elem;
+    out->bands = info->bands;
+    for (int32_t b = 0; b < PAINT_MAX_BANDS; b++) out->substrate[b] = info->substrate[b];
     return true;
+}
+
+// D7.6.4 for an in-place call: un-shares the layer in `*home`, its tile array and each tile marked
+// in `touched`, copying a level only when it is shared (an empty tile becomes a fresh one) and
+// storing each replacement before the next allocation. The unique tile array is left in `*tiles`;
+// it is reachable from the home, so the caller roots it before allocating again.
+static Item paint_unshare_touched(Item* home, const PaintLayerInfo* info, const uint8_t* touched, Item* tiles_out) {
+    RootFrame roots(4);
+    Rooted<Item> layer(roots, *home), tiles(roots, ItemNull), key(roots, paint_name("tiles")), fresh(roots, ItemNull);
+    layer.set(cow_prepare_write(layer.get()));
+    if (item_is_error(layer.get())) return layer.get();
+    *home = layer.get();
+    tiles.set(MapReader::fromItem(layer.get()).get("tiles").item());
+    if (!cow_item_is_unique(tiles.get())) {
+        tiles.set(cow_prepare_write(tiles.get()));
+        if (item_is_error(tiles.get())) return tiles.get();
+        if (item_is_error(cow_path_set_raw(layer.get(), key.get(), tiles.get()))) return paint_error("cannot install paint tiles");
+    }
+    // release and no-log builds erase the diagnostic that consumes these counters
+    [[maybe_unused]] int64_t in_place = 0, copied = 0;
+    for (int64_t i = 0; i < info->tiles_x * info->tiles_y; i++) {
+        if (!touched[i]) continue;
+        Item tile = ItemReader(tiles.get().to_const()).asArray().get(i).item();
+        if (get_type_id(tile) != LMD_TYPE_NULL && cow_item_is_unique(tile)) { in_place++; continue; }
+        copied++;
+        ArrayNum* dense = paint_tile_new(info);
+        if (!dense) return paint_error("cannot allocate a paint tile");
+        fresh.set({.array_num = dense});
+        // the source is read again after the allocation (D5.4.4)
+        paint_tile_copy(dense, ItemReader(tiles.get().to_const()).asArray().get(i).item(), info);
+        if (item_is_error(cow_path_set_raw(tiles.get(), {.item = i2it(i)}, fresh.get())))
+            return paint_error("cannot install a paint tile");
+    }
+    log_debug("paint-stroke: %lld touched tiles written in place, %lld copied or created",
+        (long long)in_place, (long long)copied);
+    *tiles_out = tiles.get();
+    return ItemNull;
 }
 
 // the result layer keeps every field of the input and replaces `tiles`.
@@ -283,9 +346,10 @@ static const int32_t PAINT_MAX_BUCKETS = 256;
 // share it.
 struct PaintDabBatch {
     PaintLayerInfo info;
-    PaintScratch table, touched, views, tip_views, tip_samples, buckets, resolved;
+    PaintScratch table, touched, views, tip_views, tip_samples, buckets, resolved, pigments;
     PaintPlane paper;
-    int64_t count = 0, tip_count = 0, bucket_count = 0;
+    int64_t count = 0, tip_count = 0, bucket_count = 0, pigment_count = 0;
+    int32_t bucket_fields = PAINT_SMUDGE_FIELDS;
     bool want_resolved = false;
     PaintDabParams params = {};
     ~PaintDabBatch() {
@@ -294,21 +358,54 @@ struct PaintDabBatch {
     }
 };
 
+// copies a numeric (rows, columns) array into native f32 samples; rows within [min_rows, max_rows].
+static const char* paint_matrix_read(const ItemReader& value, int64_t columns, int64_t min_rows, int64_t max_rows,
+        PaintScratch* out, int64_t* rows_out, const char* message) {
+    if (get_type_id(value.item()) != LMD_TYPE_ARRAY_NUM) return message;
+    ArrayNum* array = value.item().array_num;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    ArrayNumElemType lane = array->get_elem_type();
+    if (array_num_get_shape_strides(array, shape, strides) != 2 || shape[1] != columns || shape[0] < min_rows ||
+        shape[0] > max_rows || (lane != ELEM_FLOAT32 && lane != ELEM_FLOAT64)) return message;
+    int64_t rows = shape[0];
+    float* data = (float*)mem_calloc((size_t)(rows * columns > 0 ? rows * columns : 1), sizeof(float), MEM_CAT_RENDER);
+    if (!data) return "cannot allocate paint scratch";
+    out->data = data;
+    for (int64_t r = 0; r < rows; r++) for (int64_t c = 0; c < columns; c++) {
+        int64_t at = r * strides[0] + c * strides[1];
+        data[r * columns + c] = lane == ELEM_FLOAT32 ? ((const float*)array->data)[at] : (float)((const double*)array->data)[at];
+    }
+    *rows_out = rows;
+    return nullptr;
+}
+
+static const int64_t PAINT_MAX_PIGMENTS = 4096;
+
 // Reads and checks every input, then charges the whole work budget by bounding the dabs and
 // marking the tiles they touch, so a failing call has written nothing (D7.6.4 step 1). Options:
 // budget; tips, a list of (h, w) coverage planes; paper, an (h, w) height plane; smudge, the
-// (buckets, 4) state from an earlier batch, or smudge_buckets to start fresh; resolved: true
-// returns each dab's colour and target alpha after smudge (PT16). Returns a message or nullptr.
+// (buckets, fields) state from an earlier batch (4 fields on rgba, 2B + 1 on pigment), or
+// smudge_buckets to start fresh; resolved: true returns each dab's colour and target alpha after
+// smudge (PT16, rgba only); pigments, the (count, 2B) K and S table a pigment layer's dabs name
+// (PE8). Returns a message or nullptr.
 static const char* paint_dab_batch_read(PaintDabBatch* b, Item layer, Item dabs, Item options) {
-    static const char* const names[] = {"budget", "tips", "paper", "smudge", "smudge_buckets", "resolved"};
+    static const char* const names[] = {"budget", "tips", "paper", "smudge", "smudge_buckets", "resolved", "pigments"};
     const char* problem = nullptr;
-    if (!paint_options_known(options, names, 6, &problem)) return problem;
+    if (!paint_options_known(options, names, 7, &problem)) return problem;
     int64_t budget = PAINT_DEFAULT_BUDGET;
     ItemReader budget_option = paint_option(options, "budget");
     if (!budget_option.isNull() && !paint_integer(budget_option, 0, INT64_MAX / 2, &budget))
         return "paint budget must be a non-negative integer";
     if ((problem = paint_layer_read(layer, &b->info))) return problem;
+    b->bucket_fields = paint_smudge_fields(b->info.format == PAINT_FORMAT_PIGMENT ? b->info.bands : 0);
     if ((problem = paint_dabs_read(dabs, (float**)&b->table.data, &b->count))) return problem;
+    ItemReader pigments_option = paint_option(options, "pigments");
+    if (!pigments_option.isNull()) {
+        if (b->info.format != PAINT_FORMAT_PIGMENT) return "only a pigment layer takes a pigment table";
+        if ((problem = paint_matrix_read(pigments_option, 2 * b->info.bands, 1, PAINT_MAX_PIGMENTS, &b->pigments,
+                &b->pigment_count, "pigments must be a (count, 2 * bands) f32 or float array of K then S, 1 to 4096 rows")))
+            return problem;
+    }
     // tips and paper become native planes before any allocation (D5.4.4).
     // tips are a list of (h, w) planes, or a (k, h, w) numeric stack of equal-size planes.
     ItemReader tip_list = paint_option(options, "tips");
@@ -338,38 +435,26 @@ static const char* paint_dab_batch_read(PaintDabBatch* b, Item layer, Item dabs,
     if (!paper_option.isNull() && (problem = paint_plane_read(paper_option.item(), &b->paper))) return problem;
     ItemReader smudge_option = paint_option(options, "smudge"), buckets_option = paint_option(options, "smudge_buckets");
     if (!smudge_option.isNull()) {
-        if (get_type_id(smudge_option.item()) != LMD_TYPE_ARRAY_NUM) return "smudge must be a (buckets, 4) numeric array";
-        // the smudge state reuses the dab-table reader's lane handling with four columns.
-        ArrayNum* array = smudge_option.item().array_num;
-        int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
-        ArrayNumElemType lane = array->get_elem_type();
-        if (array_num_get_shape_strides(array, shape, strides) != 2 || shape[1] != PAINT_SMUDGE_FIELDS || shape[0] < 1 ||
-            shape[0] > PAINT_MAX_BUCKETS || (lane != ELEM_FLOAT32 && lane != ELEM_FLOAT64))
-            return "smudge must be a (buckets, 4) f32 or float array with 1 to 256 buckets";
-        int64_t rows = shape[0];
-        float* state = (float*)mem_calloc((size_t)(rows * PAINT_SMUDGE_FIELDS), sizeof(float), MEM_CAT_RENDER);
-        if (!state) return "cannot allocate smudge state";
-        b->buckets.data = state;
-        for (int64_t r = 0; r < rows; r++) for (int64_t c = 0; c < PAINT_SMUDGE_FIELDS; c++) {
-            int64_t at = r * strides[0] + c * strides[1];
-            state[r * PAINT_SMUDGE_FIELDS + c] = lane == ELEM_FLOAT32 ? ((const float*)array->data)[at] : (float)((const double*)array->data)[at];
-        }
-        b->bucket_count = rows;
+        if ((problem = paint_matrix_read(smudge_option, b->bucket_fields, 1, PAINT_MAX_BUCKETS, &b->buckets, &b->bucket_count,
+                "smudge must be a (buckets, fields) f32 or float array with 1 to 256 buckets: 4 fields on rgba, 2B + 1 on pigment")))
+            return problem;
     } else if (!buckets_option.isNull()) {
         if (!paint_integer(buckets_option, 1, PAINT_MAX_BUCKETS, &b->bucket_count)) return "smudge_buckets must be an integer in [1, 256]";
-        b->buckets.data = mem_calloc((size_t)(b->bucket_count * PAINT_SMUDGE_FIELDS), sizeof(float), MEM_CAT_RENDER);
+        b->buckets.data = mem_calloc((size_t)(b->bucket_count * b->bucket_fields), sizeof(float), MEM_CAT_RENDER);
         if (!b->buckets.data) return "cannot allocate smudge state";
     }
     ItemReader resolved_option = paint_option(options, "resolved");
     if (!resolved_option.isNull() && !resolved_option.isBool()) return "resolved must be a bool";
     b->want_resolved = !resolved_option.isNull() && resolved_option.asBool();
+    if (b->want_resolved && b->info.format == PAINT_FORMAT_PIGMENT) return "resolved colours are not available for pigment layers";
     if (b->want_resolved && b->count > 0) {
         b->resolved.data = mem_calloc((size_t)(b->count * 4), sizeof(float), MEM_CAT_RENDER);
         if (!b->resolved.data) return "cannot allocate resolved colours";
     }
     b->params = {(uint64_t)budget, (const PaintView*)b->tip_views.data, (int32_t)b->tip_count,
         b->paper.samples.data ? &b->paper.view : nullptr, (float*)b->buckets.data, (int32_t)b->bucket_count,
-        (float*)b->resolved.data};
+        (float*)b->resolved.data, b->info.format == PAINT_FORMAT_PIGMENT ? b->info.bands : 0,
+        (const float*)b->pigments.data, (int32_t)b->pigment_count};
     int64_t tile_count = b->info.tiles_x * b->info.tiles_y;
     b->touched.data = mem_calloc((size_t)tile_count, 1, MEM_CAT_RENDER);
     b->views.data = mem_calloc((size_t)tile_count, sizeof(PaintView), MEM_CAT_RENDER);
@@ -391,7 +476,7 @@ static Item paint_dab_batch_render(PaintDabBatch* b, Item tiles_item, Item layer
     PaintResult result = paint_dabs(&target, (const float*)b->table.data, b->count, PAINT_DAB_COLUMNS, &b->params);
     if (result.status != PAINT_OK) return paint_status_error(result);
     if (b->bucket_count > 0) {
-        smudge.set(paint_floats_item((const float*)b->buckets.data, b->bucket_count, PAINT_SMUDGE_FIELDS));
+        smudge.set(paint_floats_item((const float*)b->buckets.data, b->bucket_count, b->bucket_fields));
         if (item_is_error(smudge.get())) return smudge.get();
     }
     if (b->want_resolved) {
@@ -427,40 +512,15 @@ RADIANT_C_API Item fn_radiant_paint_dabs(Item layer_item, Item dabs_item, Item o
 // touched tile, copying a level only when it is shared and storing each replacement before the
 // next allocation; take the engine views after the last allocation. The layer keeps its shape.
 RADIANT_C_API Item fn_radiant_paint_stroke(Item* home, Item dabs_item, Item options_item) {
-    RootFrame roots(6);
-    Rooted<Item> dabs(roots, dabs_item), options(roots, options_item), layer(roots, *home), tiles(roots, ItemNull),
-        key(roots, ItemNull), fresh(roots, ItemNull);
+    RootFrame roots(3);
+    Rooted<Item> dabs(roots, dabs_item), options(roots, options_item), tiles(roots, ItemNull);
     PaintDabBatch batch;
-    const char* problem = paint_dab_batch_read(&batch, layer.get(), dabs.get(), options.get());
+    const char* problem = paint_dab_batch_read(&batch, *home, dabs.get(), options.get());
     if (problem) return paint_error(problem);
-    key.set(paint_name("tiles"));
-    layer.set(cow_prepare_write(layer.get()));
-    if (item_is_error(layer.get())) return layer.get();
-    *home = layer.get();
-    tiles.set(MapReader::fromItem(layer.get()).get("tiles").item());
-    if (!cow_item_is_unique(tiles.get())) {
-        tiles.set(cow_prepare_write(tiles.get()));
-        if (item_is_error(tiles.get())) return tiles.get();
-        if (item_is_error(cow_path_set_raw(layer.get(), key.get(), tiles.get()))) return paint_error("cannot install paint tiles");
-    }
-    const uint8_t* touched = (const uint8_t*)batch.touched.data;
-    // release and no-log builds erase the diagnostic that consumes these counters
-    [[maybe_unused]] int64_t in_place = 0, copied = 0;
-    for (int64_t i = 0; i < batch.info.tiles_x * batch.info.tiles_y; i++) {
-        if (!touched[i]) continue;
-        Item tile = ItemReader(tiles.get().to_const()).asArray().get(i).item();
-        if (get_type_id(tile) != LMD_TYPE_NULL && cow_item_is_unique(tile)) { in_place++; continue; }
-        copied++;
-        ArrayNum* dense = paint_tile_new(&batch.info);
-        if (!dense) return paint_error("cannot allocate a paint tile");
-        fresh.set({.array_num = dense});
-        // the source is read again after the allocation (D5.4.4)
-        paint_tile_copy(dense, ItemReader(tiles.get().to_const()).asArray().get(i).item(), &batch.info);
-        if (item_is_error(cow_path_set_raw(tiles.get(), {.item = i2it(i)}, fresh.get())))
-            return paint_error("cannot install a paint tile");
-    }
-    log_debug("paint-stroke: %lld touched tiles written in place, %lld copied or created",
-        (long long)in_place, (long long)copied);
+    Item unique = ItemNull;
+    Item failed = paint_unshare_touched(home, &batch.info, (const uint8_t*)batch.touched.data, &unique);
+    if (item_is_error(failed)) return failed;
+    tiles.set(unique);
     return paint_dab_batch_render(&batch, tiles.get(), ItemNull);
 }
 
@@ -617,23 +677,45 @@ RADIANT_C_API Item fn_radiant_paint_import(Item layer_item, Item pixels_item, It
     return paint_layer_with_tiles(layer.get(), tiles.get());
 }
 
+// lighting = {light: [x, y, z], relief, diffuse, specular, shininess} for a pigment layer (PE7 step 5).
+static const char* paint_lighting_read(Item lighting, PaintPresentParams* params) {
+    static const char* const names[] = {"light", "relief", "diffuse", "specular", "shininess"};
+    const char* problem = nullptr;
+    if (!paint_options_known(lighting, names, 5, &problem)) return "present lighting is {light, relief, diffuse, specular, shininess}";
+    ItemReader light = paint_option(lighting, "light");
+    double v[3], relief, diffuse, specular, shininess;
+    if (!light.isArray() || light.asArray().length() != 3) return "lighting light must be a direction [x, y, z]";
+    for (int i = 0; i < 3; i++) if (!paint_number(light.asArray().get(i), &v[i])) return "lighting light must be a direction [x, y, z]";
+    if (!paint_number(paint_option(lighting, "relief"), &relief) || !paint_number(paint_option(lighting, "diffuse"), &diffuse) ||
+        !paint_number(paint_option(lighting, "specular"), &specular) || !paint_number(paint_option(lighting, "shininess"), &shininess))
+        return "lighting needs numbers relief, diffuse, specular and shininess";
+    params->has_lighting = true;
+    for (int i = 0; i < 3; i++) params->light[i] = (float)v[i];
+    params->relief = (float)relief; params->diffuse = (float)diffuse;
+    params->specular = (float)specular; params->shininess = (float)shininess;
+    return nullptr;
+}
+
 // radiant.paint_present(layer, options) -> (h, w, 4) u8 straight-alpha samples of `rect` (PE7).
+// Options: rect, encode ('srgb' or 'none'), background (rgba layers), lighting (pigment layers).
 RADIANT_C_API Item fn_radiant_paint_present(Item layer_item, Item options_item) {
     RootFrame roots(3);
     Rooted<Item> layer(roots, layer_item), options(roots, options_item), output(roots, ItemNull);
-    static const char* const names[] = {"rect", "encode", "background"};
+    static const char* const names[] = {"rect", "encode", "background", "lighting"};
     const char* problem = nullptr;
-    if (!paint_options_known(options.get(), names, 3, &problem)) return paint_error(problem);
+    if (!paint_options_known(options.get(), names, 4, &problem)) return paint_error(problem);
     PaintLayerInfo info;
     if ((problem = paint_layer_read(layer.get(), &info))) return paint_error(problem);
-    if (info.format != PAINT_FORMAT_RGBA) return paint_error("present needs an rgba layer");
+    if (info.format == PAINT_FORMAT_COVERAGE) return paint_error("present needs an rgba or pigment layer");
     PaintRect rect = {0, 0, (int32_t)info.width, (int32_t)info.height};
     ItemReader rect_option = paint_option(options.get(), "rect");
     if (!rect_option.isNull() && !radiant_paint_rect_read(rect_option, &rect)) return paint_error("present rect must be [x0, y0, x1, y1]");
     if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > info.width || rect.y1 > info.height || rect.x1 <= rect.x0 || rect.y1 <= rect.y0)
         return paint_error("present rect must be a non-empty rectangle inside the layer");
     if ((int64_t)(rect.x1 - rect.x0) * (rect.y1 - rect.y0) > 64 * 1024 * 1024) return paint_error("present rect is too large");
-    PaintPresentParams params = {true, false, {0, 0, 0, 0}};
+    PaintPresentParams params = {true, false, {0, 0, 0, 0}, false, {0, 0, 1}, 0, 0, 0, 1, nullptr};
+    ItemReader lighting = paint_option(options.get(), "lighting");
+    if (!lighting.isNull() && (problem = paint_lighting_read(lighting.item(), &params))) return paint_error(problem);
     ItemReader encode = paint_option(options.get(), "encode");
     if (!encode.isNull()) {
         if (paint_text_is(encode, "none")) params.encode_srgb = false;
@@ -659,6 +741,180 @@ RADIANT_C_API Item fn_radiant_paint_present(Item layer_item, Item options_item) 
     PaintResult result = paint_present(&source, rect, &out, &params);
     if (result.status != PAINT_OK) return paint_status_error(result);
     return output.get();
+}
+
+// The inputs of a drying call (PE8): the rect clipped to the layer and the rate.
+struct PaintDryCall {
+    PaintLayerInfo info;
+    PaintScratch touched, views;
+    PaintRect rect = {0, 0, 0, 0};
+    float rate = 1.0f;
+};
+
+// options: rect (the whole layer by default) and rate in (0, 1] (1 by default). Marks the tiles in
+// the rect; empty ones stay empty, since a clean tile has no film (paint_pigment_dry skips it).
+static const char* paint_dry_read(PaintDryCall* d, Item layer, Item options) {
+    static const char* const names[] = {"rect", "rate"};
+    const char* problem = nullptr;
+    if (!paint_options_known(options, names, 2, &problem)) return problem;
+    if ((problem = paint_layer_read(layer, &d->info))) return problem;
+    if (d->info.format != PAINT_FORMAT_PIGMENT) return "drying needs a pigment layer";
+    d->rect = {0, 0, (int32_t)d->info.width, (int32_t)d->info.height};
+    ItemReader rect_option = paint_option(options, "rect");
+    if (!rect_option.isNull() && !radiant_paint_rect_read(rect_option, &d->rect)) return "dry rect must be [x0, y0, x1, y1]";
+    d->rect = paint_rect_clip(d->rect, &d->info);
+    ItemReader rate_option = paint_option(options, "rate");
+    double rate = 1.0;
+    if (!rate_option.isNull() && (!paint_number(rate_option, &rate) || rate <= 0.0 || rate > 1.0)) return "dry rate must be in (0, 1]";
+    d->rate = (float)rate;
+    int64_t tile_count = d->info.tiles_x * d->info.tiles_y;
+    d->touched.data = mem_calloc((size_t)tile_count, 1, MEM_CAT_RENDER);
+    d->views.data = mem_calloc((size_t)tile_count, sizeof(PaintView), MEM_CAT_RENDER);
+    if (!d->touched.data || !d->views.data) return "cannot allocate paint scratch";
+    paint_mark_rect(&d->info, d->rect, (uint8_t*)d->touched.data);
+    // a clean tile has nothing to dry, so it is not forked into existence
+    for (int64_t i = 0; i < tile_count; i++)
+        if (get_type_id(MapReader::fromItem(layer).get("tiles").asArray().get(i).item()) == LMD_TYPE_NULL)
+            ((uint8_t*)d->touched.data)[i] = 0;
+    return nullptr;
+}
+
+static Item paint_dry_render(PaintDryCall* d, Item tiles_item, Item layer_item) {
+    RootFrame roots(2);
+    Rooted<Item> tiles(roots, tiles_item), layer(roots, layer_item);
+    PaintTiles target;
+    if (!paint_views(tiles.get(), &d->info, (PaintView*)d->views.data, &target)) return paint_error("a paint tile does not match its layer");
+    PaintResult result = paint_pigment_dry(&target, d->rect, d->rate);
+    if (result.status != PAINT_OK) return paint_status_error(result);
+    RootedValueBuilder out(RootedValueBuilder::DATA_MAP);
+    if (get_type_id(layer.get()) != LMD_TYPE_NULL) out.put("layer", paint_layer_with_tiles(layer.get(), tiles.get()));
+    out.put("rect", paint_rect_item(result.dirty));
+    out.put("work", {.item = i2it((int64_t)result.work)});
+    return out.value.get();
+}
+
+// radiant.paint_dried(layer, options) -> {layer, rect, work} (PT7 pure form): the layer with
+// part of its wet film folded into the substrate (PE8); painted tiles in the rect are forked.
+RADIANT_C_API Item fn_radiant_paint_dried(Item layer_item, Item options_item) {
+    RootFrame roots(3);
+    Rooted<Item> layer(roots, layer_item), options(roots, options_item), tiles(roots, ItemNull);
+    PaintDryCall call;
+    const char* problem = paint_dry_read(&call, layer.get(), options.get());
+    if (problem) return paint_error(problem);
+    tiles.set(paint_fork_tiles(MapReader::fromItem(layer.get()).get("tiles").item(), &call.info, (const uint8_t*)call.touched.data));
+    if (item_is_error(tiles.get())) return tiles.get();
+    return paint_dry_render(&call, tiles.get(), layer.get());
+}
+
+// radiant.paint_dry(var layer, options) -> {rect, work} (PT7 in-place form, D7.6.3, D7.6.4).
+RADIANT_C_API Item fn_radiant_paint_dry(Item* home, Item options_item) {
+    RootFrame roots(2);
+    Rooted<Item> options(roots, options_item), tiles(roots, ItemNull);
+    PaintDryCall call;
+    const char* problem = paint_dry_read(&call, *home, options.get());
+    if (problem) return paint_error(problem);
+    Item unique = ItemNull;
+    Item failed = paint_unshare_touched(home, &call.info, (const uint8_t*)call.touched.data, &unique);
+    if (item_is_error(failed)) return failed;
+    tiles.set(unique);
+    return paint_dry_render(&call, tiles.get(), ItemNull);
+}
+
+static const int64_t PAINT_MAX_BRISTLES = 4096;
+
+// The native inputs of one bristle batch (PE10): the layer, the path, the bristle state and
+// paper, copied out of the GC heap before the first allocation (D5.4.4).
+struct PaintBristleBatch {
+    PaintLayerInfo info;
+    PaintScratch path, state, touched, views;
+    PaintPlane paper;
+    int64_t count = 0, bristles = 0;
+    int32_t columns = 0;
+    PaintBristleParams params = {};
+};
+
+// options: budget, paper, depletion (load per pixel of trail at full strength, 0 by default) and
+// pickup in [0, 1] (0). The state is an (n, columns) array in bristle layout v1.
+static const char* paint_bristle_batch_read(PaintBristleBatch* b, Item layer, Item path, Item state, Item options) {
+    static const char* const names[] = {"budget", "paper", "depletion", "pickup"};
+    const char* problem = nullptr;
+    if (!paint_options_known(options, names, 4, &problem)) return problem;
+    int64_t budget = PAINT_DEFAULT_BUDGET;
+    ItemReader budget_option = paint_option(options, "budget");
+    if (!budget_option.isNull() && !paint_integer(budget_option, 0, INT64_MAX / 2, &budget)) return "paint budget must be a non-negative integer";
+    if ((problem = paint_layer_read(layer, &b->info))) return problem;
+    if (b->info.format == PAINT_FORMAT_COVERAGE) return "bristles need an rgba or pigment layer";
+    int32_t bands = b->info.format == PAINT_FORMAT_PIGMENT ? b->info.bands : 0;
+    b->columns = paint_bristle_columns(bands);
+    if ((problem = paint_dabs_read(path, (float**)&b->path.data, &b->count))) return problem;
+    if ((problem = paint_matrix_read(ItemReader(state.to_const()), b->columns, 1, PAINT_MAX_BRISTLES, &b->state, &b->bristles,
+            "bristle state must be an (n, columns) f32 or float array: 1 to 4096 bristles, 11 columns on rgba, 10 + 2B on pigment")))
+        return problem;
+    ItemReader paper_option = paint_option(options, "paper");
+    if (!paper_option.isNull() && (problem = paint_plane_read(paper_option.item(), &b->paper))) return problem;
+    double depletion = 0.0, pickup = 0.0;
+    ItemReader depletion_option = paint_option(options, "depletion"), pickup_option = paint_option(options, "pickup");
+    if (!depletion_option.isNull() && !paint_number(depletion_option, &depletion)) return "bristle depletion must be a number";
+    if (!pickup_option.isNull() && !paint_number(pickup_option, &pickup)) return "bristle pickup must be a number";
+    b->params = {(uint64_t)budget, b->paper.samples.data ? &b->paper.view : nullptr, (float)depletion, (float)pickup, bands};
+    int64_t tile_count = b->info.tiles_x * b->info.tiles_y;
+    b->touched.data = mem_calloc((size_t)tile_count, 1, MEM_CAT_RENDER);
+    b->views.data = mem_calloc((size_t)tile_count, sizeof(PaintView), MEM_CAT_RENDER);
+    if (!b->touched.data || !b->views.data) return "cannot allocate paint scratch";
+    PaintResult bounds = paint_bristle_bounds((const float*)b->path.data, b->count, PAINT_DAB_COLUMNS, (const float*)b->state.data,
+        (int32_t)b->bristles, b->columns, (int32_t)b->info.width, (int32_t)b->info.height, (int32_t)b->info.tile, &b->params,
+        (uint8_t*)b->touched.data);
+    if (bounds.status != PAINT_OK) return bounds.reason ? bounds.reason : "paint engine call failed";
+    return nullptr;
+}
+
+// Draws the batch into `tiles` (touched entries owned by the call) and returns {rect, work, state},
+// plus `layer` for the pure form.
+static Item paint_bristle_batch_render(PaintBristleBatch* b, Item tiles_item, Item layer_item) {
+    RootFrame roots(3);
+    Rooted<Item> tiles(roots, tiles_item), layer(roots, layer_item), state(roots, ItemNull);
+    PaintTiles target;
+    if (!paint_views(tiles.get(), &b->info, (PaintView*)b->views.data, &target)) return paint_error("a paint tile does not match its layer");
+    PaintResult result = paint_bristles(&target, (const float*)b->path.data, b->count, PAINT_DAB_COLUMNS, (float*)b->state.data,
+        (int32_t)b->bristles, b->columns, &b->params);
+    if (result.status != PAINT_OK) return paint_status_error(result);
+    state.set(paint_floats_item((const float*)b->state.data, b->bristles, b->columns));
+    if (item_is_error(state.get())) return state.get();
+    RootedValueBuilder out(RootedValueBuilder::DATA_MAP);
+    if (get_type_id(layer.get()) != LMD_TYPE_NULL) out.put("layer", paint_layer_with_tiles(layer.get(), tiles.get()));
+    out.put("rect", paint_rect_item(result.dirty));
+    out.put("work", {.item = i2it((int64_t)result.work)});
+    out.put("state", state.get());
+    return out.value.get();
+}
+
+// radiant.paint_bristles(layer, path, state, options) -> {layer, rect, work, state} (PT7 pure
+// form, PE10): touched tiles are forked once per call.
+RADIANT_C_API Item fn_radiant_paint_bristles(Item layer_item, Item path_item, Item state_item, Item options_item) {
+    RootFrame roots(5);
+    Rooted<Item> layer(roots, layer_item), path(roots, path_item), state(roots, state_item), options(roots, options_item),
+        tiles(roots, ItemNull);
+    PaintBristleBatch batch;
+    const char* problem = paint_bristle_batch_read(&batch, layer.get(), path.get(), state.get(), options.get());
+    if (problem) return paint_error(problem);
+    tiles.set(paint_fork_tiles(MapReader::fromItem(layer.get()).get("tiles").item(), &batch.info, (const uint8_t*)batch.touched.data));
+    if (item_is_error(tiles.get())) return tiles.get();
+    return paint_bristle_batch_render(&batch, tiles.get(), layer.get());
+}
+
+// radiant.paint_bristle_stroke(var layer, path, state, options) -> {rect, work, state} (PT7
+// in-place form, D7.6.3, D7.6.4): the batch of paint_bristles, written through the layer's home.
+RADIANT_C_API Item fn_radiant_paint_bristle_stroke(Item* home, Item path_item, Item state_item, Item options_item) {
+    RootFrame roots(4);
+    Rooted<Item> path(roots, path_item), state(roots, state_item), options(roots, options_item), tiles(roots, ItemNull);
+    PaintBristleBatch batch;
+    const char* problem = paint_bristle_batch_read(&batch, *home, path.get(), state.get(), options.get());
+    if (problem) return paint_error(problem);
+    Item unique = ItemNull;
+    Item failed = paint_unshare_touched(home, &batch.info, (const uint8_t*)batch.touched.data, &unique);
+    if (item_is_error(failed)) return failed;
+    tiles.set(unique);
+    return paint_bristle_batch_render(&batch, tiles.get(), ItemNull);
 }
 
 // PT12 `layers/<id>.tiles`: a layer's present tiles as one little-endian blob. A 32-byte header
@@ -784,7 +1040,362 @@ RADIANT_C_API Item fn_radiant_paint_tiles_decode(Item bytes_item, Item layer_ite
     return paint_layer_with_tiles(layer.get(), result.value.get());
 }
 
-// radiant.paint_capabilities() -> the engine's profile (PT15).
+// The offsets are shared with the engine, including the three-pigment reference layout (PE9).
+RADIANT_C_API Item fn_radiant_paint_wet_layout(Item pigments_item) {
+    int64_t count;
+    if (!paint_integer(ItemReader(pigments_item.to_const()), 1, PAINT_WET_MAX_PIGMENTS, &count))
+        return paint_error("wet pigment count must be in [1, 4096]");
+    RootedValueBuilder out(RootedValueBuilder::DATA_MAP);
+    out.put("pigments", {.item = i2it(count)});
+    out.put("planes", {.item = i2it(paint_wet_layout((int32_t)count))});
+    out.put("suspended", {.item = i2it(8)});
+    out.put("deposited", {.item = i2it(paint_wet_deposited((int32_t)count))});
+    out.put("scratch", {.item = i2it(paint_wet_scratch((int32_t)count))});
+    return out.value.get();
+}
+
+RADIANT_C_API Item fn_radiant_paint_wet_cells(Item cells_item) {
+    RootFrame roots(1);
+    Rooted<Item> cells(roots, cells_item);
+    if (get_type_id(cells.get()) != LMD_TYPE_ARRAY_NUM) return paint_error("wet cells must be a numeric array");
+    ArrayNum* src = cells.get().array_num;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    if (array_num_get_shape_strides(src, shape, strides) != 1 || shape[0] < 0 ||
+        (src->get_elem_type() != ELEM_FLOAT32 && src->get_elem_type() != ELEM_FLOAT64))
+        return paint_error("wet cells must be a one-dimensional f32 or float array");
+    int64_t length = shape[0], stride = strides[0];
+    ArrayNum* dst = array_num_new(ELEM_FLOAT32, length);
+    if (!dst || (length && !dst->data)) return paint_error("cannot allocate wet cells");
+    src = cells.get().array_num;
+    for (int64_t i = 0; i < length; ++i)
+        ((float*)dst->data)[i] = src->get_elem_type() == ELEM_FLOAT32 ? ((float*)src->data)[i * stride]
+            : (float)((double*)src->data)[i * stride];
+    return {.array_num = dst};
+}
+
+// Present the wet sheet over a matching pigment layer without retaining their storage (D5.5.2).
+RADIANT_C_API Item fn_radiant_paint_wet_present(Item cells_item, Item layer_item, Item options_item) {
+    RootFrame roots(4);
+    Rooted<Item> cells(roots, cells_item), layer(roots, layer_item), options(roots, options_item), output(roots, ItemNull);
+    static const char* const names[] = {"pigments", "rect", "encode", "budget"};
+    const char* problem = nullptr;
+    if (!paint_options_known(options.get(), names, 4, &problem)) return paint_error(problem);
+    PaintLayerInfo info;
+    if ((problem = paint_layer_read(layer.get(), &info))) return paint_error(problem);
+    if (info.format != PAINT_FORMAT_PIGMENT || info.bands != 3) return paint_error("wet present needs a three-band pigment layer");
+    PaintScratch pigments, views; int64_t count = 0, budget = PAINT_DEFAULT_BUDGET;
+    if ((problem = paint_matrix_read(paint_option(options.get(), "pigments"), 6, 1, PAINT_WET_MAX_PIGMENTS, &pigments, &count,
+            "wet pigments must be a (count, 6) table of K and S"))) return paint_error(problem);
+    ItemReader budget_option = paint_option(options.get(), "budget");
+    if (!budget_option.isNull() && !paint_integer(budget_option, 0, INT64_MAX / 2, &budget))
+        return paint_error("paint budget must be a non-negative integer");
+    PaintRect rect = {0, 0, (int32_t)info.width, (int32_t)info.height};
+    ItemReader rect_option = paint_option(options.get(), "rect");
+    if (!rect_option.isNull() && !radiant_paint_rect_read(rect_option, &rect)) return paint_error("invalid wet present rectangle");
+    if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > info.width || rect.y1 > info.height || rect.x1 <= rect.x0 || rect.y1 <= rect.y0)
+        return paint_error("wet present rectangle must lie inside the sheet");
+    if ((int64_t)(rect.x1-rect.x0)*(rect.y1-rect.y0) > 64*1024*1024) return paint_error("wet present rectangle is too large");
+    bool encode = true; ItemReader encoding = paint_option(options.get(), "encode");
+    if (!encoding.isNull()) {
+        if (paint_text_is(encoding, "none")) encode = false;
+        else if (!paint_text_is(encoding, "srgb")) return paint_error("present encode must be 'srgb' or 'none'");
+    }
+    if (get_type_id(cells.get()) != LMD_TYPE_ARRAY_NUM) return paint_error("wet cells must be f32 or float");
+    ArrayNum* array = cells.get().array_num; bool wide = array->get_elem_type() == ELEM_FLOAT64;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], stride[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    if ((array->get_elem_type() != ELEM_FLOAT32 && !wide) || array->is_view ||
+        array_num_get_shape_strides(array, shape, stride) != 1 || stride[0] != 1 ||
+        shape[0] != paint_wet_layout((int32_t)count) * info.width * info.height)
+        return paint_error("wet cells must match the pigment-dependent dense sheet layout");
+    if ((uint64_t)(rect.x1-rect.x0)*(rect.y1-rect.y0) > (uint64_t)budget / (uint64_t)count)
+        return paint_error("wet present exceeds the work budget");
+    int64_t dims[3] = {rect.y1-rect.y0, rect.x1-rect.x0, 4};
+    ArrayNum* pixels = alloc_ndim_arraynum(ELEM_UINT8, 3, dims);
+    if (!pixels) return paint_error("cannot allocate wet presented pixels");
+    output.set({.array_num = pixels});
+    views.data = mem_calloc((size_t)(info.tiles_x * info.tiles_y), sizeof(PaintView), MEM_CAT_RENDER);
+    if (!views.data) return paint_error("cannot allocate paint scratch");
+    PaintTiles source;
+    if (!paint_views(MapReader::fromItem(layer.get()).get("tiles").item(), &info, (PaintView*)views.data, &source))
+        return paint_error("a paint tile does not match its layer");
+    // Re-read rooted storage after the output allocation (D5.4.4).
+    array = cells.get().array_num;
+    PaintWetSheet sheet{(float*)array->data, (int32_t)info.width, (int32_t)info.height, {0,0,0,0}, 0, 0};
+    sheet.pigments = (int32_t)count;
+    PaintWetSheet64 sheet64{(double*)array->data, sheet.width, sheet.height, sheet.active, 0, 0};
+    sheet64.pigments = sheet.pigments;
+    PaintView out = {output.get().array_num->data, PAINT_ELEM_U8, rect.x1-rect.x0, rect.y1-rect.y0, 4,
+        (int64_t)(rect.x1-rect.x0)*4, 4};
+    PaintResult result = wide ? paint_wet_present64(&sheet64, &source, rect, &out, (float*)pigments.data, (int32_t)count, encode, (uint64_t)budget)
+                              : paint_wet_present(&sheet, &source, rect, &out, (float*)pigments.data, (int32_t)count, encode, (uint64_t)budget);
+    if (result.status != PAINT_OK) return paint_status_error(result);
+    return output.get();
+}
+
+// Copy table and optional planes before unsharing the dense sheet (D5.4.4, D7.6.4).
+static Item paint_wet_brush(Item* home, Item dabs_item, Item state_item, Item options_item, bool bristle) {
+    RootFrame roots(5);
+    Rooted<Item> options(roots, options_item), cells(roots, *home), dabs(roots, dabs_item),
+        input_state(roots, state_item), result_state(roots, ItemNull);
+    static const char* const names[] = {"width", "height", "pigments", "active", "since_shrink", "wet_cells", "budget", "tip", "paper"};
+    static const char* const bristle_names[] = {"width", "height", "pigments", "active", "since_shrink", "wet_cells", "budget", "paper", "channel", "depletion", "pickup"};
+    const char* problem = nullptr;
+    if (!paint_options_known(options.get(), bristle ? bristle_names : names, bristle ? 11 : 9, &problem)) return paint_error(problem);
+    int64_t w, h, pigments, shrink, wet_count, budget = PAINT_DEFAULT_BUDGET;
+    if (!paint_integer(paint_option(options.get(), "width"), 8, PAINT_MAX_EXTENT, &w) ||
+        !paint_integer(paint_option(options.get(), "height"), 8, PAINT_MAX_EXTENT, &h) ||
+        !paint_integer(paint_option(options.get(), "pigments"), 1, PAINT_WET_MAX_PIGMENTS, &pigments) ||
+        !paint_integer(paint_option(options.get(), "since_shrink"), 0, INT32_MAX, &shrink) ||
+        !paint_integer(paint_option(options.get(), "wet_cells"), 0, INT32_MAX, &wet_count) || w * h > INT32_MAX)
+        return paint_error("invalid wet sheet dimensions or counters");
+    ItemReader budget_option = paint_option(options.get(), "budget");
+    if (!budget_option.isNull() && !paint_integer(budget_option, 0, INT64_MAX / 2, &budget))
+        return paint_error("paint budget must be a non-negative integer");
+    PaintScratch table; int64_t count;
+    if ((problem = paint_dabs_read(dabs.get(), (float**)&table.data, &count))) return paint_error(problem);
+    PaintScratch bristle_state; int64_t bristles = 0, channel = 0;
+    PaintBristleParams bristle_params = {};
+    if (bristle) {
+        if (!paint_integer(paint_option(options.get(), "channel"), 0, pigments - 1, &channel))
+            return paint_error("wet bristle channel must name a sheet pigment");
+        double depletion, pickup;
+        if (!paint_number(paint_option(options.get(), "depletion"), &depletion) ||
+            !paint_number(paint_option(options.get(), "pickup"), &pickup))
+            return paint_error("wet bristle depletion and pickup must be finite numbers");
+        if ((problem = paint_matrix_read(ItemReader(input_state.get().to_const()), paint_bristle_columns(0), 1,
+                PAINT_MAX_BRISTLES, &bristle_state, &bristles, "wet bristle state must be an (n, 11) float array")))
+            return paint_error(problem);
+        bristle_params.work_budget = (uint64_t)budget;
+        bristle_params.depletion = (float)depletion; bristle_params.pickup = (float)pickup;
+    }
+    PaintPlane tip, paper;
+    ItemReader tip_option = paint_option(options.get(), "tip"), paper_option = paint_option(options.get(), "paper");
+    if (!tip_option.isNull() && (problem = paint_plane_read(tip_option.item(), &tip))) return paint_error(problem);
+    if (!paper_option.isNull() && (problem = paint_plane_read(paper_option.item(), &paper))) return paint_error(problem);
+    if (get_type_id(cells.get()) != LMD_TYPE_ARRAY_NUM) return paint_error("wet cells must be f32 or float");
+    ArrayNum* array = cells.get().array_num;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], stride[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    bool wide = array->get_elem_type() == ELEM_FLOAT64;
+    if ((array->get_elem_type() != ELEM_FLOAT32 && !wide) || array->is_view ||
+        array_num_get_shape_strides(array, shape, stride) != 1 || stride[0] != 1 ||
+        shape[0] != paint_wet_layout((int32_t)pigments) * w * h)
+        return paint_error("wet cells must match the pigment-dependent dense sheet layout");
+    PaintWetSheet sheet{(float*)array->data, (int32_t)w, (int32_t)h, {0, 0, 0, 0}, (int32_t)shrink, (int32_t)wet_count};
+    sheet.pigments = (int32_t)pigments;
+    ItemReader active = paint_option(options.get(), "active");
+    if (!active.isNull() && !radiant_paint_rect_read(active, &sheet.active)) return paint_error("invalid wet active rectangle");
+    PaintWetSheet64 sheet64{(double*)array->data, sheet.width, sheet.height, sheet.active, sheet.since_shrink, sheet.wet_cells};
+    sheet64.pigments = sheet.pigments;
+    PaintDabParams params = {};
+    params.work_budget = (uint64_t)budget;
+    params.tips = tip.samples.data ? &tip.view : nullptr; params.tip_count = tip.samples.data ? 1 : 0;
+    params.paper = paper.samples.data ? &paper.view : nullptr;
+    const float* rows = (const float*)table.data;
+    bristle_params.paper = params.paper;
+    PaintResult result;
+    if (bristle) result = wide ? paint_wet_bristles_bounds64(&sheet64, rows, count, PAINT_DAB_COLUMNS,
+        (float*)bristle_state.data, (int32_t)bristles, paint_bristle_columns(0), (int32_t)channel, &bristle_params)
+        : paint_wet_bristles_bounds(&sheet, rows, count, PAINT_DAB_COLUMNS, (float*)bristle_state.data,
+            (int32_t)bristles, paint_bristle_columns(0), (int32_t)channel, &bristle_params);
+    else result = wide ? paint_wet_dabs_bounds64(&sheet64, rows, count, PAINT_DAB_COLUMNS, &params)
+                       : paint_wet_dabs_bounds(&sheet, rows, count, PAINT_DAB_COLUMNS, &params);
+    if (result.status != PAINT_OK) return paint_status_error(result);
+    if (bristle) {
+        result_state.set(paint_floats_item((const float*)bristle_state.data, bristles, paint_bristle_columns(0)));
+        if (item_is_error(result_state.get())) return result_state.get();
+    }
+    cells.set(cow_prepare_write(cells.get()));
+    if (item_is_error(cells.get())) return cells.get();
+    if (get_type_id(cells.get()) != LMD_TYPE_ARRAY_NUM) return paint_error("cannot unshare wet cells");
+    *home = cells.get();
+    if (wide) {
+        sheet64.cells = (double*)cells.get().array_num->data;
+        result = bristle ? paint_wet_bristles64(&sheet64, rows, count, PAINT_DAB_COLUMNS, (float*)bristle_state.data,
+            (int32_t)bristles, paint_bristle_columns(0), (int32_t)channel, &bristle_params)
+            : paint_wet_dabs64(&sheet64, rows, count, PAINT_DAB_COLUMNS, &params);
+        sheet.active = sheet64.active;
+    } else {
+        sheet.cells = (float*)cells.get().array_num->data;
+        result = bristle ? paint_wet_bristles(&sheet, rows, count, PAINT_DAB_COLUMNS, (float*)bristle_state.data,
+            (int32_t)bristles, paint_bristle_columns(0), (int32_t)channel, &bristle_params)
+            : paint_wet_dabs(&sheet, rows, count, PAINT_DAB_COLUMNS, &params);
+    }
+    if (result.status != PAINT_OK) return paint_status_error(result);
+    if (bristle) memcpy(result_state.get().array_num->data, bristle_state.data,
+        (size_t)bristles * paint_bristle_columns(0) * sizeof(float));
+    RootedValueBuilder out(RootedValueBuilder::DATA_MAP);
+    out.put("active", paint_rect_item(sheet.active));
+    out.put("rect", paint_rect_item(result.dirty));
+    out.put("work", {.item = i2it((int64_t)result.work)});
+    if (bristle) out.put("state", result_state.get());
+    return out.value.get();
+}
+
+RADIANT_C_API Item fn_radiant_paint_wet_dabs(Item* home, Item dabs, Item options) {
+    return paint_wet_brush(home, dabs, ItemNull, options, false);
+}
+RADIANT_C_API Item fn_radiant_paint_wet_bristles(Item* home, Item path, Item state, Item options) {
+    return paint_wet_brush(home, path, state, options, true);
+}
+
+// Validate the entire call before unsharing the caller's buffer (D7.6.4).
+RADIANT_C_API Item fn_radiant_paint_wet_step(Item* home, Item options_item) {
+    RootFrame roots(2);
+    Rooted<Item> options(roots, options_item), cells(roots, *home);
+    static const char* const names[] = {"width", "height", "active", "since_shrink", "wet_cells", "steps",
+        "wet_diffusion", "pigment_diffusion", "edge_kernel", "edge_kernel_large", "velocity_clamp",
+        "tilt", "evaporation", "edges", "drying", "adsorption", "dry_only"};
+    const char* problem = nullptr;
+    if (!paint_options_known(options.get(), names, 17, &problem)) return paint_error(problem);
+    ItemReader dry_option = paint_option(options.get(), "dry_only");
+    if (!dry_option.isNull() && !dry_option.isBool()) return paint_error("dry_only must be a bool");
+    bool dry_only = !dry_option.isNull() && dry_option.asBool();
+    ItemReader adsorption = paint_option(options.get(), "adsorption");
+    if (!adsorption.isArray() || adsorption.asArray().length() < 3 || adsorption.asArray().length() % 3 != 0 ||
+        adsorption.asArray().length() / 3 > PAINT_WET_MAX_PIGMENTS)
+        return paint_error("wet adsorption needs one density, staining and granulation row per pigment");
+    int64_t pigment_count = adsorption.asArray().length() / 3;
+    int64_t w, h, shrink, wet_count, steps, edge, edge_large;
+    if (!paint_integer(paint_option(options.get(), "width"), 8, PAINT_MAX_EXTENT, &w) ||
+        !paint_integer(paint_option(options.get(), "height"), 8, PAINT_MAX_EXTENT, &h) ||
+        !paint_integer(paint_option(options.get(), "since_shrink"), 0, INT32_MAX, &shrink) ||
+        !paint_integer(paint_option(options.get(), "wet_cells"), 0, INT32_MAX, &wet_count) ||
+        !paint_integer(paint_option(options.get(), "steps"), 0, INT32_MAX, &steps) ||
+        !paint_integer(paint_option(options.get(), "edge_kernel"), 1, INT32_MAX, &edge) ||
+        !paint_integer(paint_option(options.get(), "edge_kernel_large"), 1, INT32_MAX, &edge_large))
+        return paint_error("invalid wet sheet dimensions or counters");
+    uint64_t work_factor = (uint64_t)(pigment_count + 2) / 3;
+    if ((dry_only && steps != 1) || w * h > INT32_MAX || (steps && (uint64_t)w * h * steps > PAINT_DEFAULT_BUDGET / work_factor))
+        return paint_error("wet step exceeds the work budget");
+    if (get_type_id(cells.get()) != LMD_TYPE_ARRAY_NUM) return paint_error("wet cells must be f32 or float");
+    ArrayNum* array = cells.get().array_num;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], stride[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    bool wide = array->get_elem_type() == ELEM_FLOAT64;
+    if ((array->get_elem_type() != ELEM_FLOAT32 && !wide) || array->is_view ||
+        array_num_get_shape_strides(array, shape, stride) != 1 || stride[0] != 1 ||
+        shape[0] != paint_wet_layout((int32_t)pigment_count) * w * h)
+        return paint_error("wet cells must match the pigment-dependent dense sheet layout");
+    PaintWetSheet sheet{(float*)array->data, (int32_t)w, (int32_t)h, {0, 0, 0, 0}, (int32_t)shrink, (int32_t)wet_count};
+    sheet.pigments = (int32_t)pigment_count;
+    ItemReader rect = paint_option(options.get(), "active");
+    if (!rect.isNull() && !radiant_paint_rect_read(rect, &sheet.active)) return paint_error("invalid wet active rectangle");
+    PaintWetParams p = {};
+    double numbers[5];
+    const char* keys[] = {"wet_diffusion", "pigment_diffusion", "velocity_clamp", "tilt", "evaporation"};
+    for (int i = 0; i < 5; ++i) if (!paint_number(paint_option(options.get(), keys[i]), &numbers[i]))
+        return paint_error("wet parameters must be finite numbers");
+    p.wet_diffusion = (float)numbers[0]; p.pigment_diffusion = (float)numbers[1];
+    p.velocity_clamp = (float)numbers[2]; p.tilt = (float)numbers[3]; p.evaporation = (float)numbers[4];
+    p.edge_kernel = (int32_t)edge; p.edge_kernel_large = (int32_t)edge_large;
+    ItemReader edges = paint_option(options.get(), "edges"), drying = paint_option(options.get(), "drying");
+    if (!edges.isBool() || !drying.isBool()) return paint_error("wet edges and drying must be bools");
+    p.edges = edges.asBool(); p.drying = drying.asBool();
+    PaintScratch extended_adsorption;
+    if (pigment_count > 3) {
+        extended_adsorption.data = mem_calloc((size_t)(3 * pigment_count), sizeof(float), MEM_CAT_RENDER);
+        if (!extended_adsorption.data) return paint_error("cannot allocate wet adsorption table");
+        p.adsorption_table = (const float*)extended_adsorption.data;
+    }
+    float* ads = pigment_count > 3 ? (float*)extended_adsorption.data : p.adsorption;
+    for (int i = 0; i < 3 * pigment_count; ++i) {
+        double v;
+        if (!paint_number(adsorption.asArray().get(i), &v)) return paint_error("wet adsorption must be finite");
+        ads[i] = (float)v;
+    }
+    PaintWetSheet64 sheet64{(double*)array->data, sheet.width, sheet.height, sheet.active, sheet.since_shrink, sheet.wet_cells};
+    sheet64.pigments = sheet.pigments;
+    PaintResult result = wide ? paint_wet_step64(&sheet64, &p, 0) : paint_wet_step(&sheet, &p, 0);
+    if (result.status != PAINT_OK || shrink > INT32_MAX - steps) return paint_error("invalid wet sheet or parameters");
+    // A unique, dense buffer can be updated directly; a shared value needs its own snapshot (S9.1.2).
+    cells.set(cow_prepare_write(cells.get()));
+    if (item_is_error(cells.get())) return cells.get();
+    if (get_type_id(cells.get()) != LMD_TYPE_ARRAY_NUM) return paint_error("cannot unshare wet cells");
+    *home = cells.get();
+    if (wide) {
+        sheet64.cells = (double*)cells.get().array_num->data;
+        result = dry_only ? paint_wet_dry64(&sheet64) : paint_wet_step64(&sheet64, &p, (int32_t)steps);
+        sheet.active = sheet64.active; sheet.since_shrink = sheet64.since_shrink; sheet.wet_cells = sheet64.wet_cells;
+    } else {
+        sheet.cells = (float*)cells.get().array_num->data;
+        result = dry_only ? paint_wet_dry(&sheet) : paint_wet_step(&sheet, &p, (int32_t)steps);
+    }
+    if (result.status != PAINT_OK) return paint_status_error(result);
+    RootedValueBuilder out(RootedValueBuilder::DATA_MAP);
+    out.put("active", paint_rect_item(sheet.active));
+    out.put("rect", paint_rect_item(result.dirty));
+    out.put("since_shrink", {.item = i2it(sheet.since_shrink)});
+    out.put("wet_cells", {.item = i2it(sheet.wet_cells)});
+    out.put("work", {.item = i2it((int64_t)(result.work * work_factor))});
+    return out.value.get();
+}
+
+RADIANT_C_API Item fn_radiant_paint_wet_deposit(Item* layer_home, Item* cells_home, Item options_item) {
+    RootFrame roots(4);
+    Rooted<Item> options(roots, options_item), cells(roots, *cells_home), layer(roots, *layer_home), tiles(roots, ItemNull);
+    static const char* const names[] = {"rect", "pigments"};
+    const char* problem = nullptr;
+    if (!paint_options_known(options.get(), names, 2, &problem)) return paint_error(problem);
+    PaintLayerInfo info;
+    if ((problem = paint_layer_read(layer.get(), &info))) return paint_error(problem);
+    if (info.format != PAINT_FORMAT_PIGMENT) return paint_error("wet deposit needs a pigment layer");
+    if (info.width * info.height > INT32_MAX || get_type_id(cells.get()) != LMD_TYPE_ARRAY_NUM)
+        return paint_error("wet deposit needs a matching sheet");
+    PaintScratch pigments, touched, views;
+    int64_t count = 0, tile_count = info.tiles_x * info.tiles_y;
+    if ((problem = paint_matrix_read(paint_option(options.get(), "pigments"), 2 * info.bands, 1,
+            PAINT_WET_MAX_PIGMENTS, &pigments, &count, "wet deposit needs pigment rows of K and S"))) return paint_error(problem);
+    ArrayNum* array = cells.get().array_num;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], stride[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    bool wide = array->get_elem_type() == ELEM_FLOAT64;
+    if ((array->get_elem_type() != ELEM_FLOAT32 && !wide) || array->is_view ||
+        array_num_get_shape_strides(array, shape, stride) != 1 || stride[0] != 1 ||
+        shape[0] != paint_wet_layout((int32_t)count) * info.width * info.height)
+        return paint_error("wet cells must match the pigment-dependent dense sheet layout");
+    PaintRect rect = {0, 0, (int32_t)info.width, (int32_t)info.height};
+    ItemReader rect_option = paint_option(options.get(), "rect");
+    if (!rect_option.isNull() && !radiant_paint_rect_read(rect_option, &rect)) return paint_error("invalid wet deposit rectangle");
+    if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 < rect.x0 || rect.y1 < rect.y0 ||
+        rect.x1 > info.width || rect.y1 > info.height) return paint_error("invalid wet deposit rectangle");
+    uint64_t work_factor = (uint64_t)(count + 2) / 3;
+    uint64_t area = (uint64_t)(rect.x1 - rect.x0) * (rect.y1 - rect.y0);
+    if (area > PAINT_DEFAULT_BUDGET / work_factor) return paint_error("wet deposit exceeds the work budget");
+    touched.data = mem_calloc((size_t)tile_count, 1, MEM_CAT_RENDER);
+    views.data = mem_calloc((size_t)tile_count, sizeof(PaintView), MEM_CAT_RENDER);
+    if (!touched.data || !views.data) return paint_error("cannot allocate paint scratch");
+    tiles.set(MapReader::fromItem(layer.get()).get("tiles").item());
+    PaintTiles target;
+    if (!paint_views(tiles.get(), &info, (PaintView*)views.data, &target)) return paint_error("invalid paint tiles");
+    PaintWetSheet sheet{(float*)array->data, (int32_t)info.width, (int32_t)info.height, {0, 0, 0, 0}, 0, 0};
+    PaintWetSheet64 sheet64{(double*)array->data, sheet.width, sheet.height, sheet.active, 0, 0};
+    sheet.pigments = (int32_t)count; sheet64.pigments = (int32_t)count;
+    PaintResult result = wide ? paint_wet_deposit_bounds64(&sheet64, &target, rect, (const float*)pigments.data,
+        (int32_t)count, (uint8_t*)touched.data) : paint_wet_deposit_bounds(&sheet, &target, rect,
+        (const float*)pigments.data, (int32_t)count, (uint8_t*)touched.data);
+    if (result.status != PAINT_OK) return paint_status_error(result);
+    // Both owners are prepared only after preflight; no engine pointer survives an allocation (D5.4.4).
+    Item unique = ItemNull;
+    Item failed = paint_unshare_touched(layer_home, &info, (const uint8_t*)touched.data, &unique);
+    if (item_is_error(failed)) return failed;
+    tiles.set(unique);
+    cells.set(cow_prepare_write(cells.get()));
+    if (item_is_error(cells.get())) return cells.get();
+    if (get_type_id(cells.get()) != LMD_TYPE_ARRAY_NUM) return paint_error("cannot unshare wet cells");
+    *cells_home = cells.get();
+    if (!paint_views(tiles.get(), &info, (PaintView*)views.data, &target)) return paint_error("invalid paint tiles");
+    if (wide) {
+        sheet64.cells = (double*)cells.get().array_num->data;
+        result = paint_wet_deposit64(&sheet64, &target, rect, (const float*)pigments.data, (int32_t)count);
+    } else {
+        sheet.cells = (float*)cells.get().array_num->data;
+        result = paint_wet_deposit(&sheet, &target, rect, (const float*)pigments.data, (int32_t)count);
+    }
+    if (result.status != PAINT_OK) return paint_status_error(result);
+    RootedValueBuilder out(RootedValueBuilder::DATA_MAP);
+    out.put("rect", paint_rect_item(result.dirty));
+    out.put("work", {.item = i2it((int64_t)(result.work * work_factor))});
+    return out.value.get();
+}
+
 RADIANT_C_API Item fn_radiant_paint_capabilities(void) {
     RootedValueBuilder out(RootedValueBuilder::DATA_MAP), formats(true), profiles(true);
     out.put("engine", {.item = b2it(true)});
@@ -792,8 +1403,12 @@ RADIANT_C_API Item fn_radiant_paint_capabilities(void) {
     out.put("dab_columns", {.item = i2it(PAINT_DAB_COLUMNS)});
     out.put("tile", {.item = i2it(64)});
     out.put("budget", {.item = i2it((int64_t)PAINT_DEFAULT_BUDGET)});
-    formats.append(paint_name("rgba")); formats.append(paint_name("coverage"));
+    formats.append(paint_name("rgba")); formats.append(paint_name("coverage")); formats.append(paint_name("pigment"));
     out.put("formats", formats.value.get());
+    out.put("bands", {.item = i2it(PAINT_MAX_BANDS)});
+    out.put("pigments", {.item = i2it(PAINT_MAX_PIGMENTS)});
+    out.put("bristles", {.item = i2it(PAINT_MAX_BRISTLES)});
+    out.put("bristle_columns", {.item = i2it(PAINT_BRISTLE_INK)});   // plus the ink: 3 on rgba, 2B + 1 on pigment
     profiles.append(paint_name("mypaint")); profiles.append(paint_name("linear"));
     out.put("profiles", profiles.value.get());
     // blend modes in dab-column order (PaintBlend)
