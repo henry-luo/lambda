@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Service worker readiness without an active registration</title>
+<div id="result">pending</div>
+<script>
+const result = document.getElementById('result');
+const container = navigator.serviceWorker;
+const ready = container.ready;
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+check('promise', ready instanceof Promise && typeof ready.then === 'function');
+check('identity', container.ready === ready);
+container.ready = 'replacement';
+check('readonly', container.ready === ready);
+let settled = false;
+ready.then(() => { settled = true; }, () => { settled = true; });
+navigator.serviceWorker.getRegistrations().then(registrations => {
+    check('empty', Array.isArray(registrations) && registrations.length === 0);
+    return Promise.resolve();
+}).then(() => {
+    check('pending', !settled && container.ready === ready);
+    result.textContent = 'complete';
+});
+</script>

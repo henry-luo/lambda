@@ -881,8 +881,9 @@ static void observer_sample_geometry(void) {
             JsObserverTarget* target = &observer->targets[j];
             DomDocument* document = target->node->is_element()
                 ? target->node->as_element()->doc.get() : target->owner_doc;
-            // registration before first layout must not publish a synthetic zero-size sample.
-            if (!document || !document->view_tree || !document->view_tree->root) continue;
+            // standalone exports need the first layout even without a page geometry read;
+            // host-driven loads still wait for their normal commit boundary.
+            if (!document || !dom_ensure_geometry_snapshot(document)) continue;
             RootFrame roots(5);
             Rooted<Item> target_root(roots, dom_wrap_element(target->node));
             float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;

@@ -1,0 +1,16 @@
+<!doctype html><meta charset="utf-8"><title>Calculated clips track variables and the used box</title>
+<style>
+body {margin:0;background:blue}
+#probe {width:200px;height:100px;background:red;clip-path:inset(0 0 calc((1 - var(--open,0)) * 100%) 0)}
+button {position:absolute;top:240px;width:100px;height:40px}
+#close {left:120px} #resize {left:240px}
+</style>
+<div id="probe"></div><button id="open">Open half</button><button id="close">Close</button><button id="resize">Resize</button>
+<script>
+const box = document.getElementById('probe');
+document.getElementById('open').onclick = function () { box.style.setProperty('--open','.5'); };
+document.getElementById('close').onclick = function () { box.style.setProperty('--open','0'); };
+document.getElementById('resize').onclick = function () {
+    box.style.width = '400px'; box.style.height = '200px'; box.style.setProperty('--open','.5');
+};
+</script>

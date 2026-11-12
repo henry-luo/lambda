@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CSSOM rules survive stylesheet synchronization</title>
+<style>body {margin: 0} button {display: block; height: 40px}</style>
+<div id="box"></div>
+<button id="edit">Check insertion and replace text</button>
+<button id="check">Check reconciled sheet</button>
+<div id="result">pending</div>
+<script>
+const style = document.createElement('style');
+document.head.appendChild(style);
+style.appendChild(document.createTextNode(''));
+style.sheet.insertRule('#box {width:240px;height:80px;background:red}', 0);
+document.getElementById('edit').addEventListener('click', function () {
+    const result = document.getElementById('result');
+    result.setAttribute('data-insert', String(document.getElementById('box').getBoundingClientRect().width === 240));
+    style.textContent = '#box {width:160px;height:80px;background:green}';
+    result.setAttribute('data-sheet', String(style.sheet.cssRules[0].style.width === '160px'));
+    style.sheet.insertRule('#box {background:blue}', 1);
+});
+document.getElementById('check').addEventListener('click', function () {
+    const box = document.getElementById('box');
+    const result = document.getElementById('result');
+    result.setAttribute('data-after', String(box.getBoundingClientRect().width === 160 &&
+        getComputedStyle(box).backgroundColor === 'rgb(0, 0, 255)' && style.sheet.cssRules.length === 2));
+    result.textContent = 'complete';
+});
+</script>

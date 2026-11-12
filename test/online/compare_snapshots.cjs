@@ -163,4 +163,4 @@ function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) main();
-module.exports = {coarseImage, compareImages};
+module.exports = {coarseImage, compareImages, pngLibrary};

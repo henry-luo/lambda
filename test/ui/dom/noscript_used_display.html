@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Noscript used display with scripting enabled</title>
+<style>
+body { margin: 0; }
+p { margin: 0; height: 20px; }
+noscript { height: 400px; }
+#contents { display: contents; }
+#flex { display: flex; gap: 50px; }
+#grid { display: grid; gap: 50px; }
+</style>
+<div><noscript id="contents"><span>Fallback contents</span></noscript><p>One</p></div>
+<div id="flex"><noscript id="flexed" style="display:block">Fallback flex</noscript><p>Two</p></div>
+<div id="grid"><noscript id="gridded" style="display:block">Fallback grid</noscript><p>Three</p></div>
+<div id="result">pending</div>
+<button id="check">Check layout</button>
+<script>
+document.getElementById('check').addEventListener('click', function () {
+const result = document.getElementById('result');
+let boxes = true, styles = true, content = true;
+for (const id of ['contents', 'flexed', 'gridded']) {
+    const node = document.getElementById(id);
+    const rect = node.getBoundingClientRect();
+    boxes = boxes && rect.width === 0 && rect.height === 0;
+    styles = styles && getComputedStyle(node).display === (id === 'contents' ? 'contents' : 'block');
+    content = content && node.textContent.length > 0;
+}
+result.setAttribute('data-boxes', String(boxes));
+result.setAttribute('data-styles', String(styles));
+result.setAttribute('data-content', String(content));
+result.setAttribute('data-flow', String(document.getElementById('flex').getBoundingClientRect().top === 20 &&
+    document.getElementById('grid').getBoundingClientRect().top === 40));
+result.textContent = 'complete';
+});
+</script>

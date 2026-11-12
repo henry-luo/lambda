@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Details interface branding and startup continuation</title>
+<style>
+body { margin: 0; }
+section { height: 80px; background: green; opacity: 0; }
+section[data-revealed] { opacity: 1; }
+</style>
+<section id="probe"></section>
+<details id="parsed"><summary id="summary">Options</summary><p>Content</p></details>
+<button id="check">Check toggle</button>
+<div id="result">pending</div>
+<script>
+const result = document.getElementById('result');
+const parsed = document.getElementById('parsed');
+const created = document.createElement('details');
+result.setAttribute('data-global', String(window.HTMLDetailsElement === HTMLDetailsElement &&
+    typeof HTMLDetailsElement === 'function' && HTMLDetailsElement !== HTMLElement));
+result.setAttribute('data-brand', String(parsed instanceof HTMLDetailsElement &&
+    created instanceof HTMLDetailsElement && !(document.createElement('div') instanceof HTMLDetailsElement)));
+result.setAttribute('data-prototype', String(Object.getPrototypeOf(parsed) === HTMLDetailsElement.prototype &&
+    Object.getPrototypeOf(created) === HTMLDetailsElement.prototype &&
+    Object.getPrototypeOf(HTMLDetailsElement.prototype) === HTMLElement.prototype &&
+    HTMLDetailsElement.prototype.constructor === HTMLDetailsElement));
+result.setAttribute('data-tag', String(Object.prototype.toString.call(parsed) === '[object HTMLDetailsElement]'));
+let illegal = false;
+try { new HTMLDetailsElement(); } catch (error) { illegal = error instanceof TypeError; }
+result.setAttribute('data-illegal', String(illegal));
+created.open = true;
+let reflected = created.hasAttribute('open');
+created.removeAttribute('open');
+reflected = reflected && created.open === false;
+result.setAttribute('data-reflection', String(reflected));
+// a native interface check must let subsequent page initialization run.
+if (parsed instanceof HTMLDetailsElement) {
+    for (const section of document.querySelectorAll('section')) section.setAttribute('data-revealed', '');
+}
+document.getElementById('check').addEventListener('click', function () {
+    result.setAttribute('data-toggle', String(parsed.open));
+});
+result.textContent = 'complete';
+</script>

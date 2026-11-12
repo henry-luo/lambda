@@ -1,0 +1,12 @@
+{
+  "name": "Scripting-enabled noscript keeps computed CSS and DOM but creates no boxes",
+  "html": "test/ui/dom/noscript_used_display.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#check"}},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-boxes", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-styles", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-content", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-flow", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "complete"}
+  ]
+}

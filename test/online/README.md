@@ -56,7 +56,27 @@ Focused capture checks use a local HTTP server and Puppeteer's headless shell:
 
 ```sh
 node --test test/online/capture_snapshots.test.cjs
+node --test test/online/render_session.test.cjs
+node --test test/online/render_stylesheet.test.cjs
+node --test test/online/render_clip.test.cjs
+node --test test/online/render_observers.test.cjs
+node --test test/online/render_grid.test.cjs
+node --test test/online/render_rem.test.cjs
 ```
+
+The session tests exercise real Lambda HTTP rendering, layout and both batch
+paths against a local server, including response cookies, HttpOnly visibility,
+redirects, subresource requests and profile lifetime. `LAMBDA_RENDER_EXE` selects
+the renderer executable. Socket access and native rendering services are required.
+The stylesheet tests check real exported PNG pixels after CSSOM rule edits and
+style text replacement; they share the same executable selection.
+The clipping tests use the shared `clip_fixtures.cjs` inputs to check real PNG
+pixels after variable/math resolution, font sizing, zoom and empty clipping.
+The observer tests check initial intersection/resize delivery and rendered
+pixels without page geometry reads, including offscreen and disconnect controls.
+The grid tests use `grid_fixtures.cjs` to check intrinsic percentage contributions,
+solved area sizing, owner units and authored constraints. These four PNG suites
+share `render_fixture.cjs` for exports and image reads.
 
 Compare every available image pair and create a ranked review report:
 
@@ -156,6 +176,443 @@ hashes and the build failure are retained in `temp/online-visual-round3/`.
 DigitalOcean's full content omission and modal top-layer/backdrop painting
 (RI-029) remain explicit; the reduced grid repair does not establish their
 complete resolution.
+
+The fourth review repaired three more shared Radiant defects: flex replaced
+items ignored their natural aspect ratio after main sizing (RI-032), propagated
+body backgrounds repainted over root negative stacking layers (RI-033), and
+intrinsic positioned layout leaked its available-space mode to following blocks
+(RI-034). Opus's announcement now stays 32.8px tall in the full static control,
+and Vogelhaus's sky and centered heading are restored. See the
+[round-four examples](comparison/repairs.html#round-4).
+
+All 186 high-severity Lambda images were refreshed successfully; a Dock retry
+still exceeded the unchanged 150-second deadline. The current report has 1,066
+pairs, 182 high-severity pages (172 automated candidates and ten manually
+retained differences), one critical capture blocker and 884 low-severity pages.
+Visual review covered all newly threshold-cleared pages, the retained manual
+cases and other large score changes: 19 pages in total. Kotlin's loading spinner
+and Craft's compressed hero remain major differences. CMake's stale poster
+annotation was removed because the fresh image now includes it. Vogelhaus,
+CMake, Mural and Designmodo clear this review; live changes and readiness can
+contribute, so those outcomes are not all attributed to one isolated repair.
+Opus's main content is restored, but its different selected video frame still
+reaches the broad-difference threshold. The current evidence audit is
+`snapshots/visual_comparison_review_round4.json`.
+
+Qualification includes 73 passing dynamic-layout tests, 917 passing native
+checks, 3,851 static and 630 JavaScript layout cases, the unchanged canvas
+integration fixture's six assertions, 12 canvas-source mutation assertions,
+three local SVG raster controls, five
+comparison-tool tests and layout integer-cast lint. Six layout cases and one
+live MIDI case are skipped. The native gate retains one unavailable-voice
+provider failure, also reproduced in three isolated runs (RI-035); speech
+sources and assertions were not changed. The Lambda main checkout still has
+the independent paint API mismatch described above. Captures use the compatible
+isolated host with the three repairs, pinned as
+`temp/online-visual-round4/lambda-final.exe`; its SHA-256, full logs, controls
+and before images remain in that directory. Browser references, URLs,
+thresholds, admission limits and capture deadlines are unchanged.
+
+The fifth review repaired four shared Radiant defects: column intrinsic heights
+omitted main-axis gaps (RI-036), authored display bypassed scripting-enabled
+noscript suppression (RI-037), ratio-derived intrinsic heights ignored inline
+min/max constraints (RI-038), and recursive height queries borrowed an outer
+percentage-height basis through auto ancestors (RI-039). The existing headless
+service-worker API also now exposes a stable pending ready promise, removing
+Greenlist's isolated startup TypeError (JS13-L4). Worker execution and the
+registration lifecycle remain a major feature gap (JS13-L5); that repair does
+not establish the cause of Greenlist's remaining missing content.
+
+All 182 original high-severity Lambda images were refreshed successfully with
+the final qualified host; Dock again exceeded the unchanged 150-second deadline.
+The current comparison covers all 1066 available pairs: **180 high-severity
+pages**, one critical capture blocker and 886 low-severity pages. It contains
+168 automated candidates and 12 manually retained major omissions. Visual
+review covered 16 changed/manual pairs and two fresh previous-host controls.
+Marqeta and Path clear this major review. Maven and Empathy stay high because
+their hero text and main portrait, respectively, remain absent despite clearing
+the automated changed-area threshold. These outcomes include live/capture
+state; they are not all attributed to one repair without an isolated control.
+
+Craft's outer hero now measures 736px instead of 540px in the full frozen
+control, but nested percentage-height content still obscures its heading and
+product image. A fixed-height control reproduces that separate defect on the
+previous renderer (RI-040), so Craft remains high severity. Its annotation and
+Missive's remaining quotation omission were updated to match the fresh images.
+RFC Editor's Error 500/TypeError page and PostHog's missing application window
+also reproduce with the previous renderer; their geometry changes and remaining
+causes are recorded explicitly. See [round-five examples](comparison/repairs.html#round-5)
+and `snapshots/visual_comparison_review_round5.json` for per-page evidence.
+
+Qualification includes 77 native dynamic-layout tests, 3851 static and 630
+JavaScript layout cases, 11 assertions in two new DOM integration fixtures,
+five comparison-tool tests and layout integer-cast lint. Six static layout
+cases are skipped. Both new DOM fixtures fail with the previous qualified host.
+The main-checkout paint API mismatch remains independent; captures use the
+compatible isolated host with the exact current service-worker source change
+and current sibling sources, pinned as
+`temp/online-visual-round5/lambda-fivefix.exe` (SHA-256
+`6993045526db37b5a4b9b1b4ce504ede4e9c6eaafa582105ac4d52572425c0a4`).
+Source patches, logs, controls and before images remain in that directory.
+Browser references, catalog rows, thresholds, admission limits and deadlines
+are unchanged. The goal remains active for the unresolved high-severity work.
+
+The sixth review repaired three shared implementation defects. An inactive
+maximum no longer erases an explicit definite flex main size (RI-040), restoring
+Craft's heading and product placement. Length-valued CSS math gaps now reach
+flex, grid and multicolumn layout through the existing unit/math resolver
+(RI-042). Craft's frozen heading/action wrapper has its authored 40px gap
+instead of zero. Percentage-containing math gaps remain incomplete; pure
+percentage handling is preserved. The AST interpreter now short-circuits
+optional deletion (JS04-L1), so Vue's delete i.props?.ref no longer throws and
+RFC Editor renders its homepage instead of Error 500.
+Runtime parity follows D8.4.4; native/host ownership remains D9.1.1v4 / D9.1.3v2.
+
+All 180 remaining high-severity captures, Dock and four recently cleared
+controls were refreshed: 184 succeeded; Dock again exceeded the unchanged
+150-second deadline (RI-031). The latest comparison covers all 1066 available
+pairs: **179 high-severity pages**, one critical capture blocker and
+887 low-severity pages. It contains 166 automated candidates and
+13 manually retained major omissions. Visual review covered 16
+changed, newly threshold-cleared or manually retained pairs; the four recent
+controls were also checked. RFC Editor clears major review. Maven Central is
+retained manually because its main search field is still absent and its promo
+panel is compressed despite clearing the automated area threshold. Craft remains
+high because URL-based image masks lack a paint consumer (RI-041); the large
+paper shapes still differ. No decoration is substituted or hidden. Live score
+changes alone are not assigned to a source repair without isolated evidence.
+See [round-six examples](comparison/repairs.html#round-6) and
+snapshots/visual_comparison_review_round6.json for the current evidence.
+
+Qualification includes 79 native dynamic-layout tests, 3851 static and 630
+JavaScript layout cases, 574 AST baseline tests, 14 MIR optional/deletion/super
+neighbors, fifteen Node/AST/MIR deletion checks, sixteen independent Chromium
+gap coordinates, two DOM integration fixtures with eleven assertions, five
+comparison-tool tests and layout integer-cast lint. Six static layout cases
+are skipped. The prior unavailable-voice native limitation remains RI-035;
+the aggregate native gate was not repeated. Browser references, catalog rows,
+image thresholds, admission limits and capture deadlines are unchanged.
+
+The independent main-checkout paint API mismatch persists. Captures use the
+compatible isolated host with exact current repaired JS interpreter/DOM sources
+and current sibling archives, pinned as temp/online-visual-round6/lambda-final.exe
+(SHA-256 60f757cadefdbc438344b5826696c6b1536e5c81f4cd777ff2d531a9529b1c60).
+Source-state hashes/patches, reduced controls, logs and original images remain
+in that directory. The goal stays active for the unresolved high-severity work.
+
+The seventh review repaired two shared intrinsic-width defects in Radiant
+(D9.1.1v4 / D9.1.3v2; D5.5.1). The width/max-width classification now resolves
+custom properties before deciding that a percentage is cyclic (RI-043), so a
+definite variable-backed maximum constrains the text column. Intrinsic image
+sizing also preserves author CSS over HTML width hints when automatic or cyclic
+percentage widths use natural dimensions (RI-044). Bare hints and definite CSS
+sizes retain their existing behavior. The frozen Maven Central promo now has
+419px/509px text/image columns and 327px height, matching Chromium's
+418.97px/509.03px and 327.02px. Its live promo scale is restored, but the
+client-created search input remains absent, so Maven Central stays high.
+
+All 179 high-severity cases, Dock and five recently cleared controls were
+attempted with the final renderer. The current comparison has 1066
+available pairs, **179 high-severity pages**, 1 critical capture blocker
+and 887 low-severity pages (166 automated candidates and
+13 manually retained omissions). Visual review covered 15
+changed/manual/newly threshold-cleared pairs and five recent controls.
+No additional page clears the major queue this round: Maven's promo is restored,
+while its search omission remains; Lokalise and Affinity also improve but stay high.
+The per-page evidence is snapshots/visual_comparison_review_round7.json;
+see [round-seven examples](comparison/repairs.html#round-7). Live-content and
+readiness changes are not assigned to one repair from scores alone.
+
+All 81 native dynamic tests, 3851 recorded static and 630 JavaScript layout
+cases, both DOM integration fixtures (eleven assertions), five comparison-tool
+tests and layout integer-cast lint pass. Six static cases are skipped. Chromium
+independently verifies variable/literal constraints, the cyclic zero-percentage
+neighbor and six image sizing modes before/after hint mutation. The separate
+unavailable-voice native limitation remains RI-035; the aggregate native gate
+was not repeated. Browser references, URLs, thresholds, script admission limits
+and parent deadlines are unchanged. Dock still times out at150s (RI-031).
+
+The main-checkout paint API mismatch remains independent. Captures use the
+compatible isolated host with current sibling archives and the exact current
+JS interpreter/DOM repair sources, pinned as temp/online-visual-round7/lambda-final.exe
+(SHA-256 76e79482164f6192fee0b148cfa929e56b4d8cd129730ef36518b369bca67c9c).
+The before images, source-state patches, reduced controls, qualification logs
+and capture audit remain in that directory. The broader goal stays active.
+
+The eighth review repaired the missing browsing profile in headless document
+hosts (RI-045). Rendering and layout now use an ephemeral native session when
+the caller supplies none; shared batch jobs retain it until UI cleanup, while
+borrowed window profiles retain their existing owner. This restores response,
+document and subresource cookie continuity. Enabling the profile exposed two
+input transport bugs, also fixed: raw HTTP line terminators corrupted terminal
+Path/HttpOnly attributes (LI-018), and URL ports incorrectly became part of
+cookie domains (LI-019). File URLs retain their prior empty-host behavior.
+Ownership follows D9.1.1v4 / D9.1.3v2, headless parity D9.2.1v2 and snapshot
+policy D10.1.7. No setter exception is suppressed or synthetic cookie result used.
+
+All 179 previous high-severity pages, Dock and five recent controls were
+attempted: 184 valid PNGs and Dock's unchanged 150-second timeout (RI-031).
+The updated report covers all 1066 available pairs: **178 high-severity pages**,
+one critical capture blocker and 888 low-severity pages, with 165 automated
+candidates and 13 manually retained omissions. All 26 previously observed
+cookie-session exceptions disappear. Fifteen changed, newly threshold-cleared
+or manually retained pairs and five controls were visually reviewed. Storytale
+now shows its hero, illustrations and search and clears major review; its
+11.5% to 1.7% live score change is not assigned to these fixes without an
+isolated control. Vooma's large consent panel disappears, but its hero text
+remains absent and it stays high. See [round-eight evidence](comparison/repairs.html#round-8)
+and snapshots/visual_comparison_review_round8.json. Browser images and metadata,
+URLs, thresholds, script admission limits and capture deadlines are unchanged.
+
+All 83 focused native dynamic/session tests, 3851 recorded static layout cases,
+630 JavaScript layout cases, 574 AST baseline tests, ten local native HTTP
+cases and six real CLI session cases pass. Six static cases are skipped.
+The two DOM fixtures (eleven assertions), five comparator tests and layout
+integer-cast lint also pass. The Radiant native aggregate has 927 passes, one
+skip and the existing unavailable-voice failure RI-035. The input aggregate has
+5224 passes, one skip and the same three known failures LI-001/LI-002/LI-013.
+A separate restricted-sandbox media failure reproduces on old and new renderers;
+both pass with native macOS services, as does the final full AST gate. No media
+implementation or test expectation changed.
+
+The independent main-checkout paint API mismatch persists. The compatible
+isolated host uses the exact current repaired JS interpreter/DOM sources and
+current sibling archives, pinned as temp/online-visual-round8/lambda-final.exe
+(SHA-256 ff06c819f1cfa2a8e3bc1d1a7e20ae6e2bc9e6f153e9f10b8b1b2f5cbc8ea209).
+Source-state patches, reduced regressions, controls, logs and before images
+remain in that directory. The goal stays active for the remaining major causes.
+
+The ninth review repaired dynamic stylesheet synchronization (RI-046;
+D9.1.1v4 / D9.1.3v2). After a script connected a style node and inserted CSSOM
+rules, the final rescan reparsed its unchanged text and discarded those rules.
+Pending text changes are now consumed once, before exposing the inline sheet
+to CSSOM. Later text replacement still replaces the sheet. The native helper
+is shared with the Lambda adapter; no rules are serialized back into DOM text,
+site-specific styles applied or virtual time advanced (D10.1.7).
+
+All 178 high-severity pages, Dock and six recent controls were attempted:
+184 valid PNGs and Dock's unchanged 150-second timeout. The latest report has
+1066 available pairs, **176 high-severity pages**, one critical capture blocker
+and 890 low-severity pages (162 automated candidates and 14 manually retained
+omissions). Sixteen changed, newly cleared or manually retained pairs and all
+six controls were visually reviewed. Northstar home and about now restore
+their main layout and content, clearing major review at 8.7% and 6.1% mean error,
+versus 64.8% and 70.8%. Greenlist's palette/header improve, but its hero remains
+absent, so it stays manually high despite its 5.6% score. These live measurements
+also include consent/readiness differences; reduced regressions independently
+establish the engine repair. See [round-nine examples](comparison/repairs.html#round-9)
+and snapshots/visual_comparison_review_round9.json.
+
+Four real PNG stylesheet regressions, six HTTP/session regressions, twelve
+native input-value tests, 574 AST baseline tests, 3851 recorded static layout
+cases and 630 JavaScript layout cases pass. Six static cases are skipped.
+The new window/event fixture fails three of four assertions on the previous
+renderer and passes all four after the repair; the three recent DOM fixtures
+pass fifteen assertions. Five comparator tests and layout integer-cast lint
+also pass. The native aggregate has 928 passes, one skip and the existing
+RI-035 unavailable-voice failure. Input qualification remains the round-eight
+result above; no input implementation changed in round nine. Initial AST tests
+from the compatible worktree lacked current fixture/module links; the corrected
+environment passes all 574 tests without crypto/media source or golden changes.
+
+Browser PNG hashes and metadata, catalog URLs, comparison thresholds, script
+admission limits and capture deadlines remain unchanged. The independent
+main-checkout paint API build mismatch persists. The compatible isolated host
+uses the exact current repaired JS interpreter/DOM/CSSOM sources and current
+sibling archives, pinned as temp/online-visual-round9/lambda-final.exe
+(SHA-256 044ca5945f52565491a82c67ad85437473eb8489ad981f4bc51b69f75875f71b).
+Controls, source-state patches, before images and qualification logs remain in
+that directory. The goal remains active for unresolved high-severity causes.
+
+The tenth review repaired basic-shape clip computation (RI-047;
+D9.1.1v4 / D9.1.3v2). Raw numeric parsing discarded variables and math, so Hive
+Streaming's closed fixed menu covered its hero. Shapes now use the shared CSS
+value/unit resolver with an explicit percentage reference. Inset shorthand
+expands before resolving each physical axis; circles use their normalized
+diagonal. The shared position parser handles centers, and zoom scales the
+resolved geometry. Temporary substituted values do not escape their owner
+(D5.5.1); capture leaves virtual time unchanged (D10.1.7).
+
+All 176 high-severity pages, Dock and eight recent controls were refreshed:
+184 valid PNGs and Dock's unchanged 150-second timeout. The latest comparison
+has 1066 available pairs, **175 high-severity pages**, one critical capture
+blocker and 891 low-severity pages (161 automated candidates and 14 manually
+retained omissions). Fifteen changed/newly cleared/manual pairs and all eight
+controls were visually checked. Hive Streaming restores its main hero and
+actions, clearing major review at 1.6% mean error versus 59.7%. All fourteen
+manual omissions remain high. Browser PNG hashes and metadata, catalog URLs,
+thresholds, script admission limits and capture deadlines are unchanged.
+
+The root cause has an isolated full-page control: the frozen original and a
+variant with only an equivalent literal clip differ before the repair; the
+repaired original matches that literal control exactly in pixels. The broader
+live score can also reflect readiness/content differences. See
+[round-ten examples](comparison/repairs.html#round-10),
+snapshots/visual_comparison_review_round10.json and
+temp/online-visual-round10/hive-frozen-comparison.json.
+
+All eighteen new PNG cases pass, versus fifteen failures with the previous
+renderer. Independent Chromium verifies all eighteen expected pixel sets;
+eighteen SVG exports rasterized in Chromium pass the same checks. The new live
+window/event fixture fails four of six pixel assertions before and passes all
+six after variable changes and resizing. All four recent DOM fixtures pass
+twenty-one assertions. Qualification also passes 83 focused native cases,
+574 AST baseline tests, 3851 recorded static layout cases (six skips), 630 JS
+layout cases, 28 real CLI regressions, eight existing clip-render corpus cases,
+five comparator tests and geometry lint. The native aggregate retains 928
+passes, one skip and the known RI-035 unavailable-voice failure. Input source
+is unchanged; its round-eight qualification remains applicable.
+
+Full inset corner/slash rounding, polygon fill rules, URL clips, geometry boxes
+and full shape() grammar remain incomplete; the support matrix records them.
+The independent main-checkout paint API build mismatch persists. Captures use
+the compatible isolated host with exact current repaired JS interpreter/DOM/CSSOM
+sources and current sibling archives, pinned as
+temp/online-visual-round10/lambda-final.exe (SHA-256
+bbea00e3ff61c45ba59b981ee38781c0bdb46c700d4fcb1d351cdda770965fb5).
+Source-state patches, controls, before images and verification logs remain in
+that directory. The goal stays active for the unresolved high-severity causes.
+
+The eleventh review repaired two existing DOM behaviors (JS13-L6/JS13-L7;
+D9.1.1v4 / D9.1.3v2). The native interface registry now exposes the distinct
+`HTMLDetailsElement` constructor/prototype for parsed and created details
+nodes. Initial intersection/resize sampling now obtains the first layout via
+the existing shared checkpoint, even if page scripts never query geometry.
+Host-driven commit guards and virtual snapshot time remain unchanged (D10.1.7).
+
+All 175 high-severity pages, Dock and nine recent controls were refreshed:
+184 valid PNGs and Dock's unchanged 150-second timeout. The latest comparison
+still has 1066 pairs, **175 high-severity pages**, one critical capture blocker
+and 891 low-severity pages (161 automated candidates and 14 manually retained
+omissions). No page is newly cleared in this review. Sixteen changed/manual
+pairs and all nine controls were visually checked. The same fourteen manual
+omissions remain high. All 1,067 original browser PNG hashes and browser metadata,
+catalog URLs, thresholds, script admission limits and capture deadlines remain
+unchanged.
+
+Join's company-page startup exception is gone, but its large content omission
+remains. An archived trace sets its reveal attribute at virtual time zero;
+the authored opacity transition is separate from the repaired interface.
+The independent initial-observer defect is not assigned as Join's residual
+cause. Ahrefs' score changes from 21.5% to 35.8% with another randomly selected
+promotional banner. Its saved source contains the weighted selector, and both
+prior and final binaries select both banner variants in controls. No exclusive
+code regression is inferred from that score change. The oversized duplicated
+banner remains an unresolved major difference.
+
+Qualification passes 32 real CLI cases, including four initial-observer PNG
+cases that previously failed three, seven DOM UI fixtures with 50 assertions,
+574 AST baseline cases, 3,851 recorded static layout cases (six skips), 630
+JavaScript layout cases and five comparator tests. The details fixture fails
+all nine assertions before and passes all nine after; independent Chromium
+checks its interface expectations too. The observer tests verify asynchronous,
+single delivery without page geometry reads. Native Radiant/Input implementation
+is unchanged in this review; their recorded aggregate qualification and known
+failures remain in the prior audits.
+
+See [round-eleven evidence](comparison/repairs.html#round-11) and
+snapshots/visual_comparison_review_round11.json. The independent main-checkout
+paint API build mismatch persists. The compatible integration host uses the
+exact current repaired DOM/observer/CSSOM/interpreter files and current sibling
+archives, pinned as temp/online-visual-round11/lambda-final.exe (SHA-256
+2f61dbae9642c4a562d842ae3e1950fad3cbf8e00cbfef27457f55509b14e04e).
+Source-state patches, before images, controls and verification logs remain in
+that directory. The goal remains active for the unresolved high-severity causes.
+
+The twelfth review repaired grid-item percentage sizing (RI-048;
+D9.1.1v4 / D9.1.3v2). Intrinsic contributions used the whole grid as a
+percentage basis before the item's area had been solved. Calculated
+percentages also retained provisional preferred sizes during placement.
+The existing containing-block scope and substituted size classification now
+separate these stages; used math sizes resolve through the shared owner-aware
+length resolver in the solved area. Query scratch stays within D5.5.1 ownership.
+
+Nova Benefits restores its hero illustration and balanced text column, clearing
+major review at 15.1% mean error and 22.2% changed area versus 22.5% mean error
+before. The reference consent bar and typography still differ. Zapier's customer
+stories restore the two-column heading, action and photograph, clearing major
+review at 2.5% versus 15.2%. A frozen Nova original reproduces the offscreen image;
+a diagnostic one-declaration width-auto control works on the old renderer, and
+the repaired original matches that control exactly in pixels. A frozen Zapier
+page also reproduces the displaced hero before and restores it after using the
+same HTML/CSS with scripts removed. Canonical URLs and sources are unchanged.
+
+All 175 incoming high-severity pages, Dock and nine controls were refreshed:
+184 valid PNGs and Dock's unchanged 150-second timeout. The round-twelve comparison
+had 1066 available pairs, 173 high-severity pages, one critical blocker
+and 893 low-severity pages (159 automated candidates and 14 manually retained
+omissions). Eighteen changed/newly cleared/manual pairs and all nine controls
+were visually reviewed. All fourteen manually retained omissions remain high.
+Ahrefs' lower score selects another random promotional banner and remains high;
+prior controlled evidence separates that variation from a code regression.
+
+Qualification passes 84 native dynamic cases, 42 real CLI cases, eight DOM UI
+fixtures with 58 assertions, 574 AST cases, 3,851 recorded static layout cases
+(six skips), 630 JavaScript layout cases, five comparator tests and geometry
+lint. The new native case checks nine variants at two widths; independent
+Chromium confirms all 18 geometry sets. Ten new PNG cases pass, versus five
+failures before; independent Chromium confirms their expected pixels and
+geometry. The event fixture changes from 2/8 to 8/8 assertions through resize,
+font and variable changes. The native aggregate retains 929 passes, one device
+skip and the known RI-035 unavailable-voice failure. Input source is unchanged.
+
+See [round-twelve examples](comparison/repairs.html#round-12),
+snapshots/visual_comparison_review_round12.json and
+temp/online-visual-round12/nova-frozen-comparison.json. All 1,067 original browser
+PNG hashes and browser metadata, catalog URLs, thresholds, script admission
+limits, virtual time (D10.1.7) and capture deadlines remain unchanged. The
+independent main-checkout paint API build mismatch persists. The compatible
+integration host uses exact current repaired root sources and current sibling
+archives, pinned as temp/online-visual-round12/lambda-final.exe (SHA-256
+87bc401e1dda61f17e7696df71de0e8994fd3769cf31c3c5e02d7f3a624f3f1f).
+Source-state patches, before images, frozen controls and qualification logs are
+preserved there. The goal remains active for unresolved high-severity causes.
+
+The thirteenth review repaired the root font's rem basis (RI-049;
+D9.1.1v4 / D9.1.3v2). Root font-size evaluation had cached the initial 16px
+before the actual root became 14px. Descendant fonts and geometry retained
+that stale basis. The shared resolver now uses initial metrics for root
+self-reference and publishes the computed, unzoomed size before descendant
+layout, including cached-style and live-restyle paths.
+
+Zammad's company page restores its one-line 56px heading and section geometry,
+clearing major review at 1.1% mean error versus 20.3%. The frozen original now
+matches Chromium's geometry and matches both old/new renderers of an equivalent
+literal-14px diagnostic control exactly in pixels. Canonical HTML/CSS is unchanged.
+
+All 173 incoming high-severity pages, Dock and eleven controls were refreshed:
+184 valid PNGs and Dock's unchanged 150-second timeout. The current report has
+1066 available pairs, **172 high-severity pages**, one critical blocker and
+894 low-severity pages (157 automated candidates plus 15 manually retained
+omissions). Eighteen changed/manual/newly cleared pairs and all eleven controls
+were visually checked. Pivot's new gradient lowers its coarse score, but its
+hero heading, copy, actions and cube remain absent; visual review retains this
+major omission. The prior fourteen manually retained omissions also remain high.
+Calmind's missing first-party assets are traced to CDN browser-check responses
+for a valid compressed request profile (LI-020); no native transport defect is
+confirmed, and no compression/header workaround is introduced.
+
+Qualification passes 85 native dynamic cases, 50 real CLI cases, nine DOM UI
+fixtures/64 assertions, 574 AST cases, 3851 static layout cases (six skips),
+630 JavaScript layout cases, five comparator tests and geometry lint. Eight
+new rem PNG cases change from one pass to eight, with independent Chromium
+geometry/pixel checks. Nine native fixture geometries agree with Chromium;
+the root-variable event fixture changes from two of six pixels to six of six.
+The native aggregate has 930 passes, one device skip and the known RI-035
+unavailable-voice failure. Input implementation is unchanged.
+
+See [round-thirteen evidence](comparison/repairs.html#round-13),
+snapshots/visual_comparison_review_round13.json and temp/online-visual-round13/.
+All 1067 browser PNG hashes/metadata and catalog URLs remain unchanged, as do
+thresholds, source admission, capture deadlines and D10.1.7 virtual time.
+The independent main-checkout paint API build mismatch remains; the compatible
+integration host uses exact current repaired root sources and current sibling
+archives. The immutable pin is temp/online-visual-round13/lambda-final.exe,
+SHA-256 99f0485ed67eb6b1c0faeebd4c1d607ee10f3e1c4b3d576e0ca26055b7b4758f.
+Full source-state patches, frozen controls and qualification evidence are
+preserved there. The user ended this goal after this review; unresolved
+high-severity causes and the Stripe placement investigation remain documented
+for a later pass.
 
 `test_page_load_gtest` writes its local fixture timing and memory measurements
 to `page_load_metrics.csv` in this directory.
