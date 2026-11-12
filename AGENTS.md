@@ -23,6 +23,15 @@ the issue and tell the user what is blocked. Do not work around the issue or
 modify the sibling project's source to continue. Otherwise, continue Lambda
 work that does not depend on the issue. Ledger edits are allowed for reporting.
 
+## Issue ownership
+
+Record Lambda language, compiler and runtime issues in
+[Lambda Issue Ledger](vibe/Lambda_Issue_Ledger.md). Record package-specific
+issues in the relevant package implementation plan; TeX, LaTeX and expl3
+package issues belong in the [script TeX engine plan](vibe/impl/Lambda_Impl_Latex_Script_Engine.md).
+General Lambda defects discovered during package work remain in the Lambda
+ledger. Input and Radiant issues remain with their owners as described above.
+
 ## CRITICAL Rules for AI Agents
 
 These rules MUST be followed. Violations are considered errors.

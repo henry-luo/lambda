@@ -1187,6 +1187,18 @@ pub fn digest(expanded) any^ {
         {ast: null, issue: "latex-digest-unsupported", unsupported: "input stream command source mapping"}
     else if (expanded.input_eof_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "input EOF conditional source mapping"}
+    else if (expanded.expl3_dynamic_read_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 dynamic read source mapping"}
+    else if (expanded.expl3_dynamic_assignment_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 dynamic assignment source mapping"}
+    else if (expanded.expl3_cs_eq_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 control-sequence equality source mapping"}
+    else if (expanded.expl3_cs_exist_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 control-sequence existence source mapping"}
+    else if (expanded.expl3_seq_in_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 sequence membership source mapping"}
+    else if (expanded.expl3_seq_body_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 sequence macro source mapping"}
     else if (expanded.expl3_tl_empty_seen == true)
         {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token-list conditional source mapping"}
     else if (expanded.expl3_tl_put_seen == true)

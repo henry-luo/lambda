@@ -6,7 +6,7 @@
 
 **Formal linkage:** **D10.2.2** (this design's ruling), **S1.8** (no runtime string becomes Lambda code), **S12.1.1v2 / S12.4.1** (pure transform, eager input value), **S7.4.1–S7.4.4** (located diagnostics), **S2.6.3–S2.6.5, D3.3.1** (command-argument content contract), **D9.1.1** (lower layer owns hooks with null-safe defaults), **D9.1.2 / D11.1.2** (resource acquisition, path gate), **D9.3.1–D9.3.4** (script packages and the static adapter registry), CLAUDE.md rule 16 (vendored files are unmodified).
 
-**Implementation record:** [Lambda_Impl_Latex_Phase4.md](../impl/Lambda_Impl_Latex_Phase4.md).
+**Implementation records:** [native LaTeX Phase IV](../impl/Lambda_Impl_Latex_Phase4.md) and the [Lambda Script TeX engine migration plan](../impl/Lambda_Impl_Latex_Script_Engine.md).
 
 ## 1. Purpose and boundary
 

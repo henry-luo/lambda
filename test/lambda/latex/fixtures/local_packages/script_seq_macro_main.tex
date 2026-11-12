@@ -1,0 +1,6 @@
+\ExplSyntaxOn
+\seq_new:N\l_s_seq
+\seq_put_right:Nn\l_s_seq{a}
+\input{script_seq_macro_child.tex}
+\seq_use:Nn\l_s_seq{|}
+\ExplSyntaxOff

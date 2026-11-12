@@ -1,0 +1,6 @@
+\ExplSyntaxOn
+\seq_new:N\l_s_seq
+\seq_set_from_clist:Nn\l_s_seq{a,b,c}
+\input{script_seq_reverse_child.tex}
+\seq_use:Nn\l_s_seq{|}
+\ExplSyntaxOff

@@ -1,0 +1,6 @@
+\ExplSyntaxOn
+\seq_new:N \l_test_seq
+\seq_put_right:Nn \l_test_seq {alpha}
+\input{script_seq_in_child.tex}
+\seq_if_in:NnTF \l_test_seq {beta} {found}{missing}
+\ExplSyntaxOff

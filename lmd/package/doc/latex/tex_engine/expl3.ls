@@ -17,10 +17,12 @@ let TL_EQUAL = ["tl_if_eq:NNTF", "tl_if_eq:NNT", "tl_if_eq:NNF",
     "tl_if_eq:nnTF", "tl_if_eq:nnT", "tl_if_eq:nnF"]
 let TL_BLANK = ["tl_if_blank:nTF", "tl_if_blank:nT", "tl_if_blank:nF",
     "tl_if_blank:VTF", "tl_if_blank:VT", "tl_if_blank:VF"]
+let SEQ_EMPTY = ["seq_if_empty:NTF", "seq_if_empty:NT", "seq_if_empty:NF"]
 let SEQ_NEW = ["seq_new:N"]
 let SEQ_SET = ["seq_set_from_clist:Nn", "seq_gset_from_clist:Nn", "seq_clear:N", "seq_gclear:N",
+    "seq_reverse:N", "seq_greverse:N",
     "seq_put_left:Nn", "seq_put_right:Nn", "seq_gput_left:Nn", "seq_gput_right:Nn"]
-let SEQ_EXPAND = ["seq_use:Nn", "seq_count:N"]
+let SEQ_EXPAND = ["seq_use:Nn", "seq_count:N", "seq_item:Nn"]
 let SEQ_SORT = ["seq_sort:Nn", "seq_gsort:Nn"]
 let SORT_RETURN = ["sort_return_same:", "sort_return_swapped:"]
 let STR_COMPARE = ["str_compare:nNnTF", "str_compare:nNnT", "str_compare:nNnF"]
@@ -32,22 +34,22 @@ let INT_TEST = ["int_if_zero:nTF", "int_if_zero:nT", "int_if_zero:nF",
     "int_if_odd:nTF", "int_if_odd:nT", "int_if_odd:nF",
     "int_if_even:nTF", "int_if_even:nT", "int_if_even:nF"]
 
-pub fn exists(name) => contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(CS_NEW, name) or contains(CS_LOCAL, name) or
+pub fn exists(name) => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(CS_NEW, name) or contains(CS_LOCAL, name) or
     contains(CS_GLOBAL, name) or contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name) or
     contains(SEQ_NEW, name) or contains(SEQ_SET, name) or contains(SEQ_EXPAND, name) or
     contains(SEQ_SORT, name) or contains(SORT_RETURN, name) or contains(STR_COMPARE, name) or contains(TEXT_CASE, name) or
     contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n"], name)
-pub fn expandable(name) => contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
+pub fn expandable(name) => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
 pub fn cs_definition(name) => contains(CS_NEW, name) or contains(CS_LOCAL, name) or contains(CS_GLOBAL, name)
 pub fn fresh(name) => contains(CS_NEW, name) or contains(TL_NEW, name) or contains(SEQ_NEW, name)
 pub fn global(name) => contains(CS_NEW, name) or contains(CS_GLOBAL, name) or contains(TL_NEW, name) or
     contains(SEQ_NEW, name) or contains(["tl_gset:Nn", "tl_gset:Nx", "tl_gclear:N", "tl_gput_left:Nn", "tl_gput_right:Nn",
         "tl_gput_left:Nx", "tl_gput_right:Nx",
-        "seq_gset_from_clist:Nn", "seq_gclear:N", "seq_gput_left:Nn", "seq_gput_right:Nn", "seq_gsort:Nn"], name)
+        "seq_gset_from_clist:Nn", "seq_gclear:N", "seq_gput_left:Nn", "seq_gput_right:Nn", "seq_gsort:Nn", "seq_greverse:N"], name)
 pub fn protected(name) => contains(["cs_new_protected:Npn", "cs_set_protected:Npn", "cs_gset_protected:Npn"], name)
 pub fn token_assignment(name) => contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name)
 pub fn token_put(name) => contains(TL_PUT, name)
-pub fn token_empty(name) => contains(TL_EMPTY, name) or contains(TL_BLANK, name)
+pub fn token_empty(name) => contains(SEQ_EMPTY, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name)
 pub fn int_test(name) => contains(INT_TEST, name)
 pub fn int_compare_expr(name) => contains(INT_COMPARE_EXPR, name)
 pub fn int_compare(name) => contains(INT_COMPARE, name)
@@ -63,6 +65,7 @@ pub fn string_compare(name) => contains(STR_COMPARE, name)
 pub fn text_case(name) => contains(TEXT_CASE, name)
 pub fn case_opaque(name) => contains(["ref", "pageref", "label", "cite", "nocite"], name)
 pub fn sequence_assignment(name) => contains(SEQ_NEW, name) or contains(SEQ_SET, name)
+pub fn sequence_reverse(name) => contains(["seq_reverse:N", "seq_greverse:N"], name)
 pub fn sequence_empty_assignment(name) => contains(["seq_new:N", "seq_clear:N", "seq_gclear:N"], name)
 pub fn sequence_from_clist(name) => contains(["seq_set_from_clist:Nn", "seq_gset_from_clist:Nn"], name)
 pub fn sequence_put_left(name) => contains(["seq_put_left:Nn", "seq_gput_left:Nn"], name)

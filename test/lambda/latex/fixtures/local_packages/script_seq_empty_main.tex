@@ -1,0 +1,6 @@
+\ExplSyntaxOn
+\seq_new:N\l_s_seq
+\seq_if_empty:NTF\l_s_seq{A}{B}
+\input{script_seq_empty_child.tex}
+\seq_if_empty:NTF\l_s_seq{C}{D}
+\ExplSyntaxOff

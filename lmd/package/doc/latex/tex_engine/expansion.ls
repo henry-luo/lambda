@@ -51,6 +51,9 @@ fn nonspace(input) any^ {
     if (charcat(read.token, 10)) nonspace(read.stream) else read
 }
 
+fn parameter_token(index, start = -1, end = -1) =>
+    {kind: "parameter", value: index, cat: null, start: start, end: end}
+
 fn body_params(tokens, count, index = 0, output = []) any^ {
     if (index >= len(tokens)) {tokens: output, issue: null}
     else {
@@ -63,7 +66,7 @@ fn body_params(tokens, count, index = 0, output = []) any^ {
             if (charcat(n, 6)) body_params(tokens, count, index + 2, [*output, t])
             else if (digit == null or digit >= count) {tokens: output, issue: "tex-illegal-param"}
             else body_params(tokens, count, index + 2,
-                [*output, {kind: "parameter", value: digit, cat: null, start: t.start, end: n.end}])
+                [*output, parameter_token(digit, t.start, n.end)])
         }
     }
 }
@@ -223,6 +226,10 @@ fn assign_futurelet(st, global) any^ {
     }
 }
 
+// aliased expl3 lets require the assignment source-mapping guard.
+fn guarded_expl_let(st, token) any^ => if (meaning(st, token).source_mapping_guard == "tl_eq")
+    {*:st, expl3_tl_put_seen: true} else st
+
 fn prefixed(st, global, long_ok, protected_flag, budget) any^ {
     let read = nonspace(st.input);
     let t = read.token;
@@ -240,7 +247,7 @@ fn prefixed(st, global, long_ok, protected_flag, budget) any^ {
             cmd == "edef" or cmd == "xdef", budget)^;
         {*:assigned, prefixed_definition: true}
     }
-    else if (cmd == "let" and not long_ok and not protected_flag) assign_let(advanced, apply_global)
+    else if (cmd == "let" and not long_ok and not protected_flag) assign_let(guarded_expl_let(advanced, t)^, apply_global)
     else if (cmd == "futurelet" and not long_ok and not protected_flag) assign_futurelet(advanced, apply_global)
     else if (cmd == "font" and not long_ok and not protected_flag) define_font(advanced, apply_global, budget)
     else if (cmd == "letterspacefont" and not long_ok and not protected_flag) assign_letterspace_font(advanced, apply_global, budget)
@@ -323,7 +330,13 @@ fn expand_one(st, t, budget) any^ {
         if (st.expansions >= budget) fail(st, "tex-budget")
         else if (st.latex and len(st.packages) > 0 and unresolved_package_cycle(st, macro)^)
             unsupported(st, "recursive package bootstrap")
-        else expand_macro(st, macro, budget)
+        else {
+            let marked = if (macro.source_mapping_guard == "cs_exist") {*:st, expl3_cs_exist_seen: true}
+                else if (macro.source_mapping_guard == "cs_eq") {*:st, expl3_cs_eq_seen: true}
+                else if (macro.source_mapping_guard == "dynamic_assignment") {*:st, expl3_dynamic_assignment_seen: true}
+                else if (macro.source_mapping_guard == "dynamic_read") {*:st, expl3_dynamic_read_seen: true} else st;
+            expand_macro(marked, macro, budget)
+        }
     }
     else if (primitive(st, t) == "noexpand") noexpand(st, budget)
     else if (primitive(st, t) == "expandafter") expand_after(st, budget)
@@ -365,7 +378,7 @@ fn expand_one(st, t, budget) any^ {
     else if (st.script_expl3 and expl3.int_compare_expr(primitive(st, t))) expl3_int_compare_expr(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.int_test(primitive(st, t))) expl3_int_test(st, primitive(st, t), budget)
     else if (st.script_expl3 and primitive(st, t) == "fp_eval:n") expl3_fp_eval(st, budget)
-    else if (st.script_expl3 and contains(["seq_use:Nn", "seq_count:N"], primitive(st, t)))
+    else if (st.script_expl3 and contains(["seq_use:Nn", "seq_count:N", "seq_item:Nn"], primitive(st, t)))
         expl3_seq_expand(st, primitive(st, t), budget)
     else if (st.script_expl3 and expl3.string_compare(primitive(st, t)))
         expl3_str_compare(st, primitive(st, t), budget)
@@ -446,9 +459,13 @@ fn expanded_next(st, budget, protect = false) any^ {
     }
 }
 
+// expanded control sequences can carry the meaning of a space token.
+fn expanded_space(st, token) any^ => charcat(token, 10) or
+    (is_control(token) and meaning(st, token).kind == "char" and meaning(st, token).cat == 10)
+
 fn expanded_nonspace(st, budget) any^ {
     let read = expanded_next(st, budget);
-    if (charcat(read.token, 10)) expanded_nonspace(read.state, budget) else read
+    if (expanded_space(read.state, read.token)^) expanded_nonspace(read.state, budget) else read
 }
 
 fn csname_tokens(st, budget, chars = []) any^ {
@@ -503,7 +520,7 @@ fn digits(st, t, base, negative, budget, count = 0, value = 0) any^ {
     let n = digit(t, base);
     if (st.issue != null) {state: st, value: 0}
     else if (n == null) {
-        let after = if (count > 0 and charcat(t, 10)) st else put_back(st, t);
+        let after = if (count > 0 and expanded_space(st, t)^) st else put_back(st, t);
         if (count == 0) {state: fail(after, "tex-missing-number"), value: 0}
         else {state: after, value: if (negative) -value else value}
     } else if (value * base + n > 2147483647)
@@ -523,7 +540,7 @@ fn character_number(st, negative, budget) any^ {
         {state: fail(current, "tex-improper-alphabetic"), value: 0}
     else {
         let following = expanded_next(current, budget);
-        let after = if (charcat(following.token, 10)) following.state else put_back(following.state, following.token);
+        let after = if (expanded_space(following.state, following.token)^) following.state else put_back(following.state, following.token);
         {state: after, value: if (negative) -ord(t.value) else ord(t.value)}
     }
 }
@@ -2397,8 +2414,12 @@ fn expl3_cs_define(st, name, budget) any^ {
     if (not is_control(target.token)) fail(current, "tex-missing-cs")
     else if (expl3.fresh(name) and not latex_definable(meaning(st, target.token)))
         fail(current, "expl3-already-defined")
-    else define({*:st, input: stream.push(target.stream, [target.token])},
-        effective_global(st, expl3.global(name))^, true, expl3.protected(name), false, budget)
+    else {
+        // sequence membership redefines its item marker before expanding the body.
+        let marked = if (target.token.value == "__seq_item:n") {*:st, expl3_seq_in_seen: true} else st;
+        define({*:marked, input: stream.push(target.stream, [target.token])},
+            effective_global(marked, expl3.global(name))^, true, expl3.protected(name), false, budget)
+    }
 }
 
 fn expl3_tl_assign(st, name, budget) any^ {
@@ -2440,7 +2461,8 @@ fn expl3_tl_use(st, budget) any^ {
         let target = nonspace(st.input)^;
         let current = {*:st, input: target.stream, expansions: st.expansions + 1};
         if (not is_control(target.token)) fail(current, "tex-missing-cs")
-        else if (meaning(st, target.token).kind == "undefined") fail(current, "expl3-undefined-variable")
+        // expl3 treats a relax meaning as an undefined token-list variable.
+        else if (latex_definable(meaning(st, target.token)^)) fail(current, "expl3-undefined-variable")
         else {*:current, input: stream.push(current.input, [target.token])}
     }
 }
@@ -2448,13 +2470,14 @@ fn expl3_tl_use(st, budget) any^ {
 fn expl3_tl_empty(st, name, budget) any^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
-        let named = contains(["tl_if_empty:NTF", "tl_if_empty:NT", "tl_if_empty:NF"], name);
+        let sequence = contains(["seq_if_empty:NTF", "seq_if_empty:NT", "seq_if_empty:NF"], name);
+        let named = sequence or contains(["tl_if_empty:NTF", "tl_if_empty:NT", "tl_if_empty:NF"], name);
         let variable = contains(["tl_if_blank:VTF", "tl_if_blank:VT", "tl_if_blank:VF"], name);
         let target = if (named or variable) nonspace(st.input)^ else null;
         let argument = if (named or variable) {stream: target.stream, tokens: [], error: null} else stream.argument(st.input, true)^;
-        let yes = if (name == "tl_if_empty:NF" or name == "tl_if_empty:nF" or name == "tl_if_blank:nF" or name == "tl_if_blank:VF")
+        let yes = if (name == "tl_if_empty:NF" or name == "tl_if_empty:nF" or name == "tl_if_blank:nF" or name == "tl_if_blank:VF" or name == "seq_if_empty:NF")
             {stream: argument.stream, tokens: [], error: null} else stream.argument(argument.stream, true)^;
-        let no = if (name == "tl_if_empty:NT" or name == "tl_if_empty:nT" or name == "tl_if_blank:nT" or name == "tl_if_blank:VT")
+        let no = if (name == "tl_if_empty:NT" or name == "tl_if_empty:nT" or name == "tl_if_blank:nT" or name == "tl_if_blank:VT" or name == "seq_if_empty:NT")
             {stream: yes.stream, tokens: [], error: null} else stream.argument(yes.stream, true)^;
         let current = {*:st, input: stream.note_foreign_expansion(no.stream)^,
             expansions: st.expansions + 1, expl3_tl_empty_seen: true};
@@ -2467,7 +2490,9 @@ fn expl3_tl_empty(st, name, budget) any^ {
         else if (variable and value.kind == "undefined") fail(current, "expl3-undefined-variable")
         else if (variable and (value.kind != "macro" or value.count != 0)) unsupported(current, "expl3 token-list target")
         else {
-            let empty = if (named) meanings_equal(value, expl3.token_list([]))^
+            // sequence emptiness compares the current constant's TeX meaning.
+            let empty = if (sequence) meanings_equal(value, meaning(current, control_token("c_empty_seq"))^)^
+                else if (named) meanings_equal(value, expl3.token_list([]))^
                 else if (variable) all([for (token in (value.body^)) charcat(token, 10)])
                 else if (expl3.token_blank(name)) all([for (token in argument.tokens) charcat(token, 10)])
                 else len(argument.tokens) == 0;
@@ -2572,6 +2597,28 @@ fn expl3_seq_body(items, index = 0, output = [control_token("s__seq")]) any^ {
 
 fn expl3_seq_value(items) any^ => {*:expl3.token_list(expl3_seq_body(items)^), seq_items: items}
 
+// TeX sequences are macro token lists; decode bodies made outside the API too.
+fn expl3_seq_body_items(input, items = []) any^ {
+    let marker = stream.next(input)^;
+    if (marker.token == null) items
+    else if (marker.token.kind != "control" or marker.token.value != "__seq_item:n") null
+    else {
+        let item = stream.argument(marker.stream, true)^;
+        if (item.error != null) null else expl3_seq_body_items(item.stream, [*items, item.tokens])
+    }
+}
+
+fn expl3_seq_items(value) any^ {
+    if (value.seq_items is array) value.seq_items
+    else if (value.kind != "macro" or value.count != 0 or len(value.prefix) != 0 or value.optional == true) null
+    else {
+        let input = stream.push(stream.from_reader(reader.reader("")), value.body)^;
+        let first = stream.next(input)^;
+        if (first.token == null or first.token.kind != "control" or first.token.value != "s__seq") null
+        else expl3_seq_body_items(first.stream)
+    }
+}
+
 fn expl3_seq_assign(st, name) any^ {
     let target = nonspace(st.input)^;
     let current = {*:st, input: target.stream};
@@ -2579,20 +2626,38 @@ fn expl3_seq_assign(st, name) any^ {
     else if (expl3.fresh(name) and not latex_definable(meaning(st, target.token)))
         fail(current, "expl3-already-defined")
     else {
-        let arg = if (expl3.sequence_empty_assignment(name)) {stream: target.stream, tokens: [], error: null}
+        let arg = if (expl3.sequence_empty_assignment(name) or expl3.sequence_reverse(name)) {stream: target.stream, tokens: [], error: null}
             else stream.argument(target.stream, true)^;
         let advanced = {*:current, input: arg.stream};
         let old = meaning(advanced, target.token);
-        if (arg.error != null) fail(advanced, arg.error)
-        else if (not expl3.sequence_empty_assignment(name) and not expl3.sequence_from_clist(name) and
-                not (old.seq_items is array)) fail(advanced, "expl3-invalid-sequence")
+        let prior = expl3_seq_items(old)^;
+        let uses_prior = not expl3.sequence_empty_assignment(name) and not expl3.sequence_from_clist(name);
+        let marked = if (uses_prior and prior is array and not (old.seq_items is array))
+            {*:advanced, expl3_seq_body_seen: true} else advanced;
+        if (arg.error != null) fail(marked, arg.error)
+        else if (uses_prior and not (prior is array)) fail(marked, "expl3-invalid-sequence")
+        // mutation of protected sequence macros needs native expansion semantics.
+        else if (uses_prior and old.protected_flag == true and not (old.seq_items is array))
+            unsupported(marked, "expl3 protected sequence assignment")
         else {
+            // reverse stored items without expanding their TeX tokens.
             let items = if (expl3.sequence_empty_assignment(name)) []
                 else if (expl3.sequence_from_clist(name)) expl3.from_clist(arg.tokens)^
-                else if (expl3.sequence_put_left(name)) [arg.tokens, *old.seq_items]
-                else [*old.seq_items, arg.tokens];
-            assign_meaning(advanced, key(target.token), expl3_seq_value(items)^,
-                effective_global(advanced, expl3.global(name))^)
+                else if (expl3.sequence_reverse(name)) reverse(prior)^
+                else if (expl3.sequence_put_left(name)) [arg.tokens, *prior]
+                else [*prior, arg.tokens];
+            let value = expl3_seq_value(items)^;
+            // putting an item retains the original sequence body token for token.
+            let assigned = if (uses_prior and not expl3.sequence_reverse(name)) {
+                let added = expl3_seq_body([arg.tokens])^;
+                let item_tokens = slice(added, 1, len(added))^;
+                let body = if (expl3.sequence_put_left(name))
+                    [old.body[0], *item_tokens, *slice(old.body, 1, len(old.body))^]
+                    else [*old.body, *item_tokens];
+                {*:value, body: stored_tokens(body)}
+            } else value;
+            assign_meaning(marked, key(target.token), assigned,
+                effective_global(marked, expl3.global(name))^)
         }
     }
 }
@@ -2603,6 +2668,22 @@ fn expl3_seq_join(items, separator, index = 0, output = []) any^ {
         [*output, *(if (index == 0) [] else separator), *items[index]])
 }
 
+// keep the synthetic terminator and any residual tokens inside the index scope.
+fn expl3_seq_index(st, tokens, budget) any^ {
+    let end = {kind: "expl3-seq-index-end"};
+    let relax = {*:control_token("relax"), seq_index_boundary: true};
+    let scoped = {*:st, input: stream.push(st.input, [*tokens, relax, end])};
+    let result = scan_expression(scoped, budget)^;
+    if (result.state.issue != null) result
+    else {
+        let next = stream.next(result.state.input)^;
+        let closed = if (next.token.seq_index_boundary == true) stream.next(next.stream)^ else next;
+        if (closed.token.kind != "expl3-seq-index-end")
+            {state: unsupported(result.state, "expl3 sequence index expression"), value: 0}
+        else {state: {*:result.state, input: closed.stream}, value: result.value}
+    }
+}
+
 fn expl3_seq_expand(st, name, budget) any^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
@@ -2611,15 +2692,33 @@ fn expl3_seq_expand(st, name, budget) any^ {
         if (not is_control(target.token)) fail(current, "tex-missing-cs")
         else {
             let value = meaning(current, target.token);
-            if (not (value.seq_items is array)) fail(current, "expl3-invalid-sequence")
+            let items = expl3_seq_items(value)^;
+            let marked = if (items is array and not (value.seq_items is array))
+                {*:current, expl3_seq_body_seen: true} else current;
+            if (not (items is array)) fail(marked, "expl3-invalid-sequence")
             else if (name == "seq_count:N")
-                {*:current, input: stream.push(current.input, text_tokens(string(len(value.seq_items))))}
+                {*:marked, input: stream.push(marked.input, text_tokens(string(len(items))))}
+            else if (name == "seq_item:Nn") {
+                let argument = stream.argument(marked.input, true)^;
+                let advanced = {*:marked, input: argument.stream};
+                if (argument.error != null) fail(advanced, argument.error)
+                else {
+                    let index = expl3_seq_index(advanced, argument.tokens, budget)^;
+                    let size = len(items);
+                    let position = if (index.value < 0) size + index.value else index.value - 1;
+                    let item = if (position < 0 or position >= size) [] else items[position];
+                    let tokens = if (index.state.token_text_scan) [for (t in item)
+                        {*:t, noexpand: is_control(t), direct_toks: true}] else stored_tokens(item);
+                    if (index.state.issue != null) index.state
+                    else {*:index.state, input: stream.push(index.state.input, tokens)}
+                }
+            }
             else {
-                let separator = stream.argument(current.input, true)^;
-                let advanced = {*:current, input: separator.stream};
+                let separator = stream.argument(marked.input, true)^;
+                let advanced = {*:marked, input: separator.stream};
                 if (separator.error != null) fail(advanced, separator.error)
                 else {
-                    let tokens = expl3_seq_join(value.seq_items, separator.tokens)^;
+                    let tokens = expl3_seq_join(items, separator.tokens)^;
                     let result = if (advanced.token_text_scan) [for (t in tokens)
                         {*:t, noexpand: is_control(t), direct_toks: true}] else stored_tokens(tokens);
                     {*:advanced, input: stream.push(advanced.input, result)}
@@ -2728,12 +2827,17 @@ fn expl3_seq_sort(st, name, budget) any^ {
     else if (code.error != null) fail(current, code.error)
     else {
         let value = meaning(current, target.token);
+        let items = expl3_seq_items(value)^;
+        let marked = if (items is array and not (value.seq_items is array))
+            {*:current, expl3_seq_body_seen: true} else current;
         let comparator = body_params(code.tokens, 2)^;
-        if (not (value.seq_items is array)) fail(current, "expl3-invalid-sequence")
-        else if (comparator.issue != null) fail(current, comparator.issue)
+        if (not (items is array)) fail(marked, "expl3-invalid-sequence")
+        else if (value.protected_flag == true and not (value.seq_items is array))
+            unsupported(marked, "expl3 protected sequence sort")
+        else if (comparator.issue != null) fail(marked, comparator.issue)
         else {
-            let grouped = begin_group(current, null, true)^;
-            let sorted = expl3_sort_items(grouped, comparator.tokens, value.seq_items, budget)^;
+            let grouped = begin_group(marked, null, true)^;
+            let sorted = expl3_sort_items(grouped, comparator.tokens, items, budget)^;
             if (sorted.state.issue != null) sorted.state
             else {
                 let ended = end_group(sorted.state, null, true)^;
@@ -4519,10 +4623,14 @@ fn step(st, budget) any^ {
                 unsupported(current, "insert cross-boundary unskip")
             else {*:current, output: slice(current.output, 0, count - 1)^} else current
     }
-    else if (contains(["def", "gdef", "edef", "xdef"], cmd)) echo_definition(current, t, cmd, budget)
+    else if (contains(["def", "gdef", "edef", "xdef"], cmd)) {
+        // token-list assignment aliases share the existing source-mapping guard.
+        let guarded = if (resolved.source_mapping_guard == "tl_put") {*:current, expl3_tl_put_seen: true} else current;
+        echo_definition(guarded, t, cmd, budget)
+    }
     else if (contains(["patterns", "hyphenation", "parshape", "interlinepenalties", "clubpenalties", "widowpenalties", "displaywidowpenalties"], cmd))
         after_assignment(current, assign_paragraph_data(current, budget, cmd))
-    else if (cmd == "let") after_assignment(current, assign_let(current, assignment_global))
+    else if (cmd == "let") after_assignment(current, assign_let(guarded_expl_let(current, t)^, assignment_global))
     else if (cmd == "futurelet") after_assignment(current, assign_futurelet(current, assignment_global))
     else if (cmd == "catcode") after_assignment(current, assign_catcode(current, assignment_global, budget))
     else if (cmd == "lccode" or cmd == "uccode")
@@ -4681,21 +4789,211 @@ pub fn enable_script_expl3(st) any^ {
     let enabled = {*:st, script_expl3: true};
     let names = ["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile"];
     let primitives = enable_expl_primitives(enabled, names)^;
-    let constants = enable_expl_constants(primitives, [
+    let constants = enable_expl_values(primitives, [
         {name: "c_zero_int", kind: "chardef", value: 0},
         {name: "c_one_int", kind: "mathchardef", value: 1}])^;
-    enable_expl_scratch(constants, ["l_tmpa_tl", "l_tmpb_tl", "g_tmpa_tl", "g_tmpb_tl"])
+    let empty_sequence = if (constants.definitions["control:c_empty_seq"] != null) constants else
+        assign_meaning(constants, "control:c_empty_seq", expl3_seq_value([])^, true)^;
+    let local_put = if (empty_sequence.definitions["control:seq_put_right:Nn"] != null) empty_sequence else
+        assign_meaning(empty_sequence, "control:seq_put_right:Nn", expl3_seq_put_right_macro(false)^, true)^;
+    let global_put = if (local_put.definitions["control:seq_gput_right:Nn"] != null) local_put else
+        assign_meaning(local_put, "control:seq_gput_right:Nn", expl3_seq_put_right_macro(true)^, true)^;
+    let aliases = enable_expl_values(global_put, [
+        {name: "__kernel_tl_set:Nx", kind: "primitive", value: "edef", source_mapping_guard: "tl_put"},
+        {name: "__kernel_tl_gset:Nx", kind: "primitive", value: "xdef", source_mapping_guard: "tl_put"},
+        {name: "__kernel_exp_not:w", kind: "primitive", value: "unexpanded"},
+        {name: "exp_after:wN", kind: "primitive", value: "expandafter"}])^;
+    let local_tl = if (aliases.definitions["control:tl_put_right:Nn"] != null) aliases else
+        assign_meaning(aliases, "control:tl_put_right:Nn", expl3_tl_put_right_macro(false)^, true)^;
+    let global_tl = if (local_tl.definitions["control:tl_gput_right:Nn"] != null) local_tl else
+        assign_meaning(local_tl, "control:tl_gput_right:Nn", expl3_tl_put_right_macro(true)^, true)^;
+    let scratch = enable_expl_scratch(global_tl, ["l_tmpa_tl", "l_tmpb_tl", "g_tmpa_tl", "g_tmpb_tl",
+        "l__seq_internal_a_tl", "l__seq_internal_b_tl"])^;
+    let support = enable_expl_values(scratch, [
+        {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
+        {name: "tex_global:D", kind: "primitive", value: "global"},
+        {name: "group_begin:", kind: "primitive", value: "begingroup"},
+        {name: "group_end:", kind: "primitive", value: "endgroup"},
+        {name: "if_cs_exist:w", kind: "primitive", value: "ifcsname"},
+        {name: "if_true:", kind: "primitive", value: "iftrue"},
+        {name: "if_false:", kind: "primitive", value: "iffalse"},
+        {name: "cs_end:", kind: "primitive", value: "endcsname"},
+        {name: "cs:w", kind: "primitive", value: "csname"},
+        {name: "if_cs_exist:N", kind: "primitive", value: "ifdefined"},
+        {name: "else:", kind: "primitive", value: "else"},
+        {name: "c_true_bool", kind: "chardef", value: 1},
+        {name: "c_false_bool", kind: "chardef", value: 0},
+        {name: "if_meaning:w", kind: "primitive", value: "ifx"},
+        {name: "fi:", kind: "primitive", value: "fi"},
+        {name: "exp:w", kind: "primitive", value: "romannumeral"},
+        {name: "exp_end:", kind: "chardef", value: 0},
+        {name: "exp_not:n", kind: "primitive", value: "unexpanded"},
+        {name: "exp_stop_f:", kind: "char", value: " ", cat: 10},
+        {name: "scan_stop:", kind: "primitive", value: "relax"},
+        {name: "s__seq", kind: "primitive", value: "relax"}])^;
+    let macros = enable_expl_macro_sources(support, [
+        {source: "\\tl_use:c{\\exp_args:Nc\\tl_use:N}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\seq_use:cn{\\exp_args:Nc\\seq_use:Nn}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\seq_item:cn{\\exp_args:Nc\\seq_item:Nn}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\seq_count:c{\\exp_args:Nc\\seq_count:N}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\tl_count:c{\\exp_args:Nc\\tl_count:N}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\tl_new:c{\\exp_args:Nc\\tl_new:N}", protected_flag: true, source_mapping_guard: "dynamic_assignment"},
+        {source: "\\tl_clear:c{\\exp_args:Nc\\tl_clear:N}", protected_flag: true, source_mapping_guard: "dynamic_assignment"},
+        {source: "\\tl_gclear:c{\\exp_args:Nc\\tl_gclear:N}", protected_flag: true, source_mapping_guard: "dynamic_assignment"},
+        {source: "\\seq_new:c{\\exp_args:Nc\\seq_new:N}", protected_flag: true, source_mapping_guard: "dynamic_assignment"},
+        {source: "\\seq_clear:c{\\exp_args:Nc\\seq_clear:N}", protected_flag: true, source_mapping_guard: "dynamic_assignment"},
+        {source: "\\seq_gclear:c{\\exp_args:Nc\\seq_gclear:N}", protected_flag: true, source_mapping_guard: "dynamic_assignment"},
+        {source: "\\tl_put_left:cn{\\exp_args:Nc\\tl_put_left:Nn}", protected_flag: true},
+        {source: "\\tl_put_right:cn{\\exp_args:Nc\\tl_put_right:Nn}", protected_flag: true},
+        {source: "\\tl_gput_left:cn{\\exp_args:Nc\\tl_gput_left:Nn}", protected_flag: true},
+        {source: "\\tl_gput_right:cn{\\exp_args:Nc\\tl_gput_right:Nn}", protected_flag: true},
+        {source: "\\seq_put_left:cn{\\exp_args:Nc\\seq_put_left:Nn}", protected_flag: true},
+        {source: "\\seq_put_right:cn{\\exp_args:Nc\\seq_put_right:Nn}", protected_flag: true},
+        {source: "\\seq_gput_left:cn{\\exp_args:Nc\\seq_gput_left:Nn}", protected_flag: true},
+        {source: "\\seq_gput_right:cn{\\exp_args:Nc\\seq_gput_right:Nn}", protected_flag: true},
+        {source: "\\tl_set_eq:cN{\\exp_args:Nc\\tl_set_eq:NN}", protected_flag: true},
+        {source: "\\tl_set_eq:Nc{\\exp_args:NNc\\tl_set_eq:NN}", protected_flag: true},
+        {source: "\\tl_set_eq:cc{\\exp_args:Ncc\\tl_set_eq:NN}", protected_flag: true},
+        {source: "\\tl_gset_eq:cN{\\exp_args:Nc\\tl_gset_eq:NN}", protected_flag: true},
+        {source: "\\tl_gset_eq:Nc{\\exp_args:NNc\\tl_gset_eq:NN}", protected_flag: true},
+        {source: "\\tl_gset_eq:cc{\\exp_args:Ncc\\tl_gset_eq:NN}", protected_flag: true},
+        {source: "\\exp_args:Nc#1#2{\\exp_after:wN#1\\cs:w#2\\cs_end:}", protected_flag: false},
+        {source: "\\exp_args:NNc#1#2#3{\\exp_after:wN#1\\exp_after:wN#2\\cs:w#3\\cs_end:}", protected_flag: false},
+        {source: "\\exp_args:Ncc#1#2#3{\\exp_after:wN#1\\cs:w#2\\exp_after:wN\\cs_end:\\cs:w#3\\cs_end:}", protected_flag: false},
+        {source: "\\cs_if_eq:cNTF{\\exp_args:Nc\\cs_if_eq:NNTF}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:cNT{\\exp_args:Nc\\cs_if_eq:NNT}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:cNF{\\exp_args:Nc\\cs_if_eq:NNF}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq_p:cN{\\exp_args:Nc\\cs_if_eq_p:NN}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:NcTF{\\exp_args:NNc\\cs_if_eq:NNTF}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:NcT{\\exp_args:NNc\\cs_if_eq:NNT}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:NcF{\\exp_args:NNc\\cs_if_eq:NNF}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq_p:Nc{\\exp_args:NNc\\cs_if_eq_p:NN}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:ccTF{\\exp_args:Ncc\\cs_if_eq:NNTF}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:ccT{\\exp_args:Ncc\\cs_if_eq:NNT}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:ccF{\\exp_args:Ncc\\cs_if_eq:NNF}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq_p:cc{\\exp_args:Ncc\\cs_if_eq_p:NN}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:NNTF#1#2{\\if_meaning:w#1#2\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:NNT#1#2{\\if_meaning:w#1#2\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq:NNF#1#2{\\if_meaning:w#1#2\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\cs_if_eq_p:NN#1#2{\\if_meaning:w#1#2\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_eq"},
+        {source: "\\use_none:nnnn#1#2#3#4{}", protected_flag: false},
+        {source: "\\__cs_if_free_c_aux:w\\fi:\\use_none:n#1\\if_true:{\\fi:\\exp_after:wN\\if_meaning:w\\cs:w#1\\cs_end:\\scan_stop:}", protected_flag: false},
+        {source: "\\cs_if_free:NTF#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_free:cTF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_free:NT#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_free:cT#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_free:NF#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_free:cF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_free_p:N#1{\\if_cs_exist:N#1\\else:\\use_none:nnnn\\fi:\\if_meaning:w#1\\scan_stop:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_free_p:c#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_free_c_aux:w\\fi:\\use_none:n{#1}\\if_true:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\__cs_if_exist_c_aux:w\\fi:\\use_none:n#1\\if_false:{\\fi:\\exp_after:wN\\if_meaning:w\\cs:w#1\\cs_end:\\scan_stop:\\else:}", protected_flag: false},
+        {source: "\\cs_if_exist:cTF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_exist:cT#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_exist:cF#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_exist_p:c#1{\\if_cs_exist:w#1\\cs_end:\\__cs_if_exist_c_aux:w\\fi:\\use_none:n{#1}\\if_false:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\use_i:nnnn#1#2#3#4{#1}", protected_flag: false},
+        {source: "\\__prg_TF_true:w\\fi:\\use_ii:nn{\\fi:\\use_i:nn}", protected_flag: false},
+        {source: "\\__prg_T_true:w\\fi:\\use_none:n{\\fi:\\use:n}", protected_flag: false},
+        {source: "\\__prg_F_true:w\\fi:\\use:n{\\fi:\\use_none:n}", protected_flag: false},
+        {source: "\\__prg_p_true:w\\fi:\\c_false_bool{\\fi:\\c_true_bool}", protected_flag: false},
+        {source: "\\cs_if_exist:NTF#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_exist:NT#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_exist:NF#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\cs_if_exist_p:N#1{\\if_meaning:w#1\\scan_stop:\\use_i:nnnn\\else:\\fi:\\if_cs_exist:N#1\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false, source_mapping_guard: "cs_exist"},
+        {source: "\\exp_end_continue_f:w{`^^@}", protected_flag: true},
+        {source: "\\exp_not:f#1{\\__kernel_exp_not:w\\exp_after:wN{\\exp:w\\exp_end_continue_f:w#1}}", protected_flag: false},
+        {source: "\\__seq_put_left_aux:w\\s__seq{\\exp_stop_f:}", protected_flag: false},
+        {source: "\\seq_put_left:Nn#1#2{\\__kernel_tl_set:Nx#1{\\exp_not:n{\\s__seq\\__seq_item:n{#2}}\\exp_not:f{\\exp_after:wN\\__seq_put_left_aux:w#1}}}", protected_flag: true},
+        {source: "\\seq_gput_left:Nn#1#2{\\__kernel_tl_gset:Nx#1{\\exp_not:n{\\s__seq\\__seq_item:n{#2}}\\exp_not:f{\\exp_after:wN\\__seq_put_left_aux:w#1}}}", protected_flag: true},
+        {source: "\\tl_set_eq:NN#1#2{\\tex_let:D#1=~#2}", protected_flag: true},
+        {source: "\\tl_gset_eq:NN#1#2{\\tex_global:D\\tex_let:D#1=~#2}", protected_flag: true},
+        {source: "\\seq_set_eq:NN#1#2{\\tex_let:D#1=~#2}", protected_flag: true},
+        {source: "\\seq_gset_eq:NN#1#2{\\tex_global:D\\tex_let:D#1=~#2}", protected_flag: true},
+        {source: "\\tl_put_left:Nn#1#2{\\__kernel_tl_set:Nx#1{\\__kernel_exp_not:w{#2}\\__kernel_exp_not:w\\exp_after:wN{#1}}}", protected_flag: true},
+        {source: "\\tl_gput_left:Nn#1#2{\\__kernel_tl_gset:Nx#1{\\__kernel_exp_not:w{#2}\\__kernel_exp_not:w\\exp_after:wN{#1}}}", protected_flag: true},
+        {source: "\\use:n#1{#1}", protected_flag: false},
+        {source: "\\use_none:n#1{}", protected_flag: false},
+        {source: "\\use_i:nn#1#2{#1}", protected_flag: false},
+        {source: "\\use_ii:nn#1#2{#2}", protected_flag: false},
+        {source: "\\prg_return_true:{\\exp_after:wN\\use_i:nn\\exp:w}", protected_flag: false},
+        {source: "\\prg_return_false:{\\exp_after:wN\\use_ii:nn\\exp:w}", protected_flag: false},
+        {source: "\\prg_break_point:{}", protected_flag: false},
+        {source: "\\prg_break:n#1#2\\prg_break_point:{#1}", protected_flag: false},
+        {source: "\\__seq_if_in:{\\prg_break:n{\\group_end:\\prg_return_true:}}", protected_flag: false},
+        {source: "\\__seq_item:n{\\msg_expandable_error:nn{seq}{misused}\\use_none:n}", protected_flag: false},
+        {source: "\\seq_if_in:NnTF#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:}", protected_flag: true},
+        {source: "\\seq_if_in:NnT#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:\\use:n\\use_none:n}", protected_flag: true},
+        {source: "\\seq_if_in:NnF#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:{}}", protected_flag: true}])^;
+    let existence_aliases = [for (family in ["tl", "seq", "int", "bool", "clist", "prop", "str", "dim"],
+        suffix in [":NTF", ":NT", ":NF", "_p:N", ":cTF", ":cT", ":cF", "_p:c"])
+            {name: family ++ "_if_exist" ++ suffix, kind: "alias", value: "cs_if_exist" ++ suffix}];
+    let with_existence_aliases = enable_expl_values(macros, existence_aliases)^;
+    let sequence_eq_aliases = [for (scope in ["set", "gset"], pattern in ["cN", "Nc", "cc"])
+        {name: "seq_" ++ scope ++ "_eq:" ++ pattern, kind: "alias", value: "tl_" ++ scope ++ "_eq:" ++ pattern}];
+    enable_expl_values(with_existence_aliases, sequence_eq_aliases)
 }
 
-// preserve the distinct TeX meanings of expl3's non-allocating constants.
-fn enable_expl_constants(st, values, index = 0) any^ {
+// tokenize trusted bundled TeX definitions under expl3 category codes.
+fn expl3_definition_tokens(reader_state, output = []) any^ {
+    let next = reader.next(reader_state)^;
+    if (next.token == null) output
+    else expl3_definition_tokens(next.reader, [*output, {*:next.token, direct: false}])
+}
+
+fn enable_expl_macro_sources(st, definitions, index = 0) any^ {
+    if (index >= len(definitions)) st
+    else {
+        let definition = definitions[index];
+        let source_reader = {*:reader.reader(definition.source, -1), endline: -1,
+            catcodes: expl3.syntax_codes({'{': 1, '}': 2, '#': 6, [chr(0)]: 13})};
+        let tokens = expl3_definition_tokens(source_reader)^;
+        let name = key(tokens[0]);
+        let created = if (st.definitions[name] != null) st else
+            define({*:st, input: stream.push(st.input, tokens)}, true, true,
+                definition.protected_flag, false, 20000000)^;
+        let next = if (st.definitions[name] == null and created.issue == null and
+            definition.source_mapping_guard != null)
+                assign_meaning(created, name, {*:created.definitions[name],
+                    source_mapping_guard: definition.source_mapping_guard}, true)^ else created;
+        if (next.issue != null) next else enable_expl_macro_sources(next, definitions, index + 1)
+    }
+}
+
+// native tl insertion expands to an edef whose body preserves both token lists.
+fn expl3_tl_put_right_macro(global) any^ {
+    let parameter0 = parameter_token(0);
+    let parameter1 = parameter_token(1);
+    {kind: "macro", count: 2, prefix: [], delimiters: [[], []], brace_delim: false,
+        long_ok: true, protected_flag: true,
+        body: [control_token(if (global) "__kernel_tl_gset:Nx" else "__kernel_tl_set:Nx"), parameter0,
+            brace_token(true), control_token("__kernel_exp_not:w"), control_token("exp_after:wN"),
+            brace_token(true), parameter0, parameter1, brace_token(false), brace_token(false)]}
+}
+
+// the protected wrapper captures its arguments before the underlying assignment.
+fn expl3_seq_put_right_macro(global) any^ {
+    let parameter0 = parameter_token(0);
+    let parameter1 = parameter_token(1);
+    {kind: "macro", count: 2, prefix: [], delimiters: [[], []], brace_delim: false,
+        long_ok: true, protected_flag: true,
+        body: [control_token(if (global) "tl_gput_right:Nn" else "tl_put_right:Nn"), parameter0,
+            brace_token(true), control_token("__seq_item:n"), brace_token(true), parameter1,
+            brace_token(false), brace_token(false)]}
+}
+
+// initialize non-allocating constants and aliases with their TeX meanings.
+fn enable_expl_values(st, values, index = 0) any^ {
     if (index >= len(values)) st
     else {
-        let constant = values[index];
-        let name = "control:" ++ constant.name;
-        let next = if (st.definitions[name] != null) st else
-            assign_meaning(st, name, {kind: constant.kind, value: constant.value}, true)^;
-        enable_expl_constants(next, values, index + 1)
+        let value = values[index];
+        let name = "control:" ++ value.name;
+        let meaning = if (value.kind == "alias") st.definitions["control:" ++ value.value]
+            else if (value.kind == "primitive")
+                {kind: "primitive", name: value.value, source_mapping_guard: value.source_mapping_guard}
+            else if (value.kind == "char") {kind: "char", value: value.value, cat: value.cat}
+            else {kind: value.kind, value: value.value};
+        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, meaning, true)^;
+        enable_expl_values(next, values, index + 1)
     }
 }
 
