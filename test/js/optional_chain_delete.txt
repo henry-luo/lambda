@@ -1,0 +1,15 @@
+null true
+undefined true
+missing props true
+continuation true
+call continuation true
+computed skipped true
+base once true
+real deletion true
+no final getter true
+proxy deletion true
+group ends chain true
+nonnull missing child throws true
+nonconfigurable true
+strict nonconfigurable true
+unresolvable base true

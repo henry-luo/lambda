@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Root rem basis follows font changes</title>
+<style>
+html { --size: .875rem; font-size: var(--size); padding: 1rem; box-sizing: border-box; }
+body { margin: 0; }
+#probe { width: 10rem; height: 2rem; background: red; }
+#math { width: calc(2rem + 10px); height: 1rem; background: blue; }
+</style>
+<div id="probe"></div><div id="math"></div>
+<button id="grow">Grow root</button><button id="literal">Use literal root size</button>
+<script>
+document.getElementById('grow').addEventListener('click', function () {
+    document.documentElement.style.setProperty('--size', '2rem');
+});
+document.getElementById('literal').addEventListener('click', function () {
+    document.documentElement.style.fontSize = '14px';
+});
+</script>

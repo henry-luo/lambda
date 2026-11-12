@@ -1802,6 +1802,7 @@ static Item js_interp_make_field_initializer(JsInterpFrame* frame,
 static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node);
 static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node);
 static JsInterpCompletion js_interp_exec_list(JsInterpFrame* frame, JsAstNode* node);
+static bool js_interp_is_nullish(Item value);
 static bool js_interp_is_anonymous_function_definition(JsAstNode* initializer);
 static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
         NameScope* scope, bool initialize_functions = true);
@@ -2203,11 +2204,30 @@ static JsInterpCompletion js_interp_member_key_after_base(JsInterpFrame* frame,
     return js_interp_normal(canonical_key);
 }
 
+static JsInterpMemberResult js_interp_eval_member_base(JsInterpFrame* frame,
+        JsMemberNode* member, bool follow_chain = true) {
+    if (js_interp_member_uses_super(member)) {
+        Item receiver = js_interp_super_this(frame);
+        return {item_is_error(receiver) ? js_interp_throw(receiver)
+            : js_interp_normal(receiver), false};
+    }
+    JsInterpMemberResult object = follow_chain
+        ? js_interp_eval_chain_operand(frame, member, (JsAstNode*)member->object)
+        : JsInterpMemberResult{js_interp_eval(frame, (JsAstNode*)member->object), false};
+    if (object.completion.kind != JS_INTERP_NORMAL || object.optional_short_circuit)
+        return object;
+    if (follow_chain && member->optional && js_interp_is_nullish(object.completion.value))
+        return {js_interp_normal(make_js_undefined()), true};
+    return object;
+}
+
 static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
         JsAstNode* node, JsInterpReference* out_reference,
         uint64_t* object_home, uint64_t* key_home,
-        bool defer_property_reference = false, uint64_t* super_base_home = NULL) {
+        bool defer_property_reference = false, uint64_t* super_base_home = NULL,
+        bool* optional_short_circuit = NULL) {
     if (!out_reference) return js_interp_throw(ItemError);
+    if (optional_short_circuit) *optional_short_circuit = false;
     memset(out_reference, 0, sizeof(*out_reference));
     out_reference->object_home = object_home;
     out_reference->key_home = key_home;
@@ -2281,14 +2301,14 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
         Rooted<Item> object_root(roots, ItemNull);
         Rooted<Item> key_root(roots, ItemNull);
         bool super_property = js_interp_member_uses_super(member);
-        if (super_property) {
-            object_root.set(js_interp_super_this(frame));
-            if (item_is_error(object_root.get())) return js_interp_throw(object_root.get());
-        } else {
-            JsInterpCompletion object = js_interp_eval(frame, (JsAstNode*)member->object);
-            if (object.kind != JS_INTERP_NORMAL) return object;
-            object_root.set(object.value);
+        JsInterpMemberResult object = js_interp_eval_member_base(frame, member,
+            optional_short_circuit != NULL);
+        if (object.completion.kind != JS_INTERP_NORMAL) return object.completion;
+        if (object.optional_short_circuit) {
+            *optional_short_circuit = true;
+            return object.completion;
         }
+        object_root.set(object.completion.value);
         bool defer_key = false;
         JsInterpCompletion key = js_interp_member_key_after_base(frame, member,
             object_root.get(), !super_property, defer_property_reference,
@@ -3162,21 +3182,10 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
     } else if (call->function && (call->function->node_type == AST_NODE_MEMBER_EXPR ||
             call->function->node_type == AST_NODE_INDEX_EXPR)) {
         JsMemberNode* member = (JsMemberNode*)call->function;
-        bool member_short_circuit = false;
-        if (js_interp_member_uses_super(member)) {
-            this_root.set(js_interp_super_this(frame));
-            if (item_is_error(this_root.get())) {
-                JS_INTERP_CALL_RETURN(js_interp_throw(this_root.get()));
-            }
-        } else {
-            JsInterpMemberResult receiver = js_interp_eval_chain_operand(frame,
-                member, (JsAstNode*)member->object);
-            if (receiver.completion.kind != JS_INTERP_NORMAL) return receiver;
-            member_short_circuit = receiver.optional_short_circuit;
-            this_root.set(receiver.completion.value);
-        }
-        member_short_circuit |= member->optional && js_interp_is_nullish(this_root.get());
-        if (member_short_circuit) {
+        JsInterpMemberResult receiver = js_interp_eval_member_base(frame, member);
+        if (receiver.completion.kind != JS_INTERP_NORMAL) return receiver;
+        this_root.set(receiver.completion.value);
+        if (receiver.optional_short_circuit) {
             if (js_ast_chain_continues(call, member))
                 return {js_interp_normal(make_js_undefined()), true};
             // a grouped member completes before the outer call evaluates arguments.
@@ -3775,23 +3784,10 @@ static JsInterpMemberResult js_interp_eval_member_chain(JsInterpFrame* frame,
     Rooted<Item> key_root(roots, ItemNull);
     Rooted<Item> super_base_root(roots, ItemNull);
     bool super_property = js_interp_member_uses_super(member);
-    if (super_property) {
-        object_root.set(js_interp_super_this(frame));
-        if (item_is_error(object_root.get())) {
-            return {js_interp_throw(object_root.get()), false};
-        }
-    } else {
-        JsInterpMemberResult object = js_interp_eval_chain_operand(frame,
-            member, (JsAstNode*)member->object);
-        if (object.completion.kind != JS_INTERP_NORMAL) return object;
-        if (object.optional_short_circuit) {
-            return {js_interp_normal(make_js_undefined()), true};
-        }
-        object_root.set(object.completion.value);
-    }
-    if (member->optional && js_interp_is_nullish(object_root.get())) {
-        return {js_interp_normal(make_js_undefined()), true};
-    }
+    JsInterpMemberResult object = js_interp_eval_member_base(frame, member);
+    if (object.completion.kind != JS_INTERP_NORMAL || object.optional_short_circuit)
+        return object;
+    object_root.set(object.completion.value);
     bool key_deferred = false;
     bool dense_read = false;
     JsInterpCompletion key = js_interp_member_key_after_base(frame, member,
@@ -3951,10 +3947,14 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
                 JsInterpReference reference;
                 JsMemberNode* member = (JsMemberNode*)unary->operand;
                 bool super_property = js_interp_member_uses_super(member);
+                bool optional_short_circuit = false;
                 JsInterpCompletion resolved = js_interp_eval_reference(frame,
                     (JsAstNode*)unary->operand, &reference, object_root.home(), key_root.home(),
-                    super_property, super_base_root.home());
+                    super_property, super_base_root.home(), &optional_short_circuit);
                 if (resolved.kind != JS_INTERP_NORMAL) return resolved;
+                // a short-circuited optional chain is a value, so delete succeeds
+                // without evaluating a property key or invoking a delete trap.
+                if (optional_short_circuit) return js_interp_normal((Item){.item = b2it(true)});
                 // Evaluate the super reference before rejecting it: a null
                 // super base must not preempt delete's mandated ReferenceError.
                 if (reference.super_property) {

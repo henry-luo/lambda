@@ -1925,6 +1925,8 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"body", "HTMLBodyElement"},
     {"button", "HTMLButtonElement"},
     {"canvas", "HTMLCanvasElement"},
+    // native details behavior also needs its WebIDL identity for page guards.
+    {"details", "HTMLDetailsElement"},
     {"embed", "HTMLEmbedElement"},
     {"form", "HTMLFormElement"},
     {"frame", "HTMLFrameElement"},

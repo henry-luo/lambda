@@ -2285,6 +2285,8 @@ extern "C" Item dom_cssom_get_element_sheet(Item elem_item) {
     DomDocument* doc = elem->doc;
     if (!doc) return ItemNull;
 
+    // consume pending text edits before exposing the sheet that CSSOM will mutate.
+    if (is_inline_style) radiant_sync_mutated_inline_stylesheets(doc);
     CssStylesheet* sheet = cssom_element_sheet(elem);
     if (sheet) return dom_cssom_wrap_stylesheet(sheet);
 

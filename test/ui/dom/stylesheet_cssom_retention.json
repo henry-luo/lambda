@@ -1,0 +1,12 @@
+{
+  "name": "CSSOM edits survive loading and a later event reconciliation",
+  "html": "test/ui/dom/stylesheet_cssom_retention.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#edit"}},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-insert", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-sheet", "equals": "true"},
+    {"type": "click", "target": {"selector": "#check"}},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-after", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "complete"}
+  ]
+}

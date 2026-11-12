@@ -1,0 +1,18 @@
+{
+  "name": "Percentage grid math follows the solved area and current owner style",
+  "html": "test/ui/dom/grid_percentage_area.html",
+  "viewport": {"width":1200,"height":300},
+  "events": [
+    {"type":"assert_pixel","x":100,"y":40,"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0},
+    {"type":"assert_pixel","x":540,"y":40,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_pixel","x":620,"y":40,"min_r":0,"max_r":0,"min_g":0,"max_g":0,"min_b":255,"max_b":255},
+    {"type":"click","target":{"selector":"#resize"}},
+    {"type":"assert_pixel","x":510,"y":40,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_pixel","x":580,"y":40,"min_r":0,"max_r":0,"min_g":0,"max_g":0,"min_b":255,"max_b":255},
+    {"type":"click","target":{"selector":"#font"}},
+    {"type":"assert_pixel","x":480,"y":40,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"click","target":{"selector":"#fill"}},
+    {"type":"assert_pixel","x":300,"y":40,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_pixel","x":100,"y":40,"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0}
+  ]
+}

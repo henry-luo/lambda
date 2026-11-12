@@ -134,6 +134,42 @@ ownership. Add default-MIR and forced-GC regressions for both probes.
 4. **Sentinel values still exist.** `JS_DELETED_SENTINEL_VAL` no longer reuses the INT tag, but it remains a raw non-value `Item` in dense arrays; `ITEM_JS_TDZ` still reuses the UNDEFINED tag. Code that scans dense array items must preserve hole checks. The deleted-sentinel cleanup boundary is tracked in detail in JS06.
 5. **Batch reset is a long manual fan-out.** `js_batch_reset` (`js_runtime_state.cpp:271`) hand-enumerates ~30 per-subsystem reset calls; a new stateful module that forgets to register a reset leaks across test262 cases. `js_assert_batch_runtime_state_clear` catches only the capsule fields, not module-private statics.
 
+## 4. Expressions, references & operators (JS04)
+
+### JS04-L1 — Optional deletion throws in the AST interpreter — **RESOLVED**
+
+Found and fixed 2026-11-12. **D8.4.4** requires one semantic contract across
+AST/AUTO/MIR; **D8.4.3** also routes dynamic source through the AST. Precise
+receiver/key ownership remains **D6.3**. No design ruling changed.
+
+RFC Editor's Nuxt/Vue application replaced its home page with Error 500 and
+TypeError. LLDB isolates `delete i.props?.ref` in Vue's vnode handling
+(member span 274284..274296). The AST delete path used ordinary reference
+evaluation, coercing a nullish optional base and throwing before deletion.
+The same script already succeeds in MIR and Node. A minimal reproduction is
+`delete ({}).props?.ref`, which must return true. Earlier array-sort exceptions
+in the application are caught library feature probes, not this root cause.
+
+Delete now requests optional short-circuit information from reference
+evaluation and returns true before evaluating a skipped key or delete trap.
+Member reads, calls and optional deletion reuse one member-base helper,
+preserving grouping, receiver identity and ordinary assignment behavior.
+`optional_chain_delete.js` has 15 Node-checked golden results for null/undefined,
+continuations and calls, skipped computed keys, one-time base evaluation,
+real deletion, getter avoidance, Proxy traps, grouping, nonconfigurable and
+strict deletion, and an unresolved base. All pass in AST and MIR; seven
+short-circuit cases throw before repair in AST.
+
+All 574 AST baseline tests and 14 MIR optional/deletion/super neighbors pass,
+as do 630 JavaScript layout cases and both DOM UI integration fixtures.
+The live RFC Editor home page now retains its heading, search and RFC cards.
+Validation uses the compatible host with an exact copy of the current repaired
+js_interp.cpp; the main checkout's unrelated paint API mismatch remains.
+Evidence: `temp/online-visual-round6/{rfc-detail.log,delete-before-ast-output.log,
+delete-after-ast-output.log,delete-after-mir-output.log,js-baseline-ast-final.log,
+rfc-live.png}`. No framework code, expected failure, admission limit or capture
+deadline was changed.
+
 ## 5. Functions, closures & scope (JS05)
 
 ### JS05-L1 — `with` scope of a suspended generator leaks to unrelated code — **RESOLVED**
@@ -486,6 +522,92 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
+
+### JS13-L6 — Existing details elements lack their JavaScript interface — **FIXED**
+
+Found 2026-11-12. Native/runtime ownership follows **D9.1.1v4 / D9.1.3v2**.
+The native tag-interface registry omitted `details`, although native `open`
+reflection, summary activation and exclusive groups already existed. Join's
+company-page module checks `instanceof HTMLDetailsElement` in its language
+switcher before installing section-reveal observers, and raised ReferenceError.
+
+The registry now maps `details` to `HTMLDetailsElement`. The existing installer
+creates a distinct illegal constructor and its prototype under `HTMLElement`;
+parsed and created wrappers use that same registry. No generic-interface alias
+or page-specific branch is added. `test/ui/dom/details_interface` checks global
+identity, parsed/created branding, negative branding, prototype/constructor
+identity, string tag, illegal construction, native reflection, continuation
+pixels and summary activation: previous renderer 0/9, repaired renderer 9/9.
+The existing resource-interface control passes 5/5.
+
+Join's live startup exception disappears, but its main content remains hidden
+at the selected virtual frame. This is not a major-page clearance. In an
+archived read-only trace, its reveal attribute is set at virtual time zero;
+the authored opacity transition is a separate observation. Capture must not
+advance time merely to finish that transition (**D10.1.7**). Evidence:
+`temp/online-visual-round11/{ui-before.log,ui-final.log,join-live-after-lambda.log,join-no-geometry-results.log}`.
+
+### JS13-L7 — Initial geometry-observer sampling depends on a page geometry read — **FIXED**
+
+Found 2026-11-12. The shared DOM checkpoint follows **D9.1.1v4 / D9.1.3v2**;
+snapshot sampling retains the selected frame (**D10.1.7**).
+`observer_sample_geometry` skipped targets whose document had no view tree,
+before reaching the geometry operation that could establish the first layout.
+A standalone export has no later interactive runtime turn to recover the
+initial sample. A script observing a visible box styled with `opacity:0` never
+received its first intersection/resize callback unless something else queried
+geometry first.
+
+Sampling now calls the existing `dom_ensure_geometry_snapshot` checkpoint.
+Its host-driven loading/commit and reentry guards remain authoritative; the
+observer's sampling guard prevents recursive sampling during layout. No timer,
+threshold, admission limit or capture deadline changes. The standalone PNG
+regressions cover initial visible intersection, initial settled resize,
+initial offscreen notification and disconnect-before-delivery. With no page
+geometry reads, the previous renderer fails the first three; all four pass
+after the repair. The clip and CSSOM PNG suites reuse a common fixture runner
+with these tests, and retain their original pixel expectations.
+
+Qualification: 32 real CLI cases, seven DOM UI fixtures (50 assertions),
+574 AST baseline cases, 3,851 recorded static layout cases (six skips), 630
+JavaScript layout cases and five comparator tests pass. This repair is
+independently reduced; it is not assigned as Join's remaining visual cause.
+Evidence: `temp/online-visual-round11/{observers-before.log,cli-final.log,ui-final.log,js-baseline-ast.log,layout-static.log,layout-js.log}`.
+
+### JS13-L4 — Missing serviceWorker.ready aborts application startup — **FIXED**
+
+Found 2026-11-12. Native/runtime ownership follows **D9.1.1v4 / D9.1.3v2**;
+the published promise uses precise **D6.3** roots. The existing headless
+`navigator.serviceWorker` object installed register/getRegistrations but omitted
+`ready`. Greenlist's admitted 83KiB main bundle reads
+`navigator.serviceWorker.ready.then(...)` after ReactDOM.render and throws a
+TypeError. LLDB isolates that final uncaught member read; earlier exceptions
+are caught library feature probes. This source is identical in the current
+checkout and the compatible capture host before repair.
+
+The existing empty-registry profile now publishes one read-only pending promise,
+rooted along with its property descriptor until the navigator retains it.
+[Service Workers §3.4.2](https://w3c.github.io/ServiceWorker/#dom-serviceworkercontainer-ready)
+requires readiness to wait for a matching active registration. No registration
+or success value is fabricated. `test/ui/dom/service_worker_ready` checks the
+Promise, identity, read-only value, empty registration array and pending state
+after microtasks: all six assertions pass and the previous qualified host fails.
+The isolated real-bundle bootstrap no longer reaches its exception handler.
+Greenlist's live capture still lacks styling and hero content; that residual
+cause is unconfirmed and is not declared repaired by removing this exception.
+Evidence: `temp/online-visual-round5/{greenlist-lldb-python.log,greenlist-ready.json,ready-final-ui-result.json}`.
+
+### JS13-L5 — Service-worker execution and registration lifecycle — **FEATURE GAP**
+
+Observed 2026-11-12 while isolating JS13-L4. Ownership **D9.1.1v4 / D9.1.3v2**.
+The existing headless container returns an empty getRegistrations result and
+register resolves a placeholder object. It does not fetch/run worker scripts,
+persist registrations, activate workers or dispatch fetch events. JS13-L4 only
+completes empty-registry readiness; it does not qualify a full branded
+ServiceWorkerContainer IDL surface or that existing register placeholder.
+Implementing the worker subsystem is a major missing feature outside this
+online bug-fix round, not a blocker to unrelated layout or snapshot work.
+No remaining page omission is assigned to this gap without page-specific proof.
 
 ### JS13-L3 — Root theme mutation is dropped below a Document proxy — **FIXED**
 
