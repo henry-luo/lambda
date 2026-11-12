@@ -81,12 +81,16 @@ remain text.
 
 Open accepts `.xlsx` and editable `.sheet.json` workbooks. XLSX imports include multiple
 worksheets, values, formula source, common cell styles and dimensions. Built-in
-Excel date formats 14–17 display as ISO dates using the workbook’s 1900 or 1904
-calendar. Open reports import warnings in the status bar. Unsupported formulas
+Excel built-in and common custom date/time formats display as ISO dates and
+24-hour times using the workbook’s 1900 or 1904 calendar. The display normalizes
+these formats; it does not reproduce every Excel format string. Open reports
+import warnings in the status bar. Unsupported formulas
 show their saved XLSX result when available; any edit invalidates all imported
 formula results, after which Sheet shows its calculation errors for formulas it
 cannot evaluate. Shared and array formulas, merged cells, drawings, many styles,
-custom date/time formats and Excel formula semantics are not fully supported.
+exact custom date/time formatting and Excel formula semantics are not fully supported.
+Warnings also identify hidden dimensions, frozen panes, conditional formatting,
+and worksheet or workbook protection that Sheet does not enforce.
 
 Save writes an editable `.sheet.json` workbook, preserving the supported formulas,
 cell styles, row heights, column widths and worksheets. XLSX import does not enable
@@ -124,7 +128,7 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
@@ -139,6 +143,8 @@ Verification:
   --event-file test/ui/sheet_handle.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_files.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_xlsx.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_xlsx_external.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_resize.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_virtual_grid.json

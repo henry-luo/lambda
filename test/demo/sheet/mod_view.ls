@@ -79,9 +79,18 @@ fn excel_date(value,date1904) any^ {
         slice(rendered,2,len(rendered)-1)
     }
 }
+fn two_digits(value) => (if (value<10) "0" else "") ++ string(value)
+// A spreadsheet time is the fractional part of a day, rounded to seconds.
+fn excel_time(value) any^ {
+    let seconds=int(floor((value-floor(value))*86400+0.5))%86400;
+    two_digits(seconds div 3600) ++ ":" ++ two_digits((seconds div 60)%60) ++ ":" ++ two_digits(seconds%60)
+}
 pub fn formatted(value,style) any^ => if (value is bool) (if (value) "TRUE" else "FALSE")
     else if (not (value is number)) string(value)
     else if (style.format=="date" or style.format=="date1904") excel_date(value,style.format=="date1904")^
+    else if (style.format=="time") excel_time(value)^
+    else if (style.format=="datetime" or style.format=="datetime1904")
+        excel_date(value+0.5/86400,style.format=="datetime1904")^ ++ " " ++ excel_time(value)^
     else if (style.format=="currency") "$" ++ fixed(value)
     else if (style.format=="percent") fixed(value*100,1) ++ "%"
     else if (style.format=="number") fixed(value)

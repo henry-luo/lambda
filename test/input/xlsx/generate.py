@@ -36,3 +36,14 @@ def variant(filename, member, replace_from, replace_to):
 variant('bad-shared-string.xlsx', 'xl/worksheets/sales.xml', '<v>0</v>', '<v>999</v>')
 variant('bad-relationship.xlsx', 'xl/workbook.xml', 'r:id="s2"', 'r:id="missing"')
 variant('date1904.xlsx', 'xl/workbook.xml', '<sheets>', '<workbookPr date1904="1"/><sheets>')
+variant('bad-case-relationship.xlsx', 'xl/_rels/workbook.xml.rels', 'Target="sharedStrings.xml"', 'Target="SharedStrings.xml"')
+
+# Format tokens inside literals and color brackets must not turn numbers into dates.
+format_files = dict(files)
+format_files['xl/styles.xml'] = f'''<styleSheet xmlns="{X}"><numFmts count="3"><numFmt numFmtId="164" formatCode="yyyy-mm-dd hh:mm:ss"/><numFmt numFmtId="165" formatCode="0 &quot;days&quot;"/><numFmt numFmtId="166" formatCode="mm/dd/yyyy"/></numFmts><cellXfs count="5"><xf numFmtId="0"/><xf numFmtId="164"/><xf numFmtId="165"/><xf numFmtId="18"/><xf numFmtId="166"/></cellXfs></styleSheet>'''
+format_files['xl/worksheets/sales.xml'] = f'''<worksheet xmlns="{X}"><sheetData><row r="1"><c r="A1" s="1"><v>45292.5</v></c><c r="B1" s="2"><v>7</v></c><c r="C1" s="3"><v>0.375</v></c><c r="D1" s="4"><v>45292</v></c></row></sheetData></worksheet>'''
+with ZipFile(HERE / 'number-formats.xlsx', 'w', ZIP_DEFLATED) as archive:
+    for name, body in format_files.items():
+        info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, body.encode())

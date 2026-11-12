@@ -1,0 +1,145 @@
+{
+  "retrieved": "2026-11-12",
+  "files": [
+    {
+      "file": "bloated-workbook.xlsx",
+      "source": "https://www.exceltool.io/fixtures/bloated-workbook.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "265f527ab0d3d03828d81d192d88665218f5e6f6700354b81048dbd3263721d2",
+      "features": "120 real orders with fill and borders applied to 6,000 empty rows below them across columns A:N (the classic 'formatted whole columns' bloat), plus three cell notes. The used range reaches row 6,121."
+    },
+    {
+      "file": "contacts.xlsx",
+      "source": "https://www.exceltool.io/fixtures/contacts.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "170163d5b717ca4ca4abaa65caebd0f098bc7924250c651535d4d4139d1ecd7b",
+      "features": "24 invented business contacts with first/last name, company, title, email, mobile and work phones (555-01xx numbers reserved for fiction), full street address, website and free-text notes that contain extra emails and phone numbers."
+    },
+    {
+      "file": "customer-lists.xlsx",
+      "source": "https://www.exceltool.io/fixtures/customer-lists.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "ca042d044d15fa85a4346f96607bc0c4c5aecdde68fece73a7ca614d9381a9b2",
+      "features": "Two customer lists side by side (30 in the CRM, 28 in billing) that mostly overlap. One billing name has a trailing space and one differs only in capitalisation."
+    },
+    {
+      "file": "employees.xlsx",
+      "source": "https://www.exceltool.io/fixtures/employees.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "3cdc5dd6e40cfe9c85f24d639a2f644ad89b4f573fc31827ea9b0d79ef41d067",
+      "features": "Practice dataset: 60 invented employees (ID, name, email, department, title, office, hire date, salary, status) and a Departments sheet with a COUNTIF headcount. Carries the metadata a real HR file leaks: author, last modified by, company, manager, three custom properties and the saved folder path."
+    },
+    {
+      "file": "event-schedule.xlsx",
+      "source": "https://www.exceltool.io/fixtures/event-schedule.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "16926505c9f50208035962b95f1c95a9a9b319719d8a1a06f309039b8d993952",
+      "features": "12 company calendar events from November 2026 to January 2027: timed meetings, an overnight offsite and all-day US holidays, with dates and times stored as real Excel date/time values."
+    },
+    {
+      "file": "excelize-Book1.xlsx",
+      "source": "https://raw.githubusercontent.com/qax-os/excelize/e7deced25afc947ecf801690cb51fe47550ab306/test/Book1.xlsx",
+      "license": "BSD-3-Clause",
+      "sha256": "6ef03f24fd2bfa1936bbea416fca7c5e1b65a1107e7678ff5544c098d414ebaa",
+      "features": "Two sheets, rich text, formulas, charts, table and hyperlinks"
+    },
+    {
+      "file": "excelize-MergeCell.xlsx",
+      "source": "https://raw.githubusercontent.com/qax-os/excelize/e7deced25afc947ecf801690cb51fe47550ab306/test/MergeCell.xlsx",
+      "license": "BSD-3-Clause",
+      "sha256": "db92fcdfbf0ae5a322fca61d752b3a2fc5b2d7fa0c7143be1b286be58e3a600f",
+      "features": "Multiple horizontal and vertical merged ranges"
+    },
+    {
+      "file": "excelize-SharedStrings.xlsx",
+      "source": "https://raw.githubusercontent.com/qax-os/excelize/e7deced25afc947ecf801690cb51fe47550ab306/test/SharedStrings.xlsx",
+      "license": "BSD-3-Clause",
+      "sha256": "2d3cfade291780389848f556b21fe5ac9b249477b73d338514c25f7976bbbe26",
+      "features": "Plain and rich shared-string runs on multiple sheets"
+    },
+    {
+      "file": "exceljs-1904.xlsx",
+      "source": "https://raw.githubusercontent.com/exceljs/exceljs/5bed18b45e824f409b08456b59b87430ded023ab/spec/integration/data/1904.xlsx",
+      "license": "MIT",
+      "sha256": "5d661c1e7d68e2191878af84447a5c54ad837e152dc829b96087e5bad9a07122",
+      "features": "Three worksheets with the 1904 workbook date system and built-in date formats."
+    },
+    {
+      "file": "files-sample-1000rows.xlsx",
+      "source": "https://files-sample.com/download/xlsx-1000rows",
+      "license": "CC0-1.0",
+      "sha256": "193a6e44d45236189370a4ddeca0ce4930763af0a2a6753cbfa926ae48b3f923",
+      "features": "1,000-row inline-string table from another producer"
+    },
+    {
+      "file": "formatted-report.xlsx",
+      "source": "https://www.exceltool.io/fixtures/formatted-report.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "4d67eac71a23d4d5378fbf203e84d461a422480d06a8e9afd758a5a1f123827a",
+      "features": "A styled Q3 report: merged title, custom fonts, filled header row, borders, a highlighted total column, red negative variances, a double-underlined total row and a frozen header."
+    },
+    {
+      "file": "hidden-frozen.xlsx",
+      "source": "https://www.exceltool.io/fixtures/hidden-frozen.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "c24b5041501e932b70a0599d7a6ed09bc750452a71f031f7a8fd10da05286117",
+      "features": "Two hidden columns and one hidden row, a frozen header row and frozen label column, custom row heights, and currency formats. The hidden columns are why the visible quarters do not add up to the printed total - the case that separates a viewer reporting what Excel stores from one quietly dropping it."
+    },
+    {
+      "file": "inventory.xlsx",
+      "source": "https://www.exceltool.io/fixtures/inventory.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "5125b8938ec221f34acae7c3212b25884e0a99df80848759f14f9108bb783fcd",
+      "features": "Practice dataset: 40 invented products - SKU, Product, Category, Supplier, Warehouse, Qty On Hand, Reorder Point, Unit Cost, Unit Price, Last Restocked. About one in five items is below its reorder point."
+    },
+    {
+      "file": "merged-formats.xlsx",
+      "source": "https://www.exceltool.io/fixtures/merged-formats.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "46957c53c7ffd97cccae3bd300799bafb10c44b922955196ecae3e0da114ec68",
+      "features": "Merged title/header ranges, a frozen top row, currency/percent/date number formats, and custom column widths - exercises exactly the metadata a data-view renderer keeps or drops."
+    },
+    {
+      "file": "messy-data.xlsx",
+      "source": "https://www.exceltool.io/fixtures/messy-data.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "8999fead17b1d52c3d3af700cd83c85229920ee9f6cba0247f998bc84df236f9",
+      "features": "A contact list with exact duplicates, case-variant duplicates, stray whitespace, inconsistent casing, and blank rows - the classic cleanup workload."
+    },
+    {
+      "file": "numbers-stored-as-text.xlsx",
+      "source": "https://www.exceltool.io/fixtures/numbers-stored-as-text.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "3fe5b1ac03c7ca7668c7bf858ea0ea16982895e87e2116209bdc37c77219d414",
+      "features": "15 invoices where every amount, quantity, discount and balance is stored as text (\"$1,250.00\", \" 12\", \"15%\", \"(120.50)\"), so the SUM totals come out as 0. ZIP codes with leading zeros are text on purpose."
+    },
+    {
+      "file": "protected-sample.xlsx",
+      "source": "https://www.exceltool.io/fixtures/protected-sample.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "6bf92bfbac28c5ce8bad9ee20e3f11424681bbe7387ead115dcb07c21bbf1ddc",
+      "features": "Worksheet protection (<sheetProtection> with the legacy 16-bit password hash) on both sheets. The cells are locked against editing but the data is fully readable."
+    },
+    {
+      "file": "sales-orders.xlsx",
+      "source": "https://www.exceltool.io/fixtures/sales-orders.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "9b89b50ea7c58c623a7a8f5265b327171a6753c33bb566ee9717761dab163f8b",
+      "features": "Practice dataset: 250 invented office-supply orders from 2025 across four US regions - Order ID, Order Date, Region, State, Sales Rep, Segment, Category, Product, Units, Unit Price and a live Revenue formula. Frozen header, AutoFilter, USD and M/D/YYYY formats, plus an About sheet."
+    },
+    {
+      "file": "sample-budget.xlsx",
+      "source": "https://www.exceltool.io/fixtures/sample-budget.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "f3dd62ebfc8a0c33c6f83ea4deeabf070dda88068127ee74cdd86be19f0bd9e8",
+      "features": "Two worksheets, SUM/variance formulas with cached values, typed columns. General-purpose sample for viewers, converters, and the compare tool."
+    },
+    {
+      "file": "workbook-protected.xlsx",
+      "source": "https://www.exceltool.io/fixtures/workbook-protected.xlsx",
+      "license": "CC0-1.0",
+      "sha256": "75d43470c00305a97c55afbb025ab4c0aecd98512e05267e4bf630a3aa0b3c36",
+      "features": "Workbook structure protection (<workbookProtection lockStructure=\"1\">). Sheets cannot be added, deleted, renamed, moved, or unhidden in Excel until it is removed."
+    }
+  ]
+}

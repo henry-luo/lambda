@@ -50,13 +50,41 @@ fn color(node) any^ {
         "#" ++ lower(slice(argb,len(argb)-6)) else null
 }
 fn on(node) any^ => node!=null and not contains(["0","false","off"],lower(attr(node,"val") or "1"))
+// Ignore quoted literals, escapes and color/locale brackets when classifying formats.
+fn format_tokens(code,at=0,quoted=false) any^ {
+    if (at>=len(code)) "" else {
+        let ch=slice(code,at,at+1);
+        if (ch=="\"") format_tokens(code,at+1,not quoted)^
+        else if (quoted) format_tokens(code,at+1,true)^
+        else if (ch=="\\" or ch=="_" or ch=="*") format_tokens(code,at+2,false)^
+        else if (ch=="[") {
+            let tail=slice(code,at+1)
+            let end=index_of(tail,"]");
+            if (end==null) "" else {
+                let bracket=slice(tail,0,end)
+                let token=if (bracket=="h" or bracket=="hh" or bracket=="m" or bracket=="mm" or bracket=="s" or bracket=="ss") "h" else "";
+                token ++ format_tokens(code,at+end+2,false)^
+            }
+        }
+        else (if (contains("ymdhs",ch)) ch else "") ++ format_tokens(code,at+1,false)^
+    }
+}
+fn on_attr(node,key) any^ => contains(["1","true","on"],lower(attr(node,key) or "0"))
 fn number_format(id,custom,date1904) any^ {
-    let code=lower(custom or "");
-    if (id>=14 and id<=17) (if (date1904) "date1904" else "date")
+    let code=lower(custom or "")
+    let tokens=if (len(code)>512) "" else format_tokens(code)^
+    let has_time=contains(tokens,"h") or contains(tokens,"s")
+    let has_date=contains(tokens,"y") or contains(tokens,"d") or (contains(tokens,"m") and not has_time)
+    let date_format=if (date1904) "date1904" else "date"
+    let datetime_format=if (date1904) "datetime1904" else "datetime";
+    if (id==22 or (has_date and has_time)) datetime_format
+    else if ((id>=14 and id<=17) or has_date) date_format
+    else if ((id>=18 and id<=21) or (id>=45 and id<=47) or has_time) "time"
     else if (id==9 or id==10 or contains(code,"%")) "percent"
     else if (id>=5 and id<=8 or contains(code,"$") or contains(code,"€") or contains(code,"£")) "currency"
     else if (id>=1 and id<=4) "number" else "general"
 }
+
 fn style_context(pkg,date1904) map^ {
     let root_node=root(pkg,"styles")^;
     if (root_node==null) {fonts:[],fills:[],xfs:[],formats:{},date1904:date1904}
@@ -116,6 +144,14 @@ fn worksheet(pkg,entry,shared,styles) map^ {
             let warnings=[
                 if (child(root_node,"mergeCells")!=null) issue("merged-cells",rel.target,"Merged cells are not preserved"),
                 if (child(root_node,"drawing")!=null) issue("drawing",rel.target,"Charts and drawings are not imported"),
+                if (child(root_node,"sheetProtection")!=null) issue("sheet-protection",rel.target,"Worksheet protection is not enforced"),
+                if (any([for (row in rows) on_attr(row,"hidden")^]) or
+                    any([for (col in ((children(child(root_node,"cols"),"col")) ^ { [] })) on_attr(col,"hidden")^]))
+                    issue("hidden-dimensions",rel.target,"Hidden rows and columns are displayed"),
+                if (any([for (sheet_view in ((children(child(root_node,"sheetViews"),"sheetView")) ^ { [] })) child(sheet_view,"pane")!=null]))
+                    issue("frozen-panes",rel.target,"Split and frozen panes are not preserved"),
+                if (child(root_node,"conditionalFormatting")!=null)
+                    issue("conditional-formatting",rel.target,"Conditional formatting is not displayed"),
                 if (any([for (c in cells) c.formula!=null])) issue("formula-recalculation",rel.target,"Formula evaluation depends on the consuming application"),
                 if (any([for (c in cells) c.formula_type!=null and c.formula_type!="normal"])) issue("formula-type",rel.target,"Shared and array formulas are not expanded")];
             {title:name,part:rel.target,cells:cells,
@@ -140,6 +176,8 @@ pub fn read(source) map^ {
         let sheets=[for (entry in entries) worksheet(pkg,entry,shared,styles)^];
         if (len(sheets)==0) raise fail("invalid-package","Workbook contains no worksheets",pkg.main)
         else {title:pkg.metadata.title or "Imported workbook",date1904:date1904,sheets:sheets,metadata:pkg.metadata,
-            diagnostics:[for (sheet in sheets,warning in sheet.diagnostics) warning]}
+            diagnostics:[for (warning in [if (child(book,"workbookProtection")!=null)
+                issue("workbook-protection",pkg.main,"Workbook structure protection is not enforced"),
+                *[for (sheet in sheets,warning in sheet.diagnostics) warning]] where warning!=null) warning]}
     }
 }
