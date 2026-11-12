@@ -3,47 +3,31 @@
 .pair{display:flex;gap:12px}.pair a{width:50%}img{width:100%;border:1px solid #aaa}h2{font-size:18px}
 input{padding:8px;width:360px}.hidden{display:none}small{display:block}.severity{font-weight:700;padding:2px 7px;border-radius:4px}
 .critical{background:#8b0000;color:white}.high{background:#b54708;color:white}.low{background:#e5e7eb;color:#222}</style>
-<h1>Online snapshot comparison</h1><p>Generated 2026-11-12T04:21:18.298Z. 1067 catalog pages, ordered by severity: 1 critical, 191 high and 875 low. Critical means the comparison is blocked by a capture or image problem; high means an automated major difference or a major omission retained in visual review; low means below the major triage threshold. Coarse 120 × 80 RGB averages suppress fine text noise.
+<h1>Online snapshot comparison</h1><p>Generated 2026-11-12T05:56:42.188Z. 1067 catalog pages, ordered by severity: 1 critical, 186 high and 880 low. Critical means the comparison is blocked by a capture or image problem; high means an automated major difference or a major omission retained in visual review; low means below the major triage threshold. Coarse 120 × 80 RGB averages suppress fine text noise.
 Major candidate: mean channel error ≥12% and changed area ≥35% (RGB distance &gt;12%),
 or a nearly uniform image against content with mean error ≥2% and changed area ≥12%.
 These are review candidates, not confirmed engine defects. Live content, animation, consent and capture dates can differ.</p>
 <input id="filter" placeholder="Filter label or URL"><label><input id="high" type="checkbox" style="width:auto"> Critical and high severity only</label>
-<article data-search="lua_pil https://www.lua.org/pil/contents.html" data-severity="critical">
-<h2><span class="severity critical">CRITICAL</span> lua_pil — capture_unavailable</h2>
-<a href="https://www.lua.org/pil/contents.html">https://www.lua.org/pil/contents.html</a><small>00:05:34 [ERR!] Failed to download HTML from URL: https://www.lua.org/pil/contents.html</small>
+<article data-search="saas_landing_310 https://www.dock.us/" data-severity="critical">
+<h2><span class="severity critical">CRITICAL</span> saas_landing_310 — capture_unavailable</h2>
+<a href="https://www.dock.us/">https://www.dock.us/</a><small>timed out after 150000ms</small>
 <small>A complete image comparison is unavailable.</small>
-<small>Lambda ? × ? · 2026-11-11T16:05:34.238Z
+<small>Lambda ? × ? · 2026-11-12T05:49:00.700Z
  / Chromium ? × ? · capture date not recorded</small>
 </article>
 <article data-search="saas_landing_313 https://payloadcms.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_313 — 91.8% mean error; 99.9% area · MAJOR CANDIDATE</h2>
 <a href="https://payloadcms.com/">https://payloadcms.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:05.366Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:34.755Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_313-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_313-lambda.png"></a>
 <a href="../snapshots/saas_landing_313-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_313-browser.png"></a></div></article>
-<article data-search="saas_landing_311 https://nuxt.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_311 — 88.4% mean error; 99.8% area · MAJOR CANDIDATE</h2>
-<a href="https://nuxt.com/">https://nuxt.com/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:41:16.590Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_311-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_311-lambda.png"></a>
-<a href="../snapshots/saas_landing_311-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_311-browser.png"></a></div></article>
-<article data-search="nuxt_docs https://nuxt.com/docs/getting-started/introduction" data-severity="high">
-<h2><span class="severity high">HIGH</span> nuxt_docs — 85.2% mean error; 99.4% area · MAJOR CANDIDATE</h2>
-<a href="https://nuxt.com/docs/getting-started/introduction">https://nuxt.com/docs/getting-started/introduction</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:21.736Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/nuxt_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/nuxt_docs-lambda.png"></a>
-<a href="../snapshots/nuxt_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/nuxt_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_650 https://www.agiloft.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_650 — 83.7% mean error; 92.0% area · MAJOR CANDIDATE</h2>
 <a href="https://www.agiloft.com/">https://www.agiloft.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:02:09.823Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:44.542Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_650-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_650-lambda.png"></a>
 <a href="../snapshots/saas_landing_650-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_650-browser.png"></a></div></article>
@@ -51,7 +35,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_087 — 80.8% mean error; 99.3% area · MAJOR CANDIDATE</h2>
 <a href="https://greenlistapp.com/">https://greenlistapp.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:57.949Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:10.977Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_087-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_087-lambda.png"></a>
 <a href="../snapshots/saas_landing_087-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_087-browser.png"></a></div></article>
@@ -59,7 +43,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_435 — 79.5% mean error; 87.2% area · MAJOR CANDIDATE</h2>
 <a href="https://www.dayos.com/">https://www.dayos.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:26.276Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:30.959Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_435-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_435-lambda.png"></a>
 <a href="../snapshots/saas_landing_435-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_435-browser.png"></a></div></article>
@@ -67,47 +51,39 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_065 — 76.7% mean error; 87.8% area · MAJOR CANDIDATE</h2>
 <a href="https://monese.com/">https://monese.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:49.420Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:09.144Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_065-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_065-lambda.png"></a>
 <a href="../snapshots/saas_landing_065-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_065-browser.png"></a></div></article>
-<article data-search="saas_landing_250 https://superlistapp.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_250 — 76.1% mean error; 99.5% area · MAJOR CANDIDATE</h2>
-<a href="https://superlistapp.com/">https://superlistapp.com/</a><small></small>
+<article data-search="saas_landing_637 https://www.northstarmoney.com/about_us" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_637 — 75.1% mean error; 99.8% area · MAJOR CANDIDATE</h2>
+<a href="https://www.northstarmoney.com/about_us">https://www.northstarmoney.com/about_us</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:00.851Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:39:12.760Z
  / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_250-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_250-lambda.png"></a>
-<a href="../snapshots/saas_landing_250-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_250-browser.png"></a></div></article>
-<article data-search="saas_landing_473 https://www.popcorn.space/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_473 — 74.7% mean error; 91.6% area · MAJOR CANDIDATE</h2>
-<a href="https://www.popcorn.space/">https://www.popcorn.space/</a><small></small>
+<div class="pair"><a href="../snapshots/saas_landing_637-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_637-lambda.png"></a>
+<a href="../snapshots/saas_landing_637-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_637-browser.png"></a></div></article>
+<article data-search="saas_landing_638 https://www.northstarmoney.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_638 — 74.3% mean error; 99.9% area · MAJOR CANDIDATE</h2>
+<a href="https://www.northstarmoney.com/">https://www.northstarmoney.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:33.512Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:39:22.277Z
  / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_473-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_473-lambda.png"></a>
-<a href="../snapshots/saas_landing_473-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_473-browser.png"></a></div></article>
+<div class="pair"><a href="../snapshots/saas_landing_638-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_638-lambda.png"></a>
+<a href="../snapshots/saas_landing_638-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_638-browser.png"></a></div></article>
 <article data-search="saas_landing_129 https://cleanup.pictures/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_129 — 74.0% mean error; 84.3% area · MAJOR CANDIDATE</h2>
 <a href="https://cleanup.pictures/">https://cleanup.pictures/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:20.710Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:23.682Z
  / Chromium 1200 × 800 · 2026-11-11T13:23:45.466Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_129-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_129-lambda.png"></a>
 <a href="../snapshots/saas_landing_129-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_129-browser.png"></a></div></article>
-<article data-search="saas_landing_637 https://www.northstarmoney.com/about_us" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_637 — 70.8% mean error; 98.6% area · MAJOR CANDIDATE</h2>
-<a href="https://www.northstarmoney.com/about_us">https://www.northstarmoney.com/about_us</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:46:55.563Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_637-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_637-lambda.png"></a>
-<a href="../snapshots/saas_landing_637-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_637-browser.png"></a></div></article>
 <article data-search="saas_landing_343 https://www.greenhouse.io/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_343 — 69.5% mean error; 90.8% area · MAJOR CANDIDATE</h2>
 <a href="https://www.greenhouse.io/">https://www.greenhouse.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:23.073Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:47:55.589Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_343-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_343-lambda.png"></a>
 <a href="../snapshots/saas_landing_343-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_343-browser.png"></a></div></article>
@@ -115,7 +91,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_356 — 69.3% mean error; 87.8% area · MAJOR CANDIDATE</h2>
 <a href="https://monese.com/about">https://monese.com/about</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:08.235Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:47:58.821Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_356-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_356-lambda.png"></a>
 <a href="../snapshots/saas_landing_356-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_356-browser.png"></a></div></article>
@@ -123,7 +99,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_123 — 67.4% mean error; 91.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.attentivemobile.com/">https://www.attentivemobile.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:49.830Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:23.608Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_123-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_123-lambda.png"></a>
 <a href="../snapshots/saas_landing_123-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_123-browser.png"></a></div></article>
@@ -131,7 +107,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_228 — 66.5% mean error; 71.2% area · MAJOR CANDIDATE</h2>
 <a href="https://www.mural.co/">https://www.mural.co/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:03.086Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:48.635Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_228-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_228-lambda.png"></a>
 <a href="../snapshots/saas_landing_228-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_228-browser.png"></a></div></article>
@@ -139,23 +115,15 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_476 — 65.1% mean error; 98.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.vogel.haus/">https://www.vogel.haus/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:36.222Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:15.937Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_476-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_476-lambda.png"></a>
 <a href="../snapshots/saas_landing_476-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_476-browser.png"></a></div></article>
-<article data-search="saas_landing_638 https://www.northstarmoney.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_638 — 64.8% mean error; 99.6% area · MAJOR CANDIDATE</h2>
-<a href="https://www.northstarmoney.com/">https://www.northstarmoney.com/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:47:03.820Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_638-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_638-lambda.png"></a>
-<a href="../snapshots/saas_landing_638-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_638-browser.png"></a></div></article>
 <article data-search="saas_landing_173 https://mode.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_173 — 63.3% mean error; 93.0% area · MAJOR CANDIDATE</h2>
 <a href="https://mode.com/">https://mode.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:46.367Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:40.002Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_173-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_173-lambda.png"></a>
 <a href="../snapshots/saas_landing_173-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_173-browser.png"></a></div></article>
@@ -163,7 +131,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_254 — 62.5% mean error; 95.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.opus.so/">https://www.opus.so/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:13.714Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:08.322Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_254-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_254-lambda.png"></a>
 <a href="../snapshots/saas_landing_254-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_254-browser.png"></a></div></article>
@@ -171,7 +139,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_433 — 62.2% mean error; 82.5% area · MAJOR CANDIDATE</h2>
 <a href="https://operate.so/">https://operate.so/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:24.950Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:26.108Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_433-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_433-lambda.png"></a>
 <a href="../snapshots/saas_landing_433-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_433-browser.png"></a></div></article>
@@ -179,7 +147,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_205 — 61.0% mean error; 89.9% area · MAJOR CANDIDATE</h2>
 <a href="https://readymag.com/">https://readymag.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:50.799Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:45.853Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_205-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_205-lambda.png"></a>
 <a href="../snapshots/saas_landing_205-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_205-browser.png"></a></div></article>
@@ -187,7 +155,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_089 — 59.9% mean error; 82.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.hivestreaming.com/">https://www.hivestreaming.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:50.078Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:19.738Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_089-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_089-lambda.png"></a>
 <a href="../snapshots/saas_landing_089-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_089-browser.png"></a></div></article>
@@ -195,7 +163,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_309 — 57.2% mean error; 91.5% area · MAJOR CANDIDATE</h2>
 <a href="https://prismic.io/pricing">https://prismic.io/pricing</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:41:08.423Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:30.594Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_309-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_309-lambda.png"></a>
 <a href="../snapshots/saas_landing_309-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_309-browser.png"></a></div></article>
@@ -203,7 +171,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> unreal_docs — 55.9% mean error; 68.3% area · MAJOR CANDIDATE</h2>
 <a href="https://dev.epicgames.com/documentation/en-us/unreal-engine">https://dev.epicgames.com/documentation/en-us/unreal-engine</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:27.786Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:54.687Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/unreal_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/unreal_docs-lambda.png"></a>
 <a href="../snapshots/unreal_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/unreal_docs-browser.png"></a></div></article>
@@ -211,7 +179,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> crates_io — 54.4% mean error; 73.1% area · MAJOR CANDIDATE</h2>
 <a href="https://crates.io/">https://crates.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:32.578Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:02.886Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/crates_io-lambda.png">Lambda<img loading="lazy" src="../snapshots/crates_io-lambda.png"></a>
 <a href="../snapshots/crates_io-browser.png">Chromium<img loading="lazy" src="../snapshots/crates_io-browser.png"></a></div></article>
@@ -219,7 +187,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_040 — 53.6% mean error; 64.4% area · MAJOR CANDIDATE</h2>
 <a href="https://help.videoask.com/hc/en-us">https://help.videoask.com/hc/en-us</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:45.184Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:04.582Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_040-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_040-lambda.png"></a>
 <a href="../snapshots/saas_landing_040-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_040-browser.png"></a></div></article>
@@ -227,7 +195,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_696 — 52.6% mean error; 86.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.homerun.co/customers">https://www.homerun.co/customers</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:47:20.524Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:53.999Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_696-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_696-lambda.png"></a>
 <a href="../snapshots/saas_landing_696-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_696-browser.png"></a></div></article>
@@ -235,7 +203,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_222 — 51.3% mean error; 81.3% area · MAJOR CANDIDATE</h2>
 <a href="https://www.makipeople.com/">https://www.makipeople.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:56.390Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:41.814Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_222-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_222-lambda.png"></a>
 <a href="../snapshots/saas_landing_222-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_222-browser.png"></a></div></article>
@@ -243,7 +211,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_504 — 51.1% mean error; 82.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.doss.com/">https://www.doss.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:58.937Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:40.262Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_504-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_504-lambda.png"></a>
 <a href="../snapshots/saas_landing_504-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_504-browser.png"></a></div></article>
@@ -251,7 +219,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_152 — 50.1% mean error; 77.7% area · MAJOR CANDIDATE</h2>
 <a href="https://mailchimp.com/">https://mailchimp.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:43.209Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:36.806Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_152-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_152-lambda.png"></a>
 <a href="../snapshots/saas_landing_152-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_152-browser.png"></a></div></article>
@@ -259,7 +227,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_216 — 49.9% mean error; 99.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.dimension.dev/">https://www.dimension.dev/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:57.252Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:50.055Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_216-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_216-lambda.png"></a>
 <a href="../snapshots/saas_landing_216-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_216-browser.png"></a></div></article>
@@ -267,7 +235,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_553 — 47.9% mean error; 84.8% area · MAJOR CANDIDATE</h2>
 <a href="https://claude.com/customers">https://claude.com/customers</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:28.746Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:42.874Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_553-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_553-lambda.png"></a>
 <a href="../snapshots/saas_landing_553-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_553-browser.png"></a></div></article>
@@ -275,7 +243,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_318 — 47.9% mean error; 97.7% area · MAJOR CANDIDATE</h2>
 <a href="https://www.setpoint.io/">https://www.setpoint.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:15.261Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:42.613Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_318-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_318-lambda.png"></a>
 <a href="../snapshots/saas_landing_318-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_318-browser.png"></a></div></article>
@@ -283,7 +251,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_299 — 47.5% mean error; 87.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.dropbox.com/">https://www.dropbox.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:42:49.736Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:18.000Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_299-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_299-lambda.png"></a>
 <a href="../snapshots/saas_landing_299-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_299-browser.png"></a></div></article>
@@ -291,7 +259,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_471 — 47.5% mean error; 97.4% area · MAJOR CANDIDATE</h2>
 <a href="https://exactly.ai/">https://exactly.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:36.481Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:12.470Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_471-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_471-lambda.png"></a>
 <a href="../snapshots/saas_landing_471-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_471-browser.png"></a></div></article>
@@ -299,7 +267,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_341 — 47.1% mean error; 87.6% area · MAJOR CANDIDATE</h2>
 <a href="https://lokalise.com/">https://lokalise.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:42:53.453Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:47:16.071Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_341-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_341-lambda.png"></a>
 <a href="../snapshots/saas_landing_341-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_341-browser.png"></a></div></article>
@@ -307,7 +275,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_676 — 46.8% mean error; 55.6% area · MAJOR CANDIDATE</h2>
 <a href="https://evernote.com/features/ai-features">https://evernote.com/features/ai-features</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:02:19.522Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:49.361Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_676-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_676-lambda.png"></a>
 <a href="../snapshots/saas_landing_676-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_676-browser.png"></a></div></article>
@@ -315,7 +283,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_223 — 46.0% mean error; 92.9% area · MAJOR CANDIDATE</h2>
 <a href="https://www.xolo.io/zz-en/teams">https://www.xolo.io/zz-en/teams</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:59.575Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:43.603Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_223-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_223-lambda.png"></a>
 <a href="../snapshots/saas_landing_223-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_223-browser.png"></a></div></article>
@@ -323,7 +291,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_631 — 46.0% mean error; 87.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.clay.run/">https://www.clay.run/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:44.048Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:26.473Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_631-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_631-lambda.png"></a>
 <a href="../snapshots/saas_landing_631-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_631-browser.png"></a></div></article>
@@ -331,7 +299,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_577 — 45.4% mean error; 92.1% area · MAJOR CANDIDATE</h2>
 <a href="https://www.podia.com/">https://www.podia.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:52.400Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:59.897Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_577-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_577-lambda.png"></a>
 <a href="../snapshots/saas_landing_577-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_577-browser.png"></a></div></article>
@@ -339,7 +307,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_442 — 45.1% mean error; 98.8% area · MAJOR CANDIDATE</h2>
 <a href="https://www.useorigin.com/">https://www.useorigin.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:32.654Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:43.144Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_442-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_442-lambda.png"></a>
 <a href="../snapshots/saas_landing_442-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_442-browser.png"></a></div></article>
@@ -347,31 +315,15 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_073 — 44.7% mean error; 66.0% area · MAJOR CANDIDATE</h2>
 <a href="https://typelane.com/">https://typelane.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:41.737Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:10.216Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_073-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_073-lambda.png"></a>
 <a href="../snapshots/saas_landing_073-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_073-browser.png"></a></div></article>
-<article data-search="saas_landing_310 https://www.dock.us/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_310 — 44.1% mean error; 70.1% area · MAJOR CANDIDATE</h2>
-<a href="https://www.dock.us/">https://www.dock.us/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:42:14.896Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_310-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_310-lambda.png"></a>
-<a href="../snapshots/saas_landing_310-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_310-browser.png"></a></div></article>
-<article data-search="imagemagick_docs https://imagemagick.org/script/command-line-processing.php" data-severity="high">
-<h2><span class="severity high">HIGH</span> imagemagick_docs — 43.3% mean error; 59.1% area · MAJOR CANDIDATE</h2>
-<a href="https://imagemagick.org/script/command-line-processing.php">https://imagemagick.org/script/command-line-processing.php</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:25.695Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/imagemagick_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/imagemagick_docs-lambda.png"></a>
-<a href="../snapshots/imagemagick_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/imagemagick_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_394 https://www.monarchmoney.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_394 — 42.6% mean error; 81.3% area · MAJOR CANDIDATE</h2>
 <a href="https://www.monarchmoney.com/">https://www.monarchmoney.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:23.877Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:20.036Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_394-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_394-lambda.png"></a>
 <a href="../snapshots/saas_landing_394-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_394-browser.png"></a></div></article>
@@ -379,15 +331,15 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_290 — 42.1% mean error; 65.1% area · MAJOR CANDIDATE</h2>
 <a href="https://www.limitless.ai/">https://www.limitless.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:41:14.281Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:40.670Z
  / Chromium 1200 × 800 · 2026-11-11T15:01:40.923Z</small>
 <div class="pair"><a href="../snapshots/saas_landing_290-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_290-lambda.png"></a>
 <a href="../snapshots/saas_landing_290-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_290-browser.png"></a></div></article>
 <article data-search="saas_landing_082 https://www.getmaple.ca/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_082 — 40.3% mean error; 77.9% area · MAJOR CANDIDATE</h2>
+<h2><span class="severity high">HIGH</span> saas_landing_082 — 39.5% mean error; 77.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.getmaple.ca/">https://www.getmaple.ca/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:45.032Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:14.066Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_082-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_082-lambda.png"></a>
 <a href="../snapshots/saas_landing_082-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_082-browser.png"></a></div></article>
@@ -395,7 +347,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_072 — 38.7% mean error; 83.5% area · MAJOR CANDIDATE</h2>
 <a href="https://aircall.io/">https://aircall.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:50.418Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:10.332Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_072-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_072-lambda.png"></a>
 <a href="../snapshots/saas_landing_072-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_072-browser.png"></a></div></article>
@@ -403,7 +355,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_157 — 38.6% mean error; 87.2% area · MAJOR CANDIDATE</h2>
 <a href="https://designmodo.com/startup/">https://designmodo.com/startup/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:44.034Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:37.790Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_157-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_157-lambda.png"></a>
 <a href="../snapshots/saas_landing_157-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_157-browser.png"></a></div></article>
@@ -411,23 +363,15 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_457 — 38.4% mean error; 60.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.vooma.com/">https://www.vooma.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:41.946Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:30.961Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_457-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_457-lambda.png"></a>
 <a href="../snapshots/saas_landing_457-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_457-browser.png"></a></div></article>
-<article data-search="saas_landing_432 https://nightwatch.laravel.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_432 — 37.5% mean error; 81.5% area · MAJOR CANDIDATE</h2>
-<a href="https://nightwatch.laravel.com/">https://nightwatch.laravel.com/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:27.371Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_432-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_432-lambda.png"></a>
-<a href="../snapshots/saas_landing_432-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_432-browser.png"></a></div></article>
 <article data-search="saas_landing_122 https://testlio.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_122 — 37.4% mean error; 50.9% area · MAJOR CANDIDATE</h2>
 <a href="https://testlio.com/">https://testlio.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:27.773Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:33.302Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_122-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_122-lambda.png"></a>
 <a href="../snapshots/saas_landing_122-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_122-browser.png"></a></div></article>
@@ -435,7 +379,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_528 — 36.8% mean error; 88.9% area · MAJOR CANDIDATE</h2>
 <a href="https://handhold.io/">https://handhold.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:07.633Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:33.548Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_528-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_528-lambda.png"></a>
 <a href="../snapshots/saas_landing_528-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_528-browser.png"></a></div></article>
@@ -443,7 +387,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_041 — 36.3% mean error; 94.9% area · MAJOR CANDIDATE</h2>
 <a href="https://www.wineinvestment.com/faqs/">https://www.wineinvestment.com/faqs/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:44.668Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:03.322Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_041-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_041-lambda.png"></a>
 <a href="../snapshots/saas_landing_041-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_041-browser.png"></a></div></article>
@@ -451,7 +395,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_137 — 35.6% mean error; 76.9% area · MAJOR CANDIDATE</h2>
 <a href="https://vivid.money/en-eu/">https://vivid.money/en-eu/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:52.999Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:29.683Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_137-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_137-lambda.png"></a>
 <a href="../snapshots/saas_landing_137-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_137-browser.png"></a></div></article>
@@ -459,7 +403,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_406 — 35.1% mean error; 50.9% area · MAJOR CANDIDATE</h2>
 <a href="https://contentsquare.com/">https://contentsquare.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:32.897Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:20.935Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_406-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_406-lambda.png"></a>
 <a href="../snapshots/saas_landing_406-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_406-browser.png"></a></div></article>
@@ -467,7 +411,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_302 — 35.0% mean error; 99.5% area · MAJOR CANDIDATE</h2>
 <a href="https://remote.com/">https://remote.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:58.507Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:27.416Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_302-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_302-lambda.png"></a>
 <a href="../snapshots/saas_landing_302-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_302-browser.png"></a></div></article>
@@ -475,7 +419,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_075 — 34.3% mean error; 51.0% area · MAJOR CANDIDATE</h2>
 <a href="https://calmind.com/">https://calmind.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:52.319Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:07.504Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_075-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_075-lambda.png"></a>
 <a href="../snapshots/saas_landing_075-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_075-browser.png"></a></div></article>
@@ -483,7 +427,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_610 — 33.6% mean error; 56.7% area · MAJOR CANDIDATE</h2>
 <a href="https://youtrust.com/pricing-application">https://youtrust.com/pricing-application</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:46:00.263Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:38:13.616Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_610-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_610-lambda.png"></a>
 <a href="../snapshots/saas_landing_610-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_610-browser.png"></a></div></article>
@@ -491,7 +435,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> azure_docs — 33.6% mean error; 58.1% area · MAJOR CANDIDATE</h2>
 <a href="https://learn.microsoft.com/en-us/azure/">https://learn.microsoft.com/en-us/azure/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:28.569Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:05.267Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/azure_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/azure_docs-lambda.png"></a>
 <a href="../snapshots/azure_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/azure_docs-browser.png"></a></div></article>
@@ -499,7 +443,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_492 — 32.1% mean error; 64.7% area · MAJOR CANDIDATE</h2>
 <a href="https://www.patreon.com/europe">https://www.patreon.com/europe</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:41.673Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:19.121Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_492-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_492-lambda.png"></a>
 <a href="../snapshots/saas_landing_492-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_492-browser.png"></a></div></article>
@@ -507,47 +451,47 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> nvd_nist — 31.8% mean error; 49.6% area · MAJOR CANDIDATE</h2>
 <a href="https://nvd.nist.gov/">https://nvd.nist.gov/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:28.328Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:54.871Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/nvd_nist-lambda.png">Lambda<img loading="lazy" src="../snapshots/nvd_nist-lambda.png"></a>
 <a href="../snapshots/nvd_nist-browser.png">Chromium<img loading="lazy" src="../snapshots/nvd_nist-browser.png"></a></div></article>
 <article data-search="saas_landing_053 https://stripe.com/blog" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_053 — 31.6% mean error; 46.8% area · MAJOR CANDIDATE</h2>
+<h2><span class="severity high">HIGH</span> saas_landing_053 — 31.6% mean error; 47.7% area · MAJOR CANDIDATE</h2>
 <a href="https://stripe.com/blog">https://stripe.com/blog</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:49.185Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:10.134Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_053-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_053-lambda.png"></a>
 <a href="../snapshots/saas_landing_053-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_053-browser.png"></a></div></article>
+<article data-search="saas_landing_463 https://hera.travel/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_463 — 31.1% mean error; 98.9% area · MAJOR CANDIDATE</h2>
+<a href="https://hera.travel/">https://hera.travel/</a><small></small>
+<small>Automated broad-difference threshold reached.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:37:17.557Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_463-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_463-lambda.png"></a>
+<a href="../snapshots/saas_landing_463-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_463-browser.png"></a></div></article>
 <article data-search="digitalocean_docs https://docs.digitalocean.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> digitalocean_docs — 31.3% mean error; 39.6% area · MAJOR CANDIDATE</h2>
+<h2><span class="severity high">HIGH</span> digitalocean_docs — 30.5% mean error; 46.0% area · MAJOR CANDIDATE</h2>
 <a href="https://docs.digitalocean.com/">https://docs.digitalocean.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:24.768Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:01.721Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/digitalocean_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/digitalocean_docs-lambda.png"></a>
 <a href="../snapshots/digitalocean_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/digitalocean_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_611 https://youtrust.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_611 — 30.2% mean error; 44.4% area · MAJOR CANDIDATE</h2>
+<h2><span class="severity high">HIGH</span> saas_landing_611 — 30.5% mean error; 44.7% area · MAJOR CANDIDATE</h2>
 <a href="https://youtrust.com/">https://youtrust.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:46:03.593Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:38:16.789Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_611-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_611-lambda.png"></a>
 <a href="../snapshots/saas_landing_611-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_611-browser.png"></a></div></article>
-<article data-search="saas_landing_399 https://missiveapp.com/customers" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_399 — 30.1% mean error; 35.7% area · MAJOR CANDIDATE</h2>
-<a href="https://missiveapp.com/customers">https://missiveapp.com/customers</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:32.355Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_399-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_399-lambda.png"></a>
-<a href="../snapshots/saas_landing_399-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_399-browser.png"></a></div></article>
 <article data-search="saas_landing_367 https://www.shopify.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_367 — 29.9% mean error; 76.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.shopify.com/">https://www.shopify.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:18.027Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:08.920Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_367-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_367-lambda.png"></a>
 <a href="../snapshots/saas_landing_367-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_367-browser.png"></a></div></article>
@@ -555,7 +499,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_519 — 29.5% mean error; 50.9% area · MAJOR CANDIDATE</h2>
 <a href="https://www.nollahealth.com/">https://www.nollahealth.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:55.672Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:23.508Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_519-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_519-lambda.png"></a>
 <a href="../snapshots/saas_landing_519-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_519-browser.png"></a></div></article>
@@ -563,7 +507,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_434 — 29.5% mean error; 73.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.superpower.com/">https://www.superpower.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:50.065Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:43.561Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_434-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_434-lambda.png"></a>
 <a href="../snapshots/saas_landing_434-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_434-browser.png"></a></div></article>
@@ -571,7 +515,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_522 — 29.4% mean error; 81.2% area · MAJOR CANDIDATE</h2>
 <a href="https://ebury.com/">https://ebury.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:55.973Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:31.227Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_522-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_522-lambda.png"></a>
 <a href="../snapshots/saas_landing_522-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_522-browser.png"></a></div></article>
@@ -579,7 +523,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_535 — 29.0% mean error; 39.5% area · MAJOR CANDIDATE</h2>
 <a href="https://ref.wisprflow.ai/davide-pacilio">https://ref.wisprflow.ai/davide-pacilio</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:36.955Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:01.714Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_535-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_535-lambda.png"></a>
 <a href="../snapshots/saas_landing_535-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_535-browser.png"></a></div></article>
@@ -587,7 +531,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_454 — 28.4% mean error; 41.7% area · MAJOR CANDIDATE</h2>
 <a href="https://www.holocene.eu/">https://www.holocene.eu/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:43.361Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:17.037Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_454-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_454-lambda.png"></a>
 <a href="../snapshots/saas_landing_454-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_454-browser.png"></a></div></article>
@@ -595,7 +539,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_609 — 27.9% mean error; 68.7% area · MAJOR CANDIDATE</h2>
 <a href="https://qonto.com/en">https://qonto.com/en</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:14.002Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:14.451Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_609-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_609-lambda.png"></a>
 <a href="../snapshots/saas_landing_609-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_609-browser.png"></a></div></article>
@@ -603,23 +547,15 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_188 — 27.2% mean error; 47.2% area · MAJOR CANDIDATE</h2>
 <a href="https://swagapp.com/">https://swagapp.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:13.675Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:06.264Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_188-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_188-lambda.png"></a>
 <a href="../snapshots/saas_landing_188-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_188-browser.png"></a></div></article>
-<article data-search="saas_landing_058 https://useproof.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_058 — 27.0% mean error; 45.9% area · MAJOR CANDIDATE</h2>
-<a href="https://useproof.com/">https://useproof.com/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:48.176Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_058-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_058-lambda.png"></a>
-<a href="../snapshots/saas_landing_058-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_058-browser.png"></a></div></article>
 <article data-search="saas_landing_269 https://astrafi.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_269 — 26.6% mean error; 42.3% area · MAJOR CANDIDATE</h2>
 <a href="https://astrafi.com/">https://astrafi.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:32.966Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:07.325Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_269-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_269-lambda.png"></a>
 <a href="../snapshots/saas_landing_269-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_269-browser.png"></a></div></article>
@@ -627,7 +563,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_261 — 26.4% mean error; 42.0% area · MAJOR CANDIDATE</h2>
 <a href="https://www.orum.com/">https://www.orum.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:03.249Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:01.163Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_261-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_261-lambda.png"></a>
 <a href="../snapshots/saas_landing_261-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_261-browser.png"></a></div></article>
@@ -635,7 +571,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_038 — 26.3% mean error; 90.5% area · MAJOR CANDIDATE</h2>
 <a href="https://highnoteplatform.com/">https://highnoteplatform.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:44.812Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:06.753Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_038-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_038-lambda.png"></a>
 <a href="../snapshots/saas_landing_038-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_038-browser.png"></a></div></article>
@@ -643,7 +579,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_349 — 26.2% mean error; 91.3% area · MAJOR CANDIDATE</h2>
 <a href="https://infermedica.com/">https://infermedica.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:06.650Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:47:57.172Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_349-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_349-lambda.png"></a>
 <a href="../snapshots/saas_landing_349-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_349-browser.png"></a></div></article>
@@ -651,15 +587,23 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> leaflet_docs — 25.7% mean error; 68.5% area · MAJOR CANDIDATE</h2>
 <a href="https://leafletjs.com/reference.html">https://leafletjs.com/reference.html</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:40.973Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:02.608Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/leaflet_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/leaflet_docs-lambda.png"></a>
 <a href="../snapshots/leaflet_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/leaflet_docs-browser.png"></a></div></article>
+<article data-search="saas_landing_058 https://useproof.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_058 — 25.5% mean error; 45.0% area · MAJOR CANDIDATE</h2>
+<a href="https://useproof.com/">https://useproof.com/</a><small></small>
+<small>Automated broad-difference threshold reached.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:10.242Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_058-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_058-lambda.png"></a>
+<a href="../snapshots/saas_landing_058-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_058-browser.png"></a></div></article>
 <article data-search="saas_landing_151 https://www.wineinvestment.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_151 — 25.4% mean error; 93.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.wineinvestment.com/">https://www.wineinvestment.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:39.032Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:33.968Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_151-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_151-lambda.png"></a>
 <a href="../snapshots/saas_landing_151-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_151-browser.png"></a></div></article>
@@ -667,7 +611,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_446 — 25.4% mean error; 51.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.affinity.studio/">https://www.affinity.studio/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:46.499Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:45.115Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_446-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_446-lambda.png"></a>
 <a href="../snapshots/saas_landing_446-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_446-browser.png"></a></div></article>
@@ -675,23 +619,15 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> archive_org — 25.4% mean error; 41.2% area · MAJOR CANDIDATE</h2>
 <a href="https://archive.org/">https://archive.org/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:33.321Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:55.942Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/archive_org-lambda.png">Lambda<img loading="lazy" src="../snapshots/archive_org-lambda.png"></a>
 <a href="../snapshots/archive_org-browser.png">Chromium<img loading="lazy" src="../snapshots/archive_org-browser.png"></a></div></article>
-<article data-search="saas_landing_134 https://cequence.io/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_134 — 25.4% mean error; 49.8% area · MAJOR CANDIDATE</h2>
-<a href="https://cequence.io/">https://cequence.io/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:25.272Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_134-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_134-lambda.png"></a>
-<a href="../snapshots/saas_landing_134-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_134-browser.png"></a></div></article>
 <article data-search="rfc_editor https://www.rfc-editor.org/" data-severity="high">
 <h2><span class="severity high">HIGH</span> rfc_editor — 25.2% mean error; 41.8% area · MAJOR CANDIDATE</h2>
 <a href="https://www.rfc-editor.org/">https://www.rfc-editor.org/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:15.092Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:48.559Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/rfc_editor-lambda.png">Lambda<img loading="lazy" src="../snapshots/rfc_editor-lambda.png"></a>
 <a href="../snapshots/rfc_editor-browser.png">Chromium<img loading="lazy" src="../snapshots/rfc_editor-browser.png"></a></div></article>
@@ -699,7 +635,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_150 — 25.0% mean error; 85.0% area · MAJOR CANDIDATE</h2>
 <a href="https://metronome.com/">https://metronome.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:53.465Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:36.762Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_150-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_150-lambda.png"></a>
 <a href="../snapshots/saas_landing_150-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_150-browser.png"></a></div></article>
@@ -707,7 +643,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_271 — 24.8% mean error; 35.9% area · MAJOR CANDIDATE</h2>
 <a href="https://www.pivotapp.ai/">https://www.pivotapp.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:12.572Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:15.371Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_271-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_271-lambda.png"></a>
 <a href="../snapshots/saas_landing_271-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_271-browser.png"></a></div></article>
@@ -715,7 +651,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_003 — 24.7% mean error; 78.2% area · MAJOR CANDIDATE</h2>
 <a href="https://boards.boldare.com/">https://boards.boldare.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:39.327Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:07.403Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_003-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_003-lambda.png"></a>
 <a href="../snapshots/saas_landing_003-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_003-browser.png"></a></div></article>
@@ -723,7 +659,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> mysql_docs — 24.5% mean error; 63.3% area · MAJOR CANDIDATE</h2>
 <a href="https://dev.mysql.com/doc/">https://dev.mysql.com/doc/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:23.409Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:52.149Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/mysql_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/mysql_docs-lambda.png"></a>
 <a href="../snapshots/mysql_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/mysql_docs-browser.png"></a></div></article>
@@ -731,7 +667,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_342 — 24.4% mean error; 39.3% area · MAJOR CANDIDATE</h2>
 <a href="https://teachable.com/">https://teachable.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:03.366Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:47:25.875Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_342-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_342-lambda.png"></a>
 <a href="../snapshots/saas_landing_342-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_342-browser.png"></a></div></article>
@@ -739,7 +675,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_083 — 24.0% mean error; 49.8% area · MAJOR CANDIDATE</h2>
 <a href="https://www.overpass.com/">https://www.overpass.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:56.325Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:13.924Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_083-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_083-lambda.png"></a>
 <a href="../snapshots/saas_landing_083-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_083-browser.png"></a></div></article>
@@ -747,7 +683,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> maven_central — 23.9% mean error; 37.2% area · MAJOR CANDIDATE</h2>
 <a href="https://central.sonatype.com/">https://central.sonatype.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:34.197Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:02.986Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/maven_central-lambda.png">Lambda<img loading="lazy" src="../snapshots/maven_central-lambda.png"></a>
 <a href="../snapshots/maven_central-browser.png">Chromium<img loading="lazy" src="../snapshots/maven_central-browser.png"></a></div></article>
@@ -755,47 +691,23 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> pnpm_docs — 23.9% mean error; 41.1% area · MAJOR CANDIDATE</h2>
 <a href="https://pnpm.io/">https://pnpm.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:18.400Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:01.312Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/pnpm_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/pnpm_docs-lambda.png"></a>
 <a href="../snapshots/pnpm_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/pnpm_docs-browser.png"></a></div></article>
-<article data-search="saas_landing_463 https://hera.travel/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_463 — 23.6% mean error; 88.9% area · MAJOR CANDIDATE</h2>
-<a href="https://hera.travel/">https://hera.travel/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:28.205Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_463-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_463-lambda.png"></a>
-<a href="../snapshots/saas_landing_463-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_463-browser.png"></a></div></article>
-<article data-search="loc https://www.loc.gov/" data-severity="high">
-<h2><span class="severity high">HIGH</span> loc — 23.5% mean error; 52.5% area · MAJOR CANDIDATE</h2>
-<a href="https://www.loc.gov/">https://www.loc.gov/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:40.609Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/loc-lambda.png">Lambda<img loading="lazy" src="../snapshots/loc-lambda.png"></a>
-<a href="../snapshots/loc-browser.png">Chromium<img loading="lazy" src="../snapshots/loc-browser.png"></a></div></article>
 <article data-search="saas_landing_259 https://www.going.com/how-it-works" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_259 — 23.4% mean error; 52.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.going.com/how-it-works">https://www.going.com/how-it-works</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:00.959Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:00.299Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_259-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_259-lambda.png"></a>
 <a href="../snapshots/saas_landing_259-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_259-browser.png"></a></div></article>
-<article data-search="saas_landing_656 https://www.bizzabo.com/" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_656 — 23.3% mean error; 65.3% area · MAJOR CANDIDATE</h2>
-<a href="https://www.bizzabo.com/">https://www.bizzabo.com/</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:02:16.643Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_656-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_656-lambda.png"></a>
-<a href="../snapshots/saas_landing_656-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_656-browser.png"></a></div></article>
 <article data-search="saas_landing_654 https://join.com/company/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_654 — 23.3% mean error; 46.4% area · MAJOR CANDIDATE</h2>
 <a href="https://join.com/company/">https://join.com/company/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:47:07.859Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:46.143Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_654-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_654-lambda.png"></a>
 <a href="../snapshots/saas_landing_654-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_654-browser.png"></a></div></article>
@@ -803,15 +715,23 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_542 — 23.2% mean error; 63.1% area · MAJOR CANDIDATE</h2>
 <a href="https://www.diabrowser.com/">https://www.diabrowser.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:00.065Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:36.488Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_542-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_542-lambda.png"></a>
 <a href="../snapshots/saas_landing_542-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_542-browser.png"></a></div></article>
+<article data-search="loc https://www.loc.gov/" data-severity="high">
+<h2><span class="severity high">HIGH</span> loc — 23.2% mean error; 51.7% area · MAJOR CANDIDATE</h2>
+<a href="https://www.loc.gov/">https://www.loc.gov/</a><small></small>
+<small>Automated broad-difference threshold reached.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:04.611Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/loc-lambda.png">Lambda<img loading="lazy" src="../snapshots/loc-lambda.png"></a>
+<a href="../snapshots/loc-browser.png">Chromium<img loading="lazy" src="../snapshots/loc-browser.png"></a></div></article>
 <article data-search="saas_landing_170 https://thecape.agency/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_170 — 23.1% mean error; 37.5% area · MAJOR CANDIDATE</h2>
 <a href="https://thecape.agency/">https://thecape.agency/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:45.141Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:37.298Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_170-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_170-lambda.png"></a>
 <a href="../snapshots/saas_landing_170-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_170-browser.png"></a></div></article>
@@ -819,7 +739,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_263 — 22.8% mean error; 40.5% area · MAJOR CANDIDATE</h2>
 <a href="https://refrakt.app/">https://refrakt.app/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:25.774Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:34:09.238Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_263-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_263-lambda.png"></a>
 <a href="../snapshots/saas_landing_263-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_263-browser.png"></a></div></article>
@@ -827,7 +747,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_144 — 22.5% mean error; 41.2% area · MAJOR CANDIDATE</h2>
 <a href="https://www.novabenefits.com/">https://www.novabenefits.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:34.744Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:35.227Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_144-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_144-lambda.png"></a>
 <a href="../snapshots/saas_landing_144-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_144-browser.png"></a></div></article>
@@ -835,7 +755,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_110 — 22.5% mean error; 57.5% area · MAJOR CANDIDATE</h2>
 <a href="https://ahrefs.com/">https://ahrefs.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:49.037Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:46.857Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_110-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_110-lambda.png"></a>
 <a href="../snapshots/saas_landing_110-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_110-browser.png"></a></div></article>
@@ -843,7 +763,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_524 — 22.5% mean error; 59.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.comand.ai/">https://www.comand.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:58.391Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:33.499Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_524-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_524-lambda.png"></a>
 <a href="../snapshots/saas_landing_524-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_524-browser.png"></a></div></article>
@@ -851,7 +771,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_091 — 21.9% mean error; 31.1% area · MAJOR CANDIDATE</h2>
 <a href="https://www.hellogetsafe.com/">https://www.hellogetsafe.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:06.154Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:19.558Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_091-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_091-lambda.png"></a>
 <a href="../snapshots/saas_landing_091-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_091-browser.png"></a></div></article>
@@ -859,7 +779,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_478 — 21.9% mean error; 41.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.isomeet.com/">https://www.isomeet.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:37.548Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:17.139Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_478-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_478-lambda.png"></a>
 <a href="../snapshots/saas_landing_478-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_478-browser.png"></a></div></article>
@@ -867,7 +787,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_160 — 21.8% mean error; 65.2% area · MAJOR CANDIDATE</h2>
 <a href="https://overflow.io/">https://overflow.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:52.652Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:36.510Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_160-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_160-lambda.png"></a>
 <a href="../snapshots/saas_landing_160-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_160-browser.png"></a></div></article>
@@ -875,7 +795,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_335 — 21.7% mean error; 54.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.mavenclinic.com/">https://www.mavenclinic.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:42:54.036Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:47:12.749Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_335-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_335-lambda.png"></a>
 <a href="../snapshots/saas_landing_335-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_335-browser.png"></a></div></article>
@@ -883,7 +803,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_095 — 21.3% mean error; 85.4% area · MAJOR CANDIDATE</h2>
 <a href="https://draftbit.com/">https://draftbit.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:09.340Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:15.943Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_095-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_095-lambda.png"></a>
 <a href="../snapshots/saas_landing_095-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_095-browser.png"></a></div></article>
@@ -891,7 +811,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_317 — 21.1% mean error; 67.8% area · MAJOR CANDIDATE</h2>
 <a href="https://primer.io/">https://primer.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:02:15.920Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:47.801Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_317-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_317-lambda.png"></a>
 <a href="../snapshots/saas_landing_317-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_317-browser.png"></a></div></article>
@@ -899,7 +819,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_552 — 20.8% mean error; 72.7% area · MAJOR CANDIDATE</h2>
 <a href="https://calendly.com/">https://calendly.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:26.047Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:48.829Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_552-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_552-lambda.png"></a>
 <a href="../snapshots/saas_landing_552-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_552-browser.png"></a></div></article>
@@ -907,7 +827,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_383 — 20.5% mean error; 76.2% area · MAJOR CANDIDATE</h2>
 <a href="https://statamic.com/">https://statamic.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:30.646Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:16.972Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_383-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_383-lambda.png"></a>
 <a href="../snapshots/saas_landing_383-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_383-browser.png"></a></div></article>
@@ -915,7 +835,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_651 — 20.3% mean error; 36.3% area · MAJOR CANDIDATE</h2>
 <a href="https://zammad.com/en/company">https://zammad.com/en/company</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:47:03.901Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:42.841Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_651-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_651-lambda.png"></a>
 <a href="../snapshots/saas_landing_651-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_651-browser.png"></a></div></article>
@@ -923,7 +843,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_647 — 20.1% mean error; 46.1% area · MAJOR CANDIDATE</h2>
 <a href="https://www.conductor.com/customer-stories/">https://www.conductor.com/customer-stories/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:46:58.694Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:33.694Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_647-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_647-lambda.png"></a>
 <a href="../snapshots/saas_landing_647-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_647-browser.png"></a></div></article>
@@ -931,7 +851,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_325 — 20.1% mean error; 63.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.storetasker.com/">https://www.storetasker.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:42:26.596Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:34:59.764Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_325-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_325-lambda.png"></a>
 <a href="../snapshots/saas_landing_325-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_325-browser.png"></a></div></article>
@@ -939,7 +859,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_294 — 19.9% mean error; 54.6% area · MAJOR CANDIDATE</h2>
 <a href="https://fable.co/">https://fable.co/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:49.218Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:34:22.531Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_294-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_294-lambda.png"></a>
 <a href="../snapshots/saas_landing_294-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_294-browser.png"></a></div></article>
@@ -947,7 +867,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_561 — 19.8% mean error; 37.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.sanity.io/">https://www.sanity.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:35.106Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:19.720Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_561-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_561-lambda.png"></a>
 <a href="../snapshots/saas_landing_561-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_561-browser.png"></a></div></article>
@@ -955,7 +875,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_452 — 19.4% mean error; 38.6% area · MAJOR CANDIDATE</h2>
 <a href="https://lattice.com/customers">https://lattice.com/customers</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:08.085Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:04.681Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_452-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_452-lambda.png"></a>
 <a href="../snapshots/saas_landing_452-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_452-browser.png"></a></div></article>
@@ -963,7 +883,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_278 — 19.3% mean error; 33.8% area · MAJOR CANDIDATE</h2>
 <a href="https://studio.ai/">https://studio.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:35.197Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:34:13.583Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_278-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_278-lambda.png"></a>
 <a href="../snapshots/saas_landing_278-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_278-browser.png"></a></div></article>
@@ -971,7 +891,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_009 — 19.2% mean error; 54.6% area · MAJOR CANDIDATE</h2>
 <a href="https://betterway.fr/">https://betterway.fr/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:40.790Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:07.295Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_009-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_009-lambda.png"></a>
 <a href="../snapshots/saas_landing_009-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_009-browser.png"></a></div></article>
@@ -979,7 +899,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_235 — 19.2% mean error; 67.9% area · MAJOR CANDIDATE</h2>
 <a href="https://posthog.com/">https://posthog.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:11.257Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:55.699Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_235-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_235-lambda.png"></a>
 <a href="../snapshots/saas_landing_235-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_235-browser.png"></a></div></article>
@@ -987,15 +907,23 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_378 — 18.7% mean error; 36.5% area · MAJOR CANDIDATE</h2>
 <a href="https://andopen.co/">https://andopen.co/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:25.773Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:10.478Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_378-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_378-lambda.png"></a>
 <a href="../snapshots/saas_landing_378-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_378-browser.png"></a></div></article>
+<article data-search="saas_landing_656 https://www.bizzabo.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_656 — 18.6% mean error; 52.8% area · MAJOR CANDIDATE</h2>
+<a href="https://www.bizzabo.com/">https://www.bizzabo.com/</a><small></small>
+<small>Automated broad-difference threshold reached.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:48.881Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_656-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_656-lambda.png"></a>
+<a href="../snapshots/saas_landing_656-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_656-browser.png"></a></div></article>
 <article data-search="saas_landing_679 https://www.empathy.com/news-room" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_679 — 18.4% mean error; 37.3% area · MAJOR CANDIDATE</h2>
 <a href="https://www.empathy.com/news-room">https://www.empathy.com/news-room</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:47:18.865Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:50.827Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_679-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_679-lambda.png"></a>
 <a href="../snapshots/saas_landing_679-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_679-browser.png"></a></div></article>
@@ -1003,7 +931,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_456 — 18.4% mean error; 54.2% area · MAJOR CANDIDATE</h2>
 <a href="https://gladia.io/">https://gladia.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:13.568Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:09.211Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_456-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_456-lambda.png"></a>
 <a href="../snapshots/saas_landing_456-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_456-browser.png"></a></div></article>
@@ -1011,7 +939,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_021 — 18.3% mean error; 43.2% area · MAJOR CANDIDATE</h2>
 <a href="https://www.openunit.com/about">https://www.openunit.com/about</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:43.386Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:07.072Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_021-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_021-lambda.png"></a>
 <a href="../snapshots/saas_landing_021-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_021-browser.png"></a></div></article>
@@ -1019,7 +947,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_562 — 18.0% mean error; 40.6% area · MAJOR CANDIDATE</h2>
 <a href="https://flora.ai/">https://flora.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:02.073Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:50.058Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_562-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_562-lambda.png"></a>
 <a href="../snapshots/saas_landing_562-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_562-browser.png"></a></div></article>
@@ -1027,7 +955,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_516 — 17.9% mean error; 34.2% area · MAJOR CANDIDATE</h2>
 <a href="https://anam.ai/">https://anam.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:48.805Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:37:30.490Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_516-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_516-lambda.png"></a>
 <a href="../snapshots/saas_landing_516-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_516-browser.png"></a></div></article>
@@ -1035,7 +963,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_549 — 17.8% mean error; 46.0% area · MAJOR CANDIDATE</h2>
 <a href="https://www.lassie.ai/">https://www.lassie.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:01.137Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:37.493Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_549-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_549-lambda.png"></a>
 <a href="../snapshots/saas_landing_549-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_549-browser.png"></a></div></article>
@@ -1043,7 +971,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_213 — 17.4% mean error; 27.3% area · MAJOR CANDIDATE</h2>
 <a href="https://dribbble.com/pro">https://dribbble.com/pro</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:58.091Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:50.298Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_213-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_213-lambda.png"></a>
 <a href="../snapshots/saas_landing_213-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_213-browser.png"></a></div></article>
@@ -1051,7 +979,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_293 — 17.3% mean error; 37.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.figma.com/figjam/">https://www.figma.com/figjam/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:48.258Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:18.057Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_293-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_293-lambda.png"></a>
 <a href="../snapshots/saas_landing_293-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_293-browser.png"></a></div></article>
@@ -1059,7 +987,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_664 — 17.2% mean error; 39.7% area · MAJOR CANDIDATE</h2>
 <a href="https://www.squarespace.com/about/company">https://www.squarespace.com/about/company</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:02:16.299Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:51.496Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_664-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_664-lambda.png"></a>
 <a href="../snapshots/saas_landing_664-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_664-browser.png"></a></div></article>
@@ -1067,7 +995,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_695 — 17.2% mean error; 37.7% area · MAJOR CANDIDATE</h2>
 <a href="https://www.homerun.co/">https://www.homerun.co/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:47:20.528Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:53.618Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_695-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_695-lambda.png"></a>
 <a href="../snapshots/saas_landing_695-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_695-browser.png"></a></div></article>
@@ -1075,23 +1003,15 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_529 — 17.2% mean error; 60.2% area · MAJOR CANDIDATE</h2>
 <a href="https://onlook.cam/">https://onlook.cam/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:59.403Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:34.558Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_529-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_529-lambda.png"></a>
 <a href="../snapshots/saas_landing_529-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_529-browser.png"></a></div></article>
-<article data-search="saas_landing_586 https://basecamp.com/before-and-after" data-severity="high">
-<h2><span class="severity high">HIGH</span> saas_landing_586 — 17.1% mean error; 35.8% area · MAJOR CANDIDATE</h2>
-<a href="https://basecamp.com/before-and-after">https://basecamp.com/before-and-after</a><small></small>
-<small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:54.307Z
- / Chromium 1200 × 800 · capture date not recorded</small>
-<div class="pair"><a href="../snapshots/saas_landing_586-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_586-lambda.png"></a>
-<a href="../snapshots/saas_landing_586-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_586-browser.png"></a></div></article>
 <article data-search="saas_landing_322 https://circle.so/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_322 — 17.1% mean error; 31.9% area · MAJOR CANDIDATE</h2>
 <a href="https://circle.so/">https://circle.so/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:42:24.095Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:46.541Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_322-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_322-lambda.png"></a>
 <a href="../snapshots/saas_landing_322-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_322-browser.png"></a></div></article>
@@ -1099,7 +1019,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_111 — 16.9% mean error; 36.0% area · MAJOR CANDIDATE</h2>
 <a href="https://www.jetty.com/">https://www.jetty.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:46.049Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:15.433Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_111-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_111-lambda.png"></a>
 <a href="../snapshots/saas_landing_111-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_111-browser.png"></a></div></article>
@@ -1107,7 +1027,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_486 — 16.9% mean error; 55.0% area · MAJOR CANDIDATE</h2>
 <a href="https://easehealth.com/">https://easehealth.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:43.655Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:17.900Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_486-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_486-lambda.png"></a>
 <a href="../snapshots/saas_landing_486-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_486-browser.png"></a></div></article>
@@ -1115,7 +1035,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_678 — 16.7% mean error; 36.3% area · MAJOR CANDIDATE</h2>
 <a href="https://pitch.com/news">https://pitch.com/news</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:47:17.941Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:52.084Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_678-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_678-lambda.png"></a>
 <a href="../snapshots/saas_landing_678-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_678-browser.png"></a></div></article>
@@ -1123,7 +1043,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_207 — 16.7% mean error; 34.8% area · MAJOR CANDIDATE</h2>
 <a href="https://framerauth.com/">https://framerauth.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:55.571Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:48.562Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_207-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_207-lambda.png"></a>
 <a href="../snapshots/saas_landing_207-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_207-browser.png"></a></div></article>
@@ -1131,7 +1051,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_568 — 16.7% mean error; 35.3% area · MAJOR CANDIDATE</h2>
 <a href="https://contentsquare.com/blog/">https://contentsquare.com/blog/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:47.973Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:57.093Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_568-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_568-lambda.png"></a>
 <a href="../snapshots/saas_landing_568-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_568-browser.png"></a></div></article>
@@ -1139,7 +1059,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_416 — 16.6% mean error; 35.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.hellobonsai.com/reviews">https://www.hellobonsai.com/reviews</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:36.385Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:24.743Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_416-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_416-lambda.png"></a>
 <a href="../snapshots/saas_landing_416-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_416-browser.png"></a></div></article>
@@ -1147,7 +1067,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_257 — 16.5% mean error; 47.9% area · MAJOR CANDIDATE</h2>
 <a href="https://increase.com/">https://increase.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:16.139Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:57.144Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_257-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_257-lambda.png"></a>
 <a href="../snapshots/saas_landing_257-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_257-browser.png"></a></div></article>
@@ -1155,7 +1075,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> webkit_blog — 16.4% mean error; 36.4% area · MAJOR CANDIDATE</h2>
 <a href="https://webkit.org/blog/">https://webkit.org/blog/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:19.742Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:50.742Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/webkit_blog-lambda.png">Lambda<img loading="lazy" src="../snapshots/webkit_blog-lambda.png"></a>
 <a href="../snapshots/webkit_blog-browser.png">Chromium<img loading="lazy" src="../snapshots/webkit_blog-browser.png"></a></div></article>
@@ -1163,7 +1083,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_085 — 16.1% mean error; 51.7% area · MAJOR CANDIDATE</h2>
 <a href="https://www.marqeta.com/">https://www.marqeta.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:41.594Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:11.357Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_085-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_085-lambda.png"></a>
 <a href="../snapshots/saas_landing_085-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_085-browser.png"></a></div></article>
@@ -1171,7 +1091,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_234 — 15.9% mean error; 45.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.pelagohealth.com/">https://www.pelagohealth.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:59.262Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:49.133Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_234-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_234-lambda.png"></a>
 <a href="../snapshots/saas_landing_234-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_234-browser.png"></a></div></article>
@@ -1179,7 +1099,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_363 — 15.7% mean error; 37.0% area · MAJOR CANDIDATE</h2>
 <a href="https://slack.com/intl/en-mt/customer-stories">https://slack.com/intl/en-mt/customer-stories</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:19.362Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:04.723Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_363-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_363-lambda.png"></a>
 <a href="../snapshots/saas_landing_363-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_363-browser.png"></a></div></article>
@@ -1187,7 +1107,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_533 — 15.7% mean error; 28.6% area · MAJOR CANDIDATE</h2>
 <a href="https://support.ramp.com/hc/en-us">https://support.ramp.com/hc/en-us</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:12.479Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:37:42.118Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_533-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_533-lambda.png"></a>
 <a href="../snapshots/saas_landing_533-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_533-browser.png"></a></div></article>
@@ -1195,7 +1115,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_117 — 15.4% mean error; 44.5% area · MAJOR CANDIDATE</h2>
 <a href="https://pathedits.com/">https://pathedits.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:42.086Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:46.463Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_117-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_117-lambda.png"></a>
 <a href="../snapshots/saas_landing_117-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_117-browser.png"></a></div></article>
@@ -1203,7 +1123,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_590 — 15.2% mean error; 39.2% area · MAJOR CANDIDATE</h2>
 <a href="https://zapier.com/customer-stories">https://zapier.com/customer-stories</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:55.988Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:03.045Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_590-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_590-lambda.png"></a>
 <a href="../snapshots/saas_landing_590-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_590-browser.png"></a></div></article>
@@ -1211,7 +1131,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_530 — 15.2% mean error; 42.7% area · MAJOR CANDIDATE</h2>
 <a href="https://www.optimizely.com/">https://www.optimizely.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:00.662Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:35.514Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_530-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_530-lambda.png"></a>
 <a href="../snapshots/saas_landing_530-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_530-browser.png"></a></div></article>
@@ -1219,7 +1139,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_494 — 14.9% mean error; 37.2% area · MAJOR CANDIDATE</h2>
 <a href="https://sierra.ai/">https://sierra.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:45.307Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:21.226Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_494-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_494-lambda.png"></a>
 <a href="../snapshots/saas_landing_494-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_494-browser.png"></a></div></article>
@@ -1227,7 +1147,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_382 — 14.7% mean error; 36.7% area · MAJOR CANDIDATE</h2>
 <a href="https://frame.io/customers">https://frame.io/customers</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:26.542Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:13.228Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_382-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_382-lambda.png"></a>
 <a href="../snapshots/saas_landing_382-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_382-browser.png"></a></div></article>
@@ -1235,7 +1155,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> influx_docs — 14.6% mean error; 33.9% area · MAJOR CANDIDATE</h2>
 <a href="https://docs.influxdata.com/">https://docs.influxdata.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:34.986Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:57.114Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/influx_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/influx_docs-lambda.png"></a>
 <a href="../snapshots/influx_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/influx_docs-browser.png"></a></div></article>
@@ -1243,7 +1163,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_426 — 14.6% mean error; 37.8% area · MAJOR CANDIDATE</h2>
 <a href="https://rogo.ai/">https://rogo.ai/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:21.226Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:23.282Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_426-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_426-lambda.png"></a>
 <a href="../snapshots/saas_landing_426-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_426-browser.png"></a></div></article>
@@ -1251,7 +1171,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_141 — 14.4% mean error; 36.6% area · MAJOR CANDIDATE</h2>
 <a href="https://linktr.ee/">https://linktr.ee/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:50.526Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:31.122Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_141-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_141-lambda.png"></a>
 <a href="../snapshots/saas_landing_141-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_141-browser.png"></a></div></article>
@@ -1259,7 +1179,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_481 — 14.2% mean error; 44.1% area · MAJOR CANDIDATE</h2>
 <a href="https://www.panxo.com/">https://www.panxo.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:40.505Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:21.190Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_481-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_481-lambda.png"></a>
 <a href="../snapshots/saas_landing_481-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_481-browser.png"></a></div></article>
@@ -1267,7 +1187,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_582 — 14.1% mean error; 20.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.figma.com/pricing/">https://www.figma.com/pricing/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:52.291Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:01.463Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_582-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_582-lambda.png"></a>
 <a href="../snapshots/saas_landing_582-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_582-browser.png"></a></div></article>
@@ -1275,7 +1195,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_198 — 13.9% mean error; 37.2% area · MAJOR CANDIDATE</h2>
 <a href="https://bento.me/en/home">https://bento.me/en/home</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:53.845Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:40.867Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_198-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_198-lambda.png"></a>
 <a href="../snapshots/saas_landing_198-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_198-browser.png"></a></div></article>
@@ -1283,7 +1203,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_563 — 13.7% mean error; 38.0% area · MAJOR CANDIDATE</h2>
 <a href="https://superhuman.com/">https://superhuman.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:44.280Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:53.733Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_563-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_563-lambda.png"></a>
 <a href="../snapshots/saas_landing_563-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_563-browser.png"></a></div></article>
@@ -1291,7 +1211,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> python — 13.5% mean error; 42.2% area · MAJOR CANDIDATE</h2>
 <a href="https://www.python.org/">https://www.python.org/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:12.403Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:45.976Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/python-lambda.png">Lambda<img loading="lazy" src="../snapshots/python-lambda.png"></a>
 <a href="../snapshots/python-browser.png">Chromium<img loading="lazy" src="../snapshots/python-browser.png"></a></div></article>
@@ -1299,15 +1219,23 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_093 — 13.5% mean error; 37.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.zendesk.com/">https://www.zendesk.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:02.381Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:16.238Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_093-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_093-lambda.png"></a>
 <a href="../snapshots/saas_landing_093-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_093-browser.png"></a></div></article>
+<article data-search="saas_landing_250 https://superlistapp.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_250 — 13.4% mean error; 38.6% area · MAJOR CANDIDATE</h2>
+<a href="https://superlistapp.com/">https://superlistapp.com/</a><small></small>
+<small>Automated broad-difference threshold reached.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:52.420Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_250-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_250-lambda.png"></a>
+<a href="../snapshots/saas_landing_250-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_250-browser.png"></a></div></article>
 <article data-search="aws_docs https://docs.aws.amazon.com/" data-severity="high">
 <h2><span class="severity high">HIGH</span> aws_docs — 12.8% mean error; 38.6% area · MAJOR CANDIDATE</h2>
 <a href="https://docs.aws.amazon.com/">https://docs.aws.amazon.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:21.860Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:49.087Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/aws_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/aws_docs-lambda.png"></a>
 <a href="../snapshots/aws_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/aws_docs-browser.png"></a></div></article>
@@ -1315,7 +1243,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_565 — 12.8% mean error; 41.9% area · MAJOR CANDIDATE</h2>
 <a href="https://www.amperos.com/">https://www.amperos.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:03.445Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:55.960Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_565-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_565-lambda.png"></a>
 <a href="../snapshots/saas_landing_565-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_565-browser.png"></a></div></article>
@@ -1323,7 +1251,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_641 — 12.6% mean error; 36.5% area · MAJOR CANDIDATE</h2>
 <a href="https://toggl.com/about/">https://toggl.com/about/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:46:59.422Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:30.716Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_641-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_641-lambda.png"></a>
 <a href="../snapshots/saas_landing_641-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_641-browser.png"></a></div></article>
@@ -1331,7 +1259,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_632 — 12.6% mean error; 26.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.clay.com/pricing">https://www.clay.com/pricing</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:01:59.955Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:38.305Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_632-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_632-lambda.png"></a>
 <a href="../snapshots/saas_landing_632-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_632-browser.png"></a></div></article>
@@ -1339,7 +1267,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_436 — 12.3% mean error; 51.2% area · MAJOR CANDIDATE</h2>
 <a href="https://www.craft.do/">https://www.craft.do/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:42.996Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:35.736Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_436-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_436-lambda.png"></a>
 <a href="../snapshots/saas_landing_436-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_436-browser.png"></a></div></article>
@@ -1347,7 +1275,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_266 — 12.2% mean error; 51.3% area · MAJOR CANDIDATE</h2>
 <a href="https://coda.io/">https://coda.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:04.362Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:04.829Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_266-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_266-lambda.png"></a>
 <a href="../snapshots/saas_landing_266-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_266-browser.png"></a></div></article>
@@ -1355,7 +1283,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_258 — 11.6% mean error; 29.4% area · MAJOR CANDIDATE</h2>
 <a href="https://www.opus.so/about-us">https://www.opus.so/about-us</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:18.391Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:58.099Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_258-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_258-lambda.png"></a>
 <a href="../snapshots/saas_landing_258-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_258-browser.png"></a></div></article>
@@ -1363,7 +1291,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_475 — 11.6% mean error; 23.1% area · MAJOR CANDIDATE</h2>
 <a href="https://www.agora.xyz/about">https://www.agora.xyz/about</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:34.229Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:37:21.584Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_475-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_475-lambda.png"></a>
 <a href="../snapshots/saas_landing_475-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_475-browser.png"></a></div></article>
@@ -1371,7 +1299,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_280 — 11.5% mean error; 24.1% area · MAJOR CANDIDATE</h2>
 <a href="https://storytale.io/">https://storytale.io/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:45.793Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:16.827Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_280-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_280-lambda.png"></a>
 <a href="../snapshots/saas_landing_280-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_280-browser.png"></a></div></article>
@@ -1379,7 +1307,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_666 — 11.4% mean error; 18.0% area · MAJOR CANDIDATE</h2>
 <a href="https://anam.ai/about">https://anam.ai/about</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:02:19.513Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:39:20.615Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_666-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_666-lambda.png"></a>
 <a href="../snapshots/saas_landing_666-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_666-browser.png"></a></div></article>
@@ -1387,7 +1315,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_370 — 11.4% mean error; 17.4% area · MAJOR CANDIDATE</h2>
 <a href="https://dreamcut.ai/home">https://dreamcut.ai/home</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:23.846Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:36:21.326Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_370-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_370-lambda.png"></a>
 <a href="../snapshots/saas_landing_370-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_370-browser.png"></a></div></article>
@@ -1395,7 +1323,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_619 — 10.8% mean error; 25.5% area · MAJOR CANDIDATE</h2>
 <a href="https://webflow.grsm.io/xiud01gp3yvv">https://webflow.grsm.io/xiud01gp3yvv</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:02:03.319Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:58.164Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_619-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_619-lambda.png"></a>
 <a href="../snapshots/saas_landing_619-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_619-browser.png"></a></div></article>
@@ -1403,7 +1331,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> kotlin_docs — 10.5% mean error; 20.1% area · MAJOR CANDIDATE</h2>
 <a href="https://kotlinlang.org/docs/home.html">https://kotlinlang.org/docs/home.html</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:20.612Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:51.556Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/kotlin_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/kotlin_docs-lambda.png"></a>
 <a href="../snapshots/kotlin_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/kotlin_docs-browser.png"></a></div></article>
@@ -1411,7 +1339,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_057 — 10.5% mean error; 22.2% area · MAJOR CANDIDATE</h2>
 <a href="https://usersnap.com/">https://usersnap.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:47.022Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:08.852Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_057-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_057-lambda.png"></a>
 <a href="../snapshots/saas_landing_057-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_057-browser.png"></a></div></article>
@@ -1419,7 +1347,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_113 — 10.3% mean error; 21.5% area · MAJOR CANDIDATE</h2>
 <a href="https://www.armadillo.one/">https://www.armadillo.one/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:13.582Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:19.401Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_113-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_113-lambda.png"></a>
 <a href="../snapshots/saas_landing_113-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_113-browser.png"></a></div></article>
@@ -1427,15 +1355,23 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_571 — 9.4% mean error; 18.1% area · MAJOR CANDIDATE</h2>
 <a href="https://wetransfer.com/explore">https://wetransfer.com/explore</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:45:48.679Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:38:03.581Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_571-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_571-lambda.png"></a>
 <a href="../snapshots/saas_landing_571-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_571-browser.png"></a></div></article>
+<article data-search="saas_landing_432 https://nightwatch.laravel.com/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_432 — 8.4% mean error; 18.8% area</h2>
+<a href="https://nightwatch.laravel.com/">https://nightwatch.laravel.com/</a><small></small>
+<small>The neutral background palette is repaired, but the main hero heading, copy and actions remain absent.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:29.451Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_432-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_432-lambda.png"></a>
+<a href="../snapshots/saas_landing_432-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_432-browser.png"></a></div></article>
 <article data-search="saas_landing_168 https://www.stellar.work/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_168 — 8.2% mean error; 20.9% area · MAJOR CANDIDATE</h2>
 <a href="https://www.stellar.work/">https://www.stellar.work/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:55.483Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:39.622Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_168-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_168-lambda.png"></a>
 <a href="../snapshots/saas_landing_168-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_168-browser.png"></a></div></article>
@@ -1443,7 +1379,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_202 — 8.1% mean error; 21.7% area · MAJOR CANDIDATE</h2>
 <a href="https://mymind.com/">https://mymind.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:58.594Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:45.408Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_202-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_202-lambda.png"></a>
 <a href="../snapshots/saas_landing_202-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_202-browser.png"></a></div></article>
@@ -1451,7 +1387,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_149 — 7.1% mean error; 25.6% area · MAJOR CANDIDATE</h2>
 <a href="https://www.modernlife.com/">https://www.modernlife.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:36.453Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:33.955Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_149-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_149-lambda.png"></a>
 <a href="../snapshots/saas_landing_149-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_149-browser.png"></a></div></article>
@@ -1459,7 +1395,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> eclipse_help — 6.9% mean error; 18.8% area · MAJOR CANDIDATE</h2>
 <a href="https://help.eclipse.org/latest/index.jsp">https://help.eclipse.org/latest/index.jsp</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:29.726Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:54.427Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/eclipse_help-lambda.png">Lambda<img loading="lazy" src="../snapshots/eclipse_help-lambda.png"></a>
 <a href="../snapshots/eclipse_help-browser.png">Chromium<img loading="lazy" src="../snapshots/eclipse_help-browser.png"></a></div></article>
@@ -1467,7 +1403,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_106 — 6.9% mean error; 12.1% area · MAJOR CANDIDATE</h2>
 <a href="https://oku.club/">https://oku.club/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:39:07.831Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:33:13.555Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_106-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_106-lambda.png"></a>
 <a href="../snapshots/saas_landing_106-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_106-browser.png"></a></div></article>
@@ -1475,7 +1411,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> cmake — 6.6% mean error; 18.6% area</h2>
 <a href="https://cmake.org/">https://cmake.org/</a><small></small>
 <small>Natural video geometry is repaired; the selected snapshot still lacks the poster/video pixels. Direct poster URL responds HTTP200; ready-state/finite-frame cause is not yet isolated.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:40.401Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:46.653Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/cmake-lambda.png">Lambda<img loading="lazy" src="../snapshots/cmake-lambda.png"></a>
 <a href="../snapshots/cmake-browser.png">Chromium<img loading="lazy" src="../snapshots/cmake-browser.png"></a></div></article>
@@ -1483,7 +1419,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_247 — 6.4% mean error; 12.3% area · MAJOR CANDIDATE</h2>
 <a href="https://wiza.co/">https://wiza.co/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:48.493Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:32.218Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_247-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_247-lambda.png"></a>
 <a href="../snapshots/saas_landing_247-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_247-browser.png"></a></div></article>
@@ -1491,7 +1427,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_677 — 6.2% mean error; 28.7% area</h2>
 <a href="https://pitch.com/">https://pitch.com/</a><small></small>
 <small>Pitch remains almost blank despite a low mean error against its mostly white reference.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:02:20.111Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:39:24.242Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_677-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_677-lambda.png"></a>
 <a href="../snapshots/saas_landing_677-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_677-browser.png"></a></div></article>
@@ -1499,7 +1435,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_281 — 6.1% mean error; 17.1% area · MAJOR CANDIDATE</h2>
 <a href="https://family.co/">https://family.co/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:40:42.386Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:09.789Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_281-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_281-lambda.png"></a>
 <a href="../snapshots/saas_landing_281-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_281-browser.png"></a></div></article>
@@ -1507,7 +1443,7 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_453 — 5.7% mean error; 20.9% area · MAJOR CANDIDATE</h2>
 <a href="https://lattice.com/blog">https://lattice.com/blog</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:44:08.608Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:07.317Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_453-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_453-lambda.png"></a>
 <a href="../snapshots/saas_landing_453-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_453-browser.png"></a></div></article>
@@ -1515,23 +1451,39 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_002 — 5.1% mean error; 25.3% area · MAJOR CANDIDATE</h2>
 <a href="https://www.altruus.com/">https://www.altruus.com/</a><small></small>
 <small>Automated broad-difference threshold reached.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:38:36.151Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:57.128Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_002-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_002-lambda.png"></a>
 <a href="../snapshots/saas_landing_002-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_002-browser.png"></a></div></article>
+<article data-search="saas_landing_473 https://www.popcorn.space/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_473 — 4.0% mean error; 9.3% area</h2>
+<a href="https://www.popcorn.space/">https://www.popcorn.space/</a><small></small>
+<small>Hero heading, copy, actions and device imagery remain absent; the mostly light reference hides this from the coarse score.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:14.427Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_473-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_473-lambda.png"></a>
+<a href="../snapshots/saas_landing_473-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_473-browser.png"></a></div></article>
 <article data-search="saas_landing_121 https://banky.io/" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_121 — 3.7% mean error; 9.0% area</h2>
 <a href="https://banky.io/">https://banky.io/</a><small></small>
 <small>Hero background is restored but the main heading, copy and actions remain absent.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:59:47.219Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:20.816Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_121-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_121-lambda.png"></a>
 <a href="../snapshots/saas_landing_121-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_121-browser.png"></a></div></article>
+<article data-search="saas_landing_134 https://cequence.io/" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_134 — 3.1% mean error; 7.2% area</h2>
+<a href="https://cequence.io/">https://cequence.io/</a><small></small>
+<small>The main hero heading, copy and action remain absent despite the correct illustration and background.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:25.620Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_134-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_134-lambda.png"></a>
+<a href="../snapshots/saas_landing_134-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_134-browser.png"></a></div></article>
 <article data-search="saas_landing_365 https://supabase.com/customers" data-severity="high">
 <h2><span class="severity high">HIGH</span> saas_landing_365 — 3.0% mean error; 9.1% area</h2>
 <a href="https://supabase.com/customers">https://supabase.com/customers</a><small></small>
 <small>Customer stories and cards remain absent after the theme repair.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T02:43:16.860Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:06.617Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_365-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_365-lambda.png"></a>
 <a href="../snapshots/saas_landing_365-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_365-browser.png"></a></div></article>
@@ -1539,10 +1491,18 @@ These are review candidates, not confirmed engine defects. Live content, animati
 <h2><span class="severity high">HIGH</span> saas_landing_505 — 2.5% mean error; 5.9% area</h2>
 <a href="https://cofounder.co/">https://cofounder.co/</a><small></small>
 <small>Hero background is restored but the main heading, copy and actions remain absent.</small>
-<small>Lambda 1200 × 800 · 2026-11-12T03:00:44.492Z
+<small>Lambda 1200 × 800 · 2026-11-12T05:49:22.304Z
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_505-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_505-lambda.png"></a>
 <a href="../snapshots/saas_landing_505-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_505-browser.png"></a></div></article>
+<article data-search="saas_landing_399 https://missiveapp.com/customers" data-severity="high">
+<h2><span class="severity high">HIGH</span> saas_landing_399 — 1.7% mean error; 4.8% area</h2>
+<a href="https://missiveapp.com/customers">https://missiveapp.com/customers</a><small></small>
+<small>The large customer quotation, logo and portrait in the right card remain absent.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:48:19.206Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_399-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_399-lambda.png"></a>
+<a href="../snapshots/saas_landing_399-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_399-browser.png"></a></div></article>
 <article data-search="saas_landing_526 https://www.contentarchitecture.dev/" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_526 — 32.7% mean error; 34.2% area</h2>
 <a href="https://www.contentarchitecture.dev/">https://www.contentarchitecture.dev/</a><small></small>
@@ -1855,6 +1815,14 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_355-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_355-lambda.png"></a>
 <a href="../snapshots/saas_landing_355-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_355-browser.png"></a></div></article>
+<article data-search="imagemagick_docs https://imagemagick.org/script/command-line-processing.php" data-severity="low">
+<h2><span class="severity low">LOW</span> imagemagick_docs — 14.5% mean error; 20.3% area</h2>
+<a href="https://imagemagick.org/script/command-line-processing.php">https://imagemagick.org/script/command-line-processing.php</a><small></small>
+<small>Below the major triage threshold.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:32:52.651Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/imagemagick_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/imagemagick_docs-lambda.png"></a>
+<a href="../snapshots/imagemagick_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/imagemagick_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_350 https://infermedica.com/inference-engine" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_350 — 14.5% mean error; 19.1% area</h2>
 <a href="https://infermedica.com/inference-engine">https://infermedica.com/inference-engine</a><small></small>
@@ -3999,6 +3967,14 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_688-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_688-lambda.png"></a>
 <a href="../snapshots/saas_landing_688-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_688-browser.png"></a></div></article>
+<article data-search="saas_landing_311 https://nuxt.com/" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_311 — 5.9% mean error; 13.5% area</h2>
+<a href="https://nuxt.com/">https://nuxt.com/</a><small></small>
+<small>Below the major triage threshold.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:46:33.616Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_311-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_311-lambda.png"></a>
+<a href="../snapshots/saas_landing_311-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_311-browser.png"></a></div></article>
 <article data-search="saas_landing_185 https://www.bepreparedapp.com/" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_185 — 5.9% mean error; 11.9% area</h2>
 <a href="https://www.bepreparedapp.com/">https://www.bepreparedapp.com/</a><small></small>
@@ -4879,6 +4855,14 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_386-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_386-lambda.png"></a>
 <a href="../snapshots/saas_landing_386-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_386-browser.png"></a></div></article>
+<article data-search="nuxt_docs https://nuxt.com/docs/getting-started/introduction" data-severity="low">
+<h2><span class="severity low">LOW</span> nuxt_docs — 4.4% mean error; 12.7% area</h2>
+<a href="https://nuxt.com/docs/getting-started/introduction">https://nuxt.com/docs/getting-started/introduction</a><small></small>
+<small>Below the major triage threshold.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:45:01.306Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/nuxt_docs-lambda.png">Lambda<img loading="lazy" src="../snapshots/nuxt_docs-lambda.png"></a>
+<a href="../snapshots/nuxt_docs-browser.png">Chromium<img loading="lazy" src="../snapshots/nuxt_docs-browser.png"></a></div></article>
 <article data-search="saas_landing_074 https://wunderbucket.io/" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_074 — 4.4% mean error; 12.8% area</h2>
 <a href="https://wunderbucket.io/">https://wunderbucket.io/</a><small></small>
@@ -6015,6 +5999,14 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/nasa-lambda.png">Lambda<img loading="lazy" src="../snapshots/nasa-lambda.png"></a>
 <a href="../snapshots/nasa-browser.png">Chromium<img loading="lazy" src="../snapshots/nasa-browser.png"></a></div></article>
+<article data-search="lua_pil https://www.lua.org/pil/contents.html" data-severity="low">
+<h2><span class="severity low">LOW</span> lua_pil — 2.7% mean error; 9.0% area</h2>
+<a href="https://www.lua.org/pil/contents.html">https://www.lua.org/pil/contents.html</a><small></small>
+<small>Below the major triage threshold.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T04:38:11.179Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/lua_pil-lambda.png">Lambda<img loading="lazy" src="../snapshots/lua_pil-lambda.png"></a>
+<a href="../snapshots/lua_pil-browser.png">Chromium<img loading="lazy" src="../snapshots/lua_pil-browser.png"></a></div></article>
 <article data-search="sqlite_json1 https://www.sqlite.org/json1.html" data-severity="low">
 <h2><span class="severity low">LOW</span> sqlite_json1 — 2.7% mean error; 8.6% area</h2>
 <a href="https://www.sqlite.org/json1.html">https://www.sqlite.org/json1.html</a><small></small>
@@ -6535,6 +6527,14 @@ These are review candidates, not confirmed engine defects. Live content, animati
  / Chromium 1200 × 800 · capture date not recorded</small>
 <div class="pair"><a href="../snapshots/saas_landing_518-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_518-lambda.png"></a>
 <a href="../snapshots/saas_landing_518-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_518-browser.png"></a></div></article>
+<article data-search="saas_landing_586 https://basecamp.com/before-and-after" data-severity="low">
+<h2><span class="severity low">LOW</span> saas_landing_586 — 2.1% mean error; 5.1% area</h2>
+<a href="https://basecamp.com/before-and-after">https://basecamp.com/before-and-after</a><small></small>
+<small>Below the major triage threshold.</small>
+<small>Lambda 1200 × 800 · 2026-11-12T05:50:03.475Z
+ / Chromium 1200 × 800 · capture date not recorded</small>
+<div class="pair"><a href="../snapshots/saas_landing_586-lambda.png">Lambda<img loading="lazy" src="../snapshots/saas_landing_586-lambda.png"></a>
+<a href="../snapshots/saas_landing_586-browser.png">Chromium<img loading="lazy" src="../snapshots/saas_landing_586-browser.png"></a></div></article>
 <article data-search="saas_landing_483 https://relace.ai/" data-severity="low">
 <h2><span class="severity low">LOW</span> saas_landing_483 — 2.1% mean error; 7.6% area</h2>
 <a href="https://relace.ai/">https://relace.ai/</a><small></small>

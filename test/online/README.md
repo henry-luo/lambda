@@ -69,8 +69,8 @@ The comparison writes the report and its JSON/CSV data to
 `test/online/comparison/`. Rows are ordered by severity: capture or image
 problems first, then automated major differences and omissions retained in
 visual review, followed by pages below the major triage threshold. The report
-uses `snapshots/visual_comparison_review_round2.json` for manually retained
-major omissions.
+uses the tracked `review_annotations.json` for manually retained major
+omissions; these annotations do not change the image metrics or thresholds.
 It uses `pngjs` from the installed render-test corpus (or the root dependencies).
 The report averages images into 120 × 80 color cells to rank broad differences
 without fine glyph noise. A mean channel error of at least 12% across at least
@@ -80,8 +80,8 @@ they do not certify fidelity. Missing captures, dimensions and capture dates
 remain explicit. Live content, theme state, animations and consent dialogs can
 produce large differences that need diagnosis before any engine change.
 
-The 2026-11-12 review compared all 1,066 available pairs (PIL still has no
-Lambda capture), refreshed 250 Lambda images, and leaves 204 major review
+The 2026-11-12 review compared all 1,066 pairs then available (PIL had no
+Lambda capture), refreshed 250 Lambda images, and left 204 major review
 candidates. It repaired initially disabled linked sheets and grid declarations
 that prevented actual flex items from being sized (Radiant RI-020/RI-021).
 Downloaded-sheet media selection improved, with remaining behavior tracked as
@@ -101,7 +101,7 @@ cases after the poster-sizing repair. It fixed multi-token stylesheet relations
 (RI-024), live stylesheet media/disabled state (RI-022), dropped root theme
 mutations (JS13-L3), remote image/poster discovery and video intrinsic sizing
 (RI-025), transparent background resets (RI-026), and desktop viewport selection
-(RI-027). The final comparison still covers all 1,066 pairs, with no dimension
+(RI-027). That comparison covered all 1,066 available pairs, with no dimension
 mismatches or changes to Chromium references, URLs, deadlines or thresholds.
 
 Automated major candidates fall from 204 to 186. Visual inspection retains five
@@ -116,11 +116,46 @@ and `comparison/results.csv`. Before/after examples remain in
 authored documents, 203 successful browser diagnostics plus one navigation
 context error, render logs for all 204 and 23 focused native layout summaries.
 
+A later PIL retry captured the Lambda image successfully. That checkpoint
+compared all 1,067 pairs: 191 high-severity review candidates and no unavailable
+captures. PIL's connection remains intermittent; see LI-014 for the investigation.
+
 The 118 focused native/host checks and 14 online-tool checks pass. The final
 Radiant gate retains 8,163 passes, 299 partials, 20 skips and the existing
 JS03-L2 iframe failure. All 56 CSS images baseline cases pass, including video
 size containment. Remaining application execution, selected-frame media and
 composed Shadow DOM limitations stay explicit in the owning ledgers.
+
+The third review revisited those 191 candidates and repaired three shared
+implementation bugs: missing Oklab/OkLCh components were rejected (LI-017),
+auto-height flex columns shrank natural content to a minimum height (RI-028),
+and content-driven grid row growth left stale scroll clips (RI-030). See
+[before/after examples](comparison/repairs.html). Nuxt home changes from 88.4%
+to 5.9% mean error, Nuxt docs from 85.2% to 4.4%, Nightwatch from 37.5% to
+8.4%, and ImageMagick from 43.3% to 14.5%; these are coarse triage scores.
+
+All 191 Lambda captures were attempted; 190 succeeded. After the grid repair,
+142 cases using that code path were refreshed again. Dock timed out at the
+existing 150-second deadline on both attempts and on the previous qualified
+renderer control (RI-031). The latest report therefore covers 1,066 pairs,
+with one capture blocker, 177 automated major candidates and nine manually
+retained major omissions: 186 high-severity pages in total. Visual review of
+every threshold-cleared case retained Popcorn, Cequence, Missive and Nightwatch alongside
+the previous five omissions. Four of the original 191 clear this major review;
+Dock remains unresolved as a capture blocker. The current per-page audit is
+`snapshots/visual_comparison_review_round3.json`. Observed script admission,
+exceptions and resource errors are evidence, not automatically assigned causes.
+
+All 112 CSS parser tests, 70 native dynamic-layout tests, five comparison-tool
+tests and 3,851 recorded static layout cases pass (six layout skips); layout
+integer-cast lint also passes. The current Lambda checkout build is separately
+blocked by its paint pigment API mismatch with the Radiant checkout. Validation
+and captures use an isolated compatible host built from Lambda `f19167dbf` plus
+online commit `3d1b6230d`, current sibling sources, and these repairs. Host
+hashes and the build failure are retained in `temp/online-visual-round3/`.
+DigitalOcean's full content omission and modal top-layer/backdrop painting
+(RI-029) remain explicit; the reduced grid repair does not establish their
+complete resolution.
 
 `test_page_load_gtest` writes its local fixture timing and memory measurements
 to `page_load_metrics.csv` in this directory.
