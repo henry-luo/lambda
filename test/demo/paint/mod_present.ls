@@ -60,6 +60,19 @@ pn present_paper(owner, st) {
     return kind
 }
 
+// the medium menu and the light toggle follow the session.
+pn present_medium(owner, st) {
+    let control = node(owner, "medium")
+    let kind = model.medium(st)
+    if (dom.get_state(control, "value") != kind) dom.set_state(control, "value", kind)
+    dom.set_attribute(owner, "data-medium", kind)
+    let lit = text(st.ps.lighting != null)^
+    dom.set_attribute(owner, "data-lit", lit)
+    dom.set_attribute(node(owner, "action-light"), "aria-pressed", lit)
+    dom.set_attribute(node(owner, "action-light"), "aria-disabled", text(kind != "pigment"))
+    dom.set_attribute(node(owner, "action-dry"), "aria-disabled", text(kind != "pigment"))
+}
+
 pub pn sync(owner, st) {
     for (t in model.TOOLS) set_class(node(owner, "tool-" ++ t), "active", st.tool == t)^
     brushes(owner, st)^
@@ -71,6 +84,7 @@ pub pn sync(owner, st) {
     set_slider(owner, "sat", int(round(hsv.s * 100.0)), "")^
     set_slider(owner, "val", int(round(hsv.v * 100.0)), "")^
     let paper = present_paper(owner, st)^
+    present_medium(owner, st)^
     let color = model.hex(st.color)^
     dom.style_set_property(node(owner, "color-chip"), "background-color", color)
     dom.set_attribute(owner, "data-color", color)

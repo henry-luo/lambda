@@ -83,6 +83,14 @@ pn command(owner, st, action) any^ {
         let b = dom.bounding_box(present.node(owner, "stage"))
         return model.fit({*: st, ps: opened, stroke: null, drag: null, status: "Opened " ++ path}, b.width, b.height)
     }
+    if (action == "dry") {
+        if (model.medium(st) != "pigment") raise error("Paint: pixel paint is always dry")
+        // dries the session in place; the copy forks only the tiles the wet film covers
+        var ps = st.ps
+        paint.dry(ps)^
+        return {*: st, ps: ps, status: "Dried: new strokes glaze over the paint"}
+    }
+    if (action == "light") { return model.with_light(st)^ }
     if (action == "undo") { return {*: st, ps: paint.undo(st.ps)^, status: "Undone"} }
     if (action == "redo") { return {*: st, ps: paint.redo(st.ps)^, status: "Redone"} }
     if (action == "clear") { return {*: st, ps: paint.clear(st.ps)^, status: "Canvas cleared; undo brings it back"} }
@@ -149,9 +157,12 @@ on click(evt) {
     return 'handled'
 }
 on change(evt) {
-    if (dom.get_attribute(evt.target, "id") != "paper") { return 'pass' }
+    let id = dom.get_attribute(evt.target, "id")
+    if (id != "paper" and id != "medium") { return 'pass' }
     let owner = owner_of(evt)
-    let next = model.with_paper(session, dom.get_state(evt.target, "value")) ^ { session = failed(owner, session, ^.message); return 'handled' }
+    let value = dom.get_state(evt.target, "value")
+    let chosen = if (id == "paper") model.with_paper(session, value) else model.with_medium(session, value)
+    let next = chosen ^ { session = failed(owner, session, ^.message); return 'handled' }
     session = publish(owner, next)
     return 'handled'
 }

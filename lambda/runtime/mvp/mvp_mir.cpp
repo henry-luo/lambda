@@ -7811,7 +7811,10 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
         move(c, result, reg(c, recovery.reg)); mark(c, done);
         // the pass-through arm cannot retain an outcome consumed by this
         // handler. Keep fresh recovery errors and filtered misses (S7.6.1v9).
-        Type* pass_contract = mvp_handler_pass_contract(c->module, handler, operand.semantic_contract);
+        // It takes the operand's static contract, as the planner does when it
+        // picks the binding's lane: a lowered operand can decay to `any` (as
+        // `string(x) == "a"` does), and a bool binding then had no conversion.
+        Type* pass_contract = mvp_handler_pass_contract(c->module, handler, operand_contract);
         Type* contract = mvp_join_value_contracts(c->module, pass_contract, recovery.semantic_contract);
         MirValue handled = value(c, result, contract->type_id == LMD_TYPE_TYPE ? LMD_TYPE_ANY : contract->type_id,
             VALUE_REP_ITEM, contract, node);

@@ -1,10 +1,12 @@
 // Interactive painting sessions (Lambda_Pkg_Paint.md PT10). A session is a value: one paint layer
 // over a paper colour, the stroke in progress, the rectangle that still has to be presented, and
 // stroke-level undo and redo. A history entry is the previous layer value, which shares every tile
-// the stroke did not touch (S9.1.2), never a replay of strokes.
+// the stroke did not touch (S9.1.2), never a replay of strokes. The layer is rgba (the pixel
+// medium) or a pigment film over the paper (PE8), which stays wet until `dry`.
 import layers: lambda.paint.layer
 import strokes: lambda.paint.stroke
 import surface: lambda.paint.surface
+import media: lambda.paint.media
 import radiant
 
 // bytes of forked tiles the undo history may keep; the oldest entries are dropped first.
@@ -33,7 +35,7 @@ fn cost(l, r) int {
     if (c == null) 0
     else {
         let tiles = ((c[2] - 1) div l.tile - c[0] div l.tile + 1) * ((c[3] - 1) div l.tile - c[1] div l.tile + 1)
-        tiles * l.tile * l.tile * 16
+        tiles * (layers.tile_bytes(l) ^ { 0 })
     }
 }
 
@@ -63,19 +65,26 @@ fn texture_of(t) map^ {
 
 // session(width, height, options) -> a blank session. Options: paper, the sRGB [r, g, b] colour
 // under the paint (white); texture, the paper's height field for brush grain (see texture_of);
-// blend_space ('linear'); history_budget in bytes (HISTORY_BUDGET).
+// blend_space ('linear'); history_budget in bytes (HISTORY_BUDGET); medium, 'pixel' (an rgba layer)
+// or 'pigment' (a wet film over the paper, PE8); lighting, for a pigment session the impasto
+// light (media.lighting options, or false for none; the default light otherwise).
 pub fn session(width: int, height: int, options = {}) map^ {
-    let o = layers.checked(options, ["paper", "texture", "blend_space", "history_budget"])^
+    let o = layers.checked(options, ["paper", "texture", "blend_space", "history_budget", "medium", "lighting"])^
     let surfaced = texture_of(o.texture)^
     let paper = if (o.paper == null) ([1.0, 1.0, 1.0]) else o.paper
     let budget = if (o.history_budget == null) HISTORY_BUDGET else o.history_budget
     let checked = checked_color(paper)^
+    let medium = if (o.medium == null) "pixel" else string(o.medium)
     if (len(paper) != 3) raise error("paint: session paper must be an sRGB [r, g, b] colour")
     else if (not (budget is int) or budget < 0) raise error("paint: history_budget must be a non-negative int")
+    else if (not (medium in ["pixel", "pigment"])) raise error("paint: session medium must be 'pixel' or 'pigment'")
     else {
-        let l = layers.layer(width, height, {blend_space: if (o.blend_space == null) 'linear' else o.blend_space})^;
+        let pigmented = medium == "pigment"
+        let l = if (pigmented) layers.layer(width, height, {format: 'pigment', paper: paper})^
+            else layers.layer(width, height, {blend_space: if (o.blend_space == null) 'linear' else o.blend_space})^
+        let light = if (not pigmented or o.lighting == false) null else media.lighting(if (o.lighting == true) null else o.lighting)^;
         {layer: l, paper: [checked[0], checked[1], checked[2]], texture: surfaced.texture, texture_spec: surfaced.spec,
-         budget: budget, undo: [], redo: [], active: null, dirty: whole(l)}
+         budget: budget, undo: [], redo: [], active: null, dirty: whole(l), lighting: light}
     }
 }
 
@@ -107,7 +116,7 @@ pub pn feed(var s, pointer, samples) map^ {
     if (s.active == null or s.active.pointer != pointer) { raise error("paint: no stroke in progress for this pointer") }
     if (len(samples) == 0) { return {rect: null, work: 0} }
     let previous = s.active.cont
-    let p = strokes.batch(s.layer.blend_space, s.active.brush, s.active.color, samples, previous, s.texture)^
+    let p = strokes.batch(s.layer.blend_space, s.layer.format, s.active.brush, s.active.color, samples, previous, s.texture)^
     if (strokes.washes(s.active.brush)^) {
         let w = strokes.wash(s.active.source, s.active.brush, s.active.color, p, previous)^
         s.layer = w.layer
@@ -117,6 +126,7 @@ pub pn feed(var s, pointer, samples) map^ {
         // the first batch copies the tiles it touches, which the stroke's undo entry keeps;
         // later batches write those tiles in place (D7.6.4)
         let painted = if (p.dabs.count == 0) strokes.unpainted(p)
+            else if (p.bristles != null) radiant.paint_bristle_stroke(s.layer, p.dabs.table, p.bristles, p.options)^
             else radiant.paint_stroke(s.layer, p.dabs.table, p.options)^
         s.active.cont = strokes.continued(p, painted, previous, null)^
     }
@@ -173,7 +183,7 @@ pub fn redo(s) map^ {
 // clear(session) -> a blank layer, undoable as one entry.
 pub fn clear(s) map^ {
     let free = if (s.active == null) s else end(s, s.active.pointer)^
-    let blank = layers.layer(free.layer.width, free.layer.height, {blend_space: free.layer.blend_space})^
+    let blank = layers.blank_like(free.layer)^
     let rect = whole(free.layer);
     {*: free, layer: blank, undo: trimmed([*free.undo, {layer: free.layer, rect: rect, cost: cost(free.layer, rect)}],
         free.budget), redo: [], dirty: rect}
@@ -184,20 +194,44 @@ pub fn mark(s, rect = null) map => ({*: s, dirty: union(s.dirty, if (rect == nul
 
 fn background(s) array^ => strokes.in_space([s.paper[0], s.paper[1], s.paper[2], 1.0], s.layer.blend_space)^
 
+// how the session shows its layer: an rgba layer over the paper colour, or a pigment film over
+// its own substrate under the session's light.
+pub fn shown(s, rect) map^ => if (layers.pigmented(s.layer)) ({rect: rect, lighting: s.lighting})
+    else ({rect: rect, background: background(s)^})
+
+// with_lighting(session, lighting) -> the session under another light (media.lighting options,
+// or false for none); every pixel is presented again.
+pub fn with_lighting(s, lighting) map^ {
+    if (not layers.pigmented(s.layer)) raise error("paint: only a pigment session is lit")
+    else ({*: s, lighting: if (lighting == false) null else media.lighting(if (lighting == true) null else lighting)^,
+           dirty: whole(s.layer)})
+}
+
 // frame(var session) -> {rect, pixels} (PT7 in-place form): the dirty rectangle as (h, w, 4) sRGB
 // u8 samples over the paper, ready for dom.set_canvas_pixels_rect, leaving nothing to present.
 // rect and pixels are null when nothing changed. A frame built as a new session would share the
-// layer with it (S9.3.1), so the next feed would copy the stroke's tiles again.
+// layer with it (S9.3.1), so the next feed would copy the stroke's tiles again. Lighting reads
+// one pixel beyond the rect, so a lit frame widens by one pixel.
 pub pn frame(var s) map^ {
-    let r = clipped(s.layer, s.dirty)
+    let lit = s.lighting != null
+    let r = clipped(s.layer, if (s.dirty == null or not lit) s.dirty else ([s.dirty[0] - 1, s.dirty[1] - 1, s.dirty[2] + 1, s.dirty[3] + 1]))
     s.dirty = null
     if ((r == null)^) { return {rect: null, pixels: null} }
-    return {rect: r, pixels: layers.present(s.layer, {rect: r, background: background(s)^})^}
+    return {rect: r, pixels: layers.present(s.layer, shown(s, r)^)^}
+}
+
+// dry(var session) -> {rect, work} (PT7 in-place form): folds the pigment layer's wet film into
+// its substrate (PE8), so later strokes glaze over it instead of mixing; nothing changes on screen.
+// An rgba session has nothing to dry.
+pub pn dry(var s) map^ {
+    if (s.active != null) { s = end(s, s.active.pointer)^ }
+    if ((not layers.pigmented(s.layer))^) { return {rect: null, work: 0} }
+    return radiant.paint_dry(s.layer, {})^
 }
 
 // color_at(session, x, y) -> the sRGB [r, g, b] in [0, 1] shown at a layer pixel (paint over paper).
 pub fn color_at(s, x: int, y: int) array^ {
-    let px = layers.present(s.layer, {rect: [x, y, x + 1, y + 1], background: background(s)^})^[0, 0];
+    let px = layers.present(s.layer, shown(s, [x, y, x + 1, y + 1])^)^[0, 0];
     [px[0] / 255.0, px[1] / 255.0, px[2] / 255.0]
 }
 

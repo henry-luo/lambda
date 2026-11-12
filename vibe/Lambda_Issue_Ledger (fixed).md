@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **284 anchored records**, preserving fixed, resolved,
+This archive contains **285 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -4177,4 +4177,19 @@ Share-marking at the call site was rejected: capturing the arguments and marking
 *Evidence.* `test/lambda/proc/native_result_alias.ls` writes through the argument and through the result for each kernel. It agrees on interp, JIT and auto, also with `LAMBDA_FUNC_JIT_THRESHOLD=2` under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. 40 goldens that call the changed kernels pass on interp and JIT under forced GC. Gates: `test_lambda_gtest` 2,304/2,304; the JIT pass and the T0 differential (`test_interp_gtest`) fail only their pre-existing 8 and 10 cases; `test_lambda_runtime_gtest` 332/332. The paint UI replays (`canvas_rect` 20/20, `pen_input` 11/11) pass, and the paint demo replay passes 46/46 with its tile counts unchanged (38 written in place, 19 copied, on T0 and AUTO).
 
 *Left as is.* `content(e)` returns a read-only view of the element's storage, which is a view question, not an insertion. MVP still captures container arguments to every native without `JUBE_FN_READS_ARGS` (D7.6.5). For the built-ins that capture is now redundant, and removing it would need a revised ruling. Release-build performance was not measured.
+
+## MVP handler lanes — 2026-11-12
+
+<a id="lr12-48"></a>
+
+**LR12-48 — A handler over a comparison of an untyped read fails MVP admission in a `pn` · FIXED, 2026-11-12.**
+Authority: **S7.6.1v9** (a handler's pass-through arm), **D8.3.1** (the planner and the emitter make one static decision).
+
+*Defect.* `let p = (string(doc.format) == "pigment") ^ { false }` inside a `pn` whose `doc` is untyped stopped MVP with "unsupported representation conversion in …: any (0) from 1 to 5", so its module fell off the JIT; on AUTO it also failed promotion. Found while writing `lmd/package/paint/painting.ls` for paint M2, where it took the whole `lambda.paint` package off the JIT tier.
+
+*Cause.* The planner types a handler from its operand's static contract (`mvp_value_contract` of the operand node: `bool | error`, so the pass arm is `bool`) and gives the binding the bool lane. The emitter typed the same arm from the lowered operand value (`operand.semantic_contract`), and the generic `==` lowering for a `string | error` operand reports `any`. The handled value was therefore an `any` Item, and `convert` has no path from an unknown Item to the bool lane.
+
+*Fix.* The emitter's handler takes the pass arm from the operand's static contract, which it already computed for the protected outcome (`mvp_mir.cpp`, `AST_NODE_HANDLER_EXPR`), so its value agrees with the lane the planner chose. A static contract is sound for the value it describes, so this only removes the disagreement.
+
+*Evidence.* `test/lambda/proc/handler_static_contract.ls` (string and length comparisons under handlers in a `pn` over element reads) agrees on interp, JIT and auto. Before the fix the same shape failed admission (`temp/mvp_repro2.ls`, `temp/mvp_repro4.ls`); after it the paint goldens pass on all three tiers and under forced GC. Gates are listed in `vibe/impl/Lambda_Impl_Paint.md`, 2026-11-12.
 

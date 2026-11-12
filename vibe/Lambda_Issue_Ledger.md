@@ -18,6 +18,31 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## MVP handler lanes and a demo refusal — 2026-11-12
+
+<a id="lr12-48"></a>
+
+**LR12-48 — FIXED:** a `pn` binding of `(string(x.f) == "a") ^ { false }` over an
+untyped read failed MVP admission ("unsupported representation conversion …
+any from 1 to 5"), so the whole module fell off the JIT. The emitter typed the
+handler's pass-through arm from the lowered operand, which had decayed to `any`,
+while the planner had already given the binding the bool lane. See
+[cause, fix and qualification](<Lambda_Issue_Ledger (fixed).md#lr12-48>).
+
+<a id="lr12-49"></a>
+
+**LR12-49 — OPEN:** on AUTO and JIT, MVP refuses the `lambda demo paint`
+presenter's `sync` (`test/demo/paint/mod_present.ls`) with "unsupported
+representation conversion in _sync_b_…: any (0) from 1 to 8" (a boxed Item of
+unknown type into a raw GC pointer); provenance is not reported ("byte 0"). The
+function stays on T0, so behaviour is correct and only speed is lost. The
+refusal is in replay logs from 2026-11-11, before M2, and with the LR12-48 fix
+reverted; it is unrelated to the paint package changes. Cause not yet
+investigated. Authority: **D8.3.1** (a refused promotion stays on T0). Repro:
+`RADIANT_DAMAGE_VERIFY=1 ./lambda.exe view test/demo/paint/paint.ls --headless
+--event-file test/ui/paint/demo.json` and grep the log for `_sync`. **Does not
+block** anything.
+
 ## Online JavaScript shape memory — 2026-11-11
 
 <a id="lr03-46"></a>

@@ -1,6 +1,7 @@
 // lambda.paint facade (Lambda_Pkg_Paint.md): painting over tiled typed-array layers.
-// Layers, round and libmypaint-model brushes, .myb import, strokes with continuations, presentation
-// and interactive sessions with undo; larger scripts import lambda.paint.<module> directly.
+// Layers in the pixel and pigment media, round, libmypaint-model and bristle brushes, .myb import,
+// strokes with continuations, presentation with impasto lighting and interactive sessions with
+// undo; larger scripts import lambda.paint.<module> directly.
 import layers: lambda.paint.layer
 import brushes: lambda.paint.brush
 import strokes: lambda.paint.stroke
@@ -8,6 +9,7 @@ import mybs: lambda.paint.myb
 import sessions: lambda.paint.session
 import paintings: lambda.paint.painting
 import surfaces: lambda.paint.surface
+import media: lambda.paint.media
 import radiant
 
 pub fn capabilities() map^ => radiant.paint_capabilities()
@@ -18,6 +20,15 @@ pub fn import_pixels(l, pixels, options = {}) map^ => layers.import_pixels(l, pi
 pub fn present(l, options = {}) array^ => layers.present(l, options)^
 pub fn pixel(l, x: int, y: int) array^ => layers.pixel(l, x, y)^
 pub fn painted_tiles(l) int^ => layers.painted_tiles(l)^
+
+// the pigment medium (PE8): a pigment {K, S} whose opaque film shows an sRGB colour, the impasto
+// light for presenting a pigment layer, and drying, which folds the wet film into the paper.
+pub fn pigment(color) map^ => media.pigment(color)^
+pub fn lighting(options = {}) map^ => media.lighting(options)^
+pub fn dried(l, options = {}) map^ => radiant.paint_dried(l, options)^.layer
+pub pn dry_layer(var l, options = {}) map^ {
+    return radiant.paint_dry(l, options)^
+}
 
 pub fn brush(options = {}) map^ => brushes.brush(options)^
 // a MyPaint .myb brush (parsed JSON): {brush, ignored}.
@@ -33,7 +44,7 @@ pub fn stroke_step(source, b, color, points, previous = null, options = {}) map^
 // procedural surfaces: a tileable paper height field for brush grain, and bitmap dab tips.
 pub fn paper(kind, options = {}) array^ => surfaces.paper(kind, options)^
 pub fn tip(kind, options = {}) array^ => surfaces.tip(kind, options)^
-pub fn dabs(b, color, points, carry = null, space = 'linear') map^ => strokes.dabs(b, color, points, carry, space)^
+pub fn dabs(b, color, points, carry = null, space = 'linear') map^ => strokes.dabs(b, color, points, carry, space, {})^
 
 pub fn adjust_brush(b, changes) map^ => brushes.adjust(b, changes)^
 
@@ -58,6 +69,11 @@ pub pn frame(var s) map^ {
     return sessions.frame(s)^
 }
 pub fn color_at(s, x: int, y: int) array^ => sessions.color_at(s, x, y)^
+// a pigment session's wet film dried into its paper, in place (PE8); later strokes glaze over it.
+pub pn dry(var s) map^ {
+    return sessions.dry(s)^
+}
+pub fn with_lighting(s, lighting) map^ => sessions.with_lighting(s, lighting)^
 pub fn in_layer(samples, box, s, pressure = null) array => sessions.in_layer(samples, box, s, pressure)
 
 // painting files (PT12): a ZIP container storing layer pixels, a preview and a thumbnail.

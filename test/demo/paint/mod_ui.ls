@@ -20,6 +20,9 @@ fn slider(id, label, low, high, value) => <label class:"slider", <span class:"ca
 fn paper_select() => <label class:"slider", <span class:"caption", "Paper">
     <select id:"paper", 'aria-label':"Paper texture", *[for (p in model.PAPERS) <option value:p.kind, p.label>]>>
 
+fn medium_select() => <label class:"slider", <span class:"caption", "Medium">
+    <select id:"medium", 'aria-label':"Canvas medium", *[for (m in model.MEDIA) <option value:m.kind, m.label>]>>
+
 fn zoom_label() => <span id:"zoom-value", class:"zoom", "100%">
 
 fn action(id, label, title) => <button type:"button", class:"action", id:"action-" ++ id, 'data-action':id, title:title, label>
@@ -41,6 +44,8 @@ pub fn tree(st) => <div id:"paint", class:"paint-app", tabindex:"-1",
         <div class:"bar",
         <div class:"group brushes", id:"brushes", 'data-items':brush_markup(st), *brush_buttons(st)>
         <div class:"group paper", paper_select()>
+        <div class:"group medium", medium_select() action("dry", "Dry", "Set the wet oil paint, so new strokes glaze over it")
+            action("light", "Light", "Show or hide the oil paint's relief under a light")>
         <div class:"group history", action("undo", "Undo", "Undo (⌘Z)") action("redo", "Redo", "Redo (⇧⌘Z)")
             action("clear", "Clear", "Clear the canvas")>
         <div class:"group view", action("zoom-out", "−", "Zoom out (-)") zoom_label()
