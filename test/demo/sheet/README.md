@@ -45,13 +45,14 @@ Function names are case-insensitive. The supported functions are:
 
 | Category | Functions |
 |---|---|
-| Aggregation and criteria | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT`, `SUMSQ`, `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MINIFS`, `MAXIFS`, `SUBTOTAL` |
+| Aggregation and criteria | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT`, `SUMSQ`, `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MINIFS`, `MAXIFS`, `SUBTOTAL`, `AGGREGATE` |
 | Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `PI`, `EXP`, `LN`, `LOG`, `LOG10`, `SIN`, `COS`, `TAN`, `ASIN`, `ACOS`, `ATAN`, `ATAN2`, `DEGREES`, `RADIANS`, `QUOTIENT`, `EVEN`, `ODD`, `MROUND`, `FACT`, `COMBIN`, `CEILING.MATH`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `SQRTPI`, `SINH`, `COSH`, `TANH`, `GCD`, `LCM` |
 | Statistics | `STDEV`, `STDEV.S`, `STDEVP`, `STDEV.P`, `VAR`, `VAR.S`, `VARP`, `VAR.P`, `LARGE`, `SMALL`, `PERCENTILE`, `PERCENTILE.INC`, `QUARTILE`, `QUARTILE.INC`, `RANK`, `RANK.EQ`, `RANK.AVG`, `PERCENTILE.EXC`, `QUARTILE.EXC`, `SLOPE`, `INTERCEPT`, `FORECAST`, `FORECAST.LINEAR`, `CORREL`, `PEARSON`, `RSQ`, `MODE`, `MODE.SNGL`, `COVAR`, `COVARIANCE.P`, `COVARIANCE.S`, `STEYX`, `GEOMEAN`, `HARMEAN` |
 | Finance | `PMT`, `PV`, `FV`, `NPER`, `NPV`, `IRR`, `XNPV`, `XIRR`, `RATE`, `SLN`, `SYD` |
 | Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE`, `TEXTJOIN`, `EXACT`, `VALUE`, `REPT`, `CLEAN`, `REPLACE`, `SUBSTITUTE`, `FIND`, `SEARCH`, `PROPER`, `TEXT`, `TEXTBEFORE`, `TEXTAFTER` |
 | Dates and times | `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND`, `NETWORKDAYS`, `NETWORKDAYS.INTL`, `WORKDAY`, `WORKDAY.INTL`, `DATEDIF`, `YEARFRAC`, `WEEKNUM`, `ISOWEEKNUM` |
-| Logic and errors | `IF`, `IFS`, `CHOOSE`, `SWITCH`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA`, `LET` |
+| Logic and errors | `IF`, `IFS`, `CHOOSE`, `SWITCH`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA`, `LET`, `LAMBDA` |
+| Dynamic arrays | `FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`, `TEXTSPLIT`, `TRANSPOSE` |
 | Lookup | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `XMATCH`, `LOOKUP`, `ROW`, `COLUMN`, `ADDRESS`, `INDIRECT`, `OFFSET` |
 
 For example, `=SUMIFS(Sales!B1:B20,Sales!A1:A20,"East")` and
@@ -76,14 +77,27 @@ decimal places, an optional `$` prefix and an optional `%` suffix. `INDIRECT`
 accepts A1-style references; `LOOKUP` supports its vector form. `LET` supports
 up to seven name/value pairs. `SUBTOTAL` excludes directly nested subtotals and
 ignores hidden rows for function numbers 101–111; filters are not implemented.
-`IRR`, `XIRR` and `RATE` use bounded numerical iteration and can return `#NUM!`
-when the calculation does not converge. External-workbook references, named and
-structured references, full-column/row references, array/spill formulas,
-custom formats, and the full Excel coercion and error rules are not supported.
-`TODAY`, `NOW`, random functions, `AGGREGATE`, Excel `LAMBDA` and dynamic-array
-functions such as `FILTER` and `UNIQUE` are not yet implemented. Invalid expressions,
-missing references, division by zero, unknown functions and
-circular dependencies produce cell errors.
+`AGGREGATE` supports reference and array forms, all 19 function numbers and
+options 0–7; error suppression within computed arrays remains limited. `IRR`,
+`XIRR` and `RATE` use bounded numerical iteration and can return `#NUM!` when
+the calculation does not converge.
+
+Array results spill into neighboring cells, recalculate across worksheets, and
+can be referenced with `A1#`. A blocked spill shows `#SPILL!`; spill children
+cannot be edited independently. Operators broadcast scalar, row, and column
+operands. `TEXTSPLIT` accepts one text delimiter per axis, including
+case-insensitive matching. Inline `LAMBDA` values can be called immediately or
+bound by `LET`; workbook- and worksheet-scoped named `LAMBDA` definitions are
+read from XLSX and retained in `.sheet.json`. Function recursion and spill
+recalculation are bounded to 64 levels or passes.
+
+This profile does not yet support general named or structured references,
+external-workbook references, full-column/row references, array constants,
+multiple `TEXTSPLIT` delimiters, `SORTBY`, all array-valued built-in functions, legacy
+array-formula expansion, custom formats, or all Excel coercion and error rules.
+`TODAY`, `NOW` and random functions are not yet implemented. Invalid expressions,
+missing references, division by zero, unknown functions and circular dependencies
+produce cell errors.
 
 Every edit recalculates the active sheet. A leading apostrophe forces a cell to
 remain text.
@@ -106,7 +120,7 @@ recalculate. Formulas use Sheet's bounded function and reference profile
 (**S12.3.4v2**, **D7.2.2**); an error or unsupported expression does not apply
 its rule. Colour scales, data bars, icon sets, theme colours and other
 differential styles remain unsupported and produce an import warning. Rules
-outside Sheet's grid are clipped with a warning. Shared and array formulas,
+outside Sheet's grid are clipped with a warning. Shared and legacy array formulas,
 charts, drawings, worksheet/workbook protection, and complete Excel
 number-format and formula fidelity remain outside this profile. Imported split
 dividers can be dragged or moved with the arrow keys and are saved in
@@ -154,13 +168,15 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_common_new_test*:*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_xlsx_layout_test*:*sheet_conditional_formula_test*:*sheet_split_panes_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_aggregate_test*:*sheet_array_functions_test*:*sheet_spill_test*:*sheet_lambda_function_test*:*sheet_dynamic_xlsx_test*:*sheet_formula_common_new_test*:*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_xlsx_layout_test*:*sheet_conditional_formula_test*:*sheet_split_panes_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_editor.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_formula_functions.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_dynamic_arrays.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_ribbon.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \

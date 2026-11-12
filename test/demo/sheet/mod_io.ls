@@ -62,6 +62,9 @@ fn valid_sheet(s) any^ => s is map and s.title is string and s.rows is int and s
     valid_dimensions(s,"column") and valid_dimensions(s,"row") and valid_layout(s)
 pub fn restore(book) map^ {
     if (book is map and book.format=="lambda-sheet" and book.version==1 and book.title is string and
+        (book.defined_names==null or (book.defined_names is array and all([for (entry in book.defined_names)
+            entry is map and entry.name is string and entry.formula is string and len(entry.formula)<=512 and
+            (entry.scope==null or (entry.scope is int and entry.scope>=0 and entry.scope<len(book.sheets)))]))) and
         book.sheets is array and len(book.sheets)>0 and len(book.sheets)<=50 and all([for (s in book.sheets) valid_sheet(s)])) book
     else raise error("Sheet: invalid workbook; expected lambda-sheet version 1")
 }
@@ -71,8 +74,10 @@ pub fn import_xlsx(path) map^ => xlsx.convert(path)^
 fn quoted(value) => "\"" ++ replace(if (value is number) (format(value,'json') ^ {string(value)}) else string(value),"\"","\"\"") ++ "\""
 pub fn csv(sheet) string^ {
     let used=[for (c in sheet.cells where c.raw!="") c]
-    let rows=if (len(used)==0) 0 else max([for (c in used) c.row])
-    let cols=if (len(used)==0) 0 else max([for (c in used) c.col]);
+    let spills=[for (key,item in (sheet.spill_ranges or {}),let at=f.position(string(key))^)
+        {row:at.row+item.rows-1,col:at.col+item.cols-1}]
+    let rows=max([0,*[for (c in used) c.row],*[for (item in spills) item.row]])
+    let cols=max([0,*[for (c in used) c.col],*[for (item in spills) item.col]]);
     // CSV currently materializes the used rectangle before writing it.
     if ((rows+1)*(cols+1)>m.MAX_MATERIALIZED_CELLS) raise error("Sheet: used range is too large to export as CSV")
     else join([for (r in 0 to rows) join([for (c in 0 to cols) quoted(f.display(sheet,r,c))],",")],"\r\n") ++ "\r\n"

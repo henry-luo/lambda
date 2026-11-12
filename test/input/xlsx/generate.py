@@ -110,3 +110,15 @@ for filename, pane in [
             info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
             info.compress_type = ZIP_DEFLATED
             archive.writestr(info, body.encode())
+
+# Dynamic-array caches and named Excel LAMBDAs in a normal XLSX package.
+dynamic_files = dict(files)
+dynamic_files['xl/workbook.xml'] = dynamic_files['xl/workbook.xml'].replace(
+    '</sheets>', '</sheets><definedNames><definedName name="DOUBLE">_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2)</definedName><definedName name="DOUBLE" localSheetId="1">_xlfn.LAMBDA(_xlpm.x,_xlpm.x*3)</definedName></definedNames>')
+dynamic_files['xl/worksheets/sales.xml'] = f'''<worksheet xmlns="{X}"><sheetData><row r="1"><c r="A1"><f t="array" ref="A1:B2">_xlfn.SEQUENCE(2,2)</f><v>1</v></c><c r="B1"><v>2</v></c><c r="D1"><f>DOUBLE(6)</f><v>12</v></c></row><row r="2"><c r="A2"><v>3</v></c><c r="B2"><v>4</v></c></row></sheetData></worksheet>'''
+dynamic_files['xl/worksheets/notes.xml'] = f'''<worksheet xmlns="{X}"><sheetData><row r="1"><c r="A1"><f>DOUBLE(6)</f><v>18</v></c></row></sheetData></worksheet>'''
+with ZipFile(HERE / 'dynamic-arrays.xlsx', 'w', ZIP_DEFLATED) as archive:
+    for name, body in dynamic_files.items():
+        info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, body.encode())

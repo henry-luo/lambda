@@ -1,7 +1,7 @@
 // Modern lookup functions use scalar return ranges; dynamic arrays are not emitted.
 import c: .mod_formula_common
 import criteria: .mod_formula_criteria
-fn is_range(value) => value is map and value.kind=="range"
+fn is_range(value) => c.is_array_value(value)
 fn vector(value) => is_range(value) and (value.rows==1 or value.cols==1)
 fn comparable(a,b) => (a is number and b is number) or (a is string and b is string) or (a is bool and b is bool)
 fn exact(key,value,mode) any^ => if (mode==2 and key is string) criteria.wildcard_exact(key,value)^ else c.equal(key,value)

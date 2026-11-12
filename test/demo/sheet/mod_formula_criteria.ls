@@ -52,7 +52,7 @@ pub fn accepts(value,rule) any^ {
     else if (op=="<") c.less(value,target)
     else if (op==">=") not c.less(value,target) else not c.greater(value,target)
 }
-fn same_shape(a,b) any^ => if (a is map and a.kind=="range" and b is map and b.kind=="range")
+fn same_shape(a,b) any^ => if (c.is_array_value(a) and c.is_array_value(b))
     a.rows==b.rows and a.cols==b.cols else len(c.range_values(a))==len(c.range_values(b))
 // A single aggregation path enforces shape and error semantics for every *IF(S) function.
 fn aggregate(values,pairs,mode) any^ {

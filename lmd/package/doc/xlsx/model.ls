@@ -181,7 +181,7 @@ fn cell(node,shared,styles,part) map^ {
         else if (typ=="n" and value!="") (float(value) ^ {raise fail("invalid-package","Invalid numeric cell",part)})
         else value;
     {*:pos,type:typ,value:result,raw_value:value,has_value:child(node,"v")!=null,formula:if (formula==null) null else xml.tree_text(formula),
-        formula_type:attr(formula,"t"),style:style(styles,attr(node,"s"))}
+        formula_type:attr(formula,"t"),formula_ref:attr(formula,"ref"),style:style(styles,attr(node,"s"))}
 }
 fn worksheet(pkg,entry,shared,styles) map^ {
     let rel=opc.by_id(pkg.relationships,xml.attr(entry,"id",R))
@@ -250,6 +250,8 @@ pub fn read(source) map^ {
         let sheets=[for (entry in entries) worksheet(pkg,entry,shared,styles)^];
         if (len(sheets)==0) raise fail("invalid-package","Workbook contains no worksheets",pkg.main)
         else {title:pkg.metadata.title or "Imported workbook",date1904:date1904,sheets:sheets,metadata:pkg.metadata,
+            defined_names:[for (name in ((children(child(book,"definedNames"),"definedName")) ^ { [] }))
+                {name:attr(name,"name"),formula:xml.tree_text(name),scope:if (attr(name,"localSheetId")==null) null else as_int(attr(name,"localSheetId"),-1)}],
             diagnostics:[for (warning in [if (child(book,"workbookProtection")!=null)
                 issue("workbook-protection",pkg.main,"Workbook structure protection is not enforced"),
                 *[for (sheet in sheets,warning in sheet.diagnostics) warning]] where warning!=null) warning]}

@@ -5,7 +5,9 @@ import f: .mod_formula
 import files: .mod_io
 
 pub pn focus(owner) { dom.request_frame(dom.get_element_by_id(dom.root_node(owner),"sheet"),"sheet_focus") }
-pub fn begin_edit(st,text=null) => {*:st,editing:true,draft:if (text==null) m.active(st).raw or "" else text}
+pub fn begin_edit(st,text=null) => if (st.cache.spill.spill_values[(f.address(st.row,st.col) ^ {null})]!=null)
+    {*:st,status:"Cannot change part of a spilled array"}
+    else {*:st,editing:true,draft:if (text==null) m.active(st).raw or "" else text}
 pub pn accept(st,owner) {
     let node=dom.get_element_by_id(dom.root_node(owner),if (st.editing) "cell-editor" else "formula-input")
     return m.set_value(st,dom.get_state(node,"value") or "")

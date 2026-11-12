@@ -1,6 +1,7 @@
 // Convert the package's semantic workbook to Sheet's bounded editable format.
 import xlsx: lambda.doc.xlsx
 import m: .mod_model
+import f: .mod_formula
 
 fn raw(cell) any^ {
     if (cell.formula!=null and cell.formula!="") "=" ++ cell.formula
@@ -28,6 +29,18 @@ fn clipped_rules(src) => [for (rule in src.conditional_rules,
     where len(ranges)>0) {*:rule,ranges:ranges}]
 fn clipped(src) => any([for (rule in src.conditional_rules, rect in rule.ranges)
     rect.bottom>=m.MAX_ROWS or rect.right>=m.MAX_COLUMNS])
+// Excel stores cached spill children as cells; supported anchors own those values.
+fn dynamic_anchor(cell) => cell.formula_type=="array" and cell.formula_ref!=null and
+    any([for (name in ["SEQUENCE(","TRANSPOSE(","FILTER(","SORT(","UNIQUE(","TEXTSPLIT("])
+        starts_with(replace(replace(upper(cell.formula or ""),"_XLFN.",""),"_XLWS.",""),name)])
+fn dynamic_range(cell) any^ {
+    let parts=split(replace(cell.formula_ref,"$",""),":")^
+    let a=f.position(parts[0])^
+    let b=f.position(if (len(parts)==1) parts[0] else parts[1])^;
+    {top:min(a.row,b.row),bottom:max(a.row,b.row),left:min(a.col,b.col),right:max(a.col,b.col)}
+}
+fn spill_cache(cell,anchors) any^ => cell.formula==null and any([for (anchor in anchors,
+    let rect=dynamic_range(anchor)^) cell.row>=rect.top and cell.row<=rect.bottom and cell.col>=rect.left and cell.col<=rect.right])
 fn sheet(src,date1904) map^ {
     let invalid=[for (cell in src.cells where cell.row>=m.MAX_ROWS or cell.col>=m.MAX_COLUMNS or len(raw(cell)^)>32767) cell];
     if (len(invalid)>0 or any([for (rect in src.merges) rect.bottom>=m.MAX_ROWS or rect.right>=m.MAX_COLUMNS]) or
@@ -45,7 +58,9 @@ fn sheet(src,date1904) map^ {
         let cols=max([20,*[for (cell in src.cells) cell.col+1],*[for (col in src.column_widths) min(m.MAX_COLUMNS,col.max+1)],
             *[for (rect in src.merges) min(m.MAX_COLUMNS,rect.right+1)],
             *[for (rule in src.conditional_rules, rect in rule.ranges) min(m.MAX_COLUMNS,rect.right+1)],if (src.frozen==null) 0 else src.frozen.cols,if (src.split==null) 0 else max(src.split.top_left.col,src.split.selection.col)+1])
-        let cells=[for (cell in src.cells) {row:cell.row,col:cell.col,raw:raw(cell)^,style:cell.style,
+        let anchors=[for (cell in src.cells where ((cell.formula_type=="array" and dynamic_anchor(cell)) ^ {false})) cell]
+        let has_anchors=len(anchors)>0
+        let cells=[for (cell in src.cells) {row:cell.row,col:cell.col,raw:if (has_anchors and spill_cache(cell,anchors)^) "" else raw(cell)^,style:cell.style,
             *:if (cell.formula!=null and cell.has_value) {cached:cell.value,has_cached:true} else {}}];
         {title:src.title,rows:rows,cols:cols,cells:cells,column_widths:column_widths,row_heights:row_heights,
             merges:src.merges,split:src.split,conditional_rules:clipped_rules(src),hidden_rows:[for (r in src.hidden_rows where r>=0 and r<rows) r],
@@ -57,7 +72,7 @@ fn sheet(src,date1904) map^ {
 pub fn convert(source) map^ {
     let result=xlsx.convert(source)^
     if (len(result.sheets)>50) raise error("Sheet: XLSX exceeds the 50 worksheet limit")
-    else {book:{format:"lambda-sheet",version:1,title:result.title,sheets:[for (src in result.sheets) sheet(src,result.date1904)^]},
+    else {book:{format:"lambda-sheet",version:1,title:result.title,defined_names:result.defined_names,sheets:[for (src in result.sheets) sheet(src,result.date1904)^]},
         diagnostics:[*result.diagnostics,*[for (src in result.sheets where clipped(src)^)
             {severity:"warning",code:"conditional-range-clipped",part:src.part,message:"Conditional formatting exceeds the Sheet grid"}]]}
 }

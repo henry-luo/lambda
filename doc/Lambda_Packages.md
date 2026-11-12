@@ -5059,11 +5059,11 @@ let workbook = xlsx.convert("budget.xlsx")^
 workbook.sheets[0].cells
 ```
 
-`convert(source)` and `load(source)` return `{title, date1904, sheets, metadata,
-diagnostics}`. Each sheet has a title, part path, sparse zero-based cells, column
+`convert(source)` and `load(source)` return `{title, date1904, sheets, defined_names,
+metadata, diagnostics}`. Defined names retain their formula and optional worksheet scope. Each sheet has a title, part path, sparse zero-based cells, column
 width ranges, row heights, merged ranges, hidden dimensions, frozen prefixes,
 split-pane geometry and selection, conditional rules and diagnostics. Cells expose their coordinates, XLSX
-type, typed value, raw value, formula and formula type, cached-value presence,
+type, typed value, raw value, formula, formula type and range, cached-value presence,
 and the supported style projection. Rich shared/inline text is flattened. The
 reader accepts ordinary non-macro XLSX workbooks and rejects invalid or missing
 package parts. Diagnostics report selected unsupported features; their absence
@@ -5078,7 +5078,9 @@ where the demo supports them. Common built-in and custom date/time formats are
 classified and displayed as ISO dates and 24-hour times using the workbook's
 1900 or 1904 calendar; this normalizes presentation rather than reproducing the
 format code. Formulas retain that workbook date system and can reference other
-sheets. Common formulas recalculate in Sheet;
+sheets. Sheet evaluates its supported dynamic-array functions, spills their
+results into the grid, and resolves inline and workbook-defined `LAMBDA` functions;
+the Sheet README specifies the bounded profile. Common formulas recalculate in Sheet;
 otherwise a saved XLSX result is shown until an edit invalidates imported caches.
 Sheet displays imported merged ranges, hidden dimensions, frozen prefixes and
 split panes with independently scrolling views. It applies formula-expression
@@ -5089,7 +5091,7 @@ formulas use the Sheet formula profile and dynamically dispatched calls
 (**S12.3.4v2**, **D7.2.2**). Rules outside Sheet's bounded grid are
 clipped with diagnostics.
 
-This is not a lossless XLSX editor. Shared/array formula expansion, charts and
+This is not a lossless XLSX editor. Shared and legacy array formula expansion, charts and
 drawings, arbitrary custom format fidelity, theme colours and many conditional
 format types are outside this profile. Diagnostics identify unsupported
 conditional rules, protected sheets and workbook structures. Sheet can move
