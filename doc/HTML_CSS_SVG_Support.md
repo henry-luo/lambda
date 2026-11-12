@@ -632,7 +632,7 @@ Retained source/sample ownership follows **D5.2.5/D5.5.1**,
 
 ## 16. Image Formats
 
-The image decoders linked into `lambda` are libpng, libjpeg-turbo, giflib and libwebp (`lib/image.c`); SVG goes through Radiant's own SVG renderer, and Lottie through ThorVG.
+Raster images use the shared image codecs (`lib/image.h`); SVG goes through Radiant's own SVG renderer, and Lottie through ThorVG.
 
 | Format | `<img>`, CSS images | Notes |
 |---|---|---|
@@ -641,7 +641,7 @@ The image decoders linked into `lambda` are libpng, libjpeg-turbo, giflib and li
 | GIF | ✅ | Animated in `lambda view`; exports show the first frame. |
 | SVG | ✅ | See [§15](#15-svg). |
 | WebP | ✅ | Shared static decoder for files and data URIs, including SVG images. Animated WebP remains unsupported. |
-| AVIF, BMP, TIFF, ICO | ❌ | Render blank. |
+| AVIF, BMP, TIFF, ICO | ✅ | Representative files render in `<img>` and CSS backgrounds; `<img>` also supports data URLs. Decoder limits apply, including no 12-bit JPEG-compressed TIFF. |
 | Lottie (`.json`, `.lottie`) | ◐ | Played in `lambda view`; a blank 300 × 300 box in `layout` and `render`. |
 | Remote `http(s)` images | *not verified* | A network path exists (`radiant/surface.cpp`). |
 
@@ -797,7 +797,6 @@ The gaps most likely to change how a real page looks, with the section that has 
 - Individual SVG transforms cover static 2D shapes/groups/local-use descendants. SVG 3D/perspective and individual-property animation, paint-server/`none` and dash-list interpolation, geometry animation and CSS effects inside isolated SVG images/use-instance trees remain outside the enhancement ([§15](#15-svg)).
 - SVG filter convolution, animated component-transfer parameters, broader SVG2 vector effects and motion/discard animation remain outside the implemented inventory. Text retains the general font shaping limits ([§15](#15-svg)).
 - Fixed-frame SVG snapshots cover the tested local/file-backed instances and local SVG image import; nested resource closure, images inside use templates and complete host inheritance remain unqualified (**D10.1.7**). Network sprites are deferred; wall-clock animation capture is outside the requirement. Linux/Windows SVG export runtime smoke remains pending ([§17](#17-output-targets)).
-- AVIF, BMP, TIFF and ICO images do not load ([§16](#16-image-formats)).
 
 **Output**
 

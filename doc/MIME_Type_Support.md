@@ -102,10 +102,10 @@ The format guide documents parser and writer limits for [markup/data](Markup_For
 | **JPEG** — `image/jpeg` | ✅ decode | ✅ encode | ✅ image view/render | ◐ painting/image API |
 | **GIF** — `image/gif` | ✅ still and animated input | ✅ GIF writer | ✅ animation playback | ◐ frame/image API |
 | **WebP** — `image/webp` | ✅ decode | ✅ encode | ◐ codec/resource route | ◐ image API |
-| **AVIF** — `image/avif` | ◐ decoder/API route | — decoder only | ◐ image resource route; HTML image loading is unsupported | — |
-| **BMP** — `image/bmp` | ✅ decode | ✅ encode | ◐ codec/API route; HTML image loading is unsupported | ◐ image API |
-| **TIFF** — `image/tiff` | ✅ decode | ✅ encode | ◐ codec/API route; HTML image loading is unsupported | ◐ image API |
-| **ICO** — `image/x-icon`, `image/vnd.microsoft.icon` | ✅ decode | ✅ encode | ◐ codec/API route; HTML image loading is unsupported | ◐ image API |
+| **AVIF** — `image/avif` | ✅ decode | — decoder only | ✅ HTML images and CSS backgrounds | — |
+| **BMP** — `image/bmp` | ✅ decode | ✅ encode | ✅ HTML images and CSS backgrounds | ◐ image API |
+| **TIFF** — `image/tiff` | ✅ decode | ✅ encode | ✅ HTML images and CSS backgrounds | ◐ image API |
+| **ICO** — `image/x-icon`, `image/vnd.microsoft.icon` | ✅ decode | ✅ encode | ✅ HTML images and CSS backgrounds | ◐ image API |
 | **Photoshop PSD** — `image/vnd.adobe.photoshop` | ✅ layer-aware input | ✅ PSD output route | ✅ view/render | ◐ layer/image API |
 | **SVG** — `image/svg+xml` | ✅ HTML5 SVG parsing | ✅ DOM SVG export | ✅ view/render | ✅ DOM editing |
 | **EPS** — `application/postscript`; `.eps`, `.epsi` | ◐ EPS render input | — no EPS writer | ✅ render/view | — |
@@ -148,9 +148,10 @@ The format guide documents parser and writer limits for [markup/data](Markup_For
 | **Matroska video** — `video/x-matroska` | ◐ native media route | — no video encoder | ◐ local HTML media on macOS; codec-dependent | — |
 | **3GPP video** — `video/3gpp` | ◐ native media route | — no video encoder | ◐ local HTML media on macOS; codec-dependent | — |
 
-The image rows describe Lambda's image codecs and file-view routes; Radiant's
-HTML image pipeline has narrower format coverage. In particular, AVIF, BMP,
-TIFF, and ICO are not supported as HTML image resources. SVG uses HTML5 SVG
+The image rows describe Lambda's image codecs and display routes. AVIF, BMP,
+TIFF, and ICO samples render as local-file and data-URL HTML images and as
+local-file CSS backgrounds. Support for particular image variants remains
+subject to the decoder's limits. SVG uses HTML5 SVG
 parsing and namespace-aware DOM export (**D10.1.5–D10.1.6**). Audio decoding
 supports PCM WAV, MP3, and FLAC portably; AAC/M4A decoding uses macOS Core
 Audio. Video playback is local and host-dependent; it is not a general media
