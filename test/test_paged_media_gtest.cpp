@@ -17308,10 +17308,20 @@ TEST_F(SecondaryViewTest, PagedFlowRestartsTheRunWidthWhereAPageChangesItsBodyWi
     }
     LayoutViewNode* nested = source_fragment(tree, inner, VIEW_FRAGMENT_BODY, true); ASSERT_NE(nested, nullptr);
     EXPECT_FLOAT_EQ(nested->rect.width, 260.0f);
-    // a box below the top level cannot change the run's width
+    // an auto-width containing chain follows a nested named page and restores the next run.
     stylesheet("@page { size: 200px 100px; margin: 20px } @page wide { size: 300px 120px; margin: 20px } "
         "p, div { margin: 0; font-size: 10px; line-height: 12px } .nested { page: wide }");
     ASSERT_TRUE(inner->set_attribute("class", "nested")); ASSERT_TRUE(wide->set_attribute("style", ""));
+    ViewTree* resumed = secondary();
+    ASSERT_EQ(layout_secondary_view(resumed, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(resumed->model->page_count, 3u);
+    nested = source_fragment(resumed, inner, VIEW_FRAGMENT_BODY, true); ASSERT_NE(nested, nullptr);
+    EXPECT_EQ(occurrence_page(nested), 2u); EXPECT_FLOAT_EQ(nested->rect.width, 260.0f);
+    LayoutViewNode* tail = source_fragment(resumed, back, VIEW_FRAGMENT_BODY, true); ASSERT_NE(tail, nullptr);
+    EXPECT_EQ(occurrence_page(tail), 3u); EXPECT_FLOAT_EQ(tail->rect.width, 160.0f);
+    expect_source_range_coverage(resumed, inner->first_child);
+    // fixed-width ancestors cannot inherit a different page measure through the run restart.
+    ASSERT_TRUE(wide->set_attribute("style", "width:80px"));
     ViewTree* rejected = secondary();
     EXPECT_EQ(layout_secondary_view(rejected, &options, &diagnostic), TYPESET_UNPLACEABLE);
     EXPECT_FALSE(rejected->model->committed);

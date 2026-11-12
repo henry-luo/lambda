@@ -41,6 +41,6 @@ let shown=(sheet,row,col) any^ => v.formatted(f.display(sheet,row,col)^,get(shee
  v.formatted(45292+86399.8/86400,{format:"datetime"})=="2024-01-02 00:00:00",
  any([for (item in protected.diagnostics) item.code=="sheet-protection"]),
  any([for (item in workbook.diagnostics) item.code=="workbook-protection"]),
- any([for (item in hidden.diagnostics) item.code=="hidden-dimensions"]),
- any([for (item in hidden.diagnostics) item.code=="frozen-panes"])
+ hidden.sheets[0].hidden_rows==[5] and hidden.sheets[0].hidden_columns==[{min:2,max:2},{min:4,max:4}],
+ hidden.sheets[0].frozen=={rows:1,cols:1}
 ]

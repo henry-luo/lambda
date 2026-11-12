@@ -43,6 +43,8 @@ pub pn command(st,id,owner) map^ {
             let imported=if (files.is_xlsx(path)^) files.import_xlsx(path)^ else null
             let book=if (imported!=null) files.restore(imported.book)^ else files.read(path)^
             let warnings=if (imported==null) 0 else len(imported.diagnostics)
+            // A replacement workbook starts at its own origin, not the previous scroll offset.
+            dom.set_scroll_state(dom.get_element_by_id(dom.root_node(owner),"grid-scroll"),0.0,0.0)
             return {*:m.select(m.initial(book)^,0,0),path:if (imported!=null) "" else path,
                 status:"Opened " ++ path ++ (if (warnings>0) " (" ++ string(warnings) ++ " import warnings)" else "")}
         }

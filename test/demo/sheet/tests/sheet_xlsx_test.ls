@@ -23,7 +23,7 @@ let back=m.activate(notes_edit,0)^;
     pkg.sheets[0].title=="Sales" and pkg.sheets[1].title=="Notes",
     pkg.sheets[0].cells[3].value=="Shared text",
     pkg.sheets[0].cells[6].formula=="SUM(B2,2)",
-    pkg.diagnostics[0].code=="formula-recalculation" and pkg.diagnostics[1].code=="merged-cells",
+    pkg.diagnostics[0].code=="formula-recalculation" and pkg.sheets[1].merges[0]=={top:0,left:0,bottom:0,right:1},
     files.read(source)^==book,
     f.display(sheet,0,2)=="00123",
     f.display(sheet,1,1)==12.5,

@@ -47,3 +47,32 @@ with ZipFile(HERE / 'number-formats.xlsx', 'w', ZIP_DEFLATED) as archive:
         info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
         info.compress_type = ZIP_DEFLATED
         archive.writestr(info, body.encode())
+
+# Worksheet layout and numeric conditional rules with two differential styles.
+layout_files = dict(files)
+layout_files['xl/styles.xml'] = f'''<styleSheet xmlns="{X}"><fonts count="1"><font><sz val="11"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><cellXfs count="1"><xf fontId="0" fillId="0" numFmtId="0"/></cellXfs><dxfs count="2"><dxf><font><color rgb="FFFF0000"/><b/></font><fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/></patternFill></fill></dxf><dxf><font><i/></font></dxf></dxfs></styleSheet>'''
+layout_files['xl/worksheets/sales.xml'] = f'''<worksheet xmlns="{X}"><sheetViews><sheetView workbookViewId="0"><pane xSplit="1" ySplit="1" topLeftCell="B2" state="frozen"/></sheetView></sheetViews><cols><col min="4" max="4" hidden="1" width="12"/></cols><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Layout title</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Group</t></is></c><c r="B2"><v>15</v></c><c r="C2" t="inlineStr"><is><t>Warning</t></is></c></row><row r="3"><c r="B3"><v>5</v></c></row><row r="4"><c r="B4"><v>20</v></c></row><row r="5" hidden="1"><c r="B5"><v>99</v></c></row></sheetData><mergeCells count="2"><mergeCell ref="A1:C1"/><mergeCell ref="A2:A3"/></mergeCells><conditionalFormatting sqref="B2:B4"><cfRule type="cellIs" dxfId="0" priority="1" operator="greaterThan" stopIfTrue="1"><formula>10</formula></cfRule><cfRule type="cellIs" dxfId="1" priority="2" operator="greaterThan"><formula>0</formula></cfRule><cfRule type="colorScale" priority="3"/></conditionalFormatting><conditionalFormatting sqref="C2:C4"><cfRule type="containsText" text="warn" dxfId="1" priority="4"/><cfRule type="containsBlanks" dxfId="0" priority="5"/></conditionalFormatting></worksheet>'''
+with ZipFile(HERE / 'layout.xlsx', 'w', ZIP_DEFLATED) as archive:
+    for name, body in layout_files.items():
+        info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, body.encode())
+
+# Full-column formatting remains usable within the Sheet grid and reports clipping.
+clipped_files = dict(layout_files)
+clipped_files['xl/worksheets/sales.xml'] = clipped_files['xl/worksheets/sales.xml'].replace('sqref="B2:B4"', 'sqref="B2:B1048576"')
+with ZipFile(HERE / 'layout-clipped.xlsx', 'w', ZIP_DEFLATED) as archive:
+    for name, body in clipped_files.items():
+        info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, body.encode())
+
+# A merged range can begin in a hidden column; the visible fragment still owns its value.
+hidden_anchor_files = dict(layout_files)
+hidden_anchor_files['xl/worksheets/sales.xml'] = hidden_anchor_files['xl/worksheets/sales.xml'].replace(
+    '<col min="4" max="4" hidden="1" width="12"/>', '<col min="1" max="1" hidden="1" width="12"/>')
+with ZipFile(HERE / 'layout-hidden-anchor.xlsx', 'w', ZIP_DEFLATED) as archive:
+    for name, body in hidden_anchor_files.items():
+        info = ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, body.encode())

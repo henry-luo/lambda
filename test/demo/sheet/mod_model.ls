@@ -52,14 +52,46 @@ pub fn resize(st,axis,index,value) map^ {
         replace_sheet(st,{*:sheet,*:map([property,sizes])},if (axis=="column") "Column width updated" else "Row height updated")
     }
 }
+// Hidden dimensions retain their logical coordinates for formulas and saved data.
+pub fn hidden(sheet,axis,index) any^ => if (axis=="row") contains(sheet.hidden_rows or [],index)
+    else any([for (span in (sheet.hidden_columns or [])) index>=span.min and index<=span.max])
+pub fn merge_at(sheet,row,col) any^ => [for (rect in (sheet.merges or []) where
+    row>=rect.top and row<=rect.bottom and col>=rect.left and col<=rect.right) rect][0]
 pub fn bounds(st) => grid.bounds(st)
 pub fn range_size(b) => (b.bottom-b.top+1)*(b.right-b.left+1)
 pub fn selected(st,row,col) => grid.selected(st,row,col)
 pub fn active(st) any^ => f.cell(indexed(st),st.row,st.col)
 pub fn select(st,row,col,extend=false) {
-    let r = max(0,min(current(st).rows-1,row))
-    let c = max(0,min(current(st).cols-1,col));
-    refresh_stats({*:st,row:r,col:c,anchor:if (extend) st.anchor else {row:r,col:c},editing:false,draft:"",status:"Ready"})
+    let sheet=current(st)
+    let wanted_row=max(0,min(sheet.rows-1,row))
+    let wanted_col=max(0,min(sheet.cols-1,col))
+    let r=next_visible(sheet,"row",wanted_row,if (wanted_row>=st.row) 1 else -1,st.row) ^ {wanted_row}
+    let c=next_visible(sheet,"column",wanted_col,if (wanted_col>=st.col) 1 else -1,st.col) ^ {wanted_col}
+    let rect=merge_at(sheet,r,c) ^ {null}
+    let target=if (rect==null) {row:r,col:c} else {row:rect.top,col:rect.left};
+    refresh_stats({*:st,row:target.row,col:target.col,anchor:if (extend) st.anchor else target,editing:false,draft:"",status:"Ready"})
+}
+// Arrow navigation skips hidden coordinates and moves beyond a merged region.
+fn next_visible(sheet,direction,index,step,fallback) any^ {
+    let count=if (direction=="row") sheet.rows else sheet.cols
+    let start=max(0,min(count-1,index));
+    if (step==0 or not hidden(sheet,direction,start)^) start else {
+        let candidates=if (step>0) [for (i in start to (count-1) where not hidden(sheet,direction,i)^) i]
+            else [for (i in 0 to start where not hidden(sheet,direction,i)^) i];
+        if (len(candidates)>0) (if (step>0) candidates[0] else candidates[len(candidates)-1])
+        else {
+            let opposite=if (step>0) [for (i in 0 to start where not hidden(sheet,direction,i)^) i]
+                else [for (i in start to (count-1) where not hidden(sheet,direction,i)^) i];
+            if (len(opposite)==0) fallback else if (step>0) opposite[len(opposite)-1] else opposite[0]
+        }
+    }
+}
+pub fn move(st,dr,dc,extend=false) any^ {
+    let sheet=current(st)
+    let rect=merge_at(sheet,st.row,st.col)^
+    let row=if (rect!=null and dr>0) rect.bottom+1 else if (rect!=null and dr<0) rect.top-1 else st.row+dr
+    let col=if (rect!=null and dc>0) rect.right+1 else if (rect!=null and dc<0) rect.left-1 else st.col+dc;
+    select(st,next_visible(sheet,"row",row,dr,st.row)^,next_visible(sheet,"column",col,dc,st.col)^,extend)
 }
 // Any edit can change a formula dependency, including a different worksheet.
 fn has_cached_results(book) => any([for (sheet in book.sheets,cell in sheet.cells) cell.has_cached==true])

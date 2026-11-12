@@ -71,10 +71,13 @@ on sheet_grid_measure(evt) {
 }
 on sheet_focus(evt) {
     if (evt.event_phase!=2) { return 'pass' }
-    let cell=node(evt.target,"cell-" ++ f.address(st.row,st.col)^)^
+    let port=node(evt.target,"grid-scroll")^
+    let direct=node(evt.target,"cell-" ++ f.address(st.row,st.col)^)^
+    // A merged anchor can be hidden while its visible fragment keeps its coordinates.
+    let cell=if (direct!=null) direct else dom.query_selector(port,
+        "td[data-row='" ++ string(st.row) ++ "'][data-col='" ++ string(st.col) ++ "']")
     if ((st.dialog=="" and cell==null)^) {
         // A virtual cell must be mounted before focus or scroll-into-view.
-        let port=node(evt.target,"grid-scroll")^
         let metrics=dom.scroll_metrics(port)
         let scroll=dom.scroll_state(port)
         let axes=window.axes(st)^
@@ -270,8 +273,8 @@ on keydown(evt) {
     if (field and id!="cell-editor" and id!="formula-input") { return 'pass' }
     if (((id=="cell-editor" or id=="formula-input") and (key=="Enter" or key=="Tab"))^) {
         st=app.accept(st,evt.target)
-        st=m.select(st,st.row+(if (key=="Enter") (if (evt.shiftKey) -1 else 1) else 0),
-            st.col+(if (key=="Tab") (if (evt.shiftKey) -1 else 1) else 0))
+        st=m.move(st,if (key=="Enter") (if (evt.shiftKey) -1 else 1) else 0,
+            if (key=="Tab") (if (evt.shiftKey) -1 else 1) else 0)^
     }
     else if (field) { return 'pass' }
     else if (primary and lower(key) in ["z","y","c","x","v","b","i","u"]) {
@@ -281,8 +284,9 @@ on keydown(evt) {
     else if ((key in ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Tab","Enter","Home","End"])^) {
         let dr=if (key=="ArrowDown" or key=="Enter") 1 else if (key=="ArrowUp") -1 else 0
         let dc=if (key=="ArrowRight" or key=="Tab") (if (key=="Tab" and evt.shiftKey) -1 else 1) else if (key=="ArrowLeft") -1 else 0
-        st=m.select(st,if (primary and key=="Home") 0 else st.row+dr,
-            if (key=="Home") 0 else if (key=="End") m.current(st).cols-1 else st.col+dc,evt.shiftKey==true and key!="Tab")
+        if ((key=="Home" or key=="End")^) { st=m.select(st,if (primary and key=="Home") 0 else st.row,
+            if (key=="Home") 0 else m.current(st).cols-1,evt.shiftKey==true) }
+        else { st=m.move(st,dr,dc,evt.shiftKey==true and key!="Tab")^ }
     }
     else if ((key=="Delete" or key=="Backspace")^) { st=m.clear(st) }
     else if ((key=="F2")^) { st=app.begin_edit(st) }

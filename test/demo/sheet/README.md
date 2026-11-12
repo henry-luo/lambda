@@ -79,30 +79,38 @@ circular dependencies produce cell errors.
 Every edit recalculates the active sheet. A leading apostrophe forces a cell to
 remain text.
 
-Open accepts `.xlsx` and editable `.sheet.json` workbooks. XLSX imports include multiple
-worksheets, values, formula source, common cell styles and dimensions. Built-in
-Excel built-in and common custom date/time formats display as ISO dates and
-24-hour times using the workbook’s 1900 or 1904 calendar. The display normalizes
-these formats; it does not reproduce every Excel format string. Open reports
-import warnings in the status bar. Unsupported formulas
-show their saved XLSX result when available; any edit invalidates all imported
-formula results, after which Sheet shows its calculation errors for formulas it
-cannot evaluate. Shared and array formulas, merged cells, drawings, many styles,
-exact custom date/time formatting and Excel formula semantics are not fully supported.
-Warnings also identify hidden dimensions, frozen panes, conditional formatting,
-and worksheet or workbook protection that Sheet does not enforce.
+Open accepts `.xlsx` and editable `.sheet.json` workbooks. XLSX imports include
+multiple worksheets, values, formulas, common styles and dimensions, merged
+ranges, hidden rows and columns, and frozen row/column prefixes. Sheet displays
+merged cells across the visible grid and skips hidden dimensions during arrow
+navigation; their data remains available to formulas. Frozen prefixes remain
+visible while scrolling. Imported metadata survives `.sheet.json` save/restore.
+
+Conditional formatting supports numeric `cellIs` comparisons with constant
+operands, including between/not-between, case-insensitive plain-text
+contains/starts/ends rules, blank and nonblank rules, and RGB font/fill
+differential styles. Rules use Excel priority and `stopIfTrue`, and update when cells recalculate.
+Formula-based rules, color scales, data bars, icon sets, theme colours and other
+differential styles remain unsupported and produce an import warning. Rules
+outside Sheet's grid are clipped with a warning. Imported split panes, shared and
+array formulas, charts, drawings, worksheet/workbook protection, and complete
+Excel number-format and formula fidelity remain outside this profile.
+
+Built-in and common custom date/time formats display as ISO dates and 24-hour
+times using the workbook’s 1900 or 1904 calendar. Open reports import warnings
+in the status bar. Unsupported formulas show their saved XLSX result when
+available; an edit invalidates imported formula results.
 
 Save writes an editable `.sheet.json` workbook, preserving the supported formulas,
-cell styles, row heights, column widths and worksheets. XLSX import does not enable
-XLSX export, and the save dialog does not overwrite an `.xlsx` file with JSON.
+cell styles, row heights, column widths, imported layout and worksheets. XLSX
+import does not enable XLSX export, and the save dialog does not overwrite an `.xlsx` file with JSON.
 Writes are atomic. Export CSV writes the active sheet’s calculated values with
 quoted fields. New, Open and Studio example offer
 Save/Discard/Cancel when the workbook has unsaved changes.
 
 This first milestone covers an editable desktop spreadsheet. CSV import,
-formula reference translation during copy/sort, charts, filters, merged cells
-and drag fill remain
-future work. Clipboard and sorting retain formula source text.
+formula reference translation during copy/sort, charts, filters, creating or
+changing merged ranges and drag fill remain future work. Clipboard and sorting retain formula source text.
 The default grid is 60 × 20; loaded workbooks support at most 100,000 rows,
 1,000 columns and 50 worksheets. The grid generates only visible rows and
 columns plus a small overscan; selection and navigation use logical cell
@@ -128,7 +136,7 @@ Verification:
 
 ```sh
 # Model and workbook/format goldens, registered in the Lambda test harness.
-./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
+./test/test_lambda_gtest.exe --gtest_filter='*sheet_formula_test*:*sheet_formula_extended_test*:*sheet_formula_more_test*:*sheet_xlsx_external_test*:*sheet_xlsx_layout_test*:*sheet_model_test*:*sheet_io_test*:*sheet_resize_test*'
 
 # Native UI workflows, discovered by the baseline UI manifest.
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
@@ -145,6 +153,8 @@ Verification:
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_xlsx.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_xlsx_external.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_xlsx_layout.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_resize.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_virtual_grid.json

@@ -35,6 +35,14 @@ fn position(text) map^ {
         else {row:row,col:col}
     }
 }
+// Worksheet ranges are stored as zero-based inclusive rectangles.
+fn rectangle(ref) map^ {
+    let parts=split(ref or "",":")^
+    let a=position(parts[0])^
+    let b=position(if (len(parts)==1) parts[0] else parts[1])^;
+    if (len(parts)>2 or a.row>b.row or a.col>b.col) raise fail("invalid-package","Invalid worksheet range " ++ (ref or ""))
+    else {top:a.row,left:a.col,bottom:b.row,right:b.col}
+}
 // Concatenate rich text runs; phonetic annotations are not displayed text.
 fn text(node) any^ => join([for (part in children(node,null))
     if (part.tag=="t") xml.tree_text(part) else if (part.tag=="r") xml.tree_text(child(part,"t")) else ""],"")
@@ -87,10 +95,10 @@ fn number_format(id,custom,date1904) any^ {
 
 fn style_context(pkg,date1904) map^ {
     let root_node=root(pkg,"styles")^;
-    if (root_node==null) {fonts:[],fills:[],xfs:[],formats:{},date1904:date1904}
+    if (root_node==null) {fonts:[],fills:[],xfs:[],dxfs:[],formats:{},date1904:date1904}
     else if (root_node.uri!=X or root_node.tag!="styleSheet") raise fail("invalid-package","Invalid styles")
     else {date1904:date1904,fonts:children(child(root_node,"fonts"),"font"),fills:children(child(root_node,"fills"),"fill"),
-        xfs:children(child(root_node,"cellXfs"),"xf"),
+        xfs:children(child(root_node,"cellXfs"),"xf"),dxfs:children(child(root_node,"dxfs"),"dxf"),
         formats:map([for (n in ((children(child(root_node,"numFmts"),"numFmt")) ^ { [] })) (attr(n,"numFmtId"),attr(n,"formatCode"))])}
 }
 fn style(ctx,id) any^ {
@@ -115,6 +123,46 @@ fn style(ctx,id) any^ {
      *:if (contains(["left","center","right"],horizontal)) {align:horizontal} else {},
      *:if (on(child(xf,"alignment")) and contains(["1","true"],lower(attr(align,"wrapText") or "0"))) {wrap:true} else {},
      *:if (format!="general") {format:format} else {}}
+}
+// Differential styles contain only properties overridden by a matching rule.
+fn differential(node) any^ {
+    let font=child(node,"font")
+    let fill=child(child(node,"fill"),"patternFill")
+    let foreground=color(child(fill,"fgColor"))
+    let font_color=color(child(font,"color"));
+    {*:if (child(font,"b")!=null) {bold:on(child(font,"b"))} else {},
+     *:if (child(font,"i")!=null) {italic:on(child(font,"i"))} else {},
+     *:if (child(font,"u")!=null) {underline:on(child(font,"u"))} else {},
+     *:if (font_color!=null) {color:font_color} else {},
+     *:if (foreground!=null) {fill:foreground} else {}}
+}
+fn condition(block,rule,styles) any^ {
+    let kind=attr(rule,"type")
+    let op=if (kind=="cellIs") attr(rule,"operator") else kind
+    let formulas=[for (formula in children(rule,"formula")) xml.tree_text(formula)]
+    let values=if (kind=="cellIs") [for (formula in formulas) float(formula) ^ {null}]
+        else if (contains(["containsText","notContainsText","beginsWith","endsWith"],kind)) [attr(rule,"text")] else []
+    let refs=[for (ref in ((split(attr(block,"sqref") or ""," ")) ^ { [] }) where ref!="") ref]
+    let style_index=as_int(attr(rule,"dxfId"),-1)
+    let dxf=if (style_index>=0 and style_index<len(styles.dxfs)) styles.dxfs[style_index] else null
+    let diff=if (dxf==null) {} else differential(dxf)^
+    let font=child(dxf,"font")
+    let fill=child(child(dxf,"fill"),"patternFill")
+    let partial=any([for (item in ((children(dxf,null)) ^ { [] })) not contains(["font","fill"],item.tag)]) or
+        any([for (item in ((children(font,null)) ^ { [] })) not contains(["b","i","u","color"],item.tag)]) or
+        (child(font,"color")!=null and color(child(font,"color"))==null) or
+        (child(dxf,"fill")!=null and (fill==null or color(child(fill,"fgColor"))==null))
+    let numeric=kind=="cellIs" and contains(["equal","notEqual","greaterThan","greaterThanOrEqual",
+        "lessThan","lessThanOrEqual","between","notBetween"],op) and
+        len(values)==(if (op=="between" or op=="notBetween") 2 else 1) and all([for (value in values) value is number])
+    let text_rule=contains(["containsText","notContainsText","beginsWith","endsWith"],kind) and values[0] is string
+    let blank_rule=contains(["containsBlanks","notContainsBlanks"],kind)
+    let supported=len(refs)>0 and (numeric or text_rule or blank_rule) and
+        style_index>=0 and style_index<len(styles.dxfs) and len(diff)>0;
+    if (not supported) null else {
+        ranges:[for (ref in refs) rectangle(ref)^],
+        operator:op,values:values,priority:as_int(attr(rule,"priority"),0),
+        stop:on_attr(rule,"stopIfTrue")^,style:diff,partial:partial}
 }
 fn cell(node,shared,styles,part) map^ {
     let pos=position(attr(node,"r"))^
@@ -141,21 +189,27 @@ fn worksheet(pkg,entry,shared,styles) map^ {
             let data=child(root_node,"sheetData")
             let rows=children(data,"row")
             let cells=[for (row in rows,node in ((children(row,"c")) ^ { [] })) cell(node,shared,styles,rel.target)^]
+            let cols=children(child(root_node,"cols"),"col")
+            let pane=child(child(child(root_node,"sheetViews"),"sheetView"),"pane")
+            let frozen=if (contains(["frozen","frozenSplit"],attr(pane,"state")))
+                {rows:as_int(attr(pane,"ySplit"),0),cols:as_int(attr(pane,"xSplit"),0)} else null
+            let merges=[for (merge in ((children(child(root_node,"mergeCells"),"mergeCell")) ^ { [] })) rectangle(attr(merge,"ref"))^]
+            let blocks=children(root_node,"conditionalFormatting")
+            let rules=[for (block in blocks, rule in ((children(block,"cfRule")) ^ { [] })) condition(block,rule,styles)^]
             let warnings=[
-                if (child(root_node,"mergeCells")!=null) issue("merged-cells",rel.target,"Merged cells are not preserved"),
                 if (child(root_node,"drawing")!=null) issue("drawing",rel.target,"Charts and drawings are not imported"),
                 if (child(root_node,"sheetProtection")!=null) issue("sheet-protection",rel.target,"Worksheet protection is not enforced"),
-                if (any([for (row in rows) on_attr(row,"hidden")^]) or
-                    any([for (col in ((children(child(root_node,"cols"),"col")) ^ { [] })) on_attr(col,"hidden")^]))
-                    issue("hidden-dimensions",rel.target,"Hidden rows and columns are displayed"),
-                if (any([for (sheet_view in ((children(child(root_node,"sheetViews"),"sheetView")) ^ { [] })) child(sheet_view,"pane")!=null]))
-                    issue("frozen-panes",rel.target,"Split and frozen panes are not preserved"),
-                if (child(root_node,"conditionalFormatting")!=null)
-                    issue("conditional-formatting",rel.target,"Conditional formatting is not displayed"),
+                if (pane!=null and frozen==null) issue("split-panes",rel.target,"Split panes are not preserved"),
+                if (any([for (rule in rules) rule==null or rule.partial==true]))
+                    issue("conditional-formatting",rel.target,"Some conditional formatting rules are not supported"),
                 if (any([for (c in cells) c.formula!=null])) issue("formula-recalculation",rel.target,"Formula evaluation depends on the consuming application"),
                 if (any([for (c in cells) c.formula_type!=null and c.formula_type!="normal"])) issue("formula-type",rel.target,"Shared and array formulas are not expanded")];
-            {title:name,part:rel.target,cells:cells,
-             column_widths:[for (col in ((children(child(root_node,"cols"),"col")) ^ { [] }))
+            {title:name,part:rel.target,cells:cells,merges:merges,frozen:frozen,
+             conditional_rules:sort([for (rule in rules where rule!=null) rule],{by:(rule)=>rule.priority}),
+             hidden_rows:[for (row in rows where on_attr(row,"hidden")^) as_int(attr(row,"r"),1)-1],
+             hidden_columns:[for (col in cols where on_attr(col,"hidden")^)
+                {min:as_int(attr(col,"min"),1)-1,max:as_int(attr(col,"max"),1)-1}],
+             column_widths:[for (col in cols)
                 {min:as_int(attr(col,"min"),1)-1,max:as_int(attr(col,"max"),1)-1,width:as_real(attr(col,"width"),0.0)}],
              row_heights:[for (row in rows where ((attr(row,"ht")!=null) ^ { false }))
                 {row:as_int(attr(row,"r"),1)-1,height:as_real(attr(row,"ht"),0.0)}],

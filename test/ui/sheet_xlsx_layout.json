@@ -1,0 +1,273 @@
+{
+  "name": "XLSX merged cells, hidden and frozen panes, and conditional styles",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 1000,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/xlsx/external/merged-formats.xlsx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cell-A1').getAttribute('colspan')==='5' && document.getElementById('cell-A2').getAttribute('rowspan')==='2'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-A2"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-cell",
+      "equals": "A4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/xlsx/external/hidden-frozen.xlsx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('cell-C1') && !document.getElementById('cell-E1') && !document.getElementById('row-6') && document.getElementById('cell-A1').textContent.includes('Cost centre')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-B2"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-cell",
+      "equals": "D2"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-cell",
+      "equals": "F2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-D5"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-cell",
+      "equals": "D7"
+    },
+    {
+      "type": "script",
+      "js": "const r=document.getElementById('cell-A1').getBoundingClientRect();window.frozenTop=r.top;window.frozenLeft=r.left"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('grid-scroll');p.scrollTop=500;p.scrollLeft=700;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cell-A1')!==null && document.getElementById('cell-A1').style.position==='sticky'"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const p=document.getElementById('grid-scroll'),r=document.getElementById('cell-A1').getBoundingClientRect();return p.scrollTop>0 && p.scrollLeft>0 && Math.abs(r.top-window.frozenTop)<2 && Math.abs(r.left-window.frozenLeft)<2})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/xlsx/layout.xlsx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cell-B2').getAttribute('style').includes('background-color:#ffff00') && document.getElementById('cell-B2').getAttribute('style').includes('font-weight:700')"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cell-B3').getAttribute('style').includes('font-style:italic') && !document.getElementById('cell-B2').getAttribute('style').includes('font-style:italic')"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cell-C2').getAttribute('style').includes('font-style:italic') && document.getElementById('cell-C3').getAttribute('style').includes('background-color:#ffff00')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-B2"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "5",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cell-B2').getAttribute('style').includes('font-style:italic') && !document.getElementById('cell-B2').getAttribute('style').includes('background-color:#ffff00')"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cell-A1').textContent.includes('Layout title') && !document.getElementById('cell-B1').textContent.includes('Layout title')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-discard"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/xlsx/layout-hidden-anchor.xlsx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-B1"
+      },
+      "contains": "Layout title"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-B1"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "Changed title",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-B1"
+      },
+      "contains": "Changed title"
+    }
+  ]
+}

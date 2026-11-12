@@ -48,9 +48,12 @@ An excluded Excelize calculation-chain candidate had a case-mismatched internal
 relationship. A generated malformed fixture checks that the package rejects
 such broken OPC references, whose part names are case-sensitive.
 
-Sheet normalizes common date and time formats. Merged cells, charts and drawings,
-hidden rows/columns, frozen panes, conditional formatting, and protection are
-not fully represented or enforced; the importer reports these selected gaps.
+Sheet normalizes common date and time formats and displays imported merges,
+hidden dimensions and frozen prefixes. Conditional formatting covers numeric
+cell comparisons with constant operands, text and blank rules, and RGB
+font/fill styles. Charts,
+drawings, protection, split panes and other conditional rule types remain
+unsupported; the importer reports these selected gaps.
 Other unsupported features may lack diagnostics. Formula results use the
 supported Sheet evaluator or a saved cached value where applicable.
 

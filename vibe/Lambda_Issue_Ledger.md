@@ -18,6 +18,25 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## PDF roundtrip discovery includes an archive sentinel — 2026-11-12
+
+<a id="lr12-50"></a>
+
+**LR12-50 — OPEN:** `PdfOutputRoundtrip.LoadAndWriteAllPages` recursively admits
+`test/lambda/archive/site/docs/tide-table.pdf`, but that file is an intentional
+archive/media test sentinel, not a renderable PDF. Its generator
+`test/lambda/archive/site/make_media.py:218` writes the literal comment
+`fixture: a file, not rendered` and filler bytes. The independent reference
+reader returns zero pages before Lambda rendering begins. Preserve this archive
+fixture and the rejection coverage for actual malformed PDF input; the discovery
+contract needs an owner-side distinction between render corpora and test doubles.
+Ownership: **D9.1.1v4 / D9.1.3v2**. This does not block native fragmentation,
+but it blocks a fully passing PDF/P7 aggregate. The same failure reproduces with
+the original `340ad59` pagination object, with all other objects and flags held
+constant. Evidence: `temp/paged-p7-integration/pdf.log`, `pdf-control.xml`,
+`pdf-summary.json` and `control/receipt.json`. No fixture, baseline or tolerance
+was changed for qualification.
+
 ## MVP handler lanes and a demo refusal — 2026-11-12
 
 <a id="lr12-48"></a>
