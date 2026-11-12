@@ -1,0 +1,56 @@
+[{
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }]
+{
+  issue: null,
+  html: "<article class=\"latex-document latex-article\" lang=\"en\"><p>A<span class=\"latex-rule\" style=\"display:inline-block;width:0.996264pt;height:1.99253pt;vertical-align:0;background-color:currentColor\"></span>!B</p></article>"
+}

@@ -1,0 +1,121 @@
+[{
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    messages_empty: true
+  }]
+{
+  issue: null,
+  reconstruct_issue: null,
+  matches: true,
+  diagnostics_match: true
+}
+[{
+    issue: "tex-unsupported-primitive",
+    unsupported: "verb unterminated"
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "verb delimiter"
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "verb non-direct source"
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "lstinline"
+  }]
+{
+  issue: "latex-digest-unsupported",
+  unsupported: "raw inline source mapping"
+}
+[0, 1]

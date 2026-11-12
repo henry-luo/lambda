@@ -1,0 +1,3 @@
+# stream-reading fixtures require exact line endings and trailing spaces.
+script_stream_data.dat -text whitespace=-blank-at-eol,cr-at-eol
+script_stream_tokens.dat -text whitespace=-blank-at-eol,cr-at-eol

@@ -1,7 +1,7 @@
 // Token input levels and undelimited TeX argument scanning.
 import reader: .reader
 
-pub fn from_reader(r) => {reader: r, levels: [], everyeof: [], last_main_offset: 0}
+pub fn from_reader(r) => {reader: r, root_eof: false, levels: [], everyeof: [], last_main_offset: 0}
 
 pub fn push(stream, tokens) => if (len(tokens) == 0) stream
     else {*:stream, levels: [*stream.levels, {tokens: tokens, index: 0}]}
@@ -14,8 +14,22 @@ fn active_index(levels, index) any^ => if (index < 0) -1
 
 pub fn active_reader(stream) any^ {
     let index = active_index(stream.levels, len(stream.levels) - 1)^;
-    if (index < 0) stream.reader else stream.levels[index].reader
+    if (index < 0) if (stream.root_eof == true) null else stream.reader else stream.levels[index].reader
 }
+
+// raw capture requires the current source reader with no tokens ahead of it.
+pub fn raw_reader(stream, token) any^ {
+    let index = active_index(stream.levels, len(stream.levels) - 1)^;
+    let pending = any([for (i, level in stream.levels where i > index)
+        level.reader == null and level.index < len(level.tokens)]);
+    let source = if (index < 0) stream.reader else stream.levels[index].reader;
+    if ((index < 0 and stream.root_eof == true) or pending or token.direct != true or source.file_id != token.file) null
+    else {index: index, reader: source}
+}
+
+pub fn replace_reader(stream, index, source) any^ => if (index < 0) {*:stream, reader: source}
+    else {*:stream, levels: [for (i, level in stream.levels)
+        if (i == index) {*:level, reader: source} else level]}
 
 pub fn end_input(stream) any^ {
     let index = active_index(stream.levels, len(stream.levels) - 1)^;
@@ -32,23 +46,31 @@ pub fn configure(stream, catcodes, endline) => {*:stream,
 fn trace_read(stream, token) any^ {
     let trace = stream.trace;
     if (trace == null or trace.valid != true or token == null) {stream: stream, token: token}
+    // generated tokens already have their originating source reads in the trace.
+    else if (token.trace_internal == true) {stream: stream, token: token}
     else if (token.direct != true or token.file != trace.file or token.seq == null)
         {stream: {*:stream, trace: {*:trace, foreign: true}}, token: token}
     else {
         let slot = string(token.seq % 64);
         let next = {*:trace, low: if (token.seq < trace.low) token.seq else trace.low,
             high: if (token.seq > trace.high) token.seq else trace.high,
-            recent: {*:trace.recent, *:map([slot, {seq: token.seq, end: token.end}])}};
+            recent: {*:trace.recent, *:map([slot, {seq: token.seq, end: token.end}])},
+            captured: if (trace.capture) {*:trace.captured, *:map([string(token.seq), token])} else null};
         {stream: {*:stream, trace: next}, token: token}
     }
 }
 
+// macro-backed script primitives can expand tokens without pushing their bodies.
+pub fn note_foreign_expansion(stream) any^ => if (stream.trace == null) stream
+    else {*:stream, trace: {*:stream.trace, foreign: true}}
+
 // trace only the reads of the current command; pushed tokens keep their sequence.
-pub fn begin_trace(stream, token, main_file) any^ {
+pub fn begin_trace(stream, token, main_file, capture = false) any^ {
     if (stream.trace != null or token == null or token.direct != true or token.file != main_file or token.seq == null)
         {*:stream, trace: {valid: false}}
     else {*:stream, trace: {valid: true, file: main_file, start: token.start, first: token.seq,
-        low: token.seq, high: token.seq, foreign: false,
+        low: token.seq, high: token.seq, foreign: false, capture: capture,
+        captured: if (capture) map([string(token.seq), token]) else null,
         recent: map([string(token.seq % 64), {seq: token.seq, end: token.end}])}}
 }
 
@@ -69,6 +91,16 @@ fn limit_levels(levels, index, limit, main_file, root) any^ {
         limit_tokens(levels[index].tokens, levels[index].index, limit, main_file)^, main_file, root)
 }
 
+// retain the full token sequence separately from the bounded trace ring.
+fn captured_tokens(trace, index, limit_value, out = []) any^ {
+    if (index > limit_value) out
+    else {
+        let token = trace.captured[string(index)];
+        if (token == null) null
+        else captured_tokens(trace, index + 1, limit_value, [*out, token])
+    }
+}
+
 pub fn end_trace(stream) any^ {
     let trace = stream.trace;
     let cleared = {*:stream, trace: null};
@@ -79,7 +111,8 @@ pub fn end_trace(stream) any^ {
         if (trace.foreign or trace.low < trace.first or not remaining.valid or remaining.limit < trace.first or
             end == null or end.seq != remaining.limit) {stream: cleared, valid: false}
         else {stream: cleared, valid: true, file: trace.file, start: trace.start, end: end.end,
-            first_seq: trace.first, last_seq: end.seq}
+            first_seq: trace.first, last_seq: end.seq,
+            tokens: if (trace.capture) captured_tokens(trace, trace.first, end.seq)^ else null}
     }
 }
 
@@ -92,7 +125,9 @@ pub fn next(stream) any^ {
     let depth = len(stream.levels);
     if (depth == 0) {
         let result = reader.next(stream.reader);
-        let updated = {*:stream, reader: if (result.reader == null) stream.reader else result.reader};
+        // preserve the root reader for source data, while recording that it is exhausted.
+        let updated = {*:stream, reader: if (result.reader == null) stream.reader else result.reader,
+            root_eof: result.reader == null};
         trace_read(record_main_read(updated, result.token)^, result.token)
     } else {
         let top = stream.levels[depth - 1];

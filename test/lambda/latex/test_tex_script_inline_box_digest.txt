@@ -1,0 +1,44 @@
+[{
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }, {
+    issue: null,
+    matches: true
+  }]
+{
+  issue: null,
+  html: "<article class=\"latex-document latex-article\" lang=\"en\"><p>A<span class=\"latex-mbox\" style=\"white-space:nowrap\">Hi</span>BThereC</p></article>"
+}

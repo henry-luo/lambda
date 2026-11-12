@@ -29,7 +29,7 @@ pub fn reader(source, file_id = 0) => {source: source, file_id: file_id, next_li
     next_byte: 0, line_byte: 0, position_byte: 0,
     state: "new", endline: 13, catcodes: {}, origin: "local", end_input: false, seq: 0, line_no: 0}
 
-fn load_line(r) any^ {
+pub fn load_line(r) any^ {
     if ((r.end_input and r.loaded) or r.next_line >= len(r.source)) null
     else {
         let end = line_end(r.source, r.next_line);
@@ -40,6 +40,29 @@ fn load_line(r) any^ {
             line_byte: r.next_byte, position_byte: 0,
             next_byte: r.next_byte + byte_count(r.source, r.next_line, next),
             next_line: next, loaded: true, eol_done: false, state: "new", line_no: r.line_no + 1}
+    }
+}
+
+// raw verbatim delimiters are scanned before category-code tokenization.
+fn verb_close(line, delimiter, position) any^ {
+    if (position >= len(line)) null
+    else if (ch(line, position)^ == delimiter) position
+    else verb_close(line, delimiter, position + 1)
+}
+
+pub fn verb_line(r) any^ {
+    let at = if (ch(r.line, r.position)^ == "*") r.position + 1 else r.position;
+    let delimiter = ch(r.line, at)^;
+    if (delimiter == "" or ord(delimiter) >= 128) {issue: "verb delimiter", reader: r}
+    else {
+        let close = verb_close(r.line, delimiter, at + 1)^;
+        if (close == null) {issue: "verb unterminated", reader: r}
+        else {
+            let after = close + 1;
+            let bytes = r.position_byte + byte_count(r.line, r.position, after)^;
+            {issue: null, end: r.line_byte + bytes,
+                reader: {*:r, position: after, position_byte: bytes, state: "mid", eol_done: false}}
+        }
     }
 }
 

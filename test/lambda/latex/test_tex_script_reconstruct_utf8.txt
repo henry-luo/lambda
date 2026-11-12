@@ -1,0 +1,7 @@
+{
+  issue: null,
+  text: "x"
+}
+{
+  issue: "tex-reconstruct-missing-origin"
+}

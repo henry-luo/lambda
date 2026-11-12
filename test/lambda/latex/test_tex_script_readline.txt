@@ -1,0 +1,37 @@
+[{
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    ast_safe: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    ast_safe: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    ast_safe: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    ast_safe: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    ast_safe: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    matches: true,
+    diagnostics_match: true,
+    ast_safe: true
+  }]

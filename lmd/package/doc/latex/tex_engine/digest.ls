@@ -187,16 +187,132 @@ fn math_content(items, index = 0, out = [], run = []) any^ {
 fn math_nonspace(tokens, index) any^ => if (index < len(tokens) and tokens[index].kind == "char" and tokens[index].cat == 10)
     math_nonspace(tokens, index + 1) else index
 
+// match delimiter pairs only at the current brace and left/right nesting level.
+fn math_delimiter_boundary(tokens, index, nested = 0, braces = 0) any^ {
+    if (index >= len(tokens)) {index: index, kind: "end"}
+    else {
+        let token = tokens[index];
+        if (braces == 0 and control(token, "right") and nested == 0) {index: index, kind: "right"}
+        else if (braces == 0 and control(token, "middle") and nested == 0) {index: index, kind: "middle"}
+        else {
+            let next_braces = braces + if (opening(token)) 1 else if (closing(token)) -1 else 0;
+            let next_nested = if (braces != 0) nested else if (control(token, "left")) nested + 1
+                else if (control(token, "right")) nested - 1 else nested;
+            math_delimiter_boundary(tokens, index + 1, next_nested, next_braces)
+        }
+    }
+}
+fn math_delimiter_token(tokens, index, middle = false, right_side = false) any^ {
+    let at = math_nonspace(tokens, index)^;
+    if (at >= len(tokens)) if (middle) unsupported(at, "math delimiter")
+        else {issue: null, index: at, value: "."}
+    else if (right_side and opening(tokens[at])) {
+        let group = read_group(tokens, at)^;
+        if (group.issue != null) group
+        else if (len(group.tokens) == 0 and tokens[at].end == tokens[group.end - 1].start)
+            {issue: null, index: group.end, value: ""}
+        else {
+            let inner_at = math_nonspace(group.tokens, 0)^;
+            let comments = any([for (token in group.tokens) token.kind == "source-comment"]);
+            if (comments or inner_at + 1 != len(group.tokens) or
+                group.tokens[inner_at].end != tokens[group.end - 1].start) unsupported(at, "braced math delimiter")
+            else {
+                let inner = math_delimiter_token(group.tokens, inner_at)^;
+                if (inner.issue != null) inner else {issue: null, index: group.end, value: inner.value}
+            }
+        }
+    }
+    else {
+        let token = tokens[at];
+        let char_ok = token.kind == "char" and not opening(token) and not closing(token) and
+            len(token.value) == 1 and ord(token.value) < 128;
+        let control_ok = token.kind == "control" and (not middle or contains(["{", "}", "|", "vert", "Vert",
+            "lvert", "rvert", "lVert", "rVert", "langle", "rangle", "lbrace", "rbrace", "lceil", "rceil",
+            "lfloor", "rfloor", "uparrow", "downarrow", "updownarrow", "Uparrow", "Downarrow", "Updownarrow",
+            "backslash", "arrowvert", "Arrowvert", "bracevert", "lmoustache", "rmoustache", "lgroup", "rgroup",
+            "lbrack", "rbrack", "lparen", "rparen"], token.value));
+        if (char_ok and (not middle or contains(["(", ")", "[", "]", "|", "<", ">", "/", "."], token.value)))
+            {issue: null, index: at + 1, value: token.value}
+        else if (control_ok) {issue: null, index: at + 1, value: "\\" ++ token.value}
+        else unsupported(at, "math delimiter")
+    }
+}
+fn math_delimiter_body(tokens, index, items = []) any^ {
+    let boundary = math_delimiter_boundary(tokens, index)^;
+    let section = math_atoms(slice(tokens, index, boundary.index)^)^;
+    if (section.issue != null) section
+    else {
+        let combined = [*items, *section.items];
+        if (boundary.kind == "end") {issue: null, index: boundary.index, right: ".", items: combined}
+        else {
+            let delimiter = math_delimiter_token(tokens, boundary.index + 1, boundary.kind == "middle", boundary.kind == "right")^;
+            if (delimiter.issue != null) delimiter
+            else if (boundary.kind == "right")
+                {issue: null, index: delimiter.index, right: delimiter.value, items: combined}
+            else math_delimiter_body(tokens, delimiter.index, [*combined, <middle_delim delim: delimiter.value>])
+        }
+    }
+}
+fn math_delimiter_group(tokens, index) any^ {
+    let left = math_delimiter_token(tokens, index + 1)^;
+    if (left.issue != null) left
+    else {
+        let body = math_delimiter_body(tokens, left.index)^;
+        if (body.issue != null) body
+        else {issue: null, index: body.index,
+            value: <delimiter_group left: left.value, right: body.right, *math_content(body.items)^>}
+    }
+}
+
+// command arguments use the same atom and group rules as scripts.
+fn math_arguments(tokens, index, count, items = []) any^ {
+    if (count == 0) {issue: null, index: index, items: items}
+    else {
+        let arg = math_script_arg(tokens, index)^;
+        if (arg.issue != null) arg
+        else math_arguments(tokens, arg.index, count - 1, [*items, arg.value])
+    }
+}
+
 fn math_command(tokens, index) any^ {
     let name = tokens[index].value;
     if (contains(["frac", "dfrac", "tfrac"], name)) {
-        let numer = math_script_arg(tokens, index + 1)^;
-        if (numer.issue != null) numer
+        let args = math_arguments(tokens, index + 1, 2)^;
+        if (args.issue != null) args
+        else {issue: null, index: args.index,
+            value: <fraction cmd: "\\" ++ name, numer: args.items[0], denom: args.items[1]>}
+    }
+    // atom class commands retain their body and spacing class in the math AST.
+    else if (contains(["mathord", "mathop", "mathbin", "mathrel", "mathopen", "mathclose", "mathpunct", "mathinner"], name)) {
+        let body = math_script_arg(tokens, index + 1)^;
+        if (body.issue != null) body
         else {
-            let denom = math_script_arg(tokens, numer.index)^;
-            if (denom.issue != null) denom
-            else {issue: null, index: denom.index,
-                value: <fraction cmd: "\\" ++ name, numer: numer.value, denom: denom.value>}
+            let node = if (name == "mathop") <mathop body: body.value>
+                else <math_atom cmd: "\\" ++ name, atom: "m" ++ slice(name, 4, len(name))^, body: body.value>;
+            {issue: null, index: body.index, value: node}
+        }
+    }
+    else if (name == "mathchoice") {
+        let args = math_arguments(tokens, index + 1, 4)^;
+        if (args.issue != null) args
+        else {issue: null, index: args.index, value: <mathchoice display: args.items[0], text: args.items[1],
+            script: args.items[2], scriptscript: args.items[3]>}
+    }
+    else if (name == "left") math_delimiter_group(tokens, index)
+    // style declarations change following math without consuming an argument.
+    else if (contains(["displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle"], name))
+        {issue: null, index: index + 1, value: <style_command cmd: "\\" ++ name>}
+    else if (name == "operatorname") {
+        let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+        let star = next != null and next.kind == "char" and next.value == "*";
+        let adjacent = star and next.direct == true and tokens[index].direct == true and
+            next.file == tokens[index].file and next.start == tokens[index].end;
+        if (star and not adjacent) unsupported(index, "operatorname star source mapping")
+        else {
+            let arg = math_script_arg(tokens, index + if (star) 2 else 1)^;
+            if (arg.issue != null) arg
+            else {issue: null, index: arg.index,
+                value: <style_command cmd: "\\operatorname", *:if (star) {limits: true} else {}, arg: arg.value>}
         }
     }
     else if (contains(["mathrm", "mathbf", "boldsymbol", "mathit", "mathsf", "mathsfit",
@@ -284,6 +400,15 @@ fn math_atoms(tokens, index = 0, items = []) any^ {
     else {
         let token = tokens[index];
         if (token.kind == "char" and token.cat == 10) math_atoms(tokens, index + 1, items)
+        // a braced group is an atom and can itself carry scripts.
+        else if (opening(token)) {
+            let group = math_script_arg(tokens, index)^;
+            if (group.issue != null) group
+            else {
+                let scripted = math_scripts(tokens, group.index, group.value)^;
+                if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
+            }
+        }
         else if (math_letter(token) or math_digit(token)) {
             let numeric = if (math_digit(token)) math_number(tokens, index)^ else {index: index + 1, text: token.value};
             let scripted = math_scripts(tokens, numeric.index, numeric.text)^;
@@ -296,6 +421,11 @@ fn math_atoms(tokens, index = 0, items = []) any^ {
                 let scripted = math_scripts(tokens, atom.index, atom.value)^;
                 if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
             }
+        }
+        // ordinary delimiters are punctuation atoms and can carry scripts.
+        else if (token.kind == "char" and contains(["(", ")", "[", "]", ",", ":", "|"], token.value)) {
+            let scripted = math_scripts(tokens, index + 1, <punctuation value: token.value>)^;
+            if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
         }
         else if (token.kind == "char" and contains(["+", "-", "*", "/"], token.value))
             math_atoms(tokens, index + 1, [*items, <operator value: token.value>])
@@ -596,6 +726,142 @@ fn generic_arguments(tokens, sources, index, previous_end, source_file, groups =
     }
 }
 
+fn accent_next(tokens, index) any^ =>
+    if (index < len(tokens) and tokens[index].kind == "char" and tokens[index].cat == 10)
+        accent_next(tokens, index + 1) else index
+
+fn accent_gap_safe(tokens, sources, index) any^ {
+    let token = tokens[index];
+    let next_index = accent_next(tokens, index + 1)^;
+    if (token.direct != true) true
+    else if (next_index >= len(tokens)) false
+    else {
+        let next = tokens[next_index];
+        if (next.direct != true or next.file != token.file or next.start < token.end) false
+        else {
+            let gap = source_span({direct: true, file: token.file, start: token.end, end: next.start}, sources)^;
+            gap != null and (gap == "" or (trim(gap) ^ { null }) == "")
+        }
+    }
+}
+
+fn accent_name(name) => contains(["'", "`", "^", "\"", "~", "=", ".", "u", "v", "H", "c", "d", "b", "t", "k"], name)
+fn accent_node(tokens, sources, index) any^ {
+    let token = tokens[index];
+    let offset = if (token.emit_origin != null) token.emit_origin
+        else if (token.read_offset != null) token.read_offset
+        else if (token.direct == true) token.start else null;
+    let arg = accent_argument(tokens, sources, index + 1)^;
+    if (offset == null) unsupported(index, "accent source mapping")
+    else if (not accent_gap_safe(tokens, sources, index)^) unsupported(index, "accent source gap")
+    else if (arg.issue != null) arg
+    else {index: arg.index, node: <accent command: token.value, source_offset: offset, *arg.items>, issue: null}
+}
+
+fn accent_argument(tokens, sources, index) any^ {
+    if (index >= len(tokens)) unsupported(index, "accent argument")
+    else if (tokens[index].kind == "char" and tokens[index].cat == 10)
+        accent_argument(tokens, sources, index + 1)
+    else if (opening(tokens[index])) {
+        let group = read_group(tokens, index)^;
+        if (group.issue != null) group
+        else if (any([for (t in group.tokens) t.emit_origin != null and t.kind == "char" and t.cat == 12 and
+            contains(["\\", "{", "}", "$", "&", "#", "^", "_", "%", "~"], t.value)]))
+            unsupported(index, "accent emitted syntax")
+        else {
+            let children = inline(group.tokens, sources, 0, "", [], false)^;
+            if (children.issue != null) children
+            else if (children.index != len(group.tokens)) unsupported(index, "accent group")
+            else {index: group.end, items: [<curly_group *children.items>], issue: null}
+        }
+    }
+    else if (tokens[index].kind == "char" and not closing(tokens[index]))
+        {index: index + 1, items: [tokens[index].value], issue: null}
+    else if (tokens[index].kind == "control" and accent_name(tokens[index].value)) {
+        let nested = accent_node(tokens, sources, index)^;
+        if (nested.issue != null) nested else {index: nested.index, items: [nested.node], issue: null}
+    }
+    else unsupported(index, "accent argument")
+}
+
+fn rule_span_needs_reparse(token, sources) any^ {
+    let span = token.echo_span;
+    let raw = source_span({direct: true, file: span.file, start: span.start, end: span.end}, sources)^;
+    raw == null or index_of(raw, "%") != null
+}
+
+// generated rules have two fully synthetic arguments sharing one source origin.
+fn generated_rule_arg(group, origin) any^ {
+    let tokens = group.tokens;
+    let same_origin = all([for (token in tokens) token.emit_origin == origin]);
+    if (not same_origin) {issue: "latex-digest-unsupported", unsupported: "rule argument source"}
+    else if (len(tokens) == 1 and control(tokens[0], "linewidth"))
+        {issue: null, raw: "\\linewidth", items: [<linewidth source_offset: origin, argument_groups: []>]}
+    else if (all([for (token in tokens) token.kind == "char" and token.cat == 12])) {
+        let text = join([for (token in tokens) token.value], "");
+        {issue: null, raw: text, items: if (text == "") [<curly_group>] else [text]}
+    }
+    else {issue: "latex-digest-unsupported", unsupported: "rule argument"}
+}
+fn generated_rule(tokens, index) any^ {
+    let origin = tokens[index].emit_origin;
+    let first = read_group(tokens, index + 1)^;
+    if (first.issue != null) first
+    else {
+        let second = read_group(tokens, first.end)^;
+        if (second.issue != null) second
+        else {
+            let width = generated_rule_arg(first, origin)^;
+            let height = generated_rule_arg(second, origin)^;
+            if (width.issue != null) width
+            else if (height.issue != null) height
+            else {
+                let groups = [{kind: "required", raw: width.raw, start: origin, end: origin},
+                    {kind: "required", raw: height.raw, start: origin, end: origin}];
+                let content = pack_arguments([*width.items, *height.items])^;
+                {issue: null, index: second.end, node: <rule source_offset: origin, argument_groups: groups, *content>}
+            }
+        }
+    }
+}
+
+fn box_span_needs_reparse(tokens, sources, index, group) any^ {
+    let opening = tokens[index];
+    let closing = tokens[group.end - 1];
+    let raw = if (opening.emit_file == closing.emit_file and closing.box_close == true)
+        source_span({direct: true, file: opening.emit_file, start: opening.emit_origin, end: closing.emit_origin}, sources)^
+        else null;
+    raw == null or index_of(raw, "%") != null or any([for (t in group.tokens)
+        (t.emit_origin != null or t.direct == true) and t.kind == "char" and t.cat == 12 and
+        contains(["\\", "{", "}", "$", "&", "#", "^", "_", "%", "~"], t.value)])
+}
+fn generated_mbox(tokens, sources, index) any^ {
+    let origin = tokens[index].emit_origin;
+    let group = read_group(tokens, index + 1)^;
+    if (group.issue != null) group
+    else {
+        let opening = tokens[index + 1];
+        let closing = tokens[group.end - 1];
+        let next = if (group.end < len(tokens)) tokens[group.end] else null;
+        let safe = opening.box_open == true and closing.box_close == true and
+            opening.emit_origin == origin and opening.emit_file == closing.emit_file and
+            next != null and next.direct == true and next.file == opening.emit_file and
+            next.start == closing.emit_origin + 1 and
+            all([for (t in group.tokens) t.kind == "char" and t.direct == true and t.file == opening.emit_file and
+                contains([10, 11, 12], t.cat) and
+                not contains(["\\", "{", "}", "$", "&", "#", "^", "_", "%", "~"], t.value)]);
+        let raw = if (safe) source_span({direct: true, file: opening.emit_file,
+            start: origin + 1, end: closing.emit_origin}, sources)^ else null;
+        let text = join([for (t in group.tokens) t.value], "");
+        if (not safe or raw == null or raw != text) unsupported(index, "box source mapping")
+        else {
+            let groups = [{kind: "required", raw: raw, start: origin, end: next.start}];
+            let children = if (text == "") [<curly_group>] else [text];
+            {issue: null, index: group.end, node: <mbox source_offset: origin, argument_groups: groups, *children>}
+        }
+    }
+}
+
 fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true) any^ {
     if (index >= len(tokens)) {index: index, items: append_text(items, text), issue: null}
     else {
@@ -604,6 +870,11 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true)
             {index: index, items: append_text(items, text), issue: null}
         else if (control(token, "par"))
             inline(tokens, sources, index + 1, "", [*append_text(items, text), 'parbreak'], stop_blocks)
+        // native inline parsing consumes the end command but leaves its argument.
+        else if (control(token, "end")) {
+            let gap = control_gap(tokens, sources, index)^;
+            inline(tokens, sources, index + 1, text ++ gap.text, items, stop_blocks)
+        }
         else if (token.kind == "source-span") {
             let definition = definition_span(token, sources)^;
             if (definition.issue != null) definition
@@ -617,6 +888,8 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true)
         else if (opening(token)) {
             let group = read_group(tokens, index)^;
             if (group.issue != null) group
+            else if (token.box_open == true and box_span_needs_reparse(tokens, sources, index, group)^)
+                unsupported(index, "box source gap")
             else {
                 let children = inline(group.tokens, sources, 0, "", [], false)^;
                 if (children.issue != null) children
@@ -678,6 +951,24 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true)
                 else if (token.value == ";") ';' else if (token.value == ":") ':' else '!';
             if (gap == null) unsupported(index, "spacing command source gap")
             else inline(tokens, sources, index + 1, gap, [*append_text(items, text), value], stop_blocks)
+        }
+        else if (token.kind == "control" and accent_name(token.value)) {
+            let accent = accent_node(tokens, sources, index)^;
+            if (accent.issue != null) accent
+            else inline(tokens, sources, accent.index, "", [*append_text(items, text), accent.node], stop_blocks)
+        }
+        else if (token.kind == "control" and contains(["hrule", "vrule"], token.value) and token.echo_span != null and
+            rule_span_needs_reparse(token, sources)^)
+            unsupported(index, "rule comment source gap")
+        else if (control(token, "rule") and token.emit_origin != null) {
+            let rule = generated_rule(tokens, index)^;
+            if (rule.issue != null) rule
+            else inline(tokens, sources, rule.index, "", [*append_text(items, text), rule.node], stop_blocks)
+        }
+        else if (control(token, "mbox") and token.emit_origin != null) {
+            let box = generated_mbox(tokens, sources, index)^;
+            if (box.issue != null) box
+            else inline(tokens, sources, box.index, "", [*append_text(items, text), box.node], stop_blocks)
         }
         else if (token.kind == "control" and special_command(token.value))
             unsupported(index, token.value)
@@ -863,6 +1154,55 @@ fn blocks(tokens, sources, index = 0, nodes = [], environment = null) any^ {
 
 pub fn digest(expanded) any^ {
     if (expanded.issue != null) {ast: null, issue: expanded.issue, unsupported: expanded.unsupported}
+    // consumed paragraph data can change native argument and math source mapping.
+    else if (expanded.paragraph_data_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "paragraph assignment source mapping"}
+    else if (expanded.paragraph_quantity_seen == true and any([for (token in expanded.output) token.kind == "source-span"]))
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "paragraph quantity definition source mapping"}
+    else if (expanded.font_name_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "font name source mapping"}
+    else if (expanded.font_token_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "font token source mapping"}
+    else if (expanded.mathchardef_emission_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "math character source mapping"}
+    else if (expanded.expl3_int_math_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 integer source mapping"}
+    else if (expanded.generated_text_mapping_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "generated text source mapping"}
+    else if (expanded.inspection_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "inspection source mapping"}
+    else if (expanded.numeric_math_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "numeric math source mapping"}
+    else if (expanded.vcenter_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "vcenter source mapping"}
+    else if (expanded.shipout_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "shipout source mapping"}
+    else if (expanded.box_movement_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "box movement source mapping"}
+    else if (expanded.pdf_random_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "random or timer source mapping"}
+    else if (expanded.raw_inline_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "raw inline source mapping"}
+    else if (expanded.input_stream_state_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "input stream command source mapping"}
+    else if (expanded.input_eof_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "input EOF conditional source mapping"}
+    else if (expanded.expl3_tl_empty_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token-list conditional source mapping"}
+    else if (expanded.expl3_tl_put_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "expl3 token-list assignment source mapping"}
+    else if (expanded.page_state_assignment_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "page state assignment source mapping"}
+    else if (expanded.page_state_quantity_seen == true and any([for (token in expanded.output) token.kind == "source-span"]))
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "page state definition source mapping"}
+    else if (expanded.font_alias_assignment_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "font alias assignment source mapping"}
+    else if (expanded.font_family_assignment_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "font family assignment source mapping"}
+    else if (expanded.font_character_assignment_seen == true)
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "font character assignment source mapping"}
+    else if (expanded.font_character_quantity_seen == true and any([for (token in expanded.output) token.kind == "source-span"]))
+        {ast: null, issue: "latex-digest-unsupported", unsupported: "font character definition source mapping"}
     else {
         let parsed = blocks(expanded.output, expanded.sources)^;
         if (parsed.issue != null) {ast: null, issue: parsed.issue, unsupported: parsed.unsupported}
