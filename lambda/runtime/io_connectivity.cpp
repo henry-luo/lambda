@@ -333,10 +333,16 @@ extern "C" Item pn_io_rtc_status(Item handle) {
 
 #ifdef __APPLE__
 struct Discovered { char name[64], type[64], domain[256], host[256]; uint32_t interface; int port; bool resolved; };
-struct Browse { Discovered entries[64]; int count; DNSServiceErrorType error; };
+struct Browse { Discovered entries[64]; int count; DNSServiceErrorType error; ArrayList* names; const char* prefix; };
 static void browsed(DNSServiceRef, DNSServiceFlags flags, uint32_t interface, DNSServiceErrorType error,
     const char* name, const char* type, const char* domain, void* ptr) {
     Browse* b=(Browse*)ptr; if (error) { b->error=error; return; }
+    if (b->names) {
+        bool expected=false;
+        for (int i=0;i<b->names->length;i++) if (!strcmp((char*)b->names->data[i],name)) { expected=true; break; }
+        if (!expected) return;
+    }
+    if (b->prefix && strncmp(name,b->prefix,strlen(b->prefix))) return;
     if (!(flags&kDNSServiceFlagsAdd) || b->count>=64 || strlen(name)>63 || strlen(type)>63 || strlen(domain)>255) return;
     for (int i=0;i<b->count;i++) if (!strcmp(b->entries[i].name,name) && b->entries[i].interface==interface) return;
     Discovered* d=&b->entries[b->count++];
@@ -386,12 +392,29 @@ extern "C" Item pn_io_discovery_advertise(Item name, Item port) {
     return failure("Bonjour is unavailable on this host");
 #endif
 }
-extern "C" Item pn_io_discovery_browse(Item wait) {
+extern "C" Item pn_io_discovery_browse2(Item wait, Item options) {
+    RootFrame arguments(2); Rooted<Item> held_wait(arguments,wait), held_options(arguments,options);
     Item error=ItemNull; int64_t ms;
     if (!io_fs_allow_unbrokered("io.discovery.browse",&error)) return error;
-    if (!timeout(wait,&ms)) return failure("invalid browse deadline");
+    if (!timeout(held_wait.get(),&ms)) return failure("invalid browse deadline");
+    struct Filter {
+        ArrayList* names=nullptr;
+        char* prefix=nullptr;
+        ~Filter() { io_fs_text_list_free(names); mem_free(prefix); }
+    } filter;
+    IoFsOptionMap opts;
+    if (!io_fs_options_open(held_options.get(),"io.discovery.browse",SYSPROC_IO_DISCOVERY_BROWSE,&opts,&error) ||
+        !io_fs_option_text_list(&opts,"names",&filter.names,&error) ||
+        !io_fs_option_text(&opts,"prefix",&filter.prefix,&error)) return error;
+    if ((filter.names && (filter.names->length>64 || filter.prefix)) ||
+        (filter.prefix && (!*filter.prefix || strlen(filter.prefix)>63))) return failure("invalid browse filter");
+    if (filter.names) for (int i=0;i<filter.names->length;i++) {
+        size_t n=strlen((char*)filter.names->data[i]);
+        if (!n || n>63) return failure("invalid browse name");
+    }
 #ifdef __APPLE__
-    Browse found={}; Connectivity* s=allocate(); if (!s) return ItemError;
+    Browse found={}; found.names=filter.names; found.prefix=filter.prefix;
+    Connectivity* s=allocate(); if (!s) return ItemError;
     struct Cleanup { Connectivity* s; ~Cleanup() { free_connection(s); } } cleanup{s};
     uint64_t deadline=time_now_ms()+ms;
     if (DNSServiceBrowse(&s->service,0,0,"_lambda-sync._tcp","local.",browsed,&found)) return failure("Bonjour browse failed");
@@ -413,7 +436,10 @@ extern "C" Item pn_io_discovery_browse(Item wait) {
         if (DNSServiceResolve(&s->service,0,d->interface,d->name,d->type,d->domain,resolved,d)) continue;
         s->waiter=lambda_socket_waiter_new((uint64_t)DNSServiceRefSockFD(s->service));
         if (!s->waiter) return failure("cannot resolve Bonjour");
-        error=process_dns(s->service,s->waiter,deadline); dispose(s);
+        // A stale matching candidate cannot consume every other peer's resolution budget.
+        uint64_t now=time_now_ms();
+        uint64_t share=now<deadline ? (deadline-now)/(uint64_t)(found.count-i) : 0;
+        error=process_dns(s->service,s->waiter,now+(share ? share : 1)); dispose(s);
         if (get_type_id(error)==LMD_TYPE_ERROR) return error;
         if (!d->resolved) continue;
         static const char* names[]={"name","host","port"}; static const TypeId types[]={LMD_TYPE_STRING,LMD_TYPE_STRING,LMD_TYPE_INT};
@@ -428,3 +454,4 @@ extern "C" Item pn_io_discovery_browse(Item wait) {
     return failure("Bonjour is unavailable on this host");
 #endif
 }
+extern "C" Item pn_io_discovery_browse(Item wait) { return pn_io_discovery_browse2(wait,ItemNull); }

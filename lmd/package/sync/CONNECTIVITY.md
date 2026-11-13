@@ -56,6 +56,34 @@ config=null,settings={},observer=null)` and the discovery/signaling helpers in `
 
 ## Schedule and status
 
+With `config:null` and `mdns:true`, the native LAN agent uses OS notifications
+and short connection bursts (S12.1.1v3, D9.3.4). It registers the watcher before
+the startup scan, exchanges changes when a peer first appears, batches later
+notifications and reconciles affected subtrees. Either device can connect.
+Already authenticated connections carry further rounds in either direction and
+close after the idle timeout. Repository callbacks have one script owner;
+network waits hold no repository transaction (S12.4.4v4, S13.1.2v2, S13.3.1v2).
+Native monitoring uses libuv's OS event backend, not `uv_fs_poll`.
+
+LAN defaults add `debounce_ms:200`, `batch_ms:1000`, `idle_ms:10000`,
+`burst_ms:60000`, `verify_ms:60000` and a 100 ms scheduling/idle-message tick.
+`interval_ms` can override that tick, capped at `idle_ms`. Scans run for startup,
+restart, missed/overflowed notifications and occasional verification. Atomic
+installation still captures the tree when needed to preserve external changes.
+Neither a tick nor an unchanged discovery result triggers a scan or connection.
+Discovery refreshes every ten seconds; a changed/reappearing address requests
+catch-up. Verification also requests anti-entropy. Failed delivery retries after
+`retry_ms`; committed local changes remain in the repository until acknowledged.
+
+LAN status adds `monitor:'os'`, full/incremental scan counts, watcher-event counts,
+connection/round counts, active connections, pending batches and peer availability.
+Installation/review state is distinct from network delivery. A failed native
+monitor surfaces an error instead of silently disabling change detection.
+The initial qualification host remains macOS; Linux maintains individual
+directory watches, and other-OS qualification remains pending.
+
+The cloud/ICE profile retains the following periodic schedule:
+
 | Setting | Default | Bound |
 |---|---:|---|
 | `port`, `bind` | 0, `0.0.0.0` | Ephemeral or explicit listener; native IPv4 binding |
@@ -68,7 +96,7 @@ config=null,settings={},observer=null)` and the discovery/signaling helpers in `
 | `rounds`, `stop_after` | 0 | Zero runs continuously; positive bounds up to 1,000,000 |
 | `status`, `ready` | null | Optional atomic JSON status and initial listener-port files |
 
-The smaller device ID initiates a connection; the other answers. The agent
+For cloud/ICE negotiation, the smaller device ID initiates; the other answers. The agent
 rotates peers and finite inbox pages. It attempts discovered LAN paths or ICE
 before the next bulk cloud round. A failed attempt schedules fallback; cloud
 publication also runs periodically after successful direct delivery, preserving
@@ -93,8 +121,9 @@ active authentication/exchange, while idle `transport:'peer'` records the last
 successful delivery method. Object/request progress is reported during RTC
 exchange; completed exchanges include their synchronization summary. Bonjour
 registration errors appear separately in `discovery_error`. Status files contain
-no private keys, SDP or ICE credentials. Transfer completion can close the channel;
-this first agent uses finite synchronization sessions.
+no private keys, SDP or ICE credentials. The cloud/ICE agent uses finite
+synchronization sessions; the native LAN agent reuses a channel during a bounded
+burst. Its `connected:true` includes the short warm idle period.
 
 ## Signaling and trust
 
@@ -128,6 +157,11 @@ digest as its service name. It carries no membership grant. Native browse/resolv
 returns at most 64 hints within a finite budget; scripts filter expected names
 and DNS host syntax before trying an address. Registration forbids auto-renaming
 and confirms the platform callback before reporting readiness.
+`discovery.browse(timeout, {names:[...]})` filters expected instances before
+resolution; pairing uses `{prefix:...}`. A candidate receives a share of the
+remaining resolution deadline, so an unresolved unrelated service cannot starve
+enrolled peers. The original one-argument API remains available. Filters are
+discovery hints and never replace authentication (D9.3.4, D11.1.2).
 
 At most 64 historical members imply at most 8,128 logical signaling slots, created
 only when used. Native message size is 256 KiB; received messages are bounded by
@@ -148,6 +182,7 @@ repository receipts or content garbage collection.
 python3 test/sync_connectivity/test_goldens.py
 python3 test/sync_connectivity/test_goldens.py --gc
 python3 test/sync_connectivity/test_connectivity.py
+python3 test/sync_connectivity/test_lan_events.py
 python3 test/sync_connectivity/test_stun.py
 LAMBDA_CLOUD_TEST_STORAGE_FILE="$PWD/temp/private-storage.json" \
 python3 test/sync_connectivity/test_signaling.py

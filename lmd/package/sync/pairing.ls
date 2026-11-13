@@ -99,7 +99,7 @@ pub pn connect(url, timeout_ms=5000) any^ {
 }
 pub pn discover(value, timeout_ms=1000) any^ {
     let selected = prefix(value)^
-    let hints = discovery.browse(timeout_ms)^
+    let hints = discovery.browse(timeout_ms,{prefix:selected})^
     return unique([for (hint in hints where starts_with(hint.name,selected)^ and connectivity.hint_url(hint)^ != null)
         {name:hint.name,url:connectivity.hint_url(hint)^}])
 }

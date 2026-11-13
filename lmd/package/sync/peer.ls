@@ -18,8 +18,8 @@ pn plain_receive(socket) any^ {
     return codec.decode(frame.data,16384)^
 }
 pn plain_send(socket, value) any^ { wire.send(socket,binary(codec.encode(value)^)^)^ }
-pub pn handshake(socket, credentials, role, expected=null, authorize=null) any^ {
-    let own = session.start(credentials,role)^
+pub pn handshake(socket, credentials, role, expected=null, authorize=null, profile=session.protocol) any^ {
+    let own = session.start(credentials,role,profile)^
     var remote = null
     if (role == 'client') {
         plain_send(socket,own.hello)^
@@ -43,14 +43,14 @@ pn authorized(channel) any^ {
         raise error("sync peer: current device grant changed")
     return true
 }
-pn send_record(socket, channel, payload) any^ {
+pub pn send_record(socket, channel, payload) any^ {
     authorized(channel)^
     let sealed = session.seal(channel,payload)^
     wire.send(socket,sealed.bytes)^
     return sealed.session
 }
-pn read_record(socket, channel) any^ {
-    let frame = wire.receive(socket,30000)^
+pub pn read_record(socket, channel, timeout_ms=30000) any^ {
+    let frame = wire.receive(socket,timeout_ms)^
     if (frame.type != "binary") raise error("sync peer: connection ended before acknowledgment")
     let decoded = session.unseal(channel,frame.data)^
     authorized(channel)^
@@ -58,24 +58,36 @@ pn read_record(socket, channel) any^ {
 }
 pub pn request(socket, channel, kind, body) any^ {
     let sent = send_record(socket,channel,{kind:kind,body:body})^
-    let response = read_record(socket,sent)^
+    var response = read_record(socket,sent)^
+    // A peer may announce a new batch just as this side starts its next round.
+    var notices = 0
+    while (sent.profile == session.burst_protocol and response.value.kind == 'changed') {
+        if (notices >= 64) raise error("sync peer: excessive change notices")
+        response = read_record(socket,response.session)^
+        notices = notices+1
+    }
     v.fields(response.value,["ok","body"])^
     if (response.value.ok != true) raise error("sync peer: remote request rejected")
     return {session:response.session,value:response.value.body}
 }
 pub pn serve_connection(socket, handle, credentials, authorize=null, observer=null) any^ {
-    var channel = handshake(socket,credentials,'server',null,authorize)^
+    let channel = handshake(socket,credentials,'server',null,authorize)^
     local.scan(handle)^
-    let outgoing = exchange.offer(handle,credentials)^
+    return serve_round(socket,channel,handle,credentials,observer)^.result
+}
+pub pn serve_round(socket, initial_channel, handle, credentials, observer=null, first=null) any^ {
+    var channel = initial_channel
+    let outgoing = exchange.offer(handle,credentials,channel.profile == session.burst_protocol)^
     var pending = null
     var requests = 0
     while (requests < 100000) {
-        let incoming = read_record(socket,channel)^
+        let incoming = if (requests == 0 and first != null) first else read_record(socket,channel)^
         channel = incoming.session
         if (incoming.value == {kind:'done',body:null}) {
             channel = send_record(socket,channel,{ok:true,body:true})^
             local.release_staging(handle,outgoing.ids)^
-            return {peer:channel.peer.id,received:local.status(handle)^.state.endpoint.replica.clock}
+            return {session:channel,token:outgoing.token,
+                result:{peer:channel.peer.id,received:local.status(handle)^.state.endpoint.replica.clock}}
         }
         let result = exchange.request(handle,credentials,channel.peer,outgoing,pending,incoming.value) ^ { ^ }
         if (result is error) {
@@ -100,11 +112,17 @@ pub pn synchronize(handle, credentials, url, expected, authorize=null) any^ {
     return result
 }
 pub pn exchange_connection(socket, handle, credentials, expected, authorize=null, observer=null) any^ {
-    var channel = handshake(socket,credentials,'client',expected,authorize)^
+    let channel = handshake(socket,credentials,'client',expected,authorize)^
+    return exchange_round(socket,channel,handle,credentials,observer)^.result
+}
+pub pn exchange_round(socket, initial_channel, handle, credentials, observer=null) any^ {
+    var channel = initial_channel
     let head = request(socket,channel,'head',{})^
     channel = head.session
     exchange.summary(head.value,credentials.space)^
     let remote = head.value
+    let own = exchange.current_token(handle)^
+    let covered = remote.epoch == own.epoch and core.dominates(own.clock,remote.clock)^
     let available = local.inventory(handle)^
     var index = 0
     var downloaded = 0
@@ -124,7 +142,7 @@ pub pn exchange_connection(socket, handle, credentials, expected, authorize=null
     local.register_retention(handle,remote.retention)^
     local.register_cache(handle,remote.cache)^
     index = 0
-    while (index < remote.frames) {
+    while (not covered and index < remote.frames) {
         let response = request(socket,channel,'frame',{index:index})^
         channel = response.session
         if (response.value.packet.body.checkpoint != remote.digest or response.value.packet.body.index != index or
@@ -137,7 +155,7 @@ pub pn exchange_connection(socket, handle, credentials, expected, authorize=null
     // the server's ACK records the exact pinned channel whose dependencies have committed here.
     let ack = request(socket,channel,'ack',remote.clock)^
     channel = ack.session
-    let outgoing = exchange.offer(handle,credentials)^
+    let outgoing = exchange.offer(handle,credentials,channel.profile == session.burst_protocol)^
     index = 0
     while (index < len(outgoing.ids)^) {
         let page = slice(outgoing.ids,index,index+exchange.page_size)^
@@ -157,7 +175,16 @@ pub pn exchange_connection(socket, handle, credentials, expected, authorize=null
     let availability = request(socket,channel,'cache_root',outgoing.summary.cache)^
     channel = availability.session
     var accepted = []
-    for (packet in outgoing.frames) {
+    var covered_outgoing = false
+    if (channel.profile == session.burst_protocol) {
+        let known = request(socket,channel,'frontier',{})^
+        channel = known.session
+        v.fields(known.value,["clock","epoch"])^
+        v.clock(known.value.clock)^
+        covered_outgoing = known.value.epoch == outgoing.summary.epoch and core.dominates(known.value.clock,outgoing.summary.clock)^
+        if (covered_outgoing) { accepted = known.value.clock }
+    }
+    for (packet in (if (covered_outgoing) [] else outgoing.frames)) {
         let response = request(socket,channel,'put_frame',{packet:packet,proof:outgoing.proof})^
         channel = response.session
         accepted = response.value
@@ -168,10 +195,10 @@ pub pn exchange_connection(socket, handle, credentials, expected, authorize=null
     channel = pushed_documents.session
     let ended = request(socket,channel,'done',null)^
     local.release_staging(handle,available)^
-    return {peer:channel.peer.id,downloaded:downloaded,uploaded:uploaded,
+    return {session:ended.session,token:outgoing.token,result:{peer:channel.peer.id,downloaded:downloaded,uploaded:uploaded,
         frontier:outgoing.summary.clock,replicated:true,cloud_saved:false,
         document_packets:pulled_documents.packets+pushed_documents.packets,
-        document_roots:pulled_documents.roots+pushed_documents.roots}
+        document_roots:pulled_documents.roots+pushed_documents.roots}}
 }
 
 pn download_object(socket, channel, handle, id) any^ {
@@ -269,8 +296,9 @@ pn push_documents(socket, channel, handle, credentials, records) any^ {
     return {session:active,packets:packets,roots:roots}
 }
 
-pub pn listener(port, bind="127.0.0.1") any^ {
-    return ws.listen(port,{bind:bind,protocols:[session.protocol],max_message_bytes:session.max_frame})^
+pub pn listener(port, bind="127.0.0.1", burst=false) any^ {
+    return ws.listen(port,{bind:bind,protocols:if (burst) [session.protocol,session.burst_protocol] else [session.protocol],
+        max_message_bytes:session.max_frame})^
 }
 pub pn accept(listener, handle, credentials, timeout_ms=30000, authorize=null) any^ {
     let socket = ws.accept(listener,timeout_ms)^

@@ -11,7 +11,14 @@ spec.loader.exec_module(gate)
 gate.AREA = ROOT / "temp/sync-connectivity" / ("gc" if "--gc" in sys.argv else "goldens") / gate.TIER
 gate.GC = ["test/lambda/proc/sync_rtc.ls", "test/lambda/proc/sync_rendezvous.ls",
            "test/lambda/proc/sync_connectivity_protocol.ls", "test/lambda/proc/sync_stream_cancel.ls",
-           "test/lambda/proc/sync_pairing.ls", "test/lambda/proc/sync_agent_recovery.ls"]
+           "test/lambda/proc/sync_pairing.ls", "test/lambda/proc/sync_agent_recovery.ls",
+           "test/lambda/proc/sync_disk_watch.ls", "test/lambda/proc/sync_event_capture.ls",
+           "test/lambda/proc/sync_install_additions.ls",
+           "test/lambda/proc/sync_lan_schedule.ls", "test/lambda/proc/sync_discovery_filter.ls"]
+# The full burst workflow has real 10-second/500 ms scheduling bounds. Allocation-
+# forced GC exceeds those bounds; retain it in ordinary exact/process acceptance.
+# Stress evidence and the separate qualification limit are recorded as SD-05 in
+# vibe/impl/Lambda_Impl_Sync_LAN_Events (done).md; native watcher lifetimes remain above.
 
 if __name__ == "__main__":
     # Existing repository goldens use shared fixed fixture paths across tiers.

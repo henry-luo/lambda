@@ -859,6 +859,12 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_disk_read_stream", PROFILE_FILE_IO_FPTR(pn_io_disk_read_stream), NULL, NULL, false, 0},
     {SYSPROC_IO_DISK_WRITE_STREAM, "io_disk_write_stream", 4, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_disk_write_stream", PROFILE_FILE_IO_FPTR(pn_io_disk_write_stream), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_WATCH, "io_disk_watch", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_watch", PROFILE_SQLITE_FPTR(pn_io_disk_watch), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_DISK_CHANGES, "io_disk_changes", 2, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_changes", PROFILE_SQLITE_FPTR(pn_io_disk_changes), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_DISK_UNWATCH, "io_disk_unwatch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_unwatch", PROFILE_SQLITE_FPTR(pn_io_disk_unwatch), NULL, NULL, false, 0},
 
     {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
@@ -1490,6 +1496,8 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_discovery_advertise", PROFILE_NETWORK_FPTR(pn_io_discovery_advertise), NULL, NULL, false, 0, true},
     {SYSPROC_IO_DISCOVERY_BROWSE, "io_discovery_browse", 1, &TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_discovery_browse", PROFILE_NETWORK_FPTR(pn_io_discovery_browse), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_DISCOVERY_BROWSE, "io_discovery_browse", 2, &TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_discovery_browse2", PROFILE_NETWORK_FPTR(pn_io_discovery_browse2), NULL, NULL, false, 0, true},
 
     {SYSPROC_IO_DISCOVERY_CLOSE, "io_discovery_close", 1, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_rtc_close", PROFILE_NETWORK_FPTR(pn_io_rtc_close), NULL, NULL, false, 0, true},
@@ -4116,8 +4124,12 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
         "from", "to", NULL};
     static const char* const websocket_options[] = {"timeout_ms", "max_message_bytes", "ca_file", "origin", "protocols", NULL};
     static const char* const websocket_listen_options[] = {"origins", "protocols", "max_message_bytes", "bind", NULL};
+    static const char* const discovery_browse_options[] = {"names", "prefix", NULL};
     static const char* const rtc_options[] = {"stun", "bind", NULL};
     switch (fn) {
+    case SYSPROC_IO_DISCOVERY_BROWSE:
+        if (options_arg_index) *options_arg_index = 1;
+        return discovery_browse_options;
     case SYSPROC_IO_RTC_CREATE:
         if (options_arg_index) *options_arg_index = 0;
         return rtc_options;

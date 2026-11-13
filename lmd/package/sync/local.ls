@@ -94,28 +94,30 @@ pub pn status(handle) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let loaded = repo.load(tx,k)^
         let expanded = documents.expand(tx,k,loaded.state)^
-        validate(expanded,k.space)^
-        return {*:loaded,state:expanded}
+        if (loaded.validated != true) validate(expanded,k.space)^
+        return result(handle,loaded,expanded)
     })^
 }
+fn result(handle, loaded, expanded) => {*:loaded,state:expanded,
+    *:if (handle.keys.cache_enabled == true) {repository_cache:{*:loaded,validated:true}} else {}}
 
 pub pn mutate(handle, operation) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let loaded = repo.load(tx,k)^
         let expanded = documents.expand(tx,k,loaded.state)^
-        validate(expanded,k.space)^
+        if (loaded.validated != true) validate(expanded,k.space)^
         let updated = operation(tx,k,expanded)
         let next = documents.flush(tx,k,updated^)^
         validate(next,k.space)^
-        if (next == loaded.state) { return {*:loaded,state:expanded} }
+        if (next == loaded.state) { return result(handle,loaded,expanded) }
         let committed = repo.commit_head(tx,k,loaded.generation,{*:next,previous:loaded.id})^
-        return {*:committed,state:documents.expand(tx,k,committed.state)^}
+        return result(handle,committed,documents.expand(tx,k,committed.state)^)
     })^
 }
 
-pub pn scan(handle) any^ {
+pub pn scan(handle, paths=null, verify: bool=false) any^ {
     return mutate(handle,pn (tx,k,current)=> {
-        let captured = fs.capture(tx,k,current)^
+        let captured = if (paths == null) fs.capture(tx,k,current,verify)^ else fs.capture_paths(tx,k,current,paths)^
         let updated = fs.reconciled(current,captured,actor(handle,current)^,[],now().unix)^
         dependencies(tx,k,updated.endpoint,maintenance.get(updated).revisions,"scan",reach.cache_ids(updated))^
         return documents.refresh(tx,k,updated,actor(handle,updated)^)^
@@ -166,16 +168,19 @@ pub pn prepare_install(handle) any^ {
 }
 pub pn install_step(handle) any^ {
     return mutate(handle,pn (tx,k,current)=> {
-        let updated = install.step(tx,k,current)^
+        let updated = install.step(tx,k,current,actor(handle,current)^)^
+        dependencies(tx,k,updated.endpoint,maintenance.get(updated).revisions,"installation",reach.cache_ids(updated))^
         return if (updated.installation != null) updated else documents.refresh(tx,k,updated,actor(handle,updated)^)^
     })^
 }
 pub pn materialize(handle, max_steps=1000) any^ {
     if (not v.natural(max_steps)^ or max_steps > 100000) raise error("sync local: invalid installation budget")
-    var result = prepare_install(handle)^
+    var active = handle
+    var result = prepare_install(active)^
     var i = 0
     while (result.state.installation != null and i < max_steps) {
-        result = install_step(handle)^
+        if (result.repository_cache != null) { active = {*:active,keys:{*:active.keys,cached_head:result.repository_cache}} }
+        result = install_step(active)^
         if (result.state.installation.blocked != null) { return result }
         i = i+1
     }

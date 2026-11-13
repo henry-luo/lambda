@@ -10,18 +10,24 @@ import v: .schema
 import schema: .cloud_schema
 import rtc: lambda.io.rtc
 import ws: lambda.io.websocket
+import lan: .lan_agent
 
 pub let defaults = {port:0,bind:"0.0.0.0",stun:[],mdns:true,rtc:true,establish_ms:15000,
-    retry_ms:5000,interval_ms:1000,cloud_ms:30000,rounds:0,stop_after:0,status:null,ready:null}
+    retry_ms:5000,interval_ms:1000,cloud_ms:30000,rounds:0,stop_after:0,status:null,ready:null,
+    debounce_ms:200,batch_ms:1000,idle_ms:10000,burst_ms:60000,verify_ms:60000}
 fn options(value) any^ {
     v.record(value,[],[for (key at defaults) string(key)])^
     let result = {*:defaults,*:value}
     for (bound in [["port",0,65535],["establish_ms",1000,60000],["retry_ms",1000,3600000],
-        ["interval_ms",100,60000],["cloud_ms",1000,3600000],["rounds",0,1000000],["stop_after",0,1000000]]) {
+        ["interval_ms",100,60000],["cloud_ms",1000,3600000],["rounds",0,1000000],["stop_after",0,1000000],
+        ["debounce_ms",10,10000],["batch_ms",10,60000],["idle_ms",500,30000],
+        ["burst_ms",1000,600000],["verify_ms",1000,3600000]]) {
         let n = result[bound[0]]
         if (not v.natural(n)^ or n < bound[1] or n > bound[2]) raise error("sync connectivity: schedule bounds")
     }
     if (not (result.mdns is bool) or not (result.rtc is bool)) raise error("sync connectivity: boolean options required")
+    if (result.batch_ms < result.debounce_ms or result.burst_ms < result.idle_ms)
+        raise error("sync connectivity: inconsistent batching/idle bounds")
     return result
 }
 pn report(options, current) any^ {
@@ -87,6 +93,10 @@ pn advance(credentials, config, pending) any^ {
 
 pub pn run(directory, key, config=null, settings={}, observer=null) any^ {
     let selected = options(settings)^
+    if (config == null and selected.mdns) {
+        return lan.run(directory,key,{*:selected,observer:observer,
+            interval_ms:if (settings.interval_ms == null) 100 else min(selected.interval_ms,selected.idle_ms)})^
+    }
     let initial = agent.resume_agent(directory,key)^
     local.scan(initial.handle)^
     let listener = peer.listener(selected.port,selected.bind)^

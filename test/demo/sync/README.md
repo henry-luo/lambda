@@ -28,6 +28,13 @@ check that the network permits devices to reach one another. No cloud function,
 S3 bucket, STUN service or WebRTC dependency preparation is needed for this LAN
 profile. Initial support is the native macOS host.
 
+The agent scans on startup to capture changes made while it was stopped, then
+uses OS directory notifications. It batches changes for about 200 ms and starts
+delivery to online peers. Connections are reused for changes in either direction
+and close after ten quiet seconds. Startup/rediscovery exchanges catch up
+without a new filesystem event. Recovery and occasional verification retain full
+scans; receiving files also performs the captures needed for safe installation.
+
 ## Identity and storage
 
 The public user ID selects discovery candidates; it does not prove account
@@ -46,7 +53,7 @@ One running window owns a profile's sync operations.
 
 Discovery, pairing, profile lifecycle, synchronization and UI are Lambda Script
 (S12.1.1v3, D9.3.4). The C++ catalog only registers the demo. Existing native
-Bonjour, WebSocket, crypto and OS secret APIs supply IO (D11.1.2).
+Bonjour, WebSocket, directory monitoring, crypto and OS secret APIs supply IO (D11.1.2).
 Document-owned tasks cancel listeners, advertisements and replication on close
 (S12.4.4v4, S13.1.2v2). A pairing window pauses ordinary synchronization, then
 resumes it after enrollment. Already paired devices need no new code on restart.
@@ -81,6 +88,7 @@ LAMBDA_EXEC_BACKEND=interp python3 test/demo/sync/test_sync.py
 LAMBDA_EXEC_BACKEND=jit python3 test/demo/sync/test_sync.py
 python3 test/sync_connectivity/test_goldens.py
 python3 test/sync_connectivity/test_goldens.py --gc
+python3 test/sync_connectivity/test_lan_events.py
 ./test/test_radiant_view_gtest.exe --gtest_filter='RadiantViewTest.SyncDemoFirstRunAndPairingForm'
 ```
 
@@ -93,3 +101,5 @@ rejections. `sync_agent_recovery.ls` pins unfinished and raced-install behavior.
 These local checks do not qualify two physical machines or cross-NAT operation.
 
 Implementation and evidence: [completed implementation record](<../../../vibe/impl/Lambda_Impl_Sync_Demo (done).md>).
+
+Event monitoring and short connection bursts: [implementation and qualification](<../../../vibe/impl/Lambda_Impl_Sync_LAN_Events (done).md>).

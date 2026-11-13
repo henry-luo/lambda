@@ -124,6 +124,34 @@ The session profile is `lambda-peer-lan-1`:
    the profile, transcript digest, sender role and exact sequence number. Replay,
    reflection, reordering and cross-session messages fail authentication.
 
+The native event agent selects `lambda-peer-lan-burst-1` as both WebSocket
+subprotocol and authenticated session profile. The profile binds the transcript,
+key derivation and record authentication context, so it cannot be substituted
+for a finite-profile session. Listeners accept the existing finite CLI profile
+as well. Upgrade both automatic LAN agents to use bursts; repository and CRDT
+formats do not change.
+
+One handshake covers several rounds. Each `head` pins a fresh immutable offer;
+`done` acknowledges that round without closing the connection. Between rounds,
+the serving device can send an encrypted `changed` notice. A notice racing a
+new request is consumed before its response, preserving the continuous encrypted
+record sequence. The caller checks its own replication token and starts another
+round when either side changes. `close` ends the burst after the idle period.
+Tokens exclude private acknowledgments and disk observations, avoiding echo loops.
+Notices carry a 32-byte token fingerprint, so an already-covered notice does not
+trigger another round. Burst summaries include the workspace epoch; equal-epoch
+causal coverage skips redundant workspace checkpoint transfer. Object inventory,
+document catalogs and retention/cache roots still reconcile in those rounds.
+Every request retains current-member authorization checks.
+
+Default idle time is ten seconds. A monotonic deadline is checked between
+rounds and idle waits; existing individual network/IO bounds still apply during
+an exchange, so the burst deadline is not a hard real-time transfer cutoff.
+There are at most 1,024 rounds per burst and 64 racing notices per request;
+existing record/request/frame limits remain. Fully imported objects and pending
+local changes survive closure or failed delivery. Installation completes through
+the existing journal, with blocked target changes exposed separately for review.
+
 Native OpenSSL primitives follow [Ed25519](https://docs.openssl.org/3.5/man7/EVP_SIGNATURE-ED25519/)
 and [X25519](https://docs.openssl.org/3.5/man7/EVP_PKEY-X25519/); goldens pin
 [RFC 8032 §7.1](https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1) and

@@ -40,7 +40,7 @@ pn hold(tx, keys, current, operation, observed, reason) any^ {
         recoveries:unique([*current.installation.recoveries,recovery])}}
 }
 
-pub pn step(tx, keys, current) any^ {
+pub pn step(tx, keys, current, actor) any^ {
     let journal = current.installation
     if (journal == null) { return current }
     if (disk.inspect(current.root,"")^.identity != current.root_identity)
@@ -50,6 +50,26 @@ pub pn step(tx, keys, current) any^ {
         let wanted = journal.desired
         let expected_id = cap.capture_id(wanted)^
         if (actual.id != expected_id) {
+            let touched = unique([for (operation in journal.operations) operation.path])
+            let intact = all([for (path in touched) {
+                let member = cap.association(wanted,path)^
+                let found = cap.association(actual.members,path)^
+                if (member == null) found == null else
+                    found != null and found.type == member.type and found.content == member.content
+            }])
+            if (intact) {
+                // Unrelated edits cannot invalidate completed guarded writes. Untouched paths
+                // retain their old inode evidence while the installed frontier becomes the base.
+                let established = {*:current,installation:null,
+                    base:cap.baseline(journal.endpoint.replica,wanted,expected_id)^,
+                    disk:[for (member in wanted) {
+                        let old = cap.association(current.disk,member.path)^
+                        let observed = cap.association(actual.members,member.path)^
+                        let evidence = if (not contains(touched,member.path)^ and old != null) old else observed
+                        {*:evidence,id:member.id,path:member.path,type:member.type,content:member.content}
+                    }]}
+                return fs.reconciled(established,actual,actor,[],now().unix)^
+            }
             return {*:current,installation:{*:journal,blocked:{reason:"tree changed before completion",capture:actual},
                 recoveries:unique([*journal.recoveries,{capture:actual}])}}
         }

@@ -38,7 +38,8 @@ pub fn hint_url(hint) any^ {
     return "ws://" ++ hint.host ++ ":" ++ string(hint.port) ++ "/sync"
 }
 pub pn discover(credentials, timeout_ms=1000) any^ {
-    let hints = discovery.browse(timeout_ms)^
+    if (len(credentials.members)^ == 0) { return [] }
+    let hints = discovery.browse(timeout_ms,{names:[for (member in credentials.members) rv.lan_name(credentials,member.id)^]})^
     var result = []
     for (member in credentials.members) {
         let name = rv.lan_name(credentials,member.id)^

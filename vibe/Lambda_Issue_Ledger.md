@@ -2200,3 +2200,12 @@ Production front end: **D8.1.1**. The allocation owner and cause are
 **unconfirmed**. This does not block valid sync demo execution or qualification;
 no compiler workaround or diagnostic suppression was added. Evidence:
 `temp/sync-demo/invalid-view.log`, `invalid-view-run.log`, `ui-ast.log`.
+
+**Rechecked 2026-11-13:** `e5d5e848e` plus the LAN event work also leaks on
+a rejected imported module without a view. `_invalid_module.ls` contains
+`pub pn invalid() { if (true) return 1 }`; `_invalid_import.ls` imports it.
+Running `./lambda.exe --no-log --emit-ast-dump temp/sync-lan-events/_invalid_import.ls`
+correctly rejects the unbraced return with E100, then reports **two system
+allocations / 262 bytes**. Evidence: `temp/sync-lan-events/invalid-ast-cleanup.log`.
+This broadens the reproduction; allocation ownership/cause remain unconfirmed.
+Valid LAN execution and qualification are not blocked.

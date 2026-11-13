@@ -9,11 +9,32 @@ import crypto: lambda.io.crypto
 import document_state: .document_state
 import maintenance: .maintenance_state
 import document_exchange: .document_exchange
+import owner: .task_owner
 
 pub let page_size = 64
 pub let fragment_size = 32768
-pub pn offer(handle, credentials) any^ {
-    let stored = local.status(handle)^.state
+pub fn token(current) any^ {
+    let value = {clock:current.endpoint.replica.clock,epoch:current.endpoint.replica.epoch,
+        documents:[for (record in document_state.all(current)) {id:record.id,clock:record.endpoint.replica.clock,
+            epoch:record.endpoint.replica.epoch,origin:record.origin.id,
+            versions:sort([for (saved in record.session.versions) saved.id])^}],
+        retention:maintenance.get(current).manifest,cache:current.cache_root}
+    return {*:value,digest:codec.digest(value)^}
+}
+pub pn current_token(handle) any^ {
+    if (handle.keys.owner != null and handle.keys.token_cached == true and handle.keys.owner != self()) {
+        return owner.current(handle.keys.owner)^
+    }
+    return token(local.status(handle)^.state)^
+}
+pub pn offer(handle, credentials, extended=false) any^ {
+    if (handle.keys.owner != null and handle.keys.owner != self()) {
+        return owner.cached(handle.keys.owner,pn (cache)=> {
+            return offer({*:handle,keys:{*:handle.keys,cached_head:cache}},credentials,extended)^
+        })^
+    }
+    let loaded = local.status(handle)^
+    let stored = loaded.state
     let current = stored.endpoint
     let frames = protocol.frames(current.replica,workspace.model,65536)^
     let digest = frames[0].body.checkpoint
@@ -21,16 +42,19 @@ pub pn offer(handle, credentials) any^ {
         signature:crypto.sign(credentials.seed,auth.checkpoint_bytes(frames[0],digest)^)^}
     let ids = local.inventory(handle,false)^
     let documents = document_state.all(stored)
-    return {frames:frames,proof:proof,ids:ids,documents:documents,summary:{version:3,space:credentials.space,
+    return {frames:frames,proof:proof,ids:ids,documents:documents,token:token(stored)^,repository_cache:loaded.repository_cache,
+        summary:{version:3,space:credentials.space,
         digest:digest,clock:current.replica.clock,objects:len(ids),frames:len(frames),
-        documents:document_exchange.catalog(documents)^,retention:maintenance.get(stored).manifest,cache:stored.cache_root}}
+        documents:document_exchange.catalog(documents)^,retention:maintenance.get(stored).manifest,cache:stored.cache_root,
+        *:if (extended) {epoch:current.replica.epoch} else ({})}}
 }
 pub fn summary(value, space) any^ {
-    v.record(value,["version","space","digest","clock","objects","frames"],["documents","retention","cache"])^
+    v.record(value,["version","space","digest","clock","objects","frames"],["documents","retention","cache","epoch"])^
     if (not contains([1,2,3],value.version)^ or value.space != space or not (value.digest is binary) or len(value.digest)^ != 32 or
         not v.natural(value.objects)^ or value.objects > 100000 or not v.natural(value.frames)^ or
         value.frames < 1 or value.frames > 8192) raise error("sync peer: invalid offer")
     v.clock(value.clock)^
+    if (value.epoch != null and not v.natural(value.epoch)^) raise error("sync peer: invalid offer epoch")
     document_exchange.validate_catalog(if (value.documents == null) [] else value.documents)^
     return true
 }
@@ -94,6 +118,11 @@ pub pn request(handle, credentials, peer, outgoing, pending, command) any^ {
     if (command.kind == 'head') {
         v.fields(body,[])^
         return {body:outgoing.summary,pending:pending}
+    }
+    if (command.kind == 'frontier') {
+        v.fields(body,[])^
+        let token = current_token(handle)^
+        return {body:{clock:token.clock,epoch:token.epoch},pending:pending}
     }
     if (command.kind == 'inventory') {
         v.fields(body,["offset"])^

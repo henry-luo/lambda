@@ -10,6 +10,7 @@ import workspace: .workspace
 import protocol: .protocol
 import documents: .document_state
 import cloud: .cloud
+import owner: .task_owner
 
 fn cloud_saved(current) any^ => any([for (provider in (if (current.cloud_objects == null) [] else current.cloud_objects))
     cloud.covered(current,provider.provider)^])
@@ -53,15 +54,27 @@ pub pn open_agent(directory, wrapping_key) any^ {
 // resume a durable install before scanning; a raced install keeps its recovery capture.
 pub pn resume_agent(directory, wrapping_key) any^ {
     let opened = open_agent(directory,wrapping_key)^
-    var pending = local.status(opened.handle)^
+    let pending = resume_installation(opened.handle)^
+    if (pending.state.installation != null)
+        raise error("Sync needs review of an interrupted installation. Local files and recovery versions are preserved.")
+    return opened
+}
+pub pn resume_installation(handle) any^ {
+    if (handle.keys.owner != null and handle.keys.owner != self()) {
+        return owner.cached(handle.keys.owner,pn (cache)=> {
+            return resume_installation({*:handle,keys:{*:handle.keys,cached_head:cache}})^
+        })^
+    }
+    var pending = local.status(handle)^
     while (pending.state.installation != null) {
-        let resumed = materialize(opened.handle)^
+        let resumed = materialize(handle)^
         if (resumed.state.installation != null and
-            (resumed.state.installation.blocked != null or resumed.id == pending.id))
-            raise error("Sync needs review of an interrupted installation. Local files and recovery versions are preserved.")
+            (resumed.state.installation.blocked != null or resumed.id == pending.id)) {
+            return resumed
+        }
         pending = resumed
     }
-    return opened
+    return pending
 }
 pub pn status(directory, wrapping_key) any^ {
     let agent = open_agent(directory,wrapping_key)^
@@ -74,6 +87,11 @@ pub pn status(directory, wrapping_key) any^ {
         cloud_saved:cloud_saved(current)^}
 }
 pub pn materialize(handle) any^ {
+    if (handle.keys.owner != null and handle.keys.owner != self()) {
+        return owner.cached(handle.keys.owner,pn (cache)=> {
+            return materialize({*:handle,keys:{*:handle.keys,cached_head:cache}})^
+        })^
+    }
     let current = local.status(handle)^
     let entries = workspace.read(current.state.endpoint.replica)^.entries
     // content alternatives and retained external captures require an explicit resolution.

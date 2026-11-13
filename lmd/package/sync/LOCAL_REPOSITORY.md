@@ -14,7 +14,7 @@ now supplies explicit pairing, authenticated LAN transport and periodic retry.
 The [cloud adapter](CLOUD.md) adds object publication, periodic HTTP fallback
 and fresh-device recovery. The [document host](DOCUMENTS.md) persists unsaved
 sessions and links exact-frontier saves to workspace revisions. Native filesystem
-watchers and UI bindings follow separately.
+watchers drive the native LAN agent; editor UI bindings follow separately.
 [History and maintenance](MAINTENANCE.md) adds retention, fenced cleanup and
 independent verified-copy cache eviction.
 
@@ -60,6 +60,14 @@ admits their actors/checkpoints. It is test code, not network authentication.
 Mutations and `status` return `{generation, id, state}`. Handles contain secret
 key material and must not be serialized, logged or shared as application state.
 
+The LAN agent assigns repository effects to one task (S13.1.2v2, S13.3.1v2).
+Its private cache retains a validated immutable state and the committed replication
+token. Reads still authenticate the SQL head and require the same generation and
+object ID before reusing cached state; changed heads reload from durable storage.
+Mutations validate their output, and cache/token publication follows transaction
+completion. Restart and repository verification read durable data independently.
+Cached memory is neither an acknowledgment nor an additional durability source.
+
 | API | Contract |
 |---|---|
 | `create(path, key, space, root, device, chunker?)` | Create the local repository and empty workspace; return a handle. |
@@ -70,7 +78,7 @@ key material and must not be serialized, logged or shared as application state.
 | `register_documents(handle, roots)` | Validate imported shared document objects and merge their sessions without overwriting the local disk base. |
 | `record_cloud_control(handle, provider, generation, digest)` | Retain observed signed-control position; reject rollback/forks. |
 | `register_snapshots(handle, ids)` | Verify imported named snapshot objects and retain their roots locally. |
-| `scan(handle)` | Capture the whole tree, reconcile from the accepted disk baseline, and commit content before the new head. |
+| `scan(handle, paths=null, verify=false)` | Capture the whole tree, or reconcile bounded notification paths against the accepted index; `verify` rereads all file content. Commit content before the new head. |
 | `transact(handle, commands)` | Apply existing workspace commands; referenced content must already be available. |
 | `publish(handle, entry, bytes, document?)` | Store file bytes and publish a saved revision, preserving observed competing parents. |
 | `register_checkpoint(handle, saved)` | Store a validated CRDT checkpoint and return its workspace document link. |
@@ -173,11 +181,33 @@ path retains file identity. Type changes retain a review capture until explicit
 commands map that capture into the workspace. Case-folding path collisions reject
 materialization rather than choosing a platform-dependent winner.
 
+The native event agent uses `lambda.io.disk.watch(root)`,
+`changes(monitor, timeout_ms)` and `unwatch(monitor)` (D9.3.4, S13.1.2v2).
+The monitor is task-owned and recursive; `changes` returns bounded relative
+`paths` and a `rescan` flag, or an empty batch on timeout. Timeout zero drains
+queued hints without parking; positive waits park until a notification or timer.
+Unknown names and overflow request a full scan. Native failures are errors;
+they never mean an empty tree. Acquisition preserves the existing anchored-path
+and unbrokered-host checks (D11.1.2). The adapter uses libuv OS events, with
+per-directory registration on Linux. It never uses filesystem polling.
+
+An affected-subtree scan still enumerates ancestor directories and validates
+their observations. Stable unhinted subtrees reuse accepted index entries;
+new/replaced directories are traversed. Verification and installation captures
+continue to use the full scanner. A failed partial capture never commits a
+partially observed namespace or removes unobserved entries.
+Hinted files are recaptured even when metadata matches the index. Startup and
+periodic verification reread content, recovering writes made while stopped or
+events that were lost, including writers that preserve file timestamps.
+
 Installation creates directories, writes files and removes obsolete entries in
 recoverable steps. It captures accepted preimages before replacing files, uses
 native revision tokens, verifies readback and checks empty directories before
 removal. A detected external write blocks the journal and retains recoverable
-content; retry after review does not discard the capture. Current callers restore
+content; retry after review does not discard the capture. Once every guarded
+operation completes, unrelated additions/edits are imported against the installed
+frontier if all operation targets still have their expected type and content.
+They do not block completion or disappear from the workspace. Current callers restore
 the expected preimage or desired content before resuming. Arbitrary edits during
 a blocked partial installation are not automatically rebased yet. Native revision
 checks detect substitution; they do not exclude every concurrent external writer

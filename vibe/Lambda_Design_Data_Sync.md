@@ -1,6 +1,6 @@
 # Lambda Data Sync — Proposal
 
-**Date:** 2026-11-11
+**Date:** 2026-11-13
 
 **Status:** Draft proposal. The user confirmed the scope, provider independence,
 P2P preference, serverless preference, and periodic polling for the first version.
@@ -43,11 +43,16 @@ on PTH50v3, PTH63v2, PTH64v2, PTH67v2, and PTH71v2 in
 No existing ruling changes.
 
 **Prototype evidence:** The experimental [Lambda Script replication package](../lmd/package/sync/README.md)
-implements an in-memory RGA/MV-register model for Text and bounded Mark editing,
-external imports, packet compaction and saved endpoint recovery. Its
+began with an in-memory RGA/MV-register model for Text and bounded Mark editing,
+external imports, packet compaction and saved endpoint recovery. The initial
 [implementation record](<impl/Lambda_Impl_Sync_Prototype (done).md>) states verification
-and limits. It does not implement filesystem/GUI integration, directory moves,
-networking, encrypted repositories or automatic maintenance.
+and limits. Subsequent adapters implement encrypted local repositories,
+move-aware filesystem reconciliation, authenticated native peers, cloud storage,
+history maintenance and the LAN demo. Their scope and qualification are documented
+in the [package guides](../lmd/package/sync/README.md). The
+[LAN event plan](<impl/Lambda_Impl_Sync_LAN_Events (done).md>) records OS monitoring and
+bounded authenticated connection bursts; physical-device and other-OS
+qualification remains separate.
 
 **Related record:** [Device Sync over Passive Object Storage — Idea](idea/Passive_Storage_Sync.md).
 That record explores passive storage; this proposal adds the selected product
@@ -139,6 +144,62 @@ state into the local filesystem or editor.
 Filesystem watchers provide prompt notification. Reconciliation scans recover
 missed events and changes made while the agent was stopped. A failed or partial
 scan must not be interpreted as a directory-wide deletion.
+
+### 2.1.1 LAN change detection and connection bursts
+
+**Confirmed 2026-11-13.** Register an OS directory monitor before the initial
+inventory scan, then drain events accumulated during that scan. Repeat inventory
+and peer catch-up on restart. Monitor the entire subtree, including newly created
+directories. Native mechanisms expose bounded, task-owned notifications through
+`lambda.io.disk` (D9.3.4, S13.1.2v2, S13.3.1v2); reconciliation, batching and
+delivery policy remain Lambda Script (S12.1.1v3). The native adapter uses the
+existing libuv event loop and anchored filesystem APIs (D11.1.2).
+
+Notifications are hints, not authoritative create/delete/move operations. Batch
+nearby events with a short debounce and a maximum batching delay, inspect actual
+filesystem state, and commit the resulting move-aware workspace changes. Normal
+events reconcile affected subtrees against the accepted disk index. Missing
+paths, atomic-save renames and directory moves retain the existing identity and
+revision rules. Failed captures preserve the last accepted baseline and retry;
+they never imply deletion of unobserved files. Unknown paths, dropped/overflowed
+events and monitor errors require a complete reconciliation. Periodic full scans
+provide occasional verification. Scans also remain mandatory for recovery and
+before installation when needed to preserve concurrent external edits.
+If all operation targets still match after a completed installation, import
+unrelated additions and edits against that installed frontier. A changed installation
+target still retains its recovery capture and requires conflict/review handling.
+
+A newly available device performs an initial bidirectional exchange even if
+neither side reports a new watcher event. Once a batch commits, initiate delivery
+to every discovered, authorized online peer. Either device can initiate. Concurrent
+connection attempts must remain live and repository effects must have one
+serialized owner; a network wait must not hold that owner's transaction.
+
+The owner may cache the validated immutable local head and committed replication
+token. Authenticate the durable head before reuse and match both generation and
+object ID; changed heads require loading durable data. Validate mutation outputs
+and publish cached state/frontiers only after transaction completion. Restart and
+repository audits independently verify durable storage. The cache does not add
+durability or replace object authentication (D11.1.2).
+
+Authenticate once per connection burst. Pin a separate immutable offer for each
+exchange round, transfer missing objects and existing CRDT records, commit before
+acknowledging, and install through the existing recovery journal. Reuse the
+connection for subsequent batches, including changes originating at the receiving
+device. Close after ten seconds without further changes; also bound the total
+burst and request budgets. A change racing closure remains pending for another
+connection. Idle devices retain discovery/listening capability without a permanent
+peer connection. Peer acknowledgments describe repository durability separately
+from successful filesystem installation and cloud persistence.
+
+Derive pending work from replicated content/frontiers, not filesystem event counts
+or private acknowledgment state. Installation notifications must not produce an
+endless echo. Retain offline changes durably and retry failed/unacknowledged
+delivery. Rediscovery and periodic anti-entropy recover lost connectivity or
+acknowledgments. Cloud fallback retains its finite HTTP requests and periodic
+polling; these LAN bursts add no persistent cloud connection.
+
+Implementation and qualification: [LAN event delivery plan](<impl/Lambda_Impl_Sync_LAN_Events (done).md>).
 
 The synchronized working directory remains available to other applications;
 exclusive ownership is limited to the sync agent's private repository state.

@@ -561,12 +561,21 @@ rejections and unfinished-install startup recovery.
 ### Sync discovery and connectivity
 
 `python3 test/sync_connectivity/test_goldens.py` reuses exact sync goldens and
-serializes shared fixture paths across tiers. `--gc` selects six focused
-RTC/signaling/binding/cancellation/pairing/restart cases with the existing 300-second budget.
+serializes shared fixture paths across tiers. `--gc` selects eleven focused
+RTC/signaling/binding/cancellation/pairing/restart/watcher/installation cases
+with the existing 300-second budget.
+The full burst filesystem scenario remains ordinary timed acceptance; its
+allocation-forced GC timing limit is recorded as SD-05 in the
+[LAN event plan](<../vibe/impl/Lambda_Impl_Sync_LAN_Events (done).md>).
 `test_connectivity.py` runs private Bonjour discovery, large binary DataChannel
 transfer and interrupted-process recovery. `test_signaling.py` adds actual S3,
 fresh finite function invocations, withheld-answer fallback, direct recovery and
 process-instance replacement; supply `LAMBDA_CLOUD_TEST_STORAGE_FILE`.
+`test_lan_events.py` checks OS-triggered delivery, idle scan suppression,
+bidirectional connection reuse/closure, simultaneous changes, external saves,
+restart catch-up and three-peer fan-out. Native watcher checks require OS
+notification access in addition to local-network access; a restricted sandbox
+can deny the macOS event service. Run this gate on the native host.
 Select the tier with `LAMBDA_EXEC_BACKEND` and executable with `LAMBDA_SYNC_EXE`.
 The pinned dependency is prepared by `utils/prepare_sync_connectivity.py`.
 The full native sync golden set requires that prepared dependency; a function
