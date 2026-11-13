@@ -1,0 +1,21 @@
+{
+  "name": "link shortcut applies to the selected text and saves Markdown",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_link_shortcut.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "mouse_drag", "target": {"text": "short paragraph"}, "to_target": {"text": "for testing"}, "button": 0},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "key_combo", "key": "k", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-link"}, "count": 1},
+    {"type": "type", "text": "https://example.org"},
+    {"type": "assert_value", "target": {"selector": "#edit-dialog-href"}, "equals": "https://example.org"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface a.edit-link"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_link_shortcut.md", "contains": "](https://example.org)"}
+  ]
+}

@@ -1273,7 +1273,7 @@ These packages implement parts of the engine in Lambda. They load automatically 
 
 ### 10.1 `edit` — the `lambda edit` application
 
-`lambda.editor.app` is the document-authoring application behind `lambda edit` (see [Lambda_CLI.md](Lambda_CLI.md)). The CLI passes it a local path, and `open_document(path, options)` does the rest: it picks a format by suffix (`format_for_path(path)`, over `formats`: Markdown `.md`/`.markdown`, HTML `.html`/`.htm`, SVG `.svg`), reads and imports the file, refuses a document it could not write back without loss, and builds the editing page with its toolbar and rich-text or drawing surface. The format adapters are `lambda.editor.format.markdown`, `lambda.editor.format.html` and `lambda.editor.format.svg`; saving and reloading live in `lambda.editor.session`.
+`lambda.editor.app` is the document-authoring application behind `lambda edit` (D9.3.4, D10.2.1; see [Lambda_CLI.md](Lambda_CLI.md)). It chooses a format by suffix, imports the file and builds a rich-text, property or source surface. Rich adapters check that the format can preserve the model; property adapters retain source spans around edited values. Unsupported constructs open in source mode where available. SVG and diagrams use source editing in this application; the drawing package remains available to other applications. Saving and reloading live in `lambda.editor.session`.
 
 ### 10.2 `editor` — the editing model
 

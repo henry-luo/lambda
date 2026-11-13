@@ -1,0 +1,23 @@
+{
+  "name": "dismiss and navigate the table menu with the keyboard",
+  "command": "edit",
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_html_table_keyboard_navigation.html",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-surface td"}},
+    {"type": "key_combo", "key": "F10", "mods_str": "shift"},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 1},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 0},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface tbody td"}, "contains": "X"},
+    {"type": "key_combo", "key": "F10", "mods_str": "shift"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-surface tbody td"}, "count": 3},
+    {"type": "type", "text": "Y"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface tbody td", "index": 1}, "contains": "Y"}
+  ]
+}

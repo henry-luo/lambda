@@ -1,0 +1,17 @@
+{
+  "name": "toggle a middle ordered list item and preserve numbering",
+  "command": "edit",
+  "html": "test/ui/edit/sample-list-toggle.html",
+  "working_copy": "temp/edit-ui/edit_html_list_toggle.html",
+  "events": [
+    {"type": "click", "target": {"text": "Second item"}},
+    {"type": "key_combo", "key": "7", "mods_str": "ctrl+shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p"}, "equals": "Second item"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface ol"}, "count": 2},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_list_toggle.html", "contains": "<ol start=\"6\">"},
+    {"type": "key_combo", "key": "z", "mods_str": "ctrl"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface ol"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface ol li"}, "count": 3}
+  ]
+}

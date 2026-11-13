@@ -1,0 +1,19 @@
+{
+  "name": "edit RTF while preserving text colors",
+  "command": "edit",
+  "html": "test/ui/edit/sample-color.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_color.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface span[style]"}, "count": 2},
+    {"type": "click", "target": {"text": "Normal"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_color.rtf", "contains": "\\colortbl;\\red255\\green0\\blue0;\\red0\\green0\\blue255;"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_color.rtf", "contains": "\\cf1"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_color.rtf", "contains": "\\cf2"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_color.rtf", "contains": "More."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

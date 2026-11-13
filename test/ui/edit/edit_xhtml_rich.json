@@ -1,0 +1,16 @@
+{
+  "name": "XHTML rich editing preserves XML declaration and namespace",
+  "command": "edit",
+  "html": "test/ui/edit/sample-edit.xhtml",
+  "working_copy": "temp/edit-ui/edit_xhtml_rich.xhtml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface p"}, "count": 1},
+    {"type": "click", "target": {"text": "Plain XHTML text"}},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved edit_xhtml_rich.xhtml"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xhtml_rich.xhtml", "contains": "<?xml version=\"1.0\"?>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xhtml_rich.xhtml", "contains": "xmlns=\"http://www.w3.org/1999/xhtml\""},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xhtml_rich.xhtml", "contains": " edited"}
+  ]
+}

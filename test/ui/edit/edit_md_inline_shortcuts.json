@@ -1,0 +1,17 @@
+{
+  "name": "inline code and strikethrough shortcuts save Markdown",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_inline_shortcuts.md",
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "key_combo", "key": "e", "mods_str": "super"},
+    {"type": "type", "text": "CODE"},
+    {"type": "key_combo", "key": "e", "mods_str": "super"},
+    {"type": "key_combo", "key": "x", "mods_str": "super+shift"},
+    {"type": "type", "text": "GONE"},
+    {"type": "key_combo", "key": "x", "mods_str": "super+shift"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_inline_shortcuts.md", "contains": "`CODE`~~GONE~~"}
+  ]
+}

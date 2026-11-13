@@ -1,0 +1,35 @@
+{
+  "name": "save an untouched multiline CSV field without changing CRLF",
+  "command": "edit",
+  "html": "test/fixtures/edit/multiline-crlf.csv",
+  "working_copy": "temp/edit-ui/edit_csv_multiline_crlf.csv",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea.property-multiline"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_csv_multiline_crlf.csv",
+      "equals": "Name,Notes\r\nAlice,\"line one\r\nline two\"\r\n"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".edit-dirty"
+      },
+      "equals": ""
+    }
+  ]
+}

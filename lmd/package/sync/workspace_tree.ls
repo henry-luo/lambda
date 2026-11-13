@@ -5,7 +5,7 @@ import codec: .codec
 pub fn seen(context, id) any^ => id == v.root or v.clock_get(context,id[0]) >= id[1]
 
 pub fn events(replica) any^ => sort([for (atom in replica.atoms)
-    {*:atom.value.event,id:atom.id,time:atom.time,context:v.lookup(replica.receipts,atom.id)^.context}],
+    {*:atom.value.event,id:atom.id,time:atom.time,context:v.lookup_id(replica.receipts,atom.id)^.context}],
     (event)=>[event.time,event.id])^
 
 pub fn ancestor(entries, child, parent) any^ {

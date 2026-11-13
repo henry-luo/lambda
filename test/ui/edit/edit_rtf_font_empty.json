@@ -1,0 +1,15 @@
+{
+  "name": "type in an empty RTF document with a document font",
+  "command": "edit",
+  "html": "test/ui/edit/sample-font-empty.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_font_empty.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "click", "target": {"selector": "#edit-surface"}},
+    {"type": "type", "text": "Hello"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_font_empty.rtf", "contains": "Hello"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

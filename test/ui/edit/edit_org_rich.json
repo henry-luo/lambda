@@ -1,0 +1,19 @@
+{
+  "name": "edit Org headings, lists and links",
+  "command": "edit",
+  "html": "test/ui/edit/sample-org.org",
+  "working_copy": "temp/edit-ui/edit_org_rich.org",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface h1"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-surface li"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".edit-surface a"}, "equals": "example"},
+    {"type": "click", "target": {"selector": ".edit-surface p"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_org_rich.org", "contains": "More."},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_org_rich.org", "contains": "https://example.org"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

@@ -39,6 +39,13 @@ def main():
     executable = Path(lan.peer.EXE).resolve()
     native = executable.read_bytes()
     assert b'VALIDATOR] validate_against_base_type' not in native, 'Latency acceptance requires a release executable'
+    tracked_sources = sorted((ROOT / 'lmd/package/sync').glob('*.ls')) + [
+        Path(__file__).resolve(), ROOT / 'test/sync_connectivity/test_lan_events.py',
+        ROOT / 'test/sync_connectivity/test_connectivity.py', ROOT / 'test/sync_peer/test_peer.py']
+    def source_hashes():
+        return {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in tracked_sources}
+    sources = source_hashes()
     area = ROOT / 'temp/sync-warm-latency' / ('benchmark-' + str(os.getpid()))
     lan.AREA = area
     lan.peer.AREA = area
@@ -130,12 +137,14 @@ def main():
                       for stage in ['visible', 'installed']} for mode in ['settled', 'continuous']}
     public = [{k: v for k, v in s.items() if k not in ['value', 'previous_frontier', 'started']} for s in samples]
     result = dict(executable=str(executable), sha256=hashlib.sha256(native).hexdigest(),
+                  source_sha256=sources, sources_unchanged=sources == source_hashes(),
                   backend=os.environ.get('LAMBDA_EXEC_BACKEND', 'auto'), host_scope='independent processes on one host',
                   peers=args.peers, seed_files=args.seed_files, workload=args.workload, bytes_per_edit=4096,
                   samples_per_mode=args.samples, observer_ms=10, summary_seconds=summary, samples=public)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, indent=2)+'\n')
     print(json.dumps(summary, indent=2), flush=True)
+    assert result['sources_unchanged'], 'Sync sources changed during the benchmark'
     assert all(s['reused'] and max(s['installed'].values()) < args.max_seconds for s in samples), 'Warm durable delivery exceeded target; inspect '+str(args.report)
 
 

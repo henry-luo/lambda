@@ -1,8 +1,8 @@
 {
   "name": "the Rect tool draws a rectangle in one undoable edit; undo restores the saved drawing and Delete removes a pick",
-  "command": "edit",
-  "html": "test/ui/edit/sample.svg",
-  "working_copy": "temp/edit-ui/edit_svg_create_undo.svg",
+  "command": "view",
+  "html": "temp/edit-ui/drawing_create_undo.ls",
+  "prepare": ["python3", "test/ui/edit/prepare_drawing.py", "temp/edit-ui/edit_svg_create_undo.svg", "temp/edit-ui/drawing_create_undo.ls"],
   "viewport": {"width": 1000, "height": 700},
   "events": [
     {"type": "click", "target": {"selector": ".edit-btn-tool_rect"}},

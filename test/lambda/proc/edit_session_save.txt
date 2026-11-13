@@ -7,7 +7,7 @@
 [true, null, "Saved doc.md."]
 ["# Doc\n\nSome text.\n\nAdded.\n\nMore.\n"]
 [false, null, "Not saved: the folder temp/edit_session_save/nowhere does not exist."]
-[false, null, "Not saved: copy.txt is not a Markdown file name (.md, .markdown)."]
+[false, null, "Not saved: copy.txt is not a Markdown file name (.md, .markdown, .mdown, .mkdn)."]
 ["no copy.txt", true]
 [false, 'exists', "taken.md already exists."]
 ["taken\n"]

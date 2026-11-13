@@ -1,0 +1,19 @@
+{
+  "name": "edit a MediaWiki table with the context menu",
+  "command": "edit",
+  "html": "test/ui/edit/sample-wiki-table.wiki",
+  "working_copy": "temp/edit-ui/edit_wiki_table.wiki",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface td"}, "count": 2},
+    {"type": "click", "target": {"selector": ".edit-surface td"}},
+    {"type": "key_combo", "key": "F10", "mods_str": "shift"},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 1},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-surface td"}, "count": 4},
+    {"type": "type", "text": "new"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_wiki_table.wiki", "contains": "new"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

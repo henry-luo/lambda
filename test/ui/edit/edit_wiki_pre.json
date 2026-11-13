@@ -1,0 +1,16 @@
+{
+  "name": "edit a MediaWiki preformatted block",
+  "command": "edit",
+  "html": "test/ui/edit/sample-wiki-pre.wiki",
+  "working_copy": "temp/edit-ui/edit_wiki_pre.wiki",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".edit-surface pre"}, "equals": "hello"},
+    {"type": "click", "target": {"selector": ".edit-surface pre"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_wiki_pre.wiki", "contains": "hello edited"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

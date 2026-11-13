@@ -1,0 +1,16 @@
+{
+  "name": "SVG opens as source and can be edited and saved",
+  "command": "edit",
+  "html": "test/ui/edit/sample.svg",
+  "working_copy": "temp/edit-ui/edit_svg_source.svg",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-canvas"}, "count": 0},
+    {"type": "click", "target": {"selector": ".src-text"}},
+    {"type": "key_combo", "key": "End", "mods_str": "super"},
+    {"type": "type", "text": " "},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

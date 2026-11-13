@@ -1,0 +1,118 @@
+{
+  "name": "an invalid XML attribute name survives save and close attempts",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.xml",
+  "working_copy": "temp/edit-ui/edit_xml_invalid.xml",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "input[aria-label='Property name: @kind']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "bad name"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".property-status"
+      },
+      "contains": "Invalid value"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "input[aria-label='Property name: @kind']"
+      },
+      "equals": "bad name"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-save"
+      }
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_invalid.xml",
+      "contains": "kind=\"book\""
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-invalid-close"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "input[aria-label='Property name: @kind']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "kind"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-value[aria-label='@kind']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "journal"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_invalid.xml",
+      "contains": "kind=\"journal\""
+    }
+  ]
+}

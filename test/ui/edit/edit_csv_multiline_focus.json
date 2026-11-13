@@ -1,0 +1,53 @@
+{
+  "name": "continue editing a CSV value after it becomes single-line",
+  "command": "edit",
+  "html": "test/fixtures/edit/multiline.csv",
+  "working_copy": "temp/edit-ui/edit_csv_multiline_focus.csv",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea.property-multiline"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "short"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "x"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_csv_multiline_focus.csv",
+      "contains": "Alice,\"shortx\"\n"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".edit-dirty"
+      },
+      "equals": ""
+    }
+  ]
+}

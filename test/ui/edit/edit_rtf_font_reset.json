@@ -1,0 +1,18 @@
+{
+  "name": "edit RTF with a font and formatting reset",
+  "command": "edit",
+  "html": "test/ui/edit/sample-font-reset.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_font_reset.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface strong"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": ".edit-surface span[style]", "index": 1}, "attribute": "style", "contains": "font-family: 'Arial'"},
+    {"type": "click", "target": {"selector": ".edit-surface span[style]", "index": 1}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_font_reset.rtf", "contains": "\\f0\\fs24"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_font_reset.rtf", "contains": "edited"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

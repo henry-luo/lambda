@@ -1,0 +1,30 @@
+{
+  "name": "add and remove XML child elements with undo",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-elements.xml",
+  "working_copy": "temp/edit-ui/edit_xml_elements.xml",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-add_element"}, "count": 3},
+    {"type": "assert_count", "target": {"selector": ".property-delete_element"}, "count": 2},
+    {"type": "click", "target": {"selector": ".property-add_element", "index": 1}},
+    {"type": "click", "target": {"selector": "#property-new-key"}},
+    {"type": "type", "text": "n:item"},
+    {"type": "click", "target": {"selector": "#property-new-value"}},
+    {"type": "type", "text": "A & B"},
+    {"type": "click", "target": {"selector": ".edit-dialog-element_add"}},
+    {"type": "assert_count", "target": {"selector": ".property-delete_element"}, "count": 3},
+    {"type": "click", "target": {"selector": ".property-delete_element", "index": 2}},
+    {"type": "assert_count", "target": {"selector": ".property-delete_element"}, "count": 2},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".property-delete_element"}, "count": 3},
+    {"type": "click", "target": {"selector": "input[aria-label='Property name: group']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "collection"},
+    {"type": "click", "target": {"selector": "input[aria-label='Property name: root']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "document"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xml_elements.xml", "contains": "<document xmlns:n=\"urn:n\"><collection id=\"a\"><n:item>A &amp; B</n:item></collection><!--keep--><other>keep</other></document>"}
+  ]
+}

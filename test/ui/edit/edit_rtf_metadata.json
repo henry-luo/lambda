@@ -1,0 +1,18 @@
+{
+  "name": "RTF metadata survives a rich edit",
+  "command": "edit",
+  "html": "test/ui/edit/sample-metadata.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_metadata.rtf",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Hello"},
+    {"type": "click", "target": {"text": "Hello"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_metadata.rtf", "contains": "\\uc2 {\\info{\\title Caf\\u233??}{\\author A\\{B\\}}}\\uc1 "},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_metadata.rtf", "contains": "{\\*\\generator Lambda Editor;}"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_metadata.rtf", "contains": "Hello!"}
+  ]
+}

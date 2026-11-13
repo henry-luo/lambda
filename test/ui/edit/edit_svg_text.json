@@ -1,8 +1,8 @@
 {
   "name": "the Text tool places a text object from a dialog; a double click retypes a one-run text and leaves spanned text alone",
-  "command": "edit",
-  "html": "test/ui/edit/sample.svg",
-  "working_copy": "temp/edit-ui/edit_svg_text.svg",
+  "command": "view",
+  "html": "temp/edit-ui/drawing_text.ls",
+  "prepare": ["python3", "test/ui/edit/prepare_drawing.py", "temp/edit-ui/edit_svg_text.svg", "temp/edit-ui/drawing_text.ls"],
   "viewport": {"width": 1000, "height": 700},
   "events": [
     {"type": "click", "target": {"selector": ".edit-btn-tool_text"}},

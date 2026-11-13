@@ -1,0 +1,68 @@
+{
+  "name": "edit empty and whitespace-only XML text",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-empty.xml",
+  "working_copy": "temp/edit-ui/edit_xml_empty.xml",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-value[aria-label='#text']"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-value[aria-label='#text']",
+        "index": 0
+      }
+    },
+    {
+      "type": "type",
+      "text": "A & B"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-value[aria-label='#text']",
+        "index": 2
+      }
+    },
+    {
+      "type": "type",
+      "text": "<Z>"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_empty.xml",
+      "contains": "<self>&lt;Z&gt;</self>"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_empty.xml",
+      "contains": "<empty>A &amp; B</empty><space>  </space>"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".edit-dirty"
+      },
+      "equals": ""
+    }
+  ]
+}

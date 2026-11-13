@@ -1,0 +1,18 @@
+{
+  "name": "edit RTF with per-run font and size",
+  "command": "edit",
+  "html": "test/ui/edit/sample-font-runs.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_font_runs.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface span[style]"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": ".edit-surface span[style]"}, "attribute": "style", "contains": "font-family: 'Times New Roman'"},
+    {"type": "assert_attribute", "target": {"selector": ".edit-surface span[style]"}, "attribute": "style", "contains": "font-size: 24.00px"},
+    {"type": "click", "target": {"text": "Serif"}},
+    {"type": "type", "text": "X"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_font_runs.rtf", "contains": "\\f1\\fs36"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_font_runs.rtf", "contains": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

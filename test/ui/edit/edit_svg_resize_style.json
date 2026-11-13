@@ -1,8 +1,8 @@
 {
   "name": "a handle resizes, Style repaints through the style attribute, Duplicate remaps ids, Back reorders, and zoom leaves the file alone",
-  "command": "edit",
-  "html": "test/ui/edit/sample.svg",
-  "working_copy": "temp/edit-ui/edit_svg_resize_style.svg",
+  "command": "view",
+  "html": "temp/edit-ui/drawing_resize_style.ls",
+  "prepare": ["python3", "test/ui/edit/prepare_drawing.py", "temp/edit-ui/edit_svg_resize_style.svg", "temp/edit-ui/drawing_resize_style.ls"],
   "viewport": {"width": 1000, "height": 700},
   "events": [
     {"type": "click", "target": {"selector": "#box"}},

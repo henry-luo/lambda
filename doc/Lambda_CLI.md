@@ -523,6 +523,7 @@ lambda edit <document_file> [options]
 
 | Flag | Long Form | Description | Default |
 |------|-----------|-------------|---------|
+| | `--source` | Open a text document in the source editor | |
 | | `--event-file <file.json>` | Load simulated events from JSON for testing | |
 | | `--event-result <file.json>` | Write a machine-readable event result | |
 | | `--event-log <file>` / `--state-dump <file>` | Record events / dump editor state (testing) | |
@@ -532,14 +533,39 @@ lambda edit <document_file> [options]
 
 Remote URLs are rejected: `edit` opens local files only.
 
-**Supported formats:** the `lambda.edit` package chooses the editor from the
-file's suffix.
+**Supported formats:** `lambda.editor.app` chooses the surface from the file's
+suffix (D9.3.4, D10.2.1).
 
 | Suffix | Editor |
 |--------|--------|
-| `.md`, `.markdown` | Rich text; front matter, raw HTML, math, and blocks the editor cannot edit (footnotes, for example) are kept as written |
+| `.md`, `.markdown`, `.mdown`, `.mkdn` | Rich text; front matter, raw HTML, math, and blocks the editor cannot edit are kept as written |
 | `.html`, `.htm` | Rich text for the body; the head, attributes, scripts, and elements the editor does not edit are kept as written and never run |
-| `.svg` | Drawing: select, move, resize, rectangle/ellipse/line/text tools, fill and stroke, duplicate, delete, paint order, zoom |
+| `.xhtml`, `.xht` | Rich text for documents whose strict XML tree survives the HTML editor's round trip, including compact documents and line breaks; other XHTML opens in source |
+| `.rst`, `.rest`, `.org`, `.wiki`, `.mediawiki`, `.adoc`, `.asciidoc`, `.asc`, `.textile`, `.txtl` | Rich text when the document survives its format's round trip; otherwise source |
+| `.rtf` | Rich text for basic paragraphs, alignment, positive indents and line spacing, emphasis, superscript, subscript, RGB text colors, and ordinary font and size changes; default-language, information and generator headers are retained, while unsupported controls and metadata open in source |
+| `.properties`, `.props`, `.ini` | Property values, names and simple insertions/deletions; unsupported constructs open in source |
+| `.csv`, `.tsv` | Rows and decoded field values in a property tree; quoting is handled on save |
+| `.xml` | Add, rename and remove child elements; rename the root; add, rename, remove and edit attributes; edit decoded text and CDATA, including multiline values; unsupported constructs open in source |
+| `.svg`, `.mmd`, `.d2`, `.dot`, `.gv`, `.ls`, `.json`, `.yaml`, `.toml`, `.txt`, `.eml`, `.ics`, `.ical`, `.vcf`, `.mark`, `.1m`, `.3p` and other supported text suffixes | Source editor |
+
+Other filenames, including extensionless scripts, open in the source editor
+when their contents pass the text checks below.
+
+The property surface preserves the rest of the source when a value changes;
+use the disclosure buttons to collapse or expand nested entries.
+Continued properties currently open in source mode. XML child edits preserve
+the surrounding source; the root element cannot be removed. JSON, TOML, YAML,
+iCalendar and vCard property editing is pending input parser issues
+[LI-029–LI-032](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-029).
+CSV files affected by quoted-field separator detection also open in source
+mode ([LI-034](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-034)).
+Java properties with escaped key separators or spaces are not interpreted
+correctly by the current input parser; use source editing for those files
+([LI-045](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-045)).
+PDF, raster images and other non-text media cannot be edited.
+Text files must be valid UTF-8 and cannot contain NUL bytes.
+The content checks also identify PDF, GIF and Netpbm headers when the name
+does not identify the format; SVG remains available as source text.
 
 **View-only parts:** a part the rich-text editor cannot edit shows as it
 renders, inside a dashed frame, and Save writes it back exactly as it was read.
@@ -552,15 +578,16 @@ as its source. Math shows its TeX source (`lambda view` renders it). The
 rendering is display only: scripts, styles, event handlers, frames, and
 navigation are removed, and form controls are disabled. Typing into a
 view-only part is refused; Delete or Backspace with the caret in it removes
-the whole part, and Undo restores it. A file the editor still cannot write
-back without loss is not opened; the error says what would change, and
-`lambda view` still shows it.
+the whole part, and Undo restores it. A document the rich adapter cannot
+preserve opens in source mode where available; otherwise the error says what
+would change, and `lambda view` still shows it.
 
 **Saving:** Save writes the same format back through a temporary file that
 replaces the original only after the write succeeded. If the file changed on
 disk since it was opened, Save stops and offers Overwrite, Reload, or Save As.
 Save As takes a path relative to the document's folder, keeps the format, and
-never creates folders. Closing a window with unsaved changes asks to Save,
+never creates folders. For an unlisted source suffix, it also accepts a name
+with the same suffix (or another extensionless name). Closing a window with unsaved changes asks to Save,
 Discard, or Cancel.
 
 **Keyboard controls:**
@@ -570,10 +597,15 @@ Discard, or Cancel.
 | Cmd/Ctrl+S | Save |
 | Cmd/Ctrl+Shift+S | Save As |
 | Cmd/Ctrl+Z | Undo (Shift for redo) |
-| ESC | Cancel the current dialog or drawing gesture, then clear the selection (does not close the window) |
-| Delete, arrows | Drawing: delete or nudge the selection (Shift: by 10) |
-| Cmd/Ctrl+D | Drawing: duplicate the selection |
-| V, R, E, L, T | Drawing: Select, Rectangle, Ellipse, Line, Text tool |
+| Cmd/Ctrl+/ | Switch between source and the available rich or property view |
+| Cmd/Ctrl+K | Insert a link in supported rich-text formats; Enter confirms the address |
+| Cmd/Ctrl+E / Cmd/Ctrl+Shift+X | Toggle inline code or strikethrough where supported |
+| Cmd/Ctrl+Alt+1–3 / +0 | Apply heading level 1–3 or paragraph style in supported rich-text formats |
+| Cmd/Ctrl+Shift+7 / +8 | Create a numbered or bulleted list in supported rich-text formats |
+| Cmd/Ctrl+Shift+L/E/R/J | Align selected RTF paragraphs left, center, right or justified |
+| Shift+F10 | Open the table menu from a cell; use Tab and Enter to choose an action |
+| Enter in a single-line property field or add dialog | Commit the field or add the item to the undoable document |
+| Escape | Cancel the current dialog, dismiss the table menu, or discard a property field draft |
 
 **Examples:**
 

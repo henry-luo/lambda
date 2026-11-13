@@ -1,0 +1,16 @@
+{
+  "name": "table context menu adds a row and saves it",
+  "command": "edit",
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_html_table_menu.html",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-surface td"}},
+    {"type": "click", "target": {"selector": ".edit-surface td"}, "button": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-btn-table_row_add"}},
+    {"type": "assert_count", "target": {"selector": ".edit-surface tbody tr"}, "count": 2},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

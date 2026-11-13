@@ -261,8 +261,7 @@ pub pn request(handle, credentials, peer, outgoing, pending, command) any^ {
     }
     if (command.kind == 'missing') {
         object_ids(body)^
-        let have = local.inventory(handle)^
-        return {body:[for (id in body where not contains(have,id)^) id],pending:pending}
+        return {body:local.missing_objects(handle,body)^,pending:pending}
     }
     if (command.kind == 'put_object') {
         return {body:true,pending:import_fragment(handle,pending,body)^}

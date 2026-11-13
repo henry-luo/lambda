@@ -1,0 +1,19 @@
+{
+  "name": "edit RTF while preserving superscript and subscript",
+  "command": "edit",
+  "html": "test/ui/edit/sample-baseline.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_baseline.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".edit-surface sub"}, "equals": "2"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface sup"}, "equals": "2"},
+    {"type": "click", "target": {"text": "and x"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_baseline.rtf", "contains": "\\sub 2"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_baseline.rtf", "contains": "\\super 2"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_baseline.rtf", "contains": "More."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

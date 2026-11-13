@@ -1,0 +1,17 @@
+{
+  "name": "link shortcut respects RTF format capabilities",
+  "command": "edit",
+  "html": "test/ui/edit/sample-strike.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_link_shortcut.rtf",
+  "events": [
+    {"type": "click", "target": {"text": "Alpha"}},
+    {"type": "key_combo", "key": "k", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-link"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Not available in RTF"},
+    {"type": "key_combo", "key": "2", "mods_str": "super+alt"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Not available in RTF"},
+    {"type": "key_combo", "key": "8", "mods_str": "super+shift"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Not available in RTF"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}
