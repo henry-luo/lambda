@@ -1,5 +1,5 @@
 {
-  "reviewed_at": "2026-11-12T13:37:22.381Z",
+  "reviewed_at": "2026-11-13T08:13:04.885686+00:00",
   "interpretation": "Manual major visual omissions retained independently of coarse image thresholds; root causes remain unconfirmed unless recorded in the issue ledgers.",
   "reviews": [
     {
@@ -76,6 +76,21 @@
       "label": "saas_landing_271",
       "url": "https://www.pivotapp.ai/",
       "manual_major_remaining": "The hero heading, copy, actions and cube illustration remain absent. The fresh gradient/logo region lowers the coarse score without restoring the primary hero; retained after visual review."
+    },
+    {
+      "label": "saas_landing_207",
+      "url": "https://framerauth.com/",
+      "manual_major_remaining": "The header now appears, but the main membership heading, copy, actions and product media remain absent. Retained after visual review despite the lower coarse score."
+    },
+    {
+      "label": "saas_landing_563",
+      "url": "https://superhuman.com/",
+      "manual_major_remaining": "The main hero heading, copy and product/person imagery remain absent; footer content occupies the hero region. Retained after visual review despite the lower changed-area score."
+    },
+    {
+      "label": "saas_landing_093",
+      "url": "https://www.zendesk.com/",
+      "manual_major_remaining": "The main hero is present, but the primary logo, product navigation and header actions remain absent in a large empty header. Retained as a major functional omission after visual review."
     }
   ]
 }

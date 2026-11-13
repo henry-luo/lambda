@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **314 anchored records**, preserving fixed, resolved,
+This archive contains **315 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -36,6 +36,52 @@ resolved/obsolete appendix. LR08-14 moved here from the active ledger on
 2026-11-03 after its 2026-10-29 fix and qualification; its original resolution
 summary and implementation record are retained below. LR02-35 moved here on
 2026-11-03 after S16.10.4 was ruled and implemented.
+
+## Online DOM collection iterators — 2026-11-13
+
+<a id="dom-collection-iterators"></a>
+
+**Status:** FIXED. The shared JavaScript operation contract is **D8.4.4**;
+callable identity and virtual carriers follow **D7.2.2 / D9.5.5**.
+
+Lattice customers and blog called `qualified.docking.init` from their authored
+inline scripts. Both had zero large-script admission skips but threw
+`TypeError: object is not iterable`. The saved docking bundle enumerates
+`Array.from(element.style)`. A reduced for-of over CSSStyleDeclaration reached
+`js_get_iterator_impl` with carrier type VMAP21, which its property fallback
+did not admit. DOM interface setup installed a callback that called GetIterator
+on the receiver again. VARRAY's fast path masked this for direct collections;
+a proxy re-entered the same factory until a RangeError.
+
+Chromium confirms that HTMLCollection, NodeList, NamedNodeMap, DOMTokenList,
+StyleSheetList, CSSRuleList and CSSStyleDeclaration all expose the identical
+`Array.prototype.values` function as their value iterator. Lambda now installs
+that existing realm intrinsic. It already supports generic deferred/live
+LengthOfArrayLike and indexed reads, so no second iterator algorithm or new
+array conversion path is added. Window may not have published Array yet when
+AST binds DOM interfaces; the existing intrinsic-prototype helper supplies the
+canonical identity at that point. Precise roots retain the method and prototype
+through installation. No source-pattern, page-specific or timing fix is used.
+
+`test/ui/dom/collection_iterators` improves from 0/10 to 10/10 assertions in
+AUTO, AST and MIR: canonical identity, generic receiver, inline/rule style
+iteration, live mutation, permanent exhaustion and proxy branded TypeError.
+`test/js/array_iterator_generic.js` adds 27 controls for the existing shared
+array implementation, including abrupt length/index reads and deferral. These
+array controls already pass before the repair; they verify reuse, not a new
+array fix. Independent Chromium agrees on all 37 controls. The unchanged saved
+Qualified bundle/init throws before and prints QUALIFIED_INIT_COMPLETE after.
+Both live Lattice captures load within the unchanged 150s budget with the
+iterator exception absent. Their major visual difference is retained.
+
+Qualification: 575 AST baseline cases, 120 focused MVP iterator/array/collection
+cases, 69 CLI rendering/comparison cases, 13 DOM UI fixtures/103 assertions,
+630 recorded JavaScript layout cases and 16 static layout suites (4,979 passes,
+295 recorded partials, zero regressions). The host pin and source evidence are
+under `temp/online-visual-round15/`. Capture virtual time, browser references,
+URL admission and failure deadlines remain unchanged (**D10.1.7**). A first
+Window.Array lookup candidate failed AST setup and was corrected before this
+qualification; invalid helper/category invocations are labeled in the checkpoint.
 
 ## 1. Compilation pipeline, CLI & REPL (LR01)
 
