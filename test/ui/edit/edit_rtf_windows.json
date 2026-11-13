@@ -1,0 +1,18 @@
+{
+  "name": "edit and preserve Windows-1252 RTF characters",
+  "command": "edit",
+  "html": "test/ui/edit/sample-windows.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_windows.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "Cost €"},
+    {"type": "click", "target": {"text": "Cost"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "5"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_windows.rtf", "contains": "\\u8364?"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_windows.rtf", "contains": "5"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "keep an editable caret after deleting table structure",
+  "command": "edit",
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_html_table_keyboard_delete.html",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-surface td"}},
+    {"type": "key_combo", "key": "F10", "mods_str": "shift"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-surface tbody tr"}, "count": 2},
+    {"type": "key_combo", "key": "F10", "mods_str": "shift"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-surface tbody tr"}, "count": 1},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface tbody td"}, "contains": "X"},
+    {"type": "key_combo", "key": "F10", "mods_str": "shift"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-surface tbody td"}, "count": 1},
+    {"type": "type", "text": "Y"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface tbody td"}, "contains": "Y"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_table_keyboard_delete.html", "contains": "Y2"}
+  ]
+}

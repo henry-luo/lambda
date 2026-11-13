@@ -1,0 +1,17 @@
+{
+  "name": "continue editing an XML value after its multiline form becomes single-line",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-multiline-attr.xml",
+  "working_copy": "temp/edit-ui/edit_xml_multiline_focus.xml",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": "textarea[aria-label='@id']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "short"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "type", "text": "x"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xml_multiline_focus.xml", "contains": "id=\"shortx\""},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

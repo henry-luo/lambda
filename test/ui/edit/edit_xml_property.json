@@ -1,0 +1,44 @@
+{
+  "name": "edit XML attributes without changing comments or markup",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.xml",
+  "working_copy": "temp/edit-ui/edit_xml_property.xml",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-value"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-value[aria-label='@kind']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "journal"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_property.xml",
+      "contains": "<item kind=\"journal\">First</item><!-- keep -->"
+    }
+  ]
+}

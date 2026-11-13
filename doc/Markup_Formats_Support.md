@@ -726,7 +726,13 @@ import rtf: lambda.doc.rtf
 let document = rtf.parse_file("report.rtf")^  // or rtf.parse(source_text)^
 ```
 
-The supported subset includes nested formatting, font and color tables, paragraph alignment and indents, basic escapes, Unicode fallback, page breaks, and table separators. Headers, footers, pictures, objects, metadata, and other non-body destinations are skipped. This is not a complete RTF implementation: code-page decoding, embedded media, and full table layout are not supported. The script parser rejects nesting of 512 groups or more. The native RTF input parser has been removed; use this package for RTF content. The document viewer uses the direct script reader.
+Pass `{preserve_empty: true}` as the second argument to `parse` or
+`parse_grammar` to retain explicitly terminated empty paragraphs. The default
+omits them for compatibility with the former native reader.
+`parse_details(source, options)` returns the document and the parsed final
+font style; the editor uses it for documents with a single document-wide font.
+
+The supported subset includes nested formatting, font and color tables, paragraph alignment and indents, Windows-1252 hex escapes, named punctuation, Unicode fallback, page breaks, and table separators. Headers, footers, pictures, objects, metadata, and other non-body destinations are skipped. This is not a complete RTF implementation: other code pages, embedded media, and full table layout are not supported. The script parser rejects nesting of 512 groups or more. The native RTF input parser has been removed; use this package for RTF content. The document viewer uses the direct script reader.
 
 ### 3.4 Email (EML / RFC 822)
 

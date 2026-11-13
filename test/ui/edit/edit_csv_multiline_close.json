@@ -1,0 +1,52 @@
+{
+  "name": "preserve a focused multiline field when closing",
+  "command": "edit",
+  "html": "test/fixtures/edit/multiline.csv",
+  "working_copy": "temp/edit-ui/edit_csv_multiline_close.csv",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea.property-multiline"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "changed"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-close"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-save"
+      }
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_csv_multiline_close.csv",
+      "contains": "Alice,\"changed\"\nBob,Plain\n"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "preserve an untouched XML carriage-return reference",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-carriage-ref.xml",
+  "working_copy": "temp/edit-ui/edit_xml_carriage_noop.xml",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='@id']"}, "equals": "A\rB"},
+    {"type": "click", "target": {"selector": "textarea[aria-label='@id']"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xml_carriage_noop.xml", "equals": "<root id=\"A&#xD;B\" />\n"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

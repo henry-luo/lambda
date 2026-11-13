@@ -523,6 +523,7 @@ lambda edit <document_file> [options]
 
 | Flag | Long Form | Description | Default |
 |------|-----------|-------------|---------|
+| | `--source` | Open a text document in the source editor | |
 | | `--event-file <file.json>` | Load simulated events from JSON for testing | |
 | | `--event-result <file.json>` | Write a machine-readable event result | |
 | | `--event-log <file>` / `--state-dump <file>` | Record events / dump editor state (testing) | |
@@ -532,14 +533,30 @@ lambda edit <document_file> [options]
 
 Remote URLs are rejected: `edit` opens local files only.
 
-**Supported formats:** the `lambda.edit` package chooses the editor from the
-file's suffix.
+**Supported formats:** `lambda.editor.app` chooses the surface from the file's
+suffix (D9.3.4, D10.2.1).
 
 | Suffix | Editor |
 |--------|--------|
-| `.md`, `.markdown` | Rich text; front matter, raw HTML, math, and blocks the editor cannot edit (footnotes, for example) are kept as written |
+| `.md`, `.markdown`, `.mdown`, `.mkdn` | Rich text; front matter, raw HTML, math, and blocks the editor cannot edit are kept as written |
 | `.html`, `.htm` | Rich text for the body; the head, attributes, scripts, and elements the editor does not edit are kept as written and never run |
-| `.svg` | Drawing: select, move, resize, rectangle/ellipse/line/text tools, fill and stroke, duplicate, delete, paint order, zoom |
+| `.rst`, `.rest`, `.org`, `.wiki`, `.mediawiki`, `.adoc`, `.asciidoc`, `.asc`, `.textile`, `.txtl` | Rich text when the document survives its format's round trip; otherwise source |
+| `.rtf` | Rich text for basic paragraphs, emphasis, RGB text colors, and a single document-wide font; common view preferences are retained, while unsupported controls and metadata open in source |
+| `.properties`, `.props`, `.ini` | Property values, names and simple insertions/deletions; unsupported constructs open in source |
+| `.csv`, `.tsv` | Rows and decoded field values in a property tree; quoting is handled on save |
+| `.xml` | Add, rename and remove child elements; rename the root; add, rename, remove and edit attributes; edit decoded text and CDATA, including multiline values; unsupported constructs open in source |
+| `.svg`, `.mmd`, `.d2`, `.dot`, `.gv`, `.ls`, `.json`, `.yaml`, `.toml`, `.txt`, `.eml`, `.ics`, `.ical`, `.vcf`, `.mark`, `.xhtml`, `.1m`, `.3p` and other supported text suffixes | Source editor |
+
+The property surface preserves the rest of the source when a value changes;
+use the disclosure buttons to collapse or expand nested entries.
+Continued properties currently open in source mode. XML child edits preserve
+the surrounding source; the root element cannot be removed. JSON, TOML, YAML,
+iCalendar and vCard property editing is pending input parser issues
+[LI-029–LI-032](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-029).
+CSV files affected by quoted-field separator detection also open in source
+mode ([LI-034](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-034)).
+PDF, raster images and other non-text media cannot be edited.
+Text files must be valid UTF-8 and cannot contain NUL bytes.
 
 **View-only parts:** a part the rich-text editor cannot edit shows as it
 renders, inside a dashed frame, and Save writes it back exactly as it was read.
@@ -552,9 +569,9 @@ as its source. Math shows its TeX source (`lambda view` renders it). The
 rendering is display only: scripts, styles, event handlers, frames, and
 navigation are removed, and form controls are disabled. Typing into a
 view-only part is refused; Delete or Backspace with the caret in it removes
-the whole part, and Undo restores it. A file the editor still cannot write
-back without loss is not opened; the error says what would change, and
-`lambda view` still shows it.
+the whole part, and Undo restores it. A document the rich adapter cannot
+preserve opens in source mode where available; otherwise the error says what
+would change, and `lambda view` still shows it.
 
 **Saving:** Save writes the same format back through a temporary file that
 replaces the original only after the write succeeded. If the file changed on
@@ -570,10 +587,9 @@ Discard, or Cancel.
 | Cmd/Ctrl+S | Save |
 | Cmd/Ctrl+Shift+S | Save As |
 | Cmd/Ctrl+Z | Undo (Shift for redo) |
-| ESC | Cancel the current dialog or drawing gesture, then clear the selection (does not close the window) |
-| Delete, arrows | Drawing: delete or nudge the selection (Shift: by 10) |
-| Cmd/Ctrl+D | Drawing: duplicate the selection |
-| V, R, E, L, T | Drawing: Select, Rectangle, Ellipse, Line, Text tool |
+| Cmd/Ctrl+/ | Switch between source and the available rich or property view |
+| Shift+F10 | Open the table menu from a cell; use Tab and Enter to choose an action |
+| ESC | Cancel the current dialog or dismiss the table menu |
 
 **Examples:**
 

@@ -4257,10 +4257,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nSupported Formats:\n");
             printf("  .md/.markdown  Markdown rich text\n");
             printf("  .html/.htm     HTML rich text (head, styles and scripts are preserved)\n");
-            printf("  .svg           SVG drawing\n");
-            printf("  .txt/.ls/.json/.yaml/.css/.js/...  Source text (virtualized source editor)\n");
+            printf("  .rst/.org/.wiki/.adoc/.textile  Rich text where round trips are supported\n");
+            printf("  .svg/.mmd/.d2/.dot  SVG and diagrams as source text\n");
+            printf("  .ini/.properties/.csv/.xml  Property values (complex data may open as source)\n");
+            printf("  .json/.yaml/.toml/.txt/.ls/.css/.js/...  Source text (virtualized source editor)\n");
             printf("\nOptions:\n");
-            printf("  --source                   Open the file as source text, whatever its format\n");
+            printf("  --source                   Open a text document as source\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
             fputs("  --headless                 Run without creating a window\n  --fullscreen               Start in fullscreen (F11 toggles)\n", stdout);

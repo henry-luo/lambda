@@ -570,7 +570,7 @@ pub fn check_roundtrip(doc, envelope) any^ {
 // ---------------------------------------------------------------------------
 
 pub let descriptor = {
-  id: 'markdown', name: "Markdown", suffixes: [".md", ".markdown"],
+  id: 'markdown', name: "Markdown", suffixes: [".md", ".markdown", ".mdown", ".mkdn"],
   surface: 'rich_text', schema: schema, schema_preset: 'html5_subset',
   unsupported_input_types: unsupported_input_types,
   // kept as written: shown view-only, never written into (proposal §2)

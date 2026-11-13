@@ -1,0 +1,22 @@
+{
+  "name": "add and delete properties with keyboard undo",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.properties",
+  "working_copy": "temp/edit-ui/edit_properties_structure.properties",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".property-add"}},
+    {"type": "click", "target": {"selector": "#property-new-key"}},
+    {"type": "type", "text": "added"},
+    {"type": "click", "target": {"selector": "#property-new-value"}},
+    {"type": "type", "text": "123"},
+    {"type": "click", "target": {"selector": ".edit-dialog-property_add"}},
+    {"type": "assert_count", "target": {"selector": "input[aria-label='added']"}, "count": 1},
+    {"type": "click", "target": {"selector": ".property-delete"}},
+    {"type": "assert_count", "target": {"selector": "input[aria-label='app.name']"}, "count": 0},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "input[aria-label='app.name']"}, "count": 1},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_properties_structure.properties", "contains": "added=123"}
+  ]
+}

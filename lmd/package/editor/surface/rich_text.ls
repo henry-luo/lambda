@@ -161,8 +161,8 @@ view map () any^ {
 }
 
 // The editable host. Its content is the applied model document.
-pub fn surface(editor, css_class) =>
-  <div id: "edit-surface", class: "edit-surface " ++ css_class, contenteditable: "true", tabindex: "0",
+pub fn surface(editor, css_class, style = null) =>
+  <div id: "edit-surface", class: "edit-surface " ++ css_class, style: style, contenteditable: "true", tabindex: "0",
     apply(editor.doc)
   >
 

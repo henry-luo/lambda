@@ -1,0 +1,133 @@
+{
+  "name": "edit decoded XML values, multiline text, and CDATA",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-values.xml",
+  "working_copy": "temp/edit-ui/edit_xml_values.xml",
+  "viewport": {
+    "width": 1000,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": ".property-value[aria-label='@id']"
+      },
+      "equals": "A&B"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-value[aria-label='@id']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_values.xml",
+      "contains": "id=\"A&#38;B\""
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "C & <\"D\""
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_values.xml",
+      "contains": "id=\"C &amp; &lt;&quot;D&quot;\""
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='#text']"
+      },
+      "equals": "first\nsecond"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='#text']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "X & Y"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type",
+      "text": "next"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_values.xml",
+      "contains": "<block>X &amp; Y\nnext</block>"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea[aria-label='#cdata']"
+      },
+      "equals": "literal <tag>\nmore"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea[aria-label='#cdata']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "raw <x> &"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_values.xml",
+      "contains": "<![CDATA[raw <x> &]]><!--stay-->"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".edit-dirty"
+      },
+      "equals": ""
+    }
+  ]
+}

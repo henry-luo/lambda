@@ -1,0 +1,16 @@
+{
+  "name": "retain blank RTF paragraphs when editing",
+  "command": "edit",
+  "html": "test/ui/edit/sample-blank.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_paragraphs.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface p"}, "count": 4},
+    {"type": "click", "target": {"text": "Omega"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_paragraphs.rtf", "contains": "Alpha\\par \\par Omega edited\\par \\par "},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

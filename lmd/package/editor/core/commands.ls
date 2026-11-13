@@ -2033,6 +2033,13 @@ fn empty_cell_like(cell) =>
   if (cell != null and is_node(cell) and cell.tag == 'th') { node('th', [text("")]) }
   else { node('td', [text("")]) }
 
+// Existing cells can contain nested blocks or be empty; use their editable edge.
+fn table_cell_selection(doc, path) any^ {
+  let cell = node_at(doc, path)
+  if (cell == null or not is_node(cell) or not (cell.tag in ['td', 'th'])) node_selection(path)
+  else caret(first_caret_pos_in(cell, path)^)
+}
+
 // both insertion directions share the cell context and history shape.
 pub fn cmd_add_table_row(st, before=false) any^ {
   let ctx = selected_table_context(st)
@@ -2042,7 +2049,9 @@ pub fn cmd_add_table_row(st, before=false) any^ {
     let cols = len(ctx.row.content)
     let tx0 = tx_begin(st.doc, st.selection)
     let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, insert_at, insert_at, [make_table_row(cols, false)]))
-    tx_set_selection(tx1, node_selection([*ctx.row_container_path, insert_at]))
+    // Place the caret in the new row so typing can continue immediately.
+    let caret = pos([*ctx.row_container_path, insert_at, ctx.col_index, 0], 0)
+    tx_set_selection(tx1, text_selection(caret, caret))
   }
 }
 
@@ -2053,7 +2062,11 @@ pub fn cmd_delete_table_row(st) any^ {
     let tx0 = tx_begin(st.doc, st.selection)
     let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, ctx.row_index, ctx.row_index + 1, []))
     let next_row = if (ctx.row_index >= len(ctx.row_container.content) - 1) { ctx.row_index - 1 } else { ctx.row_index }
-    tx_set_selection(tx1, node_selection([*ctx.row_container_path, next_row]))
+    let row_path = [*ctx.row_container_path, next_row]
+    let row = node_at(tx1.doc_after, row_path)
+    let selection = if (row == null or not is_node(row) or len(row.content) == 0) node_selection(row_path)
+      else table_cell_selection(tx1.doc_after, [*row_path, min(ctx.col_index, len(row.content) - 1)])^
+    tx_set_selection(tx1, selection)
   }
 }
 
@@ -2090,7 +2103,8 @@ pub fn cmd_add_table_column(st, before=false) any^ {
     let insert_at = ctx.col_index + if (before) 0 else 1
     let steps = collect_add_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, insert_at, 0, len(ctx.table.content), [])
     let tx1 = tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps))
-    tx_set_selection(tx1, node_selection([*ctx.row_path, insert_at]))
+    let caret = pos([*ctx.row_path, insert_at, 0], 0)
+    tx_set_selection(tx1, text_selection(caret, caret))
   }
 }
 
@@ -2125,7 +2139,7 @@ pub fn cmd_delete_table_column(st) any^ {
     let steps = collect_delete_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
     let tx1 = tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps))
     let next_col = if (ctx.col_index >= len(ctx.row.content) - 1) { ctx.col_index - 1 } else { ctx.col_index }
-    tx_set_selection(tx1, node_selection([*ctx.row_path, next_col]))
+    tx_set_selection(tx1, table_cell_selection(tx1.doc_after, [*ctx.row_path, next_col])^)
   }
 }
 

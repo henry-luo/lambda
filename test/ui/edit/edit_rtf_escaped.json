@@ -1,0 +1,17 @@
+{
+  "name": "edit RTF containing an ANSI escaped character",
+  "command": "edit",
+  "html": "test/ui/edit/sample-escaped.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_escaped.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "Café"},
+    {"type": "click", "target": {"text": "Café"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_escaped.rtf", "contains": "\\u233?"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_escaped.rtf", "contains": "More."}
+  ]
+}

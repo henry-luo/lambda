@@ -1,0 +1,16 @@
+{
+  "name": "edit and save basic RTF in the rich surface",
+  "command": "edit",
+  "html": "test/ui/edit/sample-simple.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_rich.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "click", "target": {"text": "Hello"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_rich.rtf", "contains": "More."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

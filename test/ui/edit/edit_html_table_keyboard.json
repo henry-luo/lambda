@@ -1,0 +1,18 @@
+{
+  "name": "open and use the table menu with the keyboard",
+  "command": "edit",
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_html_table_keyboard.html",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-surface td"}},
+    {"type": "key_combo", "key": "F10", "mods_str": "shift"},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 1},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-surface tbody tr"}, "count": 2},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface tbody td", "index": 2}, "contains": "X"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

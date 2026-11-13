@@ -1,15 +1,20 @@
 // RTF subset parser. Group-local formatting retains the former native behavior (D9.3.4).
 import lex: .rtf.lexer
 import grammar_lex: .rtf.grammar_lexer
+import doc_encoding: lambda.doc.encoding
 
 // Both readers feed one semantic lowering; only the grammar reader materializes records.
 fn raw_source(source) => if (source is string) source else source.source
 fn next_token(source,at) any^ => if (source is string) lex.next(source,at)^ else grammar_lex.next(source,at)^
 
-fn initial_style() => {font:0,size:24,color:0,align:"left",li:0,ri:0,sl:0,uc:1,
+fn initial_style() => {font:0,size:24,color:0,align:"left",li:0,ri:0,sl:0,uc:1,codepage:1252,
     bold:false,italic:false,underline:false,strike:false,caps:false,baseline:0}
-fn initial() => {style:initial_style(),default_font:0,fonts:[],colors:[],blocks:[],spans:[],
-    paragraph_style:null,text:""}
+// RTF's named punctuation and escaped special characters denote Unicode text.
+pub let punctuation = {bullet:8226, emdash:8212, endash:8211, lquote:8216, rquote:8217,
+    ldblquote:8220, rdblquote:8221}
+let special_symbols = map(["~",160, "-",173, "_",8209])
+fn initial(preserve_empty) => {style:initial_style(),default_font:0,fonts:[],colors:[],blocks:[],spans:[],
+    paragraph_style:null,text:"",pending_surrogate:null,preserve_empty:preserve_empty}
 fn fixed(n) any^ {
     let hundredths = int(round(n * 100.0));
     let whole = int(hundredths / 100);
@@ -23,12 +28,16 @@ fn font_name(fonts, font_id) any^ {
 fn safe_font(name) any^ => join([for (c in (split(name, "")^) where
     ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or
      (c >= "0" and c <= "9") or c == " " or c == "-")) c], "")
-fn span_style(s) any^ {
+fn font_style(s) any^ {
     let st = s.style;
     let name = font_name(s.fonts,st.font);
-    let color = if (st.color >= 0 and st.color < len(s.colors)) s.colors[st.color] else null;
     (if (name == null) "" else "font-family:'" ++ safe_font(name) ++ "';") ++
-    (if (st.size <= 0) "" else "font-size:" ++ fixed(st.size * (2.0 / 3.0)) ++ "px;") ++
+    (if (st.size <= 0) "" else "font-size:" ++ fixed(st.size * (2.0 / 3.0)) ++ "px;")
+}
+fn span_style(s) any^ {
+    let st = s.style;
+    let color = if (st.color >= 0 and st.color < len(s.colors)) s.colors[st.color] else null;
+    font_style(s)^ ++
     (if (st.bold) "font-weight:700;" else "") ++ (if (st.italic) "font-style:italic;" else "") ++
     (if (not st.underline and not st.strike) "" else "text-decoration:" ++
         (if (st.underline) "underline" else "") ++ (if (st.underline and st.strike) " " else "") ++
@@ -50,10 +59,11 @@ fn flush(s) any^ {
         {*:s,text:"",paragraph_style:pstyle,spans:[*s.spans,<span style:css,s.text>]}
     }
 }
-fn finish(s) any^ {
+fn finish(s, explicit = false) any^ {
     let result = flush(s)^;
-    if (result.paragraph_style == null) result else {*:result,paragraph_style:null,spans:[],
-        blocks:[*result.blocks,<p style:result.paragraph_style,*result.spans>]}
+    if (result.paragraph_style == null and not (explicit and result.preserve_empty)) result
+    else {*:result,paragraph_style:null,spans:[],
+        blocks:[*result.blocks,<p style:if (result.paragraph_style == null) paragraph_style(result.style) else result.paragraph_style,*result.spans>]}
 }
 fn add(s, text) => {*:s,text:s.text ++ text}
 fn skip_group(source, at, depth = 0) any^ {
@@ -98,7 +108,7 @@ fn color_table(source, at, s, color = empty_color()) any^ {
         color_table(source,t.end,{*:s,colors:[*s.colors,color,*[for (part in extras) empty_color()]]},empty_color())
     } else color_table(source,t.end,s,color)
 }
-fn fallback(source, at, count) any^ {
+pub fn fallback(source, at, count) any^ {
     if (count <= 0 or at >= len(raw_source(source))) { at } else {
         let t = next_token(source,at)^;
         if (t == null or t.kind == "open" or t.kind == "close" or t.kind == "control") at
@@ -108,14 +118,27 @@ fn fallback(source, at, count) any^ {
         else at
     }
 }
+// RTF \u carries signed UTF-16 units; supplementary scalars need both units.
+fn unicode_unit(s, value) any^ {
+    let unit = (value % 65536 + 65536) % 65536
+    if (unit >= 55296 and unit <= 56319) {*:s,pending_surrogate:unit}
+    else if (unit >= 56320 and unit <= 57343) {
+        if (s.pending_surrogate == null) s
+        else add({*:s,pending_surrogate:null},chr(65536 + (s.pending_surrogate - 55296) * 1024 + unit - 56320))
+    }
+    else add(s,chr(unit))
+}
 fn control(s, t) any^ {
     let w = t.word; let v = if (t.parameter == null) 1 else t.parameter; let st = s.style;
-    if (w == "par" or w == "row") finish(s)
+    if (w == "par" or w == "row") finish(s,true)
     else if (w == "page") {let p = finish(s); {*:p,blocks:[*p.blocks,<hr>]}}
     else if (w == "line") add(s,"\n")
     else if (w == "tab" or w == "cell") add(s,"\t")
-    else if (w == "bullet") add(s,chr(8226))
-    else if (w == "u" and t.parameter != null) add(s,chr((v % 65536 + 65536) % 65536))
+    else if (punctuation[w] != null) add(s,chr(punctuation[w]))
+    else if (w == "ansi") {*:s,style:{*:st,codepage:1252}}
+    else if (w == "mac" or w == "pc" or w == "pca") {*:s,style:{*:st,codepage:0}}
+    else if (w == "ansicpg" and t.parameter != null) {*:s,style:{*:st,codepage:v}}
+    else if (w == "u" and t.parameter != null) unicode_unit(s,v)
     else if (w == "deff" and t.parameter != null) {*:s,default_font:v,style:{*:st,font:v}}
     else if (w == "plain") {*:s,style:{*:st,font:s.default_font,size:24,color:0,bold:false,
         italic:false,underline:false,strike:false,caps:false,baseline:0}}
@@ -162,7 +185,13 @@ fn group(source, at, s, depth) any^ {
 }
 fn walk(source, at, s, depth) any^ {
     let t = next_token(source,at)^;
-    if (t == null) {at:at,state:flush(s)}
+    let unit = if (t != null and t.kind == "control" and t.word == "u" and t.parameter != null)
+        (t.parameter % 65536 + 65536) % 65536 else null
+    let low = unit != null and unit >= 56320 and unit <= 57343;
+    // Preserve the reader's established unpaired-unit behavior while joining
+    // valid pairs; reconsider the current token after discarding an orphan.
+    if (s.pending_surrogate != null and not low) walk(source,at,{*:s,pending_surrogate:null},depth)
+    else if (t == null) {at:at,state:flush(s)}
     else if (t.kind == "close") {at:t.end,state:flush(s)}
     else if (t.kind == "open") {
         let before = flush(s)^;
@@ -171,10 +200,13 @@ fn walk(source, at, s, depth) any^ {
         walk(source,child.at,{*:child.state,style:before.style},depth)
     } else if (t.kind == "text")
         walk(source,t.end,add(s,replace(replace(t.value,"\r",""),"\n","")),depth)
-    else if (t.kind == "hex") walk(source,t.end,add(s,chr(t.value)),depth)
+    else if (t.kind == "hex") {
+        let mapped = if (s.style.codepage == 1252) doc_encoding.winansi_special(t.value) else null;
+        walk(source,t.end,add(s,if (mapped == null) chr(t.value) else mapped),depth)
+    }
     else if (t.kind == "symbol") {
         let value = if (contains(["\\","{","}"],t.value)) t.value
-            else if (t.value == "~") chr(160) else if (t.value == "-") chr(173) else "";
+            else if (special_symbols[t.value] != null) chr(special_symbols[t.value]) else "";
         walk(source,t.end,add(s,value),depth)
     } else {
         let before = flush(s)^;
@@ -186,7 +218,7 @@ fn walk(source, at, s, depth) any^ {
     }
 }
 // Accept RTF source text; callers that own file I/O can read text before parsing.
-fn parse_with(source, use_grammar) element^ {
+fn parse_with(source, use_grammar, options) map^ {
     if (not (source is string)) raise error({message:"rtf: expected source text"})
     else {
         let begin = skip_space(source,0);
@@ -194,13 +226,15 @@ fn parse_with(source, use_grammar) element^ {
             raise error({message:"rtf: document must start with '{\\rtf'"})
         else {
             let stream = if (use_grammar) grammar_lex.prepare(source)^ else source;
-            let result = group(stream,begin,initial(),0)^;
+            let result = group(stream,begin,initial(options != null and options.preserve_empty == true),0)^;
             let done = finish(result.state)^;
-            <doc *done.blocks>
+            {document:<doc *done.blocks>, font_style:font_style(done)^, colors:done.colors}
         }
     }
 }
-pub fn parse(source) element^ => parse_with(source,false)^
+pub fn parse(source, options = null) element^ { let result = parse_with(source,false,options)^; result.document }
+// The editor uses the parsed document-wide font without reparsing font tables.
+pub fn parse_details(source, options = null) map^ => parse_with(source,false,options)^
 // The grammar variant is retained for differential and performance analysis.
-pub fn parse_grammar(source) element^ => parse_with(source,true)^
+pub fn parse_grammar(source, options = null) element^ { let result = parse_with(source,true,options)^; result.document }
 pub fn parse_file(path) element^ => parse(input(path,'text')^)^

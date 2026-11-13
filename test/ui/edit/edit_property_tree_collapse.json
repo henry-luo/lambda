@@ -1,0 +1,28 @@
+{
+  "name": "collapse and expand nested property trees",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-elements.xml",
+  "working_copy": "temp/edit-ui/edit_property_tree_collapse.xml",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "click", "target": {"selector": ".property-toggle", "index": 2}},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": ".property-toggle[aria-expanded='false']"}, "count": 1},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "key_press", "key": "Space"},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "key_press", "key": "Space"},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "click", "target": {"selector": ".property-toggle", "index": 1}},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 0},
+    {"type": "click", "target": {"selector": ".property-toggle[aria-expanded='false']"}},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_property_tree_collapse.xml", "contains": "<group id=\"a\"/><!--keep-->"}
+  ]
+}

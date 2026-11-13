@@ -1,0 +1,20 @@
+{
+  "name": "property and source views retain edits across a switch",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.properties",
+  "working_copy": "temp/edit-ui/edit_properties_switch.properties",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": "input[aria-label='app.name']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "Tea"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "app.name = Tea"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_properties_switch.properties", "contains": "app.name = Tea"}
+  ]
+}

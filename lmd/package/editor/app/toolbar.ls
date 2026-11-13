@@ -8,6 +8,7 @@
 // Active and disabled state come from model queries, never a UI switch.
 
 import lambda.editor.model
+import lambda.editor.format.model
 
 // Shared by every format: file and history commands.
 pub let file_group = [
@@ -42,6 +43,16 @@ let insert_group = [
   {cmd: "codeblock", label: "Code block", title: "Code block", input_type: "insertCodeBlock", payload: {data: ""}, block: 'pre'},
   {cmd: "rule", label: "Rule", title: "Horizontal rule", input_type: "insertHorizontalRule", payload: {}}
 ]
+pub let table_insert = [
+  {cmd: "table", label: "Table", title: "Insert table", input_type: "insertTable", payload: {rows: 2, cols: 2, header: true}}
+]
+
+pub let table_menu = [
+  {cmd: "table_row_add", label: "Add row", title: "Add row", input_type: "insertTableRow", payload: {}},
+  {cmd: "table_row_delete", label: "Delete row", title: "Delete row", input_type: "deleteTableRow", payload: {}},
+  {cmd: "table_column_add", label: "Add column", title: "Add column", input_type: "insertTableColumn", payload: {}},
+  {cmd: "table_column_delete", label: "Delete column", title: "Delete column", input_type: "deleteTableColumn", payload: {}}
+]
 
 let structure_group = [
   {cmd: "ul", label: "List", title: "Bulleted list", input_type: "insertUnorderedList", payload: {kind: 'bullet'}, inside: 'ul'},
@@ -67,7 +78,14 @@ fn mark_group(underline) {
 
 // Rich-text command groups for a profile; underline only where the format
 // can spell it (Markdown cannot).
-pub fn rich_text_groups(underline) => [block_group, mark_group(underline), structure_group, insert_group]
+// A format can admit specific model marks even when the generic command is blocked.
+pub fn command_supported(item, unsupported, allowed_marks = []) bool^ =>
+  not member(unsupported, item.input_type)^ or
+  (item.input_type == "modelToggleMark" and member(allowed_marks, item.mark)^)
+
+pub fn rich_text_groups(underline, unsupported = [], allowed_marks = []) =>
+  [for (items in [block_group, mark_group(underline), structure_group, insert_group])
+    [for (item in items where (command_supported(item, unsupported, allowed_marks) ^ { false })) item]]
 
 // Drawing groups (proposal §7): tools, object edits, and the view. A tool
 // item is active while its tool is; an object edit needs a selection.
@@ -141,6 +159,7 @@ let icon_paths = {
   quote: "M4 6h6v7H4V6 M10 13c0 4-2 5-5 5 M14 6h6v7h-6V6 M20 13c0 4-2 5-5 5",
   link: "m10 13 4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M16 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0",
   image: "M3 3h18v18H3V3 M3 17l6-6 4 4 3-3 5 5 M8 7h.01",
+  table: "M3 4h18v16H3z M3 10h18 M3 15h18 M12 4v16",
   codeblock: "M3 3h18v18H3V3 m5 5-3 4 3 4 m8-8 3 4-3 4",
   rule: "M3 12h18",
   view_source: "m8 6-6 6 6 6 m8-12 6 6-6 6",
@@ -165,7 +184,7 @@ fn member_label(cmd) => cmd == "save" or cmd == "view_source" or cmd == "view_ri
 
 // File actions have their own row; formatting groups wrap as units and never
 // change height when the filename gains its dirty indicator.
-pub fn toolbar(file, editor, dirty, ds, groups, view_items) {
+pub fn toolbar(file, editor, dirty, ds, groups, view_items, table_allowed = true) {
   let history = group(drop(file_group, 2), editor, dirty, ds)
   let has_formatting = len(groups) > 0;
   <div class: "edit-toolbar",
@@ -179,11 +198,29 @@ pub fn toolbar(file, editor, dirty, ds, groups, view_items) {
     >
     if (has_formatting) <div class: "edit-format-bar", role: "toolbar", ["aria-label"]: "Document formatting",
       history;
-      *[for (items in groups) group(items, editor, dirty, ds)]
+      if (ds != null) [for (items in groups) group(items, editor, dirty, ds)]
+      else [
+        compact_group("Format", "format", [*groups[0], *groups[1]], editor, dirty),
+        compact_group("Lists", "lists", groups[2], editor, dirty),
+        if (table_allowed) group(table_insert, editor, dirty, null) else null,
+        compact_group("Insert", "insert", groups[3], editor, dirty)
+      ]
       if (ds != null) <span class: "edit-zoom", string(round(ds.zoom * 100.0)) ++ "%"> else null
     > else null
   >
 }
+
+fn compact_group(label, id, items, editor, dirty) =>
+  if (len(items) == 0) null else apply(<edit_compact label: label, id: id, items: items, editor: editor, dirty: dirty>)
+
+view <edit_compact> {
+  <details class: "edit-compact edit-compact-" ++ ~.id,
+    <summary class: "edit-compact-trigger", ~.label>
+    <div class: "edit-compact-panel", group(~.items, ~.editor, ~.dirty, null)>
+  >
+}
+// Preserve the document selection while opening the formatting menu.
+on mousedown(evt) { 'prevent-default' }
 
 // A toolbar button bound to its computed state.
 fn button(item, editor, dirty, ds) =>
@@ -224,6 +261,11 @@ pub let css = "
   .edit-dirty { flex: none; width: 8px; color: #b17a24; }
   .edit-format-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
                       padding: 7px 20px; background: #fafbfc; }
+  .edit-compact { position: relative; }
+  .edit-compact-trigger { cursor: pointer; padding: 7px 9px; border-radius: 6px; font-size: 13px; }
+  .edit-compact-panel { position: absolute; top: 34px; left: 0; z-index: 12; padding: 8px;
+                        background: white; border: 1px solid #d0d7de; border-radius: 6px;
+                        box-shadow: 0 4px 16px rgba(0,0,0,.18); }
   .edit-group { display: flex; align-items: center; flex: none; gap: 3px;
                 padding-right: 10px; border-right: 1px solid #e2e7ef; }
   .edit-group:last-child { padding-right: 0; border-right: none; }

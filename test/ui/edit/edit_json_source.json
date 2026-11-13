@@ -1,0 +1,11 @@
+{
+  "name": "JSON remains available in the existing source editor",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.json",
+  "working_copy": "temp/edit-ui/edit_json_source.json",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "\"count\":42"}
+  ]
+}

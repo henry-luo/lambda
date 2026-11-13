@@ -1,0 +1,16 @@
+{
+  "name": "edit a quoted CSV field without changing other rows",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.csv",
+  "working_copy": "temp/edit-ui/edit_csv_property.csv",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 6},
+    {"type": "assert_value", "target": {"selector": ".property-value", "index": 3}, "equals": "Kuala Lumpur, MY"},
+    {"type": "click", "target": {"selector": ".property-value", "index": 3}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "New York, \"US\""},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_property.csv", "contains": "Alice,\"New York, \"\"US\"\"\"\nBob,Paris\n"}
+  ]
+}
