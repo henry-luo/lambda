@@ -24,6 +24,10 @@ pub let normal_path = paths.normal_path
 pub let resolve_path = paths.resolve_path
 
 fn same_path(a, b) any^ => normal_path(a) == normal_path(b)
+fn source_suffix(path) any^ {
+  let parts = split(lower(basename(path)^), ".")^;
+  if (len(parts) <= 1) "" else "." ++ parts[len(parts) - 1]
+}
 
 pub fn new_session(path, format, source, loaded) =>
   {path: path, name: basename(path), format: format, disk_text: source,
@@ -53,7 +57,8 @@ fn outcome(ok, session, status, conflict) =>
 fn new_target_problem(session, doc, target) any^ {
   let format = session.format
   let folder = dirname(target)
-  let named = any([for (s in format.suffixes) ends_with(lower(target), s)]) or false
+  let named = (any([for (s in format.suffixes) ends_with(lower(target), s)]) or false) or
+    (format.id == 'source' and source_suffix(target)^ == source_suffix(session.path)^)
   if (not named)
     basename(target) ++ " is not a " ++ format.name ++ " file name (" ++ join(format.suffixes, ", ") ++ ")"
   else if (not exists(folder)) "the folder " ++ folder ++ " does not exist"

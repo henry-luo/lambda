@@ -1,0 +1,16 @@
+{
+  "name": "RTF default languages survive a rich edit",
+  "command": "edit",
+  "html": "test/ui/edit/sample-language.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_default_language.rtf",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Hello"},
+    {"type": "click", "target": {"text": "Hello"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_default_language.rtf", "contains": "\\deflang1033 \\deflangfe2052 \\adeflang1025 "},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_default_language.rtf", "contains": "Hello!"}
+  ]
+}

@@ -17,6 +17,21 @@ pub fn valid_scalar(cp, byte_count) {
 fn continuation(byte) => byte>=128 and byte<=191
 fn scalar_width(head) => if (head<128) 1 else if (head>=194 and head<=223) 2
     else if (head>=224 and head<=239) 3 else if (head>=240 and head<=244) 4 else 0
+fn complete_sequence(bytes, at, count) bool^ =>
+    at + count <= len(bytes) and
+    all([for (i in ((1 to count-1) ^ { [] })) continuation(bytes[at+i])])
+
+// Check without constructing a second copy of a potentially large document.
+pub fn is_valid(bytes: binary) bool^ {
+    var at = 0
+    while ((at < len(bytes))^) {
+        let count = scalar_width(bytes[at])^
+        if ((count == 0 or (count > 1 and
+             (not complete_sequence(bytes,at,count)^ or not valid_scalar(scalar_value(slice(bytes,at,at+count)^),count))))^) { return false }
+        at = at + count
+    }
+    true
+}
 // UTF-8 has at most three continuation bytes; lookbehind never grows with the input.
 fn continuation_owner(bytes,at,distance=1) any^ => if (distance>3 or at<distance) false
     else if (continuation(bytes[at-distance])) continuation_owner(bytes,at,distance+1)
@@ -29,8 +44,7 @@ fn decode_piece(bytes,at) string^ {
         if (continuation_owner(bytes,at)) "" else raise error("utf8: invalid byte sequence")
     } else {
         let count = scalar_width(head);
-        if (count==0 or at+count>len(bytes) or
-            not all([for (i in ((1 to count-1) ^ { [] })) continuation(bytes[at+i])])) raise error("utf8: invalid byte sequence")
+        if (count==0 or not complete_sequence(bytes,at,count)^) raise error("utf8: invalid byte sequence")
         else {
             let cp = scalar_value(slice(bytes,at,at+count)^);
             if (not valid_scalar(cp,count)) raise error("utf8: invalid scalar") else chr(cp)

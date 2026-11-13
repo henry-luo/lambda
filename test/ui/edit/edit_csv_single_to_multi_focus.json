@@ -1,0 +1,19 @@
+{
+  "name": "continue editing a CSV value after it becomes multiline",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.csv",
+  "working_copy": "temp/edit-ui/edit_csv_single_to_multi_focus.csv",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".property-value", "index": 3}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "one"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type", "text": "two"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "type", "text": "x"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_single_to_multi_focus.csv", "contains": "Alice,\"one\ntwox\"\n"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

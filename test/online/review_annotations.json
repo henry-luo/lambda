@@ -1,5 +1,5 @@
 {
-  "reviewed_at": "2026-11-13T08:13:04.885686+00:00",
+  "reviewed_at": "2026-11-13T15:42:48.763222+00:00",
   "interpretation": "Manual major visual omissions retained independently of coarse image thresholds; root causes remain unconfirmed unless recorded in the issue ledgers.",
   "reviews": [
     {
@@ -35,7 +35,19 @@
     {
       "label": "saas_landing_399",
       "url": "https://missiveapp.com/customers",
-      "manual_major_remaining": "The large customer quotation and logo in the right card remain absent; portraits now appear in the fresh capture."
+      "manual_major_remaining": "",
+      "review_history": [
+        {
+          "label": "saas_landing_399",
+          "url": "https://missiveapp.com/customers",
+          "manual_major_remaining": "The large customer quotation and logo in the right card remain absent; portraits now appear in the fresh capture."
+        }
+      ],
+      "reviewed_at": "2026-11-13T14:30:05.804708+00:00",
+      "evidence": "comparison/repairs.html#round-24",
+      "resolved_at": "2026-11-13T14:30:05.804708+00:00",
+      "resolved_by": "RI-071",
+      "resolution": "The same saved script-free source and refreshed canonical image restore the large right-card customer quotation and Canny logo after the shared positioned sibling paint-order repair. Minor font/logo-size and spacing differences remain outside the major-gap milestone."
     },
     {
       "label": "saas_landing_432",
@@ -75,7 +87,33 @@
     {
       "label": "saas_landing_271",
       "url": "https://www.pivotapp.ai/",
-      "manual_major_remaining": "The hero heading, copy, actions and cube illustration remain absent. The fresh gradient/logo region lowers the coarse score without restoring the primary hero; retained after visual review."
+      "manual_major_remaining": "",
+      "review_history": [
+        {
+          "label": "saas_landing_271",
+          "url": "https://www.pivotapp.ai/",
+          "manual_major_remaining": "The hero heading, copy, actions and cube illustration remain absent. The fresh gradient/logo region lowers the coarse score without restoring the primary hero; retained after visual review."
+        },
+        {
+          "label": "saas_landing_271",
+          "url": "https://www.pivotapp.ai/",
+          "manual_major_remaining": "The large cube illustration remains absent after the hero heading, copy, actions and customer logos were restored. High severity is retained for the missing primary hero artwork; its cause remains unisolated.",
+          "review_history": [
+            {
+              "label": "saas_landing_271",
+              "url": "https://www.pivotapp.ai/",
+              "manual_major_remaining": "The hero heading, copy, actions and cube illustration remain absent. The fresh gradient/logo region lowers the coarse score without restoring the primary hero; retained after visual review."
+            }
+          ],
+          "reviewed_at": "2026-11-13T14:30:05.804708+00:00",
+          "evidence": "comparison/repairs.html#round-24"
+        }
+      ],
+      "reviewed_at": "2026-11-13T15:42:48.763222+00:00",
+      "evidence": "comparison/repairs.html#round-25",
+      "resolved_at": "2026-11-13T15:42:48.763222+00:00",
+      "resolved_by": "RI-073",
+      "resolution": "The shared cyclic-percentage sizing repair restores the native video box from zero to about619.73px and the refreshed canonical page now displays the large animated hero artwork alongside the previously restored heading/copy/actions/logos. The remaining shape difference is a movie phase difference; static diagnostic poster/time-zero frames are blank. No later-frame substitution or capture-clock adjustment is used. Smaller background/header/spacing residue remains outside the major-gap milestone."
     },
     {
       "label": "saas_landing_207",
@@ -85,12 +123,47 @@
     {
       "label": "saas_landing_563",
       "url": "https://superhuman.com/",
-      "manual_major_remaining": "The main hero heading, copy and product/person imagery remain absent; footer content occupies the hero region. Retained after visual review despite the lower changed-area score."
+      "manual_major_remaining": "The main hero heading, copy and product/person imagery remain absent. The earlier footer overlap is no longer visible; high severity is retained for the missing main hero content.",
+      "review_history": [
+        {
+          "reviewed_at": "2026-11-13T12:36:31.193216+00:00",
+          "manual_major_remaining": "The main hero heading, copy and product/person imagery remain absent; footer content occupies the hero region. Retained after visual review despite the lower changed-area score.",
+          "evidence": "snapshots/round23-saas_landing_563-before.png"
+        }
+      ],
+      "reviewed_at": "2026-11-13T13:10:49.900130+00:00",
+      "evidence": "comparison/repairs.html#round-23"
     },
     {
       "label": "saas_landing_093",
       "url": "https://www.zendesk.com/",
       "manual_major_remaining": "The main hero is present, but the primary logo, product navigation and header actions remain absent in a large empty header. Retained as a major functional omission after visual review."
+    },
+    {
+      "label": "saas_landing_565",
+      "url": "https://www.amperos.com/",
+      "manual_major_remaining": "Hero media and main text are present, but the brand and primary navigation remain nearly invisible as dark text on the dark header. Retained as a major navigation omission after before/current/browser review despite the small threshold crossing."
+    },
+    {
+      "label": "saas_landing_442",
+      "url": "https://www.useorigin.com/",
+      "manual_major_remaining": "The blue hero background is visible after inline CSS URL discovery, but the primary heading, copy, action and product image remain absent. Retained after visual review despite the lower changed-area score; remaining visibility/initialization cause is unisolated."
+    },
+    {
+      "label": "saas_landing_481",
+      "url": "https://www.panxo.com/",
+      "manual_major_remaining": "",
+      "resolved_at": "2026-11-13T12:36:31.193216+00:00",
+      "resolved_by": "RI-067",
+      "resolution": "Assigned-width cross-height measurement restores the hero heading/copy/actions and the product panel to the viewport. Identical static HTML and the refreshed canonical image confirm the large gap is repaired. Minor first-card text, font and spacing differences remain outside this major-review milestone.",
+      "evidence": "comparison/repairs.html#round-22"
+    },
+    {
+      "label": "saas_landing_170",
+      "url": "https://thecape.agency/",
+      "manual_major_remaining": "The hero heading, description, primary action and large geometric illustration remain absent. Only the dark section height has changed; visual review rejects automatic clearance and the remaining cause is unisolated.",
+      "reviewed_at": "2026-11-13T13:10:49.900130+00:00",
+      "evidence": "comparison/repairs.html#round-23"
     }
   ]
 }

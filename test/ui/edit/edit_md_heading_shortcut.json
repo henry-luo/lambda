@@ -1,0 +1,17 @@
+{
+  "name": "keyboard shortcuts change and restore Markdown heading levels",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_heading_shortcut.md",
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "key_combo", "key": "2", "mods_str": "super+alt"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface h2"}, "contains": "short paragraph"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_heading_shortcut.md", "contains": "## This is a short paragraph"},
+    {"type": "key_combo", "key": "0", "mods_str": "super+alt"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p"}, "contains": "short paragraph"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_heading_shortcut.md", "contains": "\n\nThis is a short paragraph"}
+  ]
+}

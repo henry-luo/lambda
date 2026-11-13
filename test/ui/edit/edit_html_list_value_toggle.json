@@ -1,0 +1,16 @@
+{
+  "name": "list toggle retains numbering after an explicit item value",
+  "command": "edit",
+  "html": "test/ui/edit/sample-list-explicit.html",
+  "working_copy": "temp/edit-ui/edit_html_list_value_toggle.html",
+  "events": [
+    {"type": "click", "target": {"text": "Second item"}},
+    {"type": "key_combo", "key": "7", "mods_str": "ctrl+shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p"}, "equals": "Second item"},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_list_value_toggle.html", "contains": "<li value=\"10\">"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_list_value_toggle.html", "contains": "<ol start=\"12\">"},
+    {"type": "key_combo", "key": "z", "mods_str": "ctrl"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface ol"}, "count": 1}
+  ]
+}

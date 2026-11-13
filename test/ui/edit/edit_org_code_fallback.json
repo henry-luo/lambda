@@ -1,0 +1,12 @@
+{
+  "name": "preserve an unsupported Org source block in source mode",
+  "command": "edit",
+  "html": "test/ui/edit/sample-org-code.org",
+  "working_copy": "temp/edit-ui/edit_org_code_fallback.org",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "#+BEGIN_SRC"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Opened source"}
+  ]
+}

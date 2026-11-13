@@ -1,0 +1,20 @@
+{
+  "name": "edit RTF with a retained document font",
+  "command": "edit",
+  "html": "test/ui/edit/sample-complex.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_font.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "contains": "font-family:'Arial'"},
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface"}, "attribute": "style", "contains": "font-size:20.00px"},
+    {"type": "click", "target": {"text": "Hello world."}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_font.rtf", "contains": "{\\fonttbl{\\f0 Arial;}}"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_font.rtf", "contains": "\\fs30 "},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_font.rtf", "contains": "Hello world. More."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

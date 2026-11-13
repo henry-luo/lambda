@@ -1,0 +1,23 @@
+{
+  "name": "an invalid property draft cannot be discarded by saving another field",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.ini",
+  "working_copy": "temp/edit-ui/edit_property_invalid_other_field.ini",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": "input[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "invalid;value"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "click", "target": {"selector": "input[aria-label='global']"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".property-status"}, "contains": "Correct the invalid value"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='port']"}, "equals": "invalid;value"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_property_invalid_other_field.ini", "contains": "port=42 # port comment"},
+    {"type": "type", "text": "x"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='global']"}, "equals": "value"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='port']"}, "equals": "invalid;value"},
+    {"type": "window_close"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-invalid-close"}, "count": 1}
+  ]
+}

@@ -1,8 +1,8 @@
 {
   "name": "an SVG object is picked and dragged; the save moves only its coordinates and keeps the rest of the file",
-  "command": "edit",
-  "html": "test/ui/edit/sample.svg",
-  "working_copy": "temp/edit-ui/edit_svg_move_save.svg",
+  "command": "view",
+  "html": "temp/edit-ui/drawing_move_save.ls",
+  "prepare": ["python3", "test/ui/edit/prepare_drawing.py", "temp/edit-ui/edit_svg_move_save.svg", "temp/edit-ui/drawing_move_save.ls"],
   "viewport": {"width": 1000, "height": 700},
   "events": [
     {"type": "assert_count", "target": {"selector": ".edit-canvas"}, "count": 1},

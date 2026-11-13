@@ -29,7 +29,13 @@ import rich: lambda.editor.surface.rich_text
 
 let suffixes = [".txt", ".text", ".log", ".ls", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".ini",
                 ".conf", ".cfg", ".csv", ".tsv", ".xml", ".css", ".js", ".mjs", ".ts", ".tex",
-                ".c", ".h", ".cpp", ".hpp", ".py", ".rb", ".sh", ".lua", ".sql", ".rst", ".org"]
+                ".c", ".h", ".cpp", ".hpp", ".py", ".rb", ".sh", ".lua", ".sql", ".rst", ".org",
+                ".md", ".markdown", ".mdown", ".mkdn", ".html", ".htm", ".xhtml", ".xht",
+                ".wiki", ".mediawiki", ".rest", ".adoc", ".asciidoc", ".asc", ".textile", ".txtl",
+                ".eml", ".ics", ".ical", ".vcf", ".mark", ".rtf", ".typ", ".man", ".1", ".2", ".3", ".4", ".5", ".6", ".7", ".8", ".9", ".1m", ".3p",
+                ".jsx", ".tsx", ".cxx", ".rs", ".go", ".java", ".php", ".swift", ".kt",
+                ".svg", ".mmd", ".d2", ".dot", ".gv", ".latex", ".pgf", ".eps", ".epsi", ".properties", ".props",
+                ".slides", ".diff", ".patch"]
 
 fn import_text(text) => {doc: buf.from_text(text), envelope: null}
 fn export_text(doc, envelope) any^ => buf.to_text(doc)
@@ -904,7 +910,9 @@ pn rich_view(session, b) {
               else (format.import_text(session.disk_text) ^ { {doc: null} }).doc
   let s = {*: sess.new_session(session.path, format, session.disk_text, {doc: saved, envelope: loaded.envelope}),
            rich_format: format}
-  {mode: 'rich', session: s, doc: edit_open(loaded.doc, format.schema, null), status: ""}
+  if (format.surface == 'property')
+    {mode: 'property', session: s, doc: loaded.doc, status: ""}
+  else {mode: 'rich', session: s, doc: edit_open(loaded.doc, format.schema, null), status: ""}
 }
 
 // The surface's rows, and its width in characters from the measuring span's

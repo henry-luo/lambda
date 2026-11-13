@@ -1,0 +1,19 @@
+{
+  "name": "keyboard shortcuts create Markdown lists and retain undo",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_list_shortcuts.md",
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "key_combo", "key": "8", "mods_str": "super+shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface ul li"}, "contains": "short paragraph"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_list_shortcuts.md", "contains": "- This is a short paragraph"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p"}, "contains": "short paragraph"},
+    {"type": "key_combo", "key": "7", "mods_str": "super+shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface ol li"}, "contains": "short paragraph"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_list_shortcuts.md", "contains": "1. This is a short paragraph"}
+  ]
+}

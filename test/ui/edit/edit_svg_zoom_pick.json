@@ -1,8 +1,8 @@
 {
   "name": "at 125% a press still picks the object under it, and a drag moves it by the pointer distance in user units",
-  "command": "edit",
-  "html": "test/ui/edit/sample.svg",
-  "working_copy": "temp/edit-ui/edit_svg_zoom_pick.svg",
+  "command": "view",
+  "html": "temp/edit-ui/drawing_zoom_pick.ls",
+  "prepare": ["python3", "test/ui/edit/prepare_drawing.py", "temp/edit-ui/edit_svg_zoom_pick.svg", "temp/edit-ui/drawing_zoom_pick.ls"],
   "viewport": {"width": 1000, "height": 700},
   "events": [
     {"type": "click", "target": {"selector": ".edit-btn-zoom_in"}},

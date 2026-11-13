@@ -35,6 +35,10 @@ let shell_css = "
   .edit-main { flex: 1; max-width: 980px; width: 100%; margin: 0 auto; }
   .edit-status { position: sticky; bottom: 0; padding: 4px 12px; font-size: 12px;
                  color: #57606a; background: #f6f8fa; border-top: 1px solid #d0d7de; }
+  .edit-table-menu { position: fixed; z-index: 30; background: white; border: 1px solid #d0d7de;
+                     border-radius: 6px; padding: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+  .edit-table-menu .edit-group { display: flex; flex-direction: column; align-items: stretch; }
+  .edit-table-menu .edit-btn { width: 150px; text-align: left; }
 "
 
 // The surfaces' own stylesheets; the edit application adds the shared ones.
@@ -61,7 +65,7 @@ fn dialog_view(dialog, session) any^ {
   else if (member(files.dialog_kinds, dialog.kind)) files.dialog_view(dialog, session)
   else if (dialog.kind == 'link') {
     files.dialog_frame("link", "Insert link", "Link the selection (or insert the address).",
-      [files.field("edit-dialog-href", "", "https://")],
+      [files.field("edit-dialog-href", "", "https://", true)],
       [files.dialog_button("cancel", "Cancel", false), files.dialog_button("link_ok", "Insert", true)])
   }
   else if (dialog.kind == 'style') {
@@ -142,9 +146,36 @@ fn deleted_part(session, doc, selection, input_type) any^ {
 
 let view_only_status = "This part is view-only and is saved as written; press Delete to remove it."
 
+fn command_problem(session, editor, item) any^ =>
+  if (item == null or not tools.command_supported(item, session.format.unsupported_input_types, session.format.allowed_model_marks)^)
+    "Not available in " ++ session.format.name ++ " documents."
+  else if (writes_view_only(session, editor.doc, editor.selection, item.input_type)) view_only_status
+  else null
+
 fn primary_key(evt) => evt.metaKey == true or evt.ctrlKey == true
 
 fn key_is(evt, letter) any^ => lower(string(evt.key)) == letter
+
+fn keyboard_format_command(evt) =>
+  if (not primary_key(evt)) null
+  else if (evt.shiftKey == true and evt.altKey != true) {
+    if (evt.key in ["7", "&"]) "ol" else if (evt.key in ["8", "*"]) "ul"
+    else if (key_is(evt, "x") ^ { false }) "strike" else null
+  }
+  else if (evt.shiftKey == true) null
+  else if (evt.altKey == true) {
+    if (evt.key == "0") "p" else if (evt.key == "1") "h1" else if (evt.key == "2") "h2"
+    else if (evt.key == "3") "h3" else null
+  }
+  else if (key_is(evt, "k") ^ { false }) "link"
+  else if (key_is(evt, "e") ^ { false }) "code" else null
+
+// Toolbar and keyboard commands share model dispatch and status handling.
+pn apply_format_item(editor, item) {
+  let input_type = if (item.lift != null and edit_inside(editor, item.inside)) item.lift else item.input_type
+  let run = run_request(editor, input_type, item.payload)
+  {editor: run.editor, status: if (run.result.failure == null) "" else "Could not apply " ++ item.title ++ "."}
+}
 
 // ---------------------------------------------------------------------------
 // Drawing input: drawing.ls owns the model edits; these read the rendered
@@ -220,24 +251,55 @@ fn text_dialog_for(doc, index) =>
 // ---------------------------------------------------------------------------
 
 fn format_groups(session) any^ =>
-  if (is_drawing(session)) tools.drawing_groups() else tools.rich_text_groups(session.format.underline == true)
+  if (is_drawing(session)) tools.drawing_groups()
+  else tools.rich_text_groups(session.format.underline == true, session.format.unsupported_input_types,
+                              session.format.allowed_model_marks)
+
+pn insert_dialog_link(editor, target) {
+  let href = trim(files.field_value(target, "edit-dialog-href"))
+  if (href == "") editor else run_request(editor, "insertLink", {href: href, title: "", label: href}).editor
+}
 
 fn surface_of(session, editor, ds) any =>
-  if (is_drawing(session)) dr.surface(editor.doc, ds) else rich.surface(editor, "edit-" ++ string(session.format.id))
+  if (is_drawing(session)) dr.surface(editor.doc, ds)
+  else rich.surface(editor, "edit-" ++ string(session.format.id),
+    if (session.format.surface_style == null) null else session.format.surface_style(session.envelope))
+
+view <table_context> {
+  <div class: "edit-table-menu", role: "group", ['aria-label']: "Table actions", style: "left:" ++ string(~.x) ++ "px;top:" ++ string(~.y) ++ "px",
+    tools.group(tools.table_menu, ~.editor, ~.dirty, null)>
+}
+on render(evt) {
+  if (evt.event_phase == 2 and ~.keyboard) {
+    let first = dom.query_selector(evt.target, ".edit-btn-table_row_add")
+    if (first != null) { dom.focus_set(first, true) }
+  }
+  return 'pass'
+}
 
 edit <edit_app> state editor: ~.editor, session: ~.session, status: ~.status, dialog: null, after_save: null,
-                      ds: dr.new_state() {
+                      ds: dr.new_state(), table_menu: null {
   let dirty = sess.is_dirty(session, editor.doc);
   <body class: "edit-app edit-format-" ++ string(session.format.id),
     tools.toolbar(files.file_label(session, dirty), editor, dirty,
-                  if (is_drawing(session)) ds else null, format_groups(session), tools.source_view_group);
+                  if (is_drawing(session)) ds else null, format_groups(session), tools.source_view_group,
+                  not member(session.format.unsupported_input_types, "insertTable"));
     <div class: "edit-main", surface_of(session, editor, ds)>
     <div class: "edit-status", role: "status", status>
+    if (table_menu != null) apply(<table_context x: table_menu.x, y: table_menu.y, keyboard: table_menu.keyboard, editor: editor, dirty: dirty>) else null
     dialog_view(dialog, session)
   >
 }
 on beforeinput(evt) {
   return 'pass'
+}
+on contextmenu(evt) {
+  let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_node(evt.target)
+  if ((is_drawing(session) or target == null or dom.closest(target, "td,th") == null)^) { return 'pass' }
+  let selected = controller.adopt(editor, evt, session.format.schema_preset)
+  editor = selected.editor
+  table_menu = {x: evt.clientX, y: evt.clientY}
+  return 'prevent-default'
 }
 on editaction(evt) {
   // A copy changes nothing in the model; Radiant has already copied the DOM
@@ -279,6 +341,7 @@ on selectionchange(evt) {
   }
 }
 on edit_cmd(req) {
+  table_menu = null
   editor = mounted(editor, req.node, session.format)
   let cmd = req.cmd
   if (cmd == "view_source") {
@@ -327,19 +390,20 @@ on edit_cmd(req) {
   }
   else {
     let item = if (cmd == "undo" or cmd == "redo") tools.find_item([tools.file_group], cmd)
-               else tools.find_item(format_groups(session), cmd)
+               else tools.find_item([*format_groups(session), tools.table_insert, tools.table_menu], cmd)
     if (item == null) { status = "Unknown command " ++ cmd ++ "." }
-    else if (writes_view_only(session, editor.doc, editor.selection, item.input_type)) { status = view_only_status }
+    else if (command_problem(session, editor, item)^ != null) { status = command_problem(session, editor, item)^ }
     else if (item.dialog != null) { dialog = {kind: item.dialog} }
     else {
-      // quote toggles: lift when the selection is already quoted
-      let input_type = if (item.lift != null and edit_inside(editor, item.inside)) item.lift
-                       else item.input_type
-      let run = run_request(editor, input_type, item.payload)
-      editor = run.editor
-      if ((not (run.result.failure is null))^) { status = "Could not apply " ++ item.title ++ "." }
-      else { status = "" }
-      files.sync_window(req.node, session, editor.doc)
+      let result = apply_format_item(editor, item)
+      editor = result.editor
+      status = result.status
+      files.sync_window(req.node, session, editor.doc)^
+      if (starts_with(cmd, "table_")^) {
+        // Menu activation must return typing to the retained document selection.
+        controller.focus(req.node)^
+        controller.restore(editor)^
+      }
     }
   }
 }
@@ -391,11 +455,10 @@ on edit_dialog(req) {
     }
   }
   else if (action == "link_ok") {
-    let href = trim(files.field_value(req.node, "edit-dialog-href"))
+    let next = insert_dialog_link(editor, req.node)
     dialog = null
-    if (href != "") {
-      let run = run_request(editor, "insertLink", {href: href, title: "", label: href})
-      editor = run.editor
+    if ((next != editor)^) {
+      editor = next
       edited = true
       files.sync_window(req.node, session, editor.doc)^
     }
@@ -419,6 +482,82 @@ on edit_dialog(req) {
   }
 }
 on keydown(evt) {
+  if ((dialog != null and dialog.kind == 'link' and evt.key == "Enter" and
+       dom.matches(evt.target, "#edit-dialog-href"))^) {
+    editor = insert_dialog_link(editor, evt.target)
+    dialog = null
+    files.sync_window(evt.target, session, editor.doc)^
+    files.focus_surface(evt.target)^
+    controller.restore(editor)^
+    return 'prevent-default'
+  }
+  if ((evt.key == "Escape" and table_menu != null)^) {
+    table_menu = null
+    controller.restore(editor)^
+    controller.focus(evt.target)^
+    return 'prevent-default'
+  }
+  let format_command = keyboard_format_command(evt)
+  if ((dialog == null and not is_drawing(session) and format_command != null)^) {
+    let host = controller.surface(evt.target)
+    if ((host != null and dom.contains(host, evt.target))^) {
+      let selected = controller.adopt(editor, evt, session.format.schema_preset)
+      editor = selected.editor
+      let item = tools.find_item(format_groups(session), format_command)
+      let problem = command_problem(session, editor, item)^
+      if (problem != null) { status = problem }
+      else if ((item.dialog != null)^) {
+        dialog = {kind: item.dialog}
+        // Release the editing host so the new dialog field can autofocus.
+        dom.clear_editing_focus(host)
+      }
+      else {
+        let result = apply_format_item(editor, item)
+        editor = result.editor
+        status = result.status
+        files.sync_window(evt.target, session, editor.doc)^
+        controller.restore(editor)^
+      }
+      return 'prevent-default'
+    }
+  }
+  if ((dialog == null and session.format.align_paragraphs != null and primary_key(evt) and evt.shiftKey == true and
+       lower(string(evt.key)) in ["l", "e", "r", "j"])^) {
+    let host = controller.surface(evt.target)
+    if ((host != null and dom.contains(host, evt.target))^) {
+      let selected = controller.adopt(editor, evt, session.format.schema_preset)
+      let key = lower(string(evt.key))
+      let align = if (key == "l") "left" else if (key == "e") "center" else if (key == "r") "right" else "justify"
+      let tx = session.format.align_paragraphs(selected.editor, align)^
+      if (tx != null) {
+        let problem = session.format.check_roundtrip(tx.doc_after, session.envelope)
+        if ((problem != null)^) { status = problem }
+        else {
+          editor = apply_edit(selected.editor, tx)^
+          status = ""
+          files.sync_window(evt.target, session, editor.doc)^
+          controller.restore(editor)^
+        }
+      }
+      return 'prevent-default'
+    }
+  }
+  if ((dialog == null and not is_drawing(session) and
+       (evt.key == "ContextMenu" or (evt.key == "F10" and evt.shiftKey == true)))^) {
+    let selected = controller.adopt(editor, evt, session.format.schema_preset)
+    let current = selected.editor
+    if ((edit_inside(current, 'td') or edit_inside(current, 'th'))^) {
+      let selection = dom.document_selection(dom.root_node(evt.target))
+      let boundary = if (selection == null) null else dom.selection_boundaries(selection)
+      let anchor = if (boundary == null) null else boundary.anchor_node
+      let target = if (anchor == null or dom.node_type(anchor) == 1) anchor else dom.parent_node(anchor)
+      let cell = if (target == null) null else dom.closest(target, "td,th")
+      let box = if (cell == null) dom.bounding_box(evt.target) else dom.bounding_box(cell)
+      editor = current
+      table_menu = {x: box.x, y: box.y + box.height, keyboard: true}
+      return 'prevent-default'
+    }
+  }
   if ((primary_key(evt) and key_is(evt, "s"))^) {
     if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
     else {

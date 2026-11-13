@@ -1,0 +1,22 @@
+{
+  "name": "Escape discards a pending or invalid property edit",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.ini",
+  "working_copy": "temp/edit-ui/edit_property_cancel_key.ini",
+  "events": [
+    {"type": "click", "target": {"selector": "input[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "invalid;value"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_text", "target": {"selector": ".property-status"}, "contains": "Invalid value"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='port']"}, "equals": "42"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "type", "text": "9"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='port']"}, "equals": "42"},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_property_cancel_key.ini", "contains": "port=42 # port comment"}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "edit and save an extensionless text file",
+  "command": "edit",
+  "html": "test/ui/edit/sample-extensionless",
+  "working_copy": "temp/edit-ui/edit_extensionless_source",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "click", "target": {"selector": ".src-text"}},
+    {"type": "key_combo", "key": "End", "mods_str": "super"},
+    {"type": "type", "text": "# edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_extensionless_source", "contains": "# edited"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

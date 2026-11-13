@@ -1,0 +1,16 @@
+{
+  "name": "edit properties while retaining comments and spacing",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.properties",
+  "working_copy": "temp/edit-ui/edit_properties.properties",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "click", "target": {"selector": "input[aria-label='app.name']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "Tea"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_properties.properties", "contains": "# Keep this comment\napp.name = Tea\nfeature.enabled:true\n"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "edit INI values without changing section comments",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.ini",
+  "working_copy": "temp/edit-ui/edit_ini_property.ini",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 3},
+    {"type": "assert_text", "target": {"selector": ".property-tree"}, "contains": "server /"},
+    {"type": "click", "target": {"selector": "input[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "99"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_ini_property.ini", "contains": "name = \"old # name\" ; keep\nport=99 # port comment"}
+  ]
+}

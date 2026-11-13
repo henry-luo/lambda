@@ -1,0 +1,14 @@
+{
+  "name": "edit TSV values containing quotes",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.tsv",
+  "working_copy": "temp/edit-ui/edit_tsv_property.tsv",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".property-value", "index": 3}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "He said \"yes\""},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_tsv_property.tsv", "contains": "Alice\t\"He said \"\"yes\"\"\"\n"}
+  ]
+}

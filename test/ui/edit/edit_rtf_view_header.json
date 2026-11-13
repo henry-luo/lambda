@@ -1,0 +1,17 @@
+{
+  "name": "edit RTF while retaining view preferences",
+  "command": "edit",
+  "html": "test/ui/edit/sample-view.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_view_header.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "click", "target": {"text": "Hello"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_view_header.rtf", "contains": "\\viewkind4 \\viewscale125 \\viewzk2 "},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_view_header.rtf", "contains": "More."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

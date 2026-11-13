@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<root id="A&#38;B"><block>first
+second</block><![CDATA[literal <tag>
+more]]><!--stay--></root>

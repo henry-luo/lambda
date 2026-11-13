@@ -56,8 +56,9 @@ on click(evt) {
 pub fn dialog_button(action, label, primary) =>
   apply(<edit_dialog_button action: action, label: label, primary: primary>)
 
-pub fn field(id, value, placeholder) =>
-  <input id: id, class: "edit-dialog-field", type: "text", value: value, placeholder: placeholder>
+pub fn field(id, value, placeholder, autofocus = false) =>
+  <input id: id, class: "edit-dialog-field", type: "text", value: value, placeholder: placeholder,
+    autofocus: if (autofocus) "autofocus" else null>
 
 pub fn dialog_frame(kind, title, text, fields, buttons) =>
   <div class: "edit-dialog-layer",

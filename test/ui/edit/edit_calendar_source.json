@@ -1,0 +1,11 @@
+{
+  "name": "calendar files open in the source editor",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.ics",
+  "working_copy": "temp/edit-ui/edit_calendar_source.ics",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "SUMMARY:Meeting"}
+  ]
+}

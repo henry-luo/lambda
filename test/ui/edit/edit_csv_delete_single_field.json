@@ -1,0 +1,16 @@
+{
+  "name": "deleting the only field removes the row and can be undone",
+  "command": "edit",
+  "html": "test/ui/edit/sample-single-field.csv",
+  "working_copy": "temp/edit-ui/edit_csv_delete_single_field.csv",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 3},
+    {"type": "click", "target": {"selector": ".property-delete", "index": 4}},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 3},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_delete_single_field.csv", "equals": "a,b\n"}
+  ]
+}

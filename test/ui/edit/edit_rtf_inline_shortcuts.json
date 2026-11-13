@@ -1,0 +1,16 @@
+{
+  "name": "RTF supports strikethrough shortcut but rejects inline code",
+  "command": "edit",
+  "html": "test/ui/edit/sample-strike.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_inline_shortcuts.rtf",
+  "events": [
+    {"type": "click", "target": {"text": "Alpha"}},
+    {"type": "key_combo", "key": "e", "mods_str": "ctrl"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Not available in RTF"},
+    {"type": "key_combo", "key": "a", "mods_str": "ctrl"},
+    {"type": "key_combo", "key": "x", "mods_str": "ctrl+shift"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface del"}, "count": 1},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_inline_shortcuts.rtf", "contains": "\\strike "}
+  ]
+}

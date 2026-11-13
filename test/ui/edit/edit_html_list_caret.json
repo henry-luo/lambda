@@ -1,0 +1,15 @@
+{
+  "name": "list unwrapping retains the caret for continued typing",
+  "command": "edit",
+  "html": "test/ui/edit/sample-list-toggle.html",
+  "working_copy": "temp/edit-ui/edit_html_list_caret.html",
+  "events": [
+    {"type": "click", "target": {"text": "Second item"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_combo", "key": "7", "mods_str": "ctrl+shift"},
+    {"type": "type", "text": "!"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p"}, "equals": "Second item!"},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_list_caret.html", "contains": "<p>Second item!</p>"}
+  ]
+}

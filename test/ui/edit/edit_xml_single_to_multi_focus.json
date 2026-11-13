@@ -1,0 +1,19 @@
+{
+  "name": "continue editing an XML value after it becomes multiline",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.xml",
+  "working_copy": "temp/edit-ui/edit_xml_single_to_multi_focus.xml",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": "textarea[aria-label='@kind']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "one"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type", "text": "two"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "type", "text": "x"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xml_single_to_multi_focus.xml", "contains": "kind=\"one&#xA;twox\""},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

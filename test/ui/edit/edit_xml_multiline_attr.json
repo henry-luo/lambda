@@ -1,0 +1,20 @@
+{
+  "name": "edit a multiline XML attribute without losing numeric references",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-multiline-attr.xml",
+  "working_copy": "temp/edit-ui/edit_xml_multiline_attr.xml",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='@id']"}, "equals": "A\nB"},
+    {"type": "click", "target": {"selector": "textarea[aria-label='@id']"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xml_multiline_attr.xml", "contains": "id=\"A&#10;B\""},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "X & Y"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type", "text": "Z"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xml_multiline_attr.xml", "contains": "id=\"X &amp; Y&#xA;Z\""},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "add a CSV row with keyboard",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.csv",
+  "working_copy": "temp/edit-ui/edit_csv_add_keyboard.csv",
+  "events": [
+    {"type": "click", "target": {"selector": ".property-add", "index": 0}},
+    {"type": "type", "text": "Cara,Rome"},
+    {"type": "assert_value", "target": {"selector": "#property-new-value"}, "equals": "Cara,Rome"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-add-property"}, "count": 0},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_add_keyboard.csv", "contains": "Cara,Rome\n"}
+  ]
+}

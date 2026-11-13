@@ -1,0 +1,21 @@
+{
+  "name": "edit RTF with paragraph measurements",
+  "command": "edit",
+  "html": "test/ui/edit/sample-indented.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_indented.rtf",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": ".edit-surface p", "index": 0}, "attribute": "style", "contains": "margin-left: 48"},
+    {"type": "assert_attribute", "target": {"selector": ".edit-surface p", "index": 0}, "attribute": "style", "contains": "margin-right: 16"},
+    {"type": "assert_attribute", "target": {"selector": ".edit-surface p", "index": 0}, "attribute": "style", "contains": "line-height: 24"},
+    {"type": "click", "target": {"selector": ".edit-surface p", "index": 0}},
+    {"type": "key_combo", "key": "e", "mods_str": "super+shift"},
+    {"type": "assert_attribute", "target": {"selector": ".edit-surface p", "index": 0}, "attribute": "style", "contains": "text-align: center"},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_indented.rtf", "contains": "\\qc\\li720\\ri240\\sl360"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_indented.rtf", "contains": "edited"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

@@ -5,6 +5,8 @@ const path = require('node:path');
 const http = require('node:http');
 const {spawn} = require('node:child_process');
 const {parseOptions, runLambdaRender} = require('./capture_snapshots.cjs');
+const {pngLibrary} = require('./compare_snapshots.cjs');
+const {rgb} = require('./render_fixture.cjs');
 
 const root = path.resolve(__dirname, '../..');
 fs.mkdirSync(path.join(root, 'temp'), {recursive: true});
@@ -25,6 +27,23 @@ before(async () => {
         if (url.pathname.endsWith('.svg')) {
             response.setHeader('Content-Type', 'image/svg+xml');
             response.end('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="blue"/></svg>');
+            return;
+        }
+        if (url.pathname === '/inline-background') {
+            const run = url.searchParams.get('run');
+            const image = '/initial.svg?run=' + run;
+            let style = 'background-image:url(&quot;' + image + '&quot;)';
+            let script = '';
+            if (run === 'variable') style = '--hero:url(&quot;' + image + '&quot;);background-image:var(--hero)';
+            if (run === 'image-set') style = 'background-image:image-set(url(&quot;' + image + '&quot;) 1x,url(&quot;/second.svg?run=' + run + '&quot;) 2x)';
+            if (run === 'mutation') {
+                style = '';
+                script = `<script>document.getElementById("probe").style.backgroundImage='url("${image}")';</script>`;
+            }
+            const tag = run === 'video' ? 'video' : 'div';
+            response.setHeader('Content-Type', 'text/html');
+            response.end('<!doctype html><html><head><style>body{margin:0}#probe{display:block;width:80px;height:80px}</style></head><body><' +
+                tag + ' id="probe" style="' + style + '"></' + tag + '>' + script + '</body></html>');
             return;
         }
         const run = url.searchParams.get('run');
@@ -49,13 +68,18 @@ after(async () => {
     fs.rmSync(scratch, {recursive: true, force: true});
 });
 
-async function render(run, route = '/page') {
+async function renderPage(run, route = '/page') {
     const label = 'session-' + run;
     const options = parseOptions([], root);
     const result = await runLambdaRender({label, url: `${origin}${route}?run=${run}`},
         path.join(scratch, label + '.png'), options, scratch);
     assert.equal(result.ok, true, result.error);
     const output = fs.readFileSync(path.join(scratch, result.outputLog), 'utf8');
+    return {output, png: path.join(scratch, label + '.png')};
+}
+
+async function render(run, route = '/page') {
+    const {output} = await renderPage(run, route);
     const records = sessionResults(output);
     assert.equal(records.length, 1, output.slice(-2000));
     return records[0];
@@ -138,5 +162,16 @@ for (const formats of [false, true]) {
         assert.match(records[0].after, /script_cookie=written/);
         assert.equal(records[1].error, undefined);
         assert.match(records[1].initial, /script_cookie=written/);
+    });
+}
+
+for (const run of ['div', 'video', 'variable', 'image-set', 'mutation']) {
+    test('inline CSS image resources reach HTTP export: ' + run, async () => {
+        const {png} = await renderPage(run, '/inline-background');
+        const image = pngLibrary(root).sync.read(fs.readFileSync(png));
+        assert.deepEqual(rgb(image, 40, 40), [0, 0, 255], 'inline image missing from exported pixels');
+        assert.deepEqual(rgb(image, 100, 40), [255, 255, 255], 'image stays within its box');
+        assert(requests.some(row => row.run === run && row.path === '/initial.svg'),
+            'inline image never entered the network scheduler');
     });
 }

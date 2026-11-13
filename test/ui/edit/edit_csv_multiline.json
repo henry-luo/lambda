@@ -1,0 +1,66 @@
+{
+  "name": "edit a multiline CSV field as a value",
+  "command": "edit",
+  "html": "test/fixtures/edit/multiline.csv",
+  "working_copy": "temp/edit-ui/edit_csv_multiline.csv",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "textarea.property-multiline"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "textarea.property-multiline"
+      },
+      "equals": "line one\nline two"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "textarea.property-multiline"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "new"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type",
+      "text": "lines"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_csv_multiline.csv",
+      "contains": "Alice,\"new\nlines\"\nBob,Plain\n"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".edit-dirty"
+      },
+      "equals": ""
+    }
+  ]
+}

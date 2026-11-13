@@ -1,0 +1,16 @@
+{
+  "name": "edit and save the Textile extension alias",
+  "command": "edit",
+  "html": "test/ui/edit/sample.txtl",
+  "working_copy": "temp/edit-ui/edit_textile_alias.txtl",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "click", "target": {"text": "Hello world."}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_textile_alias.txtl", "contains": "More."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

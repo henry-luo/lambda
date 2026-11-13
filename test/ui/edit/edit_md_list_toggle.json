@@ -1,0 +1,16 @@
+{
+  "name": "repeating a list command removes the list instead of nesting it",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_list_toggle.md",
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "key_combo", "key": "8", "mods_str": "super+shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface ul li"}, "contains": "short paragraph"},
+    {"type": "key_combo", "key": "8", "mods_str": "super+shift"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "equals": ""},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p"}, "contains": "short paragraph"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_list_toggle.md", "contains": "\n\nThis is a short paragraph for testing the editor.\n"}
+  ]
+}

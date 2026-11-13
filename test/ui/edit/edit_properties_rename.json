@@ -1,0 +1,17 @@
+{
+  "name": "rename one duplicate property without changing its neighbor",
+  "command": "edit",
+  "html": "test/ui/edit/sample-duplicate.properties",
+  "working_copy": "temp/edit-ui/edit_properties_rename.properties",
+  "events": [
+    {"type": "click", "target": {"selector": "input.property-key[aria-label='Property name: name']", "index": 0}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "renamed"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_properties_rename.properties", "contains": "# retained comment\nrenamed=one\nname=two\n"},
+    {"type": "assert_count", "target": {"selector": "input[aria-label='renamed']"}, "count": 1},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_properties_rename.properties", "contains": "name=one\nname=two\n"}
+  ]
+}

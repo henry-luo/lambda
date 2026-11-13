@@ -1,0 +1,12 @@
+{
+  "name": "markup that cannot survive a rich round trip opens in source mode",
+  "command": "edit",
+  "html": "test/ui/edit/sample-wiki-fallback.wiki",
+  "working_copy": "temp/edit-ui/edit_wiki_fallback.wiki",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "Hello {{Template|x}}."},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Opened source"}
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "name": "add, rename and remove XML attributes with undo",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.xml",
+  "working_copy": "temp/edit-ui/edit_xml_attributes.xml",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-add"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-add"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#property-new-key"
+      }
+    },
+    {
+      "type": "type",
+      "text": "title"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#property-new-value"
+      }
+    },
+    {
+      "type": "type",
+      "text": "new"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-property_add"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-value[aria-label='@title']"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-delete"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-value[aria-label='@title']"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".property-value[aria-label='@title']"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "input[aria-label='Property name: @id']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "code"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_attributes.xml",
+      "contains": "<catalog title=\"new\" code=\"c1\">"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_attributes.xml",
+      "contains": "<!-- keep -->"
+    }
+  ]
+}

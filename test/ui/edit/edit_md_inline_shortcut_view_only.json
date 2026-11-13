@@ -1,0 +1,13 @@
+{
+  "name": "inline formatting shortcut does not edit a view-only formula",
+  "command": "edit",
+  "html": "test/ui/edit/math.md",
+  "working_copy": "temp/edit-ui/edit_md_inline_shortcut_view_only.md",
+  "events": [
+    {"type": "click", "target": {"selector": "#edit-surface p svg.lambda-math"}},
+    {"type": "key_combo", "key": "x", "mods_str": "super+shift"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "view-only"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_inline_shortcut_view_only.md", "contains": "$\\frac{1}{2}$"}
+  ]
+}

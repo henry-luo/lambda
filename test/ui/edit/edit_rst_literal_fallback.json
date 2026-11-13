@@ -1,0 +1,12 @@
+{
+  "name": "preserve an unsupported RST literal block in source mode",
+  "command": "edit",
+  "html": "test/ui/edit/sample-rst-literal.rst",
+  "working_copy": "temp/edit-ui/edit_rst_literal_fallback.rst",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "Example::"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Opened source"}
+  ]
+}

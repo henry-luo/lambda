@@ -1,0 +1,16 @@
+{
+  "name": "HTML heading shortcut is undoable and saves",
+  "command": "edit",
+  "html": "test/ui/edit/sample-heading.html",
+  "working_copy": "temp/edit-ui/edit_html_heading_shortcut.html",
+  "events": [
+    {"type": "click", "target": {"text": "Plain heading text"}},
+    {"type": "key_combo", "key": "1", "mods_str": "ctrl+alt"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface h1"}, "equals": "Plain heading text"},
+    {"type": "key_combo", "key": "z", "mods_str": "ctrl"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p"}, "equals": "Plain heading text"},
+    {"type": "key_combo", "key": "z", "mods_str": "ctrl+shift"},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_heading_shortcut.html", "contains": "<h1>Plain heading text</h1>"}
+  ]
+}

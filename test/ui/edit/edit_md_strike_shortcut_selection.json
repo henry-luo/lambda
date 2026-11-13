@@ -1,0 +1,15 @@
+{
+  "name": "strikethrough shortcut applies to selected Markdown text",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_strike_shortcut_selection.md",
+  "events": [
+    {"type": "mouse_drag", "target": {"text": "short paragraph"}, "to_target": {"text": "for testing"}, "button": 0},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "key_combo", "key": "x", "mods_str": "super+shift"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface p del"}, "count": 1},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_strike_shortcut_selection.md", "contains": "~~"}
+  ]
+}

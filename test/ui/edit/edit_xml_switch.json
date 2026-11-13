@@ -1,0 +1,68 @@
+{
+  "name": "switch between decoded XML properties and source",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-values.xml",
+  "working_copy": "temp/edit-ui/edit_xml_switch.xml",
+  "viewport": {
+    "width": 1000,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".property-value[aria-label='@id']"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "type",
+      "text": "A & B"
+    },
+    {
+      "type": "key_combo",
+      "key": "/",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".src-text"
+      },
+      "contains": "id=\"A &amp; B\""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".edit-dirty"
+      },
+      "equals": "*"
+    },
+    {
+      "type": "key_combo",
+      "key": "/",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": ".property-value[aria-label='@id']"
+      },
+      "equals": "A & B"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/edit-ui/edit_xml_switch.xml",
+      "contains": "id=\"A &amp; B\""
+    }
+  ]
+}

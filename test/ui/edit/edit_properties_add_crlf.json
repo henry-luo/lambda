@@ -1,0 +1,16 @@
+{
+  "name": "adding a property keeps CRLF line endings",
+  "command": "edit",
+  "html": "test/ui/edit/sample-crlf.properties",
+  "working_copy": "temp/edit-ui/edit_properties_add_crlf.properties",
+  "events": [
+    {"type": "click", "target": {"selector": ".property-add"}},
+    {"type": "click", "target": {"selector": "#property-new-key"}},
+    {"type": "type", "text": "third"},
+    {"type": "click", "target": {"selector": "#property-new-value"}},
+    {"type": "type", "text": "three"},
+    {"type": "click", "target": {"selector": ".edit-dialog-property_add"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_properties_add_crlf.properties", "contains": "first=one\r\nsecond=two\r\nthird=three\r\n"}
+  ]
+}

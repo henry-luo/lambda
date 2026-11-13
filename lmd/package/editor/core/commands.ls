@@ -20,6 +20,7 @@ import lambda.editor.core.source_pos
 import lambda.editor.core.html_paste
 import lambda.editor.core.paste
 import lambda.editor.schema.markdown
+import inline_format: lambda.editor.core.inline_format
 import text_policy: lambda.dom.edit_text_policy
 
 // ---------------------------------------------------------------------------
@@ -378,10 +379,11 @@ fn insert_line_break_same_parent_selection(st) any^ {
 fn sel_top_block_range(sel) any^ =>
   sel.kind == 'text' and not sel_single_leaf(sel) and len(sel_lo(sel).path) == 2 and len(sel_hi(sel).path) == 2 and sel_lo(sel).path[0] < sel_hi(sel).path[0]
 
-fn selected_top_block_end(sel) any^ {
+pub fn selected_top_block_end(sel) any^ {
   let lo = sel_lo(sel)
   let hi = sel_hi(sel)
-  if (len(hi.path) == 2 and hi.offset == 0 and hi.path[0] > lo.path[0]) { hi.path[0] - 1 }
+  // Offset zero in a later inline run is still inside the final block.
+  if (len(hi.path) == 2 and hi.path[1] == 0 and hi.offset == 0 and hi.path[0] > lo.path[0]) { hi.path[0] - 1 }
   else { hi.path[0] }
 }
 
@@ -614,7 +616,8 @@ fn selected_inline_content(span, label, fallback_marks) any^ {
 fn link_label(label, href) => if (label == null or len(label) == 0) { href } else { label }
 
 fn link_attrs(href, title) =>
-  [{name: 'href', value: href}, {name: 'title', value: if (title == null) { "" } else { title }}]
+  // A missing title stays absent; Markdown does not serialize an empty title.
+  [{name: 'href', value: href}, *if (title == null or title == "") [] else [{name: 'title', value: title}]]
 
 fn image_attrs(src, alt) =>
   [{name: 'src', value: src}, {name: 'alt', value: if (alt == null) { "" } else { alt }}]
@@ -1853,6 +1856,17 @@ fn list_items_from_blocks(st, blocks, i, n, acc) {
   else { list_items_from_blocks(st, blocks, i + 1, n, [*acc, list_item_from_block(st, blocks[i])]) }
 }
 
+fn wrapped_list_position(st, point, first, final_index) any^ {
+  if (len(point.path) == 0 or point.path[0] < first or point.path[0] > final_index) null
+  else {
+    let block_index = point.path[0]
+    let block = st.doc.content[block_index]
+    // The non-HTML schema inserts a placeholder before a non-default block.
+    let child_index = if (state_list_item_tag(st) == 'li' or block.tag == state_default_block(st)) 0 else 1
+    pos([first, block_index - first, child_index, *list_drop(point.path, 1)], point.offset)
+  }
+}
+
 fn wrap_top_blocks_in_list(st, start_index, end_index, kind) any^ {
   if (start_index < 0 or end_index < start_index) { null }
   else {
@@ -1862,7 +1876,162 @@ fn wrap_top_blocks_in_list(st, start_index, end_index, kind) any^ {
     let list_node = node_attrs(tag, list_attrs_for_kind(st, kind), items)
     let tx0 = tx_begin(st.doc, st.selection)
     let tx1 = tx_step(tx0, step_replace([], start_index, end_index + 1, [list_node]))
-    tx_set_selection(tx1, node_selection([start_index]))
+    let sel = st.selection
+    let anchor = if (sel.kind == 'text') wrapped_list_position(st, sel.anchor, start_index, end_index) else null
+    let head = if (sel.kind == 'text') wrapped_list_position(st, sel.head, start_index, end_index) else null
+    tx_set_selection(tx1, if (anchor != null and head != null) text_selection(anchor, head) else node_selection([start_index]))
+  }
+}
+
+// Find the list itself for a node selection, or the current item for a caret.
+fn selected_list(st, sel) any^ {
+  if (sel.kind == 'node') {
+    let n = node_at(st.doc, sel.path)
+    if (is_list_node(n)) {path: sel.path, first: 0, last: len(n.content)}
+    else {
+      let item_path = ancestor_tag(st.doc, sel.path, state_list_item_tag(st))
+      if (item_path == null) null else {path: parent_path(item_path), first: last_index(item_path), last: last_index(item_path) + 1}
+    }
+  }
+  else if (sel.kind == 'text') {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    let first = ancestor_tag(st.doc, lo.path, state_list_item_tag(st))
+    let final_item = ancestor_tag(st.doc, hi.path, state_list_item_tag(st))
+    let selected_node = if (len(lo.path) == 0 and len(hi.path) == 0 and hi.offset == lo.offset + 1)
+      node_at(st.doc, [lo.offset]) else null
+    if (is_list_node(selected_node)) {path: [lo.offset], first: 0, last: len(selected_node.content)}
+    else if (first == null or final_item == null or not path_equal(parent_path(first), parent_path(final_item))) null
+    else {
+      // A half-open selection ending at the next item's start excludes it.
+      let tail = list_drop(hi.path, len(final_item))^
+      let end_at_start = hi.offset == 0 and all([for (part in tail) part == 0])
+      let final_index = last_index(final_item)
+      {path: parent_path(first), first: last_index(first),
+       last: final_index + (if (end_at_start and final_index > last_index(first)) 0 else 1)}
+    }
+  }
+  else null
+}
+
+fn list_inline(st, child) any^ =>
+  is_text(child) or (is_node(child) and state_schema(st)[child.tag] != null and
+    state_schema(st)[child.tag].role in ['inline', 'mark']) or false
+
+// Unwrap inline runs into paragraphs while keeping nested blocks in order.
+fn unwrapped_item(st, item) any^ {
+  if (not is_node(item) or len(item.attrs) != 0) { return null }
+  {
+    var blocks = [], inline = [], i = 0
+    while ((i < len(item.content))^) {
+      let child = item.content[i]
+      if (list_inline(st, child)^) { inline = [*inline, child] }
+      else {
+        if (len(inline) > 0) { blocks = [*blocks, node(state_default_block(st), inline)]; inline = [] }
+        blocks = [*blocks, child]
+      }
+      i = i + 1
+    }
+    if (len(inline) > 0) { blocks = [*blocks, node(state_default_block(st), inline)] }
+    if (len(blocks) == 0) [node(state_default_block(st), [])] else blocks
+  }
+}
+
+// An item's explicit value resets numbering for the items that follow it.
+fn list_ordinal_at(list_node, index) any^ {
+  let start = int(attrs_get(list_node.attrs, 'start')) ^ { null }
+  var ordinal = if (start == null) 1 else start, i = 0
+  while (i < index) {
+    let explicit_value = int(attrs_get(list_node.content[i].attrs, 'value')) ^ { null }
+    ordinal = (if (explicit_value == null) ordinal else explicit_value) + 1
+    i = i + 1
+  }
+  ordinal
+}
+
+// Keep ordered-list numbering when only a middle range is transformed.
+fn list_fragment(list_node, first, end_pos) any^ {
+  let items = list_slice(list_node.content, first, end_pos)
+  if (len(items) == 0) []
+  else {
+    let ordinal = if (list_node.tag == 'ol' and first > 0) list_ordinal_at(list_node, first) else null
+    let attrs = if (ordinal == null) list_node.attrs else
+      attrs_set(list_node.attrs, 'start', if (ordinal == 1) null else string(ordinal));
+    [node_attrs(list_node.tag, attrs, items)]
+  }
+}
+
+// Map a position in an item to its preserved block or its new inline paragraph.
+fn unwrapped_position(st, item, relative, parent, start_index, offset) any^ {
+  if (len(relative) == 0) { return null }
+  let target = relative[0]
+  if (target < 0 or target >= len(item.content)) { return null }
+  var block_index = 0, inline_count = 0, i = 0
+  while (i < target) {
+    if (list_inline(st, item.content[i])^) { inline_count = inline_count + 1 }
+    else {
+      if (inline_count > 0) { block_index = block_index + 1; inline_count = 0 }
+      block_index = block_index + 1
+    }
+    i = i + 1
+  }
+  let rest = list_drop(relative, 1)
+  if (list_inline(st, item.content[target])^)
+    pos([*parent, start_index + block_index, inline_count, *rest], offset)
+  else pos([*parent, start_index + block_index + (if (inline_count > 0) 1 else 0), *rest], offset)
+}
+
+fn transformed_list_position(st, point, chosen, list_node, blocks, base, middle_count, unwrapped) any^ {
+  let depth = len(chosen.path)
+  if (len(point.path) <= depth or not path_equal(list_take(point.path, depth), chosen.path)) null
+  else {
+    let item_index = point.path[depth]
+    let rest = list_drop(point.path, depth + 1)
+    if (item_index < chosen.first) pos([*parent_path(base), last_index(base) - 1, item_index, *rest], point.offset)
+    else if (item_index >= chosen.last)
+      pos([*parent_path(base), last_index(base) + middle_count, item_index - chosen.last, *rest], point.offset)
+    else {
+      let local = item_index - chosen.first
+      if (not unwrapped) pos([*base, local, *rest], point.offset)
+      else {
+        let preceding = sum([0, *[for (i in range(0, local, 1)) len(blocks[i])]])
+        unwrapped_position(st, list_node.content[item_index], rest, parent_path(base), last_index(base) + preceding, point.offset)
+      }
+    }
+  }
+}
+
+fn change_existing_list(st, sel, chosen, kind) any^ {
+  let list_node = node_at(st.doc, chosen.path)
+  // Splitting a list with arbitrary attributes could duplicate IDs or lose metadata.
+  if ((not is_list_node(list_node) or len(chosen.path) == 0 or
+      any([for (a in ((list_node.attrs) ^ { [] })) not (a.name in ['start', 'loose', 'ordered', 'style'])]))^) null
+  else {
+    let tag = state_list_tag_for_kind(st, kind)
+    let desired = list_attrs_for_kind(st, kind)
+    let same = list_node.tag == tag and (tag != 'list' or
+      (attrs_get(list_node.attrs, 'ordered') == true) == (attrs_get(desired, 'ordered') == true))
+    let remaining_style = inline_format.css_set(attrs_get(list_node.attrs, 'style'), "list-style-type", null)
+    let selected = list_slice(list_node.content, chosen.first, chosen.last)
+    let blocks = if (same) [for (item in selected) unwrapped_item(st, item)] else []
+    if (same and (remaining_style != "" or any([for (part in blocks) part == null]))) null
+    else {
+      let converted_attrs = if (tag == 'list') attrs_set(list_node.attrs, 'ordered', attrs_get(desired, 'ordered'))
+                              else attrs_set(list_node.attrs, 'start', null)
+      let middle = if (same) [for (part in blocks) for (block in part) block]
+        else [node_attrs(tag, attrs_set(converted_attrs, 'style', if (remaining_style == "") null else remaining_style), selected)]
+      let before = list_fragment(list_node, 0, chosen.first)
+      let after = list_fragment(list_node, chosen.last, len(list_node.content))
+      let parent = parent_path(chosen.path)
+      let index = last_index(chosen.path)
+      let tx = tx_step(tx_begin(st.doc, sel), step_replace(parent, index, index + 1, [*before, *middle, *after]))
+      let base = [*parent, index + len(before)]
+      let anchor = if (sel.kind == 'text') transformed_list_position(st, sel.anchor, chosen, list_node, blocks, base, len(middle), same) else null
+      let head = if (sel.kind == 'text') transformed_list_position(st, sel.head, chosen, list_node, blocks, base, len(middle), same) else null
+      let selection = if (anchor != null and head != null) text_selection(anchor, head)
+                      else caret(first_caret_pos_in(middle[0], base));
+      tx_set_selection(tx, selection)
+    }
   }
 }
 
@@ -1872,6 +2041,10 @@ pub fn cmd_wrap_list(st, kind) any^ {
   else {
     let sel = st.selection
     if (sel == null or st.doc == null or not is_node(st.doc) or len(st.doc.content) == 0) { null }
+    else if (selected_list(st, sel) != null) { change_existing_list(st, sel, selected_list(st, sel), kind) }
+    // A cross-list range cannot be transformed as one list without nesting it.
+    else if (sel.kind == 'text' and (ancestor_tag(st.doc, sel.anchor.path, state_list_item_tag(st)) != null or
+             ancestor_tag(st.doc, sel.head.path, state_list_item_tag(st)) != null)) { null }
     else if (sel.kind == 'all') { wrap_top_blocks_in_list(st, 0, len(st.doc.content) - 1, kind) }
     else if (sel.kind == 'node') {
       if (len(sel.path) == 0) { null } else { wrap_top_blocks_in_list(st, sel.path[0], sel.path[0], kind) }
@@ -2033,6 +2206,13 @@ fn empty_cell_like(cell) =>
   if (cell != null and is_node(cell) and cell.tag == 'th') { node('th', [text("")]) }
   else { node('td', [text("")]) }
 
+// Existing cells can contain nested blocks or be empty; use their editable edge.
+fn table_cell_selection(doc, path) any^ {
+  let cell = node_at(doc, path)
+  if (cell == null or not is_node(cell) or not (cell.tag in ['td', 'th'])) node_selection(path)
+  else caret(first_caret_pos_in(cell, path)^)
+}
+
 // both insertion directions share the cell context and history shape.
 pub fn cmd_add_table_row(st, before=false) any^ {
   let ctx = selected_table_context(st)
@@ -2042,7 +2222,9 @@ pub fn cmd_add_table_row(st, before=false) any^ {
     let cols = len(ctx.row.content)
     let tx0 = tx_begin(st.doc, st.selection)
     let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, insert_at, insert_at, [make_table_row(cols, false)]))
-    tx_set_selection(tx1, node_selection([*ctx.row_container_path, insert_at]))
+    // Place the caret in the new row so typing can continue immediately.
+    let caret = pos([*ctx.row_container_path, insert_at, ctx.col_index, 0], 0)
+    tx_set_selection(tx1, text_selection(caret, caret))
   }
 }
 
@@ -2053,7 +2235,11 @@ pub fn cmd_delete_table_row(st) any^ {
     let tx0 = tx_begin(st.doc, st.selection)
     let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, ctx.row_index, ctx.row_index + 1, []))
     let next_row = if (ctx.row_index >= len(ctx.row_container.content) - 1) { ctx.row_index - 1 } else { ctx.row_index }
-    tx_set_selection(tx1, node_selection([*ctx.row_container_path, next_row]))
+    let row_path = [*ctx.row_container_path, next_row]
+    let row = node_at(tx1.doc_after, row_path)
+    let selection = if (row == null or not is_node(row) or len(row.content) == 0) node_selection(row_path)
+      else table_cell_selection(tx1.doc_after, [*row_path, min(ctx.col_index, len(row.content) - 1)])^
+    tx_set_selection(tx1, selection)
   }
 }
 
@@ -2090,7 +2276,8 @@ pub fn cmd_add_table_column(st, before=false) any^ {
     let insert_at = ctx.col_index + if (before) 0 else 1
     let steps = collect_add_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, insert_at, 0, len(ctx.table.content), [])
     let tx1 = tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps))
-    tx_set_selection(tx1, node_selection([*ctx.row_path, insert_at]))
+    let caret = pos([*ctx.row_path, insert_at, 0], 0)
+    tx_set_selection(tx1, text_selection(caret, caret))
   }
 }
 
@@ -2125,7 +2312,7 @@ pub fn cmd_delete_table_column(st) any^ {
     let steps = collect_delete_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
     let tx1 = tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps))
     let next_col = if (ctx.col_index >= len(ctx.row.content) - 1) { ctx.col_index - 1 } else { ctx.col_index }
-    tx_set_selection(tx1, node_selection([*ctx.row_path, next_col]))
+    tx_set_selection(tx1, table_cell_selection(tx1.doc_after, [*ctx.row_path, next_col])^)
   }
 }
 

@@ -1,0 +1,16 @@
+{
+  "name": "add an XML child with keyboard",
+  "command": "edit",
+  "html": "test/fixtures/edit/xml-elements.xml",
+  "working_copy": "temp/edit-ui/edit_xml_add_keyboard.xml",
+  "events": [
+    {"type": "click", "target": {"selector": ".property-add_element", "index": 1}},
+    {"type": "type", "text": "n:item"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "type", "text": "A & B"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".property-delete_element"}, "count": 3},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xml_add_keyboard.xml", "contains": "<n:item>A &amp; B</n:item>"}
+  ]
+}
