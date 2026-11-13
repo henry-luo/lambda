@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Nested grid keeps its formatted height</title>
+<style>
+body { margin: 0; }
+#outer { display: grid; width: 300px; align-items: start; grid-template-columns: 1fr; }
+#inner {
+    display: grid; grid-template-columns: 1fr; grid-template-rows: 40px 60px;
+    gap: 10px; padding: 10px 20px; border: 2px solid black; background: yellow;
+}
+#first { background: red; }
+#second { background: blue; }
+</style>
+<div id="outer"><div id="inner"><div id="first"></div><div id="second"></div></div></div>
+<div style="position:absolute;left:650px;top:0">
+    <button id="center">Center</button><button id="stretch">Stretch</button><button id="size">Set height</button>
+</div>
+<script>
+const outer = document.getElementById('outer');
+document.getElementById('center').addEventListener('click', function () {
+    outer.style.height = '300px';
+    outer.style.alignItems = 'center';
+});
+document.getElementById('stretch').addEventListener('click', function () {
+    outer.style.alignItems = 'stretch';
+});
+document.getElementById('size').addEventListener('click', function () {
+    outer.style.alignItems = 'start';
+    document.getElementById('inner').style.height = '180px';
+});
+</script>

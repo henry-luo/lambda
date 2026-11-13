@@ -77,7 +77,7 @@ format and platform limits. See [System Functions](Lambda_Sys_Func.md) and the
 | **BibTeX / BibLaTeX resources** — `.bib` (read as a local TeX resource; MIME is not registered) | ✅ bounded resource parser | — no BibTeX writer | ✅ bibliography in rendered TeX documents | — |
 | **Math expressions** — explicit `math` or `math-ascii` type; plain-text source, no dedicated MIME | ✅ LaTeX/ASCII math parser | ✅ LaTeX/ASCII math writer | ◐ documented MathML rendering subset | — |
 | **PDF** — `application/pdf` | ✅ page/content input | ◐ render-to-PDF export | ✅ view/render | — |
-| **RTF** — `application/rtf` | ◐ experimental raw control-group parser | — | — | — |
+| **RTF** — `application/rtf` | ◐ experimental `lambda.doc.rtf` script reader | — | ◐ document viewer | — |
 | **EML / RFC 822 email** — `message/rfc822`, `application/eml`, `message/eml` | ✅ message/MIME tree | ✅ EML writer | ✅ header/body preview | — |
 | **vCard** — `text/vcard`; `.vcf` | ✅ | ✅ VCF writer | ◐ property preview | — |
 | **iCalendar** — `text/calendar`, `application/ics`; `.ics` | ✅ | ✅ ICS writer | ◐ property preview | — |

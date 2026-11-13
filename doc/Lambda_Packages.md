@@ -88,6 +88,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.doc.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
+| `rtf` | `lambda.doc.rtf` | Experimental reader | Parses RTF source into styled document elements; see [RTF support](Markup_Formats_Support.md#33-rtf) | Document viewer RTF preview |
 | `docx` | `lambda.doc.docx` | Library, bounded import and export profiles | Reads DOCX and writes editable Word packages from HTML elements (§15) | `lambda view report.docx`; `--archive` browses package parts |
 | `pptx` | `lambda.doc.pptx` | Library, initial editable import profile | Reads PowerPoint into slide elements, HTML handouts, text, metadata and diagnostics (§28) | `lambda view deck.pptx`; also `layout`, `render`, document-browser preview and Slides Open |
 | `xlsx` | `lambda.doc.xlsx` | Library, bounded workbook import | Reads spreadsheet values, formulas and basic styles into a semantic workbook (§31) | Sheet demo Open |

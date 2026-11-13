@@ -1,0 +1,18 @@
+{
+  "name": "Absolute named grid area follows track, area and size changes",
+  "html": "test/ui/dom/grid_absolute_area.html",
+  "events": [
+    {"type":"assert_pixel","x":130,"y":200,"min_r":0,"max_r":0,"min_g":255,"max_g":255,"min_b":0,"max_b":0},
+    {"type":"assert_pixel","x":330,"y":30,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"click","target":{"selector":"#grow"}},
+    {"type":"assert_pixel","x":130,"y":30,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_pixel","x":400,"y":200,"min_r":0,"max_r":0,"min_g":255,"max_g":255,"min_b":0,"max_b":0},
+    {"type":"click","target":{"selector":"#swap"}},
+    {"type":"assert_pixel","x":30,"y":200,"min_r":0,"max_r":0,"min_g":255,"max_g":255,"min_b":0,"max_b":0},
+    {"type":"assert_pixel","x":400,"y":30,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"click","target":{"selector":"#size"}},
+    {"type":"assert_pixel","x":30,"y":40,"min_r":0,"max_r":0,"min_g":255,"max_g":255,"min_b":0,"max_b":0},
+    {"type":"assert_pixel","x":120,"y":40,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_pixel","x":30,"y":100,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255}
+  ]
+}

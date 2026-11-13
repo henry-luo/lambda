@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Generic DOM collection value iterators</title>
+<style id="sheet">.rule { color: red; background-color: blue; }</style></head>
+<body><div id="result">pending</div><main id="root"><span id="one"></span></main>
+<div id="styled" style="color: red; background-color: blue"></div>
+<script>
+const result = document.getElementById('result');
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+try {
+    const interfaces = [HTMLCollection, NodeList, NamedNodeMap, DOMTokenList,
+        StyleSheetList, CSSRuleList, CSSStyleDeclaration];
+    check('identity', interfaces.every(function(ctor) {
+        return ctor.prototype[Symbol.iterator] === Array.prototype.values;
+    }));
+    check('generic', interfaces.every(function(ctor) {
+        return ctor.prototype[Symbol.iterator].call({0: 'value', length: 1}).next().value === 'value';
+    }));
+    const style = document.getElementById('styled').style;
+    let names = [];
+    for (const name of style) names.push(name);
+    check('style', names.join(',') === 'color,background-color' &&
+        Array.from(style).join(',') === names.join(','));
+    check('rule', Array.from(document.getElementById('sheet').sheet.cssRules[0].style).join(',') === names.join(','));
+    const root = document.getElementById('root');
+    const iterator = root.children[Symbol.iterator]();
+    check('first', iterator.next().value === document.getElementById('one'));
+    const second = document.createElement('span');
+    root.appendChild(second);
+    check('live', iterator.next().value === second);
+    check('done', iterator.next().done);
+    root.appendChild(document.createElement('span'));
+    check('permanent', iterator.next().done);
+    const keys = root.children;
+    const proxied = new Proxy(keys, {});
+    const proxyIterator = proxied[Symbol.iterator]();
+    let branded = false;
+    try { proxyIterator.next(); } catch (error) { branded = error instanceof TypeError; }
+    check('proxy', branded);
+    result.textContent = 'complete';
+} catch (error) { result.textContent = error.name + ':' + error.message; }
+</script></body></html>

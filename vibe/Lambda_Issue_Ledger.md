@@ -765,6 +765,17 @@ and `final-source-audit.json`.
 <a id="lr01-23"></a>LR01-23 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr01-23>).
 
 
+<a id="lr01-25"></a>**LR01-25 · macOS ASan host omits sanitizer linkage · OPEN (2026-11-13)**
+
+On `e5d5e848e`, `make build-debug-asan` builds the instrumented sibling archives
+then fails linking `lambda-debug-asan.exe` with unresolved `___asan_*` symbols.
+The generated host compile/link flags omit `-fsanitize=address` while its input
+and Radiant archives require the sanitizer runtime (D9.1.3v2). The flag omission
+is confirmed; the generator/configuration cause remains **unconfirmed**.
+Evidence: `temp/failed-radiant-tests/asan-build.log`. This blocks sanitizer
+qualification of LR12-54; the normal debug host and forced-GC/poison UI replay
+pass. No sibling source or build workaround was applied.
+
 <a id="lr01-24"></a>**LR01-24 · Forced-GC batch timeout can crash during cleanup · OPEN (2026-11-11)**
 
 On `21fdc7cf6` plus the document-protocol changes and logical-join fix,
@@ -1400,6 +1411,8 @@ as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 
 
 ## 12. Procedural runtime (LR12)
+
+<a id="lr12-54"></a>LR12-54 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-54>).
 
 <a id="lr12-53"></a>LR12-53 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-53>).
 
@@ -2209,3 +2222,73 @@ correctly rejects the unbraced return with E100, then reports **two system
 allocations / 262 bytes**. Evidence: `temp/sync-lan-events/invalid-ast-cleanup.log`.
 This broadens the reproduction; allocation ownership/cause remain unconfirmed.
 Valid LAN execution and qualification are not blocked.
+
+## Online canvas WebGL1 context profile — 2026-11-13
+
+<a id="dom-canvas-webgl1"></a>
+
+**Status:** OPEN feature gap; no new graphics profile implemented in the online
+bug-fix milestone. **Online task blocker:** no for the repaired Stripe text,
+image and card geometry. DOM/provider ownership follows **D9.1.1v4 /
+D9.1.3v2**; capture virtual time remains **D10.1.7**.
+
+Stripe's blog retains a missing gradient after RI-058/RI-059 repair its hero.
+Its authored `v1-Gradient-FMG6JXXX.js` imports `v1-chunk-U27CH7XD.js`, whose
+constructor requests `canvas.getContext("webgl", {antialias:true})` before
+creating shaders and buffers. `lambda/dom/dom_canvas.cpp` currently admits
+`webgl2` and `2d`; a `webgl` identifier returns null. The selected native
+WebGL2 profile and default null-host export's context absence are already
+documented in `test/webgl/README.md` and the HTML/CSS support matrix.
+
+This establishes an incompatible requested context profile. It does not prove
+that this is the only live startup/capture cause of the absent gradient.
+Providing a WebGL1 context requires its actual interface, branding, capabilities
+and graphics lifecycle; aliasing its request to WebGL2 or substituting a painted
+gradient would hide the gap. Neither is done. The original browser reference,
+capture host configuration and selected virtual time remain unchanged.
+
+Evidence: `temp/online-visual-round14/stripe-gradient-controller.js` contains the
+bounded controller source, `stripe-gradient.js` its import, and
+`stripe-live-grid-after.png` the remaining difference. The same round's frozen
+HTML/CSS and fourteen independent browser/PNG controls isolate the two native
+grid repairs separately from this graphics limitation.
+
+## Online DOM collection iterators — 2026-11-13
+
+<a id="dom-collection-iterators"></a>
+
+**Status:** FIXED. DOM collection installation used a recursive iterator
+callback that rejected CSSStyleDeclaration's VMAP carrier and overflowed through
+proxies. It now installs the shared realm's existing Array values method, using
+the intrinsic prototype before Window publishes Array (**D8.4.4 / D7.2.2 /
+D9.5.5**). The unchanged saved Qualified docking bundle now initializes; both
+Lattice pages lose the startup exception, but remain major visual candidates.
+[Reproduction, repair and qualification](<Lambda_Issue_Ledger (fixed).md#dom-collection-iterators>).
+
+## Online reference frame timing — 2026-11-13
+
+<a id="online-capture-frame-timing"></a>
+
+**Status:** OPEN comparison-qualification gap; no engine timing policy change.
+**Task blocker:** no for the repaired iterator; Lattice customers/blog remain
+major visual candidates. **D10.1.7** keeps export at its selected virtual frame.
+
+After fixing the collection iterator, both Lattice pages load without the
+Qualified startup exception but still capture blank. Their authored stylesheet
+hides `.anti-flicker` and descendants; their inline script removes the class
+with a 4000ms timer. `radiant/render_output.cpp` configures a zero-initialized
+virtual clock for one-shot export. An added observation-only animation-frame
+callback in the saved customers document reports `w-mod-js anti-flicker`,
+`visibility:hidden`, `opacity:0` at the selected frame. The reduced authored
+probe reports the same. Chromium also hides the reduced initial frame and only
+reveals it after the authored timer fires. The preserved online Chromium image
+is from a later visible state.
+
+This isolates a timing mismatch for these two comparisons, not a failure to
+load their CSS or a reason to change their author styles. It does not assign
+this cause to other blank pages. No later image is substituted, no clock is
+advanced to obtain a match, and no browser reference or deadline changes. A
+future comparison profile needs explicit equivalent frame selection rather
+than an engine workaround. Evidence: `temp/online-visual-round15/` contains
+`lattice-final-state.html`, its output/PNG, `authored-timer.html`, and the
+independent `timer-browser.json` plus initial/later screenshots.

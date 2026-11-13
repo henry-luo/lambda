@@ -62,6 +62,8 @@ node --test test/online/render_clip.test.cjs
 node --test test/online/render_observers.test.cjs
 node --test test/online/render_grid.test.cjs
 node --test test/online/render_rem.test.cjs
+node --test test/online/render_grid_absolute.test.cjs
+node --test test/online/render_grid_nested.test.cjs
 ```
 
 The session tests exercise real Lambda HTTP rendering, layout and both batch
@@ -581,8 +583,8 @@ matches Chromium's geometry and matches both old/new renderers of an equivalent
 literal-14px diagnostic control exactly in pixels. Canonical HTML/CSS is unchanged.
 
 All 173 incoming high-severity pages, Dock and eleven controls were refreshed:
-184 valid PNGs and Dock's unchanged 150-second timeout. The current report has
-1066 available pairs, **172 high-severity pages**, one critical blocker and
+184 valid PNGs and Dock's unchanged 150-second timeout. The round-thirteen report had
+1066 available pairs, 172 high-severity pages, one critical blocker and
 894 low-severity pages (157 automated candidates plus 15 manually retained
 omissions). Eighteen changed/manual/newly cleared pairs and all eleven controls
 were visually checked. Pivot's new gradient lowers its coarse score, but its
@@ -613,6 +615,103 @@ Full source-state patches, frozen controls and qualification evidence are
 preserved there. The user ended this goal after this review; unresolved
 high-severity causes and the Stripe placement investigation remain documented
 for a later pass.
+
+The fourteenth review resumed the goal on 2026-11-13 and repaired two shared
+grid defects (RI-058/RI-059; D9.1.1v4 / D9.1.3v2). Absolute named/numeric grid
+placement now supplies its containing area before child sizing through the
+ordinary positioned solver. Nested grids retain their formatter's geometry
+and use natural block sizing when alignment does not assign an extent. The
+existing edge and detailed alignment resolvers are shared, with borrowed
+per-child state scoped under D5.5.1.
+
+Stripe's blog restores the heading, author, copy, action, image and white card.
+The same frozen input now has a 460px card, 524×428px image and row sizes that
+match Chromium, with a remaining 9px global vertical offset. The fresh online
+comparison clears major review at 6.0% mean error versus 31.6%. Its residual
+gradient requests a WebGL1 profile outside the current bridge; that feature
+gap is recorded in the [central Lambda ledger](../../vibe/Lambda_Issue_Ledger.md#dom-canvas-webgl1).
+No canvas substitute or graphics-host override is used.
+
+All 172 incoming high-severity pages, Dock and twelve controls were refreshed:
+184 valid PNGs and Dock's unchanged 150-second timeout. The current report has
+1066 available pairs, **169 high-severity pages**, one critical blocker and
+897 low-severity pages (153 automated candidates plus 16 omissions retained
+below the automatic threshold). Twenty-six changed/manual pairs and all twelve
+controls were visually checked. FramerAuth and Superhuman still lack their main
+hero, and Zendesk lacks its primary navigation, so their lower metrics do not
+clear major review. All eighteen manual annotations remain high severity.
+Bizzabo and ExactlyAI now clear visual review; their exclusive restoration
+cause remains unisolated from source and live-resource changes.
+
+The four initially missing-media cases were checked with alternating current
+baseline/repaired binaries at unchanged settings. Cofounder, Banky and Amperos
+restore the images in both hosts when their requests finish; this does not
+isolate a grid regression. The canonical attempts retain their pending-resource
+observations, and the one-second optional-resource grace is unchanged (RI-061).
+Unreal's preserved browser reference itself shows an access-denied page, limiting
+interpretation of that comparison. No URL or reference is removed to lower a score.
+
+Qualification passes 89 native dynamic cases, 64 real CLI cases, eleven DOM UI
+fixtures/81 assertions, 574 AST cases, 3851 static layout cases (six skips),
+630 JavaScript layout cases, five comparator tests and geometry lint. Fourteen
+new PNG/geometry cases agree with independent Chromium; the two live fixtures
+pass all seventeen assertions. Radiant's aggregate has 1083 passes, one device
+skip and the known RI-035 voice failure. The fresh Input gate has 5224 passes,
+one skip and its existing graph LOC, transition admission and archive failures.
+
+The current main checkout builds successfully against current sibling archives;
+the old compatible-host fallback and paint API mismatch are obsolete for these
+revisions. All three source heads advanced before this review, so unrelated
+score movement is not exclusively attributed to the two grid repairs.
+See [round-fourteen evidence](comparison/repairs.html#round-14),
+snapshots/visual_comparison_review_round14.json and temp/online-visual-round14/.
+The immutable renderer is lambda-final.exe in that evidence directory,
+SHA-256 4453b420a133510ae84eea0c9bfafae8b7605786d7df270a1405c4bb55c605e3.
+All 1067 browser PNG hashes/metadata and catalog URLs, thresholds, source
+admission, deadlines and D10.1.7 virtual time are unchanged. The goal remained
+active after that milestone.
+
+The fifteenth review repaired DOM collection iterator installation
+(**D8.4.4 / D7.2.2 / D9.5.5**). It reuses the realm's canonical
+`Array.prototype.values`, including before Window publishes Array. This fixes
+CSSStyleDeclaration's non-iterable error and proxy recursion. The unchanged
+saved Qualified docking bundle now initializes, and both live Lattice pages
+lose that startup exception. Their visual differences remain high severity:
+a saved customers final-state probe finds its authored anti-flicker class
+hiding the root at export's selected virtual frame. Its 4000ms timer reveals
+a later Chromium frame. The reduced initial Chromium frame is hidden too;
+**D10.1.7** timing and original references stay unchanged. See the
+[iterator repair](<../../vibe/Lambda_Issue_Ledger (fixed).md#dom-collection-iterators>)
+and [frame timing limitation](../../vibe/Lambda_Issue_Ledger.md#online-capture-frame-timing).
+
+All 169 incoming high-severity pages, Dock and fifteen low controls were
+refreshed: 184 valid PNGs and Dock's unchanged 150-second timeout. The report
+still has **169 high-severity pages**, one critical blocker and 897 low-severity
+pages across 1066 pairs (151 automatic candidates plus eighteen manual
+omissions below the automatic threshold). Twenty-four changed/manual pairs
+were visually reviewed; all fifteen low control PNGs are byte-identical to
+their previous captures. Cofounder and Banky regain media but still lack main
+hero text/actions, so lower scores do not clear major review. Superlist changes
+from partial dark content to blank (13.7% to 76.1% mean error); its cause remains
+unisolated from live source, readiness or the iterator change. No regression
+exclusion is claimed. All original browser PNGs/metadata, catalog URLs,
+thresholds and deadlines remain unchanged.
+
+Qualification passes 575 AST baseline cases, 120 focused MVP cases, 69 CLI
+rendering/comparison cases, thirteen DOM UI fixtures/103 assertions, and 630
+recorded JavaScript layouts. Sixteen static suites retain 4979 passes and
+295 recorded partials with zero regressions. The new DOM fixture improves
+from 0/10 to 10/10 in AUTO, AST and MIR; Chromium independently agrees on those
+ten checks and 27 generic-array controls. Those 27 controls already passed
+before the repair and verify reuse of the shared implementation. No additional
+Lambda-input or Radiant implementation changes were made in this review.
+
+Evidence: [round fifteen](comparison/repairs.html#round-15),
+`snapshots/visual_comparison_review_round15.json` and
+`temp/online-visual-round15/`. Its immutable host is `lambda-final.exe`, SHA-256
+`074755341e8a92787e9bd8b160480748053cfc954a7d604d78f32b4cddf73a4f`.
+The user cleared the goal and requested wrap-up during this refresh; no further
+repair cycle is active. The next investigation is checkpointed separately.
 
 `test_page_load_gtest` writes its local fixture timing and memory measurements
 to `page_load_metrics.csv` in this directory.

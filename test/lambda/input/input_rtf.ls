@@ -1,4 +1,5 @@
-let rtf = input('./test/input/test.rtf', 'rtf')^
+import rtf_package: lambda.doc.rtf
+let rtf = rtf_package.parse_file('./test/input/test.rtf')^
 rtf
 
 "\nFormat RTF:\n"

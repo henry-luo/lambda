@@ -16,6 +16,7 @@ import math_renderer: lambda.doc.math.math
 import graph_doc: lambda.graph.document
 import tikz: lambda.doc.tikz.tikz
 import media: .media
+import rtf: .rtf
 import docx: .docx
 import docx_view: .docx.view
 import docx_css: .docx.css
@@ -380,6 +381,9 @@ fn selected_preview(file) any^ {
       let parsed = input(selected_path, {type:"graph", flavor:flavor}) ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected graph"> }
       else { graph_doc.to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected graph"> } }
+    }
+    else if (format == "rtf") {
+      rtf.parse(selected_source(file)^) ^ { <p class:"preview-error", "Unable to render selected RTF"> }
     }
     else if (format == null) { null }
     else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
