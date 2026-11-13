@@ -106,6 +106,35 @@ fn source_gap_bytes(bytes, index = 0, comment = false, seen = false, out = "") a
     }
 }
 
+// the last token in a group can still have skipped source before its closing brace.
+fn trailing_gap_end(bytes, index, comment = false) any^ {
+    if (index >= len(bytes)) index
+    else {
+        let b = bytes[index];
+        if (comment) trailing_gap_end(bytes, index + 1, b != 10 and b != 13)
+        else if (b == 37) trailing_gap_end(bytes, index + 1, true)
+        else if (contains([9, 10, 12, 13, 32], b)) trailing_gap_end(bytes, index + 1)
+        else index
+    }
+}
+
+fn format_control_gap(tokens, sources, index) any^ {
+    let token = tokens[index];
+    let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+    let found = [for (source in sources where source.id == token.file) source];
+    if (token.direct != true or len(found) == 0 or (next != null and
+            (next.direct != true or next.file != token.file or next.start < token.end)))
+        {valid: false, seen: false, text: ""}
+    else {
+        let bytes = binary(found[0].data)^;
+        let end = if (next != null and next.direct == true and next.file == token.file and next.start >= token.end)
+            next.start else if (next == null) trailing_gap_end(bytes, token.end)^ else token.end;
+        let bounded = end <= len(bytes) and (next != null or end == len(bytes) or bytes[end] == 125);
+        if (not bounded) {valid: false, seen: false, text: ""}
+        else source_gap_bytes(slice(bytes, token.end, end)^)
+    }
+}
+
 fn source_control_gap(tokens, sources, index) any^ {
     let token = tokens[index];
     let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
@@ -923,16 +952,33 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true)
             contains(["textbf", "textit", "emph", "texttt", "textsf", "textrm", "underline"], token.value))
             unsupported(index, "inline command source mapping")
         else if (token.kind == "control" and contains(["textbf", "textit", "emph", "texttt", "textsf", "textrm", "underline"], token.value)) {
-            let arg = read_group(tokens, index + 1)^;
-            if (arg.issue != null) arg
+            // native parsing keeps a formatting node even without a following group.
+            let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+            let star = next != null and next.kind == "char" and next.value == "*";
+            let mapped = star and token.direct == true and next.direct == true and token.file == next.file;
+            let starred = mapped and token.end == next.start;
+            let at = index + if (starred) 2 else 1;
+            let gap = format_control_gap(tokens, sources, at - 1)^;
+            if (star and not mapped) unsupported(index, "inline command star source mapping")
+            else if (at >= len(tokens) or not opening(tokens[at]) or (gap.valid and gap.seen)) {
+                let node = inline_element(token.value, if (token.read_offset != null)
+                    token.read_offset else token.start, []);
+                let text_gap = if (gap.valid) gap.text else spacing_word_gap(tokens, sources, at - 1)^;
+                inline(tokens, sources, at, text_gap,
+                    [*append_text(items, text), node], stop_blocks)
+            }
             else {
-                let children = inline(arg.tokens, sources, 0, "", [], false)^;
-                if (children.issue != null) children
-                else if (children.index != len(arg.tokens)) unsupported(index, "inline group")
+                let arg = read_group(tokens, at)^;
+                if (arg.issue != null) arg
                 else {
-                    let node = inline_element(token.value, if (token.read_offset != null)
-                        token.read_offset else token.start, children.items);
-                    inline(tokens, sources, arg.end, "", [*append_text(items, text), node], stop_blocks)
+                    let children = inline(arg.tokens, sources, 0, "", [], false)^;
+                    if (children.issue != null) children
+                    else if (children.index != len(arg.tokens)) unsupported(index, "inline group")
+                    else {
+                        let node = inline_element(token.value, if (token.read_offset != null)
+                            token.read_offset else token.start, children.items);
+                        inline(tokens, sources, arg.end, "", [*append_text(items, text), node], stop_blocks)
+                    }
                 }
             }
         }

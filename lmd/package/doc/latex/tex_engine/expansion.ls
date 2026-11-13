@@ -190,11 +190,13 @@ fn expand_macro(st, macro, budget) any^ {
         else {
             let optional = if (macro.optional == true) latex_optional(matched.input)^
                 else {input: matched.input, present: false, tokens: [], issue: null};
-            let initial = if (macro.optional == true) [if (optional.present) optional.tokens else macro.optional_default] else [];
+            let initial = if (macro.optional == true)
+                [if (optional.present) optional.tokens else stored_tokens(macro.optional_default)] else [];
             let args = collect_args(optional.input, macro.delimiters, macro.brace_delim, macro.long_ok, initial);
             if (optional.issue != null) fail({*:st, input: optional.input}, optional.issue)
             else if (args.issue != null) fail({*:st, input: args.input}, args.issue)
-            else {*:st, input: stream.push(args.input, stored_tokens(substitute(macro.body, args.args))),
+            // replacement text is stored, while freshly scanned arguments retain their source identity.
+            else {*:st, input: stream.push(args.input, substitute(stored_tokens(macro.body), args.args)),
                 expansions: st.expansions + 1}
         }
     }
@@ -4760,7 +4762,8 @@ fn step(st, budget) any^ {
     else if (charcat(t, 3)) math_shift(current, t)
     else if (charcat(t, 1)) begin_group(current, t, false)
     else if (charcat(t, 2)) end_group(current, t, false)
-    else {*:current, output: [*st.output, t]}
+    // the output serializer needs the reader position at emission, including lookahead.
+    else {*:current, output: [*st.output, {*:t, emit_origin: current.input.last_main_offset}]}
 }
 
 // the native LaTeX scanner splits control words at non-letter characters.

@@ -3271,3 +3271,183 @@ AST cases, an included file, seven focused regressions and sampled
 forced-GC checks pass both execution backends; see
 `test/lambda/latex/test_tex_script_expl3_empty_c.ls`. Expanded-output source
 mapping remains guarded.
+
+
+## Inline formatting commands without a brace group — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the tested script digester cases. S1.8 and
+D10.2.2 govern the document and input boundary.
+
+For `\def\x{\textbf}\begin{document}A\end{document}`, the native parser
+creates an empty `textbf` node in the definition body. The script digester
+instead returned `latex-digest-expected-group`: it required a brace group for
+every formatting command. The native parser consumes an adjacent star, skips
+ordinary space only when a group follows, and leaves a comment before a group
+outside the formatting command. The script digester now follows these rules,
+retains trailing group whitespace, and restores separators on synthetic output.
+
+`test/lambda/latex/test_tex_script_inline_without_group.ls/.txt` compares 47
+native ASTs for the supported formatting commands, definitions, comments,
+whitespace, stars, Unicode and generated text. Interpreter and JIT pass with
+the explicit generated-star guard, affected digest and provenance regressions,
+and sampled forced GC. Earlier five-suite digest regressions passed in both
+tiers. Full reconstructed-output digestion and malformed-input parity remain
+unqualified.
+
+An expanded command followed by a star can have different token source files
+or offsets; for example `\def\x{\textbf}\begin{document}\x*{B}\end{document}`.
+The native AST associates the star with `textbf`, while the script cannot yet
+prove their reconstructed adjacency. It returns `latex-digest-unsupported` /
+`inline command star source mapping`, rather than emitting an incorrect tree.
+This blocks parity for affected documents. Reproduce with the final guarded
+case in the test above; implementing general reconstructed-output source
+mapping remains open.
+
+
+## Experimental reconstruction drops source-mapping guards — 2026-11-13
+
+**Status:** OPEN in the uninstalled reconstruction/reparse prototype; full
+script-port blocker for affected documents. S1.8 and D10.2.2 apply. Production
+continues to use the native parser.
+
+For `\begin{document}A\textbf{B\hyphenation{words}C}D\end{document}`,
+the experimental expander sets `paragraph_data_seen`; direct script digestion
+correctly reports `latex-digest-unsupported` / `paragraph assignment source
+mapping`. The reconstruction prototype instead returns an AST with no issue,
+but that AST differs from native because the assignment was executed inside a
+constructor argument. The prototype builds a new input map containing only
+the reconstructed tokens and package/diagnostic metadata; it drops the source
+flags before calling `digest.digest`. Reproduce with
+`../lambda-input/temp/expl3-script/reparse-guard-probe.ls` and
+`reparse-guard-before.out`. Do not integrate this path until it preserves the
+relevant guard decisions, with any relaxed guards justified by direct native
+comparisons and the constructor-argument behavior fixed separately.
+
+
+## Ordinary output omits its emission origin — 2026-11-13
+
+**Status:** PARTIALLY FIXED for ordinary emitted tokens; other emission paths
+still need auditing for reconstructed output. S1.8 and D10.2.2 apply.
+Production continues to use the native engine.
+
+For `\def\spaceout{\quad}\begin{document}A\spaceout B\end{document}`,
+`reconstruct.reconstruct` returns `tex-reconstruct-missing-origin`. The `B`
+is a direct main-file token and needs a synthesized separator after `\quad`,
+but its output item does not carry the current main-reader offset. Native
+`emit_token` records that offset even on direct tokens, and reconstruction
+uses it for separator source mapping. Evidence is
+`../lambda-input/temp/expl3-script/reparse-spacing-origin-detail.out`.
+
+The ordinary output path now records the reader position at emission,
+including when lookahead has advanced it. Thirty-two native text, document-message
+and diagnostic cases, four direct AST comparisons, an included-file fixture,
+six focused regressions and sampled forced GC pass both execution backends;
+see `test/lambda/latex/test_tex_script_macro_argument_origin.ls`. Other
+emission paths require separate audit.
+
+
+## Macro substitution loses argument source identity — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested macro argument substitution; other
+source-map and constructor-argument gaps remain open. S1.8 and D10.2.2 apply. Production still
+uses native parsing.
+
+For `\def\q#1{\quad#1}\begin{document}\q{\textbf{B}}C\end{document}`,
+the native AST maps `textbf` to byte 36, its main-file source location. The
+reconstruction prototype maps it to byte 46 instead. The script's
+`expand_macro` applies `stored_tokens` to the entire substituted list,
+clearing `direct` on freshly scanned arguments. Native macro substitution
+copies argument tokens with their existing flags while its stored replacement
+body is non-direct. Evidence:
+`../lambda-input/temp/expl3-script/reparse-macro-argument-detail.out`.
+
+The expander now clears the replacement body's direct flags separately,
+keeps scanned argument flags and clears stored optional defaults. Thirty-two
+native text, document-message and diagnostic cases, four direct AST cases, an
+included-file fixture, six focused regressions and sampled forced GC pass both
+backends; see `test/lambda/latex/test_tex_script_macro_argument_origin.ls`.
+The separate reconstruction prototype matches 16 text/AST cases in both
+tiers and 29 provenance cases in the interpreter; it is still uninstalled.
+
+
+## Kernel preload messages are omitted from script results — 2026-11-13
+
+**Status:** OPEN for ordinary non-expl3 profile output; blocks full native
+message parity. S1.8 and D10.2.2 apply. The production native path is unchanged.
+
+With `X` as input, native `parse(..., {type: "tex"})` includes the kernel's
+allocation messages, whereas `profile.expand_with_kernel` returns no
+messages. Running `expansion.expand` on the script kernel directly produces
+the same preload messages as native; `expansion.resume` explicitly resets
+`messages` to `[]`. Native `run_preload` clears the emitted tokens but leaves
+the messages. Reproduce with
+`../lambda-input/temp/expl3-script/kernel-preload-message-detail.ls/.out`;
+the pre-change and staged macro profiles behave identically. Existing
+inspection goldens deliberately compare document messages after subtracting
+the native empty-document baseline, so changing this behavior requires
+resolving those preserved assertions and qualifying the separate expl3-format
+preload path. The failing full-message comparisons in
+`macro-origin-native-interp.out` remain visible.
+
+
+## Reconstructed leading blank lines lose a paragraph — 2026-11-13
+
+**Status:** OPEN in the uninstalled reconstruction/reparse prototype; blocks
+AST parity for affected documents. S1.8 and D10.2.2 apply. Production still
+uses native parsing.
+
+The local-file fixture `../lambda-input/temp/expl3-script/macro-origin-fixture-cwd/`
+loads a file defining two macros before `\begin{document}`. Script and native
+reconstructed text match, starting with three newline bytes, but the prototype
+omits the leading `<paragraph "\n">` present in the native AST. Its TeX
+reader converts those newlines to three `par` tokens, and `blocks` drops them
+at the top level. Evidence: `../lambda-input/temp/expl3-script/
+macro-origin-fixture-interp.out`, produced by `macro-origin-fixture.ls`.
+The precise blank-line and comment rules must be preserved when reparsing; do
+not integrate this prototype while it silently accepts the mismatched case.
+
+
+## Formatted optional defaults are not digested — 2026-11-13
+
+**Status:** OPEN in the script digester; blocks AST parity for affected
+command definitions. S1.8 and D10.2.2 apply. Production remains native.
+
+For `\newcommand{\q}[2][\textbf{Z}]{#1/#2}\begin{document}\q{B}\end{document}`,
+native parsing returns an AST while `digest.digest` returns
+`latex-digest-unsupported` / `optional argument`. The script's `bracket_end`
+accepts only simple character tokens and rejects the formatting command and
+nested brace group in the default. Reproduce with the final case of
+`../lambda-input/temp/expl3-script/macro-origin-direct-ast.ls`; interpreter
+output is `macro-origin-direct-ast-interp.out` in that directory. Port balanced
+optional-argument parsing and source mapping before claiming this case.
+
+
+2026-11-13 prototype follow-up: reconstructed blank-line normalization
+matched 12 focused cases and the included-file fixture in the interpreter;
+its 103-case corpus matched 100 ASTs and explicitly rejected three. The
+prototype and its shared source guards remain uninstalled pending broader
+qualification and do not close the production migration.
+
+
+## Constructor execution also bypasses reconstruction guards — 2026-11-13
+
+**Status:** OPEN in the uninstalled reconstruction prototype; blocks safe
+integration and full script-port parity. S1.8 and D10.2.2 apply. Production
+still uses native parsing.
+
+Forwarding the existing source flags is necessary but insufficient. For
+`\count0=0\begin{document}\textbf{\global\count0=7 X}\the\count0\end{document}`,
+the legacy script expander executes the assignment inside the constructor
+argument and emits `7`; native passes the assignment through and emits `0`.
+The reconstruction prototype reports no issue and returns a different AST.
+The same happens for unknown commands and optional arguments; evidence:
+`../lambda-input/temp/expl3-script/reparse-constructor-safety-interp.out`.
+
+An isolated candidate adds opt-in constructor argument mode, passes expandable
+tokens through the native-style argument scanner without executing assignments,
+and makes reconstruction reject legacy-mode results. In the interpreter the
+four cases above match native, and the 103-case corpus has 100 matches and
+three explicitly unsupported forms. Raw argument commands and custom
+environments still report unsupported, the latter also affected by LI-017.
+The candidate is uninstalled; JIT, more argument forms, source mapping,
+existing goldens and GC still need qualification.
