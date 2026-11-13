@@ -1,0 +1,85 @@
+{
+  "name": "DOM collections share generic live Array value iterators",
+  "html": "test/ui/dom/collection_iterators.html",
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-identity",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-generic",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-style",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-rule",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-first",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-live",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-done",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-permanent",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-proxy",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result"
+      },
+      "equals": "complete"
+    }
+  ]
+}

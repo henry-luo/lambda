@@ -35,6 +35,7 @@
 #include "../dom/realm/dom_realm.h"
 #include "js_runtime.h"
 #include "js_function.hpp"
+#include "js_class.h"
 #include "js_props.h"
 #include "js_property_attrs.h"
 #include "mvp-lmd/mvp_lmd_runtime.h"
@@ -307,17 +308,16 @@ extern "C" void dom_install_storage_globals(Item global) {
         session_getter_root.get(), ItemNull, 0);
 }
 
-static Item dom_collection_iterator(void) {
-    return js_get_iterator(dom_realm_receiver());
-}
-
 static void _install_collection_iterator(Item global, const char* name) {
     RootFrame roots(3);
     Rooted<Item> proto_root(roots, _iface_proto(global, name));
     if (get_type_id(proto_root.get()) != LMD_TYPE_MAP) return;
     Rooted<Item> key_root(roots, js_well_known_symbol_key(1));
+    // WebIDL uses the realm's Array.values, even before Array is published on
+    // Window. Re-entering GetIterator recurses on proxies and rejects VMAPs.
     Rooted<Item> method_root(roots,
-        dom_realm_new_function(dom_collection_iterator));
+        js_get_key_cstr(js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY), "values"));
+    if (!js_is_callable(method_root.get())) return;
     js_set_key_default(proto_root.get(), key_root.get(), method_root.get());
     js_mark_non_enumerable(proto_root.get(), key_root.get());
 }
@@ -1479,15 +1479,18 @@ extern "C" void dom_install_window_dialog_globals(void) {
 
 extern "C" void dom_install_window_frames_global(void) {
     // The core answered "which frames"; this decides where a realm sees them.
-    Item frames = dom_collect_frame_windows_array();
-    Item length_item = (Item){.item = i2it(js_array_length(frames))};
+    RootFrame roots(1);
+    if (!roots.valid()) return;
+    // publication can allocate property storage before frames becomes reachable.
+    Rooted<Item> frames(roots, dom_collect_frame_windows_array());
+    Item length_item = (Item){.item = i2it(js_array_length(frames.get()))};
     Item global = js_get_global_this();
-    js_set_key_cstr(global, "frames", frames);
+    js_set_key_cstr(global, "frames", frames.get());
     js_set_key_cstr(global, "length", length_item);
 
     Item window = js_get_key_cstr(global, "window");
     if (get_type_id(window) == LMD_TYPE_MAP) {
-        js_set_key_cstr(window, "frames", frames);
+        js_set_key_cstr(window, "frames", frames.get());
         js_set_key_cstr(window, "length", length_item);
     }
 }
