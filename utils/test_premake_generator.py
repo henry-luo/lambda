@@ -671,6 +671,19 @@ def expect_release_full_lto(module) -> None:
                 fail(f'{system}/{compiler} {profile} must compile and link with {flag}')
 
 
+def expect_rtc_tls_closure(module) -> None:
+    forbidden = {'sync-ssl', 'openssl-crypto', 'ssl', 'crypto', 'ngtcp2_crypto_ossl'}
+    for platform in ('mac', 'linux', 'windows'):
+        generator = (linux_validation_generator(module) if platform == 'linux' else
+                     module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), platform))
+        for consumer in ('lambda-rt', 'lambda-data'):
+            closure = generator._executable_external_dependencies({'libraries': [consumer]})
+            if not {'mbedtls', 'mbedx509', 'mbedcrypto'}.issubset(closure):
+                fail(f'{platform}/{consumer} lost the host mbedTLS provider')
+            if forbidden.intersection(closure) or forbidden.intersection(generator.external_libraries):
+                fail(f'{platform}/{consumer} retained an OpenSSL dependency')
+
+
 def main() -> int:
     module = load_generator_module()
     generator = linux_validation_generator(module)
@@ -694,6 +707,7 @@ def main() -> int:
     expect_radiant_property_ownership(module)
     expect_radiant_media_platform_selection(module)
     expect_release_full_lto(module)
+    expect_rtc_tls_closure(module)
     expect_module_only_libraries(module)
     expect_host_export_list(module)
     print("PREMAKE_GENERATOR_SELFTEST: passed")

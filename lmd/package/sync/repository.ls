@@ -7,9 +7,13 @@ import codec: .codec
 import chunks: .chunks
 import blob: .blob
 import v: .schema
+import owner: .task_owner
 let kinds = ["chunk","manifest","state","snapshot","checkpoint","document","version","history","retention","maintenance","cache","file_page","locator","chunk_raw"]
 
 pub pn access(path, keys, action) any^ {
+    if (keys.owner != null and keys.owner != self()) {
+        return owner.cached(keys.owner,pn (cache)=> { return access(path,{*:keys,cached_head:cache},action)^ })^
+    }
     open tx = (sqlite.existing(path)^) { return action(tx,{*:keys,objects:path ++ ".objects"}) }
 }
 
@@ -121,6 +125,9 @@ pub pn load(tx, keys) any^ {
     let plaintext = crypto.open(keys.encryption,rows[0][1],context(keys,"head",generation)^)^
     let value = codec.decode(plaintext)^
     let id = value.state
+    // The encrypted head authenticates the immutable ID before any in-memory reuse.
+    let cached = keys.cached_head
+    if (cached != null and cached.generation == generation and cached.id == id) { return cached }
     return {generation:generation,id:id,state:get(tx,keys,id,"state")^}
 }
 

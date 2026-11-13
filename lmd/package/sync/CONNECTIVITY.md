@@ -12,17 +12,35 @@ remembers the pairing for later launches.
 
 ## Prepare and run
 
-On the initial macOS profile, prepare the optional static WebRTC dependency:
+The platform `setup-*-deps.sh` scripts prepare the static WebRTC dependency after
+the owning input setup installs mbedTLS 3. To prepare it separately:
 
 ```sh
-python3 utils/prepare_sync_connectivity.py
+make build-sync-connectivity
 make build
 ```
 
 The recipe checks libdatachannel v0.24.6 at commit
 `6b1e2e620f1e37f0eafeee702eaea0043cb305fd` and its pinned submodules, builds them
-unmodified, and installs into `build/deps/connectivity/`. It disables media,
-WebSockets, examples and dependency tests. `provenance.json` records the inputs.
+unmodified, and installs into `build/deps/connectivity/`. Lambda's
+`build_deps_config.json` recipe builds libdatachannel, libjuice and usrsctp with
+Premake-generated Makefiles, using the shared dependency builder (D9.1.5).
+Source revisions are pinned; compiler probes select platform features. No CMake is invoked. Build artifacts are
+under `temp/dependency-build/<system>-<architecture>/libdatachannel/`.
+
+The recipe uses the same mbedTLS 3 headers and archives selected for the host's
+platform. It disables media, WebSockets, examples and dependency tests. Release
+dependency archives define upstream `PLOG_DISABLE_LOGGING`: plog headers remain
+required for compilation, while log statements are compiled out. There is no
+separate plog runtime library. `provenance.json` records the source revision,
+submodules, recipe identity, TLS provider and logging policy. The host, RTC transport and curl share mbedTLS/mbedCrypto; neither OpenSSL
+`libssl` nor `libcrypto` is linked. Device authentication uses the version 2 P-256
+identity profile described in [PEER.md](PEER.md#crypto-suite-transition).
+
+`python3 utils/prepare_sync_connectivity.py --jobs 4` is the direct helper;
+`--dry-run` prints its plan. If the host was previously built without RTC,
+use `make rebuild KEEP_CONNECTIVITY=1` from the main checkout to rebuild that
+feature probe while retaining the prepared dependency prefix.
 No sibling sources or vendor files are patched. Without the prepared prefix,
 the native capability report has `rtc:false`; acquisition returns an explicit
 unavailable error. The initial Bonjour implementation uses macOS DNS-SD.
@@ -56,6 +74,37 @@ config=null,settings={},observer=null)` and the discovery/signaling helpers in `
 
 ## Schedule and status
 
+With `config:null` and `mdns:true`, the native LAN agent uses OS notifications
+and short connection bursts (S12.1.1v3, D9.3.4). It registers the watcher before
+the startup scan, exchanges changes when a peer first appears, batches later
+notifications and reconciles affected subtrees. Either device can connect.
+Already authenticated connections carry further rounds in either direction and
+close after the idle timeout. Repository callbacks have one script owner;
+network waits hold no repository transaction (S12.4.4v4, S13.1.2v2, S13.3.1v2).
+Native monitoring uses libuv's OS event backend, not `uv_fs_poll`.
+
+LAN defaults add `debounce_ms:50`, `batch_ms:250`, `idle_ms:10000`,
+`burst_ms:60000`, `verify_ms:60000` and a 100 ms scheduling/idle-message tick.
+`interval_ms` can override that tick, capped at `idle_ms`. Scans run for startup,
+restart, missed/overflowed notifications and occasional verification. Atomic
+installation still captures the tree when needed to preserve external changes.
+Neither a tick nor an unchanged discovery result triggers a scan or connection.
+Discovery refreshes every ten seconds; a changed/reappearing address requests
+catch-up. Verification also requests anti-entropy. Failed delivery retries after
+`retry_ms`; committed local changes remain in the repository until acknowledged.
+
+LAN status adds `monitor:'os'`, full/incremental scan counts, watcher-event counts,
+connection/round counts, active connections, pending batches and peer availability.
+`captured_frontier` identifies committed source capture; `installed_frontier`
+identifies completed destination installation. File visibility can precede the
+installation journal's final commit.
+Installation/review state is distinct from network delivery. A failed native
+monitor surfaces an error instead of silently disabling change detection.
+The initial qualification host remains macOS; Linux maintains individual
+directory watches, and other-OS qualification remains pending.
+
+The cloud/ICE profile retains the following periodic schedule:
+
 | Setting | Default | Bound |
 |---|---:|---|
 | `port`, `bind` | 0, `0.0.0.0` | Ephemeral or explicit listener; native IPv4 binding |
@@ -68,7 +117,7 @@ config=null,settings={},observer=null)` and the discovery/signaling helpers in `
 | `rounds`, `stop_after` | 0 | Zero runs continuously; positive bounds up to 1,000,000 |
 | `status`, `ready` | null | Optional atomic JSON status and initial listener-port files |
 
-The smaller device ID initiates a connection; the other answers. The agent
+For cloud/ICE negotiation, the smaller device ID initiates; the other answers. The agent
 rotates peers and finite inbox pages. It attempts discovered LAN paths or ICE
 before the next bulk cloud round. A failed attempt schedules fallback; cloud
 publication also runs periodically after successful direct delivery, preserving
@@ -93,8 +142,9 @@ active authentication/exchange, while idle `transport:'peer'` records the last
 successful delivery method. Object/request progress is reported during RTC
 exchange; completed exchanges include their synchronization summary. Bonjour
 registration errors appear separately in `discovery_error`. Status files contain
-no private keys, SDP or ICE credentials. Transfer completion can close the channel;
-this first agent uses finite synchronization sessions.
+no private keys, SDP or ICE credentials. The cloud/ICE agent uses finite
+synchronization sessions; the native LAN agent reuses a channel during a bounded
+burst. Its `connected:true` includes the short warm idle period.
 
 ## Signaling and trust
 
@@ -128,6 +178,11 @@ digest as its service name. It carries no membership grant. Native browse/resolv
 returns at most 64 hints within a finite budget; scripts filter expected names
 and DNS host syntax before trying an address. Registration forbids auto-renaming
 and confirms the platform callback before reporting readiness.
+`discovery.browse(timeout, {names:[...]})` filters expected instances before
+resolution; pairing uses `{prefix:...}`. A candidate receives a share of the
+remaining resolution deadline, so an unresolved unrelated service cannot starve
+enrolled peers. The original one-argument API remains available. Filters are
+discovery hints and never replace authentication (D9.3.4, D11.1.2).
 
 At most 64 historical members imply at most 8,128 logical signaling slots, created
 only when used. Native message size is 256 KiB; received messages are bounded by
@@ -148,6 +203,7 @@ repository receipts or content garbage collection.
 python3 test/sync_connectivity/test_goldens.py
 python3 test/sync_connectivity/test_goldens.py --gc
 python3 test/sync_connectivity/test_connectivity.py
+python3 test/sync_connectivity/test_lan_events.py
 python3 test/sync_connectivity/test_stun.py
 LAMBDA_CLOUD_TEST_STORAGE_FILE="$PWD/temp/private-storage.json" \
 python3 test/sync_connectivity/test_signaling.py

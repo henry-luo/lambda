@@ -458,6 +458,19 @@ function discoverTests(config) {
     });
 }
 
+function withGtestExclusions(test, excluded) {
+    const args = [...test.runnerArgs];
+    const index = args.findIndex(arg => arg === '--gtest_filter' || arg.startsWith('--gtest_filter='));
+    const separate = index >= 0 && args[index] === '--gtest_filter';
+    const filter = index < 0 ? '*' : separate ? args[index + 1] : args[index].slice('--gtest_filter='.length);
+    if (filter === undefined) throw new Error(`missing GTest filter: ${test.baseName}`);
+    const restricted = `${filter}${filter.includes('-') ? ':' : '-'}${excluded.join(':')}`;
+    if (index < 0) args.push(`--gtest_filter=${restricted}`);
+    else if (separate) args[index + 1] = restricted;
+    else args[index] = `--gtest_filter=${restricted}`;
+    return { ...test, runnerArgs: args };
+}
+
 function filterTests(tests) {
     let result = tests;
     if (targetSuite)    result = result.filter(t => t.suite === targetSuite);
@@ -473,6 +486,11 @@ function filterTests(tests) {
             return owner === 'lambda';
         });
     }
+    if (targetCategory === 'baseline') {
+        // keep LaTeX discoverable for focused runs and the full Lambda gate.
+        result = result.map(t => t.suite === 'lambda' && t.baseName === 'test_lambda_gtest'
+            ? withGtestExclusions(t, ['AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/latex_*']) : t);
+    }
     if (radiantBaseline) {
         // Keep the full inventory as the source of truth; the fast gate selects
         // named cases so new tests cannot silently change its coverage or cost.
@@ -487,13 +505,7 @@ function filterTests(tests) {
                     throw new Error(`invalid Radiant full-only case list: ${t.baseName}`);
                 }
                 // Preserve the full suite's existing positive and negative filters.
-                const args = [...t.runnerArgs];
-                const index = args.findIndex(arg => arg.startsWith('--gtest_filter='));
-                const filter = index < 0 ? '*' : args[index].slice('--gtest_filter='.length);
-                const suffix = filter.includes('-') ? ':' : '-';
-                const restricted = `--gtest_filter=${filter}${suffix}${excluded.join(':')}`;
-                if (index < 0) args.push(restricted); else args[index] = restricted;
-                return { ...t, runnerArgs: args };
+                return withGtestExclusions(t, excluded);
             }
             if (t.suite !== 'radiant' || !cases[t.baseName]) return t;
             const selected = cases[t.baseName];

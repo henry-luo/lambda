@@ -66,6 +66,53 @@ pub fn verb_line(r) any^ {
     }
 }
 
+fn raw_spaces(source, index) any^ =>
+    if (ch(source, index)^ == " " or ch(source, index)^ == "\t") raw_spaces(source, index + 1) else index
+
+fn raw_comment_end(source, index) any^ =>
+    if (index >= len(source) or ch(source, index)^ == "\n" or ch(source, index)^ == "\r") index
+    else raw_comment_end(source, index + 1)
+
+fn raw_group_end(source, index, opener, closer, depth = 1) any^ {
+    if (index >= len(source)) null
+    else {
+        let c = ch(source, index)^;
+        if (c == "\\" and index + 1 < len(source)) raw_group_end(source, index + 2, opener, closer, depth)
+        else if (c == "%") raw_group_end(source, raw_comment_end(source, index + 1)^, opener, closer, depth)
+        else if (c == opener) raw_group_end(source, index + 1, opener, closer, depth + 1)
+        else if (c == closer and depth == 1) index + 1
+        else raw_group_end(source, index + 1, opener, closer, depth - if (c == closer) 1 else 0)
+    }
+}
+
+fn raw_line_start(source, index) any^ =>
+    if (index <= 0 or ch(source, index - 1)^ == "\n" or ch(source, index - 1)^ == "\r") index
+    else raw_line_start(source, index - 1)
+
+// raw capture can cross lines, so rebuild the reader at the absolute source position.
+fn raw_seek(r, index) any^ {
+    let start = raw_line_start(r.source, index)^;
+    let end = line_end(r.source, index)^;
+    let trimmed = trim_end(r.source, start, end)^;
+    let next = after_line(r.source, end)^;
+    let position = if (index < trimmed) index - start else trimmed - start;
+    let line_byte = r.line_byte + byte_count(r.source, r.line_start, start)^;
+    {*:r, line: slice(r.source, start, trimmed)^, position: position,
+        line_start: start, line_end: trimmed, line_next: next, next_line: next,
+        line_byte: line_byte, position_byte: byte_count(r.source, start, start + position)^,
+        next_byte: line_byte + byte_count(r.source, start, next)^, loaded: true, eol_done: false, state: "mid"}
+}
+
+// raw document commands scan source characters before TeX tokenization.
+pub fn raw_group_command(r) any^ {
+    let source = r.source;
+    let at = raw_spaces(source, r.line_start + r.position)^;
+    let grouped = if (ch(source, at)^ == "{") raw_group_end(source, at + 1, "{", "}")^ else null;
+    let end = if (ch(source, at)^ == "{") if (grouped == null) len(source) else grouped
+        else at;
+    {end: r.line_byte + byte_count(source, r.line_start, end)^, reader: raw_seek(r, end)^}
+}
+
 fn lower_hex(c) => c != "" and index_of("0123456789abcdef", c) != null
 fn decode_super(line, at, c, after, cats) any^ {
     let next = ch(line, after);

@@ -1,0 +1,58 @@
+import profile: lambda.doc.latex.tex_engine.profile
+import reconstruct: lambda.doc.latex.tex_engine.reconstruct
+import expansion: lambda.doc.latex.tex_engine.expansion
+import expansion: lambda.doc.latex.tex_engine.expansion
+import digest: lambda.doc.latex.tex_engine.digest
+let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let baseline=parse("",{type:"tex"})^.messages;
+fn check(body, constructor = false) any^ {
+ let source="\\ExplSyntaxOn" ++ body ++ "\\ExplSyntaxOff";
+ let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,constructor_argument_mode:constructor,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let n=parse(source,{type:"tex"})^;let b=reconstruct.reconstruct(r)^;
+ {body:body,issue:r.issue,unsupported:r.unsupported,reconstruct_issue:b.issue,text_match:if(r.issue==null)b.text==n.text else null,
+ messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
+}
+[for (body in [
+ "\\tl_set:Nn\\l_tmpa_tl{abc}\\tl_head:V\\l_tmpa_tl/\\tl_tail:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{}\\tl_head:V\\l_tmpa_tl/\\tl_tail:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{{ab}cd}\\tl_head:V\\l_tmpa_tl/\\tl_tail:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{~abc}\\tl_head:V\\l_tmpa_tl/\\tl_tail:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{~~}\\tl_head:V\\l_tmpa_tl/\\tl_tail:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{éclair}\\tl_head:V\\l_tmpa_tl/\\tl_tail:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{abc}\\edef\\x{\\tl_head:V\\l_tmpa_tl}\\meaning\\x",
+ "\\tl_set:Nn\\l_tmpa_tl{abc}\\edef\\x{\\tl_tail:V\\l_tmpa_tl}\\meaning\\x",
+ "\\tl_set:Nn\\l_tmpa_tl{abc}{\\tl_set:Nn\\l_tmpa_tl{xyz}\\tl_head:V\\l_tmpa_tl}\\tl_tail:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{abc}\\let\\h\\tl_head:V\\h\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{abc}\\let\\h\\tl_tail:V\\h\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{abc}\\if\\tl_head:V\\l_tmpa_tl a Y\\else N\\fi",
+ "\\meaning\\exp_args:NV/\\meaning\\tl_head:V/\\meaning\\tl_tail:V",
+ "\\def\\x{abc}\\exp_args:NV\\tl_head:n\\x",
+ "\\def\\x{abc}\\exp_args:NV\\tl_tail:n\\x",
+ "\\def\\x{abc}\\exp_args:NV\\use:n\\x", "\\exp_args:NV\\use:n\\l_tmpa_tl",
+ "\\def\\x{abc}\\tl_head:V\\x/\\tl_tail:V\\x",
+ "\\def\\x{\\y}\\def\\y{abc}\\tl_head:V\\x/\\tl_tail:V\\x",
+ "\\tl_set:Nn\\l_tmpa_tl{\\textbf{X}Y}\\tl_head:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{a\\textbf{X}}\\tl_tail:V\\l_tmpa_tl",
+ "\\tl_set:Nn\\l_tmpa_tl{abc}\\begin{document}\\textbf{\\tl_head:V\\l_tmpa_tl}\\end{document}",
+ "\\countdef\\n=0\\relax\\n=123\\relax\\tl_head:V\\n/\\tl_tail:V\\n",
+ "\\dimendef\\d=0\\relax\\d=12pt\\relax\\tl_head:V\\d/\\tl_tail:V\\d",
+ "\\toksdef\\t=0\\relax\\t={abc}\\relax\\tl_head:V\\t/\\tl_tail:V\\t",
+ "\\tl_head:V\\missing"
+]) check(body)^];
+
+[for (body in ["\\tl_set:Nn\\l_tmpa_tl{abc}\\begin{document}\\textbf{\\tl_head:V\\l_tmpa_tl}\\end{document}",
+ "\\tl_set:Nn\\l_tmpa_tl{abc}\\begin{document}\\section{\\tl_tail:V\\l_tmpa_tl}X\\end{document}"]) check(body,true)^]
+
+fn ast(body) any^ {
+ let source="\\ExplSyntaxOn\\def\\v{abc}\\begin{document}" ++ body ++ "\\ExplSyntaxOff\\end{document}";
+ let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+ let d=digest.digest(r)^;let n=parse(source,{type:"latex"})^;
+ {body:body,issue:d.issue,unsupported:d.unsupported,matches:if(d.ast==null)null else d.ast==n}
+}
+[for (body in ["\\tl_head:V\\v", "\\tl_tail:V\\v", "\\let\\h\\tl_head:V\\h\\v", "\\let\\t\\tl_tail:V\\t\\v",
+ "\\exp_args:NV\\textbf\\v", "\\exp_args:NV\\section\\v X", "\\let\\e\\exp_args:NV\\e\\textbf\\v"]) ast(body)^]
+
+let first=profile.expand_with_kernel("\\ExplSyntaxOn\\def\\v{abc}\\exp_args:NV\\use:n\\v\\ExplSyntaxOff",kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
+let second=expansion.resume(first,"X","<second>",100000)^;
+let resumed=digest.digest(second)^;
+{first_guard:first.expl3_exp_args_value_seen,first_issue:first.issue,second_guard:second.expl3_exp_args_value_seen,issue:resumed.issue,unsupported:resumed.unsupported}

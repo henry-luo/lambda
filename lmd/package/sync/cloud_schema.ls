@@ -25,10 +25,10 @@ pub fn storage_epoch(key) any^ {
 pub fn readable(key) bool^ => data_key(key)^ or (key is string and
     (starts_with(key,"receipts/") or starts_with(key,"publications/") or starts_with(key,"catalogs/") or
      starts_with(key,"pages/")) and id(slice(key,index_of(key,"/")+1,len(key))))
-pub fn signed(seed, domain, body) any^ => {body:body,signature:crypto.sign(seed,codec.encode([domain,body])^)^}
+pub fn signed(seed, domain, body) any^ => {body:body,signature:crypto.sign(seed,codec.encode(["lambda-cloud-p256-1",domain,body])^)^}
 pub fn verify(envelope, domain, public_key) any^ {
     v.fields(envelope,["body","signature"])^
-    if (not verify_signature(public_key,codec.encode([domain,envelope.body])^,envelope.signature,'ed25519')^)
+    if (not verify_signature(public_key,codec.encode(["lambda-cloud-p256-1",domain,envelope.body])^,envelope.signature,identity.signing_scheme)^)
         raise error("sync cloud: invalid signature")
     return envelope.body
 }

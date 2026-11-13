@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **315 anchored records**, preserving fixed, resolved,
+This archive contains **316 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -5027,3 +5027,32 @@ suspected cause, not yet confirmed. Evidence:
 `temp/mvp_untyped_tuning_goal/p92-projection-full-control.log` and
 `p92-focused-units-2.log`. This does not block MVP tuning. The permanent
 MVP oracle is retained; no Full correctness pass is claimed.
+
+## Bonjour resolution can starve enrolled peer discovery — 2026-11-13
+
+
+<a id="lr02-39"></a>**LR02-39 · Unrelated unresolved Bonjour entries consume the finite discovery window · RESOLVED 2026-11-13**
+
+**Observed:** `e5d5e848e` plus LAN event work registered two new peer services
+successfully, but `lambda.io.discovery.browse(1000)` repeatedly returned no
+resolved rows. The OS `dns-sd -B _lambda-sync._tcp local.` diagnostic listed
+both peers and two unrelated instances. Resolving the first unrelated instance
+with `dns-sd -L` did not complete; it must not prevent discovering the peers.
+The independent-process gate timed out at initial inventory exchange.
+
+**Cause:** `pn_io_discovery_browse` resolves an unfiltered service list in order,
+giving each candidate the entire remaining deadline. One stale/unresolvable
+instance can consume the resolution half of every browse attempt. Script-side
+member filtering happens after resolution, too late to avoid starvation.
+
+**Resolution:** filter expected names or pairing prefixes before native
+resolution and share the remaining time among matching candidates. Preserve
+the overall finite budget, bounded native rows and authenticated peer checks
+(D9.3.4, D11.1.2). Evidence: `temp/sync-lan-events/final-lan-auto.log`,
+`discovery-raw.log`; implementation: [LAN event plan](<impl/Lambda_Impl_Sync_LAN_Events (done).md>).
+
+**Verification:** the six-assertion `sync_discovery_filter` fixture passes on
+AUTO/interpreter/JIT. Exact-name discovery finds enrolled peers in the original
+stale-service environment; initial exchange and three-peer fan-out pass. No
+unrelated service registration was removed. See the linked implementation record
+for final source/binary identities and the native qualification scope.

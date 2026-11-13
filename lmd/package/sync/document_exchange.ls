@@ -6,6 +6,7 @@ import core: .core
 import codec: .codec
 import v: .schema
 import crypto: lambda.io.crypto
+import identity: .peer_identity
 
 pub fn descriptor(record) any^ => {id:record.id,object:record.export_id,origin:record.origin.id,
     have:protocol.have(record.endpoint.replica,record.endpoint.schema)^,
@@ -35,7 +36,7 @@ pub pn need(handle, remote) any^ {
     let own = descriptor(record)^
     return {root:own.versions != remote.versions,have:own.have}
 }
-fn signed_bytes(space, body) any^ => codec.encode(["lambda-document-relay-1",space,body])^
+fn signed_bytes(space, body) any^ => codec.encode(["lambda-document-relay-2",space,body])^
 pub fn reply(record, credentials, have, index=0) any^ {
     let next = protocol.next(record.endpoint,have)^
     let packets = if (next.kind == 'checkpoint_required') protocol.frames(record.endpoint.replica,record.endpoint.schema,65536)^ else [next]
@@ -46,7 +47,7 @@ pub fn reply(record, credentials, have, index=0) any^ {
 pub pn receive_packet(handle, credentials, peer, envelope) any^ {
     v.fields(envelope,["body","signature"])^
     if (not verify_signature(peer.public_key,signed_bytes(credentials.space,envelope.body)^,
-        envelope.signature,'ed25519')^) raise error("sync document: relay attestation rejected")
+        envelope.signature,identity.signing_scheme)^) raise error("sync document: relay attestation rejected")
     let body = envelope.body
     v.fields(body,["id","origin","packet","frontier"])^
     let result = local.mutate(handle,pn (tx,k,current)=> {

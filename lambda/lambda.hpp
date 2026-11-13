@@ -418,6 +418,7 @@ typedef enum SysFunc {
     SYSPROC_IO_RTC_REMOTE, SYSPROC_IO_RTC_SEND, SYSPROC_IO_RTC_RECEIVE, SYSPROC_IO_RTC_CLOSE,
     SYSPROC_IO_RTC_STATUS,
     SYSPROC_IO_DISCOVERY_ADVERTISE, SYSPROC_IO_DISCOVERY_BROWSE, SYSPROC_IO_DISCOVERY_CLOSE,
+    SYSPROC_IO_DISK_WATCH, SYSPROC_IO_DISK_CHANGES, SYSPROC_IO_DISK_UNWATCH,
 } SysFunc;
 
 #ifdef __cplusplus
@@ -1475,6 +1476,9 @@ extern "C" {
     Item pn_io_disk_erase(Item root, Item relative, Item expected);
     Item pn_io_disk_directory(Item root, Item relative);
     Item pn_io_disk_resolve(Item root);
+    Item pn_io_disk_watch(Item root);
+    Item pn_io_disk_changes(Item handle, Item timeout);
+    Item pn_io_disk_unwatch(Item handle);
     Item fn_split(Item str, Item sep);
     // A literal ASCII split whose result stores tagged Items for guest arrays.
     Item fn_split_literal_items(Item str, Item sep);
@@ -1652,6 +1656,7 @@ extern "C" {
     Item pn_io_rtc_status(Item handle);
     Item pn_io_discovery_advertise(Item name, Item port);
     Item pn_io_discovery_browse(Item timeout);
+    Item pn_io_discovery_browse2(Item timeout, Item options);
     Item pn_io_websocket_open1(Item url);
     Item pn_io_websocket_open2(Item url, Item options);
     Item pn_io_websocket_send(Item connection, Item data);

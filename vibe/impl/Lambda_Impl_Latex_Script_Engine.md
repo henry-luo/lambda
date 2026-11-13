@@ -3257,3 +3257,1269 @@ an included file, twenty-two focused regressions and sampled forced-GC tests
 pass both backends; see `test/lambda/latex/test_tex_script_expl3_use_c.ls`.
 Missing-name diagnostics, recovery and count semantics remain open as
 described above; expanded-output source mapping remains guarded.
+
+
+## Dynamic-name token-list and sequence emptiness — 2026-11-13
+
+**Status:** IMPLEMENTED for `\tl_if_empty:cTF`/`:cT`/`:cF` and
+`\seq_if_empty:cTF`/`:cT`/`:cF` in the experimental Script profile.
+S1.8 and D10.2.2 apply.
+
+These forms use expandable TeX wrappers and the shared name-expansion helper.
+Thirty-three native text, message and diagnostic comparisons, seven guarded
+AST cases, an included file, seven focused regressions and sampled
+forced-GC checks pass both execution backends; see
+`test/lambda/latex/test_tex_script_expl3_empty_c.ls`. Expanded-output source
+mapping remains guarded.
+
+
+## Inline formatting commands without a brace group — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the tested script digester cases. S1.8 and
+D10.2.2 govern the document and input boundary.
+
+For `\def\x{\textbf}\begin{document}A\end{document}`, the native parser
+creates an empty `textbf` node in the definition body. The script digester
+instead returned `latex-digest-expected-group`: it required a brace group for
+every formatting command. The native parser consumes an adjacent star, skips
+ordinary space only when a group follows, and leaves a comment before a group
+outside the formatting command. The script digester now follows these rules,
+retains trailing group whitespace, and restores separators on synthetic output.
+
+`test/lambda/latex/test_tex_script_inline_without_group.ls/.txt` compares 47
+native ASTs for the supported formatting commands, definitions, comments,
+whitespace, stars, Unicode and generated text. Interpreter and JIT pass with
+the explicit generated-star guard, affected digest and provenance regressions,
+and sampled forced GC. Earlier five-suite digest regressions passed in both
+tiers. Full reconstructed-output digestion and malformed-input parity remain
+unqualified.
+
+An expanded command followed by a star can have different token source files
+or offsets; for example `\def\x{\textbf}\begin{document}\x*{B}\end{document}`.
+The native AST associates the star with `textbf`, while the script cannot yet
+prove their reconstructed adjacency. It returns `latex-digest-unsupported` /
+`inline command star source mapping`, rather than emitting an incorrect tree.
+This blocks parity for affected documents. Reproduce with the final guarded
+case in the test above; implementing general reconstructed-output source
+mapping remains open.
+
+
+## Experimental reconstruction drops source-mapping guards — 2026-11-13
+
+**Status:** OPEN in the uninstalled reconstruction/reparse prototype; full
+script-port blocker for affected documents. S1.8 and D10.2.2 apply. Production
+continues to use the native parser.
+
+For `\begin{document}A\textbf{B\hyphenation{words}C}D\end{document}`,
+the experimental expander sets `paragraph_data_seen`; direct script digestion
+correctly reports `latex-digest-unsupported` / `paragraph assignment source
+mapping`. The reconstruction prototype instead returns an AST with no issue,
+but that AST differs from native because the assignment was executed inside a
+constructor argument. The prototype builds a new input map containing only
+the reconstructed tokens and package/diagnostic metadata; it drops the source
+flags before calling `digest.digest`. Reproduce with
+`../lambda-input/temp/expl3-script/reparse-guard-probe.ls` and
+`reparse-guard-before.out`. Do not integrate this path until it preserves the
+relevant guard decisions, with any relaxed guards justified by direct native
+comparisons and the constructor-argument behavior fixed separately.
+
+
+## Ordinary output omits its emission origin — 2026-11-13
+
+**Status:** PARTIALLY FIXED for ordinary emitted tokens; other emission paths
+still need auditing for reconstructed output. S1.8 and D10.2.2 apply.
+Production continues to use the native engine.
+
+For `\def\spaceout{\quad}\begin{document}A\spaceout B\end{document}`,
+`reconstruct.reconstruct` returns `tex-reconstruct-missing-origin`. The `B`
+is a direct main-file token and needs a synthesized separator after `\quad`,
+but its output item does not carry the current main-reader offset. Native
+`emit_token` records that offset even on direct tokens, and reconstruction
+uses it for separator source mapping. Evidence is
+`../lambda-input/temp/expl3-script/reparse-spacing-origin-detail.out`.
+
+The ordinary output path now records the reader position at emission,
+including when lookahead has advanced it. Thirty-two native text, document-message
+and diagnostic cases, four direct AST comparisons, an included-file fixture,
+six focused regressions and sampled forced GC pass both execution backends;
+see `test/lambda/latex/test_tex_script_macro_argument_origin.ls`. Other
+emission paths require separate audit.
+
+
+## Macro substitution loses argument source identity — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested macro argument substitution; other
+source-map and constructor-argument gaps remain open. S1.8 and D10.2.2 apply. Production still
+uses native parsing.
+
+For `\def\q#1{\quad#1}\begin{document}\q{\textbf{B}}C\end{document}`,
+the native AST maps `textbf` to byte 36, its main-file source location. The
+reconstruction prototype maps it to byte 46 instead. The script's
+`expand_macro` applies `stored_tokens` to the entire substituted list,
+clearing `direct` on freshly scanned arguments. Native macro substitution
+copies argument tokens with their existing flags while its stored replacement
+body is non-direct. Evidence:
+`../lambda-input/temp/expl3-script/reparse-macro-argument-detail.out`.
+
+The expander now clears the replacement body's direct flags separately,
+keeps scanned argument flags and clears stored optional defaults. Thirty-two
+native text, document-message and diagnostic cases, four direct AST cases, an
+included-file fixture, six focused regressions and sampled forced GC pass both
+backends; see `test/lambda/latex/test_tex_script_macro_argument_origin.ls`.
+The separate reconstruction prototype matches 16 text/AST cases in both
+tiers and 29 provenance cases in the interpreter; it is still uninstalled.
+
+
+## Kernel preload messages are omitted from script results — 2026-11-13
+
+**Status:** OPEN for ordinary non-expl3 profile output; blocks full native
+message parity. S1.8 and D10.2.2 apply. The production native path is unchanged.
+
+With `X` as input, native `parse(..., {type: "tex"})` includes the kernel's
+allocation messages, whereas `profile.expand_with_kernel` returns no
+messages. Running `expansion.expand` on the script kernel directly produces
+the same preload messages as native; `expansion.resume` explicitly resets
+`messages` to `[]`. Native `run_preload` clears the emitted tokens but leaves
+the messages. Reproduce with
+`../lambda-input/temp/expl3-script/kernel-preload-message-detail.ls/.out`;
+the pre-change and staged macro profiles behave identically. Existing
+inspection goldens deliberately compare document messages after subtracting
+the native empty-document baseline, so changing this behavior requires
+resolving those preserved assertions and qualifying the separate expl3-format
+preload path. The failing full-message comparisons in
+`macro-origin-native-interp.out` remain visible.
+
+
+## Reconstructed leading blank lines lose a paragraph — 2026-11-13
+
+**Status:** OPEN in the uninstalled reconstruction/reparse prototype; blocks
+AST parity for affected documents. S1.8 and D10.2.2 apply. Production still
+uses native parsing.
+
+The local-file fixture `../lambda-input/temp/expl3-script/macro-origin-fixture-cwd/`
+loads a file defining two macros before `\begin{document}`. Script and native
+reconstructed text match, starting with three newline bytes, but the prototype
+omits the leading `<paragraph "\n">` present in the native AST. Its TeX
+reader converts those newlines to three `par` tokens, and `blocks` drops them
+at the top level. Evidence: `../lambda-input/temp/expl3-script/
+macro-origin-fixture-interp.out`, produced by `macro-origin-fixture.ls`.
+The precise blank-line and comment rules must be preserved when reparsing; do
+not integrate this prototype while it silently accepts the mismatched case.
+
+
+## Formatted optional defaults are not digested — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested formatted defaults; comment source
+mapping and some nested-bracket scanning remain open. S1.8 and D10.2.2 apply.
+Production remains native. Definition options now reuse balanced delimited
+reading and inline digestion, preserving the raw source descriptor while
+building the same formatted children as native. The new
+`test/lambda/latex/test_tex_script_definition_option.ls` checks 24 matching
+ASTs for commands and environments, formatting, nested groups, math, Unicode,
+and whitespace on both backends. Three percent-containing cases explicitly
+report `definition option comment source mapping`, because a source comment
+can alter native whitespace. A nested unbraced bracket case remains explicitly
+unclosed in the existing expansion path. Sampled forced GC also passes both
+backends. Evidence: `../lambda-input/temp/expl3-script/formatted-option-v3-interp.out`.
+
+
+2026-11-13 prototype follow-up: reconstructed blank-line normalization
+matched 12 focused cases and the included-file fixture in the interpreter;
+its 103-case corpus matched 100 ASTs and explicitly rejected three. The
+prototype and its shared source guards remain uninstalled pending broader
+qualification and do not close the production migration.
+
+
+## Constructor execution also bypasses reconstruction guards — 2026-11-13
+
+**Status:** PARTIALLY FIXED in opt-in script expansion; the reconstructed
+pipeline and complete TeX/LaTeX parity remain open. S1.8 and D10.2.2 apply.
+Production still uses native parsing.
+
+For `\count0=0\begin{document}\textbf{\global\count0=7 X}\the\count0\end{document}`,
+the default script expander executes the assignment inside the constructor
+argument and emits `7`; native passes the assignment through and emits `0`.
+The same mismatch occurs for unknown commands and optional arguments; evidence
+is `../lambda-input/temp/expl3-script/reparse-constructor-safety-interp.out`.
+
+The opt-in `constructor_argument_mode: true` now expands argument tokens
+without executing assignments, handles passthrough environment headers, and
+retains emission-time source identity. `test/lambda/latex/
+test_tex_script_constructor_mode.ls` compares 41 cases with native text and
+records five explicit unsupported forms in both execution backends. Nine
+existing default-mode and expl3 goldens and sampled forced GC also pass both
+backends. Raw inline commands, custom environments and unqualified expl3
+assignments remain guarded; custom environments also depend on LI-017. The
+experimental reconstruction pipeline remains uninstalled and incomplete.
+
+
+## Declaration source tracing and synthesized origins — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the tested class and package declarations;
+reconstructed-output and full script-parser parity remain open. S1.8 and
+D10.2.2 govern source handling and the production boundary.
+
+For `\documentclass{article}\n\usepackage{xcolor}\n\begin{document}A\end{document}`,
+script reconstruction dropped the first newline and produced a different AST.
+The class and package handlers emitted individual raw tokens without the
+source trace needed to retain skipped bytes. With a local class that invokes
+`\LoadClass`, reconstruction could instead fail with
+`tex-reconstruct-missing-origin`, because a synthesized declaration carried
+no main-reader emission position. Native traces direct declarations and
+assigns an emission origin to synthesized output.
+
+The script now retains the traced span for direct class/package declarations,
+synthesizes a declaration when the trace contains foreign expansion, and
+records the emission position of synthesized declaration tokens. Fifteen
+direct, macro-generated, whitespace, comment and duplicate declaration cases
+and the local-class/package fixture compare reconstructed text and diagnostics
+with native in `test/lambda/latex/test_tex_script_declaration_origin.ls`.
+The separate experimental pipeline also matches the local fixture's AST and
+HTML; it remains uninstalled and incomplete. Production remains native.
+
+
+## Declaration argument gaps in the script digester — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the tested declaration arguments; blank-line
+and general source-mapping forms remain open. S1.8 and D10.2.2 apply.
+Production remains native.
+
+For `\usepackage {xcolor} [2020/01/01]\begin{document}A\end{document}`,
+native creates a `usepackage` node with no arguments and keeps the space and
+group in the following paragraph. The script digester incorrectly attached the
+group to `usepackage`. Declaration scanning also consumes whitespace between
+some raw tokens, which caused later gaps and argument end offsets to be lost.
+
+The digester now restores whitespace consumed within a traced declaration,
+uses generic adjacent-group parsing with literal group endpoints, and handles
+an adjacent star. `test/lambda/latex/test_tex_script_declaration_digest.ls`
+compares 32 spacing, comment, option, star, Unicode and group cases with the
+native AST in both backends. Six existing digest and provenance goldens and
+sampled forced GC also pass both backends.
+
+The same test retains one explicit unsupported case:
+`\usepackage[foo]\n\n{xcolor}\begin{document}A\end{document}` returns
+`latex-digest-unsupported` / `command argument source gap`. Literal paragraph
+breaks inside scanned declarations and generated-star source mapping remain
+unqualified and block parity for affected documents.
+
+
+## Redefined length and counter commands in constructor arguments — 2026-11-13
+
+**Status:** PARTIALLY FIXED in opt-in constructor argument mode; raw AST
+mapping and full script-parser parity remain open. S1.8 and D10.2.2 apply.
+Production remains native.
+
+For `\def\setlength#1#2{BAD}\begin{document}\textbf{\setlength{\foo}{X}}\end{document}`,
+native argument mode passes the direct, redefined `\setlength` call through,
+while the initial script candidate expanded it to `BAD`. The same mismatch
+occurred for `\addtolength`, `\setcounter`, and `\stepcounter`; evidence is
+`../lambda-input/temp/expl3-script/constructor-redefined-before-interp.out`.
+
+The opt-in argument scanner now checks the native direct-main-source rule
+before expansion, including the separate math profile condition. The focused
+cases match native text in `test/lambda/latex/test_tex_script_constructor_mode.ls`.
+The script digester still explicitly rejects the affected `setlength` AST
+forms; the reconstructed pipeline remains uninstalled.
+
+
+## Redefined length and counter commands at document level — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the tested document-level calls; constructor
+argument handling and other source mappings remain open. S1.8 and D10.2.2
+apply. Production remains native.
+
+For `\def\setcounter#1#2{Q}\begin{document}\setcounter{foo}{7}\end{document}`,
+native emits the original `\setcounter{foo}{7}` call and then executes the
+redefined macro, yielding `Q`. The script expander previously emitted only
+`Q`, so the experimental pipeline returned a different AST without an issue.
+Native checks for direct, main-source redefined commands before expansion and
+replays arguments as non-direct tokens after echoing the source.
+
+The script now traces and echoes the original call and replays its macro and
+arguments once, including for a command defined in a local package.
+`test/lambda/latex/test_tex_script_redefined_document.ls` compares 15 calls
+and a local-package fixture with native reconstructed text and diagnostics in
+both backends, including state changes, comments, spacing, macro-generated
+calls and math in a document. Existing expansion, profile, counter, expl3,
+package and provenance regressions and sampled forced GC also pass both
+backends. Opt-in constructor argument mode handles the tested redefined calls separately.
+
+
+## Raw Lua groups are expanded at document level — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the tested raw Lua groups; raw-source AST
+mapping and inline-code commands remain open. S1.8 and D10.2.2 apply.
+Production remains native.
+
+For `\def\foo{EXPANDED}\begin{document}\directlua{\foo}\end{document}`,
+native keeps the raw group as `\directlua{\foo}`, while the script expander
+previously emitted `\directlua{EXPANDED}` without an issue. The same occurred
+for `\luaexec`. Native scans the current source reader for balanced raw groups
+at document level, including escaped delimiters and comments.
+
+The script reader now scans and seeks over these raw groups without expanding
+their contents. `test/lambda/latex/test_tex_script_raw_lua.ls` compares 20
+direct cases and a local package with native text and diagnostic records,
+including multiline, Unicode, malformed and redefined-command cases. The
+existing reader, stream, verb, expansion, profile, diagnostics, package and
+reconstruction checks and sampled forced GC pass in the qualified execution
+backends. The digester explicitly reports `raw inline source mapping` until it
+can construct the correct AST for these spans.
+
+
+## Raw inline-command expansion conflicts with a preserved golden — 2026-11-13
+
+**Status:** OPEN in the installed script expander; blocks the affected raw
+inline commands. S1.8 and D10.2.2 apply. Production remains native.
+
+The isolated raw-source scanner supports `\lstinline`, `\Verb`, `\mint` and
+`\mintinline`, and matches native reconstructed text and diagnostics for
+braced and delimited examples in
+`../lambda-input/temp/expl3-script/test_tex_script_raw_commands.ls`. However,
+the existing `test/lambda/latex/test_tex_script_verb.txt` explicitly expects
+`tex-unsupported-primitive` / `lstinline`. Enabling the scanner changes that
+assertion to a successful expansion; the exact failing comparison is in
+`../lambda-input/temp/expl3-script/raw-regression-interp-verb.out`.
+The checkout instructions require preserving existing assertions and reference
+results, so the raw inline-command integration remains uninstalled. The raw
+Lua-group implementation can be qualified independently. This conflict must
+be resolved before the inline support can replace the old expected failure;
+raw-inline AST source mapping is separately unsupported.
+
+
+## expl3 assignments inside constructor arguments — 2026-11-13
+
+**Status:** PARTIALLY FIXED in opt-in constructor argument mode; other expl3
+assignments remain guarded. S1.8 and D10.2.2 apply. Production remains native.
+
+For a `\tl_set:Nn` inside `\textbf`, native argument mode expands the expl3
+assignment macro to `\__kernel_tl_set:Nx` without executing the assignment.
+The initial script candidate emitted `\tl_set:Nn` instead; evidence is
+`../lambda-input/temp/expl3-script/constructor-expl3-interp.out`.
+
+Argument mode now hand-ports the `tl_set:Nn` and `tl_gset:Nn` macro bodies
+from `expl3-code.tex`, including unexpanded values, and preserves `\noexpand`.
+The native text comparisons in `test/lambda/latex/
+test_tex_script_constructor_mode.ls` cover local and global setters, aliases,
+empty and nested values, overrides and expandable expl3 reads. Other recognized
+expl3 assignments, including built-in sequence put wrappers and their aliases,
+explicitly report `tex-unsupported-primitive` / `constructor argument expl3
+assignment` until their argument-mode expansions are qualified. The wider
+expl3 API and reconstructed pipeline remain incomplete.
+
+
+## Environments inside inline arguments become `begin` nodes — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested passthrough environments; special,
+custom and option-bearing environments remain open. S1.8 and D10.2.2 apply.
+Production remains native.
+
+For `\begin{document}\textbf{A\begin{quote}B\end{quote}C}D\end{document}`
+with opt-in constructor argument mode, native creates a nested `quote`
+environment. The script digester previously emitted a generic `begin`
+command, text, and a stray curly group without an issue; evidence is
+`../lambda-input/temp/expl3-script/inline-environment-before-interp.out`.
+
+The digester now shares environment parsing between block and inline contexts.
+`test/lambda/latex/test_tex_script_inline_environment.ls` compares eight
+supported AST cases with native, including nested environments, formatting,
+declarations and ordinary groups, and retains six explicit guarded forms.
+Existing digest, definition, formatting, declaration, provenance and
+constructor-mode goldens and sampled forced GC pass both backends. Special or
+custom environments and environment options still report unsupported where
+their source mapping or expansion has not been qualified.
+
+
+## Nested environment whitespace restoration shifts the parent cursor — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the tested nested arguments and environments;
+the reconstructed pipeline remains incomplete. S1.8 and D10.2.2 apply.
+Production remains native.
+
+For `\begin{document}\begin{quote}\maketitle\nA\end{quote}TAIL\end{document}`,
+native retains `TAIL`, while the script digester previously returned `AIL`
+without an issue. Restoring source-gap tokens created a new token array inside
+the environment, but its cursor was returned to a parent still using the old
+array. A real fixture, `test/input/test_input.tex`, also lost its trailing
+newline paragraph in the uninstalled reconstructed pipeline; evidence is
+`../lambda-input/temp/expl3-script/nested-gap-state-before.out` and
+`pipeline-test-input-debug-v4.out`.
+
+Nested block and inline parsing now return the updated token stream with its
+cursor, including when an environment appears inside a command argument.
+`test/lambda/latex/test_tex_script_nested_gap_state.ls` compares 15 native AST
+cases covering multiple gaps, nested environments, arguments, comments and
+Unicode. Existing digest and provenance goldens and sampled forced GC pass
+both backends. The separate reconstructed pipeline now matches the fixture's
+native AST and HTML in focused testing, but remains uninstalled and incomplete.
+
+
+## Common math operators and delimiters are unsupported — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the tested math operators, functions and
+delimiter commands; broader math parsing remains open. S1.8 and D10.2.2 apply.
+Production remains native.
+
+The experimental script pipeline previously rejected `\downarrow` in
+`test/input/sample.tex` and `\vert` in
+`test/latex/samples/complex_numbers.tex`. Native math digestion treats these
+standalone delimiters as generic commands and recognizes a broader table of
+operators and functions.
+
+The script digester now ports the native operator and function tables and
+handles optional and braced children on standalone delimiter commands.
+`test/lambda/latex/test_tex_script_math_symbols.ls` compares 36 grouped cases
+with native ASTs, including scripts, nested arguments and delimiters. Existing
+math and digest goldens and sampled forced GC pass both execution backends.
+The sample document proceeds through this math case, but the reconstructed
+pipeline remains experimental and other math atoms remain unsupported.
+
+An unmatched optional bracket after a generic math command causes native
+LaTeX parsing to stall. Input-owned **LI-028** records the bounded
+reproduction and root cause. Malformed-input parity for that case remains
+blocked until the input parser is fixed.
+
+
+## Reconstructed whitespace-only lines create extra paragraphs — 2026-11-13
+
+**Status:** OPEN in the uninstalled reconstruction/reparse prototype; blocks
+safe script-only integration for affected documents. S1.8 and D10.2.2 apply.
+Production remains native.
+
+After adding common math command support, `test/input/sample.tex` produces
+matching reconstructed text but a different AST and HTML. The candidate creates
+paragraph breaks around whitespace-only lines that native leaves within a
+paragraph, and loses some indentation after comments. Native's direct LaTeX
+parser treats consecutive literal LF bytes as a paragraph break; the TeX
+reader can convert a line containing spaces into `\par`, losing the
+distinction when the prototype retokenizes reconstructed output. Evidence:
+`../lambda-input/temp/expl3-script/pipeline-sample-text.out`,
+`pipeline-sample-actual.txt`, and `pipeline-sample-native.txt`.
+Reproduce with `pipeline-real-documents.ls` against the staged math candidate.
+Preserve whitespace and comment text while normalizing reconstructed tokens,
+and keep this pipeline uninstalled until the mismatch is fixed or guarded.
+
+## Theorem declarations and adjacent stars — 2026-11-13
+
+The script digester now handles `\newtheorem` through the same generic
+argument parser as native LaTeX. A directly adjacent star produces the native
+`newtheorem*` tag and `starred` attribute. A generic command consumes a star
+only when the source positions are adjacent; previously `\mystery *{X}` was
+silently parsed as a starred command. When the star is emitted without direct
+source mapping, the digester reports `command star source mapping` rather than
+guessing. S1.8 and D10.2.2 apply; this does not change the production boundary.
+
+`test/lambda/latex/test_tex_script_theorem.ls` compares 18 declaration and
+generic-command cases with native ASTs and checks the generated-star guard.
+The focused cases, four existing digester goldens and sampled forced-GC checks
+pass in interpreter and JIT. In the experimental reconstructed pipeline,
+`test/input/test_latex_m7.tex` now proceeds beyond theorem declarations and
+explicitly reports an unsupported environment; the document is not yet fully
+supported.
+
+## Math comparison operators — 2026-11-13
+
+The script digester now parses `<`, `>`, `<=`, and `>=` as math relations.
+An equals sign joins the preceding comparison only when their source positions
+are adjacent; relation atoms can carry scripts. S1.8 and D10.2.2 apply, and
+the production LaTeX input boundary remains unchanged.
+
+`test/lambda/latex/test_tex_script_math_relations.ls` compares 23 direct,
+spaced, commented, nested and scripted cases against native ASTs. Focused
+comparisons, three existing math/digest goldens and sampled forced-GC checks
+pass in interpreter and JIT. In the experimental reconstructed pipeline,
+`test/latex/samples/complex_numbers.tex` now matches the native AST and HTML
+in both backends, though the pipeline remains incomplete.
+
+The separately staged whitespace normalization passes a 126-case interpreter
+matrix, a 90-case JIT matrix plus 36 added cases, focused reparse and pipeline
+checks in both backends, and a 103-case corpus with 100 matches and three
+explicit unsupported results in each backend. Four other real documents
+match native AST and HTML. This evidence does not establish complete parity;
+the whitespace normalization and reconstructed pipeline remain uninstalled.
+
+## Table and tabular environments — 2026-11-13
+
+The script digester now preserves `table` placement and `tabular` column
+headers when their source mapping is available. In tabular bodies it emits
+alignment separators at the current environment level, while nested groups
+and environments retain their own parsing context. S1.8 and D10.2.2 apply;
+production continues to use the native input boundary.
+
+`test/lambda/latex/test_tex_script_tables.ls` exercises 22 native AST matches
+and six explicit guards, including nested tables, spacing, formatting, math,
+comments, and generated content. Placement containing comments or generated
+tokens, and headers or columns with unqualified generated source mapping,
+remain unsupported. Four existing digest/environment goldens and sampled
+forced-GC checks pass in interpreter and JIT. With this candidate, the
+experimental reconstructed pipeline matches the native AST and HTML for
+`test/input/test_latex_m7.tex` in both backends; full parser parity and
+production migration remain open.
+
+## Generic math symbols and periods — 2026-11-13
+
+Common set relations and other symbols that the native parser represents as
+generic commands now use that same shape in the script digester. Math periods
+also distinguish punctuation, decimal prefixes and three-dot text, including
+attached scripts. S1.8 and D10.2.2 apply; production remains at the native
+input boundary.
+
+`test/lambda/latex/test_tex_script_math_generic_symbols.ls` and
+`test/lambda/latex/test_tex_script_math_dots.ls` compare 15 grouped command
+cases and 20 punctuation/number cases against native ASTs. Three existing
+math goldens and sampled forced-GC checks pass both execution backends. The
+scientific-writing sample now progresses to a displayed math environment in
+the experimental pipeline; displayed math remains under qualification.
+
+## Displayed math environments — 2026-11-13
+
+**Status:** PARTIALLY FIXED for `equation`, `equation*`, `align`, and
+`align*`; other displayed environments and several source forms remain open.
+S1.8 and D10.2.2 apply; production remains at the native input boundary.
+
+The script digester builds native-shaped math ASTs and uses shared TeX token
+reconstruction for the body source. This fixes the staged mismatch where a
+consumed `\relax` or assignment remained in the source attribute even though
+native emitted only the surrounding text. Comments, generated body tokens,
+nested math environments and equation tags remain explicitly unsupported
+when their source mapping or parser is not qualified.
+
+Local qualification compared 19 native ASTs, recorded seven explicit
+unsupported cases, and checked a delimiter guard. Repository coverage for
+those cases remains pending. The existing inline-environment golden was updated for its newly supported
+equation with the user's explicit approval. Focused existing math and digest
+goldens, interpreter and JIT comparisons, and sampled forced-GC checks pass.
+The experimental pipeline still reports itself incomplete.
+
+## Math accents and inequality — 2026-11-13
+
+The script digester now ports the native math accent command table, including
+wide accents, braces and arrows, and emits the native negation node for `\ne`
+and `\neq`. S1.8 and D10.2.2 apply; production remains native.
+
+`test/lambda/latex/test_tex_script_math_accents.ls` compares 19 grouped cases
+against native ASTs, including missing and unbraced arguments, scripts, and
+nested fractions. Three existing math/underline goldens and sampled forced-GC
+checks pass in interpreter and JIT. Unsupported text-mode and displayed-math
+forms remain separate work.
+
+## Malformed expl3 integer expressions abort instead of recovering — 2026-11-13
+
+**Status:** OPEN; blocks malformed-input parity, not valid integer-expression
+work. S1.8 and D10.2.2 apply. In the installed `int_sign:n` implementation,
+`\ExplSyntaxOn\int_sign:n{}\ExplSyntaxOff` stops with `tex-missing-number`,
+returns no text, and has no diagnostic record. Native TeX reports the same
+error code with a diagnostic and recovers to output `0`. Division by zero,
+undefined numeric control sequences, and out-of-range integers likewise
+produce divergent recovery and diagnostics. The already-installed
+`\int_abs:n` shows the same four failures, so this is not specific to the new
+sign operation. Reproduce with
+`../lambda-input/temp/expl3-script/expl3-sign-errors.ls` and
+`expl3-abs-errors.ls`; `expl3-sign-error-detail.out` includes the direct
+missing-number comparison. The shared expression scanner's recovery path has
+not yet been fully traced; do not infer a more specific cause from these
+results.
+
+## expl3 integer sign — 2026-11-13
+
+The script expl3 profile implements `\int_sign:n` using the existing TeX
+integer-expression scanner and returns -1, 0 or 1 after one evaluation. S1.8
+and D10.2.2 apply. `test/lambda/latex/test_tex_script_expl3_int_sign.ls`
+compares 17 valid text, message and diagnostic cases with native TeX, including
+nested expressions, aliases, registers and random-state effects. It also
+checks two document-digestion cases. Three existing integer goldens and sampled
+forced-GC checks pass interpreter and JIT.
+
+The malformed-integer recovery issue above applies to this operation as well.
+Its `\meaning` also exposes the script primitive rather than native's long
+macro definition, like the existing `\int_abs:n`; evidence is
+`../lambda-input/temp/expl3-script/expl3-sign-meaning.out`. Introspection
+parity remains open under the earlier primitive-meaning record.
+
+## expl3 integer division and remainder — 2026-11-13
+
+The script expl3 profile now implements `\int_div_truncate:nn`,
+`\int_div_round:nn`, and `\int_mod:nn`. It scans each expression once,
+uses truncation toward zero for the truncated quotient and remainder, and
+shares the TeX rounded-division helper for rounded quotients. S1.8 and
+D10.2.2 apply.
+
+`test/lambda/latex/test_tex_script_expl3_int_div.ls` compares 23 grouped cases
+with native text, messages and diagnostics, covering signs, ties, integer
+limits, nested expressions, aliases, registers and random-state effects. Two
+further cases check safe document digestion. Three existing integer goldens
+and sampled forced-GC checks pass interpreter and JIT. The malformed-number
+recovery and primitive-meaning limitations described above also apply here.
+
+## Assignment prefixes do not expand a following macro — 2026-11-13
+
+**Status:** PARTIALLY FIXED for expansion after a prefix; AST source mapping
+remains guarded. S1.8 and D10.2.2 apply. Before the fix, in the boolean prototype,
+`\ExplSyntaxOn{\bool_gset_true:N\g_tmpa_bool}\ExplSyntaxOff` stops with
+`tex-bad-prefix`, while native TeX completes the global assignment. The real
+macro expands to `\tex_global:D\cs_set_eq:NN...`; the Script `prefixed`
+scanner reads its next token without expansion and rejects the macro before
+it reaches the underlying `\let`. The same root affects ordinary TeX macros
+after an assignment prefix. Evidence is in
+`../lambda-input/temp/expl3-script/expl3-bool-interp.out` and the staged
+`expl3-bool-stage-home` candidate. Source-echo and scoped-assignment checks
+are covered below.
+
+The prefix candidate expands macros before locating the assignment and matches
+13 focused native text/diagnostic cases in both backends. Its direct digester
+initially produced incorrect ASTs when an echoed definition was followed by a
+source group emptied by the assignment: native attaches that group to the
+preceding definition, while the Script digester emitted it separately. The
+candidate reports `prefixed macro source mapping` for macro-expanded prefixes
+combined with echoed definitions until that reconstructed group provenance is
+implemented. Evidence: `../lambda-input/temp/expl3-script/prefix-v2-interp.out`
+and `prefix-v3-interp.out`. This is a guard, not a resolution of AST parity.
+
+The prefix expansion fix is now installed. `test/lambda/latex/test_tex_script_prefix_expansion.ls`
+compares 14 expansion/diagnostic cases and four source-mapping guards. Five
+existing TeX and expl3 goldens and sampled forced-GC checks pass interpreter
+and JIT. The prefix source-mapping guard remains until reconstructed definition
+arguments are handled correctly.
+
+
+## Source after the document end is absent from direct digestion — 2026-11-13
+
+**Status:** PARTIALLY FIXED for plain trailing text; structured tails remain
+guarded and block full AST parity. S1.8 and D10.2.2
+apply. With script expl3 enabled,
+`\ExplSyntaxOn\begin{document}\textbf{F}\end{document}\ExplSyntaxOff`
+produces a script AST ending at the document element, while native LaTeX also
+contains a following paragraph with an `ExplSyntaxOff` node. The expansion
+result records the remaining text as `trailing_source`, and shared TeX
+reconstruction includes it, but the direct digester reads only `output`.
+The same mismatch occurs without any boolean call, so it predates the boolean
+prototype. Evidence: `../lambda-input/temp/expl3-script/expl3-bool-ast-end.out`
+and `expl3-bool-tail-state.out`. Additional trailing forms and the remaining guard are described below.
+
+The direct digester now appends plain trailing text as paragraphs using the
+native parser's adjacent-LF rule, preserving spaces, line endings and Unicode.
+Tails containing commands, groups, math or comments explicitly report
+`post-document source mapping` until source-aware tail digestion is ported.
+`test/lambda/latex/test_tex_script_trailing_source.ls` covers 25 matching cases
+and two guarded cases. Four existing goldens and sampled forced-GC checks pass
+in interpreter and JIT.
+
+## expl3 boolean declarations and conditionals — 2026-11-13
+
+The script expl3 profile now provides the standard scratch booleans,
+`\bool_new:N`/`:c`, local and global true/false setters, equality aliases,
+and `N`/`c` conditionals and predicates. The boolean wrappers use TeX macro
+bodies and the existing conditional and `\let` machinery; the fresh-name
+copy operation `\cs_new_eq:NN` is script-backed. S1.8 and D10.2.2 apply.
+
+`test/lambda/latex/test_tex_script_expl3_bool.ls` contains 31 matching native
+text/message/diagnostic comparisons, source-mapping checks, and a constructor
+declaration guard. It covers scope, `\globaldefs`, dynamic names, aliases,
+reflection of the boolean wrappers, and constructor arguments. Existing
+existence and equality goldens and sampled forced-GC checks pass interpreter
+and JIT.
+
+Boolean declarations and setters still encounter the existing direct-digester
+assignment source-mapping guard. Duplicate `\bool_new:N` aborts with
+`expl3-already-defined` without native's diagnostic and recovery; this is the
+same open duplicate-declaration issue noted above. Evidence is
+`../lambda-input/temp/expl3-script/expl3-bool-duplicate.out`. Introspection of
+script-backed `\cs_new_eq:NN` and of existing primitive-backed expl3 setup
+commands remains subject to the primitive-meaning limitation. Boolean
+expression setters and other APIs remain unimplemented; inversion is covered
+below.
+
+## Equation tags and nested math environments — 2026-11-13
+
+**Status:** staged, not installed. S1.8 and D10.2.2 apply; production remains
+native. The reconstructed pipeline stopped on `\tag{$\dagger$}` in
+`test/latex/samples/scientific_writing.tex`, then on a control-space and nested
+`split` environment. The staged candidate adds tag text and embedded-math
+parsing, math control spaces, and common nested matrix-style environments.
+It matches the sample's native AST and HTML in interpreter and JIT; evidence
+is `../lambda-input/temp/expl3-script/scientific-nested-v2-interp.out` and
+`scientific-nested-v2-jit.out`. The staged pipeline still reports incomplete.
+
+An initial nested-environment implementation emitted `\\[2pt]` as a row
+separator followed by ordinary math tokens, while native attaches `2pt` as the
+row gap. Evidence is `math-nested-env-interp.out` in the same temporary
+folder. The candidate now preserves that row-gap attribute and guards
+unqualified options. Existing golden cases that explicitly expect `tag` and
+`split` to be unsupported will need an authorized reference update before the
+candidate can be installed.
+
+The staged tag and nested-environment candidate now has 38 matching native
+AST cases for tag text, 16 for nested environments, and explicit guards for
+unsupported commands and source mappings. Nested row gaps, macro-expanded
+source guards, existing math goldens, and sampled forced GC pass in both
+backends. The math-environment golden would change only the two cases noted
+above; it remains unchanged pending authorization. Evidence is in
+`../lambda-input/temp/expl3-script/math-tag-v5-interp.out`,
+`math-nested-env-probe-v2-interp.out`, and `math-tag-source-interp.out`.
+
+## expl3 boolean inversion — 2026-11-13
+
+The Script expl3 profile now implements local and global boolean inversion,
+with `N` and dynamically constructed `c` arguments. S1.8 and D10.2.2 apply.
+`test/lambda/latex/test_tex_script_expl3_bool_inverse.ls` compares text,
+messages, and diagnostics with native TeX across scope, `globaldefs`,
+introspection, and constructor arguments. Direct AST digestion reports the
+existing assignment source-mapping guard. Focused existing expl3 goldens and
+sampled forced-GC checks pass interpreter and JIT.
+
+Without constructor argument mode, inversion inside a constructor has the
+existing reconstructed-source difference; with the mode enabled it matches
+native. Evidence: `../lambda-input/temp/expl3-script/expl3-bool-inverse-constructor.out`.
+Boolean expression setters and the assignment source mapping remain open.
+
+## expl3 boolean string conversion — 2026-11-13
+
+The script profile implements `\bool_to_str:N` and `\bool_to_str:c` with
+other-category letters, preserving the native token identity under `\ifx`.
+S1.8 and D10.2.2 apply. `test/lambda/latex/test_tex_script_expl3_bool_string.ls`
+compares native output, diagnostics, introspection, token identity, three
+LaTeX ASTs and a constructor argument. Existing boolean-inversion and token
+string goldens and sampled forced-GC checks pass in interpreter and JIT.
+Boolean expressions remain unimplemented.
+
+
+## Whitespace between echoed definition arguments — 2026-11-13
+
+**Status:** PARTIALLY FIXED for single-line and newline whitespace; paragraph
+breaks and structured tails remain guarded. S1.8 and D10.2.2 apply. A line break between the
+name and the first body of `\newenvironment` produces
+`latex-digest-expected-group` in the Script digester, though native LaTeX
+parses it. The definition-span parser assumes consecutive group tokens, while
+TeX's argument scanner skips spaces and the native AST instead ends the
+command's argument list at source whitespace. A space immediately after
+`\newenvironment` also causes a silent AST mismatch: native emits an empty
+command followed by the separate groups, while the Script digester attaches
+all groups. Evidence: `../lambda-input/temp/expl3-script/definition-gap-before.out`,
+`definition-gap-native.out`, and `math-proof-debug-v3.out`. The command-source
+adjacency rule and remaining source spans need to be preserved when digesting
+echoed definitions; simply skipping spaces would still produce the wrong AST.
+
+
+The installed definition-gap parser now preserves native command argument
+boundaries and returns the remaining source as ordinary inline nodes. The
+new `test/lambda/latex/test_tex_script_definition_gap.ls` has 28 matching
+native AST cases and a paragraph-break guard, covering options, stars,
+comments, newlines, and local definitions. Existing digest, theorem,
+prefix and inline-environment goldens and sampled forced GC pass both
+backends. The experimental `math_proof.tex` pipeline advances to an
+explicit guard for a nested `renewcommand`; it is not yet complete.
+
+## Undefined environment renewal omits native diagnostic — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested source locations. S1.8 and D10.2.2
+apply. `\renewenvironment{x}{A}{B}X` previously appended only a diagnostic
+code, leaving its text and location unavailable to the direct AST. The
+Script expander now uses the shared source-aware diagnostic recorder.
+`test/lambda/latex/test_tex_script_environment_diagnostic.ls` compares 12
+native ASTs and diagnostic metadata for a dynamically expanded name. The
+existing expansion and definition-gap goldens and sampled forced GC pass
+interpreter and JIT. `definition-renew-diagnostic.out` captures the original
+mismatch. `test/lambda/latex/test_tex_script_environment_diagnostic_foreign.ls`
+checks a diagnostic emitted by an included file, including its file and source
+location. Source-offset parity with an expanded environment name is a separate
+open issue below; broader foreign-source cases require further qualification.
+
+## Expanded environment names shift an echoed definition boundary — 2026-11-13
+
+**Status:** PARTIALLY FIXED for qualified main-file definition boundaries;
+following groups still require source-aware argument merging. S1.8 and D10.2.2
+apply. Native maps the end of an echoed definition's final argument through
+the next reconstructed segment when intervening TeX commands emit no text.
+The Script digester now applies that mapping for known emitted origins, while
+preserving source gaps. This fixes the expanded environment-name example and
+similar assignments, conditionals, generated text and following block commands.
+`test/lambda/latex/test_tex_script_definition_boundary.ls` compares 25 cases
+with native on interpreter and JIT. A following group that native would merge
+into the definition reports `definition following group source mapping` until
+that parsing behavior is ported. Focused existing goldens and sampled forced
+GC pass both backends. Evidence:
+`../lambda-input/temp/expl3-script/definition-boundary-v4-interp.out`.
+
+
+## Duplicate environment declaration omits native diagnostic — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested duplicate environments.
+S1.8 and D10.2.2 apply. With two `\newenvironment{x}` declarations, native
+adds a `latex-already-defined` record with its message and location, while the
+Script AST omits the record because the expander stores only the code.
+Evidence: `../lambda-input/temp/expl3-script/environment-duplicate-diagnostic.out`.
+This is the same missing-record mechanism as the renewal diagnostic fixed
+above; the existing definition-recovery behavior requires separate checking.
+
+The Script expander now uses the shared diagnostic recorder for duplicate
+environments. `test/lambda/latex/test_tex_script_environment_duplicate.ls`
+compares ten native ASTs and two recovery cases. Existing expansion and
+renewal-diagnostic goldens and sampled forced GC pass interpreter and JIT.
+Broader definition recovery and source locations remain to be qualified.
+
+
+## Command definition errors omit native diagnostic records — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested command definitions.
+S1.8 and D10.2.2 apply. Both `\renewcommand{\x}{A}` when `\x` is undefined
+and a duplicate `\newcommand{\x}` produce native diagnostic records, while
+the Script expander appends only their codes and the direct AST omits them.
+Evidence: `../lambda-input/temp/expl3-script/command-definition-diagnostic.out`.
+The missing-record mechanism is the same as the environment cases above;
+command spelling, source locations and recovery need qualification.
+
+The Script expander now records the native messages and locations for these
+command-definition errors. `test/lambda/latex/test_tex_script_command_diagnostic.ls`
+compares 15 native ASTs and three recovery cases, including changed escape
+characters. An included-file diagnostic also matches native in the temporary
+`command-diagnostic-foreign.out` probe. Existing expansion and duplicate
+environment goldens and sampled forced GC pass interpreter and JIT. Broader
+other error recovery remains open; invalid argument counts are covered below.
+
+
+## Invalid command argument counts lack native diagnostics — 2026-11-13
+
+**Status:** PARTIALLY FIXED for representable counts in `\newcommand`
+and `\renewcommand` argument counts. S1.8 and D10.2.2 apply. Native reports
+`latex-bad-arg-count` immediately after the optional count, including its
+actual numeric value and location; the Script expander records only the code
+after consuming the command body. In an undefined renewal both diagnostics
+are needed in order. Evidence:
+`../lambda-input/temp/expl3-script/command-arity-before.out`. The Script
+count reader currently saturates values at 10, so complete error-message
+parity also requires preserving the original parsed numeric value.
+
+
+The Script parser now records the diagnostic at the count argument and uses
+the full representable numeric value. `test/lambda/latex/test_tex_script_command_arity.ls`
+compares 15 native ASTs, checks two explicit overflow guards, and verifies the
+long-name diagnostic. The included-file count diagnostic also matches native
+in `command-arity-foreign.out`. Existing expansion, command-diagnostic and
+definition-gap goldens and sampled forced GC pass interpreter and JIT.
+
+## Long command names differ in definition diagnostics — 2026-11-13
+
+**Status:** PARTIALLY FIXED for names whose 100-byte prefix is valid UTF-8. S1.8 and D10.2.2
+apply. The newly recorded `\renewcommand` diagnostic contains the entire
+110-byte name, while native truncates it to 100 bytes when constructing the
+message. Evidence: `../lambda-input/temp/expl3-script/long-command-name.out`;
+`lambda/input/input-tex-latex.cpp` constructs the message with a 100-byte name
+limit. UTF-8 truncation at a code-point boundary requires separate handling.
+
+The diagnostic now uses the native 100-byte prefix for valid UTF-8. A prefix
+that cuts a multibyte character explicitly reports an unsupported encoding
+until byte-preserving diagnostic strings are qualified.
+
+
+## Nested definitions in echoed source groups — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested nested definitions. S1.8 and D10.2.2 apply. After the
+source-whitespace fix, `math_proof.tex` reached an explicitly unsupported
+`renewcommand` inside the separated body of a `newenvironment`. A prototype
+retains the enclosing echoed span's TeX category codes and reuses the existing
+definition digester for nested definitions. Initial cases match native ASTs;
+whitespace within a nested definition remains guarded. The experimental
+pipeline then advances to a `math atom` guard. Evidence:
+`../lambda-input/temp/expl3-script/nested-definition-v2.out` and
+`math-proof-nested-interp.out`. The installed implementation rereads with the
+original category codes and verifies token kinds, values, categories and source
+offsets before accepting the result. `test/lambda/latex/test_tex_script_nested_definition.ls`
+contains 22 native AST matches, one source-gap guard and two invalid-parameter
+cases. Five existing goldens and sampled forced GC pass in both backends; the
+current executable also matches the reference. Included-file AST whitespace
+remains a separate open issue below.
+
+
+## Included definition whitespace creates an extra paragraph — 2026-11-13
+
+**Status:** OPEN; blocks direct AST parity for the reproduced included source.
+S1.8 and D10.2.2 apply. A main file that inputs a child containing a multiline
+`\newenvironment` declaration produces an extra paragraph containing two
+newlines in the Script AST; native parsing omits it. The mismatch reproduces
+with the installed digester before the nested-definition candidate. Evidence:
+`../lambda-input/temp/expl3-script/nested-definition-foreign-before.out` and
+fixture files in `environment-diagnostic-fixture/`. The exact source-origin
+and whitespace cause is unconfirmed. The reconstructed Script TeX text does
+match native for this fixture, so the observed difference is in AST digestion
+or source-origin interpretation; see `nested-definition-foreign-expansion.out`.
+The nested-definition candidate does not fix included-file AST parity.
+
+
+## Raw math text for parameter markers and exclamation marks — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested raw-math runs; work remains in the experimental
+`math_proof.tex` pipeline. S1.8 and D10.2.2 apply. A macro body containing
+`$#1$` reports `math atom` in the Script digester, while native produces a
+`raw_math_text` node whose value is `#1`. Native's math parser groups runs
+starting with `#` or `!` and continuing with those characters or decimal
+digits. Evidence: `../lambda-input/temp/expl3-script/math-atom-debug.out`,
+`math-parameter-native.out`, and `lambda/input/input-latex-c.cpp`. Source
+adjacency and attached scripts must be preserved when porting this rule.
+
+
+## Escaped punctuation in math — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested escaped punctuation; work remains in the experimental
+`math_proof.tex` pipeline. S1.8 and D10.2.2 apply. After the staged raw-math
+and `\Box` support, the sample stops at `math command {` for `\{`.
+Native emits an `escaped_symbol` and combines adjacent compatible escapes;
+`\_` is a separate atom. Evidence: `../lambda-input/temp/expl3-script/math-proof-box-interp.out`,
+`math-brace-native.out`, and the math command parser in
+`lambda/input/input-latex-c.cpp`. Source adjacency and scripts must be kept.
+
+
+## Overset and underset math commands — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested annotation commands; work remains in the experimental
+`math_proof.tex` pipeline. S1.8 and D10.2.2 apply. After staged escaped
+punctuation support, the sample stops at `math command underset`. Native
+uses `overunder_command` with parsed annotation and base, and maps
+`\stackrel` to `\overset`. Evidence:
+`../lambda-input/temp/expl3-script/math-proof-escaped-interp.out`,
+`math-under-over-native.out`, and `lambda/input/input-latex-c.cpp`.
+
+
+## Math-proof sample AST differences — 2026-11-13
+
+**Status:** OPEN in the experimental reconstructed pipeline; blocks AST
+parity for this sample. S1.8 and D10.2.2 apply. With staged raw math,
+escaped punctuation, `\Box` and over/under commands, `math_proof.tex` now
+parses and renders HTML matching native, but its AST differs. The Script AST
+retains an `ifthen` package node absent from the native result and differs in
+several whitespace or empty-paragraph nodes. Evidence:
+`../lambda-input/temp/expl3-script/math-proof-overunder-interp.out` and the
+`math-proof-native-ast.out` / `math-proof-script-ast.out` diff in that folder.
+The package difference came from the experiment's empty bundled-resource
+snapshot: supplying the shipped `ifthen.sty` removes that difference, while
+three whitespace or empty-paragraph differences remain. Evidence:
+`math-proof-with-ifthen-interp.out` and the diff against
+`math-proof-ifthen-ast.out` in the same temporary folder. The whitespace cause
+is unconfirmed; matching HTML does not establish AST parity or completeness.
+
+## Qualified raw and annotated math atoms — 2026-11-13
+
+The Script digester now handles raw runs beginning with `#` or `!`, escaped
+punctuation runs, `\Box`, and `\overset` / `\underset` / `\stackrel`.
+S1.8 and D10.2.2 apply. `test/lambda/latex/test_tex_script_math_raw.ls` compares
+54 native ASTs and records three existing source or command guards. Five
+related math and definition goldens and sampled forced GC pass in interpreter
+and JIT. The separately staged reconstructed pipeline renders the math-proof
+sample with matching HTML but still has the AST differences recorded above.
+Native dollar-delimited escaped-dollar comparison is blocked by input issue
+LI-030; the named-delimiter equivalent is covered.
+
+
+## Direct digestion loses comment-adjacent paragraph whitespace — 2026-11-13
+
+**Status:** OPEN; blocks direct AST parity for the reproduced comment gaps.
+S1.8 and D10.2.2 apply. With `A\n%comment\n\nText` inside a document, the
+installed Script digester emits separate `A` and `Text` paragraphs, while
+native places `A\n\nText` in one paragraph. A comment gap after an echoed
+`\newcommand` can also lose a newline. Evidence:
+`../lambda-input/temp/expl3-script/paragraph-direct-before.out`. The direct
+digester consumes TeX `par` tokens whose source spans can include skipped
+comments, while native paragraph splitting is based on adjacent source line
+feeds. Source-aware comment and line-boundary normalization needs to be
+shared or ported before claiming parity; simply keeping a space is not enough
+for all reproduced cases.
+
+
+The isolated `paragraph-direct-stage-home` candidate normalizes direct literal
+newline runs and preserves comment-gap text. Its first broad pass had 41 native
+AST matches and one existing math-source guard; a wider matrix then exposed
+two generated-macro cases. Reconstruction evidence shows that a non-adjacent
+TeX `par` token after generated text emits a full pair of newlines, not its
+single source byte (`../lambda-input/temp/expl3-script/macro-comment-reconstruction.out`).
+The revised candidate matches 41 focused cases and 64 combinations of source
+whitespace, comments, formatting, headings and generated macros in both
+backends. A bounded-chunk version has identical results and matches 18 cases
+around chunk boundaries in both backends. Five existing goldens and sampled forced GC also pass in both backends. It
+remains staged pending a release-profile performance assessment; unrelated
+concurrent Lambda build changes make a shared rebuild inappropriate at present.
+
+## Reconstructed paragraph comment gaps — 2026-11-13
+
+**Status:** STAGED; the reconstructed pipeline remains uninstalled. S1.8 and
+D10.2.2 apply. A comment between literal paragraph breaks can create an empty
+native paragraph, and a preceding newline must survive when comments separate
+it from the following break. The isolated candidate preserves both boundaries.
+It matches 27 focused comment/whitespace cases, the six-document AST/HTML
+corpus and the scientific-writing sample in interpreter and JIT. With the
+shipped `ifthen.sty` supplied, `math_proof.tex` now matches both native AST and
+HTML in both backends. Sampled forced GC also passes. Evidence:
+`../lambda-input/temp/expl3-script/paragraph-comment-v4-interp.out`,
+`paragraph-corpus-interp.out`, `paragraph-scientific-interp.out`, and
+`math-proof-comment-interp.out`. The pipeline still reports `complete: false`;
+the direct-digester comment gap and the separately staged math-golden update
+remain open. Do not infer full compatibility from this corpus.
+
+
+## expl3 integer predicate forms — 2026-11-13
+
+**Status:** PARTIALLY FIXED for the qualified predicate and constructor cases;
+direct digestion of character definitions in arguments remains guarded. S1.8
+and D10.2.2 apply. `\int_if_zero_p:n`, `\int_if_odd_p:n`, and
+`\int_if_even_p:n` now use the native-shaped expandable macros and conditional
+primitive aliases. Numeric expressions, negative and computed values, aliases,
+macro meanings, conditionals, constructor expansion, diagnostics, and tested
+document-level ASTs match native. The new
+`test/lambda/latex/test_tex_script_expl3_int_predicate.ls` covers these cases in
+both execution backends. Four existing integer and boolean goldens and sampled
+forced GC also pass in both backends.
+
+Direct digestion executes a character definition before parsing a constructor
+argument, while native argument processing retains it. The token now records
+its origin and the digester reports `character definition argument source
+mapping` for this unqualified path; direct top-level use remains supported.
+Evidence: `../lambda-input/temp/expl3-script/int-predicate-v6-interp.out` and
+`chardef-guard.out`. Full source-aware argument digestion remains open.
+
+
+## Numeric conditional delimiters encountered while scanning operands — 2026-11-13
+
+**Status:** PARTIALLY FIXED for qualified numeric and case conditionals;
+full malformed-input recovery remains open. S1.8 and D10.2.2 apply. Production remains native.
+Before the fix, `\ifnum1=1\else Z\fi X` produced `X ` without diagnostics natively, while
+the Script engine stopped with `tex-extra-fi`; a space between `1` and `\else`
+avoids the mismatch. The false comparison `\ifnum1=2\else Z\fi X` also
+failed, while an ordinary `\iftrue` empty branch succeeded. Evidence:
+`../lambda-input/temp/expl3-script/empty-if-probe.ls` and `.out`.
+The Script numeric scanner expands the next token before `begin_conditional`
+adds the conditional to its stack, so it executes the delimiter against the
+wrong condition depth. This is independent of the definition source-offset work.
+
+
+The Script engine now records a pending conditional while scanning, inserts a
+relax before an early delimiter, and preserves nested conditional state when
+the operand ends. A token returned by integer digit scanning also loses a
+consumed `\noexpand` marker, allowing its normal subsequent expansion. The
+new `test/lambda/latex/test_tex_script_numeric_conditional.ls` checks 73 native
+text/message/diagnostic cases and 11 AST cases, including true and false
+branches, aliases, nested conditions, `\ifcase`, `\expandafter`, and
+`\noexpand`. Both execution backends and sampled forced GC pass. Focused
+existing expansion, expl3 integer and random goldens pass both backends.
+Evidence: `../lambda-input/temp/expl3-script/numeric-case-golden-interp.out`.
+
+
+## expl3 token-list head — 2026-11-13
+
+**Status:** PARTIALLY FIXED for expansion; direct AST source mapping remains guarded.
+S1.8 and D10.2.2 apply. Before the fix, `\tl_head:n{abc}` stopped with
+`tex-unsupported-primitive` while native emits `a`, and `\meaning\tl_head:n`
+was undefined in Script. Evidence: `../lambda-input/temp/expl3-script/
+tl-head-before.ls` and `.out`. The native macro uses expandable primitives
+and a helper to preserve token and group semantics; expansion, empty inputs,
+category codes, macro meaning, source mapping and constructor arguments need
+qualification. Production remains native.
+
+
+The Script profile now installs the native-shaped expandable `\tl_head:n`
+and helper macros, backed by the existing `\expanded` and `\unexpanded`
+primitives. The new `test/lambda/latex/test_tex_script_expl3_tl_head.ls`
+compares 35 text, message and diagnostic cases, including macro meanings,
+token categories, grouping, aliases, and constructor arguments. Eight direct
+AST cases report `expl3 token head source mapping`: a control sequence
+returned as the head can have a native emission offset different from its
+original token location. The flag follows meaning aliases and resets on
+resume. Both backends, focused token-list goldens and sampled forced GC pass.
+Evidence: `../lambda-input/temp/expl3-script/tl-head-final-interp.out` and
+`tl-head-cases-interp.out`. Full direct source mapping remains open.
+
+
+## expl3 token-list tail — 2026-11-13
+
+**Status:** PARTIALLY FIXED for expansion; direct AST source mapping remains guarded.
+S1.8 and D10.2.2 apply. Before the fix, `\tl_tail:n{abc}` stopped with
+`tex-unsupported-primitive` while native emits `bc`, and `\meaning\tl_tail:n`
+was undefined in Script. Evidence: `../lambda-input/temp/expl3-script/
+tl-tail-before.ls` and `.out`. Expansion, blank and grouped inputs, category
+codes, macro meaning, source mapping and constructor arguments need
+qualification. Production remains native.
+
+
+The Script profile now installs the native-shaped expandable `\tl_tail:n`
+macro with its native primitive aliases. The new
+`test/lambda/latex/test_tex_script_expl3_tl_tail.ls` compares 35 text, message
+and diagnostic cases, including macro meanings, token categories, grouping,
+aliases, and constructor arguments. Twelve direct AST cases report
+`expl3 token tail source mapping`: returned control sequences can have native
+emission offsets different from their original token positions. The flag
+follows meaning aliases and resets on resume. Both backends, focused token-list
+goldens and sampled forced GC pass. Evidence:
+`../lambda-input/temp/expl3-script/tl-tail-final-interp.out` and
+`tl-tail-v2-interp.out`. Full direct source mapping remains open.
+
+
+## expl3 token-list head and tail N variants — 2026-11-13
+
+**Status:** PARTIALLY FIXED for `:N`; distinct `:V` variants remain open.
+S1.8 and D10.2.2 apply. `\tl_head:N` and `\tl_tail:N` were absent from the
+Script profile, as was their expandable `\exp_args:No` helper. With a variable
+containing `abc`, native emits `a/bc`, while Script stopped at `\tl_head:N`.
+Evidence: `../lambda-input/temp/expl3-script/tl-n-before.ls` and `.out`, plus
+`tl-variants-native.out` for native meanings. The helper must perform exactly
+one expansion and retain token, scope, alias and source-mapping semantics;
+the distinct `:V` variants need separate support. Production remains native.
+
+
+The profile now installs the native-shaped expandable `\exp_args:No`,
+`\tl_head:N` and `\tl_tail:N` macros. The new
+`test/lambda/latex/test_tex_script_expl3_tl_head_tail_n.ls` compares 24 native
+text, message and diagnostic cases, including one-step expansion, scope,
+aliases, meanings and constructor arguments. Existing head/tail guards apply
+to their `:N` forms. The generic helper separately reports `expl3 one-step
+argument source mapping` in direct digestion because an expanded heading can
+carry a different native emission offset. Its guard follows aliases and resets
+on resume. Both backends, focused token-list goldens and sampled forced GC
+pass. Evidence: `../lambda-input/temp/expl3-script/tl-n-final-v2-interp.out`
+and `tl-n-ast-detail.out`. Full direct source mapping remains open.
+
+
+## expl3 token-list head and tail V variants — 2026-11-13
+
+**Status:** PARTIALLY FIXED for qualified values; invalid-variable diagnostics remain open.
+S1.8 and D10.2.2 apply. `\tl_head:V`, `\tl_tail:V`, and their expandable
+`\exp_args:NV` helper were undefined in the Script profile. With a variable
+containing `abc`, native emits `a/bc` while Script stopped at `\tl_head:V`.
+Evidence: `../lambda-input/temp/expl3-script/tl-v-before.ls` and `.out`.
+Unlike `:N`, `:V` uses variable evaluation, including register and invalid
+variable handling; macro meanings, tokens, source mapping and diagnostics
+need qualification. Production remains native.
+
+
+The Script profile now installs native-shaped `\exp_args:NV`, variable
+resolution helpers and `\tl_head:V` / `\tl_tail:V`. The new
+`test/lambda/latex/test_tex_script_expl3_tl_head_tail_v.ls` compares 28 native
+text, message and diagnostic cases, including token lists, explicitly defined
+count/dimension/token registers, aliases, macro meanings and constructor
+arguments. Seven direct AST cases report the existing head/tail or new value
+argument source-mapping guards; the new guard follows aliases and resets on
+resume. Both backends, focused token-list goldens and sampled forced GC pass.
+Evidence: `../lambda-input/temp/expl3-script/tl-v-final-v3-interp.out`.
+
+Invalid variable recovery remains open: `\tl_tail:V\scan_stop:` stops with
+`tex-missing-number` in Script while native reports `tex-macro-mismatch`;
+see `../lambda-input/temp/expl3-script/tl-v-register-final.out`. Named
+registers allocated with `\newcount` and related commands produce different
+allocation messages because the separately recorded expl3 preload allocation
+state is incomplete, although their tested values match.
+
+
+## Noexpand token meaning in ifx — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested comparisons; full variable evaluation
+and malformed-input recovery remain open. S1.8 and D10.2.2 apply.
+For `\def\x{A}\expandafter\ifx\noexpand\x\x T\else F\fi`,
+native emitted `F`, while Script emitted `T`; comparing the protected token with
+`\relax` had the opposite discrepancy. Script `ifx` read the original
+meaning despite its one-use `noexpand` marker. Evidence:
+`../lambda-input/temp/expl3-script/noexpand-ifx.ls` and `.out`. The correction
+must preserve aliases, active tokens, undefined controls, nested conditionals
+and expansion semantics. Production remains native.
+
+
+The Script `\ifx` comparison now treats a one-use `\noexpand` marker as
+`\relax`, while leaving the stored control-sequence meaning unchanged. The
+new `test/lambda/latex/test_tex_script_noexpand_ifx.ls` compares 26 native
+text, message and diagnostic cases and four AST cases, including undefined
+controls, aliases, active tokens, register kinds and nested conditionals. Both execution
+backends, focused conditional/expl3 goldens and sampled forced GC pass.
+Evidence: `../lambda-input/temp/expl3-script/noexpand-ifx-final-interp.out`.
+
+
+## Invalid unless recovery — 2026-11-13
+
+**Status:** OPEN; affects malformed-input recovery and diagnostics, not the
+valid `\noexpand` / `\ifx` comparisons. S1.8 and D10.2.2 apply. For
+`\def\x{A}\unless\expandafter\ifx\noexpand\x\x T\else F\fi`,
+native records `tex-bad-unless` with a location and continues to emit `F`,
+while Script stops with the issue and no diagnostic record. Evidence:
+`../lambda-input/temp/expl3-script/bad-unless-native.out` and
+`noexpand-ifx-cases-interp.out`. The recovery sequence has not been traced.
+Production remains native.
+
+
+## Noexpand marks unexpandable registers — 2026-11-13
+
+**Status:** PARTIALLY FIXED for tested unexpandable register kinds; broader
+variable evaluation and diagnostics remain open. S1.8 and
+D10.2.2 apply. For `\newcount\n\expandafter\ifx\noexpand\n\n T\else F\fi`,
+native emitted `T`, while the earlier staged correction emitted `F`. The Script
+`noexpand` routine marked register controls even though they are unexpandable;
+the staged `ifx` code then interpreted the marker as relax. Dimension and token
+registers reproduce the same issue. Ordinary `\the` register reads match;
+`\exp_args:NV` over these registers fails. Evidence:
+`../lambda-input/temp/expl3-script/noexpand-register-before.out` and
+`tl-v-register-probe.out`. Expansion classification, aliases and register
+kinds need qualification. Production remains native.
+
+
+The corrected classification leaves unexpandable registers and character
+definitions unmarked. Count, dimension, token and glue registers, character
+definitions and ordinary numeric reads match native in both backends; see
+`test/lambda/latex/test_tex_script_noexpand_ifx.ls`.
+
+
+## expl3 token-list dynamic-name head and tail — 2026-11-13
+
+**Status:** PARTIALLY FIXED for qualified dynamic-name values; invalid-name diagnostics remain open.
+S1.8 and D10.2.2 apply. For a token-list variable containing `abc`, native
+emits `a/bc` from its dynamic name, whereas Script stopped at `\tl_head:v`;
+the three macro meanings were undefined. Evidence:
+`../lambda-input/temp/expl3-script/tl-v-lower-before.ls` and `.out`.
+Dynamic control-sequence construction, value evaluation, scope, aliases,
+source mapping and invalid-name diagnostics need qualification. Production
+remains native.
+
+
+The Script profile now installs native-shaped `\exp_args:Nv`, the dynamic
+variable-resolution helper, and `\tl_head:v` / `\tl_tail:v`. The new
+`test/lambda/latex/test_tex_script_expl3_tl_head_tail_v_lower.ls` compares 26
+native text, message and diagnostic cases for expanded names, scoped token
+lists, explicitly defined count/dimension/token registers, aliases, meanings
+and constructor arguments. Seven direct AST cases use the existing head,
+tail or value-argument source-mapping guards, including aliases and resume.
+Both backends, focused existing goldens and sampled forced GC pass. Evidence:
+`../lambda-input/temp/expl3-script/tl-v-lower-v2-interp.out`.
+
+Invalid-name diagnostics share the open variable-evaluation recovery gap.
+Dynamic `\tl_set:cn` assignment remains separately unsupported; it was
+observed while testing this feature (`tl-v-lower-cases-interp.out`).
+
+
+## Protected token-list setter provenance prototype — 2026-11-13
+
+**Status:** STAGED; the macro-backed setter and `\tl_set:cn` wrappers are not
+installed. S1.8 and D10.2.2 apply. A provenance tag on the native-shaped
+`\tl_set:Nn` and `\tl_gset:Nn` macro bodies distinguishes their internal
+unexpanded assignment from token-list insertion. The prototype preserves the
+previously supported direct setter AST and matches the `\tl_set:cn` catcode
+lookahead reproducer, while retaining the insertion guard. Evidence:
+`../lambda-input/temp/expl3-script/tl-set-provenance-probe.out`,
+`tl-set-provenance-cn.out`, and `tl-set-guard-cases-interp.out`. The analogous
+sequence-from-clist wrapper remains unsupported.
+
+This is not ready to install: a setter inside a constructor or generic
+command argument can be executed by direct expansion while native argument
+processing preserves its expansion. The prototype silently differs for
+`\textbf{\tl_set:Nn\l_tmpa_tl{A}}`, optional and required heading
+arguments, and a generic `\foo` argument. A plain standalone group and a
+setter preceding a formatting command match native. Evidence:
+`../lambda-input/temp/expl3-script/tl-set-constructor-ast.ls` and `.out`.
+The underlying constructor-argument source context must be tracked or parsed
+faithfully; a broad guard would reject previously supported cases, while an
+incomplete guard would hide mismatches. A nested macro-definition case is
+explicitly guarded in the prototype and remains subject to the separately
+recorded native source-boundary issue. Production remains native.
+
+
+## expl3 token-list f-expanded head and tail — 2026-11-13
+
+**Status:** OPEN; blocks `\tl_head:f`, `\tl_tail:f`, and `\exp_args:Nf`.
+S1.8 and D10.2.2 apply. For a two-step macro expanding to `abc`, native
+emits `a/bc` from the head and tail, while Script stops at `\tl_head:f`;
+the three macro meanings are undefined. Evidence:
+`../lambda-input/temp/expl3-script/tl-f-before.ls` and `.out`. The `f`
+expansion boundary, spaces, protected controls, token identity, source mapping
+and diagnostics need qualification. Production remains native.

@@ -6,6 +6,8 @@ import v: .schema
 import w: .workspace
 import p: .protocol
 import rules: .workspace_rules
+import c: .core
+import codec: .codec
 
 pub let default_limits = {file_bytes:268435456,scan_bytes:1073741824}
 pub fn limits(current) any^ {
@@ -33,7 +35,9 @@ pub pn observe(root, path, maximum=268435456) any^ {
     return {*:item.source,hash:item.hash}
 }
 pub fn matches(reference, observation) bool^ => reference.size == observation.size and reference.hash == observation.hash
-pn walk(tx, keys, root, prefix, result, config, bounds, previous, depth=0) any^ {
+fn overlaps(path, targets) any^ => targets == null or any([for (target in targets)
+    path == target or starts_with(path,target ++ "/")^ or starts_with(target,path ++ "/")^])
+pn walk(tx, keys, root, prefix, result, config, bounds, previous, depth=0, targets=null, old_members=[]) any^ {
     if (depth > 128) raise error("sync filesystem: depth limit")
     let before = disk.inspect(root,prefix)^
     if (before.kind != 'dir') raise error("sync filesystem: missing directory")
@@ -66,23 +70,52 @@ pn walk(tx, keys, root, prefix, result, config, bounds, previous, depth=0) any^ 
         }
         captured = {*:captured,members:[*captured.members,
             {path:path,type:child.kind,identity:child.identity,token:token,content:reference}]}
-        if (child.kind == 'dir') { captured = walk(tx,keys,root,path,captured,config,bounds,previous,depth+1)^ }
+        if (child.kind == 'dir') {
+            let old = previous[path]
+            if (not overlaps(path,targets)^ and old != null and old.type == 'dir' and
+                old.identity == child.identity and old.token == child.token) {
+                // A stable unhinted subtree keeps its accepted observations; verification scans audit it.
+                let retained = [for (member in old_members where starts_with(member.path,path ++ "/")^)
+                    {path:member.path,type:member.type,identity:member.identity,token:member.token,content:member.content}]
+                let bytes = sum([for (member in retained where member.type == 'file') member.content.size])
+                if (len(captured.members)^+len(retained)^ > 10000 or bytes > bounds.scan_bytes-captured.bytes or
+                    any([for (member in retained where member.type == 'file') member.content.size > bounds.file_bytes]))
+                    raise error("sync filesystem: capture limit")
+                captured = {members:[*captured.members,*retained],bytes:captured.bytes+bytes}
+            } else {
+                captured = walk(tx,keys,root,path,captured,config,bounds,previous,depth+1,targets,old_members)^
+            }
+        }
         i = i+1
     }
     if (disk.inspect(root,prefix)^.token != before.token) raise error("sync filesystem: directory changed during scan")
     return captured
 }
 
-pub pn capture(tx, keys, current) any^ {
+pn capture_selected(tx, keys, current, targets, verify=false) any^ {
     let root = disk.inspect(current.root,"")^
     if (root.kind != 'dir' or root.identity != current.root_identity)
         raise error("sync filesystem: working root missing or replaced")
-    let result = walk(tx,keys,current.root,"",{members:[],bytes:0},current.chunker,limits(current)^,map([for (member in current.disk) (member.path,member)]))^
+    // Notifications invalidate content even when an external writer preserves size/mtime.
+    let cached = map([for (member in current.disk where not verify and
+        not (targets != null and member.type == 'file' and overlaps(member.path,targets)^)) (member.path,member)])
+    let result = walk(tx,keys,current.root,"",{members:[],bytes:0},current.chunker,limits(current)^,
+        cached,0,targets,current.disk)^
     let members = sort(result.members,(member)=>member.path)^
     if (len(unique([for (member in members) lower(member.path)^])) != len(members))
         raise error("sync filesystem: ambiguous portable path spelling")
     if (disk.inspect(current.root,"")^.token != root.token) raise error("sync filesystem: root changed during scan")
     return {*:result,members:members,id:cap.capture_id(members)^}
+}
+pub pn capture(tx, keys, current, verify=false) any^ { return capture_selected(tx,keys,current,null,verify)^ }
+pub pn capture_paths(tx, keys, current, paths) any^ {
+    if (not (paths is array) or len(paths)^ > 256) raise error("sync filesystem: invalid notification batch")
+    for (path in paths) {
+        if (not (path is string) or len(path)^ > 4096 or
+            not all([for (part in split(path,"/")^) rules.component(part)^]))
+            raise error("sync filesystem: unsafe notification path")
+    }
+    return capture_selected(tx,keys,current,if (len(paths)^ == 0) null else unique(paths))^
 }
 
 fn hints(previous, captured) any^ {
@@ -99,6 +132,25 @@ fn hints(previous, captured) any^ {
     return result
 }
 
+fn merge_capture(endpoint, branch, actor) any^ {
+    var merged = endpoint
+    var rounds = 0
+    // The branch was authored from the validated disk base. Apply its atomic deltas
+    // instead of validating and unioning the entire historical replica again.
+    while (not c.dominates(merged.replica.clock,branch.replica.clock)^) {
+        if (rounds >= 10000) raise error("sync filesystem: capture transaction budget")
+        let packet = p.next(branch,w.have(merged)^)^
+        if (packet.kind != 'transaction' and packet.kind != 'updates') { return p.join_branch(endpoint,branch)^ }
+        merged = p.accept(merged,codec.encode(packet)^,{actors:[actor],checkpoints:[]})^
+        rounds = rounds+1
+    }
+    let floor = c.clock_join(merged.replica.floor,branch.replica.floor)
+    let replica = {*:merged.replica,floor:floor,
+        log:[for (op in merged.replica.log where not c.covered(floor,op.id)^) op]}
+    return {*:merged,replica:replica,journal:[for (group in merged.journal where
+        not c.dominates(floor,group.frontier)^) group]}
+}
+
 pub fn reconciled(current, captured, actor, documents=[], saved_at=null) any^ {
     if (current.installation != null) raise error("sync filesystem: installation must finish before scanning")
     if (len(documents) == 0 and current.review == null and captured.id == current.base.capture and
@@ -110,7 +162,7 @@ pub fn reconciled(current, captured, actor, documents=[], saved_at=null) any^ {
     if (imported is error) {
         return {*:current,serial:current.serial+1,review:{capture:captured,reason:imported.message}}
     }
-    let endpoint = p.join_branch(current.endpoint,imported.endpoint)^
+    let endpoint = merge_capture(current.endpoint,imported.endpoint,actor)^
     let members = [for (member in captured.members) {*:member,id:cap.association(imported.members,member.path)^.id}]
     return {*:current,serial:current.serial+1,endpoint:endpoint,
         base:cap.baseline(imported.endpoint.replica,imported.members,captured.id)^,disk:members,review:null}

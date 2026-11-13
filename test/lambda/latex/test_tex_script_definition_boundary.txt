@@ -1,0 +1,183 @@
+[{
+    body: "\\def\\envname{x}\\renewenvironment{\\envname}{A}{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}\\count0=4 X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}\\newenvironment{\\envname}{A}{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}\\newcommand{\\q}{Y}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}\\let\\q=\\relax X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}\\relax X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}\\iftrue\\else Y\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}  X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\envname{x}%a\nX",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newcommand{\\q}{A}\\count0=4 X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4\\textbf{X}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4\\section{T}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4\\begin{quote}X\\end{quote}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4\\q",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4\\char65",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4\\def\\r{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4 X\\q",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4\\relax  X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}{A}{B}\\count0=4 X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}[1]{A#1}{B}\\count0=4 X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4 $x$",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4 {X}",
+    issue: "latex-digest-unsupported",
+    unsupported: "definition following group source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4 \\emph{X}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4 \\def\\r{B}\\relax X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\q{A}\\count0=4 \\par X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }]

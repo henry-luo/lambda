@@ -14,9 +14,10 @@ fn schema(value, profile=null) any^ {
     return true
 }
 
-fn message(replica, model, kind, body) => {protocol:"lambda-crdt",version:1,codec:codec.version,
-    document:replica.document,profile:replica.profile,epoch:replica.epoch,schema:model,
-    root:replica.nodes[0],kind:kind,body:body}
+fn envelope(document:any, profile:any, epoch:any, model:any, root:any, kind:any, body:any) => {protocol:"lambda-crdt",version:1,codec:codec.version,
+    document:document,profile:profile,epoch:epoch,schema:model,root:root,kind:kind,body:body}
+fn message(replica, model, kind, body) => envelope(replica.document,replica.profile,replica.epoch,
+    model,replica.nodes[0],kind,body)
 
 fn header(replica, model, packet, same_epoch=true) any^ {
     v.fields(packet,["protocol","version","codec","document","profile","epoch","schema","root","kind","body"])^
@@ -31,6 +32,13 @@ fn header(replica, model, packet, same_epoch=true) any^ {
 pub fn have(replica, model=default_schema) any^ {
     schema(model,replica.profile)^
     return message(replica,model,'have',{clock:replica.clock,floor:replica.floor})
+}
+pub fn have_frontier(document, profile, epoch, model, root, clock) any^ {
+    schema(model,profile)^
+    v.clock(clock)^
+    if (not v.actor(document)^ or not v.natural(epoch)^ or not v.id(root.id,true)^)
+        raise error("sync protocol: invalid frontier header")
+    return envelope(document,profile,epoch,model,root,'have',{clock:clock,floor:[]})
 }
 
 fn have_body(packet) any^ {
@@ -216,7 +224,10 @@ fn receive_transaction(endpoint, packet, admission, max_bytes) any^ {
 }
 
 pub fn transaction(before, after, model=default_schema, max_bytes=8388608) any^ {
-    let packet = message(after,model,'transaction',change.batch(before,after)^)
+    return transaction_frame(after,change.batch(before,after)^,model,max_bytes)^
+}
+pub fn transaction_frame(replica, body, model=default_schema, max_bytes=8388608) any^ {
+    let packet = message(replica,model,'transaction',body)
     if (len(binary(codec.encode(packet)^))^ > max_bytes) raise error("sync protocol: transaction size limit")
     return packet
 }
@@ -246,12 +257,13 @@ pub fn accept(endpoint, encoded, admission, max_bytes=8388608) any^ {
 pub fn cancel_transfer(endpoint, digest) => {*:endpoint,
     transfers:[for (item in endpoint.transfers where item.id != digest) item]}
 
-pub fn local_change(endpoint, actor, commands, max_bytes=8388608) any^ {
-    let edited = change.transaction(endpoint.replica,actor,commands)^
+pub fn local_change(endpoint, actor, commands, max_bytes=8388608, retain_undo=true) any^ {
+    let edited = change.transaction(endpoint.replica,actor,commands,retain_undo)^
     if (len(edited.batch.operations) > 1024) raise error("sync protocol: transaction operation limit")
     let journal = if (len(edited.batch.operations) == 0) endpoint.journal else
         sort([*endpoint.journal,edited.batch],(tx)=>tx.id)^
-    return {endpoint:bounded({*:endpoint,replica:edited.replica,journal:journal},max_bytes)^,undo:edited.undo}
+    return {endpoint:bounded({*:endpoint,replica:edited.replica,journal:journal},max_bytes)^,undo:edited.undo,
+        *:if (retain_undo) {} else {batch:edited.batch}}
 }
 
 // endpoints relay the original atomic groups until a checkpoint covers them.
@@ -345,8 +357,13 @@ pub fn fresh_writer(endpoint, actor) any^ => v.actor(actor)^ and
         any([for (tx in old.transactions) for (op in tx.operations) op.id[0] == actor])])
 
 pub fn validate_endpoint(endpoint, max_bytes=8388608) any^ {
-    v.fields(endpoint,["replica","schema","transfers","transactions","journal","received","recoveries","local","cloud","peers"])^
     c.validate(endpoint.replica)^
+    return validate_endpoint_fields(endpoint,max_bytes)^
+}
+
+// The local owner separately validates or fingerprints the immutable replica.
+pub fn validate_endpoint_fields(endpoint, max_bytes=8388608) any^ {
+    v.fields(endpoint,["replica","schema","transfers","transactions","journal","received","recoveries","local","cloud","peers"])^
     schema(endpoint.schema,endpoint.replica.profile)^
     validate_frontier(endpoint.replica,endpoint.local)^
     validate_frontier(endpoint.replica,endpoint.cloud)^

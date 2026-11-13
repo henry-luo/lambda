@@ -121,7 +121,7 @@ edit remains pending even when an older captured frontier was cloud-saved.
 The service has S3 credentials and signed public membership records. It never
 receives repository encryption keys, wrapping keys or decrypted checkpoints.
 
-1. A request is an Ed25519-signed typed envelope binding protocol version, space,
+1. A request is an P-256/SHA-256-signed typed envelope binding protocol version, space,
    device, operation/body, fresh nonce and millisecond issue time. The function
    requires current authorization and a clock difference of at most five minutes.
    Nonces do not imply a server replay cache. A repeated request rechecks current

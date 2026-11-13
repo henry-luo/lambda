@@ -15,6 +15,9 @@ CONFIG = ROOT / 'build_deps_config.json'
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'libdatachannel':
+        from prepare_sync_connectivity import configure_mbedtls
+        configure_mbedtls()
     build_main(ROOT, CONFIG, sibling_roots()[0])
 
 

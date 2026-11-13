@@ -1,0 +1,186 @@
+[{
+    body: "\\begin{equation}x+y\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation*} x^2 \\end{equation*}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{align}x&=y\\\\ z&=w\\end{align}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{align*}  x+y \n\\end{align*}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}\\frac{a}{b}\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "A\\begin{equation} x \\end{equation}B",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}\\left(x+y\\right)\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{align}a&<b\\\\c&>d\\end{align}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}\\subseteq + .5\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation} a% comment\n+b \\end{equation}",
+    issue: "latex-digest-unsupported",
+    unsupported: "math environment source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\m{x}\\begin{equation}\\m+1\\end{equation}",
+    issue: "latex-digest-unsupported",
+    unsupported: "math environment source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\textbf{A\\begin{equation}x\\end{equation}B}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation} a \r\n b \\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{align}a\\cr b\\end{align}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}a&b\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}\\emptyset\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{align}\\begin{split}x+y\\end{split}\\end{align}",
+    issue: "latex-digest-unsupported",
+    unsupported: "math command begin",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{align}x\\tag{1}\\end{align}",
+    issue: "latex-digest-unsupported",
+    unsupported: "math command tag",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}[x]\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}a\\relax b\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}a\\ignorespaces  b\\end{equation}",
+    issue: "tex-unsupported-primitive",
+    unsupported: "ignorespaces",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}a{}b\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}a\\hskip1pt b\\end{equation}",
+    issue: "latex-digest-unsupported",
+    unsupported: "math environment source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{equation}a\\global\\count0=3 b\\end{equation}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\e{equation}\\begin{\\e}x\\end{equation}",
+    issue: "latex-digest-unsupported",
+    unsupported: "environment",
+    matches: null,
+    actual: null,
+    native: null
+  }]
+{
+  spaced_end_guarded: true
+}

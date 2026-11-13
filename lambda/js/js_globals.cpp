@@ -3381,7 +3381,7 @@ extern "C" Item js_process_binding(Item name) {
     // process.binding('config') — return config object
     if (s->len == 6 && memcmp(s->chars, "config", 6) == 0) {
         Item cfg = js_new_object();
-        js_set_key_cstr(cfg, "hasOpenSSL", (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(cfg, "hasOpenSSL", (Item){.item = ITEM_FALSE});
         js_set_key_cstr(cfg, "hasCrypto", (Item){.item = ITEM_TRUE});
         js_set_key_cstr(cfg, "fipsMode", (Item){.item = ITEM_FALSE});
         return cfg;
@@ -3512,9 +3512,7 @@ static Item build_process_versions(void) {
     js_set_key_cstr(versions_root.get(), "v8", make_string_item("0.0.0"));
     js_set_key_cstr(versions_root.get(), "uv", make_string_item("1.0.0"));
     js_set_key_cstr(versions_root.get(), "modules", make_string_item("115"));
-    // LambdaJS exposes crypto compatibility APIs backed by mbedTLS, not full
-    // OpenSSL 3 provider/FIPS/RSA-keygen semantics.
-    js_set_key_cstr(versions_root.get(), "openssl", make_string_item("1.1.1"));
+    // crypto uses mbedTLS; advertising an OpenSSL version would promise a removed provider.
     js_set_key_cstr(versions_root.get(), "zlib", make_string_item("1.3.0"));
     js_set_key_cstr(versions_root.get(), "napi", make_string_item("9"));
     return versions_root.get();

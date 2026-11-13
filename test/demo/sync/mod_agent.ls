@@ -102,6 +102,6 @@ pub pn run(paths, key, notify, options={}) any^ {
     if (saved == null) raise error("Create a sync folder or link this device first.")
     notify({type:"running",user:saved.user,folder:saved.folder})^
     return connectivity.run(profile.directory(paths,saved.user)^,key,null,
-        {*:{mdns:true,rtc:false,interval_ms:1000},*:options},
+        {*:{mdns:true,rtc:false},*:options},
         pn (status)=> { notify({type:"status",status:status})^ })^
 }

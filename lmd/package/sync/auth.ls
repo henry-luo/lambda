@@ -2,12 +2,14 @@
 import c: .core
 import v: .schema
 import codec: .codec
+import identity: .peer_identity
 
-pub fn operation_bytes(op) any^ => codec.encode(["lambda-crdt-operation-1",c.stamp(op)^])^
-pub fn transaction_bytes(packet) any^ => codec.encode(["lambda-crdt-transaction-1",
+pub fn operation_bytes(op) any^ => codec.encode(["lambda-crdt-operation-p256-1",c.stamp(op)^])^
+pub fn transaction_bytes(packet) any^ => codec.encode(["lambda-crdt-transaction-p256-1",
     packet.document,packet.profile,packet.epoch,packet.schema,packet.root,packet.body])^
-pub fn checkpoint_bytes(packet, digest) any^ => codec.encode(["lambda-crdt-checkpoint-1",
+pub fn checkpoint_bytes(packet, digest) any^ => codec.encode(["lambda-crdt-checkpoint-p256-1",
     packet.document,packet.profile,packet.epoch,packet.schema,packet.root,digest])^
+pub fn checkpoint_delta_bytes(packet) any^ => codec.encode(["lambda-crdt-checkpoint-delta-p256-1",packet])^
 
 fn grant(grants, actor, packet, permission) any^ {
     let matches = [for (entry in grants where entry.actor == actor and entry.document == packet.document and
@@ -15,7 +17,7 @@ fn grant(grants, actor, packet, permission) any^ {
         contains(entry.permissions,permission)^) entry]
     if (len(matches) != 1) raise error("sync auth: missing or ambiguous grant")
     let key = matches[0].public_key
-    if (not (key is binary) or len(key) != 32) raise error("sync auth: invalid Ed25519 public key")
+    if (not identity.signing_key(key)) raise error("sync auth: invalid P-256 public key")
     return key
 }
 
@@ -26,8 +28,18 @@ fn verify(proofs, id, kind, payload, packet, grants, permission) any^ {
     if (proof.kind != kind or not v.actor(proof.actor)^ or not (proof.signature is binary) or len(proof.signature) != 64)
         raise error("sync auth: invalid proof")
     let key = grant(grants,proof.actor,packet,permission)^
-    if (not verify_signature(key,payload,proof.signature,'ed25519')^) raise error("sync auth: invalid signature")
+    if (not verify_signature(key,payload,proof.signature,identity.signing_scheme)^) raise error("sync auth: invalid signature")
     return proof.actor
+}
+
+// A full-space checkpoint authority can attest relayed deltas, without claiming
+// that the original operation authors signed them with the authority's key.
+pub fn checkpoint_delta_admission(packet, proof, grants) any^ {
+    if (not contains(['transaction','updates'],packet.kind)^ or not (packet.body.operations is array) or
+        len(packet.body.operations)^ > 1024) raise error("sync auth: invalid checkpoint delta")
+    let digest = codec.digest(packet)^
+    verify([proof],digest,'checkpoint_delta',checkpoint_delta_bytes(packet)^,packet,grants,'checkpoint')^
+    return {actors:unique([for (op in packet.body.operations) op.id[0]])^,checkpoints:[]}
 }
 
 // hosts supply current grants; encrypted transports/repositories carry proofs with packets.

@@ -13,7 +13,7 @@ pub let revision = rules.revision
 
 pub fn empty(id) => c.empty(id,'workspace','workspace',null)
 pub fn start(id) any^ => p.start(empty(id),model)^
-pub fn transact(endpoint, actor, commands) any^ => p.local_change(endpoint,actor,commands)^
+pub fn transact(endpoint, actor, commands, retain_undo=true) any^ => p.local_change(endpoint,actor,commands,8388608,retain_undo)^
 pub fn have(endpoint) any^ => p.have(endpoint.replica,model)^
 
 pub fn read(replica) any^ {

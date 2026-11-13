@@ -34,6 +34,43 @@ The separate timeout/cleanup crash [LR01-24](#lr01-24) remains open. The
 workspace member-access observation below retains its original probe; its
 semantics and cause remain unconfirmed. Those two earlier archived records add no live issues.
 
+## Node KeyObject native GC ownership — 2026-11-13
+
+**Status:** FIXED and verified, 2026-11-13. **D6.3.3**
+requires slot-backed roots for native temporaries; conservative stack scanning
+remains retired. `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js
+test/js/crypto_mbed_only.js --no-log` loses native P-256 KeyObject material and
+reports an invalid `key` object after the digest checks. Ordinary mode passes.
+The KeyObject factories leave the new typed-array bytes and wrapper in unrooted
+C++ locals while constructor linking, property allocation and RSA details can
+collect. RSA pair construction also leaves the private wrapper unrooted during
+public-wrapper creation. These native lifetime paths predate OpenSSL removal;
+no old fallback or vendor modification is needed to reproduce the ownership gap.
+
+The fix roots backing bytes, wrappers, details, method keys, one-shot operation
+objects and key-pair results through `RootFrame` / `Rooted`. Signature results
+also stay rooted while stream-context cleanup allocates. Final verification:
+576/576 JS tests; both crypto fixtures under forced GC/poison; three ordinary
+and three forced-GC direct profile runs. Evidence and final qualification are tracked in
+[the migration plan](<impl/Lambda_Impl_MbedCrypto_Only (done).md>) and
+`temp/mbedcrypto-only/node-mbed-only-gc.out/.err`. No test limits or goldens are
+changed to hide the failure.
+
+## mbedCrypto migration qualification — 2026-11-13
+
+The native P-256 migration passes 7,473/7,473 Lambda baseline checks and the
+standalone authenticated peer, DataChannel and LAN demo process gates. One
+AUTO peer rerun during the concurrent aggregate received SIGKILL while starting
+`28-serve` after intentional interruption/recovery (`returncode=-9`, empty
+stdout/stderr). No native diagnostic established the cause. The unchanged
+standalone retry passed every peer check after the aggregate finished; resource
+contention is a hypothesis, not a root cause or a fixed runtime defect.
+Evidence: `temp/mbedcrypto-only/peer-process-final.log`, `peer-standalone.log`,
+`lambda-baseline-summary.json`; identities and limits are in the
+[implementation checkpoint](<impl/Lambda_Impl_MbedCrypto_Only (done).md>). Existing
+SIGKILL residue, [LR01-24](#lr01-24) and sibling LI-015 remain separate. No test
+limits, goldens or runtime code were changed to suppress the failure.
+
 ## Recovery/scale integration findings — 2026-11-12
 
 <a id="sync-recovery-scale-safety"></a>
@@ -2213,6 +2250,15 @@ Production front end: **D8.1.1**. The allocation owner and cause are
 **unconfirmed**. This does not block valid sync demo execution or qualification;
 no compiler workaround or diagnostic suppression was added. Evidence:
 `temp/sync-demo/invalid-view.log`, `invalid-view-run.log`, `ui-ast.log`.
+
+**Rechecked 2026-11-13:** `e5d5e848e` plus the LAN event work also leaks on
+a rejected imported module without a view. `_invalid_module.ls` contains
+`pub pn invalid() { if (true) return 1 }`; `_invalid_import.ls` imports it.
+Running `./lambda.exe --no-log --emit-ast-dump temp/sync-lan-events/_invalid_import.ls`
+correctly rejects the unbraced return with E100, then reports **two system
+allocations / 262 bytes**. Evidence: `temp/sync-lan-events/invalid-ast-cleanup.log`.
+This broadens the reproduction; allocation ownership/cause remain unconfirmed.
+Valid LAN execution and qualification are not blocked.
 
 ## Online canvas WebGL1 context profile — 2026-11-13
 

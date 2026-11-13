@@ -67,7 +67,7 @@ text.read(received.replica)^
 ```
 
 Result: `Hello!`. Real host code can use `auth.admission(message, proofs, grants)`
-to verify original Ed25519 authorship and obtain the admission record. Never
+to verify original P-256/SHA-256 authorship and obtain the admission record. Never
 construct that record solely from an unverified relay's claimed actor IDs.
 Checkpoint admission names the exact authorized digest.
 
@@ -293,3 +293,7 @@ are documented [separately](LOCAL_REPOSITORY.md). Native ZIP
 capture/output is reused through its existing public API. No native
 CRDT runtime, upstream wire compatibility, transferred formal proof, or production
 performance claim is implied.
+
+The native cryptographic suite is mbedCrypto only; identity version 2 requires
+new P-256 device pairing. See [crypto-suite transition](PEER.md#crypto-suite-transition)
+for preserving legacy credentials, repositories and cloud history.
