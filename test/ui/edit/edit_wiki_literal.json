@@ -1,0 +1,19 @@
+{
+  "name": "edit and save literal MediaWiki syntax",
+  "command": "edit",
+  "html": "test/ui/edit/sample-wiki-literal.wiki",
+  "working_copy": "temp/edit-ui/edit_wiki_literal.wiki",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-surface p"}, "contains": "[[link]]"},
+    {"type": "assert_count", "target": {"selector": ".edit-surface a"}, "count": 0},
+    {"type": "click", "target": {"selector": ".edit-surface p"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_wiki_literal.wiki", "contains": "[[link]]"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_wiki_literal.wiki", "contains": "More!"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

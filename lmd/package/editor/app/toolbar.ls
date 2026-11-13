@@ -31,14 +31,14 @@ fn mark_button(cmd, label, title, input_type, mark) =>
    payload: {mark: mark, value: true}, mark: mark}
 
 let block_group = [
-  block_button('p', "P", "Paragraph"),
-  block_button('h1', "H1", "Heading 1"),
-  block_button('h2', "H2", "Heading 2"),
-  block_button('h3', "H3", "Heading 3")
+  block_button('p', "P", "Paragraph (Cmd/Ctrl+Alt+0)"),
+  block_button('h1', "H1", "Heading 1 (Cmd/Ctrl+Alt+1)"),
+  block_button('h2', "H2", "Heading 2 (Cmd/Ctrl+Alt+2)"),
+  block_button('h3', "H3", "Heading 3 (Cmd/Ctrl+Alt+3)")
 ]
 
 let insert_group = [
-  {cmd: "link", label: "Link", title: "Insert link", dialog: 'link', input_type: "insertLink"},
+  {cmd: "link", label: "Link", title: "Insert link (Cmd/Ctrl+K)", dialog: 'link', input_type: "insertLink"},
   {cmd: "image", label: "Image", title: "Insert image", dialog: 'image', input_type: "insertImage"},
   {cmd: "codeblock", label: "Code block", title: "Code block", input_type: "insertCodeBlock", payload: {data: ""}, block: 'pre'},
   {cmd: "rule", label: "Rule", title: "Horizontal rule", input_type: "insertHorizontalRule", payload: {}}
@@ -55,8 +55,8 @@ pub let table_menu = [
 ]
 
 let structure_group = [
-  {cmd: "ul", label: "List", title: "Bulleted list", input_type: "insertUnorderedList", payload: {kind: 'bullet'}, inside: 'ul'},
-  {cmd: "ol", label: "1. List", title: "Numbered list", input_type: "insertOrderedList", payload: {kind: 'ordered'}, inside: 'ol'},
+  {cmd: "ul", label: "List", title: "Bulleted list (Cmd/Ctrl+Shift+8)", input_type: "insertUnorderedList", payload: {kind: 'bullet'}, inside: 'ul'},
+  {cmd: "ol", label: "1. List", title: "Numbered list (Cmd/Ctrl+Shift+7)", input_type: "insertOrderedList", payload: {kind: 'ordered'}, inside: 'ol'},
   {cmd: "indent", label: "Indent", title: "Indent list item (Tab)", input_type: "formatIndent", payload: {}},
   {cmd: "outdent", label: "Outdent", title: "Outdent list item (Shift+Tab)", input_type: "formatOutdent", payload: {}},
   {cmd: "quote", label: "Quote", title: "Block quote", input_type: "formatBlockquote", payload: {},
@@ -70,8 +70,8 @@ fn mark_group(underline) {
   ]
   let under = if (underline) [mark_button("underline", "U", "Underline (Cmd/Ctrl+U)", "formatUnderline", 'u')] else []
   let rest = [
-    mark_button("strike", "S", "Strikethrough", "modelToggleMark", 'del'),
-    mark_button("code", "Code", "Inline code", "modelToggleMark", 'code')
+    mark_button("strike", "S", "Strikethrough (Cmd/Ctrl+Shift+X)", "modelToggleMark", 'del'),
+    mark_button("code", "Code", "Inline code (Cmd/Ctrl+E)", "modelToggleMark", 'code')
   ];
   [*base, *under, *rest]
 }

@@ -729,8 +729,9 @@ let document = rtf.parse_file("report.rtf")^  // or rtf.parse(source_text)^
 Pass `{preserve_empty: true}` as the second argument to `parse` or
 `parse_grammar` to retain explicitly terminated empty paragraphs. The default
 omits them for compatibility with the former native reader.
-`parse_details(source, options)` returns the document and the parsed final
-font style; the editor uses it for documents with a single document-wide font.
+`parse_details(source, options)` returns the document, font and color tables,
+and the final font style. Its optional `editor_runs` flag adds font IDs and
+sizes to spans so the editor can retain ordinary per-run font changes.
 
 The supported subset includes nested formatting, font and color tables, paragraph alignment and indents, Windows-1252 hex escapes, named punctuation, Unicode fallback, page breaks, and table separators. Headers, footers, pictures, objects, metadata, and other non-body destinations are skipped. This is not a complete RTF implementation: other code pages, embedded media, and full table layout are not supported. The script parser rejects nesting of 512 groups or more. The native RTF input parser has been removed; use this package for RTF content. The document viewer uses the direct script reader.
 

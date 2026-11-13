@@ -77,8 +77,12 @@ fn heading(node,context) map^ {
     let level = int(c.get(node,"level",slice(c.tag(node),1,2)))
     let body = children(node,context)^;
     if (level == null or level < 1 or level > 6) raise c.fail("heading level must be 1..6")
-    else if (context.type == "man") c.result((if (level == 1) ".SH\n" else ".SS\n") ++ body.text ++ "\n",body.diagnostics ++
-        if (level > 2) [c.issue("heading-depth",node,"man has two section heading levels")] else [])
+    else if (context.type == "man") {
+        // A heading is a single quoted macro argument, not a following text line.
+        let title = replace(c.single_line(body.text,"man heading")^,"\"","\\(dq")
+        c.result((if (level == 1) ".SH \"" else ".SS \"") ++ title ++ "\"\n",body.diagnostics ++
+            if (level > 2) [c.issue("heading-depth",node,"man has two section heading levels")] else [])
+    }
     else if (context.type == "asciidoc") c.result(c.times("=",min(6,level+1)) ++ " " ++ body.text ++ "\n\n",body.diagnostics ++
         if (level > 5) [c.issue("heading-depth",node,"AsciiDoc has five body section levels; the document title is separate")] else [])
     else c.result(c.times("=",level) ++ " " ++ body.text ++ "\n\n",body.diagnostics)

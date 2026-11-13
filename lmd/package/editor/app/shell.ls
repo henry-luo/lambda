@@ -65,7 +65,7 @@ fn dialog_view(dialog, session) any^ {
   else if (member(files.dialog_kinds, dialog.kind)) files.dialog_view(dialog, session)
   else if (dialog.kind == 'link') {
     files.dialog_frame("link", "Insert link", "Link the selection (or insert the address).",
-      [files.field("edit-dialog-href", "", "https://")],
+      [files.field("edit-dialog-href", "", "https://", true)],
       [files.dialog_button("cancel", "Cancel", false), files.dialog_button("link_ok", "Insert", true)])
   }
   else if (dialog.kind == 'style') {
@@ -146,9 +146,36 @@ fn deleted_part(session, doc, selection, input_type) any^ {
 
 let view_only_status = "This part is view-only and is saved as written; press Delete to remove it."
 
+fn command_problem(session, editor, item) any^ =>
+  if (item == null or not tools.command_supported(item, session.format.unsupported_input_types, session.format.allowed_model_marks)^)
+    "Not available in " ++ session.format.name ++ " documents."
+  else if (writes_view_only(session, editor.doc, editor.selection, item.input_type)) view_only_status
+  else null
+
 fn primary_key(evt) => evt.metaKey == true or evt.ctrlKey == true
 
 fn key_is(evt, letter) any^ => lower(string(evt.key)) == letter
+
+fn keyboard_format_command(evt) =>
+  if (not primary_key(evt)) null
+  else if (evt.shiftKey == true and evt.altKey != true) {
+    if (evt.key in ["7", "&"]) "ol" else if (evt.key in ["8", "*"]) "ul"
+    else if (key_is(evt, "x") ^ { false }) "strike" else null
+  }
+  else if (evt.shiftKey == true) null
+  else if (evt.altKey == true) {
+    if (evt.key == "0") "p" else if (evt.key == "1") "h1" else if (evt.key == "2") "h2"
+    else if (evt.key == "3") "h3" else null
+  }
+  else if (key_is(evt, "k") ^ { false }) "link"
+  else if (key_is(evt, "e") ^ { false }) "code" else null
+
+// Toolbar and keyboard commands share model dispatch and status handling.
+pn apply_format_item(editor, item) {
+  let input_type = if (item.lift != null and edit_inside(editor, item.inside)) item.lift else item.input_type
+  let run = run_request(editor, input_type, item.payload)
+  {editor: run.editor, status: if (run.result.failure == null) "" else "Could not apply " ++ item.title ++ "."}
+}
 
 // ---------------------------------------------------------------------------
 // Drawing input: drawing.ls owns the model edits; these read the rendered
@@ -227,6 +254,11 @@ fn format_groups(session) any^ =>
   if (is_drawing(session)) tools.drawing_groups()
   else tools.rich_text_groups(session.format.underline == true, session.format.unsupported_input_types,
                               session.format.allowed_model_marks)
+
+pn insert_dialog_link(editor, target) {
+  let href = trim(files.field_value(target, "edit-dialog-href"))
+  if (href == "") editor else run_request(editor, "insertLink", {href: href, title: "", label: href}).editor
+}
 
 fn surface_of(session, editor, ds) any =>
   if (is_drawing(session)) dr.surface(editor.doc, ds)
@@ -360,17 +392,12 @@ on edit_cmd(req) {
     let item = if (cmd == "undo" or cmd == "redo") tools.find_item([tools.file_group], cmd)
                else tools.find_item([*format_groups(session), tools.table_insert, tools.table_menu], cmd)
     if (item == null) { status = "Unknown command " ++ cmd ++ "." }
-    else if (not tools.command_supported(item, session.format.unsupported_input_types, session.format.allowed_model_marks)) { status = "Not available in " ++ session.format.name ++ " documents." }
-    else if (writes_view_only(session, editor.doc, editor.selection, item.input_type)) { status = view_only_status }
+    else if (command_problem(session, editor, item)^ != null) { status = command_problem(session, editor, item)^ }
     else if (item.dialog != null) { dialog = {kind: item.dialog} }
     else {
-      // quote toggles: lift when the selection is already quoted
-      let input_type = if (item.lift != null and edit_inside(editor, item.inside)) item.lift
-                       else item.input_type
-      let run = run_request(editor, input_type, item.payload)
-      editor = run.editor
-      if ((not (run.result.failure is null))^) { status = "Could not apply " ++ item.title ++ "." }
-      else { status = "" }
+      let result = apply_format_item(editor, item)
+      editor = result.editor
+      status = result.status
       files.sync_window(req.node, session, editor.doc)^
       if (starts_with(cmd, "table_")^) {
         // Menu activation must return typing to the retained document selection.
@@ -428,11 +455,10 @@ on edit_dialog(req) {
     }
   }
   else if (action == "link_ok") {
-    let href = trim(files.field_value(req.node, "edit-dialog-href"))
+    let next = insert_dialog_link(editor, req.node)
     dialog = null
-    if (href != "") {
-      let run = run_request(editor, "insertLink", {href: href, title: "", label: href})
-      editor = run.editor
+    if ((next != editor)^) {
+      editor = next
       edited = true
       files.sync_window(req.node, session, editor.doc)^
     }
@@ -456,11 +482,65 @@ on edit_dialog(req) {
   }
 }
 on keydown(evt) {
+  if ((dialog != null and dialog.kind == 'link' and evt.key == "Enter" and
+       dom.matches(evt.target, "#edit-dialog-href"))^) {
+    editor = insert_dialog_link(editor, evt.target)
+    dialog = null
+    files.sync_window(evt.target, session, editor.doc)^
+    files.focus_surface(evt.target)^
+    controller.restore(editor)^
+    return 'prevent-default'
+  }
   if ((evt.key == "Escape" and table_menu != null)^) {
     table_menu = null
     controller.restore(editor)^
     controller.focus(evt.target)^
     return 'prevent-default'
+  }
+  let format_command = keyboard_format_command(evt)
+  if ((dialog == null and not is_drawing(session) and format_command != null)^) {
+    let host = controller.surface(evt.target)
+    if ((host != null and dom.contains(host, evt.target))^) {
+      let selected = controller.adopt(editor, evt, session.format.schema_preset)
+      editor = selected.editor
+      let item = tools.find_item(format_groups(session), format_command)
+      let problem = command_problem(session, editor, item)^
+      if (problem != null) { status = problem }
+      else if ((item.dialog != null)^) {
+        dialog = {kind: item.dialog}
+        // Release the editing host so the new dialog field can autofocus.
+        dom.clear_editing_focus(host)
+      }
+      else {
+        let result = apply_format_item(editor, item)
+        editor = result.editor
+        status = result.status
+        files.sync_window(evt.target, session, editor.doc)^
+        controller.restore(editor)^
+      }
+      return 'prevent-default'
+    }
+  }
+  if ((dialog == null and session.format.align_paragraphs != null and primary_key(evt) and evt.shiftKey == true and
+       lower(string(evt.key)) in ["l", "e", "r", "j"])^) {
+    let host = controller.surface(evt.target)
+    if ((host != null and dom.contains(host, evt.target))^) {
+      let selected = controller.adopt(editor, evt, session.format.schema_preset)
+      let key = lower(string(evt.key))
+      let align = if (key == "l") "left" else if (key == "e") "center" else if (key == "r") "right" else "justify"
+      let tx = session.format.align_paragraphs(selected.editor, align)^
+      if (tx != null) {
+        let problem = session.format.check_roundtrip(tx.doc_after, session.envelope)
+        if ((problem != null)^) { status = problem }
+        else {
+          editor = apply_edit(selected.editor, tx)^
+          status = ""
+          files.sync_window(evt.target, session, editor.doc)^
+          controller.restore(editor)^
+        }
+      }
+      return 'prevent-default'
+    }
   }
   if ((dialog == null and not is_drawing(session) and
        (evt.key == "ContextMenu" or (evt.key == "F10" and evt.shiftKey == true)))^) {

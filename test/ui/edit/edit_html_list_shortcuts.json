@@ -1,0 +1,15 @@
+{
+  "name": "HTML list keyboard shortcuts save and undo",
+  "command": "edit",
+  "html": "test/ui/edit/sample-heading.html",
+  "working_copy": "temp/edit-ui/edit_html_list_shortcuts.html",
+  "events": [
+    {"type": "click", "target": {"text": "Plain heading text"}},
+    {"type": "key_combo", "key": "7", "mods_str": "ctrl+shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface ol li"}, "contains": "Plain heading text"},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_list_shortcuts.html", "contains": "<ol>"},
+    {"type": "key_combo", "key": "z", "mods_str": "ctrl"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p"}, "equals": "Plain heading text"}
+  ]
+}

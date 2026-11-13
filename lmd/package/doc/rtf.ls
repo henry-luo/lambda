@@ -13,8 +13,8 @@ fn initial_style() => {font:0,size:24,color:0,align:"left",li:0,ri:0,sl:0,uc:1,c
 pub let punctuation = {bullet:8226, emdash:8212, endash:8211, lquote:8216, rquote:8217,
     ldblquote:8220, rdblquote:8221}
 let special_symbols = map(["~",160, "-",173, "_",8209])
-fn initial(preserve_empty) => {style:initial_style(),default_font:0,fonts:[],colors:[],blocks:[],spans:[],
-    paragraph_style:null,text:"",pending_surrogate:null,preserve_empty:preserve_empty}
+fn initial(preserve_empty, editor_runs) => {style:initial_style(),default_font:0,fonts:[],colors:[],blocks:[],spans:[],
+    paragraph_style:null,text:"",pending_surrogate:null,preserve_empty:preserve_empty,editor_runs:editor_runs}
 fn fixed(n) any^ {
     let hundredths = int(round(n * 100.0));
     let whole = int(hundredths / 100);
@@ -34,6 +34,8 @@ fn font_style(s) any^ {
     (if (name == null) "" else "font-family:'" ++ safe_font(name) ++ "';") ++
     (if (st.size <= 0) "" else "font-size:" ++ fixed(st.size * (2.0 / 3.0)) ++ "px;")
 }
+// The editor uses the same font projection for run marks and the viewer.
+pub fn font_run_style(fonts, font, size) any^ => font_style({fonts:fonts, style:{font:font, size:size}})^
 fn span_style(s) any^ {
     let st = s.style;
     let color = if (st.color >= 0 and st.color < len(s.colors)) s.colors[st.color] else null;
@@ -56,7 +58,9 @@ fn flush(s) any^ {
     if (s.text == "") s else {
         let css = span_style(s)^;
         let pstyle = if (s.paragraph_style == null) paragraph_style(s.style) else s.paragraph_style;
-        {*:s,text:"",paragraph_style:pstyle,spans:[*s.spans,<span style:css,s.text>]}
+        let span = if (s.editor_runs) <span style:css, rtf_font:s.style.font, rtf_size:s.style.size, s.text>
+                   else <span style:css,s.text>;
+        {*:s,text:"",paragraph_style:pstyle,spans:[*s.spans,span]}
     }
 }
 fn finish(s, explicit = false) any^ {
@@ -66,11 +70,14 @@ fn finish(s, explicit = false) any^ {
         blocks:[*result.blocks,<p style:if (result.paragraph_style == null) paragraph_style(result.style) else result.paragraph_style,*result.spans>]}
 }
 fn add(s, text) => {*:s,text:s.text ++ text}
-fn skip_group(source, at, depth = 0) any^ {
+// Strict mode is used when an editor retains a complete raw destination.
+pub fn skip_group(source, at, depth = 0, strict = false) any^ {
     let t = next_token(source,at)^;
-    if (t == null) at else if (t.kind == "open") skip_group(source,t.end,depth+1)
-    else if (t.kind == "close") (if (depth == 0) t.end else skip_group(source,t.end,depth-1))
-    else skip_group(source,t.end,depth)
+    if (t == null) (if (strict) raise error("rtf: incomplete retained group") else at)
+    else if (strict and t.kind == "control" and t.word == "bin") raise error("rtf: binary destination requires source mode")
+    else if (t.kind == "open") skip_group(source,t.end,depth+1,strict)
+    else if (t.kind == "close") (if (depth == 0) t.end else skip_group(source,t.end,depth-1,strict))
+    else skip_group(source,t.end,depth,strict)
 }
 fn put_font(s, font_id, name) any^ {
     let clean = trim(name)^;
@@ -226,9 +233,11 @@ fn parse_with(source, use_grammar, options) map^ {
             raise error({message:"rtf: document must start with '{\\rtf'"})
         else {
             let stream = if (use_grammar) grammar_lex.prepare(source)^ else source;
-            let result = group(stream,begin,initial(options != null and options.preserve_empty == true),0)^;
+            let result = group(stream,begin,initial(options != null and options.preserve_empty == true,
+                options != null and options.editor_runs == true),0)^;
             let done = finish(result.state)^;
-            {document:<doc *done.blocks>, font_style:font_style(done)^, colors:done.colors}
+            {document:<doc *done.blocks>, font_style:font_style(done)^, colors:done.colors,
+             fonts:done.fonts, base_font:done.style.font, base_size:done.style.size}
         }
     }
 }

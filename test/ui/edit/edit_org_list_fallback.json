@@ -1,0 +1,13 @@
+{
+  "name": "preserve an Org paragraph following a list in source mode",
+  "command": "edit",
+  "html": "test/ui/edit/sample-org-list-followed.org",
+  "working_copy": "temp/edit-ui/edit_org_list_fallback.org",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "- two"},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "https://example.org"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Opened source"}
+  ]
+}

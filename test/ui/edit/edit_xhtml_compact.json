@@ -1,0 +1,14 @@
+{
+  "name": "compact XHTML opens as rich text and keeps its XML tree",
+  "command": "edit",
+  "html": "test/ui/edit/sample-compact.xhtml",
+  "working_copy": "temp/edit-ui/edit_xhtml_compact.xhtml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface p"}, "count": 1},
+    {"type": "click", "target": {"text": "Compact source"}},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved edit_xhtml_compact.xhtml"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xhtml_compact.xhtml", "contains": " edited"}
+  ]
+}

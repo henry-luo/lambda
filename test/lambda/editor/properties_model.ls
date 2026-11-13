@@ -11,7 +11,7 @@ let added = p.insert_child(removed.doc, 0, "added", "true")^;
   first.doc.text == "# keep\r\nempty=hello   \r\né=old  \r\né:second\r\n",
   second.doc.text == "# keep\r\nempty=hello   \r\né=old  \r\né:new\r\n",
   removed.doc.text == "# keep\r\nempty=hello   \r\né:new\r\n",
-  ends_with(added.doc.text, "added=true\n"),
+  ends_with(added.doc.text, "added=true\r\n"),
   (p.import_text("a=one\\\ntwo\n") ^ { null }) == null,
   (p.rename_key(loaded.doc, 0, 0, "bad key") ^ { null }) == null,
   (p.rename_key(loaded.doc, 0, 0, "#comment") ^ { null }) == null

@@ -1,0 +1,15 @@
+{
+  "name": "XHTML line breaks remain editable and survive save",
+  "command": "edit",
+  "html": "test/ui/edit/sample-break.xhtml",
+  "working_copy": "temp/edit-ui/edit_xhtml_break.xhtml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface p br"}, "count": 1},
+    {"type": "click", "target": {"text": "Second line"}},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved edit_xhtml_break.xhtml"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xhtml_break.xhtml", "contains": "<br></br>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_xhtml_break.xhtml", "contains": " edited"}
+  ]
+}

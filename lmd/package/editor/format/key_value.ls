@@ -1,5 +1,6 @@
 // INI and Java properties retain each original line and replace only the edited span.
 // Continued values use source mode until they have a multi-line span model.
+import source_text: lambda.editor.format.source_text
 fn raw(source, first, end_pos) => slice(source, first, end_pos) ^ { "" }
 fn valid_key(key) any^ => not starts_with(key, "#") and not starts_with(key, "!") and
   not any([for (ch in split(key, "")^) contains(["=", ":", " ", "\t", "\r", "\n"], ch)^])
@@ -80,26 +81,40 @@ pub fn import_text(source) map^ => import_as(source, 'properties')^
 fn import_ini(source) map^ => import_as(source, 'ini')^
 fn replace_span(doc, first, end_pos, text) map^ =>
   import_as(raw(doc.text, 0, first) ++ text ++ raw(doc.text, end_pos, len(doc.text)), doc.kind)^
+// Names and values are source text; reject changes the line parser would alter.
+fn checked_entry(result, line_first, key, value) map^ {
+  let entries = [for (entry in result.doc.tree.children where entry.line_first == line_first) entry]
+  if (len(entries) != 1 or entries[0].name != key)
+    raise error("property name would be changed by the file syntax")
+  else if (entries[0].node.text != value)
+    raise error("value would be changed by the file syntax; quote INI comments and avoid unquoted edge whitespace")
+  else result
+}
 pub fn replace_scalar(doc, first, end_pos, value) map^ {
-  let entries = [for (entry in doc.tree.children where entry.node.first == first) entry]
+  let entries = [for (entry in doc.tree.children where entry.node.first == first and entry.node.last == end_pos) entry]
   if (len(entries) == 0) { raise error("property no longer exists") }
   else if (not valid_value(value)) { raise error("use source mode for a multi-line value") }
   else {
     // An empty value can end at the comment marker; retain a separating space.
     let next = raw(doc.text, end_pos, end_pos + 1)
     let suffix = if (first == end_pos and value != "" and doc.kind != 'properties' and (next == "#" or next == ";")) " " else ""
-    replace_span(doc, first, end_pos, value ++ suffix)^
+    checked_entry(replace_span(doc, first, end_pos, value ++ suffix)^, entries[0].line_first, entries[0].name, value)^
   }
 }
-pub fn rename_key(doc, first, end_pos, key) map^ =>
-  if (not valid_key_for(key, doc.kind)) raise error("invalid property name")
-  else replace_span(doc, first, end_pos, key)^
+pub fn rename_key(doc, first, end_pos, key) map^ {
+  let entries = [for (entry in doc.tree.children where entry.first == first and entry.key_end == end_pos) entry]
+  if (len(entries) == 0) raise error("property no longer exists")
+  else if (not valid_key_for(key, doc.kind)) raise error("invalid property name")
+  else checked_entry(replace_span(doc, first, end_pos, key)^, entries[0].line_first, key, entries[0].node.text)^
+}
 pub fn insert_child(doc, first, key, value) map^ {
   if (first != 0) { raise error("properties can only be added at the root") }
   else if (not valid_key_for(key, doc.kind) or not valid_value(value)) { raise error("invalid property name or value") }
   else {
-    let newline = if (doc.text == "" or ends_with(doc.text, "\n")) "" else "\n"
-    import_as(doc.text ++ newline ++ key ++ "=" ++ value ++ "\n", doc.kind)^
+    let newline = source_text.trailing_line_ending(doc.text)^
+    let prefix = if (doc.text == "" or ends_with(doc.text, "\n")) "" else newline
+    let line_first = len(doc.text) + len(prefix)
+    checked_entry(import_as(doc.text ++ prefix ++ key ++ "=" ++ value ++ newline, doc.kind)^, line_first, key, value)^
   }
 }
 pub fn delete_child(doc, first) map^ {

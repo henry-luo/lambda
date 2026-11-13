@@ -1,0 +1,15 @@
+{
+  "name": "switch list kind while preserving unrelated styles",
+  "command": "edit",
+  "html": "test/ui/edit/sample-list-styled.html",
+  "working_copy": "temp/edit-ui/edit_html_list_style_switch.html",
+  "events": [
+    {"type": "click", "target": {"text": "Styled item"}},
+    {"type": "key_combo", "key": "8", "mods_str": "ctrl+shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface ul li"}, "equals": "Styled item"},
+    {"type": "key_combo", "key": "s", "mods_str": "ctrl"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_list_style_switch.html", "contains": "<ul style=\"color: red\">"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_list_style_switch.html", "not_contains": "upper-roman"}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "cancelling one field retains other unsaved property changes",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.ini",
+  "working_copy": "temp/edit-ui/edit_property_cancel_dirty.ini",
+  "events": [
+    {"type": "click", "target": {"selector": "input[aria-label='global']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "changed"},
+    {"type": "click", "target": {"selector": "input[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "invalid;value"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='port']"}, "equals": "42"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_property_cancel_dirty.ini", "contains": "global = changed\n"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_property_cancel_dirty.ini", "contains": "port=42 # port comment"}
+  ]
+}

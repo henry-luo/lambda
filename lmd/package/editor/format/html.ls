@@ -402,10 +402,13 @@ fn retained_html(source) any^ {
 }
 
 fn indent(depth) => join([for (i in 0 to depth - 1) "  "], "")
+// Negative depth suppresses writer-added whitespace for strict XML clients.
+fn block_gap(depth) => if (depth < 0) "" else "\n" ++ indent(depth)
+fn child_depth(depth) => if (depth < 0) depth else depth + 1
 
 fn is_implied(n) any^ => is_node(n) and n.tag == 'p' and attr_get(n, implied_attr) == true
 
-fn blocks_html(blocks, depth) => join([for (b in blocks) "\n" ++ indent(depth) ++ block_html(b, depth)], "")
+fn blocks_html(blocks, depth) => join([for (b in blocks) block_gap(depth) ++ block_html(b, depth)], "")
 
 // A container's blocks go one per line; a lone implied paragraph is the
 // container's own run of text again.
@@ -413,7 +416,7 @@ fn container_html(n, depth) any^ {
   let kids = n.content
   if (len(kids) == 1 and is_implied(kids[0])) open_tag(n.tag, n.attrs) ++ inline_html(kids[0].content) ++ close_tag(n.tag)
   else if (len(kids) == 0) open_tag(n.tag, n.attrs) ++ close_tag(n.tag)
-  else open_tag(n.tag, n.attrs) ++ blocks_html(kids, depth + 1) ++ "\n" ++ indent(depth) ++ close_tag(n.tag)
+  else open_tag(n.tag, n.attrs) ++ blocks_html(kids, child_depth(depth)) ++ block_gap(depth) ++ close_tag(n.tag)
 }
 
 fn is_block_model(n) any^ => (is_node(n) and member(block_model_tags, n.tag)) or false
@@ -422,13 +425,13 @@ fn is_block_model(n) any^ => (is_node(n) and member(block_model_tags, n.tag)) or
 fn li_html(n, depth) any^ {
   let has_blocks = any([for (c in n.content) is_block_model(c)]) or false
   if (not has_blocks) open_tag('li', n.attrs) ++ inline_html(n.content) ++ close_tag('li')
-  else open_tag('li', n.attrs) ++ li_parts_at(n.content, 0, [], depth, "") ++ "\n" ++ indent(depth) ++ close_tag('li')
+  else open_tag('li', n.attrs) ++ li_parts_at(n.content, 0, [], depth, "") ++ block_gap(depth) ++ close_tag('li')
 }
 
 fn li_parts_at(items, i, run, depth, acc) any^ {
   if (i >= len(items)) acc ++ inline_html(run)
   else if (is_block_model(items[i]))
-    li_parts_at(items, i + 1, [], depth, acc ++ inline_html(run) ++ "\n" ++ indent(depth + 1) ++ block_html(items[i], depth + 1))
+    li_parts_at(items, i + 1, [], depth, acc ++ inline_html(run) ++ block_gap(child_depth(depth)) ++ block_html(items[i], child_depth(depth)))
   else li_parts_at(items, i + 1, [*run, items[i]], depth, acc)
 }
 
@@ -481,7 +484,7 @@ fn envelope_html(items, leading, trailing) =>
   join([for (item in items) leading ++ retained_html(item) ++ trailing], "")
 
 // Serialize an editor document with its envelope back to HTML source.
-pub fn export_text(doc, envelope) any^ {
+pub fn export_text(doc, envelope, compact = false) any^ {
   let before = envelope_html(envelope.before, "", "\n")
   let between = envelope_html(envelope.between, "\n", "")
   let after = envelope_html(envelope.after, "\n", "")
@@ -495,10 +498,11 @@ pub fn export_text(doc, envelope) any^ {
       (if (starts_with(body, "\n")) slice(body, 1, len(body)) else body) ++ after ++ "\n"
   }
   else {
-    let head = if (envelope.head_tag) "\n" ++ retained_html(envelope.head) else ""
-    before ++ open_tag('html', envelope.html_attrs) ++ head ++ between ++ "\n" ++
-      open_tag('body', envelope.body_attrs) ++ body_html(doc.content, 1) ++ "\n" ++ close_tag('body') ++
-      "\n" ++ close_tag('html') ++ after ++ "\n"
+    let gap = if (compact) "" else "\n"
+    let head = if (envelope.head_tag) gap ++ retained_html(envelope.head) else ""
+    before ++ open_tag('html', envelope.html_attrs) ++ head ++ between ++ gap ++
+      open_tag('body', envelope.body_attrs) ++ body_html(doc.content, if (compact) -1 else 1) ++ gap ++ close_tag('body') ++
+      gap ++ close_tag('html') ++ after ++ gap
   }
 }
 
@@ -539,6 +543,7 @@ fn norm_li(items, i, run, acc) any^ {
 pub fn normal_form(doc) any => node('doc', [for (b in doc.content) norm_node(b)])
 
 fn envelope_key(e) => [e.document, e.head_tag, e.before, e.html_attrs, e.head, e.between, e.body_attrs, e.after]
+pub fn same_envelope(a, b) => envelope_key(a) == envelope_key(b)
 
 // null when `doc` and its envelope survive export and re-import unchanged in
 // normal form, else a sentence naming what would change.

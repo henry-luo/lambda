@@ -17,8 +17,10 @@ fn twiki_word_at(chars,index) any^ {
 fn escaped(value,profile) any^ {
     let chars = split(value,"")
     let special = "[]{}|*_~^+`'=!#<>\\%/@:.()-&";
-    if (profile.name == "mediawiki" and any([for (char in ((split(value,"")) ^ { [] })) contains(special,char)]))
+    // A period is literal in MediaWiki text; escaping it creates needless nowiki spans.
+    if (profile.name == "mediawiki" and any([for (char in ((split(value,"")) ^ { [] })) contains(replace(special, ".", ""),char)]))
         "<nowiki>" ++ replace(value,"</nowiki>","</nowiki>&lt;/nowiki&gt;<nowiki>") ++ "</nowiki>"
+    else if (profile.name == "mediawiki") value
     else if (profile.name == "twiki" and (any([for (char in chars) contains(special,char)]) or any([for (i,char in chars) twiki_word_at(chars,i)])))
         "<literal>" ++ replace(value,"</literal>","</literal>&lt;/literal&gt;<literal>") ++ "</literal>"
     else if (profile.name == "dokuwiki" and contains(value,"\\")) "%%" ++ value ++ "%%"

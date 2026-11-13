@@ -77,17 +77,27 @@ fn edited(format, doc, target) any^ {
 }
 fn draft_for(target) => {first: int(dom.get_attribute(target, "data-first")),
   key: dom.matches(target, ".property-key"), text: string(dom.get_state(target, "value"))}
+fn draft_matches(draft, target) => draft != null and dom.matches(target, ".property-value,.property-key") and
+  draft.first == (int(dom.get_attribute(target, "data-first")) ^ { null }) and draft.key == dom.matches(target, ".property-key")
+
+// A field commit is shared by change, Enter, save and source-switch actions.
+fn commit_field(format, doc, undo, redo, target) map^ {
+  let result = edited(format, doc, target)
+  if (result.error != null) {doc:doc, undo:undo, redo:redo, draft:draft_for(target), status:"Invalid value: " ++ result.error, ok:false}
+  else if (result.doc.text != doc.text) {doc:result.doc, undo:[*undo, doc], redo:[], draft:null, status:"", ok:true}
+  else {doc:doc, undo:undo, redo:redo, draft:null, status:"", ok:true}
+}
 
 fn dialog_view(dialog, session) any^ =>
   if (dialog != null and dialog.kind == 'add_property')
     files.dialog_frame("add-property", "Add " ++ (if (dialog.container == 'object') "property" else "item"),
       session.format.value_help,
-      [if (dialog.container == 'object') files.field("property-new-key", "", "Property name") else null,
-       files.field("property-new-value", "", "Value")],
+      [if (dialog.container == 'object') files.field("property-new-key", "", "Property name", true) else null,
+       files.field("property-new-value", "", "Value", dialog.container != 'object')],
       [files.dialog_button("cancel", "Cancel", false), files.dialog_button("property_add", "Add", true)])
   else if (dialog != null and dialog.kind == 'add_element')
     files.dialog_frame("add-element", "Add child element", "Enter an element name and optional text.",
-      [files.field("property-new-key", "", "Element name"), files.field("property-new-value", "", "Text")],
+      [files.field("property-new-key", "", "Element name", true), files.field("property-new-value", "", "Text")],
       [files.dialog_button("cancel", "Cancel", false), files.dialog_button("element_add", "Add", true)])
   else if (dialog != null and dialog.kind == 'invalid_close')
     files.dialog_frame("invalid-close", "Invalid property value",
@@ -118,21 +128,26 @@ edit <property_app> state session: ~.session, doc: ~.doc, status: ~.status,
 }
 on change(evt) {
   if (evt.event_phase != 2 or not dom.matches(evt.target, ".property-value,.property-key")) { return 'pass' }
-  let result = edited(session.format, doc, evt.target)
-  if ((result.error != null)^) { draft = draft_for(evt.target); status = "Invalid value: " ++ result.error; return }
-  draft = null
-  if ((result.doc.text != doc.text)^) {
-    undo = [*undo, doc]
-    redo = []
-    doc = result.doc
-    status = ""
-    files.sync_window(evt.target, session, doc)^
-  }
+  if ((draft != null and not draft_matches(draft, evt.target))^) { status = "Correct the invalid value before continuing."; return }
+  let result = commit_field(session.format, doc, undo, redo, evt.target)^
+  draft = result.draft; status = result.status
+  if (not result.ok) { return }
+  doc = result.doc; undo = result.undo; redo = result.redo
+  files.sync_window(evt.target, session, doc)^
 }
 on input(evt) {
   // The control owns its live text until change; guard a window close even
   // while that text has not yet been committed to the model.
   if (evt.event_phase == 2 and dom.matches(evt.target, ".property-value,.property-key")) {
+    if ((draft != null and not draft_matches(draft, evt.target))^) {
+      // Keep the invalid draft authoritative until it is corrected.
+      dom.set_state(evt.target, "value", dom.get_attribute(evt.target, "data-original"))
+      status = "Correct the invalid value before continuing."
+      let selector = (if (draft.key) ".property-key" else ".property-value") ++ "[data-first='" ++ string(draft.first) ++ "']"
+      let field = dom.query_selector(dom.root_node(evt.target), selector)
+      if (field != null) { dom.focus_set(field, false) }
+      return
+    }
     dom.set_close_guard(evt.target, true)
   }
 }
@@ -189,6 +204,7 @@ on edit_dialog(req) {
     dialog = null
     status = ""
     files.sync_window(req.node, session, doc)^
+    dom.focus_set(dom.query_selector(dom.root_node(req.node), "body"), false)
     return
   }
   let result = files.dialog_action(req.action, req.node,
@@ -201,17 +217,50 @@ on edit_dialog(req) {
 }
 on keydown(evt) {
   let primary = evt.metaKey == true or evt.ctrlKey == true
+  if ((dialog != null and dialog.kind in ['add_property', 'add_element'] and evt.key == "Enter" and not primary and
+       dom.matches(evt.target, "#property-new-key,#property-new-value"))^) {
+    let selector = if (dialog.kind == 'add_element') ".edit-dialog-element_add" else ".edit-dialog-property_add"
+    let button = dom.query_selector(dom.root_node(evt.target), selector)
+    if (button != null) { dom.keyboard_click(button) }
+    return 'prevent-default'
+  }
+  if ((dialog == null and evt.key == "Escape" and dom.matches(evt.target, ".property-value,.property-key"))^) {
+    if ((draft != null and not draft_matches(draft, evt.target))^) {
+      status = "Correct the invalid value before continuing."
+    } else {
+      // A field draft is separate from the committed document and its history.
+      dom.set_state(evt.target, "value", dom.get_attribute(evt.target, "data-original"))
+      draft = null
+      status = ""
+      files.sync_window(evt.target, session, doc)^
+    }
+    return 'prevent-default'
+  }
+  if ((dialog == null and evt.key == "Enter" and not primary and
+       dom.matches(evt.target, "input.property-value,input.property-key"))^) {
+    if ((draft != null and not draft_matches(draft, evt.target))^) {
+      status = "Correct the invalid value before continuing."
+      return 'prevent-default'
+    }
+    let result = commit_field(session.format, doc, undo, redo, evt.target)^
+    draft = result.draft; status = result.status
+    if (result.ok) {
+      doc = result.doc; undo = result.undo; redo = result.redo
+      files.sync_window(evt.target, session, doc)^
+    }
+    return 'prevent-default'
+  }
   if ((primary and lower(string(evt.key)) == "s")^) {
-    if ((draft != null and not dom.matches(evt.target, ".property-value,.property-key"))^) {
+    if ((draft != null and not draft_matches(draft, evt.target))^) {
       status = "Correct the invalid value before saving."
       return 'prevent-default'
     }
     // Keyboard save can arrive before the focused field's change event.
     if (dom.matches(evt.target, ".property-value,.property-key")) {
-      let result = edited(session.format, doc, evt.target)
-      if ((result.error != null)^) { draft = draft_for(evt.target); status = "Invalid value: " ++ result.error; return 'prevent-default' }
-      draft = null
-      if ((result.doc.text != doc.text)^) { undo = [*undo, doc]; redo = []; doc = result.doc }
+      let result = commit_field(session.format, doc, undo, redo, evt.target)^
+      draft = result.draft; status = result.status
+      if (not result.ok) { return 'prevent-default' }
+      doc = result.doc; undo = result.undo; redo = result.redo
     }
     if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
     else {
@@ -238,15 +287,15 @@ on keydown(evt) {
     }
   }
   if ((primary and evt.key == "/")^) {
-    if ((draft != null and not dom.matches(evt.target, ".property-value,.property-key"))^) {
+    if ((draft != null and not draft_matches(draft, evt.target))^) {
       status = "Correct the invalid value before switching views."
       return 'prevent-default'
     }
     if (dom.matches(evt.target, ".property-value,.property-key")) {
-      let result = edited(session.format, doc, evt.target)
-      if ((result.error != null)^) { draft = draft_for(evt.target); status = "Invalid value: " ++ result.error; return 'prevent-default' }
-      draft = null
-      if ((result.doc.text != doc.text)^) { doc = result.doc }
+      let result = commit_field(session.format, doc, undo, redo, evt.target)^
+      draft = result.draft; status = result.status
+      if (not result.ok) { return 'prevent-default' }
+      doc = result.doc; undo = result.undo; redo = result.redo
     }
     emit("edit_switch", src.source_view(session, doc.text, sess.is_dirty(session, doc)))
     return 'prevent-default'

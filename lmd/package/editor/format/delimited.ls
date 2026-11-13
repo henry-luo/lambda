@@ -1,5 +1,6 @@
 // Source-backed CSV/TSV rows. The scanner keeps quoting and line endings;
 // changing a field replaces only its original encoded span.
+import source_text: lambda.editor.format.source_text
 fn raw(chars, first, end_pos) => join(slice(chars, first, end_pos) ^ { [] }, "")
 fn at(chars, i) => if (i < len(chars)) chars[i] else ""
 // The tree edits field values; quoting belongs to the file representation.
@@ -87,7 +88,7 @@ pub fn insert_child(doc, first, key, value) map^ {
     let parsed = row(chars, 0, doc.separator, 0)^
     if (parsed.next != len(chars) or parsed.node.last != len(chars)) { raise error("enter one row") }
     else {
-      let newline = if (contains(doc.text, "\r\n")) "\r\n" else "\n"
+      let newline = source_text.trailing_line_ending(doc.text)^
       let prefix = if (doc.text == "" or ends_with(doc.text, "\n") or ends_with(doc.text, "\r")) "" else newline
       import_as(doc.text ++ prefix ++ value ++ newline, doc.separator, doc.kind)^
     }
@@ -103,14 +104,18 @@ pub fn delete_child(doc, first) map^ {
   if (len(rows) > 0) replace_span(doc, rows[0].first, rows[0].line_last, "")^
   else {
     let found = [for (entry in doc.tree.children) for (i, cell in entry.node.children where cell.node.first == first)
-      {row: entry.node, index: i}]
+      {row: entry.node, first: entry.first, line_last: entry.line_last, index: i}]
     if (len(found) == 0) { raise error("field no longer exists") }
     else {
       let cells = found[0].row.children
       let i = found[0].index
-      let begin = if (i == len(cells) - 1 and i > 0) cells[i - 1].node.last else cells[i].node.first
-      let end_pos = if (i < len(cells) - 1) cells[i + 1].node.first else cells[i].node.last
-      replace_span(doc, begin, end_pos, "")^
+      // CSV has no row with zero fields; deleting its last field removes the row.
+      if (len(cells) == 1) replace_span(doc, found[0].first, found[0].line_last, "")^
+      else {
+        let begin = if (i == len(cells) - 1 and i > 0) cells[i - 1].node.last else cells[i].node.first
+        let end_pos = if (i < len(cells) - 1) cells[i + 1].node.first else cells[i].node.last
+        replace_span(doc, begin, end_pos, "")^
+      }
     }
   }
 }

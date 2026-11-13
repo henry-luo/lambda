@@ -441,7 +441,10 @@ pub fn export_text(doc, envelope) any^ {
 
 fn norm_text(s, single_line) {
   let lines = split(s, "\n")
-  let trimmed = [for (l in lines) trim(l)]
+  // Trim at actual line breaks, not at inline element boundaries.
+  let trimmed = [for (i, l in lines) {
+    let start = if (i > 0) trim_start(l) else l;
+    if (i < len(lines) - 1) trim_end(start) else start}]
   if (single_line) join(trimmed, " ") else join(trimmed, "\n")
 }
 
@@ -451,7 +454,7 @@ fn norm_inline_item(it) any^ {
     // a mark node is its content with that mark applied
     it
   }
-  else if (is_node(it)) { node_attrs(it.tag, sorted_attrs(it), norm_inline_seq(it.content, false)) }
+  else if (is_node(it)) { node_attrs(it.tag, sorted_attrs(it), norm_inline_seq(it.content, false, false)) }
   else { it }
 }
 
@@ -461,13 +464,17 @@ fn drop_trailing_breaks(items) any^ {
   else items
 }
 
-fn trim_run_text(items, single_line) =>
-  [for (it in items) if (is_text(it)) text_marked(norm_text(it.text, single_line), it.marks) else it]
+fn trim_run_text(items, single_line, trim_edges) =>
+  [for (i, it in items) if (is_text(it)) {
+    let value = norm_text(it.text, single_line)
+    let leading = if (trim_edges and i == 0) trim_start(value) else value;
+    text_marked(if (trim_edges and i == len(items) - 1) trim_end(leading) else leading, it.marks)
+  } else it]
 
-fn norm_inline_seq(items, single_line) any^ {
+fn norm_inline_seq(items, single_line, trim_edges = true) any^ {
   let flat = flatten_mark_nodes(items, mark_order)
   let merged = merge_leaves([for (it in flat) norm_inline_item(it)])
-  drop_trailing_breaks(merge_leaves(trim_run_text(merged, single_line)))
+  drop_trailing_breaks(merge_leaves(trim_run_text(merged, single_line, trim_edges)))
 }
 
 fn paragraph_unit(n) any^ => is_inline_model(n) or (is_node(n) and n.tag == 'p')

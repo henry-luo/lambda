@@ -1,0 +1,17 @@
+{
+  "name": "edit MediaWiki prose containing a link",
+  "command": "edit",
+  "html": "test/ui/edit/sample-wiki-link.wiki",
+  "working_copy": "temp/edit-ui/edit_wiki_link.wiki",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".edit-surface a"}, "equals": "label"},
+    {"type": "click", "target": {"selector": ".edit-surface p"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_wiki_link.wiki", "contains": "[[Page|label]]"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_wiki_link.wiki", "contains": "More!"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

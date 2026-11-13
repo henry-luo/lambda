@@ -1,0 +1,20 @@
+{
+  "name": "invalid property insertion stays editable from the keyboard",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.properties",
+  "working_copy": "temp/edit-ui/edit_property_add_invalid_keyboard.properties",
+  "events": [
+    {"type": "click", "target": {"selector": ".property-add"}},
+    {"type": "type", "text": "bad key"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_text", "target": {"selector": ".property-status"}, "contains": "Invalid property"},
+    {"type": "assert_value", "target": {"selector": "#property-new-key"}, "equals": "bad key"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "goodkey"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "type", "text": "value"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_property_add_invalid_keyboard.properties", "contains": "goodkey=value"}
+  ]
+}

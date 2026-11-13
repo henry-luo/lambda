@@ -1,0 +1,19 @@
+{
+  "name": "Enter commits a property edit to the undoable document",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.ini",
+  "working_copy": "temp/edit-ui/edit_property_enter_key.ini",
+  "events": [
+    {"type": "click", "target": {"selector": "input[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "99"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='port']"}, "equals": "42"},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='port']"}, "equals": "99"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_property_enter_key.ini", "contains": "port=99 # port comment"}
+  ]
+}

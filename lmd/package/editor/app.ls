@@ -11,6 +11,7 @@
 
 import md: lambda.editor.format.markdown
 import html: lambda.editor.format.html
+import xhtml: lambda.editor.format.xhtml
 import markup: lambda.editor.format.markup
 import rtf: lambda.editor.format.rtf
 import properties: lambda.editor.format.key_value
@@ -28,17 +29,16 @@ import lambda.editor.model
 // Every editable format, in lookup order. The source surface opens the text
 // formats no rich surface claims, and any file under `--source`
 // (Radiant_Design_Source_Editor CED20).
-pub let formats = [md.descriptor, html.descriptor, *markup.formats, rtf.descriptor, properties.descriptor,
+pub let formats = [md.descriptor, html.descriptor, xhtml.descriptor, *markup.formats, rtf.descriptor, properties.descriptor,
                    properties.ini_descriptor, delimited.csv_descriptor, delimited.tsv_descriptor, xml.descriptor, src.descriptor]
 
 // These viewer formats are binary containers or media, even with --source.
 let non_text_suffixes = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".psd", ".docx", ".pptx", ".epub",
-  ".webp", ".bmp", ".tif", ".tiff", ".ico", ".mp3", ".wav", ".ogg", ".mp4", ".mov", ".webm",
+  ".webp", ".bmp", ".tif", ".tiff", ".ico", ".avif", ".heic", ".heif", ".jxl", ".pbm", ".pgm", ".ppm", ".pnm", ".svgz",
+  ".mp3", ".wav", ".ogg", ".mp4", ".mov", ".webm",
   ".zip", ".7z", ".rar", ".tar", ".gz"]
 pub fn is_non_text_path(path) =>
   any([for (s in non_text_suffixes) ends_with(lower(path), s)]) or false
-
-fn supported_suffixes() => join([for (f in formats) for (s in f.suffixes) s], ", ")
 
 // The format whose suffix the path ends with, or null.
 pub fn format_for_path(path) {
@@ -47,18 +47,35 @@ pub fn format_for_path(path) {
   if (len(found) == 0) null else found[0]
 }
 
+// Plain Netpbm images are valid UTF-8, so validate their numeric header too.
+fn is_netpbm(source) any^ {
+  let prefix = slice(source, 0, min(len(source), 4096))^
+  if (not (slice(prefix, 0, min(len(prefix), 2))^ in ["P1", "P2", "P3", "P4", "P5", "P6"])) { return false }
+  let lines = split(prefix, "\n")^
+  let uncommented = join([for (line in lines) {
+    let at = index_of(line, "#")
+    if (at == null) line else slice(line, 0, at)^
+  }], " ")^
+  let words = [for (word in split(replace(replace(uncommented, "\t", " ")^, "\r", " ")^, " ")^ where word != "") word]
+  if (len(words) < 3 or not (words[0] in ["P1", "P2", "P3", "P4", "P5", "P6"])) false
+  else {
+    let width = int(words[1]) ^ { null }
+    let height = int(words[2]) ^ { null }
+    width != null and height != null and width > 0 and height > 0
+  }
+}
+fn is_non_text_content(source) any^ =>
+  starts_with(source, "%PDF-") or starts_with(source, "GIF87a") or starts_with(source, "GIF89a") or is_netpbm(source)^
+
 pub pn open_document(path, options) element^ {
   if (is_non_text_path(path)) {
     raise error("'" ++ sess.basename(path) ++ "' is a non-text document and cannot be edited")
   }
-  let selected = if (options != null and options.source == true) src.descriptor else format_for_path(path)
-  if (selected == null) {
-    raise error("'" ++ sess.basename(path) ++ "' is not a document type lambda edit supports (" ++
-                supported_suffixes() ++ ")")
-  }
+  let named = format_for_path(path)
+  // The source surface accepts unlisted text formats after the same byte checks.
+  let selected = if (options != null and options.source == true or named == null) src.descriptor else named
   let source = input(path, 'text') ^ { raise error("could not read " ++ path, ^) }
-  // PDF can be entirely ASCII, so the text and UTF-8 checks cannot identify it.
-  if (starts_with(source, "%PDF-")^) {
+  if (is_non_text_content(source)^) {
     raise error("'" ++ sess.basename(path) ++ "' is a non-text document and cannot be edited")
   }
   // A NUL cannot safely pass through the source editor's text interfaces.
@@ -78,7 +95,6 @@ pub pn open_document(path, options) element^ {
   let format = if (reason != null) src.descriptor else selected
   let loaded = if (reason != null) src.descriptor.import_text(source) else attempt
   // the rich format behind the view switch, null for plain text
-  let named = format_for_path(path)
   let rich_format = if (named != null and named.surface != 'source') named else null
   let session = {*: sess.new_session(path, format, source, loaded), rich_format: rich_format}
   let status = if (reason != null) "Opened source: " ++ reason else "Opened " ++ session.name ++ "."

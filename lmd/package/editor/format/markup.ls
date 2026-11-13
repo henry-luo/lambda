@@ -2,6 +2,35 @@
 // round trip retains the original parsed document and the editable model.
 import md: lambda.editor.format.markdown
 
+// Parser-created plain spans and text-only nowiki guards do not change the
+// document meaning; retain every other element and attribute in the check.
+fn literal_wiki_span(item) any^ => type(item) == element and name(item) == 'span' and
+  item["data-wiki-nowiki"] == "true" and
+  all([for (key, value at map(item)) string(key) in ["data-wiki-nowiki", "source"]]) and
+  all([for (child in (content(item) ^ { [] })) type(child) == string])
+fn merge_text(parts, i, acc) any^ {
+  if (i >= len(parts)) acc
+  else if (parts[i] is string and len(acc) > 0 and acc[len(acc) - 1] is string)
+    merge_text(parts, i + 1, [*take(acc, len(acc) - 1), acc[len(acc) - 1] ++ parts[i]])^
+  else merge_text(parts, i + 1, [*acc, parts[i]])^
+}
+fn semantic_parts(item) any^ {
+  if (type(item) != element) [item]
+  else if (literal_wiki_span(item)^ or (name(item) == 'span' and len(map(item)) == 0))
+    [for (child in content(item)^) for (part in semantic_parts(child)^) part]
+  else {
+    let attrs = map(item)
+    let children = semantic_children(content(item)^)^
+    // Same-line pre blocks may be wrapped in an otherwise empty parser paragraph.
+    if (name(item) == 'p' and len(attrs) == 0 and len(children) == 1 and children[0] is map and
+        children[0].tag == 'code' and children[0].attributes.type == "block") children
+    else [{tag:name(item), attributes:attrs, children:children}]
+  }
+}
+fn semantic_children(items) any^ =>
+  merge_text([for (item in items) for (part in semantic_parts(item)^) part], 0, [])^
+fn same_wiki_document(a, b) any^ => semantic_parts(a)^ == semantic_parts(b)^
+
 fn to_markdown(source, kind) any^ {
   let parsed = parse(source, kind)^
   let markdown = format(parsed, 'markdown')^;
@@ -18,7 +47,9 @@ fn import_as(source, kind) map^ {
   let envelope = {kind: kind, markdown: loaded.envelope, source: source, original: loaded.doc}
   let written = from_model(loaded.doc, envelope)^
   let back = parse(written, kind)^
-  if (back != converted.parsed) { raise error("this document contains markup the editor cannot preserve") }
+  if (back != converted.parsed and (kind != 'wiki' or not same_wiki_document(converted.parsed, back)^)) {
+    raise error("this document contains markup the editor cannot preserve")
+  }
   else { {doc: loaded.doc, envelope: envelope} }
 }
 fn export_text(doc, envelope) any^ =>

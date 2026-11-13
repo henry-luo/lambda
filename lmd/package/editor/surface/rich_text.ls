@@ -17,13 +17,20 @@ import component: lambda.ui.core.component
 fn leaf_text(leaf) => if (leaf.text == "") "​" else leaf.text
 
 // Marks, innermost first, as the surface nests them around a leaf. The
-// only color declarations from span marks are projected; imported classes stay inert.
+// Only vetted inline declarations are projected; imported classes stay inert.
 let leaf_marks = ['code', 'sub', 'sup', 'del', 's', 'u', 'span', 'em', 'i', 'strong', 'b']
+
+fn safe_font_family(value) any^ => value is string and len(value) >= 3 and
+  starts_with(value, "'") and ends_with(value, "'") and
+  not any([for (ch in (split(slice(value, 1, len(value) - 1), "") ^ { [] }) where
+    ((not ((ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or
+         (ch >= "0" and ch <= "9") or ch == " " or ch == "-")) ^ { false })) true])
 
 fn color_style(marks) {
   let css = inline_format.span_css(marks)
-  join([for (key in ["color", "background-color"], let value = inline_format.css_get(css, key)
-    where ((value is string and component.css_color(value)) ^ { false })) key ++ ": " ++ value], "; ")
+  join([for (key in ["color", "background-color", "font-family", "font-size"], let value = inline_format.css_get(css, key)
+    where ((value is string and (if (key == "font-family") safe_font_family(value)
+      else if (key == "font-size") component.css_length(value) else component.css_color(value))) ^ { false })) key ++ ": " ++ value], "; ")
 }
 
 fn mark_element(mark, marks, child) {
@@ -47,7 +54,11 @@ fn render_text_leaf(leaf) any^ =>
 
 fn align_style(n) any^ {
   let align = attr_get(n, 'align')
-  if (align == null) null else "text-align: " ++ align
+  let measurements = [for (entry in [{name:'rtf-li', css:"margin-left"}, {name:'rtf-ri', css:"margin-right"},
+                                     {name:'rtf-sl', css:"line-height"}], let value = attr_get(n, entry.name)
+    where ((value is int and value > 0) ^ { false })) entry.css ++ ": " ++ string(value / 15.0) ++ "px"]
+  let parts = [*if (align == null) [] else ["text-align: " ++ align], *measurements]
+  if (len(parts) == 0) null else join(parts, "; ")
 }
 
 // A short label for retained source: its tag, first attribute, and text.
@@ -107,8 +118,8 @@ fn render_node(n, kids) any^ {
   let tag = n.tag
   if (tag == 'doc') <div class: "edit-doc", *kids>
   // a paragraph the HTML source did not spell is its container's own text
-  else if (tag == 'p' and attr_get(n, 'edit implied') == true) <p class: "edit-implied", *kids>
-  else if (tag == 'p') <p *kids>
+  else if (tag == 'p' and attr_get(n, 'edit implied') == true) <p class: "edit-implied", style: align_style(n), *kids>
+  else if (tag == 'p') <p style: align_style(n), *kids>
   else if (tag == 'h1') <h1 *kids>
   else if (tag == 'h2') <h2 *kids>
   else if (tag == 'h3') <h3 *kids>

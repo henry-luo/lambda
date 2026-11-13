@@ -1,0 +1,17 @@
+{
+  "name": "edit and save MediaWiki prose in the rich surface",
+  "command": "edit",
+  "html": "test/ui/edit/sample.wiki",
+  "working_copy": "temp/edit-ui/edit_wiki_rich.wiki",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-surface em"}, "equals": "world"},
+    {"type": "click", "target": {"selector": ".edit-surface p"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " More."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_wiki_rich.wiki", "contains": "''world''. More."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}
