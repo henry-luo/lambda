@@ -4832,6 +4832,12 @@ pub fn enable_script_expl3(st) any^ {
         {name: "scan_stop:", kind: "primitive", value: "relax"},
         {name: "s__seq", kind: "primitive", value: "relax"}])^;
     let macros = enable_expl_macro_sources(support, [
+        {source: "\\tl_if_empty:cTF{\\exp_args:Nc\\tl_if_empty:NTF}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\tl_if_empty:cT{\\exp_args:Nc\\tl_if_empty:NT}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\tl_if_empty:cF{\\exp_args:Nc\\tl_if_empty:NF}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\seq_if_empty:cTF{\\exp_args:Nc\\seq_if_empty:NTF}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\seq_if_empty:cT{\\exp_args:Nc\\seq_if_empty:NT}", protected_flag: false, source_mapping_guard: "dynamic_read"},
+        {source: "\\seq_if_empty:cF{\\exp_args:Nc\\seq_if_empty:NF}", protected_flag: false, source_mapping_guard: "dynamic_read"},
         {source: "\\tl_use:c{\\exp_args:Nc\\tl_use:N}", protected_flag: false, source_mapping_guard: "dynamic_read"},
         {source: "\\seq_use:cn{\\exp_args:Nc\\seq_use:Nn}", protected_flag: false, source_mapping_guard: "dynamic_read"},
         {source: "\\seq_item:cn{\\exp_args:Nc\\seq_item:Nn}", protected_flag: false, source_mapping_guard: "dynamic_read"},

@@ -3257,3 +3257,17 @@ an included file, twenty-two focused regressions and sampled forced-GC tests
 pass both backends; see `test/lambda/latex/test_tex_script_expl3_use_c.ls`.
 Missing-name diagnostics, recovery and count semantics remain open as
 described above; expanded-output source mapping remains guarded.
+
+
+## Dynamic-name token-list and sequence emptiness — 2026-11-13
+
+**Status:** IMPLEMENTED for `\tl_if_empty:cTF`/`:cT`/`:cF` and
+`\seq_if_empty:cTF`/`:cT`/`:cF` in the experimental Script profile.
+S1.8 and D10.2.2 apply.
+
+These forms use expandable TeX wrappers and the shared name-expansion helper.
+Thirty-three native text, message and diagnostic comparisons, seven guarded
+AST cases, an included file, seven focused regressions and sampled
+forced-GC checks pass both execution backends; see
+`test/lambda/latex/test_tex_script_expl3_empty_c.ls`. Expanded-output source
+mapping remains guarded.
