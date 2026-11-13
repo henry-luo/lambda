@@ -206,6 +206,14 @@ and publish cached state/frontiers only after transaction completion. Restart an
 repository audits independently verify durable storage. The cache does not add
 durability or replace object authentication (D11.1.2).
 
+Installation may batch progress commits after the complete guarded operation
+intent is durable. A crash or rollback can leave completed filesystem effects
+with an earlier journal cursor; recovery must safely repeat them, detect external
+edits and preserve recovery content. Keep explicit single-step installation for
+recovery tooling. Batched progress does not make filesystem visibility atomic.
+Reuse a namespace projection only when it matches the validated typed replica,
+including after external filesystem reconciliation.
+
 The current LAN implementation debounces notifications for 50 ms, with a 250 ms
 maximum batch wait. Its negotiated burst v2 profile uses causal HAVE frontiers
 to select complete sequences of missing atomic workspace transactions. A
@@ -214,6 +222,11 @@ original operation authors. Compacted prefixes, epoch changes and oversized
 sequences retain signed-checkpoint fallback. Small immutable objects and frames
 can share a bounded encrypted bundle and one local head transaction; signatures
 and dependencies must validate before publication. Large objects retain streaming.
+
+Before accepting another workspace batch, the local agent may discard transport
+packets and complete journal groups covered by its installed baseline. Retain
+causal receipts and immutable file revisions, plus newer atomic groups for relay.
+An older peer receives a signed checkpoint when its required packet prefix is gone.
 
 Authenticate once per connection burst. Pin a separate immutable offer for each
 exchange round, transfer missing objects and existing CRDT records, commit before
@@ -234,14 +247,22 @@ polling; these LAN bursts add no persistent cloud connection.
 
 Implementation and qualification: [LAN event delivery plan](<impl/Lambda_Impl_Sync_LAN_Events (done).md>).
 The [warm latency investigation](impl/Lambda_Impl_Sync_Warm_Latency.md) records
-the subsequent optimization and remaining scale limits; subsecond delivery is
-not yet qualified for the final implementation.
+the subsequent optimization and remaining scale limits. Release tests with
+ten seed files pass subsecond completed installation with two or three local
+processes; the 100-file workload still exceeds one second. Physical-device LAN
+latency remains unqualified by these measurements.
 
 The synchronized working directory remains available to other applications;
 exclusive ownership is limited to the sync agent's private repository state.
 External filesystem observations enter the same revision/operation pipeline
 as managed changes (§6.7). For an open document, the editor retains its live
 state while an import bridge reconciles the changed disk content (§7.8).
+
+Filesystem captures classify detected snapshot changes separately from fatal
+IO errors (S7.4.4, D11.1.2). Retry a fresh bounded capture when an external edit
+races inventory or installation readback; the default allows three attempts.
+Keep the authenticated burst through a successfully retried capture. Publish
+the accepted disk baseline only after the successful capture transaction.
 
 ### 2.2 Function endpoint
 

@@ -34,7 +34,9 @@ fn scalar_values(value, depth=0) any^ {
     if (value is map) { return [for (key at value) *[*scalar_values(key,depth+1)^,*scalar_values(value[key],depth+1)^]] }
     let tag = string(type(value))
     if (not contains(scalars,tag)^) raise error("sync codec: unsupported value type")
-    return if (tag == "u64") [] else [value]
+    // Finite int53 spellings are exact; poison retains the lossless round-trip check (S4.1.1, S4.2.2).
+    return if (contains(["null","bool","u64"],tag)^ or
+        (tag == "int" and value >= -9007199254740991 and value <= 9007199254740991)) [] else [value]
 }
 fn validate_scalars(value) any^ {
     let originals = scalar_values(value)^
@@ -66,7 +68,7 @@ fn scalar_tuples(tuple, depth=0) any^ {
         }
         return result
     }
-    if (tag == "string" or tag == "u64") { return [] }
+    if (contains(["string","null","bool","int","u64"],tag)^) { return [] }
     if (not contains(scalars,tag)^ or not (tuple[1] is string)) raise error("sync codec: unknown type")
     return [tuple]
 }
@@ -96,7 +98,9 @@ fn pack(value, depth) any^ {
     let tag = string(type(value))
     if (tag == "u64") { return [tag,string(value)] }
     if (not contains(scalars,tag)) raise error("sync codec: unsupported value type")
-    let literal = format([value],'mark')^
+    let literal = if (tag == "null") "[null]" else if (tag == "bool")
+        (if (value) "[true]" else "[false]") else if (tag == "int") "[" ++ string(value) ++ "]"
+        else format([value],'mark')^
     return [tag,literal]
 }
 
@@ -131,6 +135,22 @@ fn unpack(tuple, depth, decoded) any^ {
         return result
     }
     if (not contains(scalars,tag)^ or not (payload is string)) raise error("sync codec: unknown type")
+    // Canonical re-encoding below also rejects saturated, padded or non-integer spellings.
+    if (tag == "null") {
+        if (payload != "[null]") raise error("sync codec: invalid scalar literal")
+        return null
+    }
+    if (tag == "bool") {
+        if (payload != "[true]" and payload != "[false]") raise error("sync codec: invalid scalar literal")
+        return payload == "[true]"
+    }
+    if (tag == "int") {
+        if (payload == "[inf]") { return inf }
+        if (payload == "[-inf]") { return -inf }
+        if (len(payload)^ < 3 or not starts_with(payload,"[")^ or not ends_with(payload,"]")^)
+            raise error("sync codec: invalid scalar literal")
+        return int(slice(payload,1,len(payload)^-1)^)^
+    }
     return decoded[tag ++ ":" ++ payload]
 }
 

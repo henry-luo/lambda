@@ -99,7 +99,8 @@ pub pn materialize(handle) any^ {
         // No managed changes require writes; external edits enter through capture, not ACKs.
         return current
     }
-    let entries = workspace.read(current.state.endpoint.replica)^.entries
+    let proof = current.repository_cache.validation
+    let entries = if (proof == null) workspace.read(current.state.endpoint.replica)^.entries else proof.projection.entries
     // content alternatives and retained external captures require an explicit resolution.
     if (current.state.review != null or any([for (entry in entries where entry.visible and entry.type == 'file')
         len(entry.heads)^ != 1])) { return current }

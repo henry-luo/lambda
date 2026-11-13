@@ -6,26 +6,28 @@ import fs: .filesystem
 import codec: .codec
 import blob: .blob
 
-pub fn prepare(current) any^ {
+pub fn prepare(current, projection=null) any^ {
     if (current.review != null) raise error("sync installation: external capture needs review")
-    let desired = fs.desired(current.endpoint)^
-    let replaced = [for (member in current.disk where any([for (target in desired)
-        target.path == member.path and target.type != member.type])) member.path]
+    let desired = if (projection == null) fs.desired(current.endpoint)^ else fs.desired_entries(projection.entries)^
+    let prior_paths = cap.index_paths(current.disk)^
+    let desired_paths = cap.index_paths(desired)^
+    let replaced = [for (member in current.disk where desired_paths[member.path] != null and
+        desired_paths[member.path].type != member.type) member.path]
     let early = [for (member in current.disk where any([for (path in replaced)
         member.path == path or starts_with(member.path,path ++ "/")^]))
         {kind:'erase',path:member.path,expected:member,content:null}]
     let additions = [for (member in desired where
-        cap.association(current.disk,member.path)^.type != member.type or
-        (member.type == 'file' and cap.association(current.disk,member.path)^.content != member.content))
+        prior_paths[member.path].type != member.type or
+        (member.type == 'file' and prior_paths[member.path].content != member.content))
         {kind:if (member.type == 'dir') 'directory' else 'write',path:member.path,
-         expected:if (contains(replaced,member.path)^) null else cap.association(current.disk,member.path)^,content:member.content}]
-    let removals = sort([for (member in current.disk where cap.association(desired,member.path)^ == null and
+         expected:if (contains(replaced,member.path)^) null else prior_paths[member.path],content:member.content}]
+    let removals = sort([for (member in current.disk where desired_paths[member.path] == null and
         not any([for (op in early) op.path == member.path]))
         {kind:'erase',path:member.path,expected:member,content:null}],(op) any^ =>0-len(op.path)^)^
     let operations = [*sort(early,(op) any^ =>0-len(op.path)^)^,*additions,*removals]
     if (len(operations) == 0) {
         return {*:current,base:cap.baseline(current.endpoint.replica,desired,cap.capture_id(desired)^)^,
-            disk:[for (member in current.disk) {*:member,id:cap.association(desired,member.path)^.id}]}
+            disk:[for (member in current.disk) {*:member,id:desired_paths[member.path].id}]}
     }
     return {*:current,installation:{id:codec.digest([current.base.id,current.endpoint.replica.clock,desired])^,
         endpoint:current.endpoint,desired:desired,operations:operations,next:0,blocked:null,recoveries:[]}}
@@ -48,23 +50,26 @@ pub pn step(tx, keys, current, actor) any^ {
     if (journal.next >= len(journal.operations)^) {
         let actual = fs.capture(tx,keys,current)^
         let wanted = journal.desired
+        let wanted_paths = cap.index_paths(wanted)^
         let expected_id = cap.capture_id(wanted)^
         if (actual.id != expected_id) {
             let touched = unique([for (operation in journal.operations) operation.path])
+            let actual_paths = cap.index_paths(actual.members)^
             let intact = all([for (path in touched) {
-                let member = cap.association(wanted,path)^
-                let found = cap.association(actual.members,path)^
+                let member = wanted_paths[path]
+                let found = actual_paths[path]
                 if (member == null) found == null else
                     found != null and found.type == member.type and found.content == member.content
             }])
             if (intact) {
+                let prior_paths = cap.index_paths(current.disk)^
                 // Unrelated edits cannot invalidate completed guarded writes. Untouched paths
                 // retain their old inode evidence while the installed frontier becomes the base.
                 let established = {*:current,installation:null,
                     base:cap.baseline(journal.endpoint.replica,wanted,expected_id)^,
                     disk:[for (member in wanted) {
-                        let old = cap.association(current.disk,member.path)^
-                        let observed = cap.association(actual.members,member.path)^
+                        let old = prior_paths[member.path]
+                        let observed = actual_paths[member.path]
                         let evidence = if (not contains(touched,member.path)^ and old != null) old else observed
                         {*:evidence,id:member.id,path:member.path,type:member.type,content:member.content}
                     }]}
@@ -73,7 +78,7 @@ pub pn step(tx, keys, current, actor) any^ {
             return {*:current,installation:{*:journal,blocked:{reason:"tree changed before completion",capture:actual},
                 recoveries:unique([*journal.recoveries,{capture:actual}])}}
         }
-        let members = [for (member in actual.members) {*:member,id:cap.association(wanted,member.path)^.id}]
+        let members = [for (member in actual.members) {*:member,id:wanted_paths[member.path].id}]
         return {*:current,base:cap.baseline(journal.endpoint.replica,wanted,expected_id)^,
             disk:members,installation:null}
     }

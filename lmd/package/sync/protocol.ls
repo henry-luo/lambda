@@ -293,6 +293,15 @@ pub fn next(endpoint, peer_have, max_ops=128, max_bytes=65536) any^ {
 pub fn compact(endpoint) any^ => {*:endpoint,replica:c.compact(endpoint.replica),
     journal:[for (tx in endpoint.journal where not c.dominates(endpoint.replica.clock,tx.frontier)^) tx]}
 
+// Installed workspace baselines cover transport packets, not immutable revision history.
+pub fn compact_log(endpoint, frontier) any^ {
+    validate_frontier(endpoint.replica,frontier)^
+    let floor = c.clock_join(endpoint.replica.floor,frontier)
+    return {*:endpoint,replica:{*:endpoint.replica,floor:floor,
+        log:[for (op in endpoint.replica.log where not c.covered(floor,op.id)^) op]},
+        journal:[for (group in endpoint.journal where not c.dominates(floor,group.frontier)^) group]}
+}
+
 // caller presents an already authenticated current-epoch checkpoint. Old work is preserved.
 pub fn bootstrap(endpoint, replica, admitted_digest) any^ {
     c.validate(replica)^

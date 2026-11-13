@@ -6,6 +6,20 @@ pub fn lookup(entries, id) {
     if (len(found) == 0) null else found[0]
 }
 
+// Causal indexes are validated/sorted by (actor, numeric counter), never by serialized text.
+pub fn lookup_id(entries, id) {
+    var lo = 0
+    var hi = len(entries)
+    while (lo < hi) {
+        let mid = (lo+hi) div 2
+        let entry = entries[mid]
+        if (entry.id == id) { return entry }
+        if (entry.id[0] < id[0] or (entry.id[0] == id[0] and entry.id[1] < id[1])) { lo = mid+1 }
+        else { hi = mid }
+    }
+    return null
+}
+
 pub fn record(value, required, optional=[]) any^ {
     if (not (value is map)) raise error("sync: expected record")
     let names = [for (key at value) string(key)]

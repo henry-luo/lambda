@@ -67,6 +67,13 @@ pub fn association(members, path) any^ {
     return if (len(matches) == 0) null else matches[0]
 }
 
+pub fn index_paths(members) any^ {
+    // Capture/install loops reuse one path index rather than searching the whole tree per member.
+    let indexed = map([for (member in members) (member.path,member)])
+    if (len(indexed)^ != len(members)^) raise error("sync ZIP: duplicate member path")
+    return indexed
+}
+
 pub fn desired_path(member, members, hints) any^ {
     let candidates = [for (hint in hints) {original:v.lookup(members,hint.entry)^,path:hint.path}]
     let matches = sort([for (hint in candidates where member.id == hint.original.id or
@@ -97,12 +104,13 @@ pub fn correspondence(base, captured, hints) any^ {
 // each command emits one event, so IDs can be assigned before bounded groups run.
 pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], saved_at=null) any^ {
     let base_view = w.read(endpoint.replica)^
+    let old_paths = index_paths(old_members)^
     var members = []
     var commands = []
     var i = 0
     while (i < len(captured.members)^) {
         let member = captured.members[i]
-        let old = association(old_members,member.path)^
+        let old = old_paths[member.path]
         let parent = parent_path(member.path)^
         let owner = if (parent == "") w.root else association(members,parent)^.id
         if (owner == null) raise error("sync ZIP: parent identity missing")

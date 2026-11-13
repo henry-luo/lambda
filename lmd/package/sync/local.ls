@@ -93,6 +93,12 @@ pn dependencies(tx, keys, endpoint, retired=[], source="workspace", cached=[], v
 fn dependency_scope(current) any^ => codec.digest([maintenance.get(current).manifest,
     maintenance.get(current).revisions,reach.cache_ids(current)])^
 
+fn installed_packets(current) any^ {
+    let endpoint = current.endpoint
+    return if (current.base.checkpoint.epoch == endpoint.replica.epoch)
+        p.compact_log(endpoint,current.base.checkpoint.frontier)^ else endpoint
+}
+
 pub pn open_repository(path, secret, space) any^ {
     let handle = {path:path,keys:repo.keys(secret,space)^,writer:uuid()^}
     status(handle)^
@@ -138,7 +144,7 @@ pub pn mutate(handle, operation) any^ {
         let loaded = repo.load(tx,k)^
         let expanded = documents.expand(tx,k,loaded.state)^
         let previous = if (loaded.validated == true) loaded.validation else validate(expanded,k.space)^
-        let updated = operation(tx,k,expanded)
+        let updated = operation(tx,{*:k,workspace_validation:previous},expanded)
         let next = documents.flush(tx,k,updated^)^
         let proof = validate(next,k.space,previous)^
         let scope = dependency_scope(next)^
@@ -204,36 +210,58 @@ pub pn prepare_install(handle) any^ {
         let fresh = fs.reconciled(current,fs.capture(tx,k,current)^,workspace_actor(handle,true)^,[],now().unix)^
         if (handle.keys.cache_enabled != true)
             dependencies(tx,k,fresh.endpoint,maintenance.get(fresh).revisions,"install preparation",reach.cache_ids(fresh))^
-        return install.prepare(fresh)^
+        // Reuse only the projection tied to this exact typed replica, after external reconciliation.
+        let proof = k.workspace_validation
+        let projection = if (proof.replica == codec.digest(fresh.endpoint.replica)^) proof.projection else null
+        return install.prepare(fresh,projection)^
     })^
 }
-pub pn install_step(handle) any^ {
+pn advance_install(handle, max_steps) any^ {
     return mutate(handle,pn (tx,k,current)=> {
-        let updated = install.step(tx,k,current,workspace_actor(handle,true))^
+        var updated = current
+        var i = 0
+        // The complete intent is already durable. A rollback replays guarded, idempotent effects.
+        while (updated.installation != null and i < max_steps) {
+            updated = install.step(tx,k,updated,workspace_actor(handle,true))^
+            i = i+1
+            if (updated.installation.blocked != null) { break }
+        }
         return if (updated.installation != null) updated else documents.refresh(tx,k,updated,actor(handle,updated)^)^
     })^
 }
+pub pn install_step(handle) any^ { return advance_install(handle,1)^ }
 pub pn materialize(handle, max_steps=1000) any^ {
     if (not v.natural(max_steps)^ or max_steps > 100000) raise error("sync local: invalid installation budget")
     var active = handle
-    var result = prepare_install(active)^
-    var i = 0
-    while (result.state.installation != null and i < max_steps) {
-        if (result.repository_cache != null) { active = {*:active,keys:{*:active.keys,cached_head:result.repository_cache}} }
-        result = install_step(active)^
-        if (result.state.installation.blocked != null) { return result }
-        i = i+1
-    }
-    return result
+    let prepared = prepare_install(active)^
+    if (prepared.state.installation == null or max_steps == 0) { return prepared }
+    if (prepared.repository_cache != null) { active = {*:active,keys:{*:active.keys,cached_head:prepared.repository_cache}} }
+    return advance_install(active,max_steps)^
 }
 
+pn selected_inventory(tx, keys, current, include_documents=true) any^ {
+    let rows = sqlite.query(tx,"SELECT id, kind FROM objects WHERE kind NOT IN ('state', 'maintenance', 'locator') ORDER BY id")^
+    let selected = if (maintenance.get(current).manifest == null) null else reach.roots(tx,keys,current,false)^
+    // An unretired inventory already selects every exportable row; avoid a quadratic self-join.
+    return [for (row in rows where (selected == null or contains(selected,row[0])^) and
+        (include_documents or row[1] != "document")) row[0]]
+}
 pub pn inventory(handle, include_documents=true) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let current = repo.load(tx,k)^.state
-        let rows = sqlite.query(tx,"SELECT id, kind FROM objects WHERE kind NOT IN ('state', 'maintenance', 'locator') ORDER BY id")^
-        let selected = if (maintenance.get(current).manifest == null) [for (row in rows) row[0]]
-            else reach.roots(tx,k,current,false)^
-        return [for (row in rows where contains(selected,row[0])^ and (include_documents or row[1] != "document")) row[0]]
+        return selected_inventory(tx,k,current,include_documents)^
+    })^
+}
+pub pn missing_objects(handle, ids) any^ {
+    if (not (ids is array) or len(ids)^ > 128) raise error("sync local: object query limit")
+    if (len(ids)^ == 0) { return [] }
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+        let current = repo.load(tx,k)^.state
+        // Resolve bounded peer pages through the primary key, not a fresh full inventory.
+        let have = if (maintenance.get(current).manifest != null) selected_inventory(tx,k,current)^ else
+            [for (row in sqlite.query(tx,"SELECT id FROM objects WHERE kind NOT IN ('state', 'maintenance', 'locator') AND id IN (" ++
+                join([for (id in ids) "?"],",")^ ++ ")",ids)^) row[0]]
+        return [for (id in ids where not contains(have,id)^) id]
     })^
 }
 pub pn export_objects(handle, ids) any^ {
@@ -268,7 +296,8 @@ pub pn receive_batch(handle, packets, records=[]) any^ {
     return mutate(handle,pn (tx,k,current)=> {
         // Objects reach durable immutable storage before the referencing head commits.
         repo.import_objects(tx,k,records)^
-        var endpoint = current.endpoint
+        // Drop only packets covered by the accepted disk base; keep new atomic groups for relay.
+        var endpoint = installed_packets(current)^
         for (item in packets) { endpoint = p.accept(endpoint,codec.encode(item.packet)^,item.admission)^ }
         return {*:current,endpoint:endpoint,
             *:if (len(records)^ == 0) ({}) else {staged_objects:sort(unique([

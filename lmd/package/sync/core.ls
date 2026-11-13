@@ -32,11 +32,11 @@ pub fn empty(document, profile, kind, tag) => {
 
 pub let lookup = v.lookup
 
-pub fn node(replica, id) any^ => lookup(replica.nodes,id)^
+pub fn node(replica, id) any^ => v.lookup_id(replica.nodes,id)^
 
 fn by_id(entries) any^ => sort(entries, (entry) => entry.id)^
 fn has_id(entries, id) any^ => lookup(entries,id)^ != null
-fn receipt(replica, id) any^ => lookup(replica.receipts,id)^
+fn receipt(replica, id) any^ => v.lookup_id(replica.receipts,id)^
 
 fn compatible(a, b) any^ {
     if (a.protocol != 1 or b.protocol != 1 or a.document != b.document or
@@ -460,7 +460,7 @@ pub fn validate(replica) any^ {
         observed(replica,atom.node,evidence.context)^
         let owner = check_slot(replica,atom.node,atom.slot)^
         if (atom.left != null) {
-            let anchor = lookup(replica.atoms,atom.left)^
+            let anchor = v.lookup_id(replica.atoms,atom.left)^
             if (anchor == null or anchor.node != atom.node or anchor.slot != atom.slot or not covered(evidence.context,atom.left)^)
                 raise error("sync: invalid atom anchor")
         }
@@ -483,7 +483,7 @@ pub fn validate(replica) any^ {
     }
     i = 0
     while (i < len(replica.dead)^) {
-        if (lookup(replica.atoms,replica.dead[i])^ == null) raise error("sync: unknown deleted atom")
+        if (v.lookup_id(replica.atoms,replica.dead[i])^ == null) raise error("sync: unknown deleted atom")
         i = i+1
     }
     i = 0

@@ -84,7 +84,7 @@ pub fn envelope(replica, op) any^ {
 
 fn creation(replica, id, context, directory=false) any^ {
     if (id == v.root) { return {type:'dir'} }
-    let atom = v.lookup(replica.atoms,id)^
+    let atom = v.lookup_id(replica.atoms,id)^
     if (atom == null or atom.value.event.action != 'create' or not tree.seen(context,id)^ or
         (directory and atom.value.event.type != 'dir')) raise error("sync workspace: unobserved or invalid entry")
     return atom.value.event
