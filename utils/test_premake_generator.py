@@ -671,6 +671,15 @@ def expect_release_full_lto(module) -> None:
                 fail(f'{system}/{compiler} {profile} must compile and link with {flag}')
 
 
+def expect_rtc_tls_closure(module) -> None:
+    generator = linux_validation_generator(module)
+    closure = generator._executable_external_dependencies({'libraries': ['lambda-rt']})
+    if not {'mbedtls', 'mbedx509', 'mbedcrypto'}.issubset(closure):
+        fail('RTC runtime consumers lost the host mbedTLS provider')
+    if 'sync-ssl' in generator.external_libraries or 'sync-ssl' in closure:
+        fail('RTC consumers retained the old OpenSSL TLS dependency')
+
+
 def main() -> int:
     module = load_generator_module()
     generator = linux_validation_generator(module)
@@ -694,6 +703,7 @@ def main() -> int:
     expect_radiant_property_ownership(module)
     expect_radiant_media_platform_selection(module)
     expect_release_full_lto(module)
+    expect_rtc_tls_closure(module)
     expect_module_only_libraries(module)
     expect_host_export_list(module)
     print("PREMAKE_GENERATOR_SELFTEST: passed")

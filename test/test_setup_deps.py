@@ -27,6 +27,10 @@ class SetupOwnership(unittest.TestCase):
                 self.assertEqual(builds, [f'make -C {INPUT} vendor-deps curl-deps native-deps'])
                 self.assertEqual(sum('glfw' in line for line in lines), 1)
                 self.assertTrue(any('npm install --ignore-scripts' in line for line in lines))
+                rtc = [line for line in lines if 'prepare_sync_connectivity.py' in line]
+                self.assertEqual(len(rtc), 1)
+                self.assertLess(lines.index(builds[0]), lines.index(rtc[0]))
+                self.assertLess(lines.index(rtc[0]), next(i for i, line in enumerate(lines) if 'glfw' in line))
                 if platform == 'linux':
                     self.assertEqual(sum('setup_linux_sources.py' in line for line in lines), 1)
 
@@ -38,6 +42,7 @@ class SetupOwnership(unittest.TestCase):
                 'brew': 'if [ "$1" = list ]; then exit 1; fi; echo "brew $*" >> "$SETUP_TEST_LOG"',
                 'npm': 'echo "npm $*" >> "$SETUP_TEST_LOG"',
                 'make': 'echo "make $*" >> "$SETUP_TEST_LOG"; exit "${SETUP_TEST_MAKE_STATUS:-0}"',
+                'python3': 'echo "python3 $*" >> "$SETUP_TEST_LOG"; exit "${SETUP_TEST_RTC_STATUS:-0}"',
             }
             for name, body in stubs.items():
                 path = scratch / name
@@ -52,11 +57,22 @@ class SetupOwnership(unittest.TestCase):
             input_build = next(i for i, line in enumerate(commands) if line.startswith('make '))
             self.assertLess(commands.index('brew install mbedtls@3'), input_build)
             self.assertGreater(commands.index('brew install glfw'), input_build)
+            rtc_build = next(i for i, line in enumerate(commands) if 'prepare_sync_connectivity.py' in line)
+            self.assertLess(input_build, rtc_build)
+            self.assertLess(rtc_build, commands.index('brew install glfw'))
             self.assertEqual(sum(line.startswith('make ') for line in commands), 1)
             log.unlink()
             env['SETUP_TEST_MAKE_STATUS'] = '7'
             result = subprocess.run(command, cwd=ROOT / 'temp', env=env, capture_output=True)
             self.assertEqual(result.returncode, 7)
+            self.assertNotIn('brew install glfw', log.read_text())
+            self.assertNotIn('prepare_sync_connectivity.py', log.read_text())
+            log.unlink()
+            env['SETUP_TEST_MAKE_STATUS'] = '0'
+            env['SETUP_TEST_RTC_STATUS'] = '9'
+            result = subprocess.run(command, cwd=ROOT / 'temp', env=env, capture_output=True)
+            self.assertEqual(result.returncode, 9)
+            self.assertIn('prepare_sync_connectivity.py', log.read_text())
             self.assertNotIn('brew install glfw', log.read_text())
 
     def test_vendor_recipes_belong_to_input(self):

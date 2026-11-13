@@ -405,13 +405,6 @@
       "include": "",
       "link": "static",
       "optional": true
-    },
-    {
-      "name": "sync-ssl",
-      "lib": "/opt/homebrew/opt/openssl@3/lib/libssl.a",
-      "include": "",
-      "link": "static",
-      "optional": true
     }
   ],
   "dev_libraries": [
@@ -641,7 +634,9 @@
         "sync-datachannel",
         "sync-juice",
         "sync-usrsctp",
-        "sync-ssl",
+        "mbedtls",
+        "mbedx509",
+        "mbedcrypto",
         "openssl-crypto"
       ],
       "defines": [
@@ -785,7 +780,6 @@
         "sync-datachannel",
         "sync-juice",
         "sync-usrsctp",
-        "sync-ssl",
         "openssl-crypto"
       ],
       "target_name": "lambda-static",

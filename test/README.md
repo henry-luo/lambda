@@ -582,7 +582,12 @@ restart catch-up and three-peer fan-out. Native watcher checks require OS
 notification access in addition to local-network access; a restricted sandbox
 can deny the macOS event service. Run this gate on the native host.
 Select the tier with `LAMBDA_EXEC_BACKEND` and executable with `LAMBDA_SYNC_EXE`.
-The pinned dependency is prepared by `utils/prepare_sync_connectivity.py`.
+Platform dependency setup prepares pinned RTC dependencies automatically;
+`make build-sync-connectivity` runs the step separately. The shared JSON recipe
+uses Premake/Make and the host's mbedTLS 3 provider, with plog statements disabled
+in release dependency archives (D9.1.5). `python3 test/test_setup_deps.py` checks
+platform setup order and failure propagation. Build and native RTC verification
+are recorded in the [dependency build plan](<../vibe/impl/Lambda_Impl_Sync_Dependency_Build (done).md>).
 
 `benchmark_warm.py --seed-files 10 --samples 10` measures independent native
 agents on one host using a release executable. It verifies connection reuse,

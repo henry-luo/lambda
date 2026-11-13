@@ -138,6 +138,14 @@ and Make. On Windows, setup requires an MSYS2 CLANG64 or MINGW64 shell and
 uses pacman. Input builds its pinned curl, ThorVG, Brotli and utf8proc into
 `../lambda-input/build/deps/`; Radiant setup installs its graphics packages.
 
+Lambda's platform setup also prepares pinned libdatachannel v0.24.6 and its
+libjuice/usrsctp dependencies under `build/deps/connectivity/`, after input's
+mbedTLS provider is available. `make build-sync-connectivity` runs this step
+separately. The Lambda-owned JSON recipe uses the shared Premake/Make builder
+(D9.1.5), selects the host's mbedTLS 3 provider, and compiles out plog statements
+in the release dependency archives. The headers remain a build dependency.
+See [native connectivity](../../lmd/package/sync/CONNECTIVITY.md#prepare-and-run).
+
 The macOS host build was verified on 2026-11-10. Linux and Windows setup plans
 were checked with `--dry-run`; full setup and build runs need platform testing.
 

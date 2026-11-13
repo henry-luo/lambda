@@ -12,17 +12,35 @@ remembers the pairing for later launches.
 
 ## Prepare and run
 
-On the initial macOS profile, prepare the optional static WebRTC dependency:
+The platform `setup-*-deps.sh` scripts prepare the static WebRTC dependency after
+the owning input setup installs mbedTLS 3. To prepare it separately:
 
 ```sh
-python3 utils/prepare_sync_connectivity.py
+make build-sync-connectivity
 make build
 ```
 
 The recipe checks libdatachannel v0.24.6 at commit
 `6b1e2e620f1e37f0eafeee702eaea0043cb305fd` and its pinned submodules, builds them
-unmodified, and installs into `build/deps/connectivity/`. It disables media,
-WebSockets, examples and dependency tests. `provenance.json` records the inputs.
+unmodified, and installs into `build/deps/connectivity/`. Lambda's
+`build_deps_config.json` recipe builds libdatachannel, libjuice and usrsctp with
+Premake-generated Makefiles, using the shared dependency builder (D9.1.5).
+Source revisions are pinned; compiler probes select platform features. No CMake is invoked. Build artifacts are
+under `temp/dependency-build/<system>-<architecture>/libdatachannel/`.
+
+The recipe uses the same mbedTLS 3 headers and archives selected for the host's
+platform. It disables media, WebSockets, examples and dependency tests. Release
+dependency archives define upstream `PLOG_DISABLE_LOGGING`: plog headers remain
+required for compilation, while log statements are compiled out. There is no
+separate plog runtime library. `provenance.json` records the source revision,
+submodules, recipe identity, TLS provider and logging policy. The old RTC-only
+OpenSSL `libssl` dependency is removed; host public-key crypto still uses its
+existing OpenSSL primitives.
+
+`python3 utils/prepare_sync_connectivity.py --jobs 4` is the direct helper;
+`--dry-run` prints its plan. If the host was previously built without RTC,
+use `make rebuild KEEP_CONNECTIVITY=1` from the main checkout to rebuild that
+feature probe while retaining the prepared dependency prefix.
 No sibling sources or vendor files are patched. Without the prepared prefix,
 the native capability report has `rtc:false`; acquisition returns an explicit
 unavailable error. The initial Bonjour implementation uses macOS DNS-SD.

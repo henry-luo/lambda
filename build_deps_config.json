@@ -5,7 +5,9 @@
       "path": "../lambda-input/build_native_deps_config.json",
       "root_env": "LAMBDA_INPUT_ROOT",
       "root_path": "build_native_deps_config.json",
-      "include_keys": ["targets"]
+      "include_keys": [
+        "targets"
+      ]
     }
   ],
   "dependency_builds": {
@@ -519,6 +521,400 @@
             "-Wl,-rpath,${llvm_libdir}"
           ],
           "install_executable": "bin/typemeta_extract"
+        }
+      ]
+    },
+    "libdatachannel": {
+      "source_dir": "temp/sync-connectivity/libdatachannel",
+      "projects": [
+        {
+          "name": "datachannel",
+          "lang": "c++17",
+          "source_files": [
+            "${source}/src/candidate.cpp",
+            "${source}/src/channel.cpp",
+            "${source}/src/configuration.cpp",
+            "${source}/src/datachannel.cpp",
+            "${source}/src/dependencydescriptor.cpp",
+            "${source}/src/description.cpp",
+            "${source}/src/iceudpmuxlistener.cpp",
+            "${source}/src/mediahandler.cpp",
+            "${source}/src/global.cpp",
+            "${source}/src/message.cpp",
+            "${source}/src/peerconnection.cpp",
+            "${source}/src/rtcpreceivingsession.cpp",
+            "${source}/src/track.cpp",
+            "${source}/src/websocket.cpp",
+            "${source}/src/websocketserver.cpp",
+            "${source}/src/rtppacketizationconfig.cpp",
+            "${source}/src/rtcpsrreporter.cpp",
+            "${source}/src/rtppacketizer.cpp",
+            "${source}/src/rtpdepacketizer.cpp",
+            "${source}/src/h264rtppacketizer.cpp",
+            "${source}/src/h264rtpdepacketizer.cpp",
+            "${source}/src/nalunit.cpp",
+            "${source}/src/h265rtppacketizer.cpp",
+            "${source}/src/h265rtpdepacketizer.cpp",
+            "${source}/src/h265nalunit.cpp",
+            "${source}/src/av1rtppacketizer.cpp",
+            "${source}/src/rtcpnackresponder.cpp",
+            "${source}/src/rtp.cpp",
+            "${source}/src/capi.cpp",
+            "${source}/src/plihandler.cpp",
+            "${source}/src/pacinghandler.cpp",
+            "${source}/src/rembhandler.cpp",
+            "${source}/src/impl/certificate.cpp",
+            "${source}/src/impl/channel.cpp",
+            "${source}/src/impl/datachannel.cpp",
+            "${source}/src/impl/dtlssrtptransport.cpp",
+            "${source}/src/impl/dtlstransport.cpp",
+            "${source}/src/impl/icetransport.cpp",
+            "${source}/src/impl/iceudpmuxlistener.cpp",
+            "${source}/src/impl/init.cpp",
+            "${source}/src/impl/peerconnection.cpp",
+            "${source}/src/impl/logcounter.cpp",
+            "${source}/src/impl/sctptransport.cpp",
+            "${source}/src/impl/threadpool.cpp",
+            "${source}/src/impl/tls.cpp",
+            "${source}/src/impl/track.cpp",
+            "${source}/src/impl/utils.cpp",
+            "${source}/src/impl/processor.cpp",
+            "${source}/src/impl/sha.cpp",
+            "${source}/src/impl/pollinterrupter.cpp",
+            "${source}/src/impl/pollservice.cpp",
+            "${source}/src/impl/http.cpp",
+            "${source}/src/impl/httpproxytransport.cpp",
+            "${source}/src/impl/tcpserver.cpp",
+            "${source}/src/impl/tcptransport.cpp",
+            "${source}/src/impl/tlstransport.cpp",
+            "${source}/src/impl/transport.cpp",
+            "${source}/src/impl/verifiedtlstransport.cpp",
+            "${source}/src/impl/websocket.cpp",
+            "${source}/src/impl/websocketserver.cpp",
+            "${source}/src/impl/wstransport.cpp",
+            "${source}/src/impl/wshandshake.cpp"
+          ],
+          "includes": [
+            "${source}/include",
+            "${source}/include/rtc",
+            "${source}/src",
+            "${source}/deps/plog/include",
+            "${source}/deps/usrsctp/usrsctplib",
+            "${source}/deps/libjuice/include"
+          ],
+          "defines": [
+            "RTC_STATIC",
+            "RTC_EXPORTS",
+            "RTC_ENABLE_MEDIA=0",
+            "RTC_ENABLE_WEBSOCKET=0",
+            "USE_MBEDTLS=1",
+            "USE_GNUTLS=0",
+            "USE_NICE=0",
+            "PLOG_DISABLE_LOGGING",
+            "JUICE_STATIC"
+          ],
+          "source_sets": [
+            {
+              "platforms": [
+                "windows"
+              ],
+              "defines": [
+                "WIN32_LEAN_AND_MEAN",
+                "NOMINMAX",
+                "_CRT_SECURE_NO_WARNINGS"
+              ]
+            }
+          ],
+          "install_archive": "lib/libdatachannel.a"
+        },
+        {
+          "name": "juice",
+          "lang": "c17",
+          "source_files": [
+            "${source}/deps/libjuice/src/addr.c",
+            "${source}/deps/libjuice/src/agent.c",
+            "${source}/deps/libjuice/src/crc32.c",
+            "${source}/deps/libjuice/src/const_time.c",
+            "${source}/deps/libjuice/src/conn.c",
+            "${source}/deps/libjuice/src/conn_poll.c",
+            "${source}/deps/libjuice/src/conn_thread.c",
+            "${source}/deps/libjuice/src/conn_mux.c",
+            "${source}/deps/libjuice/src/base64.c",
+            "${source}/deps/libjuice/src/hash.c",
+            "${source}/deps/libjuice/src/hmac.c",
+            "${source}/deps/libjuice/src/ice.c",
+            "${source}/deps/libjuice/src/juice.c",
+            "${source}/deps/libjuice/src/log.c",
+            "${source}/deps/libjuice/src/random.c",
+            "${source}/deps/libjuice/src/server.c",
+            "${source}/deps/libjuice/src/stun.c",
+            "${source}/deps/libjuice/src/timestamp.c",
+            "${source}/deps/libjuice/src/tcp.c",
+            "${source}/deps/libjuice/src/turn.c",
+            "${source}/deps/libjuice/src/udp.c"
+          ],
+          "includes": [
+            "${source}/deps/libjuice/include",
+            "${source}/deps/libjuice/include/juice",
+            "${source}/deps/libjuice/src"
+          ],
+          "defines": [
+            "JUICE_STATIC",
+            "JUICE_EXPORTS",
+            "USE_NETTLE=0",
+            "RELEASE=1"
+          ],
+          "source_sets": [
+            {
+              "platforms": [
+                "windows"
+              ],
+              "defines": [
+                "WIN32_LEAN_AND_MEAN",
+                "NOMINMAX",
+                "_CRT_SECURE_NO_WARNINGS"
+              ]
+            }
+          ],
+          "install_archive": "lib/libjuice.a"
+        },
+        {
+          "name": "usrsctp",
+          "lang": "c17",
+          "source_files": [
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_asconf.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_auth.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_bsd_addr.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_callout.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_cc_functions.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_crc32.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_indata.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_input.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_output.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_pcb.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_peeloff.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_sha1.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_ss_functions.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_sysctl.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_timer.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_userspace.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctp_usrreq.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet/sctputil.c",
+            "${source}/deps/usrsctp/usrsctplib/netinet6/sctp6_usrreq.c",
+            "${source}/deps/usrsctp/usrsctplib/user_environment.c",
+            "${source}/deps/usrsctp/usrsctplib/user_mbuf.c",
+            "${source}/deps/usrsctp/usrsctplib/user_recv_thread.c",
+            "${source}/deps/usrsctp/usrsctplib/user_socket.c"
+          ],
+          "includes": [
+            "${source}/deps/usrsctp/usrsctplib"
+          ],
+          "defines": [
+            "__Userspace__",
+            "SCTP_SIMPLE_ALLOCATOR",
+            "SCTP_PROCESS_LEVEL_LOCKS",
+            "SCTP_DEBUG"
+          ],
+          "source_sets": [
+            {
+              "platforms": [
+                "macos"
+              ],
+              "defines": [
+                "__APPLE_USE_RFC_2292"
+              ]
+            },
+            {
+              "platforms": [
+                "linux"
+              ],
+              "defines": [
+                "_GNU_SOURCE"
+              ]
+            },
+            {
+              "platforms": [
+                "windows"
+              ],
+              "defines": [
+                "WIN32_LEAN_AND_MEAN",
+                "NOMINMAX",
+                "SCTP_STDINT_INCLUDE=<stdint.h>"
+              ]
+            }
+          ],
+          "install_archive": "lib/libusrsctp.a"
+        }
+      ],
+      "compiler_features": [
+        {
+          "name": "HAVE_SYS_QUEUE_H",
+          "source": "#include <sys/queue.h>\nint main(void) { return 0; }\n",
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_SYS_QUEUE_H"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_LINUX_IF_ADDR_H",
+          "source": "#include <sys/socket.h>\n#include <linux/if_addr.h>\nint main(void) { return 0; }\n",
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_LINUX_IF_ADDR_H"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_LINUX_RTNETLINK_H",
+          "source": "#include <sys/socket.h>\n#include <linux/rtnetlink.h>\nint main(void) { return 0; }\n",
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_LINUX_RTNETLINK_H"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_NETINET_IP_ICMP_H",
+          "source": "#include <sys/types.h>\n#include <netinet/in.h>\n#include <netinet/ip.h>\n#include <netinet/ip_icmp.h>\nint main(void) { return 0; }\n",
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_NETINET_IP_ICMP_H"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_NET_ROUTE_H",
+          "source": "#include <sys/types.h>\n#include <sys/socket.h>\n#include <net/route.h>\nint main(void) { return 0; }\n",
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_NET_ROUTE_H"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_STDATOMIC_H",
+          "source": "#include <stdatomic.h>\nint main(void) { return 0; }\n",
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_STDATOMIC_H"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_SA_LEN",
+          "source": "#include <sys/types.h>\n#include <sys/socket.h>\nint main(void) { (void)sizeof(((struct sockaddr *)0)->sa_len); return 0; }\n",
+          "flags": [
+            "-I${source}/deps/usrsctp/usrsctplib"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_SA_LEN"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_SIN_LEN",
+          "source": "#include <sys/types.h>\n#include <netinet/in.h>\nint main(void) { (void)sizeof(((struct sockaddr_in *)0)->sin_len); return 0; }\n",
+          "flags": [
+            "-I${source}/deps/usrsctp/usrsctplib"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_SIN_LEN"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_SIN6_LEN",
+          "source": "#include <sys/types.h>\n#include <netinet/in.h>\nint main(void) { (void)sizeof(((struct sockaddr_in6 *)0)->sin6_len); return 0; }\n",
+          "flags": [
+            "-I${source}/deps/usrsctp/usrsctplib"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_SIN6_LEN"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "HAVE_SCONN_LEN",
+          "source": "#include <usrsctp.h>\nint main(void) { (void)sizeof(((struct sockaddr_conn *)0)->sconn_len); return 0; }\n",
+          "flags": [
+            "-I${source}/deps/usrsctp/usrsctplib"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "${source}/deps/usrsctp/usrsctplib/**.c"
+              ],
+              "defines": [
+                "HAVE_SCONN_LEN"
+              ]
+            }
+          ]
+        }
+      ],
+      "install_files": [
+        {
+          "source": "${source}/include/rtc",
+          "destination": "include/rtc",
+          "directory": false
+        },
+        {
+          "source": "${source}/deps/libjuice/include/juice",
+          "destination": "include/juice",
+          "directory": false
+        },
+        {
+          "source": "${source}/deps/usrsctp/usrsctplib/usrsctp.h",
+          "destination": "include/usrsctp.h",
+          "directory": false
         }
       ]
     }
