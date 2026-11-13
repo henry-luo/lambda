@@ -1,0 +1,38 @@
+[{
+    name: "basic",
+    equal: true
+  }, {
+    name: "tables",
+    equal: true
+  }, {
+    name: "escapes",
+    equal: true
+  }, {
+    name: "unicode",
+    equal: true
+  }, {
+    name: "destinations",
+    equal: true
+  }, {
+    name: "reset",
+    equal: true
+  }, {
+    name: "empty-color-slots",
+    equal: true
+  }, {
+    name: "unterminated",
+    equal: true
+  }, {
+    name: "tablesep",
+    equal: true
+  }]
+{
+  fixture: true,
+  invalid: true
+}
+{
+  depth_guard: true
+}
+{
+  depth_511: true
+}

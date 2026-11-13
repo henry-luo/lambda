@@ -719,7 +719,14 @@ report?<p> |> ~[0]             // first text of each paragraph
 
 ### 3.3 RTF
 
-The RTF parser is **experimental**: it currently yields the document's control groups as raw maps (`{content: [...], formatting: {pard: true, qc: true, fs: 28, …}}`) rather than a Mark Doc tree, so RTF is not yet usable for conversion.
+The experimental `lambda.doc.rtf` script package parses RTF source text into a `doc` element containing styled `p` and `span` elements (D9.3.4):
+
+```lambda
+import rtf: lambda.doc.rtf
+let document = rtf.parse_file("report.rtf")^  // or rtf.parse(source_text)^
+```
+
+The supported subset includes nested formatting, font and color tables, paragraph alignment and indents, basic escapes, Unicode fallback, page breaks, and table separators. Headers, footers, pictures, objects, metadata, and other non-body destinations are skipped. This is not a complete RTF implementation: code-page decoding, embedded media, and full table layout are not supported. The script parser rejects nesting of 512 groups or more. `input(path, 'rtf')` continues to use the native input parser; the document viewer uses the script package.
 
 ### 3.4 Email (EML / RFC 822)
 
