@@ -6795,28 +6795,23 @@ TEST(PaintOwnership, TextOverlayUsesSerialReplayWithATextFreeRetainedDocument) {
     render_export_session_end(&session); rdt_engine_term();
 }
 
-TEST(PaintOwnership, VideoPostCompositeKeepsPlacementsAndRetiresAbsentStreamsWithoutScanning) {
-    rdt_engine_init(0);
-    ImageSurface* surface = image_surface_create(32, 32); ASSERT_NE(surface, nullptr);
+TEST(PaintOwnership, VideoEpochInvalidatesRetainedSnapshots) {
     RdtVideo* video = rdt_video_create(nullptr, nullptr); ASSERT_NE(video, nullptr);
     DocState state = {};
     DisplayList list;
     Bound clip = {0, 0, 32, 32};
-    dl_video_placeholder(&list, video, 0, 0, 32, 32, 0, &clip, 1);
+    doc_state_mark_video_frame_pending(&state);
+    dl_video_placeholder(&list, video, 0, 0, 32, 32, 0, &clip, state.video_frame_generation);
     ValidatedDisplayList recording;
     ASSERT_TRUE(dl_validate_recording(&list, list.item_count(), &recording, "test video"));
     EXPECT_TRUE(recording.content().has_video);
-    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    EXPECT_TRUE(dl_resources_current(&list, state.video_frame_generation, 0));
+    doc_state_clear_video_frame_pending(&state);
+    EXPECT_FALSE(state.video_frame_pending);
     doc_state_mark_video_frame_pending(&state);
-    render_video_frames(recording.get(), surface, &state, nullptr);
-    EXPECT_EQ(state.video_placement_count, 1); EXPECT_FALSE(state.video_frame_pending);
-    EXPECT_EQ(counters.media_command_checks, 1u);
+    EXPECT_FALSE(dl_resources_current(&list, state.video_frame_generation, 0));
     dl_clear(&list); EXPECT_EQ(recording.get(), nullptr);
-    doc_state_mark_video_frame_pending(&state); counters = {};
-    render_video_frames(nullptr, surface, &state, nullptr);
-    EXPECT_EQ(state.video_placement_count, 0); EXPECT_FALSE(state.video_frame_pending);
-    EXPECT_EQ(counters.media_command_checks, 0u);
-    dl_destroy(&list); rdt_video_destroy(video); image_surface_destroy(surface); rdt_engine_term();
+    dl_destroy(&list); rdt_video_destroy(video);
 }
 
 TEST(PaintOwnership, ReplayMetadataRecognizesNativeTextPictures) {

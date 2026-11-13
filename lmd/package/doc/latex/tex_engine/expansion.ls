@@ -234,19 +234,21 @@ fn guarded_expl_let(st, token) any^ => if (meaning(st, token).source_mapping_gua
     {*:st, expl3_tl_put_seen: true} else st
 
 fn prefixed(st, global, long_ok, protected_flag, budget) any^ {
-    let read = nonspace(st.input);
+    // TeX expands macros while searching for the assignment after a prefix.
+    let read = expanded_nonspace({*:st, prefix_scan: true}, budget)^;
     let t = read.token;
-    let advanced = {*:st, input: read.stream};
-    let cmd = primitive(st, t);
-    let apply_global = effective_global(st, global)^;
-    if (cmd == null and (not is_control(t) or
-        (meaning(st, t).kind != "register" and meaning(st, t).kind != "dimension-register" and meaning(st, t).kind != "glue-register" and meaning(st, t).kind != "font" and meaning(st, t).kind != "token-register")))
+    let advanced = {*:read.state, prefix_scan: false};
+    let cmd = primitive(advanced, t);
+    let apply_global = effective_global(advanced, global)^;
+    if (advanced.issue != null) advanced
+    else if (cmd == null and (not is_control(t) or
+        (meaning(advanced, t).kind != "register" and meaning(advanced, t).kind != "dimension-register" and meaning(advanced, t).kind != "glue-register" and meaning(advanced, t).kind != "font" and meaning(advanced, t).kind != "token-register")))
         fail(advanced, "tex-bad-prefix")
     else if (cmd == "global") prefixed(advanced, true, long_ok, protected_flag, budget)
     else if (cmd == "long") prefixed(advanced, global, true, protected_flag, budget)
     else if (cmd == "protected") prefixed(advanced, global, long_ok, true, budget)
     else if (contains(["def", "gdef", "edef", "xdef"], cmd)) {
-        let assigned = define(advanced, effective_global(st, global or cmd == "gdef" or cmd == "xdef")^, long_ok, protected_flag,
+        let assigned = define(advanced, effective_global(advanced, global or cmd == "gdef" or cmd == "xdef")^, long_ok, protected_flag,
             cmd == "edef" or cmd == "xdef", budget)^;
         {*:assigned, prefixed_definition: true}
     }
@@ -280,16 +282,16 @@ fn prefixed(st, global, long_ok, protected_flag, budget) any^ {
     else if (cmd == "toks" and not long_ok and not protected_flag) assign_toks(advanced, apply_global, budget, null)
     else if (cmd == "everyeof" and not long_ok and not protected_flag) assign_toks(advanced, apply_global, budget, -1)
     else if (cmd == "toksdef" and not long_ok and not protected_flag) assign_toksdef(advanced, apply_global, budget)
-    else if (meaning(st, t).kind == "font" and not long_ok and not protected_flag)
-        select_font(advanced, apply_global, meaning(st, t).index)
-    else if (meaning(st, t).kind == "register" and not long_ok and not protected_flag)
-        assign_count(advanced, apply_global, budget, meaning(st, t).index)
-    else if (meaning(st, t).kind == "dimension-register" and not long_ok and not protected_flag)
-        assign_dimen(advanced, apply_global, budget, meaning(st, t).index)
-    else if (meaning(st, t).kind == "glue-register" and not long_ok and not protected_flag)
-        assign_glue(advanced, apply_global, budget, meaning(st, t).index, meaning(st, t).mu)
-    else if (meaning(st, t).kind == "token-register" and not long_ok and not protected_flag)
-        assign_toks(advanced, apply_global, budget, meaning(st, t).index)
+    else if (meaning(advanced, t).kind == "font" and not long_ok and not protected_flag)
+        select_font(advanced, apply_global, meaning(advanced, t).index)
+    else if (meaning(advanced, t).kind == "register" and not long_ok and not protected_flag)
+        assign_count(advanced, apply_global, budget, meaning(advanced, t).index)
+    else if (meaning(advanced, t).kind == "dimension-register" and not long_ok and not protected_flag)
+        assign_dimen(advanced, apply_global, budget, meaning(advanced, t).index)
+    else if (meaning(advanced, t).kind == "glue-register" and not long_ok and not protected_flag)
+        assign_glue(advanced, apply_global, budget, meaning(advanced, t).index, meaning(advanced, t).mu)
+    else if (meaning(advanced, t).kind == "token-register" and not long_ok and not protected_flag)
+        assign_toks(advanced, apply_global, budget, meaning(advanced, t).index)
     else if (cmd == "catcode" and not long_ok and not protected_flag) assign_catcode(advanced, apply_global, budget)
     else if (contains(["sfcode", "mathcode", "delcode"], cmd) and not long_ok and not protected_flag)
         assign_extra_code(advanced, apply_global, budget, cmd)
@@ -314,7 +316,9 @@ fn noexpand(st, budget, argument_mode = false) any^ {
         let cmd = primitive(st, read.token);
         let script_macro = argument_mode and st.script_expl3 and cmd != null and
             expl3.exists(cmd) and not expl3.expandable(cmd);
-        let unexpandable = is_control(read.token) and not script_macro and (existing.kind == "relax" or existing.kind == "char" or
+        let unexpandable = is_control(read.token) and not script_macro and
+            (contains(["relax", "char", "register", "dimension-register", "glue-register", "token-register",
+                "font", "chardef", "mathchardef", "constructor"], existing.kind) or
             (cmd != null and not primitives.expandable(cmd) and not (st.latex and primitives.latex_expandable(cmd)) and
                 not (st.script_expl3 and expl3.expandable(cmd))));
         let marked = if (is_control(read.token) and not unexpandable)
@@ -329,7 +333,11 @@ fn expandable(st, t) any^ => is_control(t) and t.noexpand != true and
         (st.script_expl3 and expl3.expandable(primitive(st, t))))))
 
 fn expand_one(st, t, budget) any^ {
+    let pending = len(st.conditions) > 0 and st.conditions[len(st.conditions) - 1] == "scanning";
     if (not expandable(st, t)) {*:st, input: stream.push(st.input, [t])}
+    // TeX inserts a relax before a delimiter encountered during an if test.
+    else if (pending and contains(["else", "fi", "or"], primitive(st, t)))
+        {*:st, input: stream.push(st.input, [control_token("relax"), t])}
     else if (meaning(st, t).kind == "macro") {
         let macro = meaning(st, t)^;
         if (st.expansions >= budget) fail(st, "tex-budget")
@@ -339,8 +347,13 @@ fn expand_one(st, t, budget) any^ {
             let marked = if (macro.source_mapping_guard == "cs_exist") {*:st, expl3_cs_exist_seen: true}
                 else if (macro.source_mapping_guard == "cs_eq") {*:st, expl3_cs_eq_seen: true}
                 else if (macro.source_mapping_guard == "dynamic_assignment") {*:st, expl3_dynamic_assignment_seen: true}
-                else if (macro.source_mapping_guard == "dynamic_read") {*:st, expl3_dynamic_read_seen: true} else st;
-            expand_macro(marked, macro, budget)
+                else if (macro.source_mapping_guard == "dynamic_read") {*:st, expl3_dynamic_read_seen: true}
+                else if (macro.source_mapping_guard == "tl_head") {*:st, expl3_tl_head_seen: true}
+                else if (macro.source_mapping_guard == "tl_tail") {*:st, expl3_tl_tail_seen: true}
+                else if (macro.source_mapping_guard == "exp_args_once") {*:st, expl3_exp_args_once_seen: true}
+                else if (macro.source_mapping_guard == "exp_args_value") {*:st, expl3_exp_args_value_seen: true} else st;
+            let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
+            expand_macro(traced, macro, budget)
         }
     }
     else if (primitive(st, t) == "noexpand") noexpand(st, budget)
@@ -536,7 +549,9 @@ fn digits(st, t, base, negative, budget, count = 0, value = 0) any^ {
     let n = digit(t, base);
     if (st.issue != null) {state: st, value: 0}
     else if (n == null) {
-        let after = if (count > 0 and expanded_space(st, t)^) st else put_back(st, t);
+        // noexpand affects the scan once; a returned token can expand again.
+        let returned = if (t != null and t.noexpand == true) {*:t, noexpand: false} else t;
+        let after = if (count > 0 and expanded_space(st, t)^) st else put_back(st, returned);
         if (count == 0) {state: fail(after, "tex-missing-number"), value: 0}
         else {state: after, value: if (negative) -value else value}
     } else if (value * base + n > 2147483647)
@@ -2438,6 +2453,20 @@ fn expl3_cs_define(st, name, budget) any^ {
     }
 }
 
+// a new expl3 control sequence copies the source meaning globally.
+fn expl3_cs_new_equal(st) any^ {
+    let target = nonspace(st.input)^;
+    let current = {*:st, input: target.stream};
+    if (not is_control(target.token)) fail(current, "tex-missing-cs")
+    else if (not latex_definable(meaning(st, target.token))) fail(current, "expl3-already-defined")
+    else {
+        // an explicit equals sign preserves a source token that is itself `=`.
+        let equal = {kind: "char", value: "=", cat: 12, start: -1, end: -1};
+        let input = stream.push(target.stream, [target.token, equal])^;
+        assign_let({*:current, input: input, expl3_tl_put_seen: true}, effective_global(st, true)^)
+    }
+}
+
 fn expl3_tl_assign(st, name, budget) any^ {
     let target = nonspace(st.input)^;
     let current = {*:st, input: target.stream};
@@ -2974,14 +3003,27 @@ fn expl3_int_math(st, name, budget) any^ {
     else {
         let first = expl3_int_argument({*:st, expansions: st.expansions + 1, expl3_int_math_seen: true}, budget)^;
         if (first.state.issue != null) first.state
-        else if (name == "int_abs:n")
-            {*:first.state, input: stream.push(first.state.input, text_tokens(string(abs(first.value))))}
+        else if (name == "int_abs:n" or name == "int_sign:n") {
+            let value = if (name == "int_abs:n") abs(first.value)
+                else if (first.value < 0) -1 else if (first.value > 0) 1 else 0;
+            {*:first.state, input: stream.push(first.state.input, text_tokens(string(value)))}
+        }
         else {
             let second = expl3_int_argument(first.state, budget)^;
             if (second.state.issue != null) second.state
             else {
-                let value = if (name == "int_max:nn") max(first.value, second.value) else min(first.value, second.value);
-                {*:second.state, input: stream.push(second.state.input, text_tokens(string(value)))}
+                let division = contains(["int_div_truncate:nn", "int_div_round:nn", "int_mod:nn"], name);
+                let invalid = division and second.value == 0;
+                // TeX truncates toward zero, so the remainder follows the dividend's sign.
+                let quotient = if (not division or invalid) 0
+                    else (abs(first.value) div abs(second.value)) * if ((first.value < 0) != (second.value < 0)) -1 else 1;
+                let result = if (invalid) {state: fail(second.state, "tex-arith-overflow"), value: 0}
+                    else if (name == "int_div_round:nn") rounded_fraction(second.state, first.value, second.value)^
+                    else {state: second.state, value: if (name == "int_div_truncate:nn") quotient
+                        else if (name == "int_mod:nn") first.value - quotient * second.value
+                        else if (name == "int_max:nn") max(first.value, second.value) else min(first.value, second.value)};
+                if (result.state.issue != null) result.state
+                else {*:result.state, input: stream.push(result.state.input, text_tokens(string(result.value)))}
             }
         }
     }
@@ -3261,10 +3303,15 @@ fn skip_case(st, remaining, depth = 0) any^ {
 }
 
 fn case_conditional(st, budget) any^ {
-    let selected = scan_number(st, budget)^;
+    let depth = len(st.conditions);
+    let selected = scan_number({*:st, conditions: [*st.conditions, "scanning"]}, budget)^;
     if (selected.state.issue != null) selected.state
-    else if (selected.value == 0) {*:selected.state, conditions: [*selected.state.conditions, "case"]}
-    else skip_case(selected.state, selected.value)
+    else {
+        let prefix = slice(selected.state.conditions, 0, depth)^;
+        let nested = slice(selected.state.conditions, depth + 1, len(selected.state.conditions))^;
+        if (selected.value == 0) {*:selected.state, conditions: [*prefix, "case", *nested]}
+        else skip_case({*:selected.state, conditions: prefix}, selected.value, len(nested))
+    }
 }
 
 fn begin_conditional(st, truth, negate = false) any^ {
@@ -3277,10 +3324,24 @@ fn begin_conditional(st, truth, negate = false) any^ {
     }
 }
 
+// a nested test may still be open when the enclosing numeric operand ends.
+fn finish_numeric_conditional(st, depth, truth, negate) any^ {
+    let prefix = slice(st.conditions, 0, depth)^;
+    let nested = slice(st.conditions, depth + 1, len(st.conditions))^;
+    if (truth != negate) {*:st, conditions: [*prefix, true, *nested]}
+    else {
+        let skipped = skip_conditional(st, len(nested), true)^;
+        if (skipped.state.issue != null) skipped.state
+        else {*:skipped.state, conditions: [*prefix, *(if (skipped.delimiter == "else") [false] else [])]}
+    }
+}
+
 fn numeric_conditional(st, name, budget, negate) any^ {
-    let left = if (name == "ifdim") scan_dimen(st, budget)^ else scan_number(st, budget)^;
+    let depth = len(st.conditions);
+    let pending = {*:st, conditions: [*st.conditions, "scanning"]};
+    let left = if (name == "ifdim") scan_dimen(pending, budget)^ else scan_number(pending, budget)^;
     if (left.state.issue != null) left.state
-    else if (name == "ifodd") begin_conditional(left.state, (left.value % 2) != 0, negate)
+    else if (name == "ifodd") finish_numeric_conditional(left.state, depth, (left.value % 2) != 0, negate)
     else {
         let relation = expanded_nonspace(left.state, budget)^;
         if (not (other(relation.token, "<") or other(relation.token, "=") or other(relation.token, ">")))
@@ -3288,7 +3349,8 @@ fn numeric_conditional(st, name, budget, negate) any^ {
         else {
             let right = if (name == "ifdim") scan_dimen(relation.state, budget)^ else scan_number(relation.state, budget)^;
             if (right.state.issue != null) right.state
-            else begin_conditional(right.state, if (relation.token.value == "<") left.value < right.value
+            else finish_numeric_conditional(right.state, depth,
+                if (relation.token.value == "<") left.value < right.value
                 else if (relation.token.value == ">") left.value > right.value else left.value == right.value, negate)
         }
     }
@@ -3317,6 +3379,10 @@ fn delimiters_equal(a, b, index = 0) any^ {
     else if (index == len(a)) true
     else tokens_equal(a[index], b[index]) and delimiters_equal(a, b, index + 1)
 }
+
+// an unexpanded control token compares as relax for this read only.
+fn ifx_meaning(st, token) any^ => if (token != null and token.noexpand == true)
+    {kind: "primitive", name: "relax"} else meaning(st, token)
 
 fn meanings_equal(a, b) any^ {
     if (a.kind != b.kind) false
@@ -3405,7 +3471,7 @@ fn condition(st, name, budget, negate = false) any^ {
             let a = stream.next(current.input);
             let b = stream.next(a.stream);
             begin_conditional({*:current, input: b.stream}, a.token != null and b.token != null and
-                meanings_equal(meaning(current, a.token), meaning(current, b.token)), negate)
+                meanings_equal(ifx_meaning(current, a.token), ifx_meaning(current, b.token)), negate)
         }
         else if (name == "ifdefined") {
             let read = stream.next(current.input);
@@ -3631,20 +3697,20 @@ fn latex_optional(input) any^ {
     {input: scanned.stream, present: scanned.present, tokens: scanned.tokens, raw: scanned.raw, issue: scanned.error}
 }
 
-fn decimal_prefix(text, position, value = 0) any^ {
+fn decimal_prefix(text, position, value = 0, limit = 10) any^ {
     if (position >= len(text)) value
     else {
         let c = slice(text, position, position + 1)^;
         let n = index_of("0123456789", c);
-        if (n == null) value else decimal_prefix(text, position + 1, min(10, value * 10 + n))
+        if (n == null) value else decimal_prefix(text, position + 1, min(limit, value * 10 + n), limit)
     }
 }
 
-fn latex_arg_count(tokens) any^ {
+fn latex_arg_count(tokens, limit = 10) any^ {
     let text = trim(join([for (t in tokens) t.value], ""));
     let negative = starts_with(text, "-");
     let signed = negative or starts_with(text, "+");
-    let value = decimal_prefix(text, if (signed) 1 else 0)^;
+    let value = decimal_prefix(text, if (signed) 1 else 0, 0, limit)^;
     if (negative) -value else value
 }
 
@@ -3654,6 +3720,14 @@ fn latex_macro(nargs, starred, protected_flag, optional, default_tokens, body) a
         optional: optional, optional_default: default_tokens, body: body}
 
 fn latex_definable(m) => m.kind == "undefined" or m.kind == "relax" or (m.kind == "primitive" and m.name == "relax")
+
+// native command diagnostics limit names to 100 bytes.
+fn latex_command_diagnostic(st, code, token, suffix) any^ {
+    let bytes = binary(token.value)^;
+    let name = utf8.decode(slice(bytes, 0, min(len(bytes), 100))^)^ { null };
+    if (name == null) unsupported(st, "command diagnostic name encoding")
+    else record_diagnostic(st, code, "LaTeX Error: Command \\" ++ name ++ suffix)
+}
 
 fn latex_newcommand(st, name) any^ {
     let star = nonspace(st.input);
@@ -3675,18 +3749,26 @@ fn latex_newcommand(st, name) any^ {
         else {
             let raw_count = if (count.present) latex_arg_count(count.tokens)^ else 0;
             let nargs = if (raw_count < 0 or raw_count > 9) 0 else raw_count;
-            let noted = if (raw_count < 0 or raw_count > 9) {*:advanced,
-                diagnostics: [*advanced.diagnostics, "latex-bad-arg-count"]} else advanced;
+            let full_count = if (raw_count < 0 or raw_count > 9) latex_arg_count(count.tokens, 2147483648)^ else raw_count;
+            // the native diagnostic is located at the count, before the body is scanned.
+            let count_state = {*:current, input: count.input};
+            let diagnosed = if (abs(full_count) >= 2147483648) unsupported(count_state, "command argument count overflow")
+                else if (raw_count < 0 or raw_count > 9) record_diagnostic(count_state, "latex-bad-arg-count",
+                    "Illegal number of arguments " ++ string(full_count))^ else count_state;
+            let noted = {*:advanced, diagnostics: diagnosed.diagnostics, diagnostic_records: diagnosed.diagnostic_records,
+                issue: diagnosed.issue, unsupported: diagnosed.unsupported};
             let parsed = body_params(body.tokens, nargs)^;
             let old = meaning(noted, controls[0]);
             let definable = latex_definable(old);
-            if (parsed.issue != null) fail(noted, parsed.issue)
+            if (noted.issue != null) noted
+            else if (parsed.issue != null) fail(noted, parsed.issue)
             else if (name == "newcommand" and not definable)
-                {*:noted, diagnostics: [*noted.diagnostics, "latex-already-defined"]}
+                latex_command_diagnostic(noted, "latex-already-defined", controls[0], " already defined")
             else if (name == "providecommand" and not definable) noted
             else {
                 let ready = if (name == "renewcommand" and definable)
-                    {*:noted, diagnostics: [*noted.diagnostics, "latex-undefined"]} else noted;
+                    latex_command_diagnostic(noted, "latex-undefined", controls[0], " undefined")^
+                    else noted;
                 let macro = latex_macro(nargs, starred, name == "DeclareRobustCommand", default_arg.present,
                     default_arg.tokens, parsed.tokens)^;
                 assign_meaning(ready, key(controls[0]), macro, false)
@@ -3945,10 +4027,12 @@ fn latex_newenvironment(st, mode, budget) any^ {
             if (first.issue != null) fail(advanced, first.issue)
             else if (final_body.issue != null) fail(advanced, final_body.issue)
             else if (mode == "newenvironment" and not definable)
-                {*:advanced, diagnostics: [*advanced.diagnostics, "latex-already-defined"]}
+                record_diagnostic(advanced, "latex-already-defined", "LaTeX Error: Environment " ++ named.name ++ " already defined")
             else {
+                // the AST needs the full diagnostic, including its source location.
                 let ready = if (mode == "renewenvironment" and definable)
-                    {*:advanced, diagnostics: [*advanced.diagnostics, "latex-undefined"]} else advanced;
+                    record_diagnostic(advanced, "latex-undefined", "LaTeX Error: Environment " ++ named.name ++ " undefined")^
+                    else advanced;
                 let begin_macro = latex_macro(nargs, starred, false, default_arg.present, default_arg.tokens, first.tokens)^;
                 let end_macro = latex_macro(0, starred, false, false, [], final_body.tokens)^;
                 let added = assign_meaning(ready, "control:" ++ named.name, begin_macro, false)^;
@@ -4783,6 +4867,8 @@ fn step(st, budget) any^ {
         after_assignment(current, expl3_syntax(current, cmd == "ExplSyntaxOn"))
     else if (st.script_expl3 and contains(["ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile"], cmd))
         latex_provides_expl(current, cmd, budget)
+    else if (st.script_expl3 and cmd == "cs_new_eq:NN")
+        after_assignment(current, expl3_cs_new_equal(current))
     else if (st.script_expl3 and expl3.cs_definition(cmd))
         after_assignment(current, expl3_cs_define(current, cmd, budget))
     else if (st.script_expl3 and expl3.token_assignment(cmd))
@@ -4889,7 +4975,7 @@ fn step(st, budget) any^ {
         // synthesized characters need the current main-source position.
         {*:current, output: [*st.output,
             {kind: "char", value: chr(resolved.value), cat: 12, start: t.start, end: t.end,
-                read_offset: current.input.last_main_offset, read_file: current.main_file}]}
+                chardef_emission: true, read_offset: current.input.last_main_offset, read_file: current.main_file}]}
     }
     else if (resolved.kind == "mathchardef")
         {*:current, output: [*st.output, t], mathchardef_emission_seen:
@@ -4963,6 +5049,21 @@ pub fn enable_script_expl3(st) any^ {
         {name: "group_end:", kind: "primitive", value: "endgroup"},
         {name: "if_cs_exist:w", kind: "primitive", value: "ifcsname"},
         {name: "if_true:", kind: "primitive", value: "iftrue"},
+        {name: "if_bool:N", kind: "primitive", value: "ifodd"},
+        {name: "if_int_compare:w", kind: "primitive", value: "ifnum"},
+        {name: "if_int_odd:w", kind: "primitive", value: "ifodd"},
+        {name: "__int_eval:w", kind: "primitive", value: "numexpr"},
+        {name: "__int_eval_end:", kind: "primitive", value: "relax"},
+        {name: "reverse_if:N", kind: "primitive", value: "unless"},
+        {name: "l_tmpa_bool", kind: "chardef", value: 0},
+        {name: "l_tmpb_bool", kind: "chardef", value: 0},
+        {name: "g_tmpa_bool", kind: "chardef", value: 0},
+        {name: "g_tmpb_bool", kind: "chardef", value: 0},
+        {name: "tex_expanded:D", kind: "primitive", value: "expanded"},
+        {name: "tex_the:D", kind: "primitive", value: "the"},
+        {name: "exp_not:N", kind: "primitive", value: "noexpand"},
+        {name: "if:w", kind: "primitive", value: "if"},
+        {name: "__kernel_tl_to_str:w", kind: "primitive", value: "detokenize"},
         {name: "if_false:", kind: "primitive", value: "iffalse"},
         {name: "cs_end:", kind: "primitive", value: "endcsname"},
         {name: "cs:w", kind: "primitive", value: "csname"},
@@ -4979,6 +5080,50 @@ pub fn enable_script_expl3(st) any^ {
         {name: "scan_stop:", kind: "primitive", value: "relax"},
         {name: "s__seq", kind: "primitive", value: "relax"}])^;
     let macros = enable_expl_macro_sources(support, [
+        {source: "\\cs_set_eq:NN#1{\\tex_let:D#1=~}", protected_flag: true},
+        {source: "\\bool_new:N#1{\\cs_new_eq:NN#1\\c_false_bool}", protected_flag: true},
+        {source: "\\bool_new:c{\\exp_args:Nc\\bool_new:N}", protected_flag: true},
+        {source: "\\cs_gset_eq:NN{\\tex_global:D\\cs_set_eq:NN}", protected_flag: true},
+        {source: "\\bool_set_true:N#1{\\cs_set_eq:NN#1\\c_true_bool}", protected_flag: true},
+        {source: "\\bool_set_false:N#1{\\cs_set_eq:NN#1\\c_false_bool}", protected_flag: true},
+        {source: "\\bool_gset_true:N#1{\\cs_gset_eq:NN#1\\c_true_bool}", protected_flag: true},
+        {source: "\\bool_gset_false:N#1{\\cs_gset_eq:NN#1\\c_false_bool}", protected_flag: true},
+        {source: "\\bool_set_inverse:N#1{\\bool_if:NTF#1{\\bool_set_false:N}{\\bool_set_true:N}#1}", protected_flag: true},
+        {source: "\\bool_gset_inverse:N#1{\\bool_if:NTF#1{\\bool_gset_false:N}{\\bool_gset_true:N}#1}", protected_flag: true},
+        {source: "\\bool_set_inverse:c{\\exp_args:Nc\\bool_set_inverse:N}", protected_flag: true},
+        {source: "\\bool_gset_inverse:c{\\exp_args:Nc\\bool_gset_inverse:N}", protected_flag: true},
+        {source: "\\use_i_ii:nnn#1#2#3{#1#2}", protected_flag: false},
+        {source: "\\__exp_eval_register:N#1{\\exp_after:wN\\if_meaning:w\\exp_not:N#1#1\\if_meaning:w\\scan_stop:#1\\__exp_eval_error_msg:w\\fi:\\else:\\exp_after:wN\\use_i_ii:nnn\\fi:\\exp_after:wN\\exp_end:\\tex_the:D#1}", protected_flag: false},
+        {source: "\\__exp_eval_error_msg:w#1\\tex_the:D#2{\\fi:\\fi:\\msg_expandable_error:nnn{kernel}{bad-variable}{#2}\\exp_end:}", protected_flag: false},
+        {source: "\\__exp_eval_register:c#1{\\exp_after:wN\\__exp_eval_register:N\\cs:w#1\\cs_end:}", protected_flag: false},
+        {source: "\\exp_args:Nv#1#2{\\exp_after:wN#1\\exp_after:wN{\\exp:w\\__exp_eval_register:c{#2}}}", protected_flag: false, source_mapping_guard: "exp_args_value"},
+        {source: "\\tl_head:v{\\exp_args:Nv\\tl_head:n}", protected_flag: false},
+        {source: "\\tl_tail:v{\\exp_args:Nv\\tl_tail:n}", protected_flag: false},
+        {source: "\\exp_args:NV#1#2{\\exp_after:wN#1\\exp_after:wN{\\exp:w\\__exp_eval_register:N#2}}", protected_flag: false, source_mapping_guard: "exp_args_value"},
+        {source: "\\tl_head:V{\\exp_args:NV\\tl_head:n}", protected_flag: false},
+        {source: "\\tl_tail:V{\\exp_args:NV\\tl_tail:n}", protected_flag: false},
+        {source: "\\exp_args:No#1#2{\\exp_after:wN#1\\exp_after:wN{#2}}", protected_flag: false, source_mapping_guard: "exp_args_once"},
+        {source: "\\tl_head:N{\\exp_args:No\\tl_head:n}", protected_flag: false},
+        {source: "\\tl_tail:N{\\exp_args:No\\tl_tail:n}", protected_flag: false},
+        {source: "\\tl_tail:n#1{\\__kernel_exp_not:w\\if:w\\scan_stop:\\__kernel_tl_to_str:w\\exp_after:wN{\\use_none:n#1?}\\scan_stop:\\__prg_TF_true:w\\fi:\\use_ii:nn{{}}{\\exp_after:wN{\\use_none:n#1}}}", protected_flag: false, source_mapping_guard: "tl_tail"},
+        {source: "\\tl_head:n#1{\\__kernel_exp_not:w\\tex_expanded:D{{\\if_false:{\\fi:\\__tl_head_aux:n#1{}}}}}", protected_flag: false, source_mapping_guard: "tl_head"},
+        {source: "\\__tl_head_aux:n#1{\\__kernel_exp_not:w{#1}\\exp_after:wN\\use_none:n\\exp_after:wN{\\if_false:}\\fi:}", protected_flag: false},
+        {source: "\\int_if_zero_p:n#1{\\if_int_compare:w\\__int_eval:w#1=\\c_zero_int\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
+        {source: "\\int_if_odd_p:n#1{\\if_int_odd:w\\__int_eval:w#1\\__int_eval_end:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
+        {source: "\\int_if_even_p:n#1{\\reverse_if:N\\if_int_odd:w\\__int_eval:w#1\\__int_eval_end:\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
+        {source: "\\bool_if:NTF#1{\\if_bool:N#1\\__prg_TF_true:w\\fi:\\use_ii:nn}", protected_flag: false},
+        {source: "\\bool_if:NT#1{\\if_bool:N#1\\__prg_T_true:w\\fi:\\use_none:n}", protected_flag: false},
+        {source: "\\bool_if:NF#1{\\if_bool:N#1\\__prg_F_true:w\\fi:\\use:n}", protected_flag: false},
+        {source: "\\bool_if_p:N#1{\\if_bool:N#1\\__prg_p_true:w\\fi:\\c_false_bool}", protected_flag: false},
+        {source: "\\bool_to_str:c{\\exp_args:Nc\\bool_to_str:N}", protected_flag: false},
+        {source: "\\bool_if:cTF{\\exp_args:Nc\\bool_if:NTF}", protected_flag: false},
+        {source: "\\bool_if:cT{\\exp_args:Nc\\bool_if:NT}", protected_flag: false},
+        {source: "\\bool_if:cF{\\exp_args:Nc\\bool_if:NF}", protected_flag: false},
+        {source: "\\bool_if_p:c{\\exp_args:Nc\\bool_if_p:N}", protected_flag: false},
+        {source: "\\bool_set_true:c{\\exp_args:Nc\\bool_set_true:N}", protected_flag: true},
+        {source: "\\bool_set_false:c{\\exp_args:Nc\\bool_set_false:N}", protected_flag: true},
+        {source: "\\bool_gset_true:c{\\exp_args:Nc\\bool_gset_true:N}", protected_flag: true},
+        {source: "\\bool_gset_false:c{\\exp_args:Nc\\bool_gset_false:N}", protected_flag: true},
         {source: "\\tl_if_empty:cTF{\\exp_args:Nc\\tl_if_empty:NTF}", protected_flag: false, source_mapping_guard: "dynamic_read"},
         {source: "\\tl_if_empty:cT{\\exp_args:Nc\\tl_if_empty:NT}", protected_flag: false, source_mapping_guard: "dynamic_read"},
         {source: "\\tl_if_empty:cF{\\exp_args:Nc\\tl_if_empty:NF}", protected_flag: false, source_mapping_guard: "dynamic_read"},
@@ -5077,13 +5222,18 @@ pub fn enable_script_expl3(st) any^ {
         {source: "\\seq_if_in:NnTF#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:}", protected_flag: true},
         {source: "\\seq_if_in:NnT#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:\\use:n\\use_none:n}", protected_flag: true},
         {source: "\\seq_if_in:NnF#1#2{\\group_begin:\\tl_set:Nn\\l__seq_internal_a_tl{#2}\\cs_set_protected:Npn\\__seq_item:n##1{\\tl_set:Nn\\l__seq_internal_b_tl{##1}\\if_meaning:w\\l__seq_internal_a_tl\\l__seq_internal_b_tl\\exp_after:wN\\__seq_if_in:\\fi:}#1\\group_end:\\prg_return_false:\\prg_break_point:\\exp_end:{}}", protected_flag: true}])^;
+    let string_macro = if (macros.definitions["control:bool_to_str:N"] != null) macros else
+        assign_meaning(macros, "control:bool_to_str:N", expl3_bool_to_str_macro()^, true)^;
     let existence_aliases = [for (family in ["tl", "seq", "int", "bool", "clist", "prop", "str", "dim"],
         suffix in [":NTF", ":NT", ":NF", "_p:N", ":cTF", ":cT", ":cF", "_p:c"])
             {name: family ++ "_if_exist" ++ suffix, kind: "alias", value: "cs_if_exist" ++ suffix}];
-    let with_existence_aliases = enable_expl_values(macros, existence_aliases)^;
+    let with_existence_aliases = enable_expl_values(string_macro, existence_aliases)^;
     let sequence_eq_aliases = [for (scope in ["set", "gset"], pattern in ["cN", "Nc", "cc"])
         {name: "seq_" ++ scope ++ "_eq:" ++ pattern, kind: "alias", value: "tl_" ++ scope ++ "_eq:" ++ pattern}];
-    enable_expl_values(with_existence_aliases, sequence_eq_aliases)
+    let with_sequence_aliases = enable_expl_values(with_existence_aliases, sequence_eq_aliases)^;
+    let boolean_eq_aliases = [for (scope in ["set", "gset"], pattern in ["NN", "cN", "Nc", "cc"])
+        {name: "bool_" ++ scope ++ "_eq:" ++ pattern, kind: "alias", value: "tl_" ++ scope ++ "_eq:" ++ pattern}];
+    enable_expl_values(with_sequence_aliases, boolean_eq_aliases)
 }
 
 // tokenize trusted bundled TeX definitions under expl3 category codes.
@@ -5110,6 +5260,14 @@ fn enable_expl_macro_sources(st, definitions, index = 0) any^ {
                     source_mapping_guard: definition.source_mapping_guard}, true)^ else created;
         if (next.issue != null) next else enable_expl_macro_sources(next, definitions, index + 1)
     }
+}
+
+// expl3 string results contain other-category letters, even under expl syntax.
+fn expl3_bool_to_str_macro() any^ {
+    {kind: "macro", count: 1, prefix: [], delimiters: [[]], brace_delim: false,
+        long_ok: true, protected_flag: false, body: [control_token("bool_if:NTF"), parameter_token(0),
+            brace_token(true), *text_tokens("true")^, brace_token(false),
+            brace_token(true), *text_tokens("false")^, brace_token(false)]}
 }
 
 // native tl insertion expands to an edef whose body preserves both token lists.
@@ -5179,7 +5337,10 @@ pub fn resume(st, source, name = "<input>", budget = 20000000) any^ {
             catcodes: st.input.reader.catcodes, endline: parameter_value(st, "endlinechar")};
         let next_input = {*:stream.from_reader(next_reader), everyeof: st.input.everyeof};
         let resumed = {*:st, input: next_input, finished: false, output: [], messages: [], terminal_line: "", expansions: 0,
-            main_file: id, echo_incomplete: false, generated_text_mapping_seen: false, mathchardef_emission_seen: false,
+            main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
+            generated_text_mapping_seen: false, mathchardef_emission_seen: false,
+            expl3_tl_head_seen: false, expl3_tl_tail_seen: false,
+            expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: "local", data: source}]};
         run(resumed, budget)
     }

@@ -1,1 +1,1 @@
-[true, false, false, 'denied', 'denied']
+[true, false, false, 'denied', 'denied', 'denied']

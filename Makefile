@@ -932,10 +932,13 @@ build-node-crypto: build build-windows-host-import
 build-rdb-deps:
 	utils/build-rdb-deps.sh
 
-.PHONY: build-dependency build-typemeta-extract test-build-dependencies test-setup-dependencies
+.PHONY: build-dependency build-sync-connectivity build-typemeta-extract test-build-dependencies test-setup-dependencies
 build-dependency:
 	@test -n "$(DEP)" || { echo "Usage: make build-dependency DEP=thorvg [ARGS=...]"; exit 1; }
 	$(PYTHON) utils/build_dependencies.py $(DEP) --jobs $(JOBS) $(ARGS)
+
+build-sync-connectivity:
+	$(PYTHON) utils/prepare_sync_connectivity.py --jobs $(JOBS)
 
 build-typemeta-extract:
 	$(PYTHON) utils/build_dependencies.py typemeta-extract --jobs $(JOBS) $(ARGS)

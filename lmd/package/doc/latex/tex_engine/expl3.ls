@@ -27,7 +27,8 @@ let SEQ_SORT = ["seq_sort:Nn", "seq_gsort:Nn"]
 let SORT_RETURN = ["sort_return_same:", "sort_return_swapped:"]
 let STR_COMPARE = ["str_compare:nNnTF", "str_compare:nNnT", "str_compare:nNnF"]
 let TEXT_CASE = ["text_uppercase:n", "text_lowercase:n"]
-let INT_MATH = ["int_abs:n", "int_max:nn", "int_min:nn"]
+let INT_MATH = ["int_abs:n", "int_sign:n", "int_max:nn", "int_min:nn",
+    "int_div_truncate:nn", "int_div_round:nn", "int_mod:nn"]
 let INT_COMPARE = ["int_compare:nNnTF", "int_compare:nNnT", "int_compare:nNnF"]
 let INT_COMPARE_EXPR = ["int_compare:nTF", "int_compare:nT", "int_compare:nF"]
 let INT_TEST = ["int_if_zero:nTF", "int_if_zero:nT", "int_if_zero:nF",
@@ -38,7 +39,7 @@ pub fn exists(name) => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or 
     contains(CS_GLOBAL, name) or contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name) or
     contains(SEQ_NEW, name) or contains(SEQ_SET, name) or contains(SEQ_EXPAND, name) or
     contains(SEQ_SORT, name) or contains(SORT_RETURN, name) or contains(STR_COMPARE, name) or contains(TEXT_CASE, name) or
-    contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n"], name)
+    contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n", "cs_new_eq:NN"], name)
 pub fn expandable(name) => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
 pub fn cs_definition(name) => contains(CS_NEW, name) or contains(CS_LOCAL, name) or contains(CS_GLOBAL, name)
 pub fn fresh(name) => contains(CS_NEW, name) or contains(TL_NEW, name) or contains(SEQ_NEW, name)

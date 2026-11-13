@@ -209,7 +209,7 @@ extern "C" Item pn_io_rtc_create(Item options) {
         rtcSetUserPointer(s->pc,s); rtcSetGatheringStateChangeCallback(s->pc,gathering);
         rtcSetStateChangeCallback(s->pc,changed);
         rtcDataChannelInit init = {}; init.negotiated = true; init.manualStream = true; init.stream = 0;
-        init.protocol = "lambda-peer-lan-1";
+        init.protocol = "lambda-peer-lan-p256-1";
         s->dc = rtcCreateDataChannelEx(s->pc,"lambda-sync",&init);
         if (s->dc >= 0) { rtcSetUserPointer(s->dc,s); rtcSetMessageCallback(s->dc,message); }
     }

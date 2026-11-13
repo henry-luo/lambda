@@ -52,7 +52,7 @@ pub pn discover(credentials, timeout_ms=1000) any^ {
 pub pn session_id() any^ { return schema.digest(crypto.key()^)^ }
 pub fn description(payload) any^ {
     v.fields(payload,["protocol","sdp","instance","target_instance","offer"])^
-    if (payload.protocol != "lambda-peer-lan-1" or not (payload.sdp is string) or len(payload.sdp)^ > 60000 or
+    if (payload.protocol != "lambda-peer-lan-p256-1" or not (payload.sdp is string) or len(payload.sdp)^ > 60000 or
         not schema.id(payload.instance) or not schema.id(payload.target_instance) or
         (payload.offer != null and not schema.id(payload.offer)))
         raise error("sync connectivity: incompatible channel offer")

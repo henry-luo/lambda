@@ -29,9 +29,11 @@ fi
 if [ "${SETUP_DRY_RUN:-0}" = 1 ]; then
     echo "npm install --ignore-scripts (in $ROOT)"
     bash "$INPUT_ROOT/scripts/setup_deps.sh" "$platform" --dry-run
+    echo "python3 $ROOT/utils/prepare_sync_connectivity.py --jobs ${JOBS:-4}"
     bash "$RADIANT_ROOT/scripts/setup_deps.sh" "$platform" --skip-input --dry-run
 else
     (cd "$ROOT" && PUPPETEER_SKIP_DOWNLOAD=true npm install --ignore-scripts)
     bash "$INPUT_ROOT/scripts/setup_deps.sh" "$platform"
+    python3 "$ROOT/utils/prepare_sync_connectivity.py" --jobs "${JOBS:-4}"
     bash "$RADIANT_ROOT/scripts/setup_deps.sh" "$platform" --skip-input
 fi

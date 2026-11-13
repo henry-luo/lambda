@@ -1,0 +1,663 @@
+[{
+    source: "\\ifnum1=1\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1 \\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2 \\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1 A\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2 A\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum-1<0\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum-1>0\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifodd1\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifodd2\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifodd1\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifodd2\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifdim1pt=1pt\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifdim1pt=2pt\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifdim1pt<2pt\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifdim2pt<1pt\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\unless\\ifnum1=1\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\unless\\ifnum1=2\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\iftrue\\ifnum1=1\\else Z\\fi A\\else B\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\iftrue\\ifnum1=2\\else Z\\fi A\\else B\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\iffalse A\\else\\ifodd1\\else Z\\fi B\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\def\\n{1}\\ifnum\\n=1\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\def\\n{2}\\ifnum1=\\n\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\let\\e=\\else\\ifnum1=1\\e Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\let\\f=\\fi\\ifnum1=1\\f X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=\\iftrue1\\else2\\fi\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=\\iftrue2\\else1\\fi\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\ifodd2 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifodd\\numexpr2+1\\relax\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\ifodd1 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2\\ifodd1 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2\\ifodd2 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifodd1\\ifnum2=1 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifodd2\\ifnum2=1 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\iftrue\\iffalse A\\else B\\fi\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2\\iftrue\\iffalse A\\else B\\fi\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\unless\\ifnum1=1\\ifodd2 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\unless\\ifnum1=2\\ifodd2 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\def\\n{\\ifodd2 A\\else B\\fi}\\ifnum1=1\\n\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\noexpand\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2\\noexpand\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\expandafter\\else\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\ifcase0 A\\or B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2\\ifcase0 A\\or B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\ifcase1 A\\or B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=1\\iftrue\\iftrue A\\else B\\fi\\else C\\fi\\else D\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifnum1=2\\iftrue\\iftrue A\\else B\\fi\\else C\\fi\\else D\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\def\\x{Y}\\count0=1\\noexpand\\x X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\def\\x{Y}\\ifnum1=1\\noexpand\\x\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\def\\x{Y}\\ifodd1\\noexpand\\x\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\let\\e=\\else\\ifnum1=1\\noexpand\\e Z\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase0\\or A\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase1\\or A\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase0\\else A\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase1\\else A\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase0\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase0\\or A\\or B\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase1\\or A\\or B\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase2\\or A\\or B\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase3\\or A\\or B\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase-1\\or A\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase0\\noexpand\\or A\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase1\\noexpand\\or A\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase0\\expandafter\\or\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase0\\ifodd1 A\\else B\\fi\\or C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase1\\ifodd1 A\\else B\\fi\\or C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase0\\ifodd2 A\\else B\\fi\\or C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\ifcase1\\ifodd2 A\\else B\\fi\\or C\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\iftrue\\ifcase1\\or A\\else B\\fi C\\else D\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\def\\n{1}\\ifcase\\n\\or A\\else B\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    source: "\\let\\o=\\or\\ifcase1\\o A\\fi X",
+    issue: null,
+    unsupported: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }]
+[{
+    body: "\\ifnum1=1\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifnum1=2\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifnum1=1\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifodd2\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifdim1pt=1pt\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifdim1pt=2pt\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifnum1=1\\ifodd2 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifnum1=2\\ifodd2 A\\else B\\fi\\else C\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifnum1=1\\noexpand\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\ifnum1=1\\expandafter\\else\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\x{Y}\\ifnum1=1\\noexpand\\x\\else Z\\fi X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }]

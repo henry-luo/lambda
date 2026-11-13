@@ -64,11 +64,18 @@ node --test test/online/render_grid.test.cjs
 node --test test/online/render_rem.test.cjs
 node --test test/online/render_grid_absolute.test.cjs
 node --test test/online/render_grid_nested.test.cjs
+node --test test/online/render_flex_percentage.test.cjs
+node --test test/online/render_nested_pseudo.test.cjs
+node --test test/online/render_intrinsic_width_value.test.cjs
+node --test test/online/render_positioned_order.test.cjs
+node --test test/online/render_video_percentage.test.cjs
 ```
 
 The session tests exercise real Lambda HTTP rendering, layout and both batch
 paths against a local server, including response cookies, HttpOnly visibility,
-redirects, subresource requests and profile lifetime. `LAMBDA_RENDER_EXE` selects
+redirects, subresource requests and profile lifetime. Five additional PNG/request
+controls cover inline CSS image discovery on div/video, custom properties,
+image-set and script style edits (RI-064; D5.5.1). `LAMBDA_RENDER_EXE` selects
 the renderer executable. Socket access and native rendering services are required.
 The stylesheet tests check real exported PNG pixels after CSSOM rule edits and
 style text replacement; they share the same executable selection.
@@ -78,7 +85,11 @@ The observer tests check initial intersection/resize delivery and rendered
 pixels without page geometry reads, including offscreen and disconnect controls.
 The grid tests use `grid_fixtures.cjs` to check intrinsic percentage contributions,
 solved area sizing, owner units and authored constraints. These four PNG suites
-share `render_fixture.cjs` for exports and image reads.
+share `render_fixture.cjs` for exports and image reads. The flex percentage tests
+check cyclic preferred-size contributions in nested rows, computed and logical
+widths, style mutations, and authored fixed/nowrap overflow controls.
+The nested pseudo-selector tests check that type-prefixed pseudo rules preserve
+following rules in style, media and supports blocks, with component-block controls.
 
 Compare every available image pair and create a ranked review report:
 
@@ -715,3 +726,385 @@ repair cycle is active. The next investigation is checkpointed separately.
 
 `test_page_load_gtest` writes its local fixture timing and memory measurements
 to `page_load_metrics.csv` in this directory.
+
+The seventeenth review resumed the goal and fixed **RI-062**, the cyclic
+percentage contribution in nested flex rows. A child `width:100%` incorrectly
+replaced its min-content contribution with its full unwrapped width. The fix
+retains the existing intrinsic measurement and shares substituted percentage
+facts for math, variables and logical sizes (**D9.1.1v4 / D9.1.3v2**, scratch
+**D5.5.1**). In identical saved Azure HTML/CSS, four media rows now fit236px
+and the titles wrap instead of clipping. Missing primary navigation/banner and
+a small auto cross-height discrepancy remain separate; Azure stays high.
+
+All185 selected attempts completed:184 valid PNGs and Dock's unchanged150s
+timeout. The severity-sorted report retains **169 high-severity pages**, one
+critical blocker and897 low pages across1066pairs. There are150 automatic major
+candidates and19 manual omissions below threshold. Amperos crosses the coarse
+threshold by only0.2 percentage points but its primary navigation remains
+nearly invisible, so visual review retains it as major. Every prior manual
+omission is retained. Thirty-one changed/manual/control pairs were reviewed;
+11of15 low control PNGs are byte-identical, and the four changed controls remain
+visually below major severity. No exclusive repair is assigned to live-only
+metric movements: Mailchimp and Pelago lose media, while Ahrefs changes its
+weighted authored banner.
+
+WebKit's article omission reduces to its authored400ms fade-in: native export
+selects0ms and independent Chromium is also transparent at0ms, opaque at400ms.
+The earlier paint suspicion is not confirmed. Superlist's same saved current
+HTML is blank on both round14 and15 qualified hosts; the iterator change alone
+does not explain the prior movement. External navigation/resources were not
+fully frozen, so source/readiness causality remains open. **D10.1.7** frame
+timing, original browser PNGs/metadata,URLs,admission,thresholds and deadlines
+remain unchanged.
+
+Qualification:89 native dynamic cases,91 online CLI/capture/comparator cases,
+630 recorded JS layouts, and16 static suites with4979passes/295recordedpartials,
+zero regressions and skips; required layout integer-cast lint passes. The13
+new flex PNG cases improve8/13 to13/13 and Chromium independently agrees on
+all13 pixel witnesses, including style mutation after a layout read.
+
+Evidence: [round seventeen](comparison/repairs.html#round-17),
+`snapshots/visual_comparison_review_round17.json` and
+`temp/online-visual-round17/`. Immutable host SHA256
+`10fae5cc038c9f09a06c06b189b5f604bb648b6e30a628e9f2c52edc96c3da25`.
+The goal remains active. The next confirmed cause is the CSS nesting parser
+mistaking type-prefixed pseudo selectors for declarations on DigitalOcean.
+
+The eighteenth review repaired **LI-028**, CSS nesting ambiguity in
+lambda-input. A type-prefixed pseudo selector such as `body::before` was
+mistaken for a declaration and consumed later nested rules. One shared
+rule-start decision now preserves the following rules in style, media and
+supports blocks, including when the type name is also a property name.
+Custom property and function blocks retain their declaration context.
+Ownership follows **D9.1.1v4 / D9.1.3v2**, parsed state **D5.5.1**; no authored
+CSS or page-specific behavior is substituted.
+
+Identical saved DigitalOcean HTML/CSS isolates the restoration of the
+lighthouse hero, paragraph width and hero spacing. Its fresh primary content
+is reviewed against the unchanged original reference; cookie overlay,
+background and minor navigation differences remain separately visible.
+
+All185 attempts completed:184 valid Lambda PNGs and Dock's unchanged150s
+timeout. The updated severity-sorted report has **169 high-severity pages**,
+1 critical blocker and897 low pages across1066pairs.
+There are151 automatic candidates and18 manual
+omissions below the threshold. 32 changed/manual/control pairs were
+visually reviewed; 12of15 low controls are byte-identical. Live-only
+metric changes are not assigned exclusively to the parser repair. DigitalOcean
+clears major review, while Bizzabo's fresh control loses its main hero text and
+becomes high severity. Its source/readiness versus parser-change cause remains
+unisolated; no regression exclusion is claimed. Patreon now renders a feed
+after an observed redirect/navigation, so its large movement also stays high.
+Original
+browser PNGs/metadata, catalog URLs, thresholds, admission, deadlines and
+**D10.1.7** virtual time stay unchanged.
+
+Qualification:114 native parser cases,111 online CLI/capture/comparator cases,
+74 existing live CSS nesting/CSSOM UI assertions,630 recorded JS layouts and
+16 static suites with4979passes/295recordedpartials,zero regressions/skips.
+The20 new PNG controls improve2/20 to20/20; independent Chromium agrees on
+all20. Full Input aggregate records5223passes and one emoji fallback skip,
+with the same GraphParser LOC budget, external-parent admissibility and
+sample.tar.gz failures (**LI-001 / LI-002 / LI-012**). The aggregate is not
+reported green. The separate deferred single-block width discrepancy is
+recorded as LI-029 with an unconfirmed cause; it is outside this major fix.
+
+Evidence: [round eighteen](comparison/repairs.html#round-18),
+`snapshots/visual_comparison_review_round18.json` and
+`temp/online-visual-round18/`. Immutable host SHA256
+`2119303b51366ffd876710921373c88ea244d4cfe84f159572136e6cd1fe37fc`.
+The goal remains active.
+
+The nineteenth review repaired **RI-063**, decoded video painting over
+foreground content. Both full-frame and cached video paths previously blitted
+frames after the completed page, covering Bizzabo's hero heading/copy/action
+and header despite the video's negative z-index. Immutable video/controls
+snapshots now enter the ordinary CSS paint stream; playback wakes repaint
+ordered page content. Shared fit, positioning, clipping, transformations and
+effect scopes apply. Ownership follows **D5.5.1** and **D9.1.1v4 / D9.1.3v2**;
+**D10.1.7** clocks and authored page content stay unchanged.
+
+A native decoded-frame foreground witness fails before the fix and passes
+after it. The same saved complete Bizzabo HTML restores the main foreground;
+external resources remain live, so this is not a fully frozen-source/time
+comparison. Its fresh canonical difference improves17.8% to5.5% and it clears
+major review. Logo/media, banner and small text differences remain separate.
+
+The latest severity-sorted report has **168 high-severity pages**,1 critical
+Dock capture blocker and898 low pages across1066 pairs. There are149 automatic
+candidates and19 retained manual omissions below threshold. All185 selected
+pages have fresh attempts; PNPM's first DNS failure is archived and one
+unchanged retry succeeds, giving186 attempts/184 valid PNGs plus Dock's
+unchanged150s timeout. All19 manual annotations remain. Twenty-nine changed,
+manual and control triples were visually reviewed;14of15 low controls are
+byte-identical. Patreon returns to marketing content after the previous feed,
+Ahrefs changes its weighted banner, and Unreal loses media while its original
+browser reference itself shows403. Those live/reference variations are not
+assigned exclusively to the video repair. URLs, original browser data,
+admission, deadlines and thresholds stay unchanged.
+
+Qualification:34 native video cases,247 raster/paint/ownership cases,
+111 online tests,117 existing media/CSSOM UI assertions (10 runner cases),
+and17 layout categories with5609passes (630JS+4979static),295recordedpartials,
+0regressions/0skips. Four Node modules and native rendering/UI clients were
+refreshed after the document-state ABI change. Input's aggregate was not
+repeated; round18's independent LI-001/002/012 failures remain recorded.
+Playback now replays the page rather than only blitting video placements;
+release playback cost is unmeasured. This does not qualify a new platform
+backend, GPU video composition or SVG/PDF frame parity.
+
+Evidence: [round nineteen](comparison/repairs.html#round-19),
+`snapshots/visual_comparison_review_round19.json` and
+`temp/online-visual-round19/`. Qualified host SHA256
+`b18598069c746fb40190437aa5d1af1d4d300bc303a11529df2194ae7f8898dc`.
+The goal remains active; Maki's missing hero media is the next investigation.
+
+The twentieth review repaired **RI-064**, missing inline CSS image discovery.
+Headless network-managed paint only consumes ready bytes, but resource discovery
+queued stylesheet URLs before inline attributes were parsed and never requested
+those inline dependencies. It now walks initial inline declarations and CSSOM
+edits using the existing recursive URL walker. Untouched attributes parse in
+traversal-owned scratch; cached CSSOM blocks keep their own owner (**D5.5.1**,
+**D9.1.1v4 / D9.1.3v2**). No page-specific fetch or blocking paint transfer is added.
+
+Five HTTP PNG/request controls improve0/5 to5/5: div/video background,
+custom-property URL, image-set and script style mutation. Both identical saved
+Maki controls regain their hero background. Its canonical difference improves
+51.3% to7.2%; the heading/copy/actions are readable and it clears major review.
+Remaining sizing and video-frame details are separate. External resources are
+live, so a fully frozen-source/time comparison is not claimed.
+
+The latest report has **167 high-severity pages**,1 critical Dock blocker and
+899 low pages across1066 pairs. There are148 automatic candidates and19 manual
+omissions below threshold. All19 previous manual annotations remain, with a
+new twentieth annotation for Origin: its blue background returns, but the hero
+heading/copy/action and product image remain absent. Its automatic clearance
+is rejected after visual review. All185 attempts finish with184 valid PNGs and
+Dock's unchanged150s timeout. 29 changed/manual/control triples were
+reviewed;14of16 low controls are byte-identical. Ahrefs again changes
+its weighted banner; live-only changes are not exclusively attributed to the
+inline-resource repair. Original browser PNGs/metadata, URLs, admission,
+thresholds, finite resource grace and **D10.1.7** virtual time remain unchanged.
+
+Qualification:116 online cases,247 refreshed raster/paint/ownership cases,
+117 existing media/CSSOM UI assertions (10 runner cases), and17 layout categories
+with5609passes (630JS+4979static)/295recordedpartials,0regressions/0skips.
+Input's aggregate was not repeated; the independent LI-001/002/012 failures
+from round18 remain recorded. This repair covers dependency discovery; broader
+network readiness, missing mask consumers and new media backends remain outside
+its scope.
+
+Evidence: [round twenty](comparison/repairs.html#round-20),
+`snapshots/visual_comparison_review_round20.json` and
+`temp/online-visual-round20/`. Qualified host SHA256
+`4d256d4cdd80441451d1309ebb2195d3ddeb225f6f256ae60ca1570b1281733e`.
+The goal remains active.
+
+The twenty-first review repairs **RI-065** and companion **RI-066**. Structured
+inline text/BR height estimation discarded forced lines when headings contained
+spans. Eligible horizontal runs now use the existing line formatter and restore
+selected fragments and caller/counter state (**D5.5.1**). Comand's static headline
+moves from y463.2 to y333.6, agreeing with Chromium within 0.02px; its copy and
+action are visible again. Its background video remains absent, so it stays high.
+
+Visual review rejected the first pin because Exactly's headline clipped upward.
+Auto column sizing walked zero-height contents wrappers and then recursed over
+unmeasured text boxes for auto bases. It now uses the existing collected-item
+walker and constrained flex-basis calculation. The same static Exactly headline
+returns from y210 to Chromium's y298. The ineffective cache experiment and all
+diagnostic logging were removed before final qualification.
+
+The latest report has **167 high-severity pages**, 1 critical Dock
+blocker and 899 low pages across 1066 pairs: 147
+automatic candidates and 20 retained manual omissions
+below threshold. All 20 prior annotations remain; a new Panxo annotation
+rejects its automatic clearance because major hero placement/media gaps persist. Two passes
+make 370 attempts across 185 pages; the final pass produces 184 valid PNGs and
+Dock's unchanged 150s timeout. 31 final triples were reviewed; 15
+of 17 low controls are byte-identical. Original browser PNGs/metadata, URLs,
+thresholds, admission, finite resource grace and **D10.1.7** virtual clocks remain
+unchanged. Live-only movements, including Ahrefs' varying banner, are not
+exclusively attributed to these repairs.
+
+Qualification: 11 PNG and independent Chromium controls, 91 native dynamic
+cases, 127 online cases, 247 refreshed raster/ownership cases, and 117 existing
+UI assertions (10 runner cases). The 17 layout categories retain 5609 full
+passes (630 JS + 4979 static) plus 295 recorded partials, with zero baseline
+regressions, skips or runner errors. Input's aggregate was not repeated; the
+previous independent LI-001/002/012 failures remain recorded. Release performance
+and broader vertical/paged/atomic inline estimation are outside this milestone.
+
+Evidence: [round twenty-one](comparison/repairs.html#round-21),
+`snapshots/visual_comparison_review_round21.json` and
+`temp/online-visual-round21/`. Qualified host SHA256 `48f7bfd4a632cc934b8171c95133d6697b1da9d15a6128a68eebe891e9f892a0`.
+The goal remains active.
+
+The twenty-second review repairs **RI-067**. Row-flex cross-height queries reused
+the preferred CSS width after flex allocation, and intrinsic height keywords and
+clamps kept their pre-flex measurements. Queries now distinguish available width
+from assigned content width, include that mode in the cache key, and refresh
+intrinsic cross sizes at the assigned width (**D5.5.1**). Descendant percentage
+resolution and authored styles retain their existing behavior.
+
+In the same saved script-free Panxo HTML, the hero row shrinks from 508px to
+172px (Chromium 163.19px), returning the heading, copy, actions and product panel
+to the viewport. Its canonical difference falls from 9.1% to 3.0%.
+The final image confirms the major repair, so its manual annotation is retained
+with a resolution rather than an active omission. Small text and spacing
+differences remain outside this major-review milestone.
+
+The latest report has **166 high-severity pages**, 1 critical Dock
+blocker and 900 low pages across 1066 pairs: 147
+automatic candidates and 19 active manual omissions
+below threshold. All 21 annotation records remain: 20 active and Panxo resolved.
+All 185 fresh attempts finished with 184 valid PNGs and Dock's unchanged 150s
+timeout. 30 final triples were reviewed; 15/17 low controls are
+byte-identical. Original browser PNGs/metadata, URLs, thresholds, admission,
+finite resource grace and **D10.1.7** virtual clocks remain unchanged. Live-only
+source/readiness movements are not exclusively attributed to this repair.
+
+Qualification: 22 PNG and independent Chromium controls, 92 native dynamic cases
+(including resize and query-cache separation), 149 online cases, 247 refreshed
+raster/ownership cases, 117 existing UI assertions (10 runner cases), and no
+layout integer-cast lint violations. All 17 layout categories retain 5609 full
+passes (630 JS + 4979 static) plus 295 recorded partials, with zero regressions,
+skips or runner errors. Input's aggregate was not repeated; previous independent
+LI-001/002/012 failures remain recorded. Release performance and broader vertical
+or atomic intrinsic measurement are outside this milestone.
+
+Evidence: [round twenty-two](comparison/repairs.html#round-22),
+`snapshots/visual_comparison_review_round22.json` and
+`temp/online-visual-round22/`. Qualified host SHA256 `910ce492b2448433eac314b50e79156e2d0e14c08cf1f04300c2efe959685df5`.
+The goal remains active.
+
+The twenty-third review repairs **RI-068**. Grid row contributions preferred a
+percentage width resolved against the whole grid over the solved column area.
+The generic enclosing height query also estimated equal-width columns, keeping
+the inflated percentage minimum. Row measurement now shares placement's size
+resolver, and horizontal grid height queries reuse the existing track algorithm
+under geometry rollback (**D5.5.1**). No page conditions or authored-style
+changes are used.
+
+In unchanged saved script-free Monese HTML, the hero shrinks from 1392px to
+800px, matching Chromium; its heading moves from y533.90 to y237.90 (Chromium
+y237.90625). Smaller side-image height/spacing differences remain. This static
+repair is separate from the live page's unresolved hidden-state initialization;
+it does not clear the blank canonical capture. Agiloft's saved script-free page
+is blank in both engines, and Leaflet's modal remains the recorded RI-029
+top-layer/backdrop feature gap.
+
+The latest report has **166 high-severity pages**, 1 critical Dock
+blocker and 900 low pages across 1066 pairs: 146
+automatic candidates and 20 active manual omissions
+below threshold. All 21 earlier annotation records remain. Superhuman's
+wording now records that the footer overlap is gone while its main hero remains
+absent; the earlier reason is preserved in review history. A new Cape annotation
+rejects automatic clearance because its main hero text, action and illustration
+remain absent. There are 22 annotation records, 21 active.
+All 185 attempts finished with 184 valid PNGs and
+Dock's unchanged 150s timeout. 38 final triples were reviewed; 12/18
+low controls are byte-identical. Original browser PNGs/metadata, URLs,
+thresholds, admission, finite resource grace and **D10.1.7** virtual clocks stay
+unchanged. Live-only source/readiness movement is not exclusively attributed
+to this sizing repair.
+
+Qualification: 12 PNG and independent Chromium controls, 93 native dynamic
+cases including live resize and query rollback, 161 online cases, 247 refreshed
+raster/ownership cases, 117 UI assertions (10 runner cases), and integer-cast
+lint. The 17 layout categories retain 5609 full passes (630 JS + 4979 static)
+plus 295 recorded partials, with zero regressions/skips/errors. Four Node DSOs
+were refreshed. Input's aggregate was not repeated; prior LI-001/002/012 failures
+remain recorded. Vertical intrinsic height and release performance are outside
+this milestone.
+
+Evidence: [round twenty-three](comparison/repairs.html#round-23),
+`snapshots/visual_comparison_review_round23.json` and
+`temp/online-visual-round23/`. Qualified host SHA256 `d0aae7d46c8943d80bc05f1445aee9bd13d01b2c78380560297193b0b88aef2c`.
+The goal remains active.
+
+The twenty-fourth review repairs **RI-069, RI-071 and RI-072**. Height queries
+now use resolved preferred widths, width constraints and proper box edges;
+block-owned zero-level relative/sticky and absolute siblings paint in DOM order,
+with the inverse hit sequence; atomic inline alignment retains relative-inline
+ancestor offsets (**D5.5.1**).
+
+The unchanged saved Maple hero shrinks from 843.4px to 605.77px (Chromium about
+600px), restoring the statistics section to the viewport. Its large title is
+separately confirmed as unsupported animated WebP (**LI-030**). The unchanged
+saved Pivot source regains its headline, copy, actions and customer logos.
+Missive also regains the large right-card quotation and logo in the same saved source; its manual major omission is resolved. Pivot still lacks the large cube illustration and stays high severity. Background/header and smaller spacing differences remain. No page shim,
+URL substitution, capture-clock change, major new feature or exact parity is
+claimed. **RI-070** records a pre-existing inherited-percentage-width discrepancy
+whose source cause remains unisolated.
+
+The latest report has **165 high-severity pages**, 1 critical Dock blocker
+and 901 low pages across 1066 pairs: 146 automatic
+candidates and 19 active manual omissions below threshold.
+2 earlier annotation records were updated with the full previous record preserved in review history; 1 resolved. All other earlier records are unchanged. 20 records remain active. The final 185 attempts produce
+184 valid PNGs and Dock's unchanged 150s timeout. The preceding 185-attempt
+RI-069-only pass is preserved under `temp/online-visual-round24/first-qualified-pass/`.
+36 final triples were reviewed; 15/18 low controls are byte-identical.
+Original browser PNGs/metadata, URLs, thresholds, admission, finite resource
+grace and **D10.1.7** clocks remain unchanged. Live-only movements are not
+exclusively attributed to these repairs.
+
+Qualification: 96 dynamic and 13 custom native cases, 193 online cases, 247 rebuilt paint/ownership cases, 117 UI assertions (10 runner cases), 16 width-value plus 16 positioned PNG/independent Chromium controls, 32 independent SVG/PDF controls and integer-cast lint. All 17 layout categories retain 5609 full passes and 295 recorded partials with zero regressions/skips/errors.
+Two child-walk signatures extend with an explicit phase flag; native clients
+and all four Node module build targets are refreshed. Structure/Node state
+layout is unchanged. Final layout/UI checks use the exact pin after correcting
+an incidental host relink by the native test target. Input source is unchanged;
+its aggregate was not repeated and prior LI-001/002/012 failures remain recorded.
+Full zero-level descendant lifting, stacking conformance and release performance
+are outside this milestone.
+
+Evidence: [round twenty-four](comparison/repairs.html#round-24),
+`snapshots/visual_comparison_review_round24.json` and
+`temp/online-visual-round24/`. Qualified host SHA256 `4648e3a3abaec9cd3eb443e4962ddf164bd43c37d39cdf8d65272e6dfe6a69eb`.
+The goal remains active.
+
+The twenty-fifth review repairs **RI-073**. Replaced natural/default sizing now
+follows cyclic percentage-height invalidation. Videos in auto-height containers
+retain their natural or default height instead of collapsing to zero; definite
+and zero-height parents keep their specified behavior. Natural ratios describe
+content through border-box decorations. The existing helpers are shared; no
+page condition or new media/codec feature is added (**D5.5.1** ownership).
+
+In identical saved script-free Pivot HTML, the video/immediate wrapper grows
+from 0 to 619.72888px (Chromium 619.71875px), while the hero stays 984.699px.
+Its latest canonical full-page capture now displays the large animated artwork,
+so its missing-artwork annotation is resolved. The remaining shape difference
+reflects movie phase, with smaller background/header/spacing residue. The quick
+script-free diagnostic captured the blank initial poster/frame; the full page
+advances during loading. Native video uses wall-clock playback, which
+**D10.1.7** does not freeze. Capture clocks are unchanged and no diagnostic
+frame is substituted into a capture. Playback synchronization is unqualified.
+
+Two Northstar pages became high severity as their vendor bundle changed to
+6,043,094 bytes, exceeding the unchanged 5,242,880-byte single-script limit.
+Prior/current hosts produce identical blank PNGs for the same current source;
+the prior host also reproduces this at both live URLs. Scripted Chromium renders
+the page; its script-free capture matches native pixels. This external-source/
+admission-profile limit is recorded in the
+[Lambda ledger](../../vibe/Lambda_Issue_Ledger.md#online-northstar-source-admission).
+No budget, URL, bundle or readiness exception is adopted.
+
+The latest report has **166 high-severity pages**, 1 critical Dock blocker
+and 900 low pages across 1066 pairs: 148 automatic
+candidates and 18 active manual omissions below threshold.
+Pivot clears and Northstar adds two, a net increase of one high page from round 24.
+1 earlier annotation record was updated with its full previous record preserved in review history; 1 resolved. All other earlier records are unchanged. 19 records remain active. All 185 attempts produce 184 valid
+PNGs and Dock's unchanged 150s timeout. 38 final triples were reviewed;
+15/19 low controls are byte-identical. Original browser images/metadata,
+URLs, thresholds, admission, finite resource grace and capture clocks stay
+unchanged. Live-only movements are not attributed exclusively to this repair.
+
+Qualification: 97 dynamic and 13 refreshed custom native cases, 206 online cases, 247 rebuilt paint/ownership cases, 117 UI assertions (10 runner cases), 13 PNG/independent Chromium controls, 26 independent SVG/PDF rasters, 4 iframe neighbor controls and integer-cast lint. All 17 layout categories retain 5609 full passes and 295 recorded partials with zero regressions/skips/errors.
+No public API/header/structure/state layout changes; Node module ABI is unchanged.
+Input source is unchanged; its aggregate was not repeated and prior independent
+LI-001/002/012 failures remain recorded. Broader replaced-size conformance,
+playback synchronization and release performance are outside this milestone.
+
+Evidence: [round twenty-five](comparison/repairs.html#round-25),
+`snapshots/visual_comparison_review_round25.json` and
+`temp/online-visual-round25/`. Qualified host SHA256 `3fb7114ad21abb7a6c90ce36ee6bfb3573d94370694c7817df60d2a20643e882`.
+Work stopped after this qualified round at the user’s request; the remaining high-severity pages are unresolved.

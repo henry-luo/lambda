@@ -1,6 +1,8 @@
 # Lambda Script — Developer Guide
 
 > **Last verified against tree:** 2026-08-23 *(initial stamp from git history)*
+> Native crypto dependency row verified on 2026-11-13; see
+> [migration validation](<../../vibe/impl/Lambda_Impl_MbedCrypto_Only (done).md>).
 > MVP compiler sections updated against sources on 2026-11-10. The release host
 > builds after RI-004; focused verification and remaining failures are recorded in
 > [the retirement checkpoint](../../vibe/impl/Lambda_Impl_MIR_Full_Retirement.md#current-checkpoint).
@@ -101,8 +103,7 @@ These libraries and tools are required on every platform.
 | **mpdecimal** | System package or built from source | Multi-precision decimal arithmetic |
 | **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |
 | **libcurl** | Built from source with mbedTLS | HTTP/HTTPS client library |
-| **mbedTLS** | System package | TLS/SSL for libcurl |
-| **OpenSSL 3** | `openssl@3` on macOS; `libssl-dev` on Linux; toolchain OpenSSL on Windows | Public-key signature verification in a private built-in provider context; the updater transport continues to use mbedTLS |
+| **mbedTLS 3 / mbedCrypto** | System package or pinned source build | Shared TLS for libcurl and RTC; native P-256/RSA-PSS verification, P-256 signing, X25519, hashes, HMAC, AES-GCM and entropy. Native build/setup does not require OpenSSL (D11.1.2). |
 | **zlib** | System package | Gzip compression (HTTP, PDF, etc.) |
 | **bzip2** | System package | bzip2-compressed tar input |
 | **liblzma (xz)** | System package | Native 7z LZMA/LZMA2 and xz-compressed tar input |
@@ -137,6 +138,14 @@ and mpdecimal into `../lambda-input/build/deps/linux-support/` with Premake
 and Make. On Windows, setup requires an MSYS2 CLANG64 or MINGW64 shell and
 uses pacman. Input builds its pinned curl, ThorVG, Brotli and utf8proc into
 `../lambda-input/build/deps/`; Radiant setup installs its graphics packages.
+
+Lambda's platform setup also prepares pinned libdatachannel v0.24.6 and its
+libjuice/usrsctp dependencies under `build/deps/connectivity/`, after input's
+mbedTLS provider is available. `make build-sync-connectivity` runs this step
+separately. The Lambda-owned JSON recipe uses the shared Premake/Make builder
+(D9.1.5), selects the host's mbedTLS 3 provider, and compiles out plog statements
+in the release dependency archives. The headers remain a build dependency.
+See [native connectivity](../../lmd/package/sync/CONNECTIVITY.md#prepare-and-run).
 
 The macOS host build was verified on 2026-11-10. Linux and Windows setup plans
 were checked with `--dry-run`; full setup and build runs need platform testing.

@@ -69,10 +69,10 @@
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "environment",
+    issue: null,
+    unsupported: null,
     native_parsed: true,
-    matches: null,
+    matches: true,
     actual: null,
     native: null
   }, {

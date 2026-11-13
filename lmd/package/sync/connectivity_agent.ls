@@ -70,7 +70,7 @@ pn begin_description(handle, credentials, config, options, remote, instance) any
     if (now().unix >= deadline) raise error("sync connectivity: gathering exceeded attempt deadline")
     let offer = if (answering) schema.digest(remote.body)^ else null
     let published = connectivity.publish(config,credentials,if (answering) "answer" else "offer",target,session,
-        {protocol:"lambda-peer-lan-1",sdp:sdp,instance:instance,target_instance:remote_instance,offer:offer})^
+        {protocol:"lambda-peer-lan-p256-1",sdp:sdp,instance:instance,target_instance:remote_instance,offer:offer})^
     return {handle:handle,peer:target,session:session,deadline:deadline,started:started,
         role:if (answering) 'server' else 'client',applied:answering,instance:instance,
         remote_instance:remote_instance,offer:if (answering) offer else schema.digest(published.body)^}
@@ -137,7 +137,7 @@ pn loop(listener, directory, key, config, options) any^ {
         current = {*:current,cloud_saved:coverage(opened.handle,config)^}
         if (pending == null and config != null and now().unix >= next_presence) {
             let presence = connectivity.publish(config,credentials,"presence",null,instance,
-                {protocol:"lambda-peer-lan-1",rtc:options.rtc and capabilities.rtc}) ^ { ^ }
+                {protocol:"lambda-peer-lan-p256-1",rtc:options.rtc and capabilities.rtc}) ^ { ^ }
             next_presence = now().unix+20000
             if (presence is error) { current = {*:current,fallback_reason:"rendezvous unavailable",error_code:presence.code} }
         }

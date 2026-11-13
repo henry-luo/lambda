@@ -962,13 +962,17 @@ error for unsupported schemes, invalid argument types, or an unavailable
 cryptographic provider. Keys, messages and signatures accept binary or UTF-8
 text; `null` denotes empty bytes. Signatures are binary bytes, not hexadecimal.
 
-Supported schemes are `'ed25519'` (raw 32-byte public key),
-`'rsassa-pss-sha256'` (RSA 2048–8192 bits, SHA-256/MGF1, 32-byte salt), and
-`'ecdsa-sha2-nistp256'` (P-256/SHA-256, DER signature). RSA and EC public keys
-use PEM or DER SubjectPublicKeyInfo. The native primitive uses OpenSSL 3's
-built-in provider in a private context, without reading key files or ambient
-OpenSSL configuration. It grants no network, filesystem, installation or
-publisher authority (**D11.2.3–D11.2.4**).
+Supported schemes are `'rsassa-pss-sha256'` (RSA 2048–8192 bits,
+SHA-256/MGF1, 32-byte salt) and `'ecdsa-sha2-nistp256'` (P-256/SHA-256).
+RSA and EC public keys use PEM or DER SubjectPublicKeyInfo; EC uses a named
+P-256 curve and DER signatures. P-256 also accepts a 65-byte uncompressed SEC1
+public key (`04 || x || y`), paired with a 64-byte P1363 `r || s` signature;
+this raw profile requires canonical low-S. The encodings cannot be mixed.
+The mbedCrypto provider rejects malformed keys, trailing bytes and extra PEM
+blocks. Ed25519 is unsupported and raises an unsupported-scheme error.
+The primitive reads no key files or ambient provider configuration and grants
+no network, filesystem, installation or publisher authority
+(**D11.1.2, D11.2.3–D11.2.4**).
 
 ### uuid()
 
@@ -2080,10 +2084,14 @@ D11.1.2. They expose mechanisms; repository policy remains Lambda Script.
   `open(key, envelope, context)` authenticates/decrypts and returns bytes or null
   for empty plaintext (S2.2.2v2); `mac(key, bytes)` returns HMAC-SHA256. Keys must
   be 32-byte binaries; payloads are bounded to 8 MiB and context to 64 KiB.
-  Pure `public(seed, scheme)` derives a raw public key for `'ed25519'` or
-  `'x25519'`; `sign(seed, bytes)` returns a 64-byte Ed25519 signature;
-  `agree(seed, peer_key)` performs X25519 and rejects low-order peers. Raw seeds
-  and public keys are 32 bytes. Signing uses the existing 8 MiB message bound.
+  Pure `public(seed, scheme)` derives a 65-byte uncompressed SEC1 P-256 key for
+  `'ecdsa-sha2-nistp256'` or a 32-byte key for `'x25519'`.
+  `sign(seed, bytes)` hashes with SHA-256 and returns deterministic RFC 6979
+  P-256 signatures as 64-byte low-S `r || s`. Its 32-byte big-endian private scalar
+  must satisfy `1 <= d < n`; generic `key()` output may need rejection sampling.
+  `agree(seed, peer_key)` performs X25519 and rejects low-order/all-zero shared
+  secrets. X25519 private/public/shared bytes follow RFC 7748. Signing uses the
+  existing 8 MiB message bound. All primitives use mbedCrypto.
 - `lambda.io.disk`: procedures `resolve(root)`, `inspect(root, relative)`,
   `entries(root, relative, limit)`, `capture(root, relative, limit)`,
   `install(root, relative, bytes, expected_token)`, `erase(root, relative, token)`,
@@ -2778,7 +2786,7 @@ channels continue to process pixel-array input. See the
 | `url_resolve` | 2 | Resolve relative URL against base |
 | `url_encode` | 1 | Percent-encode text (RFC 3986) |
 | `hash` | 2 | SHA-256/384/512 digest as binary |
-| `verify_signature` | 4 | Ed25519, RSA-PSS/SHA-256 or P-256/SHA-256 public-key signature verification |
+| `verify_signature` | 4 | RSA-PSS/SHA-256 or P-256/SHA-256 public-key signature verification |
 | `uuid` | 0 | Random version 4 UUID (proc) |
 
 ### Collection Functions

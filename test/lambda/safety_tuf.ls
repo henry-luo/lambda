@@ -5,7 +5,7 @@ import json: lambda.security.tuf.json
 let base = "test/safety/tuf/fixtures/"
 // fixture IO failures propagate under the same contract as verifier failures.
 fn fixture_bytes(name) binary^ => input(base ++ name, 'binary')^
-let root = tuf.bootstrap(fixture_bytes("root.json"), "c04e64c95ecf1bf31b5cc92a98bf34d3548da0d85691ab6da3bbc0d169971662")^
+let root = tuf.bootstrap(fixture_bytes("root.json"), "33af1d0bffee1e1ba3a683e32529e3adff54fcf50aa0222c263fa1b2820ccf47")^
 let rotated = tuf.rotate_root(root, fixture_bytes("2.root.json"))^
 let timestamp = tuf.timestamp(root, fixture_bytes("timestamp.json"), null, "2026-11-03T00:00:00Z")^.metadata
 let snapshot = tuf.snapshot(root, timestamp, fixture_bytes("1.snapshot.json"), null, "2026-11-03T00:00:00Z")^
@@ -15,7 +15,7 @@ let vectors = input(base ++ "signature-vectors.json", 'json')^
 let newer = tuf.timestamp(root, fixture_bytes("timestamp-v2-chain.json"), null, "2026-11-03T00:00:00Z")^.metadata
 let newer_snapshot = tuf.snapshot(root, newer, fixture_bytes("2.snapshot.json"), null, "2026-11-03T00:00:00Z")^
 let removed = tuf.timestamp(root, fixture_bytes("timestamp-removed.json"), null, "2026-11-03T00:00:00Z")^.metadata
-let algorithms = [for (v in vectors) verify_signature(if (v.scheme == "ed25519") meta.unhex(v.public)^ else v.public,
+let algorithms = [for (v in vectors) verify_signature(v.public,
     v.message, meta.unhex(v.signature)^, v.scheme)^];
 [root.version, rotated.version, tuf.rotation_resets(root, rotated)^,
  tuf.verify_target(description, fixture_bytes("artifact.bin"))^, algorithms,
@@ -33,4 +33,5 @@ let algorithms = [for (v in vectors) verify_signature(if (v.scheme == "ed25519")
  tuf.timestamp(root, fixture_bytes("timestamp.json"), newer, "2026-11-03T00:00:00Z") ^ { 'denied' },
  tuf.snapshot(root, timestamp, fixture_bytes("1.snapshot.json"), newer_snapshot, "2026-11-03T00:00:00Z") ^ { 'denied' },
  tuf.snapshot(root, removed, fixture_bytes("snapshot-removed.json"), snapshot, "2026-11-03T00:00:00Z") ^ { 'denied' },
- meta.root(fixture_bytes("root-aliased-key.json")) ^ { 'denied' }]
+ meta.root(fixture_bytes("root-aliased-key.json")) ^ { 'denied' },
+ meta.root(fixture_bytes("../legacy-root-ed25519.json")) ^ { 'denied' }]

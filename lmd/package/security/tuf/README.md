@@ -5,7 +5,7 @@ authentication workflow in [TUF 1.0.37](https://theupdateframework.github.io/spe
 It is a component under qualification, not a qualified update service or a
 claim of TUF conformance. No Rust or Python runtime is required.
 
-Building the signature primitive requires OpenSSL 3 headers and libcrypto.
+Building the signature primitive uses the host mbedTLS 3 / mbedCrypto dependency.
 Deployment packages must build that dependency for their advertised minimum OS;
 the local Homebrew archive currently targets a newer macOS than Lambda's
 configured link minimum, so passing on this machine does not qualify older
@@ -98,7 +98,9 @@ console reports delivery unavailable.
 
 ## Initial interoperability profile and limits
 
-Supported keys are Ed25519, RSA-PSS/SHA-256 and ECDSA P-256/SHA-256. Key IDs
+Supported keys are RSA-PSS/SHA-256 and ECDSA P-256/SHA-256 (named-curve SPKI,
+DER signature). Ed25519 keys contribute no valid signatures; Ed25519-only trust
+roots must be explicitly replaced/pinned before use with this build. Key IDs
 must equal SHA-256 of the canonical key object; arbitrary key aliases are
 refused. Metadata uses strict integer JSON and UTC `YYYY-MM-DDTHH:MM:SSZ` timestamps. Repository
 role names are opaque printable UTF-8 values up to 128 bytes, stored inside one

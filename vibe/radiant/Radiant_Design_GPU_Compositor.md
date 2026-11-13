@@ -420,6 +420,25 @@ the sample. It passes headless, as the harness runs it.
 of 9,031 passed, 2 skipped, the rest expected partials. Its scene3d cases now run
 their hidden host window on the core profile.
 
+## Video paint-order correction — 2026-11-13
+
+RI-063 supersedes the placement-only video path described in the historical
+step1 checkpoint above. Post-page video blits covered foreground HTML despite
+CSS z-order, including Bizzabo's negative-z-index hero. Decoded frames and
+controls now publish immutable image snapshots (**D5.5.1**), recorded in the
+ordinary native paint stream (**D9.1.1v4 / D9.1.3v2**). Decoder-epoch changes
+invalidate retained media and playback wakes repaint the page. Video still
+selects CPU replay and a full surface upload; no new GPU composition capability
+is claimed. Capture does not advance virtual time (**D10.1.7**).
+
+The native decoded-frame foreground witness fails before the repair and passes
+after it. Qualification:34 native video cases,247 raster/ownership cases,
+111 online tests,117 existing UI assertions and the17-category layout baseline
+(5609 passes/295 recorded partials,0 regressions/0 skips). Historical cached-blit
+performance and presentation counts above do not measure this new path;
+release playback cost remains unmeasured. Evidence and full online refresh:
+`../../temp/online-visual-round19/` and the owning RI-063 fixed-ledger entry.
+
 ## Step 2 checkpoint — 2026-11-02
 
 ### What was built

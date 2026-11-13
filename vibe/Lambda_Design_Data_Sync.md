@@ -60,6 +60,30 @@ scope, a small function endpoint, and an explicit P2P-first transport policy.
 
 ---
 
+## Native cryptographic suite and identity transition
+
+**Authority: D11.1.2, D11.2.3–D11.2.4; implementation build: D9.1.5.**
+The native host uses mbedTLS/mbedCrypto for TLS, hashes, HMAC, AES-GCM, entropy,
+P-256 ECDSA/SHA-256 authentication and X25519 agreement. OpenSSL is removed from
+native dependency/setup closure. The optional Node crypto module also uses only mbedCrypto/PSA; its former
+OpenSSL loader and fallback code are removed. Node crypto compatibility is not
+a requirement of this profile. There is no supplemental Ed25519 provider.
+
+P-256 uses a 32-byte big-endian private scalar in `[1,n)`, a 65-byte uncompressed
+SEC1 public key, and deterministic RFC 6979 signatures encoded as 64-byte low-S
+`r || s`. The verifier also retains named-curve SPKI/DER ECDSA and constrained
+RSA-PSS/SHA-256 for package metadata. Signing and agreement use separate keys.
+
+Sync descriptors, credentials and invitations use version 2; negotiated transport
+names and signed domains identify P-256. Ed25519 peers/credentials and historical
+signatures are never reinterpreted as P-256. Existing credentials fail explicitly
+without replacement; working files, local repository history and cloud objects
+remain intact. Explicit re-enrollment uses new agent state, new paired identities
+and, for cloud, a new pinned owner and separate space/namespace. Existing history
+stays with the old repository; automatic in-place identity/history conversion is
+not implemented. See [the transition procedure](../lmd/package/sync/PEER.md#crypto-suite-transition)
+and [implementation checkpoint](<impl/Lambda_Impl_MbedCrypto_Only (done).md>).
+
 ## 1. Proposed architecture
 
 Use a local sync agent, direct authenticated peer connections, a generic
