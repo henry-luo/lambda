@@ -1479,15 +1479,18 @@ extern "C" void dom_install_window_dialog_globals(void) {
 
 extern "C" void dom_install_window_frames_global(void) {
     // The core answered "which frames"; this decides where a realm sees them.
-    Item frames = dom_collect_frame_windows_array();
-    Item length_item = (Item){.item = i2it(js_array_length(frames))};
+    RootFrame roots(1);
+    if (!roots.valid()) return;
+    // publication can allocate property storage before frames becomes reachable.
+    Rooted<Item> frames(roots, dom_collect_frame_windows_array());
+    Item length_item = (Item){.item = i2it(js_array_length(frames.get()))};
     Item global = js_get_global_this();
-    js_set_key_cstr(global, "frames", frames);
+    js_set_key_cstr(global, "frames", frames.get());
     js_set_key_cstr(global, "length", length_item);
 
     Item window = js_get_key_cstr(global, "window");
     if (get_type_id(window) == LMD_TYPE_MAP) {
-        js_set_key_cstr(window, "frames", frames);
+        js_set_key_cstr(window, "frames", frames.get());
         js_set_key_cstr(window, "length", length_item);
     }
 }

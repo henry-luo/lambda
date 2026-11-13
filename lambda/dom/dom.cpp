@@ -3646,12 +3646,15 @@ static void dom_collect_frame_windows(DomElement* elem, Item frames) {
 // result as window.frames/length is realm shape, so the two are split and the
 // installer in js_dom_realm.cpp calls this for the array.
 extern "C" Item dom_collect_frame_windows_array(void) {
-    Item frames = js_array_new(0);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    // child window wrappers allocate before the collection reaches its realm root.
+    Rooted<Item> frames(roots, js_array_new(0));
     DomDocument* doc = _js_main_document ? _js_main_document : _js_current_document;
     if (doc && doc->root) {
-        dom_collect_frame_windows(doc->root, frames);
+        dom_collect_frame_windows(doc->root, frames.get());
     }
-    return frames;
+    return frames.get();
 }
 
 

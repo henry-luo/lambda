@@ -765,6 +765,17 @@ and `final-source-audit.json`.
 <a id="lr01-23"></a>LR01-23 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr01-23>).
 
 
+<a id="lr01-25"></a>**LR01-25 · macOS ASan host omits sanitizer linkage · OPEN (2026-11-13)**
+
+On `e5d5e848e`, `make build-debug-asan` builds the instrumented sibling archives
+then fails linking `lambda-debug-asan.exe` with unresolved `___asan_*` symbols.
+The generated host compile/link flags omit `-fsanitize=address` while its input
+and Radiant archives require the sanitizer runtime (D9.1.3v2). The flag omission
+is confirmed; the generator/configuration cause remains **unconfirmed**.
+Evidence: `temp/failed-radiant-tests/asan-build.log`. This blocks sanitizer
+qualification of LR12-54; the normal debug host and forced-GC/poison UI replay
+pass. No sibling source or build workaround was applied.
+
 <a id="lr01-24"></a>**LR01-24 · Forced-GC batch timeout can crash during cleanup · OPEN (2026-11-11)**
 
 On `21fdc7cf6` plus the document-protocol changes and logical-join fix,
@@ -1400,6 +1411,8 @@ as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 
 
 ## 12. Procedural runtime (LR12)
+
+<a id="lr12-54"></a>LR12-54 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-54>).
 
 <a id="lr12-53"></a>LR12-53 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr12-53>).
 

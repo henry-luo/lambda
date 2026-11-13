@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **313 anchored records**, preserving fixed, resolved,
+This archive contains **314 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -2138,6 +2138,24 @@ Four caps in one subsystem failed four ways, silent truncation among them. `SHAP
 
 
 ## 12. Procedural runtime (LR12)
+
+<a id="lr12-54"></a>**LR12-54 · Window frames collection loses its precise root · RESOLVED (2026-11-13)**
+
+At `e5d5e848e`, `./test/test_ui_automation_gtest.exe --suite dom --test
+dom_iframe_retire` crashed during parent JS realm initialization with forced
+GC and freed-memory poisoning. The frames array was a native local while child
+window wrappers allocated, so GC could collect it before global publication.
+The native crash trace reached `shape_entry_set_type` through
+`dom_install_window_frames_global` and `js_set_key_cstr`.
+
+Precise `RootFrame` / `Rooted<Item>` ownership now covers construction and
+publication (D6.3.3, D5.5.2). The original regression passes on AUTO and forced
+JIT; all six selected iframe/realm neighbors pass. The final debug host's
+`make test-radiant-baseline` exits 0: 8,165 passed, 299 recorded partial,
+20 skipped, zero failures, including the 329/329 selected UI tests.
+The extra Lambda sweep remains incomplete after its independent missing-WebRTC
+failure; ASan host linkage is separately tracked by LR01-25.
+[Implementation and evidence](impl/Lambda_Impl_Radiant_Baseline_Repairs.md).
 
 <a id="lr12-53"></a>**LR12-53 · Draft peer credential updates can restore revoked membership · RESOLVED (2026-11-11)**
 
