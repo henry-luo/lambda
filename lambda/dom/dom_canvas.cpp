@@ -83,17 +83,24 @@ static void* js_canvas_context_element(Item context_item) {
     return dom_unwrap_element(canvas);
 }
 
-static Item js_canvas_number_arg(Item* args, int argc, int index, float* out) {
+static Item js_canvas_number_value(Item input, double* out) {
     if (!out) return js_throw_type_error("Canvas numeric result is unavailable");
-    Item input = args && index < argc ? args[index] : make_js_undefined();
     Item numeric = js_to_number(input);
     if (item_is_error(numeric)) return numeric;
     TypeId type = get_type_id(numeric);
-    if (type == LMD_TYPE_INT) *out = (float)it2i(numeric);
-    else if (type == LMD_TYPE_INT64) *out = (float)it2l(numeric);
-    else if (type == LMD_TYPE_FLOAT) *out = (float)it2d(numeric);
+    if (type == LMD_TYPE_INT) *out = (double)it2i(numeric);
+    else if (type == LMD_TYPE_INT64) *out = (double)it2l(numeric);
+    else if (type == LMD_TYPE_FLOAT) *out = it2d(numeric);
     else *out = NAN;
     return ItemNull;
+}
+
+static Item js_canvas_number_arg(Item* args, int argc, int index, float* out) {
+    double value = NAN;
+    Item error = js_canvas_number_value(
+        args && index < argc ? args[index] : make_js_undefined(), &value);
+    if (!item_is_error(error)) *out = (float)value;
+    return error;
 }
 
 static bool js_canvas_numbers_are_finite(const float* values, int count) {
@@ -205,6 +212,71 @@ static Item js_canvas_context_rotate(Item callee, Item this_value,
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
     return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::rotate, element, radians) ? make_js_undefined() : js_canvas_draw_failed();
+}
+
+static Item js_canvas_matrix_dictionary(Item dictionary, float* coefficients) {
+    static const char* members[] = {
+        "a", "b", "c", "d", "e", "f", "m11", "m12", "m21", "m22", "m41", "m42"};
+    static const double defaults[] = {1, 0, 0, 1, 0, 0};
+    double values[12] = {};
+    bool present[12] = {};
+    RootFrame roots(2);
+    Rooted<Item> source(roots, dictionary);
+    Rooted<Item> member(roots, ItemNull);
+    TypeId type = get_type_id(source.get());
+    bool empty = source.get().item == 0 || type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;
+    if (!empty && !js_is_object_value(source.get()))
+        return js_throw_type_error("Canvas transform dictionary must be an object");
+    // WebIDL reads dictionary members in name order before validating their aliases.
+    for (int index = 0; !empty && index < 12; index++) {
+        member.set(dom_realm_get_name(source.get(), members[index]));
+        if (item_is_error(member.get())) return member.get();
+        if (get_type_id(member.get()) == LMD_TYPE_UNDEFINED) continue;
+        Item error = js_canvas_number_value(member.get(), &values[index]);
+        if (item_is_error(error)) return error;
+        present[index] = true;
+    }
+    for (int index = 0; index < 6; index++) {
+        double first = values[index], second = values[index + 6];
+        if (present[index] && present[index + 6] && first != second &&
+            !(isnan(first) && isnan(second)))
+            return js_throw_type_error("Canvas transform aliases disagree");
+        coefficients[index] = (float)(present[index + 6] ? second
+            : present[index] ? first : defaults[index]);
+    }
+    return ItemNull;
+}
+
+static Item js_canvas_context_matrix(Item this_value, Item* args, int argc,
+                                     bool replace, bool reset) {
+    RootFrame roots(1);
+    Rooted<Item> receiver(roots, this_value);
+    void* element = js_canvas_context_element(receiver.get());
+    if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
+    float coefficients[6] = {1, 0, 0, 1, 0, 0};
+    if (!reset && replace && argc <= 1) {
+        Item error = js_canvas_matrix_dictionary(argc ? args[0] : make_js_undefined(), coefficients);
+        if (item_is_error(error)) return error;
+    } else if (!reset) {
+        if (argc < 6) return js_throw_type_error("Canvas transform requires six coefficients");
+        for (int index = 0; index < 6; index++) {
+            Item error = js_canvas_number_arg(args, argc, index, &coefficients[index]);
+            if (item_is_error(error)) return error;
+        }
+    }
+    if (!js_canvas_numbers_are_finite(coefficients, 6)) return make_js_undefined();
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::transform,
+        element, coefficients, replace) ? make_js_undefined() : js_canvas_draw_failed();
+}
+
+static Item js_canvas_context_transform(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    return js_canvas_context_matrix(receiver, args, argc, false, false);
+}
+static Item js_canvas_context_set_transform(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    return js_canvas_context_matrix(receiver, args, argc, true, false);
+}
+static Item js_canvas_context_reset_transform(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    return js_canvas_context_matrix(receiver, args, argc, true, true);
 }
 
 static Item js_canvas_context_begin_path(Item callee, Item this_value,
@@ -500,6 +572,9 @@ static void js_canvas_install_context_methods(Item context) {
         {"scale", js_canvas_context_scale, 2},
         {"translate", js_canvas_context_translate, 2},
         {"rotate", js_canvas_context_rotate, 1},
+        {"transform", js_canvas_context_transform, 6},
+        {"setTransform", js_canvas_context_set_transform, 0},
+        {"resetTransform", js_canvas_context_reset_transform, 0},
         {"beginPath", js_canvas_context_begin_path, 0},
         {"closePath", js_canvas_context_close_path, 0},
         {"moveTo", js_canvas_context_move_to, 2},

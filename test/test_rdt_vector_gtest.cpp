@@ -377,6 +377,26 @@ TEST(RadiantProviderInit, NativeEmbeddingRegistrationIsIdempotent) {
     EXPECT_EQ(dom_host_engine_ops(), operations);
 }
 
+TEST(RdtVectorTest, BoxBlurSpanPreservesTruncationStrideAndBoundaryNormalization) {
+    const uint32_t source[] = {0x00000000u, 0xdeadbeefu, 0x0a0a0a0au, 0xdeadbeefu,
+        0x1e1e1e1eu, 0xdeadbeefu, 0x3c3c3c3cu, 0xdeadbeefu};
+    uint32_t output[8];
+    const uint32_t normalized[] = {5,13,33,45};
+    const uint32_t transparent[] = {3,13,33,30};
+    for (bool renormalize : {false, true}) {
+        for (uint32_t& pixel : output) pixel = 0xdeadbeefu;
+        render_box_blur_span(source, 2, 4, output, 2, 0, 4, 1, 1, renormalize);
+        for (unsigned index = 0; index < 4; index++) {
+            EXPECT_EQ(output[index * 2], (renormalize ? normalized[index] : transparent[index]) * 0x01010101u);
+            EXPECT_EQ(output[index * 2 + 1], 0xdeadbeefu);
+        }
+    }
+    for (uint32_t& pixel : output) pixel = 0xdeadbeefu;
+    render_box_blur_span(source, 2, 4, output, 2, 1, 3, 2, 1, false);
+    EXPECT_EQ(output[0], 0xdeadbeefu); EXPECT_EQ(output[6], 0xdeadbeefu);
+    EXPECT_EQ(output[2], 0x0a0a0a0au); EXPECT_EQ(output[4], 0x19191919u);
+}
+
 TEST(RdtVectorTest, GaussianFlatRunsPreserveEdgesChannelsAndPitches) {
     // independent Gaussian step-response samples (sigma=1.25, support=4).
     const int points[] = {0,4,6,10,11,16,21,22,28,32};
@@ -2702,6 +2722,99 @@ TEST(SvgFilterTest, StandardInputsAreCapturedLazilyAndBackgroundAlphaSharesItsIm
     for (unsigned slot = 0; slot < 3; slot++) EXPECT_EQ(calls.count[slot], 1u);
     for (unsigned index = 0; index < 4; index++) EXPECT_EQ(((uint32_t*)result->pixels)[index], 0xe8401018u);
     image_surface_destroy(result); scratch_release(&scratch); arena_destroy(arena);
+    render_svg_filter_program_release(program); document.destroy();
+}
+
+TEST(SvgFilterTest, GaussianFlatRunsSpendOnlyTheirExecutedConvolutions) {
+    DomDocument document; Element element = {};
+    RdtSvgFilterProgram* program = svg_filter_test_program(&document, &element, 1, 128, 128);
+    ASSERT_NE(program, nullptr);
+    RdtSvgFilterNode* node = program->nodes;
+    node->kind = RDT_SVG_FILTER_BLUR; node->valid = true;
+    node->input = RDT_SVG_FILTER_SOURCE;
+    node->values[0] = node->values[1] = 1.5f;
+    Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    ImageSurface* source = image_surface_create(128, 128);
+    ASSERT_NE(source, nullptr);
+    const size_t pixels = 128u * 128u;
+    for (size_t i = 0; i < pixels; i++) ((uint32_t*)source->pixels)[i] = 0x80402010u;
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
+    run.geometry = run.source_bounds = {0,0,128,128}; run.lengths = {128,128,16,8};
+    run.frame = rdt_matrix_identity(); run.density = 1;
+    size_t used = 0; run.work_used = lam::up(&used);
+    Bound bounds = {}; RdtMatrix placement;
+    for (unsigned edge = 0; edge < 3; edge++) {
+        SCOPED_TRACE(edge);
+        node->variant = edge;
+        ImageSurface* expected = nullptr; ImageSurface* result = nullptr;
+        used = 0; run.work_limit = 0;
+        ASSERT_TRUE(render_svg_filter_execute(program, &run, &expected, &bounds, &placement));
+        // the same exact flat-run kernel fits a linear budget; skipped convolutions cost no taps.
+        used = 123; run.work_limit = 123 + 16 * pixels;
+        ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+        EXPECT_GT(used, 123u); EXPECT_LE(used, run.work_limit);
+        EXPECT_EQ(memcmp(result->pixels, expected->pixels, pixels * sizeof(uint32_t)), 0);
+        image_surface_destroy(result); image_surface_destroy(expected);
+    }
+    // transparent filter padding joins the zero extension even when the kernel is wider than the image.
+    memset(source->pixels, 0, pixels * sizeof(uint32_t));
+    node->variant = 0; node->values[0] = node->values[1] = 80.0f;
+    ImageSurface* transparent = nullptr;
+    used = 123; run.work_limit = 123 + 16 * pixels;
+    ASSERT_TRUE(render_svg_filter_execute(program, &run, &transparent, &bounds, &placement));
+    EXPECT_LE(used, run.work_limit);
+    EXPECT_EQ(memcmp(transparent->pixels, source->pixels, pixels * sizeof(uint32_t)), 0);
+    image_surface_destroy(transparent);
+    node->values[0] = node->values[1] = 1.5f;
+    for (size_t i = 0; i < pixels; i++)
+        ((uint32_t*)source->pixels)[i] = 0xff000000u | (uint32_t)((i * 1103515245u + 12345u) & 0x00ffffffu);
+    ImageSurface* result = nullptr;
+    used = 123; run.work_limit = 123 + 16 * pixels;
+    EXPECT_FALSE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+    EXPECT_EQ(result, nullptr); EXPECT_LE(used, run.work_limit);
+    image_surface_destroy(source); scratch_release(&scratch); arena_destroy(arena);
+    render_svg_filter_program_release(program); document.destroy();
+}
+
+TEST(SvgFilterTest, WideGaussianUsesLinearWorkAndPreservesItsExtendedInput) {
+    DomDocument document; Element element = {};
+    RdtSvgFilterProgram* program = svg_filter_test_program(&document, &element, 1, 96, 32);
+    ASSERT_NE(program, nullptr);
+    RdtSvgFilterNode* node = program->nodes;
+    node->kind = RDT_SVG_FILTER_BLUR; node->valid = true; node->input = RDT_SVG_FILTER_SOURCE;
+    Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    ImageSurface* source = image_surface_create(96, 32);
+    ImageSurface* exact = image_surface_create(96, 32);
+    ASSERT_NE(source, nullptr); ASSERT_NE(exact, nullptr);
+    for (int row = 0; row < 32; row++) for (int column = 0; column < 96; column++)
+        ((uint32_t*)source->pixels)[row * 96 + column] = column < 48 ? 0x80402010u : 0xff102080u;
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
+    run.geometry = run.source_bounds = {0,0,96,32}; run.lengths = {96,32,16,8};
+    run.frame = rdt_matrix_identity(); run.density = 1;
+    size_t used = 0; run.work_used = lam::up(&used); run.work_limit = 100u * 96u * 32u;
+    Bound bounds = {}; RdtMatrix placement;
+    const float deviations[] = {8.0f, 9.0f, 40.0f};
+    for (float deviation : deviations) for (unsigned edge = 0; edge < 3; edge++) for (unsigned axis = 0; axis < 2; axis++) {
+        SCOPED_TRACE(deviation);
+        SCOPED_TRACE(edge);
+        SCOPED_TRACE(axis);
+        node->variant = edge; node->values[axis] = deviation; node->values[1 - axis] = 0;
+        ASSERT_TRUE(render_gaussian_blur_axis(&scratch, source, exact, deviation, axis, 0, axis ? 32 : 96, edge));
+        used = 13; ImageSurface* result = nullptr;
+        ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+        EXPECT_LE(used, run.work_limit);
+        // the specified three-box approximation stays within the 3% Gaussian envelope, including edge extension.
+        for (size_t pixel = 0; pixel < 96u * 32u; pixel++) for (unsigned channel = 0; channel < 4; channel++)
+            EXPECT_NEAR((((uint32_t*)result->pixels)[pixel] >> (channel * 8)) & 255u,
+                (((uint32_t*)exact->pixels)[pixel] >> (channel * 8)) & 255u, 8);
+        image_surface_destroy(result);
+    }
+    used = 13; run.work_limit = 20;
+    ImageSurface* rejected = nullptr;
+    EXPECT_FALSE(render_svg_filter_execute(program, &run, &rejected, &bounds, &placement));
+    EXPECT_EQ(rejected, nullptr); EXPECT_LE(used, run.work_limit);
+    image_surface_destroy(exact); image_surface_destroy(source);
+    scratch_release(&scratch); arena_destroy(arena);
     render_svg_filter_program_release(program); document.destroy();
 }
 

@@ -69,6 +69,14 @@ node --test test/online/render_nested_pseudo.test.cjs
 node --test test/online/render_intrinsic_width_value.test.cjs
 node --test test/online/render_positioned_order.test.cjs
 node --test test/online/render_video_percentage.test.cjs
+node --test test/online/render_canvas_transform.test.cjs
+node --test test/online/render_console_groups.test.cjs
+node --test test/online/render_svg_percentage_intrinsics.test.cjs
+node --test test/online/render_compact_conditions.test.cjs
+node --test test/online/render_grid_flow_variable.test.cjs
+node --test test/online/render_abs_percentage_height.test.cjs
+node --test test/online/render_css_resource_discovery.test.cjs
+node --test test/online/render_nested_ratio_height.test.cjs
 ```
 
 The session tests exercise real Lambda HTTP rendering, layout and both batch
@@ -1108,3 +1116,205 @@ Evidence: [round twenty-five](comparison/repairs.html#round-25),
 `snapshots/visual_comparison_review_round25.json` and
 `temp/online-visual-round25/`. Qualified host SHA256 `3fb7114ad21abb7a6c90ce36ee6bfb3573d94370694c7817df60d2a20643e882`.
 Work stopped after this qualified round at the user’s request; the remaining high-severity pages are unresolved.
+
+The twenty-sixth review fixes **LI-030**, **RI-074** and **RI-070**: animated
+WebP initial-frame decoding, min-content minimum widths and computed axis-size
+inheritance. Maple’s title now renders; the independent form and image-bearing
+inheritance reductions match Chromium. Playback, cookie-panel and remaining
+Python slider/header differences stay unresolved. No page-wide clearance is
+claimed: **166 high-severity pages**, 1 critical Dock blocker and 900 low remain.
+
+Only **two online pages** were refreshed; other captures retain their earlier
+dates. Focused checks pass: **99 native layout**, **37 image I/O** and **42 related
+online render cases**, plus integer lint. The 185-page recapture, full layout
+baseline, Input aggregate and unrelated paint/export checks were deferred.
+Browser references, annotations, URLs, thresholds, admission and clocks are
+unchanged (**D5.5.1 / D10.1.7**). See [round twenty-six](comparison/repairs.html#round-26)
+and `snapshots/visual_comparison_review_round26.json`. The goal remains active.
+
+The twenty-seventh review fixes **RI-075** (Canvas general matrices) and missing
+**console group host bindings**. Origin’s particle initializer and Maven’s
+slider initializer now complete. Their independent hero visibility gaps remain;
+there are **166 high-severity pages**, 1 critical Dock blocker and 900 low.
+
+Only **Maven and Origin** were refreshed. Focused checks pass: **11 render
+controls**, 10 independent Chromium matrix controls, 8 AST/MIR console goldens,
+2 existing Canvas goldens and 1 rebuilt provider contract; integer lint has zero
+unmarked casts. Broad baselines and catalog recapture were deferred. Stellar’s
+saved callback fails identically in Chromium; WebKit’s blank grid agrees with
+Chromium at the native zero-time CSS fade frame. No renderer change is justified
+by those observations. URLs, references, annotations and capture clocks are
+unchanged (**D10.1.7**). See [round twenty-seven](comparison/repairs.html#round-27)
+and `snapshots/visual_comparison_review_round27.json`. The goal remains active.
+
+The twenty-eighth review fixes **RI-076**: percentage SVG viewport attributes
+no longer feed a 300px fallback into height-at-width queries. Definite zero
+containing widths also propagate correctly. The saved Contentsquare lead card
+shrinks from **757.65px to 502.05px**, matching Chromium’s 501.61px; the refreshed
+canonical image restores its hero image position and following card row.
+The large lead-card sizing omission clears this review. Minor navigation wrapping, sidebar text and consent-state differences remain. The report now has **165 high-severity pages**,
+1 critical Dock blocker and 901 low; 1 major-review clearance.
+
+Only **Contentsquare blog** was recaptured. Focused checks pass: **7 PNG controls**,
+7 independent Chromium controls and **98 native layout/cache units**; integer
+lint has zero unmarked casts. Full layout/paint/JS/Input baselines and catalog
+recapture were deferred. URLs, browser references, annotations, thresholds,
+budgets and D10.1.7 capture clocks remain unchanged. See
+[round twenty-eight](comparison/repairs.html#round-28) and
+`snapshots/visual_comparison_review_round28.json`. The goal remains active.
+
+The twenty-ninth review fixes **RI-077**, repeated shared-ancestor declaration
+queries in SVG transition snapshots. It reuses the existing property cache with
+an iterative walk and unchanged ownership/invalidation guards (**D5.5.1**).
+Two focused native cases and five existing SVG cache/lifetime cases pass. The
+saved Dock output is byte-identical; single release controls observe 9.83→9.12
+CPU seconds, a limited result without a broad performance claim.
+
+**Dock remains unresolved (RI-031):** matched scripted release profiles both
+reach 150 seconds, with 23/25 completed full layouts. No canonical image or
+comparison score is refreshed this round. **165 high-severity pages**, 1 critical
+blocker and 901 low remain at their recorded capture dates. Thirty-four stored
+pairs were inspected; full baselines and catalog recapture were deferred. URLs,
+references, annotations, admission, budgets and **D10.1.7** clocks remain unchanged.
+See [round twenty-nine](comparison/repairs.html#round-29) and
+`snapshots/visual_comparison_review_round29.json`. The goal remains active.
+
+The thirtieth review repairs **LI-034**, compact logical-condition token boundaries
+and nested supports groups; **LI-035**, pending grid-auto-flow variables; and
+**RI-078**, absolute percentage math after an auto-height container completes.
+Ahrefs’ duplicated/tall promotion and over-wide hero are corrected. Statamic’s
+large missing landscape returns. Only these two Lambda captures were refreshed;
+**1 pages clear major review**, leaving **164 high-severity pages**,
+1 critical Dock blocker and 902 low.
+
+Focused checks pass: **17 PNG controls**, 17 independent Chromium controls,
+32 Input media/supports units and four native absolute/grid cases. Integer lint
+has zero unmarked casts. Full baselines and catalog recapture were deferred.
+Other captures retain their dates; URLs, browser references, annotations,
+thresholds, admission, budgets and D10.1.7 clocks are unchanged. See
+[round thirty](comparison/repairs.html#round-30) and
+`snapshots/visual_comparison_review_round30.json`. The goal remains active.
+
+The thirty-first review fixes **RI-079**, stylesheet prefetch of unmatched/inactive
+icon rules, and **LI-036**, rejection of existing consumers at resource capacity.
+Discovery follows selected element/pseudo cascades; the existing **500-resource
+limit remains unchanged**. Conductor's large hero and logos return, and
+Storetasker imagery loads. Their remaining wrapping/state and heading gaps keep
+both pages high. Only these two Lambda captures were refreshed; **164 high**,
+1 critical Dock blocker and 902 low remain, with no page clearance.
+
+Focused verification passes **ten rendering/request controls** and three native
+capacity/cache units; integer lint has zero unmarked casts. The new HTTP controls
+improve from 0/5 to 5/5; five existing inline controls pass. Full baselines and
+catalog recapture were deferred. Other captures keep their dates. URLs, browser
+references, annotations, thresholds, admission, limits and D10.1.7 clocks remain
+unchanged. See [round thirty-one](comparison/repairs.html#round-31) and
+`snapshots/visual_comparison_review_round31.json`. The goal remains active.
+
+The thirty-second review fixes **RI-080**: preferred width now precedes ratio
+height contributions, and SVG percentage height consumes a definite parent
+basis before cached/natural fallbacks. Ratio-transferred heights are not treated
+as cyclic. Isomeet's launch badge, button height and large hero placement return;
+its error falls **20.46% → 8.75%**, clearing major review. Only Isomeet was
+recaptured, leaving **163 high-severity pages**, 1 critical Dock blocker and 903 low.
+
+Focused checks pass: **14 PNG controls**, seven independent Chromium controls,
+and four native sizing cases; integer lint has zero unmarked casts. The first
+6/7 candidate was held for its non-square failure. No ABI/structure layout change.
+Full baselines and catalog recapture were deferred; other captures keep their
+dates. Browser references, URLs, annotations, thresholds, admission, limits and
+D10.1.7 clocks are unchanged. See [round thirty-two](comparison/repairs.html#round-32)
+and `snapshots/visual_comparison_review_round32.json`. The goal remains active.
+
+The thirty-third review fixes **RI-081**: wrapped flex height queries now include
+item cross margins. Betterway's complete hero returns to its intended position;
+its error falls **19.22% → 0.55%**, clearing major review. Only Betterway was
+recaptured, leaving **162 high-severity pages**, 1 critical Dock blocker and904 low.
+
+Four focused native cases pass, including signed/percentage/live margin changes
+and read-only query geometry. Chromium confirms all four margin states; layout
+integer lint passes. No ABI/structure change. Broad baselines and catalog
+recapture were deferred. Browser references, URLs, annotations, thresholds,
+admission, limits and D10.1.7 clocks are unchanged. See
+[round thirty-three](comparison/repairs.html#round-33) and
+`snapshots/visual_comparison_review_round33.json`. The goal remains active.
+
+The thirty-fourth review fixes **RI-082**: Gaussian work accounting now follows
+executed convolutions, and exact transparent runs cross zero-extension image
+boundaries. Five focused native tests pass, including pixel equality, edge and
+memory guards, a wide zero kernel, and noisy-input rejection. The public API,
+limits and Gaussian math are unchanged.
+
+Overflow's complete filter graph still fails; its two candidate PNGs are
+identical. No canonical images, capture metadata or scores were refreshed.
+The report remains **162 high**, 1 critical Dock blocker and904 low. No comparator
+rerun or broad baseline was needed. See
+[round thirty-four](comparison/repairs.html#round-34),
+`snapshots/visual_comparison_review_round34.json`, and Radiant's RI-082 ledger.
+The goal remains active.
+
+The thirty-fifth review fixes **RI-083**: early flex intrinsic widths now include
+variable/calculated scalar gaps and resolve em lengths against the owner's font.
+Affinity's actions share a row and its navigation labels stop clipping at the top;
+error falls **18.13% → 14.66%**. It remains high, leaving **162 high-severity pages**,
+1 critical Dock blocker and904 low. Only Affinity was recaptured.
+
+Four focused native tests and five independent Chromium gap states pass;
+integer lint passes. No ABI/structure change. Broad baselines and catalog recapture
+were deferred. Initial animation/anti-flicker states were confirmed on Agiloft,
+Ebury, WebKit and Python; their clocks and references were retained. See
+[round thirty-five](comparison/repairs.html#round-35) and
+`snapshots/visual_comparison_review_round35.json`. The goal remains active.
+
+The thirty-sixth review fixes **RI-084**: positioned descendants retain their
+static ancestor's opacity group while keeping their containing-block geometry.
+Zero-height parents now defer their backdrop save until descendant ink bounds
+are known. Paint, export and native hit testing share the ownership traversal;
+ordinary overflow below an external containing block preserves its CSS escape.
+
+Eight PNG controls, four native paint/hit tests, three focused display-list tests
+and eight Chromium controls pass; integer lint passes. The previous qualified
+binary fails six of the final eight PNG controls. No ABI/structure change.
+Saved Metronome and Highnote pages are pixel-identical before/after, so no page
+clearance or canonical refresh is claimed. The report remains **162 high**,
+1 critical Dock blocker and 904 low. Broad baselines and catalog capture were
+deferred. See [round thirty-six](comparison/repairs.html#round-36) and
+`snapshots/visual_comparison_review_round36.json`. The goal remains active.
+
+The thirty-seventh review fixes **RI-085**: wide SVG Gaussian blurs use admitted
+sliding box passes, preserving original-input edge extension and independent axes.
+The shared window core also retains CSS shadow truncation/normalization. Small
+kernels keep exact convolution. Memory/work limits and admission are unchanged.
+
+Twenty-one focused filter/shadow/budget tests pass, with eighteen independent
+exact-Gaussian quality/axis/edge states and four Chromium controls (maximum channel
+difference3); integer lint passes. Only four Lambda captures were refreshed.
+Overflow's error falls **20.40% → 1.86%**, Calendly **20.04% → 6.42%**, FramerAuth
+**16.08% → 14.20%**, and Pitch **6.26% → 3.53%**. Their filter errors are gone.
+
+Large independent omissions remain: Overflow's navigation, Calendly's hero text
+and signup actions, and FramerAuth/Pitch main content. Two new manual annotations
+retain Overflow and Calendly as high despite their lower coarse scores; all prior
+reviews are preserved. Thus the report stays **162 high** (142 automatic +20
+manual), 1 critical Dock blocker and904 low. Original browser references, URLs,
+thresholds, budgets and clocks are unchanged. Broad baselines and catalog capture
+were deferred. See [round thirty-seven](comparison/repairs.html#round-37),
+`snapshots/visual_comparison_review_round37.json`, and Radiant's RI-085 ledger.
+The goal remains active.
+
+The thirty-eighth review fixes **RI-086/RI-087**: the root retains its resolved
+minimum after empty-child collapse, and viewport-source body overflow no longer
+clips its own zero-height box. One source selector is shared across viewport,
+paint, native hit and coordinate scopes, with root/body containment exceptions.
+Six focused native tests and eight PNG controls pass; Chromium independently
+confirms seven geometry states and all eight pixel controls. Integer lint passes.
+
+The identical saved hydrated Mymind source restores the main heading, copy and
+actions. Its live canonical capture remains blank, so no page clearance is
+claimed; that initialization cause is separate and unconfirmed. Only Mymind was
+retried, with unchanged pixels/metrics. The report remains **162 high**, 1 critical
+Dock blocker and904 low. RI-088 records an independent flow-restoration error.
+See [round thirty-eight](comparison/repairs.html#round-38) and
+`snapshots/visual_comparison_review_round38.json`. The user cleared the goal
+during wrap-up; no further work is scheduled. Broad baselines and catalog capture
+were deferred; references, URLs, annotations, budgets and clocks are retained.

@@ -1,5 +1,5 @@
 {
-  "reviewed_at": "2026-11-13T15:42:48.763222+00:00",
+  "reviewed_at": "2026-11-13T22:41:48.359621+00:00",
   "interpretation": "Manual major visual omissions retained independently of coarse image thresholds; root causes remain unconfirmed unless recorded in the issue ledgers.",
   "reviews": [
     {
@@ -164,6 +164,20 @@
       "manual_major_remaining": "The hero heading, description, primary action and large geometric illustration remain absent. Only the dark section height has changed; visual review rejects automatic clearance and the remaining cause is unisolated.",
       "reviewed_at": "2026-11-13T13:10:49.900130+00:00",
       "evidence": "comparison/repairs.html#round-23"
+    },
+    {
+      "label": "saas_landing_160",
+      "url": "https://overflow.io/",
+      "manual_major_remaining": "The large colored hero background is restored by RI-085, making the heading readable. The brand, primary navigation and header actions remain absent. The saved source retains the authored navbar opacity0 loading rule; its live initialization cause is not assigned to this filter repair.",
+      "reviewed_at": "2026-11-13T22:41:48.359621+00:00",
+      "evidence": "comparison/repairs.html#round-37"
+    },
+    {
+      "label": "saas_landing_552",
+      "url": "https://calendly.com/",
+      "manual_major_remaining": "The large hero gradient is restored by RI-085, but the main heading, explanatory text and signup actions remain absent. Retained after visual review despite dropping below the coarse image threshold.",
+      "reviewed_at": "2026-11-13T22:41:48.359621+00:00",
+      "evidence": "comparison/repairs.html#round-37"
     }
   ]
 }

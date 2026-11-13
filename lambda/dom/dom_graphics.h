@@ -32,6 +32,7 @@ using DomCanvasStateSnapshot = RadiantCanvasStateSnapshot;
     OP(bool, get_state, (void* canvas_element, DomCanvasStateSnapshot* out)) \
     OP(bool, save, (void* canvas_element)) \
     OP(bool, restore, (void* canvas_element)) \
+    OP(bool, transform, (void* canvas_element, const float* coefficients, bool replace)) \
     OP(bool, scale, (void* canvas_element, float x, float y)) \
     OP(bool, translate, (void* canvas_element, float x, float y)) \
     OP(bool, rotate, (void* canvas_element, float radians)) \

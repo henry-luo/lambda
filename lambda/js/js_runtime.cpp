@@ -9178,6 +9178,11 @@ JS_CONSOLE_SPAN_ADAPTER(js_console_debug_span, js_console_debug_multi)
 
 #undef JS_CONSOLE_SPAN_ADAPTER
 
+static Item js_console_group_span(Item* args, int argc) {
+    if (argc) js_console_log_multi(args, argc);
+    return js_console_group_fn(make_js_undefined());
+}
+
 // =============================================================================
 // Function Functions
 // =============================================================================
@@ -25363,7 +25368,8 @@ static Item js_get_console_object() {
 #define JS_CONSOLE_SPAN_METHODS(M) \
         M("log", js_console_log_span) M("warn", js_console_warn_span) \
         M("error", js_console_error_span) M("info", js_console_log_span) \
-        M("debug", js_console_debug_span)
+        M("debug", js_console_debug_span) \
+        M("group", js_console_group_span) M("groupCollapsed", js_console_group_span)
 #define JS_CONSOLE_INSTALL_SPAN(name, target) \
         js_runtime_set_native_span_method(js_console_object, name, target);
         JS_CONSOLE_SPAN_METHODS(JS_CONSOLE_INSTALL_SPAN)
@@ -25373,7 +25379,7 @@ static Item js_get_console_object() {
         M("count", js_console_count_fn) M("countReset", js_console_countReset_fn) \
         M("time", js_console_time_fn) M("timeEnd", js_console_timeEnd_fn) \
         M("timeLog", js_console_timeLog_fn) M("clear", js_console_clear_fn) \
-        M("group", js_console_group_fn) M("groupEnd", js_console_groupEnd_fn) \
+        M("groupEnd", js_console_groupEnd_fn) \
         M("trace", js_console_trace_fn) M("dir", js_console_dir_fn) \
         M("table", js_console_table_fn) M("assert", js_console_assert_fn)
 #define JS_CONSOLE_INSTALL_METHOD(name, target) \

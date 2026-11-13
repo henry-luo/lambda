@@ -63,6 +63,18 @@ template<bool error_stream = false>
 static Item host_console_log(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
     return host_output(self, arguments, count, true, error_stream ? stderr : NULL);
 }
+static Item host_console_group(Context* context, MvpLmdProgram* program,
+        Item* arguments, uint64_t count, Item self, Item receiver, Item target) {
+    if (count) {
+        Item result = host_console_log(context, program, arguments, count, self, receiver, target);
+        if (item_is_error(result)) return result;
+    }
+    // retain the argument span, then update the same context-owned group state as native callers.
+    return js_console_group_fn(make_js_undefined());
+}
+static Item host_console_group_end(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
+    return js_console_groupEnd_fn();
+}
 struct MvpLmdConsoleLabelBinding { const char* name; Item (*call)(Item); };
 static Item host_console_label(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
     const auto* binding = (const MvpLmdConsoleLabelBinding*)((MvpLmdNativeCallable*)self.function)->state;
@@ -275,7 +287,10 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
             {LMD_HOST_CONSOLE, "info", host_console_log<>, 0},
             {LMD_HOST_CONSOLE, "debug", host_console_log<>, 0},
             {LMD_HOST_CONSOLE, "error", host_console_log<true>, 0},
-            {LMD_HOST_CONSOLE, "warn", host_console_log<true>, 0}
+            {LMD_HOST_CONSOLE, "warn", host_console_log<true>, 0},
+            {LMD_HOST_CONSOLE, "group", host_console_group, 0},
+            {LMD_HOST_CONSOLE, "groupCollapsed", host_console_group, 0},
+            {LMD_HOST_CONSOLE, "groupEnd", host_console_group_end, 0}
         };
         for (const Binding& binding : functions) {
             if (native_realm) break; // prepared host namespaces retain their methods and descriptors.

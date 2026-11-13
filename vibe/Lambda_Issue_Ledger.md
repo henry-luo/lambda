@@ -2394,3 +2394,37 @@ Evidence: `temp/online-visual-round25/northstar-*`, `northstar-evidence.json`,
 current 637/638 native logs, and the earlier admitted-script log under
 `temp/online-visual-round24/first-qualified-pass/`. This is recorded as a
 profile limit, not a newly implemented graphics/DOM feature or a fixed page.
+
+
+## Online callback initialization repairs — 2026-11-14
+
+<a id="online-console-group-bindings"></a>
+
+**Status:** FIXED for the selected console group methods. Host-native operation
+ownership **D9.5.6**, complete argument spans **D7.2.2**, realm ownership
+**D6.3**. Native Canvas matrix operations are separately recorded as
+[RI-075](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-075).
+
+Maven's slider initialization throws on `console.group`, before breakpoint
+setup. The console group implementation already exists, but the MVP host
+namespace installs only five stream methods and count/timer labels. Its
+canonical namespace therefore omits group/groupEnd; the fallback native
+console object cannot restore properties on that existing namespace.
+The host now publishes group, groupCollapsed and groupEnd, sharing existing
+context-owned group state. Both host and native group functions preserve the
+full argument span through their existing output paths. No inert shim,
+exception suppression, page script edit or renderer visibility change is added.
+Existing textual group formatting remains limited; full Console UI is not claimed.
+
+The new document-initialization PNG control fails before and passes after.
+Eight new/existing console goldens pass across AST and MIR: groups, log, label
+registry and document console/performance. Maven's unchanged saved callback
+now reaches its breakpoint check without the previous exception. The main
+hero has independent visibility/timing gaps, so no page clearance is claimed.
+Canvas and console focused render suites pass 11 cases together. Broad
+baseline and catalog recapture are deferred under the user's instruction.
+
+Evidence: `temp/online-visual-round27/console-before.log`,
+`batch-focused.log`, `console-goldens.json`, Maven callback before/after logs;
+`test/js/console_groups.js` and its golden, and
+`test/online/render_console_groups.test.cjs`.
