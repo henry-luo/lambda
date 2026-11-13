@@ -1,0 +1,197 @@
+[{
+    body: "\\begin{table}A\\end{table}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table}[h]A\\end{table}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table}[htbp]A\\end{table}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table} [h]A\\end{table}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table}[h!]A\\end{table}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{lc}a & b\\\\c & d\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{|l|c|} a&b \\\\ c&d \\\\ \\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular} a&b\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular} {cc}a&b\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table}[h]\\caption{Title}\\begin{tabular}{cc}a&b\\end{tabular}\\end{table}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{cc}{a & b}&c\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{cc}$a+b$ & \\textbf{b}\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{cc}a \\& b & c\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{cc}a&b\\\\[2pt]c&d\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "A\\begin{table}[h]B\\end{table}C",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\textbf{A\\begin{table}[h]B\\end{table}C}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{c}\\begin{quote}a&b\\end{quote}&c\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table}%comment\n[h]A\\end{table}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{p{2cm}c}a&b\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table}[ h  t ]A\\end{table}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table}[h% comment\n t]A\\end{table}",
+    issue: "latex-digest-unsupported",
+    unsupported: "table placement source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{table}[\\textbf{x}]A\\end{table}",
+    issue: "latex-digest-unsupported",
+    unsupported: "optional argument",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\sep{&}\\begin{tabular}{cc}A\\sep B\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\col{{cc}}\\begin{tabular}\\col A&B\\end{tabular}",
+    issue: "latex-digest-unsupported",
+    unsupported: "table header source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\pos{[h]}\\begin{table}\\pos A\\end{table}",
+    issue: "latex-digest-unsupported",
+    unsupported: "table header source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\begin{tabular}{cc}A&\\textbf{x & y}\\end{tabular}",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\c{l}\\begin{tabular}{\\c c}A&B\\end{tabular}",
+    issue: "latex-digest-unsupported",
+    unsupported: "table columns source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\def\\place{h}\\begin{table}[\\place]A\\end{table}",
+    issue: "latex-digest-unsupported",
+    unsupported: "table placement source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }]

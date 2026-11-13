@@ -1,0 +1,75 @@
+[{
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }]
+[{
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }]
+{
+  issue: null,
+  reconstruct_issue: null,
+  text_match: true,
+  messages_match: true,
+  diagnostics_match: true
+}

@@ -1,0 +1,93 @@
+[{
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }, {
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }]
+[{
+    issue: null,
+    reconstruct_issue: null,
+    text_match: true,
+    messages_match: true,
+    diagnostics_match: true
+  }]
+[{
+    issue: "latex-digest-unsupported",
+    unsupported: "expl3 token-list assignment source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "expl3 token-list assignment source mapping",
+    matches: null,
+    actual: null,
+    native: null
+  }]

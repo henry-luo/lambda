@@ -1,0 +1,176 @@
+[{
+    body: "\\newenvironment{x}\n{\\renewcommand{\\foo}{A}}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\renewcommand{\\foo}{A} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\renewcommand{\\foo}{A}}\n{\\newcommand{\\bar}{B}}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\def\\foo{A} \\foo}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\renewcommand{\\foo} {A}}\n{B}X",
+    issue: "latex-digest-unsupported",
+    unsupported: "inline definition source gap",
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\renewcommand{\\foo}[1]{#1} \\textbf{T}}\n{B}X",
+    issue: "tex-illegal-param",
+    unsupported: null,
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\newcommand*{\\foo}{A}}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\newcommand{\\foo}[1]{##1} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\def\\foo#1{#1} \\small}\n{B}X",
+    issue: "tex-illegal-param",
+    unsupported: null,
+    matches: null,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\def\\foo{A}\\def\\bar{B}}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{A\\newcommand{\\foo}{A}B}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\newenvironment{y}{A}{B} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\renewcommand{\\foo}{A}%comment\n\\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\renewcommand{\\foo}{\\textbf{A}} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newcommand{\\foo}{\\renewcommand{\\bar}{A}}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newcommand{\\foo}{\\def\\bar{A} \\small}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\global\\def\\foo{A} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\newcommand{\\foo}{A}  {B}}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\catcode`@=11 \\newenvironment{x}\n{\\def\\foo@bar{A} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}[1]\n{\\def\\foo{#1} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\def\\foo{\\newcommand{\\bar}{B}} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\newcommand{\\foo}{A}\\newcommand{\\bar}{B}C}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\def\\foo{} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{{\\def\\foo{A}} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    body: "\\newenvironment{x}\n{\\renewcommand{\\foo}[1][V]{##1} \\small}\n{B}X",
+    issue: null,
+    unsupported: null,
+    matches: true,
+    actual: null,
+    native: null
+  }]
