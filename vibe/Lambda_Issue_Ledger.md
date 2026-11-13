@@ -2283,3 +2283,68 @@ future comparison profile needs explicit equivalent frame selection rather
 than an engine workaround. Evidence: `temp/online-visual-round15/` contains
 `lattice-final-state.html`, its output/PNG, `authored-timer.html`, and the
 independent `timer-browser.json` plus initial/later screenshots.
+
+The 2026-11-13 resumed review also reduces WebKit blog's missing article cards
+to only its authored `fade-in` keyframes (opacity0 to1) and `.tile` animation
+lasting0.4s. Removing footer shadows, hidden SVG definitions and overflow did
+not restore the cards; removing the animation does. The native selected frame
+has opacity0. This is another timing-qualified comparison, not a flex layout
+or paint-dispatch repair. The original image and virtual clock are retained.
+Independent Chromium at0ms is also transparent and at400ms is opaque.
+Reduction evidence: `temp/online-visual-round17/minimal.css`, `delta-*`, and
+`frame-browser.json`.
+
+
+## Reduced media fixture initialization — 2026-11-13
+
+<a id="online-reduced-media-initialization"></a>
+
+**Status:** OPEN observation, cause unconfirmed. **Task blocker:** no for
+RI-063/RI-064; the complete online pages and native decoded-frame controls work.
+The host boundary remains **D9.1.3v2**; no clock is advanced under **D10.1.7**.
+
+Several small valid HTML video probes under temp/online-visual-round19/ fail
+to start playback, including explicit querySelector/getElementById lookup and
+load/rAF initialization, with the round18 qualified host. Some report
+NotSupportedError: Media backend is unavailable; a later layout-read variant
+reports AbortError and JUBE_RADIANT_MEDIA_INFO: expected DOM node wrapper.
+The native provider subsequently opens the existing local test media file.
+The loopback HTTP reproducer is repro-video.cjs with video-order-document.html;
+logs and PNGs are retained. These red foreground PNGs are not successful
+video-order controls because playback never started. Initial backend/adapter
+registration versus wrapper conversion/lifetime is unisolated; no GC or native
+renderer root cause is asserted. A separate real decoded-frame native test
+establishes and verifies RI-063, while Bizzabo's complete saved page plays.
+
+## Online source growth beyond snapshot admission — 2026-11-13
+
+<a id="online-northstar-source-admission"></a>
+
+**Status:** OPEN profile/capability limit; a new layout regression is excluded
+by identical-source controls. Lambda script-runner ownership follows
+**D9.1.1v4 / D9.1.3v2**; **D10.1.7** capture clocks are unchanged. No formal
+ruling is changed. This blocks current Northstar content parity under the
+selected profile, but does not block the independent RI-073 sizing repair.
+
+Both Northstar 637 (`/about_us`, now redirecting to `/about`) and 638 (home)
+previously rendered content. Round24's preserved log admits
+`vendor-e865e1a1ee738a8bc4b7.js`. The current page instead requests
+`vendor-8540100a9f2747df8bef.js`, whose 6,043,094 bytes exceed the unchanged
+5,242,880-byte `JS_EXTERNAL_SCRIPT_BUDGET_BYTES` in
+[script_runner.cpp](../lambda/module/radiant/script_runner.cpp). Both pages
+finish 44 resources but remain a solid background without the bootstrap.
+
+The same saved home document gives byte-identical blank PNGs in the prior
+round24 and current round25 hosts, with scripts intact or removed. The prior
+qualified host also gives exactly that PNG at both original live URLs.
+Independent Chromium renders the scripted saved document, while its script-free
+capture matches the blank native image. The changing external bundle and
+existing admission limit explain the new visual candidates; no RI-073
+regression is assigned. No page exception, bundle rewriting, URL removal,
+readiness delay or budget increase is adopted. Broader large-bundle execution
+and its memory/CPU qualification remain outside this repair milestone.
+
+Evidence: `temp/online-visual-round25/northstar-*`, `northstar-evidence.json`,
+current 637/638 native logs, and the earlier admitted-script log under
+`temp/online-visual-round24/first-qualified-pass/`. This is recorded as a
+profile limit, not a newly implemented graphics/DOM feature or a fixed page.
