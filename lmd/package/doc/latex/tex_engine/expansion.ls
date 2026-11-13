@@ -13,7 +13,8 @@ import path: lambda.io.path
 
 fn result(input, definitions, groups, output, count, issue = null, options = null) =>
     {input: input, definitions: definitions, groups: groups, output: output,
-        latex: options.latex == true, script_expl3: options.script_expl3 == true, expl_syntax: null, adapters: if (options.adapters == null) [] else options.adapters,
+        latex: options.latex == true, math_mode: options.math_mode == true, script_expl3: options.script_expl3 == true,
+        constructor_argument_mode: options.constructor_argument_mode == true, expl_syntax: null, adapters: if (options.adapters == null) [] else options.adapters,
         chaptered: if (options.chaptered == null) [] else options.chaptered, packages: [], class_options: "",
         in_document: false, base_path: if (options.base_path is string) options.base_path else null,
         begin_hooks: [], end_hooks: [], package_frames: [],
@@ -305,13 +306,15 @@ fn prefixed(st, global, long_ok, protected_flag, budget) any^ {
     else fail(advanced, "tex-bad-prefix")
 }
 
-fn noexpand(st, budget) any^ {
+fn noexpand(st, budget, argument_mode = false) any^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
         let read = stream.next(st.input);
         let existing = if (is_control(read.token)) meaning(st, read.token) else null;
         let cmd = primitive(st, read.token);
-        let unexpandable = is_control(read.token) and (existing.kind == "relax" or existing.kind == "char" or
+        let script_macro = argument_mode and st.script_expl3 and cmd != null and
+            expl3.exists(cmd) and not expl3.expandable(cmd);
+        let unexpandable = is_control(read.token) and not script_macro and (existing.kind == "relax" or existing.kind == "char" or
             (cmd != null and not primitives.expandable(cmd) and not (st.latex and primitives.latex_expandable(cmd)) and
                 not (st.script_expl3 and expl3.expandable(cmd))));
         let marked = if (is_control(read.token) and not unexpandable)
@@ -449,15 +452,26 @@ fn expand_after(st, budget) any^ {
     }
 }
 
-fn expanded_next(st, budget, protect = false) any^ {
+// document length and counter calls stay visible after package redefinition.
+fn redefined_document_command(st, token) any^ => st.latex and st.math_mode != true and
+    token != null and token.kind == "control" and token.noexpand != true and
+    token.direct == true and token.file == st.main_file and
+    contains(["setlength", "addtolength", "setcounter", "addtocounter", "stepcounter"], token.value) and
+    meaning(st, token).kind == "macro"
+
+fn expanded_next(st, budget, protect = false, argument_mode = false) any^ {
     let read = stream.next(st.input);
     let current = {*:st, input: read.stream};
     if (read.token == null or (protect and is_control(read.token) and
         meaning(current, read.token).kind == "macro" and meaning(current, read.token).protected_flag) or
+        (argument_mode and redefined_document_command(current, read.token)^) or
+        (argument_mode and read.token.noexpand != true and is_control(read.token) and
+            meaning(current, read.token).expl3_argument_unqualified == true) or
         not expandable(current, read.token)) {state: current, token: read.token}
     else {
-        let expanded = expand_one(current, read.token, budget);
-        if (expanded.issue != null) {state: expanded, token: null} else expanded_next(expanded, budget, protect)
+        let expanded = if (argument_mode and primitive(current, read.token) == "noexpand")
+            noexpand(current, budget, true)^ else expand_one(current, read.token, budget);
+        if (expanded.issue != null) {state: expanded, token: null} else expanded_next(expanded, budget, protect, argument_mode)
     }
 }
 
@@ -3989,7 +4003,8 @@ fn latex_begin(st, original, budget) any^ {
             else {
                 let emitted = environment_output(opened, original, argument.raw, named.name, "begin", closed.echo, closed.span)^;
                 let passed = {*:opened, output: [*opened.output, *emitted]};
-                if (named.name != "document") passed
+                if (named.name != "document")
+                    if (passed.constructor_argument_mode and passed.math_mode != true) constructor_arguments(passed, budget)^ else passed
                 else {*:passed, in_document: true, begin_hooks: [], input: stream.push(passed.input, st.begin_hooks)}
             }
         }
@@ -4096,11 +4111,12 @@ fn package_plan(st, names, opts, index = 0, loads = [], passthrough = []) any^ {
     }
 }
 
-fn declaration_tokens(name, opts, names) any^ {
+fn declaration_tokens(name, opts, names, origin) any^ {
     let opener = brace_token(true);
     let closer = brace_token(false);
-    [control_token(name), *(if (opts == "") [] else text_tokens("[" ++ opts ++ "]")),
-        opener, *text_tokens(join(names, ",")), closer]
+    // synthesized declarations map to the main-reader position where they are emitted.
+    [for (token in [control_token(name), *(if (opts == "") [] else text_tokens("[" ++ opts ++ "]")),
+        opener, *text_tokens(join(names, ",")), closer]) {*:token, emit_origin: origin}]
 }
 
 fn latex_usepackage(st, original, budget) any^ {
@@ -4122,11 +4138,12 @@ fn latex_usepackage(st, original, budget) any^ {
         if (planned.state.issue != null) planned.state
         else {
             let closed = end_main_trace(planned.state, original)^;
+            let raw = [original, *opt.raw, *name_arg.raw, *version_arg.raw];
             // a script-handled name must not leak into an echoed package declaration.
             let passed = if (len(planned.loads) == 0 and len(planned.passthrough) == len(names) and closed.echo)
-                [original, *opt.raw, *name_arg.raw, *version_arg.raw]
+                [{*:original, echo_span: closed.span, echo_count: len(raw)}, *slice(raw, 1, len(raw))^]
                 else if (len(planned.passthrough) > 0)
-                    declaration_tokens("usepackage", opts, planned.passthrough)^
+                    declaration_tokens("usepackage", opts, planned.passthrough, closed.state.input.last_main_offset)^
                 else [];
             {*:closed.state, output: [*closed.state.output, *passed],
                 input: stream.push(closed.state.input, planned.loads)}
@@ -4439,7 +4456,8 @@ fn latex_needs_format(st) any^ {
 }
 
 fn latex_documentclass(st, original, budget, cmd) any^ {
-    let opt = latex_optional(st.input)^;
+    let traced = begin_main_trace(st, original)^;
+    let opt = latex_optional(traced.input)^;
     let name_arg = stream.raw_argument(opt.input)^;
     let named = expand_argument_name({*:st, input: name_arg.stream}, name_arg.tokens, budget)^;
     let version_arg = latex_optional(named.state.input)^;
@@ -4456,17 +4474,20 @@ fn latex_documentclass(st, original, budget, cmd) any^ {
         let adapter = contains(initial.adapters, named.name);
         let local = if (adapter) {state: initial, available: true, found: false}
             else probe_resource(initial, named.name ++ ".cls", "local")^;
-        if (local.state.issue != null) local.state
-        else if (not local.available) unsupported(initial, cmd)
-        else if (local.found) {*:initial, input: stream.push(initial.input,
+        let closed = end_main_trace(local.state, original)^;
+        if (closed.state.issue != null) closed.state
+        else if (not local.available) unsupported(closed.state, cmd)
+        else if (local.found) {*:closed.state, input: stream.push(closed.state.input,
             [{kind: "package-load", name: named.name, options: opts, scope: "local", is_class: true}])}
         else {
-            let recorded = record_package(initial, named.name, opts, true, if (adapter) "adapter" else "unknown")^;
+            let recorded = record_package(closed.state, named.name, opts, true, if (adapter) "adapter" else "unknown")^;
             let with_chapter = if (contains(recorded.chaptered, named.name))
                 assign_meaning(recorded, "control:chapter", {kind: "constructor", name: "chapter"}, true)^
                 else recorded;
-            let passed = if (cmd == "documentclass") [original, *opt.raw, *name_arg.raw, *version_arg.raw]
-                else declaration_tokens("documentclass", opts, [named.name])^;
+            let raw = [original, *opt.raw, *name_arg.raw, *version_arg.raw];
+            let passed = if (closed.echo)
+                [{*:original, echo_span: closed.span, echo_count: len(raw)}, *slice(raw, 1, len(raw))^]
+                else declaration_tokens("documentclass", opts, [named.name], with_chapter.input.last_main_offset)^;
             {*:with_chapter, output: [*with_chapter.output, *passed]}
         }
     }
@@ -4503,6 +4524,20 @@ fn latex_verb(st, token) any^ {
             let captured = {*:token, echo_span: span, echo_count: 1};
             {*:st, input: input, raw_inline_seen: true, output: [*st.output, captured]}
         }
+    }
+}
+
+// raw command bodies bypass token expansion while a source reader is available.
+fn latex_raw_group(st, token) any^ {
+    let source = stream.raw_reader(st.input, token)^;
+    if (source == null) {*:st, output: [*st.output, token]}
+    else {
+        let scanned = reader.raw_group_command(source.reader)^;
+        let input = stream.replace_reader(st.input, source.index, scanned.reader)^;
+        let span = {file: token.file, start: token.start, end: scanned.end,
+            first_seq: token.seq, last_seq: source.reader.seq};
+        {*:st, input: input, raw_inline_seen: true,
+            output: [*st.output, {*:token, echo_span: span, echo_count: 1}]}
     }
 }
 
@@ -4564,13 +4599,110 @@ fn echo_prefixed(st, token, cmd, budget) any^ {
 fn direct_package_token(st, token) any^ => token.direct == true and
     any([for (source in st.sources) source.id == token.file and source.package == true])
 
+// generated argument delimiters need the same origin as other emitted tokens.
+fn emission_token(st, input, raw) any^ => if (raw != null and contains(["char", "control", "active"], raw.kind) and
+        (raw.direct != true or raw.file != st.main_file))
+    {*:raw, read_offset: input.last_main_offset, read_file: st.main_file} else raw
+
+// passthrough environments preserve the original name tokens inside arguments.
+fn constructor_environment(st, token, budget) any^ {
+    let argument = stream.raw_argument(st.input)^;
+    let current = {*:st, input: argument.stream};
+    if (argument.error != null) fail(current, argument.error)
+    else {
+        let named = expand_argument_name(current, argument.tokens, budget)^;
+        if (named.state.issue != null) named.state
+        else if (meaning(named.state, control_token(named.name)).kind == "macro")
+            unsupported(named.state, "constructor argument custom environment")
+        else {*:named.state, output: [*named.state.output, token, *argument.raw]}
+    }
+}
+
+// argument mode expands the expl3 setter macro without running its assignment.
+fn constructor_expl3_tl_set(st, name, budget) any^ {
+    let internal = if (name == "tl_gset:Nn") "__kernel_tl_gset:Nx" else "__kernel_tl_set:Nx";
+    let macro = {kind: "macro", count: 2, prefix: [], delimiters: [[], []], brace_delim: false,
+        long_ok: true, protected_flag: true, body: [control_token(internal), {kind: "parameter", value: 0},
+            brace_token(true), control_token("unexpanded"), brace_token(true), {kind: "parameter", value: 1},
+            brace_token(false), brace_token(false)]};
+    expand_macro(st, macro, budget)
+}
+
+// constructor arguments expand tokens but do not execute assignments.
+fn constructor_argument(st, budget, bracket, depth) any^ {
+    let read = expanded_next(st, budget, false, true)^;
+    let token = emission_token(st, read.state.input, read.token)^;
+    let current = read.state;
+    if (current.issue != null) current
+    else if (token == null) fail(current, "tex-runaway")
+    else if (token.noexpand != true and current.latex and contains(["begin", "end"], primitive(current, token))) {
+        let advanced = constructor_environment(current, token, budget)^;
+        if (advanced.issue != null) advanced else constructor_argument(advanced, budget, bracket, depth)
+    }
+    else if (token.noexpand != true and contains(["verb", "lstinline", "Verb", "mint", "mintinline"], primitive(current, token)))
+        unsupported(current, "constructor argument raw command")
+    else if (token.noexpand != true and current.script_expl3 and
+            contains(["tl_set:Nn", "tl_gset:Nn"], primitive(current, token))) {
+        let expanded = constructor_expl3_tl_set(current, primitive(current, token), budget)^;
+        if (expanded.issue != null) expanded else constructor_argument(expanded, budget, bracket, depth)
+    }
+    else if (token.noexpand != true and current.script_expl3 and is_control(token) and
+            meaning(current, token).expl3_argument_unqualified == true)
+        unsupported(current, "constructor argument expl3 assignment")
+    // script expl3 assignments stand in for macros that native argument mode expands.
+    else if (token.noexpand != true and current.script_expl3 and is_control(token) and
+            expl3.exists(primitive(current, token)) and not expl3.expandable(primitive(current, token)))
+        unsupported(current, "constructor argument expl3 assignment")
+    else {
+        let emitted = if (token.noexpand == true) {*:token, noexpand: false} else token;
+        // argument-mode tokens also need their emission-time source position.
+        let next = {*:current, output: [*current.output,
+            {*:emitted, emit_origin: current.input.last_main_offset}]};
+        let level = depth + if (charcat(token, 1)) 1 else if (charcat(token, 2)) -1 else 0;
+        if ((not bracket and level == 0) or (bracket and depth == 0 and other(token, "]"))) next
+        else if (level < 0) fail(next, "tex-extra-brace")
+        else constructor_argument(next, budget, bracket, level)
+    }
+}
+fn constructor_arguments(st, budget, first = true) any^ {
+    let read = stream.next(st.input);
+    let token = emission_token(st, read.stream, read.token)^;
+    let current = {*:st, input: read.stream};
+    if (token == null) current
+    else if (first and other(token, "*"))
+        constructor_arguments({*:current, output: [*current.output, token]}, budget, false)
+    else if (charcat(token, 1) or other(token, "[")) {
+        let bracket = other(token, "[");
+        let entered = {*:current, output: [*current.output, token]};
+        let after = constructor_argument(entered, budget, bracket, if (bracket) 0 else 1)^;
+        if (after.issue != null) after else constructor_arguments(after, budget, false)
+    }
+    else put_back(current, token)
+}
+
+// echo the document call, then replay non-direct tokens to execute the macro once.
+fn echo_redefined_command(st, token) any^ {
+    let traced = begin_main_trace(st, token, true)^;
+    let first = stream.argument(traced.input, true)^;
+    let second = if (token.value == "stepcounter") {stream: first.stream, tokens: [], error: null}
+        else stream.argument(first.stream, true)^;
+    let current = {*:traced, input: second.stream};
+    if (first.error != null) fail(current, first.error)
+    else if (second.error != null) fail(current, second.error)
+    else {
+        let closed = end_main_trace(current, token)^;
+        let echoed = if (closed.echo) emit_traced_span(closed, "redefined command echo trace")^ else closed.state;
+        let replay = stored_tokens([control_token(token.value), brace_token(true), *first.tokens, brace_token(false),
+            *(if (token.value == "stepcounter") [] else [brace_token(true), *second.tokens, brace_token(false)])]);
+        if (echoed.issue != null) echoed else {*:echoed, input: stream.push(echoed.input, replay)}
+    }
+}
+
+
 fn step(st, budget) any^ {
     let read = stream.next(st.input);
     let raw = read.token;
-    // keep the current main-file position when processing a non-main token.
-    let t = if (raw != null and contains(["char", "control", "active"], raw.kind) and
-            (raw.direct != true or raw.file != st.main_file))
-        {*:raw, read_offset: read.stream.last_main_offset, read_file: st.main_file} else raw;
+    let t = emission_token(st, read.stream, raw)^;
     let current = {*:st, input: read.stream};
     let cmd = primitive(st, t);
     let resolved = if (is_control(t)) meaning(st, t) else null;
@@ -4589,6 +4721,7 @@ fn step(st, budget) any^ {
             trailing_source: stream.root_tail(current.input), finished: true}
     }
     else if (t.noexpand == true) {*:current, output: [*st.output, {*:t, noexpand: false}]}
+    else if (redefined_document_command(current, t)^) echo_redefined_command(current, t)
     else if (expandable(current, t)) expand_one(current, t, budget)
     // these native TeX commands remain tokens for the document adapters.
     else if (contains([" ", "underline", "overline", "indent", "noindent", "hfil", "hfill", "hss", "hfilneg",
@@ -4688,6 +4821,8 @@ fn step(st, budget) any^ {
     else if (st.latex and contains(["documentclass", "LoadClass", "LoadClassWithOptions"], cmd))
         latex_documentclass(current, t, budget, cmd)
     else if (st.latex and cmd == "verb") latex_verb(current, t)
+    else if (st.latex and t.kind == "control" and resolved.kind == "undefined" and
+            contains(["directlua", "luaexec"], t.value)) latex_raw_group(current, t)
     else if (st.latex and cmd == "begin") latex_begin(current, t, budget)
     else if (st.latex and cmd == "end") latex_end(current, t, budget)
     else if (cmd == "newif" and st.latex) latex_newif(current)
@@ -4742,7 +4877,11 @@ fn step(st, budget) any^ {
     else if (cmd == "begingroup") begin_group(current, null, true)
     else if (cmd == "endgroup") end_group(current, null, true)
     else if (cmd == "global" or cmd == "long" or cmd == "protected") echo_prefixed(current, t, cmd, budget)
-    else if (resolved.kind == "constructor") {*:current, output: [*st.output, t]}
+    else if (resolved.kind == "constructor") {
+        let emitted = {*:current, output: [*st.output, t]};
+        if (current.constructor_argument_mode and current.latex and current.math_mode != true)
+            constructor_arguments(emitted, budget) else emitted
+    }
     else if (resolved.kind == "relax" or cmd == "relax") current
     else if (resolved.kind == "char") {*:current, input: stream.push(current.input,
         [{kind: "char", value: resolved.value, cat: resolved.cat, start: t.start, end: t.end}])}
@@ -4759,6 +4898,11 @@ fn step(st, budget) any^ {
     else if (cmd != null) unsupported(current, cmd)
     else if (st.script_expl3 and is_control(t) and index_of(t.value, ":") != null)
         unsupported(current, t.value)
+    else if (current.constructor_argument_mode and current.latex and current.math_mode != true and
+            is_control(t) and resolved.kind == "undefined") {
+        let emitted = {*:current, output: [*st.output, t]};
+        constructor_arguments(emitted, budget)
+    }
     else if (charcat(t, 3)) math_shift(current, t)
     else if (charcat(t, 1)) begin_group(current, t, false)
     else if (charcat(t, 2)) end_group(current, t, false)
@@ -4973,7 +5117,7 @@ fn expl3_tl_put_right_macro(global) any^ {
     let parameter0 = parameter_token(0);
     let parameter1 = parameter_token(1);
     {kind: "macro", count: 2, prefix: [], delimiters: [[], []], brace_delim: false,
-        long_ok: true, protected_flag: true,
+        long_ok: true, protected_flag: true, expl3_argument_unqualified: true,
         body: [control_token(if (global) "__kernel_tl_gset:Nx" else "__kernel_tl_set:Nx"), parameter0,
             brace_token(true), control_token("__kernel_exp_not:w"), control_token("exp_after:wN"),
             brace_token(true), parameter0, parameter1, brace_token(false), brace_token(false)]}
@@ -4984,7 +5128,7 @@ fn expl3_seq_put_right_macro(global) any^ {
     let parameter0 = parameter_token(0);
     let parameter1 = parameter_token(1);
     {kind: "macro", count: 2, prefix: [], delimiters: [[], []], brace_delim: false,
-        long_ok: true, protected_flag: true,
+        long_ok: true, protected_flag: true, expl3_argument_unqualified: true,
         body: [control_token(if (global) "tl_gput_right:Nn" else "tl_put_right:Nn"), parameter0,
             brace_token(true), control_token("__seq_item:n"), brace_token(true), parameter1,
             brace_token(false), brace_token(false)]}
