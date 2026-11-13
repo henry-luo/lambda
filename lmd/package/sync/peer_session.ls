@@ -4,9 +4,9 @@ import identity: .peer_identity
 import codec: .codec
 import v: .schema
 
-pub let protocol = "lambda-peer-lan-1"
-pub let burst_protocol = "lambda-peer-lan-burst-1"
-pub let batch_protocol = "lambda-peer-lan-burst-2"
+pub let protocol = "lambda-peer-lan-p256-1"
+pub let burst_protocol = "lambda-peer-lan-burst-p256-1"
+pub let batch_protocol = "lambda-peer-lan-burst-p256-2"
 pub fn is_burst(profile) bool^ => profile == burst_protocol or profile == batch_protocol
 pub let max_frame = 262144
 pub pn start(credentials, role, profile=protocol) any^ {
@@ -27,12 +27,12 @@ pub fn transcript(credentials, own, remote) any^ {
         if (own.hello.role == 'server') own.hello else remote])^
 }
 pub fn proof(credentials, own, remote) any^ => crypto.sign(credentials.seed,
-    codec.encode(["lambda-peer-handshake-1",own.hello.role,transcript(credentials,own,remote)^])^)^
+    codec.encode(["lambda-peer-handshake-2",own.hello.role,transcript(credentials,own,remote)^])^)^
 pub fn finish(credentials, own, remote, signature) any^ {
     let text = transcript(credentials,own,remote)^
     let peer = identity.member(credentials,remote.device)^
-    if (not verify_signature(peer.public_key,codec.encode(["lambda-peer-handshake-1",remote.role,text])^,
-        signature,'ed25519')^) raise error("sync peer: handshake signature rejected")
+    if (not verify_signature(peer.public_key,codec.encode(["lambda-peer-handshake-2",remote.role,text])^,
+        signature,identity.signing_scheme)^) raise error("sync peer: handshake signature rejected")
     let salt = hash(text,'sha256')^
     let shared = crypto.agree(own.secret,remote.ephemeral)^
     let client = identity.derive(shared,salt,own.hello.protocol ++ ":client")^

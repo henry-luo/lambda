@@ -672,12 +672,16 @@ def expect_release_full_lto(module) -> None:
 
 
 def expect_rtc_tls_closure(module) -> None:
-    generator = linux_validation_generator(module)
-    closure = generator._executable_external_dependencies({'libraries': ['lambda-rt']})
-    if not {'mbedtls', 'mbedx509', 'mbedcrypto'}.issubset(closure):
-        fail('RTC runtime consumers lost the host mbedTLS provider')
-    if 'sync-ssl' in generator.external_libraries or 'sync-ssl' in closure:
-        fail('RTC consumers retained the old OpenSSL TLS dependency')
+    forbidden = {'sync-ssl', 'openssl-crypto', 'ssl', 'crypto', 'ngtcp2_crypto_ossl'}
+    for platform in ('mac', 'linux', 'windows'):
+        generator = (linux_validation_generator(module) if platform == 'linux' else
+                     module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), platform))
+        for consumer in ('lambda-rt', 'lambda-data'):
+            closure = generator._executable_external_dependencies({'libraries': [consumer]})
+            if not {'mbedtls', 'mbedx509', 'mbedcrypto'}.issubset(closure):
+                fail(f'{platform}/{consumer} lost the host mbedTLS provider')
+            if forbidden.intersection(closure) or forbidden.intersection(generator.external_libraries):
+                fail(f'{platform}/{consumer} retained an OpenSSL dependency')
 
 
 def main() -> int:

@@ -1,5 +1,6 @@
 // Checkpoint bytes remain encrypted in object storage; signed publication binds their digest.
 import crypto: lambda.io.crypto
+import identity: .peer_identity
 import hex: lambda.security.tuf.metadata
 import codec: .codec
 import core: .core
@@ -62,7 +63,7 @@ pub fn inspect(credentials, control, physical_key, bytes) any^ {
     if (payload.saved.replica.document != credentials.space or payload.proof.kind != 'checkpoint' or
         payload.proof.id != frames[0].body.checkpoint or
         not verify_signature(signer.public_key,auth.checkpoint_bytes(frames[0],payload.proof.id)^,
-            payload.proof.signature,'ed25519')^)
+            payload.proof.signature,identity.signing_scheme)^)
         raise error("sync audit: invalid checkpoint proof")
     return true
 }

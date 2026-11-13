@@ -7,7 +7,7 @@ pn main() {
     let session = schema.digest("session")^
     let digest = schema.digest("offer")^
     let peer = schema.digest("peer")^
-    let payload = {protocol:"lambda-peer-lan-1",sdp:"sdp",instance:a,target_instance:b,offer:null}
+    let payload = {protocol:"lambda-peer-lan-p256-1",sdp:"sdp",instance:a,target_instance:b,offer:null}
     let offer = {body:{session:session,actor:peer},payload:payload}
     let pending = {session:session,peer:peer,remote_instance:a,instance:b,offer:digest}
     let answer = {*:offer,payload:{*:payload,offer:digest}}

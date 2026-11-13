@@ -33,9 +33,9 @@ platform. It disables media, WebSockets, examples and dependency tests. Release
 dependency archives define upstream `PLOG_DISABLE_LOGGING`: plog headers remain
 required for compilation, while log statements are compiled out. There is no
 separate plog runtime library. `provenance.json` records the source revision,
-submodules, recipe identity, TLS provider and logging policy. The old RTC-only
-OpenSSL `libssl` dependency is removed; host public-key crypto still uses its
-existing OpenSSL primitives.
+submodules, recipe identity, TLS provider and logging policy. The host, RTC transport and curl share mbedTLS/mbedCrypto; neither OpenSSL
+`libssl` nor `libcrypto` is linked. Device authentication uses the version 2 P-256
+identity profile described in [PEER.md](PEER.md#crypto-suite-transition).
 
 `python3 utils/prepare_sync_connectivity.py --jobs 4` is the direct helper;
 `--dry-run` prints its plan. If the host was previously built without RTC,

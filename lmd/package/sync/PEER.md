@@ -95,14 +95,33 @@ The gate creates all artifacts under `temp/sync-peer`. It uses separate processe
 folders and wrapping keys, and tests a non-loopback host interface when available.
 It is not evidence of testing on two separate physical machines or other OSes.
 
+## Crypto-suite transition
+
+Authority: **D11.1.2, D11.2.3–D11.2.4**. Device descriptors, credential payloads
+and invitations use version 2. New transport names include `p256`; signed CRDT,
+cloud and document-relay domains also identify the suite. This is a protocol
+break: all participating devices must update and pair with fresh P-256 identities.
+The encrypted credential wrapper keeps its existing AES-GCM format/AAD; its inner
+version is validated before any signing key is interpreted.
+
+Legacy Ed25519 credentials fail with an explicit re-enrollment error. Loading,
+updating or trying to create over that database does not replace it. Saved files,
+immutable repository objects, snapshots and working copies remain intact. There
+is no automatic identity/trust conversion or in-place cloud-history migration.
+Keep the old agent/repository and cloud namespace as retained history; configure
+fresh agent state separately, explicitly pair peers, and capture the existing
+working folder into the new space. Cloud use requires a new owner pin and separate
+space/namespace; do not overwrite the old signed control records. Old signatures
+cannot authenticate new grants or count toward verification thresholds.
+
 ## Authentication and encryption
 
-`peer_identity` builds signed public descriptors from separate Ed25519 and X25519
-seeds. A fingerprint is lowercase SHA-256 of the Ed25519 public key. The descriptor
+`peer_identity` builds signed public descriptors from separate P-256/SHA-256 and X25519
+seeds. A fingerprint is lowercase SHA-256 of the P-256/SHA-256 public key. The descriptor
 signature binds both public keys. Explicit invitation acceptance pins the inviter;
 discovery or learning an address grants no access. Enrollment offers use ephemeral
 X25519, HKDF-SHA256 and AES-256-GCM to carry the space key to the intended recipient,
-and Ed25519 to authenticate the whole offer. Private credentials are an authenticated
+and P-256/SHA-256 to authenticate the whole offer. Private credentials are an authenticated
 encrypted row in `device.sqlite`. Enroll each device separately; copying this
 database clones its cryptographic identity. Membership mutations load the current row and
 write its replacement in the same SQLite scope; obsolete file snapshots cannot
@@ -111,7 +130,7 @@ blindly replace current membership. Cross-process writer contention is not quali
 administrative mutations sequentially. Contention and uncertain commits surface
 as errors; reopen and inspect status rather than blindly retrying. Caller-supplied wrapping keys are never protocol fields.
 
-The session profile is `lambda-peer-lan-1`:
+The session profile is `lambda-peer-lan-p256-1`:
 
 1. Client and server exchange bounded hellos containing version, space, device
    fingerprint, role, fresh nonce and ephemeral X25519 public key.
@@ -124,8 +143,8 @@ The session profile is `lambda-peer-lan-1`:
    the profile, transcript digest, sender role and exact sequence number. Replay,
    reflection, reordering and cross-session messages fail authentication.
 
-The native event agent offers `lambda-peer-lan-burst-2`, then
-`lambda-peer-lan-burst-1`. The negotiated WebSocket subprotocol is also the
+The native event agent offers `lambda-peer-lan-burst-p256-2`, then
+`lambda-peer-lan-burst-p256-1`. The negotiated WebSocket subprotocol is also the
 authenticated session profile. It binds the transcript, key derivation and
 record authentication context. Listeners also accept the existing finite CLI
 profile. Repository and CRDT formats do not change.
@@ -167,13 +186,15 @@ existing record/request/frame limits remain. Fully imported objects and pending
 local changes survive closure or failed delivery. Installation completes through
 the existing journal, with blocked target changes exposed separately for review.
 
-Native OpenSSL primitives follow [Ed25519](https://docs.openssl.org/3.5/man7/EVP_SIGNATURE-ED25519/)
-and [X25519](https://docs.openssl.org/3.5/man7/EVP_PKEY-X25519/); goldens pin
-[RFC 8032 §7.1](https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1) and
-[RFC 7748 §6.1](https://www.rfc-editor.org/rfc/rfc7748.html#section-6.1) vectors.
-Key derivation follows [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html).
-Private provider contexts exclude ambient OpenSSL configuration; low-order
-X25519 peers are rejected. The application handshake is an experimental protocol,
+Native primitives use mbedCrypto: deterministic P-256 ECDSA/SHA-256 signing
+([RFC 6979 A.2.5](https://www.rfc-editor.org/rfc/rfc6979.html#appendix-A.2.5))
+and [X25519, RFC 7748 §6.1](https://www.rfc-editor.org/rfc/rfc7748.html#section-6.1).
+P-256 private keys are 32-byte big-endian scalars, public keys are 65-byte
+uncompressed SEC1 points, and signatures are 64-byte low-S `r || s`.
+Signing-key generation rejects scalars outside the curve order. X25519 uses
+separate 32-byte keys and rejects low-order/all-zero agreements. Key derivation
+follows [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html).
+No OpenSSL provider or configuration is required by the native host. The application handshake is an experimental protocol,
 not a standardized or independently audited secure-channel implementation.
 
 The WebSocket link may use WS because application records are encrypted and

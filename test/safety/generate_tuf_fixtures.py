@@ -38,14 +38,13 @@ def generate(output, payload=None):
     def run(*args):
         return subprocess.run([openssl, *map(str, args)], cwd=ROOT, env=env,
                               capture_output=True, check=True, timeout=30).stdout
-    def key(label, algorithm='ed25519'):
+    def key(label, algorithm='ecdsa'):
         filename = private / (label + '.pem')
-        native = {'ed25519': 'ED25519', 'rsa': 'RSA', 'ecdsa': 'EC'}[algorithm]
-        options = [] if algorithm == 'ed25519' else ['-pkeyopt', 'rsa_keygen_bits:2048'] if algorithm == 'rsa' else ['-pkeyopt', 'ec_paramgen_curve:P-256']
+        native = {'rsa': 'RSA', 'ecdsa': 'EC'}[algorithm]
+        options = ['-pkeyopt', 'rsa_keygen_bits:2048'] if algorithm == 'rsa' else ['-pkeyopt', 'ec_paramgen_curve:P-256', '-pkeyopt', 'ec_param_enc:named_curve']
         run('genpkey', '-algorithm', native, *options, '-out', filename)
-        der = run('pkey', '-in', filename, '-pubout', '-outform', 'DER')
-        public = der[-32:].hex() if algorithm == 'ed25519' else run('pkey', '-in', filename, '-pubout').decode()
-        item = {'keytype': algorithm, 'scheme': {'ed25519': 'ed25519', 'rsa': 'rsassa-pss-sha256', 'ecdsa': 'ecdsa-sha2-nistp256'}[algorithm], 'keyval': {'public': public}}
+        public = run('pkey', '-in', filename, '-pubout').decode()
+        item = {'keytype': algorithm, 'scheme': {'rsa': 'rsassa-pss-sha256', 'ecdsa': 'ecdsa-sha2-nistp256'}[algorithm], 'keyval': {'public': public}}
         return {'id': hashlib.sha256(canonical(item).encode()).hexdigest(), 'item': item, 'file': filename, 'algorithm': algorithm}
     sequence = 0
     def sign(payload, signers):
@@ -53,11 +52,8 @@ def generate(output, payload=None):
         sequence += 1; message = private / f'message-{sequence}'; message.write_bytes(canonical(payload).encode())
         signatures = []
         for signer in signers:
-            if signer['algorithm'] == 'ed25519':
-                signature = run('pkeyutl', '-sign', '-rawin', '-inkey', signer['file'], '-in', message)
-            else:
-                options = ['-sigopt', 'rsa_padding_mode:pss', '-sigopt', 'rsa_pss_saltlen:32'] if signer['algorithm'] == 'rsa' else []
-                signature = run('dgst', '-sha256', '-sign', signer['file'], *options, message)
+            options = ['-sigopt', 'rsa_padding_mode:pss', '-sigopt', 'rsa_pss_saltlen:32'] if signer['algorithm'] == 'rsa' else []
+            signature = run('dgst', '-sha256', '-sign', signer['file'], *options, message)
             signatures.append({'keyid': signer['id'], 'sig': signature.hex()})
         return {'signed': payload, 'signatures': signatures}
     def write(name, data):
@@ -137,7 +133,7 @@ def generate(output, payload=None):
         snap_raw = write(case + '/1.snapshot.json', sign(snap, [old['snapshot']]))
         write(case + '/timestamp.json', sign(dict(timestamp, meta={'snapshot.json': reference(snap_raw)}), [old['timestamp']]))
     vectors = []
-    for algorithm in ('ed25519', 'rsa', 'ecdsa'):
+    for algorithm in ('rsa', 'ecdsa'):
         signer = key('vector-' + algorithm, algorithm)
         signed = sign({'test': 'signature bytes'}, [signer])
         vectors.append({'scheme': signer['item']['scheme'], 'public': signer['item']['keyval']['public'],

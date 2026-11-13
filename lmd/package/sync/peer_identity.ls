@@ -6,31 +6,46 @@ import codec: .codec
 import v: .schema
 
 pub fn bytes32(value) => value is binary and len(value) == 32
-fn descriptor_bytes(key, exchange) any^ => codec.encode(["lambda-peer-device-1",key,exchange])^
+pub let signing_scheme = 'ecdsa-sha2-nistp256'
+// full SEC1 point validation belongs to the native verifier.
+pub fn signing_key(value) => value is binary and len(value) == 65
+fn descriptor_bytes(key, exchange) any^ => codec.encode(["lambda-peer-device-2",key,exchange])^
 pub fn descriptor(seed, exchange_seed) any^ {
-    let key = crypto.public(seed,'ed25519')^
+    let key = crypto.public(seed,signing_scheme)^
     let exchange = crypto.public(exchange_seed,'x25519')^
-    return {version:1,id:hex.hex(hash(key,'sha256')^)^,public_key:key,exchange_key:exchange,
+    return {version:2,id:hex.hex(hash(key,'sha256')^)^,public_key:key,exchange_key:exchange,
         signature:crypto.sign(seed,descriptor_bytes(key,exchange)^)^}
 }
 pub fn validate_device(device) any^ {
     v.fields(device,["version","id","public_key","exchange_key","signature"])^
-    if (device.version != 1 or not bytes32(device.public_key) or not bytes32(device.exchange_key) or
+    if (device.version != 2 or not signing_key(device.public_key) or not bytes32(device.exchange_key) or
         device.id != hex.hex(hash(device.public_key,'sha256')^)^ or
         not verify_signature(device.public_key,descriptor_bytes(device.public_key,device.exchange_key)^,
-            device.signature,'ed25519')^) raise error("sync peer: invalid device descriptor")
+            device.signature,signing_scheme)^) raise error("sync peer: invalid device descriptor")
     return device
+}
+// rejection sampling keeps generic 256-bit AES keys unrestricted while excluding invalid EC scalars.
+pn new_signing_seed() any^ {
+    var attempts = 0
+    while (attempts < 16) {
+        let seed = crypto.key()^
+        let public_key = crypto.public(seed,signing_scheme) ^ { ^ }
+        if (not (public_key is error)) { return seed }
+        attempts = attempts+1
+    }
+    raise error("sync peer: cannot generate signing scalar")
 }
 pub pn create(space, secret) any^ {
     if (not v.actor(space)^ or not bytes32(secret)) raise error("sync peer: invalid space/key")
-    let seed = crypto.key()^
+    let seed = new_signing_seed()^
     let exchange = crypto.key()^
-    return {version:1,space:space,secret:secret,seed:seed,exchange_seed:exchange,
+    return {version:2,space:space,secret:secret,seed:seed,exchange_seed:exchange,
         device:descriptor(seed,exchange)^,members:[]}
 }
 pub fn validate(credentials) any^ {
     v.fields(credentials,["version","space","secret","seed","exchange_seed","device","members"])^
-    if (credentials.version != 1 or not v.actor(credentials.space)^ or not bytes32(credentials.secret) or
+    if (credentials.version == 1) raise error("sync peer: legacy credentials require explicit re-enrollment; existing data preserved")
+    if (credentials.version != 2 or not v.actor(credentials.space)^ or not bytes32(credentials.secret) or
         not (credentials.members is array) or len(credentials.members) > 64 or
         descriptor(credentials.seed,credentials.exchange_seed)^ != credentials.device)
         raise error("sync peer: invalid credentials")
@@ -57,7 +72,7 @@ pub fn derive(shared, salt, info) any^ {
     return crypto.mac(extracted,binary(info)^ ++ b'01')^
 }
 fn invitation_context(sender, recipient, ephemeral) any^ =>
-    codec.encode(["lambda-peer-invitation-1",sender,recipient,ephemeral])^
+    codec.encode(["lambda-peer-invitation-2",sender,recipient,ephemeral])^
 pub pn invite(credentials, target) any^ {
     validate(credentials)^
     validate_device(target)^
@@ -66,16 +81,16 @@ pub pn invite(credentials, target) any^ {
     let context = invitation_context(credentials.device,target.id,public_key)^
     let key = derive(crypto.agree(ephemeral,target.exchange_key)^,hash(context,'sha256')^,context)^
     let box = crypto.seal(key,codec.encode({space:credentials.space,secret:credentials.secret})^,context)^
-    return {version:1,sender:credentials.device,recipient:target.id,ephemeral:public_key,box:box,
+    return {version:2,sender:credentials.device,recipient:target.id,ephemeral:public_key,box:box,
         signature:crypto.sign(credentials.seed,codec.encode([context,box])^)^}
 }
 pub fn enroll(credentials, offer, expected_sender) any^ {
     v.fields(offer,["version","sender","recipient","ephemeral","box","signature"])^
     validate_device(offer.sender)^
-    if (offer.version != 1 or offer.sender.id != expected_sender or offer.recipient != credentials.device.id or
+    if (offer.version != 2 or offer.sender.id != expected_sender or offer.recipient != credentials.device.id or
         not bytes32(offer.ephemeral)) raise error("sync peer: invitation pin/recipient mismatch")
     let context = invitation_context(offer.sender,offer.recipient,offer.ephemeral)^
-    if (not verify_signature(offer.sender.public_key,codec.encode([context,offer.box])^,offer.signature,'ed25519')^)
+    if (not verify_signature(offer.sender.public_key,codec.encode([context,offer.box])^,offer.signature,signing_scheme)^)
         raise error("sync peer: invalid invitation signature")
     let key = derive(crypto.agree(credentials.exchange_seed,offer.ephemeral)^,hash(context,'sha256')^,context)^
     let payload = codec.decode(crypto.open(key,offer.box,context)^,65536)^

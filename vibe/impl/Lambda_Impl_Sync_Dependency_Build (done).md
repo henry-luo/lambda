@@ -87,3 +87,25 @@ only in a separate temporary recipe/archive; the installed release archive retai
 Tests did not change protocol goldens, remove authentication, relax deadlines or
 change transport policies to obtain a pass. The separate warm-latency target remains
 tracked by [its checkpoint](Lambda_Impl_Sync_Warm_Latency.md).
+
+## Configuration audit follow-up — 2026-11-13
+
+Audit against `cd3f57768` confirms the major feature exclusions and shared mbedTLS
+provider above. Two further recipe reductions are candidates, not implemented:
+add upstream `NO_SERVER` to libjuice to omit its unused embedded STUN/TURN server,
+and remove `SCTP_DEBUG` from release usrsctp compilation. TURN client support is
+separate from the server switch. The server object currently contains 16,767 bytes
+of text; no final release executable savings have been measured.
+
+Of 62 libdatachannel archive objects, 27 have zero text/data/bss under the current
+feature flags. Omitting those translation units would reduce build work rather
+than establish large executable savings. The inspected macOS test executable has
+one definition of each checked mbedTLS TLS function shared by curl and RTC.
+Curl additionally uses nghttp2, Brotli and zlib; RTC uses libjuice and usrsctp.
+Lambda's WebSocket implementation already reuses curl connections and its own
+framing, so libdatachannel's optional WebSocket transport stays disabled.
+
+Audit details and symbol evidence are under `temp/sync-connectivity/dependency-audit.md`.
+The audit changed no production recipe, vendor source or sibling source (D9.1.5,
+D9.1.1v4 / D9.1.3v2). Curl's broader file/FTP/FTPS support needs a separate URL API
+usage audit before considering changes in its owning input project.

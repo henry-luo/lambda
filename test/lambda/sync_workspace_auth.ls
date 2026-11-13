@@ -1,9 +1,11 @@
-// signatures use the public RFC 8032 section 7.1 test seed, not a user key.
+// deterministic P-256 proofs; RFC 6979 scalar is public test data.
+import crypto: lambda.io.crypto
 import w: lambda.sync.workspace
 import p: lambda.sync.protocol
 import a: lambda.sync.auth
 import k: lambda.sync.codec
-let key = b'\xD75A980182B10AB7D54BFED3C964073A0EE172F3DAA62325AF021A68F707511A'
+let seed = b'c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721'
+let key = crypto.public(seed,'ecdsa-sha2-nistp256')^
 let base = w.start("signed-workspace")^
 let changed = w.transact(base,"alice",[
     {kind:'create',type:'dir',parent:w.root,name:"docs",as:"d"},
@@ -13,8 +15,8 @@ let packet = p.next(changed,w.have(base)^)^
 let frames = p.frames(changed.replica,w.model,4096)^
 let grants = [{actor:"alice",document:"signed-workspace",profile:'workspace',epoch:0,schema:w.model,
     public_key:key,permissions:['write','checkpoint']}]
-let tx = {id:packet.body.id,kind:'transaction',actor:"alice",signature:b'\x20244F34623E3F0C83262D73F7903CE228706BFFD0798F69BA23137229DD4DCC4836C440DC153825F9711436E324BBE697947E0031F8A90849DE7CAF2E85E902'}
-let cp = {id:frames[0].body.checkpoint,kind:'checkpoint',actor:"alice",signature:b'\x2949A55DC2498E91C003EE4775FBD56C749FAEF56A43DD4A8041E4E0D7F20646E2EE3CD9A41858417F9E2E02B1680319B521C1B84BD19B5A8D11B7DBA3DECD08'}
+let tx = {id:packet.body.id,kind:'transaction',actor:"alice",signature:crypto.sign(seed,a.transaction_bytes(packet)^)^}
+let cp = {id:frames[0].body.checkpoint,kind:'checkpoint',actor:"alice",signature:crypto.sign(seed,a.checkpoint_bytes(frames[0],frames[0].body.checkpoint)^)^}
 let received = p.accept(base,k.encode(packet)^,a.admission(packet,[tx],grants)^)^
 fn recover(endpoint, frames, proof, grants) any^ {
     var result = endpoint

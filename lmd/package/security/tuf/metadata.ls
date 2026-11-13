@@ -84,7 +84,7 @@ pub fn policy(node) map^ {
     // Keep the numeral exact and refuse that child's authentication separately.
     else {keyids: ids, minimum: minimum}
 }
-let SCHEMES = [["ed25519", "ed25519"], ["rsa", "rsassa-pss-sha256"], ["ecdsa", "ecdsa-sha2-nistp256"]]
+let SCHEMES = [["rsa", "rsassa-pss-sha256"], ["ecdsa", "ecdsa-sha2-nistp256"]]
 fn supported(key) => contains(SCHEMES, [key.kind, key.scheme])
 fn public_key(node) map^ => {kind: field_text(node, "keytype")^, scheme: field_text(node, "scheme")^,
     public: field_text(require_member(node, "keyval")^, "public")^}
@@ -103,10 +103,8 @@ fn verifies(metadata, sig, key_node) bool^ {
     let key = public_key(key_node)^
     let encoded = field_text(sig, "sig")^;
     if (not supported(key) or not hex_valid(encoded)) false
-    else if (key.kind == "ed25519" and (len(key.public) != 64 or not hex_valid(key.public))) false
     else {
-        let bytes = if (key.kind == "ed25519") unhex(key.public)^ else binary(key.public);
-        verify_signature(bytes, metadata.canonical, unhex(encoded)^, key.scheme)^
+        verify_signature(binary(key.public), metadata.canonical, unhex(encoded)^, key.scheme)^
     }
 }
 pub fn authenticate(metadata, keys, role_policy) bool^ {

@@ -1,0 +1,7 @@
+provider report: true
+native digests: true
+native key objects: true
+native P-256: true
+native RSA-PSS: true
+removed DSA: true
+removed EdDSA fallback: true
