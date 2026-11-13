@@ -1,37 +1,5 @@
 # Agent Instructions for Lambda Script
 
-> This file is the single source of agent instructions. `CLAUDE.md` imports it
-> and `.github/copilot-instructions.md` points to it — edit only this file.
-
-Path ownership: references to `lib/` and `lambda/input/` in these instructions
-refer to sources in `../lambda-input/`; `radiant/` refers to sources in
-`../radiant/radiant/`. These are header include prefixes and logical source
-names, not source directories in the Lambda checkout (D9.1.1v4, D9.1.3v2).
-
-### Working across project boundaries
-
-When working on Lambda, do not directly modify source files owned by
-`lambda-input` or Radiant, including their implementation, headers, tests,
-and build scripts. If you find an issue in either project, record it in the
-owning project's ledger: [Lib and Input Issue Ledger](../lambda-input/vibe/Lib_Input_Issue_Ledger.md)
-or [Radiant Issue Ledger](../radiant/vibe/Radiant_Issue_Ledger.md). Include the
-observed behavior, reproduction, relevant evidence and whether the issue blocks
-the Lambda task; mark an unconfirmed cause as such.
-
-If the issue blocks the Lambda work, stop the affected work after recording
-the issue and tell the user what is blocked. Do not work around the issue or
-modify the sibling project's source to continue. Otherwise, continue Lambda
-work that does not depend on the issue. Ledger edits are allowed for reporting.
-
-## Issue ownership
-
-Record Lambda language, compiler and runtime issues in
-[Lambda Issue Ledger](vibe/Lambda_Issue_Ledger.md). Record package-specific
-issues in the relevant package implementation plan; TeX, LaTeX and expl3
-package issues belong in the [script TeX engine plan](vibe/impl/Lambda_Impl_Latex_Script_Engine.md).
-General Lambda defects discovered during package work remain in the Lambda
-ledger. Input and Radiant issues remain with their owners as described above.
-
 ## CRITICAL Rules for AI Agents
 
 These rules MUST be followed. Violations are considered errors.
@@ -120,6 +88,31 @@ CSS layout and rendering engine for HTML/CSS document presentation.
 - **CSS Resolution**: `resolve_css_style.cpp`
 - **Coherent subsystem headers**: `view.hpp` (view/style/animation data), `layout.hpp` (`LayoutContext`, `BlockContext`, `Linebox`), `render.hpp` (paint/display/render/media APIs), `event.hpp` (input/events), `radiant.hpp` (application shell/public API)
 
+### Working across project boundaries
+
+Path ownership: references to `lib/` and `lambda/input/` in these instructions refer to sources in `../lambda-input/`; `radiant/` refers to sources in
+`../radiant/radiant/`. These are header include prefixes and logical source
+names, not source directories in the Lambda checkout (D9.1.1v4, D9.1.3v2).
+
+When working on Lambda, do not directly modify source files owned by
+`lambda-input` or Radiant, including their implementation, headers, tests,
+and build scripts. If you find an issue in either project, record it in the
+owning project's ledger: [Lib and Input Issue Ledger](../lambda-input/vibe/Lib_Input_Issue_Ledger.md)
+or [Radiant Issue Ledger](../radiant/vibe/Radiant_Issue_Ledger.md). Include the
+observed behavior, reproduction, relevant evidence and whether the issue blocks
+the Lambda task; mark an unconfirmed cause as such.
+
+If the issue blocks the Lambda work, stop the affected work after recording
+the issue and tell the user what is blocked. Do not work around the issue or
+modify the sibling project's source to continue. Otherwise, continue Lambda
+work that does not depend on the issue. Ledger edits are allowed for reporting.
+
+**Issue ownership**: Record Lambda language, compiler and runtime issues in
+[Lambda Issue Ledger](vibe/Lambda_Issue_Ledger.md). Record package-specific
+issues in the relevant package implementation plan.
+General Lambda defects discovered during package work remain in the Lambda
+ledger. Input and Radiant issues remain with their owners as described above.
+
 ## Lambda CLI Commands
 
 ```bash
@@ -147,10 +140,6 @@ make clean-all          # Clean all build artifacts
 
 **Build architecture**: `build_lambda_config.json` → `utils/generate_premake.py` → Premake5 Lua → Makefiles
 
-**Task checkpoints:** for substantial tasks, maintain and resume from the
-checkpoint in the task's `vibe/impl/` plan, or `temp/<task>/checkpoint.md` for
-investigations without a plan. Follow [Doc Convention §5.1](doc/Doc_Convention.md#51-working-notes-and-task-checkpoints).
-
 ### Testing
 ```bash
 make build-test               # Build all test executables
@@ -158,26 +147,19 @@ make test                     # Every suite except jube and the online view test
 make test-lambda-baseline     # Full Lambda baseline suite; run at major milestones or session end
 make test-radiant-baseline    # Full Radiant baseline suite; run at major milestones or session end
 ```
-**Test cadence:** Avoid running the full Lambda or Radiant baseline suites after every incremental change. Run them at major milestones or at the end of a work session. For incremental changes, run focused unit tests related to the changed code.
+**Running single test**: `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`
+
+**Test cadence:** Be token efficient. Avoid running the full Lambda or Radiant baseline suites after every incremental change. Run them at major milestones or at the end of a work session. For incremental changes, run focused unit tests relevant to the changed code.
 
 **Test data**: run `./setup-test.sh` once per checkout — it links `test/<corpus>` to the sibling `../lambda-test` repo and fetches the pinned WPT into `ref/wpt`; suites using those corpora fail without it. All make targets: `make help` and [`doc/dev/Make_Guide.md`](doc/dev/Make_Guide.md).
 
 **Test map**: [`test/README.md`](test/README.md) — which gate covers which source area, every harness with its fixture dirs and golden convention, and single-test commands. Every `.ls` in a golden-driven test directory needs its golden; name helper, module and playground scripts `_*` or `mod_*`.
 
-**Radiant integration workflow:** read [Radiant's README](../radiant/README.md) when working on its Lambda integration. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation; run aggregate baseline gates at major milestones or at the end of a work session. Record Radiant-owned issues in its ledger and follow the project-boundary rule above. Documentation-only changes need document checks, not engine builds or regression suites.
-
-**Broad HTML/CSS priorities**: finish the highest-impact features used by common pages before less important features or detailed conformance residue. Rank work by user impact, usage frequency, dependency value and effort. Define a useful core milestone for each feature, finish it, and move on with remaining limitations recorded honestly as partial support. Keep rare combinations, exhaustive reflection and minor isolated fidelity differences in the long-tail backlog unless they block the selected milestone or expose a serious shared defect. Do not let an effectively unbounded standards tail prevent delivery of the important features.
-
 **Before building or testing in a worktree, or when a failure looks environmental** (stale objects, flaky baseline, debug vs release exe, renamed env knobs): read [`doc/dev/Developer_Guide.md` §7](doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas). Never run `make release` in a worktree.
 
-**Running single test**: `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`
-
-### Grammar & Parser
-```bash
-make generate-grammar   # Regenerate parser from grammar.js
-```
-Grammar source: `lambda/tree-sitter-lambda/grammar.js`; the generated Lambda CST
-parser is used only by the isolated `lambda-cst` verifier.
+**Task checkpoints:** for substantial tasks, maintain and resume from the
+checkpoint in the task's `vibe/impl/` plan, or `temp/<task>/checkpoint.md` for
+investigations without a plan. Follow [Doc Convention §5.1](doc/Doc_Convention.md#51-working-notes-and-task-checkpoints).
 
 ## Coding Conventions
 
