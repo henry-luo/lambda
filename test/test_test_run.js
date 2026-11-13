@@ -254,6 +254,16 @@ try {
             assert.deepEqual(targets.stdout.trim().split(/\s+/), [...new Set(tests.map(t => t.buildTarget).filter(Boolean))]);
         }
     });
+    check('Lambda baseline excludes LaTeX scripts while full discovery retains them', () => {
+        const selection = ['--target=lambda', '--include-test=test_lambda_gtest'];
+        const baseline = JSON.parse(invoke([...selection, '--category=baseline', '--list']).stdout);
+        const full = JSON.parse(invoke([...selection, '--list']).stdout);
+        assert.equal(baseline.length, 1);
+        assert.equal(full.length, 1);
+        assert.deepEqual(baseline[0].runnerArgs,
+            ['--gtest_filter=*-AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/latex_*']);
+        assert.deepEqual(full[0].runnerArgs, []);
+    });
     check('Lambda-owned selection rejects a missing owner source', () => {
         const child = invoke(['--target=lambda', '--include-test=test_zip_gtest', '--lambda-owned', '--list'], {
             LAMBDA_INPUT_ROOT: path.join(fixture, 'missing-input'), RADIANT_ROOT: path.join(fixture, 'missing-radiant'),

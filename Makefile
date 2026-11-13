@@ -1643,6 +1643,8 @@ test-chat-clients: build
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
+	@echo "Running Lambda LaTeX script tests..."
+	@./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/latex_*'
 	@$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE=debug test-input-baseline
 	@echo "Running WebSocket interoperability gate..."
 	@$(PYTHON) test/websocket/test_websocket.py

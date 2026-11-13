@@ -41,7 +41,7 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 | Change area | Must-pass gate | Quick targeted check |
 |---|---|---|
 | Lambda core: `lambda/runtime/`, `lambda/core/`, parser, MIR JIT | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*<name>*'`; `./test/test_mir_emission_gtest.exe --gtest_filter='Fixtures/*<name>*'`; `./test/test_lambda_runtime_gtest.exe --gtest_filter='NegativeScriptTest.*'` |
-| Lambda packages: `lmd/package/**/*.ls` | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*scene3d_*'` (also `physics_`, `chart_`, `latex_`, `math_`, `mermaid_`, `graphviz_`, `structurizr_`, `slide_`, `editor_`, `edit_`); `make test-math-corpus` |
+| Lambda packages: `lmd/package/**/*.ls` | **`make test-lambda-baseline`**; LaTeX: **`make test-lambda-full`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*scene3d_*'` (also `physics_`, `chart_`, `latex_`, `math_`, `mermaid_`, `graphviz_`, `structurizr_`, `slide_`, `editor_`, `edit_`); `make test-math-corpus` |
 | EPUB reader: `lmd/package/doc/ebook*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='*ebook*'`; `./test/test_ui_automation_gtest.exe --suite baseline --test 'ebook_*,doc_viewer_epub_preview,iframe_navigation_delegate,browser_focus_caret,browser_inline_focus'`; `python3 test/epub_reader_check.py --report temp/epub-state.json` |
 | Diff review: `lmd/package/doc/diff*`, byte grammar and process capture | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='*grammar_*:*diff_*'`; `./test/test_ui_automation_gtest.exe --test 'diff_*'`; `./test/test_lambda_concurrency_gtest.exe` |
 | Native geographic maps: `radiant/geomap*`, `lmd/package/map*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `make test-map` (native frames and picking, plus `lambda.exe` event replays for pointer, control and keyboard input), `make test-map-export`, `make test-map-reference` (first `npm ci --prefix test/map`); fixtures and pinned expression corpus in `test/map/`, functional goldens in `test/lambda/map/` |
@@ -262,13 +262,18 @@ still require native checks. Design: [Radiant Fullscreen](../vibe/radiant/Radian
 |---|---|
 | `make test` | every suite except `jube`, and minus `test_radiant_online_view_gtest`. This is not `test-all`, despite what `make help` says |
 | `make test-all` / `test-all-baseline` / `test-extended` | all suites / `--category=baseline` / `--category=extended`. `test-extended` also runs `dom-ui-run`. |
-| `make test-lambda-baseline` | Lambda-owned `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`) |
-| `make test-lambda-full` | the above, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, and the four relocated unit suites retained by the full gate |
+| `make test-lambda-baseline` | Lambda-owned `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`, and `test/lambda/latex` script cases) |
+| `make test-lambda-full` | the above, LaTeX script cases, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, and the four relocated unit suites retained by the full gate |
 | `make -C ../lambda-input test-input-baseline` | input-owned native library, parser, formatter, model, CSS, archive and offline network suites, including HTML, Markdown and YAML corpora |
 | `make -C ../radiant test-radiant-baseline` | Radiant-owned native layout, rendering, media and host-interface unit suites |
 | `make test-radiant-baseline` | Lambda-owned Radiant integration checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks run through `test/test_run.js` within a shared worker budget; layout partials, skips and baseline verdicts are retained |
 | `make run-radiant-baseline` | the same Radiant checks with no rebuild |
 | `make test-layout-baseline` | layout baseline suites only |
+
+The runner excludes `test/lambda/latex` script cases whenever it selects the
+`baseline` category. Run them through `make test-lambda-full`, or directly with
+`./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*/latex_*'`.
+Uncategorized full-suite runs continue to include them.
 
 Both layout baseline targets select their default categories from
 `test.layout_baseline_suites` in `build_lambda_config.json`;
