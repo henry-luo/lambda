@@ -68,6 +68,14 @@ Mutations validate their output, and cache/token publication follows transaction
 completion. Restart and repository verification read durable data independently.
 Cached memory is neither an acknowledgment nor an additional durability source.
 
+The owner also memoizes typed canonical validation fingerprints and derived
+workspace projections. Complete immutable content proofs can be reused while
+retirement and cache scope remain unchanged; eviction or destructive maintenance
+invalidates reuse. Newly referenced objects still require authentication.
+Explicit verification/recovery read physical storage, and installation reads and
+authenticates its payload afresh (D11.1.2). Filesystem captures omit editor undo
+snapshots; saved file revisions retain their version history.
+
 | API | Contract |
 |---|---|
 | `create(path, key, space, root, device, chunker?)` | Create the local repository and empty workspace; return a handle. |

@@ -14,7 +14,7 @@ import lan: .lan_agent
 
 pub let defaults = {port:0,bind:"0.0.0.0",stun:[],mdns:true,rtc:true,establish_ms:15000,
     retry_ms:5000,interval_ms:1000,cloud_ms:30000,rounds:0,stop_after:0,status:null,ready:null,
-    debounce_ms:200,batch_ms:1000,idle_ms:10000,burst_ms:60000,verify_ms:60000}
+    debounce_ms:50,batch_ms:250,idle_ms:10000,burst_ms:60000,verify_ms:60000}
 fn options(value) any^ {
     v.record(value,[],[for (key at defaults) string(key)])^
     let result = {*:defaults,*:value}

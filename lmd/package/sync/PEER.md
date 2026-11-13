@@ -124,12 +124,27 @@ The session profile is `lambda-peer-lan-1`:
    the profile, transcript digest, sender role and exact sequence number. Replay,
    reflection, reordering and cross-session messages fail authentication.
 
-The native event agent selects `lambda-peer-lan-burst-1` as both WebSocket
-subprotocol and authenticated session profile. The profile binds the transcript,
-key derivation and record authentication context, so it cannot be substituted
-for a finite-profile session. Listeners accept the existing finite CLI profile
-as well. Upgrade both automatic LAN agents to use bursts; repository and CRDT
-formats do not change.
+The native event agent offers `lambda-peer-lan-burst-2`, then
+`lambda-peer-lan-burst-1`. The negotiated WebSocket subprotocol is also the
+authenticated session profile. It binds the transcript, key derivation and
+record authentication context. Listeners also accept the existing finite CLI
+profile. Repository and CRDT formats do not change.
+
+Burst v2 exchanges causal HAVE frontiers and sends missing atomic workspace
+transaction groups when the retained log covers them. The selected sequence
+must cover the entire advertised clock. Each packet has a domain-separated
+`checkpoint_delta` signature from a full-space checkpoint authority; original
+operation authors remain intact. This attests relayed state under the existing
+checkpoint trust model. It does not represent original-author signatures.
+Epoch changes, compacted prefixes and oversized sequences fall back to full
+signed checkpoints.
+
+Small object records and all selected frames can share one encrypted bundle
+and one durable local head transaction. Validate every signature and dependency
+before publishing the head; an invalid later frame rolls back the batch.
+Bundles allow at most 128 objects and must fit the bounded encrypted record
+(262,144 bytes, including framing). Larger transfers retain object streaming and
+checkpoint-frame fallback. Burst v1 retains its previous exchange path.
 
 One handshake covers several rounds. Each `head` pins a fresh immutable offer;
 `done` acknowledges that round without closing the connection. Between rounds,
@@ -169,8 +184,9 @@ persistent server-side socket or cloud function dependency.
 
 ## Replication and recovery
 
-`peer_exchange.offer` captures one immutable compact workspace checkpoint,
-its existing protocol frames, a portable object inventory and a checkpoint proof.
+`peer_exchange.offer` captures an immutable workspace offer: either the negotiated
+v2 delta sequence or compact checkpoint frames, a portable object inventory and
+the corresponding signed proofs.
 The connection pins that offer; repository edits after it require a subsequent
 exchange. Read-only private state and recovery journals never enter the inventory.
 
@@ -188,10 +204,10 @@ the server, which requests only missing objects. Both retain pending local work
 through the existing CRDT merge; neither replaces its live state with remote state.
 
 Checkpoint signatures use the existing `auth.checkpoint_bytes` domain and
-`auth.admission`. Paired devices receive explicit checkpoint authority to attest
-combined state. This profile sends checkpoints rather than claiming a relay authored
-another device's operations. Original transaction-signature relay and incremental
-metadata optimization remain separate work. File payloads still transfer by
+`auth.admission`; v2 delta attestations use `auth.checkpoint_delta_bytes` and
+`auth.checkpoint_delta_admission`. Paired devices receive explicit checkpoint
+authority to attest combined state. Original-author signature relay remains
+separate work. File payloads still transfer by
 missing immutable objects, preserving chunk deduplication across versions.
 
 Imported objects persist independently. Partial object text is connection-local

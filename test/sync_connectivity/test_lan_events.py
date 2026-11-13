@@ -27,7 +27,7 @@ def wait_for(predicate, label, names=("a", "b")):
 
 def start(name):
     options = dict(mdns=True, rtc=False, interval_ms=100, retry_ms=1000,
-                   debounce_ms=200, verify_ms=300000,
+                   verify_ms=300000,
                    status=str(AREA / (name + ".status")), ready=str(AREA / (name + ".ready")))
     jobs[name] = peer.launch(name, "run", script=CLI, options=options)
 

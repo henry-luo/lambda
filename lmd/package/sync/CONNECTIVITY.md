@@ -65,7 +65,7 @@ close after the idle timeout. Repository callbacks have one script owner;
 network waits hold no repository transaction (S12.4.4v4, S13.1.2v2, S13.3.1v2).
 Native monitoring uses libuv's OS event backend, not `uv_fs_poll`.
 
-LAN defaults add `debounce_ms:200`, `batch_ms:1000`, `idle_ms:10000`,
+LAN defaults add `debounce_ms:50`, `batch_ms:250`, `idle_ms:10000`,
 `burst_ms:60000`, `verify_ms:60000` and a 100 ms scheduling/idle-message tick.
 `interval_ms` can override that tick, capped at `idle_ms`. Scans run for startup,
 restart, missed/overflowed notifications and occasional verification. Atomic
@@ -77,6 +77,9 @@ catch-up. Verification also requests anti-entropy. Failed delivery retries after
 
 LAN status adds `monitor:'os'`, full/incremental scan counts, watcher-event counts,
 connection/round counts, active connections, pending batches and peer availability.
+`captured_frontier` identifies committed source capture; `installed_frontier`
+identifies completed destination installation. File visibility can precede the
+installation journal's final commit.
 Installation/review state is distinct from network delivery. A failed native
 monitor surfaces an error instead of silently disabling change detection.
 The initial qualification host remains macOS; Linux maintains individual

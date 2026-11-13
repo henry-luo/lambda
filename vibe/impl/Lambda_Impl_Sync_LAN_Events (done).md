@@ -8,6 +8,10 @@ ownership), D6.3 (precise roots), D9.3.4 (native IO modules), D11.1.2
 (anchored IO), D9.1.1v4 / D9.1.3v2 (project boundaries).
 **Design:** [Data sync §2.1.1](../Lambda_Design_Data_Sync.md#211-lan-change-detection-and-connection-bursts).
 
+**Subsequent work:** [Warm latency investigation](Lambda_Impl_Sync_Warm_Latency.md)
+changes batching defaults and adds burst v2. The defaults and measurements below
+describe this completed milestone, not qualification of that later implementation.
+
 ## Current checkpoint
 
 - Scope implemented: OS notifications, affected-subtree reconciliation, bounded

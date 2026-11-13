@@ -5,18 +5,23 @@ import exchange: .peer_exchange
 import agent: .peer_agent
 import ws: lambda.io.websocket
 import timing: .timing
+import schema: .schema
 
 pn notify(report, event) any^ { if (report != null) report(event)^; return true }
 pn finished(handle, report, round, count) any^ {
+
     agent.materialize(handle)^
+
     let installed = agent.resume_installation(handle)^.state
+
     notify(report,{type:'round',peer:round.result.peer,token:round.token,progress:round.result,rounds:count,
+        installed_frontier:installed.base.checkpoint.frontier,
         installation:installed.installation != null,review:installed.review != null,
         warning:if (installed.installation == null) null else installed.installation.blocked.reason})^
     return true
 }
 pub pn client(socket, handle, credentials, expected, authorize, options, report=null) any^ {
-    var channel = peer.handshake(socket,credentials,'client',expected,authorize,session.burst_protocol)^
+    var channel = peer.handshake(socket,credentials,'client',expected,authorize,socket.protocol)^
     notify(report,{type:'connected',peer:channel.peer.id})^
     let started = timing.milliseconds()
     var last_activity = started
@@ -48,7 +53,7 @@ pub pn client(socket, handle, credentials, expected, authorize, options, report=
     return {peer:expected,token:token,rounds:rounds}
 }
 pub pn server(socket, handle, credentials, authorize, options, report=null) any^ {
-    var channel = peer.handshake(socket,credentials,'server',null,authorize,session.burst_protocol)^
+    var channel = peer.handshake(socket,credentials,'server',null,authorize,socket.protocol)^
     notify(report,{type:'connected',peer:channel.peer.id})^
     let started = timing.milliseconds()
     var last_activity = started
@@ -72,7 +77,10 @@ pub pn server(socket, handle, credentials, authorize, options, report=null) any^
             peer.send_record(socket,channel,{ok:true,body:true})^
             return {peer:channel.peer.id,token:delivered,rounds:rounds}
         }
-        if ((incoming^).value != {kind:'head',body:{}}) raise error("sync burst: expected a new round")
+        schema.fields((incoming^).value,["kind","body"])^
+        if ((incoming^).value.kind != 'head' or
+            (channel.profile != session.batch_protocol and (incoming^).value.body != {}))
+            raise error("sync burst: expected a new round")
         let round = peer.serve_round(socket,channel,handle,credentials,null,incoming^)^
         channel = round.session; delivered = round.token; announced = round.token; rounds = rounds+1
         finished(handle,report,round,rounds)^
@@ -81,7 +89,7 @@ pub pn server(socket, handle, credentials, authorize, options, report=null) any^
     return {peer:channel.peer.id,token:delivered,rounds:rounds}
 }
 pub pn connect(url, handle, credentials, expected, authorize, options, report=null) any^ {
-    let socket = ws.open(url,{protocols:[session.burst_protocol],max_message_bytes:session.max_frame,timeout_ms:5000})^
+    let socket = ws.open(url,{protocols:[session.batch_protocol,session.burst_protocol],max_message_bytes:session.max_frame,timeout_ms:5000})^
     let result = client(socket,handle,credentials,expected,authorize,options,report) ^ { ^ }
     ws.close(socket) ^ { null }
     if (result is error) raise result
@@ -89,10 +97,10 @@ pub pn connect(url, handle, credentials, expected, authorize, options, report=nu
 }
 pub pn accept(listener, handle, credentials, authorize, options, report=null) any^ {
     let socket = ws.accept(listener,1000)^
-    let result = if (socket.protocol == session.burst_protocol)
+    let result = if (session.is_burst(socket.protocol)^)
         server(socket,handle,credentials,authorize,options,report) ^ { ^ }
         else peer.serve_connection(socket,handle,credentials,authorize) ^ { ^ }
-    if (socket.protocol != session.burst_protocol and not (result is error)) agent.materialize(handle)^
+    if (not session.is_burst(socket.protocol)^ and not (result is error)) agent.materialize(handle)^
     ws.close(socket) ^ { null }
     if (result is error) raise result
     return result

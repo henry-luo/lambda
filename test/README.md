@@ -578,6 +578,18 @@ notification access in addition to local-network access; a restricted sandbox
 can deny the macOS event service. Run this gate on the native host.
 Select the tier with `LAMBDA_EXEC_BACKEND` and executable with `LAMBDA_SYNC_EXE`.
 The pinned dependency is prepared by `utils/prepare_sync_connectivity.py`.
+
+`benchmark_warm.py --seed-files 10 --samples 10` measures independent native
+agents on one host using a release executable. It verifies connection reuse,
+exact bytes, source capture and completed destination installation, and writes
+settled/continuous distributions under `temp/sync-warm-latency/`. Its default
+gate requires every installation sample below one second. Use `--seed-files 100`
+and `--peers 3` to broaden the workload; these are qualification runs, not a
+claim that the current implementation meets that target. The `sync_warm_protocol`
+golden checks atomic bundle/delta rollback, idempotency, typed cache validation
+and separate disk/managed writer streams. See the
+[latency checkpoint](../vibe/impl/Lambda_Impl_Sync_Warm_Latency.md) for measured
+failures and the limits of current validation.
 The full native sync golden set requires that prepared dependency; a function
 runtime that only serves HTTP/object storage can omit it.
 See [API and limits](../lmd/package/sync/CONNECTIVITY.md) and the

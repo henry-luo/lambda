@@ -108,6 +108,7 @@ pub pn run(directory, key, options) any^ {
     report(options,current)^
     while (options.rounds == 0 or turns < options.rounds) {
         let event = receive()^
+        var captured_this_turn = false
         if (event.type == 'monitor_error') raise event.failure
         if (event.type == 'tick') { send(ticker,true)^; turns = turns+1 }
         else if (event.type == 'filesystem') {
@@ -133,7 +134,7 @@ pub pn run(directory, key, options) any^ {
             token = exchange.current_token(handle)^
             current = {*:current,transport:'peer',phase:'idle',peer:event.peer,sessions:current.sessions+1,
                 rounds:current.rounds+1,error_code:null,fallback_reason:event.warning,progress:event.progress,
-                installation:event.installation,review:event.review}
+                installation:event.installation,review:event.review,installed_frontier:event.installed_frontier}
         } else if (event.type == 'ended') {
             let matching = [for (entry in sessions where entry.worker == event.worker) entry]
             let id = if (event.peer != null) event.peer else if (len(matching)^ > 0) matching[0].peer else null
@@ -145,7 +146,7 @@ pub pn run(directory, key, options) any^ {
                 peers = update_peer(peers,id,update)
             }
             if (failed) { current = {*:current,retries:current.retries+1,error_code:event.result.code,
-                fallback_reason:"LAN burst ended before completion"} }
+                fallback_reason:event.result.message} }
         }
         if (timing.milliseconds() >= next_verify) {
             full = true; batch_due = 0
@@ -174,6 +175,8 @@ pub pn run(directory, key, options) any^ {
                 if (full) { next_verify = timing.milliseconds()+options.verify_ms }
                 full = false; pending_paths = []; batch_started = null; scan_retry_at = 0
                 token = exchange.current_token(handle)^
+                current = {*:current,captured_frontier:token.clock}
+                captured_this_turn = true
             }
         }
         for (item in peers where item.url != null and not item.busy and item.delivered != token and
@@ -187,7 +190,7 @@ pub pn run(directory, key, options) any^ {
             batch_wait_ms:if (batch_started == null) null else max(0,max(batch_due,scan_retry_at)-timing.milliseconds()),
             frontier:token.clock,peers:[for (item in peers) {id:item.id,online:item.url != null,busy:item.busy,
                 pending:item.delivered != token}]}
-        if (event.type != 'tick' or turns%10 == 0) report(options,current)^
+        if (event.type != 'tick' or turns%10 == 0 or captured_this_turn) report(options,current)^
         if (options.stop_after > 0 and current.sessions >= options.stop_after) { break }
     }
     for (task in [watcher,ticker,browser,receiver,*[for (worker in workers) worker.task]]) { cancel(task) }

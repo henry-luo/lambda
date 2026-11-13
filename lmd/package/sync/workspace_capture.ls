@@ -24,16 +24,17 @@ pub fn apply_groups(endpoint, actor, commands, max_ops=128, max_bytes=65536) any
     var i = 0
     while (i < len(commands)) {
         var count = min(max_ops,len(commands)-i)
-        var edited = w.transact(result,actor,slice(commands,i,i+count)^)^.endpoint
-        var packet = p.transaction(result.replica,edited.replica,w.model)^
+        // Filesystem history retains saved revisions, not editor undo snapshots.
+        var edited = w.transact(result,actor,slice(commands,i,i+count)^,false)^
+        var packet = p.transaction_frame(edited.endpoint.replica,edited.batch,w.model)^
         // bound the actual wire image, including long member names and context.
         while (len(binary(codec.encode(packet)^))^ > max_bytes and count > 1) {
             count = count div 2
-            edited = w.transact(result,actor,slice(commands,i,i+count)^)^.endpoint
-            packet = p.transaction(result.replica,edited.replica,w.model)^
+            edited = w.transact(result,actor,slice(commands,i,i+count)^,false)^
+            packet = p.transaction_frame(edited.endpoint.replica,edited.batch,w.model)^
         }
         if (len(binary(codec.encode(packet)^))^ > max_bytes) raise error("sync ZIP: event exceeds transfer budget")
-        result = edited
+        result = edited.endpoint
         i = i+count
     }
     return result
@@ -41,10 +42,24 @@ pub fn apply_groups(endpoint, actor, commands, max_ops=128, max_bytes=65536) any
 
 pub fn baseline(replica, members, capture_id) any^ {
     let checkpoint = c.snapshot(replica)^
+    return baseline_snapshot(checkpoint,members,capture_id)^
+}
+fn baseline_snapshot(checkpoint, members, capture_id) any^ {
     // internal records use a fixed field order; user Mark maps retain S2.3.1v2.
     let normalized = [for (member in members) {id:member.id,path:member.path,type:member.type,content:member.content}]
     let body = {checkpoint:checkpoint,members:normalized,capture:capture_id}
     return {id:codec.digest(["lambda-zip-base-1",body])^,*:body}
+}
+
+// The owner supplies a validated immutable snapshot and its derived members.
+pub fn validate_known_base(base, checkpoint, digest, members) any^ {
+    v.fields(base,["id","checkpoint","members","capture"])^
+    if (codec.digest(base.checkpoint)^ != digest) { return false }
+    if (codec.digest(base.members)^ != codec.digest(members)^ or
+        base.capture != capture_id(members)^ or
+        base.id != baseline_snapshot(checkpoint,members,base.capture)^.id)
+        raise error("sync ZIP: invalid baseline")
+    return true
 }
 
 pub fn association(members, path) any^ {

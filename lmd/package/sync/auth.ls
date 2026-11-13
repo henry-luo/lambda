@@ -8,6 +8,7 @@ pub fn transaction_bytes(packet) any^ => codec.encode(["lambda-crdt-transaction-
     packet.document,packet.profile,packet.epoch,packet.schema,packet.root,packet.body])^
 pub fn checkpoint_bytes(packet, digest) any^ => codec.encode(["lambda-crdt-checkpoint-1",
     packet.document,packet.profile,packet.epoch,packet.schema,packet.root,digest])^
+pub fn checkpoint_delta_bytes(packet) any^ => codec.encode(["lambda-crdt-checkpoint-delta-1",packet])^
 
 fn grant(grants, actor, packet, permission) any^ {
     let matches = [for (entry in grants where entry.actor == actor and entry.document == packet.document and
@@ -28,6 +29,16 @@ fn verify(proofs, id, kind, payload, packet, grants, permission) any^ {
     let key = grant(grants,proof.actor,packet,permission)^
     if (not verify_signature(key,payload,proof.signature,'ed25519')^) raise error("sync auth: invalid signature")
     return proof.actor
+}
+
+// A full-space checkpoint authority can attest relayed deltas, without claiming
+// that the original operation authors signed them with the authority's key.
+pub fn checkpoint_delta_admission(packet, proof, grants) any^ {
+    if (not contains(['transaction','updates'],packet.kind)^ or not (packet.body.operations is array) or
+        len(packet.body.operations)^ > 1024) raise error("sync auth: invalid checkpoint delta")
+    let digest = codec.digest(packet)^
+    verify([proof],digest,'checkpoint_delta',checkpoint_delta_bytes(packet)^,packet,grants,'checkpoint')^
+    return {actors:unique([for (op in packet.body.operations) op.id[0]])^,checkpoints:[]}
 }
 
 // hosts supply current grants; encrypted transports/repositories carry proofs with packets.

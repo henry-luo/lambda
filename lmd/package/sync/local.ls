@@ -23,43 +23,75 @@ import command_model: .workspace_commands
 import document_state: .document_state
 
 fn actor(handle, current) any^ => handle.writer ++ ":" ++ string(current.serial+1)^
+// Captured disk branches and unsaved managed commands cannot reuse each other's dots.
+fn workspace_actor(handle, disk=false) any^ => handle.writer ++ (if (disk) ":disk" else ":edit")
 
-fn validate(current, space) any^ {
+fn validate(current, space, previous=null) any^ {
     if (current.format != 1 or current.space != space or not v.actor(current.device)^ or
         not v.natural(current.serial)^) raise error("sync local: invalid local state")
     chunks.profile(current.chunker)^
-    p.validate_endpoint(current.endpoint)^
-    cap.validate_base(current.base)^
+    // Typed digests preserve numeric kinds and map order; coercive equality is not a proof.
+    let identity = {replica:codec.digest(current.endpoint.replica)^,base:codec.digest(current.base)^,
+        documents:codec.digest(document_state.all(current))^}
+    let same = previous.replica == identity.replica
+    if (not same) { c.validate(current.endpoint.replica)^ }
+    p.validate_endpoint_fields(current.endpoint)^
+    let snapshot = if (same) previous.snapshot else if (len(current.endpoint.replica.pending)^ == 0)
+        c.snapshot(current.endpoint.replica)^ else null
+    let digest = if (same) previous.snapshot_digest else if (snapshot == null) null else codec.digest(snapshot)^
+    let projection = if (same) previous.projection else tree.project(tree.events(current.endpoint.replica)^)^
+    let proof = {*:identity,snapshot:snapshot,snapshot_digest:digest,projection:projection}
+    if (previous.base != proof.base) {
+        let resolved = all([for (entry in projection.entries where entry.visible and entry.type == 'file') len(entry.heads)^ == 1])
+        let known = snapshot != null and resolved and
+            cap.validate_known_base(current.base,snapshot,digest,cap.export_members(projection.entries)^)^
+        if (not known) { cap.validate_base(current.base)^ }
+    }
     if (current.endpoint.replica.document != space) raise error("sync local: wrong workspace")
-    for (record in document_state.all(current)) { document_state.validate(record,space)^ }
-    return true
+    if (previous.documents != proof.documents) {
+        for (record in document_state.all(current)) { document_state.validate(record,space)^ }
+    }
+    return proof
 }
-pn replica_dependencies(tx, keys, replica, seen=[], depth=0, retired=[], source="workspace", cached=[]) any^ {
+pn replica_dependencies(tx, keys, replica, seen=[], depth=0, retired=[], source="workspace", cached=[], verified=[], projection=null) any^ {
     if (depth > 128) raise error("sync local: checkpoint dependency depth")
-    if (replica.profile == 'workspace' and any([for (id in maintenance.live_revisions(replica)^) contains(retired,id)^]))
+    let heads = if (replica.profile != 'workspace') [] else if (projection == null) maintenance.live_revisions(replica)^
+        else [for (entry in projection.entries) for (head in entry.heads) head.id]
+    if (any([for (id in heads) contains(retired,id)^]))
         raise error("sync local: " ++ source ++ ": retired live revision requires explicit recovery")
     let roots = {contents:maintenance.contents(replica,retired)^,checkpoints:maintenance.checkpoints(replica,retired)^}
-    var i = 0
-    if (replica.profile == 'workspace') {
-        let heads = maintenance.live_revisions(replica)^
-        for (revision in maintenance.revisions(replica)^ where contains(heads,revision.id)^) { repo.availability(tx,keys,revision.content)^ }
+    let live = if (replica.profile == 'workspace')
+        [for (revision in maintenance.revisions(replica)^ where contains(heads,revision.id)^) revision.content] else []
+    var checked = []
+    // Live data is checked first without eviction exceptions, then shared history once.
+    for (group in [{references:live,evicted:[]},{references:roots.contents,evicted:cached}]) {
+        for (reference in group.references) {
+            v.descriptor(reference)^
+            if (not contains(checked,reference)^) {
+                let complete = if (contains(verified,reference)^) true else
+                    repo.availability(tx,keys,reference,group.evicted)^.complete
+                if (complete) { checked = [*checked,reference] }
+            }
+        }
     }
-    while (i < len(roots.contents)^) { repo.availability(tx,keys,roots.contents[i],cached)^; i = i+1 }
-    i = 0
+    var i = 0
     while (i < len(roots.checkpoints)^) {
         let digest = roots.checkpoints[i]
         if (not contains(seen,digest)^) {
             let nested = repo.get(tx,keys,repo.object_id(keys,"checkpoint",digest)^,"checkpoint")^
             c.validate(nested)^
-            replica_dependencies(tx,keys,nested,[*seen,digest],depth+1,retired,source,cached)^
+            checked = unique([*checked,*replica_dependencies(tx,keys,nested,[*seen,digest],depth+1,
+                retired,source,cached,verified)^])^
         }
         i = i+1
     }
-    return true
+    return checked
 }
-pn dependencies(tx, keys, endpoint, retired=[], source="workspace", cached=[]) any^ {
-    return replica_dependencies(tx,keys,endpoint.replica,[],0,retired,source,cached)^
+pn dependencies(tx, keys, endpoint, retired=[], source="workspace", cached=[], verified=[], projection=null) any^ {
+    return replica_dependencies(tx,keys,endpoint.replica,[],0,retired,source,cached,verified,projection)^
 }
+fn dependency_scope(current) any^ => codec.digest([maintenance.get(current).manifest,
+    maintenance.get(current).revisions,reach.cache_ids(current)])^
 
 pub pn open_repository(path, secret, space) any^ {
     let handle = {path:path,keys:repo.keys(secret,space)^,writer:uuid()^}
@@ -94,32 +126,43 @@ pub pn status(handle) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let loaded = repo.load(tx,k)^
         let expanded = documents.expand(tx,k,loaded.state)^
-        if (loaded.validated != true) validate(expanded,k.space)^
-        return result(handle,loaded,expanded)
+        let proof = if (loaded.validated == true) loaded.validation else validate(expanded,k.space)^
+        return result(handle,loaded,expanded,proof)
     })^
 }
-fn result(handle, loaded, expanded) => {*:loaded,state:expanded,
-    *:if (handle.keys.cache_enabled == true) {repository_cache:{*:loaded,validated:true}} else {}}
+fn result(handle, loaded, expanded, proof) => {generation:loaded.generation,id:loaded.id,state:expanded,
+    *:if (handle.keys.cache_enabled == true) {repository_cache:{*:loaded,validated:true,validation:proof}} else {}}
 
 pub pn mutate(handle, operation) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let loaded = repo.load(tx,k)^
         let expanded = documents.expand(tx,k,loaded.state)^
-        if (loaded.validated != true) validate(expanded,k.space)^
+        let previous = if (loaded.validated == true) loaded.validation else validate(expanded,k.space)^
         let updated = operation(tx,k,expanded)
         let next = documents.flush(tx,k,updated^)^
-        validate(next,k.space)^
-        if (next == loaded.state) { return result(handle,loaded,expanded) }
+        let proof = validate(next,k.space,previous)^
+        let scope = dependency_scope(next)^
+        // Destructive maintenance can remove bytes without changing a replica frontier.
+        let known = if (handle.keys.cache_enabled == true and loaded.dependency_scope == scope and
+            next.cache_job == null and loaded.state.cache_job == null and
+            next.maintenance == null and loaded.state.maintenance == null)
+            loaded.verified else null
+        let changed = next.endpoint.replica != loaded.state.endpoint.replica
+        let verified = if (changed or (handle.keys.cache_enabled == true and known == null))
+            dependencies(tx,k,next.endpoint,maintenance.get(next).revisions,"workspace",reach.cache_ids(next),
+                if (known == null) [] else known,proof.projection)^ else known
+        let accepted = {*:loaded,verified:verified,dependency_scope:scope}
+        if (next == loaded.state) { return result(handle,accepted,expanded,proof) }
         let committed = repo.commit_head(tx,k,loaded.generation,{*:next,previous:loaded.id})^
-        return result(handle,committed,documents.expand(tx,k,committed.state)^)
+        return result(handle,{*:committed,verified:verified,dependency_scope:scope},
+            documents.expand(tx,k,committed.state)^,proof)
     })^
 }
 
 pub pn scan(handle, paths=null, verify: bool=false) any^ {
     return mutate(handle,pn (tx,k,current)=> {
         let captured = if (paths == null) fs.capture(tx,k,current,verify)^ else fs.capture_paths(tx,k,current,paths)^
-        let updated = fs.reconciled(current,captured,actor(handle,current)^,[],now().unix)^
-        dependencies(tx,k,updated.endpoint,maintenance.get(updated).revisions,"scan",reach.cache_ids(updated))^
+        let updated = fs.reconciled(current,captured,workspace_actor(handle,true)^,[],now().unix)^
         return documents.refresh(tx,k,updated,actor(handle,updated)^)^
     })^
 }
@@ -129,11 +172,10 @@ pub pn resolve_review(handle, commands) any^ {
         if (current.review == null) raise error("sync local: no external review")
         let captured = current.review.capture
         let base = p.start(current.base.checkpoint.replica,w.model)^
-        let branch = cap.apply_groups(base,actor(handle,current)^,command_model.stamp(commands,now().unix)^)^
+        let branch = cap.apply_groups(base,workspace_actor(handle,true)^,command_model.stamp(commands,now().unix)^)^
         let members = fs.desired(branch)^
         if (cap.capture_id(members)^ != captured.id) raise error("sync local: resolution must represent captured disk contents")
         let endpoint = p.join_branch(current.endpoint,branch)^
-        dependencies(tx,k,endpoint,maintenance.get(current).revisions,"workspace",reach.cache_ids(current))^
         return {*:current,endpoint:endpoint,base:cap.baseline(branch.replica,members,captured.id)^,
             disk:[for (member in captured.members) {*:member,id:cap.association(members,member.path)^.id}],
             review:null,serial:current.serial+1}
@@ -142,8 +184,7 @@ pub pn resolve_review(handle, commands) any^ {
 
 pub pn transact(handle, commands) any^ {
     return mutate(handle,pn (tx,k,current)=> {
-        let endpoint = w.transact(current.endpoint,actor(handle,current)^,command_model.stamp(commands,now().unix)^)^.endpoint
-        dependencies(tx,k,endpoint,maintenance.get(current).revisions,"workspace",reach.cache_ids(current))^
+        let endpoint = w.transact(current.endpoint,workspace_actor(handle)^,command_model.stamp(commands,now().unix)^)^.endpoint
         return {*:current,endpoint:endpoint,serial:current.serial+1}
     })^
 }
@@ -151,9 +192,8 @@ pub pn transact(handle, commands) any^ {
 pub pn publish(handle, entry, bytes, document=null) any^ {
     return mutate(handle,pn (tx,k,current)=> {
         let reference = repo.content(tx,k,if (bytes is string) binary(bytes)^ else bytes,current.chunker)^
-        let endpoint = w.transact(current.endpoint,actor(handle,current)^,[
+        let endpoint = w.transact(current.endpoint,workspace_actor(handle)^,[
             {kind:'publish',entry:entry,content:reference,document:document,saved_at:now().unix}])^.endpoint
-        dependencies(tx,k,endpoint,maintenance.get(current).revisions,"workspace",reach.cache_ids(current))^
         return {*:current,endpoint:endpoint,serial:current.serial+1}
     })^
 }
@@ -161,15 +201,15 @@ pub pn publish(handle, entry, bytes, document=null) any^ {
 pub pn prepare_install(handle) any^ {
     return mutate(handle,pn (tx,k,current)=> {
         if (current.installation != null) { return current }
-        let fresh = fs.reconciled(current,fs.capture(tx,k,current)^,actor(handle,current)^,[],now().unix)^
-        dependencies(tx,k,fresh.endpoint,maintenance.get(fresh).revisions,"install preparation",reach.cache_ids(fresh))^
+        let fresh = fs.reconciled(current,fs.capture(tx,k,current)^,workspace_actor(handle,true)^,[],now().unix)^
+        if (handle.keys.cache_enabled != true)
+            dependencies(tx,k,fresh.endpoint,maintenance.get(fresh).revisions,"install preparation",reach.cache_ids(fresh))^
         return install.prepare(fresh)^
     })^
 }
 pub pn install_step(handle) any^ {
     return mutate(handle,pn (tx,k,current)=> {
-        let updated = install.step(tx,k,current,actor(handle,current)^)^
-        dependencies(tx,k,updated.endpoint,maintenance.get(updated).revisions,"installation",reach.cache_ids(updated))^
+        let updated = install.step(tx,k,current,workspace_actor(handle,true))^
         return if (updated.installation != null) updated else documents.refresh(tx,k,updated,actor(handle,updated)^)^
     })^
 }
@@ -200,15 +240,18 @@ pub pn export_objects(handle, ids) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> { return repo.export_objects(tx,k,ids)^ })^
 }
 pub pn import_objects(handle, records) any^ {
-    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+    repo.access(handle.path,handle.keys,pn (tx,k)=> {
         repo.import_objects(tx,k,records)^
         let loaded = repo.load(tx,k)^
         let current = loaded.state
         let staged = if (current.staged_objects == null) [] else current.staged_objects
-        repo.commit_head(tx,k,loaded.generation,{*:current,previous:loaded.id,
+        let committed = repo.commit_head(tx,k,loaded.generation,{*:current,previous:loaded.id,
             staged_objects:sort(unique([*staged,*[for (record in records) record.id]]))^})^
-        return true
+        // Staging changes no validated editing fields or replicated frontier.
+        return {repository_cache:{*:committed,validated:loaded.validated == true,validation:loaded.validation,
+            verified:loaded.verified,dependency_scope:loaded.dependency_scope}}
     })^
+    return true
 }
 pub pn messages(handle, peer_have) any^ {
     let current = status(handle)^.state
@@ -217,13 +260,20 @@ pub pn messages(handle, peer_have) any^ {
         else [next]
 }
 pub pn receive(handle, packet, admission) any^ {
+    return receive_batch(handle,[{packet:packet,admission:admission}])^
+}
+pub pn receive_batch(handle, packets, records=[]) any^ {
+    if (not (packets is array) or len(packets)^ < 1 or len(packets)^ > 8192)
+        raise error("sync local: invalid packet batch")
     return mutate(handle,pn (tx,k,current)=> {
-        let endpoint = p.accept(current.endpoint,codec.encode(packet)^,admission)^
-        // partial frames retain the old branch while retirement precedes checkpoint installation.
-        if (endpoint.replica != current.endpoint.replica) {
-            dependencies(tx,k,endpoint,maintenance.get(current).revisions,"receive",reach.cache_ids(current))^
-        }
-        return {*:current,endpoint:endpoint}
+        // Objects reach durable immutable storage before the referencing head commits.
+        repo.import_objects(tx,k,records)^
+        var endpoint = current.endpoint
+        for (item in packets) { endpoint = p.accept(endpoint,codec.encode(item.packet)^,item.admission)^ }
+        return {*:current,endpoint:endpoint,
+            *:if (len(records)^ == 0) ({}) else {staged_objects:sort(unique([
+                *if (current.staged_objects == null) [] else current.staged_objects,
+                *[for (record in records) record.id]]))^}}
     })^
 }
 

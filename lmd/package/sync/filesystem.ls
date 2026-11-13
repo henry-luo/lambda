@@ -6,6 +6,8 @@ import v: .schema
 import w: .workspace
 import p: .protocol
 import rules: .workspace_rules
+import c: .core
+import codec: .codec
 
 pub let default_limits = {file_bytes:268435456,scan_bytes:1073741824}
 pub fn limits(current) any^ {
@@ -130,6 +132,25 @@ fn hints(previous, captured) any^ {
     return result
 }
 
+fn merge_capture(endpoint, branch, actor) any^ {
+    var merged = endpoint
+    var rounds = 0
+    // The branch was authored from the validated disk base. Apply its atomic deltas
+    // instead of validating and unioning the entire historical replica again.
+    while (not c.dominates(merged.replica.clock,branch.replica.clock)^) {
+        if (rounds >= 10000) raise error("sync filesystem: capture transaction budget")
+        let packet = p.next(branch,w.have(merged)^)^
+        if (packet.kind != 'transaction' and packet.kind != 'updates') { return p.join_branch(endpoint,branch)^ }
+        merged = p.accept(merged,codec.encode(packet)^,{actors:[actor],checkpoints:[]})^
+        rounds = rounds+1
+    }
+    let floor = c.clock_join(merged.replica.floor,branch.replica.floor)
+    let replica = {*:merged.replica,floor:floor,
+        log:[for (op in merged.replica.log where not c.covered(floor,op.id)^) op]}
+    return {*:merged,replica:replica,journal:[for (group in merged.journal where
+        not c.dominates(floor,group.frontier)^) group]}
+}
+
 pub fn reconciled(current, captured, actor, documents=[], saved_at=null) any^ {
     if (current.installation != null) raise error("sync filesystem: installation must finish before scanning")
     if (len(documents) == 0 and current.review == null and captured.id == current.base.capture and
@@ -141,7 +162,7 @@ pub fn reconciled(current, captured, actor, documents=[], saved_at=null) any^ {
     if (imported is error) {
         return {*:current,serial:current.serial+1,review:{capture:captured,reason:imported.message}}
     }
-    let endpoint = p.join_branch(current.endpoint,imported.endpoint)^
+    let endpoint = merge_capture(current.endpoint,imported.endpoint,actor)^
     let members = [for (member in captured.members) {*:member,id:cap.association(imported.members,member.path)^.id}]
     return {*:current,serial:current.serial+1,endpoint:endpoint,
         base:cap.baseline(imported.endpoint.replica,imported.members,captured.id)^,disk:members,review:null}

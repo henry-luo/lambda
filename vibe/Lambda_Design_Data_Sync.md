@@ -182,6 +182,15 @@ and publish cached state/frontiers only after transaction completion. Restart an
 repository audits independently verify durable storage. The cache does not add
 durability or replace object authentication (D11.1.2).
 
+The current LAN implementation debounces notifications for 50 ms, with a 250 ms
+maximum batch wait. Its negotiated burst v2 profile uses causal HAVE frontiers
+to select complete sequences of missing atomic workspace transactions. A
+full-space checkpoint authority signs each relayed delta without changing its
+original operation authors. Compacted prefixes, epoch changes and oversized
+sequences retain signed-checkpoint fallback. Small immutable objects and frames
+can share a bounded encrypted bundle and one local head transaction; signatures
+and dependencies must validate before publication. Large objects retain streaming.
+
 Authenticate once per connection burst. Pin a separate immutable offer for each
 exchange round, transfer missing objects and existing CRDT records, commit before
 acknowledging, and install through the existing recovery journal. Reuse the
@@ -200,6 +209,9 @@ acknowledgments. Cloud fallback retains its finite HTTP requests and periodic
 polling; these LAN bursts add no persistent cloud connection.
 
 Implementation and qualification: [LAN event delivery plan](<impl/Lambda_Impl_Sync_LAN_Events (done).md>).
+The [warm latency investigation](impl/Lambda_Impl_Sync_Warm_Latency.md) records
+the subsequent optimization and remaining scale limits; subsecond delivery is
+not yet qualified for the final implementation.
 
 The synchronized working directory remains available to other applications;
 exclusive ownership is limited to the sync agent's private repository state.

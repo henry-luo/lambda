@@ -44,9 +44,10 @@ pub fn placements(events) any^ {
     return {entries:entries,suppressed:suppressed}
 }
 
-pub fn deletions(events, entry) any^ => [for (event in events where event.action == 'delete' and event.entry == entry and
-    not any([for (other in events where other.action == 'restore' and other.entry == entry)
+fn active_deletions(events) any^ => [for (event in events where event.action == 'delete' and
+    not any([for (other in events where other.action == 'restore' and other.entry == event.entry)
         contains(other.deletions,event.id)^])) event]
+pub fn deletions(events, entry) any^ => [for (event in active_deletions(events)^ where event.entry == entry) event]
 
 pub fn revisions(events, entry) any^ => sort(unique([for (event in events where
     (event.action == 'create' and event.id == entry and event.type == 'file') or
@@ -57,8 +58,8 @@ pub fn heads(events, entry) any^ {
     return [for (revision in versions where not any([for (other in versions) contains(other.parents,revision.id)^])) revision]
 }
 
-pub fn hidden(entries, events, id) any^ => any([for (entry in entries where ancestor(entries,id,entry.id)^)
-    len(deletions(events,entry.id)^) > 0])
+fn hidden_by(entries, deleted, id) any^ => any([for (event in deleted) ancestor(entries,id,event.entry)^])
+pub fn hidden(entries, events, id) any^ => hidden_by(entries,active_deletions(events)^,id)^
 
 fn alternatives(events, entry) any^ {
     let moves = [for (event in events where (event.action == 'create' and event.id == entry) or
@@ -90,13 +91,18 @@ fn names(entries) any^ {
 pub fn project(events) any^ {
     let replay = placements(events)^
     let entries = replay.entries
-    let visible_names = names([for (entry in entries where entry.id != v.root and not hidden(entries,events,entry.id)^) entry])^
+    // Deletion work depends on active deletions, not every entry in a live tree.
+    let deleted = active_deletions(events)^
+    let invisible = [for (entry in entries where hidden_by(entries,deleted,entry.id)^) entry.id]
+    let visible_names = names([for (entry in entries where entry.id != v.root and not contains(invisible,entry.id)^) entry])^
     let rows = [for (entry in entries where entry.id != v.root)
-        {*:entry,visible:not hidden(entries,events,entry.id)^,
+        {*:entry,visible:not contains(invisible,entry.id)^,
          materialized_name:v.lookup(visible_names,entry.id)^.name or entry.name,
-         deletions:[for (event in deletions(events,entry.id)^) event.id],
+         deletions:[for (event in deleted where event.entry == entry.id) event.id],
          heads:if (entry.type == 'file') heads(events,entry.id)^ else []}]
     var conflicts = [for (move in replay.suppressed) {kind:'cycle',*:move}]
+    let deleted_contexts = [for (event in deleted) {event:event,
+        entries:placements([for (prior in events where seen(event.context,prior.id)^) prior])^.entries}]
     var i = 0
     while (i < len(rows)) {
         let row = rows[i]
@@ -107,21 +113,19 @@ pub fn project(events) any^ {
             conflicts = [*conflicts,{kind:'name',entry:row.id,parent:row.parent,name:row.name}]
         }
         // inspect each deletion's causal tree, not a receiver's arrival order.
-        let deletes = [for (event in events where event.action == 'delete' and
-            contains([for (active in deletions(events,event.entry)^) active.id],event.id)^) event]
         var j = 0
-        while (j < len(deletes)) {
-            let deleted = deletes[j]
-            let before = placements([for (event in events where seen(deleted.context,event.id)^) event])^.entries
-            if (not row.visible and ancestor(entries,row.id,deleted.entry)^ and not seen(deleted.context,row.id)^) {
-                conflicts = [*conflicts,{kind:'delete-create',entry:row.id,deletion:deleted.id}]
+        while (j < len(deleted_contexts)) {
+            let cut = deleted_contexts[j].event
+            let before = deleted_contexts[j].entries
+            if (not row.visible and ancestor(entries,row.id,cut.entry)^ and not seen(cut.context,row.id)^) {
+                conflicts = [*conflicts,{kind:'delete-create',entry:row.id,deletion:cut.id}]
             }
-            if (ancestor(before,row.id,deleted.entry)^) {
+            if (ancestor(before,row.id,cut.entry)^) {
                 if (row.visible) {
-                    conflicts = [*conflicts,{kind:'delete-move',entry:row.id,deletion:deleted.id}]
+                    conflicts = [*conflicts,{kind:'delete-move',entry:row.id,deletion:cut.id}]
                 } else if (any([for (event in events where event.action == 'publish' and event.entry == row.id)
-                    not seen(deleted.context,event.id)^])) {
-                    conflicts = [*conflicts,{kind:'delete-edit',entry:row.id,deletion:deleted.id}]
+                    not seen(cut.context,event.id)^])) {
+                    conflicts = [*conflicts,{kind:'delete-edit',entry:row.id,deletion:cut.id}]
                 }
             }
             j = j+1

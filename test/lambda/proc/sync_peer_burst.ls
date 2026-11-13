@@ -6,6 +6,7 @@ import crypto: lambda.io.crypto
 import owner: lambda.sync.task_owner
 import ws: lambda.io.websocket
 import exchange: lambda.sync.peer_exchange
+import session: lambda.sync.peer_session
 pn after_round(event, handle, root, name) any^ {
     if (event.type == 'round' and event.rounds == 1) {
         output(name,root ++ "/" ++ name ++ ".txt")^
@@ -42,24 +43,33 @@ pn main() {
     let before = exchange.current_token(ah)^
     let rejected = local.mutate(ah,pn (tx,k,current)=> { raise error("rollback") }) ^ { ^ }
     let unchanged = exchange.current_token(ah)^ == before
-    let listener = peer.listener(0,"127.0.0.1",true)^
-    let options = {idle_ms:500,burst_ms:10000,interval_ms:100}
-    let a_report = pn (event)=> { return after_round(event,ah,area ++ "/a/tree","a")^ }
-    let b_report = pn (event)=> { return after_round(event,bh,area ++ "/b/tree","b")^ }
-    let server = start(burst.accept,[listener,bh,bo.credentials,null,options,b_report])
-    let started = clock()
-    let client = start(burst.connect,["ws://127.0.0.1:" ++ string(listener.port) ++ "/sync",ah,ao.credentials,b.id,null,options,a_report])
-    let sent = wait(client)^
-    let elapsed = clock()-started
-    let served = wait(server)^
-    let result = [called == 42,retained == 'unrelated',rejected is error,unchanged,sent.rounds >= 2,served.rounds >= 2,
-        input(area ++ "/a/tree/b.txt",'text')^ == "b",input(area ++ "/b/tree/a.txt",'text')^ == "a",
-        input(area ++ "/b/tree/initial.txt",'text')^ == "before",elapsed >= 0.5]
+    var checked = [called == 42,retained == 'unrelated',rejected is error,unchanged]
+    for (profile in [session.burst_protocol,session.batch_protocol]) {
+        let label = if (profile == session.burst_protocol) "v1" else "v2"
+        let listener = peer.listener(0,"127.0.0.1",true)^
+        let options = {idle_ms:500,burst_ms:10000,interval_ms:100}
+        let aname = "a-" ++ label
+        let bname = "b-" ++ label
+        let a_report = pn (event)=> { return after_round(event,ah,area ++ "/a/tree",aname)^ }
+        let b_report = pn (event)=> { return after_round(event,bh,area ++ "/b/tree",bname)^ }
+        let server = start(burst.accept,[listener,bh,bo.credentials,null,options,b_report])
+        let started = clock()
+        let socket = ws.open("ws://127.0.0.1:" ++ string(listener.port) ++ "/sync",
+            {protocols:[profile],max_message_bytes:session.max_frame})^
+        let client = start(burst.client,[socket,ah,ao.credentials,b.id,null,options,a_report])
+        let sent = wait(client)^
+        let elapsed = clock()-started
+        let served = wait(server)^
+        checked = [*checked,sent.rounds >= 2,served.rounds >= 2,
+            input(area ++ "/a/tree/" ++ bname ++ ".txt",'text')^ == bname,
+            input(area ++ "/b/tree/" ++ aname ++ ".txt",'text')^ == aname,
+            input(area ++ "/b/tree/initial.txt",'text')^ == "before",elapsed >= 0.5]
+        ws.close(socket)^; ws.close(listener)^
+    }
     send(a_owner,{stop:true})^
     send(b_owner,{stop:true})^
     wait(a_owner)^
     wait(b_owner)^
-    ws.close(listener)^
     io.delete(area)^
-    return result
+    return checked
 }

@@ -29,7 +29,8 @@ S3 bucket, STUN service or WebRTC dependency preparation is needed for this LAN
 profile. Initial support is the native macOS host.
 
 The agent scans on startup to capture changes made while it was stopped, then
-uses OS directory notifications. It batches changes for about 200 ms and starts
+uses OS directory notifications. It batches changes for about 50 ms, with a
+250 ms maximum batch wait, and starts
 delivery to online peers. Connections are reused for changes in either direction
 and close after ten quiet seconds. Startup/rediscovery exchanges catch up
 without a new filesystem event. Recovery and occasional verification retain full

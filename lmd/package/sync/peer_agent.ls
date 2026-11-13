@@ -93,6 +93,12 @@ pub pn materialize(handle) any^ {
         })^
     }
     let current = local.status(handle)^
+    if (current.state.installation == null and
+        current.state.base.checkpoint.replica.epoch == current.state.endpoint.replica.epoch and
+        current.state.base.checkpoint.replica.clock == current.state.endpoint.replica.clock) {
+        // No managed changes require writes; external edits enter through capture, not ACKs.
+        return current
+    }
     let entries = workspace.read(current.state.endpoint.replica)^.entries
     // content alternatives and retained external captures require an explicit resolution.
     if (current.state.review != null or any([for (entry in entries where entry.visible and entry.type == 'file')

@@ -43,10 +43,11 @@ pub fn batch(before, after) any^ {
     return {id:codec.digest([before.document,before.profile,before.epoch,body])^,*:body}
 }
 
-pub fn transaction(replica, actor, commands) any^ {
+pub fn transaction(replica, actor, commands, retain_undo=true) any^ {
     let updated = execute(replica,actor,commands)^
     let packet = batch(replica,updated)^
-    return {replica:updated,batch:packet,undo:{before:c.snapshot(replica)^,after:c.snapshot(updated)^,batch:packet}}
+    return {replica:updated,batch:packet,undo:if (retain_undo)
+        {before:c.snapshot(replica)^,after:c.snapshot(updated)^,batch:packet} else null}
 }
 
 fn restore_registers(current, before, after, actor, meta) any^ {
