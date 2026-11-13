@@ -1,38 +1,73 @@
 [{
     name: "basic",
-    equal: true
+    equal: true,
+    grammar: true
   }, {
     name: "tables",
-    equal: true
+    equal: true,
+    grammar: true
   }, {
     name: "escapes",
-    equal: true
+    equal: true,
+    grammar: true
   }, {
     name: "unicode",
-    equal: true
+    equal: true,
+    grammar: true
   }, {
     name: "destinations",
-    equal: true
+    equal: true,
+    grammar: true
   }, {
     name: "reset",
-    equal: true
+    equal: true,
+    grammar: true
   }, {
     name: "empty-color-slots",
-    equal: true
+    equal: true,
+    grammar: true
   }, {
     name: "unterminated",
-    equal: true
+    equal: true,
+    grammar: true
+  }, {
+    name: "utf8-fallback",
+    equal: true,
+    grammar: true
+  }, {
+    name: "trailing-group",
+    equal: true,
+    grammar: true
   }, {
     name: "tablesep",
-    equal: true
+    equal: true,
+    grammar: true
   }]
 {
   fixture: true,
-  invalid: true
+  grammar_fixture: true,
+  invalid: true,
+  grammar_invalid: true
 }
 {
-  depth_guard: true
+  depth_guard: true,
+  grammar_depth_guard: true
 }
 {
-  depth_511: true
+  depth_511: true,
+  grammar_depth_511: true
+}
+{
+  deep_skipped_destination: true,
+  grammar_deep_skipped_destination: true
+}
+{
+  oracle_cases_complete: true,
+  minimal: true,
+  nested: true,
+  empty_invalid: true
+}
+{
+  legacy_dispatch_removed: true,
+  auto_source_is_text: true
 }

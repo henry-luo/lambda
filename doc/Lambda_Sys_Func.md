@@ -1286,7 +1286,9 @@ Parse content from a file path or URL.
 `p#a.b` forces and then navigates. `input(p, format)` stays the
 explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
-**Supported Input Formats**: `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip`, `7z`, `tar`, `rar`, `rar5` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
+**Supported Input Formats**: `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip`, `7z`, `tar`, `rar`, `rar5` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
+
+RTF uses the script package `lambda.doc.rtf`: `rtf.parse_file(path)^` or `rtf.parse(source)^`.
 
 Wiki dialects use `"wiki:<flavor>"` or `{type:"wiki", flavor:"zimwiki"}`.
 Unqualified `wiki` and `.wiki` input default to MediaWiki; other dialects
@@ -1344,7 +1346,6 @@ accepts any filename regardless of its extension (D10.1.2).
 | Markdown | Markdown markup | `input(/.'doc.md', 'markdown')` |
 | CSV | Comma-Separated Values | `input(/.'data.csv', 'csv')` |
 | LaTeX | LaTeX markup | `input(/.'doc.tex', 'latex')` |
-| RTF | Rich Text Format | `input(/.'doc.rtf', 'rtf')` |
 | PDF | Portable Document Format | `input(/.'doc.pdf', 'pdf')` |
 | CSS | Cascading Style Sheets | `input(/.'style.css', 'css')` |
 | INI | Configuration files | `input(/.'config.ini', 'ini')` |

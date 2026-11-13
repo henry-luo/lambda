@@ -719,14 +719,14 @@ report?<p> |> ~[0]             // first text of each paragraph
 
 ### 3.3 RTF
 
-The experimental `lambda.doc.rtf` script package parses RTF source text into a `doc` element containing styled `p` and `span` elements (D9.3.4):
+The experimental `lambda.doc.rtf` script package parses RTF source text into a `doc` element containing styled `p` and `span` elements (D9.3.4). It uses the direct reader by default; `rtf.parse_grammar(source)` selects the grammar-based reader for analysis:
 
 ```lambda
 import rtf: lambda.doc.rtf
 let document = rtf.parse_file("report.rtf")^  // or rtf.parse(source_text)^
 ```
 
-The supported subset includes nested formatting, font and color tables, paragraph alignment and indents, basic escapes, Unicode fallback, page breaks, and table separators. Headers, footers, pictures, objects, metadata, and other non-body destinations are skipped. This is not a complete RTF implementation: code-page decoding, embedded media, and full table layout are not supported. The script parser rejects nesting of 512 groups or more. `input(path, 'rtf')` continues to use the native input parser; the document viewer uses the script package.
+The supported subset includes nested formatting, font and color tables, paragraph alignment and indents, basic escapes, Unicode fallback, page breaks, and table separators. Headers, footers, pictures, objects, metadata, and other non-body destinations are skipped. This is not a complete RTF implementation: code-page decoding, embedded media, and full table layout are not supported. The script parser rejects nesting of 512 groups or more. The native RTF input parser has been removed; use this package for RTF content. The document viewer uses the direct script reader.
 
 ### 3.4 Email (EML / RFC 822)
 

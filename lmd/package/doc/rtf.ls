@@ -1,5 +1,10 @@
-// RTF subset parser. Group-local formatting follows the native input parser (D9.3.4).
+// RTF subset parser. Group-local formatting retains the former native behavior (D9.3.4).
 import lex: .rtf.lexer
+import grammar_lex: .rtf.grammar_lexer
+
+// Both readers feed one semantic lowering; only the grammar reader materializes records.
+fn raw_source(source) => if (source is string) source else source.source
+fn next_token(source,at) any^ => if (source is string) lex.next(source,at)^ else grammar_lex.next(source,at)^
 
 fn initial_style() => {font:0,size:24,color:0,align:"left",li:0,ri:0,sl:0,uc:1,
     bold:false,italic:false,underline:false,strike:false,caps:false,baseline:0}
@@ -52,7 +57,7 @@ fn finish(s) any^ {
 }
 fn add(s, text) => {*:s,text:s.text ++ text}
 fn skip_group(source, at, depth = 0) any^ {
-    let t = lex.next(source,at)^;
+    let t = next_token(source,at)^;
     if (t == null) at else if (t.kind == "open") skip_group(source,t.end,depth+1)
     else if (t.kind == "close") (if (depth == 0) t.end else skip_group(source,t.end,depth-1))
     else skip_group(source,t.end,depth)
@@ -63,7 +68,7 @@ fn put_font(s, font_id, name) any^ {
 }
 // Font entries are delimited by semicolons or groups; control words are metadata.
 fn font_table(source, at, s, nesting = 0, font_id = null, name = "") any^ {
-    let t = lex.next(source,at)^;
+    let t = next_token(source,at)^;
     if (t == null) {at:at,state:put_font(s,font_id,name)}
     else if (t.kind == "open") font_table(source,t.end,s,nesting+1,font_id,name)
     else if (t.kind == "close") {
@@ -79,7 +84,7 @@ fn font_table(source, at, s, nesting = 0, font_id = null, name = "") any^ {
 }
 fn empty_color() => {red:0,green:0,blue:0,specified:false}
 fn color_table(source, at, s, color = empty_color()) any^ {
-    let t = lex.next(source,at)^;
+    let t = next_token(source,at)^;
     if (t == null) {at:at,state:s}
     else if (t.kind == "close") {at:t.end,state:s}
     else if (t.kind == "control" and t.parameter != null and contains(["red","green","blue"],t.word)) {
@@ -94,8 +99,8 @@ fn color_table(source, at, s, color = empty_color()) any^ {
     } else color_table(source,t.end,s,color)
 }
 fn fallback(source, at, count) any^ {
-    if (count <= 0 or at >= len(source)) { at } else {
-        let t = lex.next(source,at)^;
+    if (count <= 0 or at >= len(raw_source(source))) { at } else {
+        let t = next_token(source,at)^;
         if (t == null or t.kind == "open" or t.kind == "close" or t.kind == "control") at
         else if (t.kind == "text") fallback(source,at+1,count-1)
         else if (t.kind == "hex" or (t.kind == "symbol" and contains(["\\","{","}","~","-","_"],t.value)))
@@ -141,8 +146,8 @@ fn skip_space(source, at) any^ {
 fn group(source, at, s, depth) any^ {
     if (depth >= 512) raise error({message:"rtf: maximum nesting depth exceeded"})
     else {
-        let begin = skip_space(source,at+1);
-        let first = lex.next(source,begin)^;
+        let begin = skip_space(raw_source(source),at+1);
+        let first = next_token(source,begin)^;
         if (first != null and first.kind == "symbol" and first.value == "*")
             {at:skip_group(source,first.end),state:s}
         else if (first != null and first.kind == "control" and first.word == "fonttbl")
@@ -156,7 +161,7 @@ fn group(source, at, s, depth) any^ {
     }
 }
 fn walk(source, at, s, depth) any^ {
-    let t = lex.next(source,at)^;
+    let t = next_token(source,at)^;
     if (t == null) {at:at,state:flush(s)}
     else if (t.kind == "close") {at:t.end,state:flush(s)}
     else if (t.kind == "open") {
@@ -175,23 +180,27 @@ fn walk(source, at, s, depth) any^ {
         let before = flush(s)^;
         let after = control(before,t)^;
         let end = if (t.word == "u" and t.parameter != null) fallback(source,t.end,before.style.uc)
-            else if (t.word == "footnote" and slice(source,t.end,t.end+1) == "{") skip_group(source,t.end+1)
+            else if (t.word == "footnote" and slice(raw_source(source),t.end,t.end+1) == "{") skip_group(source,t.end+1)
             else t.end;
         walk(source,end,after,depth)
     }
 }
 // Accept RTF source text; callers that own file I/O can read text before parsing.
-pub fn parse(source) element^ {
+fn parse_with(source, use_grammar) element^ {
     if (not (source is string)) raise error({message:"rtf: expected source text"})
     else {
         let begin = skip_space(source,0);
         if (slice(source,begin,begin+5) != "{\\rtf")
             raise error({message:"rtf: document must start with '{\\rtf'"})
         else {
-            let result = group(source,begin,initial(),0)^;
+            let stream = if (use_grammar) grammar_lex.prepare(source)^ else source;
+            let result = group(stream,begin,initial(),0)^;
             let done = finish(result.state)^;
             <doc *done.blocks>
         }
     }
 }
+pub fn parse(source) element^ => parse_with(source,false)^
+// The grammar variant is retained for differential and performance analysis.
+pub fn parse_grammar(source) element^ => parse_with(source,true)^
 pub fn parse_file(path) element^ => parse(input(path,'text')^)^
