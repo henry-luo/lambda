@@ -2,6 +2,23 @@
 
 ## Current checkpoint
 
+- 2026-11-14 continuation, Lambda `09a40dfe2` plus this work. Java properties
+  now scan unescaped key delimiters and use the repaired Input parser (LI-051)
+  to decode names. Renaming and insertion escape Java key syntax; value edits
+  retain the original key spelling. Continued lines still open as source. CSV
+  delimiter detection now skips quoted fields, doubled quotes and embedded
+  line breaks before counting delimiters, matching the Input LI-042 repair.
+  Escaped-key and quoted-CSV model regressions both failed before the changes;
+  edit/save UI replays cover both, and the invalid-keyboard replay now checks
+  an invalid value since spaces are valid in property names. Source-backed
+  editing is governed by D9.3.4. The editor/RTF model selection passed 96/96,
+  and the full edit UI suite passed 146/146 fixtures (149/149 including its
+  scheduler checks). The standard Lambda baseline passed 7,483/7,512: the 29
+  failures are exactly the same `proc_sync_*` cases as the previous baseline,
+  whose cause remains unconfirmed in the sync plan. Evidence is in
+  `temp/edit-viewer/property-csv-{model-final,ui-final,lambda-baseline}.log`.
+  Test262 separately passed 40,261/40,261 selected tests with zero regressions
+  and 2,652 skipped (`temp/edit-viewer/property-csv-test262-baseline.log`).
 - 2026-11-13; `Lambda-opus`, branch `master`, base `8b5ebe56e` plus
   uncommitted changes for this task. The goal is structured data editing,
   keyboard-oriented rich markup editing, source editing for other text,
@@ -32,22 +49,27 @@
   `MotionCascadeTest.StylesheetResourcePrefetchPreservesAuthoredUrls`, and one
   `wpt-css-sizing` layout case. Causes and ownership are not yet established;
   the complete results are in `temp/edit-viewer/markdown-final-radiant-baseline.log`.
-- 2026-11-14 baseline follow-up, `044a38836` plus two Lambda-owned test
-  changes: the paint fixture now puts its rounded overflow clip on an ordinary
-  container, since body overflow propagates to the viewport (Radiant RI-087).
-  It retains fallback counters and byte-identical fresh-render comparisons.
-  The prefetch fixture now publishes matching consumers with loader-provided
-  stylesheet provenance (RI-079); five resources load, an inactive resource
-  stays unloaded, and all authored URLs remain unchanged. The complete changed
-  executables pass 250/250 and 186/186. `make test-radiant-baseline` now reports
-  8,169 passed, one failed, 297 partial and 20 skipped. The remaining case is
-  `keyword-sizes-for-intrinsic-contributions`: two floated min-content minimum
-  controls are 90px/150px versus 70px. It reproduces individually and is recorded
-  as [Radiant RI-089](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-089).
-  Its native cause is unconfirmed. Implementation repair stops at the sibling
-  ownership boundary (D9.1.1v4 / D9.1.3v2 and AGENTS.md). Evidence and the current
-  follow-up checkpoint are under `temp/radiant-three-failures/`, including
-  `radiant-baseline.log`, `sizing-results.json` and `sizing-single.log`.
+- 2026-11-14 baseline follow-up, Lambda `09a40dfe2` and the explicitly
+  authorized Radiant repair at `4ec1e8c` plus RI-089 changes. The two Lambda
+  fixture fixes are committed in `09a40dfe2`: the paint fixture uses an ordinary
+  parent for local rounded clipping (RI-087), retaining fallback counters and
+  byte-identical fresh-render comparisons. Prefetch publishes matching consumers
+  with stylesheet provenance (RI-079), loads five consumed resources, excludes
+  an inactive rule and preserves all authored URLs. Both complete executables
+  pass 250/250 and 186/186.
+  [Radiant RI-089](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-089) is now
+  fixed: intrinsic min/max measurement retains the definite preferred width
+  before applying measured limits. `width:auto` and the existing `fit-content`
+  negotiation remain intact. The new native regression fails before and passes
+  after; all 110 owner dynamic tests pass, and independent Chromium confirms
+  nine min/max combinations plus both fit-content controls. Integer lint checks
+  89 casts with none unmarked. The sizing baseline passes 776/776 and the full
+  `make test-radiant-baseline` exits 0 with 8,170 passed, zero failed, 297 partial
+  and 20 skipped. Native ownership remains D9.1.1v4 / D9.1.3v2; no external
+  fixture, reference or scored baseline changed. Evidence and source hashes are
+  under `temp/radiant-three-failures/`, including `ri089-radiant-baseline.log`,
+  `sizing-final-results.json`, `browser-control-final.json` and
+  `ri089-verification-identity.json`.
 - CSV and TSV now present a grid with numbered rows and columns under D9.3.4;
   the first row remains editable data. Tab and Shift+Tab commit and move between
   cells, while row and field actions use the existing source-backed model and
@@ -457,10 +479,10 @@
   replays, with the same three Markdown failures. See
   `temp/edit-viewer/markup-coverage-*`; no engine code changed in that pass.
   Calendar/contact source and RTF rich/fallback UI replays all pass.
-- Next: after Input fixes LI-029–LI-032, LI-034 and LI-045, implement property editing for the
-  affected data formats without compensating for parser defects. After LI-033,
-  use the provided source ranges for individually retained footnote blocks.
-  Independently expand the rich RTF subset only with preservation evidence,
-  and implement remaining markup adapters after LI-035 and LI-038–LI-044.
-  Do not silently rewrite source or
-  change sibling providers.
+- Next: the Input ledger IDs in older entries above predate conflict
+  reconciliation. The current fixed ledger records LI-037–LI-051 as repaired;
+  independently qualify JSON, YAML, TOML, calendar and contact property
+  editing and the remaining rich markup paths against those providers, with
+  source preservation and malformed-input tests. Independently expand the
+  rich RTF subset only with preservation evidence. Do not silently rewrite
+  source or change sibling providers.
