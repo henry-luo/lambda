@@ -250,7 +250,7 @@ fn survives(nodes) any^ {
 
 // A block the editor only shows — raw HTML, display math — is kept as
 // written rather than as an atom the formatter would respell.
-fn shown_only(item) => name(item) == 'html-block' or (name(item) == 'math' and item.type == "block")
+fn shown_only(item) => name(item) == 'html-block' or name(item) == 'footnote' or (name(item) == 'math' and item.type == "block")
 
 fn item_blocks(item, lines, span, has_notes) any^ {
   let source = join(take(drop(lines, span.first - 1), span.last - span.first + 1), "\n")
@@ -285,9 +285,16 @@ pub fn import_text(source) map^ {
   let parsed = parse(parts.body, {type: 'markdown', sourcepos: true}) ^ {
     raise error("the Markdown source could not be parsed", ^)
   }
-  // The generated note section has no single source span; definitions remain in the gaps.
+  // Definitions are in a generated footer, but their spans identify authored order.
   let has_notes = count(parsed?<footnotes>) > 0
-  let items = [for (c in ((content(doc_body(parsed))) ^ { [] }) where ((type(c) == element and name(c) != 'footnotes') ^ { false })) c]
+  let body = [for (c in ((content(doc_body(parsed))) ^ { [] }) where ((type(c) == element and name(c) != 'footnotes') ^ { false })) c]
+  let notes = [for (c in ((content(parsed?<footnotes>)) ^ { [] })
+    where ((type(c) == element and name(c) == 'footnote' and c.sourcepos != null) ^ { false })) c]
+  // A definition inside a container is already retained with that container.
+  let separate = [for (note in notes, let n = source_range(note)
+    where (not (any([for (item in body, let p = source_range(item))
+      p != null and p.first <= n.first and p.last >= n.last]) or false))) note]
+  let items = sort([*body, *separate], {by: (item) => source_range(item).first})
   // without its lines a block could be neither kept as written nor checked
   if (any([for (it in items) it.sourcepos == null]) or false) {
     raise error("the Markdown parser did not report where each block is")

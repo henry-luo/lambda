@@ -1826,7 +1826,7 @@ TEST_F(MotionCascadeTest, StylesheetResourcePrefetchPreservesAuthoredUrls) {
     }
     ArrayList* urls = arraylist_new(8);
     ASSERT_NE(urls, nullptr);
-    radiant_for_each_stylesheet_resource_url(sheet, [](CssValue* value, void* context) {
+    radiant_for_each_stylesheet_resource_url(sheet, [](const CssValue* value, void* context) {
         arraylist_append((ArrayList*)context, (void*)value->data.url);
     }, urls);
     EXPECT_EQ(urls->length, 5);

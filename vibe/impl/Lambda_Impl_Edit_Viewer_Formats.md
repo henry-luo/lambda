@@ -8,6 +8,30 @@
   and rejection of non-text media.
 - S12.1.1v2 and S12.1.3 govern file effects and editor state. Preserve the
   existing adapter round-trip checks and atomic save/conflict handling.
+- Markdown footnotes now use the Input parser's repaired LI-041 source ranges
+  to show individual definitions in authored order while preserving their
+  exact source (D9.3.4). Duplicate and multiline definitions and intervening
+  link definitions have model coverage. The two previously failing view-only
+  UI replays pass. The math-scroll fixture's former 5.5 px width came from
+  the earlier math layout, before null-delimiter spacing; the current SVG is
+  0.54925 em, or 8.8 px at 16 px. Independent Chromium measured 8.78 px and
+  a 4.25 px paragraph-relative top versus Radiant's 3.2 px; the fixture now
+  retains its 2 px tolerance around the current geometry. TeX's 10 pt oracle
+  confirms 2.4 pt of null-delimiter spacing. The three requested replays pass
+  (`temp/edit-viewer/markdown-three-fixed.log`, `math-browser.log`,
+  `math-reference-radiant.log`, and `tex-oracle/run.log`). The Input fixes
+  for LI-046 and LI-048 also make two Org cases rich-editable; their replays
+  now verify editing and saving rather than the superseded source fallback.
+  The edit UI suite passed 144/144 and the selected edit/editor model suite
+  passed 108/108. The Lambda baseline passed 7,481/7,510: all 29 failures
+  were `proc_sync_*`; the isolated repository failure reports E407 at JSON
+  column 8192, with cause unconfirmed and recorded in the sync plan. Evidence:
+  `temp/edit-viewer/markdown-final-{ui,model,lambda-baseline}.log`.
+  The Radiant baseline passed 8,167 tests, with three failures, 297 partial
+  and 20 skipped: `PaintOwnership.HtmlBoxAdmissionFallsBackForChangedAndUnsupportedPaint`,
+  `MotionCascadeTest.StylesheetResourcePrefetchPreservesAuthoredUrls`, and one
+  `wpt-css-sizing` layout case. Causes and ownership are not yet established;
+  the complete results are in `temp/edit-viewer/markdown-final-radiant-baseline.log`.
 - CSV and TSV now present a grid with numbered rows and columns under D9.3.4;
   the first row remains editable data. Tab and Shift+Tab commit and move between
   cells, while row and field actions use the existing source-backed model and

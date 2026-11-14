@@ -1,13 +1,17 @@
 {
-  "name": "preserve an Org paragraph following a list in source mode",
+  "name": "Org paragraph following a list remains separate through rich editing",
   "command": "edit",
   "html": "test/ui/edit/sample-org-list-followed.org",
   "working_copy": "temp/edit-ui/edit_org_list_fallback.org",
   "viewport": {"width": 1000, "height": 700},
   "events": [
-    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
-    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "- two"},
-    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "https://example.org"},
-    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Opened source"}
+    {"type": "assert_count", "target": {"selector": ".edit-surface li"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".edit-surface a"}, "equals": "example"},
+    {"type": "click", "target": {"selector": ".edit-surface a"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_org_list_fallback.org", "contains": "- two\n\nSee"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_org_list_fallback.org", "contains": "edited"}
   ]
 }

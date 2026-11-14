@@ -1,12 +1,18 @@
 {
-  "name": "preserve an unsupported Org source block in source mode",
+  "name": "Org source block remains intact through rich editing",
   "command": "edit",
   "html": "test/ui/edit/sample-org-code.org",
   "working_copy": "temp/edit-ui/edit_org_code_fallback.org",
   "viewport": {"width": 1000, "height": 700},
   "events": [
-    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
-    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "#+BEGIN_SRC"},
-    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Opened source"}
+    {"type": "assert_count", "target": {"selector": ".edit-surface pre"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-surface pre"}, "contains": "hello"},
+    {"type": "click", "target": {"selector": ".edit-surface pre"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " world"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_org_code_fallback.org", "contains": "#+BEGIN_SRC"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_org_code_fallback.org", "contains": "hello world"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_org_code_fallback.org", "contains": "#+END_SRC"}
   ]
 }
