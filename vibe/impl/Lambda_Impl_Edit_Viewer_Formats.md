@@ -8,6 +8,16 @@
   and rejection of non-text media.
 - S12.1.1v2 and S12.1.3 govern file effects and editor state. Preserve the
   existing adapter round-trip checks and atomic save/conflict handling.
+- CSV and TSV now present a grid with numbered rows and columns under D9.3.4;
+  the first row remains editable data. Tab and Shift+Tab commit and move between
+  cells, while row and field actions use the existing source-backed model and
+  undo history. Focused CSV/TSV edit, navigation, add and delete replays pass,
+  as does a separate uneven-row and multiline replay
+  (`temp/edit-viewer/csv-grid-focused.log` and `csv-grid-uneven.log`). The
+  editor model selection passed 88/88; the edit UI suite passed 140/143 with
+  the three previously recorded Markdown failures (`csv-grid-model.log` and
+  `csv-grid-suite.log`, under `temp/edit-viewer/`). The suite run predates the
+  added uneven-row replay.
 - XHTML now has a conservative rich adapter (D10.1.4). It preserves the
   declaration and document envelope and requires the strict XHTML tree to
   survive conversion through the HTML editor before admission. Compact HTML
@@ -28,7 +38,8 @@
   The attempted compensations were removed under the cross-project rule;
   JSON, YAML and TOML retain their pre-existing source surfaces; iCalendar
   and vCard now also open as source. Java
-  properties, INI, CSV/TSV and strict XML values share the property surface.
+  properties, INI and strict XML values use the property tree; CSV/TSV use
+  the shared surface's grid presentation.
   CSV/TSV fields display decoded values, quote edits automatically, and support
   multiline editing; unchanged fields retain their original spelling and line endings.
   Input-owned LI-034 blocks property editing when the CSV delimiter detector

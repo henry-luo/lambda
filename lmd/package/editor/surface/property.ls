@@ -21,10 +21,25 @@ pub let css = "
   .property-value:focus { border-color: #0969da; }
   .property-kind { color: #6e7781; }
   .property-status { padding: 6px 16px; color: #57606a; background: #f6f8fa; }
+  .property-grid-wrap { padding: 16px; overflow: auto; }
+  .property-grid { border-collapse: collapse; }
+  .property-grid th, .property-grid td { border: 1px solid #d0d7de; padding: 4px; vertical-align: top; }
+  .property-grid th { background: #f6f8fa; font-weight: 500; }
+  .property-grid .property-value { width: 160px; box-sizing: border-box; }
+  .property-grid-cell { display: flex; align-items: start; }
 "
 
 fn draft_value(draft, first, key, original) =>
   if (draft != null and draft.first == first and draft.key == key) draft.text else original
+
+fn value_view(name, node, format, draft, id = null) any^ =>
+  if (format.multiline_values == true or node.multiline == true)
+    <textarea id: id, class: "property-value" ++ (if (node.multiline == true) " property-multiline" else ""),
+      rows: if (node.multiline == true) 3 else 1, ['data-first']: string(node.first), ['data-end']: string(node.last),
+      ['data-original']: node.text, ['aria-label']: name, draft_value(draft, node.first, false, node.text)>
+  else <input id: id, class: "property-value", type: "text", value: draft_value(draft, node.first, false, node.text),
+      ['data-first']: string(node.first), ['data-end']: string(node.last),
+      ['data-original']: node.text, ['aria-label']: name>
 
 fn node_view(name, node, root, key_first, key_end, section, format, draft, path, closed) any^ =>
   <div class: "property-entry",
@@ -37,14 +52,8 @@ fn node_view(name, node, root, key_first, key_end, section, format, draft, path,
         ['data-first']: string(key_first), ['data-end']: string(key_end), ['data-original']: name, ['aria-label']: "Property name: " ++ name>
       else <span class: "property-name", name>
       if (node.group_header == true) <span class: "property-kind", if (node.view_only == true) "Open source to edit" else "{ }">
-      else if (node.kind == 'scalar' and (format.multiline_values == true or node.multiline == true))
-        <textarea class: "property-value" ++ (if (node.multiline == true) " property-multiline" else ""),
-          rows: if (node.multiline == true) 3 else 1, ['data-first']: string(node.first), ['data-end']: string(node.last),
-          ['data-original']: node.text, ['aria-label']: name, draft_value(draft, node.first, false, node.text)>
       else if (node.kind == 'scalar')
-        <input class: "property-value", type: "text", value: draft_value(draft, node.first, false, node.text),
-          ['data-first']: string(node.first), ['data-end']: string(node.last),
-          ['data-original']: node.text, ['aria-label']: name>
+        value_view(name, node, format, draft)
       else <span class: "property-kind", if (node.kind == 'object') "{ }" else "[ ]">
       if (node.kind != 'scalar' and format.can_add != false and node.can_add != false) apply(<property_button action: "add", label: "+", title: if (format.can_add_element == true) "Add attribute" else "Add item", first: node.first, kind: node.kind>) else null
       if (node.can_add_element == true and format.can_add_element == true) apply(<property_button action: "add_element", label: "+ child", title: "Add child element", first: node.first>) else null
@@ -56,6 +65,28 @@ fn node_view(name, node, root, key_first, key_end, section, format, draft, path,
         node_view(child.name, child.node, false, if (node.kind == 'object') child.first else null, child.key_end, child.group, format, draft, path ++ "." ++ string(i), closed)]>
     else null
   >
+
+// Rows are data, including the first row; numeric headings do not assume a header.
+fn grid_view(tree, format, draft) any^ {
+  let widths = [for (row in tree.children) len(row.node.children)]
+  let columns = if (len(widths) == 0) 0 else max(widths)
+  let add = apply(<property_button action: "add", label: "+ row", title: "Add row", first: tree.first, kind: tree.kind>)
+  let headings = [<th "Row">, *[for (i in 0 to columns - 1) <th ("Column " ++ string(i + 1))>], <th "Actions">]
+  let rows = [for (row_index, row in tree.children) {
+    let remove = apply(<property_button action: "delete", label: "−", title: "Remove row", first: row.node.first, kind: row.node.kind>)
+    let cells = [for (cell_index, cell in row.node.children) {
+      let field = value_view("Row " ++ string(row_index + 1) ++ ", column " ++ string(cell_index + 1), cell.node, format, draft,
+                             "grid-cell-" ++ string(row_index) ++ "-" ++ string(cell_index))
+      let remove_field = apply(<property_button action: "delete", label: "−", title: "Remove field", first: cell.node.first, kind: cell.node.kind>);
+      <td <div class: "property-grid-cell", *[field, remove_field]>>
+    }]
+    let add_field = apply(<property_button action: "add", label: "+ field", title: "Add field", first: row.node.first, kind: row.node.kind>);
+    <tr *[<th *[string(row_index + 1), remove]>, *cells,
+      *[for (i in (len(row.node.children)^) to columns - 1) <td>], <td add_field>]>
+  }]
+  let table = <table class: "property-grid", <thead <tr *headings>> <tbody *rows>>;
+  <div class: "property-grid-wrap", *[add, table]>
+}
 
 // The stable id lets the host restore this control after the tree is rebuilt.
 view <property_toggle> { <button id: "property-toggle-" ++ ~.path, class: "property-toggle", ['aria-expanded']: if (~.expanded) "true" else "false",
@@ -112,7 +143,9 @@ fn history_step(doc, undo, redo, forward) =>
 
 edit <property_app> state session: ~.session, doc: ~.doc, status: ~.status,
                           dialog: null, after_save: null, undo: [], redo: [], draft: null, closed: [] {
-  let dirty = sess.is_dirty(session, doc);
+  let dirty = sess.is_dirty(session, doc)
+  let content = if (session.format.id in ['csv', 'tsv']) grid_view(doc.tree, session.format, draft)
+    else <div class: "property-tree", node_view("root", doc.tree, true, null, null, null, session.format, draft, "0", closed)>;
   <body class: "edit-app edit-format-property", tabindex: "0",
     <div class: "property-toolbar", files.file_label(session, dirty)
       apply(<property_button action: "save", label: "Save">)
@@ -121,7 +154,7 @@ edit <property_app> state session: ~.session, doc: ~.doc, status: ~.status,
       apply(<property_button action: "redo", label: "Redo">)
       apply(<property_button action: "source", label: "Source">)
     >
-    <div class: "property-tree", node_view("root", doc.tree, true, null, null, null, session.format, draft, "0", closed)>
+    <div class: "property-content", content>
     <div class: "property-status", status>
     dialog_view(dialog, session)
   >
@@ -217,6 +250,25 @@ on edit_dialog(req) {
 }
 on keydown(evt) {
   let primary = evt.metaKey == true or evt.ctrlKey == true
+  if ((dialog == null and evt.key == "Tab" and not primary and
+       dom.matches(evt.target, ".property-grid .property-value"))^) {
+    let fields = dom.query_selector_all(dom.root_node(evt.target), ".property-grid .property-value")
+    let id = dom.get_attribute(evt.target, "id")
+    let positions = [for (i, field in fields where dom.get_attribute(field, "id") == id) i]
+    if (len(positions) > 0) {
+      let next = positions[0] + (if (evt.shiftKey == true) -1 else 1)
+      if ((next >= 0 and next < len(fields))^) {
+        // Programmatic focus changes do not necessarily dispatch a change event.
+        let result = commit_field(session.format, doc, undo, redo, evt.target)^
+        draft = result.draft; status = result.status
+        if (not result.ok) { return 'prevent-default' }
+        doc = result.doc; undo = result.undo; redo = result.redo
+        files.sync_window(evt.target, session, doc)^
+        dom.focus_set(fields[next], false)
+        return 'prevent-default'
+      }
+    }
+  }
   if ((dialog != null and dialog.kind in ['add_property', 'add_element'] and evt.key == "Enter" and not primary and
        dom.matches(evt.target, "#property-new-key,#property-new-value"))^) {
     let selector = if (dialog.kind == 'add_element') ".edit-dialog-element_add" else ".edit-dialog-property_add"

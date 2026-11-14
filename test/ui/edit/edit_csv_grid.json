@@ -1,0 +1,21 @@
+{
+  "name": "CSV grid edits and navigates cells with Tab",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.csv",
+  "working_copy": "temp/edit-ui/edit_csv_grid.csv",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 3},
+    {"type": "assert_count", "target": {"selector": ".property-grid thead th"}, "count": 4},
+    {"type": "click", "target": {"selector": "#grid-cell-1-0"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "Alison"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#grid-cell-1-1"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "Rome, Italy"},
+    {"type": "key_combo", "key": "Tab", "mods_str": "shift"},
+    {"type": "assert_focus", "target": {"selector": "#grid-cell-1-0"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_grid.csv", "contains": "Alison,\"Rome, Italy\""}
+  ]
+}
