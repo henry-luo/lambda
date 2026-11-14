@@ -1783,11 +1783,17 @@ protected:
 
 TEST_F(MotionCascadeTest, StylesheetResourcePrefetchPreservesAuthoredUrls) {
     CssStylesheet* sheet = css_parse_stylesheet(engine,
-        ":root { --hero: url(hero.svg); --layers: url(first.svg), url(second.svg); }"
-        "@media (min-width: 600px) { .logo { background: var(--logo, url(fallback.svg)); } }"
-        ".icon { background-image: url(icon.svg); }",
+        "* { --hero: url(hero.svg); --layers: url(first.svg), url(second.svg); }"
+        "@media (min-width: 600px) { * { background-image: var(--hero), var(--layers),"
+        " var(--logo, url(fallback.svg)), url(icon.svg); } }"
+        "@media (min-width: 1000px) { * { background-image: url(inactive.svg); } }",
         "https://assets.example.test/styles/main.css");
     ASSERT_NE(sheet, nullptr);
+    // the loader supplies declaration provenance; variable URLs use their consumer's stylesheet base.
+    CssRule* consumer = sheet->rules[1]->data.conditional_rule.rules[0];
+    consumer->data.style_rule.declarations[0]->source_file = sheet->origin_url;
+    doc.url = lam::own(url_parse("https://page.example.test/doc/index.html"));
+    ASSERT_NE(doc.url, nullptr);
     EnhancedFileCache* cache = enhanced_cache_create("temp/css_stylesheet_prefetch", 4096, 16);
     ASSERT_NE(cache, nullptr);
     struct NetworkScope {
@@ -1804,7 +1810,8 @@ TEST_F(MotionCascadeTest, StylesheetResourcePrefetchPreservesAuthoredUrls) {
     ASSERT_NE(doc.stylesheets, nullptr);
     doc.stylesheets[0] = sheet;
     doc.stylesheet_count = 1;
-    const char* expected[] = {"hero.svg", "first.svg", "second.svg", "fallback.svg", "icon.svg"};
+    const char* expected[] = {"hero.svg", "first.svg", "second.svg", "fallback.svg", "icon.svg", "inactive.svg"};
+    const int url_count = sizeof(expected) / sizeof(*expected);
     HttpCacheHeaders headers = {};
     headers.content_type = "application/octet-stream";
     for (const char* relative : expected) {
@@ -1814,14 +1821,25 @@ TEST_F(MotionCascadeTest, StylesheetResourcePrefetchPreservesAuthoredUrls) {
         ASSERT_NE(stored, nullptr);
         mem_free(stored);
     }
+    // discovery reads the published cascade; raw declarations alone have no resource consumers.
+    element.set_synthetic(false);
+    css_engine_set_viewport(engine, 800, 600);
+    SelectorMatcher matcher;
+    selector_matcher_init(&matcher, pool);
+    radiant_apply_css_stylesheet_to_tree(&element, sheet, &matcher, pool, engine);
+    CssDeclaration* selected = dom_element_get_specified_value(&element, CSS_PROPERTY_BACKGROUND_IMAGE);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_STREQ(selected->source_file, "https://assets.example.test/styles/main.css");
     radiant_prefetch_document_stylesheet_resources(&doc);
-    for (const char* relative : expected) {
+    for (int i = 0; i < url_count; i++) {
+        SCOPED_TRACE(expected[i]);
         char absolute[160];
-        str_fmt(absolute, sizeof(absolute), "https://assets.example.test/styles/%s", relative);
+        str_fmt(absolute, sizeof(absolute), "https://assets.example.test/styles/%s", expected[i]);
         size_t length = 0;
         char* content = resource_manager_copy_ready_resource_content(doc.resource_manager, absolute, &length);
-        EXPECT_EQ(length, 5u);
-        EXPECT_STREQ(content, "image");
+        bool active = i < url_count - 1;
+        EXPECT_EQ(length, active ? 5u : 0u);
+        EXPECT_STREQ(content, active ? "image" : nullptr);
         mem_free(content);
     }
     ArrayList* urls = arraylist_new(8);
@@ -1829,8 +1847,8 @@ TEST_F(MotionCascadeTest, StylesheetResourcePrefetchPreservesAuthoredUrls) {
     radiant_for_each_stylesheet_resource_url(sheet, [](const CssValue* value, void* context) {
         arraylist_append((ArrayList*)context, (void*)value->data.url);
     }, urls);
-    EXPECT_EQ(urls->length, 5);
-    for (int i = 0; i < urls->length && i < 5; i++) {
+    EXPECT_EQ(urls->length, url_count);
+    for (int i = 0; i < urls->length && i < url_count; i++) {
         EXPECT_STREQ((const char*)urls->data[i], expected[i]);
     }
     arraylist_free(urls);

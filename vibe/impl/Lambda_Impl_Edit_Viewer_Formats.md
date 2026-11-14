@@ -32,6 +32,22 @@
   `MotionCascadeTest.StylesheetResourcePrefetchPreservesAuthoredUrls`, and one
   `wpt-css-sizing` layout case. Causes and ownership are not yet established;
   the complete results are in `temp/edit-viewer/markdown-final-radiant-baseline.log`.
+- 2026-11-14 baseline follow-up, `044a38836` plus two Lambda-owned test
+  changes: the paint fixture now puts its rounded overflow clip on an ordinary
+  container, since body overflow propagates to the viewport (Radiant RI-087).
+  It retains fallback counters and byte-identical fresh-render comparisons.
+  The prefetch fixture now publishes matching consumers with loader-provided
+  stylesheet provenance (RI-079); five resources load, an inactive resource
+  stays unloaded, and all authored URLs remain unchanged. The complete changed
+  executables pass 250/250 and 186/186. `make test-radiant-baseline` now reports
+  8,169 passed, one failed, 297 partial and 20 skipped. The remaining case is
+  `keyword-sizes-for-intrinsic-contributions`: two floated min-content minimum
+  controls are 90px/150px versus 70px. It reproduces individually and is recorded
+  as [Radiant RI-089](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-089).
+  Its native cause is unconfirmed. Implementation repair stops at the sibling
+  ownership boundary (D9.1.1v4 / D9.1.3v2 and AGENTS.md). Evidence and the current
+  follow-up checkpoint are under `temp/radiant-three-failures/`, including
+  `radiant-baseline.log`, `sizing-results.json` and `sizing-single.log`.
 - CSV and TSV now present a grid with numbered rows and columns under D9.3.4;
   the first row remains editable data. Tab and Shift+Tab commit and move between
   cells, while row and field actions use the existing source-backed model and
