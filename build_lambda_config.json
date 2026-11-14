@@ -6064,10 +6064,9 @@
               "radiant/source_position_host.cpp",
               "lambda/module/radiant/source_position_adapter.cpp",
               "radiant/editing_host.cpp",
-              "test/test_dom_range_stubs.cpp",
+              "test/test_noncollecting_runtime_stubs.cpp",
               "lib/test_utils.c",
-              "lib/test_utils_pool.c",
-              "test/test_unlinked_layout_stubs.cpp"
+              "lib/test_utils_pool.c"
             ],
             "binary": "test_source_pos_bridge_gtest.exe",
             "icon": "\ud83e\udea2"
@@ -6872,13 +6871,12 @@
               "radiant/text_metrics.cpp",
               "radiant/view_geometry.cpp",
               "radiant/editing_host.cpp",
-              "test/test_dom_range_stubs.cpp",
+              "test/test_noncollecting_runtime_stubs.cpp",
               "test/test_dom_engine_provider_gtest.cpp",
               "lambda/dom/dom_engine_seam.cpp",
               "lambda/runtime/document_host.cpp",
               "lib/test_utils.c",
-              "lib/test_utils_pool.c",
-              "test/test_unlinked_layout_stubs.cpp"
+              "lib/test_utils_pool.c"
             ],
             "binary": "test_dom_range_gtest.exe",
             "icon": "\ud83c\udfaf"

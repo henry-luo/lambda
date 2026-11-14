@@ -31,29 +31,6 @@ class SourcePositionHostEnvironment : public ::testing::Environment {
 static ::testing::Environment* const source_position_host_environment =
     ::testing::AddGlobalTestEnvironment(new SourcePositionHostEnvironment);
 
-// ---------------------------------------------------------------------------
-// Bridge stubs (see test_dom_range_gtest.cpp). dom_range.cpp links against
-// these DocState accessors but the bridge tests don't exercise the
-// selection-resync paths, so trivial stubs satisfy the linker.
-// ---------------------------------------------------------------------------
-struct Arena;
-struct DocState;
-struct DomRange;
-struct DomSelection;
-
-extern "C" Arena* dom_range_state_arena(DocState*) { return nullptr; }
-extern "C" DomRange** dom_range_state_live_ranges_slot(DocState*) {
-    static DomRange* slot = nullptr;
-    return &slot;
-}
-extern "C" DomRange** dom_range_state_range_freelist_slot(DocState*) {
-    static DomRange* slot = nullptr;
-    return &slot;
-}
-extern "C" struct DomSelection* dom_range_state_selection(DocState*) {
-    return nullptr;
-}
-
 // render_map.cpp pulls in context-owned template state and lambda-mem.cpp's
 // GC root registration. Stub them out for this non-collecting unit target.
 struct TemplateRegistry;

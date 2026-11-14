@@ -4,9 +4,8 @@
  * Constructs synthetic DOM trees directly (no HTML parser needed) and
  * exercises the DomBoundary / DomRange / DomSelection APIs.
  *
- * Bridge stubs at the top of this file satisfy the two extern "C" hooks
- * that dom_range.cpp uses to reach into DocState — production wires
- * these to radiant/state_store.cpp; here we point them at a tiny FakeState.
+ * A zero-initialized DocState supplies the range fields used by the production
+ * accessors while keeping the fixture independent of StateStore creation.
  */
 
 #include <gtest/gtest.h>
@@ -26,35 +25,13 @@ extern "C" {
 #include <new>
 
 // ============================================================================
-// Bridge stubs — see comment in radiant/dom_range.cpp.
-// ============================================================================
-struct FakeState {
-    Arena* arena;
-    DomRange* live_ranges;
-    DomRange* range_freelist;
-};
-
-extern "C" Arena* dom_range_state_arena(DocState* s) {
-    return reinterpret_cast<FakeState*>(s)->arena;
-}
-extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* s) {
-    return &reinterpret_cast<FakeState*>(s)->live_ranges;
-}
-extern "C" DomRange** dom_range_state_range_freelist_slot(DocState* s) {
-    return &reinterpret_cast<FakeState*>(s)->range_freelist;
-}
-extern "C" struct DomSelection* dom_range_state_selection(DocState*) {
-    return nullptr;  // tests don't exercise selection-resync paths
-}
-
-// ============================================================================
 // Test fixture: pool + arena + a synthetic <div><span>"hello"</span><b/></div>
 // ============================================================================
 class DomRangeTest : public ::testing::Test {
 protected:
     Pool* pool = nullptr;
     Arena* arena = nullptr;
-    FakeState fake_state{};
+    DocState fake_state{};
     DocState* state = nullptr;
     DomDocument doc_storage{};
 
@@ -68,10 +45,11 @@ protected:
         pool = tu_setup_pool();
         arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
+        fake_state.pool = pool;
         fake_state.arena = arena;
         fake_state.live_ranges = nullptr;
         fake_state.range_freelist = nullptr;
-        state = reinterpret_cast<DocState*>(&fake_state);
+        state = &fake_state;
         // generated nodes require canonical ownership fields and the lifecycle
         // registry after the legacy document aliases were removed.
         doc_storage.document_pool = lam::own(pool);
