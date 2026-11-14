@@ -576,8 +576,31 @@ TEST_F(DomMutationTest, PresentationReplacementKeepsSurroundingSelectionAndRebas
     EXPECT_EQ(around->end.node, p);
     EXPECT_EQ(around->end.offset, 2u);
     EXPECT_FALSE(dom_range_collapsed(around));
+    // presentation swaps transfer text boundaries and clamp to the new length (D5.5.3).
+    EXPECT_EQ(inside->start.node, t2);
+    EXPECT_EQ(inside->start.offset, 2u);
+    EXPECT_EQ(inside->end.node, t2);
+    EXPECT_EQ(inside->end.offset, 3u);
+    EXPECT_FALSE(dom_range_collapsed(inside));
+}
+
+TEST_F(DomMutationTest, PresentationReplacementRebasesUnmatchedRetiredText) {
+    DomRange* inside = dom_range_create(state);
+    dom_range_link_into_state(state, inside);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(inside, t1, 2, &exc));
+    ASSERT_TRUE(dom_range_set_end(inside, t1, 4, &exc));
+
+    // an element cannot retain a text boundary; fall back to the replacement's slot.
+    DomElement* replacement = make_element();
+    ASSERT_TRUE(p->remove_child(t1));
+    ASSERT_TRUE(p->insert_before(replacement, c));
+    dom_reconcile_post_replace(state, t1, replacement);
+
     EXPECT_EQ(inside->start.node, p);
     EXPECT_EQ(inside->start.offset, 1u);
+    EXPECT_EQ(inside->end.node, p);
+    EXPECT_EQ(inside->end.offset, 1u);
     EXPECT_TRUE(dom_range_collapsed(inside));
 }
 
