@@ -1,0 +1,29 @@
+{
+  "name": "TOML property save preserves CRLF and rejects invalid drafts",
+  "command": "edit",
+  "html": "test/fixtures/edit/structured.toml",
+  "working_copy": "temp/edit-ui/edit_toml_property.toml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 5},
+    {"type": "click", "target": {"selector": "textarea[aria-label='note']"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toml_property.toml", "equals": "# Keep comments\r\nname = \"old\" # name\r\n[server]\r\nport = 80 # port\r\nvalues = [1, {x = 2}]\r\nnote = \"\"\"one\r\ntwo\"\"\"\r\n"},
+    {"type": "click", "target": {"selector": "textarea[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "01"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toml_property.toml", "equals": "# Keep comments\r\nname = \"old\" # name\r\n[server]\r\nport = 80 # port\r\nvalues = [1, {x = 2}]\r\nnote = \"\"\"one\r\ntwo\"\"\"\r\n"},
+    {"type": "assert_text", "target": {"selector": ".property-status"}, "contains": "Invalid value:"},
+    {"type": "click", "target": {"selector": "textarea[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "90"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toml_property.toml", "equals": "# Keep comments\r\nname = \"old\" # name\r\n[server]\r\nport = 90 # port\r\nvalues = [1, {x = 2}]\r\nnote = \"\"\"one\r\ntwo\"\"\"\r\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toml_property.toml", "equals": "# Keep comments\r\nname = \"old\" # name\r\n[server]\r\nport = 80 # port\r\nvalues = [1, {x = 2}]\r\nnote = \"\"\"one\r\ntwo\"\"\"\r\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toml_property.toml", "equals": "# Keep comments\r\nname = \"old\" # name\r\n[server]\r\nport = 90 # port\r\nvalues = [1, {x = 2}]\r\nnote = \"\"\"one\r\ntwo\"\"\"\r\n"}
+  ]
+}

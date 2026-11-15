@@ -1,22 +1,11 @@
 // JSON property projection: validate with Input and retain each authored span.
 import source: lambda.editor.format.source_text
 
-fn string_end(text: string, first: int) int^ {
-  var i = first + 1
-  while (i < len(text)) {
-    let ch = source.char_at(text, i)
-    if (ch == "\\") { i = i + 2 }
-    else if (ch == "\"") { return i + 1 }
-    else { i = i + 1 }
-  }
-  raise error("unterminated JSON string")
-}
-
 fn value_node(text: string, first: int) any^ {
   let ch = source.char_at(text, first)
   if (ch == "{" or ch == "[") { return container_node(text, first)^ }
   var end_pos = first
-  if (ch == "\"") { end_pos = string_end(text, first)^ }
+  if (ch == "\"") { end_pos = source.quoted_end(text, first)^ }
   else {
     while (end_pos < len(text) and not (contains([" ", "\t", "\r", "\n", ",", "]", "}"], source.char_at(text, end_pos)) ^ { false })) {
       end_pos = end_pos + 1
@@ -31,11 +20,11 @@ fn container_node(text: string, first: int) any^ {
   var i = source.skip_space(text, first + 1), children = []
   while ((i < len(text) and source.char_at(text, i) != close)^) {
     let entry_first = i
-    let key_end = if (is_object) string_end(text, i)^ else i
+    let key_end = if (is_object) source.quoted_end(text, i)^ else i
     let key_source = if (is_object) source.raw(text, i, key_end) else ""
     let key = if (is_object) parse(key_source, 'json')^ else string(len(children))
     // Control characters need their JSON spelling in single-line DOM controls.
-    let key_literal = is_object and any([for (ch in split(key, "")^) ord(ch) < 32 or ord(ch) == 127])
+    let key_literal = is_object and source.has_controls(key)^
     let display_key = if (key_literal) replace(key_source, chr(127), "\\u007f")^ else key
     let colon = if (is_object) source.skip_space(text, key_end) else i
     if ((is_object and source.char_at(text, colon) != ":")^) { raise error("invalid JSON object member") }
@@ -73,16 +62,8 @@ pub fn replace_scalar(doc, first, end_pos, value) map^ {
   }
 }
 
-fn find_member(node, first) any^ {
-  if (node.kind == 'scalar') null
-  else {
-    let direct = if (node.kind == 'object') [for (child in node.children where child.first == first) child] else []
-    let nested = [for (child in node.children, let found = find_member(child.node, first)^ where found != null) found]
-    if (len(direct) > 0) direct[0] else if (len(nested) > 0) nested[0] else null
-  }
-}
 pub fn rename_key(doc, first, end_pos, key) map^ {
-  let member = find_member(doc.tree, first)^
+  let member = source.find_member(doc.tree, first)^
   if (member == null or member.key_end != end_pos) raise error("JSON name no longer exists")
   else if (member.key_value == key) {doc: doc, envelope: null}
   else replace_span(doc, first, end_pos, format(key, 'json')^)^
@@ -104,19 +85,8 @@ pub fn insert_child(doc, first, key, value) map^ {
     replace_span(doc, at, at, prefix ++ member)^
   }
 }
-fn find_parent(node, first) any^ {
-  if (node.kind == 'scalar') null
-  else {
-    let direct = [for (child in node.children where child.node.first == first) child]
-    if (len(direct) > 0) node
-    else {
-      let nested = [for (child in node.children, let found = find_parent(child.node, first)^ where found != null) found]
-      if (len(nested) > 0) nested[0] else null
-    }
-  }
-}
 pub fn delete_child(doc, first) map^ {
-  let parent = find_parent(doc.tree, first)^
+  let parent = source.find_parent(doc.tree, first)^
   if (parent == null) raise error("JSON value no longer exists")
   else {
     let indexes = [for (i, child in parent.children where child.node.first == first) i]

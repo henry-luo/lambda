@@ -3,47 +3,95 @@
 ## Current checkpoint
 
 - Updated 2026-11-15 in `/Users/henryluo/Projects/Lambda-opus`, branch `master`,
-  HEAD `3b4b5e1c9` plus the uncommitted editing changes listed below.
-- Goal: continue viewer-format editing, prioritizing general keyboard behavior
-  and structured data within Lambda ownership. RTF, RST, Textile and EPUB
-  expansion is deferred. RI-090 and LI-056–LI-058 require scoped sibling-source
-  authorization; the prior automatic approval review rejected an Input patch.
-- Implemented since HEAD: shared modal keyboard handling and focus restoration,
-  keyboard-only Save As and image insertion, DOM focus-order helper extraction,
-  YAML/TOML source-preservation regressions, and optional Markdown footnote
-  lookup without `content(null)` errors (D10.2.1, D9.3.4, S1.5).
+  HEAD `17ce141e1`; Input base `2672c1a`, Radiant base `9a21ad9`. The current
+  prioritized implementation is complete and verified; changes are uncommitted
+  across these three checkouts.
+- The user explicitly authorized needed Radiant/Input fixes on 2026-11-15.
+  This continuation implements RI-090 and LI-056–LI-058 and enables the four
+  affected property formats. RTF, RST, Textile and EPUB expansion is deferred.
+- Document processing and package policy follow D9.3.4/D10.2.1. Input owns
+  validation; Radiant owns layout and canonical selection. Empty TOML keeps
+  the existing null contract (S1.5), and parser failures remain acknowledged
+  under S7.5.1v6. No formal ruling changed.
 
-| Required behavior | Current state and evidence |
+| Required behavior | Current implementation |
 |---|---|
-| General keyboard editing | Save As and editing dialogs have Enter, Escape and confined Tab navigation; model tests pass 120/120 and edit UI passes 202/203 (`optional-footnotes/{model,edit}.log`). RI-090 is the sole failing replay. |
-| Structured data properties/tables | JSON, XML, INI, Java properties and CSV/TSV have source-preserving editors. YAML, TOML, iCalendar and vCard remain source-only until LI-056–LI-058 are repaired. |
-| Simple rich markup | Existing rich adapters retain unsupported content or use source fallback; the full edit UI sweep includes ordinary markup, tables, formatting, save and undo. Deferred formats are not claimed complete. |
-| Other textual formats | SVG, graph and scripts use the source surface; routing and source edit/save checks are in the model/UI selections. |
-| Non-text media | The CLI suffix checks and session byte/content checks reject media; routing and reload-safety regressions remain green. |
-| Original broad format coverage | DOCX still lacks a user-facing package editor (LI-063); man pages still need LI-062 plus editor header retention. The implementation history records these remaining requirements. |
+| Keyboard editing | Home/End scans the full block-local visual line and preserves canonical boundaries outside retained inline content. Shift retains the selection anchor. Wrapped spans, superscripts, image-only retained spans and inline blocks have native controls. |
+| Structured data | YAML/TOML now have source-backed property trees, alongside JSON/XML/INI/properties. TOML table headings are retained; supported YAML block/flow collections and nested sequence objects are projected. Calendar/contact component trees retain folding, parameters and repeated fields. CSV/TSV remain editable tables. |
+| Source fidelity | Shared quote/line/span helpers avoid duplicate scanners. Edits preserve comments and unchanged line endings, including normalized multiline controls. Replacement validation cannot introduce neighboring fields. Invalid/unsupported syntax falls back to source. |
+| Other documents | Existing rich markup, source-based SVG/graph/scripts and non-text rejection remain in the full editor sweep. DOCX/man backlog and deferred rich formats remain outside this pass. |
 
-- Latest diagnostic proof: six Markdown cases retain identical model/round-trip
-  results in AUTO, interpreter and JIT, while runtime errors fall from nine to
-  zero (`temp/edit-viewer/optional-footnotes/verification.json`).
-- Final gates on the complete current tree: Lambda 7,534/7,534; Radiant 8,170
-  passed, zero failed, 297 partial and 20 skipped; Test262 40,261/40,261 fully
-  passing, zero regressions and 2,652 skipped, without isolated retries.
-  Evidence: `optional-footnotes/*-baseline.log`. The edit UI's RI-090 failure
-  is outside the Radiant baseline selection and remains open.
-- The 19 changed package/test files match the pre-gate source snapshot.
-  The Test262 pin matches the freshly built release executable (SHA-256
-  `43a9b014723201b7c7f46cd28a2c805bedacd2ed478d2d4a106f42163b889bac`);
-  see `optional-footnotes/final-verification.json`. Lambda/Radiant gates used
-  their debug build profiles. Input `2672c1a` and Radiant `9a21ad9` remain clean.
-- The named owner blocker has persisted across three consecutive goal turns.
-  The current four-format probe still accepts each malformed example
-  (`optional-footnotes/blockers.out`), and no sibling-source approval has been
-  granted. Next: obtain scoped authorization for RI-090 and LI-056–LI-058,
-  repair those providers, then resume their affected Lambda editing work.
-  Do not compensate for provider validation defects or native line navigation
-  in Lambda, and do not claim the overall editing objective complete.
+- Supported YAML properties exclude references, tags, directives, document
+  streams and non-string keys; those documents use source mode. Inline sequence
+  mappings support first-field deletion and retain empty mapping/sequence kinds
+  when their last child is removed. TOML table headers are not property-name
+  controls. The single-calendar profile rejects extra roots; multiple vCards
+  remain supported.
+- Owner records RI-090 and LI-056–LI-058 are archived with before/after evidence.
+  RI-091 remains open: its StateStore link is repaired with fail-fast declarations
+  for services absent from that isolated test host, while its custom-layout
+  portion is outside the repair.
+
+| Verification | Latest result |
+|---|---|
+| Input focused parser controls | 7/7 pass; malformed/valid neighbors, Unicode/control strings and CRLF/CR block scalars (`validation/focused-final.log`) |
+| Native StateStore | 39/39 pass, including retained image/inline-block controls that fail before repair (`ri090/{box-before,native-final}.log`) |
+| Editor/RTF model selection | 123/123 pass (`validation/model-qualified.log`) |
+| Edit UI selection | 209/209 fixtures; 212 GTests including scheduler controls (`validation/edit-qualified.log`) |
+| Forced interpreter/JIT | Each passes three models and five UI flows (`validation/{model,ui}-{interp,jit}-final.log`) |
+| New format models | YAML 32/32, TOML 22/22, RFC 13/13 boolean checks; all golden files are paired |
+| Input aggregate | Audited final run has exactly three existing failures: the LI-003 foreign/nullable contract cases and LI-002 external-parent case. All 276 upstream YAML JSON comparisons pass. See `validation/input-baseline-audited.log`; this gate remains non-green. |
+| Final consumer gates | Lambda 7,537/7,537; Radiant 8,170 passed, zero failed, 297 partial and 20 skipped; Test262 40,261 fully passing, zero regressions and 2,652 skipped. Evidence: `validation/{gates,final-gates}.json` and the referenced logs. |
+
+- The fresh final release pin and `lambda.exe` are byte-identical, SHA-256
+  `17466297e0c4d986bc7e3fa41dfdd86892ab3596652ebdb85ba3c2a8fb3e537b`.
+  The repeated release build produces the executable already tested by Test262;
+  no additional Test262 replay is needed. Source snapshots cover 32 Lambda,
+  five Input and six Radiant code/test files. The final owner-only test
+  correction does not change runtime sources or the release artifact.
+  Evidence: `validation/{source-snapshot,final-verification}.json`.
+- RI-090 reproduction: `ri090/before.log` fails two of three footnote assertions;
+  the focused post-fix selection passes eight replays, including Shift+Home/End.
+  Three existing fixtures assumed fragment-local navigation; their cursor setup
+  now uses character movement to keep the same intended formatting/delete/undo
+  assertions. References and tolerances are unchanged.
+- YAML CRLF reproduction: `validation/newline-before.log`; seven owner controls
+  pass after normalizing source line breaks. The additional TOML string probe
+  initially returned four false rejection results (`toml-string-before.out`);
+  the final release replay returns four true results (`toml-string-qualified.log`).
+- Final YAML CRUD review: deleting the first inline field previously raised
+  `this container requires source mode`; deleting a final nested mapping field
+  produced `server:\n` and changed its kind to scalar/null. Both reproduce in
+  `validation/yaml-{delete,empty-delete}-before.out`. Deletion now keeps the
+  sequence marker and emits empty flow collections where needed. The expanded
+  YAML model passes 32/32 checks and the new delete/undo UI passes 6/6 assertions
+  (`yaml-model-delete.out`, `yaml-delete-ui.log`). The repeated final Lambda
+  baseline passes 7,537/7,537 on this package change. Native provider behavior is unchanged by this last repair.
+- Aggregate audit correction: `input-baseline-qualified.log` has a fourth
+  failure, `TomlTests.TomlUnicodeSurrogatePairs`, beyond LI-002/LI-003. That old
+  fixture accepts UTF-16 surrogate escapes, contrary to TOML's Unicode scalar
+  rule (<https://toml.io/en/v1.0.0#string>). Its positive coverage was
+  corrected to valid scalar/raw UTF-8 spellings, preserving byte assertions and
+  adding explicit rejection checks. All ten Input/TOML units pass
+  (`validation/toml-fixture-after.log`). The audited aggregate confirms only
+  the three unrelated LI-002/LI-003 failures remain. No parser relaxation was
+  made; the runtime/editor results and release pin remain applicable.
 
 ## Implementation history
+
+- 2026-11-15 authorized owner repairs and structured editing: RI-090 and
+  LI-056–LI-058 are fixed in their owners and archived with before/after
+  evidence. `lambda.editor` now exposes source-backed YAML/TOML and RFC
+  component/property trees, with explicit source fallback for unsupported
+  syntax (D9.3.4, D10.2.1, S7.5.1v6). Shared span/quote/line-ending helpers
+  serve JSON, INI and the new adapters. Final YAML deletion preserves empty
+  collection kinds and sequence markers. The old TOML Unicode test's invalid
+  positive fixture is replaced with standard scalar/raw UTF-8 spellings and
+  explicit surrogate rejection, preserving byte assertions. The checkpoint
+  records final source/release identity and focused/aggregate results.
+  Deferred rich formats and older broad format backlog remain outside this
+  prioritized continuation.
+
 
 - 2026-11-15 optional Markdown footnotes: the parser omits the footer for
   documents without definitions. The adapter previously called `content()` on

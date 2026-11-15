@@ -1,6 +1,7 @@
 {
-  "name": "calendar files open in the source editor",
+  "name": "calendar files honor the explicit source option",
   "command": "edit",
+  "source": true,
   "html": "test/fixtures/edit/sample.ics",
   "working_copy": "temp/edit-ui/edit_calendar_source.ics",
   "viewport": {"width": 1000, "height": 700},

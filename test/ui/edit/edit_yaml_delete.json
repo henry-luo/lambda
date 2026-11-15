@@ -1,0 +1,22 @@
+{
+  "name": "delete YAML inline fields while retaining the mapping and sequence marker",
+  "command": "edit",
+  "html": "test/fixtures/edit/yaml-delete.yaml",
+  "working_copy": "temp/edit-ui/edit_yaml_delete.yaml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "click", "target": {"selector": ".property-tree > .property-entry > .property-children > .property-entry:first-child > .property-children > .property-entry:first-child .property-delete"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_delete.yaml", "equals": "# Keep this header\n- \n  enabled: true\n- name: two\n  enabled: false\n"},
+    {"type": "click", "target": {"selector": ".property-tree > .property-entry > .property-children > .property-entry:first-child > .property-children > .property-entry:first-child .property-delete"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_delete.yaml", "equals": "# Keep this header\n- \n  {}\n- name: two\n  enabled: false\n"},
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_delete.yaml", "equals": "# Keep this header\n- \n  enabled: true\n- name: two\n  enabled: false\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_delete.yaml", "equals": "# Keep this header\n- name: one\n  enabled: true\n- name: two\n  enabled: false\n"}
+  ]
+}

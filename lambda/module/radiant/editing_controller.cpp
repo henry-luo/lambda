@@ -709,8 +709,9 @@ static void editing_controller_move_to_boundary(
     if (extend) {
         selection_begin_non_pointer_extend(state, caret_view, *caret_offset);
         state_store_caret_move_to_boundary(state, boundary);
-        editing_controller_extend_to_moved_caret(
-            evcon, state, caret_view, caret_offset, hooks, extend_operation);
+        // the store already extends the canonical range, including element boundaries around atoms.
+        editing_controller_selection_snapshot(evcon, state, hooks, caret_view,
+                                              extend_operation);
         selection_finish_active_gesture(state);
         return;
     }
