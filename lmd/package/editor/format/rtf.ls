@@ -12,9 +12,13 @@ import commands: lambda.editor.core.commands
 import inline_format: lambda.editor.core.inline_format
 
 let positive_page_controls = ["paperw", "paperh", "deftab"]
+// RTF 1.7 document defaults, in twips; used only when controls are absent.
+let default_page_width = 12240
+let default_horizontal_margin = 1800
 let header_controls = ["deff", "f", "fs", "viewkind", "viewscale", "viewzk", "deflang", "deflangfe", "adeflang",
   "margl", "margr", "margt", "margb", "gutter", *positive_page_controls]
-let supported = ["rtf", "ansi", "ansicpg", "uc", "u", "par", "page", "line", "tab", "b", "i", "ul", "ulnone", "strike", "scaps", "super", "sub", "nosupersub", "plain", "pard", "ql", "qc", "qr", "qj", "cf", "highlight", "lang", "landscape", *[for (m in rtf_paragraph_measurements) m.control], *header_controls]
+let table_controls = ["trowd", "cellx", "intbl", "cell", "row"]
+let supported = ["rtf", "ansi", "ansicpg", "uc", "u", "par", "page", "line", "tab", "b", "i", "ul", "ulnone", "strike", "scaps", "super", "sub", "nosupersub", "plain", "pard", "ql", "qc", "qr", "qj", "cf", "highlight", "lang", "landscape", *rtf.paragraph_keep_controls, *[for (m in rtf_paragraph_measurements) m.control], *header_controls]
 
 // Only ordinary font entries with the ANSI charset are understood. The raw
 // table is retained, while embedded fonts and alternate encodings stay source-only.
@@ -94,8 +98,11 @@ fn color_table_end(source, at) any^ {
   raise error("incomplete RTF color table")
 }
 
-fn validate(source) any^ {
+fn validate(source, tables = false) any^ {
   var cursor = 0, depth = 0, seen = false, closed = false, header = false, body = false, paragraph_content = false, uc = 1, uc_stack = [], pending = null, retained_header = "", font_ids = [], colors = 0
+  var row_depth = 0, row_edges = [], row_cells = 0, row_started = false, row_in_table = false, after_row = false
+  var paper_width = default_page_width, left_margin = default_horizontal_margin,
+      right_margin = default_horizontal_margin, gutter = 0
   while (cursor < len(source)) {
     let t = lex.next(source, cursor)^
     if (t == null) { return null }
@@ -143,6 +150,7 @@ fn validate(source) any^ {
       }
     }
     else if (t.kind == "close") {
+      if (row_depth != 0 and depth == row_depth) { raise error("incomplete RTF table row") }
       depth = depth - 1
       if (depth < 0) { raise error("unbalanced RTF group") }
       uc = uc_stack[len(uc_stack) - 1]
@@ -150,15 +158,57 @@ fn validate(source) any^ {
       if (depth == 0) { closed = true }
     }
     else if (t.kind == "control") {
-      if (depth == 0 or (not (contains(supported, t.word) ^ { false }) and rtf.punctuation[t.word] == null)) {
+      if (depth == 0 or (not (contains(supported, t.word) ^ { false }) and
+          not (tables and t.word in table_controls) and rtf.punctuation[t.word] == null)) {
         raise error("this RTF control requires source mode")
       }
+      // Admit complete, non-nested rows only; other table properties remain source-only.
+      if (t.word == "trowd") {
+        if (row_depth != 0 or paragraph_content or t.parameter != null) { raise error("invalid RTF table row") }
+        row_depth = depth; row_edges = []; row_cells = 0; row_started = false; row_in_table = false; after_row = false
+      }
+      else if (t.word == "cellx") {
+        let last_edge = if (len(row_edges) == 0) 0 else row_edges[len(row_edges) - 1]
+        if (row_depth == 0 or depth != row_depth or row_started or t.parameter == null or t.parameter <= last_edge) {
+          raise error("invalid RTF table cell boundary")
+        }
+        row_edges = [*row_edges, t.parameter]
+      }
+      else if (t.word == "intbl") {
+        if (row_depth == 0 or depth != row_depth or len(row_edges) == 0 or row_cells >= len(row_edges) or t.parameter != null) {
+          raise error("invalid RTF table paragraph")
+        }
+        row_started = true; row_in_table = true
+      }
+      else if (t.word == "cell") {
+        if (row_depth == 0 or depth != row_depth or not row_in_table or row_cells >= len(row_edges) or t.parameter != null) {
+          raise error("invalid RTF table cell")
+        }
+        row_cells = row_cells + 1; paragraph_content = false
+      }
+      else if (t.word == "row") {
+        if (row_depth == 0 or depth != row_depth or row_cells == 0 or row_cells != len(row_edges) or paragraph_content or t.parameter != null) {
+          raise error("incomplete RTF table row")
+        }
+        row_depth = 0; after_row = true
+      }
+      else if (row_depth != 0 and t.word in ["par", "page"]) {
+        raise error("this RTF table cell requires source mode")
+      }
+      else if (t.word == "pard") {
+        if (row_depth == 0) { after_row = false } else { row_in_table = false }
+      }
+      if (t.word in ["u", "line", "tab"] or rtf.punctuation[t.word] != null) {
+        if (after_row or (row_depth != 0 and (not row_in_table or row_cells >= len(row_edges)))) {
+          raise error("RTF table content needs a paragraph or cell")
+        }
+      }
       if (t.word == "u" and not is_u) { raise error("RTF Unicode escape needs a value") }
-      if (t.word in ["super", "sub", "nosupersub", "plain", "pard", "page", "ql", "qc", "qr", "qj"] and t.parameter != null) {
+      if (t.word in ["super", "sub", "nosupersub", "plain", "pard", "page", "ql", "qc", "qr", "qj", *rtf.paragraph_keep_controls] and t.parameter != null) {
         raise error("parameterized RTF formatting control requires source mode")
       }
       // The reader captures paragraph style at its first text run.
-      if (t.word in ["pard", "ql", "qc", "qr", "qj", *[for (m in rtf_paragraph_measurements) m.control]] and paragraph_content) {
+      if (t.word in ["pard", "ql", "qc", "qr", "qj", *rtf.paragraph_keep_controls, *[for (m in rtf_paragraph_measurements) m.control]] and paragraph_content) {
         raise error("late RTF paragraph formatting requires source mode")
       }
       if (t.word in [for (m in rtf_paragraph_measurements) m.control] and (t.parameter == null or t.parameter < 0)) {
@@ -208,6 +258,10 @@ fn validate(source) any^ {
             (t.word == "f" and (len(font_ids) > 0)^ and not (contains(font_ids, t.parameter) ^ { false }))) {
           raise error("this RTF header control requires source mode")
         }
+        if (t.word == "paperw") { paper_width = t.parameter }
+        else if (t.word == "margl") { left_margin = t.parameter }
+        else if (t.word == "margr") { right_margin = t.parameter }
+        else if (t.word == "gutter") { gutter = t.parameter }
         // Retain document-wide fonts, language defaults and view preferences.
         retained_header = retained_header ++ "\\" ++ t.word ++ (string(t.parameter)^) ++ " "
       }
@@ -225,18 +279,26 @@ fn validate(source) any^ {
     }
     else if (t.kind == "text") {
       if (depth == 0 and trim(t.value) != "") { raise error("text outside the RTF document") }
+      let text = replace(replace(t.value, "\r", ""), "\n", "")^
+      if (text != "" and (after_row or (row_depth != 0 and (not row_in_table or row_cells >= len(row_edges))))) {
+        raise error("RTF table content needs a paragraph or cell")
+      }
       if (depth > 0 and (replace(replace(t.value, "\r", ""), "\n", "") ^ { "" }) != "") { body = true }
       if (depth > 0 and (replace(replace(t.value, "\r", ""), "\n", "") ^ { "" }) != "") { paragraph_content = true }
       cursor = t.end
     }
     else {
+      if (after_row or (row_depth != 0 and (not row_in_table or row_cells >= len(row_edges)))) {
+        raise error("RTF table content needs a paragraph or cell")
+      }
       body = true
       paragraph_content = true
       cursor = t.end
     }
     if (t.kind == "close") { cursor = t.end }
   }
-  if (depth != 0 or not closed or not header or pending != null) raise error("incomplete RTF document") else retained_header
+  if (depth != 0 or row_depth != 0 or not closed or not header or pending != null) raise error("incomplete RTF document")
+  else {header:retained_header, table_width:paper_width - left_margin - right_margin - gutter}
 }
 
 fn run_attrs(span, parsed) any^ {
@@ -274,23 +336,44 @@ fn paragraph_measure(style, property) any^ {
   let value = inline_format.css_get(style, property)
   if (value == null) null else int(round(float(slice(value, 0, len(value) - 2)^)^ * 15.0))
 }
-fn paragraph_attrs(style) any^ => [
-  *if (inline_format.css_get(style, "text-align") in ["center", "right", "justify"])
-    [{name:'align', value:inline_format.css_get(style, "text-align")}] else [],
-  *[for (entry in rtf_paragraph_measurements, let value = paragraph_measure(style, entry.css)^
-    where value != null) {name:entry.name, value:value}]
+fn paragraph_attrs(block) any^ => [
+  *if (inline_format.css_get(block.style, "text-align") in ["center", "right", "justify"])
+    [{name:'align', value:inline_format.css_get(block.style, "text-align")}] else [],
+  *[for (entry in rtf_paragraph_measurements, let value = paragraph_measure(block.style, entry.css)^
+    where value != null) {name:entry.name, value:value}],
+  *[for (i, control in rtf.paragraph_keep_controls where block.rtf_keeps[i] == true)
+    {name:symbol("rtf-" ++ control), value:true}]
 ]
 fn page_break(item) any^ => is_node(item) and item.tag == 'br' and attr_get(item, 'rtf-page') == true
 fn paragraph_content(block, parsed) any^ {
-  let items = [for (span in content(block)^) if (span.rtf_page == true)
+  let items = [for (span in content(block)^) if (span.rtf_line == true)
+    node('br', [])
+    else if (span.rtf_page == true)
     node_attrs('br', [{name:'rtf-page', value:true}], [])
     else text_marked(plain_text(span)^, span_marks(span, parsed)^)];
   anchor_atomic_edges(items, page_break)^
 }
+fn table_row(block, parsed) any^ => node('tr', [for (cell in content(block)^)
+  node_attrs('td', [*paragraph_attrs(cell)^, {name:'rtf-width', value:cell.rtf_width}],
+    paragraph_content(cell, parsed)^)])
+
+// Consecutive RTF row records form one table in the editing model.
+fn model_blocks(blocks, parsed) any^ {
+  var i = 0, rows = [], acc = []
+  while (i < len(blocks)) {
+    let block = blocks[i]
+    if (name(block)^ == 'rtf-row') { rows = [*rows, table_row(block, parsed)^] }
+    else {
+      acc = [*acc, *if (len(rows) == 0) [] else [node('table', rows)],
+        node_attrs('p', paragraph_attrs(block)^, paragraph_content(block, parsed)^)]
+      rows = []
+    }
+    i = i + 1
+  }
+  return [*acc, *if (len(rows) == 0) [] else [node('table', rows)]]
+}
 fn to_model(parsed) map^ {
-  let blocks = [for (block in content(parsed.document)^)
-    node_attrs('p', paragraph_attrs(block.style)^, paragraph_content(block, parsed)^
-  )];
+  let blocks = model_blocks(content(parsed.document)^, parsed)^;
   // The editable host needs a paragraph even when the source has no text.
   node('doc', if (len(blocks) == 0) [node('p', [])] else blocks)
 }
@@ -372,45 +455,90 @@ fn inline(item, envelope) any^ {
   else raise error("RTF cannot represent this inline content")
 }
 fn paragraph_settings(block) => {align: attr_get(block, 'align') or "left",
-  measurements: [for (entry in rtf_paragraph_measurements) attr_get(block, entry.name) or 0]}
-fn write_paragraph(block, previous, envelope) any^ {
+  measurements: [for (entry in rtf_paragraph_measurements) attr_get(block, entry.name) or 0],
+  keeps: [for (control in rtf.paragraph_keep_controls) attr_get(block, symbol("rtf-" ++ control))]}
+fn paragraph_prefix(block, previous) any^ {
   let settings = paragraph_settings(block)
-  let invalid = any([for (a in block.attrs where ((not (a.name in ['align', *[for (m in rtf_paragraph_measurements) m.name]])) ^ { false })) true]) or
+  let invalid = any([for (a in block.attrs where ((not (a.name in ['align', *[for (m in rtf_paragraph_measurements) m.name],
+    *[for (control in rtf.paragraph_keep_controls) symbol("rtf-" ++ control)]])) ^ { false })) true]) or
     not (settings.align in ["left", "center", "right", "justify"]) or
-    any([for (v in settings.measurements) not (v is int) or v < 0])
+    any([for (v in settings.measurements) not (v is int) or v < 0]) or
+    any([for (v in settings.keeps) v != null and v != true])
   if (invalid) raise error("RTF cannot represent this paragraph style")
-  else (if (settings == previous) ""
+  else if (settings == previous) ""
     else "\\pard" ++ (if (settings.align == "center") "\\qc" else if (settings.align == "right") "\\qr"
       else if (settings.align == "justify") "\\qj" else "") ++
       join([for (i, m in rtf_paragraph_measurements where settings.measurements[i] != 0)
-        "\\" ++ m.control ++ string(settings.measurements[i])], "") ++ " ") ++
-    join([for (child in block.content) inline(child, envelope)^], "")
+        "\\" ++ m.control ++ string(settings.measurements[i])], "") ++
+      join([for (i, control in rtf.paragraph_keep_controls where settings.keeps[i] == true) "\\" ++ control], "") ++ " "
+}
+fn write_paragraph(block, previous, envelope) any^ => paragraph_prefix(block, previous)^ ++
+  join([for (child in block.content) inline(child, envelope)^], "")
+
+// Widths are stored per cell, so a removed column cannot change its neighbors.
+fn write_table_row(row, envelope) any^ {
+  if (not is_node(row) or row.tag != 'tr' or len(row.attrs) != 0 or len(row.content) == 0) {
+    raise error("RTF cannot represent this table row")
+  }
+  let widths = [for (cell in row.content) attr_get(cell, 'rtf-width')]
+  if (any([for (cell in row.content) not is_node(cell) or cell.tag != 'td']) or
+      any([for (width in widths) not (width is int) or width <= 0])) {
+    raise error("RTF table cells need positive widths")
+  }
+  let edges = [for (i, width in widths) sum(take(widths, i + 1))]
+  let definitions = join([for (edge in edges) "\\cellx" ++ string(edge)], "")
+  let cells = [for (cell in row.content) {
+    let paragraph = node_attrs('p', [for (a in cell.attrs where a.name != 'rtf-width') a], cell.content)
+    paragraph_prefix(paragraph, null)^ ++ "\\intbl " ++
+      join([for (child in cell.content) inline(child, envelope)^], "") ++ "\\cell "
+  }];
+  return "\\trowd" ++ definitions ++ " " ++ join(cells, "") ++ "\\row "
+}
+fn write_table(table, envelope) any^ {
+  if (len(table.attrs) != 0 or len(table.content) == 0) { raise error("RTF cannot represent this table") }
+  else join([for (row in table.content) write_table_row(row, envelope)^], "")
+}
+
+fn default_paragraph_settings() => {align:"left", measurements:[for (entry in rtf_paragraph_measurements) 0],
+  keeps:[for (control in rtf.paragraph_keep_controls) null]}
+fn write_blocks(blocks, envelope) any^ {
+  var i = 0, previous = default_paragraph_settings(), parts = []
+  while (i < len(blocks)) {
+    let block = blocks[i]
+    let before = if (i == 0 or blocks[i - 1].tag == 'table') "" else "\\par "
+    let text = if (not is_node(block)) raise error("RTF cannot represent this block")
+      else if (block.tag == 'p') write_paragraph(block, previous, envelope)^
+      else if (block.tag == 'table') write_table(block, envelope)^
+      else raise error("RTF cannot represent this block")
+    // A table's final cell leaves table paragraph state active; reset it.
+    previous = if (block.tag == 'p') paragraph_settings(block) else null
+    parts = [*parts, before, text]
+    i = i + 1
+  }
+  return join(parts, "")^
 }
 fn write_document(doc, envelope) string^ {
-  let bad = [for (block in doc.content where (not (is_node(block) ^ { false }) or block.tag != 'p')) block]
-  if (len(bad) > 0) { raise error("RTF cannot represent this block") }
-  else {
-    let defaults = {align:"left", measurements:[for (entry in rtf_paragraph_measurements) 0]}
-    let blocks = [for (i, block in doc.content) write_paragraph(block,
-      if (i == 0) defaults else paragraph_settings(doc.content[i - 1]), envelope)^]
+  {
+    let blocks = write_blocks(doc.content, envelope)^
     // An empty final block needs its own terminator; a final nonempty one does not.
-    let terminal = if (len(doc.content) > 0 and all([for (child in doc.content[last].content)
+    let terminal = if (len(doc.content) > 0 and doc.content[last].tag == 'p' and all([for (child in doc.content[last].content)
       ((is_text(child) and child.text == "" and len(child.marks) == 0) ^ { false })])) "\\par " else ""
-    "{\\rtf1\\ansi\\uc1 " ++ envelope.retained_header ++ join(blocks, "\\par ") ++ terminal ++ "}"
+    "{\\rtf1\\ansi\\uc1 " ++ envelope.retained_header ++ blocks ++ terminal ++ "}"
   }
 }
 pub fn import_text(source) map^ {
-  let retained_header = validate(source)^
+  let validated = validate(source, true)^
+  let retained_header = validated.header
   // A final body font change must not become the baseline used by the writer.
   let base = rtf.parse_details("{\\rtf1\\ansi " ++ retained_header ++ "}", {preserve_empty: true, editor_runs: true})^
-  let actual = rtf.parse_details(source, {preserve_empty: true, editor_runs: true})^
+  let actual = rtf.parse_details(source, {preserve_empty: true, editor_runs: true, editor_tables: true})^
   let parsed = {*:actual, base_font: base.base_font, base_size: base.base_size, base_language: base.base_language}
   let known_font = len(base.fonts) == 0 or any([for (font in base.fonts) font.font_id == base.base_font]);
   if (not known_font) raise error("unknown RTF default font") else {
     let doc = to_model(parsed)^;
     {doc: doc, envelope: {source: source, original: doc, retained_header: retained_header, font_style: base.font_style,
                           colors: parsed.colors, fonts: parsed.fonts, base_font: base.base_font, base_size: base.base_size,
-                          base_language: base.base_language}}
+                          base_language: base.base_language, table_width: validated.table_width}}
   }
 }
 pub fn export_text(doc, envelope) any^ =>
@@ -419,7 +547,7 @@ pub fn check_roundtrip(doc, envelope) any^ {
   let written = write_document(doc, envelope) ^ { null }
   if (written == null) "this RTF edit is not representable"
   else {
-    let parsed = rtf.parse_details(written, {preserve_empty: true, editor_runs: true}) ^ { null }
+    let parsed = rtf.parse_details(written, {preserve_empty: true, editor_runs: true, editor_tables: true}) ^ { null }
     let back = if (parsed == null) null else (to_model({*:parsed, base_font:envelope.base_font, base_size:envelope.base_size,
       base_language:envelope.base_language}) ^ { null })
     if (back == null or html.normal_form(back) != html.normal_form(doc))
@@ -443,11 +571,23 @@ pub fn align_paragraphs(editor, align) any^ {
     if (len(steps) == 0) null else commands.tx_apply_steps(tx_begin(editor.doc, sel), steps, 0, len(steps))^
   }
 }
+let schema = {*:html.schema, td:{*:html.schema.td,
+  attrs:[{name:'rtf-width', required:false, type:'int', copy_on_table_insert:true},
+    {name:'align', required:false, type:'string', copy_on_table_insert:true},
+    *[for (measurement in rtf_paragraph_measurements)
+      {name:measurement.name, required:false, type:'int', copy_on_table_insert:true}],
+    *[for (control in rtf.paragraph_keep_controls)
+      {name:symbol("rtf-" ++ control), required:false, type:'bool', copy_on_table_insert:true}]]},
+  table:{*:html.schema.table, new_cell_width_attr:'rtf-width',
+    available_width:default_page_width - 2 * default_horizontal_margin, header_cells:false, separate_adjacent:true}}
+// A newly created table fits the current document's page, including its gutter.
+pub fn document_schema(envelope) => if (envelope == null) schema else
+  {*:schema, table:{*:schema.table, available_width:envelope.table_width}}
 pub let descriptor = {id: 'rtf', name: "RTF", suffixes: [".rtf"], surface: 'rich_text', fallback_source: true,
-  schema: html.schema, schema_preset: 'html5_subset', underline: true, view_only_tags: [],
+  schema: schema, document_schema:document_schema, schema_preset: 'html5_subset', underline: true, view_only_tags: [],
   unsupported_input_types: ["formatBlock", "insertUnorderedList", "insertOrderedList", "formatIndent", "formatOutdent",
     "formatBlockquote", "formatLiftBlockquote", "insertLink", "insertImage", "insertCodeBlock", "insertHorizontalRule",
-    "insertTable", "insertTableRow", "deleteTableRow", "insertTableColumn", "deleteTableColumn", "modelToggleMark"],
+    "modelToggleMark"],
   allowed_model_marks: ['del'],
   surface_style: (envelope) => envelope.font_style,
   import_text: import_text, export_text: export_text, check_roundtrip: check_roundtrip, align_paragraphs: align_paragraphs}

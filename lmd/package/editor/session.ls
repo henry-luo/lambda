@@ -68,6 +68,10 @@ pub fn new_session(path, format, source, loaded) =>
   {path: path, name: basename(path), format: format, disk_text: source,
    envelope: loaded.envelope, saved_doc: loaded.doc}
 
+// Some formats derive editor capabilities from the opened document envelope.
+pub fn edit_schema(format, envelope) any^ =>
+  if (format.document_schema == null) format.schema else format.document_schema(envelope)^
+
 // Dirty compares content with the saved checkpoint, so undoing back to the
 // saved document is clean again and selection or view changes never dirty it.
 // A format whose documents are too large to compare whole supplies `same_doc`

@@ -420,7 +420,7 @@ on edit_dialog(req) {
     dialog = filed.dialog
     after_save = filed.after_save
     if ((filed.reloaded != null)^) {
-      editor = controller.replace(editor,edit_open(filed.reloaded, session.format.schema, null))
+      editor = controller.replace(editor,edit_open(filed.reloaded, sess.edit_schema(session.format, session.envelope)^, null))
       ds = {*: ds, picked: [], gesture: null}
     }
   }

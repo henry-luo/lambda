@@ -1,0 +1,27 @@
+{
+  "name": "insert RTF table rows and columns with inherited widths",
+  "command": "edit",
+  "html": "test/fixtures/edit/table.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_table_insert.rtf",
+  "events": [
+    {"type": "click", "target": {"text": "Alpha"}, "button": 1},
+    {"type": "click", "target": {"selector": ".edit-btn-table_row_add"}},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table tr"}, "count": 3},
+    {"type": "type", "text": "New"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table_insert.rtf", "contains": "New"},
+    {"type": "click", "target": {"text": "Beta"}, "button": 1},
+    {"type": "click", "target": {"selector": ".edit-btn-table_column_add"}},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 9},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table_insert.rtf", "contains": "\\cellx1200\\cellx3000\\cellx4800"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table_insert.rtf", "contains": "\\cellx1000\\cellx3000\\cellx5000"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 6},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table tr"}, "count": 3},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "New"}
+  ]
+}

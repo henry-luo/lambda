@@ -1,0 +1,15 @@
+{
+  "name": "insert an RTF table column into a short row",
+  "command": "edit",
+  "html": "test/fixtures/edit/ragged-table.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_table_ragged.rtf",
+  "events": [
+    {"type": "click", "target": {"text": "B"}, "button": 1},
+    {"type": "click", "target": {"selector": ".edit-btn-table_column_add"}},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 6},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table_ragged.rtf", "contains": "\\cellx1000\\cellx2000\\cellx3000"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 3}
+  ]
+}

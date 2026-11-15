@@ -2,6 +2,97 @@
 
 ## Current checkpoint
 
+- 2026-11-15 RTF table creation: the table toolbar creates rows of ordinary
+  cells sized to the document's page width minus horizontal margins and gutter
+  (D9.3.4). Omitted page settings use the defaults in the
+  [RTF 1.7 specification](https://latex2rtf.sourceforge.net/RTF-Spec-1.7.pdf).
+  The available width is split into integer twips without rounding loss;
+  invalid or too-small page widths decline creation. A separating paragraph
+  keeps newly inserted adjacent tables distinct on save/reopen. The schema
+  follows the current envelope on initial open, source switching and reload.
+  The model regression covers defaults, custom geometry, uneven division,
+  invalid width and adjacent tables (`rtf-table/create-model.log`). Three
+  focused UI replays pass, including reload (`rtf-table/create-ui-final.log`);
+  the editor/RTF model selection passes 120/120 and three tests pass both
+  execution tiers (`rtf-table/create-{model-suite,interp,jit}.log`, no
+  interpreter fallback). The full edit UI selection passes 194/195, with
+  only the existing RI-090 caret replay failing (`rtf-table/create-ui-suite.log`).
+  The aggregate baselines recorded below predate this creation change.
+- 2026-11-15 RTF table continuation: an ordinary two-row RTF table was
+  reproduced as source-only (`temp/edit-viewer/rtf-table/before.log`); Pandoc
+  renders it as two rows (`rtf-table/pandoc.html`). The shared reader now has
+  an opt-in editor-table representation of rows, per-cell widths, character
+  runs and paragraph settings. It rejects incomplete rows and multi-paragraph
+  cells, while the default viewer projection and retained native oracle stay
+  unchanged. Direct/grammar-reader, malformed-row and legacy-oracle checks
+  pass in interpreter and JIT (`rtf-table/reader-{interp,jit}.log`). The
+  editor now validates and imports simple rows into its table model, writes
+  cell widths and formatting, and supports cell edits and undoable row/column
+  insertion and deletion. New cells inherit adjacent widths and paragraph
+  properties; inserting a column pads short rows. Enter in an inline cell
+  makes a line break instead of splitting the cell. Merged cells, borders,
+  multi-paragraph cells and other unsupported controls still use source mode;
+  table creation was added in the later checkpoint above. Five table UI replays pass
+  (`rtf-table/final-focused-ui.log`), and Pandoc independently renders the
+  saved line break and table (`rtf-table/pandoc-enter.html`). The editor/RTF
+  selection passes 119/119; three focused tests pass interpreter and JIT
+  (`rtf-table/final-{model-suite,interp,jit}.log`, no interpreter fallback).
+  The edit UI selection passed 191/192 with only the existing RI-090 replay
+  failing (`rtf-table/final-ui-suite.log`); its run predated the added ragged
+  table fixture, which passes separately. The Lambda baseline passes
+  7,533/7,533 (`rtf-table/lambda-baseline.log`); Radiant reports 8,170 passes,
+  no failures, 297 partial and 20 skipped (`rtf-table/radiant-baseline.log`),
+  excluding the separate RI-090 replay. Test262 reports 40,257 fully passing,
+  four passing on isolated retry after batch kills, zero regressions, and
+  2,652 skipped (`rtf-table/test262.log`); it used the same pinned release
+  executable as the preceding run. RTF table
+  structure is described by the
+  [RTF 1.7 specification](https://latex2rtf.sourceforge.net/RTF-Spec-1.7.pdf)
+  and document preservation follows D9.3.4.
+- 2026-11-15 RTF paragraph pagination continuation: the editor retains
+  keep-together (`keep`), keep-with-next (`keepn`) and page-break-before
+  (`pagebb`) as paragraph properties (D9.3.4). Microsoft documents these as
+  paragraph properties and `pard` as resetting them in its
+  [RTF control-word table](https://learn.microsoft.com/en-us/windows/win32/controls/about-text-object-model#tom-rtf).
+  They affect saved RTF but not the unpaginated editing surface. The old
+  source-mode refusal is in `temp/edit-viewer/rtf-keeps-before.log`. The model
+  test covers inheritance, group scope, empty paragraphs, paragraph and
+  character resets, both reader paths, no-op save, round trip and invalid or
+  late controls. The final reader/reset assertions pass in both tiers
+  (`rtf-keeps-final-{interp,jit}.log`) after the aggregate baselines below.
+  The UI replay edits, saves,
+  switches views and splits a paragraph (`rtf-keeps-ui-split.log`, 5/5).
+  Three focused tests pass in both interpreter and JIT, with no interpreter
+  fallback (`rtf-keeps-{interp,jit}.log`); the editor/RTF model selection
+  passes 117/117 (`rtf-keeps-model-suite.log`). The edit UI selection passes
+  187/188, with only the existing RI-090 caret replay failing
+  (`rtf-keeps-ui-suite.log`). The Lambda baseline passes 7,531/7,531
+  (`rtf-keeps-lambda.log`). Radiant reports 8,170 passes, no failures, 297
+  partial and 20 skipped (`rtf-keeps-radiant.log`), excluding the separate
+  RI-090 replay. The Test262 selection reports 40,257 fully passing, four
+  passing on isolated retry after batch kills, zero regressions, and 2,652
+  skipped (`rtf-keeps-test262.log`). It used the pinned release executable
+  from the preceding continuation; native sources have not changed.
+- 2026-11-15 table row continuation: CSV and TSV grids can insert an empty,
+  full-width row before any existing row as one undoable edit (D9.3.4).
+  The new row takes the target record's ending, or the preceding record's
+  ending when the target is unterminated; embedded quoted newlines do not
+  count as record endings. Existing fields and delimiter-detection safeguards
+  are retained. Model coverage exercises mixed endings, quoted multiline
+  fields, ragged rows and TSV in both interpreter and JIT with no interpreter
+  fallback (`temp/edit-viewer/row-final-{interp,jit}.log`). Four CSV/TSV row
+  and column UI replays pass after the final change (`row-final-ui.log`),
+  including a pending cell edit and undo. The broader model selection passed
+  116/116 before the final line-ending refinement (`row-model-suite.log`).
+  The edit UI suite ran across that refinement and passed 186/187, with only
+  the existing RI-090 caret replay failing (`row-ui-suite.log`). The Lambda
+  baseline passes 7,530/7,530 (`row-lambda-baseline.log`); Radiant reports
+  8,170 passes, no failures, 297 partial and 20 skipped
+  (`row-radiant-baseline.log`), excluding the separate RI-090 replay. Test262
+  passes 40,261/40,261 selected cases with no retries or regressions and 2,652
+  skipped (`row-test262.log`). Its release executable was copied and pinned
+  (SHA-256 `43a9b014723201b7c7f46cd28a2c805bedacd2ed478d2d4a106f42163b889bac`)
+  so stale-process cleanup could not affect a separate checkout.
 - 2026-11-15 Markdown footnote-definition continuation: ordinary definitions
   are editable as rich blocks, including multi-paragraph content, while their
   original source is retained until that definition changes (D9.3.4). A
@@ -890,6 +981,7 @@
   requalify TOML, YAML, calendar, contact, RST, Textile and man editing with
   malformed-input and source-preservation tests before expanding admission.
   Man also needs editor-side header retention. Independently expand the rich
-  RTF subset only with preservation evidence, including a compatible oracle
-  for `caps` and `highlight`. Do not silently rewrite source or change sibling
-  providers. Ledger IDs in older entries above predate reconciliation.
+  RTF subset only with preservation evidence; `highlight` is now supported,
+  while `caps` still needs a compatible oracle. Do not silently rewrite source
+  or change sibling providers. Ledger IDs in older entries above predate
+  reconciliation.

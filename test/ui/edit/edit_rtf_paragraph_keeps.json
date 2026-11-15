@@ -1,0 +1,24 @@
+{
+  "name": "retain RTF paragraph pagination settings across rich edits",
+  "command": "edit",
+  "html": "test/fixtures/edit/paragraph-keeps.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_paragraph_keeps.rtf",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "First"},
+    {"type": "click", "target": {"text": "First"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_paragraph_keeps.rtf", "contains": "\\keep\\keepn First!"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_paragraph_keeps.rtf", "contains": "\\pard\\pagebb Second"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "First!"},
+    {"type": "click", "target": {"text": "First!"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type", "text": "More"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_paragraph_keeps.rtf", "contains": "\\keep\\keepn First!\\par More\\par \\pard\\pagebb Second"}
+  ]
+}

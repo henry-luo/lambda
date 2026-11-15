@@ -194,13 +194,30 @@ fn column_change(doc, index: int, insert: bool) map^ {
 }
 pub fn insert_column(doc, index) map^ => column_change(doc, index, true)^
 pub fn delete_column(doc, index) map^ => column_change(doc, index, false)^
+// Insert a full-width empty row without rewriting the neighboring records.
+pub fn insert_row(doc, first) map^ {
+  let found = [for (entry in doc.tree.children where entry.node.first == first) entry]
+  if (len(found) == 0) { raise error("row no longer exists") }
+  let entry = found[0]
+  let widths = [for (item in doc.tree.children) len(item.node.children)]
+  let columns = max(widths)^
+  var fields = "", index = 1
+  while (index < columns) { fields = fields ++ doc.separator; index = index + 1 }
+  // A newline inside a quoted field is not a record ending.
+  let previous_endings = [for (row in doc.tree.children where row.first < entry.first and row.line_last > row.node.last)
+    source_text.raw(doc.text, row.node.last, row.line_last)]
+  let ending = if (entry.line_last > entry.node.last)
+    source_text.raw(doc.text, entry.node.last, entry.line_last)
+    else if (len(previous_endings) > 0) previous_endings[len(previous_endings) - 1] else "\n"
+  return replace_span(doc, entry.first, entry.first, fields ++ ending)^
+}
 fn export_text(doc, envelope) => doc.text
 fn check_roundtrip(doc, envelope) => null
 pub let csv_descriptor = {id: 'csv', name: "CSV", suffixes: [".csv"], surface: 'property', fallback_source: true,
   multiline_values: true,
   import_text: import_csv, export_text: export_text, check_roundtrip: check_roundtrip,
   replace_scalar: replace_scalar, rename_key: no_key, insert_child: insert_child, delete_child: delete_child,
-  insert_column: insert_column, delete_column: delete_column,
+  insert_column: insert_column, delete_column: delete_column, insert_row: insert_row,
   value_help: "Enter a field value, or a CSV row at the root."}
 pub let tsv_descriptor = {*: csv_descriptor, id: 'tsv', name: "TSV", suffixes: [".tsv"], import_text: import_tsv,
   value_help: "Enter a field value, or a TSV row at the root."}

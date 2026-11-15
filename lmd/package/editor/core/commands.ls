@@ -2145,21 +2145,27 @@ pub fn cmd_lift_blockquote(st) any^ {
 
 fn table_supported(st) => state_schema(st).table != null
 
-fn make_table_cells(cols: int, cell_tag: symbol, i: int, acc: array) array {
+fn make_table_cells(cols: int, cell_tag: symbol, table_spec, i: int, acc: array) array {
   if (i >= cols) { acc }
-  else { make_table_cells(cols, cell_tag, i + 1, [*acc, node(cell_tag, [text("")])]) }
+  else {
+    // A format can distribute its usable document width without rounding loss.
+    let width = table_spec.available_width
+    let attrs = if (table_spec.new_cell_width_attr == null) [] else
+      [{name:table_spec.new_cell_width_attr, value:width div cols + if (i < width % cols) 1 else 0}]
+    make_table_cells(cols, cell_tag, table_spec, i + 1, [*acc, node_attrs(cell_tag, attrs, [text("")])])
+  }
 }
 
-fn make_table_row(cols: int, header: bool) =>
-  node('tr', make_table_cells(cols, if (header) { 'th' } else { 'td' }, 0, []))
+fn make_table_row(cols: int, header: bool, table_spec) =>
+  node('tr', make_table_cells(cols, if (header) { 'th' } else { 'td' }, table_spec, 0, []))
 
-fn make_table_rows(rows: int, cols: int, header: bool, i: int, acc: array) array {
+fn make_table_rows(rows: int, cols: int, header: bool, table_spec, i: int, acc: array) array {
   if (i >= rows) { acc }
-  else { make_table_rows(rows, cols, header, i + 1, [*acc, make_table_row(cols, header and i == 0)]) }
+  else { make_table_rows(rows, cols, header, table_spec, i + 1, [*acc, make_table_row(cols, header and i == 0, table_spec)]) }
 }
 
-fn make_table_node(rows: int, cols: int, header: bool) =>
-  node('table', make_table_rows(rows, cols, header, 0, []))
+fn make_table_node(rows: int, cols: int, header: bool, table_spec) =>
+  node('table', make_table_rows(rows, cols, header, table_spec, 0, []))
 
 fn insert_block_after_selection(st, block) any^ {
   let sel = st.selection
@@ -2196,9 +2202,26 @@ fn insert_block_after_selection(st, block) any^ {
   }
 }
 
+fn separate_adjacent_tables(st, tx) any^ {
+  let at = tx.sel_after.path[0]
+  let before = if (at > 0) node_at(tx.doc_after, [at - 1]) else null
+  let needs_before = before != null and is_node(before) and before.tag == 'table'
+  let first = if (needs_before) tx_step(tx, step_replace([], at, at, [node(state_default_block(st), [])])) else tx
+  let table_at = at + if (needs_before) 1 else 0
+  let after = node_at(first.doc_after, [table_at + 1])
+  let second = if (after != null and is_node(after) and after.tag == 'table')
+    tx_step(first, step_replace([], table_at + 1, table_at + 1, [node(state_default_block(st), [])])) else first;
+  tx_set_selection(second, node_selection([table_at]))
+}
+
 pub fn cmd_insert_table(st, rows, cols, header) any^ {
-  if (not table_supported(st) or rows <= 0 or cols <= 0) { null }
-  else { insert_block_after_selection(st, make_table_node(rows, cols, header)) }
+  let spec = state_schema(st).table
+  if (not table_supported(st) or rows <= 0 or cols <= 0 or
+      (spec.new_cell_width_attr != null and (not (spec.available_width is int) or spec.available_width < cols))) { null }
+  else {
+    let tx = insert_block_after_selection(st, make_table_node(rows, cols, header and spec.header_cells != false, spec))
+    if (tx != null and spec.separate_adjacent == true) separate_adjacent_tables(st, tx)^ else tx
+  }
 }
 
 fn selected_table_cell_path(st) any^ {
@@ -2230,9 +2253,14 @@ pub fn selected_table_context(st) any^ {
   }
 }
 
-fn empty_cell_like(cell) =>
-  if (cell != null and is_node(cell) and cell.tag == 'th') { node('th', [text("")]) }
-  else { node('td', [text("")]) }
+// Formats may mark cell attributes that a newly inserted cell must inherit.
+fn empty_cell_like(st, cell, tag_source) any^ {
+  let tag = if (tag_source != null and is_node(tag_source) and tag_source.tag == 'th') 'th' else 'td'
+  let inherited = [for (spec in state_schema(st)[tag].attrs where spec.copy_on_table_insert == true) spec.name]
+  let attrs = if (cell == null or not is_node(cell)) [] else
+    [for (attr in cell.attrs where contains(inherited, attr.name)^) attr];
+  node_attrs(tag, attrs, [text("")])
+}
 
 // Existing cells can contain nested blocks or be empty; use their editable edge.
 fn table_cell_selection(doc, path) any^ {
@@ -2247,9 +2275,9 @@ pub fn cmd_add_table_row(st, before=false) any^ {
   if (ctx == null) { null }
   else {
     let insert_at = ctx.row_index + if (before) 0 else 1
-    let cols = len(ctx.row.content)
     let tx0 = tx_begin(st.doc, st.selection)
-    let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, insert_at, insert_at, [make_table_row(cols, false)]))
+    let row = node('tr', [for (cell in (ctx.row.content)^) empty_cell_like(st, cell, null)^])
+    let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, insert_at, insert_at, [row]))
     // Place the caret in the new row so typing can continue immediately.
     let caret = pos([*ctx.row_container_path, insert_at, ctx.col_index, 0], 0)
     tx_set_selection(tx1, text_selection(caret, caret))
@@ -2271,29 +2299,39 @@ pub fn cmd_delete_table_row(st) any^ {
   }
 }
 
-fn collect_add_col_steps_rows(rows_path, rows, col_index, insert_at, row_i, row_count, acc) any^ {
+// Pad shorter rows so insertion addresses the same column in every row.
+fn add_column_step(st, row, row_path, col_index, insert_at) any^ {
+  let count = len(row.content)^
+  let ref_cell = if (col_index < count) row.content[col_index] else null
+  let inherited = if (ref_cell != null or count == 0) ref_cell else row.content[count - 1]
+  let missing = max(0, insert_at - count)
+  let padding = if (missing == 0) [] else [for (i in 1 to missing) empty_cell_like(st, inherited, null)^]
+  let cell = empty_cell_like(st, inherited, ref_cell)^
+  let at = min(count, insert_at);
+  step_replace(row_path, at, at, [*padding, cell])
+}
+
+fn collect_add_col_steps_rows(st, rows_path, rows, col_index, insert_at, row_i, row_count, acc) any^ {
   if (row_i >= row_count) { acc }
   else {
     let row = rows.content[row_i]
     let next = if (row != null and is_node(row) and row.tag == 'tr') {
-      let ref_cell = if (col_index < len(row.content)) { row.content[col_index] } else { null };
-      [*acc, step_replace([*rows_path, row_i], insert_at, insert_at, [empty_cell_like(ref_cell)])]
+      [*acc, add_column_step(st, row, [*rows_path, row_i], col_index, insert_at)^]
     } else { acc }
-    collect_add_col_steps_rows(rows_path, rows, col_index, insert_at, row_i + 1, row_count, next)
+    collect_add_col_steps_rows(st, rows_path, rows, col_index, insert_at, row_i + 1, row_count, next)
   }
 }
 
-fn collect_add_col_steps_table(table_path, table, col_index, insert_at, i, n, acc) any^ {
+fn collect_add_col_steps_table(st, table_path, table, col_index, insert_at, i, n, acc) any^ {
   if (i >= n) { acc }
   else {
     let child = table.content[i]
     let next = if (child != null and is_node(child) and child.tag == 'tr') {
-      let ref_cell = if (col_index < len(child.content)) { child.content[col_index] } else { null };
-      [*acc, step_replace([*table_path, i], insert_at, insert_at, [empty_cell_like(ref_cell)])]
+      [*acc, add_column_step(st, child, [*table_path, i], col_index, insert_at)^]
     } else if (child != null and is_node(child) and (child.tag == 'thead' or child.tag == 'tbody' or child.tag == 'tfoot')) {
-      collect_add_col_steps_rows([*table_path, i], child, col_index, insert_at, 0, len(child.content), acc)
+      collect_add_col_steps_rows(st, [*table_path, i], child, col_index, insert_at, 0, len(child.content), acc)
     } else { acc }
-    collect_add_col_steps_table(table_path, table, col_index, insert_at, i + 1, n, next)
+    collect_add_col_steps_table(st, table_path, table, col_index, insert_at, i + 1, n, next)
   }
 }
 
@@ -2302,7 +2340,7 @@ pub fn cmd_add_table_column(st, before=false) any^ {
   if (ctx == null) { null }
   else {
     let insert_at = ctx.col_index + if (before) 0 else 1
-    let steps = collect_add_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, insert_at, 0, len(ctx.table.content), [])
+    let steps = collect_add_col_steps_table(st, ctx.table_path, ctx.table, ctx.col_index, insert_at, 0, len(ctx.table.content), [])
     let tx1 = tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps))
     let caret = pos([*ctx.row_path, insert_at, 0], 0)
     tx_set_selection(tx1, text_selection(caret, caret))
@@ -2594,8 +2632,21 @@ fn code_block_path_for_selection(st) any^ {
   else { code_block_path_for_ancestor(st, parent_path(sel.anchor.path)) }
 }
 
+// Inline-only table cells cannot be split into sibling cells by Enter.
+fn inline_table_cell_at(st, p) any^ {
+  let target = node_at(st.doc, p.path)
+  let block_path = if (target != null and is_node(target)) p.path
+    else split_block_path_for_leaf_at(st.doc, p.path)^
+  let block = node_at(st.doc, block_path)
+  if (block != null and is_node(block) and block.tag in ['td', 'th']) block_path else null
+}
 pub fn cmd_insert_paragraph(st) any^ {
   if (code_block_path_for_selection(st) != null) { cmd_insert_text(st, "\n") }
+  else if (st.selection != null and st.selection.kind == 'text' and
+      inline_table_cell_at(st, st.selection.anchor)^ != null and
+      inline_table_cell_at(st, st.selection.anchor)^ == inline_table_cell_at(st, st.selection.head)^) {
+    cmd_insert_line_break(st)
+  }
   else { cmd_split_block(st) }
 }
 

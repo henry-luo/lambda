@@ -57,7 +57,9 @@ fn align_style(n) any^ {
   let align = attr_get(n, 'align')
   let measurements = [for (entry in rtf_paragraph_measurements, let value = attr_get(n, entry.name)
     where ((value is int and value > 0) ^ { false })) entry.css ++ ": " ++ string(value / 15.0) ++ "px"]
-  let parts = [*if (align == null) [] else ["text-align: " ++ align], *measurements]
+  let width = attr_get(n, 'rtf-width')
+  let parts = [*if (align == null) [] else ["text-align: " ++ align], *measurements,
+    *if (width is int and width > 0) ["width: " ++ string(width / 15.0) ++ "px"] else []]
   if (len(parts) == 0) null else join(parts, "; ")
 }
 

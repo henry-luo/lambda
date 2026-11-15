@@ -1,0 +1,20 @@
+{
+  "name": "create and reopen an RTF table using page geometry",
+  "command": "edit",
+  "html": "test/fixtures/edit/page-setup.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_table_create.rtf",
+  "events": [
+    {"type": "click", "target": {"text": "Hello"}},
+    {"type": "click", "target": {"selector": ".edit-btn-table"}},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 4},
+    {"type": "click", "target": {"selector": "#edit-surface table td", "index": 0}},
+    {"type": "type", "text": "Created"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table_create.rtf", "contains": "\\cellx4950\\cellx9900"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table_create.rtf", "contains": "Created"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 4},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Created"}
+  ]
+}

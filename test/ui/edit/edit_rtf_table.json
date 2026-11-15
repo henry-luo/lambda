@@ -1,0 +1,22 @@
+{
+  "name": "edit and reopen an RTF table without losing cell widths",
+  "command": "edit",
+  "html": "test/fixtures/edit/table.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_table.rtf",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface table tr"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 4},
+    {"type": "click", "target": {"text": "Alpha"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table.rtf", "contains": "\\cellx1200\\cellx3000"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table.rtf", "contains": "\\cellx1000\\cellx3000"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table.rtf", "contains": "Alpha!"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_table.rtf", "contains": "{\\b Beta}"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 4},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Alpha!"}
+  ]
+}

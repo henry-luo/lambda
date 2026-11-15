@@ -82,6 +82,7 @@ fn grid_view(tree, format, draft) any^ {
       apply(<property_button action: "delete_column", label: "−", title: "Remove column " ++ string(i + 1), first: i>)]>],
     <th *["Actions", if (columns > 0) apply(<property_button action: "insert_column", label: "+ column", title: "Add column", first: columns>) else null]>]
   let rows = [for (row_index, row in tree.children) {
+    let insert = apply(<property_button action: "insert_row", label: "+", title: "Insert row before row " ++ string(row_index + 1), first: row.node.first>)
     let remove = apply(<property_button action: "delete", label: "−", title: "Remove row", first: row.node.first, kind: row.node.kind>)
     let cells = [for (cell_index, cell in row.node.children) {
       let field = value_view("Row " ++ string(row_index + 1) ++ ", column " ++ string(cell_index + 1), cell.node, format, draft,
@@ -90,7 +91,7 @@ fn grid_view(tree, format, draft) any^ {
       <td <div class: "property-grid-cell", *[field, remove_field]>>
     }]
     let add_field = apply(<property_button action: "add", label: "+ field", title: "Add field", first: row.node.first, kind: row.node.kind>);
-    <tr *[<th *[string(row_index + 1), remove]>, *cells,
+    <tr *[<th *[string(row_index + 1), insert, remove]>, *cells,
       *[for (i in (len(row.node.children)^) to columns - 1) <td>], <td add_field>]>
   }]
   let table = <table class: "property-grid", <thead <tr *headings>> <tbody *rows>>;
@@ -215,8 +216,9 @@ on property_command(req) {
   }
   else if (req.action == "add") { dialog = {kind: 'add_property', first: req.first, container: req.kind} }
   else if (req.action == "add_element") { dialog = {kind: 'add_element', first: req.first} }
-  else if (req.action in ["delete", "delete_element", "insert_column", "delete_column"]) {
+  else if (req.action in ["delete", "delete_element", "insert_column", "delete_column", "insert_row"]) {
     let result = (if (req.action == "delete_element") session.format.delete_element(doc, req.first)
+                  else if (req.action == "insert_row") session.format.insert_row(doc, req.first)
                   else if (req.action == "insert_column") session.format.insert_column(doc, req.first)
                   else if (req.action == "delete_column") session.format.delete_column(doc, req.first)
                   else session.format.delete_child(doc, req.first)) ^ { {error: ^.message} }

@@ -542,7 +542,7 @@ suffix (D9.3.4, D10.2.1).
 | `.html`, `.htm` | Rich text for the body; the head, attributes, scripts, and elements the editor does not edit are kept as written and never run |
 | `.xhtml`, `.xht` | Rich text for documents whose strict XML tree survives the HTML editor's round trip, including compact documents and line breaks; other XHTML opens in source |
 | `.rst`, `.rest`, `.org`, `.wiki`, `.mediawiki`, `.adoc`, `.asciidoc`, `.asc`, `.textile`, `.txtl` | Rich text when the document survives its format's round trip; otherwise source |
-| `.rtf` | Rich text for basic paragraphs, page breaks, alignment, nonnegative indents and spacing, emphasis, small capitals, superscript, subscript, RGB text colors and highlights, and ordinary font and size changes; run languages and default-language, page setup, information and generator headers are retained, while unsupported controls and metadata open in source |
+| `.rtf` | Rich text for basic paragraphs and simple tables, page breaks, alignment, nonnegative indents and spacing, emphasis, small capitals, superscript, subscript, RGB text colors and highlights, and ordinary font and size changes; run languages and default-language, page setup, information and generator headers are retained, while unsupported controls and metadata open in source |
 | `.properties`, `.props`, `.ini` | Property values, names and simple insertions/deletions; unsupported constructs open in source |
 | `.csv`, `.tsv` | Editable grid with numbered rows and columns; quoting is handled on save |
 | `.json` | Property tree for objects and arrays; values use JSON literals, including quotes around strings |
@@ -574,14 +574,23 @@ The grid quotes edited fields when needed to keep that detection stable and
 refuses structural edits that would reinterpret existing rows on reopening.
 Column header controls insert or remove a column across the table as one
 undoable edit. Insertion pads shorter rows with empty fields; removal is
-refused if it would leave a row without a field. Source preservation follows
-D9.3.4.
+refused if it would leave a row without a field. The control beside each row
+number inserts a blank row before it, sized to the widest row in the table;
+the insertion can be undone. Source preservation follows D9.3.4.
 RTF page dimensions, margins, gutter, orientation and default tab width are
 retained when present in the document header; the rich surface does not show
 paginated pages or apply those page settings. Page breaks appear as inline
 “Page break” markers and retain their original paragraph boundaries on save.
 RTF run language IDs are retained when editing; the rich surface does not
 provide a control for changing them.
+Paragraph keep-together, keep-with-next and page-break-before settings are
+also retained; they do not affect the unpaginated editing surface.
+Simple RTF tables retain cell widths and support cell editing and row and
+column changes through the context menu. New cells inherit widths and
+paragraph formatting from the selected row or column. A new table uses the
+document's available page width, accounting for margins and gutter. Merged
+cells, table borders, multi-paragraph cells, and other unsupported table
+properties open in source mode.
 PDF, raster images and other non-text media cannot be edited.
 When a file changes on disk, Reload checks the new content and the selected
 format's round trip before replacing the current edit. If either check fails,

@@ -70,7 +70,7 @@ pub pn open_document(path, options) element^ {
   let status = if (reason != null) "Opened source: " ++ reason else "Opened " ++ session.name ++ "."
   page(if (format.surface == 'source') {mode: 'source', session: session, doc: loaded.doc, status: status}
        else if (format.surface == 'property') {mode: 'property', session: session, doc: loaded.doc, status: status}
-       else {mode: 'rich', session: session, doc: edit_open(loaded.doc, format.schema, null), status: status})
+       else {mode: 'rich', session: session, doc: edit_open(loaded.doc, sess.edit_schema(format, loaded.envelope)^, null), status: status})
 }
 
 // The application root: the rich (or drawing) surface or the source surface

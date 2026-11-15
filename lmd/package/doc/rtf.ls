@@ -7,14 +7,19 @@ import doc_encoding: lambda.doc.encoding
 fn raw_source(source) => if (source is string) source else source.source
 fn next_token(source,at) any^ => if (source is string) lex.next(source,at)^ else grammar_lex.next(source,at)^
 
-fn initial_style() => {font:0,size:24,color:0,highlight:0,language:null,align:"left",li:0,ri:0,sl:0,sb:0,sa:0,uc:1,codepage:1252,
+// These paragraph pagination controls are retained for editing, not laid out here.
+pub let paragraph_keep_controls = ["keep", "keepn", "pagebb"]
+fn default_keeps() => [for (control in paragraph_keep_controls) false]
+fn initial_style() => {font:0,size:24,color:0,highlight:0,language:null,align:"left",li:0,ri:0,sl:0,sb:0,sa:0,
+    keeps:default_keeps(),uc:1,codepage:1252,
     bold:false,italic:false,underline:false,strike:false,caps:false,baseline:0}
 // RTF's named punctuation and escaped special characters denote Unicode text.
 pub let punctuation = {bullet:8226, emdash:8212, endash:8211, lquote:8216, rquote:8217,
     ldblquote:8220, rdblquote:8221}
 let special_symbols = map(["~",160, "-",173, "_",8209])
-fn initial(preserve_empty, editor_runs) => {style:initial_style(),default_font:0,default_language:null,fonts:[],colors:[],blocks:[],spans:[],
-    paragraph_style:null,text:"",pending_surrogate:null,preserve_empty:preserve_empty,editor_runs:editor_runs}
+fn initial(preserve_empty, editor_runs, editor_tables) => {style:initial_style(),default_font:0,default_language:null,fonts:[],colors:[],blocks:[],spans:[],
+    paragraph_style:null,paragraph_keeps:null,text:"",pending_surrogate:null,preserve_empty:preserve_empty,editor_runs:editor_runs,
+    editor_tables:editor_tables,table_row:null}
 fn fixed(n) any^ {
     let hundredths = int(round(n * 100.0));
     let whole = int(hundredths / 100);
@@ -66,14 +71,44 @@ fn flush(s) any^ {
         let pstyle = if (s.paragraph_style == null) paragraph_style(s.style) else s.paragraph_style;
         let span = if (s.editor_runs) <span style:css, rtf_font:s.style.font, rtf_size:s.style.size, rtf_lang:s.style.language, s.text>
                    else <span style:css,s.text>;
-        {*:s,text:"",paragraph_style:pstyle,spans:[*s.spans,span]}
+        let keeps = if (s.paragraph_keeps == null) s.style.keeps else s.paragraph_keeps;
+        {*:s,text:"",paragraph_style:pstyle,paragraph_keeps:keeps,spans:[*s.spans,span]}
     }
 }
 fn finish(s, explicit = false) any^ {
     let result = flush(s)^;
     if (result.paragraph_style == null and len(result.spans) == 0 and not (explicit and result.preserve_empty)) result
-    else {*:result,paragraph_style:null,spans:[],
-        blocks:[*result.blocks,<p style:if (result.paragraph_style == null) paragraph_style(result.style) else result.paragraph_style,*result.spans>]}
+    else {
+        let style = if (result.paragraph_style == null) paragraph_style(result.style) else result.paragraph_style
+        let keeps = if (result.paragraph_keeps == null) result.style.keeps else result.paragraph_keeps
+        let block = if (result.editor_runs) <p style:style,rtf_keeps:keeps,*result.spans> else <p style:style,*result.spans>;
+        {*:result,paragraph_style:null,paragraph_keeps:null,spans:[],blocks:[*result.blocks,block]}
+    }
+}
+// Editor rows retain each cell's width and paragraph formatting, independently
+// of the viewer's established tab-separated projection.
+fn table_cell(s) any^ {
+    let row = s.table_row
+    let i = len(row.cells)
+    if (i >= len(row.boundaries)) raise error("rtf: table cell has no boundary")
+    else {
+        let edge = row.boundaries[i]
+        let left = if (i == 0) 0 else row.boundaries[i - 1]
+        let style = if (s.paragraph_style == null) paragraph_style(s.style) else s.paragraph_style
+        let keeps = if (s.paragraph_keeps == null) s.style.keeps else s.paragraph_keeps
+        let cell = <'rtf-cell' style:style,rtf_keeps:keeps,rtf_width:edge - left,*s.spans>;
+        {*:s,spans:[],paragraph_style:null,paragraph_keeps:null,table_row:{*:row,cells:[*row.cells,cell]}}
+    }
+}
+fn table_end(s) any^ {
+    let row = s.table_row
+    if (len(row.cells) == 0 or len(row.cells) != len(row.boundaries) or len(s.spans) != 0) {
+        raise error("rtf: incomplete table row")
+    }
+    else {
+        let block = <'rtf-row' *row.cells>;
+        {*:s,table_row:null,blocks:[*s.blocks,block]}
+    }
 }
 fn add(s, text) => {*:s,text:s.text ++ text}
 // Strict mode is used when an editor retains a complete raw destination.
@@ -143,14 +178,33 @@ fn unicode_unit(s, value) any^ {
 }
 fn control(s, t) any^ {
     let w = t.word; let v = if (t.parameter == null) 1 else t.parameter; let st = s.style;
-    if (w == "par" or w == "row") finish(s,true)
+    if (s.editor_tables and w == "trowd") {
+        if (s.table_row != null or len(s.spans) != 0) raise error("rtf: table row interrupts content")
+        else {*:s,table_row:{boundaries:[],cells:[]}}
+    }
+    else if (s.editor_tables and s.table_row != null and w == "cellx") {
+        let row = s.table_row
+        let edges = row.boundaries
+        if (len(row.cells) > 0 or t.parameter == null or t.parameter <= (if (len(edges) == 0) 0 else edges[len(edges)-1]))
+            raise error("rtf: invalid table cell boundary")
+        else {*:s,table_row:{*:row,boundaries:[*edges,t.parameter]}}
+    }
+    else if (s.editor_tables and s.table_row != null and w == "cell") table_cell(s)
+    else if (s.editor_tables and s.table_row != null and w == "row") table_end(s)
+    else if (s.editor_tables and s.table_row != null and w == "par")
+        raise error("rtf: multi-paragraph table cells require source mode")
+    else if (w == "par" or w == "row") finish(s,true)
     else if (w == "page") {
         // In editor mode a page break stays inside its paragraph, even when
         // it is the first or last item; the viewer keeps its block projection.
         if (s.editor_runs) {*:s,spans:[*s.spans,<span rtf_page:true>]}
         else {let p = finish(s); {*:p,blocks:[*p.blocks,<hr>]}}
     }
-    else if (w == "line") add(s,"\n")
+    else if (w == "line") {
+        // The editor needs a structural break that survives model round trips.
+        if (s.editor_runs) {*:s,spans:[*s.spans,<span rtf_line:true>]}
+        else add(s,"\n")
+    }
     else if (w == "tab" or w == "cell") add(s,"\t")
     else if (punctuation[w] != null) add(s,chr(punctuation[w]))
     else if (w == "ansi") {*:s,style:{*:st,codepage:1252}}
@@ -162,13 +216,15 @@ fn control(s, t) any^ {
     // Plain restores the default language; highlighting is not a character format.
     else if (w == "plain") {*:s,style:{*:st,font:s.default_font,size:24,color:0,language:s.default_language,bold:false,
         italic:false,underline:false,strike:false,caps:false,baseline:0}}
-    else if (w == "pard") {*:s,style:{*:st,align:"left",li:0,ri:0,sl:0,sb:0,sa:0}}
+    else if (w == "pard") {*:s,style:{*:st,align:"left",li:0,ri:0,sl:0,sb:0,sa:0,keeps:default_keeps()}}
     else if (w == "ql" or w == "qc" or w == "qr" or w == "qj")
         {*:s,style:{*:st,align:if (w == "ql") "left" else if (w == "qc") "center" else if (w == "qr") "right" else "justify"}}
     else if (w == "b") {*:s,style:{*:st,bold:v != 0}}
     else if (w == "i") {*:s,style:{*:st,italic:v != 0}}
     else if (w == "ul" or w == "ulnone") {*:s,style:{*:st,underline:w == "ul" and v != 0}}
     else if (w == "strike") {*:s,style:{*:st,strike:v != 0}}
+    else if (contains(paragraph_keep_controls,w)) {*:s,style:{*:st,keeps:
+        [for (i, keep in st.keeps) if (paragraph_keep_controls[i] == w) v != 0 else keep]}}
     else if (w == "caps" or w == "scaps") {*:s,style:{*:st,caps:v != 0}}
     else if (w == "super" or w == "sub" or w == "nosupersub")
         {*:s,style:{*:st,baseline:if (w == "super") 1 else if (w == "sub") -1 else 0}}
@@ -250,9 +306,12 @@ fn parse_with(source, use_grammar, options) map^ {
             raise error({message:"rtf: document must start with '{\\rtf'"})
         else {
             let stream = if (use_grammar) grammar_lex.prepare(source)^ else source;
+            // Cell projections need the same run metadata as ordinary editor paragraphs.
+            let editor_tables = options != null and options.editor_tables == true
             let result = group(stream,begin,initial(options != null and options.preserve_empty == true,
-                options != null and options.editor_runs == true),0)^;
-            let done = finish(result.state)^;
+                editor_tables or (options != null and options.editor_runs == true), editor_tables),0)^;
+            let done = if (result.state.table_row != null) raise error("rtf: incomplete table row")
+                else finish(result.state)^;
             {document:<doc *done.blocks>, font_style:font_style(done)^, colors:done.colors,
              fonts:done.fonts, base_font:done.style.font, base_size:done.style.size, base_language:done.style.language}
         }

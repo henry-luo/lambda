@@ -912,7 +912,7 @@ pn rich_view(session, b) {
            rich_format: format}
   if (format.surface == 'property')
     {mode: 'property', session: s, doc: loaded.doc, status: ""}
-  else {mode: 'rich', session: s, doc: edit_open(loaded.doc, format.schema, null), status: ""}
+  else {mode: 'rich', session: s, doc: edit_open(loaded.doc, sess.edit_schema(format, loaded.envelope)^, null), status: ""}
 }
 
 // The surface's rows, and its width in characters from the measuring span's

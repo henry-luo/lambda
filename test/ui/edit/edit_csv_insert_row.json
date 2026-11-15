@@ -1,0 +1,18 @@
+{
+  "name": "insert a CSV row before another row and undo it",
+  "command": "edit",
+  "html": "test/fixtures/edit/columns.csv",
+  "working_copy": "temp/edit-ui/edit_csv_insert_row.csv",
+  "events": [
+    {"type": "click", "target": {"selector": "button[title='Insert row before row 2']"}},
+    {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 4},
+    {"type": "click", "target": {"selector": "#grid-cell-1-0"}},
+    {"type": "type", "text": "Grace"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_insert_row.csv", "equals": "name,role\nGrace,\nAda,dev\nLin\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_insert_row.csv", "equals": "name,role\nAda,dev\nLin\n"}
+  ]
+}
