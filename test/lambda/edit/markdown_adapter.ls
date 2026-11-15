@@ -68,8 +68,7 @@ let again = md.import_text(written)^
 let underlined = node('doc', [node('p', [text_marked("under", [{name: 'u', value: null}])])])
 "gate on unrepresentable formatting:"; [md.check_roundtrip(underlined, loaded.envelope)]
 
-// a block the model cannot hold (one with a footnote reference), or one its
-// export would not read back the same (nested emphasis), is kept as written:
+// A block the model cannot round-trip (nested emphasis) is kept as written:
 // its source lines save byte for byte and show view-only. So are lines no
 // block claims (a link reference definition), which have no view.
 let kept_source = "Intro with *emphasis*.
@@ -87,6 +86,8 @@ Outro with [a link](https://example.com).
 let kept = md.import_text(kept_source)^
 let kept_nodes = [for (b in kept.doc.content where b.tag == 'md_source') b];
 "kept blocks:"; [for (b in kept.doc.content) b.tag]
+"inline footnote reference:"; [for (n in kept.doc.content[1].content where n.tag == 'footnote_ref') attr_get(n, 'label')]
+"editable footnote:"; [for (b in kept.doc.content where b.tag == 'md_footnote') [attr_get(b, 'label'), attr_get(b, 'edit source')]]
 "kept source:"; [for (b in kept_nodes) attr_get(b, 'markdown')]
 "kept views:"; [for (b in kept_nodes where ((attr_get(b, view_attr) != null) ^ { false })) format(attr_get(b, view_attr), 'html')]
 "kept blocks save byte for byte:"; md.export_text(kept.doc, kept.envelope) == kept_source

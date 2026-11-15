@@ -2,6 +2,413 @@
 
 ## Current checkpoint
 
+- 2026-11-15 Markdown footnote-definition continuation: ordinary definitions
+  are editable as rich blocks, including multi-paragraph content, while their
+  original source is retained until that definition changes (D9.3.4). A
+  definition with unsupported content stays view-only. The model regression
+  covers source retention and an edited round trip; the focused UI replay
+  covers editing, save, undo and source switching. After updating the prior
+  view-only expectations, the editor/RTF model selection passes 117/117 and
+  the edit UI suite passes 184/185; the existing RI-090 caret replay remains
+  failing (`temp/edit-viewer/commit-{model,ui}.log`). The aggregate baselines
+  recorded below predate this footnote-definition change.
+- 2026-11-15 RTF highlight continuation: the shared direct/grammar reader
+  projects RTF 1.7 `highlight` color-table indices to text backgrounds; zero
+  clears the highlight and group scope is retained. The rich editor maps
+  highlights into its existing span marks and writes supported indices back
+  with the retained color table (D9.3.4). It rejects invalid indices and
+  unrepresentable colors. The [RTF 1.7 specification](https://latex2rtf.sourceforge.net/RTF-Spec-1.7.pdf)
+  defines the color-table index and distinguishes highlighting from character
+  formatting, so `plain` does not clear it. The prior source-mode refusal is
+  captured in `temp/edit-viewer/rtf-highlight-before.log`; model coverage
+  checks both readers, scoped and reset formatting, mixed foreground colors,
+  no-op save and rich round trip. The UI replay edits inside a highlighted
+  run, saves and switches through source and back (`rtf-highlight-ui-final.log`,
+  8/8 assertions). The editor/RTF model selection passes 116/116; three
+  focused tests pass interpreter and JIT (`rtf-highlight-{model-suite,tier-*}.log`).
+  The edit UI suite passes 183/184; the remaining failure is the known RI-090
+  replay (`rtf-highlight-ui-suite.log`). Lambda baseline passes 7,531/7,531
+  (`rtf-highlight-lambda.log`). Radiant's baseline reports 8,170 passes,
+  zero failures, 297 partial and 20 skipped; it does not include the separate
+  RI-090 edit replay (`rtf-highlight-radiant.log`). Test262's first run
+  overlapped another Lambda baseline; its default stale-process cleanup killed
+  two `lambda.exe` processes which may have belonged to that run. After the
+  other baseline finished, a rebuilt release binary was pinned via
+  `LAMBDA_TEST262_EXE` (SHA-256 `e6be0cdd2302fb42ffd426b64b83efbfadd65716cb008f7e26d1eeb350eaa6c9`)
+  and the baseline selection rerun without that cleanup. It reports 40,257
+  fully passing, four slow cases passing on isolated retry, zero regressions,
+  and 2,652 skipped; no batch was killed
+  (`rtf-highlight-test262-pinned.log`).
+- 2026-11-15 CSV/TSV column continuation: the grid can insert a column before
+  any existing column or append one, and remove a column across all rows.
+  Each operation is one undoable transaction; insertion pads short rows and
+  removal refuses to eliminate a row's only field. Source spans retain quoted
+  and multiline fields and line endings; the existing CSV delimiter check
+  rejects changes that would reinterpret rows after reopening (D9.3.4).
+  `delimited_columns.ls` covers ragged rows, CRLF, embedded newlines, TSV and
+  delimiter rejection; CSV and TSV UI replays cover pending fields, undo and
+  rejected removal (`temp/edit-viewer/columns-{model,ui,tsv-pending}.log`).
+  The editor/RTF model selection passes 115/115, two focused model tests pass
+  in interpreter and JIT tiers, and the edit UI suite passes 182/183 with
+  the existing RI-090 caret replay failing (`columns-{model-suite,tier-*,
+  ui-final}.log`). Lambda baseline passes 7,530/7,530 (`columns-lambda.log`).
+  Radiant baseline reports 7,963 passes, one failure, 293 partial and 19
+  skipped because the render runner exited without a summary; the earlier
+  missing-monitor Scene3D case passed. The isolated render rerun passed 207,
+  with four expected failures and one skip (`columns-radiant.log`,
+  `columns-render.log`). The aggregate failure's cause is unconfirmed.
+  Test262 passes 40,261/40,261 selected cases, with zero retries or regressions
+  and 2,652 skipped (`columns-test262.log`).
+- 2026-11-15 INI control-value continuation: INI skips only spaces and tabs
+  after a separator, so leading form feed and vertical tab are significant
+  value bytes. The property scanner now uses the same rule for value spans
+  and multiline quote detection. Values containing control characters that
+  do not display reliably in a field use an editable JSON string literal;
+  no-op saves retain the original source and edits validate the literal before
+  replacing the value. This follows D9.3.4. The viewer/editor mismatch was
+  reproduced in `temp/edit-viewer/ini-space-probe.log`; model coverage also
+  checks multiline and DEL values. The focused UI replay passes all seven
+  assertions (`ini-control-ui-focused.log`). The editor/RTF model selection
+  passes 114/114; the edit suite passes 180/181 with the existing RI-090
+  caret replay still failing (`ini-control-{model-suite,ui-suite}.log`).
+  Three focused model tests pass in forced interpreter and JIT modes
+  (`ini-control-tier-{interp,jit}.log`). The Lambda baseline reports 6,732
+  passes and three executable timeouts, after unusually long simultaneous
+  stalls. The JS optimization and security executables pass isolated reruns
+  (122/122 and 98/98); the JS executable passes 576/577, with a reproducible
+  media playback stall recorded in the [Lambda ledger](../Lambda_Issue_Ledger.md#unattributed-dom-media-playback-stall--2026-11-15).
+  The Radiant baseline reports 8,169 passes, one failure, 297 partial and 20
+  skipped: `Scene3dPlatform.NativeHostCleanupRetainsTheApplicationRuntime`
+  reproduces in isolation with zero GLFW monitors. Its layout selection has
+  zero failures, and the separate edit UI replay above remains outside it.
+  Test262 reports 40,259 fully passing, two slow cases passing on isolated
+  retry, zero regressions and 2,652 skipped. One stalled batch was killed;
+  all 104 lost results were recovered in the batch retry. Aggregate and isolated logs
+  are under `temp/edit-viewer/ini-control-*`; none of these results establish
+  the cause of the unrelated stalls or the missing monitors.
+- 2026-11-15 Markdown footnote-reference continuation: references in ordinary
+  paragraphs, headings, lists and tables can now be retained as inline atoms,
+  allowing surrounding text edits while definitions remain as authored source.
+  Formatting around references, deletion and undo have focused model and UI
+  coverage. Blocks combining a reference with raw HTML remain view-only to
+  retain the paired HTML projection. The before/after evidence is in
+  `temp/edit-viewer/md-footnote-{inline-before,inline-ui-before,variants,
+  marked-ui,delete-ui}.log`. Home and End at a reference on a visual line edge
+  still put text on the wrong side of the atom; the independent plain
+  contenteditable reproduction and native cause are recorded in Radiant
+  [RI-090](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-090). The
+  regression `test/ui/edit/edit_md_footnote_edges.json` remains failing until
+  the owning Radiant fix; do not claim complete keyboard support. The full
+  editor/RTF model selection passes 112/112; the full edit UI selection has
+  179 passes and that one failure (`md-footnote-full-{model,ui}.log`). Three
+  focused model tests pass forced interpreter and JIT with no interpreter
+  fallback (`md-footnote-tier-{interp,jit}.log`). Atomic-edge text anchors
+  share the existing RTF mechanism. D9.3.4 governs source preservation and
+  D10.2.1 editor selection. The first Lambda baseline had one stale adapter
+  golden for the newly editable paragraph; the updated golden asserts the
+  inline reference and the focused rerun passes (`md-adapter-failure.log`,
+  `md-adapter-updated.log`). The Lambda baseline rerun passes 7,528/7,528 with
+  the Input owner's in-worktree LI-060 fix (`md-footnote-final-lambda.log`).
+  Radiant's baseline selection reports 8,170 passes, zero failures, 297 partial
+  and 20 skipped (`md-footnote-final-radiant.log`); it does not include the
+  separate failing edit replay. Test262 passes 40,261/40,261 selected cases,
+  with no retries or regressions and 2,652 skipped (`md-footnote-final-test262.log`).
+- 2026-11-15 JSON control-name continuation: JSON object names containing
+  NUL, line endings, tabs or other control characters now open in the
+  property tree. Those names display their quoted JSON spelling, preserving
+  the original spelling on a no-op; editing validates a complete JSON string
+  before renaming. The Add Property dialog accepts newlines in names via
+  Shift+Enter. Model and UI coverage includes control names, invalid drafts,
+  no-op and edited saves, and transition back to an ordinary name. The former
+  source-fallback replay now edits the property; a new add-dialog replay
+  failed before the change (`temp/edit-viewer/json-{control-before,add-
+  multiline-before}.log`). The full editor/RTF model selection passes
+  111/111 and the edit UI suite 176/176 (`json-control-final-{model,ui}.log`).
+  Two focused model tests pass in forced interpreter and JIT with no
+  interpreter fallback (`json-control-tier-{interp,jit}.log`). JSON source
+  preservation follows D9.3.4. The Lambda baseline passes 7,527/7,527 with the
+  Input owner's in-worktree LI-060 fix (`json-control-lambda.log`). Radiant
+  reports 8,170 passes, zero failures, 297 partial and 20 skipped
+  (`json-control-radiant.log`). Test262 passes 40,261/40,261 selected cases
+  with no retries or regressions and 2,652 skipped (`json-control-test262.log`).
+- 2026-11-15 CSV delimiter continuation: editing a first-record field can no
+  longer make the viewer redetect a different separator. The editor quotes a
+  changed field containing the competing delimiter and compares row values
+  against a fresh delimiter detection after structural edits. If the latter
+  would reinterpret existing rows, the edit is refused; if row values are
+  unchanged, the editor adopts the newly detected separator. TSV remains
+  explicitly tab-delimited. The regression initially reproduced both silent
+  reinterpretation and unsafe first-row deletion (`csv-detection-before.log`);
+  model coverage exercises both delimiter directions, insertion, deletion,
+  viewer parsing and empty files. The grid UI replay verifies saved bytes,
+  source switching and rejected deletion (`csv-detection-ui.log`). The full
+  editor/RTF model selection passes 110/110 and the edit suite 174/174
+  (`csv-detection-full-{model,ui}.log`); three focused tests pass forced
+  interpreter and JIT with no interpreter fallback (`csv-detection-tier-
+  {interp,jit}.log`). Source-preserving document editing follows D9.3.4.
+  The Lambda baseline passes 7,526/7,526 with the Input owner's in-worktree
+  LI-060 fix (`csv-detection-lambda.log`). Radiant reports 8,170 passes, zero
+  failures, 297 partial and 20 skipped (`csv-detection-radiant.log`). Test262
+  passes 40,261/40,261 selected cases, with no retries or regressions and
+  2,652 skipped (`csv-detection-test262.log`).
+- 2026-11-15 document-package continuation: added an internal ZIP member
+  replacement helper and an EPUB chapter adapter that reuses the existing
+  XHTML rich model (D9.3.4, D10.1.4). The adapter checks round-trip safety,
+  rejects changes to signed publications, and returns the original archive
+  on a no-op. A sample chapter edit reopens in the EPUB reader; independent
+  Python ZIP/XML inspection confirms only the chapter bytes changed, the
+  EPUB mimetype is first and stored, and other member bytes match
+  (`temp/edit-viewer/epub-chapter-oracle.log`). The ZIP helper retains the
+  changed member's mode. Input [LI-063](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-063)
+  records that constructed replacement files cannot retain their original
+  ZIP timestamps, and reconstructed directories also lose metadata. This
+  blocks a metadata-preserving package save. `lambda edit` does not yet use
+  these internal adapters: binary session lifecycle, chapter navigation,
+  signatures and complete package preservation remain open. The editor,
+  DOCX, EPUB and RTF model selection passes 136/136
+  (`temp/edit-viewer/package-final-model.log`). Both new tests pass in forced
+  interpreter and JIT modes without interpreter fallback
+  (`package-tier-{interp,jit}.log`). The Lambda baseline passes 7,525/7,525
+  with the Input owner's in-worktree LI-060 fix (`package-final-lambda.log`).
+  Radiant reports 8,170 passes, zero failures, 297 partial and 20 skipped
+  (`package-final-radiant.log`). Test262 passes 40,261/40,261 selected cases
+  with no retries or regressions and 2,652 skipped (`package-final-test262.log`).
+- Outstanding document-package coverage: `lambda view` opens DOCX and EPUB,
+  but `lambda edit` currently rejects both by suffix. These are document
+  containers, so media rejection alone does not establish that the original
+  editing objective is met. DOCX import renders to HTML and its existing
+  exporter explicitly creates a new package without retaining unrecognized
+  parts; it cannot be used as a lossless edit/save path. Investigate a
+  package-preserving adapter and the corresponding EPUB path before claiming
+  those formats supported. The existing Input-owned issues below remain open.
+- 2026-11-15 reload continuation: opening and reloading share the same media,
+  UTF-8, NUL and byte-preservation checks; reload also checks the selected
+  format's round trip before discarding the existing edit. A successful reload
+  retains the session's rich/source switch metadata. The procedural regression
+  reproduced acceptance of NUL, invalid UTF-8 and PDF content; the UI replay
+  reproduced loss of the unsaved source edit on a non-text reload. A second
+  UI replay reproduced loss of the rich-view switch after valid reload. These
+  cases pass after the fix (`temp/edit-viewer/reload-{safety-before,safety-final,
+  ui-before,ui-after,rich-before,rich-after}.log`). CSV replays additionally
+  verify edits retain CRLF within a cell and an empty grid can receive its
+  first row. The CRLF fixture now has an explicit Git attribute so those bytes
+  survive a fresh checkout. The editor/RTF model selection passes 107/107 and
+  the edit UI suite passes 172/172 (`reload-final-{model,ui}.log`). Two focused
+  tests pass in forced interpreter and JIT modes without interpreter fallback
+  (`reload-tier-{interp,jit}.log`). File effects and source preservation follow
+  S12.1.1v2 and D9.3.4. The Lambda baseline passes 7,523/7,523 with the Input
+  owner's in-worktree LI-060 fix (`reload-final-lambda.log`). Radiant reports
+  8,170 passes, zero failures, 297 partial and 20 skipped
+  (`reload-final-radiant.log`). Test262 passes 40,261/40,261 selected cases,
+  with zero retries or regressions and 2,652 skipped (`reload-final-test262.log`).
+- 2026-11-15 INI continuation: source-backed property editing now reads quoted
+  multiline values, section headers with trailing comments, and CR-only files.
+  Quoted values use a multiline control; newly quoted values can be expanded
+  after committing. Edits retain surrounding comments and existing line
+  endings, and added value lines follow the edited record in mixed-ending
+  files. Invalid or unterminated values remain rejected. The model and UI
+  failures were reproduced before implementation, including mixed endings
+  (`temp/edit-viewer/ini-multiline-{before,ui-before}.log`,
+  `ini-mixed-before.log`). The editor/RTF model selection passes 106/106 and
+  the edit UI suite passes 168/168 fixtures (`ini-final-{model,ui}.log`).
+  Three relevant model tests pass in forced interpreter and JIT modes, with
+  no interpreter fallback (`ini-final-tier-{interp,jit}.log`). The CRLF UI
+  fixture is protected from Git line-ending conversion. Source preservation
+  follows D9.3.4. The Lambda baseline passes 7,522/7,522 with the Input
+  owner's in-worktree LI-060 fix (`ini-final-lambda.log`). The Radiant
+  baseline reports 8,170 passes, zero failures, 297 partial and 20 skipped
+  (`ini-final-radiant.log`). Test262 passes 40,261/40,261 selected cases with
+  no retries or regressions and 2,652 skipped (`ini-final-test262.log`).
+- 2026-11-15 properties continuation: the property view now scans Java
+  properties by logical record, including continued keys and values, bare
+  keys, comment boundaries and odd/even trailing backslashes. Values show
+  properties-source escape spelling without continuation indentation;
+  edits retain unchanged continuation spans when valid and reserialize only
+  the edited value when a changed escape would break the record. LF, CRLF,
+  CR, blank continued lines, end-of-file continuations, insertion, rename,
+  deletion and NUL rejection have model coverage. A 60-case model matrix
+  compares edited values and neighboring entries with the Input parser.
+  The CRLF UI replay verifies exact saved bytes; its fixture has a targeted
+  `.gitattributes` exception. Oracle's [Properties.load specification](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Properties.html#load(java.io.Reader))
+  defines logical lines and backslash parity; source preservation follows
+  D9.3.4. Focused tests and UI replays pass (`temp/edit-viewer/properties-
+  {cont-before,cont-blank-after,cont-crlf-ui,nul-after}.log`). The full
+  editor/RTF model selection passed 105/105 and the edit suite passed 166/166
+  fixtures (`properties-final-{model,ui}.log`). Three focused property model
+  tests pass forced interpreter and JIT, with no interpreter fallback
+  (`properties-cont-tier-{interp,jit}.log`). The Lambda baseline passed
+  7,521/7,521 with the Input owner's in-worktree LI-060 fix
+  (`properties-final-lambda.log`). The Radiant baseline passed with 8,170
+  passed, zero failures, 297 partial and 20 skipped
+  (`properties-final-radiant.log`). Test262 passed 40,261/40,261 selected
+  cases, with no retries or regressions and 2,652 skipped
+  (`properties-final-test262.log`). Earlier notes saying continued properties
+  open in source mode are superseded.
+- 2026-11-15 inline page-break continuation: RTF `page` controls now remain
+  inline atoms in their actual paragraph, including at the start or end and
+  for consecutive breaks. Empty text leaves provide caret positions at atomic
+  edges; they do not add source characters. Paragraph formatting after a
+  leading break remains effective. The default viewer still uses its existing
+  block projection. Page-only and inline edit/save replays pass, as do
+  Backspace, forward Delete and undo. The shared editor deletion command now
+  handles adjacent text runs, atoms and native target ranges at atom edges;
+  model regressions reproduced both the collapsed-caret and native-range
+  failures before the fix. Six focused contenteditable/editor UI replays pass
+  (`temp/edit-viewer/rtf-inline-page-{before,both-ui}.log`,
+  `rtf-page-only-{before,both}.log`, `inline-delete-{before,target-before,
+  forward-before,both-after,editor-ui}.log`). The full editor/RTF model
+  selection passed 104/104 and the full edit suite passed 164/164 fixtures
+  (`rtf-page-anchor-full-{model,ui}.log`). The Lambda baseline passed
+  7,520/7,520 with the Input owner's in-worktree LI-060 fix
+  (`rtf-page-final-lambda.log`). The Radiant baseline passed with 8,170 passed,
+  zero failures, 297 partial and 20 skipped (`rtf-page-final-radiant.log`).
+  Test262 passed 40,261/40,261 selected cases with no retries or regressions
+  and 2,652 skipped (`rtf-page-final-test262.log`). Three focused page-break
+  and inline-deletion model tests also pass forced interpreter and JIT runs;
+  interpreter admission reports no fallback (`rtf-page-tier-{interp,jit}.log`).
+  This supersedes the earlier source-only inline-page note below. Source
+  preservation follows D9.3.4.
+- 2026-11-15 RTF continuation: `lang` character-run language IDs are retained
+  through edits, including nested groups, combined font/color/small-capital
+  marks and `plain` resets to `deflang`; invalid or absent parameters still
+  fall back to source. The editor keeps the language ID as model metadata rather
+  than presenting a language control. The model regression initially failed
+  because the control was source-only. Ten focused RTF/package tests pass,
+  as does a UI replay that edits inside the language run, saves, and switches
+  through source and back. The full editor/RTF model selection passed 102/102
+  and the full edit UI suite passed 161/161 fixtures
+  (`temp/edit-viewer/rtf-run-language-{before,focused,inside-ui,full-model,full-ui}.log`).
+  The current Lambda baseline passed 7,518/7,518 with the Input owner's
+  in-worktree LI-060 fix (`temp/edit-viewer/rtf-language-lambda-baseline.log`).
+  The Radiant and Test262 baselines below predate this change.
+  [Microsoft's character-format table](https://learn.microsoft.com/en-us/windows/win32/controls/about-text-object-model)
+  defines the `plain` reset; source preservation follows D9.3.4.
+- 2026-11-15 keyboard continuation: CSV/TSV cells use Cmd/Ctrl+Enter to
+  commit and move down in the same column, or Shift+Cmd/Ctrl+Enter to move up;
+  Enter remains available for multiline values. At an uneven or boundary row,
+  the edit is committed without moving. Focused CSV and TSV replays cover
+  multiline quoting, uneven rows, undo, and existing Tab navigation. A separate
+  HTML table replay confirms context commands target the right-clicked cell
+  even when another cell was previously selected. The new vertical replay
+  failed before implementation; all six focused replays and the full edit UI
+  suite (160/160 fixtures) pass afterward (`temp/edit-viewer/csv-vertical-
+  {before,focused,full-ui}.log`). The aggregate baselines below predate this
+  keyboard-only change. Source-preserving editing follows D9.3.4.
+- 2026-11-15 follow-up: Input [LI-056](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-056)
+  blocks TOML property editing because the parser accepts invalid escapes,
+  numbers and duplicate keys. [LI-057](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-057)
+  blocks YAML property editing because malformed scalars, aliases and flow
+  collections can be accepted. Python `tomllib` and local `js-yaml` reject the
+  reproduced inputs, respectively. [LI-058](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-058)
+  blocks calendar/contact property editing: unmatched boundaries can be accepted
+  and calendar events silently dropped. [LI-059](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-059)
+  records remaining RST literal code-block newline changes after LI-047; RST
+  literal blocks remain source-only. [LI-061](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-061)
+  blocks broadening Textile rich admission: its parser loses styled span
+  attributes, which otherwise look like the harmless wrappers added by LI-045.
+  [LI-062](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-062)
+  blocks rich man output because the Input reader retains `.TH` argument quotes
+  in the visible title; independent `mandoc` gives the same title for quoted
+  and unquoted forms. Preserving the original man header is a separate editor
+  requirement after the provider fix (`man-title-parse.log`, `man-title-*.html`).
+  Source-preserving editing is governed by
+  D9.3.4 and parse errors by S7.5.1v6. Probes are under `temp/edit-viewer/`.
+  Independently, the RTF reader and rich surface now preserve nonnegative
+  paragraph spacing before/after (`sb`/`sa`), including inherited settings and
+  `pard` resets. The new model regression failed before the change and passes
+  after it; direct and grammar readers agree, and the focused RTF tests and
+  spacing/indent edit-save replays pass (`rtf-spacing-{before,after,focused,ui}.log`).
+  Independent macOS `textutil` shows inherited and reset margins for the same
+  sample (`rtf-spacing-oracle.html`); its HTML uses 15/7.5 px for 300/150
+  twips while the editor uses 20/10 CSS px at 96 dpi.
+  RTF document-level page dimensions, margins, gutter, default tab width and
+  landscape orientation are retained across edits; late, nested, invalid or
+  parameterized flag controls still fall back to source. Page settings do not
+  affect the unpaginated rich surface. The page-setup model reproduced the
+  former fallback and passes with the page-setup UI replay; all 11 focused RTF
+  tests and four spacing/page/indent/language replays pass (`rtf-page-{before,
+  after}.log`, `rtf-spacing-page-{focused,ui}.log`).
+  The full edit UI suite passed 153/153 fixtures and the editor/RTF model
+  selection passed 99/99 (`rtf-continuation-full-{ui,model}.log`). The Lambda
+  baseline passed 7,508/7,515; all seven failing `proc_sync_*` cases are in
+  the preceding run's 29-failure set (`rtf-continuation-lambda-baseline.log`).
+  The Radiant baseline passed with 8,170 passed, zero failures, 297 partial
+  and 20 skipped (`rtf-continuation-radiant-baseline.log`). Test262 exited 0:
+  40,259 fully passed, two passed only after isolated retries of batch kills,
+  zero regressions, and 2,652 skipped (`rtf-continuation-test262-baseline.log`).
+  After those baselines, paragraph-boundary RTF page breaks gained a marked
+  separator in the rich model and retain empty and consecutive breaks across
+  saves. An inline `page` control remains source-only because the reader
+  projects it as separate blocks, which cannot safely retain one paragraph's
+  semantics. The [RTF 1.7 specification](https://latex2rtf.sourceforge.net/RTF-Spec-1.7.pdf)
+  distinguishes paragraph termination from required page breaks. The regression
+  failed before the change; all 12
+  focused RTF tests and four page/spacing/fallback UI replays pass
+  (`rtf-page-break-{before,after,focused,ui}.log`). The editor/RTF selection
+  passed 100/100 and the repeated full edit suite passed 155/155 fixtures
+  (`rtf-page-break-full-{model,ui-retry}.log`). The first UI suite had one CSV
+  replay killed after both assertions passed; three isolated repetitions and
+  the full-suite retry pass. The aggregate baselines above predate page breaks.
+  RTF small capitals (`scaps`) are now projected as vetted `font-variant` marks
+  and reconstructed on save, including combined bold, font, size and color
+  runs, group scope and `plain` resets. Ordinary `caps` controls remain
+  source-only. The model reproduced the old fallback and passes afterward;
+  all 13 focused RTF tests and the small-capitals/page-break/spacing UI replays
+  pass (`rtf-smallcaps-{before,after,focused,ui,mixed}.log`). The package reader
+  and grammar reader agree; the local Cocoa HTML exporter did not render the
+  control, so it is not claimed as a visual oracle. The full editor/RTF model
+  selection passed 101/101 and the edit UI suite passed 156/156 fixtures
+  (`rtf-smallcaps-full-{model,ui}.log`); aggregate baselines predate it.
+  Separate package issue: the reader maps RTF `caps` to small-capitals CSS,
+  but the RTF specification distinguishes `caps` and `scaps`. The existing
+  native oracle encodes the current behavior, while the local Cocoa exporter
+  ignores the probe. Keep `caps` source-only in the editor until the reader's
+  compatibility contract and independent reference are established; do not
+  change the native oracle without the required scoped authorization.
+  The proposed RTF highlighting
+  extension was not admitted: Microsoft describes `highlight` as not being a
+  character format, so its interaction with `plain` needs an independent
+  compatible reader oracle before changing preservation behavior. Apple
+  `textutil` and the installed Pandoc both ignore the highlight in the local
+  probe (`rtf-highlight-oracle.rtf`), so neither establishes that behavior.
+  The later full Lambda baseline reported 18 failures, including 16 MIR
+  emission cases whose shared saved log subsequently showed 595/595 passing,
+  and two forced-GC cases: one saw `lambda.exe` missing during spawn, and one
+  exited 137. Their cause is not established. A separate 595-test emission
+  run and both exact GC cases passed with unchanged executable hashes
+  (`rtf-final-{emission-isolated,gc-isolated}.log`,
+  `rtf-final-isolated-{before,after}.sha256`); the original GC log is retained
+  as `rtf-final-gc-stress-original.log`. The Input owner concurrently fixed
+  LI-060 in its worktree and this baseline's 2,392 Lambda runtime cases passed.
+  The isolated-results Lambda baseline rerun passed 7,517/7,517, including
+  the earlier sync failures, with the Input owner's uncommitted LI-060 fix
+  present (`rtf-final-lambda-isolated.log`). Sampled executable and Input
+  archive hashes matched during and after the run; the earlier aggregate
+  failures remain recorded above. The current isolated-results Radiant
+  baseline passed with 8,170 passed, zero failed, 297 partial and 20 skipped
+  (`rtf-final-radiant-isolated.log`). The current Test262 baseline passed
+  40,261/40,261 selected cases with zero retries or regressions and 2,652
+  skipped (`rtf-final-test262.log`).
+- 2026-11-15 continuation, Lambda `e55450ec8` plus this work: JSON now uses
+  a source-backed property adapter under D9.3.4. Objects and arrays support
+  scalar edits, key renames, insertion and deletion; literal fragments and
+  whole candidates are parsed independently so edits cannot inject adjacent
+  members. Unchanged source spelling, duplicate names, whitespace and line
+  endings are retained. Invalid JSON and names containing NUL or line breaks
+  fall back to source because the single-line key control cannot retain them.
+  Existing XML source and node helpers moved into the shared source-text module.
+  The focused JSON model tests and six UI replays pass, including invalid
+  drafts, source fallback, switching and save/undo. The full editor/RTF model
+  selection passed 97/97 and the edit UI suite passed 150/150 fixtures before
+  the additional name-control guard; its targeted JSON and XML model and UI
+  replays pass afterward. Evidence: `temp/edit-viewer/json-{full-model,full-ui,
+  key-focus,final-ui}.log`. The Lambda baseline passed 7,484/7,513 with exactly
+  the same 29 `proc_sync_*` failures as the preceding baseline
+  (`temp/edit-viewer/json-lambda-baseline.log`). The Radiant baseline passed
+  with 8,170 passed, zero failed, 297 partial and 20 skipped
+  (`temp/edit-viewer/json-radiant-baseline.log`). Test262 passed 40,261/40,261
+  selected tests with zero regressions and 2,652 skipped
+  (`temp/edit-viewer/json-test262-baseline.log`).
 - 2026-11-14 continuation, Lambda `09a40dfe2` plus this work. Java properties
   now scan unescaped key delimiters and use the repaired Input parser (LI-051)
   to decode names. Renaming and insertion escape Java key syntax; value edits
@@ -479,10 +886,10 @@
   replays, with the same three Markdown failures. See
   `temp/edit-viewer/markup-coverage-*`; no engine code changed in that pass.
   Calendar/contact source and RTF rich/fallback UI replays all pass.
-- Next: the Input ledger IDs in older entries above predate conflict
-  reconciliation. The current fixed ledger records LI-037–LI-051 as repaired;
-  independently qualify JSON, YAML, TOML, calendar and contact property
-  editing and the remaining rich markup paths against those providers, with
-  source preservation and malformed-input tests. Independently expand the
-  rich RTF subset only with preservation evidence. Do not silently rewrite
-  source or change sibling providers.
+- Next: after the owning Input fixes for LI-056–LI-059 and LI-061–LI-062,
+  requalify TOML, YAML, calendar, contact, RST, Textile and man editing with
+  malformed-input and source-preservation tests before expanding admission.
+  Man also needs editor-side header retention. Independently expand the rich
+  RTF subset only with preservation evidence, including a compatible oracle
+  for `caps` and `highlight`. Do not silently rewrite source or change sibling
+  providers. Ledger IDs in older entries above predate reconciliation.

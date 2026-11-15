@@ -1,0 +1,24 @@
+{
+  "name": "edit JSON properties and retain untouched source",
+  "command": "edit",
+  "html": "test/fixtures/edit/property-tree.json",
+  "working_copy": "temp/edit-ui/edit_json_property.json",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='name']"}, "equals": "\"Tea\""},
+    {"type": "click", "target": {"selector": "input[aria-label='name']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "\"Coffee\""},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_property.json", "contains": "\"name\": \"Coffee\",\n  \"flags\": [true, false],\n  \"details\": {\"count\": 2}"},
+    {"type": "click", "target": {"selector": "input.property-key[aria-label='Property name: count']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "total"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_property.json", "contains": "\"details\": {\"total\": 2}"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "\"total\": 2"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_value", "target": {"selector": "input[aria-label='total']"}, "equals": "2"}
+  ]
+}

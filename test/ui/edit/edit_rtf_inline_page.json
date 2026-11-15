@@ -1,0 +1,19 @@
+{
+  "name": "edit on both sides of an inline RTF page break",
+  "command": "edit",
+  "html": "test/fixtures/edit/inline-page-break.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_inline_page.rtf",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface p"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-surface .edit-rtf-page-break"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-surface p", "offset_x": 5, "offset_y": 8}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "type", "text": "Start "},
+    {"type": "click", "target": {"selector": ".edit-surface p", "offset_x": 160, "offset_y": 8}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_inline_page.rtf", "contains": "Start First\\page Second!"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

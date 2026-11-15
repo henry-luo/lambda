@@ -1,0 +1,19 @@
+{
+  "name": "commit a focused JSON value before toolbar actions",
+  "command": "edit",
+  "html": "test/fixtures/edit/property-tree.json",
+  "working_copy": "temp/edit-ui/edit_json_toolbar_pending.json",
+  "events": [
+    {"type": "click", "target": {"selector": "input[aria-label='name']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "\"Coffee\""},
+    {"type": "click", "target": {"selector": ".property-save"}},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_toolbar_pending.json", "contains": "\"name\": \"Coffee\""},
+    {"type": "click", "target": {"selector": "input[aria-label='name']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "\"Cocoa\""},
+    {"type": "click", "target": {"selector": ".property-source"}},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "\"name\": \"Cocoa\""},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"}
+  ]
+}

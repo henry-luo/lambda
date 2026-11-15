@@ -1,0 +1,20 @@
+{
+  "name": "add a JSON property whose name contains a newline",
+  "command": "edit",
+  "html": "test/fixtures/edit/property-tree.json",
+  "working_copy": "temp/edit-ui/edit_json_add_multiline_name.json",
+  "events": [
+    {"type": "click", "target": {"selector": ".property-add", "index": 0}},
+    {"type": "type", "text": "line"},
+    {"type": "key_combo", "key": "Enter", "mods_str": "shift"},
+    {"type": "type", "text": "break"},
+    {"type": "assert_value", "target": {"selector": "#property-new-key"}, "equals": "line\nbreak"},
+    {"type": "click", "target": {"selector": "#property-new-value"}},
+    {"type": "type", "text": "5"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-add-property"}, "count": 0},
+    {"type": "assert_value", "target": {"selector": ".property-key[data-key-literal='json']"}, "equals": "\"line\\nbreak\""},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_add_multiline_name.json", "contains": "\"line\\nbreak\":5"}
+  ]
+}

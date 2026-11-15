@@ -1,0 +1,27 @@
+{
+  "name": "insert and remove CSV columns as single undoable table edits",
+  "command": "edit",
+  "html": "test/fixtures/edit/columns.csv",
+  "working_copy": "temp/edit-ui/edit_csv_columns.csv",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-grid thead th"}, "count": 4},
+    {"type": "click", "target": {"selector": "button[title='Remove column 1']"}},
+    {"type": "assert_text", "target": {"selector": ".property-status"}, "contains": "at least one field"},
+    {"type": "click", "target": {"selector": "button[title='Insert column before column 2']"}},
+    {"type": "assert_text", "target": {"selector": ".property-status"}, "equals": ""},
+    {"type": "assert_count", "target": {"selector": ".property-grid thead th"}, "count": 5},
+    {"type": "click", "target": {"selector": "#grid-cell-0-1"}},
+    {"type": "type", "text": "new"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_columns.csv", "equals": "name,new,role\nAda,,dev\nLin,\n"},
+    {"type": "click", "target": {"selector": "button[title='Remove column 3']"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_columns.csv", "equals": "name,new\nAda,\nLin,\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_columns.csv", "equals": "name,new,role\nAda,,dev\nLin,\n"},
+    {"type": "click", "target": {"selector": "button[title='Add column']"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_columns.csv", "equals": "name,new,role,\nAda,,dev,\nLin,,,\n"}
+  ]
+}

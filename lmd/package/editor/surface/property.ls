@@ -32,16 +32,19 @@ pub let css = "
 fn draft_value(draft, first, key, original) =>
   if (draft != null and draft.first == first and draft.key == key) draft.text else original
 
-fn value_view(name, node, format, draft, id = null) any^ =>
-  if (format.multiline_values == true or node.multiline == true)
+fn value_view(name, node, format, draft, id = null) any^ {
+  let original = if (node.value_literal == true) node.display_text else node.text
+  if (node.value_literal != true and (format.multiline_values == true or node.multiline == true or node.multiline_capable == true))
     <textarea id: id, class: "property-value" ++ (if (node.multiline == true) " property-multiline" else ""),
       rows: if (node.multiline == true) 3 else 1, ['data-first']: string(node.first), ['data-end']: string(node.last),
-      ['data-original']: node.text, ['aria-label']: name, draft_value(draft, node.first, false, node.text)>
-  else <input id: id, class: "property-value", type: "text", value: draft_value(draft, node.first, false, node.text),
+      ['data-original']: original, ['aria-label']: name, draft_value(draft, node.first, false, original)>
+  else <input id: id, class: "property-value", type: "text", value: draft_value(draft, node.first, false, original),
       ['data-first']: string(node.first), ['data-end']: string(node.last),
-      ['data-original']: node.text, ['aria-label']: name>
+      ['data-original']: original, ['data-value-literal']: if (node.value_literal == true) "json" else null,
+      title: if (node.value_literal == true) "Edit this value as a quoted JSON string" else null, ['aria-label']: name>
+}
 
-fn node_view(name, node, root, key_first, key_end, section, format, draft, path, closed) any^ =>
+fn node_view(name, node, root, key_first, key_end, section, format, draft, path, closed, key_literal = false) any^ =>
   <div class: "property-entry",
     <div class: "property-row",
       if (node.kind != 'scalar' and len(node.children) > 0)
@@ -49,7 +52,9 @@ fn node_view(name, node, root, key_first, key_end, section, format, draft, path,
       else null
       if (section != null and section != "") <span class: "property-section", section ++ " /"> else null
       if (key_first != null and format.can_rename != false and node.can_rename != false) <input class: "property-key", type: "text", value: draft_value(draft, key_first, true, name),
-        ['data-first']: string(key_first), ['data-end']: string(key_end), ['data-original']: name, ['aria-label']: "Property name: " ++ name>
+        ['data-first']: string(key_first), ['data-end']: string(key_end), ['data-original']: name,
+        ['data-key-literal']: if (key_literal) "json" else null,
+        title: if (key_literal) "Edit this name as a quoted JSON string" else null, ['aria-label']: "Property name: " ++ name>
       else <span class: "property-name", name>
       if (node.group_header == true) <span class: "property-kind", if (node.view_only == true) "Open source to edit" else "{ }">
       else if (node.kind == 'scalar')
@@ -62,7 +67,7 @@ fn node_view(name, node, root, key_first, key_end, section, format, draft, path,
     >
     if (node.kind != 'scalar' and not (contains(closed, path) ^ { false }))
       <div class: "property-children", *[for (i, child in node.children)
-        node_view(child.name, child.node, false, if (node.kind == 'object') child.first else null, child.key_end, child.group, format, draft, path ++ "." ++ string(i), closed)]>
+        node_view(child.name, child.node, false, if (node.kind == 'object') child.first else null, child.key_end, child.group, format, draft, path ++ "." ++ string(i), closed, child.key_literal == true)]>
     else null
   >
 
@@ -71,7 +76,11 @@ fn grid_view(tree, format, draft) any^ {
   let widths = [for (row in tree.children) len(row.node.children)]
   let columns = if (len(widths) == 0) 0 else max(widths)
   let add = apply(<property_button action: "add", label: "+ row", title: "Add row", first: tree.first, kind: tree.kind>)
-  let headings = [<th "Row">, *[for (i in 0 to columns - 1) <th ("Column " ++ string(i + 1))>], <th "Actions">]
+  let headings = [<th "Row">, *[for (i in 0 to columns - 1) <th
+    *["Column " ++ string(i + 1),
+      apply(<property_button action: "insert_column", label: "+", title: "Insert column before column " ++ string(i + 1), first: i>),
+      apply(<property_button action: "delete_column", label: "−", title: "Remove column " ++ string(i + 1), first: i>)]>],
+    <th *["Actions", if (columns > 0) apply(<property_button action: "insert_column", label: "+ column", title: "Add column", first: columns>) else null]>]
   let rows = [for (row_index, row in tree.children) {
     let remove = apply(<property_button action: "delete", label: "−", title: "Remove row", first: row.node.first, kind: row.node.kind>)
     let cells = [for (cell_index, cell in row.node.children) {
@@ -103,7 +112,11 @@ fn edited(format, doc, target) any^ {
   let first = int(dom.get_attribute(target, "data-first"))
   let end_pos = int(dom.get_attribute(target, "data-end"))
   let text = string(dom.get_state(target, "value"));
-  (if (dom.matches(target, ".property-key")) format.rename_key(doc, first, end_pos, text)
+  (if (dom.matches(target, ".property-key")) {
+     if (dom.get_attribute(target, "data-key-literal") == "json") format.rename_key_literal(doc, first, end_pos, text)
+     else format.rename_key(doc, first, end_pos, text)
+   }
+   else if (dom.get_attribute(target, "data-value-literal") == "json") format.replace_scalar_literal(doc, first, end_pos, text)
    else format.replace_scalar(doc, first, end_pos, text)) ^ { {error: ^.message} }
 }
 fn draft_for(target) => {first: int(dom.get_attribute(target, "data-first")),
@@ -123,7 +136,9 @@ fn dialog_view(dialog, session) any^ =>
   if (dialog != null and dialog.kind == 'add_property')
     files.dialog_frame("add-property", "Add " ++ (if (dialog.container == 'object') "property" else "item"),
       session.format.value_help,
-      [if (dialog.container == 'object') files.field("property-new-key", "", "Property name", true) else null,
+      [if (dialog.container != 'object') null else if (session.format.multiline_keys == true)
+         <textarea id: "property-new-key", class: "edit-dialog-field", rows: 2, placeholder: "Property name (Shift+Enter for a new line)", autofocus: "autofocus">
+       else files.field("property-new-key", "", "Property name", true),
        files.field("property-new-value", "", "Value", dialog.container != 'object')],
       [files.dialog_button("cancel", "Cancel", false), files.dialog_button("property_add", "Add", true)])
   else if (dialog != null and dialog.kind == 'add_element')
@@ -200,11 +215,14 @@ on property_command(req) {
   }
   else if (req.action == "add") { dialog = {kind: 'add_property', first: req.first, container: req.kind} }
   else if (req.action == "add_element") { dialog = {kind: 'add_element', first: req.first} }
-  else if (req.action == "delete" or req.action == "delete_element") {
+  else if (req.action in ["delete", "delete_element", "insert_column", "delete_column"]) {
     let result = (if (req.action == "delete_element") session.format.delete_element(doc, req.first)
+                  else if (req.action == "insert_column") session.format.insert_column(doc, req.first)
+                  else if (req.action == "delete_column") session.format.delete_column(doc, req.first)
                   else session.format.delete_child(doc, req.first)) ^ { {error: ^.message} }
     if ((result.error != null)^) { status = result.error }
     else {
+      status = ""
       undo = [*undo, doc]
       redo = []
       doc = result.doc
@@ -250,27 +268,40 @@ on edit_dialog(req) {
 }
 on keydown(evt) {
   let primary = evt.metaKey == true or evt.ctrlKey == true
-  if ((dialog == null and evt.key == "Tab" and not primary and
+  let horizontal = evt.key == "Tab" and not primary
+  let vertical = evt.key == "Enter" and primary and evt.altKey != true
+  if ((dialog == null and (horizontal or vertical) and
        dom.matches(evt.target, ".property-grid .property-value"))^) {
-    let fields = dom.query_selector_all(dom.root_node(evt.target), ".property-grid .property-value")
+    let root = dom.root_node(evt.target)
     let id = dom.get_attribute(evt.target, "id")
-    let positions = [for (i, field in fields where dom.get_attribute(field, "id") == id) i]
-    if (len(positions) > 0) {
-      let next = positions[0] + (if (evt.shiftKey == true) -1 else 1)
-      if ((next >= 0 and next < len(fields))^) {
-        // Programmatic focus changes do not necessarily dispatch a change event.
-        let result = commit_field(session.format, doc, undo, redo, evt.target)^
-        draft = result.draft; status = result.status
-        if (not result.ok) { return 'prevent-default' }
-        doc = result.doc; undo = result.undo; redo = result.redo
-        files.sync_window(evt.target, session, doc)^
-        dom.focus_set(fields[next], false)
-        return 'prevent-default'
-      }
+    let direction = if (evt.shiftKey == true) -1 else 1
+    let next_field = (if (horizontal) {
+      let fields = dom.query_selector_all(root, ".property-grid .property-value")
+      let positions = [for (i, field in fields where dom.get_attribute(field, "id") == id) i]
+      let next = if (len(positions) > 0) positions[0] + direction else -1
+      if (next >= 0 and next < len(fields)) fields[next] else null
+    } else {
+      // Cell IDs carry the row and column so uneven rows are not flattened.
+      let parts = split(id, "-")^
+      if (len(parts) == 4) {
+        let row = int(parts[2]) + direction
+        if (row < 0) null else dom.query_selector(root, "#grid-cell-" ++ string(row) ++ "-" ++ parts[3])
+      } else null
+    })^
+    if (next_field != null or vertical) {
+      // Programmatic focus changes do not necessarily dispatch a change event.
+      let result = commit_field(session.format, doc, undo, redo, evt.target)^
+      draft = result.draft; status = result.status
+      if (not result.ok) { return 'prevent-default' }
+      doc = result.doc; undo = result.undo; redo = result.redo
+      files.sync_window(evt.target, session, doc)^
+      if (next_field != null) { dom.focus_set(next_field, false) }
+      return 'prevent-default'
     }
   }
   if ((dialog != null and dialog.kind in ['add_property', 'add_element'] and evt.key == "Enter" and not primary and
-       dom.matches(evt.target, "#property-new-key,#property-new-value"))^) {
+       dom.matches(evt.target, "#property-new-key,#property-new-value") and
+       not (evt.shiftKey == true and dom.matches(evt.target, "textarea#property-new-key")))^) {
     let selector = if (dialog.kind == 'add_element') ".edit-dialog-element_add" else ".edit-dialog-property_add"
     let button = dom.query_selector(dom.root_node(evt.target), selector)
     if (button != null) { dom.keyboard_click(button) }

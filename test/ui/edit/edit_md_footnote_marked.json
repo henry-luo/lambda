@@ -1,0 +1,15 @@
+{
+  "name": "retain formatting around a Markdown footnote reference",
+  "command": "edit",
+  "html": "test/ui/edit/sample-footnote-marked.md",
+  "working_copy": "temp/edit-ui/edit_md_footnote_marked.md",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface strong .edit-view-note"}, "count": 1},
+    {"type": "click", "target": {"text": "after"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_marked.md", "contains": "**Bold [^a] after edited**"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_marked.md", "contains": "[^a]: Note."}
+  ]
+}

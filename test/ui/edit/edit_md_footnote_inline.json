@@ -1,0 +1,16 @@
+{
+  "name": "edit text around a retained Markdown footnote reference",
+  "command": "edit",
+  "html": "test/ui/edit/sample-footnote-inline.md",
+  "working_copy": "temp/edit-ui/edit_md_footnote_inline.md",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-doc > p"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-doc > p .edit-view-note"}, "count": 1},
+    {"type": "click", "target": {"text": "after."}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_inline.md", "contains": "Before note[^a] after. edited"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_inline.md", "contains": "[^a]: Keep **this** note."}
+  ]
+}

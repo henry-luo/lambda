@@ -1,0 +1,18 @@
+{
+  "name": "type at paragraph edges beside Markdown footnote references",
+  "command": "edit",
+  "html": "test/ui/edit/sample-footnote-edges.md",
+  "working_copy": "temp/edit-ui/edit_md_footnote_edges.md",
+  "events": [
+    {"type": "click", "target": {"text": "begins."}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "type", "text": "Start "},
+    {"type": "click", "target": {"text": "Ends"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " tail"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_edges.md", "contains": "Start [^a] begins."},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_edges.md", "contains": "Ends [^a] tail"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_edges.md", "contains": "[^a]: Note."}
+  ]
+}

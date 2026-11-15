@@ -1,0 +1,15 @@
+{
+  "name": "preserve CRLF continuations while editing a property value",
+  "command": "edit",
+  "html": "test/fixtures/edit/continued-crlf.properties",
+  "working_copy": "temp/edit-ui/edit_properties_continuation_crlf.properties",
+  "events": [
+    {"type": "assert_value", "target": {"selector": ".property-value", "index": 0}, "equals": "onetwo"},
+    {"type": "click", "target": {"selector": ".property-value", "index": 0}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "oneTWO"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_properties_continuation_crlf.properties", "equals": "# keep\r\nlong\\\r\n  key=one\\\r\n  TWO\r\nnext=end\r\n"}
+  ]
+}

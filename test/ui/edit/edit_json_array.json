@@ -1,0 +1,16 @@
+{
+  "name": "add and undo a JSON array value",
+  "command": "edit",
+  "html": "test/fixtures/edit/property-tree.json",
+  "working_copy": "temp/edit-ui/edit_json_array.json",
+  "events": [
+    {"type": "click", "target": {"selector": ".property-add", "index": 1}},
+    {"type": "type", "text": "null"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_array.json", "contains": "\"flags\": [true, false,null]"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_array.json", "contains": "\"flags\": [true, false]"}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "type next to a page break in an otherwise empty RTF paragraph",
+  "command": "edit",
+  "html": "test/fixtures/edit/page-only.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_page_only.rtf",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface .edit-rtf-page-break"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-surface p", "offset_x": 120, "offset_y": 8}},
+    {"type": "type", "text": "After"},
+    {"type": "click", "target": {"selector": ".edit-surface p", "offset_x": 1, "offset_y": 8}},
+    {"type": "type", "text": "Before"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_page_only.rtf", "contains": "Before\\page After"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

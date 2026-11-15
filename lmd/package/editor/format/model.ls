@@ -7,6 +7,12 @@
 import lambda.editor.core.doc
 import lambda.editor.core.step
 
+// Paragraph dimensions are retained as RTF twips and projected as CSS pixels.
+pub let rtf_paragraph_measurements = [
+  {name:'rtf-li', css:"margin-left", control:"li"}, {name:'rtf-ri', css:"margin-right", control:"ri"},
+  {name:'rtf-sl', css:"line-height", control:"sl"}, {name:'rtf-sb', css:"margin-top", control:"sb"},
+  {name:'rtf-sa', css:"margin-bottom", control:"sa"}]
+
 // [{name, value}] from [[name, value], ...], dropping absent values.
 pub fn attr_list(pairs) => [for (p in pairs where p[1] != null) {name: p[0], value: p[1]}]
 
@@ -136,6 +142,15 @@ pub fn first_block_difference(a, b, i) any^ {
 // so export writes it back within them. A space never occurs in a parsed
 // attribute name, so adapter bookkeeping cannot collide with source attributes.
 pub let node_marks_attr = 'edit marks'
+
+// Empty text leaves give the caret a position beside an atomic inline item.
+pub fn anchor_atomic_edges(items, predicate) any^ =>
+  [for (i, item in items) *[
+    *if (predicate(item)^ and (i == 0 or predicate(items[i - 1])^))
+      [text_marked("", attr_get(item, node_marks_attr) or [])] else [],
+    item,
+    *if (predicate(item)^ and i == len(items) - 1)
+      [text_marked("", attr_get(item, node_marks_attr) or [])] else []]]
 
 fn item_marks(item) any^ {
   if (is_text(item)) item.marks

@@ -1,0 +1,17 @@
+{
+  "name": "add the first row to an empty CSV grid",
+  "command": "edit",
+  "html": "test/fixtures/edit/empty.csv",
+  "working_copy": "temp/edit-ui/edit_csv_empty.csv",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-grid thead th"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 0},
+    {"type": "click", "target": {"selector": ".property-add", "index": 0}},
+    {"type": "type", "text": "first,second"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".property-grid thead th"}, "count": 4},
+    {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 1},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_empty.csv", "equals": "first,second\n"}
+  ]
+}

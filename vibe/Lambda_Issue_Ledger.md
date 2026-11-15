@@ -17,6 +17,26 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Unattributed DOM media playback stall — 2026-11-15
+
+**Status:** OPEN, cause and owner unconfirmed. The Lambda editor continuation
+baseline timed out in `test_js_gtest`; an isolated rerun of
+`./test/test_js_gtest.exe --gtest_filter='*dom_media_playback*'` reproducibly
+prints the first ten successful assertions and stops at the first
+`await media.play()` after loading `test/media/test_video_audio.mp4`. The
+30-second test timeout omits the remaining assertions and sentinel. The media
+file exists; replacing the tracked relative corpus link temporarily with an
+absolute link did not change the result, and the original link was restored.
+The next full Lambda baseline passes this test with the original link
+(`temp/edit-viewer/columns-lambda.log`), so the stall is intermittent; that
+passing run does not establish its cause.
+Earlier evidence in `impl/Radiant_Scene3d_PBR_Shadows.md` attributed a similar
+stall to that link, but that explanation does not establish this run's cause.
+The native media backend, DOM promise completion and host state remain to be
+distinguished before assigning ownership under D9.1.1v4 / D9.1.3v2. This does
+not block INI property editing. Evidence: `temp/edit-viewer/ini-control-
+{lambda,recheck-test_js_gtest,media-recheck,media-absolute}.log`.
+
 ## Sync implementation runtime findings — 2026-11-11
 
 The local-repository follow-up fixed and archived [LR07-68](#lr07-68),

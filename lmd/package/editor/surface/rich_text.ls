@@ -28,9 +28,10 @@ fn safe_font_family(value) any^ => value is string and len(value) >= 3 and
 
 fn color_style(marks) {
   let css = inline_format.span_css(marks)
-  join([for (key in ["color", "background-color", "font-family", "font-size"], let value = inline_format.css_get(css, key)
+  join([for (key in ["color", "background-color", "font-family", "font-size", "font-variant"], let value = inline_format.css_get(css, key)
     where ((value is string and (if (key == "font-family") safe_font_family(value)
-      else if (key == "font-size") component.css_length(value) else component.css_color(value))) ^ { false })) key ++ ": " ++ value], "; ")
+      else if (key == "font-size") component.css_length(value)
+      else if (key == "font-variant") value == "small-caps" else component.css_color(value))) ^ { false })) key ++ ": " ++ value], "; ")
 }
 
 fn mark_element(mark, marks, child) {
@@ -54,8 +55,7 @@ fn render_text_leaf(leaf) any^ =>
 
 fn align_style(n) any^ {
   let align = attr_get(n, 'align')
-  let measurements = [for (entry in [{name:'rtf-li', css:"margin-left"}, {name:'rtf-ri', css:"margin-right"},
-                                     {name:'rtf-sl', css:"line-height"}], let value = attr_get(n, entry.name)
+  let measurements = [for (entry in rtf_paragraph_measurements, let value = attr_get(n, entry.name)
     where ((value is int and value > 0) ^ { false })) entry.css ++ ": " ++ string(value / 15.0) ++ "px"]
   let parts = [*if (align == null) [] else ["text-align: " ++ align], *measurements]
   if (len(parts) == 0) null else join(parts, "; ")
@@ -135,6 +135,8 @@ fn render_node(n, kids) any^ {
   else if (tag == 'li') render_list_item(n, kids)
   else if (tag == 'pre' or tag == 'code_block') <pre class: "edit-code", *kids>
   else if (tag == 'hr') <hr>
+  else if (tag == 'br' and attr_get(n, 'rtf-page') == true)
+    <span class: "edit-rtf-page-break", contenteditable: "false", title: "Page break", "Page break">
   else if (tag == 'br') <br>
   else if (tag == 'a') <a class: "edit-link", title: attr_get(n, 'href'), *kids>
   else if (tag == 'img') <img src: attr_get(n, 'src'), alt: attr_get(n, 'alt'), title: attr_get(n, 'title'),
@@ -158,6 +160,11 @@ fn render_node(n, kids) any^ {
   else if (tag == 'raw_html') view_inline(n, "HTML", kept_source(n))
   else if (tag == 'math') view_inline(n, "Math", "$" ++ attr_get(n, 'tex') ++ "$")
   else if (tag == 'emoji') view_inline(n, "Emoji", ":" ++ attr_get(n, 'name') ++ ":")
+  else if (tag == 'footnote_ref') wrap_leaf(attr_get(n, node_marks_attr) or [], 0,
+    view_inline(n, "Footnote", "[^" ++ attr_get(n, 'label') ++ "]"))
+  else if (tag == 'md_footnote') <div class: "edit-md-footnote",
+    <span class: "edit-md-footnote-label", contenteditable: "false", "[" ++ attr_get(n, 'label') ++ "]">
+    <div class: "edit-md-footnote-content", *kids>>
   else if (tag == 'html_block') view_block(n, "HTML", kept_source(n))
   else if (tag == 'math_block') view_block(n, "Math", "$$" ++ attr_get(n, 'tex') ++ "$$")
   else if (tag == 'md_source') view_block(n, "Markdown", attr_get(n, 'markdown'))
@@ -209,6 +216,8 @@ pub let css = "
   .edit-surface th { background: #f6f8fa; font-weight: 600; }
   .edit-surface img { max-width: 100%; }
   .edit-surface hr { border: none; border-top: 2px solid #d8dee4; margin: 1.2em 0; }
+  .edit-surface .edit-rtf-page-break { color: #6e7781; border: 1px solid #d0d7de; border-radius: 3px;
+                                      padding: 0 4px; font-size: 0.8em; }
   .edit-view-only { cursor: default; }
   .edit-math-display { text-align: center; padding: 12px 0; overflow-x: auto; }
   .edit-view-block { display: block; margin: 0.5em -9px; padding: 1px 8px;
@@ -219,5 +228,8 @@ pub let css = "
   div.edit-view-source { padding: 6px 8px; }
   .edit-view-only a { color: #0969da; text-decoration: underline; }
   .edit-view-note { color: #0969da; }
+  .edit-md-footnote { display: flex; align-items: baseline; gap: 0.5em; }
+  .edit-md-footnote-label { color: #0969da; }
+  .edit-md-footnote-content { flex: 1; min-width: 0; }
   .edit-view-embed { font-family: 'SF Mono', Menlo, monospace; font-size: 0.85em; color: #6e7781; }
 "

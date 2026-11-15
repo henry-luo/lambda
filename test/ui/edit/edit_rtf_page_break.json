@@ -1,0 +1,16 @@
+{
+  "name": "preserve a page break while editing RTF",
+  "command": "edit",
+  "html": "test/fixtures/edit/page-break.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_page_break.rtf",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface .edit-rtf-page-break"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-surface p"}, "count": 2},
+    {"type": "click", "target": {"selector": ".edit-surface p", "index": 1}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_page_break.rtf", "contains": "\\page Second edited"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

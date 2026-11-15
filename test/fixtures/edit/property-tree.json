@@ -1,0 +1,5 @@
+{
+  "name": "Tea",
+  "flags": [true, false],
+  "details": {"count": 2}
+}

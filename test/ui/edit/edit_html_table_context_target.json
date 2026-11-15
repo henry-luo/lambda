@@ -1,0 +1,17 @@
+{
+  "name": "table context actions target the cell that was right-clicked",
+  "command": "edit",
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_html_table_context_target.html",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-surface tbody td", "index": 0}},
+    {"type": "click", "target": {"selector": ".edit-surface tbody td", "index": 1}, "button": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-table-menu"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-btn-table_column_delete"}},
+    {"type": "assert_count", "target": {"selector": ".edit-surface tbody td"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-surface tbody td"}, "equals": "1"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_table_context_target.html", "contains": ">1</td>"}
+  ]
+}

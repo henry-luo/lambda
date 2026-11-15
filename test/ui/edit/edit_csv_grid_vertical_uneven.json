@@ -1,0 +1,16 @@
+{
+  "name": "vertical CSV navigation keeps the column and commits at an uneven row",
+  "command": "edit",
+  "html": "test/ui/edit/sample-single-field.csv",
+  "working_copy": "temp/edit-ui/edit_csv_grid_vertical_uneven.csv",
+  "events": [
+    {"type": "click", "target": {"selector": "#grid-cell-0-1"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "changed"},
+    {"type": "key_combo", "key": "Enter", "mods_str": "super"},
+    {"type": "assert_focus", "target": {"selector": "#grid-cell-0-1"}},
+    {"type": "click", "target": {"selector": ".property-undo"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_grid_vertical_uneven.csv", "equals": "a,b\nonly\n"}
+  ]
+}

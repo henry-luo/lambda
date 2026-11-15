@@ -1,0 +1,17 @@
+{
+  "name": "edit multiline INI values while preserving CRLF and comments",
+  "command": "edit",
+  "html": "test/fixtures/edit/multiline-crlf.ini",
+  "working_copy": "temp/edit-ui/edit_ini_multiline.ini",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "assert_value", "target": {"selector": "textarea.property-multiline"}, "equals": "\"alpha\nbeta\""},
+    {"type": "click", "target": {"selector": "textarea.property-multiline"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_ini_multiline.ini", "equals": "; keep\r\n[server] ; section comment\r\ntext=\"alpha\r\nbeta\" ; value comment\r\nname=old\r\n"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "\"alpha\nBETA\""},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_ini_multiline.ini", "equals": "; keep\r\n[server] ; section comment\r\ntext=\"alpha\r\nBETA\" ; value comment\r\nname=old\r\n"}
+  ]
+}

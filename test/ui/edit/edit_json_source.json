@@ -5,6 +5,8 @@
   "working_copy": "temp/edit-ui/edit_json_source.json",
   "viewport": {"width": 1000, "height": 700},
   "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "click", "target": {"selector": ".property-source"}},
     {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
     {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "\"count\":42"}
   ]

@@ -1,0 +1,10 @@
+{
+  "name": "malformed JSON opens safely in source mode",
+  "command": "edit",
+  "html": "test/fixtures/edit/invalid.json",
+  "working_copy": "temp/edit-ui/edit_json_invalid_source.json",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".src-text"}, "contains": "\"name\": 1,"}
+  ]
+}

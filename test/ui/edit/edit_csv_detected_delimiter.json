@@ -1,0 +1,21 @@
+{
+  "name": "keep detected CSV delimiter stable across edits and view switches",
+  "command": "edit",
+  "html": "test/fixtures/edit/detected-tabs.csv",
+  "working_copy": "temp/edit-ui/edit_csv_detected_delimiter.csv",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-grid .property-value"}, "count": 4},
+    {"type": "click", "target": {"selector": "#grid-cell-0-0"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "red, green, blue"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_detected_delimiter.csv", "equals": "\"red, green, blue\"\tsecond\none\ttwo\n"},
+    {"type": "click", "target": {"selector": ".property-source"}},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".property-grid .property-value"}, "count": 4},
+    {"type": "click", "target": {"selector": ".property-grid .property-delete", "index": 2}},
+    {"type": "assert_text", "target": {"selector": ".property-status"}, "contains": "change the detected CSV delimiter"},
+    {"type": "assert_count", "target": {"selector": ".property-grid .property-value"}, "count": 4},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_detected_delimiter.csv", "equals": "\"red, green, blue\"\tsecond\none\ttwo\n"}
+  ]
+}

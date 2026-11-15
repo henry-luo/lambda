@@ -30,6 +30,9 @@ test/input/fts_tree/crlf.txt -text
 
 # The editor line-ending regression needs its authored CRLF bytes.
 test/ui/edit/sample-crlf.properties -text !eol whitespace=cr-at-eol
+test/fixtures/edit/continued-crlf.properties -text !eol whitespace=cr-at-eol
+test/fixtures/edit/multiline-crlf.ini -text !eol whitespace=cr-at-eol
+test/fixtures/edit/multiline-crlf.csv -text !eol whitespace=cr-at-eol
 
 # MIME fixtures: RFC 5322 lines end in CRLF, and the eml goldens keep it (test/lambda/mail)
 test/input/mail/*.eml -text

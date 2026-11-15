@@ -1,0 +1,17 @@
+{
+  "name": "edit RTF while preserving small capitals",
+  "command": "edit",
+  "html": "test/fixtures/edit/small-caps.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_small_caps.rtf",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface span[style*='font-variant: small-caps']"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "Plain Small normal"},
+    {"type": "click", "target": {"selector": ".edit-surface p"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_small_caps.rtf", "contains": "\\scaps"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_small_caps.rtf", "contains": "normal!"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

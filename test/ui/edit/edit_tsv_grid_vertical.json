@@ -1,0 +1,17 @@
+{
+  "name": "TSV grid navigates vertically and preserves tab-delimited values",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.tsv",
+  "working_copy": "temp/edit-ui/edit_tsv_grid_vertical.tsv",
+  "events": [
+    {"type": "click", "target": {"selector": "#grid-cell-0-1"}},
+    {"type": "key_combo", "key": "Enter", "mods_str": "super"},
+    {"type": "assert_focus", "target": {"selector": "#grid-cell-1-1"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "two\nlines"},
+    {"type": "key_combo", "key": "Enter", "mods_str": "super+shift"},
+    {"type": "assert_focus", "target": {"selector": "#grid-cell-0-1"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_tsv_grid_vertical.tsv", "equals": "Name\tNotes\nAlice\t\"two\nlines\"\n"}
+  ]
+}

@@ -11,8 +11,10 @@ import lambda.editor.core.source_pos
 import commands: lambda.editor.core.commands
 import inline_format: lambda.editor.core.inline_format
 
-let header_controls = ["deff", "f", "fs", "viewkind", "viewscale", "viewzk", "deflang", "deflangfe", "adeflang"]
-let supported = ["rtf", "ansi", "ansicpg", "uc", "u", "par", "line", "tab", "b", "i", "ul", "ulnone", "strike", "super", "sub", "nosupersub", "plain", "pard", "ql", "qc", "qr", "qj", "li", "ri", "sl", "cf", *header_controls]
+let positive_page_controls = ["paperw", "paperh", "deftab"]
+let header_controls = ["deff", "f", "fs", "viewkind", "viewscale", "viewzk", "deflang", "deflangfe", "adeflang",
+  "margl", "margr", "margt", "margb", "gutter", *positive_page_controls]
+let supported = ["rtf", "ansi", "ansicpg", "uc", "u", "par", "page", "line", "tab", "b", "i", "ul", "ulnone", "strike", "scaps", "super", "sub", "nosupersub", "plain", "pard", "ql", "qc", "qr", "qj", "cf", "highlight", "lang", "landscape", *[for (m in rtf_paragraph_measurements) m.control], *header_controls]
 
 // Only ordinary font entries with the ANSI charset are understood. The raw
 // table is retained, while embedded fonts and alternate encodings stay source-only.
@@ -152,14 +154,14 @@ fn validate(source) any^ {
         raise error("this RTF control requires source mode")
       }
       if (t.word == "u" and not is_u) { raise error("RTF Unicode escape needs a value") }
-      if (t.word in ["super", "sub", "nosupersub", "plain", "pard", "ql", "qc", "qr", "qj"] and t.parameter != null) {
+      if (t.word in ["super", "sub", "nosupersub", "plain", "pard", "page", "ql", "qc", "qr", "qj"] and t.parameter != null) {
         raise error("parameterized RTF formatting control requires source mode")
       }
       // The reader captures paragraph style at its first text run.
-      if (t.word in ["pard", "ql", "qc", "qr", "qj", "li", "ri", "sl"] and paragraph_content) {
+      if (t.word in ["pard", "ql", "qc", "qr", "qj", *[for (m in rtf_paragraph_measurements) m.control]] and paragraph_content) {
         raise error("late RTF paragraph formatting requires source mode")
       }
-      if (t.word in ["li", "ri", "sl"] and (t.parameter == null or t.parameter < 0)) {
+      if (t.word in [for (m in rtf_paragraph_measurements) m.control] and (t.parameter == null or t.parameter < 0)) {
         raise error("unsupported RTF paragraph measurement")
       }
       if (t.word == "par") { paragraph_content = false }
@@ -178,11 +180,20 @@ fn validate(source) any^ {
         if (t.parameter == null or t.parameter < 0) { raise error("invalid RTF fallback count") }
         uc = t.parameter
       }
-      else if (t.word == "cf") {
+      else if (t.word in ["cf", "highlight"]) {
         if (t.parameter == null or t.parameter < 0 or (t.parameter != 0 and t.parameter >= colors)) {
           raise error("invalid RTF color index")
         }
         body = true
+      }
+      else if (t.word == "lang") {
+        if (t.parameter == null or t.parameter < 0) { raise error("invalid RTF run language") }
+        body = true
+      }
+      else if (t.word == "landscape") {
+        if (depth != 1 or body or t.parameter != null) { raise error("this RTF page setting requires source mode") }
+        // These document settings affect pagination, which the rich surface does not render.
+        retained_header = retained_header ++ "\\landscape "
       }
       else if (t.word in ["f", "fs"] and (depth != 1 or body)) {
         if (t.parameter == null or t.parameter < 0 or (t.word == "fs" and t.parameter == 0) or
@@ -192,7 +203,8 @@ fn validate(source) any^ {
         body = true
       }
       else if (t.word in header_controls) {
-        if (depth != 1 or body or t.parameter == null or t.parameter < 0 or (t.word == "fs" and t.parameter == 0) or
+        if (depth != 1 or body or t.parameter == null or t.parameter < 0 or
+            ((t.word == "fs" or t.word in positive_page_controls) and t.parameter == 0) or
             (t.word == "f" and (len(font_ids) > 0)^ and not (contains(font_ids, t.parameter) ^ { false }))) {
           raise error("this RTF header control requires source mode")
         }
@@ -231,17 +243,21 @@ fn run_attrs(span, parsed) any^ {
   let style = span.style
   let font_changed = span.rtf_font != parsed.base_font
   let size_changed = span.rtf_size != parsed.base_size
+  let language_changed = span.rtf_lang != parsed.base_language
   let font_css = rtf.font_run_style(parsed.fonts, span.rtf_font, span.rtf_size)^
   let declarations = [
     *if (inline_format.css_get(style, "color") != null) ["color: " ++ inline_format.css_get(style, "color")] else [],
+    *if (inline_format.css_get(style, "background-color") != null) ["background-color: " ++ inline_format.css_get(style, "background-color")] else [],
+    *if (inline_format.css_get(style, "font-variant") == "small-caps") ["font-variant: small-caps"] else [],
     *if (font_changed and inline_format.css_get(font_css, "font-family") != null) ["font-family: " ++ inline_format.css_get(font_css, "font-family")] else [],
     *if (size_changed) ["font-size: " ++ inline_format.css_get(font_css, "font-size")] else []]
   if (font_changed and inline_format.css_get(font_css, "font-family") == null) { raise error("unknown RTF font") }
-  else if (len(declarations) == 0) []
+  else if (len(declarations) == 0 and not language_changed) []
   else [mark('span', [
     {name: 'style', value: join(declarations, "; ")},
     *if (font_changed) [{name: 'rtf-font', value: span.rtf_font}] else [],
-    *if (size_changed) [{name: 'rtf-size', value: span.rtf_size}] else []])]
+    *if (size_changed) [{name: 'rtf-size', value: span.rtf_size}] else [],
+    *if (language_changed) [{name: 'rtf-lang', value: span.rtf_lang}] else []])]
 }
 fn span_marks(span, parsed) any^ => (
   let style = span.style,
@@ -261,14 +277,20 @@ fn paragraph_measure(style, property) any^ {
 fn paragraph_attrs(style) any^ => [
   *if (inline_format.css_get(style, "text-align") in ["center", "right", "justify"])
     [{name:'align', value:inline_format.css_get(style, "text-align")}] else [],
-  *[for (entry in [{name:'rtf-li', property:"margin-left"}, {name:'rtf-ri', property:"margin-right"},
-                   {name:'rtf-sl', property:"line-height"}], let value = paragraph_measure(style, entry.property)^
+  *[for (entry in rtf_paragraph_measurements, let value = paragraph_measure(style, entry.css)^
     where value != null) {name:entry.name, value:value}]
 ]
+fn page_break(item) any^ => is_node(item) and item.tag == 'br' and attr_get(item, 'rtf-page') == true
+fn paragraph_content(block, parsed) any^ {
+  let items = [for (span in content(block)^) if (span.rtf_page == true)
+    node_attrs('br', [{name:'rtf-page', value:true}], [])
+    else text_marked(plain_text(span)^, span_marks(span, parsed)^)];
+  anchor_atomic_edges(items, page_break)^
+}
 fn to_model(parsed) map^ {
   let blocks = [for (block in content(parsed.document)^)
-    node_attrs('p', paragraph_attrs(block.style)^,
-      [for (span in content(block)^) text_marked(plain_text(span)^, span_marks(span, parsed)^)])];
+    node_attrs('p', paragraph_attrs(block.style)^, paragraph_content(block, parsed)^
+  )];
   // The editable host needs a paragraph even when the source has no text.
   node('doc', if (len(blocks) == 0) [node('p', [])] else blocks)
 }
@@ -299,26 +321,38 @@ fn control_for_mark(m, envelope) any^ {
   else {
     let css = inline_format.span_css([m])^
     let color = inline_format.css_get(css, "color")
+    let highlight = inline_format.css_get(css, "background-color")
+    let variant = inline_format.css_get(css, "font-variant")
     let matches = [for (i, entry in envelope.colors where ((color_value(entry) == color and color != null) ^ { false })) i]
+    // Highlight zero means no highlight, even if the first color is specified.
+    let highlights = [for (i, entry in envelope.colors where ((i > 0 and color_value(entry) == highlight and highlight != null) ^ { false })) i]
     let font = if (m.value is array) attrs_get(m.value, 'rtf-font') else null
     let size = if (m.value is array) attrs_get(m.value, 'rtf-size') else null
+    let language = if (m.value is array) attrs_get(m.value, 'rtf-lang') else null
     let expected = rtf.font_run_style(envelope.fonts, if (font == null) envelope.base_font else font,
                                       if (size == null) envelope.base_size else size)^
-    let remaining = inline_format.css_set(inline_format.css_set(inline_format.css_set(css, "color", null), "font-family", null), "font-size", null)
+    let remaining = inline_format.css_set(inline_format.css_set(inline_format.css_set(inline_format.css_set(
+      inline_format.css_set(css, "color", null), "background-color", null), "font-family", null), "font-size", null), "font-variant", null)
     let invalid = not (m.value is array) or any([for (a in (if (m.value is array) m.value else []) where
-      ((not (a.name in ['style', 'rtf-font', 'rtf-size'])) ^ { false })) true]) or remaining != "" or
-      (m.value is array and len(m.value) != 1 + (if (font == null) 0 else 1) + (if (size == null) 0 else 1)) or
+      ((not (a.name in ['style', 'rtf-font', 'rtf-size', 'rtf-lang'])) ^ { false })) true]) or remaining != "" or
+      (m.value is array and len(m.value) != 1 + (if (font == null) 0 else 1) + (if (size == null) 0 else 1) + (if (language == null) 0 else 1)) or
       (color != null and len(matches) == 0) or
+      (highlight != null and len(highlights) == 0) or
+      (variant != null and variant != "small-caps") or
       (font != null and (not (font is int) or inline_format.css_get(expected, "font-family") == null or
         inline_format.css_get(css, "font-family") != inline_format.css_get(expected, "font-family"))) or
       (size != null and (not (size is int) or size <= 0 or inline_format.css_get(css, "font-size") != inline_format.css_get(expected, "font-size"))) or
+      (language != null and (not (language is int) or language < 0)) or
       (font == null and inline_format.css_get(css, "font-family") != null) or
       (size == null and inline_format.css_get(css, "font-size") != null) or
-      (color == null and font == null and size == null)
+      (color == null and highlight == null and font == null and size == null and variant == null and language == null)
     if (invalid) null else
       (if (font == null) "" else "\\f" ++ string(font)) ++
       (if (size == null) "" else "\\fs" ++ string(size)) ++
-      (if (color == null) "" else "\\cf" ++ string(matches[0]))
+      (if (color == null) "" else "\\cf" ++ string(matches[0])) ++
+      (if (highlight == null) "" else "\\highlight" ++ string(highlights[0])) ++
+      (if (language == null) "" else "\\lang" ++ string(language)) ++
+      (if (variant == null) "" else "\\scaps")
   }
 }
 fn inline(item, envelope) any^ {
@@ -328,39 +362,41 @@ fn inline(item, envelope) any^ {
     else if (len(controls) == 0) encoded(item.text)^
     else "{" ++ join(controls, "") ++ " " ++ encoded(item.text)^ ++ "}"
   }
-  else if (is_node(item) and item.tag == 'br') "\\line "
+  else if (is_node(item) and item.tag == 'br' and len(item.content) == 0) {
+    if (len(item.attrs) == 0) "\\line "
+    else if (len(item.attrs) == 1 and attr_get(item, 'rtf-page') == true) "\\page "
+    else raise error("RTF cannot represent this break")
+  }
   else if (is_node(item) and mark_control(item.tag) != null)
     "{" ++ mark_control(item.tag) ++ " " ++ join([for (child in item.content) inline(child, envelope)^], "") ++ "}"
   else raise error("RTF cannot represent this inline content")
 }
-fn paragraph_settings(block) => {
-  align: attr_get(block, 'align') or "left", li: attr_get(block, 'rtf-li') or 0,
-  ri: attr_get(block, 'rtf-ri') or 0, sl: attr_get(block, 'rtf-sl') or 0}
+fn paragraph_settings(block) => {align: attr_get(block, 'align') or "left",
+  measurements: [for (entry in rtf_paragraph_measurements) attr_get(block, entry.name) or 0]}
 fn write_paragraph(block, previous, envelope) any^ {
   let settings = paragraph_settings(block)
-  let invalid = any([for (a in block.attrs where ((not (a.name in ['align', 'rtf-li', 'rtf-ri', 'rtf-sl'])) ^ { false })) true]) or
+  let invalid = any([for (a in block.attrs where ((not (a.name in ['align', *[for (m in rtf_paragraph_measurements) m.name]])) ^ { false })) true]) or
     not (settings.align in ["left", "center", "right", "justify"]) or
-    any([for (v in [settings.li, settings.ri, settings.sl]) not (v is int) or v < 0])
+    any([for (v in settings.measurements) not (v is int) or v < 0])
   if (invalid) raise error("RTF cannot represent this paragraph style")
   else (if (settings == previous) ""
     else "\\pard" ++ (if (settings.align == "center") "\\qc" else if (settings.align == "right") "\\qr"
       else if (settings.align == "justify") "\\qj" else "") ++
-      (if (settings.li == 0) "" else "\\li" ++ string(settings.li)) ++
-      (if (settings.ri == 0) "" else "\\ri" ++ string(settings.ri)) ++
-      (if (settings.sl == 0) "" else "\\sl" ++ string(settings.sl)) ++ " ") ++
+      join([for (i, m in rtf_paragraph_measurements where settings.measurements[i] != 0)
+        "\\" ++ m.control ++ string(settings.measurements[i])], "") ++ " ") ++
     join([for (child in block.content) inline(child, envelope)^], "")
 }
 fn write_document(doc, envelope) string^ {
   let bad = [for (block in doc.content where (not (is_node(block) ^ { false }) or block.tag != 'p')) block]
   if (len(bad) > 0) { raise error("RTF cannot represent this block") }
   else {
-    let defaults = {align:"left", li:0, ri:0, sl:0}
-    let paragraphs = [for (i, block in doc.content) write_paragraph(block,
+    let defaults = {align:"left", measurements:[for (entry in rtf_paragraph_measurements) 0]}
+    let blocks = [for (i, block in doc.content) write_paragraph(block,
       if (i == 0) defaults else paragraph_settings(doc.content[i - 1]), envelope)^]
     // An empty final block needs its own terminator; a final nonempty one does not.
     let terminal = if (len(doc.content) > 0 and all([for (child in doc.content[last].content)
       ((is_text(child) and child.text == "" and len(child.marks) == 0) ^ { false })])) "\\par " else ""
-    "{\\rtf1\\ansi\\uc1 " ++ envelope.retained_header ++ join(paragraphs, "\\par ") ++ terminal ++ "}"
+    "{\\rtf1\\ansi\\uc1 " ++ envelope.retained_header ++ join(blocks, "\\par ") ++ terminal ++ "}"
   }
 }
 pub fn import_text(source) map^ {
@@ -368,12 +404,13 @@ pub fn import_text(source) map^ {
   // A final body font change must not become the baseline used by the writer.
   let base = rtf.parse_details("{\\rtf1\\ansi " ++ retained_header ++ "}", {preserve_empty: true, editor_runs: true})^
   let actual = rtf.parse_details(source, {preserve_empty: true, editor_runs: true})^
-  let parsed = {*:actual, base_font: base.base_font, base_size: base.base_size}
+  let parsed = {*:actual, base_font: base.base_font, base_size: base.base_size, base_language: base.base_language}
   let known_font = len(base.fonts) == 0 or any([for (font in base.fonts) font.font_id == base.base_font]);
   if (not known_font) raise error("unknown RTF default font") else {
     let doc = to_model(parsed)^;
     {doc: doc, envelope: {source: source, original: doc, retained_header: retained_header, font_style: base.font_style,
-                          colors: parsed.colors, fonts: parsed.fonts, base_font: base.base_font, base_size: base.base_size}}
+                          colors: parsed.colors, fonts: parsed.fonts, base_font: base.base_font, base_size: base.base_size,
+                          base_language: base.base_language}}
   }
 }
 pub fn export_text(doc, envelope) any^ =>
@@ -383,7 +420,8 @@ pub fn check_roundtrip(doc, envelope) any^ {
   if (written == null) "this RTF edit is not representable"
   else {
     let parsed = rtf.parse_details(written, {preserve_empty: true, editor_runs: true}) ^ { null }
-    let back = if (parsed == null) null else (to_model({*:parsed, base_font:envelope.base_font, base_size:envelope.base_size}) ^ { null })
+    let back = if (parsed == null) null else (to_model({*:parsed, base_font:envelope.base_font, base_size:envelope.base_size,
+      base_language:envelope.base_language}) ^ { null })
     if (back == null or html.normal_form(back) != html.normal_form(doc))
       "this RTF edit cannot round-trip" else null
   }

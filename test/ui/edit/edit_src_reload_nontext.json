@@ -1,0 +1,20 @@
+{
+  "name": "refuse to reload non-text data without losing the unsaved edit",
+  "command": "edit",
+  "html": "test/ui/edit/sample.txt",
+  "working_copy": "temp/edit-ui/edit_src_reload_nontext.txt",
+  "events": [
+    {"type": "click", "target": {"text": "second line"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " MINE"},
+    {"type": "write_file", "path": "temp/edit-ui/edit_src_reload_nontext.txt", "content": "%PDF-1.7\n"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-changed"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-dialog-reload"}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-changed"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Could not reload"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "second line MINE"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_reload_nontext.txt", "equals": "%PDF-1.7\n"}
+  ]
+}

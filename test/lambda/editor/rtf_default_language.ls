@@ -15,5 +15,5 @@ let reopened = f.import_text(output)^;
   (f.import_text("{\\rtf1\\deflang-1 Hello}") ^ { null }) == null,
   (f.import_text("{\\rtf1{\\deflang1033 }Hello}") ^ { null }) == null,
   (f.import_text("{\\rtf1 Hello\\deflang1033 World}") ^ { null }) == null,
-  (f.import_text("{\\rtf1 Hello\\lang1033 World}") ^ { null }) == null
+  (f.import_text("{\\rtf1 Hello\\lang1033 World}") ^ { null }) != null
 ]

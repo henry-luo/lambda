@@ -8,7 +8,7 @@
 // keep — raw HTML, math, YAML front matter — is carried as atomic nodes shown
 // view-only (view.ls) or in the envelope, never flattened to text.
 //
-// A top-level block the model cannot hold (a footnote, say), one it only
+// A top-level block the model cannot hold, one it only
 // shows (raw HTML, display math), or one that would not survive export and
 // re-import, is kept as written: its source lines (parse's `sourcepos`) in an
 // atomic `md_source` node, shown view-only and saved byte for byte. So are
@@ -40,6 +40,10 @@ pub let schema = {
                attrs: [{name: 'tex', required: true, type: 'string'}]},
   emoji:      {role: 'inline', content: [], marks: 'none', atomic: true, selectable: true,
                attrs: [{name: 'name', required: true, type: 'string'}]},
+  footnote_ref: {role: 'inline', content: [], marks: 'none', atomic: true, selectable: true,
+                 attrs: [{name: 'label', required: true, type: 'string'}]},
+  md_footnote: {role: 'block', content: [{role: 'block', qty: 'plus'}], marks: 'none',
+                attrs: [{name: 'label', required: true, type: 'string'}]},
   html_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
                attrs: [{name: 'html', required: true, type: 'string'}]},
   math_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
@@ -57,7 +61,7 @@ pub let unsupported_input_types = ["formatUnderline", "formatSubscript"]
 let block_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'ul', 'ol', 'li',
                   'hr', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'html-block']
 let inline_tags = ['span', 'strong', 'b', 'em', 'i', 'del', 's', 'strike', 'sup',
-                   'code', 'a', 'img', 'br', 'raw-html', 'math', 'input']
+                   'code', 'a', 'img', 'br', 'raw-html', 'math', 'input', 'footnote-ref']
 
 // ---------------------------------------------------------------------------
 // Front matter envelope
@@ -99,7 +103,7 @@ fn unsupported_in(item) any^ {
     let own = if (member(block_tags, tag) or member(inline_tags, tag)) [] else [tag]
     // math and code are leaves whose text is the source; html-dom is the
     // parser's projection of raw HTML that html-block/raw-html already keep
-    if (tag == 'code' or tag == 'math' or tag == 'html-block' or tag == 'raw-html') own
+    if (tag == 'code' or tag == 'math' or tag == 'html-block' or tag == 'raw-html' or tag == 'footnote-ref') own
     else [*own, *[for (c in ((content(item)) ^ { [] })) for (t in ((unsupported_in(c)) ^ { [] })) t]]
   }
 }
@@ -109,7 +113,9 @@ fn doc_body(parsed) {
   if (len(found) > 0) found[0] else parsed
 }
 
-fn inline_children(item, marks) => [for (c in ((content(item)) ^ { [] })) for (x in ((inline_items(c, marks)) ^ { [] })) x]
+fn is_footnote_ref(item) => is_node(item) and item.tag == 'footnote_ref'
+fn inline_children(item, marks) any^ => anchor_atomic_edges(
+  [for (c in ((content(item)) ^ { [] })) for (x in ((inline_items(c, marks)) ^ { [] })) x], is_footnote_ref)^
 
 // Raw HTML and math keep their source text and a view-only rendering (view.ls).
 fn kept_atom(tag, key, text, shown) any^ => node_attrs(tag, attr_list([[key, text], [view_attr, shown]]), [])
@@ -142,6 +148,10 @@ fn inline_items(item, marks) any^ {
       else { [node_attrs('img', attr_list([['src', item.src], ['alt', item.alt], ['title', item.title]]), [])] }
     }
     else if (tag == 'br') { [node('br', [])] }
+    else if (tag == 'footnote-ref') {
+      [node_attrs('footnote_ref', attr_list([['label', item.ref], [view_attr, markdown_view(item)],
+        [node_marks_attr, if (len(marks) > 0) marks else null]]), [])]
+    }
     else if (tag == 'raw-html') { [kept_atom('raw_html', 'html', plain_text(item), html_view(plain_text(item)))] }
     else if (tag == 'math') { [kept_atom('math', 'tex', plain_text(item), math_view(plain_text(item), false))] }
     else { [] }
@@ -242,9 +252,16 @@ fn filled_text(lines, i, stop) any^ {
   else join(take(drop(lines, first), last_filled(lines, first, stop) - first + 1), "\n")
 }
 
-// A block the model holds, provided its export reads back the same.
+fn footnote_labels(item) any^ =>
+  if (not is_node(item)) []
+  else if (item.tag == 'footnote_ref') [attr_get(item, 'label')]
+  else [for (child in item.content) for (label in footnote_labels(child)^) label]
+
+// A block needs temporary definitions to reparse its footnote references.
 fn survives(nodes) any^ {
-  let back = parse(format(<doc <body *export_blocks(nodes)>>, 'markdown'), 'markdown') ^ { null };
+  let labels = unique([for (item in nodes) for (label in footnote_labels(item)^) label])
+  let definitions = join([for (label in labels) "\n\n[^" ++ label ++ "]: note"], "")
+  let back = parse(format(<doc <body *export_blocks(nodes)>>, 'markdown') ++ definitions, 'markdown') ^ { null };
   (back != null and norm_blocks(nodes) == norm_blocks(blocks_of(doc_body(back)))) or false
 }
 
@@ -252,13 +269,37 @@ fn survives(nodes) any^ {
 // written rather than as an atom the formatter would respell.
 fn shown_only(item) => name(item) == 'html-block' or name(item) == 'footnote' or (name(item) == 'math' and item.type == "block")
 
+fn contains_parsed_tag(item, tag) any^ => type(item) == element and
+  (name(item) == tag or any([for (child in content(item)^) contains_parsed_tag(child, tag)^]))
+
+// Definitions retain their original spelling until their own content changes.
+fn footnote_block(item, source) any^ {
+  let children = content(item)^
+  let unsupported = any([for (child in children) len(unsupported_in(child)^) > 0 or contains_parsed_tag(child, 'raw-html')^])
+  let blocks = if (unsupported) [] else blocks_of(item)
+  let label = string(item.label)
+  let written = if (len(blocks) == 0) null else
+    format(<doc <body <footnote label: label, *export_blocks(blocks)>>>, 'markdown')^
+  let labels = unique([for (block in blocks) for (ref in footnote_labels(block)^) ref])
+  let definitions = join([for (ref in labels where ((ref != label) ^ { false })) "\n\n[^" ++ ref ++ "]: note"], "")
+  let parsed = if (written == null) null else (parse(written ++ definitions, 'markdown') ^ { null })
+  let notes = if (parsed == null) [] else [for (note in (content(parsed?<footnotes>) ^ { [] })
+    where ((type(note) == element and name(note) == 'footnote' and note.label == label) ^ { false })) note]
+  if (len(notes) != 1 or norm_blocks(blocks) != norm_blocks(blocks_of(notes[0])))
+    kept_block(source, markdown_view(item))
+  else node_attrs('md_footnote', attr_list([['label', label], ['edit source', source], ['edit original', blocks]]), blocks)
+}
+
 fn item_blocks(item, lines, span, has_notes) any^ {
   let source = join(take(drop(lines, span.first - 1), span.last - span.first + 1), "\n")
+  if (name(item) == 'footnote') { return [footnote_block(item, source)^] }
   // Definitions move to a generated footer; keep a container that declared any as source.
   let declared_notes = if (has_notes) {
     (parse(source, 'markdown') ^ { null })?<footnotes>
   } else null
-  let nodes = if (len(unsupported_in(item)) > 0 or shown_only(item) or declared_notes != null)
+  // Paired raw HTML needs its complete block to render as authored.
+  let mixed_raw = contains_parsed_tag(item, 'footnote-ref')^ and contains_parsed_tag(item, 'raw-html')^
+  let nodes = if (len(unsupported_in(item)) > 0 or shown_only(item) or declared_notes != null or mixed_raw)
     null else block_nodes(item)
   if (nodes != null and survives(nodes)) nodes
   else [kept_block(source, markdown_view(item))]
@@ -335,6 +376,7 @@ fn export_atom(item) any^ {
     content(content(doc_body(parsed))[0])
   }
   else if (item.tag == 'br') { [<br>] }
+  else if (item.tag == 'footnote_ref') { [<'footnote-ref' ref: attr_get(item, 'label')>] }
   else if (item.tag == 'raw_html') { [<'raw-html' attr_get(item, 'html')>] }
   else if (item.tag == 'math') { [<math type: "inline", attr_get(item, 'tex')>] }
   // any other node (commands can produce mark nodes) keeps its content
@@ -345,7 +387,7 @@ fn export_inline(items, level) any^ => nest_marks(items, mark_order, wrap_mark, 
 
 fn is_inline_model(n) any^ =>
   is_text(n) or (is_node(n) and (n.tag == 'a' or n.tag == 'img' or n.tag == 'br' or
-    n.tag == 'raw_html' or n.tag == 'math' or n.tag == 'emoji' or member(mark_order, n.tag))) or false
+    n.tag == 'raw_html' or n.tag == 'math' or n.tag == 'emoji' or n.tag == 'footnote_ref' or member(mark_order, n.tag))) or false
 
 // A list item's content: inline runs are its text, blocks keep their shape.
 fn export_item_content(items, i, n, run, acc) any^ {
@@ -422,11 +464,17 @@ fn run_text(run) any^ {
   if (md == "") [] else [md]
 }
 
+fn footnote_text(note) any^ =>
+  if (note.content == attr_get(note, 'edit original')) attr_get(note, 'edit source')
+  else drop_final_newlines(format(<doc <body <footnote label: attr_get(note, 'label'), *export_blocks(note.content)>>>, 'markdown'))
+
 // Editable runs go through the formatter; a kept block is its source lines as
 // read. Top-level blocks are separated by one blank line.
 fn export_parts(nodes, i, run, acc) any^ {
   if (i >= len(nodes)) { [*acc, *run_text(run)] }
   else if (is_kept(nodes[i])) { export_parts(nodes, i + 1, [], [*acc, *run_text(run), attr_get(nodes[i], 'markdown')]) }
+  else if (is_node(nodes[i]) and nodes[i].tag == 'md_footnote')
+    { export_parts(nodes, i + 1, [], [*acc, *run_text(run), footnote_text(nodes[i])]) }
   else { export_parts(nodes, i + 1, [*run, nodes[i]], acc) }
 }
 
@@ -555,6 +603,7 @@ fn norm_block(n) any^ {
       [node_attrs('pre', attr_list([['language', if (lang == "") null else lang]]), [text(body)])]
     }
     else if (tag == 'table') { [node('table', [for (p in n.content) norm_table_part(p)])] }
+    else if (tag == 'md_footnote') { [node_attrs(tag, attr_list([['label', attr_get(n, 'label')]]), norm_blocks(n.content))] }
     else if (tag == 'hr' or tag == 'html_block' or tag == 'math_block' or tag == 'md_source') {
       [node_attrs(tag, sorted_attrs(n), [])]
     }
@@ -588,7 +637,7 @@ pub let descriptor = {
   surface: 'rich_text', schema: schema, schema_preset: 'html5_subset',
   unsupported_input_types: unsupported_input_types,
   // kept as written: shown view-only, never written into (proposal §2)
-  view_only_tags: ['md_source', 'raw_html', 'html_block', 'math', 'math_block', 'emoji'],
+  view_only_tags: ['md_source', 'raw_html', 'html_block', 'math', 'math_block', 'emoji', 'footnote_ref'],
   import_text: import_text, export_text: export_text, check_roundtrip: check_roundtrip,
   toolbar: 'markdown'
 }

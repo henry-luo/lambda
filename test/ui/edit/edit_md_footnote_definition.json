@@ -1,0 +1,23 @@
+{
+  "name": "edit and undo Markdown footnote definitions",
+  "command": "edit",
+  "html": "test/fixtures/edit/footnote-edit.md",
+  "working_copy": "temp/edit-ui/edit_md_footnote_definition.md",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-md-footnote"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".edit-md-footnote-label", "index": 0}, "equals": "[first]"},
+    {"type": "click", "target": {"selector": ".edit-md-footnote p", "index": 0}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_definition.md", "contains": "[^first]: Editable note.!"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_definition.md", "contains": "[^second]: Keep  spacing."},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_definition.md", "contains": "[^first]: Editable note.\n"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-md-footnote"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".edit-md-footnote p", "index": 0}, "equals": "Editable note."}
+  ]
+}

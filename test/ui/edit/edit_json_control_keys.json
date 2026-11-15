@@ -1,0 +1,31 @@
+{
+  "name": "edit JSON properties whose names contain control characters",
+  "command": "edit",
+  "html": "test/fixtures/edit/json-control-keys.json",
+  "working_copy": "temp/edit-ui/edit_json_control_keys.json",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-key[data-key-literal='json']"}, "count": 3},
+    {"type": "assert_value", "target": {"selector": ".property-key", "index": 0}, "equals": "\"a\\u0000b\""},
+    {"type": "assert_value", "target": {"selector": ".property-key", "index": 1}, "equals": "\"tab\\tkey\""},
+    {"type": "click", "target": {"selector": ".property-key", "index": 0}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_control_keys.json", "equals": "{\"a\\u0000b\":1,\"tab\\tkey\":2,\"control\\u0001name\":3}\n"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "click", "target": {"selector": ".property-value", "index": 0}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "9"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_control_keys.json", "equals": "{\"a\\u0000b\":9,\"tab\\tkey\":2,\"control\\u0001name\":3}\n"},
+    {"type": "click", "target": {"selector": ".property-key", "index": 0}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "\"new\\u0000name\""},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_control_keys.json", "equals": "{\"new\\u0000name\":9,\"tab\\tkey\":2,\"control\\u0001name\":3}\n"},
+    {"type": "click", "target": {"selector": ".property-key", "index": 0}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "\"normal\""},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_value", "target": {"selector": ".property-key", "index": 0}, "equals": "normal"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_json_control_keys.json", "equals": "{\"normal\":9,\"tab\\tkey\":2,\"control\\u0001name\":3}\n"}
+  ]
+}

@@ -1,23 +1,17 @@
 // XML property projection. Strict parsing validates each candidate document;
 // source spans retain declarations, namespaces, comments and entity spelling.
 import model: lambda.editor.format.model
+import source_text: lambda.editor.format.source_text
 
 let xml_options = {type: 'xml', flavor: 'strict', preserve_whitespace: true}
-fn raw(source: string, first: int, end_pos: int) string => slice(source, first, end_pos) ^ { "" }
-fn char_at(source: string, at: int) string => raw(source, at, at + 1)
-fn starts_at(source: string, at: int, text: string) bool => raw(source, at, at + len(text)) == text
+fn starts_at(source: string, at: int, text: string) bool => source_text.raw(source, at, at + len(text)) == text
 fn find_from(source: string, at: int, needle: string) int^ {
-  let found = index_of(raw(source, at, len(source)), needle)
+  let found = index_of(source_text.raw(source, at, len(source)), needle)
   if (found == null) raise error("unterminated XML construct") else at + found
-}
-fn skip_space(source: string, at: int) {
-  var i = at
-  while (i < len(source) and (contains([" ", "\t", "\r", "\n"], char_at(source, i)) ^ { false })) { i = i + 1 }
-  i
 }
 fn name_end(source: string, at: int) {
   var i = at
-  while (i < len(source) and not (contains([" ", "\t", "\r", "\n", "=", "/", ">"], char_at(source, i)) ^ { false })) {
+  while (i < len(source) and not (contains([" ", "\t", "\r", "\n", "=", "/", ">"], source_text.char_at(source, i)) ^ { false })) {
     i = i + 1
   }
   i
@@ -49,26 +43,26 @@ fn encoded_value(value: string, quote) string^ {
 }
 fn start_tag(source: string, first: int) any^ {
   let tag_end = name_end(source, first + 1)
-  let tag = raw(source, first + 1, tag_end)
-  var i = skip_space(source, tag_end), attrs = []
-  while ((i < len(source) and char_at(source, i) != ">" and not starts_at(source, i, "/>"))^) {
+  let tag = source_text.raw(source, first + 1, tag_end)
+  var i = source_text.skip_space(source, tag_end), attrs = []
+  while ((i < len(source) and source_text.char_at(source, i) != ">" and not starts_at(source, i, "/>"))^) {
     let end_name = name_end(source, i)
-    let key = raw(source, i, end_name)
-    let equals = skip_space(source, end_name)
-    let quote_at = skip_space(source, equals + 1)
-    let quote = char_at(source, quote_at)
-    if ((key == "" or char_at(source, equals) != "=" or not (quote == "\"" or quote == "'"))^) {
+    let key = source_text.raw(source, i, end_name)
+    let equals = source_text.skip_space(source, end_name)
+    let quote_at = source_text.skip_space(source, equals + 1)
+    let quote = source_text.char_at(source, quote_at)
+    if ((key == "" or source_text.char_at(source, equals) != "=" or not (quote == "\"" or quote == "'"))^) {
       raise error("unsupported XML attribute syntax")
     }
     let end_value = find_from(source, quote_at + 1, quote)^
-    let attr_text = raw(source, quote_at + 1, end_value)
+    let attr_text = source_text.raw(source, quote_at + 1, end_value)
     let value = decoded_value(attr_text, quote)^
     let multiline = contains(value, "\n") or contains(value, "\r")
     attrs = [*attrs, {name: "@" ++ key, first: i, key_end: end_name,
       node: {kind: 'scalar', first: quote_at + 1, last: end_value, quote: quote, text: value,
              key_first: i, key_end: end_name, attr_last: end_value + 1,
              can_rename: true, can_delete: true, multiline: multiline}}]
-    i = skip_space(source, end_value + 1)
+    i = source_text.skip_space(source, end_value + 1)
   }
   let closed = starts_at(source, i, "/>");
   {tag: tag, children: attrs, insert_at: tag_end, close_at: i, next: i + (if (closed) 2 else 1), closed: closed}
@@ -105,21 +99,21 @@ fn parse_element(source: string, first: int, is_root = false) any^ {
     else if ((starts_at(source, i, "<![CDATA["))^) {
       let first = i + 9
       let end_pos = find_from(source, first, "]]>")^
-      let value = decoded_cdata(raw(source, first, end_pos))^
+      let value = decoded_cdata(source_text.raw(source, first, end_pos))^
       children = [*children, {name: "#cdata", first: first,
         node: {kind: 'scalar', first: first, last: end_pos, text: value, mode: 'cdata',
                multiline: contains(value, "\n") or contains(value, "\r"), can_rename: false, can_delete: false}}]
       i = end_pos + 3
     }
     else if ((starts_at(source, i, "<?"))^) { i = find_from(source, i + 2, "?>")^ + 2 }
-    else if ((char_at(source, i) == "<")^) {
+    else if ((source_text.char_at(source, i) == "<")^) {
       let child = parse_element(source, i)^
       children = [*children, child]
       i = child.next
     }
     else {
       let end_pos = find_from(source, i, "<")^
-      let content = raw(source, i, end_pos)
+      let content = source_text.raw(source, i, end_pos)
       // Whitespace is a value when it is the element's only content; between
       // child elements it is structural formatting and stays in the source.
       if (trim(content) != "" or (i == opened.next and starts_at(source, end_pos, "</"))) {
@@ -149,16 +143,8 @@ pub fn import_text(source: string) map^ {
   if (root == null) { raise error("XML document has no root element") }
   else { {doc: {text: source, tree: {kind: 'object', first: -1, can_add: false, children: [root]}}, envelope: null} }
 }
-fn find_node(node, first) any^ {
-  if (node.first == first) node
-  else if (node.kind == 'scalar') null
-  else {
-    let matches = [for (child in node.children, let found = find_node(child.node, first)^ where found != null) found]
-    if (len(matches) == 0) null else matches[0]
-  }
-}
 pub fn replace_scalar(doc, first, end_pos, value) map^ {
-  let node = find_node(doc.tree, first)^
+  let node = source_text.find_node(doc.tree, first)^
   if (node == null or node.kind != 'scalar' or node.last != end_pos) { raise error("XML value no longer exists") }
   else if (value == node.text) { {doc: doc, envelope: null} }
   else if (node.mode == 'cdata' and (contains(value, "]]>") or contains(value, "\r"))^) {
@@ -166,12 +152,12 @@ pub fn replace_scalar(doc, first, end_pos, value) map^ {
   }
   else if (node.mode == 'self_closing') {
     let encoded = encoded_value(value, null)^
-    import_text(raw(doc.text, 0, first) ++ ">" ++ encoded ++ "</" ++ node.tag ++ ">" ++
-                raw(doc.text, node.close_end, len(doc.text)))^
+    import_text(source_text.raw(doc.text, 0, first) ++ ">" ++ encoded ++ "</" ++ node.tag ++ ">" ++
+                source_text.raw(doc.text, node.close_end, len(doc.text)))^
   }
   else {
     let encoded = if (node.mode == 'cdata') value else encoded_value(value, node.quote)^
-    import_text(raw(doc.text, 0, first) ++ encoded ++ raw(doc.text, end_pos, len(doc.text)))^
+    import_text(source_text.raw(doc.text, 0, first) ++ encoded ++ source_text.raw(doc.text, end_pos, len(doc.text)))^
   }
 }
 fn attr_name(key: string) string => if (starts_with(key, "@") ^ { false }) (slice(key, 1, len(key)) ^ { "" }) else key
@@ -180,7 +166,7 @@ fn attr_name(key: string) string => if (starts_with(key, "@") ^ { false }) (slic
 fn valid_xml_name(key: string) bool => key != "" and name_end(key, 0) == len(key) and
   not (contains(key, "\"") ^ { true }) and not (contains(key, "'") ^ { true }) and not (contains(key, "<") ^ { true })
 fn replace_span(doc, first, end_pos, value) map^ =>
-  import_text(raw(doc.text, 0, first) ++ value ++ raw(doc.text, end_pos, len(doc.text)))^
+  import_text(source_text.raw(doc.text, 0, first) ++ value ++ source_text.raw(doc.text, end_pos, len(doc.text)))^
 fn find_attribute(node, key_first) any^ {
   if (node.kind == 'scalar') if (node.key_first == key_first and node.can_rename == true) node else null
   else {
@@ -190,7 +176,7 @@ fn find_attribute(node, key_first) any^ {
 }
 pub fn rename_key(doc, first, end_pos, key) map^ {
   let attr = find_attribute(doc.tree, first)^
-  let elem = if (attr == null) find_node(doc.tree, first)^ else null
+  let elem = if (attr == null) source_text.find_node(doc.tree, first)^ else null
   if (attr != null and attr.key_end == end_pos) {
     let name = attr_name(key)
     if (not valid_xml_name(name)) raise error("invalid XML attribute name")
@@ -201,25 +187,25 @@ pub fn rename_key(doc, first, end_pos, key) map^ {
     else if (elem.self_closing) { replace_span(doc, first + 1, end_pos, key)^ }
     else {
       // Replace both names in one candidate so strict parsing never sees a mismatched pair.
-      import_text(raw(doc.text, 0, first + 1) ++ key ++ raw(doc.text, end_pos, elem.close_at + 2) ++
-        key ++ raw(doc.text, elem.close_at + 2 + len(elem.tag), len(doc.text)))^
+      import_text(source_text.raw(doc.text, 0, first + 1) ++ key ++ source_text.raw(doc.text, end_pos, elem.close_at + 2) ++
+        key ++ source_text.raw(doc.text, elem.close_at + 2 + len(elem.tag), len(doc.text)))^
     }
   }
   else { raise error("XML name no longer exists") }
 }
 pub fn insert_child(doc, first, key, value) map^ {
-  let node = find_node(doc.tree, first)^
+  let node = source_text.find_node(doc.tree, first)^
   let name = attr_name(key)
   if (node == null or node.insert_at == null or not valid_xml_name(name)) { raise error("invalid XML attribute") }
   else replace_span(doc, node.insert_at, node.insert_at, " " ++ name ++ "=\"" ++ encoded_value(value, "\"")^ ++ "\"")^
 }
 pub fn delete_child(doc, first) map^ {
-  let node = find_node(doc.tree, first)^
+  let node = source_text.find_node(doc.tree, first)^
   if (node == null or node.can_delete != true or node.attr_last == null) { raise error("attribute no longer exists") }
   else replace_span(doc, node.key_first, node.attr_last, "")^
 }
 pub fn insert_element(doc, first, name: string, value: string) map^ {
-  let parent = find_node(doc.tree, first)^
+  let parent = source_text.find_node(doc.tree, first)^
   if (parent == null or parent.can_add_element != true or not valid_xml_name(name)) {
     raise error("invalid XML element")
   }
@@ -234,7 +220,7 @@ pub fn insert_element(doc, first, name: string, value: string) map^ {
   }
 }
 pub fn delete_element(doc, first) map^ {
-  let node = find_node(doc.tree, first)^
+  let node = source_text.find_node(doc.tree, first)^
   if (node == null or node.can_delete_element != true) { raise error("the document root cannot be removed") }
   else replace_span(doc, node.first, node.last, "")^
 }

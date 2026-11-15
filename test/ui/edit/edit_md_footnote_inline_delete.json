@@ -1,0 +1,20 @@
+{
+  "name": "delete and undo a retained Markdown footnote reference",
+  "command": "edit",
+  "html": "test/ui/edit/sample-footnote-inline.md",
+  "working_copy": "temp/edit-ui/edit_md_footnote_inline_delete.md",
+  "events": [
+    {"type": "click", "target": {"selector": "#edit-surface .edit-doc > p .edit-view-note"}},
+    {"type": "type", "text": "Q"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "Q"},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-doc > p .edit-view-note"}, "count": 0},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_inline_delete.md", "contains": "Before note after."},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_inline_delete.md", "contains": "[^a]: Keep **this** note."},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-doc > p .edit-view-note"}, "count": 1},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_inline_delete.md", "contains": "Before note[^a] after."}
+  ]
+}

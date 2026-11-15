@@ -733,7 +733,7 @@ omits them for compatibility with the former native reader.
 and the final font style. Its optional `editor_runs` flag adds font IDs and
 sizes to spans so the editor can retain ordinary per-run font changes.
 
-The supported subset includes nested formatting, font and color tables, paragraph alignment and indents, Windows-1252 hex escapes, named punctuation, Unicode fallback, page breaks, and table separators. Headers, footers, pictures, objects, metadata, and other non-body destinations are skipped. This is not a complete RTF implementation: other code pages, embedded media, and full table layout are not supported. The script parser rejects nesting of 512 groups or more. The native RTF input parser has been removed; use this package for RTF content. The document viewer uses the direct script reader.
+The supported subset includes nested formatting, small capitals, font and color tables, RTF 1.7 color-table highlights, paragraph alignment, indents and nonnegative spacing before and after paragraphs, Windows-1252 hex escapes, named punctuation, Unicode fallback, page breaks, and table separators. Headers, footers, pictures, objects, metadata, and other non-body destinations are skipped. This is not a complete RTF implementation: other code pages, embedded media, and full table layout are not supported. The script parser rejects nesting of 512 groups or more. The native RTF input parser has been removed; use this package for RTF content. The document viewer uses the direct script reader.
 
 ### 3.4 Email (EML / RFC 822)
 

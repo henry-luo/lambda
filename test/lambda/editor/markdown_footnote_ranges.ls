@@ -9,10 +9,10 @@ let output = md.export_text(modified, loaded.envelope)^
 let again = md.import_text(output)^;
 [
   len(blocks) == 6,
-  attr_get(blocks[1], 'markdown') == "[^b]: Bee\n    continued",
+  blocks[1].tag == 'md_footnote' and attr_get(blocks[1], 'edit source') == "[^b]: Bee\n    continued",
   attr_get(blocks[2], 'markdown') == "[ref]: https://example.com",
-  attr_get(blocks[3], 'markdown') == "[^a]: Alpha",
-  attr_get(blocks[4], 'markdown') == "[^a]: Duplicate",
+  blocks[3].tag == 'md_footnote' and attr_get(blocks[3], 'edit source') == "[^a]: Alpha",
+  blocks[4].tag == 'md_footnote' and attr_get(blocks[4], 'edit source') == "[^a]: Duplicate",
   md.export_text(loaded.doc, loaded.envelope)^ == source,
   md.check_roundtrip(modified, loaded.envelope)^ == null,
   again.doc == modified

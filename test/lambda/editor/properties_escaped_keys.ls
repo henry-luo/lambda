@@ -16,5 +16,5 @@ let controls = p.insert_child(added.doc, 0, "tab\tform\ffeed", "seven")^;
   added.doc.tree.children[6].name == "#new:key",
   contains(added.doc.text, "\\#new\\:key=six"),
   controls.doc.tree.children[7].name == "tab\tform\ffeed" and contains(controls.doc.text, "tab\\tform\\ffeed=seven"),
-  (p.import_text("continued\\\n key=value\n") ^ { null }) == null
+  (p.import_text("continued\\\n key=value\n") ^ { null }).doc.tree.children[0].name == "continuedkey"
 ]

@@ -7,13 +7,13 @@ import doc_encoding: lambda.doc.encoding
 fn raw_source(source) => if (source is string) source else source.source
 fn next_token(source,at) any^ => if (source is string) lex.next(source,at)^ else grammar_lex.next(source,at)^
 
-fn initial_style() => {font:0,size:24,color:0,align:"left",li:0,ri:0,sl:0,uc:1,codepage:1252,
+fn initial_style() => {font:0,size:24,color:0,highlight:0,language:null,align:"left",li:0,ri:0,sl:0,sb:0,sa:0,uc:1,codepage:1252,
     bold:false,italic:false,underline:false,strike:false,caps:false,baseline:0}
 // RTF's named punctuation and escaped special characters denote Unicode text.
 pub let punctuation = {bullet:8226, emdash:8212, endash:8211, lquote:8216, rquote:8217,
     ldblquote:8220, rdblquote:8221}
 let special_symbols = map(["~",160, "-",173, "_",8209])
-fn initial(preserve_empty, editor_runs) => {style:initial_style(),default_font:0,fonts:[],colors:[],blocks:[],spans:[],
+fn initial(preserve_empty, editor_runs) => {style:initial_style(),default_font:0,default_language:null,fonts:[],colors:[],blocks:[],spans:[],
     paragraph_style:null,text:"",pending_surrogate:null,preserve_empty:preserve_empty,editor_runs:editor_runs}
 fn fixed(n) any^ {
     let hundredths = int(round(n * 100.0));
@@ -36,9 +36,13 @@ fn font_style(s) any^ {
 }
 // The editor uses the same font projection for run marks and the viewer.
 pub fn font_run_style(fonts, font, size) any^ => font_style({fonts:fonts, style:{font:font, size:size}})^
+fn color_style(colors, index, property) any^ {
+    let color = if (index >= 0 and index < len(colors)) colors[index] else null
+    if (color == null or not color.specified) "" else property ++ ":rgb(" ++
+        join([for (v in [color.red,color.green,color.blue]) string(max(0,min(255,v)))],",") ++ ");"
+}
 fn span_style(s) any^ {
     let st = s.style;
-    let color = if (st.color >= 0 and st.color < len(s.colors)) s.colors[st.color] else null;
     font_style(s)^ ++
     (if (st.bold) "font-weight:700;" else "") ++ (if (st.italic) "font-style:italic;" else "") ++
     (if (not st.underline and not st.strike) "" else "text-decoration:" ++
@@ -47,25 +51,27 @@ fn span_style(s) any^ {
     (if (st.caps) "font-variant:small-caps;" else "") ++
     (if (st.baseline == 0) "" else if (st.baseline > 0) "vertical-align:super;font-size:smaller;"
         else "vertical-align:sub;font-size:smaller;") ++
-    (if (color == null or not color.specified) "" else "color:rgb(" ++
-        join([for (v in [color.red,color.green,color.blue]) string(max(0,min(255,v)))],",") ++ ");")
+    color_style(s.colors, st.color, "color")^ ++
+    (if (st.highlight == 0) "" else color_style(s.colors, st.highlight, "background-color")^)
 }
 fn paragraph_style(st) any^ => "text-align:" ++ st.align ++ ";" ++
     (if (st.li > 0) "margin-left:" ++ fixed(st.li / 15.0) ++ "px;" else "") ++
     (if (st.ri > 0) "margin-right:" ++ fixed(st.ri / 15.0) ++ "px;" else "") ++
-    (if (st.sl > 0) "line-height:" ++ fixed(st.sl / 15.0) ++ "px;" else "")
+    (if (st.sl > 0) "line-height:" ++ fixed(st.sl / 15.0) ++ "px;" else "") ++
+    (if (st.sb > 0) "margin-top:" ++ fixed(st.sb / 15.0) ++ "px;" else "") ++
+    (if (st.sa > 0) "margin-bottom:" ++ fixed(st.sa / 15.0) ++ "px;" else "")
 fn flush(s) any^ {
     if (s.text == "") s else {
         let css = span_style(s)^;
         let pstyle = if (s.paragraph_style == null) paragraph_style(s.style) else s.paragraph_style;
-        let span = if (s.editor_runs) <span style:css, rtf_font:s.style.font, rtf_size:s.style.size, s.text>
+        let span = if (s.editor_runs) <span style:css, rtf_font:s.style.font, rtf_size:s.style.size, rtf_lang:s.style.language, s.text>
                    else <span style:css,s.text>;
         {*:s,text:"",paragraph_style:pstyle,spans:[*s.spans,span]}
     }
 }
 fn finish(s, explicit = false) any^ {
     let result = flush(s)^;
-    if (result.paragraph_style == null and not (explicit and result.preserve_empty)) result
+    if (result.paragraph_style == null and len(result.spans) == 0 and not (explicit and result.preserve_empty)) result
     else {*:result,paragraph_style:null,spans:[],
         blocks:[*result.blocks,<p style:if (result.paragraph_style == null) paragraph_style(result.style) else result.paragraph_style,*result.spans>]}
 }
@@ -138,7 +144,12 @@ fn unicode_unit(s, value) any^ {
 fn control(s, t) any^ {
     let w = t.word; let v = if (t.parameter == null) 1 else t.parameter; let st = s.style;
     if (w == "par" or w == "row") finish(s,true)
-    else if (w == "page") {let p = finish(s); {*:p,blocks:[*p.blocks,<hr>]}}
+    else if (w == "page") {
+        // In editor mode a page break stays inside its paragraph, even when
+        // it is the first or last item; the viewer keeps its block projection.
+        if (s.editor_runs) {*:s,spans:[*s.spans,<span rtf_page:true>]}
+        else {let p = finish(s); {*:p,blocks:[*p.blocks,<hr>]}}
+    }
     else if (w == "line") add(s,"\n")
     else if (w == "tab" or w == "cell") add(s,"\t")
     else if (punctuation[w] != null) add(s,chr(punctuation[w]))
@@ -147,25 +158,31 @@ fn control(s, t) any^ {
     else if (w == "ansicpg" and t.parameter != null) {*:s,style:{*:st,codepage:v}}
     else if (w == "u" and t.parameter != null) unicode_unit(s,v)
     else if (w == "deff" and t.parameter != null) {*:s,default_font:v,style:{*:st,font:v}}
-    else if (w == "plain") {*:s,style:{*:st,font:s.default_font,size:24,color:0,bold:false,
+    else if (w == "deflang" and t.parameter != null) {*:s,default_language:v,style:{*:st,language:v}}
+    // Plain restores the default language; highlighting is not a character format.
+    else if (w == "plain") {*:s,style:{*:st,font:s.default_font,size:24,color:0,language:s.default_language,bold:false,
         italic:false,underline:false,strike:false,caps:false,baseline:0}}
-    else if (w == "pard") {*:s,style:{*:st,align:"left",li:0,ri:0,sl:0}}
+    else if (w == "pard") {*:s,style:{*:st,align:"left",li:0,ri:0,sl:0,sb:0,sa:0}}
     else if (w == "ql" or w == "qc" or w == "qr" or w == "qj")
         {*:s,style:{*:st,align:if (w == "ql") "left" else if (w == "qc") "center" else if (w == "qr") "right" else "justify"}}
     else if (w == "b") {*:s,style:{*:st,bold:v != 0}}
     else if (w == "i") {*:s,style:{*:st,italic:v != 0}}
     else if (w == "ul" or w == "ulnone") {*:s,style:{*:st,underline:w == "ul" and v != 0}}
     else if (w == "strike") {*:s,style:{*:st,strike:v != 0}}
-    else if (w == "caps") {*:s,style:{*:st,caps:v != 0}}
+    else if (w == "caps" or w == "scaps") {*:s,style:{*:st,caps:v != 0}}
     else if (w == "super" or w == "sub" or w == "nosupersub")
         {*:s,style:{*:st,baseline:if (w == "super") 1 else if (w == "sub") -1 else 0}}
     else if (t.parameter == null) s
     else if (w == "f") {*:s,style:{*:st,font:v}}
     else if (w == "fs") {*:s,style:{*:st,size:v}}
     else if (w == "cf") {*:s,style:{*:st,color:v}}
+    else if (w == "highlight") {*:s,style:{*:st,highlight:v}}
+    else if (w == "lang") {*:s,style:{*:st,language:v}}
     else if (w == "li") {*:s,style:{*:st,li:v}}
     else if (w == "ri") {*:s,style:{*:st,ri:v}}
     else if (w == "sl") {*:s,style:{*:st,sl:v}}
+    else if (w == "sb") {*:s,style:{*:st,sb:v}}
+    else if (w == "sa") {*:s,style:{*:st,sa:v}}
     else if (w == "uc") {*:s,style:{*:st,uc:max(0,v)}}
     else s
 }
@@ -237,7 +254,7 @@ fn parse_with(source, use_grammar, options) map^ {
                 options != null and options.editor_runs == true),0)^;
             let done = finish(result.state)^;
             {document:<doc *done.blocks>, font_style:font_style(done)^, colors:done.colors,
-             fonts:done.fonts, base_font:done.style.font, base_size:done.style.size}
+             fonts:done.fonts, base_font:done.style.font, base_size:done.style.size, base_language:done.style.language}
         }
     }
 }

@@ -1,0 +1,13 @@
+{
+  "name": "preserve existing CRLF within an edited CSV cell",
+  "command": "edit",
+  "html": "test/fixtures/edit/multiline-crlf.csv",
+  "working_copy": "temp/edit-ui/edit_csv_multiline_crlf_edit.csv",
+  "events": [
+    {"type": "click", "target": {"selector": "textarea.property-multiline"}},
+    {"type": "key_combo", "key": "End", "mods_str": "super"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_multiline_crlf_edit.csv", "equals": "Name,Notes\r\nAlice,\"line one\r\nline two!\"\r\n"}
+  ]
+}

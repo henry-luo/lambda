@@ -10,6 +10,7 @@
 
 import lambda.editor.format.model
 import paths: lambda.io.path
+import utf8: lambda.io.utf8
 
 pub let basename = paths.basename
 pub let dirname = paths.dirname
@@ -22,6 +23,40 @@ pub let normal_path = paths.normal_path
 // A typed Save As path: absolute, or relative to the document's folder (where
 // a native save panel opens).
 pub let resolve_path = paths.resolve_path
+
+// Plain Netpbm images can be UTF-8, so inspect their dimensions as well.
+fn is_netpbm(source) any^ {
+  let prefix = slice(source, 0, min(len(source), 4096))^
+  if (not (slice(prefix, 0, min(len(prefix), 2))^ in ["P1", "P2", "P3", "P4", "P5", "P6"])) { return false }
+  let lines = split(prefix, "\n")^
+  let uncommented = join([for (line in lines) {
+    let at = index_of(line, "#")
+    if (at == null) line else slice(line, 0, at)^
+  }], " ")^
+  let words = [for (word in split(replace(replace(uncommented, "\t", " ")^, "\r", " ")^, " ")^ where word != "") word]
+  if (len(words) < 3 or not (words[0] in ["P1", "P2", "P3", "P4", "P5", "P6"])) false
+  else {
+    let width = int(words[1]) ^ { null }
+    let height = int(words[2]) ^ { null }
+    width != null and height != null and width > 0 and height > 0
+  }
+}
+fn is_non_text_content(source) any^ =>
+  starts_with(source, "%PDF-") or starts_with(source, "GIF87a") or starts_with(source, "GIF89a") or is_netpbm(source)^
+
+// Opening and reloading must apply the same byte and content checks.
+pub pn read_text(path) string^ {
+  let source = input(path, 'text') ^ { raise error("could not read " ++ path, ^) }
+  if (is_non_text_content(source)^) {
+    raise error("'" ++ basename(path) ++ "' is a non-text document and cannot be edited")
+  }
+  let bytes = input(path, 'binary') ^ { raise error("could not read " ++ path, ^) }
+  if (((index_of(source, "\u0000") != null) or (bytes != null and
+       (binary(source)^ != bytes or not utf8.is_valid(bytes)^)))^) {
+    raise error("the file is not safely readable as text")
+  }
+  return source
+}
 
 fn same_path(a, b) any^ => normal_path(a) == normal_path(b)
 fn source_suffix(path) any^ {
@@ -110,14 +145,15 @@ pub pn save(session, doc, target, overwrite) {
 
 // Re-read the file, discarding in-memory edits (the conflict dialog's Reload).
 pub pn reload(session) {
-  let source = input(session.path, 'text') ^ { null }
-  if (source == null) {
-    return {ok: false, status: "Could not read " ++ session.path ++ "."}
-  }
+  let source = read_text(session.path) ^ { ^ }
+  if (source is error) { return {ok: false, status: "Could not reload: " ++ source.message} }
   let loaded = session.format.import_text(source) ^ { {error: ^.message} }
   if (not (loaded.error is null)) {
     return {ok: false, status: "Could not reload: " ++ loaded.error}
   }
-  {ok: true, session: new_session(session.path, session.format, source, loaded),
+  let mismatch = session.format.check_roundtrip(loaded.doc, loaded.envelope) ^ { ^.message }
+  if ((mismatch != null)^) { return {ok: false, status: "Could not reload: " ++ mismatch} }
+  // Keep view-switch metadata while replacing the saved checkpoint.
+  {ok: true, session: {*: session, disk_text: source, envelope: loaded.envelope, saved_doc: loaded.doc},
    doc: loaded.doc, status: "Reloaded " ++ session.name ++ " from disk."}
 }

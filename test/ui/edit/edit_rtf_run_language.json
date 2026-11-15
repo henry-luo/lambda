@@ -1,0 +1,22 @@
+{
+  "name": "edit RTF while retaining run languages",
+  "command": "edit",
+  "html": "test/fixtures/edit/run-language.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_run_language.rtf",
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "English German English"},
+    {"type": "click", "target": {"selector": ".edit-surface p span"}},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface p span"}, "contains": "X"},
+    {"type": "click", "target": {"selector": ".edit-surface p"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_run_language.rtf", "contains": "\\lang1031"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_run_language.rtf", "contains": "English!"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface p span"}, "contains": "X"}
+  ]
+}

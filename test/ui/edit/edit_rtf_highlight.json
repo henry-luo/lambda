@@ -1,0 +1,24 @@
+{
+  "name": "edit RTF and preserve highlighted runs",
+  "command": "edit",
+  "html": "test/fixtures/edit/highlight.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_highlight.rtf",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface span[style*='background-color: rgb(255,255,0)']"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "Plain Yellow normal Mixed."},
+    {"type": "click", "target": {"selector": ".edit-surface span[style*='background-color: rgb(255,255,0)']", "index": 0}},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": ".edit-surface span[style*='background-color: rgb(255,255,0)']", "index": 0}, "contains": "X"},
+    {"type": "click", "target": {"selector": ".edit-surface p"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_highlight.rtf", "contains": "\\highlight1"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_highlight.rtf", "contains": "Mixed}.!"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-surface span[style*='background-color: rgb(255,255,0)']"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": ".edit-surface span[style*='background-color: rgb(255,255,0)']", "index": 0}, "contains": "X"}
+  ]
+}

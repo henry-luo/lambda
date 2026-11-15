@@ -1,0 +1,16 @@
+{
+  "name": "retain RTF page setup across a rich edit",
+  "command": "edit",
+  "html": "test/fixtures/edit/page-setup.rtf",
+  "working_copy": "temp/edit-ui/edit_rtf_page_setup.rtf",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Hello"},
+    {"type": "click", "target": {"text": "Hello"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_page_setup.rtf", "contains": "\\paperw12240 \\paperh15840 \\margl1440 \\margr720 \\margt1080 \\margb900 \\gutter180 \\deftab720 \\landscape "},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_rtf_page_setup.rtf", "contains": "Hello!"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

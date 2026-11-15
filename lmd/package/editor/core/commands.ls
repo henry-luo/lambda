@@ -950,11 +950,32 @@ fn delete_range(st, lo, hi) any^ {
 
 fn delete_all(st) any^ => replace_all_with_text(st, "")
 
+// Native deletion ranges can span an atom and the adjacent text endpoint
+// even though the user's caret is collapsed at the atom's edge.
+fn atomic_at_text_edge(st, text_pos, atom_pos, forward) any^ {
+  let atom = node_at(st.doc, atom_pos.path)
+  let leaf = node_at(st.doc, text_pos.path)
+  let entry = if (is_node(atom)) state_schema(st)[atom.tag] else null
+  entry != null and entry.atomic == true and entry.role == 'inline' and
+    len(atom.content) == 0 and is_text(leaf) and atom_pos.offset == 0 and
+    text_pos.offset == (if (forward) len(leaf.text) else 0) and
+    path_equal(parent_path(atom_pos.path), parent_path(text_pos.path)) and
+    last_index(atom_pos.path) == last_index(text_pos.path) + (if (forward) 1 else -1)
+}
+
 fn delete_selection(st) any^ {
   let sel = st.selection
+  let lo = if (sel != null and sel.kind == 'text') sel_lo(sel) else null
+  let hi = if (sel != null and sel.kind == 'text') sel_hi(sel) else null
   if (sel == null) { null }
   else if (sel.kind == 'all') { delete_all(st) }
   else if (sel.kind == 'node') { delete_node_selection(st) }
+  else if (lo != null and hi != null and atomic_at_text_edge(st, hi, lo, false)) {
+    delete_at_leaf_edge({*:st, selection:caret(hi)}, hi, false)
+  }
+  else if (lo != null and hi != null and atomic_at_text_edge(st, lo, hi, true)) {
+    delete_at_leaf_edge({*:st, selection:caret(lo)}, lo, true)
+  }
   else if (sel_single_leaf(sel)) { delete_range(st, sel_lo(sel), sel_hi(sel)) }
   else if (sel_same_parent_leaves(sel)) { replace_same_parent_text_selection(st, "") }
   else if (same_block_nested_text_selection(st) != null) { same_block_nested_text_selection(st) }
@@ -1134,6 +1155,35 @@ fn merge_blocks_forward(st, block_path, p) any^ {
   }
 }
 
+// Delete across a text-run edge without losing the caret when adjacent leaves
+// become one leaf after an intervening inline object is removed.
+fn delete_at_leaf_edge(st, p, forward) any^ {
+  let block_path = parent_path(p.path)
+  let block = node_at(st.doc, block_path)
+  let index = last_index(p.path)
+  let adjacent = index + (if (forward) 1 else -1)
+  if (block == null or not is_node(block) or adjacent < 0 or adjacent >= len(block.content)) {
+    if (forward) merge_blocks_forward(st, block_path, p) else merge_blocks_backward(st, block_path)
+  } else {
+    let neighbor = block.content[adjacent]
+    if (is_text(neighbor) and len(neighbor.text) > 0) {
+      let edge = if (forward) 0 else len(neighbor.text) - 1
+      delete_range(st, pos([*block_path, adjacent], edge), pos([*block_path, adjacent], edge + 1))
+    } else {
+      let left_index = adjacent - 1
+      let right_index = adjacent + 1
+      let left = if (left_index >= 0) block.content[left_index] else null
+      let right = if (right_index < len(block.content)) block.content[right_index] else null
+      let join = left != null and right != null and is_text(left) and is_text(right) and marks_equal(left.marks, right.marks)
+      let step = if (join) step_replace(block_path, left_index, right_index + 1,
+        [text_marked(left.text ++ right.text, left.marks)]) else step_replace(block_path, adjacent, adjacent + 1, [])
+      let caret_pos = if (join) pos([*block_path, left_index], len(left.text))
+        else if (forward) p else pos([*block_path, index - 1], 0)
+      tx_set_selection(tx_step(tx_begin(st.doc, st.selection), step), caret(caret_pos))
+    }
+  }
+}
+
 pub fn cmd_delete_backward(st) any^ {
   let sel = st.selection
   let seam = if (sel != null and sel.kind == 'text' and not sel_collapsed(sel)) block_seam(st, sel) else null
@@ -1148,30 +1198,8 @@ pub fn cmd_delete_backward(st) any^ {
     if (p.offset > 0) { delete_range(st, pos(p.path, p.offset - 1), p) }
     // a caret on an inline block itself (a blank block) joins that block
     else if (is_node(leaf) and block_allows_inline(st, leaf.tag)) { merge_blocks_backward(st, p.path) }
-    else if (len(p.path) >= 2 and last_index(p.path) == 0) { merge_blocks_backward(st, parent_path(p.path)) }
+    else if (is_text(leaf) and len(p.path) >= 2) { delete_at_leaf_edge(st, p, false) }
     else { null }
-  }
-}
-
-// Forward-delete at the end of a leaf: if a sibling follows within the block,
-// delete it (first char of next leaf, or the next inline node like <br>, merging
-// now-adjacent same-mark leaves); otherwise join the next block.
-fn delete_forward_at_leaf_end(st, p) any^ {
-  let block_path = parent_path(p.path)
-  let block = node_at(st.doc, block_path)
-  let leaf_idx = last_index(p.path)
-  if (block == null or not is_node(block) or leaf_idx + 1 >= len(block.content)) { merge_blocks_forward(st, block_path, p) }
-  else {
-    let next = block.content[leaf_idx + 1]
-    if (is_text(next) and len(next.text) > 0) {
-      delete_range(st, pos([*block_path, leaf_idx + 1], 0), pos([*block_path, leaf_idx + 1], 1))
-    } else {
-      let before = list_slice(block.content, 0, leaf_idx + 1)
-      let new_content = merge_adjacent_text(list_concat(before, list_slice(block.content, leaf_idx + 2, len(block.content))))
-      let tx0 = tx_begin(st.doc, st.selection)
-      let tx1 = tx_step(tx0, step_replace(block_path, 0, len(block.content), new_content))
-      tx_set_selection(tx1, caret(p))
-    }
   }
 }
 
@@ -1188,7 +1216,7 @@ pub fn cmd_delete_forward(st) any^ {
     let leaf = node_at(st.doc, p.path)
     if (is_blank_block(st, leaf)) { merge_blocks_forward(st, p.path, p) }
     else if (leaf == null or not is_text(leaf)) { null }
-    else if (p.offset >= len(leaf.text)) { delete_forward_at_leaf_end(st, p) }
+    else if (p.offset >= len(leaf.text)) { delete_at_leaf_edge(st, p, true) }
     else { delete_range(st, p, pos(p.path, p.offset + 1)) }
   }
 }

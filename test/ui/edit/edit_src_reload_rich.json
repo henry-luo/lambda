@@ -1,0 +1,20 @@
+{
+  "name": "reload source and return to the rich view",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_src_reload_rich.md",
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-btn-view_source"}},
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " MINE"},
+    {"type": "write_file", "path": "temp/edit-ui/edit_src_reload_rich.md", "content": "# New heading\n\nReloaded text.\n"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "click", "target": {"selector": ".edit-dialog-reload"}},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Reloaded text."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "Reloaded text."}
+  ]
+}
