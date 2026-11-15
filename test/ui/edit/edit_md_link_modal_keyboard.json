@@ -1,0 +1,26 @@
+{
+  "name": "link dialogs keep document Save separate and retain keyboard focus",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_link_modal_keyboard.md",
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "type", "text": "DRAFTLINK"},
+    {"type": "key_combo", "key": "k", "mods_str": "super"},
+    {"type": "type", "text": "https://example.org/draft"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_link_modal_keyboard.md", "not_contains": "DRAFTLINK"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-link"}, "count": 1},
+    {"type": "assert_value", "target": {"selector": "#edit-dialog-href"}, "equals": "https://example.org/draft"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#edit-dialog-href"}},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "assert_focus", "target": {"selector": "#edit-surface"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_link_modal_keyboard.md", "contains": "DRAFTLINK"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_link_modal_keyboard.md", "contains": "](https://example.org/draft)"}
+  ]
+}

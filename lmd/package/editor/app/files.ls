@@ -11,6 +11,7 @@
 import dom
 import sess: lambda.editor.session
 import controller: lambda.editor.controller
+import focus_policy: lambda.dom.focus_order
 
 // ---------------------------------------------------------------------------
 // Toolbar and window
@@ -33,7 +34,26 @@ pub pn sync_window(node, session, doc) {
 // A closed dialog hands focus back to the document: the button that closed it
 // is gone, and with nothing focused the next key would reach <body>, outside
 // the shell that owns the shortcuts.
-pub let focus_surface = controller.focus
+pub pn focus_surface(node) {
+  let host = controller.surface(node)
+  let target = if (host != null) host else dom.query_selector(dom.root_node(node), "body.edit-format-property")
+  if (target == null) false else dom.focus_set(target, false)
+}
+
+// Dialog autofocus needs both the active editing surface and any focused
+// toolbar/control released, including a field that triggered window close.
+pub pn release_focus(node) {
+  let host = controller.surface(node)
+  if (host != null) { dom.clear_editing_focus(host) }
+  for (field in dom.focus_candidates(dom.root_node(node)) where dom.focused(field.node)) {
+    dom.clear_editing_focus(field.node)
+  }
+}
+
+pub pn save_as_dialog(session, node) {
+  release_focus(node)^;
+  {kind: 'save_as', path: session.path}
+}
 
 // The live text of a dialog field. A click on a label targets its text node;
 // `root_node` answers for any connected node.
@@ -47,14 +67,15 @@ pub fn field_value(node, id) any^ {
 // ---------------------------------------------------------------------------
 
 view <edit_dialog_button> {
-  <button class: "edit-dialog-btn edit-dialog-" ++ ~.action ++ (if (~.primary) " primary" else ""), ~.label>
+  <button class: "edit-dialog-btn edit-dialog-" ++ ~.action ++ (if (~.primary) " primary" else ""),
+    autofocus: if (~.autofocus == true) "autofocus" else null, ~.label>
 }
 on click(evt) {
   emit("edit_dialog", {action: ~.action, node: evt.target})
 }
 
-pub fn dialog_button(action, label, primary) =>
-  apply(<edit_dialog_button action: action, label: label, primary: primary>)
+pub fn dialog_button(action, label, primary, autofocus = false) =>
+  apply(<edit_dialog_button action: action, label: label, primary: primary, autofocus: autofocus>)
 
 pub fn field(id, value, placeholder, autofocus = false) =>
   <input id: id, class: "edit-dialog-field", type: "text", value: value, placeholder: placeholder,
@@ -63,7 +84,7 @@ pub fn field(id, value, placeholder, autofocus = false) =>
 pub fn dialog_frame(kind, title, text, fields, buttons) =>
   <div class: "edit-dialog-layer",
     <div class: "edit-dialog-backdrop">
-    <div class: "edit-dialog edit-dialog-" ++ kind, role: "dialog", ["aria-label"]: title,
+    <div class: "edit-dialog edit-dialog-" ++ kind, role: "dialog", ["aria-label"]: title, ["aria-modal"]: "true",
       <div class: "edit-dialog-title", title>
       <div class: "edit-dialog-text", text>
       <div class: "edit-dialog-fields", *fields>
@@ -79,27 +100,54 @@ pub fn dialog_view(dialog, session) any^ {
   else if (dialog.kind == 'close') {
     dialog_frame("close", "Unsaved changes",
       "Save the changes to " ++ session.name ++ " before closing?", [],
-      [dialog_button("cancel", "Cancel", false), dialog_button("discard", "Don't Save", false),
+      [dialog_button("cancel", "Cancel", false, true), dialog_button("discard", "Don't Save", false),
        dialog_button("save", "Save", true)])
   }
   else if (dialog.kind == 'changed') {
     dialog_frame("changed", "File changed on disk",
       session.name ++ " was changed by another program. Overwrite it with your version, " ++
       "reload the file and lose your edits, or save your version under another name.", [],
-      [dialog_button("cancel", "Cancel", false), dialog_button("reload", "Reload", false),
+      [dialog_button("cancel", "Cancel", false, true), dialog_button("reload", "Reload", false),
        dialog_button("save_as", "Save As", false), dialog_button("overwrite", "Overwrite", true)])
   }
   else if (dialog.kind == 'exists') {
     dialog_frame("exists", "File exists",
       dialog.path ++ " already exists. Replace it?", [],
-      [dialog_button("cancel", "Cancel", false), dialog_button("overwrite", "Replace", true)])
+      [dialog_button("cancel", "Cancel", false, true), dialog_button("overwrite", "Replace", true)])
   }
   else if (dialog.kind == 'save_as') {
     dialog_frame("save_as", "Save As", "Save a copy of the document to a new file.",
-      [field("edit-dialog-path", dialog.path, "path/to/file")],
+      [field("edit-dialog-path", dialog.path, "path/to/file", true)],
       [dialog_button("cancel", "Cancel", false), dialog_button("save_as_ok", "Save", true)])
   }
   else null
+}
+
+// Modal keys stay on the dialog's action path, including an uncommitted
+// property or link draft. Document shortcuts must not escape that scope.
+pub pn dialog_keydown(dialog, evt) {
+  let root = dom.root_node(evt.target)
+  let modal = dom.query_selector(root, ".edit-dialog")
+  if (evt.key == "Tab" and evt.metaKey != true and evt.ctrlKey != true and evt.altKey != true) {
+    let fields = if (modal == null) [] else dom.focus_candidates(modal)
+    let next = focus_policy.next_candidate(fields, evt.shiftKey != true)^
+    if (next != null) { dom.focus_set(next.node, true) }
+    return 'prevent-default'
+  }
+  let save = (evt.metaKey == true or evt.ctrlKey == true) and lower(string(evt.key)) == "s"
+  let confirm = evt.key == "Enter" and evt.shiftKey != true and evt.altKey != true and
+    evt.metaKey != true and evt.ctrlKey != true and dom.matches(evt.target, ".edit-dialog-field")
+  let selector = if (evt.key == "Escape") ".edit-dialog-cancel"
+    else if (confirm or (dialog.kind == 'save_as' and save)) ".edit-dialog-btn.primary"
+    else null
+  if (selector != null) {
+    let button = dom.query_selector(root, selector)
+    if (button != null) { dom.keyboard_click(button) }
+    return 'prevent-default'
+  }
+  if (save) { return 'prevent-default' }
+  if (modal == null or not dom.contains(modal, evt.target)) { return 'prevent-default' }
+  'pass'
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +159,7 @@ pub fn dialog_view(dialog, session) any^ {
 pub pn save_now(session, doc, node) {
   let result = sess.save(session, doc, session.path, false)
   sync_window(node, result.session, doc)^;
+  if ((result.conflict != null)^) { release_focus(node)^ }
   {session: result.session, status: result.status,
    dialog: if (result.conflict != null) {kind: result.conflict, path: result.session.path} else null}
 }
@@ -130,7 +179,7 @@ pub pn dialog_action(action, node, st) {
     return {*: st, dialog: null, handled: true, reloaded: null}
   }
   if (action == "save_as") {
-    return {*: st, dialog: {kind: 'save_as', path: session.path}, handled: true, reloaded: null}
+    return {*: st, dialog: save_as_dialog(session, node)^, handled: true, reloaded: null}
   }
   if (action == "reload") {
     let result = sess.reload(session)

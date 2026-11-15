@@ -83,7 +83,7 @@ fn dialog_view(dialog, session) any^ {
   }
   else if (dialog.kind == 'image') {
     files.dialog_frame("image", "Insert image", "Image address and description.",
-      [files.field("edit-dialog-src", "", "images/picture.png"), files.field("edit-dialog-alt", "", "Description")],
+      [files.field("edit-dialog-src", "", "images/picture.png", true), files.field("edit-dialog-alt", "", "Description")],
       [files.dialog_button("cancel", "Cancel", false), files.dialog_button("image_ok", "Insert", true)])
   }
   else null
@@ -355,7 +355,7 @@ on edit_cmd(req) {
     if (saved.dialog != null) { dialog = saved.dialog }
   }
   else if (cmd == "save_as") {
-    dialog = {kind: 'save_as', path: session.path}
+    dialog = files.save_as_dialog(session, req.node)^
   }
   else if (is_drawing(session)) {
     let picked = dr.picked_indices(ds)
@@ -393,7 +393,10 @@ on edit_cmd(req) {
                else tools.find_item([*format_groups(session), tools.table_insert, tools.table_menu], cmd)
     if (item == null) { status = "Unknown command " ++ cmd ++ "." }
     else if (command_problem(session, editor, item)^ != null) { status = command_problem(session, editor, item)^ }
-    else if (item.dialog != null) { dialog = {kind: item.dialog} }
+    else if (item.dialog != null) {
+      dialog = {kind: item.dialog}
+      files.release_focus(req.node)^
+    }
     else {
       let result = apply_format_item(editor, item)
       editor = result.editor
@@ -413,7 +416,7 @@ on edit_dialog(req) {
   var edited = false
   // the file dialogs' actions are shared with the source surface (files.ls)
   let filed = files.dialog_action(action, req.node,
-    {session: session, doc: editor.doc, status: status, dialog: dialog, after_save: after_save})
+    {session: session, doc: editor.doc, status: status, dialog: dialog, after_save: after_save})^
   if (filed.handled^) {
     session = filed.session
     status = filed.status
@@ -482,14 +485,8 @@ on edit_dialog(req) {
   }
 }
 on keydown(evt) {
-  if ((dialog != null and dialog.kind == 'link' and evt.key == "Enter" and
-       dom.matches(evt.target, "#edit-dialog-href"))^) {
-    editor = insert_dialog_link(editor, evt.target)
-    dialog = null
-    files.sync_window(evt.target, session, editor.doc)^
-    files.focus_surface(evt.target)^
-    controller.restore(editor)^
-    return 'prevent-default'
+  if ((dialog != null)^) {
+    return files.dialog_keydown(dialog, evt)^
   }
   if ((evt.key == "Escape" and table_menu != null)^) {
     table_menu = null
@@ -559,18 +556,13 @@ on keydown(evt) {
     }
   }
   if ((primary_key(evt) and key_is(evt, "s"))^) {
-    if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
+    if (evt.shiftKey == true) { dialog = files.save_as_dialog(session, evt.target)^ }
     else {
       let saved = files.save_now(session, editor.doc, evt.target)
       session = saved.session
       status = saved.status
       if ((saved.dialog != null)^) { dialog = saved.dialog }
     }
-    return 'prevent-default'
-  }
-  if ((evt.key == "Escape" and dialog != null)^) {
-    dialog = null
-    after_save = null
     return 'prevent-default'
   }
   // Cmd/Ctrl+/ switches to the source view (OQ7)
@@ -699,5 +691,6 @@ on closerequest(evt) {
     dom.request_window_close(evt.target)
     return
   }
+  files.release_focus(evt.target)^
   dialog = {kind: 'close'}
 }

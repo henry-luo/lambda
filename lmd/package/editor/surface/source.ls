@@ -1042,7 +1042,7 @@ on edit_cmd(req) {
     if (saved.dialog != null) { dialog = saved.dialog }
     else { rev = project(vw, b, hs, sel, rev) }
   }
-  else if (cmd == "save_as") { dialog = {kind: 'save_as', path: session.path} }
+  else if (cmd == "save_as") { dialog = files.save_as_dialog(session, req.node)^ }
   else if (cmd == "undo" or cmd == "redo") {
     let next = history_step({b: b, sel: sel, hist: hist}, cmd == "undo")
     if ((next != null)^) {
@@ -1060,7 +1060,7 @@ on edit_cmd(req) {
 }
 on edit_dialog(req) {
   let filed = files.dialog_action(req.action, req.node,
-    {session: session, doc: b, status: status, dialog: dialog, after_save: after_save})
+    {session: session, doc: b, status: status, dialog: dialog, after_save: after_save})^
   session = filed.session
   status = filed.status
   dialog = filed.dialog
@@ -1082,8 +1082,11 @@ on keydown(evt) {
   // assigning unchanged state rebuilds the rows before the pending text input
   if ((vw.handle == null)^) { vw = mounted(vw, evt.target, rev) }
   let primary = evt.metaKey == true or evt.ctrlKey == true
+  if ((dialog != null)^) {
+    return files.dialog_keydown(dialog, evt)^
+  }
   if ((primary and lower(string(evt.key)) == "s")^) {
-    if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
+    if (evt.shiftKey == true) { dialog = files.save_as_dialog(session, evt.target)^ }
     else {
       let saved = files.save_now(session, b, evt.target)
       session = saved.session
@@ -1092,13 +1095,6 @@ on keydown(evt) {
       if ((saved.dialog != null)^) { dialog = saved.dialog }
       else { rev = project(vw, b, hs, sel, rev) }
     }
-    return 'prevent-default'
-  }
-  if ((dialog != null)^) {
-    if (evt.key != "Escape") { return 'pass' }
-    dialog = null
-    after_save = null
-    rev = project(vw, b, hs, sel, rev)
     return 'prevent-default'
   }
   // Cmd/Ctrl+/ switches to the rich view (OQ7), as Typora's source mode does
@@ -1345,5 +1341,6 @@ on closerequest(evt) {
     dom.request_window_close(evt.target)
     return
   }
+  files.release_focus(evt.target)^
   dialog = {kind: 'close'}
 }

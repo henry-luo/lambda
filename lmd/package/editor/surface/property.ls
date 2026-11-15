@@ -210,7 +210,7 @@ on property_command(req) {
     session = saved.session
     status = saved.status
     dialog = saved.dialog
-  } else if (req.action == "save_as") { dialog = {kind: 'save_as', path: session.path} }
+  } else if (req.action == "save_as") { dialog = files.save_as_dialog(session, req.node)^ }
   else if (req.action == "source") {
     emit("edit_switch", src.source_view(session, doc.text, sess.is_dirty(session, doc)))
   }
@@ -261,14 +261,18 @@ on edit_dialog(req) {
     return
   }
   let result = files.dialog_action(req.action, req.node,
-    {session: session, doc: doc, status: status, dialog: dialog, after_save: after_save})
+    {session: session, doc: doc, status: status, dialog: dialog, after_save: after_save})^
   session = result.session
   status = result.status
   dialog = result.dialog
   after_save = result.after_save
   if (result.reloaded != null) { doc = result.reloaded; undo = []; redo = []; closed = [] }
+  if (dialog == null) { files.focus_surface(req.node)^ }
 }
 on keydown(evt) {
+  if ((dialog != null)^) {
+    return files.dialog_keydown(dialog, evt)^
+  }
   let primary = evt.metaKey == true or evt.ctrlKey == true
   let horizontal = evt.key == "Tab" and not primary
   let vertical = evt.key == "Enter" and primary and evt.altKey != true
@@ -300,14 +304,6 @@ on keydown(evt) {
       if (next_field != null) { dom.focus_set(next_field, false) }
       return 'prevent-default'
     }
-  }
-  if ((dialog != null and dialog.kind in ['add_property', 'add_element'] and evt.key == "Enter" and not primary and
-       dom.matches(evt.target, "#property-new-key,#property-new-value") and
-       not (evt.shiftKey == true and dom.matches(evt.target, "textarea#property-new-key")))^) {
-    let selector = if (dialog.kind == 'add_element') ".edit-dialog-element_add" else ".edit-dialog-property_add"
-    let button = dom.query_selector(dom.root_node(evt.target), selector)
-    if (button != null) { dom.keyboard_click(button) }
-    return 'prevent-default'
   }
   if ((dialog == null and evt.key == "Escape" and dom.matches(evt.target, ".property-value,.property-key"))^) {
     if ((draft != null and not draft_matches(draft, evt.target))^) {
@@ -347,7 +343,7 @@ on keydown(evt) {
       if (not result.ok) { return 'prevent-default' }
       doc = result.doc; undo = result.undo; redo = result.redo
     }
-    if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
+    if (evt.shiftKey == true) { dialog = files.save_as_dialog(session, evt.target)^ }
     else {
       let saved = files.save_now(session, doc, evt.target)
       session = saved.session
@@ -356,7 +352,6 @@ on keydown(evt) {
     }
     return 'prevent-default'
   }
-  if ((dialog != null and evt.key == "Escape")^) { dialog = null; after_save = null; return 'prevent-default' }
   if ((dialog == null and primary and lower(string(evt.key)) == "z")^) {
     let field = dom.matches(evt.target, ".property-value,.property-key")
     let pending = field and dom.get_state(evt.target, "value") != dom.get_attribute(evt.target, "data-original")
@@ -396,5 +391,6 @@ on closerequest(evt) {
     doc = result.doc
   }
   if ((not sess.is_dirty(session, doc))^) { dom.request_window_close(evt.target); return }
+  files.release_focus(evt.target)^
   dialog = {kind: 'close'}
 }

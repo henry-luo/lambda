@@ -619,7 +619,13 @@ replaces the original only after the write succeeded. If the file changed on
 disk since it was opened, Save stops and offers Overwrite, Reload, or Save As.
 Save As takes a path relative to the document's folder, keeps the format, and
 never creates folders. For an unlisted source suffix, it also accepts a name
-with the same suffix (or another extensionless name). Closing a window with unsaved changes asks to Save,
+with the same suffix (or another extensionless name). In Save As, Enter or
+Cmd/Ctrl+S submits the typed destination. Tab and Shift+Tab cycle through a
+dialog's controls; Escape cancels and returns focus to the document. Enter
+confirms an editing dialog from its field; Shift+Enter inserts a newline in a
+multiline field. Confirm or cancel the dialog before using document Save or
+the source-view shortcut.
+Closing a window with unsaved changes asks to Save,
 Discard, or Cancel.
 
 **Keyboard controls:**

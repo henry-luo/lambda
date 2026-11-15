@@ -2,6 +2,123 @@
 
 ## Current checkpoint
 
+- Updated 2026-11-15 in `/Users/henryluo/Projects/Lambda-opus`, branch `master`,
+  HEAD `3b4b5e1c9` plus the uncommitted editing changes listed below.
+- Goal: continue viewer-format editing, prioritizing general keyboard behavior
+  and structured data within Lambda ownership. RTF, RST, Textile and EPUB
+  expansion is deferred. RI-090 and LI-056–LI-058 require scoped sibling-source
+  authorization; the prior automatic approval review rejected an Input patch.
+- Implemented since HEAD: shared modal keyboard handling and focus restoration,
+  keyboard-only Save As and image insertion, DOM focus-order helper extraction,
+  YAML/TOML source-preservation regressions, and optional Markdown footnote
+  lookup without `content(null)` errors (D10.2.1, D9.3.4, S1.5).
+
+| Required behavior | Current state and evidence |
+|---|---|
+| General keyboard editing | Save As and editing dialogs have Enter, Escape and confined Tab navigation; model tests pass 120/120 and edit UI passes 202/203 (`optional-footnotes/{model,edit}.log`). RI-090 is the sole failing replay. |
+| Structured data properties/tables | JSON, XML, INI, Java properties and CSV/TSV have source-preserving editors. YAML, TOML, iCalendar and vCard remain source-only until LI-056–LI-058 are repaired. |
+| Simple rich markup | Existing rich adapters retain unsupported content or use source fallback; the full edit UI sweep includes ordinary markup, tables, formatting, save and undo. Deferred formats are not claimed complete. |
+| Other textual formats | SVG, graph and scripts use the source surface; routing and source edit/save checks are in the model/UI selections. |
+| Non-text media | The CLI suffix checks and session byte/content checks reject media; routing and reload-safety regressions remain green. |
+| Original broad format coverage | DOCX still lacks a user-facing package editor (LI-063); man pages still need LI-062 plus editor header retention. The implementation history records these remaining requirements. |
+
+- Latest diagnostic proof: six Markdown cases retain identical model/round-trip
+  results in AUTO, interpreter and JIT, while runtime errors fall from nine to
+  zero (`temp/edit-viewer/optional-footnotes/verification.json`).
+- Final gates on the complete current tree: Lambda 7,534/7,534; Radiant 8,170
+  passed, zero failed, 297 partial and 20 skipped; Test262 40,261/40,261 fully
+  passing, zero regressions and 2,652 skipped, without isolated retries.
+  Evidence: `optional-footnotes/*-baseline.log`. The edit UI's RI-090 failure
+  is outside the Radiant baseline selection and remains open.
+- The 19 changed package/test files match the pre-gate source snapshot.
+  The Test262 pin matches the freshly built release executable (SHA-256
+  `43a9b014723201b7c7f46cd28a2c805bedacd2ed478d2d4a106f42163b889bac`);
+  see `optional-footnotes/final-verification.json`. Lambda/Radiant gates used
+  their debug build profiles. Input `2672c1a` and Radiant `9a21ad9` remain clean.
+- The named owner blocker has persisted across three consecutive goal turns.
+  The current four-format probe still accepts each malformed example
+  (`optional-footnotes/blockers.out`), and no sibling-source approval has been
+  granted. Next: obtain scoped authorization for RI-090 and LI-056–LI-058,
+  repair those providers, then resume their affected Lambda editing work.
+  Do not compensate for provider validation defects or native line navigation
+  in Lambda, and do not claim the overall editing objective complete.
+
+## Implementation history
+
+- 2026-11-15 optional Markdown footnotes: the parser omits the footer for
+  documents without definitions. The adapter previously called `content()` on
+  that absence and then caught the type error. A shared `parsed_footnotes`
+  helper checks the optional footer before reading its children (S1.5), and
+  import and definition validation use it. The six-case probe covers empty,
+  ordinary and structured Markdown, editable notes, unreferenced definitions
+  and retained unsupported definitions. Its outputs are identical before and
+  after; runtime diagnostics fall from nine to zero in AUTO, interpreter and
+  JIT (`temp/edit-viewer/optional-footnotes/verification.json`). Existing
+  editor/RTF model tests pass 120/120 and edit UI passes 202/203 with only
+  RI-090 failing (`optional-footnotes/{model,edit}.log`). No reference or
+  diagnostic configuration was changed.
+  Final Lambda, Radiant and Test262 gates pass on all current editing changes;
+  their results and executable/source identity are in the current checkpoint.
+- 2026-11-15 modal editing continuation: custom property/link/image dialogs
+  share the file dialogs' keyboard scope (D10.2.1, S12.1.3). The prior Add
+  Property and link replays both wrote the unsaved document when Cmd/Ctrl+S
+  was pressed in their fields (`temp/edit-viewer/modal-editing/before.log`).
+  Add Property also allowed the source-view shortcut to discard the open
+  dialog. All dialogs now keep document shortcuts outside the draft, cycle
+  Tab/Shift+Tab through their controls, confirm their primary action with
+  Enter from a field, and cancel with Escape. Shift+Enter keeps a newline in
+  multiline fields. The shared path replaces separate link/property Enter
+  handlers. Toolbar-opened rich editing dialogs release document focus, and
+  the image address field autofocuses; the image keyboard replay fails
+  without those focus changes (`modal-editing/image-before-focus.log`) and
+  passes with them (`modal-editing/image-after.log`).
+  All three new workflows pass in forced interpreter and JIT modes
+  (`modal-editing/interp.log`, `modal-editing/jit-final.log`), and the editor/RTF
+  model selection passes 120/120 (`modal-editing/model.log`). The final edit UI
+  sweep passes 202/203, with only the existing RI-090 replay failing
+  (`modal-editing/edit-final.log`). An earlier UI sweep overlapped the JIT
+  fixtures and is not used for qualification; the failing JIT link replay
+  passed alone and in the subsequent sequential run. The aggregate baselines
+  in the following checkpoint predate this modal extension.
+- 2026-11-15 general keyboard continuation: Save As now handles Enter and
+  Cmd/Ctrl+S through the typed destination instead of saving the original
+  file (D9.3.4, S12.1.1v3). All three rich/source/property replays failed
+  before the fix (`temp/edit-viewer/file-dialogs/before.log`); the originals
+  contained the unsaved marker. The shared file-dialog handler owns keyboard
+  submission, Escape and Tab cycling. Dialogs release document/control focus
+  before autofocus; completion restores the surface, including the property
+  editor. Sequential-focus ordering is extracted from the DOM behavior module
+  into a helper without templates, so reuse does not register an HTML root
+  view in the editor (D10.2.1). The three keyboard-only replays pass 26/26
+  assertions each, including safe overwrite confirmation, focus cycling,
+  undo and save-on-close (`file-dialogs/keyboard-final.log`); five focused
+  DOM focus replays also pass (`file-dialogs/focus-regressions.log`).
+  The editor/RTF model selection passes 120/120 (`file-dialogs/model-suite.log`),
+  and the full edit UI selection passes 199/200 with only the existing
+  RI-090 replay failing (`file-dialogs/edit-suite.log`). The Lambda baseline
+  passes 7,534/7,534 (`file-dialogs/lambda-baseline.log`); Radiant reports
+  8,170 passes, zero failures, 297 partial and 20 skipped, excluding that
+  separate RI-090 replay (`file-dialogs/radiant-baseline.log`).
+  Test262 reports 40,260 fully passing, one slow batch case passing on isolated
+  retry, zero regressions and 2,652 skipped (`file-dialogs/test262-baseline.log`).
+  The pinned release host has SHA-256
+  `43a9b014723201b7c7f46cd28a2c805bedacd2ed478d2d4a106f42163b889bac`,
+  identical to the freshly built release executable. The Test262 runner
+  refreshed its generated `test/js262/t262_partial.txt` list in the shared
+  test corpus; that output is outside the Lambda source diff.
+- 2026-11-15 prioritized general editing issues: the RI-090 Markdown replay
+  still fails its two edge-placement assertions, and the LI-056–LI-058
+  probes still accept the malformed examples in the owner ledgers. YAML and
+  TOML remain on the source surface: new UI replays edit and save malformed
+  files while preserving their other lines, and routing checks cover `.yaml`,
+  `.yml`, and `.toml`. Those two UI replays, the existing calendar/contact
+  source replays, and the routing model test pass (D9.3.4). A candidate
+  LI-058 Input patch and regression cases are in
+  `temp/edit-viewer/li058-proposal/input.patch`; they have not been applied,
+  compiled, or tested. Automatic approval review rejected applying them in
+  the sibling checkout under the project ownership rule. RI-090 and
+  LI-056–LI-058 remain open and need owner-side fixes before enabling their
+  affected editing behavior.
 - 2026-11-15 RTF table creation: the table toolbar creates rows of ordinary
   cells sized to the document's page width minus horizontal margins and gutter
   (D9.3.4). Omitted page settings use the defaults in the

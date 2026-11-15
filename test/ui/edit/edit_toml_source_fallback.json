@@ -1,0 +1,14 @@
+{
+  "name": "invalid TOML remains editable as source without changing other lines",
+  "command": "edit",
+  "html": "test/fixtures/edit/source-fallback.toml",
+  "working_copy": "temp/edit-ui/edit_toml_source_fallback.toml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "click", "target": {"text": "one"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "text": " # more"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toml_source_fallback.toml", "equals": "# Keep comments and invalid source available for repair.\nname = \"bad\\q\"\nitems = [\"one\"] # more\n"}
+  ]
+}

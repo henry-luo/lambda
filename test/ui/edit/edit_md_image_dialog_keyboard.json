@@ -1,0 +1,21 @@
+{
+  "name": "image dialog focuses its address and Enter inserts from the keyboard",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_image_dialog_keyboard.md",
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "click", "target": {"selector": ".edit-compact-insert > summary"}},
+    {"type": "click", "target": {"selector": ".edit-btn-image"}},
+    {"type": "assert_focus", "target": {"selector": "#edit-dialog-src"}},
+    {"type": "type", "text": "images/example.png"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#edit-dialog-alt"}},
+    {"type": "type", "text": "Example image"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "assert_focus", "target": {"selector": "#edit-surface"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_image_dialog_keyboard.md", "contains": "![Example image](images/example.png)"}
+  ]
+}

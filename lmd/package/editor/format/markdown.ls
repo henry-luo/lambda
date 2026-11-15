@@ -272,6 +272,13 @@ fn shown_only(item) => name(item) == 'html-block' or name(item) == 'footnote' or
 fn contains_parsed_tag(item, tag) any^ => type(item) == element and
   (name(item) == tag or any([for (child in content(item)^) contains_parsed_tag(child, tag)^]))
 
+fn parsed_footnotes(parsed) any^ {
+  let footer = if (parsed == null) null else parsed?<footnotes>
+  // the parser omits the footer without definitions; absence is not an invalid element.
+  if (footer == null) [] else [for (note in content(footer)^
+    where ((type(note) == element and name(note) == 'footnote') ^ { false })) note]
+}
+
 // Definitions retain their original spelling until their own content changes.
 fn footnote_block(item, source) any^ {
   let children = content(item)^
@@ -283,8 +290,7 @@ fn footnote_block(item, source) any^ {
   let labels = unique([for (block in blocks) for (ref in footnote_labels(block)^) ref])
   let definitions = join([for (ref in labels where ((ref != label) ^ { false })) "\n\n[^" ++ ref ++ "]: note"], "")
   let parsed = if (written == null) null else (parse(written ++ definitions, 'markdown') ^ { null })
-  let notes = if (parsed == null) [] else [for (note in (content(parsed?<footnotes>) ^ { [] })
-    where ((type(note) == element and name(note) == 'footnote' and note.label == label) ^ { false })) note]
+  let notes = [for (note in parsed_footnotes(parsed)^ where ((note.label == label) ^ { false })) note]
   if (len(notes) != 1 or norm_blocks(blocks) != norm_blocks(blocks_of(notes[0])))
     kept_block(source, markdown_view(item))
   else node_attrs('md_footnote', attr_list([['label', label], ['edit source', source], ['edit original', blocks]]), blocks)
@@ -327,10 +333,10 @@ pub fn import_text(source) map^ {
     raise error("the Markdown source could not be parsed", ^)
   }
   // Definitions are in a generated footer, but their spans identify authored order.
-  let has_notes = count(parsed?<footnotes>) > 0
+  let all_notes = parsed_footnotes(parsed)^
+  let has_notes = len(all_notes) > 0
   let body = [for (c in ((content(doc_body(parsed))) ^ { [] }) where ((type(c) == element and name(c) != 'footnotes') ^ { false })) c]
-  let notes = [for (c in ((content(parsed?<footnotes>)) ^ { [] })
-    where ((type(c) == element and name(c) == 'footnote' and c.sourcepos != null) ^ { false })) c]
+  let notes = [for (c in all_notes where ((c.sourcepos != null) ^ { false })) c]
   // A definition inside a container is already retained with that container.
   let separate = [for (note in notes, let n = source_range(note)
     where (not (any([for (item in body, let p = source_range(item))

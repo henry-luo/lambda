@@ -1,0 +1,4 @@
+# Keep comments and invalid source available for repair.
+name: "bad\q"
+items:
+  - one
