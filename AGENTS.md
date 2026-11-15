@@ -90,23 +90,6 @@ CSS layout and rendering engine for HTML/CSS document presentation.
 
 ### Working across project boundaries
 
-Path ownership: references to `lib/` and `lambda/input/` in these instructions refer to sources in `../lambda-input/`; `radiant/` refers to sources in
-`../radiant/radiant/`. These are header include prefixes and logical source
-names, not source directories in the Lambda checkout (D9.1.1v4, D9.1.3v2).
-
-When working on Lambda, do not directly modify source files owned by
-`lambda-input` or Radiant, including their implementation, headers, tests,
-and build scripts. If you find an issue in either project, record it in the
-owning project's ledger: [Lib and Input Issue Ledger](../lambda-input/vibe/Lib_Input_Issue_Ledger.md)
-or [Radiant Issue Ledger](../radiant/vibe/Radiant_Issue_Ledger.md). Include the
-observed behavior, reproduction, relevant evidence and whether the issue blocks
-the Lambda task; mark an unconfirmed cause as such.
-
-If the issue blocks the Lambda work, stop the affected work after recording
-the issue and tell the user what is blocked. Do not work around the issue or
-modify the sibling project's source to continue. Otherwise, continue Lambda
-work that does not depend on the issue. Ledger edits are allowed for reporting.
-
 **Issue ownership**: Record Lambda language, compiler and runtime issues in
 [Lambda Issue Ledger](vibe/Lambda_Issue_Ledger.md). Record package-specific
 issues in the relevant package implementation plan.

@@ -1436,7 +1436,6 @@ clean pass (`lambda-baseline.log`, `opt-baseline-rerun.log`, `mir-rerun.log`,
 `js-rerun.log`).
 
 
-
 ## 8. Memory management & GC (LR08)
 
 
