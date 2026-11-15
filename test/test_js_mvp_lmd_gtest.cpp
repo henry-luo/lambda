@@ -1,3 +1,4 @@
+#include "js_execution_modes.hpp"
 #include "lambda/js/js_runtime_state.hpp"
 #include "lambda/js/js_runtime.h"
 #include "lambda/js/js_host_hooks.h"
@@ -975,7 +976,7 @@ TEST_F(JsFormalMir, PublicHeapReplacementCreatesFreshRealm) {
 }
 
 TEST_F(JsFormalMir, ClockOriginPrecedesUserCodeAndFirstNowIsNonnegative) {
-    for (const char* backend : {"ast", "auto", "mir"}) {
+    for (const char* backend : js_test_execution_modes()) {
         SCOPED_TRACE(backend);
         setenv("JS_EXEC_BACKEND", backend, 1);
         reset_runtime();

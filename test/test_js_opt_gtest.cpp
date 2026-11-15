@@ -1,3 +1,4 @@
+#include "js_execution_modes.hpp"
 // Focused JavaScript optimization-contract tests.
 //
 // Formal MIR fixtures retain their JS behavior and trace-on/off differential,
@@ -3017,7 +3018,7 @@ TEST(JsOpt, LazyNativeMetadataPreservesReflectionMutationAndAccessors) {
         "if (Array.prototype.includes.name !== 'includes' || frozen.value !== 1 ||\n"
         "    frozen.configurable || ![1, 2].includes(2)) throw Error('native freeze');\n"
         "console.log('OPT_OK');\n";
-    for (const char* backend : {"ast", "mir", "auto"}) {
+    for (const char* backend : js_test_execution_modes()) {
         SCOPED_TRACE(backend);
         char name[96], output[4096];
         snprintf(name, sizeof(name), "lazy_native_metadata_%s", backend);

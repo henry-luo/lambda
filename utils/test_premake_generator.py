@@ -296,7 +296,12 @@ def expect_image_source_build(module) -> None:
         generator = linux_validation_generator(module, architecture)
         codec = next(t for t in generator.config['targets'] if t['name'] == 'lambda-image-codecs')
         sources = codec['source_files']
-        if any('/mux/' in f or '/demux/' in f or f.endswith('ratectrl_rtc.cc')
+        # the first-frame decoder uses demux.c; playback and mux providers remain unused (D10.1.7).
+        webp_demux = Path(os.path.relpath(module.sibling_roots()[0] /
+            'lib/image/libwebp/src/demux/demux.c', ROOT)).as_posix()
+        if webp_demux not in sources:
+            fail(f'{architecture} image target omits the WebP first-frame demux provider')
+        if any('/mux/' in f or ('/demux/' in f and f != webp_demux) or f.endswith('ratectrl_rtc.cc')
                for f in sources):
             fail('image source target includes unused WebP animation or standalone tool providers')
         # animated GIF output uses both the encoder and its compression hash table.

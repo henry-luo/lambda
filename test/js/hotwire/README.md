@@ -38,6 +38,14 @@ assertions check those records as well as DOM behavior. Readiness uses an
 atomic file under `temp/hotwire/`; subprocesses have bounded startup,
 execution and shutdown. These tests require loopback socket access.
 
+`make test-lambda-baseline` selects only AUTO for this contract. Its AST and
+MIR coverage lives in `make test-js-parity`, together with AUTO (D8.4.2/D8.4.4).
+Run just the nine runtime/DOM parity contracts with
+`make test-js-parity SUITE=targeted`, or just this HTTP contract with
+`make test-js-parity SUITE=http`. `MODE=ast`, `MODE=mir` and `MODE=auto`
+select one leg. Standalone native tests keep all three modes unless
+`LAMBDA_JS_TEST_MODE` selects one.
+
 The native test server's internal standalone mode is:
 
 ```sh

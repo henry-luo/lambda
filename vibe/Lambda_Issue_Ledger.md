@@ -1346,6 +1346,76 @@ golden reinterpretation or formal-spec change is claimed for LR07-69.
 
 <a id="lr07-70"></a>LR07-70 is [resolved and archived](<Lambda_Issue_Ledger (fixed).md#lr07-70>).
 
+<a id="lr07-71"></a>**LR07-71 · Eager MVP-Lmd code generation makes Hotwire cold execution costly under concurrent load · OPEN (2026-11-15)**
+
+The recurring `Tiers/HotwireHttpTest.ClientAndServer/1` failure is the MIR
+client's 30-second subprocess deadline. AST and AUTO pass. A pinned release
+host (`43a9b014723201b7c7f46cd28a2c805bedacd2ed478d2d4a106f42163b889bac`)
+running the unchanged 142,866-byte Hotwire bundle with the fixture server
+preserves the exact HTTP golden. Initial serial MIR runs take
+6.475/5.769/5.761 seconds with 5.63/5.71/5.74 seconds of CPU; AST takes
+0.326 seconds and AUTO 0.669 seconds. Each MIR process peaks near 1 GB RSS.
+
+Existing `js-mvp-phases` logging attributes one 6.014-second run to 0.008
+seconds parsing, 0.124 seconds planning, 0.998 seconds emission and 4.294
+seconds finalization/link/code generation. `lower_pass` in
+`lambda/js/mvp-lmd/mvp_lmd_mir.cpp` eagerly generates all 1,528 functions,
+then retrieves every native address with `MIR_gen`. Its largest function is
+46,138 instructions and the existing shared policy already selects O1.
+The ordinary `JS_TRANSPILE_TIMING` MIR record is zero because the formal
+MVP-Lmd entry bypasses the legacy record publication; use the phase log for
+this diagnosis.
+
+Four concurrent copies of that same release workload take 16.520–16.659
+seconds each; eight take 16.214–16.700 seconds, and a serial run afterward
+takes 6.104 seconds. Every run returns the exact golden. Thus contention
+increases cold compilation latency, but these experiments do not reproduce
+the original 30-second deadline or establish the exact cause of that run.
+Evidence and executable provenance are in `temp/hotwire-perf/`, including
+`mir-phases.log`, `experiments.json`, `concurrency8.json` and per-run output.
+
+An interleaved same-binary default/O0/O0/default comparison takes
+8.705/5.965/5.475/10.930 seconds, with exact golden equality in all four
+samples (`opt-paired.json`). O0 reduces compilation cost but still compiles
+every function and peaks near 1 GB. This experiment does not qualify a
+production optimization-policy change or its steady-execution tradeoff.
+
+The general optimization target is generating native bodies on first use
+while retaining their MIR/module ownership, as opposed to compiling dormant
+library methods eagerly. Keep explicit MIR selection and the common JS
+semantic contract (D8.4.2/D8.4.4); retained closures and cached code must keep
+the module alive (D6.3). MIR's lazy interface exists, but the existing Lambda
+opt-in is experimental because of previously observed module lifetime gaps;
+that flag is not evidence that enabling lazy generation for JS is qualified.
+The performance investigation changed no timeout, golden, runtime tier policy
+or vendor source. The subsequent test-workflow change moves the nine logical
+AST/MIR/AUTO contracts into `test-js-parity` (`SUITE=targeted`). The normal
+Lambda baseline selects AUTO for its eight affected contracts; the ninth is
+a Radiant view contract. This separates parity coverage from the concurrent
+baseline but does not repair the eager code-generation cost.
+
+The first `make test-js-parity SUITE=targeted` stopped in the pre-existing
+`build-test` prerequisite at `test-premake-generator`: its image-source
+self-test rejected all WebP demux providers, although Input's resolved
+LI-030 first-frame decoder now calls `WebPDemux` (D10.1.7/D9.1.1v4).
+`utils/test_premake_generator.py` now requires that demux source while
+retaining the unused animation, mux and tool exclusions. The generator
+self-tests pass (`temp/js-parity-work/generator-after.log`). Independently
+built focused parity passes 27/27 runs, and selected AUTO passes 9/9
+(`three-mode-report.json` and `auto-report.json` in the same evidence folder).
+The next full Make attempt reaches the separate Radiant native-test linker
+blocker [RI-091](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-091): state-store
+and custom-layout test stubs collide with real archive providers. Full Make
+qualification remains blocked there. The Lambda aggregate completed
+7,492/7,529 with 151/151 server tests and only `ClientAndServer/auto` selected.
+Its 35 optimization-trace failures pass in a 122/122 isolated rerun with the
+retained profiling executable; the shared host had become a release binary
+during the aggregate. The separate signal-137 MIR child and DOM fixture also
+pass isolated reruns. These focused reruns do not turn that aggregate into a
+clean pass (`lambda-baseline.log`, `opt-baseline-rerun.log`, `mir-rerun.log`,
+`js-rerun.log`).
+
+
 
 ## 8. Memory management & GC (LR08)
 

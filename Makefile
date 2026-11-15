@@ -620,7 +620,7 @@ help:
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-js262-prelim - Run the bounded Test262 runner preflight"
 	@echo "  test-js-opt   - Run JS optimization contract tests with the debug host"
-	@echo "  test-js-parity - Run test_js_gtest + test262 baseline under pinned MIR and full AST; report tier divergence"
+	@echo "  test-js-parity - Run JS/Test262 AST/MIR parity plus nine AST/MIR/AUTO runtime/DOM contracts"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
@@ -1624,7 +1624,7 @@ test-lambda-baseline: build-lambda-baseline test-gtest-result-counts
 	@$(PYTHON) test/sqlite_commit_sync_test.py
 	@echo "Running LAMBDA baseline test suite..."
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
-	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --parallel
+	@LAMBDA_JS_TEST_MODE=auto LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --parallel
 
 # Preserve explicit T0/AUTO parity arms; ordinary script cases exercise MVP/JIT.
 .PHONY: test-lambda-mvp
@@ -1800,11 +1800,16 @@ test262-baseline: test-js-exception-catalog ensure-test262-gtest
 	@$(MAKE) build-release-compile
 	@./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt $(if $(VERBOSE),--verbose)
 
-# JS execution-tier parity: test_js_gtest (--baseline) and the test262 baseline,
-# each under pinned whole-module MIR (JS_EXEC_BACKEND=mir) and the full AST
-# interpreter, then a report of per-tier results and cross-tier divergence.
-# Narrow with SUITE=js|test262 and/or MODE=mir|ast; VERBOSE=1 streams child output.
-test-js-parity: build-test
+# JS execution-tier parity: file/Test262 baselines in AST and MIR, plus the
+# focused runtime/DOM contracts in AST, MIR and AUTO (D8.4.2/D8.4.4).
+# SUITE=targeted selects those nine contracts; MODE narrows the selected tiers.
+.PHONY: test-js-parity-runner
+test-js-parity-runner:
+	@node --test test/js_parity_runner.test.mjs
+
+test-js-parity: build-test test-js-parity-runner
+	@mkdir -p temp/js_parity
+	@$(MAKE) build-lambda-split SPLIT_PROFILE=debug SPLIT_OUTPUT=temp/js_parity/lambda-opt.exe
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
 	@node test/run_js_parity.mjs $(if $(SUITE),--suite=$(SUITE)) $(if $(MODE),--mode=$(MODE)) $(if $(VERBOSE),--verbose)

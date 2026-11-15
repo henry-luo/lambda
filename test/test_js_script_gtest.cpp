@@ -1,3 +1,4 @@
+#include "js_execution_modes.hpp"
 #include <gtest/gtest.h>
 
 #include "lib/file.h"
@@ -3051,7 +3052,7 @@ TEST(JsInterpreter, EvalContextUsesBoundFactsAcrossBackends) {
         "class B { constructor(){this.value=42} }"
         "class C extends B { constructor(){eval('super()')} }new C().value===42;"
     };
-    for (const char* backend : {"ast", "auto", "mir"}) {
+    for (const char* backend : js_test_execution_modes()) {
         JsExecutionBackendScope selected(backend);
         SCOPED_TRACE(backend);
         for (const char* source : sources) {
@@ -3073,7 +3074,7 @@ TEST(JsInterpreter, DirectEvalRetainsLiveCellsWithoutProjectionJournals) {
         "let rejected=false;try{eval('fixed++')}catch(e){rejected=e instanceof TypeError}"
         "if(!rejected||eval('fixed')!==7)throw 1;return read}"
         "let read=make(33);gc();read()===42&&value===100&&typeof added==='undefined';";
-    for (const char* backend : {"ast", "auto", "mir"}) {
+    for (const char* backend : js_test_execution_modes()) {
         JsExecutionBackendScope selected(backend);
         SCOPED_TRACE(backend);
         Runtime runtime = {};
@@ -3094,7 +3095,7 @@ TEST(JsInterpreter, EscapedNumericReceiversOwnTheirScalarHomes) {
         "for(let i=0;i<32;i++)ok=ok&&saved[i]()===i/7;"
         "function strict(){'use strict';return eval('()=>this')}"
         "let a=strict.call(1/3),b=strict.call(2/3);gc();ok&&a()===1/3&&b()===2/3;";
-    for (const char* backend : {"ast", "auto", "mir"}) {
+    for (const char* backend : js_test_execution_modes()) {
         JsExecutionBackendScope selected(backend);
         SCOPED_TRACE(backend);
         Runtime runtime = {};
@@ -3106,7 +3107,7 @@ TEST(JsInterpreter, EscapedNumericReceiversOwnTheirScalarHomes) {
 }
 
 TEST(JsInterpreter, CallerResultHomeRetiresCalleeNumberTemporaries) {
-    for (const char* backend : {"ast", "auto", "mir"}) {
+    for (const char* backend : js_test_execution_modes()) {
         JsExecutionBackendScope selected(backend);
         SCOPED_TRACE(backend);
         Runtime runtime = {};
@@ -8493,7 +8494,7 @@ TEST(JsRegExp, SplitSkipsUnobservableMissesAndKeepsProtocolEffects) {
         R"JS(JSON.stringify('a1b2'.split(/(\d)/))==='["a","1","b","2",""]')JS",
         R"JS(/(old)/.exec('old');let input='a\nb\nc',out=input.split(/\n/);out.join('|')==='a|b|c'&&RegExp.lastMatch==='\n'&&RegExp.leftContext==='a\nb'&&RegExp.rightContext==='c'&&RegExp.$1==='')JS",
     };
-    for (const char* backend : {"ast", "auto", "mir"}) {
+    for (const char* backend : js_test_execution_modes()) {
         JsExecutionBackendScope selected(backend);
         for (bool collect : {false, true}) {
             for (const char* source : cases) {

@@ -1,3 +1,4 @@
+#include "js_execution_modes.hpp"
 #include <gtest/gtest.h>
 #include "../lambda/serve/server.hpp"
 #include "../lambda/serve/serve_utils.hpp"
@@ -195,7 +196,8 @@ TEST_P(HotwireHttpTest, ClientAndServer) {
     shell_result_free(&result);
 }
 
-INSTANTIATE_TEST_SUITE_P(Tiers, HotwireHttpTest, testing::Values("ast", "mir", "auto"));
+INSTANTIATE_TEST_SUITE_P(Tiers, HotwireHttpTest, testing::ValuesIn(js_test_execution_modes()),
+    [](const testing::TestParamInfo<const char*>& info) { return info.param; });
 
 TEST(HotwireServerTest, EphemeralListenersAreDistinct) {
     ServerConfig config = server_config_default();

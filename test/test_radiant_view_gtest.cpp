@@ -1,3 +1,4 @@
+#include "js_execution_modes.hpp"
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -1465,7 +1466,7 @@ TEST(RadiantViewTest, ModuleFetchFailuresDispatchElementErrorsBeforeLaterModules
     RadiantViewServerScope server_scope = {server.pid};
     char url[128];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/page", server.port);
-    for (const char* backend : {"ast", "mir", "auto"}) {
+    for (const char* backend : js_test_execution_modes()) {
         SCOPED_TRACE(backend);
         const ShellEnvEntry env[] = {
             {"JS_EXEC_BACKEND", backend}, {"MEMTRACK_MODE", "STATS"},

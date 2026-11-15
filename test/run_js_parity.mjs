@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 // JS execution-tier parity runner.
 //
-// Runs test_js_gtest and the Test262 baseline under each pinned execution tier
-// (JS_EXEC_BACKEND=mir via --full-mir / --mir-only, and the full AST
-// interpreter via --full-ast / --ast-only), then reports per-leg results and
-// the cross-tier divergence: cases that fail under one tier but not the other.
+// File and Test262 baselines cover AST/MIR; focused runtime and DOM contracts
+// additionally cover AUTO, with one execution mode selected per child process.
 //
 // When invoked by test/test_run.js, it accepts the runner's --report argument
 // and emits the summary/results shape consumed by the shared Node adapter lane.
@@ -19,23 +17,49 @@ const PROJECT_ROOT = path.resolve(path.dirname(__filename), '..');
 const OUT_DIR = path.join(PROJECT_ROOT, 'temp', 'js_parity');
 const HEARTBEAT_MS = 30 * 1000;
 
-const MODES = ['mir', 'ast'];
-const SUITES = {
+const MODES = ['mir', 'ast', 'auto'];
+const CORE_MODES = ['mir', 'ast'];
+function gtestArgs(jsonPath, extra = []) {
+  return ['--gtest_brief=1', '--gtest_color=no', `--gtest_output=json:${jsonPath}`, ...extra];
+}
+function focusedSuite(exe, cases, env = {}) {
+  return { label: path.basename(exe, '.exe'), exe, cases, env, modes: MODES,
+    args: (_mode, jsonPath) => gtestArgs(jsonPath, [`--gtest_filter=${cases.join(':')}`]) };
+}
+export const TARGETED_SUITES = {
+  runtime: focusedSuite('test/test_js_mvp_lmd_gtest.exe', [
+    'JsFormalMir.ClockOriginPrecedesUserCodeAndFirstNowIsNonnegative',
+  ]),
+  ownership: focusedSuite('test/test_js_script_gtest.exe', [
+    'JsInterpreter.EvalContextUsesBoundFactsAcrossBackends',
+    'JsInterpreter.DirectEvalRetainsLiveCellsWithoutProjectionJournals',
+    'JsInterpreter.EscapedNumericReceiversOwnTheirScalarHomes',
+    'JsInterpreter.CallerResultHomeRetiresCalleeNumberTemporaries',
+    'JsRegExp.SplitSkipsUnobservableMissesAndKeepsProtocolEffects',
+  ]),
+  optimization: focusedSuite('test/test_js_opt_gtest.exe', [
+    'JsOpt.LazyNativeMetadataPreservesReflectionMutationAndAccessors',
+  ], { LAMBDA_JS_OPT_EXE: process.env.LAMBDA_JS_OPT_EXE || path.join(OUT_DIR, 'lambda-opt.exe') }),
+  http: focusedSuite('test/test_serve_gtest.exe', ['Tiers/HotwireHttpTest.ClientAndServer/*']),
+  view: focusedSuite('test/test_radiant_view_gtest.exe', [
+    'RadiantViewTest.ModuleFetchFailuresDispatchElementErrorsBeforeLaterModules',
+  ]),
+};
+export const SUITES = {
   js: {
     label: 'test_js_gtest',
     exe: 'test/test_js_gtest.exe',
-    args: (mode, jsonPath) => [
-      mode === 'mir' ? '--full-mir' : '--full-ast',
-      '--baseline',
-      '--gtest_brief=1',
-      '--gtest_color=no',
-      `--gtest_output=json:${jsonPath}`,
-    ],
+    modes: CORE_MODES,
+    args: (mode, jsonPath) => gtestArgs(jsonPath, [
+      mode === 'mir' ? '--full-mir' : '--full-ast', '--baseline']),
   },
   test262: {
     label: 'test262',
     exe: 'test/test_js_test262_gtest.exe',
     requires: 'ref/test262',
+    modes: CORE_MODES,
+    // an explicit child path disables the runner's global lambda.exe cleanup.
+    env: { LAMBDA_TEST262_EXE: process.env.LAMBDA_TEST262_EXE || path.join(PROJECT_ROOT, 'lambda.exe') },
     args: (mode) => [
       mode === 'mir' ? '--mir-only' : '--ast-only',
       '--baseline-only',
@@ -44,9 +68,10 @@ const SUITES = {
       '--async-list=test/js262/test262_baseline.txt',
     ],
   },
+  ...TARGETED_SUITES,
 };
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const opts = {
     suites: Object.keys(SUITES),
     modes: MODES.slice(),
@@ -59,7 +84,8 @@ function parseArgs(argv) {
     if (arg === '--report' || arg.startsWith('--report=')) opts.report = path.resolve(value('--report'));
     else if (arg === '--suite' || arg.startsWith('--suite=')) {
       const suite = value('--suite');
-      opts.suites = suite === 'all' ? Object.keys(SUITES) : [suite];
+      opts.suites = suite === 'all' ? Object.keys(SUITES) :
+        suite === 'targeted' ? Object.keys(TARGETED_SUITES) : [suite];
     } else if (arg === '--mode' || arg.startsWith('--mode=')) {
       const mode = value('--mode');
       opts.modes = mode === 'all' ? MODES.slice() : [mode];
@@ -67,12 +93,13 @@ function parseArgs(argv) {
     else if (arg === '--help' || arg === '-h') {
       console.log(`Usage: node test/run_js_parity.mjs [options]
 
-Runs test_js_gtest (--baseline) and the Test262 baseline under pinned MIR and
-full AST interpreter modes, then reports results and cross-tier divergence.
+Runs file/Test262 baselines in AST/MIR and nine runtime/DOM contracts in
+AST/MIR/AUTO, then reports results and cross-tier divergence.
 
 Options:
-  --suite=js|test262|all   Suites to run (default: all)
-  --mode=mir|ast|all       Execution tiers to run (default: all)
+  --suite=js|test262|targeted|runtime|ownership|optimization|http|view|all
+                           Suites to run (default: all)
+  --mode=mir|ast|auto|all   Execution tiers (default: all; file/Test262 omit AUTO)
   --report PATH            JSON report path (default: temp/js_parity/report.json)
   --verbose                Stream child output (always saved to temp/js_parity/*.log)
 `);
@@ -87,10 +114,11 @@ Options:
   return opts;
 }
 
-function runChild(exe, args, logPath, verbose) {
+function runChild(exe, args, logPath, verbose, env) {
   return new Promise((resolve) => {
     const log = fs.createWriteStream(logPath);
-    const child = spawn(`./${exe}`, args, { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(`./${exe}`, args, { cwd: PROJECT_ROOT,
+      env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     // quiet legs still need periodic output, or test_run.js's idle timer kills them
     const heartbeat = verbose ? null : setInterval(() => {
@@ -116,7 +144,7 @@ function runChild(exe, args, logPath, verbose) {
 }
 
 // GTest JSON → per-case failures; every listed non-skipped case counts.
-function parseGtestJson(jsonPath) {
+export function parseGtestJson(jsonPath, expectedCount) {
   const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
   let total = 0;
   const failures = [];
@@ -124,9 +152,13 @@ function parseGtestJson(jsonPath) {
     for (const tc of suite.testsuite || []) {
       if (tc.result === 'SKIPPED' || tc.status === 'NOTRUN') continue;
       total++;
-      if (Array.isArray(tc.failures) && tc.failures.length > 0) failures.push(`${suite.name}.${tc.name}`);
+      // mode suffixes identify the same logical Hotwire contract across legs.
+      if (Array.isArray(tc.failures) && tc.failures.length > 0)
+        failures.push(`${suite.name}.${tc.name}`.replace(/\/(ast|mir|auto)$/, ''));
     }
   }
+  if (expectedCount !== undefined && total !== expectedCount)
+    throw new Error(`expected ${expectedCount} selected tests, got ${total}`);
   return { total, failures };
 }
 
@@ -168,17 +200,19 @@ async function runLeg(suiteKey, mode, verbose) {
   try { fs.unlinkSync(jsonPath); } catch (_) {}
   console.log(`▶ ${suite.label} [${mode}] ${suite.exe} ${suite.args(mode, jsonPath).join(' ')}`);
   const start = Date.now();
-  const run = await runChild(suite.exe, suite.args(mode, jsonPath), logPath, verbose);
+  const run = await runChild(suite.exe, suite.args(mode, jsonPath), logPath, verbose,
+    { ...suite.env, LAMBDA_JS_TEST_MODE: mode });
   leg.seconds = (Date.now() - start) / 1000;
   leg.exitCode = run.code;
   leg.log = path.relative(PROJECT_ROOT, logPath);
 
   let parsed = null;
   try {
-    parsed = suiteKey === 'js' ? parseGtestJson(jsonPath) : parseTest262Output(run.stdout);
-  } catch (_) {}
+    parsed = suiteKey === 'test262' ? parseTest262Output(run.stdout) :
+      parseGtestJson(jsonPath, suite.cases?.length);
+  } catch (error) { leg.error = `${error.message}; see ${leg.log}`; }
   if (!parsed) {
-    leg.error = `no result summary (exit ${run.code}${run.error ? `, ${run.error}` : ''}); see ${leg.log}`;
+    leg.error ||= `no result summary (exit ${run.code}${run.error ? `, ${run.error}` : ''}); see ${leg.log}`;
     return leg;
   }
   leg.total = parsed.total;
@@ -192,20 +226,21 @@ async function runLeg(suiteKey, mode, verbose) {
   return leg;
 }
 
-function divergence(legs) {
+export function divergence(legs) {
   const out = [];
   for (const suiteKey of Object.keys(SUITES)) {
     const label = SUITES[suiteKey].label;
-    const mir = legs.find((l) => l.suite === label && l.mode === 'mir' && !l.error && !l.skipped);
-    const ast = legs.find((l) => l.suite === label && l.mode === 'ast' && !l.error && !l.skipped);
-    if (!mir || !ast) continue;
-    const mirSet = new Set(mir.failures);
-    const astSet = new Set(ast.failures);
+    const selected = legs.filter((l) => l.suite === label && !l.error && !l.skipped);
+    if (selected.length < 2) continue;
+    const failures = new Set(selected.flatMap((leg) => leg.failures));
     out.push({
       suite: label,
-      astOnly: ast.failures.filter((f) => !mirSet.has(f)),
-      mirOnly: mir.failures.filter((f) => !astSet.has(f)),
-      both: ast.failures.filter((f) => mirSet.has(f)),
+      modes: selected.map((leg) => leg.mode),
+      only: Object.fromEntries(selected.map((leg) => [leg.mode,
+        leg.failures.filter((name) => selected.every((other) =>
+          other === leg || !other.failures.includes(name)))])),
+      shared: [...failures].filter((name) => selected.every((leg) => leg.failures.includes(name))),
+      divergent: [...failures].filter((name) => !selected.every((leg) => leg.failures.includes(name))),
     });
   }
   return out;
@@ -214,16 +249,19 @@ function divergence(legs) {
 function printReport(legs, diffs) {
   const pad = (s, n) => String(s).padEnd(n);
   const lpad = (s, n) => String(s).padStart(n);
-  console.log('\n╔════════════════════════════════════════════════════════════════╗');
-  console.log('║                  JS Execution-Tier Parity                      ║');
-  console.log('╠════════════════════════════════════════════════════════════════╣');
-  console.log(`║  ${pad('Suite', 15)}${pad('Tier', 6)}${lpad('Passed', 8)}${lpad('Total', 8)}${lpad('Failed', 8)}${lpad('Time', 9)}        ║`);
+  const suiteWidth = Math.max(15, ...legs.map((leg) => leg.suite.length + 1));
+  const width = suiteWidth + 49;
+  const title = 'JS Execution-Tier Parity';
+  console.log(`\n╔${'═'.repeat(width)}╗`);
+  console.log(`║${pad(' '.repeat(Math.floor((width - title.length) / 2)) + title, width)}║`);
+  console.log(`╠${'═'.repeat(width)}╣`);
+  console.log(`║  ${pad('Suite', suiteWidth)}${pad('Tier', 6)}${lpad('Passed', 8)}${lpad('Total', 8)}${lpad('Failed', 8)}${lpad('Time', 9)}        ║`);
   for (const leg of legs) {
     const time = leg.seconds !== undefined ? `${leg.seconds.toFixed(0)}s` : '-';
     const status = leg.skipped ? 'SKIP' : leg.error ? 'ERR' : leg.failed ? 'FAIL' : 'ok';
-    console.log(`║  ${pad(leg.suite, 15)}${pad(leg.mode, 6)}${lpad(leg.passed, 8)}${lpad(leg.total, 8)}${lpad(leg.failed, 8)}${lpad(time, 9)}  ${pad(status, 6)}║`);
+    console.log(`║  ${pad(leg.suite, suiteWidth)}${pad(leg.mode, 6)}${lpad(leg.passed, 8)}${lpad(leg.total, 8)}${lpad(leg.failed, 8)}${lpad(time, 9)}  ${pad(status, 6)}║`);
   }
-  console.log('╚════════════════════════════════════════════════════════════════╝');
+  console.log(`╚${'═'.repeat(width)}╝`);
 
   const listCap = 40;
   const printList = (title, names) => {
@@ -237,10 +275,10 @@ function printReport(legs, diffs) {
     if (leg.error) console.log(`\n  ⚠️  ${leg.suite} [${leg.mode}] error: ${leg.error}`);
   }
   for (const d of diffs) {
-    console.log(`\n  ${d.suite}: ${d.astOnly.length} AST-only, ${d.mirOnly.length} MIR-only, ${d.both.length} both-tier failures`);
-    printList(`${d.suite} fails only under AST`, d.astOnly);
-    printList(`${d.suite} fails only under MIR`, d.mirOnly);
-    printList(`${d.suite} fails under both tiers`, d.both);
+    console.log(`\n  ${d.suite}: ${d.divergent.length} divergent, ${d.shared.length} shared failures (${d.modes.join('/')})`);
+    for (const mode of d.modes) printList(`${d.suite} fails only under ${mode.toUpperCase()}`, d.only[mode]);
+    printList(`${d.suite} divergent cases`, d.divergent);
+    printList(`${d.suite} fails under every selected tier`, d.shared);
   }
   // legs without a counterpart tier still list their failures
   for (const leg of legs) {
@@ -256,8 +294,11 @@ async function main() {
   // legs run sequentially: both runners fan out their own worker processes,
   // and test262 holds a single-run lock
   for (const suiteKey of opts.suites) {
-    for (const mode of opts.modes) legs.push(await runLeg(suiteKey, mode, opts.verbose));
+    for (const mode of opts.modes) {
+      if (SUITES[suiteKey].modes.includes(mode)) legs.push(await runLeg(suiteKey, mode, opts.verbose));
+    }
   }
+  if (legs.length === 0) throw new Error('no suites support the selected mode');
   const diffs = divergence(legs);
   printReport(legs, diffs);
 
@@ -281,4 +322,6 @@ async function main() {
   process.exit(failed === 0 ? 0 : 1);
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch((error) => { console.error(error.message); process.exitCode = 1; });
+}
