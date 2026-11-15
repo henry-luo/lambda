@@ -37,6 +37,90 @@ distinguished before assigning ownership under D9.1.1v4 / D9.1.3v2. This does
 not block INI property editing. Evidence: `temp/edit-viewer/ini-control-
 {lambda,recheck-test_js_gtest,media-recheck,media-absolute}.log`.
 
+## Context-owned libuv provider integration — 2026-11-14
+
+**Status:** OPEN. D7.5.1 requires one scheduler per context; this blocks the
+standalone shared-module concurrency qualification described in input
+[LI-027](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-027).
+
+Input now provides `LambdaUvLoop` instances with independent libuv loops,
+checkpoint handles and drain contexts. The native input tests cover four
+concurrent owners and lifecycle refusal for active handles and requests. The
+existing Lambda scheduler, JS event loop and other consumers still use the
+legacy process-global `lambda_uv_*` API, so the reported teardown hang has
+not been repaired or requalified by the provider change. Migrate all
+context-owned users together, preserve per-context microtask/macrotask order,
+then rerun the original complete concurrency reproduction and runtime gates.
+The provider API and evidence are recorded in LI-027; no Lambda source or
+build file was changed by the input owner.
+
+## Input format integration handoffs — 2026-11-14
+
+**Status:** OPEN. D9.3.4 covers document processing; input ownership follows
+D9.1.1v4 / D9.1.3v2. These findings block the affected rich-editing paths and
+remain separate from the input-owned repairs.
+
+The properties editor source-span scanner in
+`lmd/package/editor/format/key_value.ls` chooses the first `=` or `:` without
+checking escapes. The reproduction `../Lambda-opus/temp/edit-viewer/property-escape-probe.ls`
+imports `a\=b=c` and reports editor name `a\` and value `b=c`, although the
+properties key is `a=b` and its value is `c`. The input-owned parser is repaired
+in [LI-051](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-051); the
+editor still needs an escape-aware source-span model and spelling preservation.
+The original observed output is in
+`../Lambda-opus/temp/edit-viewer/property-escape-probe.log`; this is a source
+inspection and historical reproduction, not a new Lambda integration run.
+
+The AsciiDoc heading and title handoff is resolved for the recorded editing
+case in [LI-044](<../../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-044>).
+Input now parses the document title separately, maps body sections to their
+corresponding headings, and carries metadata through Markdown front matter.
+An isolated Lambda host linked existing Lambda/Radiant debug objects with the
+updated input archives; the original parse/format/parse probe and six actual
+editor import, edit, export and reopen checks pass. Evidence and binary hashes
+are under `../lambda-input/temp/li044-editor-probe-current.log` and
+`../lambda-input/temp/li026-comparison-binaries.json`. This is a focused
+integration check, not a fresh full Lambda baseline. The earlier failed probe
+is preserved at `../Lambda-opus/temp/edit-viewer/markup-roundtrip-probe.log`.
+
+## Calmind script execution after resource retrieval — 2026-11-14
+
+**Status:** OPEN — exact cause and ownership are unconfirmed. The observation
+is in the Lambda script runner and event loop; it does not block the input
+resource-header fix in [LI-026](<../../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-026>).
+D9.1.1v4 covers ownership and D10.1.7 governs snapshot timing.
+
+With the input fix, two isolated native renders fetched the first-party CSS
+and images, but each reported a post-DOM `TypeError at byte 0` in
+`https://calmind.com/wp-content/themes/calmind/assets/js/main.js`. One also
+reported a pending-native-request snapshot drain watchdog; the other did not.
+A separate request to `www.clarity.ms` reported a certificate error. No common
+cause is established. Reproduce with `python3 temp/li026-render-pairs.py` from
+`../lambda-input`, using its pinned hosts; evidence is in
+`../lambda-input/temp/li026-render-pairs/{01-after,03-after}/render.log` and
+`../lambda-input/temp/li026-comparison-binaries.json`. The live page and
+network may change. Full dynamic-script qualification remains open.
+
+## DOM replacement of nested-array children — 2026-11-14
+
+**Status:** OPEN — host behavior inferred from source; end-to-end JS reproduction
+not yet run. **Blocker:** not established. S2.6.4 retains array boundaries and
+D5.5.1/D5.5.2 govern the DOM backing and lifetime seam.
+
+Input's native DOM can expose a child stored inside a content array, for which
+`dom_backed_node_index` returns -1 because its result denotes a direct parent
+slot. The input-only control `../lambda-input/temp/ledger-dom-nested-index.log` confirms that
+index result; input-owned nested-array insertions and removals are tracked in
+[LI-052](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-052).
+
+In `lambda/dom/dom.cpp`, the `dom_replace_child` branches that update Mark
+backing require a nonnegative direct index. For a nested child they fall
+through to a DOM-only insert and unlink, so source inspection predicts that
+`replaceChild` leaves the old nested backing and omits the replacement. Run a
+host-side nested-array replacement and serialization/rebuild control before
+claiming a reproduced runtime defect. The input owner did not modify the
+Lambda runtime or its tests.
+
 ## Sync implementation runtime findings — 2026-11-11
 
 The local-repository follow-up fixed and archived [LR07-68](#lr07-68),
