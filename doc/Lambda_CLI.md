@@ -544,7 +544,7 @@ suffix (D9.3.4, D10.2.1).
 | `.rst`, `.rest`, `.org`, `.wiki`, `.mediawiki`, `.adoc`, `.asciidoc`, `.asc`, `.textile`, `.txtl` | Rich text when the document survives its format's round trip; otherwise source |
 | `.rtf` | Rich text for basic paragraphs, alignment, positive indents and line spacing, emphasis, superscript, subscript, RGB text colors, and ordinary font and size changes; default-language, information and generator headers are retained, while unsupported controls and metadata open in source |
 | `.properties`, `.props`, `.ini` | Property values, names and simple insertions/deletions; unsupported constructs open in source |
-| `.csv`, `.tsv` | Rows and decoded field values in a property tree; quoting is handled on save |
+| `.csv`, `.tsv` | Editable grid with numbered rows and columns; quoting is handled on save |
 | `.xml` | Add, rename and remove child elements; rename the root; add, rename, remove and edit attributes; edit decoded text and CDATA, including multiline values; unsupported constructs open in source |
 | `.svg`, `.mmd`, `.d2`, `.dot`, `.gv`, `.ls`, `.json`, `.yaml`, `.toml`, `.txt`, `.eml`, `.ics`, `.ical`, `.vcf`, `.mark`, `.1m`, `.3p` and other supported text suffixes | Source editor |
 
@@ -605,6 +605,7 @@ Discard, or Cancel.
 | Cmd/Ctrl+Shift+L/E/R/J | Align selected RTF paragraphs left, center, right or justified |
 | Shift+F10 | Open the table menu from a cell; use Tab and Enter to choose an action |
 | Enter in a single-line property field or add dialog | Commit the field or add the item to the undoable document |
+| Tab / Shift+Tab in a CSV or TSV cell | Commit the cell and move to the next or previous cell |
 | Escape | Cancel the current dialog, dismiss the table menu, or discard a property field draft |
 
 **Examples:**

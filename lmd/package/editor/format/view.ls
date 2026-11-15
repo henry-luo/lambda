@@ -152,6 +152,7 @@ fn md_html(item, slots) any^ {
     // written as read: markdown_view sanitizes the whole block
     else if (tag == "raw-html" or tag == "html-block") { plain_text(item) }
     else if (tag == "footnote-ref") { "<sup class=\"edit-view-note\">[" ++ escape_text(string(item.ref)) ++ "]</sup>" }
+    else if (tag == "footnote") { "<sup class=\"edit-view-note\">[" ++ escape_text(string(item.label)) ++ "]</sup>" ++ md_children(item, slots) }
     else if (tag == "a") { "<a" ++ attr_html("title", string(item.href or "")) ++ ">" ++ md_children(item, slots) ++ "</a>" }
     else if (tag == "img") {
       "<img" ++ attr_html("src", string(item.src or "")) ++ attr_html("alt", string(item.alt or "")) ++

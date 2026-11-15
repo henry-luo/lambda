@@ -1,0 +1,15 @@
+{
+  "name": "edit a CSV whose first quoted cell contains tabs",
+  "command": "edit",
+  "html": "test/fixtures/edit/quoted-tabs.csv",
+  "working_copy": "temp/edit-ui/edit_csv_quoted_tabs.csv",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-grid"}, "count": 1},
+    {"type": "assert_value", "target": {"selector": "textarea[aria-label='Row 1, column 1']"}, "equals": "first\t\tfield"},
+    {"type": "click", "target": {"selector": "textarea[aria-label='Row 1, column 2']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "changed"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_quoted_tabs.csv", "contains": "\"first\t\tfield\",changed\none,two\n"}
+  ]
+}

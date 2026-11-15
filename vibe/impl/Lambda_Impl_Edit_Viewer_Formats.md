@@ -2,12 +2,84 @@
 
 ## Current checkpoint
 
+- 2026-11-14 continuation, Lambda `09a40dfe2` plus this work. Java properties
+  now scan unescaped key delimiters and use the repaired Input parser (LI-051)
+  to decode names. Renaming and insertion escape Java key syntax; value edits
+  retain the original key spelling. Continued lines still open as source. CSV
+  delimiter detection now skips quoted fields, doubled quotes and embedded
+  line breaks before counting delimiters, matching the Input LI-042 repair.
+  Escaped-key and quoted-CSV model regressions both failed before the changes;
+  edit/save UI replays cover both, and the invalid-keyboard replay now checks
+  an invalid value since spaces are valid in property names. Source-backed
+  editing is governed by D9.3.4. The editor/RTF model selection passed 96/96,
+  and the full edit UI suite passed 146/146 fixtures (149/149 including its
+  scheduler checks). The standard Lambda baseline passed 7,483/7,512: the 29
+  failures are exactly the same `proc_sync_*` cases as the previous baseline,
+  whose cause remains unconfirmed in the sync plan. Evidence is in
+  `temp/edit-viewer/property-csv-{model-final,ui-final,lambda-baseline}.log`.
+  Test262 separately passed 40,261/40,261 selected tests with zero regressions
+  and 2,652 skipped (`temp/edit-viewer/property-csv-test262-baseline.log`).
 - 2026-11-13; `Lambda-opus`, branch `master`, base `8b5ebe56e` plus
   uncommitted changes for this task. The goal is structured data editing,
   keyboard-oriented rich markup editing, source editing for other text,
   and rejection of non-text media.
 - S12.1.1v2 and S12.1.3 govern file effects and editor state. Preserve the
   existing adapter round-trip checks and atomic save/conflict handling.
+- Markdown footnotes now use the Input parser's repaired LI-041 source ranges
+  to show individual definitions in authored order while preserving their
+  exact source (D9.3.4). Duplicate and multiline definitions and intervening
+  link definitions have model coverage. The two previously failing view-only
+  UI replays pass. The math-scroll fixture's former 5.5 px width came from
+  the earlier math layout, before null-delimiter spacing; the current SVG is
+  0.54925 em, or 8.8 px at 16 px. Independent Chromium measured 8.78 px and
+  a 4.25 px paragraph-relative top versus Radiant's 3.2 px; the fixture now
+  retains its 2 px tolerance around the current geometry. TeX's 10 pt oracle
+  confirms 2.4 pt of null-delimiter spacing. The three requested replays pass
+  (`temp/edit-viewer/markdown-three-fixed.log`, `math-browser.log`,
+  `math-reference-radiant.log`, and `tex-oracle/run.log`). The Input fixes
+  for LI-046 and LI-048 also make two Org cases rich-editable; their replays
+  now verify editing and saving rather than the superseded source fallback.
+  The edit UI suite passed 144/144 and the selected edit/editor model suite
+  passed 108/108. The Lambda baseline passed 7,481/7,510: all 29 failures
+  were `proc_sync_*`; the isolated repository failure reports E407 at JSON
+  column 8192, with cause unconfirmed and recorded in the sync plan. Evidence:
+  `temp/edit-viewer/markdown-final-{ui,model,lambda-baseline}.log`.
+  The Radiant baseline passed 8,167 tests, with three failures, 297 partial
+  and 20 skipped: `PaintOwnership.HtmlBoxAdmissionFallsBackForChangedAndUnsupportedPaint`,
+  `MotionCascadeTest.StylesheetResourcePrefetchPreservesAuthoredUrls`, and one
+  `wpt-css-sizing` layout case. Causes and ownership are not yet established;
+  the complete results are in `temp/edit-viewer/markdown-final-radiant-baseline.log`.
+- 2026-11-14 baseline follow-up, Lambda `09a40dfe2` and the explicitly
+  authorized Radiant repair at `4ec1e8c` plus RI-089 changes. The two Lambda
+  fixture fixes are committed in `09a40dfe2`: the paint fixture uses an ordinary
+  parent for local rounded clipping (RI-087), retaining fallback counters and
+  byte-identical fresh-render comparisons. Prefetch publishes matching consumers
+  with stylesheet provenance (RI-079), loads five consumed resources, excludes
+  an inactive rule and preserves all authored URLs. Both complete executables
+  pass 250/250 and 186/186.
+  [Radiant RI-089](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-089) is now
+  fixed: intrinsic min/max measurement retains the definite preferred width
+  before applying measured limits. `width:auto` and the existing `fit-content`
+  negotiation remain intact. The new native regression fails before and passes
+  after; all 110 owner dynamic tests pass, and independent Chromium confirms
+  nine min/max combinations plus both fit-content controls. Integer lint checks
+  89 casts with none unmarked. The sizing baseline passes 776/776 and the full
+  `make test-radiant-baseline` exits 0 with 8,170 passed, zero failed, 297 partial
+  and 20 skipped. Native ownership remains D9.1.1v4 / D9.1.3v2; no external
+  fixture, reference or scored baseline changed. Evidence and source hashes are
+  under `temp/radiant-three-failures/`, including `ri089-radiant-baseline.log`,
+  `sizing-final-results.json`, `browser-control-final.json` and
+  `ri089-verification-identity.json`.
+- CSV and TSV now present a grid with numbered rows and columns under D9.3.4;
+  the first row remains editable data. Tab and Shift+Tab commit and move between
+  cells, while row and field actions use the existing source-backed model and
+  undo history. Focused CSV/TSV edit, navigation, add and delete replays pass,
+  as does a separate uneven-row and multiline replay
+  (`temp/edit-viewer/csv-grid-focused.log` and `csv-grid-uneven.log`). The
+  editor model selection passed 88/88; the edit UI suite passed 140/143 with
+  the three previously recorded Markdown failures (`csv-grid-model.log` and
+  `csv-grid-suite.log`, under `temp/edit-viewer/`). The suite run predates the
+  added uneven-row replay.
 - XHTML now has a conservative rich adapter (D10.1.4). It preserves the
   declaration and document envelope and requires the strict XHTML tree to
   survive conversion through the HTML editor before admission. Compact HTML
@@ -28,7 +100,8 @@
   The attempted compensations were removed under the cross-project rule;
   JSON, YAML and TOML retain their pre-existing source surfaces; iCalendar
   and vCard now also open as source. Java
-  properties, INI, CSV/TSV and strict XML values share the property surface.
+  properties, INI and strict XML values use the property tree; CSV/TSV use
+  the shared surface's grid presentation.
   CSV/TSV fields display decoded values, quote edits automatically, and support
   multiline editing; unchanged fields retain their original spelling and line endings.
   Input-owned LI-034 blocks property editing when the CSV delimiter detector
@@ -406,10 +479,10 @@
   replays, with the same three Markdown failures. See
   `temp/edit-viewer/markup-coverage-*`; no engine code changed in that pass.
   Calendar/contact source and RTF rich/fallback UI replays all pass.
-- Next: after Input fixes LI-029–LI-032, LI-034 and LI-045, implement property editing for the
-  affected data formats without compensating for parser defects. After LI-033,
-  use the provided source ranges for individually retained footnote blocks.
-  Independently expand the rich RTF subset only with preservation evidence,
-  and implement remaining markup adapters after LI-035 and LI-038–LI-044.
-  Do not silently rewrite source or
-  change sibling providers.
+- Next: the Input ledger IDs in older entries above predate conflict
+  reconciliation. The current fixed ledger records LI-037–LI-051 as repaired;
+  independently qualify JSON, YAML, TOML, calendar and contact property
+  editing and the remaining rich markup paths against those providers, with
+  source preservation and malformed-input tests. Independently expand the
+  rich RTF subset only with preservation evidence. Do not silently rewrite
+  source or change sibling providers.

@@ -155,3 +155,15 @@ serverless periodic polling come after this local foundation. Editor adapters
 then bind Text/Mark transactions and external-edit warnings to live UI sessions.
 Retention thinning, fenced physical reclamation and measured chunk/pack tuning
 remain later milestones; this phase keeps all committed history.
+
+## 2026-11-14 baseline observation
+
+The Lambda baseline run after rebuilding current Input and Radiant passed
+7,481/7,510 tests; 29 `proc_sync_*` tests failed. The isolated
+`./test/test_lambda_gtest.exe --gtest_filter='*proc_sync_local_repository'`
+also failed with E407, reporting unexpected JSON content at column 8192 while
+reading a repository record. Root cause and ownership are unconfirmed; the
+observation does not establish that all 29 failures have the same cause.
+Evidence: `temp/edit-viewer/markdown-final-lambda-baseline.log` and
+`temp/edit-viewer/markdown-sync-control.log`. D9.3.4 covers document parsing
+and S7.5.1v6 covers acknowledgement of parse errors.

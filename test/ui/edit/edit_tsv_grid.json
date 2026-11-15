@@ -1,0 +1,16 @@
+{
+  "name": "TSV grid edits and saves values",
+  "command": "edit",
+  "html": "test/ui/edit/sample-grid.tsv",
+  "working_copy": "temp/edit-ui/edit_tsv_grid.tsv",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 2},
+    {"type": "click", "target": {"selector": "#grid-cell-1-0"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "changed"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#grid-cell-1-1"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_tsv_grid.tsv", "equals": "first\tsecond\nchanged\ttwo\n"}
+  ]
+}

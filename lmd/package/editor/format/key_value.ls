@@ -7,6 +7,10 @@ fn valid_key(key) any^ => not starts_with(key, "#") and not starts_with(key, "!"
 fn valid_value(value) any^ => not contains(value, "\n") and not contains(value, "\r") and not ends_with(value, "\\")
 fn valid_key_for(key, kind) any^ => valid_key(key) and
   (kind != 'ini' or (key != "" and not starts_with(key, ";")))
+fn property_key_text(key) any^ => join([for (ch in split(key, "")^)
+  if (ch == "\t") "\\t" else if (ch == "\f") "\\f"
+  else if (ch in ["\\", "=", ":", " ", "#", "!"]) "\\" ++ ch else ch], "")
+fn property_key_valid(key) any^ => not contains(key, "\n") and not contains(key, "\r")
 fn separator(line, kind) {
   let a = index_of(line, "=")
   let b = index_of(line, ":")
@@ -32,12 +36,38 @@ fn ini_end(line, first) any^ {
     return len(trim_end(raw(line, 0, i)))
   }
 }
+// Locate unescaped delimiters while leaving decoding to the properties parser.
+fn property_skip_space(line, first, limit) any^ {
+  var i = first
+  while ((i < limit and raw(line, i, i + 1) in [" ", "\t", "\f"])^) { i = i + 1 }
+  return i
+}
+fn property_entry(line, offset, line_end) any^ {
+  let limit = len(trim_end(line))
+  let first = property_skip_space(line, 0, limit)^
+  var end_pos = first
+  while ((end_pos < limit and not (raw(line, end_pos, end_pos + 1) in ["=", ":", " ", "\t", "\f"]))^) {
+    if (raw(line, end_pos, end_pos + 1) == "\\") { end_pos = end_pos + 2 }
+    else { end_pos = end_pos + 1 }
+  }
+  let parsed = (if (end_pos >= limit) raise error("a property has no separator")
+                else parse(raw(line, first, end_pos) ++ "=x", 'properties'))^
+  let keys = [for (key, value at parsed) string(key)]
+  let key = (if (len(keys) != 1) raise error("a property name needs source mode") else keys[0])^
+  var value_first = property_skip_space(line, end_pos, limit)^
+  if (raw(line, value_first, value_first + 1) in ["=", ":"]) { value_first = value_first + 1 }
+  value_first = property_skip_space(line, value_first, limit)^;
+  {name: key, group: "", first: offset + first, key_end: offset + end_pos, line_first: offset, line_last: line_end,
+   node: {kind: 'scalar', first: offset + value_first, last: offset + max(value_first, limit),
+          text: raw(line, value_first, max(value_first, limit))}}
+}
 fn line_entry(line, offset, line_end, kind, section) any^ {
   let ini = kind == 'ini'
   let trimmed = trim(line)
   if (trimmed == "" or starts_with(trimmed, "#") or (not ini and starts_with(trimmed, "!")) or
       (ini and starts_with(trimmed, ";"))) null
   else if (not ini and ends_with(trim_end(line), "\\")) { raise error("continued property values require source mode") }
+  else if (not ini) { property_entry(line, offset, line_end)^ }
   else {
     let sep = separator(line, kind)
     if (sep == null) { raise error("a property has no separator") }
@@ -104,17 +134,18 @@ pub fn replace_scalar(doc, first, end_pos, value) map^ {
 pub fn rename_key(doc, first, end_pos, key) map^ {
   let entries = [for (entry in doc.tree.children where entry.first == first and entry.key_end == end_pos) entry]
   if (len(entries) == 0) raise error("property no longer exists")
-  else if (not valid_key_for(key, doc.kind)) raise error("invalid property name")
-  else checked_entry(replace_span(doc, first, end_pos, key)^, entries[0].line_first, key, entries[0].node.text)^
+  else if (not (if (doc.kind == 'properties') property_key_valid(key) else valid_key_for(key, doc.kind))) raise error("invalid property name")
+  else checked_entry(replace_span(doc, first, end_pos, if (doc.kind == 'properties') property_key_text(key)^ else key)^, entries[0].line_first, key, entries[0].node.text)^
 }
 pub fn insert_child(doc, first, key, value) map^ {
   if (first != 0) { raise error("properties can only be added at the root") }
-  else if (not valid_key_for(key, doc.kind) or not valid_value(value)) { raise error("invalid property name or value") }
+  else if (not (if (doc.kind == 'properties') property_key_valid(key) else valid_key_for(key, doc.kind)) or not valid_value(value)) { raise error("invalid property name or value") }
   else {
     let newline = source_text.trailing_line_ending(doc.text)^
     let prefix = if (doc.text == "" or ends_with(doc.text, "\n")) "" else newline
     let line_first = len(doc.text) + len(prefix)
-    checked_entry(import_as(doc.text ++ prefix ++ key ++ "=" ++ value ++ newline, doc.kind)^, line_first, key, value)^
+    let written_key = if (doc.kind == 'properties') property_key_text(key)^ else key
+    checked_entry(import_as(doc.text ++ prefix ++ written_key ++ "=" ++ value ++ newline, doc.kind)^, line_first, key, value)^
   }
 }
 pub fn delete_child(doc, first) map^ {

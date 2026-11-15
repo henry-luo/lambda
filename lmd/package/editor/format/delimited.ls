@@ -64,10 +64,26 @@ fn import_as(source, separator, kind) map^ {
   {doc: {text: source, separator: separator, kind: kind,
          tree: {kind: 'array', first: -1, last: len(chars), children: rows}}, envelope: null}
 }
+// Count only delimiters in the first logical record, as the input viewer does.
+fn detected_separator(chars) any^ {
+  var i = 0, commas = 0, tabs = 0, field_start = true
+  while (i < len(chars) and at(chars, i) != "\r" and at(chars, i) != "\n") {
+    let ch = at(chars, i)
+    if (ch == "\"" and field_start) {
+      i = field_end(chars, i, ",")^
+      field_start = false
+    }
+    else {
+      if (ch == ",") { commas = commas + 1 }
+      if (ch == "\t") { tabs = tabs + 1 }
+      field_start = ch == "," or ch == "\t"
+      i = i + 1
+    }
+  }
+  if (tabs > commas) "\t" else ","
+}
 fn import_csv(source) map^ {
-  // Match the viewer's delimiter detection on the first line.
-  let first = split(source, "\n")[0]
-  let separator = if (len(split(first, "\t")) > len(split(first, ","))) "\t" else ","
+  let separator = detected_separator(split(source, "")^)^
   import_as(source, separator, 'csv')^
 }
 fn import_tsv(source) map^ => import_as(source, "\t", 'tsv')^

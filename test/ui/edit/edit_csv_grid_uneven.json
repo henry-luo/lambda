@@ -1,0 +1,17 @@
+{
+  "name": "CSV grid displays uneven rows and edits multiline fields",
+  "command": "edit",
+  "html": "test/ui/edit/sample-single-field.csv",
+  "working_copy": "temp/edit-ui/edit_csv_grid_uneven.csv",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-grid tbody tr"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": ".property-grid tbody td"}, "count": 6},
+    {"type": "click", "target": {"selector": "#grid-cell-1-0"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "long"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type", "text": "value"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_csv_grid_uneven.csv", "contains": "\"long\nvalue\""}
+  ]
+}

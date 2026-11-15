@@ -6686,11 +6686,12 @@ static StrBuf* test_html_box_source(const char* decoration = "", const char* chi
         const char* parent_style = "", const char* spacer_style = "height:8px") {
     StrBuf* html = strbuf_new();
     if (!html) return nullptr;
-    strbuf_append_str(html, "<html><body style='margin:0;"); strbuf_append_str(html, parent_style);
+    // body overflow propagates to the viewport; use an ordinary parent for local clip coverage.
+    strbuf_append_str(html, "<html><body style='margin:0'><div style='"); strbuf_append_str(html, parent_style);
     strbuf_append_str(html, "'><div id='spacer' style='"); strbuf_append_str(html, spacer_style);
     strbuf_append_str(html, "'></div><div id='box' style='"); strbuf_append_str(html, TEST_HTML_BOX_STYLE);
     strbuf_append_str(html, decoration); strbuf_append_str(html, "'>");
-    strbuf_append_str(html, children); strbuf_append_str(html, "</div></body></html>");
+    strbuf_append_str(html, children); strbuf_append_str(html, "</div></div></body></html>");
     return html;
 }
 
