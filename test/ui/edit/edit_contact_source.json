@@ -1,6 +1,7 @@
 {
-  "name": "contact files open in the source editor",
+  "name": "contact files honor the explicit source option",
   "command": "edit",
+  "source": true,
   "html": "test/fixtures/edit/sample.vcf",
   "working_copy": "temp/edit-ui/edit_contact_source.vcf",
   "viewport": {"width": 1000, "height": 700},

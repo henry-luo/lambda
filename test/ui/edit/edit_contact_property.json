@@ -1,0 +1,20 @@
+{
+  "name": "edit contact properties with save, undo and redo",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.vcf",
+  "working_copy": "temp/edit-ui/edit_contact_property.vcf",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "click", "target": {"selector": "input[aria-label='FN']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "Changed Person"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_contact_property.vcf", "contains": "FN:Changed Person"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_contact_property.vcf", "contains": "FN:Example Person"},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_contact_property.vcf", "contains": "FN:Changed Person"}
+  ]
+}

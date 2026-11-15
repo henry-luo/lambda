@@ -109,7 +109,7 @@ fn ini_line_entry(line, offset, line_end, section) any^ {
         let value_first = offset + property_skip_space(line, sep + 1, len(line), [" ", "\t"])^
         let value_end = offset + max(value_first - offset, ini_end(line, value_first - offset)^)
         let value = value_text(raw(line, value_first - offset, max(value_first, value_end) - offset), 'ini')^;
-        let literal = any([for (ch in split(value, "")^) (ord(ch) < 32 and not (ch in ["\t", "\n"])) or ord(ch) == 127])
+        let literal = source_text.has_controls(value, ["\t", "\n"])^
         let display = if (literal) replace(format(value, 'json')^, chr(127), "\\u007f")^ else value;
         {name: key, group: section, first: key_first, key_end: key_first + len(key), line_first: offset, line_last: line_end,
          node: {kind: 'scalar', first: value_first, last: max(value_first, value_end), text: value,
@@ -119,13 +119,6 @@ fn ini_line_entry(line, offset, line_end, section) any^ {
     }
   }
 }
-fn natural_line(source, first) {
-  var end_pos = first
-  while (end_pos < len(source) and not (raw(source, end_pos, end_pos + 1) in ["\r", "\n"])) { end_pos = end_pos + 1 }
-  let next = if (raw(source, end_pos, end_pos + 2) == "\r\n") end_pos + 2
-             else if (end_pos < len(source)) end_pos + 1 else end_pos;
-  {first: first, end: end_pos, next: next}
-}
 fn trailing_backslashes(source, first, end_pos) {
   var i = end_pos
   while (i > first and raw(source, i - 1, i) == "\\") { i = i - 1 }
@@ -133,13 +126,13 @@ fn trailing_backslashes(source, first, end_pos) {
 }
 // Comment lines never continue; only an odd run immediately before a line ending does.
 fn property_record(source, first) any^ {
-  var line = natural_line(source, first)^
+  var line = source_text.natural_line(source, first)^
   let content_first = property_skip_space(source, first, line.end)^
   let comment = raw(source, content_first, content_first + 1) in ["#", "!"]
   var terminal = false
   while ((not comment and line.next > line.end and trailing_backslashes(source, first, line.end)^ % 2 == 1)^) {
     if (line.next == len(source)) { terminal = true; break }
-    line = natural_line(source, line.next)^
+    line = source_text.natural_line(source, line.next)^
   }
   {end: if (terminal) line.next else line.end, next: line.next, terminal: terminal, final_line_first: line.first - first}
 }
@@ -159,7 +152,7 @@ fn import_properties(source) map^ {
 }
 // The Input reader permits a quoted INI value to cross natural lines.
 fn ini_record(source, first) any^ {
-  let line = natural_line(source, first)^
+  let line = source_text.natural_line(source, first)^
   let initial = raw(source, first, line.end)
   let stripped = trim_start(initial)
   let ignored = starts_with(stripped, ";") or starts_with(stripped, "#") or starts_with(stripped, "[")
@@ -168,7 +161,7 @@ fn ini_record(source, first) any^ {
   let quote = raw(source, value_first, value_first + 1)
   if (quote == "\"" or quote == "'") {
     let after_quote = ini_end(source, value_first)^
-    let final_line = natural_line(source, after_quote)^;
+    let final_line = source_text.natural_line(source, after_quote)^;
     return {end:final_line.end, next:final_line.next}
   }
   return {end:line.end, next:line.next}
@@ -198,6 +191,7 @@ fn replace_span(doc, first, end_pos, text) map^ =>
   import_as(raw(doc.text, 0, first) ++ text ++ raw(doc.text, end_pos, len(doc.text)), doc.kind)^
 // Map an offset in the displayed value back to its source, retaining continuation spelling.
 fn value_source_offset(text, offset, right, kind) any^ {
+  if (kind == 'ini') { return source_text.normalized_offset(text, offset)^ }
   var raw_pos = 0, logical = 0
   while (raw_pos < len(text)) {
     let c = raw(text, raw_pos, raw_pos + 1)
@@ -220,14 +214,12 @@ fn value_source_offset(text, offset, right, kind) any^ {
 }
 fn value_edit(original, value, kind, newline) any^ {
   let old = value_text(original, kind)^
-  var prefix = 0, suffix = 0
-  while (prefix < len(old) and prefix < len(value) and raw(old, prefix, prefix + 1) == raw(value, prefix, prefix + 1)) { prefix = prefix + 1 }
-  while (suffix < len(old) - prefix and suffix < len(value) - prefix and
-         raw(old, len(old) - suffix - 1, len(old) - suffix) == raw(value, len(value) - suffix - 1, len(value) - suffix)) { suffix = suffix + 1 }
+  let changed = source_text.changed_span(old, value)^
+  let prefix = changed.prefix, suffix = changed.suffix
   let first = value_source_offset(original, prefix, true, kind)^
   let end_pos = max(first, value_source_offset(original, len(old) - suffix, false, kind)^)
-  let changed = raw(value, prefix, len(value) - suffix)
-  raw(original, 0, first) ++ (if (kind == 'ini') replace(changed, "\n", newline)^ else changed) ++ raw(original, end_pos, len(original))
+  let inserted = raw(value, prefix, len(value) - suffix)
+  raw(original, 0, first) ++ (if (kind == 'ini') replace(inserted, "\n", newline)^ else inserted) ++ raw(original, end_pos, len(original))
 }
 fn valid_property_value(value) any^ => not contains(value, "\u0000") and not contains(value, "\n") and not contains(value, "\r") and
   trailing_backslashes(value, 0, len(value)) % 2 == 0

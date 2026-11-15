@@ -1,0 +1,29 @@
+{
+  "name": "YAML property save preserves CRLF and rejects invalid drafts",
+  "command": "edit",
+  "html": "test/fixtures/edit/structured.yaml",
+  "working_copy": "temp/edit-ui/edit_yaml_property.yaml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 5},
+    {"type": "click", "target": {"selector": "textarea[aria-label='note']"}},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_property.yaml", "equals": "# Keep comments\r\nname: old # name\r\nserver:\r\n  port: 80 # port\r\n  values: [1, {x: 2}]\r\nnote: |\r\n  one\r\n  two\r\n"},
+    {"type": "click", "target": {"selector": "textarea[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "[1,,2]"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_property.yaml", "equals": "# Keep comments\r\nname: old # name\r\nserver:\r\n  port: 80 # port\r\n  values: [1, {x: 2}]\r\nnote: |\r\n  one\r\n  two\r\n"},
+    {"type": "assert_text", "target": {"selector": ".property-status"}, "contains": "Invalid value:"},
+    {"type": "click", "target": {"selector": "textarea[aria-label='port']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "90"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_property.yaml", "equals": "# Keep comments\r\nname: old # name\r\nserver:\r\n  port: 90 # port\r\n  values: [1, {x: 2}]\r\nnote: |\r\n  one\r\n  two\r\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_property.yaml", "equals": "# Keep comments\r\nname: old # name\r\nserver:\r\n  port: 80 # port\r\n  values: [1, {x: 2}]\r\nnote: |\r\n  one\r\n  two\r\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_property.yaml", "equals": "# Keep comments\r\nname: old # name\r\nserver:\r\n  port: 90 # port\r\n  values: [1, {x: 2}]\r\nnote: |\r\n  one\r\n  two\r\n"}
+  ]
+}

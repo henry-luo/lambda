@@ -6,10 +6,14 @@
   "events": [
     {"type": "assert_count", "target": {"selector": "#edit-surface strong .edit-view-note"}, "count": 1},
     {"type": "click", "target": {"text": "after"}},
-    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_press", "key": "Right"},
+    {"type": "key_press", "key": "Right"},
+    {"type": "key_press", "key": "Right"},
+    {"type": "key_press", "key": "Right"},
     {"type": "type", "text": " edited"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
-    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_marked.md", "contains": "**Bold [^a] after edited**"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_marked.md", "contains": "**Bold edited [^a] after**."},
     {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_marked.md", "contains": "[^a]: Note."}
   ]
 }

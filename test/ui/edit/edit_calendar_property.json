@@ -1,0 +1,20 @@
+{
+  "name": "edit calendar properties with save, undo and redo",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.ics",
+  "working_copy": "temp/edit-ui/edit_calendar_property.ics",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "click", "target": {"selector": "input[aria-label='SUMMARY']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "Changed meeting"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_calendar_property.ics", "contains": "SUMMARY:Changed meeting"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_calendar_property.ics", "contains": "SUMMARY:Meeting"},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_calendar_property.ics", "contains": "SUMMARY:Changed meeting"}
+  ]
+}

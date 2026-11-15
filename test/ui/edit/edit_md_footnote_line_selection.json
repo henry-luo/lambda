@@ -1,0 +1,19 @@
+{
+  "name": "extend Home and End selections around retained footnote references",
+  "command": "edit",
+  "html": "test/ui/edit/sample-footnote-edges.md",
+  "working_copy": "temp/edit-ui/edit_md_footnote_line_selection.md",
+  "events": [
+    {"type": "click", "target": {"text": "begins."}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_combo", "key": "Home", "mods_str": "shift"},
+    {"type": "type", "text": "Replaced beginning."},
+    {"type": "click", "target": {"text": "Ends"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "key_combo", "key": "End", "mods_str": "shift"},
+    {"type": "type", "text": "Replaced ending."},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_line_selection.md", "contains": "Replaced beginning.\n\nReplaced ending."},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_footnote_line_selection.md", "contains": "[^a]: Note."}
+  ]
+}
