@@ -63,29 +63,45 @@ fn separate(st, data, origin) any^ {
     else if (origin == null) {*:st, issue: "tex-reconstruct-missing-origin"}
     else append(st, " ", origin, true)
 }
+
+// share emitted source spelling with source-aware digestion.
+pub fn source_fragment(t, sources, prev_valid = false, prev_file = null, prev_seq = null, prev_end = 0) any^ {
+    let span = t.kind == "source-span";
+    let direct = span or (t.direct == true and t.file != null and t.file >= 0);
+    let adjacent = direct and prev_valid and prev_file == t.file and t.seq == prev_seq + 1;
+    let gap = if (adjacent and t.start > prev_end) source_text(sources, t.file, prev_end, t.start)^ else "";
+    let raw = source_text(sources, t.file, t.start, t.end)^;
+    let parline = t.kind == "control" and t.value == "par" and raw != null and raw != "\\par";
+    let use_source = span or (faithful(t, raw)^ and (direct or t.kind == "control" or t.cat != 10));
+    {span:span,direct:direct,adjacent:adjacent,gap:gap,
+        body:if (parline) if (adjacent) raw else "\n\n" else if (use_source) raw else canonical(t)^}
+}
+
+// raw echoes occupy their full captured source span, not just the command token.
+pub fn effective_source_token(item) => if (item.echo_span == null) item else {
+    kind:"source-span", file:item.echo_span.file, start:item.echo_span.start, end:item.echo_span.end,
+    seq:item.echo_span.first_seq, last_seq:item.echo_span.last_seq,
+    read_offset:item.read_offset, emit_origin:item.emit_origin}
+
 fn rebuild(st, tokens, sources, main, index) any^ {
     if (st.issue != null or index >= len(tokens)) st
     else {
         let item = tokens[index];
         let echo = item.echo_span;
         // echoed spans from other sources retain their main-file emission origin.
-        let t = if (echo == null) item else {kind: "source-span", file: echo.file,
-            start: echo.start, end: echo.end, seq: echo.first_seq, last_seq: echo.last_seq,
-            read_offset: item.read_offset, emit_origin: item.emit_origin};
-        let span = t.kind == "source-span";
-        let direct = span or (t.direct == true and t.file != null and t.file >= 0);
-        let adjacent = direct and st.prev_valid and st.prev_file == t.file and t.seq == st.prev_seq + 1;
-        let gap = if (adjacent and t.start > st.prev_end) source_text(sources, t.file, st.prev_end, t.start)^ else "";
+        let t = effective_source_token(item);
+        let piece = source_fragment(t,sources,st.prev_valid,st.prev_file,st.prev_seq,st.prev_end)^;
+        let span = piece.span;
+        let direct = piece.direct;
+        let adjacent = piece.adjacent;
+        let gap = piece.gap;
         let emission = if (t.emit_origin != null) t.emit_origin else t.read_offset;
         let gap_origin = if (t.file == main) st.prev_end else emission;
         let gap_state = if (gap == null or (gap != "" and gap_origin == null))
             {*:st, issue: "tex-reconstruct-missing-origin"}
             else append(st, gap, gap_origin, t.file != main)^;
-        let raw = source_text(sources, t.file, t.start, t.end)^;
-        let parline = t.kind == "control" and t.value == "par" and raw != null and raw != "\\par";
-        let use_source = span or (faithful(t, raw)^ and (direct or t.kind == "control" or t.cat != 10));
         let body = if (item.reconstruct_text != null) item.reconstruct_text
-            else if (parline) if (adjacent) raw else "\n\n" else if (use_source) raw else canonical(t)^;
+            else piece.body;
         let main_direct = direct and t.file == main;
         let origin = if (main_direct) t.start else emission;
         let before = if (body == null or origin == null) {*:gap_state, issue: "tex-reconstruct-missing-origin"}
@@ -95,15 +111,21 @@ fn rebuild(st, tokens, sources, main, index) any^ {
             else {*:appended, definition_spans: [*appended.definition_spans,
                 {start: utf8_length(before.text)^, end: utf8_length(appended.text)^,
                     value: body, catcodes: item.catcodes}]};
-        if (after.issue != null) {*:after, failed_index: index}
-        else rebuild({*:after, prev_valid: direct, prev_file: t.file, prev_seq: if (span) t.last_seq else t.seq,
-            prev_end: t.end}, tokens, sources, main, index + if (item.reconstruct_text != null) item.reconstruct_count
-                else if (echo == null) 1 else item.echo_count)
+        let count = if (item.reconstruct_text != null) item.reconstruct_count
+            else if (echo == null) 1 else item.echo_count;
+        // spans exclude gaps; coalesced output has no interior token positions.
+        let marked = if (after.issue != null or st.track_tokens != true) after else
+            {*:after, token_spans: [*after.token_spans, {index: index, count: count,
+                start: utf8_length(before.text)^, end: utf8_length(appended.text)^}]};
+        if (marked.issue != null) {*:marked, failed_index: index}
+        else rebuild({*:marked, prev_valid: direct, prev_file: t.file, prev_seq: if (span) t.last_seq else t.seq,
+            prev_end: t.end}, tokens, sources, main, index + count)
     }
 }
 
-pub fn reconstruct(result) any^ {
-    let built = rebuild({text: "", segments: [], definition_spans: [], issue: null, prev_valid: false},
+pub fn reconstruct(result, track_tokens = false) any^ {
+    let built = rebuild({text: "", segments: [], definition_spans: [], issue: null, prev_valid: false,
+            *:if (track_tokens) {track_tokens: true, token_spans: []} else {}},
         result.output, result.sources, result.main_file, 0)^;
     let tail = result.trailing_source;
     if (built.issue != null or tail == null or tail.text == "") built

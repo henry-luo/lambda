@@ -152,16 +152,17 @@ pub fn next(stream) any^ {
 
 fn is_character(token, cat) => token != null and token.kind == "char" and token.cat == cat
 fn paragraph(token) => token != null and token.kind == "control" and token.value == "par"
-fn finish(stream, tokens, code = null) => {stream: stream, tokens: tokens, error: code}
+fn finish(stream, tokens, code = null, cause = null) => {stream: stream, tokens: tokens, error: code,
+    *:if (cause == null) {} else {cause:cause}}
 pub fn same_token(a, b) => a != null and b != null and a.kind == b.kind and a.value == b.value and
     (a.kind != "char" or a.cat == b.cat)
 
 fn read_group(stream, depth, tokens, long_ok) any^ {
     let result = next(stream);
     let t = result.token;
-    if (t == null) finish(result.stream, tokens, "tex-runaway-argument")
+    if (t == null) finish(result.stream, tokens, "tex-runaway-argument", "eof")
     else if (paragraph(t) and not long_ok)
-        finish(push(result.stream, [t]), tokens, "tex-runaway-argument")
+        finish(push(result.stream, [t]), tokens, "tex-runaway-argument", "paragraph")
     else if (is_character(t, 2) and depth == 1) finish(result.stream, tokens)
     else read_group(result.stream,
         depth + if (is_character(t, 1)) 1 else if (is_character(t, 2)) -1 else 0,
@@ -172,11 +173,11 @@ fn read_group(stream, depth, tokens, long_ok) any^ {
 pub fn argument(stream, long_ok = false) any^ {
     let result = next(stream);
     let t = result.token;
-    if (t == null) finish(result.stream, [], "tex-runaway-argument")
+    if (t == null) finish(result.stream, [], "tex-runaway-argument", "missing")
     else if (is_character(t, 10)) argument(result.stream, long_ok)
     else if (paragraph(t) and not long_ok)
-        finish(push(result.stream, [t]), [], "tex-runaway-argument")
-    else if (is_character(t, 2)) finish(push(result.stream, [t]), [], "tex-extra-brace")
+        finish(push(result.stream, [t]), [], "tex-runaway-argument", "paragraph")
+    else if (is_character(t, 2)) finish(push(result.stream, [t]), [], "tex-extra-brace", "brace")
     else if (is_character(t, 1)) read_group(result.stream, 1, [], long_ok)
     else finish(result.stream, [t])
 }
@@ -210,11 +211,11 @@ pub fn strip_outer(tokens) any^ {
 fn delimited_scan(input, delimiter, depth, tokens, top, long_ok, brace_delim) any^ {
     let read = next(input);
     let t = read.token;
-    if (t == null) finish(read.stream, tokens, "tex-runaway-argument")
+    if (t == null) finish(read.stream, tokens, "tex-runaway-argument", "eof")
     else if (paragraph(t) and not long_ok)
-        finish(push(read.stream, [t]), tokens, "tex-runaway-argument")
+        finish(push(read.stream, [t]), tokens, "tex-runaway-argument", "paragraph")
     else if (is_character(t, 2) and depth == 0)
-        finish(push(read.stream, [t]), tokens, "tex-extra-brace")
+        finish(push(read.stream, [t]), tokens, "tex-extra-brace", "brace")
     else if (brace_delim and depth == 0 and is_character(t, 1) and
         len(tokens) >= len(delimiter) and matches_tail(tokens, top, delimiter))
         finish(read.stream, strip_outer(slice(tokens, 0, len(tokens) - len(delimiter))))

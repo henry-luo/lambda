@@ -55,15 +55,36 @@
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unsupported",
-    unsupported: "environment command source gap",
+    issue: null,
+    unsupported: null,
     native_parsed: true,
-    matches: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    issue: null,
+    unsupported: null,
+    native_parsed: true,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    issue: null,
+    unsupported: null,
+    native_parsed: true,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    issue: null,
+    unsupported: null,
+    native_parsed: true,
+    matches: true,
     actual: null,
     native: null
   }, {
     issue: "latex-digest-unsupported",
-    unsupported: "environment options",
+    unsupported: "environment command source gap",
     native_parsed: true,
     matches: null,
     actual: null,
@@ -76,10 +97,17 @@
     actual: null,
     native: null
   }, {
-    issue: "tex-unsupported-primitive",
-    unsupported: "constructor argument custom environment",
+    issue: null,
+    unsupported: null,
     native_parsed: true,
-    matches: null,
+    matches: true,
+    actual: null,
+    native: null
+  }, {
+    issue: null,
+    unsupported: null,
+    native_parsed: true,
+    matches: true,
     actual: null,
     native: null
   }, {

@@ -369,12 +369,12 @@
   complete: false,
   matches_native: true
 }
-"unknown environment option pending:"
+"unknown environment option:"
 {
-  issue: "latex-digest-unsupported",
-  unsupported: "environment options",
-  complete: null,
-  matches_native: null
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
 }
 "unknown whitespace before group:"
 {
@@ -558,26 +558,26 @@
   complete: false,
   matches_native: true
 }
-"expanded parenthesis mapping pending:"
+"expanded parenthesis mapping:"
 {
-  issue: "latex-digest-unsupported",
-  unsupported: "parenthesized command source mapping",
+  issue: null,
+  unsupported: null,
   incomplete: false,
-  matches_native: null
+  matches_native: true
 }
-"expanded coordinate mapping pending:"
+"expanded coordinate mapping:"
 {
-  issue: "latex-digest-unsupported",
-  unsupported: "parenthesized command source mapping",
+  issue: null,
+  unsupported: null,
   incomplete: false,
-  matches_native: null
+  matches_native: true
 }
-"expanded parenthesis with argument mapping pending:"
+"expanded parenthesis with argument mapping:"
 {
-  issue: "latex-digest-unsupported",
-  unsupported: "parenthesized command source mapping",
+  issue: null,
+  unsupported: null,
   incomplete: false,
-  matches_native: null
+  matches_native: true
 }
 "literal escapes:"
 {

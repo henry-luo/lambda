@@ -55,19 +55,27 @@ fn nonspace(input) any^ {
 fn parameter_token(index, start = -1, end = -1) =>
     {kind: "parameter", value: index, cat: null, start: start, end: end}
 
-fn body_params(tokens, count, index = 0, output = []) any^ {
-    if (index >= len(tokens)) {tokens: output, issue: null}
+// invalid parameters remain literal; primitive and LaTeX callers diagnose them differently.
+fn body_params(tokens, count, index = 0, output = [], mode = null, errors = []) any^ {
+    if (index >= len(tokens)) {tokens: output, issue: null, errors: errors}
     else {
         let t = tokens[index];
-        if (not charcat(t, 6)) body_params(tokens, count, index + 1, [*output, t])
-        else if (index + 1 >= len(tokens)) {tokens: output, issue: "tex-illegal-param"}
+        if (not charcat(t, 6)) body_params(tokens, count, index + 1, [*output, t], mode, errors)
+        else if (index + 1 >= len(tokens)) {
+            if (mode == null) {tokens: output, issue: "tex-illegal-param"}
+            else body_params(tokens, count, index + 1, [*output, t], mode,
+                if (mode == "tex") [*errors, {next:null}] else errors)
+        }
         else {
             let n = tokens[index + 1];
-            let digit = if (n.kind == "char" and n.cat == 12) index_of("123456789", n.value) else null;
-            if (charcat(n, 6)) body_params(tokens, count, index + 2, [*output, t])
-            else if (digit == null or digit >= count) {tokens: output, issue: "tex-illegal-param"}
+            let digit = if (n.kind == "char" and (mode == "latex" or n.cat == 12)) index_of("123456789", n.value) else null;
+            if (charcat(n, 6)) body_params(tokens, count, index + 2, [*output, t], mode, errors)
+            else if (digit == null or digit >= count) {
+                if (mode == null) {tokens: output, issue: "tex-illegal-param"}
+                else body_params(tokens, count, index + 1, [*output, t], mode, [*errors, {next:n}])
+            }
             else body_params(tokens, count, index + 2,
-                [*output, parameter_token(digit, t.start, n.end)])
+                [*output, parameter_token(digit, t.start, n.end)], mode, errors)
         }
     }
 }
@@ -84,26 +92,40 @@ fn assign_meaning(st, name, value, global) any^ =>
         groups: if (global) [for (scope in st.groups)
             {*:scope, definitions: set_definition(scope.definitions, name, value)}] else st.groups}
 
-fn signature(input, count, prefix = [], delimiters = []) any^ {
+fn signature(input, count, prefix = [], delimiters = [], diagnostics = []) any^ {
     let read = stream.next(input);
     let t = read.token;
-    if (t == null) {input: read.stream, issue: "tex-runaway-definition"}
-    else if (charcat(t, 1)) {input: stream.push(read.stream, [t]), issue: null,
+    if (t == null) {input: read.stream, issue: "tex-runaway-definition", diagnostics: diagnostics}
+    else if (charcat(t, 1)) {input: stream.push(read.stream, [t]), issue: null, diagnostics: diagnostics,
         count: count, prefix: prefix, delimiters: delimiters, brace_delim: false}
     else if (charcat(t, 6)) {
         let digit = stream.next(read.stream);
         let expected = if (count < 9) slice("123456789", count, count + 1) else "";
-        if (charcat(digit.token, 1) and count > 0)
-            {input: stream.push(digit.stream, [digit.token]), issue: null, count: count,
+        if (charcat(digit.token, 1))
+            {input: stream.push(digit.stream, [digit.token]), issue: null, diagnostics: diagnostics, count: count,
                 prefix: prefix, delimiters: delimiters, brace_delim: true, brace: digit.token}
-        else if (charcat(digit.token, 1)) {input: digit.stream, issue: "tex-unsupported-brace-delimiter"}
-        else if (digit.token == null or digit.token.kind != "char" or digit.token.cat != 12 or digit.token.value != expected)
-            {input: digit.stream, issue: "tex-param-order"}
-        else signature(digit.stream, count + 1, prefix, [*delimiters, []])
+        else if (digit.token == null) {input: digit.stream, issue: "tex-param-order", diagnostics: diagnostics}
+        else if (count >= 9) signature(digit.stream, count, prefix, delimiters,
+            [*diagnostics, {input:digit.stream, code:"tex-nine-params", message:"You already have nine parameters"}])
+        else if (digit.token.kind != "char" or digit.token.cat != 12 or digit.token.value != expected)
+            // native re-reads the bad number as the delimiter for the new parameter.
+            signature(stream.push(digit.stream,[digit.token]), count + 1, prefix, [*delimiters, []],
+                [*diagnostics, {input:digit.stream, code:"tex-param-order", message:"Parameters must be numbered consecutively"}])
+        else signature(digit.stream, count + 1, prefix, [*delimiters, []], diagnostics)
     }
-    else if (charcat(t, 2)) {input: read.stream, issue: "tex-extra-brace"}
-    else if (count == 0) signature(read.stream, count, [*prefix, t], delimiters)
-    else signature(read.stream, count, prefix, append_delimiter(delimiters, t))
+    else if (charcat(t, 2)) {input: read.stream, issue: "tex-extra-brace", diagnostics: diagnostics}
+    else if (count == 0) signature(read.stream, count, [*prefix, t], delimiters, diagnostics)
+    else signature(read.stream, count, prefix, append_delimiter(delimiters, t), diagnostics)
+}
+
+// signature scanning is raw; captured stream states preserve each error location.
+fn signature_diagnostics(st, events, index = 0) any^ {
+    if (index >= len(events)) st
+    else {
+        let event = events[index];
+        let noted = record_diagnostic({*:st,input:event.input},event.code,event.message)^;
+        signature_diagnostics({*:st,diagnostics:noted.diagnostics,diagnostic_records:noted.diagnostic_records},events,index + 1)
+    }
 }
 
 fn definition_tokens_inner(st, budget, depth = 1, output = []) any^ {
@@ -129,27 +151,37 @@ fn define(st, global, long_ok, protected_flag, xpand, budget) any^ {
     let name = nonspace(st.input);
     if (not is_control(name.token)) fail({*:st, input: name.stream}, "tex-missing-cs")
     else {
-        let sig = signature(name.stream, 0);
-        if (sig.issue != null) fail({*:st, input: sig.input}, sig.issue)
+        let sig = signature(name.stream, 0)^;
+        let checked = if (len(sig.diagnostics) == 0) st else signature_diagnostics(st,sig.diagnostics)^;
+        if (sig.issue != null) fail({*:checked,input:sig.input}, sig.issue)
         else {
-            let scan = if (xpand) {
-                let opening = stream.next(sig.input);
-                definition_tokens({*:st, input: opening.stream}, budget)^
-            } else {
+            let opening = if (xpand) stream.next(sig.input) else null;
+            let scan = if (xpand) definition_tokens({*:checked, input: opening.stream}, budget)^ else {
                 let body = stream.argument(sig.input, true);
-                {state: if (body.error != null) fail({*:st, input: body.stream}, body.error)
-                    else {*:st, input: body.stream}, tokens: body.tokens}
+                {state: if (body.error != null) fail({*:checked, input: body.stream}, body.error)
+                    else {*:checked, input: body.stream}, tokens: body.tokens}
             };
             if (scan.state.issue != null) scan.state
             else {
-                let parsed = body_params(scan.tokens, sig.count);
+                let initial = body_params(scan.tokens, sig.count)^;
+                // Expanded bodies need a continuous reader sequence to locate diagnostics.
+                let active = if (xpand and initial.issue != null) stream.active_reader(scan.state.input)^ else null;
+                let continuous = not xpand or (active != null and active.file_id == name.token.file and
+                    opening.token != null and opening.token.seq != null and
+                    active.seq == opening.token.seq + len(scan.tokens) + 1 and
+                    all([for (i,t in scan.tokens) t.seq == opening.token.seq + i + 1]));
+                let direct = initial.issue != null and continuous and name.token.direct == true and
+                    stream.raw_reader(name.stream,name.token)^ != null and
+                    all([for (t in scan.tokens) t.direct == true and t.file == name.token.file]);
+                let parsed = if (direct) body_params(scan.tokens, sig.count, 0, [], "tex")^ else initial;
+                let diagnosed = if (direct) parameter_diagnostics(scan.state,parsed.errors,"tex")^ else scan.state;
                 if (parsed.issue != null) fail(scan.state, parsed.issue)
                 else {
                     let k = key(name.token);
                     let value = {kind: "macro", count: sig.count, prefix: sig.prefix, delimiters: sig.delimiters,
                         brace_delim: sig.brace_delim, long_ok: long_ok, protected_flag: protected_flag,
                         body: if (sig.brace_delim) [*parsed.tokens, sig.brace] else parsed.tokens};
-                    assign_meaning(scan.state, k, value, global)
+                    assign_meaning(diagnosed, k, value, global)
                 }
             }
         }
@@ -172,7 +204,7 @@ fn collect_args(input, delimiters, brace_delim, long_ok, args = []) any^ {
     else {
         let arg = stream.delimited(input, delimiters[len(args)], long_ok,
             brace_delim and len(args) + 1 == len(delimiters));
-        if (arg.error != null) {input: arg.stream, args: args, issue: arg.error}
+        if (arg.error != null) {input: arg.stream, args: args, issue: arg.error, cause:arg.cause}
         else collect_args(arg.stream, delimiters, brace_delim, long_ok, [*args, arg.tokens])
     }
 }
@@ -183,7 +215,36 @@ fn stored_tokens(tokens) => [for (t in tokens) {*:t, direct: false}]
 fn substitute(body, args) => [for (t in body)
     *(if (t.kind == "parameter") args[t.value] else [t])]
 
-fn expand_macro(st, macro, budget) any^ {
+// native formats control names in a 128-byte C buffer, including slash and terminator.
+fn macro_diagnostic_name(call) any^ {
+    if (call == null) null
+    else if (call.kind == "active") call.value
+    else {
+        let bytes = binary(call.value)^;
+        let prefix = slice(bytes,0,min(len(bytes),126))^;
+        let zeros = [for (i,b in prefix where b == 0) i];
+        let end = if (len(zeros) == 0) len(prefix) else zeros[0];
+        "\\" ++ parse(slice(prefix,0,end)^,{type:"text"})^
+    }
+}
+
+// failed argument scans discard the call but return their lookahead to TeX.
+fn recover_macro_argument(st, issue, cause, call) any^ {
+    let current = {*:st, expansions:st.expansions + 1};
+    let name = macro_diagnostic_name(call)^;
+    if (cause == "missing") current
+    else if (name == null or not contains(["eof","paragraph","brace"],cause)) fail(current,issue)
+    else {
+        let tail = if (cause == "eof") stream.root_tail(current.input)^ else null;
+        let located = if (tail == null) current else {*:current, input:{*:current.input,last_main_offset:tail.start}};
+        let message = if (cause == "eof") "File ended while scanning use of " ++ name
+            else if (cause == "paragraph") "Paragraph ended before " ++ name ++ " was complete"
+            else "Argument of " ++ name ++ " has an extra }";
+        record_diagnostic(located,issue,message)
+    }
+}
+
+fn expand_macro(st, macro, budget, call = null) any^ {
     if (st.expansions >= budget) fail(st, "tex-budget")
     else {
         let matched = match_prefix(st.input, macro.prefix);
@@ -194,8 +255,10 @@ fn expand_macro(st, macro, budget) any^ {
             let initial = if (macro.optional == true)
                 [if (optional.present) optional.tokens else stored_tokens(macro.optional_default)] else [];
             let args = collect_args(optional.input, macro.delimiters, macro.brace_delim, macro.long_ok, initial);
-            if (optional.issue != null) fail({*:st, input: optional.input}, optional.issue)
-            else if (args.issue != null) fail({*:st, input: args.input}, args.issue)
+            // native scans LaTeX optional arguments with a synthetic \relax call.
+            if (optional.issue != null) recover_macro_argument({*:st, input: optional.input}, optional.issue,
+                if (optional.issue == "tex-extra-brace") "brace" else "eof", control_token("relax"))^
+            else if (args.issue != null) recover_macro_argument({*:st, input: args.input}, args.issue, args.cause, call)
             // replacement text is stored, while freshly scanned arguments retain their source identity.
             else {*:st, input: stream.push(args.input, substitute(stored_tokens(macro.body), args.args)),
                 expansions: st.expansions + 1}
@@ -351,9 +414,10 @@ fn expand_one(st, t, budget) any^ {
                 else if (macro.source_mapping_guard == "tl_head") {*:st, expl3_tl_head_seen: true}
                 else if (macro.source_mapping_guard == "tl_tail") {*:st, expl3_tl_tail_seen: true}
                 else if (macro.source_mapping_guard == "exp_args_once") {*:st, expl3_exp_args_once_seen: true}
+                else if (macro.source_mapping_guard == "exp_args_f") {*:st, expl3_exp_args_f_seen: true}
                 else if (macro.source_mapping_guard == "exp_args_value") {*:st, expl3_exp_args_value_seen: true} else st;
             let traced = if (st.prefix_scan == true) {*:marked, prefixed_macro_seen: true} else marked;
-            expand_macro(traced, macro, budget)
+            expand_macro(traced, macro, budget, t)
         }
     }
     else if (primitive(st, t) == "noexpand") noexpand(st, budget)
@@ -525,6 +589,9 @@ fn csname(st, budget) any^ {
 }
 
 fn put_back(st, t) => if (t == null) st else {*:st, input: stream.push(st.input, [t])}
+
+// A token read by an expanded numeric scan has consumed its one-use protection.
+fn after_numeric_scan(t) => if (t != null and t.noexpand == true) {*:t, noexpand: false} else t
 fn other(t, value) => charcat(t, 12) and t.value == value
 
 fn signs(st, budget, negative = false) any^ {
@@ -549,8 +616,7 @@ fn digits(st, t, base, negative, budget, count = 0, value = 0) any^ {
     let n = digit(t, base);
     if (st.issue != null) {state: st, value: 0}
     else if (n == null) {
-        // noexpand affects the scan once; a returned token can expand again.
-        let returned = if (t != null and t.noexpand == true) {*:t, noexpand: false} else t;
+        let returned = after_numeric_scan(t);
         let after = if (count > 0 and expanded_space(st, t)^) st else put_back(st, returned);
         if (count == 0) {state: fail(after, "tex-missing-number"), value: 0}
         else {state: after, value: if (negative) -value else value}
@@ -571,7 +637,7 @@ fn character_number(st, negative, budget) any^ {
         {state: fail(current, "tex-improper-alphabetic"), value: 0}
     else {
         let following = expanded_next(current, budget);
-        let after = if (expanded_space(following.state, following.token)^) following.state else put_back(following.state, following.token);
+        let after = if (expanded_space(following.state, following.token)^) following.state else put_back(following.state, after_numeric_scan(following.token));
         {state: after, value: if (negative) -ord(t.value) else ord(t.value)}
     }
 }
@@ -2130,21 +2196,38 @@ fn terminal_print(st, text) any^ {
     }
 }
 // preserve native diagnostic locations when the active source is known.
-fn record_diagnostic(st, code, message) any^ {
+fn record_diagnostic(st, code, message, origin = null) any^ {
     let active = stream.active_reader(st.input)^;
-    let found = if (active == null) [] else [for (source in st.sources where source.id == active.file_id) source];
-    let main = active != null and active.file_id == st.main_file;
-    let foreign = active != null and not main and len(found) > 0;
+    let file = if (origin != null) origin.file else if (active == null) null else active.file_id;
+    let found = [for (source in st.sources where source.id == file) source];
+    let main = file != null and file == st.main_file;
+    let foreign = file != null and not main and len(found) > 0;
     let bytes = binary(message)^;
     // native diagnostic formatting truncates long or NUL-containing messages.
     let exact_message = len(bytes) <= 511 and not any([for (byte in bytes) byte == 0]);
     let exhausted = active == null and st.input.root_eof == true;
-    let known = ((active != null and (main or foreign)) or exhausted) and exact_message;
-    let record = {code: code, message: message, offset: st.input.last_main_offset,
+    let known = ((file != null and (main or foreign)) or exhausted) and exact_message;
+    let bytes_before = if (origin != null and len(found) > 0)
+        slice(binary(found[0].data)^,0,origin.start)^ else null;
+    let line = if (bytes_before != null) 1 + len([for (i,b in bytes_before where
+        b == 13 or (b == 10 and (i == 0 or bytes_before[i - 1] != 13))) b])
+        else if (active != null) active.line_no else 0;
+    let record = {code: code, message: message,
+        offset: if (origin != null and main) origin.start else st.input.last_main_offset,
         *:if (foreign) {file: found[0].name} else {},
-        *:if (active != null and active.line_no > 0) {line: active.line_no} else {}};
+        *:if (line > 0) {line: line} else {}};
     {*:st, diagnostics: [*st.diagnostics, code],
         diagnostic_records: if (known) [*st.diagnostic_records, record] else st.diagnostic_records}
+}
+
+fn parameter_diagnostics(st, errors, mode, index = 0) any^ {
+    if (index >= len(errors)) st
+    else {
+        let origin = if (mode == "tex") errors[index].next else null;
+        let diagnosed = record_diagnostic(st, if (mode == "tex") "tex-illegal-param" else "latex-illegal-param",
+            "Illegal parameter number in definition", origin)^;
+        parameter_diagnostics(diagnosed, errors, mode, index + 1)
+    }
 }
 
 // native scans numeric math codes, reports the limitation and continues.
@@ -3416,8 +3499,11 @@ fn unless_conditional(st, budget) any^ {
         let read = stream.next(st.input);
         let current = {*:st, input: read.stream, expansions: st.expansions + 1};
         let name = primitive(st, read.token);
-        if (name == null or not conditional_name(name) or name == "ifcase")
-            fail(put_back(current, read.token), "tex-bad-unless")
+        if (read.token == null) current
+        // TeX diagnoses the invalid prefix, then processes the untouched token.
+        else if (name == null or not conditional_name(name) or name == "ifcase")
+            record_diagnostic(put_back(current, read.token), "tex-bad-unless",
+                "You can't use \\unless before that token")
         else condition(current, name, budget, true)
     }
 }
@@ -3620,12 +3706,20 @@ fn save_aftergroup(st) any^ {
         if (index == depth - 1) {*:scope, aftergroup: [*scope.aftergroup, {*:read.token, direct: false}]} else scope]}
 }
 
-fn end_group(st, token, explicit, environment = false, math = false) any^ {
+fn end_group(st, token, explicit, environment = false, math = false, recover = false) any^ {
     let depth = len(st.groups);
     if (depth == 0 or st.groups[depth - 1].explicit != explicit or
         ((st.groups[depth - 1].environment != null) != environment) or
         ((st.groups[depth - 1].math == true) != math))
-        fail(st, if (explicit) "tex-extra-endgroup" else "tex-extra-brace")
+        if (not recover) fail(st, if (explicit) "tex-extra-endgroup" else "tex-extra-brace")
+        else {
+            // source group errors diagnose without closing the active scope.
+            let message = if (explicit) "Extra \\endgroup" else if (depth == 0) "Too many }'s"
+                else "Extra }, or forgotten \\endgroup";
+            let diagnosed = record_diagnostic(st, if (explicit) "tex-extra-endgroup" else "tex-extra-brace", message)^;
+            if (explicit) diagnosed else {*:diagnosed, output: [*diagnosed.output,
+                {*:token, emit_origin: diagnosed.input.last_main_offset}]}
+        }
     else {
         let scope = st.groups[depth - 1];
         let restored = {*:stream.configure(st.input, scope.catcodes, scope.parameters.endlinechar),
@@ -3757,11 +3851,9 @@ fn latex_newcommand(st, name) any^ {
                     "Illegal number of arguments " ++ string(full_count))^ else count_state;
             let noted = {*:advanced, diagnostics: diagnosed.diagnostics, diagnostic_records: diagnosed.diagnostic_records,
                 issue: diagnosed.issue, unsupported: diagnosed.unsupported};
-            let parsed = body_params(body.tokens, nargs)^;
             let old = meaning(noted, controls[0]);
             let definable = latex_definable(old);
             if (noted.issue != null) noted
-            else if (parsed.issue != null) fail(noted, parsed.issue)
             else if (name == "newcommand" and not definable)
                 latex_command_diagnostic(noted, "latex-already-defined", controls[0], " already defined")
             else if (name == "providecommand" and not definable) noted
@@ -3769,9 +3861,16 @@ fn latex_newcommand(st, name) any^ {
                 let ready = if (name == "renewcommand" and definable)
                     latex_command_diagnostic(noted, "latex-undefined", controls[0], " undefined")^
                     else noted;
-                let macro = latex_macro(nargs, starred, name == "DeclareRobustCommand", default_arg.present,
-                    default_arg.tokens, parsed.tokens)^;
-                assign_meaning(ready, key(controls[0]), macro, false)
+                // native converts parameters only when it will install the definition.
+                let initial = body_params(body.tokens, nargs)^;
+                let parsed = if (initial.issue != null) body_params(body.tokens, nargs, 0, [], "latex")^ else initial;
+                let recovered = if (initial.issue != null) parameter_diagnostics(ready,parsed.errors,"latex")^ else ready;
+                if (parsed.issue != null) fail(recovered, parsed.issue)
+                else {
+                    let macro = latex_macro(nargs, starred, name == "DeclareRobustCommand", default_arg.present,
+                        default_arg.tokens, parsed.tokens)^;
+                    assign_meaning(recovered, key(controls[0]), macro, false)
+                }
             }
         }
     }
@@ -4088,7 +4187,8 @@ fn latex_begin(st, original, budget) any^ {
                 let emitted = environment_output(opened, original, argument.raw, named.name, "begin", closed.echo, closed.span)^;
                 let passed = {*:opened, output: [*opened.output, *emitted]};
                 if (named.name != "document")
-                    if (passed.constructor_argument_mode and passed.math_mode != true) constructor_arguments(passed, budget)^ else passed
+                    // native scans passthrough environment arguments in either expansion mode.
+                    if (passed.math_mode != true) constructor_arguments(passed, budget)^ else passed
                 else {*:passed, in_document: true, begin_hooks: [], input: stream.push(passed.input, st.begin_hooks)}
             }
         }
@@ -4107,13 +4207,20 @@ fn latex_end(st, original, budget) any^ {
         let depth = len(ready.groups);
         if (ready.issue != null) ready
         else if (named.name == "document") {
+            // native finish_document appends the tail only with the root reader on top.
+            let root_tail = len(ready.end_hooks) == 0 and len(ready.input.levels) == 0;
             let close = {kind: "document-close", original: original, raw: argument.raw,
-                echo: closed.echo and len(ready.end_hooks) == 0, span: closed.span};
+                echo: closed.echo and len(ready.end_hooks) == 0, span: closed.span, root_tail: root_tail};
             {*:ready, end_hooks: [], input: stream.push(ready.input, [*ready.end_hooks, close])}
         }
         else if (depth == 0 or ready.groups[depth - 1].environment != named.name) {
             let emitted = environment_output(ready, original, argument.raw, named.name, "end", closed.echo, closed.span)^;
-            {*:ready, output: [*ready.output, *emitted], diagnostics: [*ready.diagnostics, "latex-env-mismatch"]}
+            // native reports the current opening environment at this source position.
+            let opened = if (depth == 0 or ready.groups[depth - 1].environment == null) "?"
+                else ready.groups[depth - 1].environment;
+            let diagnosed = record_diagnostic(ready,"latex-env-mismatch",
+                "LaTeX Error: \\begin{" ++ opened ++ "} ended by \\end{" ++ named.name ++ "}")^;
+            {*:diagnosed, output: [*diagnosed.output, *emitted]}
         }
         else if (ready.groups[depth - 1].passthrough) {
             let emitted = environment_output(ready, original, argument.raw, named.name, "end", closed.echo, closed.span)^;
@@ -4198,9 +4305,13 @@ fn package_plan(st, names, opts, index = 0, loads = [], passthrough = []) any^ {
 fn declaration_tokens(name, opts, names, origin) any^ {
     let opener = brace_token(true);
     let closer = brace_token(false);
-    // synthesized declarations map to the main-reader position where they are emitted.
-    [for (token in [control_token(name), *(if (opts == "") [] else text_tokens("[" ++ opts ++ "]")),
-        opener, *text_tokens(join(names, ",")), closer]) {*:token, emit_origin: origin}]
+    let option = if (opts == "") "" else "[" ++ opts ++ "]";
+    let named = join(names, ",");
+    let tokens = [control_token(name), *text_tokens(option), opener, *text_tokens(named), closer];
+    let raw = "\\" ++ name ++ option ++ "{" ++ named ++ "}";
+    // native emits the complete declaration as raw text at one source origin.
+    [for (i, token in tokens) {*:token, emit_origin: origin,
+        *:if (i == 0) {reconstruct_text:raw,reconstruct_count:len(tokens)} else {}}]
 }
 
 fn latex_usepackage(st, original, budget) any^ {
@@ -4605,23 +4716,31 @@ fn latex_verb(st, token) any^ {
             let input = stream.replace_reader(st.input, source.index, scanned.reader)^;
             let span = {file: token.file, start: token.start, end: scanned.end,
                 first_seq: token.seq, last_seq: source.reader.seq};
-            let captured = {*:token, echo_span: span, echo_count: 1};
+            let captured = {*:token, echo_span: span, echo_count: 1, raw_verb: true};
             {*:st, input: input, raw_inline_seen: true, output: [*st.output, captured]}
         }
     }
 }
 
+fn raw_inline_command(name) => contains(["lstinline", "Verb", "mint", "mintinline"],name)
+
 // raw command bodies bypass token expansion while a source reader is available.
-fn latex_raw_group(st, token) any^ {
+fn latex_raw_group(st, token, inline_kind = null) any^ {
     let source = stream.raw_reader(st.input, token)^;
     if (source == null) {*:st, output: [*st.output, token]}
     else {
-        let scanned = reader.raw_group_command(source.reader)^;
-        let input = stream.replace_reader(st.input, source.index, scanned.reader)^;
-        let span = {file: token.file, start: token.start, end: scanned.end,
-            first_seq: token.seq, last_seq: source.reader.seq};
-        {*:st, input: input, raw_inline_seen: true,
-            output: [*st.output, {*:token, echo_span: span, echo_count: 1}]}
+        let scanned = if (inline_kind == null) reader.raw_group_command(source.reader)^
+            else reader.raw_inline_command(source.reader,contains(["mint","mintinline"],inline_kind))^;
+        if (scanned.issue != null) unsupported(st,scanned.issue)
+        else {
+            let input = stream.replace_reader(st.input, source.index, scanned.reader)^;
+            let span = {file: token.file, start: token.start, end: scanned.end,
+                first_seq: token.seq, last_seq: source.reader.seq};
+            {*:st, input: input, raw_inline_seen: true,
+                *:if (inline_kind == null) {raw_inline_other_seen:true} else {},
+                output: [*st.output, {*:token, echo_span: span, echo_count: 1,
+                    *:if(inline_kind == null) {} else {raw_inline_kind:inline_kind}}]}
+        }
     }
 }
 
@@ -4696,20 +4815,39 @@ fn constructor_environment(st, token, budget) any^ {
     else {
         let named = expand_argument_name(current, argument.tokens, budget)^;
         if (named.state.issue != null) named.state
-        else if (meaning(named.state, control_token(named.name)).kind == "macro")
-            unsupported(named.state, "constructor argument custom environment")
-        else {*:named.state, output: [*named.state.output, token, *argument.raw]}
+        else if (meaning(named.state, control_token(named.name)).kind == "macro") {
+            let current = named.state;
+            if (primitive(current,token) == "begin") {
+                // custom environment bodies expand in argument mode within their own scope.
+                let opened = begin_environment(current,named.name,false)^;
+                let current_env = latex_macro(0,false,false,false,[],text_tokens(named.name))^;
+                let named_env = assign_meaning(opened,"control:@currenvir",current_env,false)^;
+                {*:named_env,input:stream.push(named_env.input,[control_token(named.name)])}
+            }
+            else {
+                let depth = len(current.groups);
+                if (depth == 0 or current.groups[depth - 1].environment != named.name) current
+                else {*:current,input:stream.push(current.input,
+                    [control_token("end" ++ named.name),{kind:"env-close",value:named.name}])}
+            }
+        }
+        else {
+            // passthrough tokens are emitted after the complete name is read.
+            let emitted = [for (raw in [token, *argument.raw])
+                {*:emission_token(named.state, named.state.input, raw)^, emit_origin: named.state.input.last_main_offset}];
+            {*:named.state, output: [*named.state.output, *emitted]}
+        }
     }
 }
 
 // argument mode expands the expl3 setter macro without running its assignment.
-fn constructor_expl3_tl_set(st, name, budget) any^ {
+fn constructor_expl3_tl_set(st, token, name, budget) any^ {
     let internal = if (name == "tl_gset:Nn") "__kernel_tl_gset:Nx" else "__kernel_tl_set:Nx";
     let macro = {kind: "macro", count: 2, prefix: [], delimiters: [[], []], brace_delim: false,
         long_ok: true, protected_flag: true, body: [control_token(internal), {kind: "parameter", value: 0},
             brace_token(true), control_token("unexpanded"), brace_token(true), {kind: "parameter", value: 1},
             brace_token(false), brace_token(false)]};
-    expand_macro(st, macro, budget)
+    expand_macro(st, macro, budget, token)
 }
 
 // constructor arguments expand tokens but do not execute assignments.
@@ -4718,16 +4856,28 @@ fn constructor_argument(st, budget, bracket, depth) any^ {
     let token = emission_token(st, read.state.input, read.token)^;
     let current = read.state;
     if (current.issue != null) current
-    else if (token == null) fail(current, "tex-runaway")
+    // native returns the accumulated argument at EOF, even if it is incomplete.
+    else if (token == null) current
+    else if (token.kind == "env-close") {
+        let ended = end_group(current,null,true,true)^;
+        if (ended.issue != null) ended else constructor_argument(ended,budget,bracket,depth)
+    }
     else if (token.noexpand != true and current.latex and contains(["begin", "end"], primitive(current, token))) {
         let advanced = constructor_environment(current, token, budget)^;
         if (advanced.issue != null) advanced else constructor_argument(advanced, budget, bracket, depth)
     }
-    else if (token.noexpand != true and contains(["verb", "lstinline", "Verb", "mint", "mintinline"], primitive(current, token)))
-        unsupported(current, "constructor argument raw command")
+    else if (token.noexpand != true and primitive(current,token) == "verb") {
+        // raw verbatim text cannot alter the surrounding argument depth.
+        let after = latex_verb(current,token)^;
+        if (after.issue != null) after else constructor_argument(after,budget,bracket,depth)
+    }
+    else if (token.noexpand != true and raw_inline_command(primitive(current,token))) {
+        let after = latex_raw_group(current,token,primitive(current,token))^;
+        if (after.issue != null) after else constructor_argument(after,budget,bracket,depth)
+    }
     else if (token.noexpand != true and current.script_expl3 and
             contains(["tl_set:Nn", "tl_gset:Nn"], primitive(current, token))) {
-        let expanded = constructor_expl3_tl_set(current, primitive(current, token), budget)^;
+        let expanded = constructor_expl3_tl_set(current, token, primitive(current, token), budget)^;
         if (expanded.issue != null) expanded else constructor_argument(expanded, budget, bracket, depth)
     }
     else if (token.noexpand != true and current.script_expl3 and is_control(token) and
@@ -4741,10 +4891,13 @@ fn constructor_argument(st, budget, bracket, depth) any^ {
         let emitted = if (token.noexpand == true) {*:token, noexpand: false} else token;
         // argument-mode tokens also need their emission-time source position.
         let next = {*:current, output: [*current.output,
-            {*:emitted, emit_origin: current.input.last_main_offset}]};
+            {*:emitted, emit_origin: current.input.last_main_offset,
+                *:if (is_control(token) and reader.definition_command(token.value))
+                    {definition_catcodes:current.input.reader.catcodes} else {}}]};
         let level = depth + if (charcat(token, 1)) 1 else if (charcat(token, 2)) -1 else 0;
         if ((not bracket and level == 0) or (bracket and depth == 0 and other(token, "]"))) next
-        else if (level < 0) fail(next, "tex-extra-brace")
+        // a closing brace also terminates a malformed bracket argument.
+        else if (level < 0) next
         else constructor_argument(next, budget, bracket, level)
     }
 }
@@ -4802,7 +4955,7 @@ fn step(st, budget) any^ {
     else if (t.kind == "document-close") {
         let emitted = environment_output(current, t.original, t.raw, "document", "end", t.echo, t.span)^;
         {*:current, output: [*current.output, *emitted],
-            trailing_source: stream.root_tail(current.input), finished: true}
+            trailing_source: if (t.root_tail) stream.root_tail(current.input) else null, finished: true}
     }
     else if (t.noexpand == true) {*:current, output: [*st.output, {*:t, noexpand: false}]}
     else if (redefined_document_command(current, t)^) echo_redefined_command(current, t)
@@ -4907,6 +5060,8 @@ fn step(st, budget) any^ {
     else if (st.latex and contains(["documentclass", "LoadClass", "LoadClassWithOptions"], cmd))
         latex_documentclass(current, t, budget, cmd)
     else if (st.latex and cmd == "verb") latex_verb(current, t)
+    else if (st.latex and raw_inline_command(cmd))
+        latex_raw_group(current,t,cmd)
     else if (st.latex and t.kind == "control" and resolved.kind == "undefined" and
             contains(["directlua", "luaexec"], t.value)) latex_raw_group(current, t)
     else if (st.latex and cmd == "begin") latex_begin(current, t, budget)
@@ -4961,7 +5116,7 @@ fn step(st, budget) any^ {
     else if (cmd == "afterassignment") save_after_assignment(current)
     else if (cmd == "aftergroup") save_aftergroup(current)
     else if (cmd == "begingroup") begin_group(current, null, true)
-    else if (cmd == "endgroup") end_group(current, null, true)
+    else if (cmd == "endgroup") end_group(current, null, true, false, false, true)
     else if (cmd == "global" or cmd == "long" or cmd == "protected") echo_prefixed(current, t, cmd, budget)
     else if (resolved.kind == "constructor") {
         let emitted = {*:current, output: [*st.output, t]};
@@ -4991,7 +5146,7 @@ fn step(st, budget) any^ {
     }
     else if (charcat(t, 3)) math_shift(current, t)
     else if (charcat(t, 1)) begin_group(current, t, false)
-    else if (charcat(t, 2)) end_group(current, t, false)
+    else if (charcat(t, 2)) end_group(current, t, false, false, false, true)
     // the output serializer needs the reader position at emission, including lookahead.
     else {*:current, output: [*st.output, {*:t, emit_origin: current.input.last_main_offset}]}
 }
@@ -5103,6 +5258,10 @@ pub fn enable_script_expl3(st) any^ {
         {source: "\\tl_head:V{\\exp_args:NV\\tl_head:n}", protected_flag: false},
         {source: "\\tl_tail:V{\\exp_args:NV\\tl_tail:n}", protected_flag: false},
         {source: "\\exp_args:No#1#2{\\exp_after:wN#1\\exp_after:wN{#2}}", protected_flag: false, source_mapping_guard: "exp_args_once"},
+        // f expansion stops at the first unexpandable token, preserving the remaining tokens.
+        {source: "\\exp_args:Nf#1#2{\\exp_after:wN#1\\exp_after:wN{\\exp:w\\exp_end_continue_f:w#2}}", protected_flag: false, source_mapping_guard: "exp_args_f"},
+        {source: "\\tl_head:f{\\exp_args:Nf\\tl_head:n}", protected_flag: false},
+        {source: "\\tl_tail:f{\\exp_args:Nf\\tl_tail:n}", protected_flag: false},
         {source: "\\tl_head:N{\\exp_args:No\\tl_head:n}", protected_flag: false},
         {source: "\\tl_tail:N{\\exp_args:No\\tl_tail:n}", protected_flag: false},
         {source: "\\tl_tail:n#1{\\__kernel_exp_not:w\\if:w\\scan_stop:\\__kernel_tl_to_str:w\\exp_after:wN{\\use_none:n#1?}\\scan_stop:\\__prg_TF_true:w\\fi:\\use_ii:nn{{}}{\\exp_after:wN{\\use_none:n#1}}}", protected_flag: false, source_mapping_guard: "tl_tail"},
@@ -5340,7 +5499,7 @@ pub fn resume(st, source, name = "<input>", budget = 20000000) any^ {
             main_file: id, echo_incomplete: false, prefixed_macro_seen: false, prefix_scan: false,
             generated_text_mapping_seen: false, mathchardef_emission_seen: false,
             expl3_tl_head_seen: false, expl3_tl_tail_seen: false,
-            expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false,
+            expl3_exp_args_once_seen: false, expl3_exp_args_value_seen: false, expl3_exp_args_f_seen: false,
             sources: [*st.sources, {id: id, name: name, origin: "local", data: source}]};
         run(resumed, budget)
     }

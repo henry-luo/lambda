@@ -1,0 +1,6 @@
+{
+  issue: null,
+  text_match: true,
+  diagnostics_match: true,
+  file_recorded: true
+}

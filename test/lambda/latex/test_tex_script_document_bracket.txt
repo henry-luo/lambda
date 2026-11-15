@@ -39,14 +39,10 @@
   native: null
 }
 {
-  case: "ordinary environment still pending",
-  issue: "latex-digest-unsupported",
-  unsupported: "environment options",
-  matches: null,
+  case: "ordinary environment",
+  issue: null,
+  unsupported: null,
+  matches: true,
   script: null,
-  native: <latex_document
-    <document source_offset: 0,
-      <strange source_offset: 16,
-        <paragraph
-          "[x]Hello">>>>
+  native: null
 }

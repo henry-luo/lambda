@@ -89,8 +89,8 @@
 [["char", "["], ["char", "a"], ["control", "par"], ["char", "b"], ["char", "]"]]
 "short argument:"
 {
-  text: "",
-  issue: "tex-runaway-argument"
+  text: "parb}",
+  issue: null
 }
 "changed catcode in a control word:"
 {
@@ -150,7 +150,7 @@
 "missing argument in expanded definition:"
 {
   text: "",
-  issue: "tex-extra-brace"
+  issue: null
 }
 "conditionals:"
 {
@@ -511,8 +511,9 @@
 }
 "mismatched group end:"
 {
-  text: "{",
-  issue: "tex-extra-endgroup"
+  text: "{}",
+  issue: null,
+  diagnostics: ["tex-extra-endgroup"]
 }
 "case conditional branches:"
 {
@@ -551,8 +552,9 @@
 }
 "invalid unless:"
 {
-  text: "",
-  issue: "tex-bad-unless"
+  text: "A",
+  issue: null,
+  diagnostics: ["tex-bad-unless"]
 }
 "dimension units:"
 {
@@ -1119,9 +1121,9 @@
 }
 "latex starred short argument:"
 {
-  text: "",
-  issue: "tex-runaway-argument",
-  diagnostics: []
+  text: "parb}",
+  issue: null,
+  diagnostics: ["tex-runaway-argument", "tex-extra-brace"]
 }
 "latex long argument:"
 {
@@ -1243,7 +1245,7 @@
   text: "begin{document}ABXCDend{document}",
   issue: null,
   diagnostics: [],
-  trailing: "TAIL"
+  trailing: null
 }
 "latex late begin hook:"
 {

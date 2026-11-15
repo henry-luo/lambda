@@ -1,0 +1,22 @@
+{
+  cases: 19,
+  failures: [],
+  guarded: [{
+      source: "\\begin{document}A\\end{document}% tail\nX",
+      issue: "latex-digest-unsupported",
+      unsupported: "post-document source mapping"
+    }, {
+      source: "\\let\\finish\\end\\begin{document}A\\finish{document}tail",
+      issue: "latex-digest-unsupported",
+      unsupported: "unclosed environment"
+    }, {
+      source: "\\begin{document}A\\expandafter\\end\\expandafter{document}tail",
+      issue: "latex-digest-unsupported",
+      unsupported: "environment command source gap"
+    }],
+  foreign: {
+    issue: null,
+    text_match: true,
+    ast_match: true
+  }
+}

@@ -1,0 +1,73 @@
+[{
+    source: "\\def\\p{\\par}\\begin{document}A\\p B\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\def\\p{\\par}\\begin{document}A\\p\nB\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\def\\p{\\par}\\begin{document}A\\p\n\nB\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\def\\p{\\par}\\begin{document}A\\p%a\nB\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\def\\p{\\par}\\begin{document}A\\p \n%a\nB\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\def\\p{\\par}\\begin{document}A\\p %a\n\nB\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\def\\p{\\par}\\begin{document}A\\p\\p B\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\def\\p{\\par}\\begin{document}A\\p{}B\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\def\\p{\\par}\\begin{document}A\\p\\textbf{B}\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\newenvironment{r}{\\par X}{\\par}\\begin{document}\\begin{r}A\n\\end{r}\nB\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\newenvironment{r}{\\par X}{\\par}\\begin{document}\\begin{r}A\n\\end{r}%x\nB\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }, {
+    source: "\\newenvironment{r}{\\par X}{\\par}\\begin{document}\\begin{r}A\n\\end{r}\n\nB\\end{document}",
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    matches: true
+  }]

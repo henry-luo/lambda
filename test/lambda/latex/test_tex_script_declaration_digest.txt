@@ -156,7 +156,7 @@
     native: null
   }, {
     issue: "latex-digest-unsupported",
-    unsupported: "command argument source gap",
+    unsupported: "command argument source mapping",
     matches_native: null,
     actual: null,
     native: null

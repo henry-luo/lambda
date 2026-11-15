@@ -2,10 +2,11 @@ import reader: lambda.doc.latex.tex_engine.reader
 import stream: lambda.doc.latex.tex_engine.stream
 import expansion: lambda.doc.latex.tex_engine.expansion
 
-fn test(source, budget = 100) any^ {
+fn test(source, budget = 100, with_diagnostics = false) any^ {
     let r = {*:reader.reader(source), endline: -1, catcodes: {'{': 1, '}': 2, '#': 6}};
     let expanded = expansion.expand(stream.from_reader(r), budget)^;
-    {text: join([for (t in expanded.output) t.value], ""), issue: expanded.issue}
+    {text: join([for (t in expanded.output) t.value], ""), issue: expanded.issue,
+        *:if (with_diagnostics) {diagnostics: expanded.diagnostics} else {}}
 }
 fn test_tokens(source) any^ {
     let r = {*:reader.reader(source), endline: -1, catcodes: {'{': 1, '}': 2, '#': 6}};
@@ -179,7 +180,7 @@ fn test_latex_document(source) any^ {
 "nested aftergroup:"; test("{\\aftergroup A{\\aftergroup B}C}D")
 "explicit group:"; test("\\count0=3 \\begingroup \\count0=7 \\aftergroup X\\endgroup \\the\\count0")
 "global in explicit group:"; test("\\begingroup \\global\\count0=7 \\endgroup \\the\\count0")
-"mismatched group end:"; test("{\\endgroup}")
+"mismatched group end:"; test("{\\endgroup}", 100, true)
 "case conditional branches:"; test("\\ifcase 0 A\\or B\\else C\\fi,\\ifcase 1 A\\or B\\else C\\fi,\\ifcase 2 A\\or B\\else C\\fi")
 "case conditional negative:"; test("\\ifcase -1 A\\or B\\else C\\fi")
 "nested case skipping:"; test("\\ifcase 1 \\ifnum 1=1 A\\or B\\fi \\or C\\or D\\fi")
@@ -187,7 +188,7 @@ fn test_latex_document(source) any^ {
 "unless conditionals:"; test("\\unless\\ifnum 1=2 T\\else F\\fi,\\unless\\iftrue F\\else T\\fi")
 "unless nested scan:"; test("\\unless\\ifnum\\iftrue 1\\else 2\\fi=1 F\\else T\\fi")
 "unless defined:"; test("\\unless\\ifdefined\\x T\\fi")
-"invalid unless:"; test("\\unless\\ifcase 0 A\\fi")
+"invalid unless:"; test("\\unless\\ifcase 0 A\\fi", 100, true)
 "dimension units:"; test("\\dimen0=1in \\dimen1=1cm \\dimen2=1mm \\the\\dimen0,\\the\\dimen1,\\the\\dimen2")
 "dimension rounding:"; test("\\dimen0=0.333333pt \\dimen1=16383.99999pt \\the\\dimen0,\\the\\dimen1")
 "dimension arithmetic:"; test("\\dimen0=1.5pt \\advance\\dimen0 by 2.25pt \\multiply\\dimen0 2 \\divide\\dimen0 by 4 \\the\\dimen0")

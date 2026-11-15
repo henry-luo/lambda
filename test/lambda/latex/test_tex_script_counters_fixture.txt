@@ -3,5 +3,5 @@
   first_exercise: true,
   second_exercise: true,
   digest_issue: "latex-digest-unsupported",
-  digest_unsupported: "declaration source mapping"
+  digest_unsupported: "command source mapping"
 }

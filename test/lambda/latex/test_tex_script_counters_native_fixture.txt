@@ -1,0 +1,16 @@
+{
+  without_adapters: {
+    expansion_issue: null,
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  },
+  with_adapters: {
+    expansion_issue: null,
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }
+}

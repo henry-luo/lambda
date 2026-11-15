@@ -47,10 +47,11 @@ fn bounded(source) any^ {
  "\\def\\x{\\verb|ABC|}\\begin{document}\\x\\end{document}",
  "\\begin{document}\\lstinline|x|\\end{document}"])
  bounded(source)^]
-let document=profile.expand_with_kernel("\\begin{document}\\verb|x|\\end{document}",kernel,
+let document_source="\\begin{document}\\verb|x|\\end{document}";
+let document=profile.expand_with_kernel(document_source,kernel,
  {echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
 let ast=digest.digest(document)^;
-{issue:ast.issue,unsupported:ast.unsupported}
+{issue:ast.issue,unsupported:ast.unsupported,matches_native:ast.ast==parse(document_source,{type:"latex"})^}
 fn definition_spans(source) any^ {
  let result=profile.expand_with_kernel(source,kernel,{echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
  let rebuilt=reconstruct.reconstruct(result)^;

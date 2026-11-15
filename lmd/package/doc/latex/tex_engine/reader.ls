@@ -1,4 +1,7 @@
 // Incremental TeX reader prototype. Category codes are consulted for each token.
+pub fn definition_command(name) => contains(["def", "gdef", "edef", "xdef", "newcommand", "renewcommand",
+    "providecommand", "newenvironment", "renewenvironment"], name)
+
 fn ch(s, i) any^ => if (i >= len(s)) "" else slice(s, i, i + 1)
 
 pub fn catcode(c, overrides) {
@@ -111,6 +114,33 @@ pub fn raw_group_command(r) any^ {
     let end = if (ch(source, at)^ == "{") if (grouped == null) len(source) else grouped
         else at;
     {end: r.line_byte + byte_count(source, r.line_start, end)^, reader: raw_seek(r, end)^}
+}
+
+fn raw_inline_close(source, index, delimiter) any^ {
+    if (index >= len(source) or ch(source,index)^ == "\n") index
+    else if (ch(source,index)^ == delimiter) index + 1
+    else raw_inline_close(source,index + 1,delimiter)
+}
+
+// listings and minted capture their options and code before tokenization.
+pub fn raw_inline_command(r, language) any^ {
+    let source = r.source;
+    let start = raw_spaces(source,r.line_start + r.position)^;
+    let starred = if (ch(source,start)^ == "*") start + 1 else start;
+    let option_end = if (ch(source,starred)^ == "[") raw_group_end(source,starred + 1,"[","]")^ else null;
+    let after_option = if (option_end == null) starred else option_end;
+    let language_end = if (language and ch(source,after_option)^ == "{")
+        raw_group_end(source,after_option + 1,"{","}")^ else null;
+    let at = if (language_end == null) after_option else language_end;
+    let delimiter = ch(source,at)^;
+    let grouped = if (delimiter == "{") raw_group_end(source,at + 1,"{","}")^ else null;
+    if (delimiter != "" and delimiter != "{" and ord(delimiter) >= 128)
+        {issue:"raw inline delimiter",reader:r}
+    else {
+        let end = if (delimiter == "{") if (grouped == null) len(source) else grouped
+            else if (delimiter == "") at else raw_inline_close(source,at + 1,delimiter)^;
+        {issue:null,end:r.line_byte + byte_count(source,r.line_start,end)^,reader:raw_seek(r,end)^}
+    }
 }
 
 fn lower_hex(c) => c != "" and index_of("0123456789abcdef", c) != null

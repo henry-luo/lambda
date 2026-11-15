@@ -124,12 +124,12 @@
   unsupported: null,
   matches_native: true
 }
-"implicit expression, native LI-014:"
+"implicit expression:"
 {
   text: "\\begin{document}\\newcounter{n}\\setcounter{n}{\\numexpr1+2}3\\end{document}",
   issue: null,
   unsupported: null,
-  matches_native: false
+  matches_native: true
 }
 "value as register:"
 {
@@ -159,12 +159,12 @@
   unsupported: null,
   matches_native: true
 }
-"nested implicit expressions, native LI-014:"
+"nested implicit expressions:"
 {
   text: "\\begin{document}\\newcounter{n}\\setcounter{n}{\\numexpr\\numexpr1+2+3}6\\end{document}",
   issue: null,
   unsupported: null,
-  matches_native: false
+  matches_native: true
 }
 "macro step of main counter:"
 {

@@ -111,11 +111,12 @@
     issue: "tex-unsupported-primitive",
     unsupported: "verb non-direct source"
   }, {
-    issue: "tex-unsupported-primitive",
-    unsupported: "lstinline"
+    issue: null,
+    unsupported: null
   }]
 {
-  issue: "latex-digest-unsupported",
-  unsupported: "raw inline source mapping"
+  issue: null,
+  unsupported: null,
+  matches_native: true
 }
 [0, 1]

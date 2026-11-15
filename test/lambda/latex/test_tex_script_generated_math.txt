@@ -1,0 +1,67 @@
+[{
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: null,
+    unsupported: null,
+    text_match: true,
+    ast_match: true
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "math source mapping",
+    text_match: true,
+    ast_match: null
+  }, {
+    issue: "latex-digest-unsupported",
+    unsupported: "math source mapping",
+    text_match: true,
+    ast_match: null
+  }]
+{
+  issue: null,
+  unsupported: null,
+  text_match: true,
+  ast_match: true
+}

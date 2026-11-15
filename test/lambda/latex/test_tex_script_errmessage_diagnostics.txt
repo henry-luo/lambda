@@ -225,5 +225,5 @@
       file: "script_error.sty",
       line: 2
     }],
-  ast_match: false
+  ast_match: true
 }

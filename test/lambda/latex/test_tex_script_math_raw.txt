@@ -203,9 +203,9 @@
     native: null
   }, {
     body: "\\def\\m{!1}$\\m$",
-    issue: "latex-digest-unsupported",
-    unsupported: "math source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {

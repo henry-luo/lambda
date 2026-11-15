@@ -1,0 +1,16 @@
+{
+  cases: 23,
+  failures: [],
+  guarded: {
+    issue: "latex-digest-unsupported",
+    unsupported: "environment option source mapping"
+  },
+  token_boundary: {
+    issue: "latex-digest-unsupported",
+    unsupported: "environment option token boundary"
+  },
+  included: {
+    issue: null,
+    matches_native: true
+  }
+}

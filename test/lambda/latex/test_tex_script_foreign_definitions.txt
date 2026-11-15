@@ -1,0 +1,18 @@
+{
+  included: {
+    issue: null,
+    matches_native: true
+  },
+  direct: {
+    issue: null,
+    matches_native: true
+  },
+  incompatible_lexing: {
+    issue: "latex-digest-unsupported",
+    unsupported: "inline definition token mapping"
+  },
+  unicode_control: {
+    issue: "latex-digest-unsupported",
+    unsupported: "inline definition token mapping"
+  }
+}

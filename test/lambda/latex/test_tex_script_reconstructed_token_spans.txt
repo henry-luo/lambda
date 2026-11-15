@@ -1,0 +1,37 @@
+[{
+    issue: null,
+    default_unchanged: true,
+    covered: true,
+    coalesced: true,
+    argument: true
+  }, {
+    issue: null,
+    default_unchanged: true,
+    covered: true,
+    coalesced: true,
+    argument: true
+  }, {
+    issue: null,
+    default_unchanged: true,
+    covered: true,
+    coalesced: true,
+    argument: true
+  }, {
+    issue: null,
+    default_unchanged: true,
+    covered: true,
+    coalesced: true,
+    argument: true
+  }]
+{
+  accent_issue: null,
+  merged: true,
+  spelling: "\\'{e}",
+  covered: true
+}
+{
+  issue: null,
+  found: true,
+  separator: " ",
+  covered: true
+}

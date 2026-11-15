@@ -1,0 +1,14 @@
+{
+  included: {
+    issue: null,
+    matches_native: true
+  },
+  ordinary_mode: {
+    issue: "latex-digest-unsupported",
+    unsupported: "command source mapping"
+  },
+  generated: {
+    issue: null,
+    matches_native: true
+  }
+}
