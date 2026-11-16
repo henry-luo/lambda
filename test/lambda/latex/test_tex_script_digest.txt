@@ -145,12 +145,12 @@
   complete: false,
   matches_native: true
 }
-"repeated math scripts pending:"
+"repeated math scripts:"
 {
-  issue: "latex-digest-unsupported",
-  unsupported: "repeated math script",
-  complete: null,
-  matches_native: null
+  issue: null,
+  unsupported: null,
+  complete: false,
+  matches_native: true
 }
 "adjacent math atoms:"
 {

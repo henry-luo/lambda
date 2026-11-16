@@ -1,0 +1,23 @@
+{
+  cases: 21,
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true,
+  duplicate_guard: true
+}
+{
+  cases: 6,
+  supported: true,
+  text: true,
+  diagnostics: true,
+  tree: true,
+  guards: true
+}
+{
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true,
+  tree: true
+}

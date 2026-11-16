@@ -36,9 +36,279 @@ The existing native engine design and historical Phase IV work are in
 - **Goal:** complete the Script TeX expansion and LaTeX digestion port, qualify
   it against the native path, and coordinate production migration. S1.8,
   D10.2.2, D9.1.3v2 and D11.2.1 govern the current boundary.
-- **Worktree:** `/Users/henryluo/Projects/Lambda`, branch `master`, HEAD
-  `17ce141e1`; last updated 2026-11-16. The working tree contains the current
-  Script-engine changes and their tests; the native input owner is a sibling.
+- **Worktree:** `/Users/henryluo/Projects/Lambda`, `master` at `ffd7d5031`;
+  updated 2026-11-16. The working tree contains the Script changes, tests and
+  notes described below; sibling Input and Radiant trees have independent dirty
+  changes. Production still uses the native engine.
+- **Expanded generic arguments:** the digester now reconstructs the raw text
+  and byte offsets of expanded generic-command arguments in both constructor
+  modes, using the same provenance check as declarations. Staged comparisons
+  covered 70 argument cases and an included source. The installed regression
+  covers 24 native text, document-message, diagnostic and AST comparisons plus
+  an included source in both modes; it and five neighboring GTests pass in the
+  interpreter and JIT. The regression also passed scheduled collection every
+  100,000 allocations with freed-memory poisoning in both tiers. The original
+  message check excluded the native kernel preload; it now checks the full stream
+  after the separate kernel-message fix, pending installed GTests.
+  Three paired release samples preserved native AST and output
+  (`bench-generic-arguments.log`);
+  this is not overall performance qualification. The expl3 sequence and token-list
+  guards remain: unguarded staging exposed separate list-item spacing, echoed
+  definition control-word lexing and mixed expl3 expansion mismatches. See
+  `expl3-seq-body-structures-jit.out` (S1.8, D10.2.2).
+- **Kernel messages, installed:** native keeps kernel allocation messages for an
+  ordinary run but discards them when it restarts from the expl3 format. The
+  candidate in `temp/tex-script-f/kernel_message_candidate/` tracks executed
+  format requests and retains the appropriate messages. In an initial JIT
+  matrix all 36 full message comparisons and an included-source comparison
+  match native. A second 44-case matrix has two message mismatches from the
+  separately recorded expl3 register-allocation state (`count25` versus native
+  `count125`); the results agree between interpreter and JIT. Explicit expl3
+  package requests still differ in reconstructed text. Malformed package
+  declarations preserve the native preload choice, while options remain
+  unsupported. The generalized candidate and audited test updates are now
+  installed. Eight selected GTests pass in both interpreter and JIT; broader
+  corpus qualification remains open
+  (S1.8, D10.2.2).
+- **Format-request generalization:** `kernel_message_candidate_v2/` moves the
+  package-list check to the same point as native, including explicit requests
+  when `script_expl3` is false. Ten JIT cases match native messages and
+  diagnostics; the separately recorded package-text mismatch remains. The
+  57-case audit below used the earlier candidate. The generalized candidate
+  passed focused JIT and interpreter comparisons and scheduled collection
+  with freed-memory poisoning in both tiers. The eight installed GTests pass in
+  both tiers. Three paired release samples retained identical output and native
+  ASTs: baseline CPU 10.822/10.795/10.798 seconds and candidate
+  10.801/10.647/10.656 seconds (`bench-kernel-message.log`). This does not
+  qualify total port performance.
+- **Kernel-message audit:** `sweep-kernel-updated.py` examined 57
+  existing native-message assertions on the pinned `0d58ab8b...` release host.
+  Twenty-nine original snapshots stayed equal; all 28 staged direct-native
+  assertion updates preserved their other expected results. Source and golden hashes are recorded in
+  `kernel-updated-manifest.json`. The expanded manifest also pins 1,888 package,
+  test, fixture, candidate and host paths in `kernel-updated-full-manifest.json`.
+  Staged test files and logs are under
+  `temp/tex-script-f/`; the 28 audited updates are installed.
+  Both manifests matched on completion. Original and replacement outputs are
+  saved as `kernel-original-*` and `kernel-updated-*`; cached initial
+  results use `kernel-message-sweep-*`.
+  The focused candidate regression already matches native for 24 direct cases,
+  four expl3 package message cases, four option-off requests, four malformed
+  requests and both included-file modes in JIT and interpreter. Five tests that
+  print document-message contents also retain their prior output and now compare
+  the full native stream; their audited updates are installed.
+- **Expl3 package setup:** the pass-through candidate in
+  `expl3_package_candidate/` was rejected: all 24 comparisons differed from
+  native text and AST. Native executes the bundled `expl3.sty` backend setup;
+  forwarding the original declaration is incorrect. See
+  `expl3-package-probe-jit.out`. With the bundled loader and 37 captured TeX
+  resources, `expl3-native-preload-probe.ls` reaches `expl3-code.tex` line
+  3160, then reports `tex-extra-fi` after 10,036 expansions. The native format
+  completes this preload. Conditional tracing found the outer `\if` is not
+  registered while its operands expand nested conditionals. A staged shared
+  scanning fix matches 88 native text, message and diagnostic comparisons in
+  both tiers, plus 48 focused expansion cases, eight AST cases and an included
+  source. The focused cases pass scheduled GC with poisoning in both tiers. It
+  advances the preload to line 7821 and 105,185 expansions, where
+  `tex-missing-number` remains.
+  The next failure is numeric scanning of the aliased `\pdftexversion`
+  primitive, which is registered but has no Script numeric value; native
+  treats it as a read-only integer. See
+  `expl3-native-preload-number-trace-jit.out`.
+  See `conditional_operand_candidate/`, `expl3_condition_trace/`, and
+  `expl3-native-preload-conditional-jit.out`. Seven staged neighboring goldens
+  passed. Three release pairs retained identical output and native ASTs:
+  baseline CPU 10.672/10.821/10.787 seconds and candidate
+  10.867/10.831/10.724 seconds (`bench-conditional-operand.log`). The 1,909
+  pinned paths matched before installation. The fix and paired regression are
+  installed; six focused GTests pass in both interpreter and JIT. Broader corpus
+  qualification remains open.
+- **Engine identity, installed:** native treats `\pdftexversion` as a read-only
+  numeric engine identity. `engine_identity_candidate/` centralizes the native
+  pdfTeX and e-TeX version and revision metadata and uses it for numeric scans,
+  `\the`, and existing revision primitives. Eleven initial text, message and
+  diagnostic comparisons matched native. A 74-case matrix matched in both tiers;
+  the focused regression covers 64 expansion cases, eight AST cases and two
+  included files, including foreign-file diagnostic locations. It passed
+  scheduled GC with poisoning in both tiers, and six staged neighboring goldens
+  passed. Three release pairs preserved identical output and native ASTs:
+  baseline CPU 10.789/10.672/10.849 seconds and candidate
+  10.760/10.860/10.777 seconds (`bench-engine-identity.log`). The change advances the upstream
+  expl3 preload to line 8020 and 105,847 expansions, where `tex-illegal-param`
+  remains (`expl3-native-preload-identity-jit.out`). The source and paired
+  regression are installed; six focused GTests pass in both interpreter and JIT.
+  Broader corpus qualification remains open (S1.8, D10.2.2).
+- **Expanded-definition token lists, installed:** native appends `\unexpanded` and
+  token-register results directly while scanning an expanded definition. The
+  Script scanner previously lost that provenance and parsed literal parameter
+  characters as the outer macro's parameters. The candidate in
+  `expanded_parameter_candidate/` matches 10 of 11 focused native cases; a
+  later malformed generated definition still stops with `tex-illegal-param`.
+  An initial candidate leaked that provenance through the shared scanner for
+  `\expanded`, breaking generated expl3 conditionals. The revised candidate
+  confines it to actual definition scans: the upstream bootstrap prefix now
+  defines `\cs_if_free:NF` identically to native and takes the same branch.
+  The full preload then reports a Lambda stack overflow. With the normal stack,
+  bounded runs reach line 8433 and 113,975 expansions without diagnostics, then
+  overflow before 113,980 while generating a `\clist_get:NN` conditional
+  variant. A diagnostic run with a 16 MiB process stack reaches line 9112 and
+  130,000 expansions; this is evidence of excessive nested depth, not a fix.
+  The unfinished 200,000-expansion diagnostic was stopped when the goal was
+  cleared. See `expl3-native-preload-stack-trace-113975-jit.out` and
+  `expl3-native-preload-budget-130000-stack16-jit.out`. A focused matrix covers 34 direct cases,
+  12 nested-expansion cases, six AST comparisons and an included source in both
+  constructor modes; all match in the interpreter and under scheduled GC with
+  poisoning in both tiers. Six staged neighboring goldens pass in JIT. Three
+  paired release samples preserve native AST and identical output: baseline CPU
+  10.816/10.808/10.792 seconds, candidate 10.823/10.747/10.880 seconds
+  (`bench-expanded-parameter.log`). The 991 pinned paths matched before
+  installation. Four installed-source GTests pass in both interpreter and JIT
+  (`expanded-parameter-installed-{interp,jit}.log`). Nested source echo and
+  malformed generated-definition recovery have separate remaining gaps; this
+  does not qualify the full corpus or overall performance (S1.8, D10.2.2).
+- **Inline stars:** 31 direct and generated cases plus included sources match
+  native. Five selected GTests and sampled GC/poison pass in both tiers. In one
+  JIT run a worker received signal 9 and its retry passed; the affected case
+  subsequently passed alone. Two earlier timeouts overlapped GC. Three pinned
+  release pairs preserved output and native AST (`bench-star-parity.log`).
+- **Active definition targets:** 30 direct and nested cases and an included
+  source match native; the following-group case remains guarded.
+  Five GTests and sampled GC/poison pass in both tiers. Three pinned release
+  pairs preserved output and native AST (`bench-active-target.log`).
+- **Repeated math scripts:** 23 direct, generated and display cases and an
+  included source match native; `x__2` is now covered by the punctuation
+  increment below. Six GTests and sampled GC/poison pass in both tiers. Three pinned release pairs preserved
+  output and native AST (`bench-repeated-math.log`).
+- **Reader-normalized math:** direct math and echoed definitions now use the
+  appropriate reconstructed or raw spelling. Twenty-four cases and an included
+  source match native; the previously guarded echoed math is now covered by the
+  punctuation increment below. Eight GTests and sampled GC/poison pass in both
+  tiers. Three pinned full-reader release pairs
+  preserved output and native AST (`bench-math-source-full.log`). These bounded
+  timing samples do not qualify overall port performance. All four increments
+  used `temp/tex-script-f/lambda-release`, SHA-256
+  `bbc1e4d24f1d8d48228967d5eb5b2580f44707dadafb6fde4605d2c15acb0684`, for
+  direct and GC checks. Logs use the `inline-star-*`, `active-definition-*`,
+  `repeated-math-*` and `math-source-*` prefixes in `temp/tex-script-f/`.
+- **Constructor sweep:** the frozen 141-script sweep finished with 133 matching
+  recorded goldens, seven candidate changes and one shared stale golden. The
+  parenthesis and package-provenance changes match native AST; the stale
+  paragraph-quantity golden was corrected and passes both tier harnesses.
+  Other changes, the expl3 assignment guard and corpus qualification remain
+  open. Keep the default unchanged; see `constructor-default-v2-{sweep,resume}.log`.
+- **Math punctuation:** the installed shared punctuation parser handles native
+  unbraced script arguments and ordinary punctuation atoms, including paired
+  relations. Forty-two direct, generated and operator cases, seven additional
+  source-boundary cases, and an included file match native in both tiers on the
+  pinned host. The prior `x__2` and
+  echoed `$x^^2$` guards were replaced with native-equality cases. Three staged
+  release pairs retained matching hashes and native ASTs; baseline CPU seconds
+  were 10.960/11.054/11.314 and candidate 10.966/11.291/10.995
+  (`bench-math-punctuation.log`). This is not overall performance qualification.
+  Ten selected GTests pass in both tiers without retries; the expanded
+  49-case regression also passed a separate JIT harness recheck and scheduled
+  GC every 100,000 allocations with freed-memory poisoning in both tiers; see
+  `temp/tex-script-f/math-punctuation-*` (S1.8, D10.2.2).
+- **Definition paragraphs:** the installed partial-definition guard now scans
+  outer breaks and lets the nested inline parser handle paragraphs inside groups.
+  Eighteen direct cases, seven related forms and an included file matched native
+  in both tiers on the pinned host; a following-group case remains guarded.
+  Three release pairs on ordinary active definitions preserved output and native
+  AST (`bench-definition-paragraph.log`). Eight GTests pass without retries in
+  both tiers, and the new regression passes scheduled GC every 100,000
+  allocations with freed-memory poisoning in both tiers (S1.8, D10.2.2).
+- **Unexpanded source identity:** native `back_list_copy` stores scanned
+  `\unexpanded` tokens and clears their direct-source flag. Script now reuses
+  `stored_tokens` for replay outside a token-text scan. Fifteen direct cases
+  and an included source match native expansion text, diagnostics and AST;
+  one generated generic-command case remains guarded. Six neighboring GTests
+  pass in both tiers and the new comparison passes scheduled GC every 100,000
+  allocations with poisoning in both tiers. Three interleaved release pairs
+  preserved output and native AST; CPU seconds were 10.723/10.954/11.426
+  before and 11.093/10.967/12.042 after (`temp/tex-script-f/bench-unexpanded.log`).
+  These are bounded samples, not overall performance qualification (S1.8,
+  D10.2.2). The aggregate runs recorded below predate this increment.
+- **Constructor scanner and token-list arguments:** in explicit constructor
+  mode, the installed digester joins and splits native ASCII command words at
+  reconstructed byte boundaries, handles the qualified literal escape forms,
+  and maps expanded or normalized generic arguments from reconstructed bytes.
+  The native-shaped `tl_put_right:Nn` and `tl_gput_right:Nn` wrappers now expand
+  in argument mode without executing the assignment. Three installed goldens
+  cover 36 direct names, 30 generated names, 12 token-list cases and an included
+  source; all compare native text, diagnostics and AST in interpreter and JIT.
+  Unicode control names remain guarded because native can split UTF-8 (Input
+  LI-064); unqualified assignments and lexical cases remain guarded. The 64-case
+  direct-name staging matrix matched native in both tiers and the generated
+  matrix matched 30 ASCII cases with four Unicode guards. Ten selected existing
+  JIT goldens passed against the staged candidate after correcting a stale
+  relative test-helper import. The direct-name and token-list tests passed
+  scheduled GC every 100,000 allocations with poisoning in both tiers. Three
+  interleaved release samples on ordinary formatting preserved output and native
+  AST; CPU seconds were 10.876/10.756/10.675 before and 10.888/11.088/10.817
+  after (`bench-constructor-relex.log`), a bounded sample only. Logs
+  use `constructor-relex-*` and `direct-word-*` under `temp/tex-script-f/`
+  (S1.8, D10.2.2). These checks do not qualify the full corpus.
+- **Following-group investigation:** a staged candidate matches direct
+  active-target cases but exposes an expansion difference inside formatting
+  arguments when constructor mode is off; the installed guard remains. Do not
+  enable constructor mode by default until its source mapping and corpus gates
+  pass.
+- **Sequence wrapper probe:** a staged attempt to expand the native-shaped
+  `seq_put_right:Nn` wrapper inside constructor arguments did not match native
+  text or diagnostics in seven cases (`constructor-seq-matrix-jit.out`). It
+  remains uninstalled and the existing explicit unsupported guard remains.
+- **Expl3 Nx variants:** the six supported `Nx` token-list variants are now
+  generated as the protected native-shaped `exp_args:NNx` macros, sharing the
+  existing variant-name table. The `use:x` helper, its scratch token list and
+  `cs_set_nopar:Npx` alias use the bundled kernel definitions. This supports
+  constructor arguments and preserves native macro meaning, `\ifx`, aliases,
+  scope and normal assignments. The two new goldens cover 29 text/diagnostic/
+  AST cases, an included file, 24 scope/alias cases and eight `\show` results;
+  four selected installed GTests pass in both tiers. Eight earlier neighboring
+  goldens matched the staged implementation in JIT. The older constructor
+  golden was updated only where the former guard now matches native. Both new
+  tests pass scheduled GC every 100,000 allocations with freed-memory
+  poisoning in both tiers. Three interleaved release pairs for the final
+  representation retained native AST and identical output: baseline CPU
+  seconds were 15.064/15.269/15.195 and candidate 15.043/15.225/15.139
+  (`bench-constructor-nx-full.log`), a bounded sample. S1.8 and D10.2.2 apply.
+- **Expl3 scratch sequences:** initialize the four kernel-defined local and
+  global scratch sequences as empty sequence values, using the shared scratch
+  initialization helper. Twenty-one expansion cases and six document-tree
+  cases match native, as does an included-file case; duplicate declaration
+  still stops with `expl3-already-defined` where native emits and recovers from
+  a diagnostic, and four nonempty-sequence AST cases retain their mapping
+  guard. Three installed GTests pass in both tiers; the new test passes
+  scheduled GC every 100,000 allocations with poisoning in both tiers. Eight
+  neighboring JIT goldens match the staged candidate. Three interleaved release
+  pairs retained identical output and native AST; baseline CPU seconds were
+  15.128/15.083/15.004 and candidate 15.008/15.133/14.997
+  (`bench-expl3-scratch.log`), a bounded sample (S1.8, D10.2.2).
+- **LaTeX aggregate interrupted:** the fresh 269-script JIT selection used two
+  workers and the standard batch timeout, with no concurrent test suite. Its
+  source and host manifest is `temp/tex-script-f/latex-suite-current/source-manifest.json`
+  and log is `temp/tex-script-f/latex-suite-current/jit.log`. At 115 completed
+  records, it had reported 60-second timeouts in `test_tex_script_digest`,
+  `test_tex_script_expl3_bool` and `test_tex_script_expl3_tl_string`, and two
+  batch-worker crashes (bus error and segmentation fault). The already-failing
+  run was stopped to investigate timeout recovery; there is no aggregate result
+  and missing records were not retried. Preserve the original events and rerun
+  the gate after addressing the timeout and worker failures.
+- **Timeout recovery:** the next script after a one-second timeout hung on the
+  MIR code-generation mutex; sampling the debug host showed that the signal
+  jump bypassed the lock destructor. `test-batch` now reports 124 using
+  signal-safe writes and exits the interrupted worker; the existing harness
+  retries unstarted records. The runtime regression and an end-to-end 60-second
+  harness probe pass, keeping the intentional timeout as a failure. The three
+  LaTeX timeout cases then passed individually in one-worker JIT on the debug
+  host in 44.7, 32.0 and 30.5 seconds; this does not erase the aggregate
+  failures. The broader runtime issue remains in
+  [LR01-24](../Lambda_Issue_Ledger.md#lr01-24) (D6.3.6, D6.4.3).
+- **Prior LaTeX failures:** all ten remaining cases from the earlier 12-case
+  failure list pass a one-worker JIT harness replay without retries; the other
+  two (digester and inline formatting) passed separately. This is a focused
+  replay, not a fresh aggregate or corpus gate
+  (`temp/tex-script-f/prior-latex-failures-replay-jit.log`).
 - **State:** production still uses the native engine. Script `f` expansion and
   the numeric noexpand scan fix are installed locally; their 11-case golden
   passed interpreter and JIT. The adjacent noexpand JIT test passed; numeric
@@ -49,7 +319,38 @@ The existing native engine design and historical Phase IV work are in
 - **Open gates:** reconstructed-output and source provenance, diagnostics and
   recovery, TeX/expl3 and document parity, corpus and forced-GC qualification,
   release performance, and coordinated formal and native-client migration.
-- **Aggregate validation:** `make test-lambda-baseline` ran against
+- **Post-timeout-fix runtime gates:** the verified-snapshot Lambda baseline
+  finished 7,532/7,549, with the same 17 failed cases as the prior run and the
+  new timeout regression passing. The server failures report sandbox-denied
+  localhost binds; the media-playback and Scene3D failures remain unresolved.
+  Test262 then passed all 40,261 selected cases in the initial batches, with
+  zero reported regressions. The timeout and ordinary failed-script regressions
+  pass on both debug and release hosts. The baseline debug host SHA-256 was
+  `5da3be17c2aa6ab36917c16e1dfcdc01d25507a34793c8932b8249abb3a6cfdf`;
+  the Test262 release host SHA-256 was
+  `0d58ab8b973c3c662980d8b14a4199203253ab4664a7d498931597371645a8ea`.
+  Logs, changed-file manifest and matching sibling snapshot checks are under
+  `temp/tex-port-baseline-20261116/` with the `timeout-fix` suffix. Generated
+  build configurations were restored afterward. These runtime gates preceded
+  the expl3 Nx increment above. The 269-script LaTeX run
+  remains interrupted and must be repeated.
+- **Latest aggregate validation:** with checksum-verified snapshots of the
+  current dirty Input and Radiant source trees, `make test-lambda-baseline`
+  finished 7,531/7,548. Three server tests reported sandbox-denied localhost
+  binds; 12 sync/WebSocket cases, `dom_media_playback` and `scene3d_midtown`
+  also failed. The media test stopped early and Scene3D differed from its
+  golden; their causes were not established. The separate Test262 baseline
+  reported zero regressions: 40,257/40,261 passed in batches and four regexp
+  cases passed on isolated retry. No staged tests overlapped these runs.
+  The debug host SHA-256 was
+  `824ea083209ddcd1c54b5022046b7eace56832c49886f126734508fec74c2337`;
+  Test262 rebuilt the release host, SHA-256
+  `8eeff64dda3918d6b86d67087050b293cbbde2a929cfda9bcf68376b77abad8d`.
+  Source hashes and sibling snapshots matched before and after the runs;
+  logs and manifest are under `temp/tex-port-baseline-20261116/`. The
+  generated configurations were restored to the normal sibling roots. The
+  full LaTeX corpus gate remains open.
+- **Earlier aggregate validation:** `make test-lambda-baseline` ran against
   checksum-verified snapshots of the current dirty Input and Radiant
   source checkouts under `temp/tex-script-f/baseline-src/`. Their HEADs at copy
   time were `2672c1ada7cabbd4144f21f97f15ee96a62b1b6f` and
@@ -1312,18 +1613,35 @@ diagnostic metadata remains a separate OPEN issue.
 
 ## Script digester rejects active-character definition targets — 2026-11-11
 
-**Status:** OPEN — echoed definitions of active characters lack a digester
-branch. **Full script TeX-port blocker:** yes, for documents defining active
-characters when definition echo is enabled. Native parsing is unaffected.
+**Status:** PARTIALLY FIXED for the qualified direct, nested and included
+active-character definitions. S1.8 and D10.2.2 govern the input boundary.
 
-For `\def~{XYZ}\begin{document}A~B\end{document}`, expansion succeeds, but
-script digestion returns `latex-digest-unsupported` for `definition target`.
-Native LaTeX retains the definition and expands the document text to `AXYZB`.
-The staged active-token text fix does not handle definition targets. Evidence:
-`../lambda-input/temp/expl3-script/active-digest-interp.out`. The existing
-`test/lambda/latex/test_tex_script_active_digest.txt` explicitly expects the
-unsupported result; preserving existing references blocks promoting a change
-that alters that result without an owner ruling.
+For `\def~{XYZ}\begin{document}A~B\end{document}`, expansion succeeded but
+Script digestion rejected the echoed definition as `definition target`. Native
+LaTeX emits an empty `def` node followed by the target and its group, and the
+Script digester now follows that structure using its existing partial-definition
+handling. Nested definitions resume at the active target so the enclosing
+parser retains the rest of the source. `test_tex_script_active_definition`
+compares 30 direct and nested cases and an included file against native text,
+diagnostics and AST in both tiers. A following source group retains its
+existing explicit mapping guard; nested blank lines are handled as described below. The former guarded
+case in `test_tex_script_active_digest` now asserts native equality; current
+harness, GC and performance qualification is in the checkpoint.
+
+
+## Paragraphs inside partially digested definitions — 2026-11-16
+
+**Status:** PARTIALLY FIXED for the qualified grouped cases. S1.8 and D10.2.2
+govern the input boundary.
+
+The partial-definition safety check previously rejected a paragraph token at
+any nesting depth, including one inside a brace group that the existing inline
+parser can represent. It now skips balanced groups while checking for outer
+paragraph breaks, and retains the guard for a break at the outer level or an
+unbalanced group. `test_tex_script_definition_paragraph` compares 25 direct,
+nested and related definition cases and an included file with native text,
+diagnostics and AST. A following-group mapping case remains explicitly guarded;
+the current checkpoint records harness, GC and release qualification.
 
 
 ## Script LaTeX digester rejects emitted active characters — 2026-11-11
@@ -1362,16 +1680,58 @@ Evidence: `../lambda-input/temp/expl3-script/reparse-fixture-remapped.out`.
 
 ## Script math digester rejects repeated scripts — 2026-11-11
 
-**Status:** OPEN — repeated scripts are not represented by the script math
-digester. **Full script TeX-port blocker:** yes for native AST parity on these
-expressions. Native parsing is unaffected.
+**Status:** FIXED for the tested repeated subscript and superscript forms;
+S1.8 and D10.2.2 govern the input boundary.
 
-For `\begin{document}$x^2^3$\end{document}`, the script reports
-`latex-digest-unsupported` for `repeated math script`; native produces a
-superscript group containing `23`. The existing `test_tex_script_digest`
-golden records this case as pending. Evidence:
-`../lambda-input/temp/expl3-script/reparse-digest-v2-interp.out`. This remains
-a visible unsupported case; no reference result has been altered.
+The script previously rejected `x^2^3` as `repeated math script`. Native
+combines successive superscripts into nested groups and replaces an earlier
+subscript with the last; the Script math digester now does the same. The new
+`test_tex_script_repeated_math` compares 23 direct, macro-generated, inline and
+display expressions and an included-file case with native text, diagnostics
+and AST in both tiers. The former pending `test_tex_script_digest` case now
+asserts native equality. Unbraced punctuation such as `x__2` is handled by the
+shared math punctuation parser. The `^^` source-field repair is recorded below. Six
+focused GTests and scheduled GC/poison checks pass in each tier; release timing
+is recorded in the current checkpoint.
+
+
+## Unbraced math punctuation — 2026-11-16
+
+**Status:** IMPLEMENTED for the qualified ASCII punctuation cases. S1.8 and
+D10.2.2 govern the input boundary.
+
+Native math parsing accepts punctuation and operators as unbraced script
+arguments; the Script digester previously rejected inputs such as `x__2` and
+`x_<=2`. A shared punctuation parser now serves both script arguments and
+ordinary atoms, including adjacent `<=`, `>=`, `!=`, `->` and `;;` forms.
+The earlier guarded `x__2` and echoed `$x^^2$` cases now assert native equality.
+`test_tex_script_math_punctuation` covers 49 direct, generated and
+comment-boundary cases and an included file against native text, diagnostics
+and AST. The current checkpoint records harness, GC and release qualification;
+full Unicode, error-recovery and native-lexer parity remain open.
+
+
+## Reader-normalized math and echoed definition source — 2026-11-16
+
+**Status:** PARTIALLY FIXED for the qualified direct, generated and included
+cases. S1.8 and D10.2.2 govern the input boundary.
+
+For `$x^^2$`, the reader emits `r` from the direct `^^2` source span. The
+Script math AST matched native, but its `source` attribute incorrectly retained
+`x^^2`; native records the reconstructed `xr`. Math mapping now compares a
+direct token's source spelling with the existing reconstruction helper before
+assuming that its source span is faithful. The digester also reparses echoed
+definitions without the reader's `^^` conversion: native preserves raw
+spelling there, even when the macro's expanded output is normalized. This mode
+is confined to the digester's definition reader; normal TeX reading retains
+its conversion.
+
+`test_tex_script_math_source_normalized` compares 24 direct, generated,
+definition and delimiter cases plus an included file against native text,
+diagnostics and AST. The later math punctuation increment also handles the
+previously guarded echoed `$x^^2$` expression; broader malformed-input and
+native-lexer parity remain open. The current checkpoint records tier, GC and
+release qualification.
 
 
 ## Script digester rejects bracket text after unknown environment start — 2026-11-11
@@ -4138,12 +4498,13 @@ unqualified.
 
 An expanded command followed by a star can have different token source files
 or offsets; for example `\def\x{\textbf}\begin{document}\x*{B}\end{document}`.
-The native AST associates the star with `textbf`, while the script cannot yet
-prove their reconstructed adjacency. It returns `latex-digest-unsupported` /
-`inline command star source mapping`, rather than emitting an incorrect tree.
-This blocks parity for affected documents. Reproduce with the final guarded
-case in the test above; implementing general reconstructed-output source
-mapping remains open.
+The installed digester now uses reconstructed byte adjacency when the command
+or star has generated or consumed provenance. It checks the emitted whitespace
+before a following group independently of TeX category codes and retains a
+guard when a span cannot prove the gap. The 31-case native comparison covers
+empty macros, comments, changed category codes and included sources; see the
+current checkpoint for interpreter, JIT, GC and remaining performance evidence.
+General reconstructed-output source mapping remains open.
 
 
 ## Experimental reconstruction drops source-mapping guards — 2026-11-13
@@ -4214,22 +4575,23 @@ tiers and 29 provenance cases in the interpreter; it is still uninstalled.
 
 ## Kernel preload messages are omitted from script results — 2026-11-13
 
-**Status:** OPEN for ordinary non-expl3 profile output; blocks full native
-message parity. S1.8 and D10.2.2 apply. The production native path is unchanged.
+**Status:** PARTIALLY FIXED for ordinary profile output and executed expl3-format
+requests. Expl3 register allocation messages still differ because the script
+format state is incomplete; installed corpus qualification remains open. S1.8
+and D10.2.2 apply. The production native path is unchanged.
 
-With `X` as input, native `parse(..., {type: "tex"})` includes the kernel's
-allocation messages, whereas `profile.expand_with_kernel` returns no
+Before the fix, with `X` as input, native `parse(..., {type: "tex"})` included the kernel's
+allocation messages, whereas `profile.expand_with_kernel` returned no
 messages. Running `expansion.expand` on the script kernel directly produces
 the same preload messages as native; `expansion.resume` explicitly resets
 `messages` to `[]`. Native `run_preload` clears the emitted tokens but leaves
 the messages. Reproduce with
 `../lambda-input/temp/expl3-script/kernel-preload-message-detail.ls/.out`;
 the pre-change and staged macro profiles behave identically. Existing
-inspection goldens deliberately compare document messages after subtracting
-the native empty-document baseline, so changing this behavior requires
-resolving those preserved assertions and qualifying the separate expl3-format
-preload path. The failing full-message comparisons in
-`macro-origin-native-interp.out` remain visible.
+inspection goldens deliberately compared document messages after subtracting
+the native empty-document baseline. The current checkpoint records their audited
+updates and the separately qualified expl3-format request handling. The earlier
+failing full-message comparisons remain in `macro-origin-native-interp.out`.
 
 
 ## Reconstructed leading blank lines lose a paragraph — 2026-11-13

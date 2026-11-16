@@ -1,0 +1,35 @@
+{
+  cases: 24,
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true
+}
+{
+  cases: 4,
+  supported: true,
+  messages: true,
+  diagnostics: true
+}
+{
+  cases: 4,
+  supported: true,
+  messages: true,
+  diagnostics: true
+}
+{
+  cases: 4,
+  expected_error: true,
+  messages: true
+}
+[{
+    supported: true,
+    text: true,
+    messages: true,
+    diagnostics: true
+  }, {
+    supported: true,
+    text: true,
+    messages: true,
+    diagnostics: true
+  }]

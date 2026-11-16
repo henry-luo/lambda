@@ -1,0 +1,8 @@
+{
+  cases: 24,
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true,
+  shown: true
+}

@@ -9,7 +9,7 @@ fn check(source) any^ {
  let rebuilt=reconstruct.reconstruct(script)^;
  let messages=slice(native.messages,len(baseline),len(native.messages))^;
  {source:source,match:script.issue==null and rebuilt.issue==null and rebuilt.text==native.text and
-   script.messages==messages and script.diagnostic_records==native.diagnostics}
+   script.messages==native.messages and script.diagnostic_records==native.diagnostics}
 }
 let cases=["A}B", "A}}B", "A\\endgroup B", "{\\endgroup}", "{A\\endgroup B}C",
  "\\begingroup}A\\endgroup B", "{\\endgroup X}Y", "A}\\def\\x{Q}\\x",

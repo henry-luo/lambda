@@ -336,11 +336,11 @@
     actual: null,
     native: null
   }, {
-    issue: "tex-unsupported-primitive",
-    unsupported: "constructor argument expl3 assignment",
+    issue: null,
+    unsupported: null,
     reconstruction_issue: null,
-    text_match: null,
-    diagnostics_match: null,
+    text_match: true,
+    diagnostics_match: true,
     actual: null,
     native: null
   }, {

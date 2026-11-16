@@ -1,6 +1,8 @@
+import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
 import utf8: lambda.io.utf8
 let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let message_preload=parse("",{type:"tex"})^.messages;
 fn render(t) => if(t.kind=="control") "\\" ++ t.value else t.value
 fn render_tokens(tokens,source,index=0) any^ {
  if(index>=len(tokens)) "" else {
@@ -12,7 +14,7 @@ fn render_tokens(tokens,source,index=0) any^ {
 fn check(source) any^ {
  let x=profile.expand_with_kernel(source,kernel,{echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
  let n=parse(source,{type:"tex"})^;let text=render_tokens(x.output,source)^;
- {issue:x.issue,matches:text==n.text,messages:x.messages}
+ {issue:x.issue,matches:text==n.text,messages:message_test.document(x.messages,message_preload)^,messages_match:x.messages==n.messages}
 }
 [for(source in [
     "\\begin{document}A\\hbox{Hi}B\\end{document}",

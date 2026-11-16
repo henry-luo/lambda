@@ -1,3 +1,4 @@
+import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
 let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let baseline=parse("",{type:"tex"})^.messages;
@@ -5,7 +6,7 @@ fn report(label,source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{resources:{local:{},bundled:{}}},100000)^;
  let n=parse(source,{type:"tex"})^;
  let messages=slice(n.messages,len(baseline),len(n.messages))^;
- {case:label,issue:r.issue,unsupported:r.unsupported,script:r.messages,native:messages,matches:r.messages == messages}
+ {case:label,issue:r.issue,unsupported:r.unsupported,script:message_test.document(r.messages,baseline)^,native:messages,matches:r.messages == n.messages}
 }
 report("first line", "\\immediate\\write16{L:\\the\\inputlineno/\\number\\inputlineno}")
 report("multiple lines", "\\immediate\\write16{A:\\the\\inputlineno}\n\\immediate\\write16{B:\\the\\inputlineno}\n%comment\n\\immediate\\write16{D:\\number\\inputlineno}")
@@ -21,4 +22,4 @@ let sty=input(root ++ "script_inputline.sty","text")^;
 let x=profile.expand_with_kernel(doc,kernel,{adapters:[],resources:{local:{'script_inputline.sty':{data:sty}},bundled:{}}},100000)^;
 let native=input(root ++ "script_inputline.tex","tex")^;
 let nm=slice(native.messages,len(baseline),len(native.messages))^;
-"local package:"; {issue:x.issue,unsupported:x.unsupported,script:x.messages,native:nm,matches:x.messages == nm}
+"local package:"; {issue:x.issue,unsupported:x.unsupported,script:message_test.document(x.messages,baseline)^,native:nm,matches:x.messages == native.messages}

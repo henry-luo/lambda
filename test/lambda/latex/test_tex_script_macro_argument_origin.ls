@@ -10,7 +10,7 @@ fn check(source) any^ {
     let n = parse(source, {type: "tex"})^;
     {source: source, expansion_issue: x.issue, reconstruction_issue: r.issue,
         text_match: if (r.issue == null) r.text == n.text else null,
-        document_messages_match: x.messages == slice(n.messages, len(native_preload_messages), len(n.messages))^, diagnostics_match: x.diagnostic_records == n.diagnostics,
+        document_messages_match: x.messages == n.messages, diagnostics_match: x.diagnostic_records == n.diagnostics,
         actual: if (r.issue != null or r.text == n.text) null else r.text,
         native: if (r.issue != null or r.text == n.text) null else n.text}
 }
@@ -74,7 +74,7 @@ let fixture_native = input(fixture_root ++ "macro_origin_main.tex", "tex")^;
 let fixture_commands = [for (token in fixture.output where token.kind == "control" and token.value == "textbf") token];
 {expansion_issue: fixture.issue, reconstruction_issue: fixture_rebuilt.issue,
     text_match: fixture_rebuilt.text == fixture_native.text,
-    document_messages_match: fixture.messages == slice(fixture_native.messages, len(native_preload_messages), len(fixture_native.messages))^,
+    document_messages_match: fixture.messages == fixture_native.messages,
     diagnostics_match: fixture.diagnostic_records == fixture_native.diagnostics,
     argument_is_direct: len(fixture_commands) == 1 and fixture_commands[0].direct == true and
         fixture_commands[0].file == fixture.main_file}

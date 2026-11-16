@@ -7,7 +7,7 @@ fn check(source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{script_expl3:false,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
  let n=parse(source,{type:"tex"})^;
  let b=reconstruct.reconstruct(r)^;
- {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
+ {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages == n.messages,diagnostics_match:r.diagnostic_records==n.diagnostics}
 }
 [for (source in [
  "\\def\\assign{\\count0=3}{\\global\\assign}\\the\\count0",

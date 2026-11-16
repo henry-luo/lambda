@@ -10,7 +10,7 @@ fn matches(source) any^ {
     let rebuilt = reconstruct.reconstruct(result)^;
     let native = parse(source, {type: "tex"})^;
     {issue: result.issue, reconstruct_issue: rebuilt.issue, matches: rebuilt.text == native.text,
-        diagnostics_match: result.diagnostic_records == native.diagnostics, messages_empty: len(result.messages) == 0}
+        diagnostics_match: result.diagnostic_records == native.diagnostics, messages_match: result.messages == native.messages}
 }
 let sources = [
  "\\begin{document}$a\\vcenter{b}c$\\end{document}",

@@ -18,7 +18,7 @@ fn matches(source) any^ {
         {echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
     let text = render_tokens(result.output, source)^;
     let native = parse(source, {type: "tex"})^;
-    {issue: result.issue, matches: text == native.text, diagnostics_match: result.diagnostic_records == native.diagnostics, messages_empty: len(result.messages) == 0}
+    {issue: result.issue, matches: text == native.text, diagnostics_match: result.diagnostic_records == native.diagnostics, messages_match: result.messages == native.messages}
 }
 let sources = [
  "\\begin{document}A\\the\\hyphenchar\\nullfont B\\end{document}",

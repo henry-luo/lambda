@@ -160,7 +160,9 @@ fn decode_super(line, at, c, after, cats) any^ {
 
 fn character(r, pos) any^ {
     let c = ch(r.line, pos);
-    if (c == "") null else decode_super(r.line, pos, c, pos + 1, r.catcodes)
+    // echoed definitions are reparsed as LaTeX source, before TeX's ^^ decoding.
+    if (c == "") null else if (r.preserve_source == true) {value:c, end:pos + 1}
+        else decode_super(r.line, pos, c, pos + 1, r.catcodes)
 }
 
 fn word(r, pos, parts) any^ {

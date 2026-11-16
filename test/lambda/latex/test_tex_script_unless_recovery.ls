@@ -10,7 +10,7 @@ fn check(source) any^ {
     let native = parse(source, {type:"tex"})^;
     let rebuilt = reconstruct.reconstruct(script)^;
     script.issue == null and rebuilt.issue == null and rebuilt.text == native.text and
-        script.messages == slice(native.messages, len(baseline), len(native.messages))^ and
+        script.messages == native.messages and
         script.diagnostic_records == native.diagnostics
 }
 [for (source in [

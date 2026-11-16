@@ -16,8 +16,11 @@ pub fn expand_with_kernel(source, kernel, options = null, budget = 20000000) any
     if (preload.issue != null) preload
     else {
         let ready = if (given.script_expl3 == true) expansion.enable_script_expl3(preload)^ else preload;
-        expansion.resume({*:ready, echo_definitions: given.echo_definitions == true},
-            source, if (given.source_name == null) "<input>" else given.source_name, budget)
+        let document = expansion.resume({*:ready, echo_definitions: given.echo_definitions == true},
+            source, if (given.source_name == null) "<input>" else given.source_name, budget)^;
+        // the native expl3 format omits preload output; an ordinary kernel run retains it.
+        if (document.expl3_format_requested == true) document
+        else {*:document, messages: [*preload.messages, *document.messages]}
     }
 }
 

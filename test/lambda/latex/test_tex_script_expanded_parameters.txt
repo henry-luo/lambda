@@ -1,0 +1,35 @@
+{
+  cases: 34,
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true
+}
+{
+  cases: 6,
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true,
+  tree: true
+}
+{
+  cases: 12,
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true
+}
+[{
+    supported: true,
+    text: true,
+    messages: true,
+    diagnostics: true,
+    tree: true
+  }, {
+    supported: true,
+    text: true,
+    messages: true,
+    diagnostics: true,
+    tree: true
+  }]

@@ -1,69 +1,86 @@
 [{
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: ["box"]
+    messages: ["box"],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }]

@@ -380,7 +380,8 @@
 {
   issue: null,
   unsupported: null,
-  messages: ["LCOUNTER-ONE=4/iv/IV/d/D/8", "LCOUNTER-TWO=5/0/5", "LCOUNTER-THREE=12"]
+  messages: ["LCOUNTER-ONE=4/iv/IV/d/D/8", "LCOUNTER-TWO=5/0/5", "LCOUNTER-THREE=12"],
+  messages_match: true
 }
 "cyclic reset bounded:"
 {
