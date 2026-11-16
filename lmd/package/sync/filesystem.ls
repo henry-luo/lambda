@@ -151,8 +151,15 @@ pub pn capture_paths(tx, keys, current, paths, attempts=3) any^ {
 fn hints(previous, captured) any^ {
     var result = []
     var i = 0
+    let paths = cap.index_paths(captured)^
     while (i < len(previous)) {
         let old = previous[i]
+        let same_path = paths[old.path]
+        // A surviving identity at its original path needs no rename search, even with hard links.
+        if (same_path != null and same_path.identity == old.identity and same_path.type == old.type) {
+            i = i+1
+            continue
+        }
         let matches = [for (member in captured where member.identity == old.identity and member.type == old.type) member]
         if (len(matches) == 1 and matches[0].path != old.path) {
             result = [*result,{entry:old.id,path:matches[0].path}]

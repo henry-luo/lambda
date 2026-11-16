@@ -17,6 +17,18 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Invalid select timeout silently disables the deadline — 2026-11-17
+
+**Status:** FIXED in the working tree; AUTO/interpreter/JIT regression checks pass.
+The full Lambda baseline passes 7,566/7,566. Timeout observation follows
+S13.3.2; invalid timeout arguments must follow ordinary error admission
+(S7.4.1v2, S11.4.1v5). `pn_select` ignored failure of
+`task_read_milliseconds`, leaving its zero-initialized timeout unbounded for a
+float or string. `wait` already rejects those inputs. This surfaced when sync
+passed a floating-point monotonic deadline difference to `select`. Sync now
+rounds remaining durations up to integer milliseconds; the runtime also rejects
+invalid/negative select timeouts. Regression: `proc/select_invalid_timeout`.
+
 ## Refreshing propagated recursive calls invents operator errors — 2026-11-16
 
 **Status:** FIXED in the working tree; focused AUTO/interpreter/JIT checks and

@@ -44,8 +44,8 @@ pn main() {
     let rejected = local.mutate(ah,pn (tx,k,current)=> { raise error("rollback") }) ^ { ^ }
     let unchanged = exchange.current_token(ah)^ == before
     var checked = [called == 42,retained == 'unrelated',rejected is error,unchanged]
-    for (profile in [session.burst_protocol,session.batch_protocol]) {
-        let label = if (profile == session.burst_protocol) "v1" else "v2"
+    for (profile in [session.burst_protocol,session.batch_protocol,session.fast_protocol]) {
+        let label = if (profile == session.burst_protocol) "v1" else if (profile == session.batch_protocol) "v2" else "v3"
         let listener = peer.listener(0,"127.0.0.1",true)^
         let options = {idle_ms:500,burst_ms:10000,interval_ms:100}
         let aname = "a-" ++ label

@@ -7,12 +7,14 @@ import v: .schema
 pub let protocol = "lambda-peer-lan-p256-1"
 pub let burst_protocol = "lambda-peer-lan-burst-p256-1"
 pub let batch_protocol = "lambda-peer-lan-burst-p256-2"
-pub fn is_burst(profile) bool^ => profile == burst_protocol or profile == batch_protocol
+pub let fast_protocol = "lambda-peer-lan-burst-p256-3"
+pub fn is_batch(profile) bool^ => profile == batch_protocol or profile == fast_protocol
+pub fn is_burst(profile) bool^ => profile == burst_protocol or is_batch(profile)^
 pub let max_frame = 262144
 pub pn start(credentials, role, profile=protocol) any^ {
     if (role != 'client' and role != 'server') raise error("sync peer: invalid handshake role")
     let secret = crypto.key()^
-    if (not contains([protocol,burst_protocol,batch_protocol],profile)^) raise error("sync peer: invalid session profile")
+    if (not contains([protocol,burst_protocol,batch_protocol,fast_protocol],profile)^) raise error("sync peer: invalid session profile")
     let hello = {protocol:profile,space:credentials.space,device:credentials.device.id,role:role,
         ephemeral:crypto.public(secret,'x25519')^,nonce:crypto.key()^}
     return {secret:secret,hello:hello}

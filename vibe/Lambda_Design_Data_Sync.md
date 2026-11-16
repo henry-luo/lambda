@@ -223,7 +223,14 @@ Reuse a namespace projection only when it matches the validated typed replica,
 including after external filesystem reconciliation.
 
 The current LAN implementation debounces notifications for 50 ms, with a 250 ms
-maximum batch wait. Its negotiated burst v2 profile uses causal HAVE frontiers
+maximum batch wait. A replaceable task timer wakes the agent at the batch deadline,
+independently of periodic verification ticks (S13.1.2v2, S13.3.1v2). Committed
+repository-token subscriptions wake connected peers immediately. A single reader
+buffers one transport frame; readiness subscriptions never consume frames. Cancel
+subscriptions before shutdown, then drain the graceful close before joining the
+reader, so cancellation cannot abort an outstanding acknowledgment.
+
+The negotiated burst v2 profile uses causal HAVE frontiers
 to select complete sequences of missing atomic workspace transactions. A
 full-space checkpoint authority signs each relayed delta without changing its
 original operation authors. Compacted prefixes, epoch changes and oversized
@@ -238,11 +245,41 @@ An older peer receives a signed checkpoint when its required packet prefix is go
 
 Within an exchange round, the pinned remote inventory is already a declaration
 of object availability; do not send another missing-object query for those IDs.
-Each round still inventories the selected repository. An ACK covering the pinned
+Initial, fallback and periodic verification rounds inventory the selected
+repository. An ACK covering the pinned
 offer can release that offer's staging pins in the same durable head transaction.
 The client combines its completed-exchange ACK and staging cleanup after the
 peer finishes the round. Unrelated staging pins remain; interrupted transfers
 retain the existing recovery contract (D11.1.2).
+
+The negotiated burst v3 profile (`lambda-peer-lan-burst-p256-3`) adds a bounded
+warm exchange after the initial inventory. Send complete signed transaction groups,
+their new immutable manifest/page/chunk dependency closure, and the exact pinned
+HAVE frontier. A reverse delta and explicit ACK complete the exchange. Accept
+objects, frames, the peer ACK and release of those objects' staging pins in one
+head transaction. Never acknowledge a newer local frontier that was not included
+in the pinned response. Preserve unsent local packet groups when accepting an
+empty reverse delta: trim only the intersection of the installed baseline and
+the peer's acknowledged clock.
+
+This fast path requires matching epochs and an available packet prefix, no open
+documents, no retirement/cache controls or pending groups, at most 64 dependency
+objects, files up to 64 KiB, and a complete exchange within the existing 256 KiB
+frame budget. Otherwise use the full exchange with streaming/checkpoint fallback.
+Finite sessions and burst v1/v2 remain supported. All incoming signed frames and
+object dependencies retain full authentication. Only byte-equivalent immutable
+events and receipts may reuse a trusted local owner's previous validation proof
+(S2.3.1v2, S5.2.1v2, D11.1.2); wire input cannot supply that proof.
+
+After a complete incoming batch is durable, installation may begin before the
+remaining round bookkeeping finishes. A version-2 local installation intent refers
+to an authenticated immutable source-state ID instead of embedding another full
+replica. Resolve and validate that source before filesystem effects after restart;
+retain its recovery dependencies while the intent is pending. Legacy inline
+intents remain readable. Local state objects and shared object formats are
+unchanged; older hosts cannot resume a version-2 pending intent. Finish the
+installation with the newer host before downgrading. Filesystem visibility and
+completed installation remain separate milestones (D11.1.2).
 
 Authenticate once per connection burst. Pin a separate immutable offer for each
 exchange round, transfer missing objects and existing CRDT records, commit before

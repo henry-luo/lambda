@@ -5,6 +5,21 @@ import cap: .workspace_capture
 import fs: .filesystem
 import codec: .codec
 import blob: .blob
+import c: .core
+import v: .schema
+
+pub pn pin(tx, keys, journal) any^ {
+    if (journal.source == null and journal.version == null) { return {id:null,replica:journal.endpoint.replica} }
+    if (journal.version != 2) raise error("sync installation: unsupported intent version")
+    v.fields(journal.source,["state"])^
+    if (not (journal.source.state is binary) or len(journal.source.state)^ != 32)
+        raise error("sync installation: invalid source head")
+    let cached = if (keys.install_source != null) keys.install_source else keys.workspace_validation.install_source
+    if (cached.id == journal.source.state) { return cached }
+    let source = repo.get(tx,keys,journal.source.state,"state")^
+    c.validate(source.endpoint.replica)^
+    return {id:journal.source.state,replica:source.endpoint.replica}
+}
 
 pub fn prepare(current, projection=null) any^ {
     if (current.review != null) raise error("sync installation: external capture needs review")
@@ -45,6 +60,8 @@ pn hold(tx, keys, current, operation, observed, reason) any^ {
 pub pn step(tx, keys, current, actor) any^ {
     let journal = current.installation
     if (journal == null) { return current }
+    // Authenticate the pinned source before any filesystem effect, including after restart.
+    let source = pin(tx,keys,journal)^
     if (disk.inspect(current.root,"")^.identity != current.root_identity)
         raise error("sync installation: working root replaced")
     if (journal.next >= len(journal.operations)^) {
@@ -66,7 +83,7 @@ pub pn step(tx, keys, current, actor) any^ {
                 // Unrelated edits cannot invalidate completed guarded writes. Untouched paths
                 // retain their old inode evidence while the installed frontier becomes the base.
                 let established = {*:current,installation:null,
-                    base:cap.baseline(journal.endpoint.replica,wanted,expected_id)^,
+                    base:cap.baseline(source.replica,wanted,expected_id)^,
                     disk:[for (member in wanted) {
                         let old = prior_paths[member.path]
                         let observed = actual_paths[member.path]
@@ -79,7 +96,7 @@ pub pn step(tx, keys, current, actor) any^ {
                 recoveries:unique([*journal.recoveries,{capture:actual}])}}
         }
         let members = [for (member in actual.members) {*:member,id:wanted_paths[member.path].id}]
-        return {*:current,base:cap.baseline(journal.endpoint.replica,wanted,expected_id)^,
+        return {*:current,base:cap.baseline(source.replica,wanted,expected_id)^,
             disk:members,installation:null}
     }
     let operation = journal.operations[journal.next]

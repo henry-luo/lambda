@@ -32,6 +32,20 @@ pn ticks(parent, interval_ms) any^ {
         receive()^
     }
 }
+pn batch_timer(parent) any^ {
+    var schedule = receive()^
+    while (true) {
+        if (schedule.at == null) { schedule = receive()^; continue }
+        // Keep the sleeper in this block until it fires or a replacement cancels it.
+        let due = schedule.at
+        let sleeper = start(pn ()=> {
+            sleep(int(ceil(max(0,due-timing.milliseconds())))^)^
+            send(parent,{type:'batch_due'})^
+        },[])
+        schedule = receive()^
+        cancel(sleeper); wait(sleeper) ^ { null }
+    }
+}
 pn discovery(credentials, parent) any^ {
     while (true) {
         let hints = connectivity.discover(credentials,1000) ^ { ^ }
@@ -86,6 +100,7 @@ pub pn run(directory, key, options) any^ {
     let me = self()
     let watcher = start(watch_events,[watch,me])
     let ticker = start(ticks,[me,options.interval_ms])
+    let timer = start(batch_timer,[me])
     let browser = start(discovery,[initial.credentials,me])
     let receiver = start(incoming,[listener,directory,key,handle,initial.credentials,me,options])
     let workers = [for (member in initial.credentials.members)
@@ -97,6 +112,7 @@ pub pn run(directory, key, options) any^ {
     var batch_started = null
     var batch_due = 0
     var scan_retry_at = 0
+    var armed_at = null
     var next_verify = timing.milliseconds()+options.verify_ms
     var token = first_token
     var turns = 0
@@ -127,7 +143,7 @@ pub pn run(directory, key, options) any^ {
             }]
             send(browser,true)^
         } else if (event.type == 'connected') {
-            sessions = [*sessions,{worker:event.worker,peer:event.peer}]
+            sessions = [*sessions,{worker:event.worker,peer:event.peer,role:event.role,profile:event.profile}]
             current = {*:current,connected:true,phase:'syncing',peer:event.peer,connections:current.connections+1}
         } else if (event.type == 'round') {
             peers = update_peer(peers,event.peer,{delivered:event.token})
@@ -185,7 +201,10 @@ pub pn run(directory, key, options) any^ {
             peers = update_peer(peers,item.id,{busy:true})
             current = {*:current,phase:'connecting',peer:item.id,attempts:current.attempts+1}
         }
+        let due = if (batch_started == null) null else max(batch_due,scan_retry_at)
+        if (due != armed_at) { send(timer,{at:due})^; armed_at = due }
         current = {*:current,connected:len(sessions)^ > 0,active_connections:len(sessions)^,
+            channels:[for (entry in sessions) {peer:entry.peer,role:entry.role,profile:entry.profile}],
             ticks:turns,last_event:event.type,pending_changes:len(pending_paths)^,
             batch_wait_ms:if (batch_started == null) null else max(0,max(batch_due,scan_retry_at)-timing.milliseconds()),
             frontier:token.clock,peers:[for (item in peers) {id:item.id,online:item.url != null,busy:item.busy,
@@ -193,8 +212,8 @@ pub pn run(directory, key, options) any^ {
         if (event.type != 'tick' or turns%10 == 0 or captured_this_turn) report(options,current)^
         if (options.stop_after > 0 and current.sessions >= options.stop_after) { break }
     }
-    for (task in [watcher,ticker,browser,receiver,*[for (worker in workers) worker.task]]) { cancel(task) }
-    for (task in [watcher,ticker,browser,receiver,*[for (worker in workers) worker.task]]) { wait(task) ^ { null } }
+    for (task in [watcher,ticker,timer,browser,receiver,*[for (worker in workers) worker.task]]) { cancel(task) }
+    for (task in [watcher,ticker,timer,browser,receiver,*[for (worker in workers) worker.task]]) { wait(task) ^ { null } }
     send(broker,{stop:true})^
     wait(broker)^
     disk.unwatch(watch)^

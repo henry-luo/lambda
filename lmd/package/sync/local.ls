@@ -35,7 +35,7 @@ fn validate(current, space, previous=null) any^ {
     let same = previous.values != null and codec.same_encoding(values.replica,previous.values.replica)^
     let same_base = previous.values != null and codec.same_encoding(values.base,previous.values.base)^
     let same_documents = previous.values != null and codec.same_encoding(values.documents,previous.values.documents)^
-    if (not same) { c.validate(current.endpoint.replica)^ }
+    if (not same) { c.validate_known(current.endpoint.replica,previous.values.replica)^ }
     p.validate_endpoint_fields(current.endpoint)^
     let snapshot = if (same and previous.snapshot != null) previous.snapshot
         else if (not same_base and len(current.endpoint.replica.pending)^ == 0)
@@ -52,7 +52,9 @@ fn validate(current, space, previous=null) any^ {
     if (not same_documents) {
         for (record in document_state.all(current)) { document_state.validate(record,space)^ }
     }
-    return {values:values,snapshot:snapshot,projection:projection,base_projection:base_projection}
+    let pinned = previous.install_source
+    return {values:values,snapshot:snapshot,projection:projection,base_projection:base_projection,
+        install_source:if (pinned != null and current.installation.source.state == pinned.id) pinned else null}
 }
 pn replica_dependencies(tx, keys, replica, seen=[], depth=0, retired=[], source="workspace", cached=[], verified=[], projection=null) any^ {
     if (depth > 128) raise error("sync local: checkpoint dependency depth")
@@ -94,10 +96,11 @@ pn dependencies(tx, keys, endpoint, retired=[], source="workspace", cached=[], v
 fn dependency_scope(current) any^ => codec.digest([maintenance.get(current).manifest,
     maintenance.get(current).revisions,reach.cache_ids(current)])^
 
-fn installed_packets(current) any^ {
+fn installed_packets(current, peer_clock=null) any^ {
     let endpoint = current.endpoint
     return if (current.base.checkpoint.epoch == endpoint.replica.epoch)
-        p.compact_log(endpoint,current.base.checkpoint.frontier)^ else endpoint
+        p.compact_log(endpoint,if (peer_clock == null) current.base.checkpoint.frontier else
+            c.clock_meet(current.base.checkpoint.frontier,peer_clock)^)^ else endpoint
 }
 
 pub pn open_repository(path, secret, space) any^ {
@@ -145,9 +148,11 @@ pub pn mutate(handle, operation) any^ {
         let loaded = repo.load(tx,k)^
         let expanded = documents.expand(tx,k,loaded.state)^
         let previous = if (loaded.validated == true) loaded.validation else validate(expanded,k.space)^
-        let updated = operation(tx,{*:k,workspace_validation:previous},expanded)
+        let updated = operation(tx,{*:k,workspace_validation:previous,head_id:loaded.id},expanded)
         let next = documents.flush(tx,k,updated^)^
-        let proof = validate(next,k.space,previous)^
+        let checked = validate(next,k.space,previous)^
+        let proof = if (next.installation.source.state == loaded.id)
+            {*:checked,install_source:{id:loaded.id,replica:expanded.endpoint.replica}} else checked
         let scope = dependency_scope(next)^
         // Destructive maintenance can remove bytes without changing a replica frontier.
         let known = if (handle.keys.cache_enabled == true and loaded.dependency_scope == scope and
@@ -214,16 +219,27 @@ pub pn prepare_install(handle) any^ {
         // Reuse only the projection tied to this exact typed replica, after external reconciliation.
         let proof = k.workspace_validation
         let projection = if (proof.values != null and codec.same_encoding(fresh.endpoint.replica,proof.values.replica)^) proof.projection else null
-        return install.prepare(fresh,projection)^
+        let prepared = install.prepare(fresh,projection)^
+        if (prepared.installation == null) { return prepared }
+        var source = k.head_id
+        if (not (codec.same_encoding(fresh.endpoint.replica,current.endpoint.replica)^)) {
+            validate(fresh,k.space,k.workspace_validation)^
+            source = repo.store_object(tx,k,"state",fresh)^
+        }
+        // The authenticated source head already owns the complete replica; avoid embedding it again.
+        return {*:prepared,installation:{version:2,source:{state:source},
+            *:map([for (key at prepared.installation where string(key)^ != "endpoint") (key,prepared.installation[key])])}}
     })^
 }
 pn advance_install(handle, max_steps) any^ {
     return mutate(handle,pn (tx,k,current)=> {
         var updated = current
         var i = 0
+        let pinned = if (current.installation == null) null else install.pin(tx,k,current.installation)^
+        let step_keys = {*:k,install_source:pinned}
         // The complete intent is already durable. A rollback replays guarded, idempotent effects.
         while (updated.installation != null and i < max_steps) {
-            updated = install.step(tx,k,updated,workspace_actor(handle,true))^
+            updated = install.step(tx,step_keys,updated,workspace_actor(handle,true))^
             i = i+1
             if (updated.installation.blocked != null) { break }
         }
@@ -291,19 +307,43 @@ pub pn messages(handle, peer_have) any^ {
 pub pn receive(handle, packet, admission) any^ {
     return receive_batch(handle,[{packet:packet,admission:admission}])^
 }
-pub pn receive_batch(handle, packets, records=[]) any^ {
+pub pn receive_batch(handle, packets, records=[], ack=null) any^ {
     if (not (packets is array) or len(packets)^ < 1 or len(packets)^ > 8192)
         raise error("sync local: invalid packet batch")
     return mutate(handle,pn (tx,k,current)=> {
         // Objects reach durable immutable storage before the referencing head commits.
         repo.import_objects(tx,k,records)^
         // Drop only packets covered by the accepted disk base; keep new atomic groups for relay.
-        var endpoint = installed_packets(current)^
+        // A warm peer's incoming empty delta must not discard our still-unsent local groups.
+        var endpoint = installed_packets(current,if (ack == null) null else ack.clock)^
         for (item in packets) { endpoint = p.accept(endpoint,codec.encode(item.packet)^,item.admission)^ }
-        return {*:current,endpoint:endpoint,
+        let updated = {*:current,endpoint:endpoint,
             *:if (len(records)^ == 0) ({}) else {staged_objects:sort(unique([
                 *if (current.staged_objects == null) [] else current.staged_objects,
                 *[for (record in records) record.id]]))^}}
+        if (ack == null) { return updated }
+        v.fields(ack,["peer","clock","release"])^
+        // The explicit peer ACK and complete bundle publish together; rollback retains old pins.
+        let accepted = p.acknowledge(endpoint,ack.peer,ack.clock)^
+        let ready = if (len(ack.release)^ == 0) updated else released(updated,ack.release)^
+        return {*:ready,endpoint:accepted}
+    })^
+}
+
+pub pn delta_objects(handle, frames, maximum=64, max_bytes=65536) any^ {
+    let revisions = [for (frame in frames) for (op in frame.packet.body.operations where
+        op.value.event.revision != null) op.value.event.revision]
+    if (any([for (revision in revisions) revision.document != null or revision.content.size > max_bytes])) { return null }
+    let references = unique([for (revision in revisions) revision.content])^
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+        var ids = []
+        for (reference in references) {
+            let manifest = repo.content_manifest(tx,k,reference)^
+            ids = unique([*ids,reference.manifest,*[for (chunk in manifest.chunks) chunk.id],
+                *[for (page in (if (manifest.pages == null) [] else manifest.pages)) page.id]])^
+            if (len(ids)^ > maximum) { return null }
+        }
+        return ids
     })^
 }
 
