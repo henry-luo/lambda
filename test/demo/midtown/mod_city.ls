@@ -27,8 +27,11 @@ pub fn road(i) => (i - N / 2) * PITCH
 pub fn nearest(c) => int(max(0, min(N, round(c / PITCH + N / 2)))) ^ { 0 }
 pub fn kind_at(bi, bj) any^ => slice(PLAN[bj], bi, bi + 1)
 pub fn inside_city(x, z) => abs(x) < LIMIT and abs(z) < LIMIT
+// Union Street runs on east through a gap in the perimeter barrier to the gateway roundabout
+pub let GATE_J = 3
+pub fn on_gateway(x, z) => x > HALF and x < LIMIT + 2.0 and abs(z - road(GATE_J)) < ROAD
 pub fn on_road(x, z) =>
-    (abs(x - road(nearest(x))) < ROAD and abs(z) < HALF + ROAD) or (abs(z - road(nearest(z))) < ROAD and abs(x) < HALF + ROAD)
+    (abs(x - road(nearest(x))) < ROAD and abs(z) < HALF + ROAD) or (abs(z - road(nearest(z))) < ROAD and abs(x) < HALF + ROAD) or on_gateway(x, z)
 
 pub let BLOCKS = [for (bj in 0 to (N - 1), bi in 0 to (N - 1)) {bi: bi, bj: bj, kind: kind_at(bi, bj),
     x0: road(bi), x1: road(bi + 1), z0: road(bj), z1: road(bj + 1),
@@ -171,9 +174,10 @@ pub let OBSTACLES = [
     post(CRANE.x, CRANE.z, 1.2, CRANE.height),
     *[for (c in PARKED, let lng = abs(sin(c.heading)) > 0.5, let hl = if (c.kind == "hatch") 2.0 else 2.25)
         [c.x - (if (lng) hl else 0.93), c.z - (if (lng) 0.93 else hl), c.x + (if (lng) hl else 0.93), c.z + (if (lng) 0.93 else hl), 1.4]],
-    // the perimeter barrier
+    // the perimeter barrier, open where Union Street leaves town
     [0.0 - LIMIT - 1.0, 0.0 - LIMIT - 1.0, LIMIT + 1.0, 0.0 - LIMIT, 1.1], [0.0 - LIMIT - 1.0, LIMIT, LIMIT + 1.0, LIMIT + 1.0, 1.1],
-    [0.0 - LIMIT - 1.0, 0.0 - LIMIT, 0.0 - LIMIT, LIMIT, 1.1], [LIMIT, 0.0 - LIMIT, LIMIT + 1.0, LIMIT, 1.1]]
+    [0.0 - LIMIT - 1.0, 0.0 - LIMIT, 0.0 - LIMIT, LIMIT, 1.1], [LIMIT, 0.0 - LIMIT, LIMIT + 1.0, road(GATE_J) - ROAD, 1.1],
+    [LIMIT, road(GATE_J) + ROAD, LIMIT + 1.0, LIMIT, 1.1]]
 
 // a uniform cell index: each cell lists the obstacles overlapping it
 pub let CELL = 16.0

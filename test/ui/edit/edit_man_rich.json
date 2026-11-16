@@ -1,0 +1,18 @@
+{
+  "name": "edit man text and preserve the original title header",
+  "command": "edit",
+  "html": "test/fixtures/edit/sample.1",
+  "working_copy": "temp/edit-ui/edit_man_rich.1",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface"}, "count": 1},
+    {"type": "click", "target": {"text": "test - example"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " updated"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_man_rich.1", "contains": ".TH \"TEST\" \"1\" \"2020\" \"project\" \"manual\"\n"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_man_rich.1", "contains": "example updated"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_man_rich.1", "equals": ".TH \"TEST\" \"1\" \"2020\" \"project\" \"manual\"\n.SH NAME\ntest - example\n"}
+  ]
+}

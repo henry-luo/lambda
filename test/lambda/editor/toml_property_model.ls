@@ -25,7 +25,7 @@ let multi_changed = t.replace_scalar(multiline.doc, multi.first, multi.last, "\"
 [
   loaded.doc.text == text and len(root.children) == 4,
   server.children[0].name == "port" and len(items.children) == 2,
-  root.children[2].name == "[[workers]]" and root.children[3].node.children[0].node.text == "'two'",
+  root.children[2].name == "workers" and root.children[3].node.children[0].node.text == "'two'",
   contains(changed.doc.text, "port = 1_000 # port\r\n"),
   contains(renamed.doc.text, "\"http port\" = 80 # port\r\n"),
   contains(inserted.doc.text, "\"enabled\" = true\r\n[[workers]]"),

@@ -1,0 +1,18 @@
+{
+  "name": "edit the second calendar without changing the first",
+  "command": "edit",
+  "html": "test/fixtures/edit/calendar-stream.ics",
+  "working_copy": "temp/edit-ui/edit_calendar_stream.ics",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "click", "target": {"selector": "input[aria-label='LOCATION']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "Changed"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_calendar_stream.ics", "contains": "SUMMARY:First\nEND:VEVENT\nEND:VCALENDAR\nBEGIN:VCALENDAR"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_calendar_stream.ics", "contains": "LOCATION:Changed\nEND:VEVENT\nEND:VCALENDAR"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_calendar_stream.ics", "contains": "LOCATION:Second\nEND:VEVENT\nEND:VCALENDAR"}
+  ]
+}

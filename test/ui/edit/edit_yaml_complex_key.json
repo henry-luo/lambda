@@ -1,0 +1,17 @@
+{
+  "name": "rename a YAML sequence key without changing other entries",
+  "command": "edit",
+  "html": "test/fixtures/edit/yaml-complex-keys.yaml",
+  "working_copy": "temp/edit-ui/edit_yaml_complex_key.yaml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 2},
+    {"type": "click", "target": {"selector": "input[aria-label='Property name: [1, 2]']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "[3, 4]"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_complex_key.yaml", "equals": "? [3, 4]\n: list value\n? {a: 1}\n: map value\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_complex_key.yaml", "equals": "? [1, 2]\n: list value\n? {a: 1}\n: map value\n"}
+  ]
+}

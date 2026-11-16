@@ -3,6 +3,7 @@
 // and airtime, and box collisions resolved by separating axes. Pure: step() returns the next car.
 import u: .mod_util
 import city: .mod_city
+import world: .mod_world
 
 pub let SPEC = {length: 4.5, width: 1.86, wheelbase: 2.7, track: 1.58, wheel_r: 0.36,
     gears: [13.0, 22.0, 31.0, 40.0, 49.0],    // top speed of each gear, m/s
@@ -13,7 +14,7 @@ pub let SPEC = {length: 4.5, width: 1.86, wheelbase: 2.7, track: 1.58, wheel_r: 
 pub let HALF_LENGTH = SPEC.length / 2.0
 pub let HALF_WIDTH = SPEC.width / 2.0
 
-pub fn spawn(x, z, heading) => {x: x, y: city.ground(x, z), z: z, heading: heading, vx: 0.0, vz: 0.0, vy: 0.0,
+pub fn spawn(x, z, heading) => {x: x, y: world.ground(x, z), z: z, heading: heading, vx: 0.0, vz: 0.0, vy: 0.0,
     steer: 0.0, gear: 1, shift: 0.0, rpm: SPEC.idle_rpm, grounded: true, air: 0.0, pitch: 0.0, roll: 0.0,
     spin: 0.0, accel: 0.0, impact: 0.0, landed: 0.0, airtime: 0.0, hits: [], damage: 0.0, odometer: 0.0}
 pub let IDLE = {throttle: 0.0, brake: 0.0, steer: 0.0, handbrake: false}
@@ -55,9 +56,11 @@ fn collide(car, other: any, id: any) any^ {
 }
 fn collide_all(car, boxes, i) any^ => if (i >= len(boxes)) car
     else collide_all(collide(car, boxes[i].box, boxes[i].id), boxes, i + 1)
-// world boxes tall enough to meet the car, plus the traffic around it
+// world boxes tall enough to meet the car (the city's axis-aligned ones, the open road's oriented
+// rails and walls), plus the traffic around it
 pub fn obstacles_near(car, traffic) any^ => [
     *[for (o in city.near_obstacles(car.x, car.z, 4.0)^ where o[4] > car.y + 0.25) {box: aabb(o), id: null}],
+    *[for (b in world.near_solids(car.x, car.z, 4.0)^ where b.top > car.y + 0.25) {box: b, id: null}],
     *[for (t in traffic where u.dist2(t.x, t.z, car.x, car.z)^ < 64.0) {box: box(t.x, t.z, t.heading, t.hl, t.hw), id: t.id}]]
 
 // ---- one integration step of at most 1/60 s
@@ -85,7 +88,7 @@ fn longitudinal(car, vf, pedals, box) {
     {thrust: thrust, resist: resist}
 }
 fn ground_step(car, dt) any^ {
-    let g = city.ground(car.x, car.z)
+    let g = world.ground(car.x, car.z)
     if (car.grounded) {
         // a sharp drop under a moving car (a ramp lip) launches it with its climbing speed
         if (g < car.y - 0.35) {*: car, grounded: false, air: 0.0}
@@ -127,7 +130,7 @@ fn integrate(car, pedals, dt, boxes) any^ {
         steer: steer, gear: gb.gear, shift: gb.shift, rpm: gb.rpm, accel: (vf2 - vf) / dt,
         spin: u.wrap(car.spin + vf2 / SPEC.wheel_r * dt), odometer: car.odometer + abs(vf2) * dt}
     // curbs and ramp faces taller than a step block the car like a wall
-    let blocked = moved.grounded and city.ground(moved.x, moved.z) > car.y + SPEC.step_up
+    let blocked = moved.grounded and world.ground(moved.x, moved.z) > car.y + SPEC.step_up
     let kept = if (blocked) {*: moved, x: car.x, z: car.z, vx: 0.0 - vx * 0.2, vz: 0.0 - vz * 0.2, impact: max(car.impact, abs(vf2))} else moved
     ground_step(collide_all(collide_all(kept, boxes, 0), boxes, 0), dt)
 }

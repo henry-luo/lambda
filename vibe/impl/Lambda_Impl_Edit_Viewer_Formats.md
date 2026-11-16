@@ -1,5 +1,60 @@
 # Editing viewer document formats
 
+## Editing admission ruling — 2026-11-16
+
+D10.2.5 now requires graphical editing for successfully parsed documents in
+formats assigned a graphical surface, and for documents with isolated syntax
+errors when recovery yields a reliable remaining model. Error regions must be
+read-only and survive saves unchanged; unrecoverable input uses source mode.
+See [the working design](../radiant/Radiant_Design_Edit_Mode.md#21-parsed-documents-and-isolated-syntax-errors).
+This is a design update, not an implementation claim: graphical fallback for
+valid unsupported constructs and isolated-error recovery remain to implement.
+
+## Active continuation — 2026-11-16
+
+- Goal: rich man editing with retained header; YAML anchors/tags/directives,
+  streams and non-string keys; TOML table-heading rename; multiple iCalendar
+  roots. User previously authorized relevant Input/Radiant source changes.
+  Preserve existing sibling work, including unrelated LaTeX changes.
+- Input man `.TH` title now uses the first quoted argument, verified with the
+  existing pre-fix `man-title-current.log` and owner tests `man-native.log`.
+  The shared markup adapter admits `.man` and section suffixes and retains the
+  original preamble and `.TH` line on edits; `man_format.ls` yields 8/8 and
+  `man-ui.log` passes save/undo. It rejects edits that cannot retain the title.
+- Input iCalendar now returns its historical map for one calendar and an ordered
+  array for multiple roots, rejecting nested/malformed components. The property
+  editor parses streams; `calendar-native.log` passes 3/3, `calendar_stream.ls`
+  yields 6/6, and `doc.misc`/viewer now handle multiple roots (D9.3.4).
+- TOML heading rename rewrites matching decoded path prefixes, including
+  descendants and repeated array tables; collisions are rejected by reparse.
+  `toml_table_rename.ls` passes 10/10 and `toml-man-ui.log` passes 2/2 replays.
+  Existing TOML property model passes 22/22.
+- YAML supports scalar/collection anchors and tags, aliases, directives,
+  document streams including empty and inline-start documents, typed keys and
+  supported explicit or implicit collection keys. Edits reparse the entire
+  document and retain unchanged source (S7.5.1v6, D9.3.4). Input now scopes
+  anchors per document, rejects duplicate typed/collection keys, preserves
+  implicit collection keys and parses mappings after an inline document start.
+  `yaml-stream-anchor-before.out` and `yaml-inline-start.out` retain pre-fix
+  reproductions. Native controls pass 8/8 in `yaml-final-native.log`; all 276
+  upstream YAML JSON comparisons pass in `yaml-corpus.log`. Indented multiline
+  explicit keys, including empty keys, can be renamed or removed.
+- The full editor sweep passes 215/215 fixtures, with 130/130 model tests and
+  12 model plus five UI tests under each forced backend; the multiline-key UI
+  replay also passes under both. The calendar viewer replay passes. Radiant
+  baseline passes 8,170, with 297 partial and 20
+  skipped. The release pin passes all 40,261 selected Test262 cases, with 2,652
+  skipped and no regressions. The Lambda baseline was repeated against the final
+  source snapshot and passes 7,548/7,548 (`lambda-baseline-audited.log`). Input's final
+  `test-native` aggregate retains exactly three unrelated failures: the two
+  LI-003 foreign-type contract tests and LI-002 external-parent test. Its YAML
+  corpus passes 276/276 comparisons, 86/86 invalid-input no-crash controls and
+  29/29 parse-only no-crash controls (`input-baseline-final.log`).
+- The CLI and Input owner ledger describe the resulting behavior. Lambda HEAD is
+  `315915449`; sibling Input and Radiant trees contain authorized prior
+  uncommitted fixes plus unrelated Input LaTeX changes. Sequential gate evidence,
+  source hashes and release pin are under `temp/edit-man-structured/`.
+
 ## Current checkpoint
 
 - Updated 2026-11-15 in `/Users/henryluo/Projects/Lambda-opus`, branch `master`,

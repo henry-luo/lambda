@@ -1,0 +1,17 @@
+{
+  "name": "rename and undo an indented YAML sequence key",
+  "command": "edit",
+  "html": "test/fixtures/edit/yaml-multiline-key.yaml",
+  "working_copy": "temp/edit-ui/edit_yaml_multiline_key.yaml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-key"}, "count": 2},
+    {"type": "click", "target": {"selector": ".property-key", "index": 0}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "[c, d]"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_multiline_key.yaml", "equals": "?\n  [c, d]\n: value\nother: ok\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_multiline_key.yaml", "equals": "?\n  - a\n  - b\n: value\nother: ok\n"}
+  ]
+}

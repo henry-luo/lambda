@@ -70,3 +70,46 @@ pub fn pool_svg() element => <svg xmlns: NS, width: 128, height: 128, viewBox: "
         <stop offset: "55%", 'stop-color': "#ffffff", 'stop-opacity': "0.3">
         <stop offset: "100%", 'stop-color': "#ffffff", 'stop-opacity': "0">>>
     <rect width: 128, height: 128, fill: "url(#fall)">>
+
+// ---- the open road and the land beyond the city
+// a neutral speckle the terrain's vertex colours tint
+pub fn terrain_svg() element => speckle("terrain", 256, "#ededea", ["#d6d6d1", "#fafaf7", "#c8c8c2", "#ffffff", "#bdbdb7"], 900, 1.0, 4.0)
+// a two-lane road 10.4 m across and 24 m along: worn asphalt, solid edge lines 3.7 m out, and a
+// centre line dashed 4 m on, 8 m off
+pub fn road_svg() element {
+    let px = 256.0 / 10.4, py = 512.0 / 24.0
+    let edge = (lat) => (5.2 + lat) * px;
+    svg(256, 512, [rect(0, 0, 256, 512, "#3c3e42"),
+        *[for (k in 0 to 1100, let key = rng.derive(KEY, ["road", k]), let w = rng.between(rng.derive(key, "w"), 1.0, 3.2))
+            rect(rng.between(rng.derive(key, "x"), 0.0, 256.0 - w), rng.between(rng.derive(key, "y"), 0.0, 512.0 - w), w, w,
+                ["#3a3c40", "#55575c", "#333539", "#5e6064"][rng.below(rng.derive(key, "c"), 4)], {opacity: 0.6})],
+        // tyre-worn lanes are a touch darker, the shoulders a touch lighter
+        rect(edge(-3.2), 0, 1.0 * px, 512, "#3b3d41", {opacity: 0.35}), rect(edge(-1.4), 0, 1.0 * px, 512, "#3b3d41", {opacity: 0.35}),
+        rect(edge(0.4), 0, 1.0 * px, 512, "#3b3d41", {opacity: 0.35}), rect(edge(2.2), 0, 1.0 * px, 512, "#3b3d41", {opacity: 0.35}),
+        rect(0, 0, edge(-3.75), 512, "#55575b", {opacity: 0.5}), rect(edge(3.75), 0, 256.0 - edge(3.75), 512, "#55575b", {opacity: 0.5}),
+        rect(edge(-3.775), 0, 0.15 * px, 512, "#e9e7e0"), rect(edge(3.625), 0, 0.15 * px, 512, "#e9e7e0"),
+        rect(edge(-0.075), 0.0, 0.15 * px, 4.0 * py, "#e9e7e0"), rect(edge(-0.075), 12.0 * py, 0.15 * px, 4.0 * py, "#e9e7e0")])
+}
+// the tunnel lining: pale tiles up to the springing, bare concrete above, a dark kerb band
+pub fn tunnel_svg() element => svg(256, 256, [rect(0, 0, 256, 256, "#b9b4aa"),
+    *[for (i in 0 to 7, j in 0 to 7) rect(i * 32 + 1, j * 32 + 1, 30, 30, if ((i + j) % 5 == 0) "#e4dfd2" else "#ddd8cb")],
+    rect(0, 0, 256, 18, "#3f3f3f")])
+// one flat colour, for maps such as an occlusion map
+pub fn flat_svg(color) element => svg(8, 8, [rect(0, 0, 8, 8, color)])
+// each facade's metal-rough map (glTF: green is roughness, blue metalness): windows smooth and
+// faintly metallic so they mirror the sky, walls rough
+pub fn facade_mr_svg(style) element {
+    let o = opening(style);
+    svg(128, 128, [rect(0, 0, 128, 128, if (style == 0) "#00b000" else "#00e000"),
+        *[for (j in 0 to 7, i in 0 to 7) rect(i * 16 + o.x / 4, j * 16 + o.y / 4, o.w / 4, o.h / 4, if (style == 0) "#0018c0" else "#0026a0")]])
+}
+// a band of soft clouds a quarter of the way round the sky: texture v climbs from the nadir (bottom
+// row) to the zenith (top row), so the horizon is the middle row and the clouds sit just above it
+pub fn clouds_svg() element => svg(1024, 256, [<defs <radialGradient id: "puff", cx: "50%", cy: "50%", r: "50%",
+        <stop offset: "0%", 'stop-color': "#ffffff", 'stop-opacity': "0.9">
+        <stop offset: "60%", 'stop-color': "#ffffff", 'stop-opacity': "0.45">
+        <stop offset: "100%", 'stop-color': "#ffffff", 'stop-opacity': "0">>>,
+    *[for (k in 0 to 60, let key = rng.derive(KEY, ["cloud", k]), let y = rng.between(rng.derive(key, "y"), 30.0, 116.0),
+            let lo = (y - 30.0) / 86.0, let w = rng.between(rng.derive(key, "w"), 80.0, 210.0) * (0.55 + 0.6 * lo),
+            let x = rng.between(rng.derive(key, "x"), 0.0, 1024.0), let o = rng.between(rng.derive(key, "o"), 0.55, 1.0))
+        *[for (dx in [-1024.0, 0.0, 1024.0]) <ellipse cx: x + dx, cy: y, rx: w, ry: w * (0.16 + 0.1 * lo), fill: "url(#puff)", opacity: o>]]])

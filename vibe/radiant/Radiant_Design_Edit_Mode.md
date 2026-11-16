@@ -18,16 +18,17 @@ informed by [Stage 5](../editing/Radiant_Editor_Stage5.md) and
 
 **Specification linkage:** D9.3.1–D9.3.4 → package loading and state (§3–§4);
 D10.2.1 and D9.5.6 → editing-policy and native-mechanism boundaries (§3, §5);
+D10.2.5 → graphical editing and syntax-error recovery (§2.1);
 S12.1.1v2 and S12.1.3 → effectful loading/saving and pure rendering (§4);
 D1.5 and D6.3.3 → retained runtime and precise ownership (§4);
 D11.1.2 → persistence through the shared IO boundary (§8). These refer to
 [Formal Design](../../doc/Lambda_Formal_Design.md) and
 [Formal Semantics](../../doc/Lambda_Formal_Semantics.md).
 
-This proposal adds an application workflow under the existing contracts. It
-does not revise a formal ruling or introduce a new editing-ledger series.
-Unsettled product choices are recorded in §10; proposal wording is not a
-claim that the capability already exists.
+This proposal adds an application workflow under the existing contracts.
+D10.2.5 records the subsequent document-recovery ruling in §2.1. Unsettled
+product choices are recorded in §10; proposal wording is not a claim that the
+capability already exists.
 
 **Package organization update, 2026-11-04:** the CLI application and its
 reusable format, surface and session helpers now belong to the
@@ -67,10 +68,11 @@ all existing viewer interaction read-only.
 
 The first release accepts one existing local file. Supported suffixes are
 `.md` / `.markdown`, `.html` / `.htm`, and `.svg`, as their respective phases
-land. Missing files, unsupported types, and invalid source produce an
-actionable load error rather than an empty editor. Remote editing, new-file
-creation, and multiple documents per window are later extensions. A viewer
-may remain available for a document that cannot yet be edited safely.
+land. Missing files and unsupported types produce an actionable load error
+rather than an empty editor. Invalid source follows D10.2.5 (§2.1). Remote
+editing, new-file creation, and multiple documents per window are later
+extensions. A viewer may remain available for a document that cannot yet be
+edited safely.
 
 ## 2. Document families and initial capabilities
 
@@ -88,9 +90,10 @@ text layout are later SVG capabilities under the proposed initial scope.
 Opening an existing document must preserve content outside the editable
 profile. The adapter retains such content as structured or opaque source
 nodes, with a visible noneditable representation where appropriate. If the
-parser/model/serializer cannot retain it, editing that file is rejected with
-the unsupported construct identified. An import that silently drops content
-does not count as support.
+current parser/model/serializer cannot retain it, the application falls back
+to source mode. D10.2.5 requires the graphical path for successfully parsed
+documents; such a fallback is an implementation gap. An import that silently
+drops content does not count as support.
 
 The noneditable representation is **view-only**: the part shows as it
 renders, never as editable text, and Save writes its source as read. The
@@ -100,7 +103,49 @@ controls — and is never read back. A part that renders nothing on its own (a
 lone inline tag, a comment, a link reference definition) shows its source
 instead, so it stays visible to the reader and the caret. A view-only part is
 one atomic unit: it can be selected or deleted, not edited inside. Rejection
-remains the last resort, for a document whose round trip still fails.
+of graphical editing remains the current fallback when a document's round
+trip fails; §2.1 states the required admission rule and error-region behavior.
+
+### 2.1 Parsed documents and isolated syntax errors
+
+**Ruling: D10.2.5 (user, 2026-11-16).** For text formats assigned a graphical
+surface, such as a property tree or rich-text editor, parsing determines the
+editing surface:
+
+1. When the document parses successfully, open it in its graphical editor.
+   Valid material outside the editable model remains visible and preserved;
+   do not require source mode merely because one valid construct lacks an
+   editable control.
+2. When a syntax error is isolated and recovery gives a reliable model for the
+   rest of the document, open the graphical editor. Mark the error and display
+   its original source as a read-only region. Other reliable regions can be
+   edited. Typing, replacement, cut, deletion and structural edits must not
+   alter or remove an error region, even when a selection crosses its boundary.
+   Save preserves each error region's original source bytes and their order.
+   The source editor is the place to correct those errors; after correction,
+   reparse before returning to graphical editing.
+3. When the parser cannot isolate the errors or cannot recover a reliable model
+   for the remaining document, offer source editing only. Do not silently
+   accept a partial or guessed model as a successful parse.
+
+Recovery must identify source boundaries accurately enough to retain all text,
+including line endings, and must acknowledge parser errors (S7.5.1v6). It must
+not weaken validation for ordinary non-editor input. The graphical adapter
+must maintain the source-to-model mapping and verify that edits outside error
+regions do not alter them. If those guarantees cannot be made, treat recovery
+as unreliable and use source editing.
+
+This rule does not give a graphical surface to formats assigned source editing,
+such as scripts and diagrams, or make binary media editable. The user can
+choose source editing explicitly for any admitted text document.
+
+**Implementation status:** partial. Current graphical adapters admit many
+valid documents and retain some unsupported valid material. They can still
+fall back to source for other valid constructs. General recovery from isolated
+syntax errors, protected error regions, and safe save/reparse are not yet
+implemented; they are required work, not a description of current behavior.
+The existing view-only nodes described in §2 can be deleted as whole units;
+syntax-error regions have the stronger read-only rule above.
 
 ## 3. Ownership and reuse
 

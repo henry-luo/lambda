@@ -10,8 +10,22 @@ fn records(text: string) any^ {
     let content_first = source.skip_horizontal(text, i)
     let body = source.raw(text, content_first, line.end)^
     if (body != "" and not starts_with(body, "#")) {
-      if (body in ["---", "..."] or starts_with(body, "%")) { raise error("YAML directives and document streams require source mode") }
-      result = [*result, {*: line, content_first: content_first, indent: content_first - i}]
+      let boundary = content_first == i and (starts_with(body, "---") or starts_with(body, "...")) and
+        source.char_at(body, 3) in ["", " ", "\t"]
+      let after_marker = if (boundary) source.skip_horizontal(text, i + 3) else line.end
+      let inline_start = after_marker < line.end and source.char_at(text, after_marker) != "#"
+      // markers and directives are source records; content scanners may skip
+      // them when they occur inside a multiline scalar.
+      let marker = boundary and not inline_start
+      let directive = content_first == i and starts_with(body, "%")
+      let kind = if (marker) (if (starts_with(body, "---")) 'start' else 'end')
+        else if (directive) 'directive' else 'content'
+      if (inline_start) {
+        result = [*result, {first: i, end: i + 3, next: after_marker, content_first: i, indent: 0, record_kind: 'start'},
+          {first: after_marker, end: line.end, next: line.next, content_first: after_marker, indent: 0, record_kind: 'content'}]
+      } else {
+        result = [*result, {*: line, content_first: content_first, indent: content_first - i, record_kind: kind}]
+      }
     }
     i = int(line.next)^
   }
@@ -36,34 +50,71 @@ fn block_scalar_end(text: string, first: int, indent: int) int^ {
 }
 fn array_marker(text: string, first: int, end_pos: int) bool =>
   source.char_at(text, first) == "-" and (first + 1 == end_pos or source.char_at(text, first + 1) in [" ", "\t"])
+fn explicit_key_marker(text: string, first: int, end_pos: int) bool =>
+  source.char_at(text, first) == "?" and (first + 1 == end_pos or source.char_at(text, first + 1) in [" ", "\t"])
+fn empty_document(first, index) => {name: "Document " ++ string(index + 1),
+  node: {kind: 'scalar', first: first, last: first, text: "", empty_doc: true, can_delete: false}}
 fn block_node(text: string, lines, at: int, indent: int, first: int, inline_first: int = -1) any^ {
   let initial = at
   let first_content = if (inline_first >= 0) inline_first else int(lines[at].content_first)^
   let is_array = array_marker(text, first_content, lines[at].end)^
-  if (not is_array and config.separator(text, first_content, lines[at].end, 'yaml')^ < 0) {
+  if (not is_array and not explicit_key_marker(text, first_content, lines[at].end)^ and
+      config.separator(text, first_content, lines[at].end, 'yaml')^ < 0) {
     let value = config.value_node(text, first_content, 'yaml', false)^
     return {next: after_value(lines, at, value.last)^, node: value}
   }
   var i = at, children = [], last_pos = first
   while (i < len(lines)) {
-    let line = lines[i]
+    var line = lines[i]
     let virtual_first = i == initial and inline_first >= 0
+    if (not virtual_first and line.record_kind != 'content') { break }
     if (not virtual_first and line.indent < indent) { break }
     if (not virtual_first and line.indent != indent) { raise error("unexpected YAML indentation") }
     let content_first = if (virtual_first) inline_first else int(line.content_first)^
+    let row_first = line.first
     if (array_marker(text, content_first, line.end)^ != is_array) { raise error("mixed YAML block collections require source mode") }
-    var value_first = 0, field_name = string(len(children)), key_end = content_first
+    var value_first = 0, field_name = string(len(children)), key_first = content_first, key_end = content_first, literal_key = false, empty_key = false
     if (is_array) { value_first = source.skip_horizontal(text, content_first + 1) }
+    else if (explicit_key_marker(text, content_first, line.end)^) {
+      key_first = source.skip_horizontal(text, content_first + 1)
+      if (key_first == line.end and i + 1 < len(lines) and
+          lines[i + 1].record_kind == 'content' and lines[i + 1].indent > indent) {
+        // the key is an indented node; its source span excludes the indicator.
+        i = i + 1
+        key_first = int(lines[i].content_first)^
+        let key_node = block_node(text, lines, i, lines[i].indent, key_first)^
+        key_end = key_node.node.last
+        i = int(key_node.next)^
+      } else {
+        let key_node = config.value_node(text, key_first, 'yaml', false)^
+        key_end = key_node.last
+        i = i + 1
+      }
+      let key_source = source.raw(text, key_first, key_end)^
+      empty_key = key_source == ""
+      field_name = if (empty_key) "null" else key_source
+      literal_key = true
+      if ((i >= len(lines) or lines[i].record_kind != 'content' or lines[i].indent != indent)^)
+        { raise error("YAML explicit key has no value indicator") }
+      line = lines[i]
+      let colon = int(line.content_first)^
+      if (source.char_at(text, colon) != ":" or not (source.char_at(text, colon + 1) in ["", " ", "\t", "\r", "\n"]))
+        { raise error("YAML explicit key has no value indicator") }
+      value_first = source.skip_horizontal(text, colon + 1)
+    }
     else {
       let sep = config.separator(text, content_first, line.end, 'yaml')^
       if (sep < 0) { raise error("unsupported YAML block key") }
       let key_source = trim_end(source.raw(text, content_first, sep))
       field_name = config.key_name(key_source, 'yaml')^
+      literal_key = config.yaml_key_is_literal(key_source)^
       key_end = content_first + len(key_source)
       value_first = source.skip_horizontal(text, sep + 1)
     }
     var next = i + 1, node = null
-    if (value_first == line.end and next < len(lines) and lines[next].indent > indent) {
+    let content_after_properties = config.yaml_properties_end(text, value_first)
+    if ((content_after_properties == line.end or source.char_at(text, content_after_properties) == "#") and
+        next < len(lines) and lines[next].record_kind == 'content' and lines[next].indent > indent) {
       let nested = block_node(text, lines, next, lines[next].indent, value_first)^
       node = nested.node
       next = int(nested.next)^
@@ -73,9 +124,9 @@ fn block_node(text: string, lines, at: int, indent: int, first: int, inline_firs
       next = int(nested.next)^
     } else {
       node = config.value_node(text, value_first, 'yaml', false)^
-      let ch = source.char_at(text, value_first)
+      let ch = source.char_at(text, content_after_properties)
       if (ch in ["|", ">"]) {
-        let end_pos = block_scalar_end(text, value_first, indent)^
+        let end_pos = block_scalar_end(text, content_after_properties, indent)^
         node = {*: node, last: end_pos, text: text_policy.sanitize(source.raw(text, value_first, end_pos), true)^, multiline: true, block_scalar: true}
       }
       next = after_value(lines, i, node.last)^
@@ -85,8 +136,8 @@ fn block_node(text: string, lines, at: int, indent: int, first: int, inline_firs
     }
     let ending = source.natural_line(text, node.last)^
     last_pos = int(node.last)^
-    node = {*: node, row_first: line.first, row_last: ending.next}
-    children = [*children, {name: field_name, first: content_first, key_end: key_end, inline_first: virtual_first, node: node}]
+    node = {*: node, row_first: row_first, row_last: ending.next}
+    children = [*children, {name: field_name, first: key_first, key_end: key_end, literal_key: literal_key, empty_key: empty_key, inline_first: virtual_first, node: node}]
     i = next
   }
   let content_end = if (i < len(lines)) lines[i].first else len(text)
@@ -99,17 +150,46 @@ pub fn import_text(text: string) map^ {
   if (len(lines) == 0) {
     return {doc: {text: text, kind: 'yaml', tree: {kind: 'object', first: 0, last: len(text), child_indent: 0, content_end: len(text), children: []}}, envelope: null}
   }
-  let line = lines[0]
-  let first = int(line.content_first)^
-  var tree = null
-  if (array_marker(text, first, line.end)^ or config.separator(text, first, line.end, 'yaml')^ >= 0) {
-    let result = block_node(text, lines, 0, line.indent, 0)^
-    if (result.next != len(lines)) { raise error("unexpected YAML document content") }
-    tree = result.node
-  } else {
-    tree = config.value_node(text, first, 'yaml', false)^
-    if (config.skip_layout(text, tree.last)^ != len(text)) { raise error("unsupported YAML scalar continuation") }
+  var i = 0, documents = [], pending = null
+  while (i < len(lines)) {
+    let line = lines[i]
+    if (line.record_kind == 'start') {
+      if (pending != null) { documents = [*documents, empty_document(pending, len(documents))] }
+      pending = line.next
+      i = i + 1
+      continue
+    }
+    if (line.record_kind == 'end') {
+      if (pending != null) { documents = [*documents, empty_document(pending, len(documents))] }
+      pending = null
+      i = i + 1
+      continue
+    }
+    if (line.record_kind == 'directive') { i = i + 1; continue }
+    let first = int(line.content_first)^
+    var tree = null, next = i + 1
+    if (array_marker(text, first, line.end)^ or explicit_key_marker(text, first, line.end)^ or
+        config.separator(text, first, line.end, 'yaml')^ >= 0) {
+      let result = block_node(text, lines, i, line.indent, first)^
+      tree = result.node
+      next = int(result.next)^
+    } else {
+      tree = config.value_node(text, first, 'yaml', false)^
+      next = after_value(lines, i, tree.last)^
+    }
+    if ((next < len(lines) and lines[next].record_kind == 'content')^) {
+      raise error("unsupported YAML scalar continuation")
+    }
+    documents = [*documents, {name: "Document " ++ string(len(documents) + 1),
+      node: {*: tree, can_delete: false}}]
+    pending = null
+    i = next
   }
+  if (pending != null) { documents = [*documents, empty_document(pending, len(documents))] }
+  if (len(documents) == 0) { raise error("empty YAML document markers require source mode") }
+  let tree = if (len(documents) == 1 and documents[0].node.kind != 'scalar' and documents[0].node.flow != true) {*: documents[0].node, first: 0}
+    else if (len(documents) == 1) documents[0].node
+    else {kind: 'array', first: -1, last: len(text), can_add: false, children: documents}
   return {doc: {text: text, kind: 'yaml', tree: tree}, envelope: null}
 }
 pub fn replace_scalar(doc, first, end_pos, value) map^ => config.replace_scalar(doc, first, end_pos, value, import_text)^

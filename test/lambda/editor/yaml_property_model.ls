@@ -71,5 +71,5 @@ let filled = y.replace_scalar(blank.doc, blank.doc.tree.children[0].node.first, 
   (y.import_text("x: \"bad\\q\"\n") ^ { null }) == null,
   (y.import_text("x: [1,,2]\n") ^ { null }) == null,
   (y.import_text("x: 1\nx: 2\n") ^ { null }) == null,
-  (y.import_text("x: &number 1\ny: *number\n") ^ { null }) == null
+  y.import_text("x: &number 1\ny: *number\n")^.doc.tree.children[1].node.text == "*number"
 ]

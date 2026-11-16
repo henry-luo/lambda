@@ -10,6 +10,9 @@ import t: lambda.scene3d.transform
 import numbers: ~~.mod_number_text
 import u: .mod_util
 import city: .mod_city
+import world: .mod_world
+import roads: .mod_roads
+import region: .mod_region
 import v: .mod_vehicle
 import tr: .mod_traffic
 import pd: .mod_peds
@@ -40,9 +43,12 @@ pub fn key_of(key) => if (key == "ArrowUp" or key == "w" or key == "W") "up" els
     else if (key == " ") "brake" else if (key == "c" or key == "C") "back" else null
 
 // ---- the car on a lane: Reset parks it there; Auto drive moves it along the lanes like traffic
-fn on_lane(car, a) => {*: car, x: a.x, z: a.z, y: city.ground(a.x, a.z), heading: a.heading, vx: sin(a.heading) * a.speed,
+fn on_lane(car, a) => {*: car, x: a.x, z: a.z, y: world.ground(a.x, a.z), heading: a.heading, vx: sin(a.heading) * a.speed,
     vz: cos(a.heading) * a.speed, vy: 0.0, grounded: true, pitch: 0.0, roll: 0.0}
-pub fn reset_car(st) => (let a = tr.nearest_run(st.car.x, st.car.z, st.car.heading),
+// outside town the nearest lane of the open road; in town the nearest grid lane
+fn reset_lane(car) any^ => if (world.outside(car.x, car.z)) {*: roads.nearest_lane(car.x, car.z, car.heading), speed: 0.0}
+    else tr.nearest_run(car.x, car.z, car.heading)
+pub fn reset_car(st) any^ => (let a = reset_lane(st.car),
     {*: st, car: {*: on_lane(st.car, a), steer: 0.0, damage: 0.0, gear: 1, rpm: v.SPEC.idle_rpm}, auto: null})
 // Auto drive keeps the car's speed and hands it to the nearest lane
 pub fn engage_auto(st) => (let a = tr.nearest_run(st.car.x, st.car.z, st.car.heading, v.forward_speed(st.car)),
@@ -74,6 +80,13 @@ pub fn capped(pedals, cap, car) => if (cap == null) pedals
         if (over < 0.0) pedals else {*: pedals, throttle: 0.0, brake: max(pedals.brake, u.clamp(over * 0.3, 0.0, 0.6))})
 
 // ---- the pure step
+// outside town the camera stays above the land, and in the tunnel under its roof
+fn grounded(c) any^ {
+    let p = c.position
+    let bore = if (world.outside(p[0], p[2])) region.bore_at(p[0], p[2]) else null;
+    if (not world.outside(p[0], p[2])) c
+    else {*: c, position: [p[0], if (bore != null) min(p[1], bore.y + 6.0) else max(p[1], world.ground(p[0], p[2]) + 1.2), p[2]]}
+}
 fn say(st, text, t, seconds = 2.6) => {*: st, toast: text, toast_until: t + seconds}
 pub fn advance(st, dt, t, lag = 0.0) any^ {
     if (st.paused or dt <= 0.0) {*: st, t: t}
@@ -91,7 +104,7 @@ pub fn advance(st, dt, t, lag = 0.0) any^ {
         // the intro tours the skyline until the driver takes over
         let tour = st.tour + dt * 0.05
         // the camera body and the car body both apply their poses on the next tick, so the rig follows the new car
-        let camera = if (st.started) cam.follow({*: rig, look_back: st.keys.back}, car, dt)
+        let camera = if (st.started) grounded(cam.follow({*: rig, look_back: st.keys.back}, car, dt))
             else {*: rig, position: [sin(tour) * 230.0, 105.0, 0.0 - cos(tour) * 230.0], target: [0.0, 20.0, 0.0], fov: 52.0}
         let speed = v.speed(car)
         let next = {*: st, t: t, car: car, auto: auto, traffic: traffic, peds: peds, mission: mission, camera: camera, tour: tour,
@@ -99,7 +112,9 @@ pub fn advance(st, dt, t, lag = 0.0) any^ {
         let governed = drive and st.speed_cap == null and cap != null
         let air = car.airtime > 0.6
         let crash = car.impact > 9.0
-        if (mission.message != null) say(next, mission.message, t, 3.5)
+        // a car that drives into the sea or the river is fished out onto the nearest lane
+        if (car.y < world.SUNK) say(reset_car(next)^, "Splash! Back on the road", t, 2.4)
+        else if (mission.message != null) say(next, mission.message, t, 3.5)
         else if (air) say({*: next, best_air: max(st.best_air, car.airtime)}, "Airtime " ++ numbers.fixed(car.airtime, 1) ++ " s" ++
             (if (car.airtime > st.best_air) "  · new best" else ""), t)
         else if (crash) say(next, "Crunch! Damage " ++ string(int(car.damage) ^ { 0 }) ++ "%", t, 1.8)
@@ -210,8 +225,8 @@ pn hud_frame(h, st) {
 pn hud_words(h, st) {
     let car = st.car
     if (st.frames % 15 == 0) {
-        words(h.district, city.district(car.x, car.z))^
-        words(h.street, city.street(car.x, car.z))^
+        words(h.district, world.district(car.x, car.z))^
+        words(h.street, world.street(car.x, car.z))^
     }
     words(h.look, sc.LOOKS[st.look].label ++ " · " ++ cam.LABELS[st.camera.mode] ++ (if (st.auto != null) " · AUTO" else ""))^
     let m = st.mission

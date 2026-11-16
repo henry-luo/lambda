@@ -1,0 +1,8 @@
+%YAML 1.2
+---
+base: &anchor 1
+copy: *anchor
+...
+---
+base: &anchor 2
+copy: *anchor

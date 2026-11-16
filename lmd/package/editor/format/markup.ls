@@ -1,6 +1,7 @@
 // Shared lightweight-markup adapter. A writer is admitted only when its
 // round trip retains the original parsed document and the editable model.
 import md: lambda.editor.format.markdown
+import source_text: lambda.editor.format.source_text
 
 // Parser-created plain spans and text-only nowiki guards do not change the
 // document meaning; retain every other element and attribute in the check.
@@ -36,18 +37,43 @@ fn to_markdown(source, kind) any^ {
   let markdown = format(parsed, 'markdown')^;
   {parsed: parsed, markdown: markdown}
 }
+// retain the complete authored .TH line and its preamble as the document header.
+fn man_header(source: string) any^ {
+  var i = 0
+  while (i < len(source)) {
+    let line = source_text.natural_line(source, i)^
+    let text = source_text.raw(source, i, line.end)^
+    if (starts_with(text, ".TH ") or starts_with(text, ".TH\t"))
+      { return source_text.raw(source, 0, line.next)^ }
+    if (trim(text) != "" and not starts_with(text, ".\\\""))
+      { raise error("man preamble requires source mode") }
+    i = int(line.next)^
+  }
+  raise error("man title header is missing")
+}
+fn man_body(written: string, header: string) any^ {
+  let first = source_text.natural_line(written, 0)^
+  let title = source_text.natural_line(written, first.next)^
+  if (not starts_with(source_text.raw(written, 0, first.end)^, ".TH ") or
+      not starts_with(source_text.raw(written, first.next, title.end)^, ".SH "))
+    { raise error("man title cannot be retained") }
+  let separator = if (ends_with(header, "\n") or ends_with(header, "\r")) "" else "\n"
+  return header ++ separator ++ source_text.raw(written, title.next, len(written))^
+}
 fn from_model(doc, envelope) any^ {
   let markdown = md.export_text(doc, envelope.markdown)^
   let parsed = parse(markdown, 'markdown')^
-  format(parsed, envelope.kind)^
+  let written = format(parsed, envelope.kind)^
+  if (envelope.kind == 'man') man_body(written, envelope.header)^ else written
 }
 fn import_as(source, kind) map^ {
   let converted = to_markdown(source, kind)^
   let loaded = md.import_text(converted.markdown)^
-  let envelope = {kind: kind, markdown: loaded.envelope, source: source, original: loaded.doc}
+  let header = if (kind == 'man') man_header(source)^ else null
+  let envelope = {kind: kind, markdown: loaded.envelope, source: source, original: loaded.doc, header: header}
   let written = from_model(loaded.doc, envelope)^
   let back = parse(written, kind)^
-  if (back != converted.parsed and (kind != 'wiki' or not same_wiki_document(converted.parsed, back)^)) {
+  if (back != converted.parsed and (not (kind in ['wiki', 'man']) or not same_wiki_document(converted.parsed, back)^)) {
     raise error("this document contains markup the editor cannot preserve")
   }
   else { {doc: loaded.doc, envelope: envelope} }
@@ -80,5 +106,6 @@ pub let formats = [
   descriptor('org', "Org", [".org"]),
   descriptor('wiki', "MediaWiki", [".wiki", ".mediawiki"]),
   descriptor('asciidoc', "AsciiDoc", [".adoc", ".asciidoc", ".asc"]),
-  descriptor('textile', "Textile", [".textile", ".txtl"])
+  descriptor('textile', "Textile", [".textile", ".txtl"]),
+  descriptor('man', "Man page", [".man", ".1", ".2", ".3", ".4", ".5", ".6", ".7", ".8", ".9", ".1m", ".3p"])
 ]

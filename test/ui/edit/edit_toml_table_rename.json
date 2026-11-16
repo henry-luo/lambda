@@ -1,0 +1,16 @@
+{
+  "name": "rename a TOML table and preserve its descendant tables",
+  "command": "edit",
+  "html": "test/fixtures/edit/structured.toml",
+  "working_copy": "temp/edit-ui/edit_toml_table_rename.toml",
+  "events": [
+    {"type": "click", "target": {"selector": "input[aria-label='Property name: server']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "service"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toml_table_rename.toml", "contains": "[service]\r\nport = 80 # port\r\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_toml_table_rename.toml", "contains": "[server]\r\nport = 80 # port\r\n"}
+  ]
+}

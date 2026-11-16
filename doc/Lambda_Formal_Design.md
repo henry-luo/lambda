@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 67.2.1 (2026-11-11)
+**Spec version:** 67.3.0 (2026-11-16)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1707,6 +1707,14 @@ loosely.
   `@font-face` rules reference the bundled fonts by URL. They do not embed the
   font bytes in each document. Font bytes that a caller supplies without a URL
   keep their embedding. [Lambda_Pkg_Math §8]
+- **D10.2.5* — Graphical document editing keeps isolated errors read-only.**
+  A text format assigned a graphical editor opens there when parsing succeeds.
+  It also opens there when recovery isolates each syntax error and gives a
+  reliable model for the rest. Error spans are read-only in that editor.
+  Saving preserves their source unchanged. The user can edit them in the
+  source editor. If parsing cannot recover a reliable model, only source editing
+  is available. Source-only formats keep their assigned surface.
+  [Radiant_Design_Edit_Mode §2.1]
 
 ## D11 Security and Capabilities
 
@@ -1859,6 +1867,7 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D10.2.1 | In place (2026-09-07). |
 | D10.2.2 | Partial: expansion is the only front end. The layout-metrics hook is pending. |
 | D10.2.3 | Partial: export and strict input are in place. The MathML box builder is pending. |
+| D10.2.5 | Partial: supported valid documents have graphical surfaces; isolated syntax-error recovery and read-only error spans are pending. |
 | D11.1.1 | T1 verification layers are staged. T2 and T3 are not built. |
 | D11.1.2 | Partial: the main clients are extracted. The remaining IO surface is incomplete. |
 | D11.2.1–D11.2.4 | Components only (2026-11-02). |
@@ -2004,7 +2013,7 @@ in the [implementation history §3](../vibe/impl/Lambda_Impl_Formal_Design_Histo
 | D9.3 | RG14; DF15; ER-D2; MC1; Demo_Mail ML11 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Demo_Mail.md` |
 | D9.4–D9.5 | JA1–JA16 (D9.4.6: JA5.1); Native_Module §6–§10; Lang_Hosting §5–§13; DOM4 D4j–D4l; Radiant_Split §4 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_Type_Virtual.md`, `Lambda_Jube_DOM4.md`, `Lambda_Design_Radiant_Split.md` |
 | D10.1 | Mark file extensions; XHTML admission; SVG parsing admission and DOM export | `input/Input_System.md`, `input/Input_XML.md`, `radiant/Radiant_SVG2.md` |
-| D10.2 | UA editing; TeX engine; Pkg_Math §8, §11 | `radiant/Radiant_Design_Editable.md` §20, `latex/Lambda_Design_TeX_Engine.md`, `Lambda_Pkg_Math.md` |
+| D10.2 | UA and document editing; TeX engine; Pkg_Math §8, §11 | `radiant/Radiant_Design_Editable.md` §20, `radiant/Radiant_Design_Edit_Mode.md` §2.1, `latex/Lambda_Design_TeX_Engine.md`, `Lambda_Pkg_Math.md` |
 | D11.1 | JA10, JA16 | `Lambda_Design_Jube_Architecture.md` |
 | D11.2 | App_Safety §4.1, §6.4, §7.1, §7.3, §8.3 | `Lambda_Design_App_Safety.md` |
 | D11.3 | Speech §5; Scene3D §9.3 | `radiant/Radiant_Design_Speech.md`, `radiant/Radiant_Design_Scene3D.md` |

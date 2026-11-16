@@ -32,13 +32,9 @@ pub fn cuboid(x0, y0, z0, x1, y1, z1, bottom = true) => hexa(ring(x0, z0, x1, z1
 // a box centred on (x, z) with its base at y0
 pub fn block(x, y0, z, w, h, d) => cuboid(x - w / 2.0, y0, z - d / 2.0, x + w / 2.0, y0 + h, z + d / 2.0)
 
-// apply a column-major affine matrix to a buffer; normals turn with it and are renormalised
-pub fn placed(b, m) {
-    let turned = t.points([m[0], m[1], m[2], 0.0, m[4], m[5], m[6], 0.0, m[8], m[9], m[10], 0.0, 0.0, 0.0, 0.0, 1.0], b.normals) ^ { [] }
-    let n = [for (i in 0 to (len(turned) div 3 - 1), let x = turned[3 * i], let y = turned[3 * i + 1], let z = turned[3 * i + 2],
-        let l = max(sqrt(x * x + y * y + z * z), 0.000001)) *[x / l, y / l, z / l]];
-    {*: b, positions: t.points(m, b.positions) ^ { [] }, normals: n}
-}
+// apply a column-major affine matrix to a buffer; normals turn with it (inverse transpose) and are
+// renormalised, natively in one call
+pub fn placed(b, m) any^ => (let moved = math.transform_buffer(m, b.positions, b.normals)^, {*: b, positions: moved[0], normals: moved[1]})
 pub fn yawed(b, x, y, z, yaw, size = 1.0) any^ => placed(b, t.compose([x, y, z], u.quat(yaw), [size, size, size]))
 pub fn tinted(b, rgb) any^ => {*: b, colors: [for (i in 1 to (len(b.positions)^ div 3)) *rgb]}
 // a vertical cylinder or cone from y0 to y1
@@ -88,76 +84,6 @@ pub fn wedge(r, base) {
         tri(at(0.0 - hl, hw, base), at(hl, hw, base), at(hl, hw, top))])
 }
 
-// ---- vehicles: one buffer per material; kinds share proportions with mod_traffic.KINDS
-fn wheels_at(hl, hw, r) => merge([for (zs in [1.0, -1.0], xs in [1.0, -1.0])
-    prim.sweep([[xs * (hw - 0.14), r, zs * (hl - 0.85)], [xs * (hw + 0.02), r, zs * (hl - 0.85)]], r, 12, true)])
-// a car body: a full-length centre tub, and side panels that open over the wheel arches (centred
-// wz either side of the middle) and under the bumper corners, so the tyres show from the side and behind
-// The tub sits higher (skirt) past the arches, so the bumpers stay short and the tyres show under them.
-pub let SKIRT = 0.44
-pub let CORNER = 0.6
-fn body_shell(hl, hw, wz, sill, belt) {
-    let tub = hw - 0.31, arch = 0.48, crown = 0.78, corner = CORNER, ends = wz + arch;
-    merge([cuboid(0.0 - tub, sill, 0.0 - ends, tub, belt, ends),
-        cuboid(0.0 - tub, SKIRT, ends, tub, belt, hl), cuboid(0.0 - tub, SKIRT, 0.0 - hl, tub, belt, 0.0 - ends),
-        *[for (xs in [-1.0, 1.0], let x0 = if (xs > 0.0) tub else 0.0 - hw, let x1 = if (xs > 0.0) hw else 0.0 - tub) *[
-            cuboid(x0, sill, arch - wz, x1, belt, wz - arch),
-            cuboid(x0, crown, 0.0 - hl, x1, belt, arch - wz), cuboid(x0, crown, wz - arch, x1, belt, hl),
-            cuboid(x0, corner, 0.0 - hl, x1, crown, 0.0 - wz - arch), cuboid(x0, corner, wz + arch, x1, crown, hl)]]])
-}
-// dark liners inside the arches, slim lips under the bumpers and a rub strip along each bumper's
-// lower edge, in place of full-width bumper slabs
-fn body_trim(hl, hw, wz, sill) {
-    let tub = hw - 0.31, arch = 0.48;
-    merge([*[for (xs in [-1.0, 1.0], zs in [-1.0, 1.0], let x = xs * tub)
-            cuboid(min(x, x + xs * 0.02), sill, zs * wz - arch, max(x, x + xs * 0.02), 0.78, zs * wz + arch)],
-        // each piece runs from inside the body (in) to just proud of the bumper face (out)
-        *[for (zs in [-1.0, 1.0], piece in [[0.18 - tub, SKIRT - 0.02, tub - 0.18, SKIRT + 0.03, 0.2, 0.025],
-                [0.0 - hw - 0.01, CORNER - 0.02, hw + 0.01, CORNER + 0.025, 0.35, 0.025]], let zin = zs * (hl - piece[4]), let zout = zs * (hl + piece[5]))
-            cuboid(piece[0], piece[1], min(zin, zout), piece[2], piece[3], max(zin, zout))]])
-}
-// one lamp on side xs (+1 is the car's left), optionally grown by `grow` on every face
-fn lamp(xs, hl, y, w, front, grow = 0.0) {
-    let z = if (front) hl - 0.01 else 0.0 - hl - 0.03;
-    cuboid(xs * 0.55 - (if (xs > 0.0) 0.0 else w) - grow, y - grow, z - grow, xs * 0.55 + (if (xs > 0.0) w else 0.0) + grow, y + 0.14 + grow, z + 0.04 + grow)
-}
-fn lamps(hl, y, w, front) => merge([for (xs in [-1.0, 1.0]) lamp(xs, hl, y, w, front)])
-let SEDAN_HL = 2.25
-let TAIL_Y = 0.66, TAIL_W = 0.33
-// the player sedan's rear indicator: its tail lamp grown just enough to cover it when lit
-pub fn indicator(xs) => lamp(xs, SEDAN_HL, TAIL_Y, TAIL_W, false, 0.006)
-pub fn vehicle(kind, wheels = true) {
-    if (kind == "van") {
-        let hl = 2.45, hw = 1.0;
-        {paint: merge([cuboid(0.0 - hw, 0.35, 0.0 - hl, hw, 1.15, hl), cuboid(0.0 - hw + 0.02, 1.15, 0.0 - hl, hw - 0.02, 2.05, 0.95)]),
-         glass: hexa(ring(0.0 - hw + 0.04, 0.95, hw - 0.04, 1.75, 1.15), ring(0.0 - hw + 0.06, 0.95, hw - 0.06, 1.1, 1.95)),
-         trim: merge([cuboid(0.0 - hw - 0.02, 0.28, hl - 0.05, hw + 0.02, 0.55, hl + 0.08), cuboid(0.0 - hw - 0.02, 0.28, 0.0 - hl - 0.08, hw + 0.02, 0.55, 0.0 - hl + 0.05),
-            *(if (wheels) [wheels_at(hl, hw, 0.38)] else [])]),
-         head: lamps(hl, 0.78, 0.3, true), tail: lamps(hl, 0.9, 0.22, false)}
-    } else if (kind == "pickup") {
-        let hl = 2.55, hw = 1.0;
-        {paint: merge([cuboid(0.0 - hw, 0.38, 0.0 - hl, hw, 0.98, hl), cuboid(0.0 - hw, 0.98, 0.0 - hl, 0.0 - hw + 0.08, 1.2, -0.25),
-            cuboid(hw - 0.08, 0.98, 0.0 - hl, hw, 1.2, -0.25), cuboid(0.0 - hw, 0.98, 0.0 - hl, hw, 1.2, 0.0 - hl + 0.08),
-            cuboid(-0.86, 1.58, -0.15, 0.86, 1.64, 0.85)]),
-         glass: hexa(ring(-0.92, -0.2, 0.92, 1.35, 0.98), ring(-0.86, -0.15, 0.86, 0.85, 1.58)),
-         trim: merge([cuboid(0.0 - hw - 0.02, 0.3, hl - 0.05, hw + 0.02, 0.6, hl + 0.08), cuboid(0.0 - hw - 0.02, 0.3, 0.0 - hl - 0.08, hw + 0.02, 0.6, 0.0 - hl + 0.05),
-            *(if (wheels) [wheels_at(hl, hw, 0.4)] else [])]),
-         head: lamps(hl, 0.74, 0.3, true), tail: lamps(hl, 0.78, 0.2, false)}
-    } else {
-        // sedans, taxis and hatchbacks: a low body open over the wheels, a glasshouse and a roof panel
-        let hatch = kind == "hatch"
-        let hl = if (hatch) 2.0 else SEDAN_HL, hw = if (hatch) 0.9 else 0.93, wz = hl - 0.85
-        let back0 = if (hatch) 0.0 - hl + 0.15 else -1.35, back1 = if (hatch) 0.0 - hl + 0.3 else -0.95
-        let front0 = if (hatch) 0.75 else 0.95, front1 = if (hatch) 0.05 else 0.25;
-        {paint: merge([body_shell(hl, hw, wz, 0.32, 0.86), cuboid(-0.71, 1.36, back1 + 0.03, 0.71, 1.42, front1 - 0.03),
-            block(hw + 0.07, 0.93, 0.62, 0.14, 0.1, 0.18), block(0.0 - hw - 0.07, 0.93, 0.62, 0.14, 0.1, 0.18)]),
-         glass: hexa(ring(-0.86, back0, 0.86, front0, 0.86), ring(-0.72, back1, 0.72, front1, 1.36)),
-         trim: merge([body_trim(hl, hw, wz, 0.32), cuboid(-0.42, 0.5, hl - 0.02, 0.42, 0.66, hl + 0.02),
-            *(if (wheels) [wheels_at(hl, hw, 0.34)] else [])]),
-         head: merge([lamps(hl, 0.62, 0.3, true), *(if (kind == "taxi") [cuboid(-0.32, 1.42, -0.5, 0.32, 1.62, -0.2)] else [])]),
-         tail: lamps(hl, TAIL_Y, TAIL_W, false)}
-    }
-}
 // the player's road wheel: a tyre around a hub with five spokes, axle along X
 pub fn tyre() => prim.sweep([[-0.13, 0.0, 0.0], [0.13, 0.0, 0.0]], 0.36, 18, true)
 pub fn hub() => merge([for (xs in [-1.0, 1.0]) *[prim.sweep([[xs * 0.125, 0.0, 0.0], [xs * 0.145, 0.0, 0.0]], 0.24, 14, true),

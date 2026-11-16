@@ -1,0 +1,17 @@
+{
+  "name": "Document viewer keeps multiple calendar roots separate",
+  "html": "lmd/package/doc/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 1600},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "calendar-stream.ics"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_fixtures .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_fixtures_edit .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_fixtures_edit_calendar-stream_ics .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='VCALENDAR']"}, "count": 2},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='VCALENDAR'] > .property-row", "index": 0}},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='VCALENDAR'] > .property-row", "index": 1}},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='VEVENT']"}, "count": 2}
+  ]
+}

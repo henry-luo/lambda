@@ -436,6 +436,9 @@ fn property_roots(parsed, format) {
         not starts_with(string(name(child)), "!")) ^ { false }))
       {name:string(name(child)), value:child, segment:string(index)}]
   }
+  else if (format == "ics" and type(parsed) == array) {
+    [for (index, calendar in parsed) {name:"VCALENDAR", value:calendar, segment:string(index)}]
+  }
   else if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
   else if (format == "vcf" and type(parsed["contacts"]) != array) {
     [{name:"VCARD", value:parsed, segment:"card"}]

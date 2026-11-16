@@ -542,15 +542,16 @@ suffix (D9.3.4, D10.2.1).
 | `.html`, `.htm` | Rich text for the body; the head, attributes, scripts, and elements the editor does not edit are kept as written and never run |
 | `.xhtml`, `.xht` | Rich text for documents whose strict XML tree survives the HTML editor's round trip, including compact documents and line breaks; other XHTML opens in source |
 | `.rst`, `.rest`, `.org`, `.wiki`, `.mediawiki`, `.adoc`, `.asciidoc`, `.asc`, `.textile`, `.txtl` | Rich text when the document survives its format's round trip; otherwise source |
+| `.man`, `.1`–`.9`, `.1m`, `.3p` | Rich text when the document survives the man format's round trip; otherwise source |
 | `.rtf` | Rich text for basic paragraphs and simple tables, page breaks, alignment, nonnegative indents and spacing, emphasis, small capitals, superscript, subscript, RGB text colors and highlights, and ordinary font and size changes; run languages and default-language, page setup, information and generator headers are retained, while unsupported controls and metadata open in source |
 | `.properties`, `.props`, `.ini` | Property values, names and simple insertions/deletions; unsupported constructs open in source |
 | `.csv`, `.tsv` | Editable grid with numbered rows and columns; quoting is handled on save |
 | `.json` | Property tree for objects and arrays; values use JSON literals, including quotes around strings |
-| `.yaml`, `.yml` | Property trees for block mappings, sequences and flow values; unsupported constructs open in source |
-| `.toml` | Property fields under retained table headings, with expandable arrays and inline tables |
+| `.yaml`, `.yml` | Property trees for supported mappings, sequences, flow values and document streams; unsupported constructs open in source |
+| `.toml` | Property fields and table headings, with expandable arrays and inline tables |
 | `.ics`, `.ical`, `.vcf`, `.vcard` | Component and property trees; repeated fields, parameters, folded lines and nested components are retained |
 | `.xml` | Add, rename and remove child elements; rename the root; add, rename, remove and edit attributes; edit decoded text and CDATA, including multiline values; unsupported constructs open in source |
-| `.svg`, `.mmd`, `.d2`, `.dot`, `.gv`, `.ls`, `.txt`, `.eml`, `.mark`, `.1m`, `.3p` and other supported text suffixes | Source editor |
+| `.svg`, `.mmd`, `.d2`, `.dot`, `.gv`, `.ls`, `.txt`, `.eml`, `.mark` and other supported text suffixes | Source editor |
 
 Other filenames, including extensionless scripts, open in the source editor
 when their contents pass the text checks below.
@@ -559,6 +560,9 @@ Markdown footnote references are retained inline while surrounding text is
 editable. Supported definitions are editable; definitions with unsupported
 content remain view-only. Home and End reach the visual line edges around
 retained references; Shift keeps the selection anchor (D10.2.1).
+Man-page editing retains the original `.TH` header and preceding comments;
+the displayed title cannot be changed in rich mode because it comes from that
+retained header. Use source mode to edit the header.
 
 The property surface preserves the rest of the source when a value changes;
 use the disclosure buttons to collapse or expand nested entries.
@@ -573,10 +577,13 @@ strings so their escapes can be edited; in the Add Property dialog, use
 Shift+Enter to insert a newline in a name.
 YAML and TOML values use their file syntax, including quotes where required.
 Their edits preserve surrounding comments and line endings and reject invalid
-values and duplicate mapping keys. TOML table headings remain unchanged.
-YAML references, tags, directives, document streams and non-string keys use
-source mode. Calendar/contact values retain RFC escape spelling such as `\n`;
-component boundaries are managed by the tree. Unsupported syntax and malformed
+values and duplicate mapping keys. TOML table-heading names use full paths;
+renaming a heading also updates its descendant headings. YAML anchors, aliases,
+tags, directives, multiple documents and supported non-string keys retain their
+source spelling; enter non-string keys using YAML syntax. Calendar/contact
+values retain RFC escape spelling such as `\n`; multiple calendar roots have
+separate trees, and component boundaries are managed by the tree. Unsupported
+syntax and malformed
 documents open in source mode, and `--source` always selects source editing
 (D9.3.4).
 CSV files can be detected as comma- or tab-delimited from their first record.

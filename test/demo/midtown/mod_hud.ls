@@ -5,6 +5,9 @@ import u: .mod_util
 import city: .mod_city
 import cam: .mod_camera
 import sc: .mod_scene
+import land: .mod_land
+import roads: .mod_roads
+import media: lambda.doc.media
 
 // a readout cell stacks 0-9 and a blank, showing one at a time
 pub let GLYPHS = "0123456789 "
@@ -32,8 +35,43 @@ fn plan() element {
         <rect x: 0.0 - w, y: city.SHORE, width: 2.0 * w, height: w - city.SHORE + w, fill: "#2e5d78">,
         <rect x: 0.0 - l, y: 0.0 - l, width: 2.0 * l, height: 2.0 * l, fill: "#5a5f66">, *blocks, *towers]>
 }
+// the land beyond the city at the same scale: sea, river, the loop road (darker through the tunnel)
+// and the roundabout; it sits under the city plan. It is an image of an SVG, so Radiant rasterises it
+// once and only turns the bitmap each frame (as inline SVG it was redrawn every frame, ~2 ms)
+let REGION = {x0: -320.0, x1: 1620.0, z0: -460.0, z1: 460.0}
+fn pt(x, z) any^ => string(round(x)) ++ " " ++ string(round(z))
+fn outline(points) any^ => join([for (k, p in points) (if (k == 0) "M " else "L ") ++ pt(p[0], p[1])], " ") ++ " Z"
+// a band `half` wide either side of a run of road samples (every third), as one closed outline
+fn band(pts, half) any^ => (let picked = [for (k, p in pts where k % 3 == 0 or k == len(pts) - 1) p],
+    outline([*[for (p in picked, let r = u.right(p.heading)) [p.x + r[0] * half, p.z + r[1] * half]],
+        *[for (p in reverse(picked), let r = u.right(p.heading)) [p.x - r[0] * half, p.z - r[1] * half]]]))
+fn river_band() any^ {
+    let pts = land.RIVER
+    let n = len(pts)
+    let side = (k, sgn) any^ => (let a = pts[max(0, k - 1)], let b = pts[min(n - 1, k + 1)], let dx = b[0] - a[0], let dz = b[1] - a[1],
+        let l = sqrt(dx * dx + dz * dz), let w = land.river_half(pts[k][1]) * sgn, [pts[k][0] - dz / l * w, pts[k][1] + dx / l * w]);
+    outline([*[for (k in 0 to (n - 1)) side(k, 1.0)], *[for (k in 0 to (n - 1)) side(n - 1 - k, -1.0)]])
+}
+fn region_svg() element^ {
+    let r = REGION
+    let coast = [for (k in 0 to 48, let x = r.x0 + k * 40.0) [x, land.coast_z(x)]]
+    let loop = roads.LOOP.samples^
+    let bores = [for (st in roads.STRUCTURES where st.kind == "tunnel") [for (p in loop where p.s >= st.a and p.s <= st.b) p]];
+    <svg xmlns: "http://www.w3.org/2000/svg", width: r.x1 - r.x0, height: r.z1 - r.z0,
+        viewBox: string(r.x0) ++ " " ++ string(r.z0) ++ " " ++ string(r.x1 - r.x0) ++ " " ++ string(r.z1 - r.z0), *[
+        <rect x: r.x0, y: r.z0, width: r.x1 - r.x0, height: r.z1 - r.z0, fill: "#3c5a33">,
+        <path d: outline([*coast, [r.x1, r.z1], [r.x0, r.z1]]), fill: "#2e5d78">, <path d: river_band(), fill: "#2e5d78">,
+        <path d: band(loop, 6.5), fill: "#2b2f35">, <path d: band(loop, 4.0), fill: "#d6d0c2">,
+        *[for (b in bores) <path d: band(b, 4.0), fill: "#5d6168">],
+        <rect x: city.LIMIT, y: -6.0, width: roads.R1.x - city.LIMIT, height: 12.0, fill: "#d6d0c2">,
+        <circle cx: roads.R1.x, cy: roads.R1.z, r: roads.R1.ring + 5.0, fill: "#d6d0c2">,
+        <circle cx: roads.R1.x, cy: roads.R1.z, r: roads.R1.island, fill: "#4d7a45">]>
+}
+fn region_plan() element^ => (let r = REGION, <img class: "map-plan", alt: "", width: r.x1 - r.x0, height: r.z1 - r.z0,
+    src: media.data_uri(binary(format(region_svg()^, 'xml')^), "image/svg+xml")^,
+    style: "left:" ++ string(r.x0) ++ "px;top:" ++ string(r.z0) ++ "px;width:" ++ string(r.x1 - r.x0) ++ "px;height:" ++ string(r.z1 - r.z0) ++ "px">)
 fn minimap() element => <div class: "map-disc", *[
-    <div id: "map-world", class: "map-world", *[plan(),
+    <div id: "map-world", class: "map-world", *[*(let rp = region_plan() ^ { null }, if (rp == null) [] else [rp]), plan(),
         <div id: "map-target", class: "map-target", style: "opacity:0", *[<div class: "map-target-ring">]>]>,
     <div id: "map-pointer", class: "map-pointer", style: "opacity:0", *[<div class: "map-pointer-tip">]>,
     <div id: "map-north", class: "map-north", *[<span "N">]>,

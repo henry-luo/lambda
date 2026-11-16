@@ -151,7 +151,8 @@ fn calendar(value) map^ {
     c.result("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" ++ product ++ emitted.text ++ children.text ++ "END:VCALENDAR\r\n",emitted.diagnostics ++ children.diagnostics ++ issues)
 }
 pub fn render(value,target) map^ {
-    if (target == "ics") calendar(value)^
+    if (target == "ics" and (value is array or value is list)) c.merge([for (item in value) calendar(item)^])^
+    else if (target == "ics") calendar(value)^
     else if (value is map and value.contacts != null) c.merge([for (item in ((c.sequence(value.contacts)) ^ { [] })) contact(item)^])^
     else if (value is array or value is list) c.merge([for (item in value) contact(item)^])^
     else contact(value)^

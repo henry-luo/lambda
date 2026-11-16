@@ -1,0 +1,17 @@
+{
+  "name": "edit a YAML stream while preserving document markers and anchors",
+  "command": "edit",
+  "html": "test/fixtures/edit/yaml-stream.yaml",
+  "working_copy": "temp/edit-ui/edit_yaml_stream.yaml",
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".property-value"}, "count": 4},
+    {"type": "click", "target": {"selector": "input[aria-label='Property name: base']"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "text": "first"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_stream.yaml", "contains": "%YAML 1.2\n---\n\"first\": &anchor 1\ncopy: *anchor\n...\n---\nbase: &anchor 2\ncopy: *anchor\n"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_yaml_stream.yaml", "equals": "%YAML 1.2\n---\nbase: &anchor 1\ncopy: *anchor\n...\n---\nbase: &anchor 2\ncopy: *anchor\n"}
+  ]
+}
