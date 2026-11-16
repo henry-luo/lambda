@@ -971,6 +971,28 @@ as `test_stress.py --full`; focused persistence/export GC cases and the unchange
 full normal workflow gates are reported separately. No failure is reclassified
 as a passing stress result.
 
+2026-11-16 TeX-port follow-up: a two-worker LaTeX run recorded three ordinary
+60-second timeouts and two subsequent batch-worker crashes. A smaller batch
+reproduces a timeout followed by a second timeout on `1 + 1`; the second script
+passes alone. A symbolized sample shows the second script blocked at the MIR
+code-generation mutex: the alarm jump bypassed the first compilation's C++ lock
+destructor. The `test-batch` timeout now writes its failed result with
+signal-safe operations and exits that worker without entering cleanup or another
+script; the existing runner retries unstarted records in fresh workers. This
+preserves the timeout as a failure and does not change `js-test-batch`. Focused
+loop and interrupted-compilation regression tests pass, and eight short-timeout
+reproductions emit one 124 result and exit 124 without running the next script.
+An end-to-end GTest probe retained an intentional 60-second timeout as a
+failure and passed its unstarted neighbor in retry batch 100001; its temporary
+probe scripts were removed after the run. A two-second forced-GC `sync_laws`
+probe also emitted one 124 and exited without running the next script.
+Evidence: `temp/tex-script-f/batch-timeout-debug2-sample-stack.txt`,
+`timeout-fix-gtest.log`, `batch-timeout-root-fixed-debug.log` and
+`timeout-gtest-retry.log`. D6.3.6 and
+D6.4.3 govern recovery and reset ownership. **LR01-24 remains OPEN** until the
+original forced-GC scenarios and broader runtime gates are requalified; the
+three LaTeX timeouts also remain failures to investigate.
+
 ## 2. Parsing & AST construction (LR02)
 
 <a id="lr02-1"></a>**LR02-1 · Relational result type is representation-sensitive · PARTIAL**

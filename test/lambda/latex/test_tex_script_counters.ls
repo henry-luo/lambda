@@ -1,6 +1,8 @@
+import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
 let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let message_preload=parse("",{type:"tex"})^.messages;
 fn report(source) any^ {
  let doc="\\begin{document}" ++ source ++ "\\end{document}";
  let r=profile.expand_with_kernel(doc,kernel,{echo_definitions:true, resources:{local:{},bundled:{}}},100000)^;
@@ -93,7 +95,9 @@ let reference_source="\\newcounter{outer}\\newcounter{inner}[outer]\\begin{docum
  "\\stepcounter{outer}\\immediate\\write16{LCOUNTER-TWO=\\arabic{outer}/\\arabic{inner}/\\theouter}" ++
  "{\\setcounter{inner}{9}}\\addtocounter{inner}{2}\\refstepcounter{inner}\\immediate\\write16{LCOUNTER-THREE=\\arabic{inner}}\\end{document}";
 let reference_result=profile.expand_with_kernel(reference_source,kernel,{resources:{local:{},bundled:{}}},100000)^;
-"pdfLaTeX reference:"; {issue:reference_result.issue,unsupported:reference_result.unsupported,messages:reference_result.messages}
+let reference_native=parse(reference_source,{type:"tex"})^;
+"pdfLaTeX reference:"; {issue:reference_result.issue,unsupported:reference_result.unsupported,
+ messages:message_test.document(reference_result.messages,message_preload)^,messages_match:reference_result.messages==reference_native.messages}
 
 let cycle=profile.expand_with_kernel("\\newcounter{n}[n]\\stepcounter{n}",kernel,{resources:{local:{},bundled:{}}},100000)^;
 "cyclic reset bounded:"; {issue:cycle.issue}

@@ -93,6 +93,12 @@ let EXPANDABLE = [
 pub fn exists(name) => contains(PRIMITIVES, name)
 pub fn expandable(name) => contains(EXPANDABLE, name)
 
+// the compatibility profile exposes the native engine's pdfTeX and e-TeX identities.
+let ENGINE_VERSIONS = {eTeXversion: 2, pdftexversion: 140}
+let ENGINE_REVISIONS = {eTeXrevision: ".6", pdftexrevision: "27"}
+pub fn engine_version(name) => if (name is string) ENGINE_VERSIONS[name] else null
+pub fn engine_revision(name) => if (name is string) ENGINE_REVISIONS[name] else null
+
 // LaTeX names are enabled only in the LaTeX engine profile.
 let LATEX_PRIMITIVES = ["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand", "newenvironment", "renewenvironment", "begin", "end", "@@end", "newcounter", "setcounter", "addtocounter", "stepcounter", "refstepcounter", "newlength", "setlength", "addtolength", "settowidth", "settoheight", "settodepth", "documentclass", "LoadClass", "LoadClassWithOptions", "usepackage", "RequirePackage", "RequirePackageWithOptions", "DeclareOption", "ExecuteOptions", "ProcessOptions", "PassOptionsToPackage", "PassOptionsToClass", "@yargdef", "filename@parse", "@ifpackagewith", "@ifclasswith", "IfFileExists", "InputIfFileExists", "AtBeginDocument", "AtEndDocument", "AtEndOfPackage", "AtEndOfClass", "verb", "lstinline", "Verb", "mint", "mintinline", "lambdaconstructor", "ProvidesPackage", "ProvidesClass", "ProvidesFile", "NeedsTeXFormat", "include", "newif", "@ifnextchar", "kernel@ifnextchar", "@ifstar", "@for", "@tfor", "arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value", "(", ")", "[", "]", "lambda@Roman", "NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand", "NewDocumentEnvironment", "RenewDocumentEnvironment", "ProvideDocumentEnvironment", "DeclareDocumentEnvironment", "IfNoValueTF", "IfNoValueT", "IfNoValueF", "IfValueTF", "IfValueT", "IfValueF", "IfBooleanTF", "IfBooleanT", "IfBooleanF", "AddToHook", "IfFormatAtLeastTF", "lambda@xspace"]
 let LATEX_EXPANDABLE = ["@ifpackagewith", "@ifclasswith", "arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value", "lambda@Roman", "IfNoValueTF", "IfNoValueT", "IfNoValueF", "IfValueTF", "IfValueT", "IfValueF", "IfBooleanTF", "IfBooleanT", "IfBooleanF", "IfFormatAtLeastTF", "lambda@xspace"]

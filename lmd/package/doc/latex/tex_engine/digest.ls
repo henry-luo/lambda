@@ -264,6 +264,10 @@ fn source_control_gap(tokens, sources, index) any^ {
     else ""
 }
 
+// the native command scanner accepts ASCII letters and @ in a control word.
+fn native_word_char(value) bool^ => contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@", value)
+fn native_suffix_char(value) bool^ => native_word_char(value)^ or contains("0123456789_:-.", value)
+
 // reconstructed control words need a separator before an adjacent ASCII letter.
 fn spacing_word_gap(tokens, sources, index) any^ {
     let token = tokens[index];
@@ -273,7 +277,7 @@ fn spacing_word_gap(tokens, sources, index) any^ {
     if (paragraph_space(next,sources)^) ""
     else if (adjacent) source_control_gap(tokens, sources, index)
     else if (next != null and contains(["char", "active"], next.kind) and len(next.value) == 1 and
-        index_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ@", next.value) != null) " "
+        native_word_char(next.value)^) " "
     else ""
 }
 
@@ -760,6 +764,25 @@ fn math_command(tokens, index) any^ {
     else unsupported(index, "math command " ++ name)
 }
 
+// the native math scanner shares punctuation rules between atoms and script arguments.
+fn math_punctuation(tokens, index) any^ {
+    let token = if (index < len(tokens)) tokens[index] else null;
+    if (token == null or token.kind != "char" or len(token.value) != 1 or ord(token.value) >= 128)
+        unsupported(index, "math punctuation")
+    else {
+        let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+        let adjacent = next != null and next.kind == "char" and math_adjacent(token,next);
+        let pair = if (adjacent) token.value ++ next.value else "";
+        let joined = contains(["<=", ">=", "!=", "->", ";;"], pair);
+        let value = if (token.value == "&") 'col_sep' else if (pair == ";;") 'row_sep'
+            else if (contains(["<=", ">=", "!=", "->"], pair)) <relation value:pair>
+            else if (contains(["<", ">", "="], token.value)) <relation value:token.value>
+            else if (contains(["+", "-", "*", "/"], token.value)) <operator value:token.value>
+            else <punctuation value:token.value>;
+        {issue:null, index:index + if (joined) 2 else 1, value:value}
+    }
+}
+
 fn math_script_arg(tokens, index) any^ {
     let at = math_nonspace(tokens, index)^;
     if (at >= len(tokens)) unsupported(at, "math script argument")
@@ -775,6 +798,8 @@ fn math_script_arg(tokens, index) any^ {
     else if (math_letter(tokens[at]) or math_digit(tokens[at]))
         {issue: null, index: at + 1, value: tokens[at].value}
     else if (tokens[at].kind == "control") math_command(tokens, at)
+    else if (tokens[at].kind == "char" and len(tokens[at].value) == 1 and ord(tokens[at].value) < 128)
+        math_punctuation(tokens, at)
     else unsupported(at, "math script argument")
 }
 
@@ -783,12 +808,13 @@ fn math_scripts(tokens, index, base, sub = null, sup = null) any^ {
     let token = if (at < len(tokens)) tokens[at] else null;
     if (token != null and token.kind == "char" and (token.cat == 7 or token.cat == 8)) {
         let superscript = token.cat == 7;
-        if ((superscript and sup != null) or (not superscript and sub != null)) unsupported(at, "repeated math script")
+        let arg = math_script_arg(tokens, at + 1)^;
+        if (arg.issue != null) arg
         else {
-            let arg = math_script_arg(tokens, at + 1)^;
-            if (arg.issue != null) arg
-            else math_scripts(tokens, arg.index, base, if (superscript) sub else arg.value,
-                if (superscript) arg.value else sup)
+            // native accumulates superscripts and replaces an earlier subscript.
+            let upper = if (superscript and sup != null) <group *[sup, arg.value]> else arg.value;
+            math_scripts(tokens, arg.index, base, if (superscript) sub else arg.value,
+                if (superscript) upper else sup)
         }
     }
     else {
@@ -848,26 +874,14 @@ fn math_atoms(tokens, index = 0, items = []) any^ {
                 if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
             }
         }
-        else if (token.kind == "char" and token.value == "&")
-            math_atoms(tokens, index + 1, [*items, 'col_sep'])
-        // ordinary delimiters are punctuation atoms and can carry scripts.
-        else if (token.kind == "char" and contains(["(", ")", "[", "]", ",", ":", "|"], token.value)) {
-            let scripted = math_scripts(tokens, index + 1, <punctuation value: token.value>)^;
-            if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
+        else if (token.kind == "char" and contains(["&", "(", ")", "[", "]", ",", ":", "|", ";",
+                "+", "-", "*", "/", "<", ">", "=", "^", "_"], token.value)) {
+            let atom = math_punctuation(tokens,index)^;
+            if (atom.issue != null) atom else {
+                let scripted = math_scripts(tokens,atom.index,atom.value)^;
+                if (scripted.issue != null) scripted else math_atoms(tokens,scripted.index,[*items,scripted.value])
+            }
         }
-        else if (token.kind == "char" and contains(["+", "-", "*", "/"], token.value))
-            math_atoms(tokens, index + 1, [*items, <operator value: token.value>])
-        // native math joins an immediately adjacent equals sign to comparison operators.
-        else if (token.kind == "char" and contains(["<", ">"], token.value)) {
-            let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
-            let paired = next != null and next.kind == "char" and next.value == "=" and
-                math_adjacent(token, next);
-            let relation = <relation value: token.value ++ if (paired) "=" else "">;
-            let scripted = math_scripts(tokens, index + if (paired) 2 else 1, relation)^;
-            if (scripted.issue != null) scripted else math_atoms(tokens, scripted.index, [*items, scripted.value])
-        }
-        else if (token.kind == "char" and token.value == "=")
-            math_atoms(tokens, index + 1, [*items, <relation value: token.value>])
         else unsupported(index, "math atom")
     }
 }
@@ -886,6 +900,7 @@ fn math_element(tokens, sources, index) any^ {
         let direct = start.direct == true and finish.direct == true and start.file == finish.file and
             all([for (token in body) token.direct == true and token.file == start.file]);
         let mapped = start.output_text != null and (not direct or start.read_offset != null or
+            any([for (token in body) math_source_normalized(token,sources)^]) or
             any([for (i in (index + 1 to close.index)^) tokens[i].seq != null and tokens[i - 1].seq != null and
                 tokens[i].file == tokens[i - 1].file and tokens[i].seq != tokens[i - 1].seq + 1]));
         // mapped math must agree with native lexical categories as well as bytes.
@@ -990,9 +1005,20 @@ fn definition_head(target, first, second) => {
     children: [target.value, *(if (first.present) [first.value] else []),
         *(if (second.present) [second.value] else [])]}
 
+// paragraph breaks inside groups belong to the nested inline parse.
+fn definition_outer_paragraph(tokens, index) any^ {
+    if (index >= len(tokens)) false
+    else if (control(tokens[index],"par") or closing(tokens[index])) true
+    else if (opening(tokens[index])) {
+        let group = group_end(tokens,index + 1,1)^;
+        group.issue != null or definition_outer_paragraph(tokens,group.end)^
+    }
+    else definition_outer_paragraph(tokens,index + 1)
+}
+
 // source whitespace ends native definition arguments even when TeX scans further.
 fn definition_partial(tokens, sources, cmd, starred, groups, children, index, text = "") any^ {
-    let has_paragraph = any([for (token in slice(tokens, index, len(tokens))^) control(token, "par")]);
+    let has_paragraph = definition_outer_paragraph(tokens,index)^;
     let tail = if (has_paragraph) unsupported(index, "definition paragraph source mapping") else
         inline(tokens, sources, index, text, [], false)^;
     if (tail.issue != null) tail
@@ -1005,7 +1031,8 @@ fn definition_partial(tokens, sources, cmd, starred, groups, children, index, te
 
 fn definition_span(span, sources, allow_tail = false, mapped_end = null) any^ {
     {
-        let input = {*:tex_reader.reader(span.value, span.file), catcodes: span.catcodes};
+        // echoed definitions are parsed from raw bytes by the native digester.
+        let input = {*:tex_reader.reader(span.value, span.file), catcodes: span.catcodes, preserve_source:true};
         let read_tokens = span_tokens(input, span.start, len(binary(span.value)^))^;
         let tokens = [for (token in read_tokens) {*:token, definition_catcodes: span.catcodes}];
         let prefix = definition_prefixes(tokens, sources)^;
@@ -1042,6 +1069,15 @@ fn definition_span(span, sources, allow_tail = false, mapped_end = null) any^ {
                 let partial = if (allow_tail) unsupported(target_at, "inline definition source gap") else
                     definition_partial(tokens, sources, cmd, starred, [], [], target_at, command_gap)^;
                 if (partial.issue != null) partial else {*:partial, nodes: [*prefix.items, *partial.nodes]}
+            }
+            // native digestion leaves an active definition target as following text.
+            else if (primitive and next != null and next.kind == "active") {
+                if (allow_tail) {issue:null, end_offset:cmd.end,
+                    nodes:[*prefix.items, definition_node(cmd.value, {source_offset:cmd.start, argument_groups:[]}, [])]}
+                else {
+                    let partial = definition_partial(tokens, sources, cmd, starred, [], [], target_at)^;
+                    if (partial.issue != null) partial else {*:partial, nodes: [*prefix.items, *partial.nodes]}
+                }
             }
             else if (target.issue != null) target
             else if (first.issue != null) first
@@ -1172,12 +1208,12 @@ fn list_environment(name) => contains(["itemize", "enumerate", "description"],na
 fn declaration_command(token) any^ => token.kind == "control" and
     contains(["documentclass", "usepackage", "title", "author", "date"], token.value)
 
-// expanded declaration arguments require byte ranges from reconstructed output.
-fn declaration_expanded_args(tokens, index, file) any^ {
+// expanded command arguments require byte ranges from reconstructed output.
+fn expanded_argument_sources(tokens, index, file, sources) any^ {
     if (index >= len(tokens)) false
     else {
         let token = tokens[index];
-        if (token.kind == "char" and token.value == "*") declaration_expanded_args(tokens,index + 1,file)
+        if (token.kind == "char" and token.value == "*") expanded_argument_sources(tokens,index + 1,file,sources)
         else if (opening(token) or (token.kind == "char" and token.value == "[")) {
             let group = if (opening(token)) read_group(tokens,index)^
                 else read_generic_delimited(tokens,index,"[","]","unclosed")^;
@@ -1185,7 +1221,8 @@ fn declaration_expanded_args(tokens, index, file) any^ {
             let consumed = group.issue == null and any([for (i in (index + 1 to group.end - 1)^)
                 tokens[i - 1].seq != null and tokens[i].seq != null and tokens[i].file == tokens[i - 1].file and
                 tokens[i].seq != tokens[i - 1].seq + 1]);
-            group.issue == null and (expanded_source_group(group,file) or consumed or declaration_expanded_args(tokens,group.end,file)^)
+            let normalized = group.issue == null and any([for (t in (group.tokens)^) math_source_normalized(t,sources)^]);
+            group.issue == null and (expanded_source_group(group,file) or consumed or normalized or expanded_argument_sources(tokens,group.end,file,sources)^)
         }
         else false
     }
@@ -1200,8 +1237,18 @@ fn list_option_needs_mapping(tokens, main_file, index) any^ {
     candidate and expanded_source_group(option,main_file)
 }
 
+// a direct token may still have been normalized by the TeX reader.
+fn math_source_normalized(token, sources) any^ {
+    if (token.direct != true or not contains(["char", "control", "active"], token.kind)) false
+    else {
+        let raw = source_span(token,sources)^;
+        let emitted = rebuild.source_fragment(token,sources)^.body;
+        raw == null or emitted == null or raw != emitted
+    }
+}
+
 // expansion may insert math tokens or consume a macro without leaving tokens.
-fn expanded_math(tokens, index, main_file) any^ {
+fn expanded_math(tokens, index, main_file, sources) any^ {
     let named = control(tokens[index], "(") or control(tokens[index], "[");
     let display = if (named) control(tokens[index], "[") else index + 1 < len(tokens) and dollar(tokens[index + 1]);
     let first = index + if (display and not named) 2 else 1;
@@ -1209,13 +1256,25 @@ fn expanded_math(tokens, index, main_file) any^ {
     let end = math_close(tokens, first, display, closing)^;
     if (end.issue != null) {needed:false, end:index + 1}
     else {end:end.end, needed:any([for (i in (index to end.end - 1)^)
-        tokens[i].direct != true or tokens[i].file != main_file or
+        tokens[i].direct != true or tokens[i].file != main_file or math_source_normalized(tokens[i],sources)^ or
         (i > index and tokens[i].seq != null and tokens[i - 1].seq != null and
          tokens[i].file == tokens[i - 1].file and tokens[i].seq != tokens[i - 1].seq + 1)])}
 }
 
+// consumed or foreign source requires adjacency in reconstructed output.
+fn inline_star_needs_mapping(token, next) => next != null and
+    (token.direct != true or next.direct != true or token.file != next.file or
+        (token.seq != null and next.seq != null and next.seq != token.seq + 1))
+
+// the reconstructed gap reveals macros that vanished after a star.
+fn inline_star_group_needs_mapping(tokens,sources,index) any^ {
+    let first = index + 2;
+    let group = list_space_index(tokens,sources,first)^;
+    group > first and group < len(tokens) and opening(tokens[group])
+}
+
 // reconstruction is needed for expanded arguments and constructor-mode commands.
-fn needs_output_mapping(tokens, main_file, constructor_mode, index = 0, saw_paren = false,
+fn needs_output_mapping(tokens, sources, main_file, constructor_mode, index = 0, saw_paren = false,
         saw_generated = false, checked_paren = false) any^ {
     if (index >= len(tokens)) false
     else {
@@ -1225,17 +1284,23 @@ fn needs_output_mapping(tokens, main_file, constructor_mode, index = 0, saw_pare
         if (token.raw_verb == true or token.raw_inline_kind != null or escaped_text_name(token) != null) true
         else if (control(token,"par") and token.direct != true) true
         else if (dollar(token) or control(token,"(") or control(token,"[")) {
-            let math = expanded_math(tokens,index,main_file)^;
+            let math = expanded_math(tokens,index,main_file,sources)^;
             if (math.needed) true
-            else needs_output_mapping(tokens,main_file,constructor_mode,math.end,paren,generated,checked_paren)
+            else needs_output_mapping(tokens,sources,main_file,constructor_mode,math.end,paren,generated,checked_paren)
         }
-        else if (declaration_command(token)^ and ((token.direct != true and token.emit_origin != null) or
-                declaration_expanded_args(tokens,index + 1,token.file)^)) true
-        else if (constructor_mode and token.kind == "control" and (token.direct != true or token.file != main_file) and
-                token.read_offset != null and not inline_format_command(token.value)) true
+        else if (token.kind == "control" and ((declaration_command(token)^ and token.direct != true and token.emit_origin != null) or
+                expanded_argument_sources(tokens,index + 1,token.file,sources)^)) true
+        // generated inline stars require their reconstructed byte adjacency.
+        else if (token.kind == "control" and inline_format_command(token.value) and index + 1 < len(tokens) and
+                tokens[index + 1].kind == "char" and tokens[index + 1].value == "*" and
+                (inline_star_needs_mapping(token,tokens[index + 1]) or inline_star_group_needs_mapping(tokens,sources,index)^)) true
+        else if (constructor_mode and token.kind == "control" and
+                (((token.direct != true or token.file != main_file) and token.read_offset != null and
+                    not inline_format_command(token.value)) or native_name_needs_reparse(token.value)^ or
+                    (token.value == "@" and index + 1 < len(tokens) and native_name_letter(tokens[index + 1])^))) true
         else if (paren and generated and not checked_paren and paren_command_scan(tokens,main_file)^) true
         else if (control(token,"begin") and list_option_needs_mapping(tokens,main_file,index)^) true
-        else needs_output_mapping(tokens,main_file,constructor_mode,index + 1,paren,generated,checked_paren or (paren and generated))
+        else needs_output_mapping(tokens,sources,main_file,constructor_mode,index + 1,paren,generated,checked_paren or (paren and generated))
     }
 }
 
@@ -1363,10 +1428,15 @@ fn reconstructed_literal(token) any^ {
 
 fn reconstructed_token(token) any^ {
     if (token.output_text == null or token.output_start == null or token.output_end == null) false
-    else if (token.kind == "char") token.cat == 10 or (reconstructed_literal(token)^ and
-        token.value != "\\" and token.value != "%" and
-        (token.value != "{" or token.cat == 1) and (token.value != "}" or token.cat == 2) and
-        (token.value != "$" or token.cat == 3))
+    else if (token.kind == "char") {
+        let raw = utf8.decode(slice(binary(token.output_text)^,token.output_start,token.output_end)^)^;
+        let escaped = contains(["_", "#", "%", "$", "{", "}"],token.value) and raw == "\\" ++ token.value and
+            not opening(token) and not closing(token) and token.cat != 3;
+        token.cat == 10 or escaped or (reconstructed_literal(token)^ and
+            token.value != "\\" and token.value != "%" and
+            (token.value != "{" or token.cat == 1) and (token.value != "}" or token.cat == 2) and
+            (token.value != "$" or token.cat == 3))
+    }
     else if (token.kind == "control") {
         let raw = utf8.decode(slice(binary(token.output_text)^,token.output_start,token.output_end)^)^;
         // paragraph tokens can carry reconstructed line endings instead of a control word.
@@ -1376,6 +1446,60 @@ fn reconstructed_token(token) any^ {
     }
     else if (token.kind == "active") utf8.decode(slice(binary(token.output_text)^,token.output_start,token.output_end)^)^ == token.value
     else false
+}
+
+// native control words stop at the first byte outside letters and @.
+fn native_name_letter(token) any^ => token != null and token.kind == "char" and len(token.value) == 1 and
+    native_word_char(token.value)^
+fn native_join_end(tokens, index, previous_end) any^ {
+    if (index >= len(tokens) or not native_name_letter(tokens[index])^ or
+            tokens[index].output_start != previous_end or not reconstructed_literal(tokens[index])^)
+        index
+    else native_join_end(tokens,index + 1,tokens[index].output_end)
+}
+fn native_word_end(chars, index = 0) any^ {
+    if (index >= len(chars)) index
+    else if (native_word_char(chars[index])^)
+        native_word_end(chars, index + 1)
+    else index
+}
+fn native_name_needs_reparse(value) any^ {
+    let chars = split(value, "")^;
+    any([for (b in binary(value)^) b >= 128]) or
+        (len(chars) > 1 and (len(chars) >= 95 or native_word_end(chars)^ != len(chars)))
+}
+fn native_split_word(token) any^ {
+    if (token.kind != "control" or token.output_constructor_mode != true or
+            token.output_start == null or token.output_end == null or not reconstructed_token(token)^) null
+    else {
+        let chars = split(token.value, "")^;
+        let end = native_word_end(chars)^;
+        let suffix = slice(chars, end, len(chars))^;
+        if (end == 0 or end >= len(chars) or end >= 95 or
+                not all([for (c in suffix) native_suffix_char(c)^])) null
+        else {
+            let start = token.output_start;
+            let word_end = start + 1 + end;
+            let origin = if (token.read_offset != null) token.read_offset
+                else rebuild.map_offset(token.output_segments,start)^;
+            [{*:token, value:join(slice(chars,0,end)^, ""), direct:false,
+                read_offset:origin, read_file:if(token.read_file != null) token.read_file else token.file, output_end:word_end},
+             *[for (i,c in suffix) {*:token, kind:"char", value:c, cat:12, direct:false,
+                output_start:word_end + i, output_end:word_end + i + 1}]]
+        }
+    }
+}
+
+// the native scanner reads one escaped punctuation byte, then ordinary text.
+fn native_escaped_word(token) any^ {
+    if (token.kind != "control" or token.output_constructor_mode != true) false
+    else {
+        let chars = split(token.value, "")^;
+        len(chars) > 1 and contains(["$", "%", "#", "&", "_", "{", "}"], chars[0]) and
+            all([for (c in slice(chars, 1, len(chars))^)
+                native_suffix_char(c)^]) and
+            reconstructed_token(token)^
+    }
 }
 
 fn output_between(left, right) any^ {
@@ -1751,9 +1875,15 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             let node = escaped_text_node(token)^;
             inline(tokens,sources,index + 1,"",[*append_text(items,text),node],stop_blocks,table_mode)
         }
-        else if (token.kind == "char" and not opening(token) and not closing(token) and token.cat != 3)
+        else if (token.kind == "char" and not opening(token) and not closing(token) and token.cat != 3) {
+            let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+            let gap = if (token.cat != 10 and token.output_constructor_mode == true and next != null and
+                    token.output_end != null and next.output_start != null) output_between(token,next)^ else "";
+            // reconstruct source spaces discarded by the TeX reader in constructor arguments.
+            let after = if (gap == " ") " " else "";
             inline(tokens, sources, index + 1, text ++ (if (token.cat == 10)
-                whitespace(token, if (index + 1 < len(tokens)) tokens[index + 1] else null, sources)^ else token.value), items, stop_blocks, table_mode)
+                whitespace(token, next, sources)^ else token.value ++ after), items, stop_blocks, table_mode)
+        }
         else if (control(token, "item")) {
             let opt = read_optional(tokens, index + 1)^;
             let offset = if (token.read_offset != null) token.read_offset else token.start;
@@ -1776,11 +1906,26 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             // native parsing keeps a formatting node even without a following group.
             let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
             let star = next != null and next.kind == "char" and next.value == "*";
-            let mapped = star and token.direct == true and next.direct == true and token.file == next.file;
-            let starred = mapped and token.end == next.start;
-            let at = index + if (starred) 2 else 1;
+            let generated = star and (inline_star_needs_mapping(token,next) or inline_star_group_needs_mapping(tokens,sources,index)^);
+            let mapped = star and (if (generated) reconstructed_token(token)^ and reconstructed_literal(next)^
+                else token.direct == true and next.direct == true and token.file == next.file);
+            let gap_before_star = if (generated and star) output_between(token,next)^ else "";
+            let starred = mapped and (if (generated) gap_before_star == "" else token.end == next.start);
+            let after_star = index + if (starred) 2 else 1;
+            let group_at = if (starred) list_space_index(tokens,sources,after_star)^ else after_star;
+            let between = if (group_at > after_star and group_at < len(tokens) and opening(tokens[group_at]))
+                if (tokens[after_star - 1].output_end != null) output_between(tokens[after_star - 1],tokens[group_at])^
+                else if (tokens[after_star - 1].direct == true and tokens[group_at].direct == true and
+                        tokens[after_star - 1].file == tokens[group_at].file)
+                    source_span({direct:true,file:tokens[group_at].file,start:tokens[after_star - 1].end,end:tokens[group_at].start},sources)^
+                else null
+                else null;
+            // native skips only literal whitespace between a star and a group.
+            let at = if (between != null and all([for (b in binary(between)^) ascii_space(b)])) group_at else after_star;
             let gap = format_control_gap(tokens, sources, at - 1)^;
-            if (star and not mapped) unsupported(index, "inline command star source mapping")
+            if (star and (not mapped or gap_before_star == null)) unsupported(index, "inline command star source mapping")
+            else if (starred and group_at > after_star and group_at < len(tokens) and opening(tokens[group_at]) and between == null)
+                unsupported(index, "inline command argument source mapping")
             else if (at >= len(tokens) or not opening(tokens[at]) or (gap.valid and gap.seen)) {
                 let node = inline_element(token.value, if (token.read_offset != null)
                     token.read_offset else token.start, []);
@@ -1853,6 +1998,43 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             if (raw.issue != null) raw
             else inline(tokens,sources,index + 1,"",[*append_text(items,text),raw.node],stop_blocks,table_mode)
         }
+        // the native scanner can split UTF-8 inside a control symbol (LI-064).
+        else if (token.kind == "control" and token.output_constructor_mode == true and token.output_start != null and
+                any([for (b in binary(token.value)^) b >= 128]))
+            unsupported(index, "native command unicode source mapping")
+        // TeX can emit a control symbol followed by letters as one native word.
+        else if (control(token,"@") and token.output_constructor_mode == true and token.output_start != null and
+                token.output_end != null and index + 1 < len(tokens) and native_name_letter(tokens[index + 1])^ and
+                tokens[index + 1].output_start == token.output_end) {
+            let end = native_join_end(tokens,index + 1,token.output_end)^;
+            let word = "@" ++ join([for (t in slice(tokens,index + 1,end)^) t.value], "");
+            if (len(word) >= 95) unsupported(index, "native command lexical source mapping")
+            else {
+                let joined = {*:token, value:word, direct:false, read_offset:rebuild.map_offset(token.output_segments,token.output_start)^,
+                    read_file:if(token.read_file != null) token.read_file else token.file, output_end:tokens[end - 1].output_end};
+                inline([*slice(tokens,0,index)^, joined, *slice(tokens,end,len(tokens))^], sources, index, text, items, stop_blocks, table_mode)
+            }
+        }
+        else if (native_split_word(token)^ != null or native_escaped_word(token)^) {
+            let split_word = native_split_word(token)^;
+            let next = if (index + 1 < len(tokens)) tokens[index + 1] else null;
+            let gap = if (next == null) "" else output_between(token,next)^;
+            // the serializer may insert a separating space after the original token.
+            if (gap == null or (gap != "" and gap != " ")) unsupported(index, "native command source gap")
+            else if (split_word == null)
+                inline(tokens, sources, index + 1, text ++ token.value ++ gap, items, stop_blocks, table_mode)
+            else {
+                let space = if (gap == "") [] else [{kind:"char", value:" ", cat:10, direct:false,
+                    output_start:token.output_end, output_end:token.output_end + 1, output_text:token.output_text,
+                    output_segments:token.output_segments, output_constructor_mode:true}];
+                let replaced = [*slice(tokens,0,index)^, *split_word, *space, *slice(tokens,index + 1,len(tokens))^];
+                inline(replaced, sources, index, text, items, stop_blocks, table_mode)
+            }
+        }
+        // do not treat a longer TeX control token as one native command.
+        else if (token.kind == "control" and token.output_constructor_mode == true and token.output_start != null and
+                len(token.value) > 1 and (len(token.value) >= 95 or native_word_end(split(token.value, "")^) != len(token.value)))
+            unsupported(index, "native command lexical source mapping")
         else if (token.kind == "control" and special_command(token.value))
             unsupported(index, token.value)
         // ordinary expansion may discard argument tokens needed by the native parser.
@@ -1862,7 +2044,8 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
             unsupported(index, "command source mapping")
         else if (token.kind == "control") {
             // native commands consume a star only when it immediately follows the control word.
-            let mapped_command = token.read_offset != null;
+            let mapped_command = token.read_offset != null or (token.output_start != null and
+                expanded_argument_sources(tokens,index + 1,token.file,sources)^);
             let offset = if (mapped_command) rebuild.map_offset(token.output_segments,token.output_start)^ else token.start;
             let next_token = if (index + 1 < len(tokens)) tokens[index + 1] else null;
             let star = next_token != null and next_token.kind == "char" and next_token.value == "*";
@@ -2262,7 +2445,7 @@ fn blocks(tokens, sources, index = 0, nodes = [], environment = null) any^ {
             else {
                 let next = if (index + 1 < len(restored.tokens)) restored.tokens[index + 1] else null;
                 let star = next != null and next.kind == "char" and next.value == "*";
-                let needs_mapped = token.direct != true or declaration_expanded_args(restored.tokens,index + 1,token.file)^;
+                let needs_mapped = token.direct != true or expanded_argument_sources(restored.tokens,index + 1,token.file,sources)^;
                 let generated = needs_mapped and token.output_start != null and token.output_end != null and
                     token.output_segments != null and reconstructed_token(token)^;
                 let mapped = star and (if (generated) reconstructed_literal(next)^ else
@@ -2378,7 +2561,7 @@ pub fn digest(expanded) any^ {
     else if (expanded.font_character_quantity_seen == true and any([for (token in expanded.output) token.kind == "source-span"]))
         {ast: null, issue: "latex-digest-unsupported", unsupported: "font character definition source mapping"}
     else {
-        let mapped = if (needs_output_mapping(expanded.output,expanded.main_file,expanded.constructor_argument_mode)^) rebuild.reconstruct(expanded,true)^ else null;
+        let mapped = if (needs_output_mapping(expanded.output,expanded.sources,expanded.main_file,expanded.constructor_argument_mode)^) rebuild.reconstruct(expanded,true)^ else null;
         let tokens = if (mapped == null or mapped.issue != null) expanded.output else mark_output_tokens(expanded.output,mapped,expanded.constructor_argument_mode)^;
         let parsed = blocks(tokens, expanded.sources)^;
         if (parsed.issue != null) {ast: null, issue: parsed.issue, unsupported: parsed.unsupported}

@@ -66,5 +66,5 @@ let guarded_source = "\\def\\x{\\textbf}\\begin{document}\\x*{B}\\end{document}"
 let guarded_expansion = profile.expand_with_kernel(guarded_source, kernel, {script_expl3: false,
     echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
 let guarded_digest = digest.digest(guarded_expansion)^;
-{guarded: guarded_digest.ast == null and guarded_digest.issue == "latex-digest-unsupported" and
-    guarded_digest.unsupported == "inline command star source mapping"}
+{generated_star_equal: guarded_digest.issue == null and
+    guarded_digest.ast == (parse(guarded_source, {type: "latex"})^)}

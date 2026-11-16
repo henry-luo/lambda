@@ -60,7 +60,10 @@ fn body_params(tokens, count, index = 0, output = [], mode = null, errors = []) 
     if (index >= len(tokens)) {tokens: output, issue: null, errors: errors}
     else {
         let t = tokens[index];
-        if (not charcat(t, 6)) body_params(tokens, count, index + 1, [*output, t], mode, errors)
+        // token lists inserted into an expanded definition bypass parameter parsing.
+        if (t.definition_literal_parameter == true)
+            body_params(tokens, count, index + 1, [*output, {*:t, definition_literal_parameter:false}], mode, errors)
+        else if (not charcat(t, 6)) body_params(tokens, count, index + 1, [*output, t], mode, errors)
         else if (index + 1 >= len(tokens)) {
             if (mode == null) {tokens: output, issue: "tex-illegal-param"}
             else body_params(tokens, count, index + 1, [*output, t], mode,
@@ -128,22 +131,25 @@ fn signature_diagnostics(st, events, index = 0) any^ {
     }
 }
 
-fn definition_tokens_inner(st, budget, depth = 1, output = []) any^ {
+fn definition_tokens_inner(st, budget, depth = 1, output = [], parameter_scan = false) any^ {
     let read = expanded_next(st, budget, true);
     let t = read.token;
     if (read.state.issue != null) {state: read.state, tokens: output}
     else if (t == null) {state: fail(read.state, "tex-runaway-definition"), tokens: output}
-    else if (t.direct_toks == true)
-        definition_tokens_inner(read.state, budget, depth, [*output, {*:t, noexpand: false, direct_toks: false, trace_internal: false}])
+    else if (t.direct_toks == true) {
+        let stored = {*:t, noexpand: false, direct_toks: false, trace_internal: false};
+        let token = if (parameter_scan and charcat(t,6)) {*:stored, definition_literal_parameter:true} else stored;
+        definition_tokens_inner(read.state, budget, depth, [*output, token], parameter_scan)
+    }
     else if (charcat(t, 2) and depth == 1) {state: read.state, tokens: output}
     // stored tokens must mark foreign expansion during a later definition.
     else definition_tokens_inner(read.state, budget,
         depth + if (charcat(t, 1)) 1 else if (charcat(t, 2)) -1 else 0,
-        [*output, {*:t, noexpand: false, trace_internal: false}])
+        [*output, {*:t, noexpand: false, trace_internal: false}], parameter_scan)
 }
 
-fn definition_tokens(st, budget) any^ {
-    let scanned = definition_tokens_inner({*:st, token_text_scan: true}, budget)^;
+fn definition_tokens(st, budget, parameter_scan = false) any^ {
+    let scanned = definition_tokens_inner({*:st, token_text_scan: true}, budget, 1, [], parameter_scan)^;
     {*:scanned, state: {*:scanned.state, token_text_scan: st.token_text_scan}}
 }
 
@@ -156,7 +162,7 @@ fn define(st, global, long_ok, protected_flag, xpand, budget) any^ {
         if (sig.issue != null) fail({*:checked,input:sig.input}, sig.issue)
         else {
             let opening = if (xpand) stream.next(sig.input) else null;
-            let scan = if (xpand) definition_tokens({*:checked, input: opening.stream}, budget)^ else {
+            let scan = if (xpand) definition_tokens({*:checked, input: opening.stream}, budget, true)^ else {
                 let body = stream.argument(sig.input, true);
                 {state: if (body.error != null) fail({*:checked, input: body.stream}, body.error)
                     else {*:checked, input: body.stream}, tokens: body.tokens}
@@ -320,6 +326,8 @@ fn prefixed(st, global, long_ok, protected_flag, budget) any^ {
     else if (cmd == "font" and not long_ok and not protected_flag) define_font(advanced, apply_global, budget)
     else if (cmd == "letterspacefont" and not long_ok and not protected_flag) assign_letterspace_font(advanced, apply_global, budget)
     else if (contains(["read", "readline"], cmd) and not long_ok and not protected_flag) read_stream_assignment(advanced, apply_global, budget, cmd == "readline")
+    else if (primitives.engine_version(cmd) != null and not long_ok and not protected_flag)
+        readonly_assignment(advanced, budget)
     else if ((cmd == "interactionmode" or page_dimension(cmd)) and not long_ok and not protected_flag)
         assign_page_state(advanced, budget, cmd)
     else if (cmd == "fontdimen" and not long_ok and not protected_flag) assign_font_dimen(advanced, budget)
@@ -432,8 +440,8 @@ fn expand_one(st, t, budget) any^ {
     else if (primitive(st, t) == "pdfstrcmp") strcmp_primitive(st, budget)
     else if (contains(["pdfescapestring", "pdfescapename", "pdfescapehex", "pdfunescapehex", "pdfmdfivesum"], primitive(st, t)))
         pdf_string_primitive(st, primitive(st, t), budget)
-    else if (primitive(st, t) == "eTeXrevision") constant_primitive(st, budget, ".6")
-    else if (primitive(st, t) == "pdftexrevision") constant_primitive(st, budget, "27")
+    else if (primitives.engine_revision(primitive(st, t)) != null)
+        constant_primitive(st, budget, primitives.engine_revision(primitive(st, t)))
     else if (primitive(st, t) == "pdfuniformdeviate") random_deviate(st, budget)
     else if (primitive(st, t) == "pdfnormaldeviate")
         constant_primitive({*:st, pdf_random_seen: true}, budget, "0")
@@ -696,8 +704,10 @@ fn scan_number(st, budget) any^ {
         let line = input_line_number(start.state)^;
         {state: start.state, value: if (start.negative) -line else line}
     }
-    else if (primitive(start.state, t) == "eTeXversion")
-        {state: start.state, value: if (start.negative) -2 else 2}
+    else if (primitives.engine_version(primitive(start.state, t)) != null) {
+        let value = primitives.engine_version(primitive(start.state, t));
+        {state: start.state, value: if (start.negative) -value else value}
+    }
     else if (contains(["currentgrouplevel", "currentiflevel"], primitive(start.state, t))) {
         let value = if (primitive(start.state, t) == "currentgrouplevel") len(start.state.groups)
             else len(start.state.conditions);
@@ -896,6 +906,13 @@ fn set_toks(values, index, value) => {*:values, *:map([string(index), value])}
 fn optional_equals(st, budget) any^ {
     let next = expanded_nonspace(st, budget)^;
     if (other(next.token, "=")) next.state else put_back(next.state, next.token)
+}
+
+// native consumes an optional equals sign before diagnosing a read-only assignment.
+fn readonly_assignment(st, budget) any^ {
+    let scanned = optional_equals(st,budget)^;
+    if (scanned.issue != null) scanned
+    else record_diagnostic(scanned,"tex-cant-assign","You can't assign to a read-only quantity")
 }
 
 fn word_tail(st, word, position, consumed, budget) any^ {
@@ -1581,8 +1598,9 @@ fn expand_the(st, budget, count_expansion = true, capture = false) any^ {
         }
         else if (primitive(read.state, read.token) == "inputlineno")
             {*:read.state, input: the_push(read.state.input, the_text(st, string(input_line_number(read.state)^)), capture)}
-        else if (primitive(read.state, read.token) == "eTeXversion")
-            {*:read.state, input: the_push(read.state.input, the_text(st, "2"), capture)}
+        else if (primitives.engine_version(primitive(read.state, read.token)) != null)
+            {*:read.state, input: the_push(read.state.input,
+                the_text(st, string(primitives.engine_version(primitive(read.state, read.token)))), capture)}
         else if (primitive(read.state, read.token) == "numexpr") {
             let value = scan_expression(read.state, budget)^;
             if (value.state.issue != null) value.state
@@ -1693,7 +1711,9 @@ fn token_primitive(st, name, budget) any^ {
             } else {
                 let tokens = if (name == "detokenize") text_tokens(token_text(opening.state, text.tokens))
                     else if (opening.state.token_text_scan) [for (t in text.tokens)
-                        {*:t, noexpand: is_control(t), direct_toks: true}] else text.tokens;
+                        {*:t, noexpand: is_control(t), direct_toks: true}]
+                    // native replay stores the scanned list and clears its direct-source flags.
+                    else stored_tokens(text.tokens);
                 {*:opening.state, input: stream.push(text.stream, tokens)}
             }
         }
@@ -2505,7 +2525,8 @@ fn expl3_syntax(st, on) any^ {
             active: true, codes: expl3.save_codes(st.input.reader.catcodes),
             endline: st.parameters.endlinechar};
         let global = effective_global(st, false)^;
-        let configured = {*:st, expl_syntax: previous,
+        // native loads the expl3 format on its first executed request.
+        let configured = {*:st, expl3_format_requested: true, expl_syntax: previous,
             input: set_codes(st.input, expl3.syntax_codes(st.input.reader.catcodes)),
             groups: if (global) [for (scope in st.groups)
                 {*:scope, expl_syntax: previous, catcodes: expl3.syntax_codes(scope.catcodes)}] else st.groups};
@@ -3385,9 +3406,12 @@ fn skip_case(st, remaining, depth = 0) any^ {
     else skip_case(current, remaining, depth)
 }
 
+// reserve the outer condition before expanding any operand tokens.
+fn begin_scanning_conditional(st) => {*:st, conditions: [*st.conditions, "scanning"]}
+
 fn case_conditional(st, budget) any^ {
     let depth = len(st.conditions);
-    let selected = scan_number({*:st, conditions: [*st.conditions, "scanning"]}, budget)^;
+    let selected = scan_number(begin_scanning_conditional(st), budget)^;
     if (selected.state.issue != null) selected.state
     else {
         let prefix = slice(selected.state.conditions, 0, depth)^;
@@ -3407,8 +3431,8 @@ fn begin_conditional(st, truth, negate = false) any^ {
     }
 }
 
-// a nested test may still be open when the enclosing numeric operand ends.
-fn finish_numeric_conditional(st, depth, truth, negate) any^ {
+// a nested test may still be open when an enclosing operand ends.
+fn finish_scanned_conditional(st, depth, truth, negate) any^ {
     let prefix = slice(st.conditions, 0, depth)^;
     let nested = slice(st.conditions, depth + 1, len(st.conditions))^;
     if (truth != negate) {*:st, conditions: [*prefix, true, *nested]}
@@ -3421,10 +3445,10 @@ fn finish_numeric_conditional(st, depth, truth, negate) any^ {
 
 fn numeric_conditional(st, name, budget, negate) any^ {
     let depth = len(st.conditions);
-    let pending = {*:st, conditions: [*st.conditions, "scanning"]};
+    let pending = begin_scanning_conditional(st);
     let left = if (name == "ifdim") scan_dimen(pending, budget)^ else scan_number(pending, budget)^;
     if (left.state.issue != null) left.state
-    else if (name == "ifodd") finish_numeric_conditional(left.state, depth, (left.value % 2) != 0, negate)
+    else if (name == "ifodd") finish_scanned_conditional(left.state, depth, (left.value % 2) != 0, negate)
     else {
         let relation = expanded_nonspace(left.state, budget)^;
         if (not (other(relation.token, "<") or other(relation.token, "=") or other(relation.token, ">")))
@@ -3432,7 +3456,7 @@ fn numeric_conditional(st, name, budget, negate) any^ {
         else {
             let right = if (name == "ifdim") scan_dimen(relation.state, budget)^ else scan_number(relation.state, budget)^;
             if (right.state.issue != null) right.state
-            else finish_numeric_conditional(right.state, depth,
+            else finish_scanned_conditional(right.state, depth,
                 if (relation.token.value == "<") left.value < right.value
                 else if (relation.token.value == ">") left.value > right.value else left.value == right.value, negate)
         }
@@ -3440,14 +3464,15 @@ fn numeric_conditional(st, name, budget, negate) any^ {
 }
 
 fn box_conditional(st, name, budget, negate) any^ {
-    let index = scan_register(st, budget)^;
+    let depth = len(st.conditions);
+    let index = scan_register(begin_scanning_conditional(st), budget)^;
     if (index.state.issue != null) index.state
     else {
         let box = index.state.boxes[string(index.value)];
         let matched = if (name == "ifvoid") box == null
             else if (name == "ifhbox") box != null and box.kind == "horizontal"
             else box != null and box.kind == "vertical";
-        begin_conditional(index.state, matched, negate)
+        finish_scanned_conditional(index.state, depth, matched, negate)
     }
 }
 
@@ -3509,7 +3534,8 @@ fn unless_conditional(st, budget) any^ {
 }
 
 fn input_eof_conditional(st, budget, negate) any^ {
-    let scanned = scan_number(st, budget)^;
+    let depth = len(st.conditions);
+    let scanned = scan_number(begin_scanning_conditional(st), budget)^;
     if (scanned.state.issue != null) scanned.state
     else {
         let invalid = scanned.value < 0 or scanned.value > 15;
@@ -3518,7 +3544,7 @@ fn input_eof_conditional(st, budget, negate) any^ {
         let current = {*:diagnosed, input_eof_seen: true};
         let slot = if (invalid) 0 else scanned.value;
         let input = current.input_streams[string(slot)];
-        begin_conditional(current, input.open != true, negate)
+        finish_scanned_conditional(current, depth, input.open != true, negate)
     }
 }
 
@@ -3536,21 +3562,22 @@ fn condition(st, name, budget, negate = false) any^ {
         else if (contains(["ifvoid", "ifhbox", "ifvbox"], name)) box_conditional(current, name, budget, negate)
         else if (name == "ifeof") input_eof_conditional(current, budget, negate)
         else if (name == "if" or name == "ifcat") {
-            let a = expanded_next(current, budget)^;
+            let a = expanded_next(begin_scanning_conditional(current), budget)^;
             let b = expanded_next(a.state, budget)^;
             if (b.state.issue != null) b.state
             else {
                 let first = character_key(b.state, a.token);
                 let second = character_key(b.state, b.token);
-                begin_conditional(b.state, if (name == "if") first.value == second.value else first.cat == second.cat, negate)
+                finish_scanned_conditional(b.state, depth,
+                    if (name == "if") first.value == second.value else first.cat == second.cat, negate)
             }
         }
         else if (name == "ifcsname") {
-            let scanned = csname_tokens(current, budget)^;
+            let scanned = csname_tokens(begin_scanning_conditional(current), budget)^;
             if (scanned.state.issue != null) scanned.state
             else {
                 let t = {kind: "control", value: scanned.name};
-                begin_conditional(scanned.state, meaning(scanned.state, t).kind != "undefined", negate)
+                finish_scanned_conditional(scanned.state, depth, meaning(scanned.state, t).kind != "undefined", negate)
             }
         }
         else if (name == "ifx") {
@@ -4329,7 +4356,9 @@ fn latex_usepackage(st, original, budget) any^ {
         let opts = if (primitive(st, original) == "RequirePackageWithOptions" and st.current_options != null)
             st.current_options else if (opt.present) token_text(current, opt.tokens)^ else "";
         let names = [for (part in (split(named.name, ",") ^ { [] }) where ((trim(part) != "") ^ { false })) trim(part)];
-        let planned = package_plan(current, names, opts)^;
+        // native chooses the expl3 format before resolving the package list.
+        let requested = if (contains(names,"expl3")) {*:current, expl3_format_requested: true} else current;
+        let planned = package_plan(requested, names, opts)^;
         if (planned.state.issue != null) planned.state
         else {
             let closed = end_main_trace(planned.state, original)^;
@@ -4881,6 +4910,12 @@ fn constructor_argument(st, budget, bracket, depth) any^ {
         if (expanded.issue != null) expanded else constructor_argument(expanded, budget, bracket, depth)
     }
     else if (token.noexpand != true and current.script_expl3 and is_control(token) and
+            meaning(current,token).expl3_argument_handler == "expand") {
+        // argument mode expands the native wrapper without executing its assignment.
+        let expanded = expand_macro(current,meaning(current,token),budget,token)^;
+        if (expanded.issue != null) expanded else constructor_argument(expanded,budget,bracket,depth)
+    }
+    else if (token.noexpand != true and current.script_expl3 and is_control(token) and
             meaning(current, token).expl3_argument_unqualified == true)
         unsupported(current, "constructor argument expl3 assignment")
     // script expl3 assignments stand in for macros that native argument mode expands.
@@ -5019,7 +5054,7 @@ fn step(st, budget) any^ {
     else if (st.script_expl3 and (cmd == "ExplSyntaxOn" or cmd == "ExplSyntaxOff"))
         after_assignment(current, expl3_syntax(current, cmd == "ExplSyntaxOn"))
     else if (st.script_expl3 and contains(["ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile"], cmd))
-        latex_provides_expl(current, cmd, budget)
+        latex_provides_expl({*:current, expl3_format_requested: true}, cmd, budget)
     else if (st.script_expl3 and cmd == "cs_new_eq:NN")
         after_assignment(current, expl3_cs_new_equal(current))
     else if (st.script_expl3 and expl3.cs_definition(cmd))
@@ -5071,6 +5106,7 @@ fn step(st, budget) any^ {
     else if (cmd == "font") after_assignment(current, define_font(current, assignment_global, budget))
     else if (cmd == "letterspacefont") after_assignment(current, assign_letterspace_font(current, assignment_global, budget))
     else if (cmd == "read" or cmd == "readline") after_assignment(current, read_stream_assignment(current, assignment_global, budget, cmd == "readline"))
+    else if (primitives.engine_version(cmd) != null) after_assignment(current, readonly_assignment(current, budget)^)
     else if (cmd == "interactionmode" or page_dimension(cmd)) after_assignment(current, assign_page_state(current, budget, cmd))
     else if (contains(["batchmode", "nonstopmode", "scrollmode", "errorstopmode"], cmd))
         {*:current, page_state_assignment_seen: true}
@@ -5195,8 +5231,10 @@ pub fn enable_script_expl3(st) any^ {
         assign_meaning(aliases, "control:tl_put_right:Nn", expl3_tl_put_right_macro(false)^, true)^;
     let global_tl = if (local_tl.definitions["control:tl_gput_right:Nn"] != null) local_tl else
         assign_meaning(local_tl, "control:tl_gput_right:Nn", expl3_tl_put_right_macro(true)^, true)^;
-    let scratch = enable_expl_scratch(global_tl, ["l_tmpa_tl", "l_tmpb_tl", "g_tmpa_tl", "g_tmpb_tl",
-        "l__seq_internal_a_tl", "l__seq_internal_b_tl"])^;
+    // expl3 predefines four empty scratch sequences alongside its token lists.
+    let sequences = enable_expl_scratch(global_tl, ["l_tmpa_seq", "l_tmpb_seq", "g_tmpa_seq", "g_tmpb_seq"], expl3_seq_value([])^)^;
+    let scratch = enable_expl_scratch(sequences, ["l_tmpa_tl", "l_tmpb_tl", "g_tmpa_tl", "g_tmpb_tl",
+        "l__seq_internal_a_tl", "l__seq_internal_b_tl", "l__exp_internal_tl"], expl3.token_list([]))^;
     let support = enable_expl_values(scratch, [
         {name: "tex_let:D", kind: "primitive", value: "let", source_mapping_guard: "tl_eq"},
         {name: "tex_global:D", kind: "primitive", value: "global"},
@@ -5217,6 +5255,7 @@ pub fn enable_script_expl3(st) any^ {
         {name: "tex_expanded:D", kind: "primitive", value: "expanded"},
         {name: "tex_the:D", kind: "primitive", value: "the"},
         {name: "exp_not:N", kind: "primitive", value: "noexpand"},
+        {name: "cs_set_nopar:Npx", kind: "primitive", value: "edef"},
         {name: "if:w", kind: "primitive", value: "if"},
         {name: "__kernel_tl_to_str:w", kind: "primitive", value: "detokenize"},
         {name: "if_false:", kind: "primitive", value: "iffalse"},
@@ -5234,7 +5273,12 @@ pub fn enable_script_expl3(st) any^ {
         {name: "exp_stop_f:", kind: "char", value: " ", cat: 10},
         {name: "scan_stop:", kind: "primitive", value: "relax"},
         {name: "s__seq", kind: "primitive", value: "relax"}])^;
-    let macros = enable_expl_macro_sources(support, [
+    // native Nx variants are protected macros that call the corresponding Nn operation.
+    let variants = [for (name in expl3.expanded_argument_names()) {
+        source:"\\" ++ name ++ "{\\exp_args:NNx\\" ++ slice(name,0,len(name) - 1)^ ++ "n}", protected_flag:true}];
+    let macros = enable_expl_macro_sources(support, [*variants,
+        {source: "\\use:x#1{\\cs_set_nopar:Npx\\l__exp_internal_tl{#1}\\l__exp_internal_tl}", protected_flag: true},
+        {source: "\\exp_args:NNx#1#2#3{\\use:x{\\exp_not:N#1\\exp_not:N#2{#3}}}", protected_flag: true},
         {source: "\\cs_set_eq:NN#1{\\tex_let:D#1=~}", protected_flag: true},
         {source: "\\bool_new:N#1{\\cs_new_eq:NN#1\\c_false_bool}", protected_flag: true},
         {source: "\\bool_new:c{\\exp_args:Nc\\bool_new:N}", protected_flag: true},
@@ -5434,7 +5478,7 @@ fn expl3_tl_put_right_macro(global) any^ {
     let parameter0 = parameter_token(0);
     let parameter1 = parameter_token(1);
     {kind: "macro", count: 2, prefix: [], delimiters: [[], []], brace_delim: false,
-        long_ok: true, protected_flag: true, expl3_argument_unqualified: true,
+        long_ok: true, protected_flag: true, expl3_argument_unqualified: true, expl3_argument_handler: "expand",
         body: [control_token(if (global) "__kernel_tl_gset:Nx" else "__kernel_tl_set:Nx"), parameter0,
             brace_token(true), control_token("__kernel_exp_not:w"), control_token("exp_after:wN"),
             brace_token(true), parameter0, parameter1, brace_token(false), brace_token(false)]}
@@ -5467,13 +5511,13 @@ fn enable_expl_values(st, values, index = 0) any^ {
     }
 }
 
-// expl3 declares these standard scratch token lists at initialization.
-fn enable_expl_scratch(st, names, index = 0) any^ {
+// expl3 declares these standard scratch values at initialization.
+fn enable_expl_scratch(st, names, value, index = 0) any^ {
     if (index >= len(names)) st
     else {
         let name = "control:" ++ names[index];
-        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, expl3.token_list([]), true)^;
-        enable_expl_scratch(next, names, index + 1)
+        let next = if (st.definitions[name] != null) st else assign_meaning(st, name, value, true)^;
+        enable_expl_scratch(next, names, value, index + 1)
     }
 }
 

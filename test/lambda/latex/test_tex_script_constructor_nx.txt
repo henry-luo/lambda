@@ -1,0 +1,16 @@
+{
+  cases: 29,
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true,
+  tree: true,
+  shows: true
+}
+{
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true,
+  tree: true
+}

@@ -28,7 +28,7 @@ fn report(source) any^ {
 "math spaces:"; report("\\begin{document}A $a + b$ B\\end{document}")
 "math superscript:"; report("\\begin{document}$x^2$\\end{document}")
 "math scripts:"; report("\\begin{document}$x_i^2+y_{10}+z^{ab}$\\end{document}")
-"repeated math scripts pending:"; report("\\begin{document}$x^2^3$\\end{document}")
+"repeated math scripts:"; report("\\begin{document}$x^2^3$\\end{document}")
 "adjacent math atoms:"; report("\\begin{document}$abc+12xy$\\end{document}")
 "math commands:"; report("\\begin{document}$\\frac{a}{b}+\\sqrt{x}+\\sqrt[3]{x}+\\alpha$\\end{document}")
 "scripted math command:"; report("\\begin{document}$\\sum_i^2$\\end{document}")

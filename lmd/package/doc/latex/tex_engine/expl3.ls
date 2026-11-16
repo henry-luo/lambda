@@ -71,8 +71,10 @@ pub fn sequence_empty_assignment(name) => contains(["seq_new:N", "seq_clear:N", 
 pub fn sequence_from_clist(name) => contains(["seq_set_from_clist:Nn", "seq_gset_from_clist:Nn"], name)
 pub fn sequence_put_left(name) => contains(["seq_put_left:Nn", "seq_gput_left:Nn"], name)
 pub fn no_argument(name) => contains(["tl_new:N", "tl_clear:N", "tl_gclear:N"], name)
-pub fn expanded_argument(name) => contains(["tl_set:Nx", "tl_gset:Nx", "tl_put_left:Nx", "tl_put_right:Nx",
-    "tl_gput_left:Nx", "tl_gput_right:Nx"], name)
+let TL_EXPANDED = ["tl_set:Nx", "tl_gset:Nx", "tl_put_left:Nx", "tl_put_right:Nx",
+    "tl_gput_left:Nx", "tl_gput_right:Nx"]
+pub fn expanded_argument(name) => contains(TL_EXPANDED, name)
+pub fn expanded_argument_names() => TL_EXPANDED
 pub fn token_list(tokens) => {kind: "macro", count: 0, prefix: [], delimiters: [],
     brace_delim: false, long_ok: false, protected_flag: false, body: tokens}
 pub fn save_codes(codes) => {[chr(9)]: reader.catcode(chr(9), codes),

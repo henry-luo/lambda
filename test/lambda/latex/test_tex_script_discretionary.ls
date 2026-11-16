@@ -1,11 +1,15 @@
+import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
 let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let message_preload=parse("",{type:"tex"})^.messages;
 fn render(token) => if (token.kind == "control") "\\" ++ token.value else token.value
 fn check(source) any^ {
     let x = profile.expand_with_kernel(source, kernel,
         {echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
     let text = join([for (token in x.output) render(token)], "");
-    {issue: x.issue, matches: text == (parse(source, {type: "tex"})^).text, messages: x.messages}
+    let native = parse(source, {type: "tex"})^;
+    {issue: x.issue, matches: text == native.text, messages: message_test.document(x.messages,message_preload)^,
+        messages_match: x.messages == native.messages}
 }
 [for (source in [
     "\\begin{document}A\\discretionary{-}{z}{bc}D\\end{document}",

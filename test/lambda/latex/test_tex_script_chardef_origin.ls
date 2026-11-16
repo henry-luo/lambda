@@ -7,7 +7,7 @@ fn check(source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
  let n=parse(source,{type:"tex"})^;
  let b=reconstruct.reconstruct(r)^;
- {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
+ {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages == n.messages,diagnostics_match:r.diagnostic_records==n.diagnostics}
 }
 [for (source in [
   "\\chardef\\z=65 \\z",
@@ -49,7 +49,7 @@ let resources={local:{'script_chardef_child.tex':{data:input(root ++ "script_cha
 let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,source_name:root ++ "script_chardef_main.tex",echo_definitions:true,adapters:[],resources:resources},100000)^;
 let b=reconstruct.reconstruct(r)^;
 let n=input(root ++ "script_chardef_main.tex","tex")^;
-{issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
+{issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages == n.messages,diagnostics_match:r.diagnostic_records==n.diagnostics}
 
 fn exact_digestion(source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{script_expl3:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;

@@ -2056,6 +2056,9 @@ int exec_convert(int argc, char* argv[]) {
 // per-script timeout support for test-batch mode
 static __thread sigjmp_buf batch_timeout_jmp;
 static __thread volatile sig_atomic_t batch_timeout_active = 0;
+static __thread volatile sig_atomic_t batch_timeout_terminal = 0;
+static __thread volatile sig_atomic_t batch_timeout_message_len = 0;
+static __thread char batch_timeout_message[1152];
 // the owner is registered before handlers are installed and never changes during a batch.
 static pthread_t batch_timeout_owner;
 static __thread volatile sig_atomic_t batch_timeout_owner_thread = 0;
@@ -2108,6 +2111,13 @@ static void batch_alarm_handler(int sig) {
     }
     if (batch_timeout_active) {
         batch_timeout_active = 0;
+        if (batch_timeout_terminal) {
+            // Interrupted C++ frames may own locks; retire the worker without cleanup.
+            static const char result[] = "\x01" "BATCH_END 124\n";
+            (void)write(STDERR_FILENO, batch_timeout_message, (size_t)batch_timeout_message_len);
+            (void)write(STDOUT_FILENO, result, sizeof(result) - 1);
+            _exit(124);
+        }
         siglongjmp(batch_timeout_jmp, 1);
     }
 }
@@ -4924,17 +4934,18 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 sigemptyset(&sa.sa_mask);
                 sa.sa_flags = 0;
                 sigaction(SIGALRM, &sa, &old_sa);
-                if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
-                    batch_timeout_active = 1;
-                    alarm(batch_timeout);
-                    result = run_script_file(&runtime, script_path, run_main);
-                    alarm(0);
-                    batch_timeout_active = 0;
-                } else {
-                    // timed out
-                    fprintf(stderr, "Timeout: script '%s' exceeded %ds limit\n", script_path, batch_timeout);
-                    result = 124; // same as coreutils timeout exit code
-                }
+                int message_len = snprintf(batch_timeout_message, sizeof(batch_timeout_message),
+                    "Timeout: script '%s' exceeded %ds limit\n", script_path, batch_timeout);
+                batch_timeout_message_len = message_len < 0 ? 0 :
+                    (sig_atomic_t)((size_t)message_len < sizeof(batch_timeout_message) ?
+                        (size_t)message_len : sizeof(batch_timeout_message) - 1);
+                batch_timeout_terminal = 1;
+                batch_timeout_active = 1;
+                alarm(batch_timeout);
+                result = run_script_file(&runtime, script_path, run_main);
+                alarm(0);
+                batch_timeout_active = 0;
+                batch_timeout_terminal = 0;
                 sigaction(SIGALRM, &old_sa, NULL);
             } else {
                 result = run_script_file(&runtime, script_path, run_main);

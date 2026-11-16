@@ -7,7 +7,7 @@ fn check(source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
  let n=parse(source,{type:"tex"})^;
  let b=reconstruct.reconstruct(r)^;
- {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
+ {issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages == n.messages,diagnostics_match:r.diagnostic_records==n.diagnostics}
 }
 [for (source in [
   "\\count0=12 \\showthe\\count0",
@@ -65,4 +65,4 @@ let resources={local:{'script_showthe_child.tex':{data:input(root ++ "script_sho
 let r=profile.expand_with_kernel(source,kernel,{source_name:root ++ "script_showthe_main.tex",echo_definitions:true,adapters:[],resources:resources},100000)^;
 let b=reconstruct.reconstruct(r)^;
 let n=input(root ++ "script_showthe_main.tex","tex")^;
-{issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages==slice(n.messages,len(baseline),len(n.messages))^,diagnostics_match:r.diagnostic_records==n.diagnostics}
+{issue:r.issue,reconstruct_issue:b.issue,text_match:b.text==n.text,messages_match:r.messages == n.messages,diagnostics_match:r.diagnostic_records==n.diagnostics}

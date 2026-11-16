@@ -1,0 +1,14 @@
+{
+  cases: 15,
+  supported: true,
+  text: true,
+  diagnostics: true,
+  tree: true,
+  guard: true
+}
+{
+  supported: true,
+  text: true,
+  diagnostics: true,
+  tree: true
+}

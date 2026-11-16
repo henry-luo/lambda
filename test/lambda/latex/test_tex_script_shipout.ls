@@ -10,7 +10,7 @@ fn matches(source) any^ {
     let rebuilt = reconstruct.reconstruct(result)^;
     let native = parse(source, {type: "tex"})^;
     {issue: result.issue, reconstruct_issue: rebuilt.issue, matches: rebuilt.text == native.text,
-        diagnostics_match: result.diagnostic_records == native.diagnostics, messages_empty: len(result.messages) == 0}
+        diagnostics_match: result.diagnostic_records == native.diagnostics, messages_match: result.messages == native.messages}
 }
 let sources = [
  "\\begin{document}A\\shipout\\hbox{B}C\\end{document}",
@@ -41,7 +41,7 @@ fn message_case(source) any^ {
  let result=profile.expand_with_kernel(source,kernel,{echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
  let native=parse(source,{type:"tex"})^;
  let messages=slice(native.messages,len(native_baseline),len(native.messages))^;
- {issue:result.issue,messages_match:result.messages==messages,diagnostics_match:result.diagnostic_records==native.diagnostics}
+ {issue:result.issue,messages_match:result.messages==native.messages,diagnostics_match:result.diagnostic_records==native.diagnostics}
 }
 [for(source in [
  "\\begin{document}A\\shipout\\hbox{\\message{hello}B}C\\end{document}",

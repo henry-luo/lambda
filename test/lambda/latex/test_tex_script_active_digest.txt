@@ -32,19 +32,11 @@
 }
 {
   case: "defined active",
-  issue: "latex-digest-unsupported",
-  unsupported: "definition target",
-  matches: null,
+  issue: null,
+  unsupported: null,
+  matches: true,
   script: null,
-  native: <latex_document
-    <paragraph
-      <def source_offset: 0, argument_groups: []>
-      "~"
-      <curly_group
-        "XYZ">>
-    <document source_offset: 10,
-      <paragraph
-        "AXYZB">>>
+  native: null
 }
 {
   case: "active punctuation",

@@ -1,3 +1,4 @@
+import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
 let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let baseline = parse("", {type:"tex"})^.messages;
@@ -5,7 +6,7 @@ fn report(name, source) any^ {
  let r = profile.expand_with_kernel(source, kernel, {resources:{local:{},bundled:{}}}, 100000)^;
  let n = parse(source, {type:"tex"})^;
  let m = slice(n.messages, len(baseline), len(n.messages))^;
- {name:name, issue:r.issue, script:r.messages, native:m, matches:r.messages == m, diagnostics:r.diagnostics}
+ {name:name, issue:r.issue, script:message_test.document(r.messages,baseline)^, native:m, matches:r.messages == n.messages, diagnostics:r.diagnostics}
 }
 report("single", "\\message{hello}")
 report("successive", "\\message{A}\\message{B}")

@@ -28,6 +28,9 @@
 #include "test_eval_fixture.hpp"
 #include <string>
 #include <cstring>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #define LAMBDA_EXE "lambda.exe"
@@ -2107,6 +2110,40 @@ TEST_F(NegativeScriptTest, BatchReportsUnresolvedNameAsFailedScript) {
     shell_result_free(&result);
     remove(manifest);
 }
+
+#ifndef _WIN32
+TEST_F(NegativeScriptTest, BatchTimeoutRetiresInterruptedWorker) {
+    char loop_path[128], next_path[128], manifest_path[128], manifest[384];
+    int pid = (int)getpid();
+    snprintf(loop_path, sizeof(loop_path), "temp/batch_timeout_loop_%d.ls", pid);
+    snprintf(next_path, sizeof(next_path), "temp/batch_timeout_next_%d.ls", pid);
+    snprintf(manifest_path, sizeof(manifest_path), "temp/batch_timeout_manifest_%d.txt", pid);
+    const char* loop = "pn main() { while (true) { } }\n";
+    const char* next = "1 + 1\n";
+    ASSERT_EQ(write_binary_file(loop_path, loop, strlen(loop)), 0);
+    ASSERT_EQ(write_binary_file(next_path, next, strlen(next)), 0);
+    const char* first[] = {loop_path, "test/lambda/latex/test_tex_script_digest.ls"};
+    for (int i = 0; i < 2; i++) {
+        snprintf(manifest, sizeof(manifest), "%s%s\n%s\n", i == 0 ? "run " : "", first[i], next_path);
+        ASSERT_EQ(write_binary_file(manifest_path, manifest, strlen(manifest)), 0);
+        const char* args[] = {LAMBDA_EXE, "test-batch", "--no-log", "--timeout=1", NULL};
+        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", "jit"}, {NULL, NULL}};
+        ShellOptions options = {};
+        options.stdin_path = manifest_path;
+        options.env = env;
+        options.timeout_ms = 10000;
+        ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
+        EXPECT_EQ(result.exit_code, 124) << first[i];
+        EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf, "BATCH_END 124") : nullptr, nullptr) << first[i];
+        EXPECT_EQ(result.stdout_buf ? strstr(result.stdout_buf, next_path) : nullptr, nullptr) << first[i];
+        EXPECT_NE(result.stderr_buf ? strstr(result.stderr_buf, "exceeded 1s limit") : nullptr, nullptr) << first[i];
+        shell_result_free(&result);
+    }
+    remove(loop_path);
+    remove(next_path);
+    remove(manifest_path);
+}
+#endif
 
 TEST_F(NegativeScriptTest, CallNonFunction) {
     ExpectErrorWithoutCrash("test/lambda/negative/call_non_function.ls");

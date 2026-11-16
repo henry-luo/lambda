@@ -1,54 +1,67 @@
 [{
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: []
+    messages: [],
+    messages_match: true
   }, {
     issue: null,
     matches: true,
-    messages: ["replacement"]
+    messages: ["replacement"],
+    messages_match: true
   }]
 "tex-missing-brace"

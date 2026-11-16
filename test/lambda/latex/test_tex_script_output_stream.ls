@@ -1,3 +1,4 @@
+import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
 let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let baseline = parse("", {type:"tex"})^.messages;
@@ -5,7 +6,7 @@ fn report(label, source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{resources:{local:{},bundled:{}}},100000)^;
  let n=parse(source,{type:"tex"})^;
  let m=slice(n.messages,len(baseline),len(n.messages))^;
- {case:label,issue:r.issue,unsupported:r.unsupported,script:r.messages,native:m,matches:r.messages == m}
+ {case:label,issue:r.issue,unsupported:r.unsupported,script:message_test.document(r.messages,baseline)^,native:m,matches:r.messages == n.messages}
 }
 report("open, close", "\\immediate\\openout0=unused.txt \\immediate\\write0{hidden}\\immediate\\closeout0\\immediate\\write0{visible}")
 report("unopened", "\\write1{visible}")
