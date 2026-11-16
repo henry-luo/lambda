@@ -31,10 +31,10 @@ pub pn current_token(handle) any^ {
 }
 pub fn have_frontier(space, frontier) any^ => protocol.have_frontier(space,'workspace',frontier.epoch,
     workspace.model,workspace.empty(space).nodes[0],frontier.clock)^
-pub pn offer(handle, credentials, extended=false, batched=false, peer_have=null) any^ {
+pub pn offer(handle, credentials, extended=false, batched=false, peer_have=null, inventory=true) any^ {
     if (handle.keys.owner != null and handle.keys.owner != self()) {
         return owner.cached(handle.keys.owner,pn (cache)=> {
-            return offer({*:handle,keys:{*:handle.keys,cached_head:cache}},credentials,extended,batched,peer_have)^
+            return offer({*:handle,keys:{*:handle.keys,cached_head:cache}},credentials,extended,batched,peer_have,inventory)^
         })^
     }
     let loaded = local.status(handle)^
@@ -58,7 +58,7 @@ pub pn offer(handle, credentials, extended=false, batched=false, peer_have=null)
         batch = if (batched and batch_fits(candidates)^) candidates else null
     }
     let digest = if (delta) codec.digest(frames)^ else proof.id
-    let ids = local.inventory(handle,false)^
+    let ids = if (inventory) local.inventory(handle,false)^ else []
     let documents = document_state.all(stored)
     return {frames:frames,proof:proof,batch:batch,peer_have:peer_have,ids:ids,documents:documents,
         token:token(stored)^,repository_cache:loaded.repository_cache,
@@ -163,13 +163,13 @@ fn frame_admission(credentials, peer, frame) any^ {
 pub pn receive_frame(handle, credentials, peer, frame) any^ {
     return local.receive(handle,frame.packet,frame_admission(credentials,peer,frame)^)^
 }
-pub pn receive_frames(handle, credentials, peer, frames, records=[]) any^ {
+pub pn receive_frames(handle, credentials, peer, frames, records=[], ack=null) any^ {
     if (not (frames is array) or len(frames)^ < 1 or len(frames)^ > 8192 or not batch_fits(frames)^)
         raise error("sync peer: invalid frame batch")
     // Authenticate the complete batch before entering one durable head transaction.
     let admitted = [for (frame in frames)
         {packet:frame.packet,admission:frame_admission(credentials,peer,frame)^}]
-    return local.receive_batch(handle,admitted,records)^
+    return local.receive_batch(handle,admitted,records,ack)^
 }
 pub pn bundle(handle, frames, ids) any^ {
     if (frames == null or len(ids)^ > 128) { return null }
@@ -186,11 +186,11 @@ pub pn bundle(handle, frames, ids) any^ {
         len(binary(codec.encode({ok:true,body:body})^))^ > session.max_frame-32) { return null }
     return body
 }
-pub pn receive_bundle(handle, credentials, peer, body) any^ {
+pub pn receive_bundle(handle, credentials, peer, body, ack=null) any^ {
     v.fields(body,["frames","objects"])^
     if (not (body.objects is array) or len(body.objects)^ > 128)
         raise error("sync peer: invalid bundled objects")
-    return receive_frames(handle,credentials,peer,body.frames,body.objects)^
+    return receive_frames(handle,credentials,peer,body.frames,body.objects,ack)^
 }
 pub fn frame_matches(frame, remote, index) any^ {
     if (remote.delta == true) raise error("sync peer: delta requires a complete atomic batch")
@@ -287,7 +287,9 @@ pub pn request(handle, credentials, peer, outgoing, pending, command) any^ {
         return {body:applied.state.endpoint.replica.clock,pending:pending}
     }
     if (command.kind == 'ack') {
-        local.acknowledge(handle,peer.id,body)^
+        // Release the pinned offer only after its whole frontier is acknowledged.
+        local.acknowledge(handle,peer.id,body,
+            if (core.dominates(body,outgoing.summary.clock)^) outgoing.ids else [])^
         return {body:local.status(handle)^.state.endpoint.replica.clock,pending:pending}
     }
     if (command.kind == 'document_need') {

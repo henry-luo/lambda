@@ -151,8 +151,15 @@ pub pn capture_paths(tx, keys, current, paths, attempts=3) any^ {
 fn hints(previous, captured) any^ {
     var result = []
     var i = 0
+    let paths = cap.index_paths(captured)^
     while (i < len(previous)) {
         let old = previous[i]
+        let same_path = paths[old.path]
+        // A surviving identity at its original path needs no rename search, even with hard links.
+        if (same_path != null and same_path.identity == old.identity and same_path.type == old.type) {
+            i = i+1
+            continue
+        }
         let matches = [for (member in captured where member.identity == old.identity and member.type == old.type) member]
         if (len(matches) == 1 and matches[0].path != old.path) {
             result = [*result,{entry:old.id,path:matches[0].path}]
@@ -177,7 +184,7 @@ fn merge_capture(endpoint, branch, actor) any^ {
     return p.compact_log(merged,branch.replica.floor)^
 }
 
-pub fn reconciled(current, captured, actor, documents=[], saved_at=null) any^ {
+pub fn reconciled(current, captured, actor, documents=[], saved_at=null, validation=null) any^ {
     if (current.installation != null) raise error("sync filesystem: installation must finish before scanning")
     if (len(documents) == 0 and current.review == null and captured.id == current.base.capture and
         [for (member in current.disk) {path:member.path,type:member.type,identity:member.identity,
@@ -186,7 +193,12 @@ pub fn reconciled(current, captured, actor, documents=[], saved_at=null) any^ {
     // correspondence preserves baseline order while changing only projected paths.
     let known = [for (i in 0 to (len(associated)^-1))
         {*:associated[i],original_path:current.base.members[i].path}]
-    let imported:any^ = cap.import_branch(p.start(current.base.checkpoint.replica,w.model)^,actor,captured,known,documents,saved_at)
+    // A cached baseline projection is usable only with its complete typed validation evidence.
+    let trusted = validation.values != null and codec.same_encoding(current.base,validation.values.base)^
+    let branch = if (trusted) p.start_validated(current.base.checkpoint.replica,w.model)^
+        else p.start(current.base.checkpoint.replica,w.model)^
+    let imported:any^ = cap.import_branch(branch,actor,captured,known,documents,saved_at,
+        if (trusted) validation.base_projection else null)
     if (imported is error) {
         return {*:current,serial:current.serial+1,review:{capture:captured,reason:imported.message}}
     }

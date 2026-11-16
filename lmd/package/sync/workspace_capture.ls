@@ -52,10 +52,10 @@ fn baseline_snapshot(checkpoint, members, capture_id) any^ {
 }
 
 // The owner supplies a validated immutable snapshot and its derived members.
-pub fn validate_known_base(base, checkpoint, digest, members) any^ {
+pub fn validate_known_base(base, checkpoint, members) any^ {
     v.fields(base,["id","checkpoint","members","capture"])^
-    if (codec.digest(base.checkpoint)^ != digest) { return false }
-    if (codec.digest(base.members)^ != codec.digest(members)^ or
+    if (not (codec.same_encoding(base.checkpoint,checkpoint)^)) { return false }
+    if (not (codec.same_encoding(base.members,members)^) or
         base.capture != capture_id(members)^ or
         base.id != baseline_snapshot(checkpoint,members,base.capture)^.id)
         raise error("sync ZIP: invalid baseline")
@@ -102,8 +102,9 @@ pub fn correspondence(base, captured, hints) any^ {
 }
 
 // each command emits one event, so IDs can be assigned before bounded groups run.
-pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], saved_at=null) any^ {
-    let base_view = w.read(endpoint.replica)^
+pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], saved_at=null, projection=null) any^ {
+    let base_view = if (projection == null) w.read(endpoint.replica)^ else projection
+    let entries = sort(base_view.entries,(entry)=>entry.id)^
     let old_paths = index_paths(old_members)^
     var members = []
     var commands = []
@@ -120,7 +121,7 @@ pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], sa
             commands = [*commands,{kind:'create',type:member.type,parent:owner,name:leaf(member.path)^,content:member.content}]
         } else {
             if (old.type != member.type) raise error("sync ZIP: member type changed; identity needs review")
-            let previous = v.lookup(base_view.entries,id)^
+            let previous = v.lookup_id(entries,id)^
             // a generated conflict filename is a view, not a logical rename.
             if (previous.parent != owner or leaf(old.original_path or old.path)^ != leaf(member.path)^) {
                 commands = [*commands,{kind:'move',entry:id,parent:owner,name:leaf(member.path)^}]
@@ -137,8 +138,9 @@ pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], sa
         members = [*members,{*:member,id:id,content:reference}]
         i = i+1
     }
-    let removed = [for (old in old_members where not any([for (member in members) member.id == old.id])) old]
-    let placements = tree.placements(tree.events(endpoint.replica)^)^.entries
+    let member_ids = sort(members,(member)=>member.id)^
+    let removed = [for (old in old_members where v.lookup_id(member_ids,old.id)^ == null) old]
+    let placements = if (len(removed)^ == 0) [] else tree.placements(tree.events(endpoint.replica)^)^.entries
     i = 0
     while (i < len(removed)) {
         let old = removed[i]
@@ -154,15 +156,18 @@ pub fn export_members(entries) any^ => sort([for (entry in entries where entry.v
     {id:entry.id,path:tree.path(entries,entry.id,true)^,type:entry.type,
      content:if (entry.type == 'file') entry.heads[0].content else null}],(entry)=>entry.path)^
 
-pub fn validate_base(base) any^ {
+pub fn checked_base(base) any^ {
     v.fields(base,["id","checkpoint","members","capture"])^
     let replica = c.restore(base.checkpoint)^
     if (replica.profile != 'workspace') raise error("sync ZIP: baseline requires a workspace")
-    let entries = w.read(replica)^.entries
+    // restore already checked the replica; project that validated state once.
+    let projection = tree.project(tree.events(replica)^)^
+    let entries = projection.entries
     if (any([for (entry in entries where entry.visible and entry.type == 'file') len(entry.heads)^ != 1]))
         raise error("sync ZIP: baseline has unresolved revisions")
     let members = export_members(entries)^
     if (members != base.members or base.capture != capture_id(members)^ or
         base.id != baseline(replica,members,base.capture)^.id) raise error("sync ZIP: invalid baseline")
-    return replica
+    return {replica:replica,projection:projection}
 }
+pub fn validate_base(base) any^ => checked_base(base)^.replica

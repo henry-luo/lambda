@@ -1,14 +1,136 @@
 # Warm LAN sync latency
 
-**Date:** 2026-11-14
-**Status:** Tuning iteration verified; subsecond delivery at 100 files remains open.
-**Worktree:** Main checkout, `master`; resumed at `f98946625`. Earlier work
+**Date:** 2026-11-17
+**Status:** Wrapped up for review; 500 ms warm small-file arrival target remains unmet.
+**Worktree:** Main checkout, `master`; resumed at `8ace123f7`. Earlier work
 started at `1118f5108`, with verification base `2585cffa5` plus that change set.
 **Authority:** S12.1.1v3 (script policy), S13.1.2v2 / S13.3.1v2 (tasks),
 D6.3 (precise roots), D9.3.4 (native IO), D11.1.2 (anchored IO).
 **Design:** [Data sync §2.1.1](../Lambda_Design_Data_Sync.md#211-lan-change-detection-and-connection-bursts).
 
 ## Current checkpoint
+
+- Resumed at `8ace123f7` with a clean tree. Implement precise batch deadlines,
+  change-driven burst wakeups, earlier installation and bounded warm exchanges.
+  Keep authenticated admission, durable intents, recovery and ten quiet seconds
+  (S13.1–S13.3, D11.1.2). Evidence: `temp/sync-half-second/`. No new goal requested.
+
+### Wrap-up (2026-11-17)
+
+- Completed candidate: exact batch timers, cancellable committed-token subscriptions,
+  one-frame transport reader, negotiated burst v3 bounded bidirectional deltas,
+  early guarded installation, strict typed validation-proof reuse, and indexed
+  filesystem reconciliation. Defaults remain 50 ms / 250 ms / ten quiet seconds.
+- V3 falls back to existing full exchange for stale prefixes/epochs, linked or open
+  documents, retention/cache controls, large files or frame/object budgets. Explicit
+  ACKs refer to pinned offers; incoming empty deltas retain unsent local groups.
+  Installation intent v2 references an immutable authenticated source state, while
+  legacy inline intents remain readable. Shared objects retain existing formats.
+- Runtime root cause: `pn_select` ignored invalid timeout conversion and silently
+  waited without a deadline. Reject invalid/negative values; round computed script
+  deadlines up to integer milliseconds (S13.3.2, S7.4.1v2). Ledger entry records it.
+- Latest completed candidate (`indexed-100.json`): 100 seed files, 4 KiB edits,
+  three samples/mode, source acting as client over v3. Arrival medians 0.545 /
+  0.564 s, maximum 0.606 s; completion medians 0.735 / 0.759 s, max 0.785 s.
+  The strict 0.5 s arrival gate **fails**. This is a short candidate measurement,
+  not a sustained or physical-device qualification; reader cleanup changed later.
+- A private paged-state storage experiment failed initial inventory exchange and
+  was removed entirely at the user's wrap-up request. No metadata-page object kind
+  or storage-format migration remains. `pages-100.log` is failure evidence only.
+  Further tuning of full-state persistence is deferred, not claimed complete.
+- Final verification passes **51/51** regular exact-output runs: 17 fixtures on
+  AUTO/interpreter/JIT, including v1/v2/v3 bidirectional bursts and legacy/v2
+  intent recovery. **15/15** additional GC32/poisoning runs pass: five fixtures
+  on each tier. `verification.log` records the resumed completed run; the earlier
+  `verification-attempt1.log` retains the timeout and partial results.
+- The separate `sync_peer_fast` GC32 AUTO run timed out at 180 seconds under
+  concurrent baseline load; the interpreter stress attempt was stopped during
+  wrap-up and JIT stress was not run. That stronger fast-path GC qualification
+  remains open. Regular fast-path runs pass on all three tiers. No test was
+  changed to hide the timeout.
+- Independent native peer, LAN event and WebRTC process gates all pass, including
+  revocation, simultaneous changes, restart/catch-up, the 17,570,000-byte binary
+  and interrupted-transfer recovery. Their logs retain LI-015 contention as
+  unqualified. The aggregate Lambda baseline passes **7,566/7,566**; release
+  executable restored with `.lambda_release_build` afterward. Host SHA-256:
+  `ff03f4f1182172311da9531031b4707f65ef70214bab2da7b648b667b90f4213`.
+- Final isolated release runs use 100 seed files, 4 KiB edits and three samples
+  per mode in each source direction (12 edits total). Both source devices acted
+  as client in these independently discovered connections; server-origin edits
+  pass the functional burst/LAN gates, but their separate latency is unqualified.
+  The strict 0.5 s arrival gate fails in both runs. All completed installations
+  remain below one second in this short sample. These are independent processes
+  on one Mac, not physical LAN devices or sustained-history qualification.
+
+| Source | Mode | Arrival median | Arrival max | Completion median | Completion max |
+|---|---|---:|---:|---:|---:|
+| a | settled | 0.635 s | 0.677 s | 0.836 s | 0.873 s |
+| a | continuous | 0.585 s | 0.593 s | 0.771 s | 0.795 s |
+| b | settled | 0.533 s | 0.565 s | 0.741 s | 0.752 s |
+| b | continuous | 0.591 s | 0.617 s | 0.802 s | 0.809 s |
+
+- Evidence: `final-{a,b}-100.json`, `final-measurements.{json,log}` and
+  `final-identity.json`. Both reports verify unchanged executable/source hashes
+  and authenticated connection reuse. The measurement driver records individual
+  gate exit codes (both 1); its own completion is not an acceptance pass.
+- Changes remain uncommitted at the user's wrap-up request. Next work is measured
+  incremental metadata persistence/capture, followed by sustained and server-origin
+  timing. Do not advertise the 500 ms target as achieved.
+  Existing cross-NAT, physical-device, other-OS, LI-015 contention and
+  every-allocation integration-GC qualification limits remain.
+
+## Previous checkpoint (2026-11-16)
+
+- Resumed 2026-11-16 at `672531532`, with a clean working tree. Built the current
+  release host, reproduced the unchanged 100-file gate, and profiled repeated
+  typed validation and immutable state persistence before selecting changes.
+  Evidence: `temp/sync-warm-latency/tune2/`. Keep production tracing out, retain
+  authentication and recovery guarantees (D11.1.2), and run focused checks first.
+- Script changes now compare complete portable values instead of re-encoding
+  unchanged metadata for hashes. Preserve numeric kinds, ordered keys and scalar
+  spellings (S2.3.1v2, S5.2.1v2, S5.4.1). Compute checkpoint snapshots only when
+  needed for baseline validation; retain both validated live and disk projections.
+  An exact typed baseline match permits reuse during external import. No wire or
+  durable state format changed.
+- Reuse the peer's pinned inventory before sending missing-object queries.
+  Combine completed-exchange ACKs and staging-pin release in one head transaction;
+  partial ACKs retain pins, and unrelated pins remain. A parentless revision no
+  longer scans all historical revisions to validate an empty parent set.
+- The only native source change repairs false E228 from refreshed recursive/
+  forward calls under operators. The AST refresh pass now uses the existing unary
+  and binary resolvers instead of inventing an error on every child change
+  (S7.5.1v6, S7.6.1v9, S3.4). The Lambda issue ledger records the reproduction and fix.
+- Initial current-host 100-file medians: 1.578 s settled / 1.732 s continuous
+  completed installation, three edits/mode (`before-100.json`). The baseline-
+  projection candidate reaches 0.905 / 1.015 s with five edits/mode, maximum
+  0.960 / 1.045 s (`base-100.json`). The continuous one-second gate still fails.
+- A symbol-literal memoization experiment did not improve the measured timings
+  (`symbols-100.json`) and was removed. It is absent from the verified sources.
+- Focused current-source verification passes 54 exact-output cases, nine GC32
+  cases with poisoning, three every-allocation operator cases with poisoning,
+  and three negative E228 cases, across AUTO/interpreter/JIT. Independent native
+  peer, LAN-event and WebRTC gates pass. Evidence: `tune2/verification.log` and
+  `{peer-process,lan-events,rtc-process}.log`. The earlier full-GC integration
+  timeout remains unqualified; sampled-GC checks do not replace it.
+- The aggregate Lambda baseline passes **7,560/7,560** for the compiler change.
+  The tested release executable has been restored. Final package timing completed
+  without concurrent builds/tests. Native identity and all source hashes are in
+  `tune2/final-identity.json`; the frozen release host is `tune2/lambda-fixed.exe`.
+  Concurrent administration remains unqualified by the standard native peer gate
+  (`LI-015`, optional `--contention`); no claim is made for that skipped case.
+- Final 100-file runs: two peers / 20 edits, visibility medians **0.826 / 0.924 s**,
+  completion medians **1.001 / 1.143 s**, maximum **1.267 s**. Three peers / six
+  edits, slower-destination visibility medians **0.974 / 0.979 s**, completion
+  **1.160 / 1.205 s**, maximum **1.243 s**. Both unchanged completion gates fail;
+  visibility also has isolated samples just over one second. Source/executable
+  hashes and connection reuse were verified after both runs. Physical-device
+  latency remains unqualified.
+- This iteration is ready for review. Remaining work: incremental authenticated
+  metadata persistence and validation, preserving durable intent and immutable
+  history; qualify longer edit histories and physical LAN devices. The earlier
+  five-sample candidate is not a substitute for the final ten-sample result.
+
+## Previous checkpoint (2026-11-14)
 
 - Resumed 2026-11-13, updated 2026-11-14, main checkout `master`, `f98946625`.
   The initial working tree was clean. All changes are Lambda-owned scripts,
@@ -95,6 +217,74 @@ D6.3 (precise roots), D9.3.4 (native IO), D11.1.2 (anchored IO).
   Do not relax the timing threshold or durability to make the benchmark pass.
 
 ## Findings and evidence
+
+### 2026-11-16 tuning
+
+The first profile isolated repeated canonical digest construction, full replica
+validation, derived projections and immutable head encoding. The old instrumented
+helper had to become a procedure in the diagnostic copy to permit timing IO under
+S12.1.1v3; production validation remains a pure function. The scan-only profiles
+`tune2/profile-before.jsonl` and `profile-cached.jsonl` are diagnostic evidence,
+not latency acceptance. The final measurements use uninstrumented production
+modules and verify every changed file's exact bytes and completed frontier.
+
+The owner now retains the validated portable source values with its projections.
+`codec.same_encoding` compares ordered keys and scalar types without serializing
+unchanged containers. Less common scalar spellings use the existing canonical
+codec. Its contract requires a previously validated portable comparison value;
+it does not replace input validation. The pairwise codec fixture checks 1,521
+comparisons against actual encoded-byte equality. Cache corruption checks reject
+a numerically equal float timestamp and a reordered saved map with an unchanged
+digest; native value equality alone would not distinguish these cases.
+
+The disk-baseline projection can initialize an import branch only after the
+complete baseline matches that validation evidence. Other callers retain full
+validation. Baseline restore projects the replica already checked by restore,
+and lazy snapshots avoid hashes whose results will not be used. Mutation output
+validation, dependency verification, durable intents and physical object checks
+remain (D11.1.2).
+
+The peer now excludes IDs already present in the pinned remote inventory from
+the same round's missing-object queries. Full round inventories remain. The ACK
+and staging-pin cleanup share a head transaction once the complete offered
+frontier is acknowledged; partial ACKs preserve pins. Client ACK publication
+follows the completed exchange. The new fixture checks invalid/partial/full ACKs,
+unrelated pins, idempotence, one generation advance and restart durability.
+
+All timings below use release builds, 100 seed files and 4 KiB edits on one Mac.
+Three-peer values refer to the slower destination. Final runs use the native
+compiler fix described in the issue ledger; both executable identities are
+recorded. The before run has three samples per mode; the longer final two-peer
+run has ten and accumulates more file revisions. Do not compare their tail
+statistics as equal-duration experiments.
+
+| Run / peers / mode | Samples | Visibility median | Completion median | Completion maximum |
+|---|---:|---:|---:|---:|
+| Before / 2 / settled | 3 | 1.357 s | 1.578 s | 1.789 s |
+| Before / 2 / continuous | 3 | 1.475 s | 1.732 s | 1.736 s |
+| Final / 2 / settled | 10 | 0.826 s | 1.001 s | 1.132 s |
+| Final / 2 / continuous | 10 | 0.924 s | 1.143 s | 1.267 s |
+| Final / 3 / settled | 3 | 0.974 s | 1.160 s | 1.243 s |
+| Final / 3 / continuous | 3 | 0.979 s | 1.205 s | 1.242 s |
+
+Reports: `tune2/before-100.json`, `tune2/qualified-100.json`, and
+`tune2/qualified-three-peer.json`. Both final acceptance commands return exit 1 on the
+unchanged one-second completion threshold. All 26 edits arrive and install over
+reused authenticated connections with unchanged source hashes. Maximum visible
+arrival is 1.003 s for two peers and 1.042 s for three. Subsecond sync is still
+unqualified for the complete workload. The five-sample `base-100.json` result
+was faster, but it must not replace the longer final result. The profiles still
+identify full-state persistence and validation as the next work to make
+incremental; they do not establish that history growth alone caused the timing
+difference between runs.
+
+Verification: `tune2/verify.py` / `verification.log`, the three native process
+logs, and `lambda-baseline.log` retain exact results. The aggregate baseline
+passes 7,560/7,560 after all implementation changes. The restored release host
+is SHA-256 `553aaf37720bdad650d98194e6d41a4dca15806bda6f3f0ca0ec31bc85311759`;
+`final-identity.json` and both reports were checked against final sources.
+The final measurement driver records each gate's actual exit status; its own
+success means the reports completed, not that either latency gate passed.
 
 ### 2026-11-14 tuning
 

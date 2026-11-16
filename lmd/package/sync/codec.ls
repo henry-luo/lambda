@@ -5,6 +5,8 @@ let casts = {i8:(v) any^ =>i8(v),u8:(v) any^ =>u8(v),i16:(v) any^ =>i16(v),u16:(
     i32:(v) any^ =>i32(v),u32:(v) any^ =>u32(v),i64:(v) any^ =>i64(v),u64:(v) any^ =>u64(v),
     f16:(v) any^ =>f16(v),f32:(v) any^ =>f32(v)}
 let scalars = ["null","bool","int","float","integer","decimal","symbol","binary","datetime",*sized]
+let exact_values = ["null","bool","string","symbol","binary","int","integer",
+    "i8","u8","i16","u16","i32","u32","i64","u64"]
 
 // decode the unsigned decimal wire field directly in its full-width domain.
 fn unsigned64(payload) any^ {
@@ -198,3 +200,35 @@ pub fn decode(encoded, max_bytes=8388608) any^ {
 }
 
 pub fn digest(value) any^ => hash(encode(value)^,'sha256')^
+
+// known is already portable and validated; this compares reuse evidence, not arbitrary validity.
+pub fn same_encoding(value, known, depth=0) bool^ {
+    if (depth > 128) raise error("sync codec: nesting limit")
+    if (value is array) {
+        if (not (known is array) or len(value)^ != len(known)^) { return false }
+        var i = 0
+        while (i < len(value)^) {
+            if (not (same_encoding(value[i],known[i],depth+1)^)) { return false }
+            i = i+1
+        }
+        return true
+    }
+    if (value is map) {
+        if (not (known is map) or len(value)^ != len(known)^) { return false }
+        let keys = [for (key at value) key]
+        let old_keys = [for (key at known) key]
+        var i = 0
+        while (i < len(keys)^) {
+            if (not (same_encoding(keys[i],old_keys[i],depth+1)^) or
+                not (same_encoding(value[keys[i]],known[old_keys[i]],depth+1)^)) { return false }
+            i = i+1
+        }
+        return true
+    }
+    if (known is array or known is map) { return false }
+    let tag = string(type(value))
+    if (tag != string(type(known))) { return false }
+    if (contains(exact_values,tag)^)
+        { return value == known }
+    return encode(value)^ == encode(known)^
+}

@@ -3204,6 +3204,12 @@ TEST_F(NegativeScriptTest, SemanticError_EnforcingCallNeedsImmediateAcknowledgme
         "handle with 'risky(...) ^ { ... }'");
 }
 
+// S7.5.1v6: recomputing operator outcomes must retain an unpropagated call error.
+TEST_F(NegativeScriptTest, SemanticError_OperatorRefreshRetainsUnhandledErrors) {
+    ExpectErrorMessage("test/lambda/negative/semantic/operator_refresh_unhandled.ls",
+        "error[E228]: error from 'later' must be handled");
+}
+
 // S7.5.2v4/S7.5.5/S7.8.2: retained outcomes acknowledge independently;
 // the later print cannot acknowledge an overwritten mkdir result.
 TEST_F(NegativeScriptTest, SemanticError_AcknowledgmentUsesEachReceiver) {
