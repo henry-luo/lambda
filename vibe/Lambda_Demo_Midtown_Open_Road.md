@@ -23,9 +23,10 @@ boundary). Existing Midtown design and evidence:
 
 ## Current checkpoint
 
-- **Updated:** 2026-11-16, main checkout `master` (base `315915449`), all
-  changes uncommitted. Another session builds and tests in the same checkout;
-  timing runs wait for a quiet machine (`uptime`, `ps`).
+- **Updated:** 2026-11-16, main checkout `master`. All work is committed and
+  pushed in USER's `0fde63680` (an earlier snapshot went into `ffd7d5031`);
+  the measurement base is `315915449`. Another session builds and tests in the
+  same checkout; timing runs wait for a quiet machine (`uptime`, `ps`).
 - **Decisions (this proposal, not yet reviewed by USER):** OR1–OR9 below.
 - **State:** M1–M3 done, M2 realism done (lofted one-draw cars with a
   clearcoat atlas, reflective facades, terrain colours, vegetation, farms,
@@ -34,7 +35,8 @@ boundary). Existing Midtown design and evidence:
   traffic and people rest beyond 400 m of the barrier, far traffic staggered,
   region minimap at a third-scale raster, verges vectorized, car kinds built
   once. Golden (`open road` section) and three headless replays pass.
-- **Evidence (headless, release 11-13 binary, loaded machine):** per frame
+- **Evidence (headless, release 11-13 binary, loaded machine, before the
+  town-gap pass):** per frame
   2.9 ms in town vs 3.2–4.3 base; Lambda step+sync 2.2 ms town, 1.5 ms coast
   (was 2.6 and 3.5); startup within ~0.4 s of base.
 - **Live check (USER approved, 2026-11-16 14:06, load 2.8, release 11-13
@@ -52,9 +54,10 @@ boundary). Existing Midtown design and evidence:
   vegetation instanced per terrain chunk (12 tiles; quarters put ~1,500 trees
   in every shadow cascade near town). Headless town Lambda step+sync 1.62 ms
   (base 1.12, was 1.76); render stats show ~514 draws a frame vs ~590 base.
-  Golden unchanged, three replays pass. Live re-check awaits USER's go-ahead.
-- **Next:** live confirmation (ask first); JIT-tier style divergence ledgered
-  (pre-existing).
+  Golden unchanged, three replays pass. USER deferred the live re-check
+  ("Not now", 2026-11-16), so OR9 in town is unconfirmed.
+- **Next:** USER review of OR1–OR9; live town re-check when USER asks for it;
+  JIT-tier building-style divergence (pre-existing, ledgered).
 - **Perf lessons:** per-element Lambda calls cost ~5–10 µs; array maths
   ~0.03 µs per value (`sin`, `exp`, `abs`, `math.sqrt` are element-wise;
   clamp/min/max via `abs`); `flatten(transpose(channels))` interleaves 100k
