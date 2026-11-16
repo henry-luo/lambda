@@ -2601,3 +2601,22 @@ Evidence: `temp/online-visual-round27/console-before.log`,
 `batch-focused.log`, `console-goldens.json`, Maven callback before/after logs;
 `test/js/console_groups.js` and its golden, and
 `test/online/render_console_groups.test.cjs`.
+
+## JIT tier picks different Midtown building styles — 2026-11-16
+
+<a id="midtown-jit-building-styles"></a>
+
+**Status:** OPEN, found while extending the Midtown golden. Tier agreement
+**SI3v2** (type inference: tiers agree) and **D8.3.1** (tiered execution).
+
+`test/lambda/scene3d/midtown.ls` prints `styles: [18, 20, 30, 45]` under the
+default runner and `[15, 18, 41, 39]` with `LAMBDA_EXEC_BACKEND=jit`; every
+other value in the golden, including building count and the tallest tower,
+agrees. The committed city module (base `315915449`) shows the same split, so
+this predates the open-road work. Isolated probes agree across tiers:
+`rng.key`/`derive`/`unit`/`below`/`between`, a copy of `mod_city.pick_style`,
+`rng.derive(k, [i, j])` with indices from a two-binding comprehension, and a
+u64 key passed through a function with a default parameter. The divergence
+therefore sits in the city's composition of these (`block_buildings` →
+`parcel` → `building` → `pick_style`), not in the primitives. Repro:
+`temp/openroad/style_jit.ls` prints the first twelve buildings' styles.

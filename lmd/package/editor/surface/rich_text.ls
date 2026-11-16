@@ -198,6 +198,7 @@ pub let css = "
   .edit-surface h3 { font-size: 1.25em; margin: 1em 0 0.4em; }
   .edit-surface h4, .edit-surface h5, .edit-surface h6 { font-size: 1em; margin: 1em 0 0.4em; }
   .edit-surface p { margin: 0.5em 0; }
+  .edit-format-docx .edit-surface { white-space: pre-wrap; }
   .edit-surface p.edit-implied { margin: 0; }
   .edit-surface figure { margin: 0.8em 0; }
   .edit-surface figcaption { font-size: 0.9em; color: #57606a; }

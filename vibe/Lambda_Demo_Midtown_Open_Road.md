@@ -27,22 +27,47 @@ boundary). Existing Midtown design and evidence:
   changes uncommitted. Another session builds and tests in the same checkout;
   timing runs wait for a quiet machine (`uptime`, `ps`).
 - **Decisions (this proposal, not yet reviewed by USER):** OR1–OR9 below.
-- **State:** M1 done except junction signal for the gateway approach. New
-  modules `mod_land` (branch-free terrain formula over numbers or arrays),
-  `mod_roads` (loop spline, profile, corridor index), `mod_region` (carving,
-  driving height, solids, land use), `mod_world`, `mod_land_mesh`,
-  `mod_land_scene`; minimap region layer (an SVG image). M2 next.
-- **Evidence:** golden passes except `obstacles` 857→858 (barrier gap);
-  headless shots `temp/openroad/shots/`; startup (release/lambda of 11-13,
-  headless, load only) 1.5 s at base → 2.4 s now.
+- **State:** M1–M3 done, M2 realism done (lofted one-draw cars with a
+  clearcoat atlas, reflective facades, terrain colours, vegetation, farms,
+  turbines, lighthouse, boats, clouds painted into per-look sky domes, grade).
+  M4 perf pass done headless: commands culled beyond 900 m of the camera, town
+  traffic and people rest beyond 400 m of the barrier, far traffic staggered,
+  region minimap at a third-scale raster, verges vectorized, car kinds built
+  once. Golden (`open road` section) and three headless replays pass.
+- **Evidence (headless, release 11-13 binary, loaded machine):** per frame
+  2.9 ms in town vs 3.2–4.3 base; Lambda step+sync 2.2 ms town, 1.5 ms coast
+  (was 2.6 and 3.5); startup within ~0.4 s of base.
+- **Live check (USER approved, 2026-11-16 14:06, load 2.8, release 11-13
+  binary, 12 s drives, base/current interleaved):** town base 20.3 / 20.2 ms
+  mean, current 24.4 / 24.5 (median 16.7 for both, ~47% vs ~20% of frames
+  miss vsync); farm 21.8; coast 19.9. OR9 holds on the open road, not yet in
+  town. Lambda step+sync in town 2.1–2.3 ms vs 1.5 base; open-road cars inside
+  900 m of town still step every frame; the remaining gap is native work
+  headless timing does not show (likely the compositor/HUD path or added
+  per-frame scene work: clips, extra meshes).
+- **Town-gap pass (2026-11-16, after the live check):** tiered staggering
+  (open-road cars every 2nd frame beyond 350 m, every 4th beyond 900 m; town
+  cars every 2nd beyond 250 m), staggering and command filters made cheap
+  (no per-car record copy, no distance test from a camera in town),
+  vegetation instanced per terrain chunk (12 tiles; quarters put ~1,500 trees
+  in every shadow cascade near town). Headless town Lambda step+sync 1.62 ms
+  (base 1.12, was 1.76); render stats show ~514 draws a frame vs ~590 base.
+  Golden unchanged, three replays pass. Live re-check awaits USER's go-ahead.
+- **Next:** live confirmation (ask first); JIT-tier style divergence ledgered
+  (pre-existing).
 - **Perf lessons:** per-element Lambda calls cost ~5–10 µs; array maths
   ~0.03 µs per value (`sin`, `exp`, `abs`, `math.sqrt` are element-wise;
   clamp/min/max via `abs`); `flatten(transpose(channels))` interleaves 100k
   values in 1 ms; `a[i][k]` in a loop is ~30 µs per read (bind `a[i]` first);
   `sign()` returns an untyped array that `transpose` rejects;
   `math.transform_buffer` replaces Lambda-side point transforms.
-- **Open:** live frame timing is noisy under GPU contention (same build 23 vs
-  28 ms mean); measure OR9 with a release build on a quiet machine in M4.
+- **Lessons from M2–M4:** a blended dome draws its transparent texels as fog
+  colour (white veil) — paint clouds into the sky dome's vertex colours; a
+  presentation `scale()` on an image clips it to its layout box — scale a
+  holder instead; the minimap redraws an image at its laid-out size every
+  frame; default tiered execution makes first calls ~3× slower than warm
+  (truss builder 304 ms first, 2 ms second), so per-element code costs most at
+  startup.
 
 ## 1. What changes
 

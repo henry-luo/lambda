@@ -1,6 +1,8 @@
 // Midtown: an open-city driving sandbox on native Scene3D. Drive Lumen Bay's grid of towers,
 // parks and harbour streets among lane-keeping traffic and pedestrians, jump the stunt ramps, scatter
-// the cones, and run courier jobs against the clock. The genre follows open-world driving games such
+// the cones, and run courier jobs against the clock; or leave town by the gateway roundabout for a
+// loop road over a river truss bridge, through farmland and a ridge tunnel, along the cliffs and the
+// beach, and back over the estuary bridge. The genre follows open-world driving games such
 // as the OpenLiberty project's Godot vehicle prototype; the city, rules and art are original.
 // Open with ./lambda.exe demo midtown
 import dom
@@ -75,6 +77,7 @@ pn command(owner, st, act) {
         return {*: next, toast: if (next.auto != null) "Auto drive: hands off" else "You have the wheel", toast_until: st.t + 2.0}
     }
     if (act == "reset") { return {*: present.reset_car(st), toast: "Back on the road", toast_until: st.t + 1.5} }
+    if (act == "jump") { return present.jump(st) }
     if (act == "pause") {
         if (st.paused) {
             runtime.play(h.scene)^
@@ -141,7 +144,7 @@ on keydown(evt) {
     let act = if (key == "Enter" and not st.started) "start" else if (key == "Escape" or lower_key == "p") "pause"
         else if (lower_key == "n") "look" else if (lower_key == "l" or lower_key == "z") "lights" else if (lower_key == "v") "camera"
         else if (lower_key == "m") "courier" else if (lower_key == "o") "auto" else if (lower_key == "r") "reset"
-        else if (lower_key == "h") "help" else null
+        else if (lower_key == "h") "help" else if (lower_key == "j") "jump" else null
     if ((act == null or evt.repeat)^) { return if (act == null) 'pass' else 'prevent-default' }
     st = command(owner, st, act)
     pressed_states(owner, st)

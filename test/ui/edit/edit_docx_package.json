@@ -1,0 +1,18 @@
+{
+  "name": "edit a DOCX paragraph while retaining protected content",
+  "command": "edit",
+  "html": "test/fixtures/edit/docx-preserved.docx",
+  "working_copy": "temp/edit-ui/edit_docx_package.docx",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-btn-view_source"}, "count": 0},
+    {"type": "click", "target": {"text": "Hello, DOCX!"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "equals": "Saved edit_docx_package.docx."},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "equals": "Saved edit_docx_package.docx."}
+  ]
+}

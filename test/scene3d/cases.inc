@@ -91,6 +91,7 @@
 {"SkymasterMobileKeepsTheMechanismAndControlsReachable", "test/demo/scene3d/skymaster/skymaster.ls", "test/demo/scene3d/skymaster/tests/mobile.json", 25},
 {"MidtownControlsTrafficAndLooksStayLive", "test/demo/midtown/midtown.ls", "test/demo/midtown/tests/desktop.json", 48},
 {"MidtownMobilePedalsDriveTheCar", "test/demo/midtown/midtown.ls", "test/demo/midtown/tests/mobile.json", 15},
+{"MidtownOpenRoadJumpAutoDriveAndNight", "test/demo/midtown/midtown.ls", "test/demo/midtown/tests/openroad.json", 31},
 {"CrystalGardenPanTiltZoomRendersAndResetsCamera", "test/demo/scene3d/three-gallery.ls", "test/scene3d/events/CrystalGardenPanTiltZoomRendersAndResetsCamera.json", 43},
 {"NativeObservatoryControlsAndPlayback", "test/demo/scene3d/observatory.ls", "test/scene3d/events/NativeObservatoryControlsAndPlayback.json", 26},
 {"AquariumEditorBuildsEditsAnimatesAndSavesTank", "test/demo/aquarium/aquarium.ls", "test/demo/aquarium/tests/aquarium_editor.json", 61},

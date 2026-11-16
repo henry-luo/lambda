@@ -36,8 +36,7 @@ fn plan() element {
         <rect x: 0.0 - l, y: 0.0 - l, width: 2.0 * l, height: 2.0 * l, fill: "#5a5f66">, *blocks, *towers]>
 }
 // the land beyond the city at the same scale: sea, river, the loop road (darker through the tunnel)
-// and the roundabout; it sits under the city plan. It is an image of an SVG, so Radiant rasterises it
-// once and only turns the bitmap each frame (as inline SVG it was redrawn every frame, ~2 ms)
+// and the roundabout; it sits under the city plan, as an image of an SVG
 let REGION = {x0: -320.0, x1: 1620.0, z0: -460.0, z1: 460.0}
 fn pt(x, z) any^ => string(round(x)) ++ " " ++ string(round(z))
 fn outline(points) any^ => join([for (k, p in points) (if (k == 0) "M " else "L ") ++ pt(p[0], p[1])], " ") ++ " Z"
@@ -67,11 +66,15 @@ fn region_svg() element^ {
         <circle cx: roads.R1.x, cy: roads.R1.z, r: roads.R1.ring + 5.0, fill: "#d6d0c2">,
         <circle cx: roads.R1.x, cy: roads.R1.z, r: roads.R1.island, fill: "#4d7a45">]>
 }
-fn region_plan() element^ => (let r = REGION, <img class: "map-plan", alt: "", width: r.x1 - r.x0, height: r.z1 - r.z0,
-    src: media.data_uri(binary(format(region_svg()^, 'xml')^), "image/svg+xml")^,
-    style: "left:" ++ string(r.x0) ++ "px;top:" ++ string(r.z0) ++ "px;width:" ++ string(r.x1 - r.x0) ++ "px;height:" ++ string(r.z1 - r.z0) ++ "px">)
+// the turning map redraws this image every frame at its laid-out size, so it is laid out at a third of
+// the plan's scale in a holder of its own, whose transform enlarges it (full size cost ~2.5 ms a frame)
+pub let REGION_SHRINK = 3.0
+fn region_plan() element^ => (let r = REGION, let w = (r.x1 - r.x0) / REGION_SHRINK, let h = (r.z1 - r.z0) / REGION_SHRINK,
+    <img class: "map-plan", alt: "", width: w, height: h, src: media.data_uri(binary(format(region_svg()^, 'xml')^), "image/svg+xml")^,
+        style: "left:" ++ string(r.x0 / REGION_SHRINK) ++ "px;top:" ++ string(r.z0 / REGION_SHRINK) ++ "px;width:" ++ string(w) ++ "px;height:" ++ string(h) ++ "px">)
 fn minimap() element => <div class: "map-disc", *[
-    <div id: "map-world", class: "map-world", *[*(let rp = region_plan() ^ { null }, if (rp == null) [] else [rp]), plan(),
+    <div id: "map-region", class: "map-world", *(let rp = region_plan() ^ { null }, if (rp == null) [] else [rp])>,
+    <div id: "map-world", class: "map-world", *[plan(),
         <div id: "map-target", class: "map-target", style: "opacity:0", *[<div class: "map-target-ring">]>]>,
     <div id: "map-pointer", class: "map-pointer", style: "opacity:0", *[<div class: "map-pointer-tip">]>,
     <div id: "map-north", class: "map-north", *[<span "N">]>,
@@ -97,7 +100,8 @@ fn button(b) element => <button id: "btn-" ++ b.act, class: "hud-button", type: 
 fn pedal(hold, label, glyph) element => <button class: "pedal pedal-" ++ hold, type: "button", 'data-hold': hold, 'aria-label': label, *[glyph]>
 let KEYS = [["W / ↑", "Accelerate"], ["S / ↓", "Brake, then reverse"], ["A D / ← →", "Steer"], ["Space", "Handbrake (drift)"],
     ["C", "Look back (hold)"], ["V", "Change camera"], ["L or Z", "Headlights"], ["N", "Day, dusk or night"],
-    ["M", "Start or stop a courier run"], ["O", "Auto drive"], ["R", "Put the car back on the road"], ["P / Esc", "Pause"], ["Drag", "Look around"]]
+    ["M", "Start or stop a courier run"], ["O", "Auto drive"], ["R", "Put the car back on the road"], ["J", "Jump to the next place on the open road"],
+    ["P / Esc", "Pause"], ["Drag", "Look around"]]
 
 pub fn page(st) element => <div id: "midtown", class: "drive", 'data-started': "false", 'data-help': "false", 'data-paused': "false", *[
     <div id: "stage", class: "stage", *[sc.scene(st)]>,
@@ -128,8 +132,9 @@ pub fn page(st) element => <div id: "midtown", class: "drive", 'data-started': "
     <section id: "intro", class: "intro", <div class: "intro-card", *[
         <p class: "eyebrow", "LAMBDA · SCENE3D · OPEN CITY">,
         <h1 "Midtown">,
-        <p class: "lede", "Lumen Bay is yours: thirty-six blocks of towers, parks and harbour streets, with traffic that keeps to its lanes and people who keep out of your way.">,
+        <p class: "lede", "Lumen Bay is yours: thirty-six blocks of towers, parks and harbour streets, and beyond the gateway roundabout an open road over two bridges, through a ridge tunnel and along the coast.">,
         <ul class: "intro-list", *[<li "Drive anywhere, jump the ramps in the stunt lot, and knock the cones flying.">,
+            <li "Take Union Street east for farms, wind turbines, cliffs, a beach and a lighthouse; J jumps ahead.">,
             <li "Run courier jobs across town against the clock.">, <li "Switch between day, dusk and night, and four cameras.">]>,
         <div class: "intro-actions", *[<button id: "start", class: "start", type: "button", 'data-act': "start", "Start driving">,
             <button class: "ghost", type: "button", 'data-act': "auto-start", "Watch it drive">]>,

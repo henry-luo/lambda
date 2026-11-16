@@ -1835,6 +1835,17 @@ also previews DOCX and exposes its converted HTML on the Source tab. Use
 `lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
 content is listed above the preview; Word pagination is outside this profile.
 
+`lambda edit report.docx` uses a separate package-preserving adapter under
+D9.3.4 and D10.2.1. It edits supported paragraph runs and simple table cells,
+and retains unsupported blocks as read-only. It replaces the affected runs in
+the original main-document XML and copies unchanged ZIP members from their
+original records, including unknown parts and their metadata. It also retains
+the ZIP comment and member order. This differs from DOCX export above, which
+creates a new package. Signed packages are read-only; unsupported table
+structure and complex runs cannot be edited. See the
+[CLI editor profile](Lambda_CLI.md#edit---document-editor) for the current
+editing limits.
+
 ## 16. docbook — DocBook to HTML/CSS
 
 Open the original sample directly with

@@ -21,6 +21,7 @@ import json: lambda.editor.format.json
 import rfc: lambda.editor.format.rfc
 import yaml: lambda.editor.format.yaml
 import toml: lambda.editor.format.toml
+import docx: lambda.editor.format.docx
 import property: lambda.editor.surface.property
 import shell: lambda.editor.app.shell
 import src: lambda.editor.surface.source
@@ -33,10 +34,10 @@ import lambda.editor.model
 // formats no rich surface claims, and any file under `--source`
 // (Radiant_Design_Source_Editor CED20).
 pub let formats = [md.descriptor, html.descriptor, xhtml.descriptor, *markup.formats, rtf.descriptor, properties.descriptor,
-                   properties.ini_descriptor, delimited.csv_descriptor, delimited.tsv_descriptor, xml.descriptor, json.descriptor, rfc.descriptor, rfc.vcf_descriptor, yaml.descriptor, toml.descriptor, src.descriptor]
+                   properties.ini_descriptor, delimited.csv_descriptor, delimited.tsv_descriptor, xml.descriptor, json.descriptor, rfc.descriptor, rfc.vcf_descriptor, yaml.descriptor, toml.descriptor, docx.descriptor, src.descriptor]
 
 // These viewer formats are binary containers or media, even with --source.
-let non_text_suffixes = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".psd", ".docx", ".pptx", ".epub",
+let non_text_suffixes = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".psd", ".pptx", ".epub",
   ".webp", ".bmp", ".tif", ".tiff", ".ico", ".avif", ".heic", ".heif", ".jxl", ".pbm", ".pgm", ".ppm", ".pnm", ".svgz",
   ".mp3", ".wav", ".ogg", ".mp4", ".mov", ".webm",
   ".zip", ".7z", ".rar", ".tar", ".gz"]
@@ -55,9 +56,12 @@ pub pn open_document(path, options) element^ {
     raise error("'" ++ sess.basename(path) ++ "' is a non-text document and cannot be edited")
   }
   let named = format_for_path(path)
+  if (named != null and named.binary == true and options != null and options.source == true) {
+    raise error("DOCX is a binary package and has no text source surface")
+  }
   // The source surface accepts unlisted text formats after the same byte checks.
   let selected = if (options != null and options.source == true or named == null) src.descriptor else named
-  let source = sess.read_text(path)^
+  let source = if (selected.binary == true) input(path, 'binary')^ else sess.read_text(path)^
   let attempt = selected.import_text(source) ^ { {error: ^.message} }
   if (attempt.error != null and selected.fallback_source != true) { raise error(attempt.error) }
   let mismatch = if (attempt.error != null) null else selected.check_roundtrip(attempt.doc, attempt.envelope)

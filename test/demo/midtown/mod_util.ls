@@ -13,6 +13,16 @@ pub fn ease(rate, dt) => 1.0 - exp(0.0 - rate * dt)
 // wrap an angle into (-pi, pi]
 pub fn wrap(a) => a - TAU * round(a / TAU)
 pub fn sq(x) => x * x
+// Agents far from (x, z) take turns: tiers are [reach, every] pairs, farthest first; an agent beyond a tier's
+// reach steps every `every`th frame (by its number n), carrying the time it is owed, so distant traffic
+// costs a fraction of a frame and catches up exactly. `frame` null steps all.
+// (at most two tiers; a stepped agent's record is copied again only when it carried owed time)
+fn cadence(a, x, z, tiers) => (let d = max(abs(a.x - x), abs(a.z - z)),
+    if (d > tiers[0][0]) tiers[0][1] else if (len(tiers) > 1 and d > tiers[1][0]) tiers[1][1] else 1)
+pub fn staggered(agents, x, z, tiers, frame, dt, step_one) any^ => [for (a in agents, let every = if (frame == null) 1 else cadence(a, x, z, tiers),
+        let owed = a.owed or 0.0)
+    if (every > 1 and (a.n + frame) % every != 0) {*: a, owed: owed + dt}
+    else if (owed == 0.0) step_one(a, dt)^ else {*: step_one(a, dt + owed)^, owed: 0.0}]
 
 pub fn forward(h) => [sin(h), cos(h)]
 pub fn right(h) => [0.0 - cos(h), sin(h)]

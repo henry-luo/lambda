@@ -1,0 +1,15 @@
+{
+  "name": "edit a DOCX table cell without rebuilding the table",
+  "command": "edit",
+  "html": "test/input/docx/reference/tables.docx",
+  "working_copy": "temp/edit-ui/edit_docx_table.docx",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#edit-surface table"}, "count": 1},
+    {"type": "click", "target": {"text": "Top left"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " edited"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "equals": "Saved edit_docx_table.docx."},
+    {"type": "assert_text", "target": {"selector": "#edit-surface td", "index": 0}, "equals": "Top left edited"}
+  ]
+}

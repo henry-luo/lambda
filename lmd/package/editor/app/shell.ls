@@ -145,11 +145,13 @@ fn deleted_part(session, doc, selection, input_type) any^ {
 }
 
 let view_only_status = "This part is view-only and is saved as written; press Delete to remove it."
+fn retained_status(session) => if (session.format.protect_view_only == true)
+  "DOCX retained content is read-only." else view_only_status
 
 fn command_problem(session, editor, item) any^ =>
   if (item == null or not tools.command_supported(item, session.format.unsupported_input_types, session.format.allowed_model_marks)^)
     "Not available in " ++ session.format.name ++ " documents."
-  else if (writes_view_only(session, editor.doc, editor.selection, item.input_type)) view_only_status
+  else if (writes_view_only(session, editor.doc, editor.selection, item.input_type)) retained_status(session)
   else null
 
 fn primary_key(evt) => evt.metaKey == true or evt.ctrlKey == true
@@ -282,7 +284,8 @@ edit <edit_app> state editor: ~.editor, session: ~.session, status: ~.status, di
   let dirty = sess.is_dirty(session, editor.doc);
   <body class: "edit-app edit-format-" ++ string(session.format.id),
     tools.toolbar(files.file_label(session, dirty), editor, dirty,
-                  if (is_drawing(session)) ds else null, format_groups(session), tools.source_view_group,
+                  if (is_drawing(session)) ds else null, format_groups(session),
+                  if (session.format.binary == true) [] else tools.source_view_group,
                   not member(session.format.unsupported_input_types, "insertTable"));
     <div class: "edit-main", surface_of(session, editor, ds)>
     <div class: "edit-status", role: "status", status>
@@ -316,7 +319,7 @@ on editaction(evt) {
   }
   let target = edit_action_selection(editor, evt)
   if (writes_view_only(session, editor.doc, target, evt.input_type)^) {
-    status = view_only_status
+    status = retained_status(session)
     // The status redraw replaces the caret's DOM node even though no edit ran.
     controller.restore(editor)^
     return edit_result.decline(true, false, "view-only", 0)
@@ -328,6 +331,14 @@ on editaction(evt) {
   let run = if (part == null) controller.handle(editor, evt, false,
                 if (session.format.surface == 'rich_text') session.format.schema_preset else null)
             else edit_handle_request(edit_set_selection(editor, part), edit_request_from_toolbar(evt.input_type, {}))
+  // A package adapter can protect source that is visible but cannot be rewritten.
+  let problem = if (session.format.validate_model == null) null
+    else session.format.validate_model(run.editor.doc, session.envelope)
+  if ((problem != null)^) {
+    status = problem
+    controller.restore(editor)^
+    return edit_result.decline(true, false, "view-only", 0)
+  }
   editor = run.editor
   if ((not (run.result.failure is null))^) { status = "Could not apply " ++ evt.input_type ++ "." }
   files.sync_window(evt.target, session, editor.doc)
@@ -344,7 +355,7 @@ on edit_cmd(req) {
   table_menu = null
   editor = mounted(editor, req.node, session.format)
   let cmd = req.cmd
-  if (cmd == "view_source") {
+  if ((cmd == "view_source" and session.format.binary != true)^) {
     emit("edit_switch", source_view(session, editor)^)
     return
   }
@@ -566,7 +577,7 @@ on keydown(evt) {
     return 'prevent-default'
   }
   // Cmd/Ctrl+/ switches to the source view (OQ7)
-  if ((primary_key(evt) and evt.key == "/" and dialog == null)^) {
+  if ((primary_key(evt) and evt.key == "/" and dialog == null and session.format.binary != true)^) {
     emit("edit_switch", source_view(session, editor)^)
     return 'prevent-default'
   }

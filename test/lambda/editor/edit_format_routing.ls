@@ -23,6 +23,6 @@ import app: lambda.editor.app
   app.format_for_path("document.mark").surface == 'source',
   app.is_non_text_path("picture.PNG"),
   app.is_non_text_path("document.pdf"),
-  app.is_non_text_path("document.docx"),
+  not app.is_non_text_path("document.docx") and app.format_for_path("document.docx").id == 'docx',
   not app.is_non_text_path("drawing.svg")
 ]

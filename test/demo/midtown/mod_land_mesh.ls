@@ -162,9 +162,6 @@ pub fn asphalt(rd, a = 0, b = -1) any^ => strip(rd.samples, a, if (b < 0) len(rd
 let VERGE_LATS = [4.9, 6.4, 9.0, 12.5, 17.0, region.VERGE]
 let APPROACH_LATS = [4.9, 6.4, 9.0, 12.5, 17.0, 23.5, 31.0]
 let CAP_LATS = [for (k in 0 to 12) -30.0 + k * 5.0]
-fn verge_y(p, lat) any^ => if (abs(lat) < 5.0) p.y - 0.04
-    else (let q = side(p, lat), region.carved(land.natural_at(q[0], q[1]), {r: 0, s: p.s, y: p.y, lat: lat}) - 0.06)
-fn cap_y(p, lat) any^ => (let q = side(p, lat), region.carved(land.natural_at(q[0], q[1]), {r: 0, s: p.s, y: p.y, lat: lat}) - 0.06)
 fn sample_kind(p) any^ => if (roads.within("truss", p.s, 5.0) or roads.within("cable", p.s, 5.0)) "span"
     else if (len([for (st in roads.STRUCTURES where st.kind == "tunnel" and (abs(p.s - st.a) < roads.PORTAL or abs(p.s - st.b) < roads.PORTAL)) st]) > 0)
         (if (roads.within("tunnel", p.s)) "cap" else "approach")
@@ -177,13 +174,45 @@ fn kind_runs() any^ {
     let starts = [for (k in 0 to (n - 1) where k == 0 or kinds[k] != kinds[k - 1]) k];
     [for (q, a in starts, let b = if (q + 1 < len(starts)) starts[q + 1] else n - 1) [a, b, kinds[a]]]
 }
+// the loop's samples as flat arrays: position, deck height, arc length, right-hand direction, deck normal
+let LP = roads.LOOP.samples
+let SX = [for (p in LP) p.x]
+let SZ = [for (p in LP) p.z]
+let SY = [for (p in LP) p.y]
+let SS = [for (p in LP) p.s]
+let RX = [for (p in LP) 0.0 - cos(p.heading)]
+let RZ = [for (p in LP) sin(p.heading)]
+let UP = [for (k, p in LP) up_normal(LP, k)]
+let UP0 = [for (n in UP) n[0]]
+let UP1 = [for (n in UP) n[1]]
+let UP2 = [for (n in UP) n[2]]
+// one verge strip in array form: the cut-and-fill land (or, over a bore's mouth, the hill's cover) at
+// each offset, the deck's own edge under the asphalt, terrain colours shaded by the cross slope
+fn verge_strip(a, b, lats, cap) any^ {
+    let n = len(lats)
+    let ks = [for (k in a to b, lat in lats) k]
+    let ls = [for (k in a to b, lat in lats) lat]
+    let xs = [for (q, k in ks) SX[k] + RX[k] * ls[q]]
+    let zs = [for (q, k in ks) SZ[k] + RZ[k] * ls[q]]
+    let deck = [for (k in ks) SY[k]]
+    let nat = land.grid_many(land.NATURAL, xs, zs)
+    let off = abs(ls)
+    let land_y = if (cap) land.vmax(nat, deck + 10.5 - land.vmax(0.0, off - 8.0) * 0.25)
+        else (let target = deck - 0.15, target + (nat - target) * land.smooth(region.FLAT_BAND, roads.REACH, off))
+    let edge = if (cap) 0.0 * off else land.step(5.0 - off)
+    let ys = edge * (deck - 0.04) + (1.0 - edge) * (land_y - 0.06)
+    let ny = [for (i, y in ys, let c = i % n, let j = if (c + 1 < n) i + 1 else i - 1) 1.0 / sqrt(1.0 + u.sq((ys[j] - y) / (ls[j] - ls[i])))]
+    let coast = land.columns_at(xs);
+    {positions: interleave([xs, ys, zs]), normals: interleave([[for (k in ks) UP0[k]], [for (k in ks) UP1[k]], [for (k in ks) UP2[k]]]),
+     uvs: interleave([ls / 6.0, [for (k in ks) SS[k] / ROAD_TILE]]), colors: interleave(terrain_color(xs, zs, ys, ny, coast[0], coast[1])),
+     indices: [for (k in 0 to (b - a - 1), c in 0 to (n - 2), let r0 = k * n + c, let r1 = r0 + n) *[r0, r0 + 1, r1, r0 + 1, r1 + 1, r1]]}
+}
 pub fn verges() any^ {
-    let pts = roads.LOOP.samples
-    let runs = kind_runs();
+    let runs = kind_runs()
     let sides = (lats) => [lats, [for (l in reverse(lats)) 0.0 - l]];
     m.merge([for (rn in runs, part in (if (rn[2] == "open") sides(VERGE_LATS) else if (rn[2] == "approach") sides(APPROACH_LATS)
             else if (rn[2] == "cap") [CAP_LATS] else []))
-        strip(pts, rn[0], rn[1], part, [for (l in part) l / 6.0], if (rn[2] == "cap") cap_y else verge_y, true)])
+        verge_strip(rn[0], rn[1], part, rn[2] == "cap")^])
 }
 
 // ---- the gateway roundabout: an asphalt apron just under the arms, edge markings, the raised island
