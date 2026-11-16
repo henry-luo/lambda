@@ -53,6 +53,7 @@ bool dom_cookies_enabled(void);
 // Queue the iframe's load event after its navigated document is ready.
 void dom_iframe_navigation_complete(void* iframe);
 void dom_dispatch_pending_resource_loads();
+void dom_queue_resource_completion(void* element, bool loaded);
 void dom_queue_image_completion(void* image, bool loaded);
 
 /**

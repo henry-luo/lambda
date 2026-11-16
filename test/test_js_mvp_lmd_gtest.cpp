@@ -7,6 +7,7 @@
 #include "lambda/js/js_execution_internal.hpp"
 #include "lambda/js/js_event_loop.h"
 #include "lambda/dom/dom.h"
+#include "lambda/dom/dom_realm_hooks.h"
 #include <gtest/gtest.h>
 #include "lambda/js/mvp-lmd/mvp_lmd.h"
 #include "lambda/js/mvp-lmd/mvp_lmd_runtime.h"
@@ -1004,6 +1005,57 @@ TEST_F(JsFormalMir, ClockOriginPrecedesUserCodeAndFirstNowIsNonnegative) {
     }
 }
 
+TEST_F(JsFormalMir, ResourceTimingUsesBrandedPrivateMetadata) {
+    ASSERT_EQ(run("typeof PerformanceResourceTiming==='function'").item, ITEM_TRUE);
+    gc_set_force_collect_interval(runtime.eval_context->heap->gc, 1);
+    js_performance_record_resource("https://example.test/first", "fetch", 12.5, 27.75);
+    gc_set_force_collect_interval(runtime.eval_context->heap->gc, 0);
+    Item result = run(R"JS(
+        var resource=performance.getEntriesByType('resource')[0];
+        var resourceCtor=PerformanceResourceTiming,resourceProto=resourceCtor.prototype;
+        var baseName=Object.getOwnPropertyDescriptor(PerformanceEntry.prototype,'name').get;
+        var initiator=Object.getOwnPropertyDescriptor(resourceProto,'initiatorType');
+        function timingTypeError(action){try{action();return false}catch(e){return e instanceof TypeError}}
+        var timingOk=resource instanceof resourceCtor && resource instanceof PerformanceEntry &&
+            Object.getPrototypeOf(resourceCtor)===PerformanceEntry &&
+            Object.getPrototypeOf(resourceProto)===PerformanceEntry.prototype &&
+            Object.getPrototypeOf(resource)===resourceProto && Object.keys(resource).length===0 &&
+            Object.prototype.toString.call(resource)==='[object PerformanceResourceTiming]' &&
+            initiator.enumerable && initiator.configurable && initiator.set===undefined &&
+            initiator.get.call(resource)==='fetch' && baseName.call(resource)==='https://example.test/first' &&
+            resource.entryType==='resource' && resource.startTime===12.5 && resource.duration===15.25 &&
+            resource.fetchStart===12.5 && resource.responseEnd===27.75 &&
+            timingTypeError(()=>new resourceCtor()) && timingTypeError(()=>resourceCtor()) &&
+            timingTypeError(()=>initiator.get.call({})) &&
+            timingTypeError(()=>initiator.get.call(Object.create(resourceProto))) &&
+            timingTypeError(()=>initiator.get.call(new Proxy(resource,{}))) &&
+            timingTypeError(()=>resourceProto.toJSON.call(new PerformanceMark('mark')));
+        var resourceJSON=resource.toJSON();
+        timingOk=timingOk && Object.keys(resourceJSON).length===7 &&
+            resourceJSON.name===resource.name && resourceJSON.initiatorType==='fetch' &&
+            resourceJSON.duration===15.25 && resourceJSON.fetchStart===12.5 && resourceJSON.responseEnd===27.75 &&
+            Object.keys(PerformanceEntry.prototype.toJSON.call(resource)).length===4;
+        Object.defineProperty(resource,'name',{value:'public shadow'});
+        Object.defineProperty(resource,'entryType',{value:'mark'});
+        Object.defineProperty(resource,'startTime',{value:10000});
+        PerformanceResourceTiming=function replaced(){};
+        gc();
+        timingOk && baseName.call(resource)==='https://example.test/first' &&
+            resource.toJSON().name==='https://example.test/first' &&
+            performance.getEntriesByName('https://example.test/first','resource')[0]===resource
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    js_performance_record_resource("https://example.test/second", "xmlhttprequest", 30, 35);
+    result = run(R"JS(
+        gc();var secondResource=performance.getEntriesByType('resource')[1];
+        secondResource instanceof resourceCtor && Object.getPrototypeOf(secondResource)===resourceProto &&
+            secondResource.initiatorType==='xmlhttprequest' && secondResource.name==='https://example.test/second'
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
 TEST_F(JsFormalMir, HostPerformanceAndDateShareVirtualAndFrameClocks) {
     ASSERT_FALSE(item_is_error(run("performance.timeOrigin>1e12")));
     EXPECT_EQ(js_get_key_cstr(js_get_global_this(), "performance").item,
@@ -1126,6 +1178,105 @@ TEST_F(JsFormalMir, NativeWindowTasksRetainTheActiveGlobalAndPayload) {
     ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY);
     ASSERT_EQ(value.array->length, 1);
     EXPECT_EQ(value.array->items[0].item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, StorageEventConstructorRetainsTypedReadonlyPayload) {
+    Item value = run(R"JS(
+        const area=localStorage;
+        const e=new StorageEvent('storage',{key:42,newValue:'new',oldValue:null,
+            url:'https://example.test/',storageArea:area,bubbles:true,composed:true});
+        gc();
+        const key=Object.getOwnPropertyDescriptor(StorageEvent.prototype,'key');
+        e.key='changed';
+        e instanceof StorageEvent && e instanceof Event && e.key==='42' &&
+            e.newValue==='new' && e.oldValue===null && e.url==='https://example.test/' &&
+            e.storageArea===area && e.bubbles && e.composed && !e.cancelable && !e.isTrusted &&
+            typeof key.get==='function' && key.set===undefined &&
+            Object.prototype.toString.call(e)==='[object StorageEvent]' &&
+            StorageEvent.length===1 && StorageEvent.prototype.constructor===StorageEvent
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, WindowDocumentIsBrandedUnforgeableAccessor) {
+    ASSERT_EQ(run("true").item, ITEM_TRUE);
+    // this standalone MIR fixture needs the same interface setup as a document realm.
+    dom_install_collection_globals();
+    dom_selection_install_globals();
+    Item value = run(R"JS(
+        const descriptor=Object.getOwnPropertyDescriptor(window,'document');
+        const original=document;
+        let rejected=0;
+        let defaultReceivers=true;
+        for(const name of ['window','closed']) {
+            const get=Object.getOwnPropertyDescriptor(window,name).get;
+            defaultReceivers=defaultReceivers && get.call(null)===window[name] &&
+                get.call(undefined)===window[name];
+        }
+        for(const receiver of [{},Document.prototype,Window.prototype]) {
+            try{descriptor.get.call(receiver);}catch(e){if(e instanceof TypeError)rejected++;}
+        }
+        window.document={};
+        const removed=delete window.document;
+        const replaced=Reflect.defineProperty(window,'document',{value:{}});
+        gc();
+        typeof descriptor.get==='function' && descriptor.get.length===0 &&
+            descriptor.get.name==='get document' && descriptor.set===undefined &&
+            descriptor.configurable===false && descriptor.enumerable===true &&
+            !Object.hasOwn(descriptor,'value') && rejected===3 && defaultReceivers &&
+            descriptor.get.call(undefined)===original && descriptor.get.call(null)===original &&
+            !removed && !replaced && window.document===original &&
+            descriptor.get.call(window)===original && globalThis.document===document
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, StorageEventDictionaryDefaultsOrderAndBrands) {
+    Item value = run(R"JS(
+        const empty=new StorageEvent('storage');
+        const nullInit=new StorageEvent(null,null);
+        const strings=new StorageEvent('storage',{url:'\ud800',key:'\ud800'});
+        const order=[];const init={};
+        for(const name of ['bubbles','cancelable','composed','key','newValue','oldValue','storageArea','url'])
+            Object.defineProperty(init,name,{get(){order.push(name);return undefined;}});
+        new StorageEvent('storage',init);
+        let failures=0;
+        for(const attempt of [()=>StorageEvent('x'),()=>new StorageEvent(),
+            ()=>new StorageEvent('x',5),()=>new StorageEvent('x',{storageArea:{}}),
+            ()=>new StorageEvent('x',{storageArea:Object.create(Storage.prototype)}),
+            ()=>Object.getOwnPropertyDescriptor(StorageEvent.prototype,'key').get.call(new Event('x')),
+            ()=>new StorageEvent('x',{key:Symbol()})]) {
+            try{attempt();}catch(e){if(e instanceof TypeError)failures++;}
+        }
+        empty.key===null && empty.newValue===null && empty.oldValue===null &&
+            empty.storageArea===null && empty.url==='' && nullInit.type==='null' && nullInit.url==='' &&
+            strings.url==='\ufffd' && strings.key.charCodeAt(0)===0xd800 &&
+            order.join(',')==='bubbles,cancelable,composed,key,newValue,oldValue,storageArea,url' && failures===7
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, StorageEventLegacyInitializationAndDispatch) {
+    Item value = run(R"JS(
+        const e=new StorageEvent('before');
+        e.initStorageEvent('storage',true,true,'key','old','new','https://example.test/',sessionStorage);
+        let correct=false;
+        window.addEventListener('storage',function(received){
+            received.initStorageEvent('ignored',false,false,'changed');gc();
+            correct=received===e && received.type==='storage' && received.key==='key' &&
+                received.oldValue==='old' && received.newValue==='new' &&
+                received.storageArea===sessionStorage && received.url==='https://example.test/';
+        },{once:true});
+        window.dispatchEvent(e);
+        e.initStorageEvent('reset');
+        correct && e.type==='reset' && e.key===null && e.oldValue===null &&
+            e.newValue===null && e.url==='' && e.storageArea===null && !e.bubbles && !e.cancelable
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
 }
 
 TEST_F(JsFormalMir, PreparedWindowDispatchSharesAndRestoresTheCurrentEvent) {

@@ -6056,7 +6056,7 @@ static const RadiantLayoutHostOps lambda_radiant_layout_host_ops = {
 };
 
 static const RadiantResourceObserverOps lambda_radiant_resource_observer_ops = {
-    dom_queue_image_completion,
+    dom_queue_resource_completion,
 };
 
 static bool lambda_radiant_focusable(DomNode* view, bool programmatic) {

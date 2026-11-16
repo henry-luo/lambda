@@ -143,8 +143,7 @@ The session profile is `lambda-peer-lan-p256-1`:
    the profile, transcript digest, sender role and exact sequence number. Replay,
    reflection, reordering and cross-session messages fail authentication.
 
-The native event agent offers `lambda-peer-lan-burst-p256-2`, then
-`lambda-peer-lan-burst-p256-1`. The negotiated WebSocket subprotocol is also the
+The native event agent offers `lambda-peer-lan-burst-p256-3`, then v2 and v1. The negotiated WebSocket subprotocol is also the
 authenticated session profile. It binds the transcript, key derivation and
 record authentication context. Listeners also accept the existing finite CLI
 profile. Repository and CRDT formats do not change.
@@ -164,6 +163,21 @@ before publishing the head; an invalid later frame rolls back the batch.
 Bundles allow at most 128 objects and must fit the bounded encrypted record
 (262,144 bytes, including framing). Larger transfers retain object streaming and
 checkpoint-frame fallback. Burst v1 retains its previous exchange path.
+
+Burst v3 adds `change` and `change_ack` for warm file-only deltas. After an initial
+full inventory, each offer pins signed complete transaction groups, their new
+manifest/page/chunk closure and a causal HAVE. The reply carries the reverse
+bundle; the final ACK names that exact reply frontier. Object import, frame
+admission, explicit peer ACK and corresponding staging-pin release commit together
+(D11.1.2). Preserve local groups not yet acknowledged by that peer, including when
+the received reverse delta is empty.
+
+The fast path permits at most 64 dependency objects and files up to 64 KiB, within
+the existing encrypted record limit. Missing prefixes, changed epochs, large
+transfers, open/linked documents, pending groups or retirement/cache controls use
+the full round. Initial/reconnected and periodic verification rounds retain full
+inventory reconciliation. Commit incoming state before starting guarded filesystem
+installation; network ACK and completed installation remain distinct.
 
 One handshake covers several rounds. Each `head` pins a fresh immutable offer;
 `done` acknowledges that round without closing the connection. Between rounds,

@@ -2201,8 +2201,22 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
 
     NetworkResourceManager* mgr = doc->resource_manager;
     // source mutations admitted during scripts participate in the ordinary load boundary.
+    uint64_t source_sequence = doc->js.mutation_sequence;
     radiant_discover_document_resources(doc);
-    resource_manager_flush_layout_updates(mgr);
+    auto flush_resource_completions = [&]() -> bool {
+        // load callbacks share bootstrap's mutation batch until the loader commits its cascade.
+        RuntimeExecutionScope execution_scope(runtime_get_eval_context(runtime));
+        resource_manager_flush_layout_updates(mgr);
+        // element completion precedes window.load; its promise jobs may add another stylesheet.
+        dom_dispatch_pending_resource_loads();
+        if (item_is_error(js_microtask_flush_result())) return false;
+        if (source_sequence != doc->js.mutation_sequence) {
+            source_sequence = doc->js.mutation_sequence;
+            radiant_discover_document_resources(doc);
+        }
+        return true;
+    };
+    if (!flush_resource_completions()) return false;
     if (resource_manager_is_fully_loaded(mgr) && !dom_document_has_pending_work(doc)) {
         doc->fully_loaded = true;
         return true;
@@ -2212,7 +2226,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
     int waited_ms = 0;
     const int poll_ms = 10;
     while (timeout_ms > 0 && waited_ms < timeout_ms) {
-        resource_manager_flush_layout_updates(mgr);
+        if (!flush_resource_completions()) return false;
         if (resource_manager_is_fully_loaded(mgr) && !dom_document_has_pending_work(doc)) {
             doc->fully_loaded = true;
             return true;

@@ -1867,8 +1867,13 @@ extern "C" Item pn_select(Item handles, Item timeout_ms) {
             return result;
         }
     }
-    int64_t timeout = 0;
-    task_read_milliseconds(timeout_ms, &timeout);
+    int64_t timeout = -1;
+    // failed conversion must not turn an invalid deadline into an unlimited wait.
+    if (!task_read_milliseconds(timeout_ms, &timeout) || timeout < 0) {
+        mem_free(targets);
+        return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
+            "select timeout must be a non-negative integer", NULL));
+    }
     waiter->park_kind = LAMBDA_PARK_SELECT;
     bool parked = task_wait_targets(waiter, targets, count, true,
         timeout > 0 ? (uint64_t)timeout : 0);

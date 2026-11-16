@@ -104,6 +104,7 @@ pub fn correspondence(base, captured, hints) any^ {
 // each command emits one event, so IDs can be assigned before bounded groups run.
 pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], saved_at=null, projection=null) any^ {
     let base_view = if (projection == null) w.read(endpoint.replica)^ else projection
+    let entries = sort(base_view.entries,(entry)=>entry.id)^
     let old_paths = index_paths(old_members)^
     var members = []
     var commands = []
@@ -120,7 +121,7 @@ pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], sa
             commands = [*commands,{kind:'create',type:member.type,parent:owner,name:leaf(member.path)^,content:member.content}]
         } else {
             if (old.type != member.type) raise error("sync ZIP: member type changed; identity needs review")
-            let previous = v.lookup(base_view.entries,id)^
+            let previous = v.lookup_id(entries,id)^
             // a generated conflict filename is a view, not a logical rename.
             if (previous.parent != owner or leaf(old.original_path or old.path)^ != leaf(member.path)^) {
                 commands = [*commands,{kind:'move',entry:id,parent:owner,name:leaf(member.path)^}]
@@ -137,8 +138,9 @@ pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], sa
         members = [*members,{*:member,id:id,content:reference}]
         i = i+1
     }
-    let removed = [for (old in old_members where not any([for (member in members) member.id == old.id])) old]
-    let placements = tree.placements(tree.events(endpoint.replica)^)^.entries
+    let member_ids = sort(members,(member)=>member.id)^
+    let removed = [for (old in old_members where v.lookup_id(member_ids,old.id)^ == null) old]
+    let placements = if (len(removed)^ == 0) [] else tree.placements(tree.events(endpoint.replica)^)^.entries
     i = 0
     while (i < len(removed)) {
         let old = removed[i]

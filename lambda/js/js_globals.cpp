@@ -154,6 +154,7 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"PerformanceObserverEntryList", JS_HOST_GROUP_PERFORMANCE},
     {"PerformanceEntry", JS_HOST_GROUP_PERFORMANCE}, {"PerformanceMark", JS_HOST_GROUP_PERFORMANCE},
     {"PerformanceMeasure", JS_HOST_GROUP_PERFORMANCE},
+    {"PerformanceResourceTiming", JS_HOST_GROUP_PERFORMANCE},
     {"MessageChannel", JS_HOST_GROUP_MESSAGING},
     {"MessagePort", JS_HOST_GROUP_MESSAGING}, {"URLSearchParams", JS_HOST_GROUP_URL},
     {"URL", JS_HOST_GROUP_URL}, {"DOMException", JS_HOST_GROUP_EXCEPTION},
@@ -1628,22 +1629,28 @@ static JsPerformanceState* js_performance_resources(void) {
 }
 
 // private records preserve timing metadata when public properties are shadowed.
-enum JsTimingField { TIMING_NAME, TIMING_TYPE, TIMING_START, TIMING_DURATION, TIMING_DETAIL, TIMING_FIELDS };
-static const char* const js_timing_fields[] = {"name", "entryType", "startTime", "duration", "detail"};
+enum JsTimingField { TIMING_NAME, TIMING_TYPE, TIMING_START, TIMING_DURATION, TIMING_DETAIL, TIMING_FIELDS,
+    TIMING_INITIATOR = TIMING_FIELDS, TIMING_FETCH_START, TIMING_RESPONSE_END, TIMING_RESOURCE_FIELDS };
+static const char* const js_timing_fields[] = {"name", "entryType", "startTime", "duration", "detail",
+    "initiatorType", "fetchStart", "responseEnd"};
 static Item js_performance_insert_entry(Item buffer, Item entry);
 static void js_performance_observer_enqueue(Item entry);
 
 static Item js_timing_record(Item receiver, int required_class = 0) {
     JsClass cls = js_class_id(receiver);
-    if ((cls != JS_CLASS_PERFORMANCE_MARK && cls != JS_CLASS_PERFORMANCE_MEASURE) ||
+    if ((cls != JS_CLASS_PERFORMANCE_MARK && cls != JS_CLASS_PERFORMANCE_MEASURE &&
+            cls != JS_CLASS_PERFORMANCE_RESOURCE_TIMING) ||
             (required_class && cls != required_class))
         return js_throw_type_error("Illegal PerformanceEntry receiver");
-    return js_native_private_array_state(receiver, cls, TIMING_FIELDS, "Illegal PerformanceEntry receiver");
+    return js_native_private_array_state(receiver, cls,
+        cls == JS_CLASS_PERFORMANCE_RESOURCE_TIMING ? TIMING_RESOURCE_FIELDS : TIMING_FIELDS,
+        "Illegal PerformanceEntry receiver");
 }
 
 static Item js_timing_value(Item entry, int field) {
     JsClass cls = js_class_id(entry);
-    if (cls == JS_CLASS_PERFORMANCE_MARK || cls == JS_CLASS_PERFORMANCE_MEASURE) {
+    if (cls == JS_CLASS_PERFORMANCE_MARK || cls == JS_CLASS_PERFORMANCE_MEASURE ||
+            cls == JS_CLASS_PERFORMANCE_RESOURCE_TIMING) {
         RootFrame roots(1);
         Rooted<Item> record(roots, js_timing_record(entry));
         JS_RETURN_IF_ERROR(record.get());
@@ -1660,12 +1667,15 @@ static Item js_timing_get(Item callee, Item receiver, Item*, int, uint64_t*) {
     return js_elements_get_int(record.get(), bits & 255);
 }
 
-static Item js_timing_to_json(Item, Item receiver, Item*, int, uint64_t*) {
+static Item js_timing_to_json(Item callee, Item receiver, Item*, int, uint64_t*) {
     RootFrame roots(3);
-    Rooted<Item> record(roots, js_timing_record(receiver)), result(roots, ItemNull), value(roots, ItemNull);
+    bool resource = js_fn_native((JsFunction*)callee.function)->target.bits != 0;
+    Rooted<Item> record(roots, js_timing_record(receiver,
+        resource ? JS_CLASS_PERFORMANCE_RESOURCE_TIMING : 0)), result(roots, ItemNull), value(roots, ItemNull);
     JS_RETURN_IF_ERROR(record.get());
     result.set(js_new_object());
-    for (int i = 0; i < TIMING_DETAIL; i++) {
+    for (int i = 0; i < (resource ? TIMING_RESOURCE_FIELDS : TIMING_DETAIL); i++) {
+        if (i == TIMING_DETAIL) continue;
         value.set(js_elements_get_int(record.get(), i));
         JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(js_timing_fields[i]), value.get()));
     }
@@ -1893,20 +1903,31 @@ extern "C" void js_performance_record_resource(const char* url, const char* init
         double start_ms, double end_ms) {
     JsPerformanceState* state = js_performance_resources();
     if (!state) return;
-    RootFrame roots(3);
-    Rooted<Item> entry(roots, js_new_object()), value(roots, ItemNull);
+    RootFrame roots(6);
+    Rooted<Item> constructor(roots, *js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_PERFORMANCE_RESOURCE_TIMING_CONSTRUCTOR));
+    if (!js_is_object_value(constructor.get())) {
+        constructor.set(js_get_key_cstr(js_get_global_this(), "PerformanceResourceTiming"));
+        if (item_is_error(constructor.get())) return;
+    }
+    Rooted<Item> record(roots, js_array_new(0)), entry(roots, ItemNull), value(roots, ItemNull);
     Rooted<Item> callback(roots, ItemNull);
-    const struct { const char* name; const char* text; double number; } fields[] = {
-        {"name", url, 0}, {"entryType", "resource", 0}, {"initiatorType", initiator, 0},
-        {"startTime", nullptr, start_ms}, {"duration", nullptr, fmax(0.0, end_ms - start_ms)},
-        {"fetchStart", nullptr, start_ms}, {"responseEnd", nullptr, end_ms},
+    Rooted<Item> key(roots, js_private_key_for_class(constructor.get(), js_name_item("#ResourceTiming")));
+    if (item_is_error(key.get())) return;
+    js_set_prototype(record.get(), ItemNull);
+    const struct { const char* text; double number; } fields[] = {
+        {url, 0}, {"resource", 0}, {nullptr, start_ms}, {nullptr, fmax(0.0, end_ms - start_ms)},
+        {nullptr, 0}, {initiator, 0}, {nullptr, start_ms}, {nullptr, end_ms},
     };
     for (const auto& field : fields) {
         value.set(field.text ? make_string_item(field.text) : push_d(field.number));
-        if (item_is_error(js_create_data_property(entry.get(), js_name_item(field.name), value.get()))) return;
-        js_attr_set_writable(entry.get(), field.name, (int)strlen(field.name), false);
-        js_attr_set_configurable(entry.get(), field.name, (int)strlen(field.name), false);
+        if (item_is_error(js_array_push(record.get(), value.get()))) return;
     }
+    // resource entries need the same private metadata and branded accessors as user timing.
+    value.set(js_get_constructor_intrinsic_prototype(constructor.get()));
+    entry.set(js_native_private_array_object(JS_CLASS_PERFORMANCE_RESOURCE_TIMING,
+        key.get(), record.get(), value.get()));
+    if (item_is_error(entry.get())) return;
     js_performance_observer_enqueue(entry.get());
     if (!state->resource_full_pending &&
             (uint64_t)js_array_length(state->resource_entries) < state->resource_limit) {
@@ -2030,6 +2051,24 @@ static Item js_install_user_timing(Item global) {
         else state->measure_constructor = constructor.get();
         js_set_key_cstr(owner.get(), definition.name, constructor.get());
     }
+    constructor.set(js_install_native_constructor(owner.get(), "PerformanceResourceTiming",
+        js_performance_illegal_constructor));
+    *js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_PERFORMANCE_RESOURCE_TIMING_CONSTRUCTOR) = constructor.get();
+    js_set_prototype(constructor.get(), base.get());
+    prototype.set(js_get_constructor_intrinsic_prototype(constructor.get()));
+    js_set_prototype(prototype.get(), state->entry_prototype);
+    for (int i = TIMING_INITIATOR; i < TIMING_RESOURCE_FIELDS; i++) {
+        method.set(js_new_native_payload_function(js_timing_get,
+            (uintptr_t)i | ((uintptr_t)JS_CLASS_PERFORMANCE_RESOURCE_TIMING << 8), 0));
+        js_install_native_accessor(prototype.get(), js_name_item(js_timing_fields[i]), method.get(), ItemNull, 0);
+    }
+    method.set(js_new_native_payload_function(js_timing_to_json, 1, 0));
+    js_set_function_name(method.get(), js_name_item("toJSON"));
+    js_set_key_cstr(prototype.get(), "toJSON", method.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("toJSON"));
+    js_set_key_default(prototype.get(), js_well_known_symbol_key(4), js_name_item("PerformanceResourceTiming"));
+    js_mark_non_enumerable(prototype.get(), js_well_known_symbol_key(4));
     return make_js_undefined();
 }
 
@@ -15752,41 +15791,28 @@ JS_DEFINE_HOST_CTOR_BODY_2(transition_event, js_ctor_transition_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(animation_event, js_ctor_animation_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(webgl_context_event, js_ctor_webgl_context_event_fn)
 
-Item js_intrinsic_ctor_content_visibility_auto_state_change_event_construct_body(
-        Item, Item* args, int argc, Item new_target, uint64_t*) {
-    if (argc < 1)
-        return js_throw_type_error("ContentVisibilityAutoStateChangeEvent requires a type argument");
+static Item js_construct_payload_event(Item* args, int argc, Item new_target,
+        JsClass cls, Item (*create)(Item, Item), const char* missing_type) {
+    if (argc < 1) return js_throw_type_error(missing_type);
     RootFrame roots(2);
     Rooted<Item> target(roots, new_target);
-    Rooted<Item> result(roots, js_ctor_content_visibility_auto_state_change_event(args[0],
-        argc > 1 ? args[1] : make_js_undefined()));
+    Rooted<Item> result(roots, create(args[0], argc > 1 ? args[1] : make_js_undefined()));
     JS_RETURN_IF_ERROR(result.get());
-    return js_apply_constructed_default_prototype(result.get(), target.get(),
-        JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT);
+    return js_apply_constructed_default_prototype(result.get(), target.get(), cls);
 }
 
-Item js_intrinsic_ctor_security_policy_violation_event_construct_body(Item, Item* args,
-        int argc, Item new_target, uint64_t*) {
-    if (argc < 1) return js_throw_type_error("SecurityPolicyViolationEvent requires a type argument");
-    RootFrame roots(2);
-    Rooted<Item> target(roots, new_target);
-    Rooted<Item> event(roots, js_ctor_security_policy_violation_event(args[0],
-        argc > 1 ? args[1] : make_js_undefined()));
-    JS_RETURN_IF_ERROR(event.get());
-    return js_apply_constructed_default_prototype(event.get(), target.get(),
-        JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT);
-}
-
-Item js_intrinsic_ctor_message_event_construct_body(Item callee, Item* args,
-        int argc, Item new_target, uint64_t* result_home) {
-    if (argc < 1) return js_throw_type_error("MessageEvent requires a type argument");
-    RootFrame roots(2);
-    Rooted<Item> target(roots, new_target);
-    Rooted<Item> result(roots, js_ctor_message_event_fn(args[0],
-        argc > 1 ? args[1] : make_js_undefined()));
-    JS_RETURN_IF_ERROR(result.get());
-    return js_apply_constructed_default_prototype(result.get(), target.get(), JS_CLASS_MESSAGE_EVENT);
-}
+#define JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(name, cls, create, label) \
+    Item js_intrinsic_ctor_##name##_construct_body(Item, Item* args, int argc, Item target, uint64_t*) { \
+        return js_construct_payload_event(args, argc, target, cls, create, label " requires a type argument"); \
+    }
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(content_visibility_auto_state_change_event,
+    JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT, js_ctor_content_visibility_auto_state_change_event,
+    "ContentVisibilityAutoStateChangeEvent")
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(security_policy_violation_event,
+    JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT, js_ctor_security_policy_violation_event, "SecurityPolicyViolationEvent")
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(message_event, JS_CLASS_MESSAGE_EVENT, js_ctor_message_event_fn, "MessageEvent")
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(storage_event, JS_CLASS_STORAGE_EVENT, js_ctor_storage_event_fn, "StorageEvent")
+#undef JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT
 
 Item js_intrinsic_ctor_placeholder_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
@@ -15983,7 +16009,7 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_TOUCH_EVENT,
         JS_CLASS_STATIC_RANGE,
         JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT, JS_CLASS_WEBGL_CONTEXT_EVENT,
-        JS_CLASS_MESSAGE_EVENT, JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT,
+        JS_CLASS_MESSAGE_EVENT, JS_CLASS_STORAGE_EVENT, JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT,
         JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT,
         0
     };
@@ -16741,6 +16767,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     }
     // Populate static methods as own properties for all constructors
     if (ctor_id == JS_CTOR_EVENT_TARGET || ctor_id == JS_CTOR_MESSAGE_EVENT ||
+            ctor_id == JS_CTOR_STORAGE_EVENT ||
             ctor_id == JS_CTOR_SECURITY_POLICY_VIOLATION_EVENT ||
             ctor_id == JS_CTOR_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT) {
         RootFrame roots(1);
@@ -16750,6 +16777,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
         if (ctor_id == JS_CTOR_EVENT_TARGET) js_event_target_install_methods(prototype.get());
         else if (ctor_id == JS_CTOR_MESSAGE_EVENT) js_message_event_install_prototype(prototype.get());
+        else if (ctor_id == JS_CTOR_STORAGE_EVENT) js_storage_event_install_prototype(prototype.get());
         else if (ctor_id == JS_CTOR_SECURITY_POLICY_VIOLATION_EVENT)
             js_security_policy_violation_event_install_prototype(prototype.get());
         else js_content_visibility_event_install_prototype(prototype.get());
@@ -16827,6 +16855,7 @@ static JsClass js_intrinsic_prototype_parent_class(JsClass cls) {
         case JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT:
         case JS_CLASS_WEBGL_CONTEXT_EVENT:
         case JS_CLASS_MESSAGE_EVENT:
+        case JS_CLASS_STORAGE_EVENT:
         case JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT:
             return JS_CLASS_EVENT;
         case JS_CLASS_FOCUS_EVENT:
@@ -16850,6 +16879,9 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     JsClass cls = (JsClass)class_id;
     if (cls == JS_CLASS_TYPED_ARRAY) return js_get_typed_array_base_proto();
     if (cls == JS_CLASS_PERFORMANCE_ENTRY) return js_performance_resources()->entry_prototype;
+    if (cls == JS_CLASS_PERFORMANCE_RESOURCE_TIMING)
+        return js_get_constructor_intrinsic_prototype(*js_realm_slot(&js_runtime_state.realm_slots,
+            JS_REALM_SLOT_PERFORMANCE_RESOURCE_TIMING_CONSTRUCTOR));
     if (cls == JS_CLASS_PERFORMANCE_MARK || cls == JS_CLASS_PERFORMANCE_MEASURE) {
         JsPerformanceState* state = js_performance_resources();
         return js_get_constructor_intrinsic_prototype(cls == JS_CLASS_PERFORMANCE_MARK ? state->mark_constructor : state->measure_constructor);

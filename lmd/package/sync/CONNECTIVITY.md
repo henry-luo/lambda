@@ -84,7 +84,11 @@ network waits hold no repository transaction (S12.4.4v4, S13.1.2v2, S13.3.1v2).
 Native monitoring uses libuv's OS event backend, not `uv_fs_poll`.
 
 LAN defaults add `debounce_ms:50`, `batch_ms:250`, `idle_ms:10000`,
-`burst_ms:60000`, `verify_ms:60000` and a 100 ms scheduling/idle-message tick.
+`burst_ms:60000`, `verify_ms:60000` and a 100 ms housekeeping tick.
+A separate timer fires at the exact batch deadline. Committed-token subscriptions
+and a single buffered transport reader wake warm connections without waiting for
+that tick (S13.1.2v2, S13.3.1v2). Readiness subscriptions do not consume frames;
+graceful shutdown drains the close before joining the reader.
 `interval_ms` can override that tick, capped at `idle_ms`. Scans run for startup,
 restart, missed/overflowed notifications and occasional verification. Atomic
 installation still captures the tree when needed to preserve external changes.
@@ -94,7 +98,8 @@ catch-up. Verification also requests anti-entropy. Failed delivery retries after
 `retry_ms`; committed local changes remain in the repository until acknowledged.
 
 LAN status adds `monitor:'os'`, full/incremental scan counts, watcher-event counts,
-connection/round counts, active connections, pending batches and peer availability.
+connection/round counts, active connections, negotiated channel role/profile,
+pending batches and peer availability.
 `captured_frontier` identifies committed source capture; `installed_frontier`
 identifies completed destination installation. File visibility can precede the
 installation journal's final commit.

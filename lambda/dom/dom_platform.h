@@ -10,6 +10,7 @@ extern "C" {
 
 Item dom_storage_local_object(void);
 Item dom_storage_session_object(void);
+bool dom_storage_is_object(Item value);
 void dom_storage_install_interface(Item prototype);
 void dom_install_storage_globals(Item global);
 void dom_storage_reset(void);

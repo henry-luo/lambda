@@ -186,13 +186,20 @@ static const char* platform_string(Item value) {
     return result ? result : "";
 }
 
-static JsStorageState* storage_from_this(void) {
-    Item receiver = dom_realm_receiver();
+static JsStorageState* storage_from_receiver(Item receiver) {
     JsDomPlatformState* state = dom_platform_state_if_present();
     if (!state) return nullptr;
     if (receiver.item == state->local_storage.object.item) return &state->local_storage;
     if (receiver.item == state->session_storage.object.item) return &state->session_storage;
     return nullptr;
+}
+
+extern "C" bool dom_storage_is_object(Item value) {
+    return storage_from_receiver(value) != nullptr;
+}
+
+static JsStorageState* storage_from_this(void) {
+    return storage_from_receiver(dom_realm_receiver());
 }
 
 static int storage_find(JsStorageState* storage, const char* key) {

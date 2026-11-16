@@ -15,6 +15,9 @@ pub fn dominates(a, b) => all([for (entry in b) clock_get(a, entry.actor) >= ent
 pub fn clock_join(a, b) => [for (actor in sort(unique([*[for (x in a) x.actor], *[for (x in b) x.actor]])))
     {actor: actor, counter: max(clock_get(a, actor), clock_get(b, actor))}]
 
+pub fn clock_meet(a, b) any^ => [for (entry in a where clock_get(b,entry.actor)^ > 0)
+    {actor:entry.actor,counter:min(entry.counter,clock_get(b,entry.actor)^)}]
+
 fn clock_add(clock, id) => clock_join(clock, [{actor:id[0], counter:id[1]}])
 
 pub fn next_id(replica, actor) => [actor, clock_get(replica.clock, actor) + 1]
@@ -391,7 +394,12 @@ fn observed(replica, owner, context) any^ {
 }
 
 // checkpoints require host admission as well as these structural checks.
-pub fn validate(replica) any^ {
+pub fn validate(replica) any^ => validate_replica(replica,null)^
+
+// known must be an already validated immutable replica supplied by the local owner.
+pub fn validate_known(replica, known) any^ => validate_replica(replica,known)^
+
+fn validate_replica(replica, known) any^ {
     v.fields(replica,["protocol","document","profile","epoch","time","clock","floor","receipts",
         "nodes","atoms","dead","cells","meta","log","pending"])^
     if (replica.protocol != 1 or not v.actor(replica.document)^ or not contains(['text','mark','workspace'],replica.profile)^ or
@@ -399,6 +407,9 @@ pub fn validate(replica) any^ {
     v.clock(replica.clock)^
     v.clock(replica.floor)^
     if (not dominates(replica.clock,replica.floor)^) raise error("sync: invalid compaction floor")
+    let reuse = known != null and codec.same_encoding(
+        [replica.protocol,replica.document,replica.profile,replica.epoch],
+        [known.protocol,known.document,known.profile,known.epoch])^
     let groups = [replica.receipts,replica.nodes,replica.atoms,replica.cells,replica.meta,replica.log,replica.pending]
     var g = 0
     while (g < len(groups)) { indexed(groups[g])^; g = g+1 }
@@ -475,8 +486,13 @@ pub fn validate(replica) any^ {
             let op = {protocol:replica.protocol,document:replica.document,profile:replica.profile,epoch:replica.epoch,
                 id:atom.id,time:atom.time,context:evidence.context,kind:'insert',node:atom.node,slot:atom.slot,
                 key:null,left:atom.left,value:atom.value}
-            validate_envelope(replica,op)^
-            if (stamp(op)^ != evidence.hash) raise error("sync workspace: event receipt mismatch")
+            // Only byte-equivalent immutable events/receipts inherit a prior validation proof.
+            let same = reuse and codec.same_encoding(atom,v.lookup_id(known.atoms,atom.id)^)^ and
+                codec.same_encoding(evidence,v.lookup_id(known.receipts,atom.id)^)^
+            if (not same) {
+                validate_envelope(replica,op)^
+                if (stamp(op)^ != evidence.hash) raise error("sync workspace: event receipt mismatch")
+            }
             workspace.ready(replica,op)^
         }
         i = i+1

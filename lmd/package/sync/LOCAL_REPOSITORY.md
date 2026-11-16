@@ -109,6 +109,13 @@ frontier; later CRDT edits remain live and are not retroactively included. The
 levels. Protocol checkpoint digests map to scoped repository object IDs through
 `repository.object_id`; they are not treated as physical filenames directly.
 
+Installation intent v2 stores an immutable source-state ID in `source.state`
+instead of duplicating its replica. Resolve and validate this authenticated state
+before any filesystem effect after restart. Pending installation prevents cleanup
+from deleting recovery dependencies (D11.1.2). Legacy inline intents remain
+readable. Finish a pending v2 intent with the newer host before downgrading; older
+hosts cannot resume that intent. Other state and shared object formats remain.
+
 ## Objects and encryption
 
 `<database>.objects/` holds canonical, create-only object files named by their

@@ -59,7 +59,7 @@ node --test test/online/capture_snapshots.test.cjs
 node --test test/online/render_session.test.cjs
 node --test test/online/render_stylesheet.test.cjs
 node --test test/online/render_clip.test.cjs
-node --test test/online/render_observers.test.cjs
+node --test test/online/render_observers.test.cjs test/online/render_observer_zero_area.test.cjs
 node --test test/online/render_grid.test.cjs
 node --test test/online/render_rem.test.cjs
 node --test test/online/render_grid_absolute.test.cjs
@@ -1318,3 +1318,268 @@ See [round thirty-eight](comparison/repairs.html#round-38) and
 `snapshots/visual_comparison_review_round38.json`. The user cleared the goal
 during wrap-up; no further work is scheduled. Broad baselines and catalog capture
 were deferred; references, URLs, annotations, budgets and clocks are retained.
+
+The thirty-ninth review (2026-11-16) fixes **LI-066 / RI-094 / RI-095**:
+individual translation calculations reuse typed transform validation and preserve
+affine reference-box percentages; flex-assigned grids retain their allocated
+height for tracks and percentage children. Draftbit's navigation is restored and
+the hero no longer overlaps its header. Its phone preview renders in the identical
+saved hydrated source; the live preview still reports a load failure, with cause
+unisolated. Unsupported composite-mask tint remains under RI-041.
+
+Only Draftbit's live Lambda capture was refreshed: mean error **21.33% →17.75%**,
+load complete9.12s. It remains high; the severity-sorted report is **162 high**,
+1 critical Dock blocker and904 low. Seventeen focused checks pass (seven PNG,
+four native sizing, four transform animation/snapshot, two input validation),
+plus independent Chromium geometry and integer lint. Broad baselines are deferred.
+The goal is active again. See [round thirty-nine](comparison/repairs.html#round-39)
+and `snapshots/visual_comparison_review_round39.json`. References, URLs,
+annotations, thresholds, budgets, admission and capture clocks are unchanged.
+
+The fortieth review fixes **RI-096**: static flex/grid items honor signed and
+explicit-zero stack levels through the shared paint/hit predicates. Actual
+formatting-parent checks preserve ordinary blocks, including those with authored
+flex properties. PostHog's primary navigation is restored; its main window remains
+absent with a separate unisolated cause. Only its live Lambda side was refreshed:
+mean error **25.69% →25.02%**. No page clearance is claimed.
+
+Fifteen focused PNG checks and three native paint/hit tests pass, plus seven
+independent Chromium pixel controls and integer lint. The report remains
+**162 high**, 1 critical Dock blocker and904 low. Broad baselines are deferred;
+references, unselected rows, URLs, annotations, budgets and clocks are unchanged.
+See [round forty](comparison/repairs.html#round-40) and
+`snapshots/visual_comparison_review_round40.json`. The goal remains active.
+
+The forty-first review fixes **RI-097**: real block stacking contexts collect
+zero-level positioned descendants across ordinary wrappers while retaining
+ancestor clips and reverse hits. PostHog’s main window, heading, signup panel,
+actions and tabs render again. Its live mean error improves **25.02% →5.42%**;
+visual review clears that major omission. The report is **161 high**, 1 critical
+Dock blocker and905 low. Only PostHog’s live Lambda side was refreshed.
+
+Twenty-two focused PNG controls and four native tests pass, plus seven independent
+Chromium controls and integer lint. The standard release Radiant baseline ran
+8,488 cases:8,167 passed,299 partial,20 skipped and two CSS3D tests failed.
+The computed preserve-3d context boundary was then repaired; both failures now
+pass, with all26 focused controls still green. The full baseline was not repeated
+after that correction. No expected pixels or reference files were weakened.
+See [round forty-one](comparison/repairs.html#round-41) and
+`snapshots/visual_comparison_review_round41.json`. Original browser metadata,
+references, unselected rows, URLs, annotations, thresholds and clocks are retained.
+The goal remains active.
+
+The forty-second review fixes **RI-098** (2026-11-17): rounded inset shapes now
+publish constrained radii shared by vector paint, glyph scanlines and native
+hits. Oversized circular radii no longer discard button labels. Twenty focused
+PNG checks, three native tests and two independent Chromium equivalence controls
+pass; integer lint passes. No broad baseline was repeated after round41.
+
+The unchanged saved hydrated AndOpen source restores its navigation labels.
+Its live capture still has separate initial hidden content, with unchanged
+canonical pixels and metrics; no clearance is claimed. The report remains
+**161 high**, 1 critical Dock blocker and905 low. Original browser data,
+unselected rows, catalog, annotations, thresholds, admission and clocks remain.
+See [round forty-two](comparison/repairs.html#round-42) and
+`snapshots/visual_comparison_review_round42.json`. The goal remains active.
+
+The forty-third review fixes **LI-067 / RI-099** (2026-11-17): numeric flex
+shorthands retain their interoperable omitted0% basis, and native inline
+backgrounds reuse the shared constrained rounded path. Explicit zero lengths
+remain distinct. The current specification/browser disagreement is documented
+in [CSSWG5742](https://github.com/w3c/csswg-drafts/issues/5742).
+
+Cleanup.pictures improves **73.9942%→24.2868%**, restoring its live lower-section
+heading and background. The identical saved hydrated page also restores its
+hero. Its live client app remains absent and the page remains high; no
+clearance is claimed. The inventory remains **161 high, 1 critical,905 low**.
+Thirty-three focused PNG tests, one Input unit test and two native tests pass,
+as do eleven independent Chromium controls and integer lint. No broad baseline
+was repeated after round41. Original browser data, unselected rows, catalog,
+annotations, thresholds and clocks are retained. See
+[round forty-three](comparison/repairs.html#round-43) and
+`snapshots/visual_comparison_review_round43.json`. The goal remains active.
+
+The forty-fourth review fixes **RI-100** (2026-11-17): intrinsic button
+classification and outer line-fill lookahead share the existing atomic
+used-display context. Internal label indentation no longer wraps a fitting
+search row. No width, margin, tolerance or site condition was changed.
+Python.org improves **13.6723%→11.5233%**, but its live carousel content remains
+absent. A manual high annotation preserves that large omission despite the
+coarse threshold crossing. The inventory remains **161 high, 1 critical,905
+low** (140 automatic plus21 manual); no page clearance is claimed.
+
+Fifteen focused PNG checks, five native tests, four independent Chromium
+controls and integer lint pass. No broad baseline was repeated after round41.
+Only Python's Lambda capture and its new manual review annotation changed;
+all prior annotations, browser data, other rows, catalog, thresholds and clocks
+are retained. Cleanup's remaining absent app is now traced to its712,933-byte
+deferred bundle exceeding the unchanged128KiB admission limit. Empathy's
+server-side hero placeholder also requires client initialization; its hydrated
+source already renders the real image. See [round forty-four](comparison/repairs.html#round-44)
+and `snapshots/visual_comparison_review_round44.json`. The goal remains active.
+
+The forty-fifth review fixes **LI-068** (2026-11-17): automatic/default
+font-face weight now preserves the requested variable axis, and instance
+caches include weight. Explicit fixed descriptors retain their clamp.
+Affinity's headline weight is repaired; mean error improves from **14.6559%
+to 8.8302%**. Four large corner images are still absent, so a manual
+annotation retains its high severity. The inventory remains **161 high,
+1 critical, 905 low** (139 automatic and 22 manual); no clearance is claimed.
+
+Twenty-seven focused tests and four Chromium controls pass. A broad Radiant
+milestone ran 8,488 checks: 8,167 passed, two failed, 299 partial and 20 skipped.
+The two failures were addressed with a retained-box correction to RI-100 and
+flex shorthand expectations aligned with LI-067's browser-compatible 0%.
+The existing twelve text-overflow tests, flex cascade test, live button
+transitions and eight font/button PNG controls pass afterward. The full
+baseline was not repeated. Only Affinity's Lambda capture and its new review
+annotation change; browser data, previous annotations, other rows, inventory,
+thresholds and clocks are retained. See [round forty-five](comparison/repairs.html#round-45)
+and `snapshots/visual_comparison_review_round45.json`. The goal remains active.
+
+The forty-sixth review fixes **LI-069 / RI-101** (2026-11-17). Borrowed
+pseudo-style refreshes now invalidate the generated box locally instead of
+expiring unchanged authored host inputs during measurement. Real authored
+mutations still invalidate ancestors; replay validity checks are unchanged.
+Unregistered custom-layout names also retain ordered generated effects;
+registered callbacks keep their deferred path.
+
+The original saved Mymind source has **zero restoration errors instead of
+three**. Its live capture remains blank and high severity, so the inventory
+remains **161 high, 1 critical, 905 low** (139 automatic and 22 manual).
+Seven PNG and four native controls pass on the final executable. Two existing
+owned-flow/pseudo-font tests passed during implementation; three independent
+Chromium equivalences and integer lint pass. No baseline was repeated after
+round45. Only Mymind's Lambda capture was refreshed; browser data, annotations,
+other rows, catalog, thresholds and clocks are retained. See
+[round forty-six](comparison/repairs.html#round-46) and
+`snapshots/visual_comparison_review_round46.json`. The goal remains active.
+
+The forty-seventh review fixes **RI-102 / LI-070** and shared DOM comment
+handling (2026-11-17). Stylesheet completion now reaches DOM listeners before
+window load, and chained CSS discovery keeps the bootstrap mutation scope.
+Clone/import and fragment parsing retain comments. Backed insertion preserves
+the native position before a DOM-only comment reference.
+
+Crates.io now renders its main page instead of a blank canvas. Its image error
+falls from **54.2222% to 2.7368%**, clearing one major candidate. The inventory
+is **160 high, 1 critical, 906 low** (138 automatic and 22 manual). Icons and
+API/loading-state differences remain. Twenty focused rendering tests pass after the ownership correction; four
+document/iframe tests, three Input tests and one native observer test passed
+during implementation.
+One release Radiant baseline ran: 8,140 passed, 10 failed, 299 partial and 8 skipped (8,457 total). The fragment refactor had borrowed parser text instead of retaining independent occurrence storage. Restoring owned copies clears all nine persistent failures in focused checks; all eight affected layout fixtures return to 100% element/text matches. The initial jQuery failure also passes a final direct check. The whole baseline was not repeated after correction, so a clean full gate is not claimed.
+Only crates.io's Lambda capture was refreshed; browser data, annotations,
+other rows, catalog, thresholds and clocks are retained. See
+[round forty-seven](comparison/repairs.html#round-47) and
+`snapshots/visual_comparison_review_round47.json`. The goal remains active.
+
+The forty-eighth review restores the isolated MVP host's missing **console.table
+and console.dir** bindings (2026-11-17). Existing single-value output is shared;
+full tabular formatting is not added. Both new controls fail before and all
+three focused console rendering tests pass after the repair.
+
+Squarespace's startup exception disappears, but its canonical PNG is
+**byte-identical** and its hero remains missing. Current diagnostics show visible computed target styles and
+observer callbacks; the remaining painted-frame cause is not proven.
+The inventory remains **160 high, 1 critical, 906 low**. No baseline was repeated
+after the round47 milestone. Browser data, pixels, annotations, other rows,
+catalog, thresholds and D10.1.7 clocks are unchanged. See
+[round forty-eight](comparison/repairs.html#round-48) and
+`snapshots/visual_comparison_review_round48.json`. The goal remains active.
+
+Round forty-nine fixes **RI-103**, a final flex-content pass that discarded a
+grid-assigned height before resolving absolute child percentages. The unchanged
+saved Bonsai page improves from **12.6736% to 0.6932%** image error, with full-height
+portrait cards. All **35 focused grid/flex/absolute-height tests pass**; integer
+lint passes. No baseline was repeated after the round47 milestone.
+
+Bonsai's live main content still remains absent, so an explicit manual review
+retains it as high severity despite crossing the coarse threshold. The inventory
+remains **160 high, 1 critical, 906 low** (137 automatic and 23 manual). Browser
+references, other rows, catalog, thresholds and D10.1.7 clocks are preserved.
+See [round forty-nine](comparison/repairs.html#round-49) and
+`snapshots/visual_comparison_review_round49.json`. The goal remains active.
+
+Round fifty repairs **zero-area and edge-contact IntersectionObserver sampling**
+(2026-11-17). Empty rendered containers, collapsed transforms and viewport-edge
+contacts now notify correctly while hidden, detached and offscreen controls
+remain false. **16 focused tests pass**; Chromium confirms all twelve new fixture
+expectations, including content populated after an empty container intersects.
+No baseline was repeated after round47. The separate percentage-margin
+hypothesis was rejected and reverted after Chromium contradicted it.
+
+Calendly's latest capture restores its heading, copy and signup actions. A
+previous-pin control is byte-identical, so this clearance predates the current
+observer repair. Its stale manual omission is removed. Sanity's site content
+has changed from its original browser reference, and Primer remains major.
+The inventory is **159 high, 1 critical, 907 low** (137 automatic, 22 manual).
+Only these three Lambda captures changed; browser references, other rows,
+catalog, thresholds, budgets and D10.1.7 time are retained. See
+[round fifty](comparison/repairs.html#round-50) and
+`snapshots/visual_comparison_review_round50.json`. The goal remains active.
+
+Round fifty-one fixes **RI-092**: both intrinsic measurement paths now retain
+definite child flex bases, and nested content preserves non-growing and zero
+parent allocations. The original 100px-versus-300px failure now matches its
+saved browser geometry at **100% elements/text**. All **36 focused native tests
+pass**, including thirteen Chromium-confirmed sizing states; integer lint passes.
+One release Radiant baseline passes: 8,169 passed, zero unexpected failures, 299 partial and 20 skipped (8,488 total). Existing expected visual failures remain recorded; the gate was not repeated.
+
+Six earlier pin50 captures were refreshed (Monese, Mode, Infermedica, Fable, Dia,
+Openunit): four PNGs are unchanged and two move slightly. None clears a major
+flag, and no improvement is attributed to the subsequent layout repair.
+The inventory remains **159 high, 1 critical, 907 low**. Browser references,
+annotations, other rows, catalog, tolerances, budgets and D10.1.7 time are kept.
+A confirmed [dynamic script preparation gap](../../vibe/Lambda_Issue_Ledger.md#online-dynamic-script-preparation)
+can leave a completed-XHR startup cover in place. The full insertion lifecycle
+is a larger missing feature; no partial evaluator or unhide is introduced.
+See [round fifty-one](comparison/repairs.html#round-51) and
+`snapshots/visual_comparison_review_round51.json`. The goal remains active.
+
+Round fifty-two adds the missing **StorageEvent** interface that aborted the
+Coda/Superhuman consent bootstrap. Five focused native checks and the three new
+Chromium headless-shell controls pass. Both fresh Lambda captures load; a later
+bootstrap TypeError remains, so neither page is cleared. The report remains
+**159 high, 1 critical and 907 low**. No broad baseline is repeated after round51.
+Qualification and the next reduced exception are in
+`temp/online-visual-round52/`; see
+[the repair record](comparison/repairs.html#round-52) and
+[the runtime ledger](../../vibe/Lambda_Issue_Ledger.md#online-storage-event).
+
+Round fifty-three fixes Window.document's own readonly accessor. Six focused
+native checks and the Chromium descriptor control pass; the consent bootstrap
+now initializes on Coda/Superhuman. Their refreshed images remain unchanged,
+so the inventory remains **159 high, 1 critical and 907 low**. No broad baseline
+is repeated. See [the repair record](comparison/repairs.html#round-53) and
+[the runtime ledger](../../vibe/Lambda_Issue_Ledger.md#online-window-document-accessor).
+
+Round fifty-four refreshes **two stale live-site reference pairs** after
+archived/current HTTP HTML proves changed primary headings and designs. Sanity
+and Storetasker now compare fresh Lambda captures with fresh Chromium headless
+shell captures using the same procedure. Their image errors are **9.85%** and
+**6.11%**; both leave the major queue. This is comparison maintenance, with no
+renderer repair attributed. Prior references, source hashes and the rationale
+are retained in [reference_updates.json](comparison/reference_updates.json) and
+[the review gallery](comparison/repairs.html#round-54). The inventory is now
+**157 high, 1 critical and 909 low**. Other pairs, annotations, thresholds and
+capture clocks are unchanged; no build or baseline was rerun.
+
+Round fifty-five fixes the existing resource-timing interface: fetch/XHR
+entries now have the PerformanceResourceTiming/PerformanceEntry hierarchy,
+branded getters and private metadata. Six native checks and the real HTTP
+fixture in AST/MIR pass; Chromium passes the same HTTP fixture. Clay's captured
+bootstrap now initializes, but both refreshed live images remain unchanged.
+The inventory stays **157 high, 1 critical and 909 low**. Separate startup
+errors remain; no visual clearance is claimed. No broad baseline was repeated.
+See [the repair record](comparison/repairs.html#round-55) and
+[the runtime ledger](../../vibe/Lambda_Issue_Ledger.md#online-resource-timing-brand).
+
+Round fifty-six fixes **RI-104**, intrinsic margins resolving variables/font
+units on the parent instead of the measured child. Astra's collapsed hero is
+restored, reducing mean image error **26.63% → 5.27%**. The inventory is now
+**156 high, 1 critical and 910 low**. Five focused native cases, seven Chromium
+geometry states and layout integer-cast lint pass. Only Astra's Lambda capture
+is refreshed; browser references, all other records, catalog and thresholds
+are retained. No broad baseline was rerun. The user cleared the goal during
+the build; this repair is wrapped up and further goal work has stopped.
+See [the before/after gallery](comparison/repairs.html#round-56).

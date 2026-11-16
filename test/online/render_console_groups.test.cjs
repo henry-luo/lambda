@@ -6,3 +6,22 @@ test('console groups do not abort document initialization',async()=>{
     assert(log.includes('CONSOLE_GROUPS_READY'),log.slice(-1600));
     assert.deepEqual(rgb(image,50,40),[255,0,0]);
 });
+
+for(const method of ['table','dir']) {
+    test('console inspection method permits document startup: '+method,async()=>{
+        const {image,log}=await render(method,`<!doctype html><style>body{margin:0}#target{width:100px;height:80px;background:red}</style><div id="target"></div><script>
+            const inspect=console.${method};
+            const value={status:'ready'};
+            const options='${method}'==='table'?['status']:{depth:1};
+            const result=inspect(value,options);
+            inspect('INSPECTION_VALUE');
+            inspect();
+            if(result===undefined&&inspect.length===1&&window.console.${method}===inspect)
+                document.getElementById('target').style.background='lime';
+            console.log('INSPECTION_READY');
+        </script>`);
+        assert(log.includes('INSPECTION_READY'),log.slice(-1600));
+        assert(log.includes('INSPECTION_VALUE'),log.slice(-1600));
+        assert.deepEqual(rgb(image,50,40),[0,255,0]);
+    });
+}

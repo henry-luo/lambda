@@ -33,9 +33,13 @@ def main():
     parser.add_argument('--peers', type=int, choices=[2, 3], default=2)
     parser.add_argument('--workload', choices=['edit', 'create'], default='edit')
     parser.add_argument('--max-seconds', type=float, default=1.0)
+    parser.add_argument('--arrival-max-seconds', type=float)
+    parser.add_argument('--source', choices=['a', 'b'], default='a')
     parser.add_argument('--report', type=Path, default=ROOT / 'temp/sync-warm-latency/acceptance.json')
     args = parser.parse_args()
     assert args.seed_files >= 1 and args.samples >= 1 and args.max_seconds > 0
+    assert args.arrival_max_seconds is None or args.arrival_max_seconds > 0
+    writer = args.source
     executable = Path(lan.peer.EXE).resolve()
     native = executable.read_bytes()
     assert b'VALIDATOR] validate_against_base_type' not in native, 'Latency acceptance requires a release executable'
@@ -50,6 +54,7 @@ def main():
     lan.AREA = area
     lan.peer.AREA = area
     names = ['a', 'b', 'c'][:args.peers]
+    receivers = [name for name in names if name != writer]
     samples = []
     ids = {}
 
@@ -58,11 +63,11 @@ def main():
         now = time.perf_counter()
         for sample in samples:
             if sample['frontier'] is None:
-                fresh = reports['a'].get('captured_frontier')
+                fresh = reports[writer].get('captured_frontier')
                 if fresh and fresh != sample['previous_frontier']:
                     sample['frontier'] = fresh
                     sample['capture_seconds'] = now-sample['started']
-            for name in names[1:]:
+            for name in receivers:
                 if name not in sample['visible'] and lan.content(name, sample['path'], sample['value']):
                     sample['visible'][name] = now-sample['started']
                 if name in sample['visible'] and name not in sample['installed'] and covers(
@@ -83,7 +88,7 @@ def main():
             time.sleep(.01)
 
     def settled(reports):
-        frontier = reports['a'].get('captured_frontier')
+        frontier = reports[writer].get('captured_frontier')
         return frontier and all(r.get('active_connections', 0) > 0 and r.get('phase') == 'idle' and
             r.get('pending_changes', 1) == 0 and covers(r.get('installed_frontier'), frontier) for r in reports.values())
 
@@ -106,8 +111,8 @@ def main():
             lan.start(name)
         wait(lambda r: all(lan.content(n, 'seed-0', '0'+'x'*4096) for n in names[1:]), 'initial catch-up')
         lan.quiet(tuple(names))
-        (area/'a/tree/warmup').write_text('warmup')
-        wait(lambda r: settled(r) and all(lan.content(n, 'warmup', 'warmup') for n in names[1:]), 'settled authenticated warm connections')
+        (area/writer/'tree/warmup').write_text('warmup')
+        wait(lambda r: settled(r) and all(lan.content(n, 'warmup', 'warmup') for n in receivers), 'settled authenticated warm connections')
         for mode in ['settled', 'continuous']:
             for index in range(args.samples):
                 reports = wait(settled, 'settled warm delivery') if mode == 'settled' else poll()
@@ -115,10 +120,10 @@ def main():
                 before = {n: r['connections'] for n, r in reports.items()}
                 path = 'seed-0' if args.workload == 'edit' else mode+'-'+str(index)
                 sample = dict(mode=mode, index=index, path=path, value=(mode+':'+str(index)).ljust(4096, 'x'),
-                              previous_frontier=reports['a'].get('captured_frontier'), frontier=None,
-                              visible={}, installed={}, started=time.perf_counter())
+                              previous_frontier=reports[writer].get('captured_frontier'), frontier=None,
+                              visible={}, installed={}, source_channels=reports[writer].get('channels', []), started=time.perf_counter())
                 samples.append(sample)
-                (area/'a/tree'/path).write_text(sample['value'])
+                (area/writer/'tree'/path).write_text(sample['value'])
                 predicate = lambda r: len(sample['installed'] if mode == 'settled' else sample['visible']) == len(names)-1
                 after = wait(predicate, 'warm '+mode+' delivery')
                 sample['reused'] = before == {n: r['connections'] for n, r in after.items()}
@@ -139,12 +144,15 @@ def main():
     result = dict(executable=str(executable), sha256=hashlib.sha256(native).hexdigest(),
                   source_sha256=sources, sources_unchanged=sources == source_hashes(),
                   backend=os.environ.get('LAMBDA_EXEC_BACKEND', 'auto'), host_scope='independent processes on one host',
-                  peers=args.peers, seed_files=args.seed_files, workload=args.workload, bytes_per_edit=4096,
+                  peers=args.peers, source=writer, seed_files=args.seed_files, workload=args.workload, bytes_per_edit=4096,
+                  acceptance=dict(completed_seconds=args.max_seconds, arrival_seconds=args.arrival_max_seconds),
                   samples_per_mode=args.samples, observer_ms=10, summary_seconds=summary, samples=public)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, indent=2)+'\n')
     print(json.dumps(summary, indent=2), flush=True)
     assert result['sources_unchanged'], 'Sync sources changed during the benchmark'
+    if args.arrival_max_seconds is not None:
+        assert all(max(s['visible'].values()) < args.arrival_max_seconds for s in samples), 'Warm arrival exceeded target; inspect '+str(args.report)
     assert all(s['reused'] and max(s['installed'].values()) < args.max_seconds for s in samples), 'Warm durable delivery exceeded target; inspect '+str(args.report)
 
 

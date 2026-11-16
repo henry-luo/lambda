@@ -12350,6 +12350,59 @@ TEST_F(RadiantDocumentTest, VerticalAutoInlinePublicationUsesTheMeasuredBorderBo
     }
 }
 
+TEST_F(RadiantDocumentTest, GridIntrinsicMarginsResolveChildVariablesFontAndPercentageBasis) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><style>
+        body{margin:0;font:10px/10px sans-serif}
+        #result{display:grid;width:500px;grid-template-columns:200px 300px;--reverse:9}
+        #item,#stack{display:flex;flex-direction:column}
+        #stack>div{height:20px}
+        #child{font-size:20px;--reverse:0;
+            margin-top:calc(10% + 1em * calc(1 - var(--reverse)));
+            margin-bottom:calc(1em * var(--reverse))}
+        </style><div id=result><div id=item><div id=stack>
+        <div></div><div id=child></div></div></div><div></div></div>)HTML");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* child = dom_find_element_by_id(document->root, "child");
+    ASSERT_NE(child, nullptr);
+    const struct { const char* value; float top; } states[] = {
+        {"0", 40}, {"1", 20}, {"0.25", 35}, {"0", 40}
+    };
+    for (const auto& state : states) {
+        SCOPED_TRACE(state.value);
+        ASSERT_TRUE(dom_cssom_set_inline_property(child, "--reverse", state.value));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        expect_box("result", 0, 0, 500, 80);
+        expect_box("item", 0, 0, 200, 80);
+        expect_box("stack", 0, 0, 200, 80);
+        expect_box("child", 0, 20 + state.top, 200, 20);
+        ASSERT_FALSE(HasFailure());
+    }
+}
+
+TEST_F(RadiantDocumentTest, IntrinsicShrinkMarginsResolveTheirOwnVariableAndFontScope) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><style>
+        body{margin:0;font:10px/10px sans-serif;--gap:9}
+        #result{display:inline-block}
+        #child{width:40px;height:20px;font-size:20px;--gap:2;margin-left:calc(var(--gap) * 1em)}
+        </style><div id=result><div id=child></div></div>)HTML");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* child = dom_find_element_by_id(document->root, "child");
+    ASSERT_NE(child, nullptr);
+    const struct { const char* value; float margin; } states[] = {
+        {"2", 40}, {"1", 20}, {"0.5", 10}
+    };
+    for (const auto& state : states) {
+        SCOPED_TRACE(state.value);
+        ASSERT_TRUE(dom_cssom_set_inline_property(child, "--gap", state.value));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        expect_box("result", 0, 0, 40 + state.margin, 20);
+        expect_box("child", state.margin, 0, 40, 20);
+        ASSERT_FALSE(HasFailure());
+    }
+}
+
 TEST_F(RadiantDocumentTest, IntrinsicShrinkQueriesDiscardResolvedPercentageMargins) {
     for (const char* formatting : {"position:absolute", "display:inline-block"}) {
         SCOPED_TRACE(formatting);
