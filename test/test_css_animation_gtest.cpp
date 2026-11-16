@@ -2923,7 +2923,7 @@ TEST_F(MotionCascadeTest, FlexShorthandMembersShareTypedComputationAndCascade) {
         {"calc(1em / 10px) calc(.5) 0%", "2", "0.5", "0%"},
         {"30px 2 1", "2", "1", "30px"},
         {"calc(1em + 10px) 2 1", "2", "1", "30px"},
-        {"2", "2", "1", "0px"},
+        {"2", "2", "1", "0%"},
         {"2 1 0", "2", "1", "0px"},
         {"auto", "1", "1", "auto"}, {"none", "0", "0", "auto"},
         {"initial", "0", "1", "auto"},
@@ -2958,11 +2958,12 @@ TEST_F(MotionCascadeTest, FlexShorthandMembersShareTypedComputationAndCascade) {
     pool_get_stats(pool, &before_bytes, &before_count);
     for (unsigned read = 0; read < 128; read++) {
         expect_computed(CSS_PROPERTY_FLEX_SHRINK, "1");
-        expect_computed(CSS_PROPERTY_FLEX_BASIS, "0px");
+        // omitted basis follows interoperable browser percentages; explicit zero above stays a length.
+        expect_computed(CSS_PROPERTY_FLEX_BASIS, "0%");
         const CssValue* basis = css_project_shorthand_longhand(pool, shorthand->value,
             CSS_PROPERTY_FLEX, CSS_PROPERTY_FLEX_BASIS);
         ASSERT_NE(basis, nullptr);
-        EXPECT_EQ(basis->type, CSS_VALUE_TYPE_LENGTH);
+        EXPECT_EQ(basis->type, CSS_VALUE_TYPE_PERCENTAGE);
         EXPECT_EQ(css_project_shorthand_longhand(nullptr, shorthand->value,
             CSS_PROPERTY_FLEX, CSS_PROPERTY_FLEX_BASIS), basis);
     }

@@ -37,6 +37,14 @@ async function run() {
   let entries = resources();
   check(entries.length === 2, 'first two requests');
   const first = entries[0];
+  check(first instanceof PerformanceResourceTiming && first instanceof PerformanceEntry,
+    'resource timing prototype hierarchy');
+  const initiator = Object.getOwnPropertyDescriptor(PerformanceResourceTiming.prototype, 'initiatorType').get;
+  const entryName = Object.getOwnPropertyDescriptor(PerformanceEntry.prototype, 'name').get;
+  check(initiator.call(first) === 'fetch' && entryName.call(first) === first.name,
+    'bootstrap can capture native timing getters');
+  check(first.toJSON().responseEnd === first.responseEnd && Object.keys(first).length === 0,
+    'timing metadata is private and serializes');
   check(first.name === new URL('/first', location.href).href, 'absolute request name');
   check(first.entryType === 'resource' && first.initiatorType === 'fetch', 'entry types');
   check(first.startTime >= before && first.responseEnd >= first.startTime &&

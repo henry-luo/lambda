@@ -298,6 +298,21 @@ static String* dom_fragment_text(Item item) {
     return (s && s->len > 0) ? s : nullptr;
 }
 
+// fragment roots can be comments as well as layout elements; the element builder skips them.
+static DomNode* dom_build_fragment_node(Item item, DomDocument* doc, DomElement* context) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_STRING) {
+        String* text = dom_fragment_text(item);
+        // each occurrence needs independent storage before backing edits relink its siblings.
+        return text ? DomText::create_detached_copy(doc, text->chars, text->len) : nullptr;
+    }
+    if (type != LMD_TYPE_ELEMENT || !item.element || !item.element->type) return nullptr;
+    const char* tag = ((TypeElmt*)item.element->type)->name.str;
+    return dom_is_comment_tag(tag)
+        ? static_cast<DomNode*>(dom_comment_create_detached(item.element, doc))
+        : static_cast<DomNode*>(build_dom_tree_from_element_detached(item.element, doc, context));
+}
+
 // Reserved-attribute filter: attribute names starting with "__lambda_" are used
 // internally (e.g. createElementNS records the namespace URI as
 // "__lambda_ns_uri") and must not leak through JS-facing attribute
@@ -3433,27 +3448,8 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        TypeId t = get_type_id(body_elem->items[i]);
-        if (t == LMD_TYPE_ELEMENT) {
-            build_dom_tree_from_element(body_elem->items[i].element,
-                                        doc, body);
-        } else if (t == LMD_TYPE_STRING) {
-            String* s = dom_fragment_text(body_elem->items[i]);
-            if (!s) continue;
-            DomText* tn = dom_text_create(s, body);
-            if (tn) {
-                tn->parent = lam::up(body);
-                if (!body->first_child) {
-                    body->first_child = lam::own(tn);
-                    body->last_child = lam::up(tn);
-                } else {
-                    DomNode* last = body->last_child;
-                    last->next_sibling = lam::own(tn);
-                    tn->prev_sibling = lam::up(last);
-                    body->last_child = lam::up(tn);
-                }
-            }
-        }
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, body);
+        if (child) ((DomNode*)body)->append_child(child);
     }
 }
 
@@ -3872,7 +3868,7 @@ extern "C" void dom_dispatch_pending_resource_loads() {
     _iframe_load_drain(ItemNull, nullptr, 0);
 }
 
-extern "C" void dom_queue_image_completion(void* image_pointer, bool loaded) {
+extern "C" void dom_queue_resource_completion(void* image_pointer, bool loaded) {
     DomElement* image = (DomElement*)image_pointer;
     if (!image || !dom_foreign_document_state_ensure()) return;
     DomPendingImageEvent** tail=&s_pending_images;
@@ -3892,6 +3888,10 @@ extern "C" void dom_queue_image_completion(void* image_pointer, bool loaded) {
         s_iframe_load_drain_scheduled=true;
         Item callback=js_new_native_this_span_function(_iframe_load_drain);dom_schedule_task(callback);
     }
+}
+
+extern "C" void dom_queue_image_completion(void* image_pointer, bool loaded) {
+    dom_queue_resource_completion(image_pointer, loaded);
 }
 
 static void reset_pending_iframe_loads() {
@@ -5311,30 +5311,11 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return false;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        TypeId type = get_type_id(body_elem->items[i]);
-        if (type == LMD_TYPE_ELEMENT) {
-            // fragment names belong to the parsing context before the detached node is spliced.
-            DomElement* child_dom = build_dom_tree_from_element_detached(
-                body_elem->items[i].element, doc, context ? context : target);
-            if (child_dom && target->append_child(child_dom)) {
-                dom_post_insert((DomNode*)target, (DomNode*)child_dom,
-                                notify_mutation);
-                dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
-                                                 child_dom, target,
-                                                 nullptr, nullptr);
-            }
-        } else if (type == LMD_TYPE_STRING) {
-            String* str = dom_fragment_text(body_elem->items[i]);
-            if (!str) continue;
-            DomText* text_dom = target->append_text(str->chars);
-            if (text_dom) {
-                dom_post_insert((DomNode*)target, (DomNode*)text_dom,
-                                notify_mutation);
-                dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
-                                                 text_dom, target,
-                                                 nullptr, nullptr);
-            }
-        }
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context ? context : target);
+        if (!child || !dom_parser_move_child(target, child)) continue;
+        dom_post_insert(target, child, notify_mutation);
+        dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                                       child, target, nullptr, nullptr);
     }
     return true;
 }
@@ -5424,17 +5405,8 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     DomElement* fragment = dom_document_fragment_create(doc);
     if (!fragment) return nullptr;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        TypeId type = get_type_id(body_elem->items[i]);
-        if (type == LMD_TYPE_ELEMENT) {
-            DomElement* child = build_dom_tree_from_element_detached(
-                body_elem->items[i].element, doc, context);
-            if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
-        } else if (type == LMD_TYPE_STRING) {
-            String* text = dom_fragment_text(body_elem->items[i]);
-            if (!text) continue;
-            DomText* child = dom_text_create_detached(text, doc);
-            if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
-        }
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context);
+        if (child) ((DomNode*)fragment)->append_child(child);
     }
     return fragment;
 }
@@ -5783,6 +5755,9 @@ extern "C" Item dom_document_create_event_bridge(Item interface_name) {
     if (!interface_text) interface_text = "";
     if (strcmp(interface_text, "CustomEvent") == 0) {
         return js_create_custom_event_init("", false, false, false, ItemNull);
+    }
+    if (strcmp(interface_text, "StorageEvent") == 0) {
+        return js_ctor_storage_event_fn(js_name_item(""), make_js_undefined());
     }
     if (strcmp(interface_text, "TextEvent") == 0) {
         return js_create_text_event_init("", false, false, false, ItemNull, "");
@@ -12988,10 +12963,21 @@ static void dom_clone_content_attributes(DomElement* source, DomElement* clone) 
     }
 }
 
-static DomElement* dom_clone_element_into_document(DomElement* elem,
-                                                   DomDocument* destination,
-                                                   bool deep) {
-    if (!elem || !destination) return nullptr;
+static DomNode* dom_clone_node_into_document(DomNode* node,
+                                              DomDocument* destination,
+                                              bool deep) {
+    if (!node || !destination) return nullptr;
+    if (DomText* text = node->as_text()) {
+        return DomText::create_detached_copy(destination, text->text, text->length);
+    }
+    if (DomComment* comment = node->as_comment()) {
+        // template comment anchors are real children and need destination-owned backing.
+        MarkBuilder builder(destination->input);
+        Item backing = builder.deep_copy({.element = comment->native_element.get()});
+        return backing.element ? dom_comment_create_detached(backing.element, destination) : nullptr;
+    }
+    DomElement* elem = node->as_element();
+    if (!elem) return nullptr;
     // clones need a fresh native element; sharing the source buffer makes later
     // attribute removal on the clone dangle the original's native attribute data.
     MarkBuilder _clone_builder(destination->input);
@@ -13006,43 +12992,28 @@ static DomElement* dom_clone_element_into_document(DomElement* elem,
     // make clone.classList/style writes mutate the original element.
     clone->tag_id = elem->tag_id;
     if (deep) {
-        DomNode* child = elem->first_child;
-        while (child) {
-            if (child->is_element()) {
-                DomNode* cloned_child = (DomNode*)dom_clone_element_into_document(
-                    child->as_element(), destination, true);
-                if (!cloned_child || !dom_append_backed_element(clone, cloned_child)) {
-                    return nullptr;
-                }
-            } else if (child->is_text()) {
-                DomText* text = child->as_text();
-                DomText* text_clone = DomText::create_detached_copy(
-                    destination, text->text, text->length);
-                // Deep clones need matching DOM and Mark child order so later
-                // insertBefore()/prepend() can locate their reference child.
-                if (!text_clone || !dom_insert_backed_text(clone, text_clone, nullptr)) {
-                    return nullptr;
-                }
-            }
-            child = child->next_sibling;
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            DomNode* cloned_child = dom_clone_node_into_document(child, destination, true);
+            // keep comment, text and element order through the shared backed insertion path.
+            if (!cloned_child || !dom_append_backed_child(clone, cloned_child, false)) return nullptr;
         }
     }
     return clone;
 }
 
 extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
-    DomElement* elem = (DomElement*)elem_ptr;
-    DomElement* clone = elem ? dom_clone_element_into_document(elem, elem->doc,
+    DomNode* node = (DomNode*)elem_ptr;
+    DomNode* clone = node ? dom_clone_node_into_document(node, dom_node_owner_document(node),
         has_deep && js_is_truthy(deep_arg)) : nullptr;
     return clone ? dom_realm_custom_element_upgrade(dom_wrap_element(clone)) : ItemNull;
 }
 
 extern "C" Item dom_import_node_bridge(void* doc_ptr, void* elem_ptr, bool deep) {
     DomDocument* destination = (DomDocument*)doc_ptr;
-    DomElement* source = (DomElement*)elem_ptr;
+    DomNode* source = (DomNode*)elem_ptr;
     // Import creates destination-owned backing storage; adoption of a source
     // clone would leave its Mark attributes tied to the foreign document pool.
-    DomElement* clone = dom_clone_element_into_document(source, destination, deep);
+    DomNode* clone = dom_clone_node_into_document(source, destination, deep);
     return clone ? dom_realm_custom_element_upgrade(dom_wrap_element(clone)) : ItemNull;
 }
 
@@ -13058,7 +13029,8 @@ extern "C" Item dom_clone_document_bridge(Item document_item, Item deep_arg) {
     // A shallow Document clone has no children, including the implicit doctype.
     clone->js.implicit_doctype = deep && source->js.implicit_doctype;
     if (deep && source->root) {
-        clone->root = lam::up(dom_clone_element_into_document(source->root, clone, true));
+        DomNode* root = dom_clone_node_into_document(source->root, clone, true);
+        clone->root = lam::up(root ? root->as_element() : nullptr);
         if (!clone->root) {
             free_document(clone);
             return ItemNull;
@@ -13674,12 +13646,11 @@ extern "C" Item dom_core_clone_node(Item n, Item deep) {
         if (clone) clone->owner_changed = dom_attribute_node_owner_changed;
         return clone ? dom_wrap_element(clone) : ItemNull;
     }
-    DomElement* elem = dom_op_element(n);
     // The row always carries a `deep` argument, so the bridge's "was it
     // supplied" flag is unconditionally true here -- matching what the ordinal
     // path passed (argc == 1). Deriving it from undefined-ness instead would
     // make dom.clone(n, null) and cloneNode() disagree about shallowness.
-    return elem ? dom_clone_node_bridge((void*)elem, deep, true) : ItemNull;
+    return node ? dom_clone_node_bridge(node, deep, true) : ItemNull;
 }
 
 extern "C" Item dom_core_normalize(Item n) {

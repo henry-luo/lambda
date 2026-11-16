@@ -2541,14 +2541,9 @@ RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
                                                   Item* args, int argc) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
     if (!node) return ItemNull;
-    if (operation == JUBE_DOM_CLONE_NODE && node->as_attribute()) {
+    if (operation == JUBE_DOM_CLONE_NODE) {
+        // the catalog clone owns every Node kind and its destination backing.
         return radiant_host_api->dom_catalog->clone_node(elem_item, argc > 0 ? args[0] : ItemNull);
-    }
-    if (operation == JUBE_DOM_CLONE_NODE && !node->is_element()) {
-        // Text nodes are valid Node receivers; the element-only clone bridge
-        // passed them a null DomElement and made jQuery clone cleanup crash.
-        DomNode* clone = dom_node_clone(node, argc > 0 && js_is_truthy(args[0]));
-        return radiant_dom_node_item(clone);
     }
     if (operation == JUBE_DOM_CONTAINS) {
         DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;

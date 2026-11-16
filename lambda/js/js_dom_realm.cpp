@@ -826,9 +826,16 @@ static bool _document_receiver(Item receiver) {
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 9;
 }
 
+static bool _window_receiver(Item receiver) {
+    // WebIDL global attributes use their realm's global for null/undefined this.
+    TypeId type = get_type_id(receiver);
+    return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED ||
+        receiver.item == js_get_global_this().item;
+}
+
 static Item _window_closed_getter(Item /*callee*/, Item receiver, Item* /*args*/,
         int /*argc*/, uint64_t* /*result_home*/) {
-    if (receiver.item != js_get_global_this().item)
+    if (!_window_receiver(receiver))
         return js_throw_type_error("Illegal Window.closed receiver");
     return (Item){.item = b2it(jube_internal_host_api()->dom_catalog->window_is_closed(
         dom_get_ui_context()))};
@@ -837,9 +844,15 @@ static Item _window_closed_getter(Item /*callee*/, Item receiver, Item* /*args*/
 static Item _window_self_getter(Item /*callee*/, Item receiver, Item* /*args*/,
         int /*argc*/, uint64_t* /*result_home*/) {
     Item global = js_get_global_this();
-    if (receiver.item != global.item)
+    if (!_window_receiver(receiver))
         return js_throw_type_error("Illegal Window.window receiver");
     return global;
+}
+
+static Item _window_document_getter(Item, Item receiver, Item*, int, uint64_t*) {
+    if (!_window_receiver(receiver))
+        return js_throw_type_error("Illegal Window.document receiver");
+    return js_get_document_object_value();
 }
 
 static void* _media_receiver(Item receiver) {
@@ -1164,6 +1177,11 @@ extern "C" void dom_install_collection_globals(void) {
         getter.set(js_new_native_payload_function(_window_self_getter, 0, 0));
         js_set_function_name(getter.get(), js_name_item("get window"));
         js_install_native_accessor(global_root.get(), js_name_item("window"),
+            getter.get(), ItemNull, JSPD_NON_CONFIGURABLE);
+        // libraries capture this unforgeable getter and invoke it on their Window.
+        getter.set(js_new_native_payload_function(_window_document_getter, 0, 0));
+        js_set_function_name(getter.get(), js_name_item("get document"));
+        js_install_native_accessor(global_root.get(), js_name_item("document"),
             getter.get(), ItemNull, JSPD_NON_CONFIGURABLE);
     }
     Item window_proto = _iface_proto(global, "Window");
@@ -1557,20 +1575,6 @@ extern "C" void dom_selection_install_globals(void) {
         // window is already a real object — install getSelection on it too
         js_set_key_cstr(existing, "getSelection", fn);
     }
-    // Stage 4C: `window.document` must resolve to the document proxy. Bare
-    // `document` is special-cased in the transpiler (js_mir_expression_lowering
-    // rewrites the identifier to a direct proxy access), so it never becomes a
-    // real property on the window/global object — which left `window.document`
-    // (a plain member access) `undefined`, breaking e.g.
-    // `window.document.createRange()` in dom-bridge. Install it explicitly. The
-    // proxy is a stable wrapper whose methods route to the current main document,
-    // and it is the same item bare `document` yields, so `window.document ===
-    // document` holds.
-    Item doc_proxy = js_get_document_object_value();
-    js_set_key_cstr(global, "document", doc_proxy);
-    if (get_type_id(existing) == LMD_TYPE_MAP)
-        js_set_key_cstr(existing, "document", doc_proxy);
-
     Item flush_fn = js_new_native_this_span_function(
         dom_flush_selectionchange);
     js_set_key_cstr(global, "__lambdaFlushSelectionChange", flush_fn);
