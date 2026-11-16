@@ -7,8 +7,7 @@ import prim: lambda.procart.primitive
 import shapes: lambda.scene3d.shape
 import t: lambda.scene3d.transform
 
-fn lin(c) => [for (x in c) math.pow(x, 2.2)]
-fn dye(rgb, parts) any^ => m.tinted(m.merge(parts), lin(rgb))
+fn dye(rgb, parts) any^ => m.tinted(m.merge(parts), u.lin(rgb))
 fn ball(x, y, z, sx, sy, sz, rings = 5, segments = 8) any^ => (let b = shapes.sphere(rings, segments),
     m.placed({positions: b.positions, normals: b.normals, uvs: b.uvs, indices: b.indices}, t.compose([x, y, z], [0.0, 0.0, 0.0, 1.0], [sx, sy, sz])))
 fn cone(y0, y1, r0, r1, segments = 8) any^ => m.post(0.0, 0.0, y0, y1, r0, r1, segments)

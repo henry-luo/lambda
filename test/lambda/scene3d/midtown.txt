@@ -59,7 +59,7 @@
   bodies: 124,
   clips: ["signals", "crane", "harbour-ripples", "clouds", "beacons", "walk", "turbines", "boats"],
   commands: 57,
-  looks: [37, 37, 37],
+  looks: [35, 35, 35],
   next_look: ["dusk", "night", "day"]
 }
 "governor"

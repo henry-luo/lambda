@@ -21,6 +21,7 @@ import shapes: lambda.scene3d.shape
 import noise: lambda.procart.noise
 import rng: lambda.procart.rng
 import ls: .mod_land_scene
+import scenery: .mod_scenery
 
 // collision groups
 pub let STATIC = 1
@@ -61,8 +62,8 @@ let CAR_PAINTS = [*TRAFFIC_PAINTS, "#c0262d"]
 fn std(id, color, options = {}) element => s.material('standard', {id: id, color: color, roughness: 0.8, *: options})
 // a car body in one draw: the atlas maps give the paint its metallic clear coat, the glass its gloss, the
 // trim its matt black and the lamps their glow (the paint colour tints the atlas's white paint cell)
-fn paint(id, color, lights) element => s.material('physical', {id: id, color: color, texture: "t-car-base", 'metal-rough-texture': "t-car-mr",
-    roughness: 1.0, metalness: 1.0, 'emissive-texture': "t-car-glow", emissive: "#ffffff", 'emissive-intensity': lamps(lights),
+fn paint(id, color, glow) element => s.material('physical', {id: id, color: color, texture: "t-car-base", 'metal-rough-texture': "t-car-mr",
+    roughness: 1.0, metalness: 1.0, 'emissive-texture': "t-car-glow", emissive: "#ffffff", 'emissive-intensity': glow,
     clearcoat: 1.0, 'clearcoat-texture': "t-car-coat", 'clearcoat-roughness': 0.05})
 fn lamps(lights) => if (lights) 4.0 else 0.7
 fn materials(look, lights) => [
@@ -88,23 +89,17 @@ fn materials(look, lights) => [
     std("m-signal", "#1d2024", {roughness: 0.6}),
     *[for (g in 0 to 1, c in ["red", "amber", "green"]) s.material('basic', {id: "sig-" ++ string(g) ++ "-" ++ c, color: "#151515",
         emissive: "#000000", 'emissive-intensity': 4.0})],
-    std("m-trunk", "#5a4636", {roughness: 0.95}),
-    o.foliage({id: "m-leaf", color: "#4f7a3a"}),
     std("m-water-basin", "#7e9bb0", {roughness: 0.15, metalness: 0.1}),
     // glossy, not transmissive: refraction would cost a second opaque pass and its capture targets
     std("m-water", "#1f4d60", {roughness: 0.06, metalness: 0.35, 'water-amplitude': 0.05, 'water-frequency': 0.3}),
     s.material('basic', {id: "m-sky", color: "#ffffff", side: 'back'}),
-    std("m-hill", "#4c6b3e", {roughness: 1.0}),
     // vehicles
     // car paint: a metallic base under a clear coat that mirrors the sky
-    *[for (c in CAR_PAINTS) paint(paint_id(c), c, lights)],
-    std("m-parked", "#ffffff", {roughness: 0.35, metalness: 0.4}),
-    std("m-glass", "#10161d", {roughness: 0.04, metalness: 0.85}),
-    std("m-trim", "#1b1c1f", {roughness: 0.7}),
+    *[for (c in CAR_PAINTS) paint(paint_id(c), c, lamps(lights))],
+    // parked cars carry their paint as vertex colours, and their lamps are off
+    paint("m-parked", "#ffffff", 0.0),
     std("m-tyre", "#191919", {roughness: 0.9}),
     std("m-hub", "#c9ccd1", {roughness: 0.25, metalness: 0.9}),
-    s.material('basic', {id: "m-headlamp", color: "#f4f1e6", emissive: "#fff2d0", 'emissive-intensity': if (lights) 6.0 else 0.5}),
-    s.material('basic', {id: "m-taillamp", color: "#6e0c0c", emissive: "#ff2a1a", 'emissive-intensity': if (look.windows > 0.0) 3.0 else 1.0}),
     s.material('basic', {id: "m-indicator", color: "#6e3a05", emissive: "#ff7a10", 'emissive-intensity': 1.2}),
     std("m-person", "#ffffff", {roughness: 0.85}),
     // props
@@ -133,9 +128,7 @@ fn textures() => [
     tx.texture("t-crate", tx.crate_svg(), 128, 128), tx.texture("t-pool", tx.pool_svg(), 128, 128, {'wrap-s': 33071, 'wrap-t': 33071}),
     *ls.textures()]
 
-// ---- shared geometry: one buffer per vehicle kind and part, people, props and furniture
-pub let PARTS = ["paint", "glass", "trim", "head", "tail"]
-pub let PART_MATERIAL = {glass: "m-glass", trim: "m-trim", head: "m-headlamp", tail: "m-taillamp"}
+// ---- shared geometry: one buffer per vehicle kind, people, props, furniture and trees
 // the people on the sidewalks: skin and hair tones, then twelve outfits (looks for mod_mesh.person)
 let SKIN = [[0.95, 0.8, 0.66], [0.78, 0.57, 0.42], [0.55, 0.38, 0.27], [0.9, 0.72, 0.58], [0.4, 0.27, 0.19]]
 let HAIR = {black: [0.07, 0.06, 0.06], brown: [0.35, 0.22, 0.12], blond: [0.85, 0.7, 0.42], grey: [0.68, 0.68, 0.66], auburn: [0.55, 0.25, 0.12]}
@@ -195,7 +188,8 @@ fn shared_geometry() any^ => [
     *person_geometry(),
     m.geometry("g-cone", m.cone()), m.geometry("g-crate", m.crate(1.0)), m.geometry("g-barrel", m.barrel()), m.geometry("g-bin", m.bin()),
     m.geometry("g-beacon", m.post(0.0, 0.0, 0.0, 40.0, 2.4, 2.4, 20)),
-    m.geometry("g-parcel", m.block(0.0, -0.35, 0.0, 0.7, 0.7, 0.7))]
+    m.geometry("g-parcel", m.block(0.0, -0.35, 0.0, 0.7, 0.7, 0.7)),
+    *ls.tree_geometry()]
 
 // ---- static city geometry, merged per material
 fn mesh(id, b, material, options = {}) element^ => s.mesh(m.geometry("g-" ++ id, b), material, {id: id, *: options})
@@ -226,29 +220,25 @@ fn buildings() {
      mesh("roofs", m.merge([for (b in city.BUILDINGS) m.roof(b)]), "m-roof"),
      mesh("rooftops", m.merge([for (b in city.BUILDINGS) m.rooftop(b)]), "m-concrete")]
 }
-let PARKED_SHAPES = {sedan: cm.CARS.sedan, hatch: cm.CARS.hatch}
-fn parked_cars() {
-    let placed = (c, part) any^ => m.yawed(PARKED_SHAPES[c.kind][part], c.x, 0.0, c.z, c.heading);
-    [mesh("parked-paint", m.merge([for (c in city.PARKED) m.tinted(placed(c, "paint"), hex_rgb(c.paint))]), "m-parked"),
-     *[for (p in ["glass", "trim", "head", "tail"]) mesh("parked-" ++ p, m.merge([for (c in city.PARKED) placed(c, p)]), PART_MATERIAL[p], {'cast-shadow': p == "glass" or p == "trim"})]]
-}
+// parked cars in one draw: each car's paint is a vertex tint over the atlas's white paint cell
+let PARKED_SHAPES = {sedan: cm.tintable(cm.CARS.sedan) ^ { null }, hatch: cm.tintable(cm.CARS.hatch) ^ { null }}
+fn parked_cars() any^ => [mesh("parked-cars", m.merge([for (c in city.PARKED)
+    m.yawed(cm.tinted(PARKED_SHAPES[c.kind], u.lin(hex_rgb(c.paint)))^, c.x, 0.0, c.z, c.heading)^]), "m-parked")]
 let HEX = "0123456789abcdef"
 fn nibble(ch) any^ => [for (k in 0 to 15 where slice(HEX, k, k + 1)^ == lower(ch)) k][0]
 fn hex_rgb(c) => [for (k in 0 to 2) (nibble(slice(c, 1 + 2 * k, 2 + 2 * k)) * 16 + nibble(slice(c, 2 + 2 * k, 3 + 2 * k))) / 255.0]
 fn scatter(items, size_of) => [for (p in items) t.compose([p.x, p.y or 0.0, p.z], u.quat(p.face or p.heading or 0.0), [size_of(p), size_of(p), size_of(p)])]
 fn instanced(id, geometry_id, material, matrices, options = {}) element^ => s.mesh(geometry_id, material, {id: id, instances: matrices, *: options})
-// trees beyond the barrier, on the grass around the city
-let SCENERY_TREES = [for (k in 0 to 59, let a = k * u.TAU / 60.0, let r = city.LIMIT + 24.0 + (k % 3) * 9.0
-    where not (cos(a) > 0.45 and abs(sin(a)) < 0.9) and not (sin(a) > 0.0 and abs(cos(a) * r) < 40.0)) {x: sin(a) * r * 1.02, z: 0.0 - cos(a) * r, s: 1.1 + (k % 4) * 0.12}]
+// street trees are the countryside's broadleaf (about 8 m tall at scale 1), smaller and each turned its own way
+let STREET_TREES = [for (p in city.TREES) {x: p.x, z: p.z, s: p.s * 0.6, face: scenery.hash(p.x, p.z) * u.TAU}]
 fn street_furniture(look) {
-    let trees = [*city.TREES, *SCENERY_TREES]
-    let tree_m = scatter(trees, (p) => p.s)
+    let tree_m = scatter(STREET_TREES, (p) => p.s)
     let lamp_m = scatter(city.LAMPS, (p) => 1.0)
     let signal_m = [for (sg in city.SIGNALS) t.compose([sg.x, city.CURB, sg.z], u.quat(city.heading_of_dir((sg.d + 2) % 4)), [1.0, 1.0, 1.0])];
-    [s.resources([m.geometry("g-trunk", m.trunk()), m.geometry("g-crown", m.crown()), m.geometry("g-lamp", m.lamp_post()),
+    [s.resources([m.geometry("g-lamp", m.lamp_post()),
         m.geometry("g-bulb", m.lamp_bulb()), m.geometry("g-pool", m.light_pool()), m.geometry("g-mast", m.signal_mast()),
         *[for (k in 0 to 2) m.geometry("g-signal-" ++ string(k), m.signal_lamp(k))]]),
-     instanced("trunks", "g-trunk", "m-trunk", tree_m), instanced("crowns", "g-crown", "m-leaf", tree_m),
+     instanced("street-trees", "g-broad", "m-tree", tree_m),
      instanced("lamps", "g-lamp", "m-metal", lamp_m), instanced("bulbs", "g-bulb", "m-bulb", lamp_m, {'cast-shadow': false}),
      instanced("pools", "g-pool", "m-pool", lamp_m, {visible: look.pools, 'cast-shadow': false, 'receive-shadow': false}),
      instanced("masts", "g-mast", "m-signal", signal_m),
@@ -272,7 +262,6 @@ fn landmarks() {
      mesh("fountain-water", m.post(p.x, p.z, city.CURB + 0.7, city.CURB + 0.72, p.r - 0.35, p.r - 0.35, 24), "m-water-basin"),
      mesh("ramps", m.merge([for (r in city.RAMPS) m.wedge(r, city.CURB)]), "m-steel")]
 }
-// the harbour south of the barrier, hills and a sky dome around everything
 // ---- the sky: a dome per look whose vertex colours carry the gradient and the clouds (soft fBm patches
 // over the sky's directions, flattened, densest a little above the horizon and thin toward the zenith).
 // Painting clouds into the dome needs no transparency; the domes turn slowly together.
@@ -291,6 +280,7 @@ fn sky_dome(name) any^ {
     s.mesh(s.geometry([for (x in BALL.positions) x], {id: "g-sky-" ++ name, normals: BALL.normals, indices: BALL.indices, colors: flatten(transpose(tone))}), "m-sky",
         {id: "sky-" ++ name, visible: false, 'cast-shadow': false, 'receive-shadow': false, 'frustum-culling': false})
 }
+// the barrier, the promenade and sea wall, the water, and the sky domes around everything
 fn surroundings(look_name) any^ {
     let l = city.LIMIT, sh = city.SHORE
     let gate = city.road(city.GATE_J);
@@ -452,11 +442,9 @@ pub fn look_edits(look_name, lights) {
      {id: "m-store", key: "emissive-intensity", value: look.shops}, {id: "m-bulb", key: "emissive-intensity", value: look.bulbs},
      {id: "pools", key: "visible", value: look.pools}, {id: "glow", key: "strength", value: look.bloom},
      *[for (name in LOOK_ORDER) {id: "sky-" ++ name, key: "visible", value: name == look_name}],
-     {id: "m-taillamp", key: "emissive-intensity", value: if (look.windows > 0.0) 3.0 else 1.0},
      {id: "m-lantern", key: "emissive-intensity", value: ls.lantern(look)},
      *lights_edits(lights)]
 }
 pub fn lights_edits(lights) => [{id: "head-l", key: "intensity", value: if (lights) HEADLIGHT else 0.0},
     {id: "head-r", key: "intensity", value: if (lights) HEADLIGHT else 0.0},
-    *[for (c in CAR_PAINTS) {id: paint_id(c), key: "emissive-intensity", value: lamps(lights)}],
-    {id: "m-headlamp", key: "emissive-intensity", value: if (lights) 6.0 else 0.5}]
+    *[for (c in CAR_PAINTS) {id: paint_id(c), key: "emissive-intensity", value: lamps(lights)}]]

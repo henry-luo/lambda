@@ -13,17 +13,16 @@ import region: .mod_region
 // ---- terrain colour: grass with a soft wash of variation, crops on the farm parcels, a darker floor
 // under the woods, rock where it is steep, sand by the sea and snow on the high peaks. The palette is
 // written in display (sRGB) values and blended in linear light, the space vertex colours shade in.
-fn lin(c) => [for (x in c) math.pow(x, 2.2)]
-let GRASS = lin([0.36, 0.5, 0.21])
-let MEADOW = lin([0.5, 0.58, 0.27])
-let DRY = lin([0.64, 0.6, 0.38])
-let WOOD_FLOOR = lin([0.22, 0.31, 0.14])
-let ROCK = lin([0.5, 0.48, 0.45])
-let SAND = lin([0.84, 0.77, 0.6])
-let SEABED = lin([0.48, 0.44, 0.35])
-let SNOW = lin([0.92, 0.94, 0.97])
-let CROP_COLOR = {wheat: lin([0.78, 0.66, 0.34]), green: lin([0.42, 0.56, 0.2]), plowed: lin([0.42, 0.32, 0.22]), canola: lin([0.86, 0.78, 0.22]),
-    meadow: lin([0.52, 0.62, 0.29]), hay: lin([0.7, 0.62, 0.4])}
+let GRASS = u.lin([0.36, 0.5, 0.21])
+let MEADOW = u.lin([0.5, 0.58, 0.27])
+let DRY = u.lin([0.64, 0.6, 0.38])
+let WOOD_FLOOR = u.lin([0.22, 0.31, 0.14])
+let ROCK = u.lin([0.5, 0.48, 0.45])
+let SAND = u.lin([0.84, 0.77, 0.6])
+let SEABED = u.lin([0.48, 0.44, 0.35])
+let SNOW = u.lin([0.92, 0.94, 0.97])
+let CROP_COLOR = {wheat: u.lin([0.78, 0.66, 0.34]), green: u.lin([0.42, 0.56, 0.2]), plowed: u.lin([0.42, 0.32, 0.22]), canola: u.lin([0.86, 0.78, 0.22]),
+    meadow: u.lin([0.52, 0.62, 0.29]), hay: u.lin([0.7, 0.62, 0.4])}
 // a colour channel triple mixed toward another by k (a number or an array)
 fn mix(a, b, k) any^ => [land.mix(a[0], b[0], k), land.mix(a[1], b[1], k), land.mix(a[2], b[2], k)]
 fn wash(x, z) any^ => 0.5 + 0.5 * sin(x * 0.021 + 1.3 * sin(z * 0.017)) * cos(z * 0.026 - 0.8 * sin(x * 0.013))

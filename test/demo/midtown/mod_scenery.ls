@@ -30,12 +30,16 @@ let H = region.HEIGHT
 fn steep(k) => (let i = k % land.NX, let j = k div land.NX,
     if (i == 0 or j == 0 or i == land.NX - 1 or j == land.NZ - 1) 9.0
     else (abs(H[k + 1] - H[k - 1]) + abs(H[k + land.NX] - H[k - land.NX])) / (2.0 * land.STEP))
-pub let TREE_KINDS = ["pine", "broad"]
-pub let TREES = [for (k, w in WOOD, let x = CX[k], let z = CZ[k], let h = H[k], let p = PICK[k]
+let WILD = [for (k, w in WOOD, let x = CX[k], let z = CZ[k], let h = H[k], let p = PICK[k]
         where ((w > 0.5 and p < 0.5) or (w <= 0.5 and OPEN[k] > 0.5 and p < 0.016)) and region.ROAD_GAP[k] > 13.0 and
             h > land.SEA + 1.6 and not covered(x, z)^ and steep(k)^ < 0.8)
     {x: x, z: z, y: ground(x, z) - 0.2, s: 0.75 + 0.6 * hash(p, 4.4), yaw: hash(p, 7.7) * u.TAU,
      kind: if (h > 38.0 or hash(p, 5.5) < 0.3) "pine" else "broad"}]
+// a ring of broadleaves on the flat just beyond the barrier, clear of the gateway and the shore
+let RING = [for (k in 0 to 59, let a = k * u.TAU / 60.0, let r = city.LIMIT + 24.0 + (k % 3) * 9.0, let x = sin(a) * r * 1.02, let z = 0.0 - cos(a) * r
+        where not (cos(a) > 0.45 and abs(sin(a)) < 0.9) and not (sin(a) > 0.0 and abs(cos(a) * r) < 40.0) and land.grid_at(region.ROAD_GAP, x, z)^ > 13.0)
+    {x: x, z: z, y: ground(x, z) - 0.2, s: 0.7 + (k % 4) * 0.08, yaw: hash(float(k), 6.6) * u.TAU, kind: "broad"}]
+pub let TREES = [*WILD, *RING]
 
 // ---- hedgerows: bushes every 4.5 m along the parcel boundaries inside the farm, a third of the edges bare
 let FARM = region.FARM

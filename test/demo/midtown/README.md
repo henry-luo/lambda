@@ -107,9 +107,10 @@ the car elsewhere, for example `MIDTOWN_SPAWN=-178,168,1.5708` in front of the s
 Out of town the frame stays light: vehicles and people beyond 900 m of the camera take no pose
 commands (their bodies keep their last pose, lost in the haze); town traffic and pedestrians rest while
 the car is more than 400 m beyond the barrier; traffic far from the car steps every second (town) or
-fourth (open road) frame with the time it is owed. Every car is a single draw, and trees are
-instanced per terrain chunk so the view and shadow cascades skip distant woods; a town frame issues
-about 514 draws. The minimap's region
+fourth (open road) frame with the time it is owed. Every car is a single draw (the parked cars share
+one, their paint a vertex tint over the atlas). Street trees use the countryside's broadleaf model,
+and the countryside's trees are instanced per terrain chunk so the view and shadow cascades skip
+distant woods. The minimap's region
 layer is an SVG image laid out at a third of the map's scale and enlarged by its holder's transform:
 the turning map redraws it each frame, and at full size that cost about 2.5 ms. Measured headless
 (release, 1280×800), the Lambda step and sync take about 1.6 ms a frame in town and 1.5 ms on the

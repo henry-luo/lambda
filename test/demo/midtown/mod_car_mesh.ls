@@ -139,3 +139,8 @@ pub fn indicator(xs) any^ => (let sp = COUPE, let x0 = xs * 0.6, let x1 = xs * (
 pub let ATLAS_PARTS = ["paint", "glass", "trim", "head", "tail"]
 pub fn merged(parts) any^ => m.merge([for (k, name in ATLAS_PARTS, let b = parts[name])
     {*: b, uvs: [for (i in 1 to (len(b.positions)^ div 3)) *[(k + 0.5) / 5.0, 0.5]]}])
+// a car to tint: its merged buffer and each vertex's paint share (1 on the paint cell, which merges first)
+pub fn tintable(parts) any^ => (let n = len(parts.paint.positions)^ div 3, let b = merged(parts)^,
+    {buffer: b, mask: [for (i in 0 to (len(b.positions)^ div 3 - 1)) if (i < n) 1.0 else 0.0]})
+// its buffer with the paint cell tinted by a linear colour and the other cells left white
+pub fn tinted(car, rgb) any^ => {*: car.buffer, colors: flatten(transpose([for (c in rgb) 1.0 + car.mask * (c - 1.0)]))}
