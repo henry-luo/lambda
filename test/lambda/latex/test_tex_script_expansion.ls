@@ -132,7 +132,7 @@ fn test_latex_document(source) any^ {
 "meaning of macro:"; test("\\def\\x{X}\\edef\\z{\\noexpand\\x Y}\\meaning\\z")
 "meaning of character:"; test("\\meaning a")
 "roman numerals:"; test("\\romannumeral 1984 \\romannumeral 0 \\romannumeral 4999")
-"unsupported primitive name:"; test_unsupported("\\setbox0=\\hbox{}")
+"unsupported primitive name:"; test_unsupported("\\halign{}")
 "count register:"; test("\\count255=17 \\the\\count255")
 "local count:"; test("\\count0=3 {\\count0=4 \\the\\count0}\\the\\count0")
 "global count:"; test("\\count0=3 {\\global\\count0=4 }\\the\\count0")

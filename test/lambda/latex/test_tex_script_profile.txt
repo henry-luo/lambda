@@ -34,7 +34,7 @@
 {
   text: "",
   issue: "tex-unsupported-primitive",
-  unsupported: "setbox",
+  unsupported: "halign",
   diagnostics: [],
   sources: [[0, "<lambda-kernel>", "bundled"]]
 }

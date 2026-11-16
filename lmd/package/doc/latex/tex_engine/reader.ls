@@ -17,15 +17,28 @@ pub fn catcode(c, overrides) {
     else 12
 }
 
-fn line_end(s, i) any^ =>
-    if (i >= len(s) or ch(s, i) == "\n" or ch(s, i) == "\r") i else line_end(s, i + 1)
-fn trim_end(s, start, end) any^ =>
-    if (end > start and ch(s, end - 1) == " ") trim_end(s, start, end - 1) else end
+// scan source lines without consuming the native call stack.
+fn line_end(s, i) any^ {
+    var at = i
+    while (at < len(s) and ch(s, at)^ != "\n" and ch(s, at)^ != "\r") { at = at + 1 }
+    return at
+}
+fn trim_end(s, start, end) any^ {
+    var at = end
+    while (at > start and ch(s, at - 1)^ == " ") { at = at - 1 }
+    return at
+}
 fn after_line(s, end) any^ => if (ch(s, end) == "\r" and ch(s, end + 1) == "\n") end + 2
     else if (end < len(s)) end + 1 else end
 fn utf8_width(c) => if (ord(c) < 128) 1 else if (ord(c) < 2048) 2 else if (ord(c) < 65536) 3 else 4
-fn byte_count(s, i, end, total = 0) any^ => if (i >= end) total
-    else byte_count(s, i + 1, end, total + utf8_width(ch(s, i)))
+fn byte_count(s, i, end, total = 0) any^ {
+    var at = i, count = total
+    while (at < end) {
+        count = count + utf8_width(ch(s, at)^);
+        at = at + 1
+    }
+    return count
+}
 
 pub fn reader(source, file_id = 0) => {source: source, file_id: file_id, next_line: 0, line: "", position: 0,
     line_start: 0, line_end: 0, line_next: 0, loaded: false, eol_done: false,
@@ -178,38 +191,44 @@ fn done(r, t) => if (t == null) {reader: r, token: null}
 
 // Return one token so callers can change category codes between reads.
 pub fn next(r) any^ {
-    if (r == null) done(null, null)
-    else if (not r.loaded or (r.position >= len(r.line) and r.eol_done)) next(load_line(r))
-    else {
-        let at_eol = r.position >= len(r.line);
-        let c = if (at_eol) (if (r.endline >= 0 and r.endline <= 1114111)
-            {value: chr(r.endline), end: r.position} else null) else character(r, r.position);
-        let advanced = {*:r, position: if (c == null) r.position else c.end,
-            position_byte: r.position_byte + if (c == null or at_eol) 0 else byte_count(r.line, r.position, c.end),
-            eol_done: at_eol or r.eol_done};
-        if (c == null) next(advanced)
+    // Ignored input can span arbitrarily many physical lines.
+    var current = r
+    while (current != null) {
+        if ((not current.loaded or (current.position >= len(current.line)^ and current.eol_done))^) {
+            current = load_line(current)^
+        }
         else {
-            let cat = catcode(c.value, r.catcodes);
-            let start = r.line_byte + r.position_byte;
-            let end = if (at_eol) r.next_byte else r.line_byte + advanced.position_byte;
-            if (cat == 0) control(advanced, start, at_eol)
-            else if (cat == 13) done({*:advanced, state: "mid"}, token("active", c.value, cat, start, end))
-            else if (cat == 5) {
-                let consumed = {*:advanced, position: len(r.line), eol_done: true};
-                if (r.state == "new") done(consumed, token("control", "par", null, start, r.next_byte))
-                else if (r.state == "mid") done(consumed, token("char", " ", 10, start, r.next_byte))
-                else next(consumed)
+            let at_eol = current.position >= len(current.line);
+            let c = if (at_eol) (if (current.endline >= 0 and current.endline <= 1114111)
+                {value: chr(current.endline), end: current.position} else null) else character(current, current.position)^;
+            let advanced = {*:current, position: if (c == null) current.position else c.end,
+                position_byte: current.position_byte + if (c == null or at_eol) 0 else byte_count(current.line, current.position, c.end)^,
+                eol_done: at_eol or current.eol_done};
+            if ((c == null)^) { current = advanced }
+            else {
+                let cat = catcode(c.value, current.catcodes)^;
+                let start = current.line_byte + current.position_byte;
+                let end = if (at_eol) current.next_byte else current.line_byte + advanced.position_byte;
+                if (cat == 0) { return control(advanced, start, at_eol)^ }
+                else if (cat == 13) { return done({*:advanced, state: "mid"}, token("active", c.value, cat, start, end)) }
+                else if (cat == 5) {
+                    let consumed = {*:advanced, position: len(current.line), eol_done: true};
+                    if (current.state == "new") { return done(consumed, token("control", "par", null, start, current.next_byte)) }
+                    else if (current.state == "mid") { return done(consumed, token("char", " ", 10, start, current.next_byte)) }
+                    else { current = consumed }
+                }
+                else if (cat == 9) { current = advanced }
+                else if (cat == 10) {
+                    if (current.state == "mid") { return done({*:advanced, state: "skip"}, token("char", " ", 10, start, end)) }
+                    else { current = advanced }
+                }
+                else if (cat == 14) { current = {*:advanced, position: len(current.line), eol_done: true} }
+                else if (cat == 15) { return done(advanced, token("invalid", c.value, cat, start, end)) }
+                else { return done({*:advanced, state: "mid"}, token("char", c.value, cat, start, end)) }
             }
-            else if (cat == 9) next(advanced)
-            else if (cat == 10) {
-                if (r.state == "mid") done({*:advanced, state: "skip"}, token("char", " ", 10, start, end))
-                else next(advanced)
-            }
-            else if (cat == 14) next({*:advanced, position: len(r.line), eol_done: true})
-            else if (cat == 15) done(advanced, token("invalid", c.value, cat, start, end))
-            else done({*:advanced, state: "mid"}, token("char", c.value, cat, start, end))
         }
     }
+    return done(null, null)
 }
 
 fn control(r, start, at_eol) any^ {

@@ -109,12 +109,15 @@ pub fn ready(replica, op) any^ {
         if (event.revision.workspace != replica.document or event.revision.epoch != replica.epoch or
             event.revision.file != file or (event.action == 'publish' and creation(replica,file,op.context)^.type != 'file'))
             raise error("sync workspace: revision file mismatch")
-        let known = [for (atom in replica.atoms where tree.seen(op.context,atom.id)^ and
-            (atom.value.event.action == 'publish' or (atom.value.event.action == 'create' and atom.value.event.type == 'file')))
-            atom.value.event.revision]
-        if (not all([for (parent in event.revision.parents)
-            any([for (revision in known) revision.id == parent and revision.file == file])]))
-            raise error("sync workspace: unobserved revision parent")
+        // Initial revisions have no parents; do not scan the whole history for an empty set.
+        if (len(event.revision.parents)^ > 0) {
+            let known = [for (atom in replica.atoms where tree.seen(op.context,atom.id)^ and
+                (atom.value.event.action == 'publish' or (atom.value.event.action == 'create' and atom.value.event.type == 'file')))
+                atom.value.event.revision]
+            if (not all([for (parent in event.revision.parents)
+                any([for (revision in known) revision.id == parent and revision.file == file])]))
+                raise error("sync workspace: unobserved revision parent")
+        }
         if (event.action == 'create' and len(event.revision.parents) != 0) raise error("sync workspace: initial revision has parents")
     }
     return true

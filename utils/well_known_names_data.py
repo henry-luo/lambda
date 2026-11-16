@@ -50,6 +50,9 @@ MARKUP_TRAILING_ENTRIES = [
     ("CSS_R", "r"),
     ("CSS_RX", "rx"),
     ("CSS_RY", "ry"),
+    ("CSS_SHAPE_OUTSIDE", "shape-outside"),
+    ("CSS_SHAPE_MARGIN", "shape-margin"),
+    ("CSS_SHAPE_IMAGE_THRESHOLD", "shape-image-threshold"),
 
 ]
 MARKUP_ENTRY_SYMBOLS = {
@@ -124,6 +127,7 @@ marker-start marker-mid marker-end marker vector-effect color-interpolation colo
 -webkit-box-orient
 page string-set footnote-policy
 x y cx cy r rx ry
+shape-outside shape-margin shape-image-threshold
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

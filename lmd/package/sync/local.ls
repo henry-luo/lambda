@@ -30,28 +30,29 @@ fn validate(current, space, previous=null) any^ {
     if (current.format != 1 or current.space != space or not v.actor(current.device)^ or
         not v.natural(current.serial)^) raise error("sync local: invalid local state")
     chunks.profile(current.chunker)^
-    // Typed digests preserve numeric kinds and map order; coercive equality is not a proof.
-    let identity = {replica:codec.digest(current.endpoint.replica)^,base:codec.digest(current.base)^,
-        documents:codec.digest(document_state.all(current))^}
-    let same = previous.replica == identity.replica
+    // Compare portable types and ordered keys before reusing validation (S2.3.1v2, S5.2.1v2).
+    let values = {replica:current.endpoint.replica,base:current.base,documents:document_state.all(current)}
+    let same = previous.values != null and codec.same_encoding(values.replica,previous.values.replica)^
+    let same_base = previous.values != null and codec.same_encoding(values.base,previous.values.base)^
+    let same_documents = previous.values != null and codec.same_encoding(values.documents,previous.values.documents)^
     if (not same) { c.validate(current.endpoint.replica)^ }
     p.validate_endpoint_fields(current.endpoint)^
-    let snapshot = if (same) previous.snapshot else if (len(current.endpoint.replica.pending)^ == 0)
+    let snapshot = if (same and previous.snapshot != null) previous.snapshot
+        else if (not same_base and len(current.endpoint.replica.pending)^ == 0)
         c.snapshot(current.endpoint.replica)^ else null
-    let digest = if (same) previous.snapshot_digest else if (snapshot == null) null else codec.digest(snapshot)^
     let projection = if (same) previous.projection else tree.project(tree.events(current.endpoint.replica)^)^
-    let proof = {*:identity,snapshot:snapshot,snapshot_digest:digest,projection:projection}
-    if (previous.base != proof.base) {
+    var base_projection = if (same_base) previous.base_projection else null
+    if (not same_base) {
         let resolved = all([for (entry in projection.entries where entry.visible and entry.type == 'file') len(entry.heads)^ == 1])
         let known = snapshot != null and resolved and
-            cap.validate_known_base(current.base,snapshot,digest,cap.export_members(projection.entries)^)^
-        if (not known) { cap.validate_base(current.base)^ }
+            cap.validate_known_base(current.base,snapshot,cap.export_members(projection.entries)^)^
+        base_projection = if (known) projection else cap.checked_base(current.base)^.projection
     }
     if (current.endpoint.replica.document != space) raise error("sync local: wrong workspace")
-    if (previous.documents != proof.documents) {
+    if (not same_documents) {
         for (record in document_state.all(current)) { document_state.validate(record,space)^ }
     }
-    return proof
+    return {values:values,snapshot:snapshot,projection:projection,base_projection:base_projection}
 }
 pn replica_dependencies(tx, keys, replica, seen=[], depth=0, retired=[], source="workspace", cached=[], verified=[], projection=null) any^ {
     if (depth > 128) raise error("sync local: checkpoint dependency depth")
@@ -168,7 +169,7 @@ pub pn mutate(handle, operation) any^ {
 pub pn scan(handle, paths=null, verify: bool=false) any^ {
     return mutate(handle,pn (tx,k,current)=> {
         let captured = if (paths == null) fs.capture(tx,k,current,verify)^ else fs.capture_paths(tx,k,current,paths)^
-        let updated = fs.reconciled(current,captured,workspace_actor(handle,true)^,[],now().unix)^
+        let updated = fs.reconciled(current,captured,workspace_actor(handle,true)^,[],now().unix,k.workspace_validation)^
         return documents.refresh(tx,k,updated,actor(handle,updated)^)^
     })^
 }
@@ -207,12 +208,12 @@ pub pn publish(handle, entry, bytes, document=null) any^ {
 pub pn prepare_install(handle) any^ {
     return mutate(handle,pn (tx,k,current)=> {
         if (current.installation != null) { return current }
-        let fresh = fs.reconciled(current,fs.capture(tx,k,current)^,workspace_actor(handle,true)^,[],now().unix)^
+        let fresh = fs.reconciled(current,fs.capture(tx,k,current)^,workspace_actor(handle,true)^,[],now().unix,k.workspace_validation)^
         if (handle.keys.cache_enabled != true)
             dependencies(tx,k,fresh.endpoint,maintenance.get(fresh).revisions,"install preparation",reach.cache_ids(fresh))^
         // Reuse only the projection tied to this exact typed replica, after external reconciliation.
         let proof = k.workspace_validation
-        let projection = if (proof.replica == codec.digest(fresh.endpoint.replica)^) proof.projection else null
+        let projection = if (proof.values != null and codec.same_encoding(fresh.endpoint.replica,proof.values.replica)^) proof.projection else null
         return install.prepare(fresh,projection)^
     })^
 }
@@ -306,9 +307,16 @@ pub pn receive_batch(handle, packets, records=[]) any^ {
     })^
 }
 
-pub pn acknowledge(handle, peer, frontier) any^ {
+fn released(current, ids) any^ => {*:current,
+    staged_objects:[for (id in (if (current.staged_objects == null) [] else current.staged_objects)
+        where not contains(ids,id)^) id]}
+
+pub pn acknowledge(handle, peer, frontier, release=[]) any^ {
     return mutate(handle,pn (tx,k,current)=> {
-        return {*:current,endpoint:p.acknowledge(current.endpoint,peer,frontier)^}
+        let endpoint = p.acknowledge(current.endpoint,peer,frontier)^
+        // Completed exchange pins and its ACK can share one durable head transaction.
+        let updated = if (len(release)^ == 0) current else released(current,release)^
+        return {*:updated,endpoint:endpoint}
     })^
 }
 
@@ -537,10 +545,7 @@ pub pn register_retention(handle, id) any^ {
 }
 
 pub pn release_staging(handle, ids) any^ {
-    return mutate(handle,pn (tx,k,current)=> {
-        return {*:current,staged_objects:[for (id in (if (current.staged_objects == null) [] else current.staged_objects)
-            where not contains(ids,id)^) id]}
-    })^
+    return mutate(handle,pn (tx,k,current)=> { return released(current,ids)^ })^
 }
 
 pub pn register_cache(handle, id) any^ {

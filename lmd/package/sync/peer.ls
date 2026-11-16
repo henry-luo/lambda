@@ -135,11 +135,13 @@ pub pn exchange_round(socket, initial_channel, handle, credentials, observer=nul
     var downloaded = 0
     var uploaded = 0
     var missing_pull = []
+    var remote_inventory = []
     while (index < remote.objects) {
         let page = request(socket,channel,'inventory',{offset:index})^
         channel = page.session
         exchange.object_ids(page.value)^
         if (len(page.value)^ == 0 or index+len(page.value)^ > remote.objects) raise error("sync peer: truncated inventory")
+        remote_inventory = [*remote_inventory,*page.value]
         missing_pull = [*missing_pull,*[for (id in page.value where not contains(available,id)^) id]]
         index = index+len(page.value)^
     }
@@ -189,8 +191,10 @@ pub pn exchange_round(socket, initial_channel, handle, credentials, observer=nul
             exchange.have_frontier(credentials.space,remote)^ else null)^
     index = 0
     var missing_push = []
-    while (index < len(outgoing.ids)^) {
-        let page = slice(outgoing.ids,index,index+exchange.page_size)^
+    // The pinned inventory already declares these objects present at the peer for this round.
+    let candidates = [for (id in outgoing.ids where not contains(remote_inventory,id)^) id]
+    while (index < len(candidates)^) {
+        let page = slice(candidates,index,index+exchange.page_size)^
         let missing = request(socket,channel,'missing',page)^
         channel = missing.session
         exchange.object_ids(missing.value)^
@@ -246,11 +250,10 @@ pub pn exchange_round(socket, initial_channel, handle, credentials, observer=nul
         accepted = response.value
     }
     if (not core.dominates(accepted,outgoing.summary.clock)^) raise error("sync peer: incomplete peer acknowledgment")
-    local.acknowledge(handle,channel.peer.id,outgoing.summary.clock)^
     let pushed_documents = push_documents(socket,channel,handle,credentials,outgoing.documents)^
     channel = pushed_documents.session
     let ended = request(socket,channel,'done',null)^
-    local.release_staging(handle,available)^
+    local.acknowledge(handle,channel.peer.id,outgoing.summary.clock,available)^
     return {session:ended.session,token:outgoing.token,result:{peer:channel.peer.id,downloaded:downloaded,uploaded:uploaded,
         frontier:outgoing.summary.clock,replicated:true,cloud_saved:false,
         document_packets:pulled_documents.packets+pushed_documents.packets,

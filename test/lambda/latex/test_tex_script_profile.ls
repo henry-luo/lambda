@@ -10,7 +10,7 @@ fn report(source, kernel_source = kernel) any^ {
 "kernel makeatletter:"; report("\\makeatletter\\@firstoftwo{Y}{N}\\makeatother\\number\\catcode`\\@")
 "kernel document macro:"; report("\\def\\hi#1{Hello #1}\\hi{world}")
 "latex command unsupported:"; report("\\usepackage{geometry}")
-"failed preload:"; report("ignored", "\\setbox0=\\hbox{}")
+"failed preload:"; report("ignored", "\\halign{}")
 let direct = profile.expand("\\textbf{Hi}", {source_name: "direct.tex"}, 100000)^;
 "packaged kernel:"; {text: join([for (t in direct.output) t.value], ""), issue: direct.issue,
     sources: [for (entry in direct.sources) [entry.id, entry.name, entry.origin]]}

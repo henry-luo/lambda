@@ -1,0 +1,13 @@
+{
+  finished: true,
+  issue: null,
+  expansions: 0,
+  output: 0,
+  text: true
+}
+{
+  finished: null,
+  issue: "tex-budget",
+  expansions: 3,
+  messages: ["before"]
+}

@@ -1,0 +1,21 @@
+{
+  finished: true,
+  issue: null,
+  output: 0,
+  text: true
+}
+{
+  first: "A",
+  first_length: 1,
+  first_next: 80003,
+  first_byte: 80003,
+  second: "Z",
+  second_start: 80003,
+  second_byte: 80003
+}
+{
+  lines: ["é字🙂 A", "Z\t", "Q"],
+  starts: [0, 10, 14],
+  bytes: [0, 16, 20],
+  next_bytes: [16, 20, 22]
+}

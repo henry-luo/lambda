@@ -1,0 +1,20 @@
+[{
+    supported: true,
+    text: true,
+    messages: true,
+    diagnostics: true,
+    guarded: true
+  }, {
+    supported: true,
+    text: true,
+    messages: true,
+    diagnostics: true,
+    guarded: true
+  }]
+[{
+    issue: null,
+    unsupported: null
+  }, {
+    issue: "tex-unsupported-primitive",
+    unsupported: "read invalid UTF-8"
+  }]
