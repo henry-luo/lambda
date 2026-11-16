@@ -17,6 +17,59 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Shared host artifacts retain benchmark snapshot headers — 2026-11-16
+
+**Status:** OPEN build-configuration hazard; the CSS Shapes qualification uses
+an isolated current-source host. The exact invalid-free mechanism remains
+unconfirmed. D9.1.5 governs build identity, and D9.1.1v4 / D9.1.3v2 govern the
+Input/Radiant/runtime boundary. No Lambda implementation was changed here.
+
+During Radiant `make -j8 run-radiant-baseline`, the default standalone host
+used shared runtime/adapter archives under this checkout's `build/lib/native/debug`.
+The generated runtime and adapter Makefiles contained Input/Radiant include
+roots under `temp/tex-port-baseline-20261116`, while the cached
+`script_runner.d` still named headers under `temp/tex-script-f/baseline-src`.
+Those objects and the current Input/Radiant archives were not a coherent source
+selection. Radiant's ordinary host-dependency target did not rebuild every
+cached object after this include-root change.
+
+The `absolute_layout_within_border.html` layout fixture traps in malloc/free
+with signal 5 (exit 133), with `script_task_collection_free` in the backtrace.
+It references an unavailable optional `test_helper.js`; the older existing
+`lambda.exe` reports that missing file and completes. The mixed host caused
+748 static and 434 scripted runner errors in the first aggregate attempt;
+those results are not current-source conformance evidence.
+
+Fresh runtime/adapter objects were built in Radiant's
+`temp/css-shapes/current-host`, overriding generated Make variables for the
+object/archive destinations and all Input/Radiant include roots. No generated
+Makefile or shared snapshot configuration was hand-edited. All 252 dependency
+files in the fresh object directories have zero `temp/tex-` references. The
+isolated host passes the crashing fixture at 100% elements/text, passes all
+630 scripted baseline cases, and reproduces the existing static flex mismatch
+also seen with the older Lambda host. The CSS Shapes JS fixture reports
+`SHAPES_JS_PASS` through ordinary camelCase style writes, reflow and computed
+style reads.
+
+Evidence is in Radiant `temp/css-shapes/layout-failure-probe.log`,
+`layout-current-host-probe.log`, `layout-current-host-baseline.log`,
+`current-host/{build_host.py,rt-command.json,adapter-command.json}` and
+`js-mutation.json`. Future shared builds must distinguish source/include roots
+in object identity, or use isolated object and archive directories; restoring
+another active benchmark's shared configuration was deliberately avoided.
+
+## JIT tail recursion with open map state — 2026-11-16
+
+**Status:** OPEN. A self-tail-recursive function that replaces an untyped map
+argument completes 300,000 iterations in the interpreter but reports E308 in
+JIT at 200,000; with a 16 MiB diagnostic stack, JIT completes 300,000. The
+current MIR tail-call eligibility rejects boxed Item backedges; see
+`temp/tex-script-f/tail-state-probe.ls` and its tier and stack logs. Extending
+the optimization needs safe admission and safepoint-current roots for replaced
+values (D6.3.1–D6.3.4, D8.2.6). This is a runtime limitation, independent of
+the Script TeX driver's local-loop repair; no claim is made that the language
+specification guarantees unbounded recursion.
+
 ## Unattributed DOM media playback stall — 2026-11-15
 
 **Status:** OPEN, cause and owner unconfirmed. The Lambda editor continuation

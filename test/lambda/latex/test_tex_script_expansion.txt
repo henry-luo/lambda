@@ -278,7 +278,7 @@
   issue: null
 }
 "unsupported primitive name:"
-["tex-unsupported-primitive", "setbox"]
+["tex-unsupported-primitive", "halign"]
 "count register:"
 {
   text: "17",

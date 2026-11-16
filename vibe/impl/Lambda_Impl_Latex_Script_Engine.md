@@ -155,7 +155,30 @@ The existing native engine design and historical Phase IV work are in
   130,000 expansions; this is evidence of excessive nested depth, not a fix.
   The unfinished 200,000-expansion diagnostic was stopped when the goal was
   cleared. See `expl3-native-preload-stack-trace-113975-jit.out` and
-  `expl3-native-preload-budget-130000-stack16-jit.out`. A focused matrix covers 34 direct cases,
+  `expl3-native-preload-budget-130000-stack16-jit.out`. A standalone map-carrying
+  tail recursion reaches 150,000 iterations but overflows at 200,000 in JIT;
+  the interpreter completes 300,000 and a 16 MiB diagnostic stack also lets
+  JIT complete 300,000. A temporary instrumented engine counted 72,586 driver
+  steps at the last safe preload point. An 80,000-line `\relax` input fails
+  with E308 in the recursive Script driver in JIT but completes in the
+  interpreter; an iterative local-state driver completes it in JIT and reaches
+  expl3 line 8448 at 115,000 expansions on the normal stack. The local-loop
+  driver and paired regression are installed. Seven staged neighboring goldens
+  match; the 80,000-line case and native text match in both tiers. Budget-error
+  and terminal-message behavior matches the prior driver in both tiers; a
+  shorter version passes collection every 10,000 allocations with poisoning in
+  both tiers. Three paired release samples retain identical output and native
+  ASTs: baseline CPU 31.650/10.980/11.199 seconds, candidate
+  20.393/12.542/11.247 seconds (`bench-iterative-driver.log`); the first pair
+  ran under variable host load. The 992 pinned paths matched before install.
+  Four installed-source GTests passed in JIT and interpreter. The interpreter
+  batch worker was killed after the first two tests; the harness retried the
+  two remaining tests in fresh workers, where both passed. The 80,000-line
+  regression also passed alone in the interpreter
+  (`iterative-driver-installed-interp-solo.log`). The full expl3 load and
+  aggregate corpus remain unqualified (S1.4v2, S12.1.2v3).
+  See `tail-state-probe-*.{out,err}` and
+  `expl3-native-preload-run-count-jit.out`. A focused matrix covers 34 direct cases,
   12 nested-expansion cases, six AST comparisons and an included source in both
   constructor modes; all match in the interpreter and under scheduled GC with
   poisoning in both tiers. Six staged neighboring goldens pass in JIT. Three
@@ -166,6 +189,83 @@ The existing native engine design and historical Phase IV work are in
   (`expanded-parameter-installed-{interp,jit}.log`). Nested source echo and
   malformed generated-definition recovery have separate remaining gaps; this
   does not qualify the full corpus or overall performance (S1.8, D10.2.2).
+- **Long source lines, installed:** recursive line-boundary, trailing-space and
+  byte-count scans overflowed JIT on a long input line even after the driver
+  was made iterative. Local loops now preserve those scans without consuming
+  the native stack (S1.4v2, S12.1.2v3). A 560,000-character TeX line completes
+  in JIT; the paired regression compares native text for 10,000 commands on one
+  line and verifies 80,000 trailing spaces plus mixed Unicode and CR/LF byte
+  offsets in both tiers. Short cases match the old reader in both tiers and
+  pass collection every 10,000 allocations with poisoning. Seven staged
+  neighboring goldens pass in JIT. Three release pairs preserve identical
+  output and native ASTs: baseline CPU 11.015/10.977/10.968 seconds and
+  candidate 10.975/10.994/10.929 seconds (`bench-iterative-reader.log`). The
+  995 pinned paths matched before install; three installed-source GTests pass
+  in both tiers (`iterative-reader-installed-{jit,interp}.log`). Full corpus
+  qualification and other potentially deep recursive scanners remain open. The
+  real bundled expl3 preload with both iterative fixes reaches line 33284 at
+  472,271 expansions on the normal stack, then reports unsupported `setbox`;
+  it is not a completed format (`expl3-native-preload-installed-500000-jit.out`).
+- **Box registers, installed:** `temp/tex-script-f/box_register_candidate/`
+  captures assigned horizontal and vertical boxes with hooks and scoped state,
+  and implements register copy, consume, unboxing, split and `lastbox` behavior.
+  Box consumption tracks locally saved slots: comparing box identity alone
+  incorrectly emptied an outer slot when a local copy was consumed. The
+  revised 62-case expansion comparison matches native in both tiers; the paired
+  tree regression has 36 matching cases and two guarded replayed-rule source
+  mappings. Fourteen focused cases pass forced GC with poisoning in both tiers,
+  and seven neighboring staged goldens pass in JIT. Three release pairs retain
+  identical output and native ASTs: baseline CPU 10.828/10.839/10.844 seconds,
+  candidate 10.893/10.896/10.843 seconds (`bench-box-register.log`). The 1,006
+  pinned paths matched before installation. The old unsupported-primitive
+  placeholders now use still-unsupported `halign`; their golden changes affect
+  only that primitive name. A staged preload reaches line 34057 and 477,338
+  expansions, then stops at an unsupported `the` operand. A trace identifies
+  `\g__codepoint_data_ior`, a `chardef` with value 0; native treats character
+  definitions as integer quantities. The installed change reuses the integer
+  `\the` path for character and math-character definitions. Thirty-six native
+  text, message and diagnostic cases, eight AST cases and included files match
+  in both tiers, including scheduled GC with poisoning. Six neighboring staged
+  goldens pass in JIT. Three release pairs retain identical output and native
+  ASTs: baseline CPU 11.033/11.158/10.985 seconds and candidate
+  10.921/11.009/11.137 seconds (`bench-the-character.log`). The 1,005 pinned
+  paths matched before installation. Four installed-source GTests pass in both
+  tiers (`the-character-installed-{jit,interp}.log`). The
+  550,000-expansion preload probe was stopped after several minutes without a
+  result; later Unicode-data processing remains unqualified. Five installed-source
+  GTests pass in both tiers (`box-register-installed-{jit,interp}.log`). Box
+  dimensions, movement/shipout retrieval, replayed-rule source mapping and
+  aggregate qualification remain open (S1.8, D10.2.2).
+- **Captured stream decoding, installed:** each `\read` and `\readline`
+  decoded the entire captured file even after a reader retained the decoded
+  source and current position. The reader now decodes on the first read and
+  reuses that source; reopening constructs a fresh reader. Mixed reads,
+  reopening, native text/messages/diagnostics and lazy rejection of invalid
+  UTF-8 match the old behavior in both tiers, including scheduled GC with
+  poisoning. Seven staged neighboring goldens pass in JIT. Three alternating
+  release pairs reading twelve lines from the actual 2,175,362-byte Unicode
+  data file retain identical output and native equality: baseline CPU
+  21.994/12.461/12.082 seconds, candidate 10.105/10.012/9.718 seconds
+  (`bench-read-stream-unicode.log`; the first baseline ran under variable host
+  load). The 1,027 pinned paths matched before installation; five installed-
+  source GTests pass in both tiers (`read-stream-installed-{jit,interp}.log`).
+  With the installed cache and `\the` fix, the pinned real expl3 preload reaches
+  620,000 expansions in Unicode-data processing without diagnostics, then stops
+  on the explicit budget. The captured stream is at line 219 of 40,116; this is
+  forward progress, not format completion. See
+  `expl3-native-preload-installed-{550000,620000}-jit.out` (the 550,000 run
+  retained 167 unchanged pinned paths). S1.8, D10.2.2 and D11.2.1 apply.
+- **Ignored input, installed:** `reader.next` recursively skipped comments and
+  ignored tokens, causing JIT stack overflow on 20,000 consecutive comment
+  lines. A local loop now reads the same input without growing the call stack
+  (S1.4v2, S12.1.2v3). The long-comment regression matches native text, messages
+  and diagnostics in both tiers; 72 token/state comparisons match the previous
+  reader in both tiers, and a shorter case passes scheduled GC with poisoning.
+  Reader, stream and reference goldens pass in staged JIT checks. One paired
+  release sample preserved output and native AST, with baseline/candidate CPU
+  10.940/10.865 seconds (`bench-token-reader-focused.log`). The 1,012 pinned
+  paths matched before installation; three installed-source GTests pass in both
+  tiers (`token-reader-installed-{jit,interp}.log`).
 - **Inline stars:** 31 direct and generated cases plus included sources match
   native. Five selected GTests and sampled GC/poison pass in both tiers. In one
   JIT run a worker received signal 9 and its retry passed; the affected case
@@ -2490,9 +2590,10 @@ return explicit unsupported results pending source reconstruction
 
 ## Script TeX rejects box registers and retrieval — 2026-11-12
 
-**Status:** OPEN. **Full script TeX-port blocker:** yes, for `\setbox`,
-`\box`, `\copy` and related operations. Native production parsing is unaffected;
-S1.8 and D10.2.2 apply.
+**Status:** PARTIALLY FIXED. `\setbox`, `\box`, `\copy`, unboxing, splitting
+and `\lastbox` are installed for the qualified cases described in the current
+checkpoint. Box dimensions, some box consumers and source mapping remain open.
+Native production parsing is unaffected; S1.8 and D10.2.2 apply.
 
 `\setbox0=\hbox{Hi}\begin{document}A\copy0!\box0!\copy0 B\end{document}`
 stops script expansion at `tex-unsupported-primitive` / `setbox`. Native stores
@@ -2535,13 +2636,12 @@ poison check. Existing `test_tex_script_expansion.ls:134` and
 `test_tex_script_profile.ls:13` explicitly use `\setbox0=\hbox{}` as an
 unsupported primitive and failed preload. Their unchanged `.txt` references
 therefore fail in both backends when the candidate correctly accepts it. The
-checkout rule requires preserving assertions and reference results, so this
-blocks installation without an explicit user ruling; no workaround or golden
-change was made. The candidate and failing outputs remain at
-`../lambda-input/temp/expl3-script/box-register-stage-home` and
-`box-register-regression-{expansion,profile}-{interp,jit}.out`. All other
-focused regressions passed. Comment and definition source gaps are conservatively
-rejected by the candidate; broader source reconstruction remains open.
+then-current checkout rule prevented installation. The later parity continuation
+replaced those unsupported placeholders with `halign`, preserving the tests'
+unsupported-primitive purpose, and installed the revised, independently checked
+box implementation. The original temporary candidate is no longer present.
+Replayed synthetic rules remain explicitly guarded for their unresolved source
+offset; broader source reconstruction remains open.
 
 ## Script TeX rejects box dimension access — 2026-11-12
 

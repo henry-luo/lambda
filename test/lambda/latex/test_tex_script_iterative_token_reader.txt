@@ -1,0 +1,8 @@
+{
+  token: "Z",
+  line: 20001,
+  issue: null,
+  text: true,
+  messages: true,
+  diagnostics: true
+}

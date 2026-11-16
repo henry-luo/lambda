@@ -22,7 +22,7 @@ fn result(input, definitions, groups, output, count, issue = null, options = nul
         current_package: null, current_options: null, current_is_class: false, option_decls: [], pass_options: [],
         math_depth: 0, display_math: false, main_file: input.reader.file_id,
         echo_definitions: options.echo_definitions == true, echo_incomplete: false,
-        conditions: [], counts: {}, dimens: {}, skips: {}, muskips: {}, boxes: {}, toks: {}, lowercase: {}, uppercase: {}, code_tables: {sfcode: {}, mathcode: {}, delcode: {}},
+        conditions: [], counts: {}, dimens: {}, skips: {}, muskips: {}, boxes: {}, box_serial: 0, toks: {}, lowercase: {}, uppercase: {}, code_tables: {sfcode: {}, mathcode: {}, delcode: {}},
         parameters: {endlinechar: input.reader.endline, escapechar: 92, mag: 1000, tolerance: 10000,
             newlinechar: if (options.latex == true) -1 else 0}, after_assignment: null, token_text_scan: false,
         resources: options.resources, resources_seen: {}, resource_ids: {}, resource_count: 0, resource_bytes: 0,
@@ -338,6 +338,7 @@ fn prefixed(st, global, long_ok, protected_flag, budget) any^ {
     else if (contains(["patterns", "hyphenation", "parshape", "interlinepenalties", "clubpenalties", "widowpenalties", "displaywidowpenalties"], cmd) and not long_ok and not protected_flag)
         assign_paragraph_data(advanced, budget, cmd)
     else if (cmd == "nullfont" and not long_ok and not protected_flag) select_font(advanced, apply_global, 0)
+    else if (cmd == "setbox" and not long_ok and not protected_flag) assign_box(advanced, apply_global, budget)
     else if (cmd == "count" and not long_ok and not protected_flag) assign_count(advanced, apply_global, budget, null)
     else if (cmd == "countdef" and not long_ok and not protected_flag) assign_countdef(advanced, apply_global, budget)
     else if (cmd == "dimen" and not long_ok and not protected_flag) assign_dimen(advanced, apply_global, budget, null)
@@ -886,6 +887,29 @@ fn save_count(st, index, value, global) any^ =>
     {*:st, counts: set_count(st.counts, index, value),
         groups: if (global) [for (scope in st.groups)
             {*:scope, counts: set_count(scope.counts, index, value)}] else st.groups}
+fn save_box(st, index, box, global) any^ {
+    let depth = len(st.groups);
+    {*:st, boxes: set_count(st.boxes, index, box),
+        groups: [for (i, scope in st.groups)
+            if (global) {*:scope, boxes: set_count(scope.boxes, index, box),
+                box_written: set_count(scope.box_written, index, false)}
+            else if (i == depth - 1) {*:scope, box_written: set_count(scope.box_written, index, true)}
+            else scope]}
+}
+
+// Consumption crosses only scopes that have not saved the register locally.
+fn take_box(st, index, copy) any^ {
+    let box = st.boxes[string(index)];
+    if (copy or box == null) {state:st, box:box}
+    else {
+        let saved = [for (i, scope in st.groups where scope.box_written[string(index)] == true) i];
+        let barrier = if (len(saved) == 0) -1 else saved[len(saved) - 1];
+        {state:{*:st, boxes:set_count(st.boxes,index,null),
+            groups:[for(i, scope in st.groups) if (i > barrier)
+                {*:scope, boxes:set_count(scope.boxes,index,null)} else scope]}, box:box}
+    }
+}
+
 fn dimen_value(st, index) => if (st.dimens[string(index)] == null) 0 else st.dimens[string(index)]
 fn page_dimension(name) => contains(["pagegoal", "pagetotal", "pagestretch", "pagefilstretch",
     "pagefillstretch", "pagefilllstretch", "pageshrink", "pagedepth"], name)
@@ -1598,9 +1622,12 @@ fn expand_the(st, budget, count_expansion = true, capture = false) any^ {
         }
         else if (primitive(read.state, read.token) == "inputlineno")
             {*:read.state, input: the_push(read.state.input, the_text(st, string(input_line_number(read.state)^)), capture)}
-        else if (primitives.engine_version(primitive(read.state, read.token)) != null)
-            {*:read.state, input: the_push(read.state.input,
-                the_text(st, string(primitives.engine_version(primitive(read.state, read.token)))), capture)}
+        // character definitions and engine versions are native integer quantities.
+        else if (m.kind == "chardef" or m.kind == "mathchardef" or primitives.engine_version(primitive(read.state, read.token)) != null) {
+            let value = if (m.kind == "chardef" or m.kind == "mathchardef") m.value
+                else primitives.engine_version(primitive(read.state, read.token));
+            {*:read.state, input: the_push(read.state.input, the_text(st, string(value)), capture)}
+        }
         else if (primitive(read.state, read.token) == "numexpr") {
             let value = scan_expression(read.state, budget)^;
             if (value.state.issue != null) value.state
@@ -1948,8 +1975,9 @@ fn read_stream_line(st, slot) any^ {
         {state: diagnosed, opened: false, eof: true, text: ""}
     }
     else {
-        let decoded = utf8.decode(source.data) ^ { null };
-        if (decoded == null) {state: unsupported(st, "read invalid UTF-8"), opened: true, eof: true, text: ""}
+        // The reader retains the decoded source and position across reads.
+        let decoded = if (source.reader != null) null else utf8.decode(source.data) ^ { null };
+        if (source.reader == null and decoded == null) {state: unsupported(st, "read invalid UTF-8"), opened: true, eof: true, text: ""}
         else {
             let cursor = if (source.reader != null) source.reader else reader.reader(decoded, source.id);
             let line = reader.load_line(cursor)^;
@@ -3629,7 +3657,7 @@ fn save_after_assignment(st) any^ {
 }
 
 fn begin_group(st, token, explicit) any^ =>
-    {*:st, groups: [*st.groups, {definitions: st.definitions, counts: st.counts, dimens: st.dimens, skips: st.skips, muskips: st.muskips, toks: st.toks,
+    {*:st, groups: [*st.groups, {definitions: st.definitions, counts: st.counts, dimens: st.dimens, skips: st.skips, muskips: st.muskips, boxes: st.boxes, box_written: {}, toks: st.toks,
         lowercase: st.lowercase, uppercase: st.uppercase, code_tables: st.code_tables, current_font: st.current_font, parameters: st.parameters,
         catcodes: st.input.reader.catcodes, expl_syntax: st.expl_syntax, explicit: explicit, aftergroup: []}],
         output: if (token == null) st.output else [*st.output, token]}
@@ -3686,6 +3714,62 @@ fn begin_inline_box(st, budget, command, movement = null) any^ {
                 *text_tokens(dimension.format(movement.value)^)^, brace_token(false), brace_token(true)] else [];
         open_inline_body(opened, prefix, movement != null and not movement.wrap, command)
     }
+}
+
+// Reference commands share register scanning and native copy-or-consume behavior.
+fn scan_box_reference(st, budget, command) any^ {
+    if (command == "lastbox") {state:st,box:null}
+    else {
+        let index = scan_register(st,budget)^;
+        if (index.state.issue != null) {state:index.state,box:null}
+        else {
+            let size = if (command == "vsplit") {
+                let to = scan_word(index.state,"to",budget)^;
+                let current = if (to.state.issue != null or to.found) to.state
+                    else record_diagnostic(to.state,"tex-missing-to","Missing `to' inserted")^;
+                if (current.issue != null) {state:current} else scan_dimen(current,budget)^
+            } else {state:index.state};
+            if (size.state.issue != null) {state:size.state,box:null}
+            else take_box(size.state,index.value,contains(["copy","unhcopy","unvcopy"],command))
+        }
+    }
+}
+
+// Assigned boxes capture emitted material while running their ordinary group and hook.
+fn assign_box(st, global, budget) any^ {
+    let index = scan_register(st, budget)^;
+    if (index.state.issue != null) index.state
+    else {
+        let scanned = scan_box_command(optional_equals(index.state,budget)^, budget)^;
+        if (scanned.state.issue != null) scanned.state
+        else if (contains(["hbox", "vbox", "vtop"], scanned.command)) {
+            let opening = scan_box_opening(scanned.state,budget)^;
+            if (opening.state.issue != null) opening.state
+            else {
+                let opened = begin_group(opening.state,null,false)^;
+                let depth = len(opened.groups);
+                let scope = {*:opened, box_assignment_seen:true,
+                    groups:[for (i, item in opened.groups) if (i == depth - 1)
+                        {*:item, box_target:index.value, box_global:global, box_start:len(opened.output),
+                            box_kind:if(scanned.command == "hbox") "horizontal" else "vertical"} else item]};
+                inject_box_hook(scope, scanned.command)
+            }
+        }
+        else if (contains(["box","copy","vsplit","lastbox"],scanned.command)) {
+            let taken = scan_box_reference(scanned.state,budget,scanned.command)^;
+            if (taken.state.issue != null) taken.state
+            else save_box({*:taken.state,box_assignment_seen:true},index.value,taken.box,global)
+        }
+        else unsupported(put_back(scanned.state,scanned.token), "setbox source")
+    }
+}
+
+fn emit_box(st, budget, command) any^ {
+    let taken = scan_box_reference(st,budget,command)^;
+    if (taken.state.issue != null) taken.state
+    else {*:taken.state,box_replay_seen:true,
+        output:if(taken.box == null) taken.state.output else [*taken.state.output,
+            *[for (token in taken.box.output) {*:token,box_replayed:true}]]}
 }
 
 fn begin_vcenter(st, budget) any^ {
@@ -3751,13 +3835,18 @@ fn end_group(st, token, explicit, environment = false, math = false, recover = f
         let scope = st.groups[depth - 1];
         let restored = {*:stream.configure(st.input, scope.catcodes, scope.parameters.endlinechar),
             everyeof: if (scope.toks["-1"] == null) [] else scope.toks["-1"]};
-        {*:st, expl_syntax: scope.expl_syntax, definitions: scope.definitions, counts: scope.counts, dimens: scope.dimens, skips: scope.skips, muskips: scope.muskips, toks: scope.toks,
+        let captured = if (scope.box_target != null) slice(st.output,scope.box_start,len(st.output))^ else null;
+        let returned = {*:st, expl_syntax: scope.expl_syntax, definitions: scope.definitions, counts: scope.counts, dimens: scope.dimens, skips: scope.skips, muskips: scope.muskips, boxes: scope.boxes, toks: scope.toks,
             lowercase: scope.lowercase, uppercase: scope.uppercase, code_tables: scope.code_tables, current_font: scope.current_font, parameters: scope.parameters,
             input: stream.push(restored, scope.aftergroup), groups: slice(st.groups, 0, depth - 1),
-            output: if (scope.discard_output != null) slice(st.output, 0, scope.discard_output)^
+            output: if (scope.box_target != null) slice(st.output,0,scope.box_start)^
+                else if (scope.discard_output != null) slice(st.output, 0, scope.discard_output)^
                 else if (scope.inline_box == true) [*st.output,
                     {*:brace_token(false), emit_origin: st.input.last_main_offset, emit_file: st.main_file, box_close: true}]
-                else if (scope.inline_bare == true or token == null) st.output else [*st.output, token]}
+                else if (scope.inline_bare == true or token == null) st.output else [*st.output, token]};
+        if (scope.box_target == null) returned
+        else save_box({*:returned,box_serial:returned.box_serial + 1},scope.box_target,
+            {id:returned.box_serial + 1,kind:scope.box_kind,output:captured},scope.box_global)
     }
 }
 
@@ -5006,6 +5095,8 @@ fn step(st, budget) any^ {
     else if (contains(["hskip", "vskip", "mskip", "kern", "mkern"], cmd))
         emit_spacing(current, t, cmd, budget)
     else if (contains(["hbox", "vbox", "vtop"], cmd)) begin_inline_box(current, budget, cmd)
+    else if (contains(["box","copy","lastbox","vsplit","unhbox","unhcopy","unvbox","unvcopy"],cmd))
+        emit_box(current, budget, cmd)
     else if (cmd == "vcenter") begin_vcenter(current, budget)
     else if (contains(["raise", "lower", "moveleft", "moveright"], cmd)) move_inline_box(current, budget, cmd)
     else if (cmd == "shipout") ship_inline_box(current, budget)
@@ -5028,7 +5119,10 @@ fn step(st, budget) any^ {
         if (count > 0 and charcat(current.output[count - 1], 10))
             if (any([for (scope in current.groups) scope.discard_output != null and count <= scope.discard_output]))
                 unsupported(current, "insert cross-boundary unskip")
-            else {*:current, output: slice(current.output, 0, count - 1)^} else current
+            else {*:current, output: slice(current.output, 0, count - 1)^,
+                // native adjusts each open box capture when removal crosses its start.
+                groups:[for(scope in current.groups) if(scope.box_start != null and scope.box_start >= count)
+                    {*:scope,box_start:count - 1} else scope]} else current
     }
     else if (contains(["def", "gdef", "edef", "xdef"], cmd)) {
         // token-list assignment aliases share the existing source-mapping guard.
@@ -5116,6 +5210,7 @@ fn step(st, budget) any^ {
     else if (contains(["textfont", "scriptfont", "scriptscriptfont"], cmd))
         after_assignment(current, assign_font_family(current, budget, cmd))
     else if (cmd == "nullfont") after_assignment(current, select_font(current, assignment_global, 0))
+    else if (cmd == "setbox") after_assignment(current, assign_box(current, assignment_global, budget))
     else if (cmd == "count") after_assignment(current, assign_count(current, assignment_global, budget, null))
     else if (cmd == "countdef") after_assignment(current, assign_countdef(current, assignment_global, budget))
     else if (cmd == "dimen") after_assignment(current, assign_dimen(current, assignment_global, budget, null))
@@ -5201,8 +5296,12 @@ fn mathchardef_name_needs_mapping(t) any^ {
 }
 
 fn run(st, budget) any^ {
-    if (st.issue != null or st.finished == true) terminal_flush(st)
-    else run(step(st, budget), budget)
+    // keep document-length stepping off the native call stack.
+    var current = st
+    while (current.issue == null and current.finished != true) {
+        current = step(current, budget)^
+    }
+    return terminal_flush(current)^
 }
 
 pub fn expand(input, budget = 20000000, options = null) any^ =>

@@ -778,6 +778,25 @@
         "test/ui/svg_css_geometry_export_reference.html"
       ],
       "limits": "geometry for image, foreignObject, root/nested SVG sizing and use/symbol viewports, geometry animation, path data and exhaustive newer units remain outside the qualified scope"
+    },
+    {
+      "properties": [
+        "shape-outside",
+        "shape-margin",
+        "shape-image-threshold"
+      ],
+      "qualification": "partial",
+      "scope": "horizontal left/right float line contours, including assigned grid/flex contexts, for circle/ellipse/inset/polygon and rounded reference boxes; lengths, percentages, variables, distance margins clipped to the margin box; local/data raster alpha contours, strict clamped thresholds, retained style changes; float placement, clear and BFC avoidance retain margin boxes (D9.1.1v4, D5.5.1)",
+      "evidence": [
+        "radiant/layout_shape.cpp#shape_float_build",
+        "../radiant/test/test_css_shapes_layout_gtest.cpp#CircleChangesActualTextLineStarts",
+        "../radiant/test/test_css_shapes_layout_gtest.cpp#ShapeImageThresholdAndMarginChangeActualLineStarts",
+        "../radiant/test/test_css_shapes_gtest.cpp#EllipseMarginIsADistanceOffset",
+        "../lambda-input/test/css/test_css_parser_gtest.cpp#CssShapesRegistersAndValidatesCoreGrammar",
+        "../radiant/test/html/css_shapes_mutation.html#SHAPES_JS_PASS",
+        "../radiant/test/html/css_shapes_visual.html"
+      ],
+      "limits": "vertical/sideways, initial-letter and fragmented contours, animation, gradient/SVG/animated images and remote CORS admission; complete inset corner/slash rounding, newer basic-shape grammar, fully computed basic-shape CSSOM serialization and complex clipped concave contours remain outside this increment"
     }
   ]
 }

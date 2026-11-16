@@ -1,0 +1,32 @@
+{
+  cases: 38,
+  guarded: 2,
+  supported: true,
+  text: true,
+  messages: true,
+  diagnostics: true,
+  tree: true
+}
+[{
+    mode: false,
+    expansion_issue: null,
+    issue: null,
+    unsupported: null,
+    text: true,
+    messages: true,
+    diagnostics: true,
+    tree: true,
+    script: null,
+    native: null
+  }, {
+    mode: true,
+    expansion_issue: null,
+    issue: null,
+    unsupported: null,
+    text: true,
+    messages: true,
+    diagnostics: true,
+    tree: true,
+    script: null,
+    native: null
+  }]

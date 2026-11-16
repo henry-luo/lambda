@@ -1972,6 +1972,9 @@ fn inline(tokens, sources, index = 0, text = "", items = [], stop_blocks = true,
         else if (token.kind == "control" and contains(["hrule", "vrule"], token.value) and token.echo_span != null and
             rule_span_needs_reparse(token, sources)^)
             unsupported(index, "rule comment source gap")
+        // a replayed synthetic rule's last argument follows the later source cursor.
+        else if (control(token, "rule") and token.emit_origin != null and token.box_replayed == true)
+            unsupported(index, "box rule source mapping")
         else if (control(token, "rule") and token.emit_origin != null) {
             let rule = generated_rule(tokens, index)^;
             if (rule.issue != null) rule
