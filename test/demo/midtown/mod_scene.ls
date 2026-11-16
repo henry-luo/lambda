@@ -13,9 +13,13 @@ import m: .mod_mesh
 import cm: .mod_car_mesh
 import tx: .mod_textures
 import tr: .mod_traffic
+import rt: .mod_route
 import cam: .mod_camera
 import land: .mod_land
 import roads: .mod_roads
+import shapes: lambda.scene3d.shape
+import noise: lambda.procart.noise
+import rng: lambda.procart.rng
 import ls: .mod_land_scene
 
 // collision groups
@@ -26,35 +30,41 @@ pub let PROPS = 8
 pub let NOBODY = {membership: 0, filter: 0}
 pub let PARKED_Y = -60.0              // hidden bodies wait below the city
 
-// ---- lighting looks; `sun` points from the city toward the light
+// ---- lighting looks; `sun` points from the city toward the light. The sky dome's zenith and horizon are
+// vertex colours, shaded in linear light (the day sky is written so: 0.6 blue displays as about 0.8)
 pub let LOOKS = {
-    day: {label: "DAY", background: "#a9c3da", fog: "#b8c9d7", density: 0.0026, sun: [0.42, 0.78, 0.33], sun_color: "#fff2df",
+    day: {label: "DAY", background: "#9dbbd8", fog: "#b4c6d6", density: 0.0016, sun: [0.42, 0.78, 0.33], sun_color: "#fff2df",
         sun_i: 2.5, sky: "#d8e7ff", ground: "#5f5c50", hemi_i: 0.8, env_i: 0.9, exposure: 1.0, windows: 0.0, shops: 0.15,
-        bulbs: 0.3, pools: false, bloom: 0.15, zenith: [0.33, 0.52, 0.8], horizon: [0.72, 0.8, 0.86], clouds: "#ffffff",
-        grade: {saturation: 1.06, contrast: 1.05, lift: [0.004, 0.002, 0.0], gain: [1.02, 1.0, 0.98], vignette: 0.32}},
+        bulbs: 0.3, pools: false, bloom: 0.15, zenith: [0.05, 0.17, 0.6], horizon: [0.42, 0.57, 0.75], clouds: [0.9, 0.92, 0.95]},
     dusk: {label: "DUSK", background: "#c98f7c", fog: "#c08f84", density: 0.0032, sun: [-0.78, 0.17, 0.42], sun_color: "#ffad74",
         sun_i: 2.3, sky: "#f0b08c", ground: "#3a3240", hemi_i: 0.6, env_i: 0.55, exposure: 1.05, windows: 0.8, shops: 1.4,
-        bulbs: 5.0, pools: true, bloom: 0.4, zenith: [0.25, 0.3, 0.55], horizon: [0.95, 0.62, 0.45], clouds: "#ffc4a2",
-        grade: {saturation: 1.1, contrast: 1.07, lift: [0.012, 0.0, 0.01], gain: [1.05, 0.98, 0.93], vignette: 0.4}},
+        bulbs: 5.0, pools: true, bloom: 0.4, zenith: [0.25, 0.3, 0.55], horizon: [0.95, 0.62, 0.45], clouds: [1.0, 0.68, 0.5]},
     night: {label: "NIGHT", background: "#0c1324", fog: "#121a2d", density: 0.0038, sun: [0.32, 0.72, -0.48], sun_color: "#9fb5ff",
         sun_i: 0.32, sky: "#273a62", ground: "#0b0d13", hemi_i: 0.42, env_i: 0.16, exposure: 1.15, windows: 1.7, shops: 2.4,
-        bulbs: 10.0, pools: true, bloom: 0.75, zenith: [0.02, 0.03, 0.08], horizon: [0.07, 0.1, 0.18], clouds: "#2b3448",
-        grade: {saturation: 0.95, contrast: 1.04, lift: [0.0, 0.004, 0.012], gain: [0.96, 0.99, 1.05], vignette: 0.45}}}
+        bulbs: 10.0, pools: true, bloom: 0.75, zenith: [0.02, 0.03, 0.08], horizon: [0.07, 0.1, 0.18], clouds: [0.07, 0.08, 0.12]}}
 pub let LOOK_ORDER = ["day", "dusk", "night"]
-// the display-domain grade after tone mapping: saturation, contrast, a split-tone lift and gain, a vignette
+// the display-domain grade after tone mapping: saturation, contrast, a split-tone lift and gain, a
+// vignette. One grade serves every look (a uniforms edit cannot cross the attribute boundary as text)
 let GRADE = "uniform float saturation;uniform float contrast;uniform vec3 lift;uniform vec3 gain;uniform float vignette;" ++
     "void main(){vec2 uv=gl_FragCoord.xy/resolution;vec4 c=texture(color_input,uv);vec3 k=c.rgb;" ++
     "k=mix(vec3(dot(k,vec3(0.2126,0.7152,0.0722))),k,saturation);k=(k-0.5)*contrast+0.5;k=k*gain+lift*(1.0-k);" ++
     "vec2 d=uv-0.5;k*=1.0-vignette*dot(d,d)*1.6;fragment_color=vec4(clamp(k,0.0,1.0),c.a);}"
+let GRADE_UNIFORMS = {saturation: 1.06, contrast: 1.05, lift: [0.004, 0.002, 0.0], gain: [1.02, 1.0, 0.98], vignette: 0.34}
 
 pub fn next_look(look) => (let i = [for (k, n in LOOK_ORDER where n == look) k][0], LOOK_ORDER[(i + 1) % len(LOOK_ORDER)])
 pub let HEADLIGHT = 420.0
 
 // ---- materials
 fn paint_id(color) any^ => "m-paint-" ++ slice(color, 1, 7)
-let TRAFFIC_PAINTS = [*tr.PAINTS, "#f2c230"]
+let TRAFFIC_PAINTS = unique([*tr.PAINTS, *rt.PAINTS, "#f2c230"])
+let CAR_PAINTS = [*TRAFFIC_PAINTS, "#c0262d"]
 fn std(id, color, options = {}) element => s.material('standard', {id: id, color: color, roughness: 0.8, *: options})
-fn paint(id, color) element => s.material('physical', {id: id, color: color, roughness: 0.42, metalness: 0.55, clearcoat: 1.0, 'clearcoat-roughness': 0.05})
+// a car body in one draw: the atlas maps give the paint its metallic clear coat, the glass its gloss, the
+// trim its matt black and the lamps their glow (the paint colour tints the atlas's white paint cell)
+fn paint(id, color, lights) element => s.material('physical', {id: id, color: color, texture: "t-car-base", 'metal-rough-texture': "t-car-mr",
+    roughness: 1.0, metalness: 1.0, 'emissive-texture': "t-car-glow", emissive: "#ffffff", 'emissive-intensity': lamps(lights),
+    clearcoat: 1.0, 'clearcoat-texture': "t-car-coat", 'clearcoat-roughness': 0.05})
+fn lamps(lights) => if (lights) 4.0 else 0.7
 fn materials(look, lights) => [
     std("m-asphalt", "#ffffff", {texture: "t-asphalt", roughness: 0.93}),
     std("m-sidewalk", "#ffffff", {texture: "t-sidewalk", roughness: 0.9}),
@@ -84,12 +94,11 @@ fn materials(look, lights) => [
     // glossy, not transmissive: refraction would cost a second opaque pass and its capture targets
     std("m-water", "#1f4d60", {roughness: 0.06, metalness: 0.35, 'water-amplitude': 0.05, 'water-frequency': 0.3}),
     s.material('basic', {id: "m-sky", color: "#ffffff", side: 'back'}),
-    s.material('basic', {id: "m-clouds", color: look.clouds, texture: "t-clouds", side: 'back', 'alpha-mode': 'blend'}),
     std("m-hill", "#4c6b3e", {roughness: 1.0}),
     // vehicles
     // car paint: a metallic base under a clear coat that mirrors the sky
-    *[for (c in [*TRAFFIC_PAINTS, "#c0262d"]) paint(paint_id(c), c)],
-    paint("m-parked", "#ffffff"),
+    *[for (c in CAR_PAINTS) paint(paint_id(c), c, lights)],
+    std("m-parked", "#ffffff", {roughness: 0.35, metalness: 0.4}),
     std("m-glass", "#10161d", {roughness: 0.04, metalness: 0.85}),
     std("m-trim", "#1b1c1f", {roughness: 0.7}),
     std("m-tyre", "#191919", {roughness: 0.9}),
@@ -112,7 +121,10 @@ fn textures() => [
     *[for (k in 0 to (city.STYLES - 1)) *[tx.texture("t-facade-" ++ string(k), tx.facade_svg(k, false), 512, 512),
         tx.texture("t-facade-" ++ string(k) ++ "-lit", tx.facade_svg(k, true), 512, 512),
         tx.texture("t-facade-" ++ string(k) ++ "-mr", tx.facade_mr_svg(k), 128, 128, {'color-space': 'linear'})]],
-    tx.texture("t-clouds", tx.clouds_svg(), 1024, 256, {'wrap-t': 33071}),
+    // the car atlas: sampled at cell centres without mipmaps, so a distant car never mixes cells
+    *[for (a in [["t-car-base", ["#ffffff", "#0e1319", "#1b1c1f", "#f4f1e6", "#5c0d0c"], 'srgb'], ["t-car-mr", ["#006b8c", "#000ad9", "#00b400", "#003c00", "#005000"], 'linear'],
+            ["t-car-glow", ["#000000", "#000000", "#000000", "#fff2d0", "#ff2a1a"], 'srgb'], ["t-car-coat", ["#ffffff", "#000000", "#000000", "#000000", "#000000"], 'linear']])
+        tx.texture(a[0], tx.car_atlas_svg(a[1]), 80, 16, {'color-space': a[2], 'min-filter': 9728, 'mag-filter': 9728, 'wrap-s': 33071, 'wrap-t': 33071})],
     tx.texture("t-store", tx.storefront_svg(false), 512, 144, {'wrap-t': 33071}),
     tx.texture("t-store-lit", tx.storefront_svg(true), 512, 144, {'wrap-t': 33071}),
     tx.texture("t-asphalt", tx.asphalt_svg(), 256, 256), tx.texture("t-sidewalk", tx.sidewalk_svg(), 256, 256),
@@ -176,8 +188,8 @@ pub fn walk_clip(peds) any^ {
             [for (a in keys, c in [0.0, 0.03 * abs(cos(p.gait + a)), 0.0]) c], 'vector')]], {duration: STRIDE, autoplay: true})
 }
 fn shared_geometry() any^ => [
-    *[for (kind in ["sedan", "hatch", "van", "taxi", "pickup", "suv"], let parts = cm.car(kind)^) for (p in PARTS) m.geometry("g-" ++ kind ++ "-" ++ p, parts[p])],
-    *[for (p in PARTS, let parts = cm.car("coupe", false)^) m.geometry("g-player-" ++ p, parts[p])],
+    *[for (kind in ["sedan", "hatch", "van", "taxi", "pickup", "suv"]) m.geometry("g-" ++ kind, cm.merged(cm.CARS[kind])^)],
+    m.geometry("g-player", cm.merged(cm.CARS.player)^),
     m.geometry("g-tyre", m.tyre()), m.geometry("g-hub", m.hub()),
     m.geometry("g-indicator-l", cm.indicator(1.0)^), m.geometry("g-indicator-r", cm.indicator(-1.0)^),
     *person_geometry(),
@@ -201,7 +213,7 @@ fn markings() any^ {
     let stops = [for (sg in city.SIGNALS, let f = city.DIRS[sg.d])
         stop_bar(city.road(sg.i) - f[0] * (e + 0.5), city.road(sg.j) - f[1] * (e + 0.5), f, [0.0 - f[1], f[0]])]
     let zebra = [for (i in 0 to n, j in 0 to n, d in 0 to 3, s in 0 to 9, let f = city.DIRS[d]
-            where i + int(f[0])^ >= 0 and i + int(f[0])^ <= n and j + int(f[1])^ >= 0 and j + int(f[1])^ <= n)
+            where (i + int(f[0])^ >= 0 and i + int(f[0])^ <= n and j + int(f[1])^ >= 0 and j + int(f[1])^ <= n) or (i == n and j == city.GATE_J and d == 0))
         (let x = city.road(i), (let z = city.road(j), (let across = -5.4 + s * 1.2, (let near = e - 2.6,
             if (abs(f[0]) > 0.5) m.ground_quad(x + f[0] * near - (if (f[0] < 0.0) 2.2 else 0.0), z + across - 0.3, x + f[0] * near + (if (f[0] > 0.0) 2.2 else 0.0), z + across + 0.3, 0.013, 1.0)
             else m.ground_quad(x + across - 0.3, z + f[1] * near - (if (f[1] < 0.0) 2.2 else 0.0), x + across + 0.3, z + f[1] * near + (if (f[1] > 0.0) 2.2 else 0.0), 0.013, 1.0)))))];
@@ -214,7 +226,7 @@ fn buildings() {
      mesh("roofs", m.merge([for (b in city.BUILDINGS) m.roof(b)]), "m-roof"),
      mesh("rooftops", m.merge([for (b in city.BUILDINGS) m.rooftop(b)]), "m-concrete")]
 }
-let PARKED_SHAPES = {sedan: cm.car("sedan") ^ { null }, hatch: cm.car("hatch") ^ { null }}
+let PARKED_SHAPES = {sedan: cm.CARS.sedan, hatch: cm.CARS.hatch}
 fn parked_cars() {
     let placed = (c, part) any^ => m.yawed(PARKED_SHAPES[c.kind][part], c.x, 0.0, c.z, c.heading);
     [mesh("parked-paint", m.merge([for (c in city.PARKED) m.tinted(placed(c, "paint"), hex_rgb(c.paint))]), "m-parked"),
@@ -261,11 +273,26 @@ fn landmarks() {
      mesh("ramps", m.merge([for (r in city.RAMPS) m.wedge(r, city.CURB)]), "m-steel")]
 }
 // the harbour south of the barrier, hills and a sky dome around everything
-fn surroundings(look) any^ {
+// ---- the sky: a dome per look whose vertex colours carry the gradient and the clouds (soft fBm patches
+// over the sky's directions, flattened, densest a little above the horizon and thin toward the zenith).
+// Painting clouds into the dome needs no transparency; the domes turn slowly together.
+let BALL = shapes.sphere(36, 96)
+let SKY_NOISE = noise.make(rng.derive(rng.key([city.SEED, "sky"]), "clouds"), {kind: 'simplex', octaves: 4, frequency: 2.4}) ^ { null }
+let BALL_N = BALL.normals
+let SKY_N = (len(BALL_N) div 3) ^ { 0 }
+let SKY_Y = [for (i in 0 to (SKY_N - 1)) BALL_N[3 * i + 1]]
+let CLOUD = (let n = [for (i in 0 to (SKY_N - 1)) if (SKY_NOISE == null) 0.0 else noise.sample3(SKY_NOISE, BALL_N[3 * i] * 2.0, SKY_Y[i] * 5.0, BALL_N[3 * i + 2] * 2.0) ^ { 0.0 }],
+    land.smooth(0.08, 0.5, n) * land.smooth(0.02, 0.1, SKY_Y) * (1.0 - land.smooth(0.45, 0.85, SKY_Y)) * 0.92)
+fn sky_dome(name) any^ {
+    let look = LOOKS[name]
+    let k = land.clamp01(SKY_Y * 1.6)
+    let sky = [for (c in 0 to 2) look.horizon[c] + (look.zenith[c] - look.horizon[c]) * k]
+    let tone = [for (c in 0 to 2) sky[c] + (look.clouds[c] - sky[c]) * CLOUD];
+    s.mesh(s.geometry([for (x in BALL.positions) x], {id: "g-sky-" ++ name, normals: BALL.normals, indices: BALL.indices, colors: flatten(transpose(tone))}), "m-sky",
+        {id: "sky-" ++ name, visible: false, 'cast-shadow': false, 'receive-shadow': false, 'frustum-culling': false})
+}
+fn surroundings(look_name) any^ {
     let l = city.LIMIT, sh = city.SHORE
-    let dome = s.sphere(12, 24)
-    let colors = [for (i in 0 to (len(dome.positions)^ div 3 - 1), let y = dome.positions[3 * i + 1] * 2.0, let k = u.clamp(y * 1.6, 0.0, 1.0))
-        *[for (c in 0 to 2) u.lerp(look.horizon[c], look.zenith[c], k)]]
     let gate = city.road(city.GATE_J);
     [mesh("barrier", m.merge([m.cuboid(0.0 - l - 1.0, 0.0, 0.0 - l - 1.0, l + 1.0, 1.1, 0.0 - l), m.cuboid(0.0 - l - 1.0, 0.0, l, l + 1.0, 1.1, l + 1.0),
         m.cuboid(0.0 - l - 1.0, 0.0, 0.0 - l, 0.0 - l, 1.1, l), m.cuboid(l, 0.0, 0.0 - l, l + 1.0, 1.1, gate - city.ROAD),
@@ -277,13 +304,8 @@ fn surroundings(look) any^ {
      // under it: the sea south of the shore and a corridor along the river
      mesh("harbour", m.merge([m.ground_quad(-6000.0, sh + 1.2, 6000.0, 6000.0, land.SEA, 40.0),
         m.ground_quad(370.0, land.FZ0, 600.0, sh + 1.2, land.SEA, 40.0)]), "m-water", {'cast-shadow': false}),
-     s.mesh(s.geometry(dome.positions, {id: "g-sky", normals: dome.normals, indices: dome.indices, colors: colors}), "m-sky",
-        {id: "sky-dome", scale: [9000.0, 9000.0, 9000.0], 'cast-shadow': false, 'receive-shadow': false, 'frustum-culling': false}),
-     // the cloud band wraps the sky four times round
-     s.group([s.mesh(s.geometry(dome.positions, {id: "g-clouds", normals: dome.normals, indices: dome.indices,
-            uvs: [for (k, v in dome.uvs) if (k % 2 == 0) v * 4.0 else v]}), "m-clouds",
-        {id: "cloud-dome", scale: [8600.0, 8600.0, 8600.0], 'cast-shadow': false, 'receive-shadow': false, 'frustum-culling': false})],
-        {id: "cloud-turn"})]
+     s.group([for (name in LOOK_ORDER) (let d = sky_dome(name)^, <mesh *: d, visible: name == look_name, *content(d)>)],
+        {id: "cloud-turn", scale: [9000.0, 9000.0, 9000.0]})]
 }
 // the sidewalk between the outermost roads and the perimeter barrier
 fn outer_walks(o, l) => (let gate = city.road(city.GATE_J), [m.slab(0.0 - l, 0.0 - l, l, 0.0 - o, 0.0, city.CURB, 4.0), m.slab(0.0 - l, o, l, l, 0.0, city.CURB, 4.0),
@@ -323,7 +345,7 @@ fn city_body() element {
 pub let WHEEL_IDS = ["wheel-fl", "wheel-fr", "wheel-rl", "wheel-rr"]
 fn player_body(car, look, lights) element => physics.body("player", [
     physics.collider("player-shape", 'box', {size: [1.86, 1.1, 4.5], position: [0.0, 0.85, 0.0], groups: {membership: PLAYER, filter: PROPS}}),
-    *[for (p in PARTS) s.mesh("g-player-" ++ p, if (p == "paint") "m-paint-c0262d" else PART_MATERIAL[p], {id: "player-" ++ p})],
+    s.mesh("g-player", "m-paint-c0262d", {id: "player-body"}),
     *[for (side in [-1.0, 1.0]) s.light('spot', {id: if (side < 0.0) "head-l" else "head-r", position: [side * 0.62, 0.7, 2.2],
         target: [side * 0.9, 0.0, 16.0], color: "#fff1d6", intensity: if (lights) HEADLIGHT else 0.0, angle: 0.48, penumbra: 0.5, distance: 55.0})]],
     {type: 'kinematic-position', position: [car.x, car.y, car.z], quaternion: u.quat(car.heading)})
@@ -337,9 +359,9 @@ fn indicator_body(id) element => physics.body(id, [physics.collider(id ++ "-shap
     s.mesh("g-" ++ id, "m-indicator", {id: id ++ "-lamp", 'cast-shadow': false, 'receive-shadow': false})],
     {type: 'kinematic-position', position: [0.0, PARKED_Y, 0.0]})
 // traffic and people take their IDs from their records, so they are built as literal bodies
-fn traffic_body(a) element => <'rigid-body' id: a.id, type: 'kinematic-position', position: [a.x, 0.0, a.z], quaternion: u.quat(a.heading),
+fn traffic_body(a) element => <'rigid-body' id: a.id, type: 'kinematic-position', position: [a.x, a.y or 0.0, a.z], quaternion: u.quat(a.heading, a.pitch or 0.0),
     *[physics.collider(a.id ++ "-shape", 'box', {size: [a.hw * 2.0, 1.3, a.hl * 2.0], position: [0.0, 0.95, 0.0], groups: {membership: TRAFFIC, filter: PROPS}}),
-      *[for (p in PARTS) s.mesh("g-" ++ a.kind ++ "-" ++ p, if (p == "paint") paint_id(a.paint) else PART_MATERIAL[p], {id: a.id ++ "-" ++ p})]]>
+      s.mesh("g-" ++ a.kind, paint_id(a.paint), {id: a.id ++ "-body"})]>
 fn ped_body(p) element => <'rigid-body' id: p.id, type: 'kinematic-position', position: [p.x, p.y, p.z], quaternion: u.quat(p.heading),
     *[physics.collider(p.id ++ "-shape", 'sphere', {radius: 0.2, groups: NOBODY}), person_figure(p.id, p.n % PERSON_VARIANTS, p.gait)]>
 fn prop_body(k, p) element {
@@ -402,14 +424,14 @@ pub fn scene(st) element {
         s.light('hemisphere', {id: "hemi", position: [0.0, 1.0, 0.0], color: look.sky, 'ground-color': look.ground, intensity: look.hemi_i}),
         o.fog('height', {id: "haze", color: look.fog, density: look.density, height: 0.0, falloff: 0.012}),
         s.resources([*(if (SKY == null) [] else [SKY]), *textures(), *materials(look, st.lights), *(shared_geometry() ^ { [] })]),
-        *ground_cover(), *buildings(), *parked_cars(), *street_furniture(look), *landmarks(), *surroundings(look), *(ls.elements() ^ { [] }), *(ls.scenery_elements() ^ { [] }),
+        *ground_cover(), *buildings(), *parked_cars(), *street_furniture(look), *landmarks(), *surroundings(st.look), *(ls.elements() ^ { [] }), *(ls.scenery_elements() ^ { [] }),
         city_body(), player_body(st.car, look, st.lights), *[for (id in WHEEL_IDS) wheel_body(id)],
         *[for (id in INDICATOR_IDS) indicator_body(id)],
-        *[for (a in st.traffic) traffic_body(a)], *[for (p in st.peds) ped_body(p)], *[for (k, p in city.PROPS) prop_body(k, p)],
+        *[for (a in st.traffic) traffic_body(a)], *[for (a in st.route) traffic_body(a)], *[for (p in st.peds) ped_body(p)], *[for (k, p in city.PROPS) prop_body(k, p)],
         beacon_body("pickup"), beacon_body("drop"), camera_body(st.camera),
         *clips(), walk_clip(st.peds), *(ls.clips() ^ { [] }),
         post.chain([post.effect('bloom', {id: "glow", strength: look.bloom, threshold: 1.0, radius: 3.0}),
-            post.shader(GRADE, look.grade, {id: "grade", domain: 'display'}), post.effect('fxaa')])
+            post.shader(GRADE, GRADE_UNIFORMS, {id: "grade", domain: 'display'}), post.effect('fxaa')])
     ], {id: "city", camera: "cam", width: 1280, height: 720, viewBox: "0 0 1280 720", preserveAspectRatio: "xMidYMid slice",
         background: look.background, environment: "sky", 'environment-intensity': look.env_i, 'tone-mapping': 'aces',
         // a full-window scene renders at one pixel per CSS pixel and is upsampled on the GPU for dense displays
@@ -429,11 +451,12 @@ pub fn look_edits(look_name, lights) {
      *[for (k in 0 to (city.STYLES - 1)) {id: "m-facade-" ++ string(k), key: "emissive-intensity", value: look.windows}],
      {id: "m-store", key: "emissive-intensity", value: look.shops}, {id: "m-bulb", key: "emissive-intensity", value: look.bulbs},
      {id: "pools", key: "visible", value: look.pools}, {id: "glow", key: "strength", value: look.bloom},
-     {id: "grade", key: "uniforms", value: look.grade}, {id: "m-clouds", key: "color", value: look.clouds},
+     *[for (name in LOOK_ORDER) {id: "sky-" ++ name, key: "visible", value: name == look_name}],
      {id: "m-taillamp", key: "emissive-intensity", value: if (look.windows > 0.0) 3.0 else 1.0},
      {id: "m-lantern", key: "emissive-intensity", value: ls.lantern(look)},
      *lights_edits(lights)]
 }
 pub fn lights_edits(lights) => [{id: "head-l", key: "intensity", value: if (lights) HEADLIGHT else 0.0},
     {id: "head-r", key: "intensity", value: if (lights) HEADLIGHT else 0.0},
+    *[for (c in CAR_PAINTS) {id: paint_id(c), key: "emissive-intensity", value: lamps(lights)}],
     {id: "m-headlamp", key: "emissive-intensity", value: if (lights) 6.0 else 0.5}]

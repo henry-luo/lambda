@@ -1,0 +1,15 @@
+{
+  "name": "split a DOCX paragraph while retaining protected content",
+  "command": "edit",
+  "html": "test/fixtures/edit/docx-preserved.docx",
+  "working_copy": "temp/edit-ui/edit_docx_paragraph.docx",
+  "events": [
+    {"type": "click", "target": {"text": "Hello, DOCX!"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "type", "text": "New paragraph"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "equals": "Saved edit_docx_paragraph.docx."},
+    {"type": "assert_text", "target": {"selector": "#edit-surface p", "index": 1}, "equals": "New paragraph"}
+  ]
+}

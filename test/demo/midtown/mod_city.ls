@@ -159,8 +159,11 @@ fn post(x, z, r, top) => [x - r, z - r, x + r, z + r, top]
 pub let SIGNAL_POLE = 6.7
 pub fn junction_signalised(i, j) => not ((i == 0 or i == N) and (j == 0 or j == N))
 // far-side mast arms: one per approach, on the departing corner to the approaching driver's right
+// an approach into junction (i, j) travelling d comes from a grid junction, or in along the gateway
+pub fn approach_open(i, j, d) any^ => (let f = DIRS[d], (i - f[0] >= 0 and i - f[0] <= N and j - f[1] >= 0 and j - f[1] <= N) or
+    (i == N and j == GATE_J and d == 2))
 pub let SIGNALS = [for (i in 0 to N, j in 0 to N, d in 0 to 3, let f = DIRS[d], let r = [0.0 - f[1], f[0]]
-        where junction_signalised(i, j) and i - f[0] >= 0 and i - f[0] <= N and j - f[1] >= 0 and j - f[1] <= N)
+        where junction_signalised(i, j) and approach_open(i, j, d)^)
     {i: i, j: j, d: d, group: (d % 2 + (i + j) % 2) % 2,
      x: road(i) + f[0] * (EDGE + 0.5) + r[0] * SIGNAL_POLE, z: road(j) + f[1] * (EDGE + 0.5) + r[1] * SIGNAL_POLE}]
 

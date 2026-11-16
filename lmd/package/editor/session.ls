@@ -57,6 +57,9 @@ pub pn read_text(path) string^ {
   }
   return source
 }
+pub pn read_snapshot(format, path) any^ {
+  return if (format.binary == true) input(path, 'binary')^ else read_text(path)^
+}
 
 fn same_path(a, b) any^ => normal_path(a) == normal_path(b)
 fn source_suffix(path) any^ {
@@ -114,8 +117,10 @@ fn new_target_problem(session, doc, target) any^ {
 // checkpoint moves only after the write succeeded.
 pub pn save(session, doc, target, overwrite) {
   let format = session.format
-  let text = format.export_text(doc, session.envelope)
-  let mismatch = format.check_roundtrip(doc, session.envelope)
+  let prepared: any^ = if (format.binary == true) format.export_tree(doc, session.envelope)
+    else format.export_text(doc, session.envelope)
+  if (prepared is error) { return outcome(false, session, "Not saved: " ++ prepared.message, null) }
+  let mismatch = if (format.binary == true) null else format.check_roundtrip(doc, session.envelope)
   if ((mismatch != null)^) {
     return outcome(false, session, "Not saved: " ++ mismatch ++ " when written as " ++
                    format.name ++ ".", null)
@@ -126,7 +131,7 @@ pub pn save(session, doc, target, overwrite) {
     return outcome(false, session, "Not saved: " ++ problem ++ ".", null)
   }
   // probe first: reading a missing Save As target is the normal case, not a failure
-  let on_disk = if (exists(target)) (input(target, 'text') ^ { null }) else null
+  let on_disk = if (exists(target)) (input(target, if (format.binary == true) 'binary' else 'text') ^ { null }) else null
   let conflict = if (overwrite) null
                  else if (same_file and on_disk != session.disk_text) 'changed'
                  else if (not same_file and on_disk != null) 'exists'
@@ -138,18 +143,27 @@ pub pn save(session, doc, target, overwrite) {
     return outcome(false, session, basename(target) ++ " already exists.", 'exists')
   }
   // S7.5.1v6: retain output's ordinary outcome to report a failed save.
-  let written: any^ = output(text, target, {format: 'text', atomic: true})
+  // An unchanged package must not be reconstructed just to save it.
+  let same_snapshot = format.binary == true and same_file and doc == session.saved_doc and on_disk == session.disk_text
+  let written: any^ = if (same_snapshot) null else if (format.binary == true and prepared.changed)
+    output(prepared.tree, target, {format:'zip', atomic:true})
+    else if (format.binary == true) output(session.envelope.snapshot, target, {format:'binary', atomic:true})
+    else output(prepared, target, {format: 'text', atomic: true})
   if (written is error) {
     return outcome(false, session, "Not saved: could not write " ++ target ++ ".", null)
   }
   let saved_path = if (same_file) session.path else target
-  outcome(true, {*: session, path: saved_path, name: basename(saved_path), disk_text: text, saved_doc: doc},
+  let saved = if (format.binary == true) (input(saved_path, 'binary') ^ { null }) else prepared
+  if ((format.binary == true and saved == null)^) {
+    return outcome(false, session, "Saved " ++ basename(saved_path) ++ ", but could not verify the saved package.", null)
+  }
+  outcome(true, {*: session, path: saved_path, name: basename(saved_path), disk_text: saved, saved_doc: doc},
           "Saved " ++ basename(saved_path) ++ ".", null)
 }
 
 // Re-read the file, discarding in-memory edits (the conflict dialog's Reload).
 pub pn reload(session) {
-  let source = read_text(session.path) ^ { ^ }
+  let source = read_snapshot(session.format, session.path) ^ { ^ }
   if (source is error) { return {ok: false, status: "Could not reload: " ++ source.message} }
   let loaded = session.format.import_text(source) ^ { {error: ^.message} }
   if (not (loaded.error is null)) {

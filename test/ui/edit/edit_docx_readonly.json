@@ -1,0 +1,12 @@
+{
+  "name": "protect an unrecognized DOCX block from deletion",
+  "command": "edit",
+  "html": "test/fixtures/edit/docx-preserved.docx",
+  "working_copy": "temp/edit-ui/edit_docx_readonly.docx",
+  "events": [
+    {"type": "click", "target": {"text": "Protected content"}},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "equals": "DOCX retained content is read-only."},
+    {"type": "assert_count", "target": {"selector": ".edit-view-only"}, "count": 1}
+  ]
+}

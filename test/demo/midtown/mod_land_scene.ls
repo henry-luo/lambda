@@ -57,15 +57,18 @@ fn structure(st) any^ {
 // the loop's asphalt in runs: open road, and the tunnel bore under its own dimmer material
 let BORES = [for (st in roads.STRUCTURES where st.kind == "tunnel") [st.start_k, st.end_k]]
 let BORE_RUNS = (let n = len(roads.LOOP.samples), let b = BORES[0], [[0, b[0], "m-road"], [b[0], b[1], "m-road-bore"], [b[1], n - 1, "m-road"]])
-// ---- scenery: vegetation instanced in four tiles (the near grid's quarters) so the view culls what it
-// cannot see; static buildings merged; turbine rotors and boats moved by native clips
-let MID_X = (land.X0 + land.X1) / 2.0
-let MID_Z = (land.Z0 + land.Z1) / 2.0
-fn tile(p) => (if (p.x < MID_X) 0 else 1) + (if (p.z < MID_Z) 0 else 2)
+// ---- scenery: vegetation instanced per terrain chunk (about 600 x 500 m), so the view and each shadow
+// cascade draw only the trees near them (with quarter-size tiles every cascade near town drew ~1,500);
+// static buildings merged; turbine rotors and boats moved by native clips
+let TILE_W = lm.CHUNK_X * land.STEP
+let TILE_D = lm.CHUNK_Z * land.STEP
+let TILE_COLS = (land.NX - 2) div lm.CHUNK_X + 1
+let TILES = len(lm.CHUNKS)
+fn tile(p) => (let c = int(floor((p.x - land.X0) / TILE_W)) ^ { 0 }, let r = int(floor((p.z - land.Z0) / TILE_D)) ^ { 0 }, r * TILE_COLS + c)
 fn matrix(p) any^ => t.compose([p.x, p.y, p.z], u.quat(p.yaw), [p.s, p.s, p.s])
-fn instanced(id, geometry_id, material, items, options = {}) any^ =>
-    [for (q in 0 to 3, let mine = [for (p in items where tile(p)^ == q) matrix(p)^] where len(mine) > 0)
-        s.mesh(geometry_id, material, {id: id ++ "-" ++ string(q), instances: mine, *: options})]
+fn instanced(id, geometry_id, material, items, options = {}) any^ => (let tiled = [for (p in items) {tile: tile(p), m: matrix(p)^}],
+    [for (q in 0 to (TILES - 1), let mine = [for (e in tiled where e.tile == q) e.m] where len(mine) > 0)
+        s.mesh(geometry_id, material, {id: id ++ "-" ++ string(q), instances: mine, *: options})])
 fn placed_copies(b, items) any^ => m.merge([for (p in items) m.yawed(b, p.x, p.y, p.z, p.heading)^])
 pub fn scenery_elements() any^ {
     let lh = scenery.LIGHTHOUSE;

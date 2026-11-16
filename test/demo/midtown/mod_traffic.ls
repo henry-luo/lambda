@@ -128,9 +128,11 @@ pub fn step_car(a, others, t, dt, bumped) {
     {*: moved, *: pose(moved)}
 }
 // one tick for all traffic; player is {x, z, heading, hl, id, player: true}, hits lists the ids it struck
-pub fn step(agents, player, t, dt, hits = []) {
+// cars more than 250 m from the player step every other frame when a frame number is given
+pub let CADENCE = [[250.0, 2]]
+pub fn step(agents, player, t, dt, hits = [], frame = null) any^ {
     let others = [*agents, player];
-    [for (a in agents) step_car(a, others, t, dt, contains(hits, a.id))]
+    u.staggered(agents, player.x, player.z, CADENCE, frame, dt, (a, owed) any^ => step_car(a, others, t, owed, contains(hits, a.id)))^
 }
 
 // the lane run nearest a free-driving car, as an agent record: Reset puts the car there and

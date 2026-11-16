@@ -11,7 +11,7 @@ import prim: lambda.procart.primitive
 fn ring_of(pts) any^ => [*pts, *[for (k in 1 to (len(pts) - 2), let p = pts[len(pts) - 1 - k]) [0.0 - p[0], p[1]]]]
 pub fn loft(sections, caps = true) any^ {
     let rings = [for (sc in sections) ring_of(sc.pts)]
-    let n = len(rings[0])^, m_ = len(sections)^
+    let n = len(rings[0])^, m_ = len(sections)
     let at = (s, i) any^ => (let r = rings[s], let p = r[(i + n) % n], [p[0], p[1], sections[s].z])
     let normal = (s, i) any^ => (let a = at(s, i - 1), let b = at(s, i + 1), let c = at(max(0, s - 1), i), let d = at(min(m_ - 1, s + 1), i),
         let tu = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], let tv = [d[0] - c[0], d[1] - c[1], d[2] - c[2]],
@@ -127,6 +127,15 @@ pub fn car(kind, with_wheels = true) any^ {
         *(if (kind == "taxi") [m.cuboid(-0.34, rows[1][3] + 0.06, -0.55, 0.34, rows[1][3] + 0.28, -0.22)] else [])]),
      tail: m.merge([lamp_pair(sp.tail[0], 0.05, sp.tail[1], sp.tail[2], 0.32, sp.hw - 0.1), m.cuboid(-0.32, sp.tail[1] + sp.tail[2] * 0.3, sp.tail[0], 0.32, sp.tail[1] + sp.tail[2] * 0.7, sp.tail[0] + 0.05)])}
 }
+// every kind built once, for traffic, parked cars and the player (whose wheels turn separately)
+pub let CARS = {sedan: car("sedan") ^ { null }, hatch: car("hatch") ^ { null }, van: car("van") ^ { null }, taxi: car("taxi") ^ { null },
+    pickup: car("pickup") ^ { null }, suv: car("suv") ^ { null }, player: car("coupe", false) ^ { null }}
 // the player coupe's rear indicator: its tail lamp grown just enough to cover the lit side (+1 is the car's left)
 pub fn indicator(xs) any^ => (let sp = COUPE, let x0 = xs * 0.6, let x1 = xs * (sp.hw - 0.09),
     m.cuboid(min(x0, x1), sp.tail[1] - 0.006, sp.tail[0] - 0.006, max(x0, x1), sp.tail[1] + sp.tail[2] + 0.006, sp.tail[0] + 0.056))
+
+// ---- one draw per car: the parts merge into one buffer whose UVs pick a cell of a five-cell atlas
+// (paint, glass, trim, head lamp, tail lamp), so a single material with atlas maps shades them all
+pub let ATLAS_PARTS = ["paint", "glass", "trim", "head", "tail"]
+pub fn merged(parts) any^ => m.merge([for (k, name in ATLAS_PARTS, let b = parts[name])
+    {*: b, uvs: [for (i in 1 to (len(b.positions)^ div 3)) *[(k + 0.5) / 5.0, 0.5]]}])

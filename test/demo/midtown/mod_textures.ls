@@ -103,13 +103,5 @@ pub fn facade_mr_svg(style) element {
     svg(128, 128, [rect(0, 0, 128, 128, if (style == 0) "#00b000" else "#00e000"),
         *[for (j in 0 to 7, i in 0 to 7) rect(i * 16 + o.x / 4, j * 16 + o.y / 4, o.w / 4, o.h / 4, if (style == 0) "#0018c0" else "#0026a0")]])
 }
-// a band of soft clouds a quarter of the way round the sky: texture v climbs from the nadir (bottom
-// row) to the zenith (top row), so the horizon is the middle row and the clouds sit just above it
-pub fn clouds_svg() element => svg(1024, 256, [<defs <radialGradient id: "puff", cx: "50%", cy: "50%", r: "50%",
-        <stop offset: "0%", 'stop-color': "#ffffff", 'stop-opacity': "0.9">
-        <stop offset: "60%", 'stop-color': "#ffffff", 'stop-opacity': "0.45">
-        <stop offset: "100%", 'stop-color': "#ffffff", 'stop-opacity': "0">>>,
-    *[for (k in 0 to 60, let key = rng.derive(KEY, ["cloud", k]), let y = rng.between(rng.derive(key, "y"), 30.0, 116.0),
-            let lo = (y - 30.0) / 86.0, let w = rng.between(rng.derive(key, "w"), 80.0, 210.0) * (0.55 + 0.6 * lo),
-            let x = rng.between(rng.derive(key, "x"), 0.0, 1024.0), let o = rng.between(rng.derive(key, "o"), 0.55, 1.0))
-        *[for (dx in [-1024.0, 0.0, 1024.0]) <ellipse cx: x + dx, cy: y, rx: w, ry: w * (0.16 + 0.1 * lo), fill: "url(#puff)", opacity: o>]]])
+// the car atlas: five 16 px cells across (paint, glass, trim, head lamp, tail lamp), one image per map
+pub fn car_atlas_svg(colors) element => svg(80, 16, [for (k, c in colors) rect(k * 16, 0, 16, 16, c)])

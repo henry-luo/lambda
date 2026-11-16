@@ -34,6 +34,10 @@ pn main() {
    contains(ebook.chapter(loaded_book, 0)^.text, "Edited Chapter"),
    member(doc, doc_path)^.mode == member(written, doc_path)^.mode,
    member(book, chapter)^.mode == member(book_written, chapter)^.mode,
+   member(doc, doc_path)^.modified == member(written, doc_path)^.modified,
+   member(book, chapter)^.modified == member(book_written, chapter)^.modified,
+   member(doc, doc_path)^.compression == member(written, doc_path)^.compression,
+   member(book, chapter)^.compression == member(book_written, chapter)^.compression,
    (package.replace_members(doc, {'missing.xml':"x"}) ^ { null }) == null,
    (package.replace_members(doc, {'word/document.xml':1}) ^ { null }) == null]
 }

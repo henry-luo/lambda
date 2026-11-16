@@ -116,6 +116,10 @@ pub fn natural(x, z, n, cz, sand) any^ {
 
 // ---- the near grid, row by row from Z0; vertex (i, j) sits at (X0 + i STEP, Z0 + j STEP)
 pub let COLUMNS = [for (i in 0 to (NX - 1), let x = X0 + i * STEP) {x: x, cz: coast_z(x), sand: beach(x)}]
+// the coastline and beach weight above many x at once, from the near grid's column table
+let COLUMN_CZ = [for (c in COLUMNS) c.cz]
+let COLUMN_SAND = [for (c in COLUMNS) c.sand]
+pub fn columns_at(xs) any^ => (let i = round(vmin(vmax((xs - X0) / STEP, 0.0), NX - 1.0)), [[for (k in i) COLUMN_CZ[k]], [for (k in i) COLUMN_SAND[k]]])
 let COARSE = if (HILLS == null) [] else [for (row in noise.field(HILLS, LNX, LNZ) ^ { [] }, n in row) n]
 fn fill(k) => (let i = k % NX, let j = k div NX, let a = (j div 2) * LNX + i div 2, let di = i % 2, let dj = (j % 2) * LNX,
     (COARSE[a] + COARSE[a + di] + COARSE[a + dj] + COARSE[a + dj + di]) / 4.0)
@@ -136,6 +140,17 @@ pub fn grid_at(values, x, z) any^ {
     let a = j * NX + i
     if (fx + fz <= 1.0) values[a] + (values[a + 1] - values[a]) * fx + (values[a + NX] - values[a]) * fz
     else values[a + NX + 1] + (values[a + NX] - values[a + NX + 1]) * (1.0 - fx) + (values[a + 1] - values[a + NX + 1]) * (1.0 - fz)
+}
+// the same lookup at many points at once (xs, zs arrays inside the near grid): gather the four corners,
+// then take whichever of the cell's two triangles holds each point
+pub fn grid_many(values, xs, zs) any^ {
+    let gx = vmin(vmax((xs - X0) / STEP, 0.0), NX - 1.001), gz = vmin(vmax((zs - Z0) / STEP, 0.0), NZ - 1.001)
+    let i = floor(gx), j = floor(gz)
+    let fx = gx - i, fz = gz - j
+    let a = j * NX + i
+    let va = [for (k in a) values[k]], vb = [for (k in a) values[k + 1]], vc = [for (k in a) values[k + NX]], vd = [for (k in a) values[k + NX + 1]]
+    let lower = step(1.0 - fx - fz);
+    lower * (va + (vb - va) * fx + (vc - va) * fz) + (1.0 - lower) * (vd + (vc - vd) * (1.0 - fx) + (vb - vd) * (1.0 - fz))
 }
 pub fn noise_at(x, z) any^ => if (HILLS == null) 0.0 else noise.sample(HILLS, (x - X0) / LATTICE, (z - Z0) / LATTICE)
 // the natural height anywhere: the near grid where it reaches, the formula beyond

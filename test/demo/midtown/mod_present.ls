@@ -15,6 +15,7 @@ import roads: .mod_roads
 import region: .mod_region
 import v: .mod_vehicle
 import tr: .mod_traffic
+import rt: .mod_route
 import pd: .mod_peds
 import ms: .mod_mission
 import cam: .mod_camera
@@ -22,13 +23,21 @@ import sc: .mod_scene
 import hud: .mod_hud
 
 pub let NO_KEYS = {up: false, down: false, left: false, right: false, brake: false, back: false}
+// vehicles and people further than this from the camera are lost in the haze: their bodies keep their
+// last pose rather than take a command every frame
+pub let AWAY = 900.0
+// town traffic and people move only while the car is within this of the perimeter barrier
+pub let TOWN = 400.0
+// a camera this close to the centre has every car and person in town within AWAY, so their commands need no distance test
+let TOWN_VIEW = AWAY - city.LIMIT
+fn seen(a, eye) any^ => abs(a.x - eye[0]) < AWAY and abs(a.z - eye[2]) < AWAY
 pub let START = {x: city.road(3) - city.LANE, z: city.road(1) + 26.0, heading: 0.0}
 pub fn initial(start = START) {
     let car = v.spawn(start.x, start.z, start.heading);
     {token: 0, last: null, t: 0.0, started: false, paused: false, help: false, handles: null, keys: NO_KEYS, touch: NO_KEYS,
-     car: car, traffic: tr.spawn(16), peds: pd.spawn(24), mission: ms.initial(), camera: cam.initial(car),
+     car: car, traffic: tr.spawn(16), route: rt.spawn(7), peds: pd.spawn(24), mission: ms.initial(), camera: cam.initial(car),
      look: "day", lights: false, auto: null, shown: {speed: "   ", timer: "   ", gear: "N", place: "", street: "", look: "", mission: "", cash: ""},
-     toast: "", toast_until: 0.0, smashed: [], best_air: 0.0, top_speed: 0.0, drag: null, tour: 0.0, frames: 0, speed_cap: null}
+     toast: "", toast_until: 0.0, smashed: [], best_air: 0.0, top_speed: 0.0, drag: null, tour: 0.0, frames: 0, speed_cap: null, spot: 0}
 }
 
 // ---- controls
@@ -50,8 +59,10 @@ fn reset_lane(car) any^ => if (world.outside(car.x, car.z)) {*: roads.nearest_la
     else tr.nearest_run(car.x, car.z, car.heading)
 pub fn reset_car(st) any^ => (let a = reset_lane(st.car),
     {*: st, car: {*: on_lane(st.car, a), steer: 0.0, damage: 0.0, gear: 1, rpm: v.SPEC.idle_rpm}, auto: null})
-// Auto drive keeps the car's speed and hands it to the nearest lane
-pub fn engage_auto(st) => (let a = tr.nearest_run(st.car.x, st.car.z, st.car.heading, v.forward_speed(st.car)),
+// Auto drive keeps the car's speed and hands it to the nearest lane: a grid lane in town, the loop
+// road's path (either way round) outside it
+pub fn engage_auto(st) any^ => (let c = st.car, let a = if (world.outside(c.x, c.z)) rt.nearest(c.x, c.z, c.heading, v.forward_speed(c))^
+        else tr.nearest_run(c.x, c.z, c.heading, v.forward_speed(c)),
     {*: st, car: on_lane(st.car, a), auto: a})
 fn auto_drive(car, before, after, dt) {
     let moved = on_lane(car, after)
@@ -61,7 +72,20 @@ fn auto_drive(car, before, after, dt) {
      odometer: car.odometer + after.speed * dt, rpm: u.lerp(car.rpm, v.SPEC.idle_rpm + after.speed * 210.0, u.ease(6.0, dt)),
      gear: if (after.speed < 12.0) 1 else 2, impact: 0.0, landed: 0.0, airtime: 0.0, hits: [], accel: 0.0}
 }
-fn player_record(car) => {id: "player", player: true, x: car.x, z: car.z, heading: car.heading, hl: v.HALF_LENGTH, hw: v.HALF_WIDTH}
+fn player_record(car) => {id: "player", player: true, x: car.x, z: car.z, y: car.y, heading: car.heading, hl: v.HALF_LENGTH, hw: v.HALF_WIDTH}
+
+// ---- Jump: the car hops to the next place worth driving from, round the loop road and back into town
+pub let SPOTS = [{name: "Union Street", s: null}, {name: "Gateway Roundabout", s: 4.0}, {name: "Fernbrook Bridge", s: 165.0},
+    {name: "Hollow Farms", s: 360.0}, {name: "Ridge Tunnel", s: 840.0}, {name: "Cliff Road", s: 1700.0},
+    {name: "Pelican Beach", s: 2120.0}, {name: "Estuary Bridge", s: 2480.0}]
+fn spot_lane(s) any^ => (let pts = roads.LOOP.samples^, let p = pts[min(len(pts) - 1, len([for (q in pts where q.s < s) q]))], let r = u.right(p.heading),
+    {x: p.x + r[0] * roads.LANE, z: p.z + r[1] * roads.LANE, heading: p.heading, speed: 0.0})
+pub fn jump(st) any^ {
+    let k = (st.spot + 1) % len(SPOTS)
+    let a = if (SPOTS[k].s == null) {*: START, speed: 0.0} else spot_lane(SPOTS[k].s)^
+    let car = {*: on_lane(st.car, a), steer: 0.0, damage: 0.0, gear: 1, rpm: v.SPEC.idle_rpm};
+    {*: st, car: car, auto: null, spot: k, camera: cam.cut_to(st.camera, car, st.camera.mode), toast: SPOTS[k].name, toast_until: st.t + 2.0}
+}
 
 // ---- speed governor. The native scene pauses itself once its unsimulated time (lag) passes two
 // seconds, and a faster car costs more per frame. Past `hold` seconds of lag the car may not speed up;
@@ -93,11 +117,15 @@ pub fn advance(st, dt, t, lag = 0.0) any^ {
     else {
         let drive = st.started and st.auto == null
         let cap = govern(st.speed_cap, lag, v.forward_speed(st.car), dt)
-        let auto = if (st.auto == null) null else tr.step_car(st.auto, st.traffic, t, dt, false)
+        let auto = if (st.auto == null) null else if (st.auto.path != null) rt.step_car(st.auto, st.route, dt, false)^
+            else tr.step_car(st.auto, st.traffic, t, dt, false)
         let car = if (auto != null) auto_drive(st.car, st.auto, auto, dt)
-            else v.step(st.car, if (drive) capped(controls(st), cap, st.car) else v.IDLE, dt, st.traffic)
-        let traffic = tr.step(st.traffic, player_record(car), t, dt, car.hits)
-        let peds = pd.step(st.peds, car, dt)
+            else v.step(st.car, if (drive) capped(controls(st), cap, st.car) else v.IDLE, dt, [*st.traffic, *st.route])
+        // town traffic and people rest while the car is far out of town (no one is there to see them)
+        let in_town = abs(car.x) < city.LIMIT + TOWN and abs(car.z) < city.LIMIT + TOWN
+        let traffic = if (in_town) tr.step(st.traffic, player_record(car), t, dt, car.hits, st.frames)^ else st.traffic
+        let route = rt.step(st.route, player_record(car), dt, car.hits, st.frames)^
+        let peds = if (in_town) pd.step(st.peds, car, dt) else st.peds
         let mission = if (st.started) ms.step(st.mission, car, t) else st.mission
         let jolt = max(car.impact, car.landed * 0.8)
         let rig = if (jolt > 5.0) cam.jolt(st.camera, jolt) else st.camera
@@ -107,7 +135,7 @@ pub fn advance(st, dt, t, lag = 0.0) any^ {
         let camera = if (st.started) grounded(cam.follow({*: rig, look_back: st.keys.back}, car, dt))
             else {*: rig, position: [sin(tour) * 230.0, 105.0, 0.0 - cos(tour) * 230.0], target: [0.0, 20.0, 0.0], fov: 52.0}
         let speed = v.speed(car)
-        let next = {*: st, t: t, car: car, auto: auto, traffic: traffic, peds: peds, mission: mission, camera: camera, tour: tour,
+        let next = {*: st, t: t, car: car, auto: auto, traffic: traffic, route: route, peds: peds, mission: mission, camera: camera, tour: tour,
             top_speed: max(st.top_speed, speed), frames: st.frames + 1, speed_cap: cap}
         let governed = drive and st.speed_cap == null and cap != null
         let air = car.airtime > 0.6
@@ -145,9 +173,13 @@ fn indicator_targets(car, t) {
     let q = u.quat(car.heading, car.pitch, car.roll);
     [for (k, side in ["l", "r"]) target(sc.INDICATOR_IDS[k], if (lit == side) [car.x, car.y, car.z] else [0.0, sc.PARKED_Y, 0.0], q)]
 }
+// town traffic and people: all of them from a camera in town, only those within AWAY from one outside it
+fn town_targets(st, eye) => (let near_town = abs(eye[0]) < TOWN_VIEW and abs(eye[2]) < TOWN_VIEW,
+    [*[for (a in st.traffic where near_town or (seen(a, eye) ^ { true })) target(a.id, [a.x, 0.0, a.z], u.quat(a.heading))],
+     *[for (p in st.peds where near_town or (seen(p, eye) ^ { true })) target(p.id, [p.x, p.y, p.z], u.quat(p.heading))]])
 pub fn commands(st, eye) => [target("camera-rig", eye, cam.look(eye, st.camera.target)), target("player", [st.car.x, st.car.y, st.car.z], u.quat(st.car.heading, st.car.pitch, st.car.roll)),
-    *wheel_targets(st.car), *indicator_targets(st.car, st.t), *[for (a in st.traffic) target(a.id, [a.x, 0.0, a.z], u.quat(a.heading))],
-    *[for (p in st.peds) target(p.id, [p.x, p.y, p.z], u.quat(p.heading))],
+    *wheel_targets(st.car), *indicator_targets(st.car, st.t), *town_targets(st, eye),
+    *[for (a in st.route where (seen(a, eye) ^ { true })) target(a.id, [a.x, a.y, a.z], u.quat(a.heading, a.pitch))],
     beacon_target("pickup", st.mission, st.t), beacon_target("drop", st.mission, st.t)]
 
 // the chase camera pulls in front of any building between it and the car's roof
@@ -172,7 +204,7 @@ pub pn bind(owner) {
     return {owner: owner, scene: node("city"), needle: node("needle"), rpm: node("rpm-fill"), damage: node("damage-fill"),
         speed: cells("speed", 3), timer: cells("timer", 3), timer_box: node("timer-box"), gears: [for (k in 0 to 6) node("gear-" ++ string(k))],
         district: node("district"), street: node("street"), look: node("look-name"), mission: node("mission"), mission_text: node("mission-text"),
-        cash: node("cash"), toast: node("toast"), toast_text: node("toast-text"), map: node("map-world"), map_target: node("map-target"),
+        cash: node("cash"), toast: node("toast"), toast_text: node("toast-text"), map: node("map-world"), region: node("map-region"), map_target: node("map-target"),
         pointer: node("map-pointer"), north: node("map-north")}
 }
 pn paint(target, property, value) { dom.presentation_style_set_property(target, property, value) }
@@ -191,6 +223,8 @@ fn padded(text, width) any^ => join(fill(max(0, width - len(text)), " ")^, "") +
 fn deg(a) any^ => numbers.fixed(a * 180.0 / u.PI, 2) ++ "deg"
 fn px(x) any^ => numbers.fixed(x, 2) ++ "px"
 
+let MAP_SCALE_TEXT = numbers.fixed(hud.MAP_SCALE, 3) ^ { "0.62" }
+let REGION_SCALE_TEXT = numbers.fixed(hud.MAP_SCALE * hud.REGION_SHRINK, 3) ^ { "1.86" }
 pn hud_frame(h, st) {
     let car = st.car
     let kmh = v.speed(car) * 3.6
@@ -205,8 +239,11 @@ pn hud_frame(h, st) {
     }
     // the map turns so the car always points up
     let turn = car.heading - u.PI
-    paint(h.map, "transform", "rotate(" ++ deg(turn) ++ ") scale(" ++ numbers.fixed(hud.MAP_SCALE, 3) ++ ") translate(" ++ px(0.0 - car.x) ++ ", " ++ px(0.0 - car.z) ++ ")")^
-    paint(h.north, "transform", "rotate(" ++ deg(turn) ++ ")")^
+    let rot = "rotate(" ++ deg(turn) ++ ")"
+    paint(h.map, "transform", rot ++ " scale(" ++ MAP_SCALE_TEXT ++ ") translate(" ++ px(0.0 - car.x) ++ ", " ++ px(0.0 - car.z) ++ ")")^
+    paint(h.region, "transform", rot ++ " scale(" ++ REGION_SCALE_TEXT ++ ") translate(" ++
+        px((0.0 - car.x) / hud.REGION_SHRINK) ++ ", " ++ px((0.0 - car.z) / hud.REGION_SHRINK) ++ ")")^
+    paint(h.north, "transform", rot)^
     let m = st.mission
     let tgt = m.target
     if (tgt != null) {

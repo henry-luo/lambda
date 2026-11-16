@@ -4,10 +4,10 @@
   buildings: 113,
   lamps: 288,
   trees: 172,
-  signals: 160,
+  signals: 161,
   parked: 102,
   props: 59,
-  obstacles: 857,
+  obstacles: 859,
   tallest: 111.85,
   styles: [18, 20, 30, 45],
   ground: [0, 0.15, 1],
@@ -56,10 +56,10 @@
 "scene"
 {
   valid: true,
-  bodies: 110,
-  clips: ["signals", "crane", "harbour-ripples", "beacons", "walk"],
-  commands: 50,
-  looks: [23, 23, 23],
+  bodies: 124,
+  clips: ["signals", "crane", "harbour-ripples", "clouds", "beacons", "walk", "turbines", "boats"],
+  commands: 57,
+  looks: [37, 37, 37],
   next_look: ["dusk", "night", "day"]
 }
 "governor"
@@ -89,4 +89,33 @@
   straight: null,
   at_speed: "l",
   drift: null
+}
+"open road"
+{
+  loop: [3015, 764],
+  structures: [["truss", 98, 8.3], ["cable", 190, 11.8], ["tunnel", 231, 27.61]],
+  grade_ok: true,
+  deck_exact: true,
+  steps_ok: true,
+  land: [35485, 10005, -4.5, 146, 0.2],
+  truss: {
+    past_end: true,
+    hits: true,
+    level: true
+  },
+  tunnel: {
+    past_end: true,
+    hits: true,
+    level: true
+  },
+  traffic: {
+    cars: 14,
+    overlaps: 0,
+    laps: true,
+    paths: 2
+  },
+  auto: [0, "Ridge Tunnel", true],
+  splash: [true, "Splash! Back on the road"],
+  scenery: [true, true, 5, 7, 6],
+  places: ["Eastgate / Union Street", "Gateway Roundabout / Gateway Roundabout", "Fernbrook Bridge / Ridge Road", "Hollow Farms / Ridge Road", "Ridge Tunnel / Ridge Road", "Pelican Beach / Coast Road", "Estuary Bridge / Coast Road", "Lighthouse Point / Off road"]
 }

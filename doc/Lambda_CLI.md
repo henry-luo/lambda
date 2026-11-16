@@ -539,6 +539,7 @@ suffix (D9.3.4, D10.2.1).
 | Suffix | Editor |
 |--------|--------|
 | `.md`, `.markdown`, `.mdown`, `.mkdn` | Rich text; front matter, raw HTML, math, and blocks the editor cannot edit are kept as written |
+| `.docx` | Rich text for supported paragraphs and simple table cells; other content remains read-only in its original package |
 | `.html`, `.htm` | Rich text for the body; the head, attributes, scripts, and elements the editor does not edit are kept as written and never run |
 | `.xhtml`, `.xht` | Rich text for documents whose strict XML tree survives the HTML editor's round trip, including compact documents and line breaks; other XHTML opens in source |
 | `.rst`, `.rest`, `.org`, `.wiki`, `.mediawiki`, `.adoc`, `.asciidoc`, `.asc`, `.textile`, `.txtl` | Rich text when the document survives its format's round trip; otherwise source |
@@ -563,6 +564,14 @@ retained references; Shift keeps the selection anchor (D10.2.1).
 Man-page editing retains the original `.TH` header and preceding comments;
 the displayed title cannot be changed in rich mode because it comes from that
 retained header. Use source mode to edit the header.
+
+DOCX editing supports text, paragraph splitting and insertion, and basic inline
+emphasis in supported paragraphs and simple table cells. Complex runs, merged
+or multi-paragraph cells, and other unsupported blocks are view-only; table
+rows and columns cannot be changed. The editor retains the original document
+XML outside edited runs and preserves other package members, including their
+ZIP records. Signed packages open read-only. DOCX has no source editor; a
+package that cannot be parsed cannot be opened for editing (D9.3.4, D10.2.1).
 
 The property surface preserves the rest of the source when a value changes;
 use the disclosure buttons to collapse or expand nested entries.

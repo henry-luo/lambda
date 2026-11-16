@@ -20,6 +20,17 @@ steering, a chase camera that swings with the car, headlights, and day and night
 OpenLiberty loads the user's own copy of a commercial game's files; Midtown uses
 none of them. Its city, rules, models and textures are original and generated in Lambda.
 
+## The open road
+
+Union Street runs east through a gap in the perimeter barrier to the gateway roundabout. From there a
+3 km loop road crosses a river truss bridge, climbs through farmland with hedgerows, farmsteads and a
+row of wind turbines, passes through a lit ridge tunnel, follows cliff tops and a beach past a
+lighthouse, and returns over a cable-stayed estuary bridge. Open-road traffic drives the loop both
+ways through the roundabout; Auto drive follows it when engaged outside town; **J** jumps the car to
+the next place along it. The land is a carved heightfield (`mod_land`, `mod_region`), the roads are
+sampled splines (`mod_roads`), and `mod_world` answers driving height and solids everywhere. Design
+and rulings: [Midtown Open Road](../../../vibe/Lambda_Demo_Midtown_Open_Road.md).
+
 ## Driving
 
 - **W / ↑** accelerate, **S / ↓** brake and then reverse, **A D / ← →** steer,
@@ -54,7 +65,9 @@ more props. Buildings, parked cars, lamp posts, trees and signal poles are solid
 | `mod_vehicle.ls` | Car dynamics: gearbox, speed-sensitive steering, tyre grip and drifting, curbs, ramps and airtime, separating-axis collisions with buildings and traffic. |
 | `mod_traffic.ls` | Lane-following traffic and signal timing; also places the player's car on the nearest lane for Reset and Auto drive. |
 | `mod_peds.ls`, `mod_mission.ls`, `mod_camera.ls` | Pedestrians, courier runs, camera rigs. |
-| `mod_mesh.ls`, `mod_textures.ls` | Buffer geometry for the city, vehicles, people and props; procedural SVG facades, storefronts and ground textures. |
+| `mod_mesh.ls`, `mod_car_mesh.ls`, `mod_textures.ls` | Buffer geometry for the city, people and props; lofted car bodies drawn in one call each through a five-cell material atlas; procedural SVG facades, storefronts, road and ground textures. |
+| `mod_land.ls`, `mod_roads.ls`, `mod_region.ls`, `mod_world.ls` | The open road: terrain, coast and river (one branch-free formula over numbers or whole-grid arrays); the loop road's spline, elevation and corridor index; carving, driving height and solids beyond the city; one ground and naming function for the car everywhere. |
+| `mod_land_mesh.ls`, `mod_land_scene.ls`, `mod_scenery*.ls`, `mod_route.ls`, `mod_cells.ls` | Terrain, road, roundabout, bridge and tunnel meshes; woods, hedgerows, farms, turbines, lighthouse and boats; open-road traffic on two lane paths; the shared cell index. |
 | `mod_scene.ls` | The native scene: merged city meshes, instanced furniture, the physics world, clips, lighting looks and post effects. |
 | `mod_hud.ls`, `mod_present.ls`, `midtown.ls` | HUD markup, the per-frame step and sync, and the page with its event handlers. |
 
@@ -91,6 +104,17 @@ frame of one 60 Hz vsync. `MIDTOWN_PROFILE=1` prints each frame's interval, step
 and sync times, the scene's lag and the speed cap; `MIDTOWN_SPAWN=x,z,heading` starts
 the car elsewhere, for example `MIDTOWN_SPAWN=-178,168,1.5708` in front of the stunt ramp.
 
+Out of town the frame stays light: vehicles and people beyond 900 m of the camera take no pose
+commands (their bodies keep their last pose, lost in the haze); town traffic and pedestrians rest while
+the car is more than 400 m beyond the barrier; traffic far from the car steps every second (town) or
+fourth (open road) frame with the time it is owed. Every car is a single draw, and trees are
+instanced per terrain chunk so the view and shadow cascades skip distant woods; a town frame issues
+about 514 draws. The minimap's region
+layer is an SVG image laid out at a third of the map's scale and enlarged by its holder's transform:
+the turning map redraws it each frame, and at full size that cost about 2.5 ms. Measured headless
+(release, 1280×800), the Lambda step and sync take about 1.6 ms a frame in town and 1.5 ms on the
+open road.
+
 The native scene pauses itself once its physics falls two seconds behind real time
 ("simulation pacing debt exceeded"). Two things keep a slow machine short of that.
 The physics world allows 24 substeps of 1/120 s per frame, so frames as slow as 200 ms
@@ -109,6 +133,12 @@ LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/midtown/midtown.ls \
   --headless --event-file test/demo/midtown/tests/desktop.json \
   --event-result temp/midtown/desktop-result.json
 ```
+
+The golden also has an `open road` section: the loop's length and structures, the grade limit, the
+deck heights the car drives on, a drive across the truss bridge and through the tunnel without a
+scrape, a simulated minute of open-road traffic, Auto drive round the loop, a car fished out of the
+river, and the place names. `tests/openroad.json` replays jumping out of town, Auto drive across the
+bridge, the coast at night and a reset. Replays and captures run headless.
 
 The golden `test/lambda/scene3d/midtown.ls` checks the city, the car's dynamics,
 a simulated minute of traffic with no overlaps and no car off the road, pedestrian
