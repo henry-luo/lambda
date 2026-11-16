@@ -65,6 +65,8 @@ DOM_UI_JOBS ?= $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); e
 # Match the browser-reference extractor's post-load stabilization window while
 # keeping static capture deterministic through Radiant's virtual JS clock.
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
+# Lambda owns the integration host; the shared runner defaults to Radiant's CLI.
+LAYOUT_TEST_RUNNER = node test/layout/test_radiant_layout.js --exe "$(abspath $(LAMBDA_EXE))"
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
 # Derive native build projects from the same suite selection used for execution.
@@ -2289,7 +2291,7 @@ layout-snapshot:
 		exit 1; \
 	fi; \
 	echo "Saving snapshot for suite: $$SUITE_VAR"; \
-	$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+	$(LAYOUT_TEST_ENV) $(LAYOUT_TEST_RUNNER) --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
 		| node test/layout/layout_suite_snapshot.js --save $$SUITE_VAR
 
 layout-snapshot-check:
@@ -2298,7 +2300,7 @@ layout-snapshot-check:
 		echo "Usage: make layout-snapshot-check suite=<name>"; \
 		exit 1; \
 	fi; \
-	$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+	$(LAYOUT_TEST_ENV) $(LAYOUT_TEST_RUNNER) --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
 		| node test/layout/layout_suite_snapshot.js --check $$SUITE_VAR
 
 layout-snapshot-diff:
@@ -2307,7 +2309,7 @@ layout-snapshot-diff:
 		echo "Usage: make layout-snapshot-diff suite=<name>"; \
 		exit 1; \
 	fi; \
-	$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+	$(LAYOUT_TEST_ENV) $(LAYOUT_TEST_RUNNER) --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
 		| node test/layout/layout_suite_snapshot.js --diff $$SUITE_VAR
 
 # Math Testing targets (multi-layered semantic comparison framework)
@@ -3324,7 +3326,7 @@ test-layout:
 		echo "🔧 $(LAMBDA_EXE) missing; building before layout tests"; \
 		$(MAKE) build; \
 	else \
-		STALE_FILE=$$(find -L radiant lambda lib -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hpp' -o -name '*.m' -o -name '*.mm' \) -newer "$(LAMBDA_EXE)" -print -quit 2>/dev/null); \
+		STALE_FILE=$$(find -L lambda "$(SPLIT_INPUT_ROOT)/lambda" "$(SPLIT_INPUT_ROOT)/lib" "$(SPLIT_RADIANT_ROOT)/radiant" "$(SPLIT_INPUT_ROOT)/build/lib/debug/liblambda-input.a" "$(SPLIT_INPUT_ROOT)/build/lib/debug/liblambda-lib.a" "$(SPLIT_RADIANT_ROOT)/build/lib/debug/libradiant.a" -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hpp' -o -name '*.m' -o -name '*.mm' -o -name '*.a' \) -newer "$(LAMBDA_EXE)" -print -quit 2>/dev/null); \
 		if [ -n "$$STALE_FILE" ]; then \
 			echo "🔧 $(LAMBDA_EXE) is older than $$STALE_FILE; rebuilding before layout tests"; \
 			$(MAKE) build; \
@@ -3395,16 +3397,16 @@ test-layout:
 				;; \
 			esac; \
 			echo "🎯 Running single test: $$TEST_FILE"; \
-			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
+			$(LAYOUT_TEST_ENV) $(LAYOUT_TEST_RUNNER) --engine lambda-css --test $$TEST_FILE -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
-			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR $$CONCURRENCY_FLAG; \
+			$(LAYOUT_TEST_ENV) $(LAYOUT_TEST_RUNNER) --engine lambda-css --pattern $$PATTERN_VAR $$CONCURRENCY_FLAG; \
 		elif [ -n "$$SUITE_VAR" ]; then \
 			echo "📂 Running test suite: $$SUITE_VAR"; \
-			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
+			$(LAYOUT_TEST_ENV) $(LAYOUT_TEST_RUNNER) --engine lambda-css --category $$SUITE_VAR $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
 		else \
 			echo "🎯 Running all layout tests"; \
-			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
+			$(LAYOUT_TEST_ENV) $(LAYOUT_TEST_RUNNER) --engine lambda-css $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
 		fi; \
 	else \
 		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \
