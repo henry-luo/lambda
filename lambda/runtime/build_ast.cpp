@@ -15947,11 +15947,11 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
     }
     case AST_NODE_UNARY:
         if (((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) break;
-        node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+        // a refreshed call can propagate its error away; changed is not an error outcome.
+        resolve_unary(tp, (AstUnaryNode*)node);
         break;
     case AST_NODE_BINARY:
-        if (((AstBinaryNode*)node)->op == OPERATOR_IS) break;
-        node->type = lambda_type_union_normalized(tp->pool, node->type, &TYPE_ERROR);
+        resolve_binary(tp, (AstBinaryNode*)node);
         break;
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM:

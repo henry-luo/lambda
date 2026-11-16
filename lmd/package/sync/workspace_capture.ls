@@ -52,10 +52,10 @@ fn baseline_snapshot(checkpoint, members, capture_id) any^ {
 }
 
 // The owner supplies a validated immutable snapshot and its derived members.
-pub fn validate_known_base(base, checkpoint, digest, members) any^ {
+pub fn validate_known_base(base, checkpoint, members) any^ {
     v.fields(base,["id","checkpoint","members","capture"])^
-    if (codec.digest(base.checkpoint)^ != digest) { return false }
-    if (codec.digest(base.members)^ != codec.digest(members)^ or
+    if (not (codec.same_encoding(base.checkpoint,checkpoint)^)) { return false }
+    if (not (codec.same_encoding(base.members,members)^) or
         base.capture != capture_id(members)^ or
         base.id != baseline_snapshot(checkpoint,members,base.capture)^.id)
         raise error("sync ZIP: invalid baseline")
@@ -102,8 +102,8 @@ pub fn correspondence(base, captured, hints) any^ {
 }
 
 // each command emits one event, so IDs can be assigned before bounded groups run.
-pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], saved_at=null) any^ {
-    let base_view = w.read(endpoint.replica)^
+pub fn import_branch(endpoint, actor, captured, old_members=[], documents=[], saved_at=null, projection=null) any^ {
+    let base_view = if (projection == null) w.read(endpoint.replica)^ else projection
     let old_paths = index_paths(old_members)^
     var members = []
     var commands = []
@@ -154,15 +154,18 @@ pub fn export_members(entries) any^ => sort([for (entry in entries where entry.v
     {id:entry.id,path:tree.path(entries,entry.id,true)^,type:entry.type,
      content:if (entry.type == 'file') entry.heads[0].content else null}],(entry)=>entry.path)^
 
-pub fn validate_base(base) any^ {
+pub fn checked_base(base) any^ {
     v.fields(base,["id","checkpoint","members","capture"])^
     let replica = c.restore(base.checkpoint)^
     if (replica.profile != 'workspace') raise error("sync ZIP: baseline requires a workspace")
-    let entries = w.read(replica)^.entries
+    // restore already checked the replica; project that validated state once.
+    let projection = tree.project(tree.events(replica)^)^
+    let entries = projection.entries
     if (any([for (entry in entries where entry.visible and entry.type == 'file') len(entry.heads)^ != 1]))
         raise error("sync ZIP: baseline has unresolved revisions")
     let members = export_members(entries)^
     if (members != base.members or base.capture != capture_id(members)^ or
         base.id != baseline(replica,members,base.capture)^.id) raise error("sync ZIP: invalid baseline")
-    return replica
+    return {replica:replica,projection:projection}
 }
+pub fn validate_base(base) any^ => checked_base(base)^.replica

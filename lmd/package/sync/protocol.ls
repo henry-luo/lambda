@@ -106,6 +106,11 @@ pub fn frames(replica, model=default_schema, max_bytes=65536, expected=null) any
 
 pub fn start(replica, model=default_schema) any^ {
     c.validate(replica)^
+    return start_validated(replica,model)^
+}
+
+// The caller must hold validation evidence for this exact replica; wire admission uses start.
+pub fn start_validated(replica, model=default_schema) any^ {
     schema(model,replica.profile)^
     return {replica:replica,schema:model,transfers:[],transactions:[],journal:[],received:[],recoveries:[],local:[],cloud:[],peers:[]}
 }

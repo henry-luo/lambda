@@ -287,7 +287,9 @@ pub pn request(handle, credentials, peer, outgoing, pending, command) any^ {
         return {body:applied.state.endpoint.replica.clock,pending:pending}
     }
     if (command.kind == 'ack') {
-        local.acknowledge(handle,peer.id,body)^
+        // Release the pinned offer only after its whole frontier is acknowledged.
+        local.acknowledge(handle,peer.id,body,
+            if (core.dominates(body,outgoing.summary.clock)^) outgoing.ids else [])^
         return {body:local.status(handle)^.state.endpoint.replica.clock,pending:pending}
     }
     if (command.kind == 'document_need') {

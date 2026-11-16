@@ -17,6 +17,30 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Refreshing propagated recursive calls invents operator errors — 2026-11-16
+
+**Status:** FIXED in the working tree; focused AUTO/interpreter/JIT checks and
+the full Lambda baseline (7,560/7,560) pass. This blocked the sync validation-cache
+optimization. S7.5.1v6,
+S7.6.1v9 and S3.4 require `not (f(...)^)` to consume the successful value after
+propagation, while preserving actual unhandled errors.
+
+The current release (`672531532`) rejects the recursive array comparator in
+`temp/sync-warm-latency/tune2/minimal.ls` with E228 on
+`if (not (compare(a[i],b[i])^))`. The call has an explicit `bool^` return and
+propagates with `^`. The refresh pass in `build_ast.cpp` updates a completed
+recursive call signature, then unconditionally adds `error` to enclosing unary
+and binary nodes when any child changed. That change can remove an error from
+a propagated call's normal outcome; it is not evidence of a new operator error.
+The refresh pass now recomputes operator outcomes using their existing resolvers.
+`propagated_operator_refresh` covers recursive/forward unary, logical and numeric
+operations, including actual propagated failures. The negative
+`operator_refresh_unhandled` case still reports E228 on all three tiers; its
+native error-harness registration retains that rejection as a baseline check.
+Focused loop-admission fixtures pass as well. Evidence:
+`temp/sync-warm-latency/tune2/verification.log` and matching tier outputs.
+The aggregate result is in `tune2/lambda-baseline.log` under the same directory.
+
 ## Shared host artifacts retain benchmark snapshot headers — 2026-11-16
 
 **Status:** OPEN build-configuration hazard; the CSS Shapes qualification uses
