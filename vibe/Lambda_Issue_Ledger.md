@@ -17,6 +17,52 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+<a id="lr12-55"></a>
+## LR12-55 — TreeWalker discards NodeFilter and lets cleanup delete all text
+
+**Status:** FIXED, 2026-11-17; the final append-only API, focused regressions,
+live capture and curated Radiant milestone are qualified. **Affected owner:** Lambda `lambda/dom/` and its
+`radiant-dom` binding (**D9.1.1v4 / D9.5.6v2**), not native Radiant paint.
+
+Wispr's current HTTP source contains its heading text, but the loaded native
+DOM has an empty heading with visible styles. The page's quote-cleanup script
+creates a SHOW_TEXT walker whose object filter rejects ordinary content. The
+binding forwarded only root and mask, and traversal never invoked a filter.
+The cleanup therefore received every text node and removed the entire page's
+text. A two-node reduction deletes both before the fix instead of preserving
+ordinary text and removing only the quote.
+
+The shared constructor now retains function/object filters. A new three-argument
+catalog operation is appended; all **461 published catalog rows**, including
+the legacy two-argument constructor, keep their order and signature (**D9.5.4**).
+The old constructor delegates with a null filter. The document binding forwards
+the optional filter and keeps SHOW_ALL as the omitted/undefined mask default.
+The readonly filter getter preserves identity. Traversal applies the mask before
+calling the filter, distinguishes rejection/pruning from skipping/descending,
+and keeps first-child/sibling traversal within the visible boundary. Callback
+getters, invocation, return conversion and reentrancy errors use one active-flag
+scope, cleared on exceptions. `RootFrame` / `Rooted` retain the callback, walker
+and candidate wrappers across script allocations (**D6.3.3**). This follows
+[DOM §6 Traversal](https://dom.spec.whatwg.org/#traversal).
+
+Three new native tests cover destructive cleanup, function/object filters,
+masking and receiver identity, reject/skip behavior, readonly filter identity,
+traversal bounds, callback getter exceptions, reentrancy and result conversion.
+Those tests and the existing unfiltered template walker control pass on the
+final release binary, including strict function-filter receiver semantics;
+Chromium confirms the three new scripts. The fast Radiant baseline deliberately
+selects 201 named document cases, so these focused regressions run separately
+without changing that inventory. The final curated milestone passes **8,169
+of 8,488**, with 299 partial, 20 skipped and no failures. Final live Wispr text
+returns with **0.85%** error against the preserved browser reference, clearing
+its temporary manual high annotation. The sorted inventory becomes **150 high,
+1 critical, 916 low**. Other rows, prior annotations and browser references remain
+unchanged. The final capture's metrics exactly match the earlier comparison
+row and are checked directly, avoiding another whole-catalog image recomputation.
+Evidence: `temp/online-visual-round74/`; report destination:
+`test/online/comparison/repairs.html#round-74`. Capture budgets and clocks stay
+unchanged (**D10.1.7**); no page-specific exception is introduced.
+
 ## HTTP debug/error logs can expose signed URL queries — 2026-11-17
 
 **Status:** Open; the trusted local S3 integration avoids capability URLs in

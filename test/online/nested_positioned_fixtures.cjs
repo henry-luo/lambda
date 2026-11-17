@@ -1,4 +1,6 @@
 const fixtures=[
+    {name:'a positive layer crosses an escaping absolute ancestor',positive:true,escape:'absolute',expected:[0,0,255]},
+    {name:'a fixed ancestor keeps its positive descendant below a later outer layer',positive:true,escape:'fixed',expected:[255,0,0]},
     {name:'zero layers across block wrappers',expected:[0,128,0]},
     {name:'zero foreground across an inline wrapper',inline:true,expected:[0,128,0]},
     {name:'foreground retains its ordinary ancestor clip',clip:true,expected:[0,128,0]},
@@ -13,9 +15,10 @@ function fixtureHtml(f) {
         '#stage{position:relative;width:160px;height:120px}'+
         '#wallpaper{position:absolute;inset:0;background:red}'+
         '#front{position:relative;width:100px;height:80px;background:green;'+(f.alpha?'opacity:.5;':'')+(f.zero?'z-index:0;':'')+'}'+
+        (f.escape?'#front{position:'+f.escape+';left:0;top:0}':'')+
         (f.clip?'#wrap{overflow:hidden;height:40px}':'')+(f.hidden?'#wrap{opacity:0}':'')+
         (f.positive?'#positive{position:absolute;inset:0;background:blue;z-index:2}#later{position:absolute;inset:0;background:red;z-index:1}':'')+
-        '</style><div id="stage"><div id="wrap"><span><div id="wallpaper"></div></span>'+
+        '</style><div id="stage">'+(f.escape?'<div style="height:200px"></div>':'')+'<div id="wrap"><span><div id="wallpaper"></div></span>'+
         (f.inline?'<span>'+foreground+'</span>':foreground)+'</div>'+(f.positive?'<div id="later"></div>':'')+'</div>';
 }
 module.exports={fixtures,fixtureHtml};

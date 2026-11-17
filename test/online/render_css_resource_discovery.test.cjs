@@ -5,11 +5,20 @@ const path = require('node:path');
 const http = require('node:http');
 const {parseOptions, runLambdaRender} = require('./capture_snapshots.cjs');
 const {pngLibrary} = require('./compare_snapshots.cjs');
-const {rgb} = require('./render_fixture.cjs');
+const {rgb, renderFixtures} = require('./render_fixture.cjs');
+const renderLocalMedia = renderFixtures('media-resource-local');
 const root = path.resolve(__dirname, '../..');
 const scratch = fs.mkdtempSync(path.join(root, 'temp/css-resource-discovery-'));
 const requests = [];
 let server, origin;
+
+function mediaSourceHtml(run, source = `/media.mp4?run=${run}`) {
+    const deferred = run === 'media-none';
+    const preload = deferred || run === 'media-none-autoplay' ? 'preload="none"' : '';
+    const media = run === 'media-child' ? `<source src="${source}" type="video/mp4">` : '';
+    return `<!doctype html><style>body{margin:0}video{display:block;width:320px;height:${deferred ? '120px' : 'auto'}}#band{height:10px;background:lime}</style>
+        <video ${preload} ${deferred ? '' : 'autoplay muted'} ${media ? '' : `src="${source}"`}>${media}</video><div id="band"></div>`;
+}
 
 before(async () => {
     server = http.createServer((request, response) => {
@@ -17,6 +26,16 @@ before(async () => {
         const run = url.searchParams.get('run');
         requests.push({run, path: url.pathname, initial: url.searchParams.has('initial')});
         response.setHeader('Cache-Control', 'no-store');
+        if (url.pathname === '/media.mp4') {
+            response.writeHead(200, {'Content-Type': 'video/mp4'});
+            response.end(fs.readFileSync(path.join(root, 'test/media/test_video.mp4')));
+            return;
+        }
+        if (url.pathname === '/media-source-page') {
+            response.writeHead(200, {'Content-Type': 'text/html'});
+            response.end(mediaSourceHtml(run));
+            return;
+        }
         if (url.pathname === '/base/page') {
             response.writeHead(200, {'Content-Type': 'text/html'});
             response.end(`<!doctype html><head><template><base href="/ignored/"></template>
@@ -208,3 +227,21 @@ for (const run of ['print', 'active', 'empty', 'error']) {
             'discovery reuses the prefetched transfer');
     });
 }
+
+for (const run of ['media-direct', 'media-child', 'media-none-autoplay', 'media-none']) {
+    test(`snapshot media discovery: ${run}`, {skip: process.platform !== 'darwin'}, async () => {
+        const {image} = await renderHttpFixture(run, '/media-source-page');
+        const deferred = run === 'media-none';
+        assert.deepEqual(rgb(image, 10, (deferred ? 120 : 180) + 4), [0, 255, 0],
+            'ready video metadata supplies its 640:360 ratio before snapshot layout');
+        assert.equal(requests.filter(row => row.run === run && row.path === '/media.mp4').length,
+            deferred ? 0 : 1, 'preload none stays deferred unless autoplay requests media; layout reuses the transfer');
+    });
+}
+
+test('snapshot media discovery: local HTML discovers its remote source', {skip: process.platform !== 'darwin'}, async () => {
+    const run = 'media-local';
+    const {image} = await renderLocalMedia(run, mediaSourceHtml(run, `${origin}/media.mp4?run=${run}`));
+    assert.deepEqual(rgb(image, 10, 184), [0, 255, 0], 'remote media initializes its manager before the snapshot wait');
+    assert.equal(requests.filter(row => row.run === run && row.path === '/media.mp4').length, 1);
+});

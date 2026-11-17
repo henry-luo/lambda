@@ -5640,6 +5640,8 @@ static Item dom_create_document_fragment(DomDocument* doc) {
 static const char* JS_TREE_WALKER_ROOT = "__lambda_tree_walker_root";
 static const char* JS_TREE_WALKER_CURRENT = "currentNode";
 static const char* JS_TREE_WALKER_WHAT_TO_SHOW = "whatToShow";
+static const char* JS_TREE_WALKER_FILTER = "__lambda_tree_walker_filter";
+static const char* JS_TREE_WALKER_ACTIVE = "__lambda_tree_walker_active";
 
 enum JsDomTreeWalkerStep {
     JS_TREE_WALKER_STEP_NEXT_NODE = 0,
@@ -5653,7 +5655,38 @@ static uint32_t dom_tree_walker_node_mask(DomNode* node) {
     if (node_type == 0 || node_type > 32) return 0;
     return 1u << (node_type - 1u);
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_tree_walker_accepts, (DomNode* node, uint32_t what_to_show), ((dom_tree_walker_node_mask(node) & what_to_show) != 0))
+static Item dom_tree_walker_filter(Item walker, DomNode* node, uint32_t what_to_show) {
+    RootFrame roots(5);
+    Rooted<Item> walker_root(roots, walker);
+    Rooted<Item> filter_root(roots, ItemNull), method_root(roots, ItemNull);
+    Rooted<Item> node_root(roots, ItemNull), result_root(roots, ItemNull);
+    if (js_is_truthy(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_ACTIVE)))
+        return dom_raise_named("InvalidStateError", "TreeWalker filter is already active");
+    if (!(dom_tree_walker_node_mask(node) & what_to_show)) return {.item = i2it(3)};
+    filter_root.set(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_FILTER));
+    if (filter_root.get().item == ITEM_NULL || is_js_undefined(filter_root.get()))
+        return {.item = i2it(1)};
+    // the walker retains its callback; precise roots protect callback/getter allocations (D6.3.3).
+    node_root.set(dom_wrap_element(node));
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ACTIVE, {.item = ITEM_TRUE});
+    bool function_filter = dom_realm_is_callable(filter_root.get());
+    method_root.set(function_filter ? filter_root.get()
+        : dom_realm_get_name(filter_root.get(), "acceptNode"));
+    if (item_is_error(method_root.get())) result_root.set(method_root.get());
+    else if (!dom_realm_is_callable(method_root.get()))
+        result_root.set(dom_realm_throw_type_error("NodeFilter.acceptNode is not callable"));
+    else {
+        Item argument = node_root.get();
+        result_root.set(dom_realm_call(method_root.get(),
+            function_filter ? make_js_undefined() : filter_root.get(), &argument, 1));
+        if (!item_is_error(result_root.get())) result_root.set(js_to_number(result_root.get()));
+        if (!item_is_error(result_root.get()))
+            result_root.set({.item = i2it((uint16_t)js_to_int32(it2d(result_root.get())))});
+    }
+    // exceptions must not leave later traversal permanently reentrant.
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ACTIVE, {.item = ITEM_FALSE});
+    return result_root.get();
+}
 
 static DomNode* dom_tree_walker_first_child_raw(DomNode* node) {
     if (!node || !node->is_element()) return nullptr;
@@ -5667,15 +5700,21 @@ static DomNode* dom_tree_walker_next_raw(DomNode* root, DomNode* current) {
     return dom_next_after_subtree(root, current);
 }
 
-static DomNode* dom_tree_walker_next_matching(DomNode* root,
-                                                  DomNode* current,
-                                                  uint32_t what_to_show) {
-    for (DomNode* node = dom_tree_walker_next_raw(root, current);
-         node;
-         node = dom_tree_walker_next_raw(root, node)) {
-        if (dom_tree_walker_accepts(node, what_to_show)) return node;
+static Item dom_tree_walker_find_forward(Item walker, DomNode* boundary,
+                                          DomNode* first, uint32_t what_to_show) {
+    RootFrame roots(3);
+    Rooted<Item> walker_root(roots, walker), result_root(roots, ItemNull), node_root(roots, ItemNull);
+    for (DomNode* node = first; node;) {
+        node_root.set(dom_wrap_element(node));
+        result_root.set(dom_tree_walker_filter(walker_root.get(), node, what_to_show));
+        if (item_is_error(result_root.get())) return result_root.get();
+        int64_t result = it2i(result_root.get());
+        if (result == 1) return node_root.get();
+        // reject prunes a subtree; skip only hides its own node (DOM Traversal §6).
+        node = result == 2 ? dom_next_after_subtree(boundary, node)
+            : dom_tree_walker_next_raw(boundary, node);
     }
-    return nullptr;
+    return ItemNull;
 }
 
 static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) {
@@ -5694,37 +5733,30 @@ static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) 
 
     uint32_t what_to_show = dom_to_u32(
         dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_WHAT_TO_SHOW));
-    DomNode* next = nullptr;
-    if (step == JS_TREE_WALKER_STEP_FIRST_CHILD) {
-        for (DomNode* node = dom_tree_walker_first_child_raw(current);
-             node;
-             node = dom_tree_walker_next_raw(root, node)) {
-            if (dom_tree_walker_accepts(node, what_to_show)) {
-                next = node;
-                break;
-            }
-        }
-    } else if (step == JS_TREE_WALKER_STEP_NEXT_SIBLING) {
-        for (DomNode* node = current->next_sibling;
-             node;
-             node = node->next_sibling) {
-            if (dom_tree_walker_accepts(node, what_to_show)) {
-                next = node;
-                break;
-            }
+    if (step == JS_TREE_WALKER_STEP_NEXT_SIBLING) {
+        for (DomNode* node = current; node && node != root;) {
+            DomNode* parent = node->parent;
+            if (!parent) break;
+            node_root.set(dom_tree_walker_find_forward(walker_root.get(), parent,
+                node->next_sibling, what_to_show));
+            if (item_is_error(node_root.get())) return node_root.get();
+            if (node_root.get().item != ITEM_NULL) break;
+            node = parent;
+            if (node == root) break;
+            node_root.set(dom_tree_walker_filter(walker_root.get(), node, what_to_show));
+            if (item_is_error(node_root.get())) return node_root.get();
+            bool visible_parent = it2i(node_root.get()) == 1;
+            node_root.set(ItemNull);
+            if (visible_parent) break;
         }
     } else {
-        next = dom_tree_walker_next_matching(root, current, what_to_show);
+        DomNode* boundary = step == JS_TREE_WALKER_STEP_FIRST_CHILD ? current : root;
+        DomNode* first = step == JS_TREE_WALKER_STEP_FIRST_CHILD
+            ? dom_tree_walker_first_child_raw(current) : dom_tree_walker_next_raw(root, current);
+        node_root.set(dom_tree_walker_find_forward(walker_root.get(), boundary, first, what_to_show));
     }
-    if (!next) return ItemNull;
-
-    // Sanitizer walks detached editor documents; keep the wrapper rooted while
-    // publishing it as currentNode so a compacting collection cannot leave the
-    // walker pointing at the pre-move wrapper during the next traversal step.
-    node_root.set(dom_wrap_element(next));
-    if (node_root.get().item == ItemNull.item) return ItemNull;
-    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_CURRENT,
-                    node_root.get());
+    if (item_is_error(node_root.get()) || node_root.get().item == ITEM_NULL) return node_root.get();
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_CURRENT, node_root.get());
     return node_root.get();
 }
 
@@ -5740,30 +5772,51 @@ JS_DOM_TREE_WALKER_METHOD(dom_tree_walker_next_sibling_method,
     JS_TREE_WALKER_STEP_NEXT_SIBLING)
 #undef JS_DOM_TREE_WALKER_METHOD
 
+static Item dom_tree_walker_filter_get(void) {
+    Item receiver = dom_realm_receiver();
+    if (!dom_realm_object_has_class(receiver, JS_CLASS_TREE_WALKER))
+        return dom_realm_throw_type_error("Illegal TreeWalker receiver");
+    return dom_realm_get_name(receiver, JS_TREE_WALKER_FILTER);
+}
+
 extern "C" void dom_tree_walker_install_interface(Item prototype) {
-    RootFrame roots(1);
+    RootFrame roots(3);
     Rooted<Item> prototype_root(roots, prototype);
     if (!roots.valid()) return;
+    Rooted<Item> getter_root(roots, dom_realm_new_function(dom_tree_walker_filter_get));
+    Rooted<Item> name_root(roots, js_string_key("filter"));
+    dom_realm_install_accessor(prototype_root.get(), name_root.get(), getter_root.get(), ItemNull, 0);
     dom_realm_install_method(prototype_root.get(), "nextNode", dom_tree_walker_next_node_method);
     dom_realm_install_method(prototype_root.get(), "firstChild", dom_tree_walker_first_child_method);
     dom_realm_install_method(prototype_root.get(), "nextSibling", dom_tree_walker_next_sibling_method);
 }
 
-extern "C" Item dom_create_tree_walker_bridge(Item root_item, Item what_to_show_item) {
+extern "C" Item dom_create_tree_walker_filtered_bridge(Item root_item, Item what_to_show_item, Item filter_item) {
     if (!dom_unwrap_element(root_item)) return ItemNull;
     RootFrame roots(4);
-    Rooted<Item> root_root(roots, root_item);
+    Rooted<Item> root_root(roots, root_item), filter_root(roots, filter_item);
+    if (is_js_undefined(filter_root.get())) filter_root.set(ItemNull);
+    if (filter_root.get().item != ITEM_NULL && !js_is_object_value(filter_root.get()))
+        return dom_realm_throw_type_error("NodeFilter must be an object");
     Rooted<Item> walker_root(roots, dom_realm_new_object_of_class(JS_CLASS_TREE_WALKER));
     if (walker_root.get().item == ItemNull.item) return ItemNull;
-    uint32_t what_to_show = dom_to_u32(what_to_show_item);
+    uint32_t what_to_show = is_js_undefined(what_to_show_item)
+        ? UINT32_MAX : dom_to_u32(what_to_show_item);
     dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ROOT, root_root.get());
     dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_CURRENT, root_root.get());
     dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_WHAT_TO_SHOW,
                     (Item){.item = i2it((int64_t)what_to_show)});
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_FILTER, filter_root.get());
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ACTIVE, {.item = ITEM_FALSE});
     // captured prototype methods operate on the actual native walker receiver;
     // per-instance bound callbacks hid the WebIDL surface (D3.4.7, D7.2.2).
     dom_bind_interface_prototype(dom_realm_global(), walker_root.get(), "TreeWalker");
     return walker_root.get();
+}
+
+extern "C" Item dom_create_tree_walker_bridge(Item root_item, Item what_to_show_item) {
+    // preserve the published two-argument catalog slot; filtering appends its own entry.
+    return dom_create_tree_walker_filtered_bridge(root_item, what_to_show_item, ItemNull);
 }
 
 extern "C" Item dom_document_create_event_bridge(Item interface_name) {

@@ -479,6 +479,7 @@ Item dom_document_set_design_mode_bridge(Item);
 Item dom_document_exec_command_bridge(Item, Item);
 Item dom_document_query_command_bridge(Item, Item);
 Item dom_create_tree_walker_bridge(Item, Item);
+Item dom_create_tree_walker_filtered_bridge(Item, Item, Item);
 Item dom_report_validity_bridge(Item);
 Item dom_form_submit_bridge(Item);
 Item dom_form_request_submit_bridge(Item, Item);

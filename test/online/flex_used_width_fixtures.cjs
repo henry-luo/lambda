@@ -7,6 +7,10 @@ for (const width of ['auto', '1px', '100px']) {
     }
 }
 fixtures.push(
+    {name: 'block flex item ignores a percentage preferred width when flexing', width: '100%', flex: '1 0 100px', rowWidth: 360, rowHeight: 76, nested: true, flowItem: true},
+    {name: 'block flex item retains a fractional percentage preferred width', width: '80%', flex: '1 0 100px', rowWidth: 360, rowHeight: 76, nested: true, flowItem: true},
+    {name: 'block flex item separates its fixed preference from content minimum', width: '100px', flex: '1 0 100px', rowWidth: 360, rowHeight: 76, nested: true, flowItem: true},
+    {name: 'block flex item content minimum ignores a larger fixed preference', width: '300px', flex: '1 0 100px', rowWidth: 360, rowHeight: 76, nested: true, flowItem: true},
     {name: 'maximum content height at assigned width', width: '100px', height: 'max-content'},
     {name: 'fit content height at assigned width', width: '100px', height: 'fit-content'},
     {name: 'intrinsic minimum height at assigned width', width: '100px', style: 'min-height:min-content'},
@@ -23,9 +27,9 @@ function fixtureHtml(fixture) {
     return `<!doctype html><meta charset="utf-8"><style>
 body{margin:0}*{box-sizing:border-box}#outer{${fixture.outerColumn ? 'display:flex;flex-direction:column;' : ''}width:${fixture.rowWidth || 600}px}
 #row{display:flex;align-items:flex-end;width:100%;${fixture.outerColumn ? 'height:min-content;flex:none;' : ''}background:#eee}
-#left{display:flex;flex-direction:column;flex:${fixture.flex || '1 0 0'};width:${fixture.width || '100px'};
+#left{display:${fixture.flowItem ? 'block' : 'flex'};flex-direction:column;flex:${fixture.flex || '1 0 0'};width:${fixture.width || '100px'};
 height:${fixture.height || 'auto'};gap:12px;align-items:flex-start;background:red;${fixture.style || ''}}
-#label{margin:0;font:12px/16px monospace}#title{${fixture.nested ? 'display:flex;flex-direction:column;' : ''}width:${fixture.childWidth || '100%'};height:auto}
+#label{margin:${fixture.flowItem ? '0 0 12px' : '0'};font:12px/16px monospace}#title{${fixture.nested ? 'display:flex;flex-direction:column;' : ''}width:${fixture.childWidth || '100%'};height:auto}
 #text{margin:0;font:20px/24px monospace}#right{flex:none;width:200px;height:40px;background:blue}#band{flex:none;height:10px;width:100%;background:lime}
 </style><div id="outer"><div id="row"><div id="left"><p id="label">caption</p>
 <div id="title"><p id="text">AAAA BBBB CCCC DDDD</p></div></div><div id="right"></div></div><div id="band"></div></div>`;

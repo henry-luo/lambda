@@ -185,7 +185,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_notify_mutation radiant_host_api->dom_catalog->notify_mutation
 #define dom_get_ui_context radiant_host_api->dom_catalog->get_ui_context
 #define dom_has_committed_geometry_snapshot radiant_host_api->dom_catalog->has_committed_geometry_snapshot
-#define dom_create_tree_walker_bridge radiant_host_api->dom_catalog->create_tree_walker
+#define dom_create_tree_walker_filtered_bridge radiant_host_api->dom_catalog->create_tree_walker_filtered
 #define dom_document_create_event_bridge radiant_host_api->realm->document_create_event_bridge
 #define dom_document_exec_command_bridge radiant_host_api->dom_catalog->exec_command
 #define dom_document_query_command_bridge radiant_host_api->dom_catalog->query_command
@@ -3278,8 +3278,10 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_TREE_WALKER) {
-        *out = argc >= 2
-            ? dom_create_tree_walker_bridge(args[0], args[1])
+        *out = argc >= 1
+            ? dom_create_tree_walker_filtered_bridge(args[0],
+                argc >= 2 ? args[1] : (Item){.item = i2it(0xffffffffLL)},
+                argc >= 3 ? args[2] : ItemNull)
             : ItemNull;
         return 1;
     }

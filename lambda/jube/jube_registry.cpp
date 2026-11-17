@@ -500,6 +500,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
 extern "C" Item dom_create_tree_walker_bridge(Item root, Item what_to_show);
+extern "C" Item dom_create_tree_walker_filtered_bridge(Item root, Item what_to_show, Item filter);
 extern "C" Item dom_document_create_event_bridge(Item interface_name);
 extern "C" Item dom_document_exec_command_bridge(Item command, Item value);
 extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name);

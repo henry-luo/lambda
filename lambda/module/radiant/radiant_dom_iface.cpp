@@ -349,7 +349,7 @@ const char radiant_dom_interface_decl[] =
     "    add_event_listener: pn(a0: any, a1: any, a2: any) any,\n"
     "    remove_event_listener: pn(a0: any, a1: any, a2: any) any,\n"
     "    dispatch_event: pn(a0: any) any,\n"
-    "    create_tree_walker: fn(a0: any, a1: any) any,\n"
+    "    create_tree_walker: fn(a0: any, a1: any, a2: any) any,\n"
     "    create_event: fn(a0: any) any,\n"
     "    exec_command: pn(a0: any, a1: any, a2: any) bool,\n"
     "    query_command_supported: fn(a0: any) bool,\n"

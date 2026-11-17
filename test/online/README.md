@@ -1661,3 +1661,245 @@ Operate's main interface and gray panels return, clearing high severity:
 budgets remain unchanged. No broad baseline was repeated. The persistent goal
 was cleared by the user; this confirmed fix was qualified and wrapped up.
 See [the repair record](comparison/repairs.html#round-63).
+
+Round sixty-four fixes **RI-112**: fixed/absolute document roots were deferred
+by the raster normal-flow walker with no parent stacking pass to paint them.
+The tree entry now calls the existing direct stacking dispatcher. Four new
+cases fail before the fix; all **24 focused paint/overflow fixtures** pass
+after it, and Chromium confirms the five new controls. The exact saved Dayos
+source improves **99.01% to 0.77%** mean error. Dayos's live capture still
+shows its authored yellow startup overlay, so it remains high severity.
+The inventory stays **152 high, 1 critical, 914 low**. Browser references,
+other comparison rows, catalog, annotations and capture budgets are preserved.
+Broad baselines were deferred; the goal remains active.
+See [the repair record](comparison/repairs.html#round-64).
+
+Round sixty-five fixes **RI-113**: preferred aspect ratios ignored dimensionless
+CSS math. The shared resolver now evaluates number components using the existing
+math engine, including calculated numerator/denominator values. Remote's large
+SVG logo returns on the exact saved source: **11.27% to 0.75%** mean error.
+Two new pixel cases fail before the fix; all nine related fixtures, two focused
+native tests and integer lint pass afterward. Remote's live capture still lacks
+its hydrated hero, so it remains high. The sorted inventory stays **152 high,
+1 critical, 914 low**. Browser references, other rows, catalog, annotations,
+thresholds and capture clocks remain unchanged. Broad baselines were deferred.
+See [the repair record](comparison/repairs.html#round-65). The goal remains active.
+
+Round sixty-six fixes **RI-114**: the shared flex/grid positioned-child layout
+pass missed boxes beneath display:contents wrappers. It now reuses the existing
+flattened-box collector. Superlist's fixed navigation returns. Four new cases
+fail before the fix; all **29 related paint fixtures** and integer lint pass.
+The accumulated three repairs pass one broad Radiant milestone: **8,169 passed,
+299 partial, 20 skipped; no failures out of 8,488 checks**.
+
+Superlist's current HTTP heading/title and light design differ from the archived
+dark site. Its browser reference is refreshed under the existing audit policy;
+prior images, source hashes and both attempts are retained. This is reference
+maintenance, separate from the engine repair. A large app image still has a
+zero-height ratio container, so a new manual annotation keeps Superlist high.
+The inventory remains **152 high, 1 critical, 914 low** (129 automatic and 23
+manual candidates). Other rows, previous annotations, catalog, clocks, budgets
+and thresholds remain unchanged. See [the repair record](comparison/repairs.html#round-66)
+and [the reference audit](comparison/reference_updates.json). The goal is active.
+
+Round sixty-seven fixes **RI-115**: flex refinement saved heights from flattened
+items but restored them using direct DOM children, losing ratio-box heights
+through display:contents. Both phases now use the existing item iterator.
+Superlist's large app image returns in its saved source and live capture,
+clearing its temporary manual high annotation. Its current error is **1.79%**;
+headline wrapping and minor rendering details remain. Two wrapper cases fail
+before the fix while the direct control passes; all **25 focused ratio and
+positioning fixtures** and integer lint pass afterward. The broad round66
+baseline passed before this follow-up and was not repeated.
+
+The inventory is **151 high, 1 critical, 915 low**. Other rows, previous
+annotations, browser references, the round66 reference audit, catalog, clocks,
+budgets and thresholds remain unchanged. See [the repair record](comparison/repairs.html#round-67).
+The goal remains active.
+
+Round sixty-eight fixes **RI-116**: lifted paint layers replayed intermediate
+absolute ancestors using the normal DOM parent's origin. Raster and shared
+vector replay now apply the existing containing-block offset helper at those
+ancestors, including the raster clip origin. One new absolute case fails before
+the fix, its fixed stacking-context control passes, and Chromium confirms both.
+All **38 related paint fixtures** pass afterward; SVG output moves the witness
+from y200 to y0. Exact-source Readymag error improves **41.50% to 9.87%**.
+Its current live capture still has a blank startup state, so it remains high.
+The inventory stays **151 high, 1 critical, 915 low**. Browser references,
+other rows, annotations, catalog, clocks and budgets are preserved. The broad
+round66 baseline preceded these local follow-ups and was not repeated.
+See [the repair record](comparison/repairs.html#round-68). The goal is active.
+
+Round sixty-nine diagnoses **RI-117**, an invalid-mask interoperability
+difference. Readymag's SVG references a nonexistent mask. Native transparent
+coverage follows CSS Masking §7.1; Chromium paints the card. Four controls
+separate missing-mask behavior from drop-shadow effects. The native rule is
+retained; no renderer, canonical capture, metric, budget or reference changes.
+The inventory remains **151 high, 1 critical, 915 low**.
+See [the diagnosis](comparison/repairs.html#round-69). The goal is active.
+
+Round seventy refreshes the **eight remaining high-severity Framer pages**
+with the qualified round68 renderer and two workers. All eight load and capture
+successfully. Visual review retains all eight: large headings, applications,
+media or background video remain missing. Pitch News crosses below the coarse
+threshold without restoring its main content, so a new manual annotation keeps
+it high. No additional engine repair or page clearance is claimed.
+
+The inventory remains **151 high, 1 critical, 915 low** (128 automatic, 23 manual).
+Only the eight Lambda attempts and that annotation change; browser references,
+previous annotations, catalog, reference audit, clocks and budgets remain intact.
+No build or baseline was repeated. See [the targeted review](comparison/repairs.html#round-70).
+The goal remains active.
+
+Round seventy-one fixes **RI-118**: flex content-only intrinsic measurements
+resolved descendant percentages against a preferred width that the query
+should ignore. The shared percentage-basis helper now reads the existing query
+mode before cache lookup. Orum's saved hero columns and right image recover.
+Three reduced cases fail before; a smaller fixed-width control passes. All
+**55 focused flex/intrinsic PNG cases**, the new warm-cache native regression
+and integer lint pass afterward; Chromium confirms the allocation. Two older
+selected core tests fail identically before and after and remain unchanged.
+
+The accumulated follow-ups pass a second broad Radiant milestone: **8,169
+passed, 299 partial, 20 skipped, no failures out of 8,488**. Both old and new
+renderers produce blank current live Orum captures, so its independent startup
+remains unresolved. Inventory: **151 high, 1 critical, 915 low**. Browser
+references, other rows, annotations, catalog, audit, clocks and budgets remain
+unchanged. See [the repair record](comparison/repairs.html#round-71).
+The goal remains active.
+
+Round seventy-two fixes **RI-119**: an absolute underline made intrinsic
+height classification stack Overpass's inline letters as blocks. Classification
+now excludes out-of-flow children using the existing helper. Independent flow
+roots also use the existing inline-child classification without requiring line
+clamping. Three reduced cases fail before, two controls pass, and Chromium
+confirms all five. All **42 focused flex/inline PNG cases** and integer lint
+pass afterward. Exact-source Overpass error improves **18.22% to 0.47%**.
+
+Its live hero stays blank, as before the repair, so Overpass remains high.
+Proof/Podia image omissions vanish in unchanged warm captures and do not
+justify a layout patch. Inventory remains **151 high, 1 critical, 915 low**.
+Browser references, other rows, annotations, catalog, audit, clocks and budgets
+are unchanged. The passing round71 broad checkpoint is not repeated.
+See [the repair record](comparison/repairs.html#round-72). The goal is active.
+
+Round seventy-three fixes **RI-120**: SVG height="auto" was marked as a
+natural 150px height after parsing failed. The metadata reader now uses the
+existing parse-success contract; nonnumeric dimensions do not invent natural
+axes. Wispr's large path regions recover, improving saved-page error
+**15.30% to 2.43%**. Three new cases fail before; two controls pass. Chromium
+confirms all five; all **34 focused SVG/ratio/flex PNG cases** and integer
+lint pass afterward. The preceding broad checkpoint is not repeated.
+
+The current live capture still lacks its heading, paragraph, navigation and
+path text. A new manual annotation retains this major omission despite a
+lower coarse score. Inventory remains **151 high, 1 critical, 915 low**
+(127 automatic, 24 manual). Browser references, other rows, prior annotations,
+catalog, audit, clocks and budgets are preserved.
+See [the repair record](comparison/repairs.html#round-73). The goal is active.
+
+Round seventy-four fixes **LR12-55** in the shared DOM: TreeWalker discarded
+its filter, so Wispr's quote-cleanup script deleted every text node. Function
+and object filters now run after the mask, distinguish rejection from skipping,
+and retain proper receivers, traversal bounds, exception cleanup and reentrancy.
+Precise roots protect callbacks and wrappers. The readonly filter preserves
+identity. A new filtered native entry is appended; all **461 published catalog
+entries** keep their signatures and positions.
+
+Three new semantic regressions and an existing unfiltered control pass on the
+final runner; Chromium confirms the three new scripts. The fast baseline keeps
+its curated 201 document cases; the new tests run separately.
+The accumulated fixes pass the Radiant milestone: **8,169 passed, 299
+partial, 20 skipped, no failures out of 8,488**. Wispr's live text
+returns and its error is **0.85%**, clearing its temporary manual annotation.
+Final capture metrics are checked directly against the unchanged comparison
+row, avoiding another full image recomputation.
+
+Inventory: **150 high, 1 critical, 916 low** (127 automatic, 23 manual).
+Other rows, prior annotations, browser references, catalog, audit, clocks and
+budgets remain intact. See [the repair record](comparison/repairs.html#round-74).
+The goal remains active.
+
+Round seventy-five refreshes **six other high-severity pages with filtered
+TreeWalker calls** using the qualified round74 renderer: Agiloft, Xolo Teams,
+Swag, Orum, Circle and Armadillo. All six load and capture. Five remain largely
+blank; Swag retains substantial consent/page-state differences. These captures
+do not establish filtering as their remaining root cause, and no further page
+clearance or engine repair is claimed.
+
+Inventory remains **150 high, 1 critical, 916 low**. Only the six native
+attempts change. Wispr's existing comparison timestamp is synchronized with
+its final attempt; its image, score and cleared severity are unchanged. Other
+rows, browser references, annotations, catalog, audit, clocks and budgets remain
+intact. No build or baseline is repeated.
+See [the targeted review](comparison/repairs.html#round-75). The goal is active.
+
+Round seventy-six fixes **RI-121**: media source requests were created during
+layout after snapshot resource waiting. Discovery now reuses existing media
+preparation before that wait, including local HTML's first remote-source manager.
+Source selection, preload:none/autoplay and audio permission policy remain
+shared. No timeout, clock or site condition changes. Four new cases fail before,
+one defer control passes; all **34 focused CSS-resource/video checks** and
+integer lint pass afterward. The preceding broad checkpoint is not repeated.
+
+Five current native captures load. Going's large video remains absent; complete
+downloaded-file playback is supported, progressive/range playback remains open.
+Origin's existing manual annotation keeps its missing main content high.
+Optimizely and Pitch remain high. No further engine-driven clearance is claimed.
+
+Holocene's changed HTTP title/heading and white design require a separately
+audited browser-reference refresh. Its current pair is **0.52%** error and
+leaves high through reference maintenance. Old images and source hashes remain
+in [the reference audit](comparison/reference_updates.json).
+Inventory: **149 high, 1 critical, 917 low** (126 automatic, 23 manual).
+Other rows/references, all annotations, catalog, clocks and budgets are preserved.
+See [the repair record](comparison/repairs.html#round-76). The goal is active.
+
+Round seventy-seven fixes **RI-123**: intrinsic height discarded the enclosing
+line strut when atomic inline content could not be flattened as text. The failed
+collection now reuses the existing inline formatter and fragment restoration.
+Optimizely's 222.3px heading no longer receives a 117px parent, correcting the
+105.3px shift in its copy, background and following section.
+
+Six reduced cases cover short/tall line height in block/flex/grid parents;
+Chromium confirms all six and the old release fails the tall-grid case.
+All **22 focused inline-height/break checks** and integer lint pass. The
+preceding broad checkpoint is retained without another full baseline run.
+Optimizely's identical-source error falls **13.56% → 1.44%**; its normal live
+error falls **14.43% → 2.53%** and it leaves high severity. Smaller letter
+styling differences remain.
+
+Nolla's named view-progress timeline/ranges are a major missing subsystem,
+recorded as **RI-122**; its qualified same-source error is 29.85% and it remains
+high. No timeline suppression or timing exception is introduced.
+
+Inventory: **148 high, 1 critical, 918 low** (125 automatic, 23 manual).
+All other report rows, browser references, annotations, URL list, clocks and
+budgets remain intact. See [the repair record](comparison/repairs.html#round-77).
+The goal remains active.
+
+Round seventy-eight fixes **RI-124**: a strict atomic-inline fit test treated
+about 0.0000305px of float roundoff as real overflow. Python's search form/social
+group added a line and shifted the page by about 46px. The existing float-edge
+comparator is now shared by atomic fit decisions; no pixel allowance or site
+condition is added. Six reduced cases cover inline-block/flex/grid fits and
+genuine overflow. Before: three failures and three controls; Chromium confirms
+all six. After: **32 focused checks** and integer lint pass.
+
+Python's saved-source difference falls **10.8% → 0.27%**. Its normal capture
+loads and scores **4.20%**, but the live carousel content remains absent; the
+existing manual high review is retained. This does not claim a page clearance.
+
+A temporary optimized trace ruled out Jetty's responsive-source mismatch:
+the correct image is queued but still pending at the existing wait. Jetty,
+Squarespace and Pelago show incomplete resources at that point. Trace source
+changes were removed before the final build. No capture budget or priority
+exception is introduced. Known Leaflet top-layer, Draftbit composite-mask and
+WebKit initial-fade differences are retained. Twenty-six saved pairs were
+reviewed; most other saved layouts are already close.
+
+Inventory remains **148 high, 1 critical, 918 low** (125 automatic, 23 manual).
+All other report rows, browser references, every annotation, catalog and capture
+policy remain intact. The preceding broad checkpoint is retained without
+another full baseline run. See [the repair record](comparison/repairs.html#round-78).
+The goal remains active.
