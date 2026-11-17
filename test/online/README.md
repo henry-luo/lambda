@@ -1583,3 +1583,81 @@ is refreshed; browser references, all other records, catalog and thresholds
 are retained. No broad baseline was rerun. The user cleared the goal during
 the build; this repair is wrapped up and further goal work has stopped.
 See [the before/after gallery](comparison/repairs.html#round-56).
+
+Round fifty-seven fixes **LI-072**, pending substitutions mixed with other
+font-family entries. Literal family validation now follows substitution and
+both parser entry points share existing grouping. All **205 Input tests** and
+**three native font/margin cases** pass; Chromium confirms admission, font
+selection, invalid variables and live changes. Four selected live captures
+remain major: **156 high, 1 critical and 910 low**. Cofounder's first attempt
+lacks media; matching later base/fixed controls are byte-identical, and the
+first attempt is retained with that readiness limitation recorded. Browser
+references, other rows and thresholds are unchanged. No broad baseline was
+rerun. See [the repair record](comparison/repairs.html#round-57).
+
+Round fifty-eight fixes **LI-073 / RI-107**, initial stylesheet completion
+lost when byte-only prefetch was reused without its element consumer.
+Contentsquare's hero now renders, moving high to low: mean difference
+**35.11% → 15.38%**. Four selected live captures leave **155 high, 1 critical
+and 911 low**. Six native resource-manager controls and four final HTTP
+regressions pass; the first candidate also passes all fourteen adjacent HTTP
+resource cases. Chromium confirms the four fixture outcomes. No broad baseline
+was repeated. Browser references, other rows, annotations and thresholds are
+preserved. See [the repair record](comparison/repairs.html#round-58).
+
+Round fifty-nine fixes **RI-108**, final grid percentage-height definiteness
+and stale intrinsic image-ratio constraints. The Cape's saved hydrated page now
+paints its large illustration; the live hero still remains absent, retaining
+**155 high, 1 critical and 911 low**. Five focused native tests pass, including
+**54 retained states** independently confirmed by Chromium. One configured
+layout sweep exposed three sizing regressions; after correction, the affected
+**776-case sizing category passes**. Other categories passed the initial sweep;
+the full sweep was not repeated. No full native Radiant/Lambda baseline is
+claimed. Browser references, other rows, annotations and thresholds are
+preserved. See [the repair record](comparison/repairs.html#round-59).
+
+Round sixty fixes **JS07-L1, JS13-L8 and JS13-L9**: native superclass static
+writes retain the public class receiver, `Element.hasAttributes()` supports
+live namespaced attributes, and imported fragments initialize nested custom
+elements before property binding. Text/comment imports also reach their
+existing clone support. **Five focused runtime and four focused document tests
+pass**, with Chromium controls covering 16 attribute and 18 import/lifecycle
+states. Archive.org's module and root template now complete, but its shadow
+content remains unpainted. The inventory stays **155 high, 1 critical and
+911 low**. Only its Lambda attempt is refreshed; browser references, other
+rows, catalog, annotations and thresholds are preserved. No broad baseline
+was run. See [the repair record](comparison/repairs.html#round-60).
+
+Round sixty-one confirms **LI-026's Calmind visual repair** in the inventory.
+The current renderer restores the first-party stylesheet and hero; mean error
+falls from **34.26% to 0.80%**, clearing high severity. The existing fresh capture
+is promoted without a duplicate render. The inventory is now **154 high,
+1 critical and 912 low**. Its separate generic script exception remains open.
+This round adds no engine source change or repeated baseline; round-60 source
+and focused-test qualification is preserved. Browser references, other rows,
+annotations and thresholds remain unchanged. See [the repair record](comparison/repairs.html#round-61).
+
+Round sixty-two fixes **RI-109** (relative document bases and URL identity),
+**LI-074** (head-template closure) and **RI-110 / JS13-L10** (inert template
+styles, scripts and dependencies). Nine focused native document tests, three
+Input parser tests, two persistent HTTP regressions and integer lint pass.
+Chromium agrees on five base fixtures and the inert HTML/active SVG control;
+its malformed-base fallback discrepancy is retained explicitly. No broad
+baseline was repeated. MySQL clears high severity (24.46% to **1.24%** mean
+error). Unreal now displays styled documentation, but Chromium shows a 403
+application route; its content discrepancy remains high by manual review.
+The inventory is **153 high, 1 critical and 913 low**. Browser references,
+unselected captures, catalog, timing and resource budgets and thresholds are
+preserved. See [the repair record](comparison/repairs.html#round-62).
+
+Round sixty-three fixes **RI-111**: canonical inline-style sharing omitted
+isolation, ruby position and explicit line-strut state. The shared identity
+field list now preserves these distinctions. Five focused style-sharing unit
+tests and eleven related paint fixtures pass; two new isolation fixtures fail
+before the fix, and three Chromium cases confirm the expected behavior.
+Operate's main interface and gray panels return, clearing high severity:
+**60.27% to 2.33%** mean error. The inventory is **152 high, 1 critical and
+914 low**. Browser references, other rows, catalog, annotations and capture
+budgets remain unchanged. No broad baseline was repeated. The persistent goal
+was cleared by the user; this confirmed fix was qualified and wrapped up.
+See [the repair record](comparison/repairs.html#round-63).

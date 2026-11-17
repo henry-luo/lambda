@@ -949,27 +949,41 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
     if (node && dom_node_is_connected(node)) dom_custom_element_tree_changed(node, true);
 }
 
-extern "C" void dom_custom_element_tree_changed(void* node_ptr, bool connected) {
-    DomNode* node = (DomNode*)node_ptr;
-    if (!dom_realm_active() || !node || !node->is_element()) return;
+enum DomCustomElementTreeAction { DOM_CUSTOM_UPGRADE, DOM_CUSTOM_CONNECT, DOM_CUSTOM_DISCONNECT };
+
+static Item dom_custom_element_visit_tree(DomNode* node, DomCustomElementTreeAction action) {
+    if (!node) return ItemNull;
+    if (!dom_realm_active() || !node->is_element()) return dom_wrap_element(node);
     RootFrame roots(3);
     Rooted<Item> owner(roots, dom_wrap_element(node));
     Rooted<Item> child_owner(roots, ItemNull);
     Rooted<Item> next_owner(roots, ItemNull);
     DomElement* element = node->as_element();
-    if (element->tag_name && strchr(element->tag_name, '-'))
-        dom_realm_custom_element_connection(owner.get(), connected);
+    if (element->tag_name && strchr(element->tag_name, '-')) {
+        if (action == DOM_CUSTOM_UPGRADE) {
+            Item result = dom_realm_custom_element_upgrade(owner.get());
+            if (item_is_error(result)) return result;
+        } else dom_realm_custom_element_connection(owner.get(), action == DOM_CUSTOM_CONNECT);
+    }
     // template contents are inert; importing/inserting them upgrades their nodes.
-    if (element->tag_name && !strcmp(element->tag_name, "template")) return;
+    if (element->tag_name && !strcmp(element->tag_name, "template")) return owner.get();
     // anonymous layout boxes have no DOM identity and cannot own reactions.
     for (DomNode* child = dom_source_child(element, true); child;) {
         DomNode* next = dom_source_sibling(child, true);
         child_owner.set(dom_wrap_element(child));
         // constructors may detach siblings and collect before traversal resumes.
         next_owner.set(next ? dom_wrap_element(next) : ItemNull);
-        dom_custom_element_tree_changed(child, connected);
+        Item result = dom_custom_element_visit_tree(child, action);
+        if (item_is_error(result)) return result;
         child = next;
     }
+    return owner.get();
+}
+
+extern "C" void dom_custom_element_tree_changed(void* node_ptr, bool connected) {
+    if (!dom_realm_active()) return;
+    dom_custom_element_visit_tree((DomNode*)node_ptr,
+        connected ? DOM_CUSTOM_CONNECT : DOM_CUSTOM_DISCONNECT);
 }
 
 extern "C" void* dom_visible_child(void* element, bool first) {
@@ -1752,7 +1766,9 @@ extern "C" void dom_set_document(void* dom_doc) {
         // Batch-mode page scripts enter a fresh JS realm after document load;
         // rebind XHR to the retained document URL instead of leaving relative
         // requests with the reset batch's empty base.
-        js_xhr_set_base_url(doc->url ? url_get_href(doc->url) : nullptr);
+        Url* resource_base = dom_document_resolve_url(doc);
+        js_xhr_set_base_url(resource_base ? url_get_href(resource_base) : nullptr);
+        if (resource_base) url_destroy(resource_base);
         if (doc->document_pool) {
             css_property_system_init(doc->document_pool);
         }
@@ -6121,31 +6137,10 @@ static JsDomPropId dom_prop_id(const char* prop) {
 // the query to say *which* document -- a Lambda-only document never sets the
 // global, and a node knows its own.
 static Item dom_document_base_uri(DomDocument* doc) {
-    const char* fallback = doc && doc->url ? url_get_href(doc->url) : nullptr;
-    if (!fallback) fallback = "about:blank";
-    if (doc && doc->root) {
-        SelectorQueryScratch query;
-        if (query.parse_list("base[href]")) {
-            query.matcher = dom_create_selector_matcher(doc, query.pool);
-            DomElement* base = dom_selector_group_find_first(
-                query.matcher, query.group, doc->root, true);
-            if (base) {
-                // only the first connected base applies; an invalid href falls back to the document URL.
-                Url* resolved = doc->url
-                    ? url_parse_with_base(base->get_attribute("href"), doc->url)
-                    : url_parse(base->get_attribute("href"));
-                if (resolved && url_is_valid(resolved) &&
-                        resolved->scheme != URL_SCHEME_DATA &&
-                        resolved->scheme != URL_SCHEME_JAVASCRIPT) {
-                    Item result = js_name_item(url_get_href(resolved));
-                    url_destroy(resolved);
-                    return result;
-                }
-                if (resolved) url_destroy(resolved);
-            }
-        }
-    }
-    return js_name_item(fallback);
+    Url* resolved = dom_document_resolve_url(doc);
+    Item result = js_name_item(resolved ? url_get_href(resolved) : "about:blank");
+    if (resolved) url_destroy(resolved);
+    return result;
 }
 
 static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) {
@@ -13014,7 +13009,8 @@ extern "C" Item dom_import_node_bridge(void* doc_ptr, void* elem_ptr, bool deep)
     // Import creates destination-owned backing storage; adoption of a source
     // clone would leave its Mark attributes tied to the foreign document pool.
     DomNode* clone = dom_clone_node_into_document(source, destination, deep);
-    return clone ? dom_realm_custom_element_upgrade(dom_wrap_element(clone)) : ItemNull;
+    // imported fragment descendants must be initialized before callers bind properties.
+    return clone ? dom_custom_element_visit_tree(clone, DOM_CUSTOM_UPGRADE) : ItemNull;
 }
 
 extern "C" Item dom_clone_document_bridge(Item document_item, Item deep_arg) {
@@ -13753,6 +13749,16 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                            elem->parent, attr_name, old_value);
     return ItemNull;
+}
+
+extern "C" Item dom_fp_has_attributes(Item n) {
+    DomAttributeIterator iterator = dom_element_attribute_iterator(dom_op_element(n));
+    DomAttributeView attribute;
+    // use the live namespace-aware list; internal bookkeeping is not a DOM attribute.
+    while (dom_element_next_attribute(&iterator, &attribute)) {
+        if (!dom_is_internal_attr(attribute.qualified_name)) return (Item){.item = ITEM_TRUE};
+    }
+    return (Item){.item = ITEM_FALSE};
 }
 
 extern "C" Item dom_core_attribute_names(Item n) {

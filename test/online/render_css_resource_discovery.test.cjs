@@ -15,12 +15,66 @@ before(async () => {
     server = http.createServer((request, response) => {
         const url = new URL(request.url, 'http://fixture.invalid');
         const run = url.searchParams.get('run');
-        requests.push({run, path: url.pathname});
+        requests.push({run, path: url.pathname, initial: url.searchParams.has('initial')});
         response.setHeader('Cache-Control', 'no-store');
+        if (url.pathname === '/base/page') {
+            response.writeHead(200, {'Content-Type': 'text/html'});
+            response.end(`<!doctype html><head><template><base href="/ignored/"></template>
+                <base href="/base/assets/"><base href="/later/">
+                <link rel="stylesheet" href="entry.css?run=${run}"></head><body>
+                <div id="probe"></div><img src="image.svg?run=${run}">
+                <script src="entry.js?run=${run}" defer></script>
+                <script type="module">import {value} from './value.js?run=${run}';
+                    document.getElementById('probe').dataset.module=value;</script><script>
+                window.addEventListener('load',()=>{const probe=document.getElementById('probe');
+                    console.log('BASE_URL_CONTROL',[document.URL===${JSON.stringify(origin + request.url)},
+                        location.href===document.URL,document.baseURI===${JSON.stringify(origin + '/base/assets/')},
+                        probe.dataset.classic==='loaded',probe.dataset.module==='loaded'].join(','));});
+                </script></body>`);
+            return;
+        }
+        const baseAssets = {
+            '/base/assets/entry.css': ['text/css', 'body{margin:0}#probe{width:80px;height:80px;background:green}img{display:block}'],
+            '/base/assets/entry.js': ['application/javascript', "document.getElementById('probe').dataset.classic='loaded';"],
+            '/base/assets/value.js': ['application/javascript', "export const value='loaded';"],
+            '/base/assets/image.svg': ['image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><path fill="blue" d="M0 0H80V80H0Z"/></svg>'],
+        };
+        if (baseAssets[url.pathname]) {
+            response.writeHead(200, {'Content-Type': baseAssets[url.pathname][0]});
+            response.end(baseAssets[url.pathname][1]);
+            return;
+        }
+        if (url.pathname === '/template-page') {
+            response.writeHead(200, {'Content-Type': 'text/html'});
+            response.end(`<!doctype html><head><template>
+                <link rel="stylesheet" href="/inert/sheet.css?run=${run}">
+                <style>#probe{background:red!important}</style>
+                <script>globalThis.inertInline=true;</script><script src="/inert/script.js?run=${run}"></script>
+                </template><style>body{margin:0}#probe{width:80px;height:80px;background:green}</style>
+                </head><body><div id="probe"></div><template>
+                <img src="/inert/image.svg?run=${run}">
+                <div style="background-image:url(/inert/background.svg?run=${run})"></div></template>
+                <script>console.log('TEMPLATE_RESOURCE_CONTROL',globalThis.inertInline===undefined,
+                    document.styleSheets.length===1);</script></body>`);
+            return;
+        }
         if (url.pathname === '/event.css') {
             response.writeHead(run === 'error' ? 404 : 200, {'Content-Type': 'text/css'});
             response.end(run === 'empty' ? '' : run === 'chain-second'
                 ? '#probe{background:blue}' : '#probe{background:rgb(0,128,0)}');
+            return;
+        }
+        if (url.pathname === '/initial-event-page') {
+            response.writeHead(200, {'Content-Type': 'text/html'});
+            response.end(`<!doctype html><style>#probe{width:80px;height:80px;background:red}</style>
+                <link id="sheet" rel="stylesheet" media="${run === 'print' ? 'print' : 'all'}"
+                    href="/event.css?run=${run}&initial=1" onload="this.media='all';console.log('INITIAL_CSS_EVENT','load')"
+                    onerror="console.log('INITIAL_CSS_EVENT','error')">
+                <div id="probe"></div><script>
+                    document.getElementById('sheet').addEventListener('${run === 'error' ? 'error' : 'load'}',
+                        function(e){console.log('INITIAL_CSS_LISTENER',e.target===this,!!this.sheet)});
+                    window.addEventListener('load',()=>console.log('INITIAL_WINDOW_LOAD',document.styleSheets.length));
+                </script>`);
             return;
         }
         if (url.pathname === '/event-page') {
@@ -89,6 +143,26 @@ async function renderHttpFixture(run, route = '/page') {
         log: fs.readFileSync(path.join(scratch, result.outputLog), 'utf8')};
 }
 
+test('HTML base resolves initial dependencies without changing document identity', async () => {
+    const {image, log} = await renderHttpFixture('html-base', '/base/page');
+    assert.match(log, /BASE_URL_CONTROL true,true,true,true,true/);
+    assert.deepEqual(rgb(image, 40, 40), [0, 128, 0]);
+    assert.deepEqual(rgb(image, 40, 100), [0, 0, 255]);
+    const selected = requests.filter(row => row.run === 'html-base');
+    for (const name of ['entry.css', 'entry.js', 'value.js', 'image.svg']) {
+        assert(selected.some(row => row.path === '/base/assets/' + name), name + ' resolves against the first active base');
+    }
+    assert(!selected.some(row => row.path.startsWith('/ignored/') || row.path.startsWith('/later/')));
+});
+
+test('HTML template contents neither activate nor acquire document resources', async () => {
+    const {image, log} = await renderHttpFixture('inert-template', '/template-page');
+    assert.match(log, /TEMPLATE_RESOURCE_CONTROL true true/);
+    assert.deepEqual(rgb(image, 40, 40), [0, 128, 0]);
+    assert(!requests.some(row => row.run === 'inert-template' && row.path.startsWith('/inert/')),
+        'inert stylesheet, script, image and inline CSS must not enter resource discovery');
+});
+
 for (const run of ['capacity', 'variable', 'pseudo', 'activation', 'dynamic-sheet']) {
     test('CSS resource discovery: ' + run, async () => {
         const {image} = await renderHttpFixture(run);
@@ -116,5 +190,21 @@ for (const run of ['before', 'after', 'empty', 'error', 'chain']) {
             'stylesheet completion and its dependent stylesheet must precede window load');
         assert.deepEqual(rgb(image, 40, 40), run === 'chain' ? [0, 0, 255] :
             run === 'before' || run === 'after' ? [0, 128, 0] : [255, 0, 0]);
+    });
+}
+
+for (const run of ['print', 'active', 'empty', 'error']) {
+    test('Initial CSS link completion: ' + run, async () => {
+        const {image, log} = await renderHttpFixture(run, '/initial-event-page');
+        const failed = run === 'error';
+        assert.deepEqual([...log.matchAll(/INITIAL_CSS_EVENT (load|error)/g)].map(m => m[1]),
+            [failed ? 'error' : 'load'], 'initial link completes exactly once');
+        assert(log.includes('INITIAL_CSS_LISTENER true '), 'listener observes its link as the target');
+        if (!failed) assert(log.includes('INITIAL_CSS_LISTENER true true'), 'successful completion exposes its sheet');
+        assert(log.indexOf('INITIAL_CSS_EVENT') < log.indexOf('INITIAL_WINDOW_LOAD'), 'link completes before window load');
+        if (!failed) assert(log.includes('INITIAL_WINDOW_LOAD 2'), 'prefetched sheet is published only once');
+        assert.deepEqual(rgb(image, 40, 40), failed || run === 'empty' ? [255, 0, 0] : [0, 128, 0]);
+        assert.equal(requests.filter(row => row.run === run && row.initial && row.path === '/event.css').length, 1,
+            'discovery reuses the prefetched transfer');
     });
 }

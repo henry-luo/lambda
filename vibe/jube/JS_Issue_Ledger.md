@@ -436,6 +436,29 @@ The block record holding `let x` is inside the object environment, so it answers
 
 ## 7. Classes (JS07)
 
+### JS07-L1 — Native superclass property writes lose the public class receiver — **RESOLVED**
+
+Found 2026-11-17 while diagnosing Archive.org's blank online capture. Under
+**D8.4.4 / D7.2.2**, a class shell owns its observable static properties;
+its captured AST constructor function is executable payload. The foreign
+property bridge and native-call receiver conversion unwrapped explicit
+constructors into that payload. Static assignment across `HTMLElement`
+reported success but stored on the wrong function; native inherited methods
+also observed that wrong receiver. Implicit constructors did not reproduce.
+
+`mvp_lmd_dynamic.cpp` now shares a public-receiver conversion that retains
+class shells for foreign properties, native calls and prototype arguments.
+Body invocation keeps the existing executable unwrapping. The focused
+`JsFormalMir.DynamicClassStaticWritesAcrossNativeSuperclassKeepPublicReceiver`
+regression covers explicit/implicit native inheritance, string/computed/Symbol
+keys, `Reflect.set`, inherited setters and receiver/prototype identity. It and
+four adjacent runtime checks pass; Chromium independently agrees with the
+small class and Lit property-decorator controls. Archive.org's navigation
+module imports successfully after the fix. Its subsequent template-commit
+failure is a separate DOM surface omission; module success alone does not
+clear the page's high-severity classification. Evidence is retained under
+`temp/online-visual-round60/`.
+
 ### JS07 known issues
 
 1. **Class-expression inner-name scope leak.** The immutable inner class-name binding is tracked via `inner_module_var_index` and `alias_name` on `JsClassEntry`, but the lowering for named class *expressions* writes the class object into module-var slots driven by name (`js_mir_statement_lowering.cpp:4718`+) rather than a fully isolated lexical scope; an inner name can be observable beyond the strict class-body scope the spec mandates.
@@ -522,6 +545,60 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
+
+### JS13-L10 — Initial script collection executes inert HTML template contents — **RESOLVED**
+
+Fixed 2026-11-17 under **D8.4.4 / D9.5.6v2**. The raw source walker collected
+inline and external scripts beneath HTML templates. It now uses the shared
+namespace-aware Radiant predicate, retaining the template element's own event
+attributes while excluding its contents. Foreign SVG template elements remain
+active. Initial and document.write collection share this path and the current
+document resource base (RI-109/RI-110). This does not implement dynamic script
+preparation or full template insertion-mode support.
+
+Nine focused native document tests and two persistent HTTP regressions pass.
+The inert HTTP fixture asserts both non-execution and no dependency downloads;
+native/Chromium controls agree on six inert HTML and active SVG states.
+Evidence: `temp/online-visual-round62/`; owner records are in
+`../radiant/vibe/Radiant_Issue_Ledger (fixed).md#ri-110`.
+
+### JS13-L8 — Missing Element.hasAttributes rejects dynamic Lit templates — **RESOLVED**
+
+Found 2026-11-17 during Archive.org review. **D8.4.4 / D9.5.4 /
+D9.5.6v2** require the existing declared DOM operation boundary. Lit calls
+`Element.hasAttributes()` while walking its parsed template; the absent
+method rejected even a one-interpolation template, while a static template
+worked. Added the derived `has_attributes` catalog row, its declared interface
+member and Element prototype exposure. The native fast path reuses the live
+namespace-aware attribute iterator and excludes internal bookkeeping.
+
+The focused document test checks 16 states: empty elements, expando exclusion,
+HTML mutation, empty attribute values, SVG namespace add/remove, template
+TreeWalker traversal, arity and invalid receivers. It and two adjacent document
+tests pass after correcting an initially missed interface declaration.
+Chromium agrees with all 16 states. The small dynamic Lit component now
+commits successfully in both renderers. This fixes the method omission;
+Archive.org also exposes a distinct imported-descendant upgrade omission.
+Evidence: `temp/online-visual-round60/`.
+
+### JS13-L9 — Imported fragments leave custom descendants uninitialized — **RESOLVED**
+
+Found 2026-11-17 after removing Archive.org's earlier Lit failures.
+**D8.4.4 / D9.5.6v2** keep DOM lifecycle operations behind their existing
+boundary. `dom_import_node_bridge` cloned a fragment's descendants but
+upgraded only its root. Lit then reached a custom property setter before the
+child constructor had initialized its reactive state. The existing tree walk
+now shares upgrade/connect/disconnect actions; imports upgrade descendants
+without sending connected callbacks for detached nodes. Template contents
+remain inert. The document adapter also admits text/comment sources already
+handled by its clone owner, rather than returning null at an element-only guard.
+
+`ImportedFragmentUpgradesNestedCustomElementsBeforePropertyBinding` passes
+18 checks for detached construction, pre-insertion property binding, shallow
+fragments, text/comments, connection/disconnection and no duplicate construction.
+Chromium agrees with all 18. The final four selected document tests pass;
+Archive.org's root template update completes. This does not clear the separate
+shadow-tree painting limitation below. Evidence: `temp/online-visual-round60/`.
 
 ### JS13-L6 — Existing details elements lack their JavaScript interface — **FIXED**
 
@@ -637,6 +714,18 @@ previously reproduced JS03-L2 iframe failure. Evidence:
 `test-theme-before.log`, and the original/focused browser/native captures.
 
 ### JS13-L2 — ShadowRoot APIs do not provide full composed-tree rendering — **PARTIAL**
+
+Round sixty (2026-11-17) separates this residue from confirmed runtime bugs:
+after JS07-L1, JS13-L8 and JS13-L9, Archive.org's module and root Lit template
+update complete, and its shadow DOM contains the header/main/footer nodes.
+The capture still omits them. A local `shadow-hosts.html` control also produces
+an empty image for shadow content on span, div and custom hosts, including
+explicit block hosts; `lit-nested.html` commits its nested template but paints
+empty. Radiant has partial shadow traversal code, so these observations do not
+prove that every composed-tree path is absent. They do show that successful
+DOM construction is insufficient to claim painted support. Full shadow-tree
+rendering remains outside this milestone's scope. Controls and logs are under
+`temp/online-visual-round60/`.
 
 Observed 2026-11-12 in the online comparison. Native/runtime boundaries follow
 **D9.1.1v4 / D9.1.3v2**. This is a major missing rendering feature outside the

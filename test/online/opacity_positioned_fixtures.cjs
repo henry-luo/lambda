@@ -7,6 +7,9 @@ const fixtures = [
     {name:'positive z descendants retain the existing opacity grouping', parent:'opacity:.5', child:'z-index:1', expected:[255,127,127]},
     {name:'a local relative containing block keeps its coordinate basis', parent:'opacity:.5', middle:'position:relative;height:80px', sampleY:230, expected:[255,127,127]},
     {name:'absolute descendants escape ordinary overflow below their containing block', parent:'opacity:1', middle:'overflow:hidden;width:200px;height:40px', expected:[255,0,0]},
+    {name:'isolation retains a negative layer after an auto ancestor', parent:'isolation:auto;position:relative;height:120px;background:green', middle:'position:relative;isolation:isolate;height:100px', child:'z-index:-1', sampleY:230, expected:[255,0,0]},
+    {name:'static isolation owns a negative layer with an external containing block', parent:'isolation:auto;position:relative;height:120px;background:green', middle:'isolation:isolate;height:100px', child:'z-index:-1', sampleY:230, expected:[255,0,0]},
+    {name:'auto isolation leaves a negative layer below the ancestor background', parent:'isolation:auto;position:relative;height:120px;background:green', middle:'position:relative;isolation:auto;height:100px', child:'z-index:-1', sampleY:230, expected:[0,128,0]},
 ];
 function fixtureHtml(fixture) {
     return '<!doctype html><style>body{margin:0;background:white}#lead{height:200px}' +

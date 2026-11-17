@@ -1054,7 +1054,7 @@ static void _install_node_interface_members(Item global) {
     static const char* const element_members[] = {
         "tagName", "localName", "namespaceURI", "prefix", "attributes", "innerHTML",
         "nextElementSibling", "previousElementSibling", "getAttribute", "setAttribute",
-        "removeAttribute", "toggleAttribute", "hasAttribute", "getAttributeNames",
+        "removeAttribute", "toggleAttribute", "hasAttribute", "hasAttributes", "getAttributeNames",
         "getAttributeNS", "setAttributeNS", "removeAttributeNS", "matches", "closest",
         "getElementsByTagName", "getElementsByClassName", "getBoundingClientRect",
         "getClientRects", "attachShadow", NULL};

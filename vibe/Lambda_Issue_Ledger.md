@@ -466,6 +466,19 @@ is preserved at `../Lambda-opus/temp/edit-viewer/markup-roundtrip-probe.log`.
 
 ## Calmind script execution after resource retrieval — 2026-11-14
 
+Visual follow-up, 2026-11-17: the current qualified release
+`863bd80c209b6bec1e65565fc218fb814eb1cd47a06130518620de33dc57ab69`
+retrieves and paints the first-party stylesheet and hero, closely matching the
+retained browser reference. Round 61 promotes that fresh loaded capture to
+the online inventory; the old canonical capture still showed the earlier
+unstyled resource failure. This confirms the visual benefit of LI-026, rather
+than a new script-runtime repair. The generic `main.js` exception remains
+unlocalized and open. The saved HTML lacks the modal/button IDs queried by
+that script, but this alone does not identify its exact failing statement.
+The late pending-request watchdog still appears in the diagnostic log; the
+renderer exits successfully and the document load and PNG checks pass.
+Evidence: `temp/online-visual-round61/calmind-current-*`, `promotion.json`.
+
 **Status:** OPEN — exact cause and ownership are unconfirmed. The observation
 is in the Lambda script runner and event loop; it does not block the input
 resource-header fix in [LI-026](<../../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-026>).
