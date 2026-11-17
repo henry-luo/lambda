@@ -645,7 +645,8 @@ fn digits(st, t, base, negative, budget, count = 0, value = 0) NumberScan^ {
     else if (n == null) {
         let returned = after_numeric_scan(t);
         let after = if (count > 0 and expanded_space(st, t)^) st else put_back(st, returned);
-        if (count == 0) {state: fail(after, "tex-missing-number"), value: 0}
+        // TeX reports the missing operand and scans the returned token again.
+        if (count == 0) {state: record_diagnostic(after, "tex-missing-number", "Missing number, treated as zero")^, value: 0}
         else {state: after, value: if (negative) -value else value}
     } else if (value * base + n > 2147483647)
         {state: fail(st, "tex-number-too-big"), value: 0}

@@ -33,6 +33,23 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Missing-number recovery, 2026-11-17:** the shared integer scanner now
+  records TeX's `tex-missing-number` diagnostic, returns zero and replays the
+  triggering token instead of stopping expansion. The installed regression
+  compares text and complete diagnostics with native for 21 ordinary cases,
+  four expl3 expressions and an included file. A separate 31-case caller audit
+  finds no silent mismatch; `\\ignorespaces` remains explicitly unsupported.
+  A further 29-case JIT audit matches 24 cases and explicitly stops on five
+  cases requiring unit, brace, relation or macro-parameter recovery. A missing
+  `\ifnum` relation and numeric overflow/division recovery remain separate
+  open work. The new regression and the expansion, numeric-conditional,
+  expl3-integer-sign and stream goldens pass in both interpreter and JIT;
+  the new regression also passes scheduled collection every 100,000 allocations
+  with freed-memory poisoning in both tiers (12 checks). These runs used the
+  previously pinned `temp/tex-structured/lambda-release-final` host, not a
+  fresh full baseline. Evidence is in `temp/tex-port-continuation/`, including
+  `checks-final.log`, `caller-jit.out` and `extra-jit.out` (S1.8, D10.2.2).
+
 - **Capture follow-up, 2026-11-17:** `next` returns a nullable complete
   `ReadStep`; capture functions return complete `SourceSpan` values or an
   error. Private delimiter scans retain presence, endpoint and closure status;
@@ -1049,7 +1066,9 @@ The existing native engine design and historical Phase IV work are in
   (`edef-v2-neighbors-*.log`). The subsequent numeric candidate and its
   regressions remain before promotion.
 - **Missing numeric operands:** `span_edef_number_recovery` is a staged
-  follow-up, not installed. Native diagnoses a missing number, uses zero, and
+  follow-up, not installed as a whole. Its shared numeric recovery was
+  independently applied to the current structured scanner on 2026-11-17;
+  the expanded-definition changes remain separate. Native diagnoses a missing number, uses zero, and
   returns the triggering token to the stream. The candidate matches native
   text and complete diagnostics in 22 of 24 primary cases and 25 of 29 broader
   contexts in both tiers; the other cases stop explicitly on separate
@@ -5184,20 +5203,21 @@ forms remain separate work.
 
 ## Malformed expl3 integer expressions abort instead of recovering — 2026-11-13
 
-**Status:** OPEN; blocks malformed-input parity, not valid integer-expression
-work. S1.8 and D10.2.2 apply. In the installed `int_sign:n` implementation,
-`\ExplSyntaxOn\int_sign:n{}\ExplSyntaxOff` stops with `tex-missing-number`,
-returns no text, and has no diagnostic record. Native TeX reports the same
+**Status:** PARTIALLY FIXED for missing operands; arithmetic and other malformed
+input recovery remain open. S1.8 and D10.2.2 apply. Previously,
+`\ExplSyntaxOn\int_sign:n{}\ExplSyntaxOff` stopped with `tex-missing-number`,
+returned no text, and had no diagnostic record. Native TeX reports the same
 error code with a diagnostic and recovers to output `0`. Division by zero,
-undefined numeric control sequences, and out-of-range integers likewise
-produce divergent recovery and diagnostics. The already-installed
-`\int_abs:n` shows the same four failures, so this is not specific to the new
-sign operation. Reproduce with
+undefined numeric control sequences, and out-of-range integers also diverged
+in recovery and diagnostics. The already-installed `\int_abs:n` showed the
+same four failures, so this was not specific to the sign operation. Historical
+reproducers were
 `../lambda-input/temp/expl3-script/expl3-sign-errors.ls` and
 `expl3-abs-errors.ls`; `expl3-sign-error-detail.out` includes the direct
-missing-number comparison. The shared expression scanner's recovery path has
-not yet been fully traced; do not infer a more specific cause from these
-results.
+missing-number comparison. The shared integer scanner now recovers a missing
+operand with zero and a diagnostic, including empty `int_sign:n` and
+`int_abs:n`; the overflow, division and undefined numeric-control cases have
+not been established as fixed by this change.
 
 ## expl3 integer sign — 2026-11-13
 
