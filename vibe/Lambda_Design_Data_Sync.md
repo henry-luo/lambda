@@ -1847,6 +1847,15 @@ byte-exact recovery; repeat median/idle qualification is pending. HTTP still buf
 pack body; file-backed upload is a follow-up. The
 [historical diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md) preserves the
 original owner attribution and profiling limits (D5.2.4).
+The [sync test performance implementation](impl/Lambda_Impl_Sync_Test_Performance.md#implementation--2026-11-17)
+reuses the already committed state for document replies and retains at most one
+expanded current-head view up to 1 MiB of canonical bytes. Fresh authenticated
+head generation/identity gates reuse; maintenance changes invalidate it and
+explicit verification rereads storage. Larger views use the existing hydration
+path. This is a GC-owned client optimization (D5.1.3, D5.3.1), with unchanged
+save recovery boundaries and wire bytes. Test fixture transaction batching is
+separate from production request durability (D11.1.2).
+
 Internet traversal, cloud adapters, polling deployment, broader key management
 and editor bindings remain subsequent acceptance work; this does not complete §12.1.
 

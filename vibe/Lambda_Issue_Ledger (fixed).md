@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **324 anchored records**, preserving fixed, resolved,
+This archive contains **326 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -5273,3 +5273,46 @@ sibling source patch or masked build success was added. Evidence:
 `temp/sync-memory-detail/build-cli.log`, `temp/build_lambda-cli.log`.
 
 **Resolution:** CLI file rules select the existing static-value contract for Input-owned sources only; the generator preserves scoped variant rules. Shared core directory resolution includes the Input implementation rather than only Lambda compatibility headers. Clean CLI release and parser/codec smoke checks pass; generator regressions pass. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+<a id="batch-compiler-timing-analysis-field"></a>
+
+## Batch compiler timing reader rejects the emitted analysis field — 2026-11-17
+
+**Status:** FIXED 2026-11-17; found during sync-test latency attribution on `e1b1ac324`.
+**Authority:** D5.2.4 (diagnostic attribution).
+
+`test/test_lambda_helpers.hpp::parse_lambda_timing_line` expects `mir_lower_us`
+immediately after `index_us`, but `lambda/main.cpp` emits `analysis_us` between
+them. Its `sscanf` matches only six fields and returns false because ten are
+required. With compiler timing enabled, valid records are therefore omitted from
+the test's compiler timing metadata. The ordinary per-script elapsed measurements
+remain valid; this does not explain the 20-second burst test.
+
+A direct libc `sscanf` reproduction against a real release-emitted record is in
+`temp/sync-test-latency/timing-parser-repro.json`. Repair the parser against the
+current record, retain intentional compatibility with older schema-1 fields,
+and cover the actual emitted spelling with a focused regression. Sync profiling
+uses the independent phase TSV and native samples; it does not treat the missing
+helper record as zero compiler work. See [analysis](impl/Lambda_Impl_Sync_Test_Performance.md).
+
+**Resolution:** named-field schema-1 parsing accepts current/legacy records and optional columns, and rejects missing, duplicate, malformed and overflowing fields without partial publication. Both native regressions pass; the actual batch harness captures nonzero analysis columns from three passing sync cases. See `temp/sync-test-performance-impl/{timing-reader.log,timing-capture.tsv,baseline-reruns.log}`.
+
+
+
+<a id="duplicate-document-resource-base"></a>
+
+## Duplicate document resource-base resolver blocks release LTO — 2026-11-17
+
+**Status:** FIXED 2026-11-17 in the pending sync-test performance changes. **Authority:**
+D9.1.1v4 (Input ownership boundary), D9.1.3v2 (document clients).
+
+On `ae76dbf6d` with the current Input checkout, the full release link reports
+`dom_document_resolve_url(DomDocument*)` multiply defined by Lambda's `dom.o`
+and Input's `dom_element.cpp.o`. Lambda retained a selector-based duplicate of
+the extracted Input API. The Lambda definition/forward declaration are removed;
+base-URI and XHR callers share Input's template/namespace-aware resolver. No
+sibling/vendor source changes were needed. Fresh full release linking succeeds.
+See [implementation and qualification](impl/Lambda_Impl_Sync_Test_Performance.md#implementation--2026-11-17).
+
+**Verification:** full release link passes; all 201 Radiant document cases pass in the full baseline. No sibling implementation or vendor code was edited.

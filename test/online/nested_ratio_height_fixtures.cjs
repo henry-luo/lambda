@@ -4,6 +4,8 @@ const fixtures = [
     {name: 'ratio width uses its own font and variable', style: '--side:1em;font-size:20px;width:var(--side)', height: 52},
     {name: 'ratio width retains its authored maximum', style: 'width:100px;max-width:16px', height: 48},
     {name: 'non-square ratio transfers the resolved width', style: 'width:32px;aspect-ratio:2', height: 48},
+    {name: 'a calculated preferred ratio transfers the width', style: 'width:32px;aspect-ratio:calc(4 / 2)', height: 48},
+    {name: 'a variable retains its calculated preferred ratio', style: '--ratio:calc(4 / 2);width:32px;aspect-ratio:var(--ratio)', height: 48},
     {name: 'empty ratio icon retains natural sizing', style: 'width:16px', height: 48, empty: true},
     {name: 'definite height overrides the preferred ratio', style: 'width:16px;height:80px', height: 112},
 ];

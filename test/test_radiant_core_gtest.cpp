@@ -279,6 +279,23 @@ TEST_F(RadiantCoreTest, LengthMathSubstitutesVariablesBeforeResolvingLeaves) {
     }
 }
 
+TEST_F(RadiantCoreTest, PreferredAspectRatioEvaluatesDimensionlessMath) {
+    const struct { const char* expression; float expected; } cases[] = {
+        {"2", 2.0f}, {"4 / 2", 2.0f}, {"calc(4 / 2)", 2.0f},
+        {"min(3, 2)", 2.0f}, {"calc(8 / 2) / calc(1 + 1)", 2.0f},
+        {"auto calc(4 / 2)", 2.0f}, {"calc(0)", 0.0f},
+        {"calc(4) / calc(0)", 0.0f}, {"calc(2px)", 0.0f},
+        {"calc(2px) / 2", 0.0f},
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.expression);
+        CssDeclaration* declaration = css_parse_property_declaration("aspect-ratio", 12,
+            entry.expression, strlen(entry.expression), tree.prop_pool);
+        ASSERT_NE(declaration, nullptr);
+        EXPECT_FLOAT_EQ(layout_aspect_ratio_value(declaration->value), entry.expected);
+    }
+}
+
 TEST_F(RadiantCoreTest, RetainedLeadingRecomputesFromTheCurrentParentCascade) {
     DomElement* parent = element();
     DomElement* child = element();
@@ -1196,6 +1213,28 @@ TEST_F(IncrementalCssTest, IntrinsicFlowReusesOnlyGeometryIndependentSubtrees) {
     repeated = measure_element_intrinsic_widths(&context, target);
     EXPECT_FLOAT_EQ(repeated.max_content, 204.0f);
     radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+}
+
+TEST_F(IncrementalCssTest, ContentOnlyWidthsSeparateCyclicPercentageCacheQueries) {
+    DomElement* child = append_intrinsic_child();
+    DomElement* grandchild = append_intrinsic_child(child);
+    set_property(child, "width", "100%");
+    set_property(grandchild, "width", "40px");
+    context.block.content_width = containing.content_width = containing.given_width = 300.0f;
+    context.available_space = AvailableSpace::make_definite(300.0f, 100.0f);
+    for (const char* width : {"100%", "300px"}) {
+        SCOPED_TRACE(width);
+        set_property("width", width);
+        for (bool content_only : {false, true, false, true}) {
+            IntrinsicSizes normal_child = measure_element_intrinsic_widths(&context, child);
+            EXPECT_FLOAT_EQ(normal_child.min_content, 300.0f);
+            IntrinsicSizes sizes = measure_element_intrinsic_widths(&context, target, content_only);
+            EXPECT_FLOAT_EQ(sizes.min_content, content_only ? 40.0f : 300.0f);
+            EXPECT_FLOAT_EQ(sizes.max_content, content_only ? 40.0f : 300.0f);
+        }
+    }
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+    radiant::css_resolved_style_release(grandchild->layout_cache, tree.prop_pool);
 }
 
 TEST_F(IncrementalCssTest, CachedDescendantPropagatesContainingSizeDependency) {

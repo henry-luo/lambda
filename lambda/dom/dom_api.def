@@ -850,3 +850,6 @@ DOM_RAW(frame_request_once_native, timing, uint64_t, (void* owner, const char* e
 #undef DOM_RAW
 #undef DOM_API_DEF_CLEAR_RAW
 #endif
+
+// filtered traversal appends without changing the published two-argument slot (D9.5.4).
+DOM_OP(CORE, create_tree_walker_filtered, tree, 3, "fn(root: any, what: any, filter: any) -> any", dom_create_tree_walker_filtered_bridge, 0, "", none, "", "")

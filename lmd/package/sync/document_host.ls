@@ -19,8 +19,7 @@ import blob: .blob
 import reach: .reachability
 
 fn actor(handle, current) any^ => handle.writer ++ ":doc:" ++ string(current.serial+1)^
-pub pn status(handle, document) any^ {
-    let current = local.status(handle)^.state
+fn status_from(current, document) any^ {
     let record = model.get(current,document)^
     let value:any^ = session.value(record.endpoint.replica)
     return {id:record.id,entry:record.entry,profile:record.endpoint.replica.profile,format:record.format,
@@ -34,6 +33,10 @@ pub pn status(handle, document) any^ {
         file_heads:[for (head in workspace.entry(current.endpoint.replica,record.entry)^.heads) head.id],
         workspace_review:current.review != null}
 }
+pub pn status(handle, document) any^ {
+    return status_from(local.status(handle)^.state,document)^
+}
+
 pub pn open_document(handle, path, profile='text', encoding='text') any^ {
     local.scan(handle)^
     let result = local.mutate(handle,pn (tx,k,current)=> {
@@ -57,10 +60,10 @@ pub pn open_document(handle, path, profile='text', encoding='text') any^ {
         return model.replace(current,record)^
     })^
     let entry = [for (item in model.all(result.state)^ where workspace.path(result.state.endpoint.replica,item.entry)^ == path) item][0]
-    return status(handle,entry.id)^
+    return status_from(result.state,entry.id)^
 }
 pub pn apply_edits(handle, document, commands, resolve=false, request_id=null) any^ {
-    local.mutate(handle,pn (tx,k,current)=> {
+    let result = local.mutate(handle,pn (tx,k,current)=> {
         let record = model.get(current,document)^
         let fingerprint = codec.digest([commands,resolve])^
         let previous = model.request(record,'edit',request_id)^
@@ -77,17 +80,17 @@ pub pn apply_edits(handle, document, commands, resolve=false, request_id=null) a
         return {*:model.replace(current,remembered)^,serial:current.serial+1,
             staged_objects:[for (id in reach.staged(current) where not contains(used,id)^) id]}
     })^
-    return status(handle,document)^
+    return status_from(result.state,document)^
 }
 pub pn refresh(handle, document) any^ {
-    local.scan(handle)^
-    return status(handle,document)^
+    let scanned = local.scan(handle)^
+    return status_from(scanned.state,document)^
 }
 pub pn compact(handle, document) any^ {
-    local.mutate(handle,pn (tx,k,current)=> {
+    let result = local.mutate(handle,pn (tx,k,current)=> {
         return model.replace(current,model.compact(model.get(current,document)^)^)^
     })^
-    return status(handle,document)^
+    return status_from(result.state,document)^
 }
 pub pn restore_version(handle, document, version) any^ {
     let record = model.get(local.status(handle)^.state,document)^
@@ -134,7 +137,7 @@ pub pn prepare_save(handle, document, request_id=null) any^ {
     return if (previous != null) {completed:true,version:previous.version} else record.prepared
 }
 pub pn cancel_save(handle, document) any^ {
-    local.mutate(handle,pn (tx,k,current)=> {
+    let result = local.mutate(handle,pn (tx,k,current)=> {
         let record = model.get(current,document)^
         if (record.prepared != null and record.prepared.installed)
             raise error("sync document: installed save must finish")
@@ -149,7 +152,7 @@ pub pn cancel_save(handle, document) any^ {
         }
         return model.replace(current,{*:record,prepared:null})^
     })^
-    return status(handle,document)^
+    return status_from(result.state,document)^
 }
 pub pn install_save(handle, document) any^ {
     return local.mutate(handle,pn (tx,k,current)=> {
@@ -195,8 +198,8 @@ pub pn commit_save(handle, document) any^ {
         return next
     })^
     // scan updates the filesystem base against the same saved export; no import loop.
-    local.scan(handle)^
-    return status(handle,document)^
+    let scanned = local.scan(handle)^
+    return status_from(scanned.state,document)^
 }
 pub pn save(handle, document, request_id=null) any^ {
     let prepared = prepare_save(handle,document,request_id)^

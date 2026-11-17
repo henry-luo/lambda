@@ -6,6 +6,16 @@ for (const contents of [false, true]) {
     }
 }
 fixtures.push(
+    ...['inline-block', 'inline-flex', 'inline-grid'].flatMap(display => [false, true].map(wrap => ({
+        name: `fractional ${display} edges ${wrap ? 'overflow and wrap' : 'fit on one line'}`,
+        fractionalAtomic: true, display, wrap,
+    }))),
+    ...['block', 'flex', 'grid'].flatMap(parent => [24, 80].map(lineHeight => ({
+        name: `inline atomic child retains ${lineHeight}px ancestor strut in ${parent}`,
+        strut: true, parent, lineHeight,
+    }))),
+    ...['flow-root', 'block', 'inline-block'].map(display => ({name: `atomic inline letters in ${display}`, atomicLetters: true, display})),
+    ...['absolute', 'fixed'].map(position => ({name: `atomic inline letters with ${position} decoration`, atomicLetters: true, display: 'block', decoration: position})),
     {name: 'mixed inline font sizes', nestedBreak: true, mixed: true},
     {name: 'preserved whitespace', nestedBreak: true, whitespace: 'pre-wrap'},
     {name: 'nonwrapping forced lines', nestedBreak: true, whitespace: 'nowrap'},
@@ -16,6 +26,26 @@ fixtures.push(
 );
 
 function fixtureHtml(fixture) {
+    if (fixture.fractionalAtomic) return `<!doctype html><style>
+body{margin:0;font:20px/30px monospace}
+#row{float:left;width:${fixture.wrap ? '446.8' : '446.9125061'}px;text-align:center;background:red}
+#first{display:${fixture.display};width:348.8812866px;height:30px;background:blue}
+#second{display:inline-block;width:98.03125px;height:20px;background:lime}
+</style><div id="row"><div id="first"></div><div id="second"></div></div>`;
+    if (fixture.strut) return `<!doctype html><style>
+body{margin:0}#outer{display:${fixture.parent};${fixture.parent === 'flex' ? 'flex-direction:column;' : ''}width:300px}
+#column{display:flex;flex-direction:column;width:300px}
+#heading{margin:0;font:20px/${fixture.lineHeight}px monospace;background:red}
+#wrapper{display:block}#atom{display:inline-block;line-height:24px;width:100%;background:blue}
+#band{height:10px;width:300px;background:lime}
+</style><div id="outer"><div id="column"><div id="heading"><span id="wrapper"><span id="atom"><span style="display:block">ABC</span></span></span></div></div><div id="band"></div></div>`;
+    if (fixture.atomicLetters) return `<!doctype html><style>
+body{margin:0}#outer{display:flex;flex-direction:column;align-items:flex-start;width:300px}
+#line{position:relative;display:${fixture.display};font:20px/24px monospace;background:red}
+#line div{display:inline-block;position:relative;transform:translate(0,0%)}
+#decoration{position:${fixture.decoration || 'absolute'};width:100%;height:2px;bottom:0}
+#band{width:300px;height:10px;background:lime}
+</style><div id="outer"><div id="line">${[...'ABCDEFGH'].map(letter => `<div>${letter}</div>`).join('')}${fixture.decoration ? '<span id="decoration"></span>' : ''}</div><div id="band"></div></div>`;
     if (fixture.centered) return `<!doctype html><style>
 body{margin:0}*{box-sizing:border-box}
 #hero{display:flex;flex-direction:column;align-items:center;justify-content:center;

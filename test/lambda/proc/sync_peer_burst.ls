@@ -59,12 +59,14 @@ pn main() {
         let client = start(burst.client,[socket,ah,ao.credentials,b.id,null,options,a_report])
         let sent = wait(client)^
         let elapsed = clock()-started
+        // answer the server's WebSocket close before joining its task.
+        ws.close(socket)^
         let served = wait(server)^
         checked = [*checked,sent.rounds >= 2,served.rounds >= 2,
             input(area ++ "/a/tree/" ++ bname ++ ".txt",'text')^ == bname,
             input(area ++ "/b/tree/" ++ aname ++ ".txt",'text')^ == aname,
             input(area ++ "/b/tree/initial.txt",'text')^ == "before",elapsed >= 0.5]
-        ws.close(socket)^; ws.close(listener)^
+        ws.close(listener)^
     }
     send(a_owner,{stop:true})^
     send(b_owner,{stop:true})^

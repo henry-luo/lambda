@@ -1,4 +1,8 @@
 const fixtures = [
+    {name: 'a contents wrapper exposes the grid positioned child', contents: 1, placement: 'grid-area:photo', box: [122, 12, 200, 200]},
+    {name: 'nested contents wrappers preserve grid placement', contents: 2, placement: 'grid-area:photo', box: [122, 12, 200, 200]},
+    {name: 'a contents wrapper exposes the flex absolute child', contents: 1, grid: 'display:flex', placement: 'left:20px;top:20px;width:80px;height:60px', box: [22, 22, 80, 60]},
+    {name: 'nested contents wrappers expose the flex fixed child', contents: 2, grid: 'display:flex', placement: 'position:fixed;left:20px;top:20px;width:80px;height:60px', box: [20, 20, 80, 60]},
     {name: 'named area constrains the absolute child before content layout', placement: 'grid-area:photo', box: [122, 12, 200, 200]},
     {name: 'numeric area also constrains descendant percentages', placement: 'grid-column:2/3;grid-row:1/3', box: [122, 12, 200, 200]},
     {name: 'percentage insets use the resolved area', placement: 'grid-area:photo;inset:10%', box: [142, 32, 160, 160]},
@@ -11,13 +15,16 @@ const fixtures = [
 ];
 
 function fixtureHtml(fixture) {
+    let subject = '<div id="subject"><div id="inner"></div></div>';
+    for (let depth = 0; depth < (fixture.contents || 0); depth++)
+        subject = '<div style="display:contents">' + subject + '</div>';
     return '<!doctype html><style>body{margin:0}#outer{position:relative;width:600px;height:400px}' +
         '#grid{display:grid;position:relative;width:300px;height:200px;padding:10px 20px;border:2px solid black;' +
         'grid-template-columns:100px 200px;grid-template-rows:80px 120px;' +
         'grid-template-areas:"copy photo" "copy photo";' + (fixture.grid || '') + '}' +
         '#subject{position:absolute;inset:0;background:red;' + fixture.placement + '}' +
         '#inner{width:100%;height:100%;background:lime}</style>' +
-        '<div id="outer"><div id="grid"><div id="subject"><div id="inner"></div></div></div></div>' +
+        '<div id="outer"><div id="grid">' + subject + '</div></div>' +
         '<script>var subject=document.getElementById("subject").getBoundingClientRect();' +
         'var inner=document.getElementById("inner").getBoundingClientRect();' +
         'console.log("GRID_ABSOLUTE_GEOMETRY",JSON.stringify([subject.x,subject.y,subject.width,subject.height,' +

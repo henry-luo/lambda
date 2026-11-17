@@ -6196,6 +6196,79 @@ TEST_F(RadiantDocumentTest, HasAttributesTracksLiveHtmlAndNamespacedAttributes) 
         "true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true");
 }
 
+TEST_F(RadiantDocumentTest, TreeWalkerFiltersPreserveTextDuringCleanup) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><div id=result></div>
+        <div id=fixture><p>keep</p><p>"</p><span>also keep</span></div><script>
+        const root=document.getElementById('fixture'), notes=[], removed=[];
+        let calls=0,receiver=true,mask=true;
+        const filter={acceptNode(node){calls++;receiver=receiver&&this===filter;
+            mask=mask&&node.nodeType===3;
+            return node.textContent==='"'?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT}};
+        const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,filter);
+        notes.push(walker.filter===filter);
+        while(walker.nextNode())removed.push(walker.currentNode);
+        removed.forEach(node=>node.remove());
+        notes.push(root.textContent==='keepalso keep',removed.length===1,calls===3,receiver,mask);
+        let functionReceiver=false;
+        function rejectingFilter(node){'use strict';functionReceiver=this===undefined;return 2}
+        const rejecting=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,rejectingFilter);
+        notes.push(rejecting.nextNode()===null,rejecting.currentNode===root,functionReceiver);
+        walker.filter=null;notes.push(walker.filter===filter);
+        document.getElementById('result').setAttribute('data-checks',notes.join(','));
+        </script>)HTML");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-checks"),
+        "true,true,true,true,true,true,true,true,true,true");
+}
+
+TEST_F(RadiantDocumentTest, TreeWalkerFiltersPruneAndKeepTraversalBoundaries) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><div id=result></div><div id=fixture>
+        <section id=skip><b id=deep></b></section><section id=reject><i id=hidden></i></section><p id=last></p>
+        </div><script>
+        const root=document.getElementById('fixture'),notes=[];
+        const filter=node=>node.id==='skip'?3:node.id==='reject'?2:1;
+        const walker=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT,filter);
+        notes.push(walker.nextNode().id==='deep',walker.nextNode().id==='last',walker.nextNode()===null);
+        walker.currentNode=root;
+        notes.push(walker.firstChild().id==='deep',walker.nextSibling().id==='last');
+        notes.push(walker.firstChild()===null,walker.currentNode.id==='last');
+        let rejected=false;try{document.createTreeWalker(root,1,7)}catch(e){rejected=e instanceof TypeError}
+        notes.push(rejected);
+        const defaults=document.createTreeWalker(root,undefined,null);
+        notes.push(defaults.filter===null,defaults.nextNode().nodeType===3);
+        document.getElementById('result').setAttribute('data-checks',notes.join(','));
+        </script>)HTML");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-checks"),
+        "true,true,true,true,true,true,true,true,true,true");
+}
+
+TEST_F(RadiantDocumentTest, TreeWalkerFilterExceptionsResetTheActiveFlag) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><div id=result></div><div id=fixture><b></b><i></i></div><script>
+        const root=document.getElementById('fixture'),notes=[],token={};let fail=true;
+        const filter={get acceptNode(){if(fail){fail=false;throw token}return ()=>1}};
+        const walker=document.createTreeWalker(root,1,filter);
+        try{walker.nextNode()}catch(e){notes.push(e===token)}
+        notes.push(walker.currentNode===root,walker.nextNode().tagName==='B');
+        let reentrant;reentrant=document.createTreeWalker(root,1,()=>{
+            try{reentrant.nextNode()}catch(e){notes.push(e.name==='InvalidStateError')}
+            return {valueOf(){return 65537}};
+        });
+        notes.push(reentrant.nextNode().tagName==='B',reentrant.nextNode().tagName==='I');
+        notes.push(reentrant.nextNode()===null);
+        document.getElementById('result').setAttribute('data-checks',notes.join(','));
+        </script>)HTML");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-checks"),
+        "true,true,true,true,true,true,true,true");
+}
+
 TEST_F(RadiantDocumentTest, ImportedFragmentUpgradesNestedCustomElementsBeforePropertyBinding) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source, R"HTML(<!doctype html><div id=result></div><script>

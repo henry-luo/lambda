@@ -1,4 +1,9 @@
 const fixtures = [
+    {name:'a fixed document root paints its normal-flow subtree', html:'position:fixed;inset:0;overflow:hidden', parent:'height:120px', expected:[255,0,0]},
+    {name:'fixed HTML and BODY retain nested positioned paint', html:'position:fixed;inset:0;overflow:hidden', body:'position:fixed;inset:0;overflow:hidden', parent:'height:120px', child:'position:fixed', expected:[255,0,0]},
+    {name:'an absolute document root paints its subtree', html:'position:absolute;inset:0', parent:'height:120px', expected:[255,0,0]},
+    {name:'a fixed document root paints a positive stacking layer', html:'position:fixed;inset:0', parent:'height:120px', child:'z-index:1', expected:[255,0,0]},
+    {name:'a fixed BODY remains owned by its ordinary document root', body:'position:fixed;inset:0;overflow:hidden', parent:'height:120px', child:'position:fixed', expected:[255,0,0]},
     {name:'zero opacity groups an absolute descendant outside its border box', parent:'opacity:0', expected:[255,255,255]},
     {name:'half opacity groups a zero-height parent', parent:'opacity:.5', expected:[255,127,127]},
     {name:'overlapping descendants composite once through the parent', parent:'opacity:.5', overlap:true, expected:[127,127,255]},
@@ -12,7 +17,7 @@ const fixtures = [
     {name:'auto isolation leaves a negative layer below the ancestor background', parent:'isolation:auto;position:relative;height:120px;background:green', middle:'position:relative;isolation:auto;height:100px', child:'z-index:-1', sampleY:230, expected:[0,128,0]},
 ];
 function fixtureHtml(fixture) {
-    return '<!doctype html><style>body{margin:0;background:white}#lead{height:200px}' +
+    return '<!doctype html><style>html{'+(fixture.html||'')+'}body{margin:0;background:white;'+(fixture.body||'')+'}#lead{height:200px}' +
         '.child{position:absolute;left:20px;top:20px;width:80px;height:60px;background:red}' +
         '</style><div id="lead"></div><div id="parent" style="'+fixture.parent+'">' +
         '<div id="middle" style="'+(fixture.middle||'')+'"><div class="child" style="'+(fixture.child||'')+'"></div>' +

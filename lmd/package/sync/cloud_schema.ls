@@ -6,7 +6,8 @@ import hex: lambda.security.tuf.metadata
 import v: .schema
 import core: .core
 
-pub fn digest(value) any^ => hex.hex(codec.digest(value)^)^
+pub fn encoded_digest(bytes) any^ => hex.hex(hash(bytes,'sha256')^)^
+pub fn digest(value) any^ => encoded_digest(codec.encode(value)^)^
 pub fn id(value) => value is string and len(value) == 64 and hex.hex_valid(value) and lower(value) == value
 pub fn prefix(space) any^ => "spaces/" ++ hex.hex(hash(space,'sha256')^)^ ++ "/"
 pub fn data_key(key) bool^ {

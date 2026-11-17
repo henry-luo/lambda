@@ -33,7 +33,8 @@ pub pn read(store, prefix, root) any^ {
     if (found == null) raise error("sync pages: missing page")
     let node = codec.decode(found.body,262144)^
     v.record(node,["version","kind","count","first","last"],["entries","children"])^
-    if (schema.digest(node)^ != root.id or node.version != 1 or
+    // decode already proved canonical bytes; bind the reference without encoding again.
+    if (schema.encoded_digest(found.body)^ != root.id or node.version != 1 or
         root != reference(root.id,node)^) raise error("sync pages: reference binding mismatch")
     if (node.kind == 'leaf') {
         if (not (node.entries is array) or len(node.entries)^ < 1 or len(node.entries)^ > leaf_size or
@@ -60,8 +61,8 @@ pub pn read(store, prefix, root) any^ {
     return node
 }
 pn persist(store, prefix, node) any^ {
-    let id = schema.digest(node)^
     let encoded = codec.encode(node)^
+    let id = schema.encoded_digest(encoded)^
     if (len(encoded)^ > 262144) raise error("sync pages: page byte limit")
     let result = store.write(prefix ++ "pages/" ++ id,encoded,null)^
     if (not result.written) {
