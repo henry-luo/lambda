@@ -146,14 +146,16 @@ fields are package design cleanup, not additional Lambda language issues.
 
 **Constrained error unions:** the prior shared-core/compiler repair is
 [archived in the fixed ledger](<Lambda_Issue_Ledger (fixed).md#reader-constrained-error-return-fixed>).
-**Current checkout follow-up (2026-11-17): OPEN in Input LI-076.** With Input
-`6e22903`, `lambda_type_accepts_error` lacks the constrained-base walk. The
-unchanged `constrained_error_return` golden and
-`TypeContractMetadataTest.ConstrainedErrorChannelsFollowTheirBase` fail in the
-full baseline; the golden also fails on the preserved pre-sync-tuning release.
-See [Input LI-076](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-076).
-This is separate from sync optimization and remains visible; no compiler/test
-workaround was introduced.
+**Current checkout follow-up (2026-11-18): FIXED in Input LI-076.** The shared
+`lambda_type_accepts_error` and `lambda_type_accepts_null` walks again follow
+constrained bases (S11.4.2v3, S11.4.6v4). The unchanged
+`constrained_error_return` golden passes in AUTO, interpreter and JIT, including
+forced/poisoned GC in both explicit tiers. The native runtime/error suite passes
+340/340 with additional nested-nullability and top-exclusion assertions; 11
+related goldens pass per tier. The full Lambda baseline passes 7,604/7,604;
+the Input baseline passes 5,324 tests with three skipped cases. See
+[Input LI-076](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-076).
+Evidence: `temp/constrained-error-fix/`. No compiler or golden workaround.
 
 **Performance residue: OPEN.** Three interleaved same-host release/JIT pairs
 over 8,000 tokens preserve exact output. On the final pinned host, median

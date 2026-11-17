@@ -491,6 +491,9 @@ TEST(TypeContractMetadataTest, ConstrainedErrorChannelsFollowTheirBase) {
     choice.right = (Type*)&nested;
     EXPECT_TRUE(lambda_type_accepts_error((Type*)&optional));
     EXPECT_TRUE(lambda_type_accepts_error((Type*)&choice));
+    EXPECT_FALSE(lambda_type_accepts_null((Type*)&nested));
+    EXPECT_TRUE(lambda_type_accepts_null((Type*)&optional));
+    EXPECT_FALSE(lambda_type_accepts_null((Type*)&choice));
     EXPECT_TRUE(lambda_type_contract_is_subtype((Type*)&nested, &TYPE_ERROR));
     EXPECT_FALSE(lambda_type_contract_is_subtype(&TYPE_ERROR, (Type*)&nested));
     Pool* pool = pool_create();
@@ -501,6 +504,10 @@ TEST(TypeContractMetadataTest, ConstrainedErrorChannelsFollowTheirBase) {
     nullable_error.operand = &TYPE_ERROR;
     TypeConstrained maybe_error = constrained;
     maybe_error.base = (Type*)&nullable_error;
+    TypeConstrained nested_maybe = constrained;
+    nested_maybe.base = (Type*)&maybe_error;
+    EXPECT_TRUE(lambda_type_accepts_error((Type*)&nested_maybe));
+    EXPECT_TRUE(lambda_type_accepts_null((Type*)&nested_maybe));
     TypeBinary nullable_choice = choice;
     nullable_choice.left = &TYPE_FLOAT;
     nullable_choice.right = (Type*)&maybe_error;
@@ -515,6 +522,11 @@ TEST(TypeContractMetadataTest, ConstrainedErrorChannelsFollowTheirBase) {
     EXPECT_FALSE(lambda_type_accepts_error((Type*)&nested));
     EXPECT_FALSE(lambda_type_accepts_error((Type*)&optional));
     EXPECT_FALSE(lambda_type_accepts_error((Type*)&choice));
+    EXPECT_FALSE(lambda_type_accepts_null((Type*)&nested));
+    EXPECT_TRUE(lambda_type_accepts_null((Type*)&optional));
+    maybe_error.base = &TYPE_ANY_NO_ERROR_OR_NULL;
+    EXPECT_FALSE(lambda_type_accepts_error((Type*)&nested_maybe));
+    EXPECT_FALSE(lambda_type_accepts_null((Type*)&nested_maybe));
 }
 
 TEST(TypeContractMetadataTest, MapStorageDoesNotEstablishNominalIdentity) {
