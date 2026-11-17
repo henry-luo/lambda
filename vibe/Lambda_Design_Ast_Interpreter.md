@@ -1016,3 +1016,28 @@ RI4–RI6] *(Historical: v1 ruled the opposite — "no
 AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
 by user ruling 2026-08-15; the full record is
 `Lambda_Design_Unified_AST.md` §12.)* [CGP1, CGP2, AI1–AI22]
+
+## ARM64 scalar-body experiment (retired 2026-11-18)
+
+D8.3.1v3 retires this experiment at the user's request. Its selector and runtime
+hooks are removed, and source/fixtures are archived under
+`test/benchmark/ast_native/archive/`. The following describes the historical
+prototype; current builds do not implement these native controls.
+
+Under D8.3.1v2, `LAMBDA_EXEC_BACKEND=ast-native` selects an explicit macOS
+ARM64 baseline experiment. It eagerly emits admitted scalar function bodies
+from the planned AST, then reuses T0 activation, parameter/return admission
+and precise RootFrame ownership (D6.3.3). Unsupported bodies stay T0, without
+MIR promotion. Procedures, error-channel functions, captures, tail-call
+transformations, binding declarations, loops, collections, effects and other
+expressions are outside initial native admission. Native body calls use the existing boxed runtime ABI. The default
+AUTO and MIR L2 policies stay as specified in D8.3.1v2–D8.3.4.
+
+Code and metadata belong to the Script, are cleared when cloning cache
+templates, and are released before the AST. `LAMBDA_AST_NATIVE_REPORT` writes
+per-script admission counts, native/interpreted body calls, emitted and mapped
+bytes, and emitter nanoseconds at destruction. The prototype intentionally
+keeps T0 wrappers, so benchmarks must disclose native coverage and cannot
+attribute every runtime cost to the generated body. `LAMBDA_MIR_OPT_LEVEL`
+selects 0–3 (default 2) for a same-binary MIR control; cache keys already carry
+that level.

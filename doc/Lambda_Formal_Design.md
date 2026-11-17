@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 67.3.0 (2026-11-16)
+**Spec version:** 67.5.0 (2026-11-18)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1261,14 +1261,16 @@ reflected and matched (S10.1, S11).*
 
 ### D8.3 Lambda execution tiers
 
-- **D8.3.1* — The AST interpreter is the baseline tier.** The boxed
+- **D8.3.1v3* — The AST interpreter is the baseline tier.** The boxed
   AST-walking interpreter (T0) is the baseline. The retained AST is the
   runtime source of truth. The default policy is AUTO: each definition starts
   in T0, and a hot eligible definition can be promoted to a boxed MIR image.
   The tier selector has three modes: `interp` (T0 only), `auto`, and `jit`
   (eager whole-module MIR Direct, T1). In `interp` mode, an unsupported script
   or import fails before execution, with a diagnostic. A fallback to
-  whole-module MIR belongs only to AUTO. [AI1–AI24, CGP1, CGP2]
+  whole-module MIR belongs only to AUTO. The `ast-native` experiment is retired
+  and excluded from all builds; its source and measurements remain archived.
+  [AI1–AI24, CGP1, CGP2]
 - **D8.3.2* — Only hit counters trigger promotion; a handoff is one way.**
   Call counts, self-tail edges and loop back edges are counted at each site. A
   definition is promoted only when a counter reaches its threshold. The color

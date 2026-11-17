@@ -1,0 +1,752 @@
+{
+  "git_commit": "ae76dbf6de6917dd2a7b397bd6c211f8d118959b",
+  "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+  "source_hashes": {
+    "lambda/runtime/ast_native.cpp": "a10a4e6e2f4a21d418ef95eb16547dd3ed2379b2d532156ccc9dac2d6a586d6f",
+    "lambda/runtime/ast_native.hpp": "70c3169d7811ae0bc183ab9a7acb76868e52370091584b67553f86179dd052ec",
+    "lambda/runtime/interp.cpp": "2449bd9cfebe2b91ad479213b4b56c848a844c47d144f06be57b69cfd2b44194",
+    "lambda/runtime/interp.hpp": "670f0d94ab27f25b260ba09236d893ec3ba7dac42f23dd904cb7776fb83c717c",
+    "lambda/runtime/runner.cpp": "00ff1ccf863773b2262913306e7481cb7dc32ad7ee00ed2898698b31663c8e8e",
+    "lambda/runtime/ast.hpp": "bfd55b90131b4489d349c513d0759c580e7b5af6cd7f0993975b95c3e5df8368"
+  },
+  "environment": {
+    "LAMBDA_MIR_OPT_LEVEL": "0",
+    "LAMBDA_DISABLE_MIR_CACHE": "1",
+    "LAMBDA_JS_LARGE_INTERP": "0"
+  },
+  "binary": "/Users/henryluo/Projects/Lambda/temp/arm64_baseline/lambda-release",
+  "binary_sha256": "35ae34ee65e0061c827dc8e9bdaade1a113d9686b1131e4a69938449107abefd",
+  "pairs_requested": 3,
+  "rows": [
+    {
+      "name": "fib",
+      "variant": "untyped",
+      "script": "test/benchmark/r7rs/fib.ls",
+      "source_sha256": "a0f8639c13726a2028a1364092775fa989be232a089060dd3efa2e4cd30dcd41",
+      "pairs": [
+        {
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.815,
+            "wall_ms": 9.835042,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 73.025,
+            "wall_ms": 80.011833,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        },
+        {
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 74.005,
+            "wall_ms": 81.40025,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.799,
+            "wall_ms": 9.37475,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        },
+        {
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.841,
+            "wall_ms": 9.04275,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 74.313,
+            "wall_ms": 81.312416,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        }
+      ],
+      "warmup": {
+        "ast-native": {
+          "returncode": 0,
+          "self_ms": 74.165,
+          "wall_ms": 82.887417,
+          "stdout": "fib: PASS",
+          "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+          "stderr": "",
+          "compiler": {},
+          "process_peak_rss_bytes": null
+        },
+        "jit": {
+          "returncode": 0,
+          "self_ms": 0.887,
+          "wall_ms": 9.747916,
+          "stdout": "fib: PASS",
+          "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+          "stderr": "",
+          "compiler": {},
+          "process_peak_rss_bytes": null
+        },
+        "output_equal": true
+      },
+      "metrics": {
+        "jit": {
+          "returncode": 0,
+          "self_ms": 0.813,
+          "wall_ms": 11.636875,
+          "stdout": "fib: PASS",
+          "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+          "stderr": "        0.00 real         0.00 user         0.00 sys\n            17678336  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1273  page reclaims\n                  28  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n           100249370  instructions retired\n            29717004  cycles elapsed\n             5734832  peak memory footprint\n",
+          "compiler": {
+            "COMPILER_TIMING": {
+              "schema": "1",
+              "parse_us": "61",
+              "ast_build_us": "445",
+              "bind_us": "16",
+              "validate_us": "22",
+              "index_us": "0",
+              "analysis_us": "6",
+              "mir_lower_us": "1349",
+              "module_finalize_us": "186",
+              "link_us": "0",
+              "build_transpile_us": "2079",
+              "compile_peak_rss_bytes": "16187392"
+            },
+            "MIR_VOLUME": {
+              "schema": "1",
+              "sample_id": "test/benchmark/r7rs/fib.ls",
+              "test_name": "fib.ls",
+              "modules": "1",
+              "functions": "4",
+              "insns": "647"
+            }
+          },
+          "process_peak_rss_bytes": 17678336
+        },
+        "ast-native": {
+          "returncode": 0,
+          "self_ms": 73.862,
+          "wall_ms": 82.143583,
+          "stdout": "fib: PASS",
+          "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+          "stderr": "        0.08 real         0.07 user         0.00 sys\n            15908864  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1182  page reclaims\n                  26  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  34  involuntary context switches\n          1501204724  instructions retired\n           299386100  cycles elapsed\n             5079568  peak memory footprint\n",
+          "compiler": {
+            "COMPILER_TIMING": {
+              "schema": "1",
+              "parse_us": "60",
+              "ast_build_us": "439",
+              "bind_us": "15",
+              "validate_us": "21",
+              "index_us": "0",
+              "analysis_us": "5",
+              "mir_lower_us": "0",
+              "module_finalize_us": "0",
+              "link_us": "0",
+              "build_transpile_us": "622",
+              "compile_peak_rss_bytes": "13778944"
+            },
+            "MIR_VOLUME": {
+              "schema": "1",
+              "sample_id": "test/benchmark/r7rs/fib.ls",
+              "test_name": "fib.ls",
+              "modules": "0",
+              "functions": "0",
+              "insns": "0"
+            }
+          },
+          "process_peak_rss_bytes": 15908864,
+          "native": [
+            {
+              "accepted": 1,
+              "rejected": 2,
+              "calls": 635621,
+              "interpreted_calls": 2,
+              "code_bytes": 876,
+              "mapped_bytes": 16384,
+              "compile_ns": 78000
+            }
+          ]
+        }
+      },
+      "mir_native_code_bytes": 4640,
+      "mir_functions": 4
+    },
+    {
+      "name": "fib",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/fib2.ls",
+      "source_sha256": "3c0410886c59b18c8f0105aaa348f385fcfe2f53d9d40d9c894d5efcd69bff96",
+      "pairs": [
+        {
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.823,
+            "wall_ms": 8.818084,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 74.424,
+            "wall_ms": 81.153292,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        },
+        {
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 74.179,
+            "wall_ms": 81.827708,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.806,
+            "wall_ms": 9.496291,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        },
+        {
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.81,
+            "wall_ms": 8.811125,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 74.446,
+            "wall_ms": 81.32175,
+            "stdout": "fib: PASS",
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        }
+      ],
+      "warmup": {
+        "ast-native": {
+          "returncode": 0,
+          "self_ms": 74.188,
+          "wall_ms": 80.901875,
+          "stdout": "fib: PASS",
+          "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+          "stderr": "",
+          "compiler": {},
+          "process_peak_rss_bytes": null
+        },
+        "jit": {
+          "returncode": 0,
+          "self_ms": 0.81,
+          "wall_ms": 9.5525,
+          "stdout": "fib: PASS",
+          "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+          "stderr": "",
+          "compiler": {},
+          "process_peak_rss_bytes": null
+        },
+        "output_equal": true
+      },
+      "metrics": {
+        "jit": {
+          "returncode": 0,
+          "self_ms": 0.809,
+          "wall_ms": 10.987458,
+          "stdout": "fib: PASS",
+          "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+          "stderr": "        0.00 real         0.00 user         0.00 sys\n            17629184  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1270  page reclaims\n                  28  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n           100353235  instructions retired\n            29670272  cycles elapsed\n             5620144  peak memory footprint\n",
+          "compiler": {
+            "COMPILER_TIMING": {
+              "schema": "1",
+              "parse_us": "69",
+              "ast_build_us": "438",
+              "bind_us": "16",
+              "validate_us": "21",
+              "index_us": "0",
+              "analysis_us": "4",
+              "mir_lower_us": "1341",
+              "module_finalize_us": "189",
+              "link_us": "0",
+              "build_transpile_us": "2074",
+              "compile_peak_rss_bytes": "16138240"
+            },
+            "MIR_VOLUME": {
+              "schema": "1",
+              "sample_id": "test/benchmark/r7rs/fib2.ls",
+              "test_name": "fib2.ls",
+              "modules": "1",
+              "functions": "4",
+              "insns": "647"
+            }
+          },
+          "process_peak_rss_bytes": 17629184
+        },
+        "ast-native": {
+          "returncode": 0,
+          "self_ms": 74.137,
+          "wall_ms": 82.5715,
+          "stdout": "fib: PASS",
+          "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+          "stderr": "        0.08 real         0.07 user         0.00 sys\n            15974400  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1192  page reclaims\n                  26  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  31  involuntary context switches\n          1520899214  instructions retired\n           300516731  cycles elapsed\n             5079568  peak memory footprint\n",
+          "compiler": {
+            "COMPILER_TIMING": {
+              "schema": "1",
+              "parse_us": "66",
+              "ast_build_us": "433",
+              "bind_us": "17",
+              "validate_us": "21",
+              "index_us": "0",
+              "analysis_us": "6",
+              "mir_lower_us": "0",
+              "module_finalize_us": "0",
+              "link_us": "0",
+              "build_transpile_us": "621",
+              "compile_peak_rss_bytes": "13844480"
+            },
+            "MIR_VOLUME": {
+              "schema": "1",
+              "sample_id": "test/benchmark/r7rs/fib2.ls",
+              "test_name": "fib2.ls",
+              "modules": "0",
+              "functions": "0",
+              "insns": "0"
+            }
+          },
+          "process_peak_rss_bytes": 15974400,
+          "native": [
+            {
+              "accepted": 1,
+              "rejected": 2,
+              "calls": 635621,
+              "interpreted_calls": 2,
+              "code_bytes": 876,
+              "mapped_bytes": 16384,
+              "compile_ns": 73000
+            }
+          ]
+        }
+      },
+      "mir_native_code_bytes": 4640,
+      "mir_functions": 4
+    },
+    {
+      "name": "fibfp",
+      "variant": "untyped",
+      "script": "test/benchmark/r7rs/fibfp.ls",
+      "source_sha256": "0b0f887776dd89772d0ce0d2a495856ad4a90bb12dcab70b03d4d999003d9d50",
+      "pairs": [
+        {
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.775,
+            "wall_ms": 11.251125,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 67.12,
+            "wall_ms": 74.720167,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        },
+        {
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 65.55,
+            "wall_ms": 73.185583,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.849,
+            "wall_ms": 10.066458,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        },
+        {
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.8,
+            "wall_ms": 9.562792,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 65.826,
+            "wall_ms": 73.416041,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        }
+      ],
+      "warmup": {
+        "ast-native": {
+          "returncode": 0,
+          "self_ms": 120.552,
+          "wall_ms": 127.751916,
+          "stdout": "fibfp: PASS",
+          "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+          "stderr": "",
+          "compiler": {},
+          "process_peak_rss_bytes": null
+        },
+        "jit": {
+          "returncode": 0,
+          "self_ms": 0.84,
+          "wall_ms": 10.711083,
+          "stdout": "fibfp: PASS",
+          "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+          "stderr": "",
+          "compiler": {},
+          "process_peak_rss_bytes": null
+        },
+        "output_equal": true
+      },
+      "metrics": {
+        "jit": {
+          "returncode": 0,
+          "self_ms": 0.827,
+          "wall_ms": 11.644958,
+          "stdout": "fibfp: PASS",
+          "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+          "stderr": "        0.00 real         0.00 user         0.00 sys\n            17760256  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1278  page reclaims\n                  28  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            97428644  instructions retired\n            29840225  cycles elapsed\n             5816752  peak memory footprint\n",
+          "compiler": {
+            "COMPILER_TIMING": {
+              "schema": "1",
+              "parse_us": "66",
+              "ast_build_us": "476",
+              "bind_us": "15",
+              "validate_us": "22",
+              "index_us": "0",
+              "analysis_us": "5",
+              "mir_lower_us": "1337",
+              "module_finalize_us": "200",
+              "link_us": "0",
+              "build_transpile_us": "2116",
+              "compile_peak_rss_bytes": "16318464"
+            },
+            "MIR_VOLUME": {
+              "schema": "1",
+              "sample_id": "test/benchmark/r7rs/fibfp.ls",
+              "test_name": "fibfp.ls",
+              "modules": "1",
+              "functions": "4",
+              "insns": "568"
+            }
+          },
+          "process_peak_rss_bytes": 17760256
+        },
+        "ast-native": {
+          "returncode": 0,
+          "self_ms": 65.625,
+          "wall_ms": 75.167125,
+          "stdout": "fibfp: PASS",
+          "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+          "stderr": "        0.07 real         0.06 user         0.00 sys\n            15908864  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1181  page reclaims\n                  26  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  42  involuntary context switches\n          1421466175  instructions retired\n           268685706  cycles elapsed\n             5095952  peak memory footprint\n",
+          "compiler": {
+            "COMPILER_TIMING": {
+              "schema": "1",
+              "parse_us": "58",
+              "ast_build_us": "447",
+              "bind_us": "16",
+              "validate_us": "23",
+              "index_us": "0",
+              "analysis_us": "5",
+              "mir_lower_us": "0",
+              "module_finalize_us": "0",
+              "link_us": "0",
+              "build_transpile_us": "632",
+              "compile_peak_rss_bytes": "13795328"
+            },
+            "MIR_VOLUME": {
+              "schema": "1",
+              "sample_id": "test/benchmark/r7rs/fibfp.ls",
+              "test_name": "fibfp.ls",
+              "modules": "0",
+              "functions": "0",
+              "insns": "0"
+            }
+          },
+          "process_peak_rss_bytes": 15908864,
+          "native": [
+            {
+              "accepted": 1,
+              "rejected": 2,
+              "calls": 635621,
+              "interpreted_calls": 2,
+              "code_bytes": 876,
+              "mapped_bytes": 16384,
+              "compile_ns": 78000
+            }
+          ]
+        }
+      },
+      "mir_native_code_bytes": 4128,
+      "mir_functions": 4
+    },
+    {
+      "name": "fibfp",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/fibfp2.ls",
+      "source_sha256": "891d26fc17ecbe5c8ccf997bc5eb0106942155eadc1c9c1db4bda8358fae525d",
+      "pairs": [
+        {
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.801,
+            "wall_ms": 9.457917,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 66.278,
+            "wall_ms": 73.806,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        },
+        {
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 66.503,
+            "wall_ms": 74.336458,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.791,
+            "wall_ms": 9.859834,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        },
+        {
+          "jit": {
+            "returncode": 0,
+            "self_ms": 0.817,
+            "wall_ms": 9.478042,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "ast-native": {
+            "returncode": 0,
+            "self_ms": 66.413,
+            "wall_ms": 73.360833,
+            "stdout": "fibfp: PASS",
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr": "",
+            "compiler": {},
+            "process_peak_rss_bytes": null
+          },
+          "output_equal": true
+        }
+      ],
+      "warmup": {
+        "ast-native": {
+          "returncode": 0,
+          "self_ms": 66.686,
+          "wall_ms": 74.171,
+          "stdout": "fibfp: PASS",
+          "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+          "stderr": "",
+          "compiler": {},
+          "process_peak_rss_bytes": null
+        },
+        "jit": {
+          "returncode": 0,
+          "self_ms": 0.837,
+          "wall_ms": 10.115375,
+          "stdout": "fibfp: PASS",
+          "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+          "stderr": "",
+          "compiler": {},
+          "process_peak_rss_bytes": null
+        },
+        "output_equal": true
+      },
+      "metrics": {
+        "jit": {
+          "returncode": 0,
+          "self_ms": 0.776,
+          "wall_ms": 10.749666,
+          "stdout": "fibfp: PASS",
+          "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+          "stderr": "        0.00 real         0.00 user         0.00 sys\n            17678336  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1273  page reclaims\n                  28  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                   6  involuntary context switches\n            95653105  instructions retired\n            28353989  cycles elapsed\n             5669296  peak memory footprint\n",
+          "compiler": {
+            "COMPILER_TIMING": {
+              "schema": "1",
+              "parse_us": "67",
+              "ast_build_us": "439",
+              "bind_us": "15",
+              "validate_us": "21",
+              "index_us": "0",
+              "analysis_us": "5",
+              "mir_lower_us": "1184",
+              "module_finalize_us": "185",
+              "link_us": "0",
+              "build_transpile_us": "1911",
+              "compile_peak_rss_bytes": "16154624"
+            },
+            "MIR_VOLUME": {
+              "schema": "1",
+              "sample_id": "test/benchmark/r7rs/fibfp2.ls",
+              "test_name": "fibfp2.ls",
+              "modules": "1",
+              "functions": "4",
+              "insns": "532"
+            }
+          },
+          "process_peak_rss_bytes": 17678336
+        },
+        "ast-native": {
+          "returncode": 0,
+          "self_ms": 66.008,
+          "wall_ms": 74.783458,
+          "stdout": "fibfp: PASS",
+          "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+          "stderr": "        0.07 real         0.06 user         0.00 sys\n            15958016  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1192  page reclaims\n                  26  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                  33  involuntary context switches\n          1435139891  instructions retired\n           268286228  cycles elapsed\n             5063184  peak memory footprint\n",
+          "compiler": {
+            "COMPILER_TIMING": {
+              "schema": "1",
+              "parse_us": "68",
+              "ast_build_us": "446",
+              "bind_us": "15",
+              "validate_us": "21",
+              "index_us": "0",
+              "analysis_us": "5",
+              "mir_lower_us": "0",
+              "module_finalize_us": "0",
+              "link_us": "0",
+              "build_transpile_us": "638",
+              "compile_peak_rss_bytes": "13844480"
+            },
+            "MIR_VOLUME": {
+              "schema": "1",
+              "sample_id": "test/benchmark/r7rs/fibfp2.ls",
+              "test_name": "fibfp2.ls",
+              "modules": "0",
+              "functions": "0",
+              "insns": "0"
+            }
+          },
+          "process_peak_rss_bytes": 15958016,
+          "native": [
+            {
+              "accepted": 1,
+              "rejected": 2,
+              "calls": 635621,
+              "interpreted_calls": 2,
+              "code_bytes": 876,
+              "mapped_bytes": 16384,
+              "compile_ns": 77000
+            }
+          ]
+        }
+      },
+      "mir_native_code_bytes": 3808,
+      "mir_functions": 4
+    }
+  ],
+  "complete": true,
+  "binary_stable": true,
+  "hardware": {
+    "cpu": "Apple M3",
+    "ram_bytes": 25769803776
+  }
+}
