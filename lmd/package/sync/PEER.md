@@ -122,9 +122,10 @@ signature binds both public keys. Explicit invitation acceptance pins the invite
 discovery or learning an address grants no access. Enrollment offers use ephemeral
 X25519, HKDF-SHA256 and AES-256-GCM to carry the space key to the intended recipient,
 and P-256/SHA-256 to authenticate the whole offer. Private credentials are an authenticated
-encrypted row in `device.sqlite`. Enroll each device separately; copying this
-database clones its cryptographic identity. Membership mutations load the current row and
-write its replacement in the same SQLite scope; obsolete file snapshots cannot
+encrypted `credentials-<hash>.box` file; `device.sqlite` stores its current pointer.
+Enroll each device separately; copying both the database and credential files
+clones its cryptographic identity. Membership mutations load the current pointer,
+durably write a new envelope and commit its pointer in the same SQLite scope; obsolete file snapshots cannot
 blindly replace current membership. Cross-process writer contention is not qualified
 ([LI-015](../../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-015)); run
 administrative mutations sequentially. Contention and uncertain commits surface

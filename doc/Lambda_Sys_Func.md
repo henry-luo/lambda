@@ -2112,6 +2112,10 @@ IO/grant boundary (D11.1.2, D11.2.1–D11.2.4):
 | `disk.read_stream(root, relative, options, consumer)` | Calls `pn(state, bytes)` for positive binary blocks; returns `{source, state, hash}` with observed metadata and SHA256. Options: `state`, optional `token`, `block_bytes` (default 65,536, maximum 8 MiB), `max_bytes` (default 256 MiB), `offset` (default 0) and `length` (default remaining bytes). Ranges retain held-file/revision checks; SHA256 covers the selected bytes, while source metadata describes the full file. |
 | `disk.write_stream(root, relative, options, producer)` | Options require `size`, 32-byte SHA256 `hash`, initial `state`, and optional `expected` observation token. Producer returns `{bytes, state, done}`; final `done:true` requires `bytes:null`. Exact length/hash precede atomic publication. Null expected token is create-only. |
 | `crypto.hash_stream(options, producer)` | Same producer contract, `size` and `state`; returns `{source:null, state, hash}` without file publication. |
+| `disk.spool(root, max_bytes, action)` | Calls `action(handle)` with a task-owned, scoped buffered scratch file. Returns the action result; errors discard unpublished bytes and escaped handles fail. Each published segment may contain at most `max_bytes` (1–64 GiB). |
+| `disk.spool_write(handle, bytes)` | Append a positive binary block up to 16 MiB; return its byte offset. A failed write invalidates the spool. |
+| `disk.spool_read(handle, offset, length)` | Read an already written range up to 16 MiB. Reads do not change append offsets or the incremental digest. |
+| `disk.spool_publish(handle, suffix)` | Finalize SHA256, copy to an anchored create-only file named by its lowercase hash plus a suffix of at most 16 lowercase letters/dots, and reset the spool. Publication checks a second digest and durable file/directory barriers. Failed publication invalidates the spool; an error can report uncertain durability. |
 
 Native streaming size bounds are 0–64 GiB. Each producer block is 1 byte–8 MiB.
 Consumer/producer procedures can suspend. The native scope roots callback state,

@@ -751,6 +751,48 @@ ranges. Repacking writes and verifies a new pack and publishes its locations
 before retiring an old one. Pack size remains a tuning choice; chunking,
 deduplication, encryption, and recovery contracts are part of the baseline.
 
+### 5.9 Streaming pack publication and metadata-only SQLite
+
+Encrypted payload bytes must never enter SQLite, including temporary blob
+staging. Stream newly encrypted records into a private, bounded file spool;
+retain only IDs, kinds, offsets and lengths in the transactional metadata index.
+Keep the current 16 MiB pack target and 32 MiB hard bound, independent of SQL
+result limits. Reads of unsealed records use spool ranges. Pack footers retain
+the authenticated recovery index. Policy remains Lambda Script; native code
+provides scoped buffered file IO, range reads, hashing and durable publication
+(S12.1.1v3, D11.1.2, D11.2.1–D11.2.4).
+
+Seal at a size/count boundary and at the end of a save/change batch. A partial
+pack must not wait indefinitely for more edits. Flush the authenticated footer,
+publish the immutable pack, then register its locations. The SQLite workspace
+head may commit only after all dependencies are durable. Failed scopes retain
+the previous head; already published packs are recoverable orphans. Concurrent
+pruning must exclude active writers and uploads. Cleanup never treats an orphan
+as proof that a workspace save completed.
+
+Use separate data and metadata lanes so ordinary cloud publication can reuse
+whole data packs without disclosing private local-state objects. Exportable
+metadata and private state must likewise remain distinguishable. Remote
+publication uploads required immutable packs first, followed by indexes and the
+authenticated workspace publication. Keep queued packs and upload concurrency
+bounded. Repacking copies authenticated records without decrypting/re-encrypting
+unchanged blobs; retire old locations only after the replacement is durable.
+
+SQLite stores object descriptors, pack lifecycle metadata, current-head pointers
+and recovery/upload bookkeeping. It must not duplicate ciphertext in `objects`,
+`heads` or credential tables. Authenticated head envelopes and device credentials
+belong in protected immutable/atomic files outside SQLite. Keep generation and
+authenticated-head binding checks. Migrate existing indexes from authenticated
+pack/object records, never drop the only usable copy, and preserve recovery
+across interruption. A migration must account for ciphertext left in SQLite
+free pages as well as visible columns.
+
+This follows restic's buffered temporary pack writer, authenticated trailing
+header and post-save index update, while preserving Lambda's live-edit and
+workspace transaction semantics. Sources: [pack writer](https://github.com/restic/restic/blob/master/internal/repository/pack/pack.go),
+[packer manager](https://github.com/restic/restic/blob/master/internal/repository/packer_manager.go),
+[repository format](https://restic.readthedocs.io/en/stable/100_references.html).
+
 ## 6. Directory and file synchronization
 
 Maintain an index from local entries to stable node IDs, their last accepted
@@ -1783,6 +1825,13 @@ SQLite locator catalog and encrypted local head, Gear chunking, complete scans,
 workspace reconciliation, installation journals, snapshots and recovery. Policy
 is Lambda Script (S12.1.1v3); C++ exposes crypto and file-anchor mechanisms through
 D11.1.2. [API and current limits](../lmd/package/sync/LOCAL_REPOSITORY.md).
+The [streaming pack implementation](impl/Lambda_Impl_Sync_Streaming_Packs.md)
+replaces SQL ciphertext staging with file spools and external head/credential
+envelopes (§5.9). SQLite contains descriptors and pointers; physical legacy free
+pages require separate compaction. A release fresh 80 MiB / 128-file publication
+to local S3 completes in 8.328 s with a 112 KiB metadata database, followed by a
+byte-exact restore in 13.530 s. These are isolated single samples; peak RSS is
+still approximately 1 GiB, and HTTP currently buffers one bounded pack body.
 Internet traversal, cloud adapters, polling deployment, broader key management
 and editor bindings remain subsequent acceptance work; this does not complete §12.1.
 

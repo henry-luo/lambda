@@ -92,6 +92,29 @@ restore. Peak RSS is macOS `/usr/bin/time -l`; MB/MiB labels remain distinct.
 | 64 KiB | 128 | 3.882 s | 2.771 s | 1150.3 MiB | 830.7 MiB |
 | 8 MiB | 128 | 4.835 s | 3.610 s | 1939.7 MiB | 895.2 MiB |
 
+### 80 MiB / 128-file attempt — 2026-11-17
+
+A release run used 128 independently generated random files of 655,360 bytes
+each (80 MiB total), a fresh repository and the same isolated local SeaweedFS
+S3 publication harness. It failed during `local.scan`, before cloud pull or
+publication, with `io.sqlite: statement failed or result exceeded its limits`.
+The recorded wall time to failure was 1.17 s; this is not a sync-time result.
+The run record is under `temp/wasabi-integration/measure-80m-128/`.
+
+Root cause confirmed with a separately copied, instrumented sync package and
+the same corpus: `pack_store.flush` queried all pending object records at once.
+It requested 17,066,092 ciphertext bytes plus 3,091 ID and kind bytes across
+76 rows, exceeding the SQLite result accumulator's 16,777,216-byte aggregate
+limit. The flush threshold is 16 MiB and is checked after staging an object,
+so the batch may already exceed the query limit. The 64 MiB create/clone image
+limit does not apply to this existing database transaction. Diagnostic output:
+`temp/sync-80-diagnosis/run2/err`. The error occurs before S3 (D11.1.2).
+
+The subsequent [streaming-pack implementation](Lambda_Impl_Sync_Streaming_Packs.md)
+removes SQL payload staging. The release 80 MiB / 128-file case now publishes
+in 8.328 s with a 112 KiB metadata database and restores exactly in 13.530 s.
+That report records the final samples and remaining memory/transport limits.
+
 For 8 MiB / 128 files, median scan falls **2.936 -> 1.969 s**, pull falls
 **0.396 -> 0.199 s**, and publication remains **1.131 -> 1.123 s**.
 End-to-end publication improves 25.3%; peak RSS falls 53.9%. The unchanged

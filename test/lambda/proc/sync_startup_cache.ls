@@ -22,14 +22,14 @@ pn main() {
     let scanned = local.scan(refreshed,null,true)^
     let latest = local.with_cache(refreshed,scanned)
     let row = repo.access(initial.path,initial.keys,pn (tx,k)=> {
-        return sqlite.query(tx,"SELECT box FROM heads WHERE name = 'local'")^[0][0]
+        return sqlite.query(tx,"SELECT object FROM heads WHERE name = 'local'")^[0][0]
     })^
     repo.access(initial.path,initial.keys,pn (tx,k)=> {
-        sqlite.execute(tx,"UPDATE heads SET box = ? WHERE name = 'local'",[row ++ binary([0])^])^
+        sqlite.execute(tx,"UPDATE heads SET object = ? WHERE name = 'local'",["invalid-head-pointer"])^
     })^
     let rejected = local.status(latest) ^ { ^ }
     repo.access(initial.path,initial.keys,pn (tx,k)=> {
-        sqlite.execute(tx,"UPDATE heads SET box = ? WHERE name = 'local'",[row])^
+        sqlite.execute(tx,"UPDATE heads SET object = ? WHERE name = 'local'",[row])^
     })^
     let agent_dir = area ++ "/agent"
     io.mkdir(agent_dir)^

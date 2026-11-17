@@ -358,3 +358,150 @@ extern "C" Item pn_io_crypto_hash_stream(Item options, Item producer) {
     if (!stream.digest) return ItemError;
     return hash_producer(&stream, callback.get(), state.get(), size);
 }
+
+// scoped scratch files carry payload bytes; SQL callers retain descriptors only.
+namespace {
+char spool_brand;
+VMapVtable spool_vtable = {io_resource_get, io_resource_set, io_resource_count,
+    io_resource_keys, io_resource_at, io_resource_at, io_resource_destroy, io_resource_trace};
+struct DiskSpool {
+    DiskAnchor disk;
+    LambdaTask* owner = nullptr;
+    FILE* file = nullptr;
+    DigestCtx* digest = nullptr;
+    int64_t size = 0, limit = 0;
+    bool failed = false, anonymous = false;
+    char leaf[64] = {};
+    void clear() {
+        if (file) {
+            fflush(file);
+            FileRevision revision = file_revision_stream(file);
+            fclose(file); file = nullptr;
+            if (!anonymous) file_anchor_remove(disk.anchor, leaf, &revision);
+        }
+        digest_ctx_free(digest); digest = nullptr; size = 0; leaf[0] = 0; anonymous = false;
+    }
+    ~DiskSpool() { clear(); }
+};
+DiskSpool* spool_of(Item handle) {
+    DiskSpool* s = get_type_id(handle) == LMD_TYPE_VMAP && handle.vmap &&
+        handle.vmap->host_type == &spool_brand ? (DiskSpool*)handle.vmap->host_data : nullptr;
+    Item denied = ItemNull;
+    return s && s->owner == lambda_task_running() && !s->failed &&
+        !lambda_task_cancel_requested(s->owner) && io_fs_allow_unbrokered("io.disk.spool", &denied)
+        ? s : nullptr;
+}
+bool spool_seek(FILE* file, int64_t offset) {
+#ifdef _WIN32
+    return _fseeki64(file, offset, SEEK_SET) == 0;
+#else
+    return fseeko(file, (off_t)offset, SEEK_SET) == 0;
+#endif
+}
+bool spool_open(DiskSpool* s) {
+    if (s->file) return true;
+    uint8_t random[16];
+    if (!crypto_random_bytes(random, sizeof(random))) return false;
+    memcpy(s->leaf, ".lambda-spool-", 14);
+    static const char hex[] = "0123456789abcdef";
+    for (int i = 0; i < 16; ++i) { s->leaf[14+i*2] = hex[random[i] >> 4]; s->leaf[15+i*2] = hex[random[i] & 15]; }
+    s->leaf[46] = 0;
+    s->file = file_anchor_create_regular(s->disk.anchor, s->leaf);
+    s->digest = digest_ctx_new(DIGEST_SHA256);
+    if (!s->file || !s->digest) return false;
+    // unlink while held so cancellation/crash cleanup needs only close, without new IO authority.
+    FileRevision revision = file_revision_stream(s->file);
+    s->anonymous = file_anchor_remove(s->disk.anchor, s->leaf, &revision);
+    return s->anonymous;
+}
+}
+extern "C" Item pn_io_disk_spool(Item root, Item limit, Item action) {
+    RootFrame roots(5);
+    Rooted<Item> held_root(roots, root), callback(roots, action), handle(roots, ItemNull), result(roots, ItemNull);
+    DiskSpool spool; Item error = ItemNull;
+    spool.owner = lambda_task_running();
+    if (!bound(limit, INT64_C(68719476736), &spool.limit) || !spool.limit || get_type_id(action) != LMD_TYPE_FUNC)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.disk.spool: expected positive limit and action");
+    Rooted<Item> relative(roots, ItemNull);
+    relative.set(io_fs_make_string("", 0));
+    if (!disk_open(held_root.get(), relative.get(), &spool.disk, &error)) return error;
+    VMap* carrier = io_resource_handle_new(&spool_vtable, &spool_brand, &spool);
+    if (!carrier) return ItemError;
+    handle.set((Item){.vmap = carrier});
+    result.set(fn_call1((Function*)(uintptr_t)callback.get().item, handle.get()));
+    // an escaped carrier must fail after this native scope, including error exits.
+    handle.get().vmap->host_data = nullptr; handle.get().vmap->data = nullptr;
+    return result.get();
+}
+extern "C" Item pn_io_disk_spool_write(Item handle, Item bytes) {
+    DiskSpool* s = spool_of(handle);
+    if (!s || get_type_id(bytes) != LMD_TYPE_BINARY || bytes.get_len() < 1 || bytes.get_len() > 16777216)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.disk.spool_write: invalid handle or block");
+    size_t n = bytes.get_len();
+    if ((int64_t)n > s->limit - s->size || !spool_open(s) ||
+        !spool_seek(s->file, s->size) || fwrite(binary_data(bytes.get_safe_binary()), 1, n, s->file) != n ||
+        !digest_update(s->digest, binary_data(bytes.get_safe_binary()), n)) {
+        s->failed = true;
+        return io_fs_error(ERR_IO_ERROR, "io.disk.spool_write: bounded write failed");
+    }
+    int64_t offset = s->size; s->size += (int64_t)n;
+    return (Item){.item = i2it(offset)};
+}
+extern "C" Item pn_io_disk_spool_read(Item handle, Item offset, Item length) {
+    DiskSpool* s = spool_of(handle); int64_t at = 0, n = 0;
+    if (!s || !bound(offset, INT64_C(68719476736), &at) || !bound(length, 16777216, &n) ||
+        !s->file || at > s->size || n > s->size-at)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.disk.spool_read: invalid handle or range");
+    if (!n) return ItemNull;
+    char* buffer = (char*)mem_alloc((size_t)n, MEM_CAT_EVAL);
+    if (!buffer) return ItemError;
+    if (fflush(s->file) || !spool_seek(s->file, at) || fread(buffer, 1, (size_t)n, s->file) != (size_t)n) {
+        s->failed = true; mem_free(buffer);
+        return io_fs_error(ERR_IO_ERROR, "io.disk.spool_read: incomplete read");
+    }
+    Binary* bytes = heap_binary_from_bytes(buffer, n); mem_free(buffer);
+    return bytes ? (Item){.item = x2it(bytes)} : ItemError;
+}
+extern "C" Item pn_io_disk_spool_publish(Item handle, Item suffix) {
+    DiskSpool* s = spool_of(handle);
+    if (!s || !s->file || get_type_id(suffix) != LMD_TYPE_STRING || suffix.get_len() > 16)
+        return io_fs_error(ERR_INVALID_OPERATION, "io.disk.spool_publish: invalid handle or suffix");
+    for (uint32_t i = 0; i < suffix.get_len(); ++i) {
+        char c = suffix.get_chars()[i];
+        if (!(c == '.' || (c >= 'a' && c <= 'z')))
+            return io_fs_error(ERR_INVALID_OPERATION, "io.disk.spool_publish: invalid suffix");
+    }
+    uint8_t hash[32];
+    if (fflush(s->file) || !digest_finalize(s->digest, hash, sizeof(hash)) || !spool_seek(s->file, 0)) {
+        s->failed = true; return io_fs_error(ERR_IO_ERROR, "io.disk.spool_publish: cannot finalize");
+    }
+    char name[81]; static const char hex[] = "0123456789abcdef";
+    for (int i = 0; i < 32; ++i) { name[i*2] = hex[hash[i] >> 4]; name[i*2+1] = hex[hash[i] & 15]; }
+    memcpy(name+64, suffix.get_chars(), suffix.get_len()); name[64+suffix.get_len()] = 0;
+    DiskStream published;
+    published.writer = file_anchor_write_begin(s->disk.anchor, name, nullptr);
+    published.digest = digest_ctx_new(DIGEST_SHA256);
+    published.buffer = (char*)mem_alloc(65536, MEM_CAT_EVAL);
+    if (!published.writer || !published.digest || !published.buffer) { s->failed = true; return ItemError; }
+    int64_t left = s->size;
+    while (left) {
+        size_t n = left < 65536 ? (size_t)left : 65536;
+        if (lambda_task_cancel_requested(s->owner) || fread(published.buffer, 1, n, s->file) != n ||
+            !digest_update(published.digest, published.buffer, n) ||
+            !file_anchor_write_chunk(published.writer, published.buffer, n)) {
+            s->failed = true; return io_fs_error(ERR_IO_ERROR, "io.disk.spool_publish: copy failed");
+        }
+        left -= (int64_t)n;
+    }
+    uint8_t copied[32];
+    if (!digest_finalize(published.digest, copied, sizeof(copied)) || memcmp(hash, copied, 32)) {
+        s->failed = true; return io_fs_error(ERR_IO_ERROR, "io.disk.spool_publish: content changed");
+    }
+    FileAtomicWriter* writer = published.writer; published.writer = nullptr;
+    int status = file_anchor_write_commit(writer);
+    s->failed = status != 0;
+    if (status) return io_fs_error(ERR_IO_ERROR, status > 0 ?
+        "io.disk.spool_publish: published; durability uncertain" : "io.disk.spool_publish: failed");
+    s->clear();
+    return io_fs_make_string(name, 64);
+}

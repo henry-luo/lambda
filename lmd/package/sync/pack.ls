@@ -13,7 +13,6 @@ pub pn encode(keys, records) any^ {
         raise error("sync pack: invalid record count or duplicate")
     var parts = [binary("LPK1")^]
     var body_size = 4
-    var header = binary("LPI1")^ ++ wire.encode_u32(len(records)^)^
     var entries = []
     var position = 0
     while (position < len(records)^) {
@@ -22,14 +21,20 @@ pub pn encode(keys, records) any^ {
         let bytes = wire.encode(record)^
         let entry = {id:record.id,offset:body_size,length:len(bytes)^}
         entries = [*entries,entry]
-        header = header ++ record.id ++ wire.encode_u32(entry.offset)^ ++ wire.encode_u32(entry.length)^
         parts = [*parts,bytes]
         body_size = body_size+len(bytes)^
         if (body_size > maximum-1048576) raise error("sync pack: byte limit")
     }
-    let sealed = crypto.seal(keys.encryption,header,context(keys))^
-    let bytes = wire.concat([*parts,sealed,wire.encode_u32(len(sealed)^)^])^
+    let bytes = wire.concat([*parts,footer(keys,entries)^])^
     return {bytes:bytes,entries:entries,id:hex.hex(hash(bytes,'sha256')^)^}
+}
+// the same footer serves in-memory exports and sequential file spools.
+pub pn footer(keys, entries) any^ {
+    if (len(entries)^ < 1 or len(entries)^ > count_limit) raise error("sync pack: invalid index count")
+    let header = wire.concat([binary("LPI1")^,wire.encode_u32(len(entries)^)^,
+        *[for (entry in entries) entry.id ++ wire.encode_u32(entry.offset)^ ++ wire.encode_u32(entry.length)^]])^
+    let sealed = crypto.seal(keys.encryption,header,context(keys))^
+    return sealed ++ wire.encode_u32(len(sealed)^)^
 }
 pub fn index(keys, tail, size) any^ {
     if (not (tail is binary) or len(tail)^ < 44 or size > maximum or size < len(tail)^+4)

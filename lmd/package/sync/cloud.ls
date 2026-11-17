@@ -170,11 +170,10 @@ pn publish_paged(handle, credentials, config, remote, current, ids, old, previou
     let epoch = remote.epoch or 0
     let prior = local.cloud_locations(handle,provider(config)^,ids)^
     var physical = [for (entry in prior where entry.key != null) entry]
-    let pending = [for (entry in prior where entry.key == null) entry.id]
+    var pending = [for (entry in prior where entry.key == null) entry.id]
     var uploaded = 0
-    var offset = 0
-    while (offset < len(pending)^) {
-        let packed = local.export_pack(handle,slice(pending,offset)^)^
+    while (len(pending)^ > 0) {
+        let packed = local.export_pack(handle,pending)^
         let key = catalog.data_key("objects",packed.id,epoch)^
         let stored = transport.ensure(config,credentials,transport.descriptor(key,packed.bytes)^,packed.bytes)^
         if (stored.existing != null) {
@@ -182,7 +181,7 @@ pn publish_paged(handle, credentials, config, remote, current, ids, old, previou
                 raise error("sync cloud: pack collision")
         }
         physical = [*physical,*[for (id in packed.ids) {id:id,key:key}]]
-        offset = offset+len(packed.ids)^
+        pending = [for (id in pending where not contains(packed.ids,id)^) id]
         if (stored.uploaded) { uploaded = uploaded+1 }
     }
     let objects = inventory_pages.stage(config,credentials,[for (entry in physical) entry.key],epoch)^

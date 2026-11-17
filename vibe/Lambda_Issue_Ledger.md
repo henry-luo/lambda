@@ -3039,3 +3039,18 @@ attribution of all multi-GiB sync memory. Sync batch index updates reduce repeat
 page decoding; parser lifetime and bounded decoding remain unresolved. Do not
 free the Input while its returned Item can remain reachable. Details and further
 profiling targets: [sync performance investigation](impl/Lambda_Impl_Sync_Wasabi_Demo.md#file-count-versus-byte-count-investigation--2026-11-17).
+
+## Large workspace capture fails during a SQLite statement — 2026-11-17
+
+**Status:** FIXED by descriptor-only SQL staging and scoped file spools. The
+release 80 MiB / 128-file publication completes in 8.328 s and restores exactly;
+see [streaming packs](impl/Lambda_Impl_Sync_Streaming_Packs.md). Original failure:
+a release capture of 128 random files totaling 80 MiB fails
+before cloud publication. A separately copied and instrumented package confirms
+that `pack_store.flush` requests 17,066,092 ciphertext bytes plus 3,091 ID and
+kind bytes in one query, exceeding the SQLite result's 16,777,216-byte aggregate
+limit. Its 16 MiB pack threshold is checked after staging an object. The earlier
+attribution to the 64 MiB create/clone image limit was incorrect: capture uses
+an existing file-backed transaction (D11.1.2). The 1.17 s failure provides no
+sync timing. Fix the batching and preserve recovery; diagnostic output:
+`temp/sync-80-diagnosis/run2/err`.
