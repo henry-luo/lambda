@@ -1728,7 +1728,6 @@ void dom_register_named_elements(DomElement* root) {
 }
 
 static DomDocument* js_document_proxy_doc_from_item(Item item);
-static Url* dom_document_resolve_url(DomDocument* doc);
 
 // ============================================================================
 // DOM Context Management
@@ -6137,29 +6136,9 @@ static JsDomPropId dom_prop_id(const char* prop) {
 // this makes that node able to answer as a Document too (ESO101), which needs
 // the query to say *which* document -- a Lambda-only document never sets the
 // global, and a node knows its own.
-static Url* dom_document_resolve_url(DomDocument* doc) {
-    if (doc && doc->root) {
-        SelectorQueryScratch query;
-        if (query.parse_list("base[href]")) {
-            query.matcher = dom_create_selector_matcher(doc, query.pool);
-            DomElement* base = dom_selector_group_find_first(
-                query.matcher, query.group, doc->root, true);
-            if (base) {
-                // Only the first connected base applies, even if its URL is invalid.
-                Url* resolved = doc->url
-                    ? url_parse_with_base(base->get_attribute("href"), doc->url)
-                    : url_parse(base->get_attribute("href"));
-                if (resolved && url_is_valid(resolved) &&
-                        resolved->scheme != URL_SCHEME_DATA &&
-                        resolved->scheme != URL_SCHEME_JAVASCRIPT) return resolved;
-                if (resolved) url_destroy(resolved);
-            }
-        }
-    }
-    return doc && doc->url ? url_clone(doc->url) : nullptr;
-}
 
 static Item dom_document_base_uri(DomDocument* doc) {
+    // share Input's resource-base traversal for inert templates and namespaces.
     Url* resolved = dom_document_resolve_url(doc);
     Item result = js_name_item(resolved ? url_get_href(resolved) : "about:blank");
     if (resolved) url_destroy(resolved);

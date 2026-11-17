@@ -143,21 +143,40 @@ pub pn create(path, secret, space, root, device, config=chunks.default_profile) 
 pub pn status(handle) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let loaded = repo.load(tx,k)^
-        let expanded = documents.expand(tx,k,loaded.state)^
+        let expanded = expand_loaded(tx,k,loaded)^
         let proof = if (loaded.validated == true) loaded.validation else validate(expanded,k.space)^
-        return result(handle,loaded,expanded,proof)
+        return result(handle,loaded,expanded,proof)^
     })^
 }
-fn result(handle, loaded, expanded, proof) => {generation:loaded.generation,id:loaded.id,state:expanded,
-    *:if (handle.keys.cache_enabled == true) {repository_cache:{*:loaded,validated:true,validation:proof}} else {}}
+// one current authenticated head owns the cache; explicit verify always rereads storage.
+let expanded_cache_limit = 1048576
+pn expand_loaded(tx, keys, loaded) any^ {
+    return if (loaded.validated == true and loaded.expanded != null) loaded.expanded
+        else documents.expand(tx,keys,loaded.state)^
+}
+fn result(handle, loaded, expanded, proof) any^ {
+    if (handle.keys.cache_enabled != true) {
+        return {generation:loaded.generation,id:loaded.id,state:expanded}
+    }
+    let bytes = if (loaded.expanded != null) loaded.expanded_bytes
+        else len(binary(codec.encode(expanded)^)^)^
+    return {generation:loaded.generation,id:loaded.id,state:expanded,
+        repository_cache:{*:loaded,validated:true,validation:proof,expanded_bytes:bytes,
+            expanded:if (bytes <= expanded_cache_limit) expanded else null}}
+}
 
 pub pn mutate(handle, operation) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let loaded = repo.load(tx,k)^
-        let expanded = documents.expand(tx,k,loaded.state)^
+        let expanded = expand_loaded(tx,k,loaded)^
         let previous = if (loaded.validated == true) loaded.validation else validate(expanded,k.space)^
-        let updated = operation(tx,{*:k,workspace_validation:previous,head_id:loaded.id},expanded)
-        let next = documents.flush(tx,k,updated^)^
+        let updated = operation(tx,{*:k,workspace_validation:previous,head_id:loaded.id},expanded)^
+        // a settled head has already observed retention/recovery; keep outer SQL/pack finalization.
+        if (loaded.settled == true and expanded.cache_job == null and expanded.maintenance == null and
+            codec.same_encoding(updated,expanded)^) {
+            return result(handle,loaded,expanded,previous)^
+        }
+        let next = documents.flush(tx,k,updated)^
         let checked = validate(next,k.space,previous)^
         let proof = if (next.installation.source.state == loaded.id)
             {*:checked,install_source:{id:loaded.id,replica:expanded.endpoint.replica}} else checked
@@ -171,11 +190,11 @@ pub pn mutate(handle, operation) any^ {
         let verified = if (changed or (handle.keys.cache_enabled == true and known == null))
             dependencies(tx,k,next.endpoint,maintenance.get(next).revisions,"workspace",reach.cache_ids(next),
                 if (known == null) [] else known,proof.projection)^ else known
-        let accepted = {*:loaded,verified:verified,dependency_scope:scope}
-        if (next == loaded.state) { return result(handle,accepted,expanded,proof) }
+        let accepted = {*:loaded,verified:verified,dependency_scope:scope,settled:true}
+        if (next == loaded.state) { return result(handle,accepted,expanded,proof)^ }
         let committed = repo.commit_head(tx,k,loaded.generation,{*:next,previous:loaded.id})^
-        return result(handle,{*:committed,verified:verified,dependency_scope:scope},
-            documents.expand(tx,k,committed.state)^,proof)
+        return result(handle,{*:committed,verified:verified,dependency_scope:scope,settled:true},
+            documents.expand(tx,k,committed.state)^,proof)^
     })^
 }
 

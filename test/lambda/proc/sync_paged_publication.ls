@@ -24,23 +24,29 @@ pn main() {
     open tx = (sqlite.existing(area ++ "/store.sqlite")^) {
         for (key in [*keys,bundle_key]) { sqlite.execute(tx,"INSERT INTO objects VALUES (?, ?, ?)",[prefix ++ key,"abc",key])^ }
     }
-    let root = pages.build(store,prefix,[for (key in [bundle_key,*keys]) {id:key,value:null}])^
-    let current = catalog.load(store,prefix,control.body)^
-    catalog.write(store,prefix,current,{*:current.value,objects_root:root})^
-    var children = []
-    for (offset in range(0,len(keys)^,64)) {
-        children = [*children,receipts.stage(store,prefix,slice(keys,offset,offset+64)^,0)^.id]
-    }
-    var level = children
-    while (len(level)^ > 1) {
-        var parents = []
-        for (offset in range(0,len(level)^,32)) {
-            parents = [*parents,receipts.merge(store,prefix,slice(level,offset,offset+32)^,0)^.id]
+    // Commit bulk construction before independently committed publication and replay.
+    let prepared = fixture.scoped(area ++ "/store.sqlite",pn (scoped)=> {
+        let root = pages.build(scoped,prefix,[for (key in [bundle_key,*keys]) {id:key,value:null}])^
+        let current = catalog.load(scoped,prefix,control.body)^
+        catalog.write(scoped,prefix,current,{*:current.value,objects_root:root})^
+        var children = []
+        for (offset in range(0,len(keys)^,64)) {
+            children = [*children,receipts.stage(scoped,prefix,slice(keys,offset,offset+64)^,0)^.id]
         }
-        level = parents
-    }
-    let bundle_receipt = receipts.stage(store,prefix,[bundle_key],0)^
-    let combined = receipts.merge(store,prefix,[bundle_receipt.id,level[0]],0)^
+        var level = children
+        while (len(level)^ > 1) {
+            var parents = []
+            for (offset in range(0,len(level)^,32)) {
+                parents = [*parents,receipts.merge(scoped,prefix,slice(level,offset,offset+32)^,0)^.id]
+            }
+            level = parents
+        }
+        let bundle_receipt = receipts.stage(scoped,prefix,[bundle_key],0)^
+        let combined = receipts.merge(scoped,prefix,[bundle_receipt.id,level[0]],0)^
+        return {root:root,combined:combined}
+    })^
+    let root = prepared.root
+    let combined = prepared.combined
     let publication = schema.signed(owner.seed,"lambda-cloud-publication-1",{version:2,space:owner.space,
         actor:owner.device.id,sequence:1,previous:null,clock:[],
         bundle:{key:bundle_key,bytes:3,checksum:s3.checksum("abc")^},inventory:schema.digest(root)^,

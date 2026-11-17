@@ -144,8 +144,16 @@ fields are package design cleanup, not additional Lambda language issues.
 
 <a id="reader-constrained-error-return"></a>
 
-**Constrained error unions:** fixed; the shared-core and compiler repair is
+**Constrained error unions:** the prior shared-core/compiler repair is
 [archived in the fixed ledger](<Lambda_Issue_Ledger (fixed).md#reader-constrained-error-return-fixed>).
+**Current checkout follow-up (2026-11-17): OPEN in Input LI-076.** With Input
+`6e22903`, `lambda_type_accepts_error` lacks the constrained-base walk. The
+unchanged `constrained_error_return` golden and
+`TypeContractMetadataTest.ConstrainedErrorChannelsFollowTheirBase` fail in the
+full baseline; the golden also fails on the preserved pre-sync-tuning release.
+See [Input LI-076](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-076).
+This is separate from sync optimization and remains visible; no compiler/test
+workaround was introduced.
 
 **Performance residue: OPEN.** Three interleaved same-host release/JIT pairs
 over 8,000 tokens preserve exact output. On the final pinned host, median
@@ -3320,3 +3328,37 @@ This does not block sync memory ownership work: empty-file and nullable-binary
 sync cases pass. The added parse-name test compares the names as strings,
 including empty/NUL/Unicode keys, without depending on binary conversion.
 Evidence: `temp/sync-memory-impl/{_empty_binary.ls,empty-binary-before.out}`.
+
+
+<a id="batch-compiler-timing-analysis-field"></a>
+
+**Batch compiler timing reader rejects the emitted analysis field: FIXED.** See the [resolution](<Lambda_Issue_Ledger (fixed).md#batch-compiler-timing-analysis-field>).
+
+<a id="duplicate-document-resource-base"></a>
+
+**Duplicate document resource-base resolver blocks release LTO: FIXED.** See the [resolution](<Lambda_Issue_Ledger (fixed).md#duplicate-document-resource-base>).
+
+
+<a id="outdoor-default-home-admission"></a>
+
+## Outdoor demo default argument is rejected as an unhandled error — 2026-11-17
+
+**Status:** OPEN; found in the broader sync-fix qualification, outside sync's
+implementation. **Authority:** S7.5.5, S7.6.3v3, S12.1.1v3 (error reporting/propagation and procedures).
+
+`Scene3dTest.OutdoorGardenFogWindWaterAndCascades` fails before opening its scene:
+`test/demo/scene3d/mod_outdoors.ls:38` reports E228 on `lens=home()`, although
+`home` declares a `map` return. Importing `.mod_outdoors` subsequently reports
+E217. The isolated renderer rerun reproduces the compile error. A tiny import-only
+probe succeeds on preserved release `130e5cb5…` and fails on current release
+`2c072951…`; this narrows a separate engine/default-effect regression, without
+attributing it to the sync library (which the demo does not import). Whether the
+missing engagement belongs in this default expression or the compiler's default-
+argument effect analysis needs a separate contract investigation; no rendering,
+compiler or golden change was made to hide the failure.
+
+Observed with unchanged demo/compiler sources on Lambda `ae76dbf6d` plus the sync
+fixes. Evidence: `temp/sync-test-performance-impl/radiant-rerun.log` and the full
+`radiant-baseline.log`. The remaining 201 document resolver tests and 329 UI
+automation tests pass. This failure is separate from the Input LI-076 constrained
+error contract failure and is not a sync performance acceptance case.

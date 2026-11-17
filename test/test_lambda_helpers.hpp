@@ -2,6 +2,7 @@
 #define TEST_LAMBDA_HELPERS_HPP
 
 #include <gtest/gtest.h>
+#include <errno.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -463,31 +464,52 @@ struct BatchResult {
     bool has_volume;
 };
 
+// named fields preserve schema-1 compatibility as optional timing columns grow.
+inline int lambda_timing_field(const char* line, const char* key, uint64_t* value) {
+    bool found = false;
+    size_t length = strlen(key);
+    for (const char* token = line; *token;) {
+        while (*token == ' ' || *token == '\t' || *token == '\r' || *token == '\n') token++;
+        if (!*token) break;
+        const char* end = token;
+        while (*end && *end != ' ' && *end != '\t' && *end != '\r' && *end != '\n') end++;
+        if ((size_t)(end-token) >= length && !strncmp(token,key,length)) {
+            if (found || token[length] < '0' || token[length] > '9') return -1;
+            errno = 0;
+            char* parsed_end = nullptr;
+            unsigned long long parsed = strtoull(token+length,&parsed_end,10);
+            if (errno == ERANGE || parsed_end != end) return -1;
+            *value = (uint64_t)parsed;
+            found = true;
+        }
+        token = end;
+    }
+    return found ? 1 : 0;
+}
+
 inline bool parse_lambda_timing_line(const char* line, LambdaCompilerTiming* out) {
-    if (!line || !out) return false;
-    unsigned long long parse_us = 0, ast_build_us = 0, bind_us = 0;
-    unsigned long long validate_us = 0, index_us = 0, mir_lower_us = 0;
-    unsigned long long module_finalize_us = 0, link_us = 0, build_transpile_us = 0;
-    int schema = 0;
-    int matched = sscanf(line,
-        "COMPILER_TIMING schema=%d parse_us=%llu ast_build_us=%llu "
-        "bind_us=%llu validate_us=%llu index_us=%llu "
-        "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
-        "build_transpile_us=%llu",
-        &schema, &parse_us, &ast_build_us, &bind_us, &validate_us, &index_us,
-        &mir_lower_us,
-        &module_finalize_us, &link_us, &build_transpile_us);
-    if (matched != 10 || schema != 1) return false;
-    out->parse_us = parse_us;
-    out->ast_build_us = ast_build_us;
-    out->bind_us = bind_us;
-    out->validate_us = validate_us;
-    out->index_us = index_us;
-    out->mir_lower_us = mir_lower_us;
-    out->module_finalize_us = module_finalize_us;
-    out->link_us = link_us;
-    out->build_transpile_us = build_transpile_us;
-    out->valid = 1;
+    if (!line || !out || strncmp(line,"COMPILER_TIMING ",16)) return false;
+    uint64_t schema = 0;
+    if (lambda_timing_field(line,"schema=",&schema) != 1 || schema != 1) return false;
+    LambdaCompilerTiming parsed = *out;
+    struct Field { const char* key; uint64_t* value; bool required; };
+    Field fields[] = {
+        {"parse_us=",&parsed.parse_us,true}, {"ast_build_us=",&parsed.ast_build_us,true},
+        {"bind_us=",&parsed.bind_us,true}, {"validate_us=",&parsed.validate_us,true},
+        {"index_us=",&parsed.index_us,true}, {"analysis_us=",&parsed.analysis_us,false},
+        {"plan_us=",&parsed.plan_us,false}, {"mir_lower_us=",&parsed.mir_lower_us,true},
+        {"emitter_finalize_us=",&parsed.emitter_finalize_us,false},
+        {"module_finalize_us=",&parsed.module_finalize_us,true}, {"link_us=",&parsed.link_us,true},
+        {"build_transpile_us=",&parsed.build_transpile_us,true},
+        {"compile_peak_rss_bytes=",&parsed.compile_peak_rss_bytes,false},
+    };
+    for (Field& field : fields) {
+        int present = lambda_timing_field(line,field.key,field.value);
+        if (present < 0 || (!present && field.required)) return false;
+        if (!present) *field.value = 0;
+    }
+    parsed.valid = 1;
+    *out = parsed;
     return true;
 }
 

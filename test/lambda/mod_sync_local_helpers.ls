@@ -1,5 +1,7 @@
 // test-only trusted local exchange; production hosts must supply authenticated admission.
 import local: lambda.sync.local
+import owner: lambda.sync.task_owner
+import exchange: lambda.sync.peer_exchange
 import w: lambda.sync.workspace
 import c: lambda.sync.core
 import p: lambda.sync.protocol
@@ -46,4 +48,18 @@ pub fn at_path(current, path) any^ {
     let matches = [for (entry in entries where entry.visible and w.path(current.endpoint.replica,entry.id)^ == path) entry]
     if (len(matches) != 1) raise error("sync local test: path missing or ambiguous")
     return matches[0]
+}
+
+// recursive scopes keep every broker alive through the callback, then join on success/error.
+pub pn owned(handles, action, index=0, managed=[]) any^ {
+    if (index == len(handles)^) { return action(managed)^ }
+    let raw = handles[index]
+    let base = {*:raw,keys:{*:raw.keys,cache_enabled:true}}
+    let loaded = local.status(base)^
+    let broker = start(owner.run,[exchange.token(loaded.state)^,exchange.token,loaded.repository_cache])
+    let handle = {*:base,keys:{*:base.keys,owner:broker,token_cached:true}}
+    let outcome = owned(handles,action,index+1,[*managed,handle]) ^ { ^ }
+    send(broker,{stop:true})^; wait(broker)^
+    if (outcome is error) raise outcome
+    return outcome
 }

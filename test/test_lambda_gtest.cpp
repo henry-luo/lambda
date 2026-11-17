@@ -13,6 +13,40 @@
 #include "lib/thread_pool.h"
 #include <string.h>
 
+TEST(LambdaBatchTiming, CurrentAndLegacyRecordsPreserveAllAvailableFields) {
+    LambdaCompilerTiming timing = {};
+    const char* current = "COMPILER_TIMING schema=1 parse_us=1 ast_build_us=2 bind_us=3 "
+        "validate_us=4 index_us=5 analysis_us=6 mir_lower_us=7 module_finalize_us=8 "
+        "link_us=9 build_transpile_us=10 compile_peak_rss_bytes=123456";
+    ASSERT_TRUE(parse_lambda_timing_line(current,&timing));
+    EXPECT_EQ(timing.analysis_us,6u);
+    EXPECT_EQ(timing.mir_lower_us,7u);
+    EXPECT_EQ(timing.compile_peak_rss_bytes,123456u);
+    const char* legacy = "COMPILER_TIMING schema=1 parse_us=1 ast_build_us=2 bind_us=3 "
+        "validate_us=4 index_us=5 mir_lower_us=7 module_finalize_us=8 link_us=9 build_transpile_us=10";
+    ASSERT_TRUE(parse_lambda_timing_line(legacy,&timing));
+    EXPECT_EQ(timing.analysis_us,0u);
+    EXPECT_EQ(timing.compile_peak_rss_bytes,0u);
+    EXPECT_EQ(timing.build_transpile_us,10u);
+}
+
+TEST(LambdaBatchTiming, InvalidFieldsDoNotPublishPartialRecords) {
+    const char* prefix = "COMPILER_TIMING schema=1 parse_us=1 ast_build_us=2 bind_us=3 "
+        "validate_us=4 index_us=5 mir_lower_us=7 module_finalize_us=8 link_us=9 ";
+    const char* invalid[] = {"", "build_transpile_us=-1", "build_transpile_us=1x",
+        "build_transpile_us=18446744073709551616", "build_transpile_us=1 analysis_us=bad",
+        "build_transpile_us=1 index_us=6"};
+    for (const char* suffix : invalid) {
+        char record[1024];
+        snprintf(record,sizeof(record),"%s%s",prefix,suffix);
+        LambdaCompilerTiming timing = {};
+        timing.parse_us = 99;
+        EXPECT_FALSE(parse_lambda_timing_line(record,&timing));
+        EXPECT_EQ(timing.parse_us,99u);
+        EXPECT_EQ(timing.valid,0);
+    }
+}
+
 //==============================================================================
 // Directory Configuration for Baseline Tests
 //==============================================================================
