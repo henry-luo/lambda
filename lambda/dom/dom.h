@@ -579,11 +579,6 @@ void dom_realm_define(const char* name, Item value);
 #ifdef __cplusplus
 struct DomDocument;
 struct JsRuntimeState;
-struct Url;
-
-// Resolve the document's first applicable base URL; caller owns the result.
-Url* dom_document_resolve_url(DomDocument* doc);
-
 /** Per-runtime-state teardown for the DOM-owned caches. */
 /** contenteditable HTML insertion, driven by the editing waist. */
 bool dom_exec_insert_html(DomDocument* doc, const char* html);
