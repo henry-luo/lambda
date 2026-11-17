@@ -30,7 +30,7 @@ static gc_data_block_t* allocate_block(gc_data_zone_t* dz, size_t min_size) {
         return NULL;
     }
     uint8_t* memory = (uint8_t*)mem_vm_region_base(region);
-    memset(memory, 0, capacity);
+    // fresh VM pages are zero; do not touch unused worst-case evacuation capacity.
 
     gc_data_block_t* block = (gc_data_block_t*)mem_calloc(1, sizeof(gc_data_block_t),
                                                            MEM_CAT_CONTAINER);
@@ -163,6 +163,34 @@ void gc_data_zone_reset(gc_data_zone_t* dz) {
     dz->total_allocated = 0;
 
     log_debug("gc_data_zone_reset: all blocks reset");
+}
+
+void gc_data_zone_trim(gc_data_zone_t* dz) {
+    if (!dz) return;
+    gc_data_block_t** link = &dz->head;
+    while (*link) {
+        gc_data_block_t* block = *link;
+        size_t used = (size_t)(block->cursor - block->base);
+        if (link != &dz->head && !used) {
+            *link = block->next;
+            if (dz->current == block) dz->current = dz->head;
+            mem_vm_region_release(block->region);
+            mem_free(block);
+            dz->total_blocks--;
+            continue;
+        }
+        size_t keep = used > GC_DATA_ZONE_BLOCK_SIZE ? used : GC_DATA_ZONE_BLOCK_SIZE;
+        size_t page = mem_vm_page_size();
+        if (math_size_align_up(keep, page, &keep)) {
+            size_t committed = mem_vm_region_committed_bytes(block->region);
+            if (keep < committed && mem_vm_region_decommit(block->region, keep, committed - keep)) {
+                block->limit = block->base + keep;
+            }
+        }
+        link = &block->next;
+    }
+    // Evacuation preallocates a worst-case block; future growth uses normal blocks.
+    if (dz->block_size > GC_DATA_ZONE_BLOCK_SIZE) dz->block_size = GC_DATA_ZONE_BLOCK_SIZE;
 }
 
 int gc_data_zone_owns(gc_data_zone_t* dz, void* ptr) {

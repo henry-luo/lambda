@@ -51,6 +51,8 @@ typedef struct gc_object_slab {
     MemVmRegion* region;        // owning VM extent; released with the slab
     size_t slot_size;           // bytes per slot (header + user data, aligned)
     size_t slot_count;          // total slots in this slab
+    size_t live_slots;             // collection-only region liveness
+    bool retire;                   // removed from indexes before unmapping
     size_t next_fresh;          // next un-used slot index (sequential allocation)
     struct gc_object_slab* next;// next slab in chain for this size class
 } gc_object_slab_t;
@@ -130,7 +132,7 @@ typedef struct gc_object_zone {
     unsigned page_index_bits;
     unsigned page_shift;
     bool page_index_disabled;       // an allocation failure retired the index
-    // ranges and their owners live until zone destruction; mark walks cluster in one range.
+    // invalidated when trimming regions; mark walks cluster in one range.
     gc_slab_range_t recent_range;
     gc_range_owner_t recent_owner;
 } gc_object_zone_t;
@@ -145,6 +147,10 @@ gc_object_zone_t* gc_object_zone_create(MemContext* context, MemNode* owner);
  * Only frees the zone struct itself.
  */
 void gc_object_zone_destroy(gc_object_zone_t* oz);
+
+struct gc_heap;
+// reclaim wholly dead regions after sweep; live object addresses remain stable.
+void gc_object_zone_trim(struct gc_heap* gc);
 
 /**
  * Allocate a slot from the object zone. Returns pointer to user data

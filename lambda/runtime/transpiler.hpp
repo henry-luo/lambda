@@ -249,6 +249,8 @@ MIR_context_t jit_init(unsigned int optimize_level);
 MIR_context_t jit_init_native(unsigned int optimize_level);
 void jit_log_code_addresses(MIR_context_t ctx);
 size_t jit_release_generated_ir(MIR_context_t ctx);
+// sealed eager images retain code/data, but no further generator work.
+bool jit_seal_generated_context(MIR_context_t ctx, bool* generator_initialized);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
 void* find_data(MIR_context_t ctx, const char *data_name);

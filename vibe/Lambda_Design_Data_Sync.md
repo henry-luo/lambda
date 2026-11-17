@@ -1828,10 +1828,25 @@ D11.1.2. [API and current limits](../lmd/package/sync/LOCAL_REPOSITORY.md).
 The [streaming pack implementation](impl/Lambda_Impl_Sync_Streaming_Packs.md)
 replaces SQL ciphertext staging with file spools and external head/credential
 envelopes (§5.9). SQLite contains descriptors and pointers; physical legacy free
-pages require separate compaction. A release fresh 80 MiB / 128-file publication
-to local S3 completes in 8.328 s with a 112 KiB metadata database, followed by a
-byte-exact restore in 13.530 s. These are isolated single samples; peak RSS is
-still approximately 1 GiB, and HTTP currently buffers one bounded pack body.
+pages require separate compaction. The [memory tuning implementation](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17)
+adds scoped formatter/JSON/Mark owners, native backing pressure, eager MIR scratch
+retirement and GC region reclamation. Cloud restore groups by physical pack and
+imports at most 128 records before proceeding to the next pack. This preserves
+authentication/recovery and keeps script policy in Lambda Script (S12.1.1v3;
+D5.1.3–D5.1.5, D5.3.1, D8.3.4).
+
+In matched normal-release three-run local-S3 tests, 80 MiB / 128-file publication
+peak RSS falls from 1032 to 431 MiB and independent restore from 1500 to 441 MiB.
+Time medians are 8.878 s publication and 13.658 s restore, versus 8.513/13.712 s
+before; every restored file matches SHA256. These results precede a final fresh-
+VM residency fix; the implementation record distinguishes that fix's limited
+wrap-up check from the three-run arm. Repeated native owner counts/capacity are
+flat, but initial OS peak/idle budgets remain open. The final fresh-VM single-sample wrap-up check records
+10.022/13.884 s and 384.08/409.23 MiB RSS for 80 MiB publication/restore, with
+byte-exact recovery; repeat median/idle qualification is pending. HTTP still buffers one bounded
+pack body; file-backed upload is a follow-up. The
+[historical diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md) preserves the
+original owner attribution and profiling limits (D5.2.4).
 Internet traversal, cloud adapters, polling deployment, broader key management
 and editor bindings remain subsequent acceptance work; this does not complete §12.1.
 

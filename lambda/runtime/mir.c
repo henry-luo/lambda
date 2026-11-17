@@ -343,11 +343,8 @@ void jit_log_code_addresses(MIR_context_t ctx) {
 // machine_code gate below skips interp-interface and lazy-pending functions,
 // whose IR is still live input. LAMBDA_MIR_KEEP_IR=1 disables for debugging.
 size_t jit_release_generated_ir(MIR_context_t ctx) {
-    static int keep_ir = -1;
-    if (keep_ir < 0) {
-        const char* flag = getenv("LAMBDA_MIR_KEEP_IR");
-        keep_ir = flag && flag[0] && strcmp(flag, "0") != 0;
-    }
+    const char* flag = getenv("LAMBDA_MIR_KEEP_IR");
+    bool keep_ir = flag && flag[0] && strcmp(flag, "0") != 0;
     if (keep_ir || !ctx) return 0;
     size_t released = 0, bytes = 0;
     for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
@@ -375,6 +372,24 @@ size_t jit_release_generated_ir(MIR_context_t ctx) {
     if (released) log_info("mir-release-ir: freed %zu KB of insns across %zu generated functions"
         " (reg tables freed additionally)", bytes / 1024, released);
     return released;
+}
+
+bool jit_seal_generated_context(MIR_context_t ctx, bool* generator_initialized) {
+    const char* keep = getenv("LAMBDA_MIR_KEEP_IR");
+    if (!ctx || !generator_initialized || !*generator_initialized ||
+            (keep && keep[0] && strcmp(keep, "0") != 0)) return false;
+    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); module;
+            module = DLIST_NEXT(MIR_module_t, module)) {
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items); item;
+                item = DLIST_NEXT(MIR_item_t, item)) {
+            // pending lazy/interpreter bodies still need their compiler state.
+            if (item->item_type == MIR_func_item && !item->u.func->machine_code) return false;
+        }
+    }
+    jit_release_generated_ir(ctx);
+    MIR_gen_finish(ctx);
+    *generator_initialized = false;
+    return true;
 }
 
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name) {

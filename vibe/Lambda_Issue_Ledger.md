@@ -435,6 +435,19 @@ then rerun the original complete concurrency reproduction and runtime gates.
 The provider API and evidence are recorded in LI-027; no Lambda source or
 build file was changed by the input owner.
 
+
+Reproduced again during sync memory qualification on 2026-11-17 with the normal
+release runtime: the 20-second shared chart/PDF phase passes, then
+`ModuleStateSlabsArePrivateToEachEvalContext` spins on one CPU during cleanup.
+The main thread waits in `pthread_join`; a surviving worker's sampled hot path
+repeatedly enters libuv time/pthread-once routines. This matches LI-027's original
+sequence; the exact list race remains unconfirmed. The run was stopped after
+more than six minutes, without changing the test. Earlier cache/image and
+cancellation cases passed. Evidence: `temp/sync-memory-impl/concurrency-release-final.log`,
+`concurrency-stall.sample`, `concurrency-stall-symbols.txt`. The complete optional
+concurrency suite remains unqualified; this does not invalidate the independently
+passing 7,590-case Lambda baseline or 112 release GC/lifetime cases.
+
 ## Input format integration handoffs — 2026-11-14
 
 **Status:** OPEN. D9.3.4 covers document processing; input ownership follows
@@ -3038,7 +3051,7 @@ therefore sits in the city's composition of these (`block_buildings` →
 `temp/openroad/style_jit.ls` prints the first twelve buildings' styles.
 ## Repeated parse retains Input arenas during long-running sync — 2026-11-17
 
-**Status:** OPEN. Authority: **D5.2.5** (Input pool ownership), **D11.1.2**
+**Status:** PARTIAL — explicit JSON/Mark runtime parsing fixed; automatic and other-format Input lifetimes remain separate. Authority: **D5.2.5** (Input pool ownership), **D11.1.2**
 (host IO). `fn_parse2` returns an Input-owned tree from InputManager; the
 manager reuses a per-thread pool and registers each Input until cleanup.
 Sync codec decode repeatedly invokes JSON/Mark parse and canonical re-encoding,
@@ -3052,6 +3065,20 @@ attribution of all multi-GiB sync memory. Sync batch index updates reduce repeat
 page decoding; parser lifetime and bounded decoding remain unresolved. Do not
 free the Input while its returned Item can remain reachable. Details and further
 profiling targets: [sync performance investigation](impl/Lambda_Impl_Sync_Wasabi_Demo.md#file-count-versus-byte-count-investigation--2026-11-17).
+
+Further release attribution shows this is one component, not the main explanation
+for the full peak: both AUTO and interpreter publication runs retain 86.2 MiB in
+the parser-heavy `system` category before InputManager cleanup. MIR compiler
+state and missing binary GC pressure account for substantial additional memory.
+See [release memory diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md).
+
+The detailed follow-up counts **12,578 Mark versus 610 JSON parses** at 80 MiB
+publication. After warmup, an unchanged verification/cloud round adds about 4.77 MiB Mark
+arenas and 4.21 MiB formatter allocations. Scoped parsing must release Input
+bookkeeping and names as well as arenas, after transferring every escaping
+result owner. [Evidence and proposed P5](impl/Lambda_Impl_Sync_Memory_Tuning.md#p5--bound-parser-ownership-and-reduce-redundant-codec-validation).
+
+**Implementation follow-up (2026-11-17):** Implemented P5: explicit JSON/Mark parses use a scoped Input, transfer escaping values/names/shapes/scalar owners into runtime ownership, and destroy the parser owner. Native owner-count and Unicode/NUL key regressions pass. Five versus twenty-five unchanged rounds retain identical Input arena counts/bytes. Other formats and automatic dispatch retain their previous ownership. See [implementation qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
 
 ## Large workspace capture fails during a SQLite statement — 2026-11-17
 
@@ -3067,3 +3094,53 @@ attribution to the 64 MiB create/clone image limit was incorrect: capture uses
 an existing file-backed transaction (D11.1.2). The 1.17 s failure provides no
 sync timing. Fix the batching and preserve recovery; diagnostic output:
 `temp/sync-80-diagnosis/run2/err`.
+
+## Promoted MIR images retain large compiler working state — 2026-11-17
+
+**Status:** PARTIAL — eager compiler scratch and generated IR released; remaining context accounting is separate. Authority: **D8.3.3–D8.3.4** (promoted image ownership),
+**D5.2.4** (diagnostic tracking).
+
+After an isolated release 80 MiB / 128-file cloud publication, AUTO has 541.1 MiB
+of live native allocations in 4,859,872 blocks; strict interpreter has 178.4 MiB
+in 247,215 blocks. A separate allocation-stack run attributes 4,607,961 live
+blocks to MIR. Its bytes include stack-logging overhead and are not a production
+RSS figure. The retained working state includes register-allocation bitmaps,
+live ranges, SSA/definition tables and instruction/register/string data.
+`mvp_compile_function_image()` retains a private MIR context with each image;
+the existing generated-IR cleanup is absent on that path, and generator scratch
+is finished only by image destruction. Audit eager sealing/lazy thunks before
+shortening compiler scratch lifetime. No vendor modification is needed or made.
+Evidence and exact limits: [memory diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md).
+
+A public-allocator diagnostic now separates 173.35 MiB generator scratch,
+68.33 MiB generated IR, and 78.98 MiB remaining context data released at teardown
+for the 8 MiB publication. Early eager-image sealing remains unimplemented and
+needs lazy-mode, publication, cancellation and teardown qualification. A small
+0.11 MiB post-finish accounting residue also needs reconciliation; it is not the
+large peak's cause. [Proposed P3](impl/Lambda_Impl_Sync_Memory_Tuning.md#p3--seal-eager-mir-images-and-retire-compilation-scratch).
+
+**Implementation follow-up (2026-11-17):** Implemented P3: eagerly generated images release generated IR and generator scratch before publication; executable context/code remain owned by the image. Lazy, interpreter and keep-IR paths retain their required IR. Publication/lifetime/cancellation and 368 MIR/GC stress checks pass. The earlier small post-finish accounting residue is not claimed resolved. See [implementation qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+
+
+
+
+## Empty text conversion exposes a zero-length binary — 2026-11-17
+
+**Status:** OPEN, existing before sync memory fixes. **Authority:** S2.2.2v2
+(binary is solid; zero-length runtime results must be null).
+
+`binary("")` returns a binary with length zero, while `binary([])` returns null.
+`fn_binary` in `lambda/runtime/lambda-eval-num.cpp` lacks an empty-length guard
+on its text/virtual-output branches. The clean pre-fix release reproduces
+`[false,"binary",0]` for `[binary("") == null,string(type(binary(""))),len(binary(""))]`.
+Native zero-length storage descriptors also escape through database/other IO
+boundaries; this needs a consistent boundary migration, not a formatter or sync
+codec workaround. Existing RDB spool/session and UTF-8 fixtures rely on the
+current representation and must be reviewed against S2.2.2v2 when correcting it.
+
+This does not block sync memory ownership work: empty-file and nullable-binary
+sync cases pass. The added parse-name test compares the names as strings,
+including empty/NUL/Unicode keys, without depending on binary conversion.
+Evidence: `temp/sync-memory-impl/{_empty_binary.ls,empty-binary-before.out}`.

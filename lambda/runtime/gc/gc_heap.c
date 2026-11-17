@@ -256,7 +256,54 @@ gc_tune_stats_t gc_heap_get_tune_stats(const gc_heap_t* gc) {
 gc_external_stats_t gc_heap_get_external_stats(const gc_heap_t* gc) {
     gc_external_stats_t empty;
     memset(&empty, 0, sizeof(empty));
-    return gc ? gc->external : empty;
+    if (!gc) return empty;
+    empty.live_bytes = __atomic_load_n(&gc->external.live_bytes, __ATOMIC_RELAXED);
+    empty.peak_bytes = __atomic_load_n(&gc->external.peak_bytes, __ATOMIC_RELAXED);
+    empty.bytes_since_collection = __atomic_load_n(&gc->external.bytes_since_collection, __ATOMIC_RELAXED);
+    empty.allocation_count = __atomic_load_n(&gc->external.allocation_count, __ATOMIC_RELAXED);
+    empty.release_count = __atomic_load_n(&gc->external.release_count, __ATOMIC_RELAXED);
+    empty.pressure_collections = gc->external.pressure_collections;
+    for (int i = 0; i < GC_EXTERNAL_KIND_COUNT; i++) {
+        empty.live_by_kind[i] = __atomic_load_n(&gc->external.live_by_kind[i], __ATOMIC_RELAXED);
+        empty.peak_by_kind[i] = __atomic_load_n(&gc->external.peak_by_kind[i], __ATOMIC_RELAXED);
+    }
+    return empty;
+}
+
+gc_memory_stats_t gc_heap_get_memory_stats(const gc_heap_t* gc) {
+    gc_memory_stats_t stats = {0};
+    if (!gc) return stats;
+    stats.object_used = gc->total_allocated;
+    for (gc_bump_block_t* block = gc->bump_blocks; block; block = block->next) {
+        stats.object_capacity += mem_vm_region_committed_bytes(block->region);
+        stats.object_reserved += mem_vm_region_reserved_bytes(block->region);
+    }
+    for (int i = 0; i < GC_NUM_SIZE_CLASSES; i++) {
+        for (gc_object_slab_t* slab = gc->object_zone->slabs[i]; slab; slab = slab->next) {
+            stats.object_capacity += mem_vm_region_committed_bytes(slab->region);
+            stats.object_reserved += mem_vm_region_reserved_bytes(slab->region);
+        }
+    }
+    // Large native objects have requested backing sizes, rather than VM extents.
+    for (size_t i = 0; i < gc->large_objects.capacity; i++) {
+        gc_header_t* header = gc->large_objects.slots[i];
+        if (header) {
+            size_t bytes = header->alloc_size + sizeof(gc_header_t);
+            stats.object_capacity += bytes;
+            stats.object_reserved += bytes;
+        }
+    }
+    for (gc_data_block_t* block = gc->data_zone->head; block; block = block->next) {
+        stats.nursery_capacity += mem_vm_region_committed_bytes(block->region);
+        stats.nursery_reserved += mem_vm_region_reserved_bytes(block->region);
+    }
+    for (gc_data_block_t* block = gc->tenured_data->head; block; block = block->next) {
+        stats.tenured_capacity += mem_vm_region_committed_bytes(block->region);
+        stats.tenured_reserved += mem_vm_region_reserved_bytes(block->region);
+    }
+    stats.nursery_used = gc_data_zone_used(gc->data_zone);
+    stats.tenured_used = gc_data_zone_used(gc->tenured_data);
+    return stats;
 }
 
 static int gc_external_kind_index(int kind) {
@@ -316,7 +363,7 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
     }
     uint8_t* memory = (uint8_t*)mem_vm_region_base(region);
     size_t reserved = mem_vm_region_reserved_bytes(region);
-    memset(memory, 0, reserved);
+    // fresh VM pages are zero; touch growing bump blocks only as slots are used.
 
     gc_bump_block_t* block = (gc_bump_block_t*)mem_calloc(1, sizeof(gc_bump_block_t),
                                                           MEM_CAT_CONTAINER);
@@ -775,7 +822,7 @@ void gc_external_preflight(gc_heap_t* gc, size_t bytes, int kind) {
         return;
     }
     (void)gc_external_kind_index(kind);
-    size_t since = gc->external.bytes_since_collection;
+    size_t since = __atomic_load_n(&gc->external.bytes_since_collection, __ATOMIC_RELAXED);
     bool overflow = bytes > SIZE_MAX - since;
     if (!overflow && since + bytes < GC_EXTERNAL_PRESSURE_THRESHOLD) return;
 
@@ -788,36 +835,36 @@ void gc_external_preflight(gc_heap_t* gc, size_t bytes, int kind) {
 void gc_external_record_alloc(gc_heap_t* gc, size_t bytes, int kind) {
     if (!gc || bytes == 0) return;
     int index = gc_external_kind_index(kind);
-    if (bytes > SIZE_MAX - gc->external.live_bytes ||
-            bytes > SIZE_MAX - gc->external.live_by_kind[index] ||
-            bytes > SIZE_MAX - gc->external.bytes_since_collection) {
+    if (bytes > SIZE_MAX - __atomic_load_n(&gc->external.live_bytes, __ATOMIC_RELAXED) ||
+            bytes > SIZE_MAX - __atomic_load_n(&gc->external.live_by_kind[index], __ATOMIC_RELAXED) ||
+            bytes > SIZE_MAX - __atomic_load_n(&gc->external.bytes_since_collection, __ATOMIC_RELAXED)) {
         log_error("gc-external-accounting: overflow bytes=%zu kind=%d", bytes, kind);
         return;
     }
-    gc->external.live_bytes += bytes;
-    gc->external.live_by_kind[index] += bytes;
-    gc->external.bytes_since_collection += bytes;
-    gc->external.allocation_count++;
-    if (gc->external.live_bytes > gc->external.peak_bytes) {
-        gc->external.peak_bytes = gc->external.live_bytes;
-    }
-    if (gc->external.live_by_kind[index] > gc->external.peak_by_kind[index]) {
-        gc->external.peak_by_kind[index] = gc->external.live_by_kind[index];
-    }
+    size_t live = __atomic_add_fetch(&gc->external.live_bytes, bytes, __ATOMIC_RELAXED);
+    size_t kind_live = __atomic_add_fetch(&gc->external.live_by_kind[index], bytes, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&gc->external.bytes_since_collection, bytes, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&gc->external.allocation_count, 1, __ATOMIC_RELAXED);
+    size_t peak = __atomic_load_n(&gc->external.peak_bytes, __ATOMIC_RELAXED);
+    while (live > peak && !__atomic_compare_exchange_n(&gc->external.peak_bytes,
+        &peak, live, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+    peak = __atomic_load_n(&gc->external.peak_by_kind[index], __ATOMIC_RELAXED);
+    while (kind_live > peak && !__atomic_compare_exchange_n(&gc->external.peak_by_kind[index],
+        &peak, kind_live, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
 }
 
 void gc_external_record_release(gc_heap_t* gc, size_t bytes, int kind) {
     if (!gc || bytes == 0) return;
     int index = gc_external_kind_index(kind);
-    if (bytes > gc->external.live_bytes || bytes > gc->external.live_by_kind[index]) {
+    if (bytes > __atomic_load_n(&gc->external.live_bytes, __ATOMIC_RELAXED) ||
+            bytes > __atomic_load_n(&gc->external.live_by_kind[index], __ATOMIC_RELAXED)) {
         log_error("gc-external-accounting: release exceeds live bytes=%zu kind=%d", bytes, kind);
-        gc->external.live_bytes = 0;
-        gc->external.live_by_kind[index] = 0;
         return;
     }
-    gc->external.live_bytes -= bytes;
-    gc->external.live_by_kind[index] -= bytes;
-    gc->external.release_count++;
+    // a backing's final native owner can release on a different thread.
+    __atomic_sub_fetch(&gc->external.live_bytes, bytes, __ATOMIC_RELAXED);
+    __atomic_sub_fetch(&gc->external.live_by_kind[index], bytes, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&gc->external.release_count, 1, __ATOMIC_RELAXED);
 }
 
 static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* site) {
@@ -979,7 +1026,7 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
 
     // ---- Bump-pointer path ----
     uint8_t* cursor = gc->bump_cursor;
-    if (cursor + slot_size > gc->bump_end) {
+    if (!cursor || (size_t)(gc->bump_end - cursor) < slot_size) {
         // Current block exhausted — allocate a new one (double size, capped)
         size_t current_size = gc->bump_blocks ? gc->bump_blocks->size : GC_BUMP_BLOCK_INITIAL_SIZE;
         size_t new_size = current_size * 2;
@@ -2837,13 +2884,16 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     // Phase 4: Reset nursery data zone (all surviving data copied to tenured)
     uint64_t gc_reset_token = GC_PROFILE_ENTER("gc_data_zone_reset");
     gc_data_zone_reset(gc->data_zone);
+    gc_data_zone_trim(gc->data_zone);
+    gc_data_zone_trim(gc->tenured_data);
+    gc_object_zone_trim(gc);
     GC_PROFILE_LEAVE("gc_data_zone_reset", gc_reset_token);
 
     gc->collections++;
     // All external bytes allocated before this completed sweep have had the
     // same collection opportunity as zone allocations; only new payloads add
     // pressure toward the next legal MAY_GC boundary.
-    gc->external.bytes_since_collection = 0;
+    __atomic_store_n(&gc->external.bytes_since_collection, 0, __ATOMIC_RELAXED);
     gc->mark_top = 0;
     gc->collecting = 0;
 

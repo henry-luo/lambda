@@ -69,3 +69,20 @@ Final release SHA256:
 `7bcdabf0e4d7706a111748fef15af5d5b884fe02902d5775ef87c3752db61a25`.
 The final small gate passes 2/2; inspection of the 80 MiB fixture confirms no
 payload column in any of its six tables and no pending pack descriptors.
+
+
+### Follow-up memory attribution
+
+The [release memory investigation](Lambda_Impl_Sync_Memory_Diagnosis.md) identifies
+retained MIR compiler working state, unaccounted native binary GC pressure, Input
+lifetime retention and resident VM pool capacity. The binary reproducer grows
+from 31.7 to 289.8 MiB with zero collections. An 80 MiB publication retains 362.7
+MiB more live native heap under AUTO than strict interpreter, predominantly MIR.
+These are diagnostic comparisons, not an alternative sync mode or a runtime fix
+(D5.3.1, D8.3.4). These observations describe the pre-tuning release host.
+
+
+The closer follow-up identifies a separate formatter-result lifetime bug and
+quantifies Mark validation churn, GC region capacity, generator/IR/context bytes,
+and freed malloc residency. Both profiled 80 MiB restores match every SHA256.
+The [memory tuning implementation](Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17) covers these owners in independent phases and records clean release peak/idle and unchanged-round gates. P0–P5 and physical-pack download grouping are now implemented; the older measurements above remain historical streaming-pack results. See that record for matched final performance, remaining memory budgets and independent baseline failures.

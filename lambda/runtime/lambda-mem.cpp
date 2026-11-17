@@ -24,6 +24,8 @@
 #include "sysinfo.h"
 #include "template_state.h"
 #include "lambda/core/binary.h"
+#include "context_capsule.h"
+#include <uv.h>
 #include <math.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -558,6 +560,127 @@ extern "C" void heap_gc_external_record_release(void* owner, size_t bytes, int k
     gc_external_record_release((gc_heap_t*)owner, bytes, kind);
 }
 
+struct HeapByteLease;
+struct HeapByteOwner;
+struct HeapByteCharge {
+    HeapByteLease* lease;
+    HeapByteOwner* owner;
+    HeapByteCharge *owner_prev, *owner_next, *lease_next;
+    size_t bytes;
+    int kind;
+};
+struct HeapByteLease {
+    ByteStorageReleaseFn release;
+    void* context;
+    HeapByteCharge* charges;
+};
+struct HeapByteOwner { gc_heap_t* gc; HeapByteCharge* charges; };
+static const uint32_t heap_byte_owner_key = 0x42595445; // BYTE
+static uv_once_t heap_byte_once = UV_ONCE_INIT;
+static uv_mutex_t heap_byte_mutex;
+static void heap_byte_initialize(void) { uv_mutex_init(&heap_byte_mutex); }
+
+static void heap_byte_uncharge(HeapByteCharge* charge) {
+    HeapByteOwner* owner = charge->owner;
+    if (charge->owner_prev) charge->owner_prev->owner_next = charge->owner_next;
+    else owner->charges = charge->owner_next;
+    if (charge->owner_next) charge->owner_next->owner_prev = charge->owner_prev;
+    gc_external_record_release(__atomic_load_n(&owner->gc, __ATOMIC_ACQUIRE), charge->bytes, charge->kind);
+}
+
+static void heap_byte_owner_clear(void* data) {
+    HeapByteOwner* owner = (HeapByteOwner*)data;
+    uv_once(&heap_byte_once, heap_byte_initialize);
+    uv_mutex_lock(&heap_byte_mutex);
+    while (owner->charges) {
+        HeapByteCharge* charge = owner->charges;
+        HeapByteCharge** link = &charge->lease->charges;
+        while (*link != charge) link = &(*link)->lease_next;
+        *link = charge->lease_next;
+        heap_byte_uncharge(charge);
+        mem_free(charge);
+    }
+    // external owners can release the backing after this heap is gone.
+    __atomic_store_n(&owner->gc, (gc_heap_t*)NULL, __ATOMIC_RELEASE);
+    uv_mutex_unlock(&heap_byte_mutex);
+}
+
+static void heap_byte_owner_destroy(void* data) {
+    heap_byte_owner_clear(data);
+    mem_free(data);
+}
+
+static HeapByteOwner* heap_byte_owner(void) {
+    if (!context || !context->heap || !context->heap->gc) return NULL;
+    HeapByteOwner* owner = (HeapByteOwner*)context_capsule_extension(context, heap_byte_owner_key, 1);
+    if (!owner) {
+        owner = (HeapByteOwner*)mem_calloc(1, sizeof(*owner), MEM_CAT_EVAL);
+        if (!owner) return NULL;
+        static const ContextCapsuleOps ops = {"byte-storage", CONTEXT_CAPSULE_LIFETIME_REALM,
+            0, NULL, heap_byte_owner_clear, heap_byte_owner_destroy};
+        if (!context_capsule_extension_install(context, heap_byte_owner_key, 1, owner, &ops)) {
+            mem_free(owner); return NULL;
+        }
+    }
+    __atomic_store_n(&owner->gc, context->heap->gc, __ATOMIC_RELEASE);
+    return owner;
+}
+
+static void heap_byte_release(void* bytes, size_t size, void* data) {
+    HeapByteLease* lease = (HeapByteLease*)data;
+    uv_mutex_lock(&heap_byte_mutex);
+    while (lease->charges) {
+        HeapByteCharge* charge = lease->charges;
+        lease->charges = charge->lease_next;
+        heap_byte_uncharge(charge);
+        mem_free(charge);
+    }
+    uv_mutex_unlock(&heap_byte_mutex);
+    if (lease->release) lease->release(bytes, size, lease->context);
+    mem_free(lease);
+}
+
+static bool heap_track_byte_storage_admitted(ByteStorage* storage, int kind, bool admitted) {
+    if (!storage || !storage->capacity || !context || !context->heap || !context->heap->gc) return true;
+    HeapByteOwner* owner = heap_byte_owner();
+    if (!owner) return false;
+    uv_once(&heap_byte_once, heap_byte_initialize);
+    uv_mutex_lock(&heap_byte_mutex);
+    HeapByteLease* lease = storage->release_data == heap_byte_release ? (HeapByteLease*)storage->release_context : NULL;
+    for (HeapByteCharge* c = lease ? lease->charges : NULL; c; c = c->lease_next) {
+        if (c->owner == owner) { uv_mutex_unlock(&heap_byte_mutex); return true; }
+    }
+    uv_mutex_unlock(&heap_byte_mutex);
+    // no accounting lock can cross a collection/finalizer boundary.
+    if (!admitted) gc_external_preflight(owner->gc, storage->capacity, kind);
+    HeapByteCharge* charge = (HeapByteCharge*)mem_calloc(1, sizeof(*charge), MEM_CAT_EVAL);
+    HeapByteLease* fresh = (HeapByteLease*)mem_calloc(1, sizeof(*fresh), MEM_CAT_EVAL);
+    if (!charge || !fresh) { mem_free(charge); mem_free(fresh); return false; }
+    uv_mutex_lock(&heap_byte_mutex);
+    lease = storage->release_data == heap_byte_release ? (HeapByteLease*)storage->release_context : NULL;
+    if (!lease) {
+        lease = fresh; fresh = NULL;
+        lease->release = storage->release_data;
+        lease->context = storage->release_context;
+        storage->release_data = heap_byte_release;
+        storage->release_context = lease;
+    }
+    charge->lease = lease; charge->owner = owner;
+    charge->bytes = storage->capacity; charge->kind = kind;
+    charge->owner_next = owner->charges;
+    if (owner->charges) owner->charges->owner_prev = charge;
+    owner->charges = charge;
+    charge->lease_next = lease->charges; lease->charges = charge;
+    gc_external_record_alloc(owner->gc, charge->bytes, kind);
+    uv_mutex_unlock(&heap_byte_mutex);
+    mem_free(fresh);
+    return true;
+}
+
+extern "C" bool heap_track_byte_storage(ByteStorage* storage, int kind) {
+    return heap_track_byte_storage_admitted(storage, kind, false);
+}
+
 // register an external root slot (e.g., BSS global address)
 extern "C" bool heap_try_register_gc_root(uint64_t* slot) {
     if (!context || !context->heap || !context->heap->gc || !slot) return false;
@@ -842,20 +965,32 @@ extern "C" String* heap_strcpy(const char* src, int64_t len) {
     return str;
 }
 
-extern "C" Binary* heap_binary_from_storage(ByteStorage* storage, size_t offset,
-        size_t length, bool is_ascii) {
+static Binary* heap_binary_from_storage_admitted(ByteStorage* storage, size_t offset,
+        size_t length, bool is_ascii, bool admitted) {
     if (!storage || length > UINT32_MAX || offset > storage->capacity ||
         length > storage->capacity - offset || (length > 0 && !storage->data)) return NULL;
+    // the native hold survives preflight even before a traced view exists.
+    if (!byte_storage_retain(storage)) return NULL;
+    if (!heap_track_byte_storage_admitted(storage, GC_EXTERNAL_KIND_BINARY, admitted)) {
+        byte_storage_release(storage); return NULL;
+    }
     Binary* binary = (Binary*)heap_alloc((int)sizeof(Binary), LMD_TYPE_BINARY);
-    if (!binary) return NULL;
+    if (!binary) { byte_storage_release(storage); return NULL; }
     // A failed retain must leave a finalizer-safe GC descriptor.
     memset(binary, 0, sizeof(Binary));
-    if (!binary_init_storage(binary, storage, offset, length, is_ascii)) return NULL;
-    return binary;
+    bool initialized = binary_init_storage(binary, storage, offset, length, is_ascii);
+    byte_storage_release(storage);
+    return initialized ? binary : NULL;
+}
+
+extern "C" Binary* heap_binary_from_storage(ByteStorage* storage, size_t offset,
+        size_t length, bool is_ascii) {
+    return heap_binary_from_storage_admitted(storage, offset, length, is_ascii, false);
 }
 
 extern "C" Binary* heap_binary_from_bytes(const char* src, int64_t len) {
     if (len < 0 || (len > 0 && !src) || (uint64_t)len > UINT32_MAX) return NULL;
+    heap_gc_external_preflight((size_t)len, GC_EXTERNAL_KIND_BINARY);
     ByteStorage* storage = byte_storage_alloc((size_t)len, MEM_CAT_CONTAINER);
     if (!storage) return NULL;
     if (len > 0) {
@@ -863,40 +998,46 @@ extern "C" Binary* heap_binary_from_bytes(const char* src, int64_t len) {
         binary_record_payload_copy();
     }
     bool is_ascii = len == 0 || str_is_ascii(src, (size_t)len);
-    Binary* binary = heap_binary_from_storage(storage, 0, (size_t)len, is_ascii);
+    // no collecting operation intervened after preflight; charge this backing once.
+    Binary* binary = heap_binary_from_storage_admitted(storage, 0, (size_t)len, is_ascii, true);
     byte_storage_release(storage);
     return binary;
 }
 
 extern "C" Binary* heap_binary_slice(Binary* source, size_t offset, size_t length) {
     if (!source || offset > source->len || length > source->len - offset) return NULL;
+    RootFrame roots(1);
+    Rooted<Item> held(roots, (Item){.item = x2it(source)});
     const uint8_t* data = binary_data(source);
     if (length > 0 && !data) return NULL;
     if (source->storage) {
-        Binary* binary = (Binary*)heap_alloc((int)sizeof(Binary), LMD_TYPE_BINARY);
-        if (!binary) return NULL;
-        memset(binary, 0, sizeof(Binary));
-        return binary_init_slice(binary, source, offset, length) ? binary : NULL;
+        return heap_binary_from_storage(source->storage, source->offset + offset, length,
+            length == 0 || str_is_ascii((const char*)data + offset, length));
     }
     return heap_binary_from_bytes((const char*)data + offset, (int64_t)length);
 }
 
 extern "C" Binary* heap_binary_copy(Binary* source) {
     if (!source) return NULL;
+    RootFrame roots(1);
+    Rooted<Item> held(roots, (Item){.item = x2it(source)});
     return heap_binary_from_bytes((const char*)binary_data(source), source->len);
 }
 
 extern "C" Binary* heap_binary_concat(Binary* left, Binary* right) {
     if (!left || !right || left->len > UINT32_MAX - right->len) return NULL;
+    RootFrame roots(2);
+    Rooted<Item> held_left(roots, (Item){.item = x2it(left)}), held_right(roots, (Item){.item = x2it(right)});
     size_t length = (size_t)left->len + right->len;
+    heap_gc_external_preflight(length, GC_EXTERNAL_KIND_BINARY);
     ByteStorage* storage = byte_storage_alloc(length, MEM_CAT_CONTAINER);
     if (!storage) return NULL;
     // Concatenation stays contiguous and length-based because bytes may contain NUL.
     if (left->len > 0) memcpy(storage->data, binary_data(left), left->len);
     if (right->len > 0) memcpy(storage->data + left->len, binary_data(right), right->len);
     if (length > 0) binary_record_payload_copy();
-    Binary* binary = heap_binary_from_storage(storage, 0, length,
-        left->is_ascii && right->is_ascii);
+    Binary* binary = heap_binary_from_storage_admitted(storage, 0, length,
+        left->is_ascii && right->is_ascii, true);
     byte_storage_release(storage);
     return binary;
 }
@@ -1312,6 +1453,9 @@ void heap_discard_unfinalized() {
     // Signal recovery can leave native finalizers with interrupted allocator
     // state. Release the pool generation without traversing those finalizers;
     // the short-lived batch worker reclaims their external payloads on exit.
+    // Fault recovery must disarm the lease without walking interrupted allocator state.
+    HeapByteOwner* byte_owner = (HeapByteOwner*)context_capsule_extension(context, heap_byte_owner_key, 1);
+    if (byte_owner) __atomic_store_n(&byte_owner->gc, (gc_heap_t*)NULL, __ATOMIC_RELEASE);
     gc_heap_t* gc = context->heap->gc;
     if (gc) {
         gc->external_destroy = NULL;
