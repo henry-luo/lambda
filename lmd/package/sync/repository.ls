@@ -410,11 +410,30 @@ pub pn records(keys) any^ {
     let names = sort(disk.entries(keys.objects,"",100000)^,(entry)=>entry.name)^
     var result = []
     var position = 0
+    var scratch_locked = false
     while (position < len(names)^) {
         let entry = names[position]
         position = position+1
         if (entry.kind != 'file') raise error("sync repository: unexpected repository entry")
-        if (starts_with(entry.name,".lambda-spool-")^ or ends_with(entry.name,".head")^) { continue }
+        if (starts_with(entry.name,".lambda-spool-")^) {
+            // A crash before unlink can leave only an empty reserved scratch name.
+            if (keys.tx != null and len(entry.name)^ == 46 and entry.size == 0) {
+                let suffix = slice(entry.name,14,46)^
+                let decoded = hex.unhex(suffix) ^ { ^ }
+                if (not (decoded is error) and hex.hex(decoded)^ == suffix) {
+                    if (not scratch_locked) {
+                        // Repository spool writers hold SQLite's writer lock before creating a spool.
+                        sqlite.execute(keys.tx,"UPDATE objects SET kind = kind WHERE id IS NULL")^
+                        scratch_locked = true
+                    }
+                    let observed = disk.inspect(keys.objects,entry.name)^
+                    if (observed != null and observed.size == 0 and observed.token == entry.token)
+                        { disk.erase(keys.objects,entry.name,entry.token)^ }
+                }
+            }
+            continue
+        }
+        if (ends_with(entry.name,".head")^) { continue }
         if (len(entry.name)^ == 69 and ends_with(entry.name,".pack")^) {
             let id = slice(entry.name,0,64)^
             let retired = if (keys.tx == null) [] else sqlite.query(keys.tx,"SELECT pack FROM pack_obsolete WHERE pack = ?",[id])^

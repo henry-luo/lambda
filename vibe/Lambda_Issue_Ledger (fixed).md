@@ -16,9 +16,38 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="durable-scratch-spool-amplification"></a>
+## Scratch spools durably create and unlink transient files — 2026-11-18
+
+**Status:** FIXED, 2026-11-18; guarded scratch creation no longer forces durability before publication. **Owners:**
+Lambda's `lambda/runtime/io_disk.cpp::spool_open` adapter and Input's guarded
+file API (D9.1.1v4, D9.1.3v2, D11.1.2). No durability ruling changes.
+
+`spool_open` uses `file_anchor_create_regular`, which durably syncs the new empty
+file and parent directory, then `file_anchor_remove` syncs its unlink. The spool
+is anonymous while being filled; `pn_io_disk_spool_publish` later copies and
+durably commits its final pack separately. The durable create API also serves
+lock/lease streams, so weakening it globally would be incorrect. The repair adds a
+dedicated guarded anonymous scratch-stream API while preserving final publication,
+scope ownership, cancellation and filesystem authority checks.
+
+Release sync traces observe 72 spool publications and 639 full-sync calls in
+`sync_peer_burst`, and 38 publications / 437 full-sync calls in
+`sync_retention_repository`. The source-derived scratch budget is three barriers
+per opened spool, not a measured repair speedup. No barrier was bypassed; all
+traced tests retain expected output. See the
+[diagnosis and acceptance plan](impl/Lambda_Impl_Sync_Test_Performance.md#native-scratch-spool-avoid-durability-before-publication);
+evidence: `temp/sync-test-phase2/`.
+
+The guarded scratch API now creates and unlinks transient names without forcing
+them to storage. Final pack publication retains its durable barriers. Recovery
+cleans only canonical empty scratch names under the SQLite writer lock;
+collision, denial, process-kill windows and concurrent-writer cases pass.
+The final sync cases and local S3 interrupted-upload recovery also pass.
+
 ## Archive index
 
-This archive contains **326 anchored records**, preserving fixed, resolved,
+This archive contains **327 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's

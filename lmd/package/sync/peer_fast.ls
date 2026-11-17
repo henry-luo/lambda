@@ -25,14 +25,18 @@ pub pn prepare(handle, credentials, have) any^ {
             return prepare({*:handle,keys:{*:handle.keys,cached_head:cache}},credentials,have)^
         })^
     }
-    let current = local.status(handle)^.state
+    // Keep one bounded observation for this operation; each access still authenticates the head.
+    let scoped = {*:handle,keys:{*:handle.keys,cache_enabled:true}}
+    let observed = local.status(scoped)^
+    let active = local.with_cache(scoped,observed)
+    let current = observed.state
     if (have == null or not eligible(current)^ or have.epoch != current.endpoint.replica.epoch or
         not core.dominates(have.body.clock,current.endpoint.replica.floor)^) { return null }
-    let outgoing = exchange.offer(handle,credentials,true,true,have,false)^
+    let outgoing = exchange.offer(active,credentials,true,true,have,false)^
     if (outgoing.summary.delta != true) { return null }
-    let ids = local.delta_objects(handle,outgoing.batch,exchange.page_size,session.max_frame div 4)^
+    let ids = local.delta_objects(active,outgoing.batch,exchange.page_size,session.max_frame div 4)^
     if (ids == null) { return null }
-    let bundle = exchange.bundle(handle,outgoing.batch,ids)^
+    let bundle = exchange.bundle(active,outgoing.batch,ids)^
     if (bundle == null) { return null }
     let data = {have:exchange.have_frontier(credentials.space,outgoing.token)^,
         summary:{*:outgoing.summary,objects:len(ids)^},bundle:bundle,
@@ -40,7 +44,8 @@ pub pn prepare(handle, credentials, have) any^ {
     if (max(len(binary(codec.encode({kind:'change',body:data})^))^,
         len(binary(codec.encode({ok:true,body:{accepted:true,exchange:data,clock:data.summary.clock}})^))^) > session.max_frame-32)
         { return null }
-    return {data:data,token:outgoing.token,repository_cache:outgoing.repository_cache}
+    return {data:data,token:outgoing.token,repository_cache:if (handle.keys.cache_enabled == true)
+        outgoing.repository_cache else null}
 }
 
 pub pn accept(handle, credentials, peer, data) any^ {
@@ -57,7 +62,11 @@ pub pn accept(handle, credentials, peer, data) any^ {
         data.have.body.clock != data.ack.clock or len(data.summary.documents)^ != 0 or
         data.summary.retention != null or data.summary.cache != null)
         raise error("sync fast: inconsistent frontier or unsupported controls")
-    let current = local.status(handle)^.state
+    // Reuse the observed head only within this receive operation.
+    let scoped = {*:handle,keys:{*:handle.keys,cache_enabled:true}}
+    let observed = local.status(scoped)^
+    let active = local.with_cache(scoped,observed)
+    let current = observed.state
     // Header/HAVE validation also rejects foreign roots, spaces, profiles and schemas.
     protocol.reply(current.endpoint.replica,data.have,workspace.model)^
     if (not eligible(current)^ or data.summary.epoch != current.endpoint.replica.epoch) { return null }
@@ -65,6 +74,7 @@ pub pn accept(handle, credentials, peer, data) any^ {
     let ids = [for (record in data.bundle.objects) record.id]
     exchange.object_ids(ids)^
     if (len(ids)^ != data.summary.objects) raise error("sync fast: object count mismatch")
-    return exchange.receive_bundle(handle,credentials,peer,data.bundle,
+    let received = exchange.receive_bundle(active,credentials,peer,data.bundle,
         {peer:peer.id,clock:data.ack.clock,release:ids})^
+    return if (handle.keys.cache_enabled == true) received else {*:received,repository_cache:null}
 }

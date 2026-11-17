@@ -406,13 +406,12 @@ bool spool_open(DiskSpool* s) {
     static const char hex[] = "0123456789abcdef";
     for (int i = 0; i < 16; ++i) { s->leaf[14+i*2] = hex[random[i] >> 4]; s->leaf[15+i*2] = hex[random[i] & 15]; }
     s->leaf[46] = 0;
-    s->file = file_anchor_create_regular(s->disk.anchor, s->leaf);
+    s->file = file_anchor_create_scratch(s->disk.anchor, s->leaf);
     s->digest = digest_ctx_new(DIGEST_SHA256);
     if (!s->file || !s->digest) return false;
-    // unlink while held so cancellation/crash cleanup needs only close, without new IO authority.
-    FileRevision revision = file_revision_stream(s->file);
-    s->anonymous = file_anchor_remove(s->disk.anchor, s->leaf, &revision);
-    return s->anonymous;
+    // Scratch has no published name; final pack publication performs the durable sync.
+    s->anonymous = true;
+    return true;
 }
 }
 extern "C" Item pn_io_disk_spool(Item root, Item limit, Item action) {

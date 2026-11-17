@@ -21,6 +21,8 @@ pn main() {
         let edited = host.apply_edits(handle,opened.id,[{kind:'text',start:1,count:0,value:"L"}])^
         let restarted = local.open_repository(handle.path,secret,"document-repository")^
         let recovered = host.status(restarted,opened.id)^
+        return h.owned([restarted],pn (resumed)=> {
+        let restarted = resumed[0]
         let disk_before = input(area ++ "/tree/note",'text')^
         let prepared = host.prepare_save(restarted,opened.id)^
         let saved = host.commit_save(local.open_repository(handle.path,secret,"document-repository")^,opened.id)^
@@ -48,6 +50,7 @@ pn main() {
             restored.value == "ab",restored.dirty,not restored_save.dirty,
             any([for (version in retained) version.raw == "aLb"]),
             empty.coverage.local,not empty.coverage.cloud,not empty.coverage.peer,checked.verified]
+        })^
     })^
     io.delete(area)^
     return outcome

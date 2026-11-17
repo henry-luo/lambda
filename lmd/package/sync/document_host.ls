@@ -34,7 +34,8 @@ fn status_from(current, document) any^ {
         workspace_review:current.review != null}
 }
 pub pn status(handle, document) any^ {
-    return status_from(local.status(handle)^.state,document)^
+    let observed = local.status_headers(handle,document)^
+    return status_from(if (observed.document_state == null) observed.state else observed.document_state,document)^
 }
 
 pub pn open_document(handle, path, profile='text', encoding='text') any^ {
@@ -62,23 +63,26 @@ pub pn open_document(handle, path, profile='text', encoding='text') any^ {
     let entry = [for (item in model.all(result.state)^ where workspace.path(result.state.endpoint.replica,item.entry)^ == path) item][0]
     return status_from(result.state,entry.id)^
 }
+fn apply_commands(current, handle, document, commands, resolve, request_id) any^ {
+    let record = model.get(current,document)^
+    let fingerprint = codec.digest([commands,resolve])^
+    let previous = model.request(record,'edit',request_id)^
+    if (previous != null) {
+        if (previous.fingerprint != fingerprint) raise error("sync document: edit request ID reused with different commands")
+        return current
+    }
+    let edited = protocol.local_change(record.endpoint,actor(handle,current)^,commands)^
+    let next = model.update(record,edited.endpoint)^
+    let selected = if (resolve) {*:next,session:session.resolve(next.session,next.endpoint.replica)^} else next
+    let remembered = model.record_request(selected,'edit',request_id,
+        {fingerprint:fingerprint,frontier:edited.endpoint.replica.clock})^
+    let used = [for (reference in blob.required(remembered.endpoint.replica)^) reference.manifest]
+    return {*:model.replace(current,remembered)^,serial:current.serial+1,
+        staged_objects:[for (id in reach.staged(current) where not contains(used,id)^) id]}
+}
 pub pn apply_edits(handle, document, commands, resolve=false, request_id=null) any^ {
     let result = local.mutate(handle,pn (tx,k,current)=> {
-        let record = model.get(current,document)^
-        let fingerprint = codec.digest([commands,resolve])^
-        let previous = model.request(record,'edit',request_id)^
-        if (previous != null) {
-            if (previous.fingerprint != fingerprint) raise error("sync document: edit request ID reused with different commands")
-            return current
-        }
-        let edited = protocol.local_change(record.endpoint,actor(handle,current)^,commands)^
-        let next = model.update(record,edited.endpoint)^
-        let selected = if (resolve) {*:next,session:session.resolve(next.session,next.endpoint.replica)^} else next
-        let remembered = model.record_request(selected,'edit',request_id,
-            {fingerprint:fingerprint,frontier:edited.endpoint.replica.clock})^
-        let used = [for (reference in blob.required(remembered.endpoint.replica)^) reference.manifest]
-        return {*:model.replace(current,remembered)^,serial:current.serial+1,
-            staged_objects:[for (id in reach.staged(current) where not contains(used,id)^) id]}
+        return apply_commands(current,handle,document,commands,resolve,request_id)^
     })^
     return status_from(result.state,document)^
 }
@@ -93,14 +97,17 @@ pub pn compact(handle, document) any^ {
     return status_from(result.state,document)^
 }
 pub pn restore_version(handle, document, version) any^ {
-    let record = model.get(local.status(handle)^.state,document)^
-    let saved = v.lookup(record.session.versions,version)^
-    if (saved == null) raise error("sync document: saved version is not retained")
-    let command = if (record.endpoint.replica.profile == 'text')
-        {kind:'text',start:0,count:len(session.value(record.endpoint.replica)^)^,value:saved.value}
-        else {kind:'root',value:mark.export_value(saved.replica)^}
-    // restoration is a new compensating edit; the existing history and disk remain intact.
-    return apply_edits(handle,document,[command],true)^
+    let result = local.mutate(handle,pn (tx,k,current)=> {
+        let record = model.get(current,document)^
+        let saved = v.lookup(record.session.versions,version)^
+        if (saved == null) raise error("sync document: saved version is not retained")
+        let command = if (record.endpoint.replica.profile == 'text')
+            {kind:'text',start:0,count:len(session.value(record.endpoint.replica)^)^,value:saved.value}
+            else {kind:'root',value:mark.export_value(saved.replica)^}
+        // Select the retained version and apply its compensating edit under the same head.
+        return apply_commands(current,handle,document,[command],true,null)^
+    })^
+    return status_from(result.state,document)^
 }
 pub pn attachment(handle, bytes, media_type="application/octet-stream") any^ {
     let result = local.mutate(handle,pn (tx,k,current)=> {

@@ -20,7 +20,6 @@ pub pn run(initial=null, observe=null, initial_cache=null) any^ {
             continue
         }
         let result = if (message.cached == true) message.work(cache) ^ { ^ } else message.work() ^ { ^ }
-        if (result is map and (result^).repository_cache != null) { cache = (result^).repository_cache }
         // The work has left its SQLite scope before its committed frontier becomes visible.
         if (observe != null and result is map and (result^).state is map and (result^).state.endpoint != null) {
             let projected = observe((result^).state) ^ { ^ }
@@ -28,6 +27,8 @@ pub pn run(initial=null, observe=null, initial_cache=null) any^ {
             token = projected^
         }
         if (observe != null and result is map and (result^).token is map) { token = (result^).token }
+        // A failed observer must not publish a head cache ahead of its token.
+        if (result is map and (result^).repository_cache != null) { cache = (result^).repository_cache }
         for (item in watchers where item.token != token) { send(item.reply,{value:token}) ^ { null } }
         watchers = [for (item in watchers where item.token == token) item]
         // A cancelled requester can disappear while an atomic repository operation finishes.

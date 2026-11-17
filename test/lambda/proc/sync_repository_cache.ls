@@ -3,6 +3,8 @@ import host: lambda.sync.document_host
 import workspace: lambda.sync.workspace
 import crypto: lambda.io.crypto
 import disk: lambda.io.disk
+import codec: lambda.sync.codec
+import exchange: lambda.sync.peer_exchange
 import h: ~~.mod_sync_local_helpers
 pn main() {
     let area = "temp/sync-repository-cache-" ++ string(sys.proc.self.pid#)
@@ -33,6 +35,8 @@ pn main() {
         let saved = host.save(handle,opened.id)^
         let restored = host.status(local.open_repository(raw.path,key,"cache-regression")^,opened.id)^
         let current = local.status(handle)^
+        let independently_loaded = local.status(local.open_repository(raw.path,key,"cache-regression")^)^
+        let same_view = codec.same_encoding(current.state,independently_loaded.state)^
         let filename = h.physical(handle,current.id)^
         let original = disk.capture(raw.path ++ ".objects",filename,16777216)^
         disk.install(raw.path ++ ".objects",filename,binary("damaged pack")^,original.token)^
@@ -41,12 +45,18 @@ pn main() {
         let verified = local.verify(handle)^
         let padding = join([for (i in 1 to 1024) join([for (j in 1 to 1024) "x"],"")^],"")^
         let large = local.mutate(handle,pn (tx,k,value)=> { return {*:value,test_padding:padding} })^
+        let token_before = exchange.current_token(handle)^
+        let header_status = host.status(handle,opened.id)^
+        let token_after = exchange.current_token(handle)^
+        let full_status = host.status(local.open_repository(raw.path,key,"cache-regression")^,opened.id)^
         return [edited.value == "aLb" and edited.dirty,first.repository_cache.expanded != null,
             first.repository_cache.expanded_bytes <= 1048576,stable.generation == first.generation,
             again.generation == stable.generation,steady,wrong_type is error,held.generation == again.generation,
             advanced.generation > held.generation,h.at_path(advanced.state,"external-dir")^.type == 'dir',
             not saved.dirty,restored.value == "aLb" and not restored.dirty,invalid is error,verified.verified,
-            large.repository_cache.expanded == null,large.repository_cache.expanded_bytes > 1048576]
+            large.repository_cache.expanded == null,large.repository_cache.expanded_bytes > 1048576,same_view,
+            header_status == full_status,token_before == token_after,
+            large.repository_cache.validation.values == null and large.repository_cache.verified == null]
     })^
     io.delete(area)^
     return checked

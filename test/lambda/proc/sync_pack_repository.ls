@@ -29,11 +29,26 @@ pn main() {
         packs.flush(tx,k)^
         raise error("test transaction interrupted after durable pack")
     }) ^ { ^ }
+    // A crash before scratch unlink can leave an empty reserved name behind.
+    let scratch = ".lambda-spool-0123456789abcdef0123456789abcdef"
+    let nonempty = ".lambda-spool-abcdef0123456789abcdef0123456789"
+    let unrelated = ".lambda-spool-not-a-spool"
+    let invalid = ".lambda-spool-gggggggggggggggggggggggggggggggg"
+    output("",handle.path ++ ".objects/" ++ scratch)^
+    output("keep",handle.path ++ ".objects/" ++ nonempty)^
+    output("",handle.path ++ ".objects/" ++ unrelated)^
+    output("",handle.path ++ ".objects/" ++ invalid)^
+    repo.records({*:handle.keys,objects:handle.path ++ ".objects"})^
+    let unlocked_kept = disk.inspect(handle.path ++ ".objects",scratch)^ != null
     let recovered = repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let found = repo.recover(tx,k)^
         repo.rebuild_index(tx,k)^
         return len(found)^ == 1 and repo.get(tx,k,found[0].id)^ == binary("orphan")^
     })^
+    let cleaned_scratch = disk.inspect(handle.path ++ ".objects",scratch)^ == null
+    let preserved = input(handle.path ++ ".objects/" ++ nonempty,'text')^ == "keep" and
+        disk.inspect(handle.path ++ ".objects",unrelated)^ != null and
+        disk.inspect(handle.path ++ ".objects",invalid)^ != null
     repo.access(handle.path,handle.keys,pn (tx,k)=> { return repo.remove_object(tx,k,saved[0])^ })^
     let retained = repo.access(handle.path,handle.keys,pn (tx,k)=> {
         return not repo.present(k,saved[0])^ and repo.get(tx,k,saved[1])^ == binary("second")^ and repo.verify(tx,k)^.verified
@@ -47,7 +62,8 @@ pn main() {
     disk.install(handle.path ++ ".objects",filename,original.bytes,bad.token)^
     let verified = local.verify(handle)^
     let checks = [len([for (entry in before where ends_with(entry.name,".pack")^) entry])^ == 1,
-        *checked,interrupted is error,recovered,retained,rejected is error,verified.verified]
+        *checked,interrupted is error,recovered,retained,rejected is error,verified.verified,
+        unlocked_kept,cleaned_scratch,preserved]
     io.delete(area)^
     return checks
 }

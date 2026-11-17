@@ -174,14 +174,8 @@ pub pn receive_frames(handle, credentials, peer, frames, records=[], ack=null) a
 }
 pub pn bundle(handle, frames, ids) any^ {
     if (frames == null or len(ids)^ > 128) { return null }
-    var records = []
-    var bytes = 0
-    for (id in ids) {
-        let record = local.export_objects(handle,[id])^[0]
-        bytes = bytes+len(record.box)^
-        if (bytes > session.max_frame-32) { return null }
-        records = [*records,record]
-    }
+    let records = local.export_bounded(handle,ids,session.max_frame-32)^
+    if (records == null) { return null }
     let body = {frames:frames,objects:records}
     if (len(binary(codec.encode({kind:'put_bundle',body:body})^))^ > session.max_frame-32 or
         len(binary(codec.encode({ok:true,body:body})^))^ > session.max_frame-32) { return null }

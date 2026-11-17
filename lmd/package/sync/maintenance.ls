@@ -13,6 +13,8 @@ import core: .core
 import codec: .codec
 import v: .schema
 
+let prune_cache_limit = 1048576
+let prune_cache_entries = 4096
 
 fn linked(header, revision) bool^ => revision.document != null and revision.document.checkpoint == header.checkpoint and
     revision.content.hash == header.raw_hash
@@ -176,17 +178,31 @@ pub pn prune_step(handle, id, budget=16) any^ {
         let loaded = repo.load(tx,k)^
         let current = documents.expand(tx,k,loaded.state)^
         let plan = check(current,id,'prune')^
-        let reachable = [*reach.roots(tx,k,current)^,loaded.id,*if (current.previous == null) [] else [current.previous]]
+        let cached = loaded.prune_proof
+        let previous = if (handle.keys.cache_enabled == true and cached != null and
+            cached.id == plan.id and cached.fingerprint == plan.fingerprint)
+            cached.graph else null
+        let graph = if (handle.keys.cache_enabled == true) reach.roots_observed(tx,k,current,true,previous)^
+            else {ids:reach.roots(tx,k,current)^,orphans:[],available:[]}
+        let reachable = [*graph.ids,loaded.id,*if (current.previous == null) [] else [current.previous]]
         let end = min(len(plan.objects)^,plan.next+budget)
         let next = {*:loaded.state,maintenance:{*:plan,next:end},previous:loaded.id}
         // the uncommitted head write acquires SQLite's writer lock before any filesystem removal.
-        repo.commit_head(tx,k,loaded.generation,next)^
+        let committed = repo.commit_head(tx,k,loaded.generation,next)^
         for (offset in range(plan.next,end,1)) {
             let target = plan.objects[offset]
             if (contains(reachable,target)^) raise error("sync maintenance: object became protected; replan required")
             repo.remove_object(tx,k,target)^
         }
-        return {id:id,removed:end-plan.next,next:end,total:len(plan.objects)^,complete:end == len(plan.objects)^}
+        let count = len(graph.ids)^+len(graph.orphans)^+len(graph.available)^
+        // Reject large proofs before serialization so the byte cap does not cause a large temporary encoding.
+        let bytes = if (handle.keys.cache_enabled != true or count > prune_cache_entries) prune_cache_limit+1
+            else if (previous != null and graph == previous) cached.bytes else len(binary(codec.encode(graph)^)^)^
+        // A proof follows only the exact new head, and is bounded independently of repository size.
+        let retained = if (handle.keys.cache_enabled == true and bytes <= prune_cache_limit)
+            {*:committed,prune_proof:{id:plan.id,fingerprint:plan.fingerprint,graph:graph,bytes:bytes}} else null
+        return {id:id,removed:end-plan.next,next:end,total:len(plan.objects)^,complete:end == len(plan.objects)^,
+            *:if (retained == null) ({}) else {repository_cache:retained}}
     })^
 }
 

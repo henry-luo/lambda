@@ -16,6 +16,7 @@ import codec: .codec
 import tree: .workspace_tree
 import blob: .blob
 import documents: .documents
+import history: .history
 import maintenance: .maintenance_state
 import reach: .reachability
 import cache_state: .cache_state
@@ -140,12 +141,33 @@ pub pn create(path, secret, space, root, device, config=chunks.default_profile) 
     return handle
 }
 
+pn observe(tx, keys, handle, loaded) any^ {
+    let expanded = expand_loaded(tx,keys,loaded)^
+    let proof = if (loaded.validated == true) loaded.validation else validate(expanded,keys.space)^
+    return result(handle,loaded,expanded,proof)^
+}
 pub pn status(handle) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+        return observe(tx,k,handle,repo.load(tx,k)^)^
+    })^
+}
+// A validated large head can answer editor status from headers without retaining versions.
+pub pn status_headers(handle, document) any^ {
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let loaded = repo.load(tx,k)^
-        let expanded = expand_loaded(tx,k,loaded)^
-        let proof = if (loaded.validated == true) loaded.validation else validate(expanded,k.space)^
-        return result(handle,loaded,expanded,proof)^
+        if (loaded.validated != true or loaded.expanded != null) {
+            return observe(tx,k,handle,loaded)^
+        }
+        var current = loaded.state
+        let record = document_state.get(current,document)^
+        if (record.history != null) {
+            let catalog = history.headers(tx,k,record.history)^
+            let versions = [for (header in catalog.entries where not contains(history.retired(current),header.id)^)
+                {id:header.id}]
+            current = document_state.replace(current,{*:record,session:{*:record.session,versions:versions}})^
+        }
+        // The head was already observed; do not publish this partial state to owner observers.
+        return {generation:loaded.generation,id:loaded.id,document_state:current,repository_cache:loaded}
     })^
 }
 // one current authenticated head owns the cache; explicit verify always rereads storage.
@@ -160,9 +182,15 @@ fn result(handle, loaded, expanded, proof) any^ {
     }
     let bytes = if (loaded.expanded != null) loaded.expanded_bytes
         else len(binary(codec.encode(expanded)^)^)^
+    let fits = bytes <= expanded_cache_limit
+    // Large heads retain the validation result, not its expanded document/projection graphs.
+    let retained_proof = if (fits) proof else
+        {values:null,snapshot:null,projection:null,base_projection:null,install_source:null}
     return {generation:loaded.generation,id:loaded.id,state:expanded,
-        repository_cache:{*:loaded,validated:true,validation:proof,expanded_bytes:bytes,
-            expanded:if (bytes <= expanded_cache_limit) expanded else null}}
+        repository_cache:{*:loaded,validated:true,validation:retained_proof,expanded_bytes:bytes,
+            expanded:if (fits) expanded else null,
+            verified:if (fits) loaded.verified else null,
+            dependency_scope:if (fits) loaded.dependency_scope else null}}
 }
 
 pub pn mutate(handle, operation) any^ {
@@ -176,7 +204,12 @@ pub pn mutate(handle, operation) any^ {
             codec.same_encoding(updated,expanded)^) {
             return result(handle,loaded,expanded,previous)^
         }
-        let next = documents.flush(tx,k,updated)^
+        let reusable = loaded.settled == true and expanded.cache_job == null and updated.cache_job == null and
+            expanded.maintenance == null and updated.maintenance == null and
+            codec.same_encoding(reach.cache_ids(expanded),reach.cache_ids(updated))^ and
+            codec.same_encoding(maintenance.get(expanded),maintenance.get(updated))^
+        let flushed = documents.flush_observed(tx,k,updated,expanded,reusable)^
+        let next = flushed.state
         let checked = validate(next,k.space,previous)^
         let proof = if (next.installation.source.state == loaded.id)
             {*:checked,install_source:{id:loaded.id,replica:expanded.endpoint.replica}} else checked
@@ -193,8 +226,10 @@ pub pn mutate(handle, operation) any^ {
         let accepted = {*:loaded,verified:verified,dependency_scope:scope,settled:true}
         if (next == loaded.state) { return result(handle,accepted,expanded,proof)^ }
         let committed = repo.commit_head(tx,k,loaded.generation,{*:next,previous:loaded.id})^
-        return result(handle,{*:committed,verified:verified,dependency_scope:scope,settled:true},
-            documents.expand(tx,k,committed.state)^,proof)^
+        // Flush already produced the exact expanded committed documents from validated history.
+        let expanded_state = if (flushed.expanded.documents == null) committed.state else
+            ({*:committed.state,documents:flushed.expanded.documents})
+        return result(handle,{*:committed,verified:verified,dependency_scope:scope,settled:true},expanded_state,proof)^
     })^
 }
 
@@ -310,6 +345,22 @@ pub pn missing_objects(handle, ids) any^ {
 }
 pub pn export_objects(handle, ids) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> { return repo.export_objects(tx,k,ids)^ })^
+}
+pub pn export_bounded(handle, ids, maximum) any^ {
+    if (not (ids is array) or len(ids)^ > 128 or not v.natural(maximum)^)
+        raise error("sync repository: invalid bounded object batch")
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+        var records = []
+        var bytes = 0
+        // Stop before retaining an oversized bundle while sharing one repository scope.
+        for (id in ids) {
+            let record = repo.export_objects(tx,k,[id])^[0]
+            bytes = bytes+len(record.box)^
+            if (bytes > maximum) { return null }
+            records = [*records,record]
+        }
+        return records
+    })^
 }
 pub pn export_pack(handle, ids) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> { return repo.export_pack(tx,k,ids)^ })^

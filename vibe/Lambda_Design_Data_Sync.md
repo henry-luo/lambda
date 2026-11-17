@@ -762,6 +762,14 @@ the authenticated recovery index. Policy remains Lambda Script; native code
 provides scoped buffered file IO, range reads, hashing and durable publication
 (S12.1.1v3, D11.1.2, D11.2.1–D11.2.4).
 
+Scratch spools are unlinked before accepting payload bytes. Their transient
+names need no durability barrier; the final immutable pack and its directory do.
+A crash before unlink can leave an empty reserved name. Repository recovery
+removes only canonical empty spool names after acquiring the SQLite writer lock,
+so an active repository writer cannot lose its staging file. Nonempty and
+noncanonical names are retained. Guarded anchored access, scope lifetime and
+failure handling remain mandatory (D9.1.1v4, D11.1.2).
+
 Seal at a size/count boundary and at the end of a save/change batch. A partial
 pack must not wait indefinitely for more edits. Flush the authenticated footer,
 publish the immutable pack, then register its locations. The SQLite workspace
@@ -1852,9 +1860,23 @@ reuses the already committed state for document replies and retains at most one
 expanded current-head view up to 1 MiB of canonical bytes. Fresh authenticated
 head generation/identity gates reuse; maintenance changes invalidate it and
 explicit verification rereads storage. Larger views use the existing hydration
-path. This is a GC-owned client optimization (D5.1.3, D5.3.1), with unchanged
+path and keep only a compact validation marker instead of retaining expanded
+document/projection proofs. The packed current head still has its own memory
+cost; the expanded-view limit is not a total process-memory limit. This is a
+GC-owned client optimization (D5.1.3, D5.3.1), with unchanged
 save recovery boundaries and wire bytes. Test fixture transaction batching is
 separate from production request durability (D11.1.2).
+
+Within a fast peer operation, one authenticated observation can serve its
+subcalls; each subsequent access still checks the head's generation and identity.
+Document flush can reuse an unchanged document only from a previously settled
+head with matching retention and cache state. A validated large head can answer
+editor status from the selected document's history headers; cold loads and
+explicit verification still validate physical history. Pruning can retain a
+bounded reachability proof tied to the repository, key, plan and content roots;
+each step rechecks recovery candidates, deferred-object availability, the
+current head and previous head before removing anything (D5.1.3, D5.3.1,
+D11.1.2). See the [current implementation record](impl/Lambda_Impl_Sync_Test_Performance.md#remaining-four-tests--2026-11-18-analysis-and-proposal).
 
 Internet traversal, cloud adapters, polling deployment, broader key management
 and editor bindings remain subsequent acceptance work; this does not complete §12.1.

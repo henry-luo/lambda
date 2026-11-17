@@ -54,14 +54,16 @@ pub pn expand(tx, keys, record, expired=[]) any^ {
     let versions = [for (header in catalog.entries where not contains(expired,header.id)^) endpoint(tx,keys,header)^]
     return {*:record,session:{*:record.session,versions:versions,saved_heads:session.heads({versions:catalog.entries})^}}
 }
-pub pn flush(tx, keys, record, milliseconds) any^ {
+pub pn flush_observed(tx, keys, record, milliseconds, previous=null, expired=[]) any^ {
     let catalog = headers(tx,keys,roots(record))^
     var additions = []
+    var added_versions = []
     for (saved in record.session.versions) {
         if (v.lookup(catalog.entries,saved.id)^ == null) {
             session.validate_version(saved)^
             let value = {*:saved,replica:core.compact(saved.replica)}
             let id = repo.store_object(tx,keys,"version",value)^
+            added_versions = [*added_versions,value]
             additions = [*additions,{id:saved.id,group:record.id,object:id,parents:saved.parents,
                 frontier:saved.frontier,checkpoint:codec.digest(protocol.checkpoint(saved.replica))^,raw_hash:hash(saved.raw,'sha256')^,
                 saved_at:if (saved.save_metadata == null) 0 else saved.save_metadata.at}]
@@ -83,7 +85,20 @@ pub pn flush(tx, keys, record, milliseconds) any^ {
         let page = {version:1,document:record.id,previous:pages,entries:slice(additions,offset,offset+16)^}
         pages = [repo.store_object(tx,keys,"history",page)^]
     }
-    return {*:record,history:pages,session:{*:record.session,saved_heads:session.heads({versions:[*catalog.entries,*additions]})^}}
+    // Existing headers were validated on read and additions were built from validated versions.
+    let entries = sort([*catalog.entries,*additions],(item)=>item.id)^
+    let reuse = previous != null and codec.same_encoding(roots(record),roots(previous))^
+    let versions = [for (header in entries where not contains(expired,header.id)^) {
+        let added = v.lookup(added_versions,header.id)^
+        let old = if (reuse) v.lookup(previous.session.versions,header.id)^ else null
+        if (added != null) added else if (old != null) old else endpoint(tx,keys,header)^
+    }]
+    return {record:{*:record,history:pages,session:{*:record.session,
+        saved_heads:session.heads({versions:[*catalog.entries,*additions]})^}},headers:entries,
+        versions:versions}
+}
+pub pn flush(tx, keys, record, milliseconds) any^ {
+    return flush_observed(tx,keys,record,milliseconds)^.record
 }
 pub fn pack(record) => {*:record,session:{*:record.session,versions:[]}}
 pub pn expand_public(tx, keys, value, expired=[]) any^ {

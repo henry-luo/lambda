@@ -102,10 +102,27 @@ pn state_roots(tx, keys, current, include_private=true) any^ {
     }
     return unique(roots)
 }
-pub pn roots(tx, keys, current, include_private=true) any^ {
+pn root_seed(tx, keys, current, include_private) any^ {
     let roots = state_roots(tx,keys,current,include_private)^
     let orphans = if (include_private) [for (entry in repo.recover(tx,keys)^) entry.id] else []
-    return closure(tx,keys,[*roots,*orphans],retention_state.get(current),cache_ids(current))^
+    return {roots:roots,orphans:orphans}
+}
+pub pn roots_observed(tx, keys, current, include_private=true, previous=null) any^ {
+    let seed = root_seed(tx,keys,current,include_private)^
+    let binding = retention_state.fingerprint(current)^
+    let key_context = repo.object_id(keys,"checkpoint",hash("lambda-prune-proof-v1",'sha256')^)^
+    let available = [for (item in cache_ids(current)) {id:item,present:repo.present(keys,item)^}]
+    // Recovery and deferred availability can change independently of the authenticated head.
+    if (previous != null and previous.binding == binding and previous.private == include_private and
+        previous.repository == keys.objects and previous.key_context == key_context and
+        previous.orphans == seed.orphans and previous.available == available) { return previous }
+    return {ids:closure(tx,keys,[*seed.roots,*seed.orphans],retention_state.get(current),cache_ids(current))^,
+        orphans:seed.orphans,binding:binding,private:include_private,available:available,
+        repository:keys.objects,key_context:key_context}
+}
+pub pn roots(tx, keys, current, include_private=true) any^ {
+    let seed = root_seed(tx,keys,current,include_private)^
+    return closure(tx,keys,[*seed.roots,*seed.orphans],retention_state.get(current),cache_ids(current))^
 }
 pub pn hot(tx, keys, current) any^ {
     let retention = retention_state.get(current)

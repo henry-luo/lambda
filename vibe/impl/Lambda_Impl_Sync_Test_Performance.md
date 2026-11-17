@@ -382,7 +382,37 @@ this implementation does not require changing the saved-version/wire model.
 
 ## Remaining four tests — 2026-11-18 analysis and proposal
 
-**Status:** analyzed; implementation proposed, not applied. Lambda starts at
+**Implementation checkpoint:** implemented and qualified for the sync scope. Fast-peer operations
+reuse authenticated observations, and bundle exports stop at the frame budget
+inside one repository scope. The document fixture resumes its owner after a cold
+recovery check. Input's guarded scratch API avoids syncing an unpublished name;
+repository recovery cleans canonical empty scratch names only under the SQLite
+writer lock. Scratch collision, denial, cancellation and both process-kill
+windows pass. Document flush carries forward verified headers and the committed
+expanded view; selective editor status uses headers for an already validated
+large head. Cached-versus-cold comparisons, foreign-writer invalidation and
+owner-token observer failure are covered. Bounded pruning proofs bind the plan,
+repository/key, recovery candidates and deferred availability; a new unindexed
+recovery root is tested between steps. Focused interpreter/JIT cases pass and
+an isolated forced/poisoned-GC retention run returned all true; its original
+parallel worker timed out at 60 s. Input merge issue LI-077 is repaired and its
+bounded-parser test passes. The final matched release benchmark is recorded
+below. All 121 final sync cases pass: 112 in the restricted sandbox and the
+nine network/watch cases on a host-permitted rerun. Eight focused cases pass
+under the interpreter; local S3 protocol, interrupted upload and exact offline
+restore pass, as does the multiprocess peer suite (its pre-existing LI-015
+concurrent administration limitation remains unqualified). Four final direct
+forced-GC/poison cases pass; retention safety required 118 seconds in the
+stress configuration. The Input baseline passes. The Lambda baseline has
+7,603/7,608 passing: all five layout/graph failures independently reproduce
+the foreign scratch-scope assertion recorded under Radiant RI-125, with their
+individual allocation sites still unconfirmed. The Radiant baseline reports
+7,044 passed, 929 failed, 296 partial and 20 skipped; RI-125 records the
+existing scratch-scope assertion, without attributing every failure to it.
+Authority: D5.1.3, D5.3.1, D11.1.2.
+
+
+**Prior analysis status:** analyzed; implementation proposed, not applied. Lambda starts at
 `1d3aae0a3`; Input includes the preceding LI-076 error/null metadata repair.
 The earlier completion checkpoint is historical: LI-076 is now fixed and the
 subsequent Lambda baseline passes **7,604/7,604**. This investigation changes
@@ -578,3 +608,66 @@ proof-home overlays retain every counterfactual source. The first sandboxed
 host accounting path. The interposer is launched directly, because macOS strips
 `DYLD_INSERT_LIBRARIES` through the protected `/usr/bin/time` executable. The
 normal debug host is restored after profiling. No sync implementation changed.
+
+### Implementation and matched release measurements — 2026-11-18
+
+Implementation and sync-specific qualification are complete. The four original
+workflows and their original assertions remain; additional boundary and retention
+safety checks use separate fixtures. The following changes are present:
+
+- `peer_fast.prepare` and `accept` retain one authenticated observation within
+  the operation. Uncached callers do not retain it afterward. Bundle export uses
+  a single repository scope and stops at the byte bound; invalid sizes and more
+  than 128 IDs are rejected.
+- Input's guarded scratch stream unlinks before accepting bytes. A crash before
+  unlink can leave an empty reserved name. Recovery removes only canonical,
+  empty names after acquiring the SQLite writer lock; nonempty or malformed names
+  are preserved. Final pack publication and SQLite commit retain their separate
+  durable barriers (D9.1.1v4, D11.1.2). A lock-contention test covers a live
+  writer; process-kill tests cover before and after unlink.
+- Document flush carries validated history headers and expanded committed
+  versions forward. A settled head may reuse an unchanged document only when
+  retention, deferred cache and maintenance state permit it. Status on an already
+  validated oversized head can read one document's headers without hydrating all
+  saved endpoints. A cold head and explicit physical verification retain full
+  checks. Restoring a version selects it and applies its compensating edit under
+  one head transaction (S11.4.6v4, S12.4.4v4, D5.1.3, D5.3.1). Fully selective
+  cold restoration of one version is a longer-term session/history API change;
+  this implementation still validates and expands a cold head.
+- Prune steps may retain a graph proof under 1 MiB and 4,096 entries. It is tied
+  to the authenticated head, plan, repository and keyed context. Every step
+  rechecks orphan IDs and deferred-object presence, and freshly protects the head
+  and previous head; large proofs fall back without first serializing them.
+  A new orphan or a stale plan must not authorize deletion (D11.1.2).
+- An owner publishes a new cache only after its observer accepts the associated
+  token; observer failure leaves the previous cache/token paired (S13.3.1v2).
+
+Three alternating serial samples per arm use one frozen release binary,
+`6f7f2f280da1c502f049540b3a54740d54cb1b08f78b6e02c79865349a2754bf`.
+Before sources are mirrored from `f1bf1a9fd`, after sources are mirrored from
+the implementation. All **24/24** outputs match their expected results. Both
+arms include the new native scratch API; this comparison isolates script and
+fixture changes, not the native scratch speedup.
+
+| Original test | Before median / range | After median / range | Median peak RSS before → after |
+|---|---:|---:|---:|
+| Cold peer | 6.488 s / 6.459–6.509 | 5.489 s / 5.481–5.569 | 283.9 → 270.1 MiB |
+| Document repository | 5.109 s / 5.069–5.367 | 3.089 s / 3.052–3.150 | 307.5 → 293.1 MiB |
+| Burst | 4.244 s / 4.218–4.259 | 4.240 s / 4.199–4.244 | 278.1 → 279.4 MiB |
+| Retention | 3.489 s / 3.479–3.549 | 3.187 s / 3.179–3.199 | 265.3 → 272.8 MiB |
+
+A separate instrumented execution invokes the real filesystem barriers and
+matches every golden. Compared with the earlier one-run diagnostic, full-sync
+calls are **220 → 151**, **282 → 177**, **639 → 420**, and **437 → 296** in
+that table's order. These are diagnostic counts across different builds and
+workflows, not a controlled standalone measurement of scratch-only latency.
+The two saves' prepare/install/finalize commits remain separate. Burst retains
+all three 500 ms idle checks. Peak RSS is process-wide; long-lived idle budgets
+remain a separate qualification.
+
+Artifacts: `temp/sync-test-phase2/goal-benchmark-{results,summary}.json`,
+`goal-benchmark.log`, `goal-barriers-summary.json`, frozen source overlays and
+per-case output. Forced-GC retention was also run directly after the parallel
+60-second harness timed out; its completed output contained only true values.
+Final full-suite, cloud and owner-side qualification, including unrelated
+baseline failures, is recorded in the checkpoint.

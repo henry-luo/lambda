@@ -28,24 +28,45 @@ pub pn dependencies(tx, keys, record, cached=[]) any^ {
     }
     return true
 }
-pub pn flush(tx, keys, current) any^ {
+pn flush_record(tx, keys, current, original, previous, reusable) any^ {
+    if (reusable and previous != null and previous.history != null and previous.export_id != null and
+        codec.same_encoding(original,previous)^) {
+        // Only a previously settled head can reuse unchanged document persistence.
+        return {record:previous,headers:history.headers(tx,keys,previous.history)^.entries,
+            versions:previous.session.versions}
+    }
+    let flushed = history.flush_observed(tx,keys,original,now().unix,previous,history.retired(current))^
+    let record = flushed.record
+    model.validate(record,keys.space)^
+    dependencies(tx,keys,record,reach.cache_ids(current))^
+    for (saved in [record.origin,*record.session.versions]) {
+        repo.store_object(tx,keys,"checkpoint",protocol.checkpoint(saved.replica))^
+    }
+    let stored_id = repo.store_object(tx,keys,"document",model.public_state(record)^)^
+    let endpoint = protocol.durable(record.endpoint,'local',record.endpoint.replica.clock,
+        [for (reference in blob.required(record.endpoint.replica)^) reference.manifest])^
+    return {record:{*:record,endpoint:endpoint,export_id:stored_id},headers:flushed.headers,
+        versions:flushed.versions}
+}
+pub pn flush_observed(tx, keys, current, previous=null, reusable=false) any^ {
     var updated = current
+    var expanded = current
     var observed_headers = []
     if (len(model.all(current))^ > 64) raise error("sync document: document count limit")
     for (original in model.all(current)) {
-        let record = history.flush(tx,keys,original,now().unix)^
-        observed_headers = [*observed_headers,*history.headers(tx,keys,record.history)^.entries]
-        model.validate(record,keys.space)^
-        dependencies(tx,keys,record,reach.cache_ids(current))^
-        for (saved in [record.origin,*record.session.versions]) {
-            repo.store_object(tx,keys,"checkpoint",protocol.checkpoint(saved.replica))^
-        }
-        let stored_id = repo.store_object(tx,keys,"document",model.public_state(record)^)^
-        let endpoint = protocol.durable(record.endpoint,'local',record.endpoint.replica.clock,
-            [for (reference in blob.required(record.endpoint.replica)^) reference.manifest])^
-        updated = model.replace(updated,history.pack({*:record,endpoint:endpoint,export_id:stored_id}))^
+        let old = v.lookup(model.all(previous),original.id)^
+        let flushed = flush_record(tx,keys,current,original,old,reusable)^
+        let durable = flushed.record
+        observed_headers = [*observed_headers,*flushed.headers]
+        updated = model.replace(updated,history.pack(durable))^
+        expanded = model.replace(expanded,{*:durable,session:{*:durable.session,versions:flushed.versions,
+            saved_heads:session.heads({versions:flushed.headers})^}})^
     }
-    return cache_state.recover(tx,keys,maintenance.observe(updated,observed_headers,now().unix)^)^
+    let packed = cache_state.recover(tx,keys,maintenance.observe(updated,observed_headers,now().unix)^)^
+    return {state:packed,expanded:if (expanded.documents == null) packed else ({*:packed,documents:expanded.documents})}
+}
+pub pn flush(tx, keys, current) any^ {
+    return flush_observed(tx,keys,current)^.state
 }
 pub pn install_roots(tx, keys, current, roots) any^ {
     if (not (roots is array) or len(roots) > 64 or len(unique([for (root in roots) root.id])) != len(roots))
