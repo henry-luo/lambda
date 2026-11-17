@@ -20,10 +20,14 @@ pub fn capture_id(members) any^ => codec.digest(["lambda-zip-capture-1",[for (me
     {path:member.path,type:member.type,size:member.content.size,hash:member.content.hash}]])^
 
 pub fn apply_groups(endpoint, actor, commands, max_ops=128, max_bytes=65536) any^ {
+    if (not v.natural(max_ops)^ or max_ops < 1 or max_ops > 1024 or
+        not v.natural(max_bytes)^ or max_bytes < 1024)
+        raise error("sync ZIP: invalid capture group limits")
     var result = endpoint
     var i = 0
+    var width = max_ops
     while (i < len(commands)) {
-        var count = min(max_ops,len(commands)-i)
+        var count = min(width,len(commands)-i)
         // Filesystem history retains saved revisions, not editor undo snapshots.
         var edited = w.transact(result,actor,slice(commands,i,i+count)^,false)^
         var packet = p.transaction_frame(edited.endpoint.replica,edited.batch,w.model)^
@@ -34,6 +38,8 @@ pub fn apply_groups(endpoint, actor, commands, max_ops=128, max_bytes=65536) any
             packet = p.transaction_frame(edited.endpoint.replica,edited.batch,w.model)^
         }
         if (len(binary(codec.encode(packet)^))^ > max_bytes) raise error("sync ZIP: event exceeds transfer budget")
+        // reuse a measured fitting width instead of reauthoring an oversized suffix each round.
+        width = count
         result = edited.endpoint
         i = i+count
     }

@@ -2096,7 +2096,8 @@ D11.1.2. They expose mechanisms; repository policy remains Lambda Script.
   `entries(root, relative, limit)`, `capture(root, relative, limit)`,
   `install(root, relative, bytes, expected_token)`, `erase(root, relative, token)`,
   and `directory(root, relative)` reuse held-directory file anchors. Capture
-  returns bytes and observed metadata; null byte content represents an empty
+  accepts a byte limit up to 64 MiB and returns bytes and observed metadata;
+  null byte content represents an empty
   existing file (S2.2.4). Null install token means create-only. Existing-file
   replacement/removal requires a current token. Tokens detect substitution,
   not exclusion of all external writers. Unsupported entries/platforms and
@@ -2108,11 +2109,11 @@ IO/grant boundary (D11.1.2, D11.2.1–D11.2.4):
 
 | Procedure | Contract |
 |---|---|
-| `disk.read_stream(root, relative, options, consumer)` | Calls `pn(state, bytes)` for positive binary blocks; returns `{source, state, hash}` with observed metadata and SHA256. Options: `state`, optional `token`, `block_bytes` (default 65,536, maximum 1 MiB), `max_bytes` (default 256 MiB). |
+| `disk.read_stream(root, relative, options, consumer)` | Calls `pn(state, bytes)` for positive binary blocks; returns `{source, state, hash}` with observed metadata and SHA256. Options: `state`, optional `token`, `block_bytes` (default 65,536, maximum 8 MiB), `max_bytes` (default 256 MiB), `offset` (default 0) and `length` (default remaining bytes). Ranges retain held-file/revision checks; SHA256 covers the selected bytes, while source metadata describes the full file. |
 | `disk.write_stream(root, relative, options, producer)` | Options require `size`, 32-byte SHA256 `hash`, initial `state`, and optional `expected` observation token. Producer returns `{bytes, state, done}`; final `done:true` requires `bytes:null`. Exact length/hash precede atomic publication. Null expected token is create-only. |
 | `crypto.hash_stream(options, producer)` | Same producer contract, `size` and `state`; returns `{source:null, state, hash}` without file publication. |
 
-Native streaming size bounds are 0–64 GiB. Each producer block is 1 byte–1 MiB.
+Native streaming size bounds are 0–64 GiB. Each producer block is 1 byte–8 MiB.
 Consumer/producer procedures can suspend. The native scope roots callback state,
 checks cancellation, closes held files, and aborts unpublished stages on error.
 Reads revalidate held and named source revisions after callbacks. Writes preserve

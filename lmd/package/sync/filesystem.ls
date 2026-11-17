@@ -31,7 +31,7 @@ pub pn capture_file(tx, keys, root, path, config, maximum, token=null) any^ {
     if (observed == null or observed.kind != 'file' or (token != null and observed.token != token))
         raise capture_changed("capture changed or exceeds limit")
     if (observed.size > maximum) raise error("sync filesystem: capture changed or exceeds limit")
-    if (observed.size <= 8388608) {
+    if (observed.size <= repo.legacy_capture_limit(config)) {
         let item = disk.capture(root,path,8388608) ^ {
             capture_failure(root,path,observed,^,"file changed during capture")^
         }
@@ -50,7 +50,7 @@ pub pn observe(root, path, maximum=268435456) any^ {
 pub fn matches(reference, observation) bool^ => reference.size == observation.size and reference.hash == observation.hash
 fn overlaps(path, targets) any^ => targets == null or any([for (target in targets)
     path == target or starts_with(path,target ++ "/")^ or starts_with(target,path ++ "/")^])
-pn walk(tx, keys, root, prefix, result, config, bounds, previous, depth=0, targets=null, old_members=[]) any^ {
+pn walk(tx, keys, root, prefix, result, config, bounds, previous, depth=0, targets=null, old_members=[], known={}) any^ {
     if (depth > 128) raise error("sync filesystem: depth limit")
     let before = disk.inspect(root,prefix)^
     if (before.kind != 'dir') raise capture_changed("missing directory")
@@ -78,9 +78,18 @@ pn walk(tx, keys, root, prefix, result, config, bounds, previous, depth=0, targe
                 if (after == null or after.identity != child.identity or after.token != child.token)
                     raise capture_changed("cached file observation changed")
             } else {
-                let item = capture_file(tx,keys,root,path,config,bounds.file_bytes,child.token)^
-                reference = item.content
-                token = item.token
+                let prior = known[path]
+                let observed = if (prior != null and prior.type == 'file') observe(root,path,bounds.file_bytes)^ else null
+                if (observed != null and observed.token != child.token) raise capture_changed("file changed during verification")
+                if (observed != null and matches(prior.content,observed)^) {
+                    // A verification scan or profile upgrade must not manufacture a new file revision.
+                    reference = prior.content
+                    token = observed.token
+                } else {
+                    let item = capture_file(tx,keys,root,path,config,bounds.file_bytes,child.token)^
+                    reference = item.content
+                    token = item.token
+                }
             }
             captured = {*:captured,bytes:captured.bytes+reference.size}
         }
@@ -99,7 +108,7 @@ pn walk(tx, keys, root, prefix, result, config, bounds, previous, depth=0, targe
                     raise error("sync filesystem: capture limit")
                 captured = {members:[*captured.members,*retained],bytes:captured.bytes+bytes}
             } else {
-                captured = walk(tx,keys,root,path,captured,config,bounds,previous,depth+1,targets,old_members)^
+                captured = walk(tx,keys,root,path,captured,config,bounds,previous,depth+1,targets,old_members,known)^
             }
         }
         i = i+1
@@ -116,7 +125,7 @@ pn capture_selected(tx, keys, current, targets, verify=false) any^ {
     let cached = map([for (member in current.disk where not verify and
         not (targets != null and member.type == 'file' and overlaps(member.path,targets)^)) (member.path,member)])
     let result = walk(tx,keys,current.root,"",{members:[],bytes:0},current.chunker,limits(current)^,
-        cached,0,targets,current.disk)^
+        cached,0,targets,current.disk,map([for (member in current.disk) (member.path,member)]))^
     let members = sort(result.members,(member)=>member.path)^
     if (len(unique([for (member in members) lower(member.path)^])) != len(members))
         raise error("sync filesystem: ambiguous portable path spelling")

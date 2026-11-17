@@ -4,6 +4,7 @@ import protocol: .protocol
 import workspace: .workspace
 import auth: .auth
 import codec: .codec
+import wire: .object_wire
 import v: .schema
 import crypto: lambda.io.crypto
 import document_state: .document_state
@@ -113,7 +114,7 @@ pub fn object_id(id) any^ {
     return true
 }
 pub fn offset(value) any^ {
-    if (not v.natural(value)^ or value > 8388608) raise error("sync peer: invalid offset")
+    if (not v.natural(value)^ or value > wire.maximum) raise error("sync peer: invalid offset")
     return true
 }
 pub fn object_ids(ids) any^ {
@@ -124,8 +125,8 @@ pub fn object_ids(ids) any^ {
 }
 pub pn object_text(handle, id) any^ {
     object_id(id)^
-    let encoded = codec.encode(local.export_objects(handle,[id])^[0])^
-    if (len(encoded) > 8388608) raise error("sync peer: encoded object limit")
+    let encoded = wire.encode(local.export_objects(handle,[id])^[0])^
+    if (len(encoded) > wire.maximum) raise error("sync peer: encoded object limit")
     return encoded
 }
 pub fn fragment(id, encoded, start) any^ {
@@ -137,15 +138,15 @@ pub pn import_fragment(handle, pending, part) any^ {
     v.fields(part,["id","offset","total","text"])^
     object_id(part.id)^
     offset(part.offset)^
-    if (not v.natural(part.total)^ or part.total < 1 or part.total > 8388608 or
-        not (part.text is string) or len(part.text)^ < 1 or len(part.text)^ > fragment_size or
+    if (not v.natural(part.total)^ or part.total < 1 or part.total > wire.maximum or
+        not (part.text is string or part.text is binary) or len(part.text)^ < 1 or len(part.text)^ > fragment_size or
         part.offset+len(part.text)^ > part.total) raise error("sync peer: invalid object fragment")
-    let base = if (part.offset == 0) {id:part.id,total:part.total,text:""} else pending
+    let base = if (part.offset == 0) {id:part.id,total:part.total,text:if (part.text is binary) null else ""} else pending
     if (base == null or base.id != part.id or base.total != part.total or len(base.text)^ != part.offset)
         raise error("sync peer: noncontiguous object fragment")
     let text = base.text ++ part.text
     if (len(text)^ < part.total) { return {id:part.id,total:part.total,text:text} }
-    let record = codec.decode(text)^
+    let record = if (text is binary) wire.decode(text)^ else codec.decode(text)^
     if (record.id != part.id) raise error("sync peer: object descriptor mismatch")
     local.import_objects(handle,[record])^
     return null

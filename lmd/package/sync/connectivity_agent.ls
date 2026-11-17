@@ -93,9 +93,10 @@ pn advance(credentials, config, pending) any^ {
 
 pub pn run(directory, key, config=null, settings={}, observer=null) any^ {
     let selected = options(settings)^
-    if (config == null and selected.mdns) {
+    if ((config == null or config.storage != null) and selected.mdns) {
         return lan.run(directory,key,{*:selected,observer:observer,
-            interval_ms:if (settings.interval_ms == null) 100 else min(selected.interval_ms,selected.idle_ms)})^
+            interval_ms:if (settings.interval_ms == null) 100 else min(selected.interval_ms,selected.idle_ms)},
+            if (config == null) null else config.storage)^
     }
     let initial = agent.resume_agent(directory,key)^
     local.scan(initial.handle)^

@@ -4,6 +4,16 @@ import w: lambda.sync.workspace
 import c: lambda.sync.core
 import p: lambda.sync.protocol
 import codec: lambda.sync.codec
+import repo: lambda.sync.repository
+import packs: lambda.sync.pack_store
+import hex: lambda.security.tuf.metadata
+
+pub pn physical(handle, id) any^ {
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> {
+        let found = packs.location(k,id)^
+        return if (found == null) hex.hex(id)^ ++ ".object" else found.pack ++ ".pack"
+    })^
+}
 
 pub pn transfer(source, destination) any^ {
     let available = local.inventory(destination)^

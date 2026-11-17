@@ -34,12 +34,12 @@ pub pn capture(handle, credentials, epoch=0, inventory=null, physical=null) any^
     let content = {saved:saved,snapshots:current.snapshots,proof:proof,documents:documents.roots(current),
         retention:maintenance.get(current).manifest,cache:current.cache_root}
     let payload = if (physical == null) {version:3,*:content,ids:ids}
-        else {version:4,*:content,inventory:physical.root}
+        else {version:5,*:content,inventory:physical.root,locations:physical.locations}
     let bytes = crypto.seal(key(credentials)^,codec.encode(payload)^,context(credentials))^
     return {bytes:bytes,key:catalog.data_key("bundles",hex.hex(hash(bytes,'sha256')^)^,epoch)^,payload:if (physical == null) payload else {*:payload,ids:ids,locations:physical.locations}}
 }
 pub pn reseal(credentials, payload, root, epoch) any^ {
-    let wire = {version:4,saved:payload.saved,snapshots:payload.snapshots,proof:payload.proof,
+    let wire = {version:5,locations:payload.locations,saved:payload.saved,snapshots:payload.snapshots,proof:payload.proof,
         documents:payload.documents,retention:payload.retention,cache:payload.cache,inventory:root}
     let bytes = crypto.seal(key(credentials)^,codec.encode(wire)^,context(credentials))^
     return {bytes:bytes,key:catalog.data_key("bundles",hex.hex(hash(bytes,'sha256')^)^,epoch)^,
@@ -47,8 +47,8 @@ pub pn reseal(credentials, payload, root, epoch) any^ {
 }
 pub fn open_payload(credentials, bytes) any^ {
     let payload = codec.decode(crypto.open(key(credentials)^,bytes,context(credentials))^)^
-    v.record(payload,["version","saved","snapshots","proof"],["ids","inventory","documents","retention","cache"])^
-    if (not contains([1,2,3,4],payload.version)^ or not (payload.snapshots is array) or
+    v.record(payload,["version","saved","snapshots","proof"],["ids","inventory","locations","documents","retention","cache"])^
+    if (not contains([1,2,3,4,5],payload.version)^ or not (payload.snapshots is array) or
         (payload.version >= 2 and not (payload.documents is array)))
         raise error("sync cloud: unsupported checkpoint payload")
     core.restore(payload.saved)^
@@ -72,7 +72,7 @@ pub fn decode(credentials, publication, bytes) any^ {
         len(binary(bytes)^) != publication.bundle.bytes) raise error("sync cloud: bundle digest mismatch")
     let payload = open_payload(credentials,bytes)^
     let replica = core.restore(payload.saved)^
-    if (payload.version == 4) {
+    if (payload.version >= 4) {
         if (payload.inventory != null) { pages.valid_ref(payload.inventory)^ }
         if (publication.version != 2 or replica.document != credentials.space or replica.clock != publication.clock or
             payload.proof.actor != publication.actor or schema.digest(payload.inventory)^ != publication.inventory)
@@ -98,11 +98,11 @@ pub fn decode(credentials, publication, bytes) any^ {
     return payload
 }
 pub pn expand(config, credentials, publication, payload) any^ {
-    if (payload.version != 4) {
+    if (payload.version < 4) {
         return {*:payload,locations:[for (id in payload.ids) {id:id,key:object_key(id,catalog.epoch(publication.bundle.key)^)^}]}
     }
     inventory_pages.verify_binding(config,credentials,publication,payload.inventory)^
-    let inventory = inventory_pages.expand(config,credentials,payload.inventory)^
+    let inventory = inventory_pages.expand(config,credentials,payload.inventory,if (payload.version == 5) payload.locations else null)^
     let ids = inventory.ids
     if (not (payload.snapshots is array) or not all([for (id in payload.snapshots) contains(ids,id)^]) or
         not (payload.documents is array) or len(payload.documents)^ > 64 or

@@ -41,10 +41,22 @@ pub pn merge(config, credentials, values, epoch) any^ {
     let root = pages.combined([for (value in values where value != null) value.root])^
     return checked(transport.call(config,credentials,"stage_merge",{receipts:receipts})^,root,epoch)^
 }
-pub pn expand(config, credentials, root) any^ {
+pub pn expand(config, credentials, root, mapping=null) any^ {
     let entries = pages.all(reader(config,credentials),"",root,65536)^
     if (not all([for (entry in entries) starts_with(entry.id,"objects/")^ and schema.data_key(entry.id)^]))
         raise error("sync cloud: inventory contains non-object paths")
+    if (mapping != null) {
+        if (not (mapping is array) or len(mapping)^ > 65536) raise error("sync cloud: invalid logical inventory")
+        for (entry in mapping) {
+            if (not (entry.id is binary) or len(entry.id)^ != 32 or
+                not contains([for (item in entries) item.id],entry.key)^)
+                raise error("sync cloud: logical inventory references an uncommitted pack")
+        }
+        if (len(unique([for (entry in mapping) entry.id]))^ != len(mapping)^ or
+            sort(unique([for (entry in mapping) entry.key]))^ != [for (entry in entries) entry.id])
+            raise error("sync cloud: incomplete or duplicate logical inventory")
+        return {locations:mapping,ids:sort([for (entry in mapping) entry.id])^}
+    }
     let locations = [for (entry in entries) {id:hex.unhex(split(entry.id,"/")^[len(split(entry.id,"/")^)^-1])^,key:entry.id}]
     return {locations:locations,ids:sort(unique([for (entry in locations) entry.id]))^}
 }

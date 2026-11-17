@@ -42,6 +42,8 @@ fn scalar_values(value, depth=0) any^ {
 }
 fn validate_scalars(value) any^ {
     let originals = scalar_values(value)^
+    // exact primitive tuples need no Mark round-trip or retained Input arena.
+    if (len(originals)^ == 0) { return true }
     // one parsed document per value avoids one retained Input arena per scalar.
     let decoded = parse(format(originals,'mark')^,'mark')^
     if (not (decoded is array) or len(decoded)^ != len(originals)^)
@@ -76,6 +78,7 @@ fn scalar_tuples(tuple, depth=0) any^ {
 }
 fn decoded_scalars(tuple) any^ {
     let selected = scalar_tuples(tuple)^
+    if (len(selected)^ == 0) { return {} }
     let values = parse("[" ++ join([for (item in selected) item[1]],",")^ ++ "]",'mark')^
     if (not (values is array) or len(values)^ != len(selected)^) raise error("sync codec: invalid scalar literal")
     var result = {}

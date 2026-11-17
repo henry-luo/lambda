@@ -8,6 +8,7 @@ import transport: .cloud_transport
 import bundle: .cloud_bundle
 import schema: .cloud_schema
 import codec: .codec
+import objects: .cloud_objects
 import v: .schema
 import hex: lambda.security.tuf.metadata
 import sqlite: lambda.io.sqlite
@@ -17,7 +18,7 @@ fn pin_request(id, ids, locations, protocol) any^ => {id:id,objects:[for (object
     *:if (protocol != 2) {} else {keys:[for (entry in locations) entry.key]}}
 pub fn physical_key(pin, id, epoch, fallback=null) any^ {
     let keys = if (pin == null or pin.keys == null) [] else
-        [for (key in pin.keys where ends_with(key,"/" ++ hex.hex(id)^)^) key]
+        [for (index in 0 to (len(pin.objects)^-1) where pin.objects[index] == hex.hex(id)^) pin.keys[index]]
     return if (len(keys)^ > 0) keys[0] else if (fallback != null) fallback else bundle.object_key(id,epoch)^
 }
 pub pn plan(handle, credentials, config, limit=64) any^ {
@@ -47,7 +48,7 @@ pub pn plan(handle, credentials, config, limit=64) any^ {
     if (not pin.reserved) raise error("sync cache: remote reservation contention; retry")
     // authenticate actual remote bytes, rather than treating an existence check as a verified copy.
     for (object_id in selected) {
-        let record = codec.decode(transport.read(config,credentials,physical_key({keys:[for (entry in locations where entry.id == object_id) entry.key]},object_id,pin.epoch)^)^)^
+        let record = objects.select(handle.keys,transport.read(config,credentials,physical_key({objects:[hex.hex(object_id)^],keys:[for (entry in locations where entry.id == object_id) entry.key]},object_id,pin.epoch)^)^,object_id)^
         if (record.id != object_id or not repo.is_chunk(record.kind)^) raise error("sync cache: wrong remote copy")
         repo.validate_record(handle.keys,record)^
     }
@@ -104,7 +105,7 @@ pub pn hydrate(handle, credentials, config, budget=64) any^ {
     for (entry in selected) {
         let pin = v.lookup(remote.pins,entry.pin)^
         let key = if (v.lookup(known,entry.id)^.key != null) v.lookup(known,entry.id)^.key else v.lookup(discovered,entry.id)^.key
-        let record = codec.decode(transport.read(config,credentials,physical_key(pin,entry.id,epoch,key)^)^)^
+        let record = objects.select(handle.keys,transport.read(config,credentials,physical_key(pin,entry.id,epoch,key)^)^,entry.id)^
         if (record.id != entry.id or not repo.is_chunk(record.kind)^)
             raise error("sync cache: durable reservation missing; local metadata retained for recovery")
         repo.validate_record(handle.keys,record)^

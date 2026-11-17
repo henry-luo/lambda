@@ -6,7 +6,7 @@ pub fn lookup(entries, id) {
     if (len(found) == 0) null else found[0]
 }
 
-// Causal indexes are validated/sorted by (actor, numeric counter), never by serialized text.
+// Causal IDs use actor/numeric order; locator IDs use their full sorted strings.
 pub fn lookup_id(entries, id) {
     var lo = 0
     var hi = len(entries)
@@ -14,7 +14,9 @@ pub fn lookup_id(entries, id) {
         let mid = (lo+hi) div 2
         let entry = entries[mid]
         if (entry.id == id) { return entry }
-        if (entry.id[0] < id[0] or (entry.id[0] == id[0] and entry.id[1] < id[1])) { lo = mid+1 }
+        let before = if (id is string) entry.id < id else
+            entry.id[0] < id[0] or (entry.id[0] == id[0] and entry.id[1] < id[1])
+        if (before) { lo = mid+1 }
         else { hi = mid }
     }
     return null
@@ -31,7 +33,7 @@ pub fn record(value, required, optional=[]) any^ {
 
 pub fn fields(value, names) any^ {
     if (not (value is map) or sort([for (key at value) string(key)]) != sort(names))
-        raise error("sync: invalid record fields")
+        raise error("sync: invalid record fields; expected " ++ join(sort(names),",")^ ++ " found " ++ join(sort([for (key at value) string(key)]),",")^)
     return true
 }
 

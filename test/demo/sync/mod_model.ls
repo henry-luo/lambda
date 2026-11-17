@@ -28,6 +28,10 @@ pub fn detail(st) any^ => if (st.mode == "active" and st.status.discovery_error 
         "An external edit needs review. Your local files have been preserved."
     else if (st.mode == "active" and len(st.status.progress.conflicts or []) > 0)
         "Some files have concurrent changes. Their versions are preserved for review."
+    else if (st.mode == "active" and st.status.cloud_enabled == true and st.status.cloud_saved == true)
+        "Your current changes are backed up to cloud storage."
+    else if (st.mode == "active" and st.status.cloud_enabled == true)
+        "Cloud backup is pending. Keep Lambda Sync open while it retries."
     else if (st.mode == "active" and st.status.sessions > 0)
         "Changes in this folder sync automatically while your devices are on the same network."
     else if (st.mode == "active") "Keep Lambda Sync open on your paired devices on the same network."

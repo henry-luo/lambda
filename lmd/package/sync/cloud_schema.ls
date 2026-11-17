@@ -58,7 +58,7 @@ pub fn member(control, actor, active=true) any^ {
 }
 pub fn descriptor(value) any^ {
     v.fields(value,["key","bytes","checksum"])^
-    if (not data_key(value.key)^ or not v.natural(value.bytes)^ or value.bytes < 1 or value.bytes > 8388608 or
+    if (not data_key(value.key)^ or not v.natural(value.bytes)^ or value.bytes < 1 or value.bytes > 33554432 or
         not (value.checksum is string) or len(value.checksum) != 44 or slice(value.checksum,43,44) != "=" or
         not all([for (ch in split(slice(value.checksum,0,43),"")^)
             contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",ch)^])) raise error("sync cloud: invalid object descriptor")

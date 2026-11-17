@@ -4,6 +4,8 @@ import sqlite: lambda.io.sqlite
 import crypto: lambda.io.crypto
 import disk: lambda.io.disk
 import hex: lambda.security.tuf.metadata
+import packs: lambda.sync.pack_store
+import helpers: ~~.mod_sync_local_helpers
 
 pn main() {
     let area = "temp/sync-local-maintenance"
@@ -16,6 +18,7 @@ pn main() {
     let before = local.status(handle)^
     let interrupted = repo.access(handle.path,handle.keys,pn (tx,k)=> {
         repo.store_object(tx,k,"chunk",binary("unpublished orphan")^)^
+        packs.flush(tx,k)^
         raise error("interrupted before head publication")
     }) ^ { true }
     let recovery = local.recover(handle)^
@@ -27,8 +30,8 @@ pn main() {
     let restored_inventory = local.inventory(handle)^
     let id = available[0]
     let directory = handle.path ++ ".objects"
-    let name = hex.hex(id)^ ++ ".object"
-    let captured = disk.capture(directory,name,8388608)^
+    let name = helpers.physical(handle,id)^
+    let captured = disk.capture(directory,name,33554432)^
     let bytes = captured.bytes
     let changed = binary([for (index in 0 to (len(bytes)^-1))
         if (index == len(bytes)^-1) bxor(bytes[index],1)^ else bytes[index]])^

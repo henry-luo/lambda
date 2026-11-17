@@ -79,12 +79,13 @@ snapshots; saved file revisions retain their version history.
 | API | Contract |
 |---|---|
 | `create(path, key, space, root, device, chunker?)` | Create the local repository and empty workspace; return a handle. |
-| `open_repository(path, key, space)` | Authenticate and validate existing state; return a fresh writer handle. |
+| `open_repository(path, key, space, cache_enabled=false)` | Authenticate and validate existing state; return a fresh writer handle, optionally carrying its validation proof through startup. |
+| `with_cache(handle, observed)` | Attach a committed result's existing repository cache; every access still authenticates the head and matches its generation and immutable ID before reuse. |
 | `status(handle)` | Read the committed local state without advancing it. |
 | `acknowledge(handle, peer, frontier)` | Validate and persist a peer's accepted causal frontier; this does not mark it cloud-saved. |
 | `record_cloud(handle, provider, actor, sequence, publication, captured, objects?, documents?)` | Record host-verified workspace/document coverage and per-provider progress after validating dependencies. |
 | `register_documents(handle, roots)` | Validate imported shared document objects and merge their sessions without overwriting the local disk base. |
-| `record_cloud_control(handle, provider, generation, digest)` | Retain observed signed-control position; reject rollback/forks. |
+| `record_cloud_control(handle, provider, generation, digest, backup=null)` | Retain observed signed-control position and optional catalog backup in one durable transaction; reject rollback/forks before updating either. |
 | `register_snapshots(handle, ids)` | Verify imported named snapshot objects and retain their roots locally. |
 | `scan(handle, paths=null, verify=false)` | Capture the whole tree, or reconcile bounded notification paths against the accepted index; `verify` rereads all file content. Commit content before the new head. |
 | `transact(handle, commands)` | Apply existing workspace commands; referenced content must already be available. |
@@ -118,8 +119,8 @@ hosts cannot resume that intent. Other state and shared object formats remain.
 
 ## Objects and encryption
 
-`<database>.objects/` holds canonical, create-only object files named by their
-32-byte scoped ID in lowercase hex plus `.object`. SQLite stores a derived
+`<database>.objects/` holds immutable packs named by SHA256 of their complete
+bytes plus `.pack`, alongside readable legacy loose `.object` files. SQLite stores a derived
 `objects` locator table and an encrypted generation-checked `heads` record.
 Paths, manifests, workspace state and private recovery journals are encrypted;
 SQL exposes object IDs, generic kinds, sizes and head generations. Editable
@@ -162,6 +163,42 @@ file/revision history remains represented by workspace checkpoints and manifests
 
 ## Chunking and exchange
 
+### Immutable packs
+
+Authority: D11.1.2, D11.2.1–D11.2.4. Normal repository scopes stage encrypted
+records transactionally, flush bounded packs, and then commit the locator/head
+transaction. A pack targets 16 MiB with a hard 32 MiB bound and 4,096-record
+limit. Its layout is `LPK1 | LRP1 records | encrypted index | index_length_u32le`.
+The index plaintext is `LPI1 | count_u32le | (id[32], offset_u32le, length_u32le)*`.
+AES-GCM authenticates the index under a separate space-bound context; every
+blob retains its own existing AEAD and scoped content ID. The index must describe
+contiguous, non-overlapping records covering the body exactly. Whole-pack SHA256,
+index authentication, record IDs and content authentication are checked during
+verification/recovery. Bounded native range reads retrieve a blob without parsing
+or reading the whole pack.
+
+`pack_locations` is a disposable offset index; `pack_pending` is transaction-local
+staging. Durable packs precede commit. Interrupted transactions may leave valid
+unindexed packs; recovery discovers them without advancing the selected head.
+Rebuilding locators scans authenticated pack metadata and mixed legacy objects.
+Direct initialization outside normal repository scopes retains loose-file support.
+
+Pruning removes logical locators and batches each affected pack's rewrite once
+per scope. Retained records are copied into a new immutable pack before locator
+commit. `pack_obsolete` schedules old-pack deletion on the next scope, after the
+new locators have committed. A crash may leave extra recoverable bytes; it cannot
+make a committed locator refer to an intentionally deleted predecessor pack.
+Repair does not invent history references to rediscovered unreachable data.
+
+Cloud publication uses the same binary packs and checkpoint payload v5: a signed
+physical dependency tree plus an encrypted logical-ID-to-pack mapping. One pack
+may satisfy many logical IDs. Receivers fetch each selected pack once per batch,
+validate its index and authenticate imported records. Existing v1–v4 payloads and
+typed-JSON loose envelopes remain readable. Older clients must update before
+reading v5 publications or the new chunk profile; this is not wire negotiation.
+Legacy maintenance replacement paths can still emit individual binary records;
+normal maintenance reuses committed packs without recopying retained ciphertext.
+
 `lambda-gear32-1` uses the Gear rolling fingerprint described by the
 [FastCDC work](https://www.usenix.org/conference/atc16/technical-sessions/presentation/xia),
 without claiming FastCDC wire compatibility or its normalization optimizations.
@@ -169,9 +206,22 @@ Its table is the first four SHA-256 bytes, big-endian, of
 `"lambda-gear32-1:" ++ string(byte)` for byte values 0–255. Starting at zero,
 `fingerprint = (2*fingerprint + table[byte]) % 2^32`; cut after the minimum when
 `fingerprint & (target-1) == 0`, or at the maximum, then reset the fingerprint.
-The initial profile is 1 KiB minimum, 4 KiB target and 16 KiB maximum. Parameters
-are stored with each manifest and must use a power-of-two target. This is a
-reference profile; release tuning and packing are later work.
+That legacy profile remains readable and preserves its original boundaries.
+New repositories use `lambda-fastcdc32-1`: 512 KiB minimum, 1 MiB target and
+8 MiB maximum. It skips fingerprint updates before the minimum and normalizes
+boundaries with a stricter mask (`2*target-1`) before `target-minimum/2`, then
+an easier mask (`target/2-1`). The pivot compensates for the relatively large
+minimum; the actual average depends on input. The Gear table is shared with the
+legacy profile, but the algorithm ID distinguishes boundary rules. This is a
+versioned Gear-based implementation of FastCDC techniques, not byte-compatible
+with restic's Rabin chunker or an upstream FastCDC library.
+
+Parameters are stored with each manifest and must use a power-of-two target.
+Opening a repository using the exact former default upgrades its future capture
+profile. Customized legacy profiles remain unchanged. Existing manifests and
+snapshots retain their profiles. Verification hashes unchanged working files and
+reuses their original content references; changing the profile alone creates no
+file revision (D11.1.2).
 
 Manifests retain ordered chunk IDs/lengths, total size, profile and whole-file
 SHA-256. Empty files have a manifest with no chunks and null byte content
@@ -251,8 +301,10 @@ Implementation and qualification: [completed local milestone](<../../../vibe/imp
 
 ## Streamed files and private location pages
 
-Files above 8 MiB use manifest v2 with encrypted `file_page` objects, each holding
-up to 256 chunk descriptors. New streamed chunks use appended object kind
+Files larger than the smaller of 256 KiB or 256 times the configured minimum chunk size use manifest v2
+with encrypted `file_page` objects, each holding up to 256 chunk descriptors.
+With the default chunker this threshold is 256 KiB. Verification can hash
+without collecting the whole payload, and installation streams larger files. New streamed chunks use appended object kind
 `chunk_raw`: raw binary plaintext, SHA256/HMAC identity and a separate raw-binary
 cryptographic context (`lambda-repository-chunk-raw-1:` + UTF-8 space + fixed
 32-byte digest/ID). Existing kind numbers, legacy chunk plaintext and contexts

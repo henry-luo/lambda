@@ -13,6 +13,9 @@ import retention_state: .maintenance_state
 import inventory_pages: .cloud_inventory
 import hex: lambda.security.tuf.metadata
 import cache_state: .cache_state
+import objects: .cloud_objects
+import wire: .object_wire
+import repository: .repository
 
 pub fn provider(config) any^ => schema.digest([config.url,config.authority])^
 fn sources(current) => if (current.cloud_sources == null) [] else current.cloud_sources
@@ -30,12 +33,7 @@ pn install(handle, credentials, config, control, publication, verify=false) any^
     let pending = [for (id in payload.ids where verify or (not contains(have,id)^ and not contains(deferred,id)^)) id]
     for (offset in range(0,len(pending)^,64)) {
         let ids = slice(pending,offset,offset+64)^
-        let records = transport.read_many(config,credentials,[for (id in ids) locations[hex.hex(id)^]])^
-        let decoded = [for (index in 0 to (len(ids)^-1)) {
-            let record = codec.decode(records[index].bytes)^;
-            if (record.id != ids[index]) raise error("sync cloud: object ID mismatch")
-            record
-        }]
+        let decoded = objects.read(config,credentials,[for (id in ids) {id:id,key:locations[hex.hex(id)^]}])^
         local.import_objects(handle,decoded)^
         downloaded = downloaded+len(decoded)^
     }
@@ -44,9 +42,7 @@ pn install(handle, credentials, config, control, publication, verify=false) any^
     let needed = [for (id in hot where contains(deferred,id)^ and not contains(have,id)^) id]
     for (offset in range(0,len(needed)^,64)) {
         let ids = slice(needed,offset,offset+64)^
-        let records = transport.read_many(config,credentials,[for (id in ids) locations[hex.hex(id)^]])^
-        let decoded = [for (index in 0 to (len(ids)^-1)) codec.decode(records[index].bytes)^]
-        if ([for (record in decoded) record.id] != ids) raise error("sync cloud: hot chunk identities mismatch")
+        let decoded = objects.read(config,credentials,[for (id in ids) {id:id,key:locations[hex.hex(id)^]}])^
         local.import_objects(handle,decoded)^
         downloaded = downloaded+len(decoded)^
     }
@@ -58,9 +54,8 @@ pub pn pull(handle, credentials, config, verify=false) any^ {
     let control = schema.control(remote.control,config.authority)^
     if (control.space != credentials.space) raise error("sync cloud: wrong control space")
     let provider = provider(config)^
-    local.record_cloud_control(handle,provider,control.generation,schema.digest(remote.control)^)^
-    local.record_catalog_backup(handle,provider,remote.catalog_backup)^
-    let current = local.status(handle)^.state
+    let current = local.record_cloud_control(handle,provider,control.generation,
+        schema.digest(remote.control)^,remote.catalog_backup)^.state
     let old_epochs = if (current.cloud_epochs == null) [] else current.cloud_epochs
     let seen_epoch = v.lookup(old_epochs,provider)^
     let epoch = if (remote.epoch == null) 0 else remote.epoch
@@ -138,11 +133,11 @@ pub pn publish(handle, credentials, config, remote) any^ {
     for (id in captured.payload.ids) {
         if (not contains(known,id)^) {
             let record = local.export_objects(handle,[id])^[0]
-            let encoded = codec.encode(record)^
+            let encoded = wire.encode(record)^
             let stored = transport.ensure(config,credentials,transport.descriptor(bundle.object_key(id,epoch)^,encoded)^,encoded)^
             if (stored.existing != null) {
                 if (not stored.existing.ok) raise error("sync cloud: existing object unavailable")
-                let existing = codec.decode(stored.existing.body)^
+                let existing = objects.select(repository.keys(credentials.secret,credentials.space)^,stored.existing.body,id)^
                 if (existing.id != id) raise error("sync cloud: immutable object mismatch")
                 local.import_objects(handle,[existing])^
             }
@@ -174,22 +169,21 @@ pub pn publish(handle, credentials, config, remote) any^ {
 pn publish_paged(handle, credentials, config, remote, current, ids, old, previous) any^ {
     let epoch = remote.epoch or 0
     let prior = local.cloud_locations(handle,provider(config)^,ids)^
-    var physical = []
+    var physical = [for (entry in prior where entry.key != null) entry]
+    let pending = [for (entry in prior where entry.key == null) entry.id]
     var uploaded = 0
-    for (entry in prior) {
-        let key = if (entry.key == null) bundle.object_key(entry.id,epoch)^ else entry.key
-        if (entry.key == null) {
-            let record = local.export_objects(handle,[entry.id])^[0]
-            let encoded = codec.encode(record)^
-            let stored = transport.ensure(config,credentials,transport.descriptor(key,encoded)^,encoded)^
-            if (stored.existing != null) {
-                let existing = if (stored.existing.ok) codec.decode(stored.existing.body)^ else null
-                if (existing == null or existing.id != entry.id) raise error("sync cloud: existing physical copy unavailable")
-                local.import_objects(handle,[existing])^
-            }
-            if (stored.uploaded) { uploaded = uploaded+1 }
+    var offset = 0
+    while (offset < len(pending)^) {
+        let packed = local.export_pack(handle,slice(pending,offset)^)^
+        let key = catalog.data_key("objects",packed.id,epoch)^
+        let stored = transport.ensure(config,credentials,transport.descriptor(key,packed.bytes)^,packed.bytes)^
+        if (stored.existing != null) {
+            if (not stored.existing.ok or hash(stored.existing.body,'sha256')^ != hash(packed.bytes,'sha256')^)
+                raise error("sync cloud: pack collision")
         }
-        physical = [*physical,{id:entry.id,key:key}]
+        physical = [*physical,*[for (id in packed.ids) {id:id,key:key}]]
+        offset = offset+len(packed.ids)^
+        if (stored.uploaded) { uploaded = uploaded+1 }
     }
     let objects = inventory_pages.stage(config,credentials,[for (entry in physical) entry.key],epoch)^
     let captured = bundle.capture(handle,credentials,epoch,ids,

@@ -61,7 +61,7 @@ pub pn request(config, method, key, bytes=null, conditions={}, query={}) any^ {
     let headers = signed(config,method,target.path,query,
         {host:target.host,*:conditions},stamp(now().unix)^,hex.hex(hash(bytes,'sha256')^)^)^
     return io.fetch(config.endpoint ++ target.path ++ (if (len(query)^ == 0) "" else "?" ++ query_string(query)),{method:method,body:bytes,
-        headers:headers,timeout:30,max_bytes:8388608,follow_redirects:false})^
+        headers:headers,timeout:30,max_bytes:33554432,follow_redirects:false})^
 }
 fn result(response) any^ {
     if (response.status == 404) { return null }

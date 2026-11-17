@@ -67,16 +67,24 @@ pub fn reply(replica, peer_have, model=default_schema, max_ops=128, max_bytes=65
     }
     let missing = sort([for (op in replica.log where not c.covered(peer_have.body.clock,op.id)^) op],
         (op)=>[op.time,op.id])^
+    let empty = message(replica,model,'updates',{clock:replica.clock,operations:[],more:true})
+    let overhead = len(binary(codec.encode(empty)^))^
+    let final_overhead = len(binary(codec.encode({*:empty,body:{*:empty.body,more:false}})^))^
+    var operation_bytes = 0
     var selected = []
     var i = 0
     while (i < len(missing) and i < max_ops) {
-        let candidate = [*selected,missing[i]]
-        let packet = message(replica,model,'updates',{clock:replica.clock,operations:candidate,more:i+1<len(missing)})
-        if (len(binary(codec.encode(packet)^))^ > max_bytes) {
+        // typed JSON array entries are independent; encode each once instead of every prefix.
+        let singleton = {*:empty,body:{*:empty.body,operations:[missing[i]]}}
+        let candidate_bytes = operation_bytes+len(binary(codec.encode(singleton)^))^-overhead+
+            (if (i == 0) 0 else 1)
+        let packet_bytes = candidate_bytes+(if (i+1 < len(missing)) overhead else final_overhead)
+        if (packet_bytes > max_bytes) {
             if (i == 0) raise error("sync protocol: operation exceeds batch limit")
             return message(replica,model,'updates',{clock:replica.clock,operations:selected,more:true})
         }
-        selected = candidate
+        selected = [*selected,missing[i]]
+        operation_bytes = candidate_bytes
         i = i+1
     }
     return message(replica,model,'updates',{clock:replica.clock,operations:selected,more:i<len(missing)})

@@ -1,5 +1,6 @@
 import chunks: lambda.sync.chunks
-let config = {*:chunks.default_profile,minimum:16,target:32,maximum:64}
+// The fixed vector pins the legacy algorithm; normalized boundaries have their own gate.
+let config = {*:chunks.legacy_profile,minimum:16,target:32,maximum:64}
 let bytes = binary([for (index in 0 to 1023) index%251])^
 let whole = chunks.split(bytes,config)^
 let a = chunks.feed(chunks.start(config)^,slice(bytes,0,17)^)^

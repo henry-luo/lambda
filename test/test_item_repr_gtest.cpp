@@ -17,6 +17,7 @@
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/runtime/type_contract.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/re2_wrapper.hpp"
 #include "../lambda/runtime/lambda-number-runtime.hpp"
 #include "lambda/input/input.hpp"
 #include "lambda/core/name_pool.hpp"
@@ -356,6 +357,23 @@ TEST_F(RuntimeShapeTransition, EmptyStringUsesPinnedSharedItem) {
     EXPECT_FALSE(empty->is_pooled);
     EXPECT_EQ(heap_strcpy("", 0), empty);
     EXPECT_EQ(heap_strcpy("", 0), empty);
+}
+
+TEST_F(RuntimeShapeTransition, PrivateResultShapeOwnsTransientNamesAfterBudgetExhaustion) {
+    Input* tree = runtime_shape_tree();
+    ASSERT_NE(tree, nullptr);
+    tree->shape_graph_budget = 1;
+    tree->shape_transition_shapes = 1;
+    char field[] = "x-transient-header";
+    const char* names[] = {field};
+    const TypeId types[] = {LMD_TYPE_STRING};
+    TypeMap* shape = runtime_result_shape(names, types, 1, true);
+    ASSERT_NE(shape, nullptr);
+    ASSERT_NE(shape->shape, nullptr);
+    EXPECT_FALSE(type_tree_owns(tree, shape));
+    // The HTTP layer frees its temporary header buffers after constructing the map.
+    memset(field, 'z', sizeof(field) - 1);
+    EXPECT_STREQ(shape->shape->name->str, "x-transient-header");
 }
 
 TEST_F(RuntimeShapeTransition, ShapeTreeUsesOneIndexedOwnerAndExplicitReset) {

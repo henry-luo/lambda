@@ -134,7 +134,7 @@ Item hash_producer(DiskStream* stream, Item producer, Item initial, int64_t size
             break;
         }
         if (get_type_id(bytes.get()) != LMD_TYPE_BINARY || bytes.get().get_len() < 1 ||
-                bytes.get().get_len() > 1048576 || bytes.get().get_len() > size - written)
+                bytes.get().get_len() > 8388608 || bytes.get().get_len() > size - written)
             return io_fs_error(ERR_INVALID_STATE, "io.stream: invalid block or length overrun");
         Binary* payload = bytes.get().get_safe_binary();
         if (!digest_update(stream->digest, binary_data(payload), binary_length(payload)) ||
@@ -197,7 +197,7 @@ extern "C" Item pn_io_disk_entries(Item root, Item relative, Item limit) {
 extern "C" Item pn_io_disk_capture(Item root, Item relative, Item limit) {
     DiskAnchor disk; Item error = ItemNull; int64_t maximum;
     if (!disk_open(root, relative, &disk, &error)) return error;
-    if (!bound(limit, 8 * 1024 * 1024, &maximum)) return io_fs_error(ERR_INVALID_OPERATION, "io.disk.capture: invalid limit");
+    if (!bound(limit, 64 * 1024 * 1024, &maximum)) return io_fs_error(ERR_INVALID_OPERATION, "io.disk.capture: invalid limit");
     char* bytes = nullptr; size_t size = 0; FileRevision revision;
     if (!file_anchor_read_all(disk.anchor, disk.relative, maximum, MEM_CAT_EVAL, &bytes, &size, &revision))
         return io_fs_error(ERR_IO_ERROR, "io.disk.capture: incomplete capture (%d)", errno);
@@ -244,11 +244,14 @@ extern "C" Item pn_io_disk_read_stream(Item root, Item relative, Item options, I
     DiskAnchor disk; DiskStream stream; Item error = ItemNull;
     if (!disk_open(held_root.get(), held_relative.get(), &disk, &error)) return error;
     IoFsOptionMap opts;
-    int64_t block_bytes = 65536, maximum = 268435456;
+    int64_t block_bytes = 65536, maximum = 268435456, offset = 0, length = -1;
     if (!io_fs_options_open(held_options.get(), "io.disk.read_stream", SYSPROC_IO_DISK_READ_STREAM, &opts, &error) ||
             !io_fs_option_count(&opts, "block_bytes", &block_bytes, &error) ||
-            !io_fs_option_count(&opts, "max_bytes", &maximum, &error)) return error;
-    if (block_bytes < 1 || block_bytes > 1048576 || maximum < 0 || maximum > INT64_C(68719476736) ||
+            !io_fs_option_count(&opts, "max_bytes", &maximum, &error) ||
+            !io_fs_option_count(&opts, "offset", &offset, &error) ||
+            !io_fs_option_count(&opts, "length", &length, &error)) return error;
+    if (block_bytes < 1 || block_bytes > 8388608 || maximum < 0 || maximum > INT64_C(68719476736) ||
+            offset < 0 || length < -1 ||
             get_type_id(callback.get()) != LMD_TYPE_FUNC)
         return io_fs_error(ERR_INVALID_OPERATION, "io.disk.read_stream: invalid bounds or consumer");
     state.set(io_fs_option_get(&opts, "state"));
@@ -256,14 +259,23 @@ extern "C" Item pn_io_disk_read_stream(Item root, Item relative, Item options, I
     stream.source = file_anchor_open_read(disk.anchor, disk.relative);
     if (!stream.source) return io_fs_error(ERR_IO_ERROR, "io.disk.read_stream: cannot open source (%d)", errno);
     FileRevision before = file_revision_stream(stream.source);
-    if (!before.stat.is_file || before.stat.size < 0 || before.stat.size > maximum ||
+    if (!before.stat.is_file || before.stat.size < 0 || offset > before.stat.size ||
+            (length >= 0 && length > before.stat.size - offset) ||
             (get_type_id(token) != LMD_TYPE_NULL && !matches(token, before)) ||
             !stream_matches(&disk, stream.source, before))
         return io_fs_error(ERR_INVALID_STATE, "io.disk.read_stream: source changed or exceeds limit");
+    // a pack range retains the same held-file and revision guards as a full capture.
+    int64_t remaining = length < 0 ? before.stat.size - offset : length;
+#ifdef _WIN32
+    bool positioned = _fseeki64(stream.source, offset, SEEK_SET) == 0;
+#else
+    bool positioned = fseeko(stream.source, (off_t)offset, SEEK_SET) == 0;
+#endif
+    if (remaining > maximum || !positioned)
+        return io_fs_error(ERR_INVALID_STATE, "io.disk.read_stream: invalid or oversized range");
     stream.digest = digest_ctx_new(DIGEST_SHA256);
     stream.buffer = (char*)mem_alloc((size_t)block_bytes, MEM_CAT_EVAL);
     if (!stream.digest || !stream.buffer) return ItemError;
-    int64_t remaining = before.stat.size;
     while (remaining > 0) {
         if (lambda_task_cancel_requested(lambda_task_running()))
             return io_fs_error(ERR_CANCELLED, "io.disk.read_stream: cancelled");

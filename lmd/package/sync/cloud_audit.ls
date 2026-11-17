@@ -11,6 +11,8 @@ import repo: .repository
 import codec: .codec
 import hex: lambda.security.tuf.metadata
 import v: .schema
+import objects: .cloud_objects
+import pack: .pack
 
 fn tasks(current) => current.cloud_audits or []
 pub pn status(handle, config) any^ {
@@ -46,11 +48,15 @@ pub pn scan(handle, credentials, config, budget=32) any^ {
 }
 pub fn check(keys, credentials, control, physical_key, bytes) any^ {
     if (starts_with(physical_key,"objects/")^) {
-        let record = codec.decode(bytes)^
-        if (not ends_with(physical_key,"/" ++ hex.hex(record.id)^)^ or
-            contains(["state","maintenance","locator"],record.kind)^)
-            raise error("sync audit: unsupported object identity or private kind")
-        repo.validate_record(keys,record)^
+        let records = objects.decode(keys,bytes)^
+        if (pack.is_pack(binary(bytes)^)^ and not ends_with(physical_key,"/" ++ hex.hex(hash(bytes,'sha256')^)^)^)
+            raise error("sync audit: pack filename mismatch")
+        for (record in records) {
+            if ((not pack.is_pack(binary(bytes)^)^ and not ends_with(physical_key,"/" ++ hex.hex(record.id)^)^) or
+                contains(["state","maintenance","locator"],record.kind)^)
+                raise error("sync audit: unsupported object identity or private kind")
+            repo.validate_record(keys,record)^
+        }
     } else { bundle.inspect(credentials,control,physical_key,bytes)^ }
     return true
 }
