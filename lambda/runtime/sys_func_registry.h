@@ -108,7 +108,8 @@ typedef struct SysFuncInfo {
     bool is_async;              // call is a suspension seed for Lambda pn analysis
     // Value-lane effects are independent of `can_raise`/T^.
     // `success_type` describes a successful result; `may_return_error` marks
-    // ordinary ItemError values that callers may contain with `or`.
+    // ordinary error outcomes requiring acknowledgement. Error-operand
+    // rejection is refined at the call site for total-query rows.
     Type* success_type;
     bool may_return_error;
     // How the success type is derived from the call site (S11.4.9).
@@ -125,6 +126,8 @@ typedef struct SysFuncInfo {
     // D7.6.5: the function only reads its arguments: it keeps none of them,
     // nor any part of one, and returns neither (JUBE_FN_READS_ARGS).
     bool reads_args;
+    // S7.10.7: invalid non-error inputs yield null, not an ordinary error.
+    bool invalid_returns_null;
 } SysFuncInfo;
 
 static inline bool sysfunc_arg_is_var(const SysFuncInfo* info, int index) {

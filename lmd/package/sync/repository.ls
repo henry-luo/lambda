@@ -17,14 +17,22 @@ pub pn access(path, keys, action) any^ {
     if (keys.owner != null and keys.owner != self()) {
         return owner.cached(keys.owner,pn (cache)=> { return access(path,{*:keys,cached_head:cache},action)^ })^
     }
-    open tx = (sqlite.existing(path)^) {
-        packs.prepare(tx)^
-        let scoped = {*:keys,objects:path ++ ".objects",tx:tx}
-        packs.cleanup(tx,scoped)^
-        let result = action(tx,scoped)^
-        packs.flush(tx,scoped)^
-        return result
-    }
+    return disk.spool(path ++ ".objects",pack.maximum,pn (data)=> {
+        return disk.spool(path ++ ".objects",pack.maximum,pn (shared)=> {
+            return disk.spool(path ++ ".objects",pack.maximum,pn (private)=> {
+                open tx = (sqlite.existing(path)^) {
+                    let scoped = {*:keys,objects:path ++ ".objects",tx:tx,
+                        spools:{data:data,shared:shared,private:private}}
+                    packs.prepare(tx)^
+                    migrate(tx,scoped)^
+                    packs.cleanup(tx,scoped)^
+                    let result = action(tx,scoped)^
+                    packs.flush(tx,scoped)^
+                    return result
+                }
+            })^
+        })^
+    })^
 }
 
 pub fn keys(secret, space, path=null) any^ {
@@ -80,9 +88,9 @@ pub pn get(tx, keys, id, kind=null) any^ {
 }
 
 pn index_record(tx, chosen) any^ {
-    let rows = sqlite.query(tx,"SELECT kind, box FROM objects WHERE id = ?",[chosen.id])^
-    if (len(rows) == 0) { sqlite.execute(tx,"INSERT INTO objects VALUES (?, ?, ?)",[chosen.id,chosen.kind,chosen.box])^ }
-    else if (rows[0][0] != chosen.kind or rows[0][1] != chosen.box) raise error("sync repository: locator index mismatch")
+    let rows = sqlite.query(tx,"SELECT kind FROM objects WHERE id = ?",[chosen.id])^
+    if (len(rows) == 0) { sqlite.execute(tx,"INSERT INTO objects VALUES (?, ?)",[chosen.id,chosen.kind])^ }
+    else if (rows[0][0] != chosen.kind) raise error("sync repository: locator index mismatch")
     return chosen.id
 }
 
@@ -95,7 +103,7 @@ pn persist_record(tx, keys, proposed) any^ {
         return index_record(tx,existing.record)^
     }
     index_record(tx,proposed)^
-    if (keys.tx != null) { return packs.stage(tx,keys,proposed.id)^ }
+    if (keys.tx != null) { return packs.stage(tx,keys,proposed)^ }
     // Direct initialization remains compatible with legacy callers outside a repository scope.
     let encoded = wire.encode(proposed)^
     disk.install(keys.objects,filename(proposed.id)^,encoded,null)^
@@ -120,16 +128,57 @@ pub pn initialize(tx, keys) any^ {
     if (len(disk.entries(keys.objects,"",100000)^) != 0) raise error("sync repository: object directory must be empty at creation")
     io.chmod(keys.objects,"700")^
     packs.prepare(tx)^
-    sqlite.execute(tx,"CREATE TABLE objects (id BLOB PRIMARY KEY NOT NULL, kind TEXT NOT NULL, box BLOB NOT NULL) WITHOUT ROWID")^
-    sqlite.execute(tx,"CREATE TABLE heads (name TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL, box BLOB NOT NULL) WITHOUT ROWID")^
+    sqlite.execute(tx,"CREATE TABLE objects (id BLOB PRIMARY KEY NOT NULL, kind TEXT NOT NULL) WITHOUT ROWID")^
+    sqlite.execute(tx,"CREATE TABLE heads (name TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL, object TEXT NOT NULL) WITHOUT ROWID")^
     return null
 }
 
+pn store_head(keys, bytes) any^ {
+    let id = hex.hex(hash(bytes,'sha256')^ )^
+    let name = id ++ ".head"
+    if (disk.inspect(keys.objects,name)^ == null) { disk.install(keys.objects,name,bytes,null)^ }
+    else if (head_bytes(keys,id)^ != bytes) raise error("sync repository: head identity collision")
+    return id
+}
+pn head_bytes(keys, id) any^ {
+    if (not (id is string) or len(id)^ != 64) raise error("sync repository: invalid head pointer")
+    let bytes = disk.capture(keys.objects,id ++ ".head",1048576)^.bytes
+    if (hex.hex(hash(bytes,'sha256')^)^ != id) raise error("sync repository: head identity mismatch")
+    return bytes
+}
+// old payload columns are read one record at a time and checked against durable files.
+pn migrate(tx, keys) any^ {
+    let definition = sqlite.query(tx,"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'objects'")^[0][0]
+    if (contains(definition,"box")^) {
+        let rows = sqlite.query(tx,"SELECT id, kind FROM objects")^
+        for (row in rows) {
+            let stored = read_record(keys,row[0])^
+            let old = sqlite.query(tx,"SELECT box FROM objects WHERE id = ?",[row[0]])^[0][0]
+            if (stored.record.kind != row[1] or stored.record.box != old)
+                raise error("sync repository: invalid legacy index")
+        }
+        sqlite.execute(tx,"ALTER TABLE objects DROP COLUMN box")^
+        sqlite.execute(tx,"DROP TABLE IF EXISTS pack_pending")^
+        packs.prepare(tx)^
+    }
+    let head_definition = sqlite.query(tx,"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'heads'")^[0][0]
+    if (contains(head_definition,"box")^) {
+        let row = sqlite.query(tx,"SELECT generation, box FROM heads WHERE name = 'local'")^[0]
+        let box = row[1]
+        crypto.open(keys.encryption,box,context(keys,"head",row[0])^)^
+        let id = store_head(keys,box)^
+        sqlite.execute(tx,"ALTER TABLE heads RENAME TO heads_legacy")^
+        sqlite.execute(tx,"CREATE TABLE heads (name TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL, object TEXT NOT NULL) WITHOUT ROWID")^
+        sqlite.execute(tx,"INSERT INTO heads VALUES ('local', ?, ?)",[row[0],id])^
+        sqlite.execute(tx,"DROP TABLE heads_legacy")^
+    }
+    return true
+}
 pub pn load(tx, keys) any^ {
-    let rows = sqlite.query(tx,"SELECT generation, box FROM heads WHERE name = 'local'")^
+    let rows = sqlite.query(tx,"SELECT generation, object FROM heads WHERE name = 'local'")^
     if (len(rows) != 1) raise error("sync repository: missing local head")
     let generation = rows[0][0]
-    let plaintext = crypto.open(keys.encryption,rows[0][1],context(keys,"head",generation)^)^
+    let plaintext = crypto.open(keys.encryption,head_bytes(keys,rows[0][1])^,context(keys,"head",generation)^)^
     let value = codec.decode(plaintext)^
     let id = value.state
     // The encrypted head authenticates the immutable ID before any in-memory reuse.
@@ -146,10 +195,11 @@ pub pn commit_head(tx, keys, generation, current) any^ {
         raise error("sync repository: stale generation")
     let id = store_object(tx,keys,"state",current)^
     let box = crypto.seal(keys.encryption,codec.encode({state:id})^,context(keys,"head",generation+1)^)^
-    if (generation == 0) { sqlite.execute(tx,"INSERT INTO heads VALUES ('local', 1, ?)",[box])^ }
+    let head_id = store_head(keys,box)^
+    if (generation == 0) { sqlite.execute(tx,"INSERT INTO heads VALUES ('local', 1, ?)",[head_id])^ }
     else {
-        sqlite.execute(tx,"UPDATE heads SET generation = ?, box = ? WHERE name = 'local' AND generation = ?",
-            [generation+1,box,generation])^
+        sqlite.execute(tx,"UPDATE heads SET generation = ?, object = ? WHERE name = 'local' AND generation = ?",
+            [generation+1,head_id,generation])^
         if (sqlite.query(tx,"SELECT changes()")^[0][0] != 1) raise error("sync repository: stale generation")
     }
     return {generation:generation+1,id:id,state:current}
@@ -305,6 +355,19 @@ pub pn export_objects(tx, keys, ids) any^ {
 }
 
 pub pn export_pack(tx, keys, ids) any^ {
+    if (len(ids)^ > 0) {
+        let located = packs.location(keys,ids[0])^
+        if (located != null) {
+            let bytes = disk.capture(keys.objects,located.pack ++ ".pack",pack.maximum)^.bytes
+            let records = pack.decode(keys,bytes,located.pack)^
+            // private local state never crosses the export boundary in a shared physical pack.
+            if (all([for (record in records) not contains(["state","maintenance","locator"],record.kind)^])) {
+                for (record in records) { authenticated(keys,record)^ }
+                let have = [for (record in records) record.id]
+                return {bytes:bytes,id:located.pack,ids:[for (id in ids where contains(have,id)^) id]}
+            }
+        }
+    }
     var selected = []
     var size = 4
     var position = 0
@@ -351,6 +414,7 @@ pub pn records(keys) any^ {
         let entry = names[position]
         position = position+1
         if (entry.kind != 'file') raise error("sync repository: unexpected repository entry")
+        if (starts_with(entry.name,".lambda-spool-")^ or ends_with(entry.name,".head")^) { continue }
         if (len(entry.name)^ == 69 and ends_with(entry.name,".pack")^) {
             let id = slice(entry.name,0,64)^
             let retired = if (keys.tx == null) [] else sqlite.query(keys.tx,"SELECT pack FROM pack_obsolete WHERE pack = ?",[id])^
@@ -380,8 +444,8 @@ pub pn records(keys) any^ {
         raise error("sync repository: unexpected repository entry")
     }
     if (keys.tx != null) {
-        for (row in sqlite.query(keys.tx,"SELECT o.id, o.kind, o.box FROM pack_pending p JOIN objects o ON p.id = o.id")^) {
-            let item = {id:row[0],kind:row[1],box:row[2]}
+        for (row in sqlite.query(keys.tx,"SELECT id FROM pack_pending")^) {
+            let item = wire.decode(packs.read(keys,row[0])^)^
             authenticated(keys,item)^
             if (not any([for (prior in result) prior.id == item.id])) { result = [*result,item] }
         }
@@ -407,7 +471,7 @@ pub pn rebuild_index(tx, keys) any^ {
     var i = 0
     while (i < len(stored)) {
         let item = stored[i]
-        sqlite.execute(tx,"INSERT INTO objects VALUES (?, ?, ?)",[item.id,item.kind,item.box])^
+        sqlite.execute(tx,"INSERT INTO objects VALUES (?, ?)",[item.id,item.kind])^
         i = i+1
     }
     return {objects:len(stored),rebuilt:true}
@@ -422,8 +486,8 @@ pub pn verify(tx, keys, evicted=[], removing=[]) any^ {
     var i = 0
     while (i < len(stored)) {
         let item = stored[i]
-        let indexed = sqlite.query(tx,"SELECT kind, box FROM objects WHERE id = ?",[item.id])^
-        if (len(indexed) != 0 and (indexed[0][0] != item.kind or indexed[0][1] != item.box))
+        let indexed = sqlite.query(tx,"SELECT kind FROM objects WHERE id = ?",[item.id])^
+        if (len(indexed) != 0 and (indexed[0][0] != item.kind))
             raise error("sync repository: locator index mismatch")
         if (item.kind == "manifest" and not contains(removing,item.id)^) {
             let value = decode(keys,item)^

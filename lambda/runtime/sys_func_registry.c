@@ -346,6 +346,9 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #define PROFILE_EMIT_FPTR(fn) FPTR(fn)
 #endif
 
+// result relation, argument index, var mask/bounds, reads_args, null-on-invalid
+#define TOTAL_QUERY_RESULT(kind) kind, 0, 0, NULL, false, true
+
 SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_PHYSICS_SIMULATE, "physics_simulate", 2, &TYPE_MAP, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_physics_simulate", PROFILE_PHYSICS_FPTR(fn_physics_simulate), NULL, NULL, false, 0,
@@ -485,17 +488,17 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_set", NULL, NULL, NULL, false, 0},  // variadic, unimplemented
 
-    // LR07-18: a fractional or non-finite offset returns an error, so a call types `T | error` and stays boxed (S7.8.1)
+    // S7.10.7: invalid inputs return null; error operands keep their error lane.
     {SYSFUNC_SLICE, "slice", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_slice2", FPTR(fn_slice2), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ true,
-     /* result */ SYS_RESULT_SLICE_OF_ARGUMENT},
+     /* result */ TOTAL_QUERY_RESULT(SYS_RESULT_SLICE_OF_ARGUMENT)},
 
-    // LR07-18: a fractional or non-finite offset returns an error, so a call types `T | error` and stays boxed (S7.8.1)
+    // S7.10.7: invalid inputs return null; error operands keep their error lane.
     {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_slice3", FPTR(fn_slice3), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ true,
-     /* result */ SYS_RESULT_SLICE_OF_ARGUMENT},
+     /* result */ TOTAL_QUERY_RESULT(SYS_RESULT_SLICE_OF_ARGUMENT)},
 
     {SYSFUNC_VIEW, "subview", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_subview", FPTR(fn_subview), NULL, NULL, false, 0},
@@ -859,6 +862,14 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_disk_read_stream", PROFILE_FILE_IO_FPTR(pn_io_disk_read_stream), NULL, NULL, false, 0},
     {SYSPROC_IO_DISK_WRITE_STREAM, "io_disk_write_stream", 4, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_disk_write_stream", PROFILE_FILE_IO_FPTR(pn_io_disk_write_stream), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_SPOOL, "io_disk_spool", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_spool", PROFILE_FILE_IO_FPTR(pn_io_disk_spool), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_SPOOL_WRITE, "io_disk_spool_write", 2, &TYPE_INT, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_spool_write", PROFILE_FILE_IO_FPTR(pn_io_disk_spool_write), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_SPOOL_READ, "io_disk_spool_read", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_spool_read", PROFILE_FILE_IO_FPTR(pn_io_disk_spool_read), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_SPOOL_PUBLISH, "io_disk_spool_publish", 2, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_spool_publish", PROFILE_FILE_IO_FPTR(pn_io_disk_spool_publish), NULL, NULL, false, 0},
     {SYSPROC_IO_DISK_WATCH, "io_disk_watch", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_disk_watch", PROFILE_SQLITE_FPTR(pn_io_disk_watch), NULL, NULL, false, 0, true},
     {SYSPROC_IO_DISK_CHANGES, "io_disk_changes", 2, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
@@ -869,33 +880,35 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
-     /* result */ SYS_RESULT_TEXT_SPLIT},
+     /* result */ TOTAL_QUERY_RESULT(SYS_RESULT_TEXT_SPLIT)},
 
     {SYSFUNC_SPLIT3, "split", 3, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_split3", FPTR(fn_split3), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
-     /* result */ SYS_RESULT_TEXT_SPLIT},
+     /* result */ TOTAL_QUERY_RESULT(SYS_RESULT_TEXT_SPLIT)},
 
     {SYSFUNC_JOIN, "join", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_join2", FPTR(fn_join2), NULL, NULL, false, 0},
 
-    // LR07-18: a non-text argument returns an error, so a call types `T | error` and stays boxed (S7.8.1)
+    // S7.10.7: invalid inputs return null; error operands keep their error lane.
     {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_replace3", FPTR(fn_replace), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ true,
-     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
+     /* result */ TOTAL_QUERY_RESULT(SYS_RESULT_TEXT_SAME_AS_ARGUMENT)},
 
-    // LR07-18: a non-text argument returns an error, so a call types `T | error` and stays boxed (S7.8.1)
+    // S7.10.7: invalid inputs return null; error operands keep their error lane.
     {SYSFUNC_REPLACE4, "replace", 4, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_replace4", FPTR(fn_replace4), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ true,
-     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
+     /* result */ TOTAL_QUERY_RESULT(SYS_RESULT_TEXT_SAME_AS_ARGUMENT)},
 
     {SYSFUNC_FIND, "find", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_find2", FPTR(fn_find2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_find2", FPTR(fn_find2), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true, TOTAL_QUERY_RESULT(SYS_RESULT_FIXED)},
 
     {SYSFUNC_FIND3, "find", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_find3", FPTR(fn_find3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_find3", FPTR(fn_find3), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true, TOTAL_QUERY_RESULT(SYS_RESULT_FIXED)},
 
     {SYSFUNC_ORD, "ord", 1, &TYPE_INT, false, false, false, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
@@ -1235,17 +1248,17 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_EXCEPT, "except", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_except", FPTR(fn_except), NULL, NULL, false, 0},
 
-    // LR07-18: a fractional or non-finite count returns an error, so a call types `T | error` and stays boxed (S7.8.1)
+    // S7.10.7: invalid inputs return null; error operands keep their error lane.
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_take", FPTR(fn_take), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ true,
-     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
+     /* result */ TOTAL_QUERY_RESULT(SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT)},
 
-    // LR07-18: a fractional or non-finite count returns an error, so a call types `T | error` and stays boxed (S7.8.1)
+    // S7.10.7: invalid inputs return null; error operands keep their error lane.
     {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_drop", FPTR(fn_drop), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ true,
-     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
+     /* result */ TOTAL_QUERY_RESULT(SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT)},
 
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_zip", FPTR(fn_zip), NULL, NULL, false, 0},

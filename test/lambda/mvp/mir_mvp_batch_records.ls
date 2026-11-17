@@ -70,7 +70,7 @@ pn main() {
     print([batch_length(null), batch_length({value: 8, next: {value: 3, next: null}})]); print("\n")
     print([batch_forward([2.0]), batch_forward("bad") is error,
         batch_rebound() is error, batch_mutated() is error]); print("\n")
-    let original = batch_record(false)^
+    let original = batch_record(false)
     var child: float[] = batch_child(original)
     batch_write(child)^
     print([original.values[0], child[0]]); print("\n")

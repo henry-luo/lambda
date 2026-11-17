@@ -215,7 +215,7 @@ static gc_object_slab_t* allocate_slab(gc_object_zone_t* oz, int cls) {
         return NULL;
     }
     uint8_t* memory = (uint8_t*)mem_vm_region_base(region);
-    memset(memory, 0, slab_bytes);
+    // fresh VM pages are zero; reused slots are cleared separately on allocation.
 
     // allocate slab metadata (from C heap — small, few slabs)
     gc_object_slab_t* slab = (gc_object_slab_t*)mem_calloc(1, sizeof(gc_object_slab_t),
@@ -429,9 +429,7 @@ int gc_object_zone_owns_or_foreign(gc_object_zone_t* oz, void* ptr, void** forei
         return 0;
     }
 #ifndef NDEBUG
-    // Slabs are freed only by gc_object_zone_destroy, which drops the whole
-    // range array with them. If any path ever retires a slab mid-run it must
-    // also remove its range, or mark would follow a dangling pointer here.
+    // Trimming removes ranges and cached owners before releasing their regions.
     if (slab->base != range_base) {
         log_error("gc_object_zone_owns: stale slab range base=%p slab=%p",
             (void*)range_base, (void*)slab);
@@ -454,4 +452,117 @@ int gc_object_zone_owns_or_foreign(gc_object_zone_t* oz, void* ptr, void** forei
 
 int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr) {
     return gc_object_zone_owns_or_foreign(oz, ptr, NULL);
+}
+
+static bool range_owner_retired(gc_range_owner_t owner) {
+    return owner.slab ? owner.slab->retire : ((gc_bump_block_t*)owner.foreign)->retire;
+}
+
+void gc_object_zone_trim(gc_heap_t* gc) {
+    gc_object_zone_t* oz = gc->object_zone;
+    if (!oz) return;
+    for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
+        for (gc_object_slab_t* slab = oz->slabs[cls]; slab; slab = slab->next) {
+            slab->live_slots = 0;
+            slab->retire = false;
+        }
+    }
+    for (gc_bump_block_t* b = gc->bump_blocks; b; b = b->next) {
+        b->live_slots = 0;
+        b->retire = false;
+    }
+    for (gc_header_t* h = gc->all_objects; h; h = h->next) {
+        gc_range_owner_t owner;
+        gc_slab_range_t range;
+        if (range_search(oz, (uint8_t*)h, &owner, &range)) {
+            if (owner.slab) owner.slab->live_slots++;
+            else ((gc_bump_block_t*)owner.foreign)->live_slots++;
+        }
+    }
+    bool any_retired = false;
+    for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
+        bool warm = false;
+        for (gc_object_slab_t* s = oz->slabs[cls]; s; s = s->next) {
+            if (s->live_slots) continue;
+            s->retire = warm;
+            warm = true;
+            any_retired |= s->retire;
+        }
+    }
+    gc_bump_block_t* warm = NULL;
+    for (gc_bump_block_t* b = gc->bump_blocks; b; b = b->next) {
+        if (!b->live_slots && b->size <= GC_BUMP_BLOCK_INITIAL_SIZE &&
+                (!warm || b->size < warm->size)) warm = b;
+    }
+    for (gc_bump_block_t* b = gc->bump_blocks; b; b = b->next) {
+        b->retire = !b->live_slots && b != warm;
+        any_retired |= b->retire;
+    }
+    if (!any_retired) return;
+    // Free lists mix bump and slab slots. Unlink every retired slot before unmapping.
+    for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
+        gc_header_t** link = &oz->free_lists[cls];
+        while (*link) {
+            gc_range_owner_t owner;
+            gc_slab_range_t range;
+            if (range_search(oz, (uint8_t*)*link, &owner, &range) && range_owner_retired(owner))
+                *link = (*link)->next;
+            else link = &(*link)->next;
+        }
+    }
+    size_t kept = 0;
+    for (size_t i = 0; i < oz->range_count; i++) {
+        if (range_owner_retired(oz->range_owners[i])) continue;
+        oz->slab_ranges[kept] = oz->slab_ranges[i];
+        oz->range_owners[kept++] = oz->range_owners[i];
+    }
+    oz->range_count = kept;
+    oz->recent_range.base = NULL;
+    oz->recent_owner = (gc_range_owner_t){0};
+    oz->min_addr = kept ? oz->slab_ranges[0].base : NULL;
+    oz->max_addr = kept ? oz->slab_ranges[kept-1].end : NULL;
+    if (oz->page_index) memset(oz->page_index, 0,
+        ((size_t)1 << oz->page_index_bits) * sizeof(gc_range_page_t));
+    oz->page_index_count = 0;
+    for (size_t i = 0; i < kept; i++)
+        page_index_add_range(oz, oz->slab_ranges[i].base, oz->slab_ranges[i].end, oz->range_owners[i]);
+    memset(gc->mark_cache, 0, sizeof(gc->mark_cache));
+    for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
+        oz->fresh_slabs[cls] = NULL;
+        gc_object_slab_t** link = &oz->slabs[cls];
+        while (*link) {
+            gc_object_slab_t* s = *link;
+            if (s->retire) {
+                *link = s->next;
+                mem_vm_region_release(s->region);
+                mem_free(s);
+                oz->slab_count--;
+            } else {
+                if (s->next_fresh < s->slot_count) oz->fresh_slabs[cls] = s;
+                link = &s->next;
+            }
+        }
+    }
+    gc_bump_block_t* previous_head = gc->bump_blocks;
+    gc_bump_block_t** link = &gc->bump_blocks;
+    gc->bump_min_addr = gc->bump_max_addr = NULL;
+    while (*link) {
+        gc_bump_block_t* b = *link;
+        if (b->retire) {
+            *link = b->next;
+            mem_vm_region_release(b->region);
+            mem_free(b->alloc_bits);
+            mem_free(b);
+        } else {
+            if (!gc->bump_min_addr || b->base < gc->bump_min_addr) gc->bump_min_addr = b->base;
+            if (!gc->bump_max_addr || b->base + b->size > gc->bump_max_addr)
+                gc->bump_max_addr = b->base + b->size;
+            link = &b->next;
+        }
+    }
+    if (gc->bump_blocks != previous_head) {
+        // Older partially live blocks have no saved fresh cursor; reuse only their free slots.
+        gc->bump_end = gc->bump_blocks ? gc->bump_blocks->base + gc->bump_blocks->size : NULL;
+        gc->bump_cursor = gc->bump_end;
+    }
 }

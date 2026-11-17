@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **316 anchored records**, preserving fixed, resolved,
+This archive contains **326 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -36,6 +36,113 @@ resolved/obsolete appendix. LR08-14 moved here from the active ledger on
 2026-11-03 after its 2026-10-29 fix and qualification; its original resolution
 summary and implementation record are retained below. LR02-35 moved here on
 2026-11-03 after S16.10.4 was ruled and implemented.
+
+## Nullable pointer admission lost its scalar tag — 2026-11-17
+
+<a id="tex-nullable-pointer-union-fixed"></a>
+
+**Status: FIXED.** D2.3.5 requires a scalar pointer to regain its scalar tag
+when crossing into Item transport. S11.4.6v4 preserves normal admission into
+an error/normal union. A present nullable binary pointer passed into
+`string | binary` instead crossed as an untagged pointer. Its first byte
+could be interpreted as another value kind: `binary(...)` in the callee saw
+bool instead of binary. Interpreter execution was correct; forced JIT failed
+with or without forced GC. This was exposed by preserving binary input in
+the typed MD5/PDF byte contracts.
+
+In `mvp_mir.cpp`'s native-nullable admission shortcut, the emitter replaced
+the source contract with the destination before boxing. A heterogeneous union
+has no single scalar tag. The present pointer now retains its proven source
+base while converting to the destination representation; the joined result
+still carries the destination contract. Absence follows the existing checked
+boundary path. No runtime check or error receiver was weakened.
+
+`test/lambda/nullable_pointer_union_admission.{ls,txt}` checks binary and
+string producers, rejection/recovery of null, and binary conversion through
+the union. It passes forced JIT with every-allocation poisoned GC. The
+structured TeX contract regression, including binary MD5/escaping, passes
+interpreter/JIT/AUTO with default and forced GC. Broader qualification is in
+[the structured-contract checkpoint](impl/Lambda_Impl_Tex_Structured_Contracts.md).
+
+## Open record admission erased overwritten extra fields — 2026-11-17
+
+<a id="tex-open-record-extra-storage-fixed"></a>
+
+**Status: FIXED.** Under S11.4.6v4, open record admission must preserve extra
+fields; D3.4.6 makes the physical lane descriptor authoritative and D4.2.5
+requires correct record reification. With `type Core = {core:int}`, returning
+`{*:value,extra:"same"}` as Core when `value.extra` was initially null instead
+returned `extra:null`, on interpreter and JIT. The source map retained its
+updated field until it crossed the named boundary. This broke TeX sequence
+comparator results when `step` gained its structured State return contract.
+
+Admission relayout decoded the live Item correctly but stored it through
+`map_field_store(..., LMD_TYPE_NULL)`, which writes null. Constructor null
+recipes deliberately use an Item lane that can retain later values. The
+runtime now shares a descriptor-based field writer between relayout and
+mutable deep-copy storage: native nullable lanes use their lane writer,
+`LANE_STORAGE_ITEM` copies the complete Item, and other lanes use the ordinary
+field store. Shaped error stores also preserve the complete error Item,
+including its message payload (S7.4.4), instead of writing a null word.
+No TeX-specific field exception or schema padding was retained.
+
+`test/lambda/open_record_extra_overwrite.{ls,txt}` checks string, integer, error-payload and
+nested-map extras and preservation of the original snapshot. It and the new
+TeX structured-contract golden pass interpreter/JIT/AUTO with default and
+every-allocation poisoned GC (12 checks). The reduced sequence sort returns
+`a,b,c` with the State contract enabled. Broader qualification is recorded in
+[the structured-contract checkpoint](impl/Lambda_Impl_Tex_Structured_Contracts.md).
+
+## Constrained error unions rejected by `raise` — 2026-11-17
+
+<a id="reader-constrained-error-return-fixed"></a>
+
+**Status:** FIXED; input and Test262 baselines pass, Lambda baseline has
+unrelated remaining failures described below.
+
+A function returning `int | CaptureError`, where `CaptureError` was a
+constrained `error`, incorrectly raised E312. The shared core's
+`lambda_type_accepts_error` did not follow constrained bases; the compiler's
+static boundary also unwrapped only one constraint layer. The core walk now
+recurses through constrained bases and compiler admission unwraps every layer.
+The reader again declares its capture error constraint.
+
+A constrained error arm also prevented `float | CaptureError` from selecting
+the normal float admission: an int success retained its int tag. Subtype
+analysis now proves a constrained source is contained by its base, so normal
+admission removes the error arm and preserves float conversion (S11.4.6v4).
+For a constrained `error | null` base, normal-arm extraction also follows the
+base and retains null rather than retaining the error alternative.
+The MIR planner now includes the emitter's possible normal-arm check in
+return effects, avoiding E501 for both implicit and explicit nullable
+constrained-error returns (D8.3.1, D6.3.2).
+
+A filtered handler followed by propagation also produced an `error & error`
+outcome that static return admission rejected. Under S10.1.1v5, an
+intersection is contained by either arm; admission now uses an arm that
+already proves the complete target, without inventing proof for other cases.
+
+S11.4.2v3 permits particular error unions. S11.4.6v4 currently enforces only
+constrained bases at admission: both matching and non-matching error values
+cross the return boundary, while a filtered handler checks its predicate.
+This is the existing formal rule, not full predicate enforcement at return.
+The reader's boundary handler therefore still handles the broad error channel.
+
+The paired `constrained_error_return` golden covers a direct return, relay,
+nested alias, normal and nullable float conversion, nullable return relays,
+typed filtered propagation and matching/non-matching filtered handlers in
+interpreter, JIT and AUTO, including forced/poisoned GC on every allocation.
+Core metadata checks, six reader contract/GC runs, 18 adjacent focused checks
+and all 285 LaTeX compile checks pass. The input baseline passes 5,312 tests
+in 109 suites with three skipped cases. The Lambda baseline reports 7,236/7,239: the PDF native suite
+aborted and is counted as one failed suite, while the editor assertion and
+unavailable WebRTC account for the other two failures. Its script suite is
+2,445/2,446, MIR emission 595/595 and MIR GC stress 368/368. Test262 passes
+40,261/40,261. Nine focused release checks pass across interpreter, JIT and
+AUTO, including forced/poisoned GC; the pinned release SHA256 is
+7702e32d4e435af9faa60eaa6ad6d8eefb29efb93a07891d28c73f8b55ead626.
+Evidence is in `temp/capture-error/`. The shared-core fix belongs
+to lambda-input under D9.1.1v4 and D9.1.3v2.
 
 ## Online DOM collection iterators — 2026-11-13
 
@@ -5056,3 +5163,156 @@ AUTO/interpreter/JIT. Exact-name discovery finds enrolled peers in the original
 stale-service environment; initial exchange and three-peer fan-out pass. No
 unrelated service registration was removed. See the linked implementation record
 for final source/binary identities and the native qualification scope.
+
+
+## Binary ByteStorage bytes are invisible to GC allocation pressure — 2026-11-17
+
+<a id="sync-binary-pressure"></a>
+
+**Status:** FIXED (2026-11-17). Authority:
+**D5.1.3**, **D5.2.1**, **D5.3.1** (allocation ownership and collection).
+
+`heap_binary_from_bytes()` allocates a native `ByteStorage` body, but
+`heap_binary_from_storage()` only adds the small descriptor to the GC heap.
+These paths do not charge backing bytes to external allocation pressure.
+Finalization frees the body, but dead binaries can accumulate without triggering
+a collection. Repeatedly concatenate a retained 1 MiB binary with itself and
+hash each result, retaining only the last digest: 1 versus 128 iterations takes
+31.7 versus 289.8 MiB peak RSS, with **zero GC collections in both runs** and
+`external_peak=0`. The container allocation peak rises to 256.1 MiB. Large-file
+streaming therefore does not bound pending dead-buffer memory. Account each
+physical backing allocation once, with precisely rooted preflight and correct
+shared-view release; do not charge each alias independently.
+Evidence: `temp/sync-memory-diagnosis/{_binary_pressure.ls,binary-pressure.json}`;
+[full diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md).
+
+Follow-up closes the finalization question: OS heap inspection falls from
+271,170,000 to 4,848,208 allocated bytes after an explicit collection, but
+252 MiB remains resident in empty malloc regions. Finalizers release the dead
+storage; early pressure is needed to prevent the burst and cached high water.
+[Detailed evidence](impl/Lambda_Impl_Sync_Memory_Diagnosis.md#5-reclamation-and-os-residency-are-separate).
+
+**Resolution:** Physical backing leases now charge each heap admission once, before allocation at precisely rooted collection boundaries; aliases share the charge. Cross-thread release and heap teardown disarm the lease safely. The 128- and 1,024-body 2 MiB release reproducers both peak near 33.5 MiB, versus 288.4 MiB for the former before the fix. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+## Release build calls undeclared DOM document URL resolver — 2026-11-17
+
+<a id="sync-release-resolver"></a>
+
+**Status:** FIXED (2026-11-17). Authority:
+**D9.1.1v4** (owner build boundary).
+
+`make build-release-compile` reaches `lambda/dom/dom.cpp`, then fails at the two
+calls to undeclared `dom_document_resolve_url` (lines 1769 and 6140 in this tree).
+The second call also produces an `Item` to `Url*` conversion diagnostic from the
+suggested alternative name. No DOM source or sibling source was changed in the
+investigation. The existing release host is preserved. Build evidence:
+`temp/sync-memory-diagnosis/build.log`, `temp/build_split-runtime.log`.
+
+**Resolution:** Input exports the missing resource-base resolver and preserves the document URL carrier. Lambda uses the extracted source-identity API for inert templates. Normal and CLI release builds pass; 24 Input native cases pass. Input owner record: LI-072. The independent Radiant loader URL mutation is RI-107. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+## Runtime format result accumulates in the heap-lifetime pool — 2026-11-17
+
+<a id="sync-format-owner"></a>
+
+**Status:** FIXED (2026-11-17). Authority: **D5.1.5**
+(destination lifetime), **D5.2.5** (owner cleanup).
+
+`fn_format2()` calls `format_data_with_json_options()` with
+`context->heap->pool`, then copies its returned String into the GC heap. The
+pool copy and builder allocation remain until runtime teardown. Repeatedly
+formatting and discarding 64 one-MiB ASCII JSON strings retains **80 MiB of live
+pool allocations** inside **160.75 MiB reserved capacity**, despite eight
+automatic collections and a subsequent explicit collection. The hash result
+still matches an independent quoted-source expectation. In 80 MiB cloud
+publication, formatter counters account for **53.91 of 56.11 MiB** live runtime
+pool bytes; unchanged sync continues to add formatted results.
+Use the existing scoped formatter owner at the native return boundary, preserving
+rooted source/options and the lifetime through the GC copy. Do not free only the
+published GC string or change per-format wire semantics.
+[Evidence](impl/Lambda_Impl_Sync_Memory_Diagnosis.md#1-formatting-retains-a-second-result-outside-the-gc),
+[proposed P1](impl/Lambda_Impl_Sync_Memory_Tuning.md#p1--release-formatter-output-ownership-promptly).
+
+**Resolution:** The result formatter uses a scoped temporary pool held through the rooted GC copy. Sixty-four discarded 1 MiB formatted results add zero retained runtime-pool bytes; normal release peak falls from 110 MiB to about 45.7 MiB. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+## GC capacity telemetry omits retained regions — 2026-11-17
+
+<a id="sync-gc-capacity"></a>
+
+**Status:** FIXED (2026-11-17). Authority:
+**D5.2.1**, **D5.2.4**, **D5.3.1** (attribution and non-moving regions).
+
+`mem_factory_rt.cpp::heap_stat_fn()` assigns `gc->total_allocated` to both
+reserved and used bytes. This does not describe the committed object bump/slab
+regions or either data zone. A precise-root collection after repeated 80 MiB
+sync leaves about **2.28 MiB occupied** in **192.8 MiB committed GC regions**;
+context telemetry reports only the object allocation counter. Object regions
+and nursery overflow capacity remain retained. Correct attribution first, then
+reclaim wholly empty regions with free-list/range/page-index cleanup while
+preserving live object addresses. The collector capacity policy and report must
+not confuse OS reservation, commitment, occupancy and native external storage.
+[Evidence and proposal](impl/Lambda_Impl_Sync_Memory_Tuning.md).
+
+**Resolution:** Telemetry now distinguishes reserved, committed and used bytes. Collections release dead object regions and surplus data capacity, repairing free lists/ranges/caches first and preserving live object addresses. Fresh zero-backed VM regions avoid whole-extent prefaulting clears. The retained-host 5/25-round gate holds committed GC capacity at 16.23 MiB; overall OS footprint budgets are qualified separately. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+## Runtime-only CLI markup sources fail the current declaration boundary — 2026-11-17
+
+<a id="sync-cli-owner-build"></a>
+
+**Status:** FIXED (2026-11-17). Authority:
+**D9.1.1v4** (Input owner/build boundary).
+
+`make build-cli` fails while compiling Input-owned markup block sources,
+including `block_asciidoc.cpp` and `block_document.cpp`: `list_push` is undeclared
+and the compiler suggests `list_push_io`. The CLI manifest/API declaration
+boundary needs root-cause repair through the relevant owner. No macro alias,
+sibling source patch or masked build success was added. Evidence:
+`temp/sync-memory-detail/build-cli.log`, `temp/build_lambda-cli.log`.
+
+**Resolution:** CLI file rules select the existing static-value contract for Input-owned sources only; the generator preserves scoped variant rules. Shared core directory resolution includes the Input implementation rather than only Lambda compatibility headers. Clean CLI release and parser/codec smoke checks pass; generator regressions pass. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+<a id="batch-compiler-timing-analysis-field"></a>
+
+## Batch compiler timing reader rejects the emitted analysis field — 2026-11-17
+
+**Status:** FIXED 2026-11-17; found during sync-test latency attribution on `e1b1ac324`.
+**Authority:** D5.2.4 (diagnostic attribution).
+
+`test/test_lambda_helpers.hpp::parse_lambda_timing_line` expects `mir_lower_us`
+immediately after `index_us`, but `lambda/main.cpp` emits `analysis_us` between
+them. Its `sscanf` matches only six fields and returns false because ten are
+required. With compiler timing enabled, valid records are therefore omitted from
+the test's compiler timing metadata. The ordinary per-script elapsed measurements
+remain valid; this does not explain the 20-second burst test.
+
+A direct libc `sscanf` reproduction against a real release-emitted record is in
+`temp/sync-test-latency/timing-parser-repro.json`. Repair the parser against the
+current record, retain intentional compatibility with older schema-1 fields,
+and cover the actual emitted spelling with a focused regression. Sync profiling
+uses the independent phase TSV and native samples; it does not treat the missing
+helper record as zero compiler work. See [analysis](impl/Lambda_Impl_Sync_Test_Performance.md).
+
+**Resolution:** named-field schema-1 parsing accepts current/legacy records and optional columns, and rejects missing, duplicate, malformed and overflowing fields without partial publication. Both native regressions pass; the actual batch harness captures nonzero analysis columns from three passing sync cases. See `temp/sync-test-performance-impl/{timing-reader.log,timing-capture.tsv,baseline-reruns.log}`.
+
+
+
+<a id="duplicate-document-resource-base"></a>
+
+## Duplicate document resource-base resolver blocks release LTO — 2026-11-17
+
+**Status:** FIXED 2026-11-17 in the pending sync-test performance changes. **Authority:**
+D9.1.1v4 (Input ownership boundary), D9.1.3v2 (document clients).
+
+On `ae76dbf6d` with the current Input checkout, the full release link reports
+`dom_document_resolve_url(DomDocument*)` multiply defined by Lambda's `dom.o`
+and Input's `dom_element.cpp.o`. Lambda retained a selector-based duplicate of
+the extracted Input API. The Lambda definition/forward declaration are removed;
+base-URI and XHR callers share Input's template/namespace-aware resolver. No
+sibling/vendor source changes were needed. Fresh full release linking succeeds.
+See [implementation and qualification](impl/Lambda_Impl_Sync_Test_Performance.md#implementation--2026-11-17).
+
+**Verification:** full release link passes; all 201 Radiant document cases pass in the full baseline. No sibling implementation or vendor code was edited.

@@ -57,10 +57,10 @@ pub fn path_object(id,pts,style={}) {
     make_object(id,"path",{x:x,y:y,width:w,height:h},{fill:"none",*:style,
         points:[for (p in pts) {x:(p.x-x)/w,y:(p.y-y)/h}]})
 }
-fn map_objects(doc,ids,transform: fn (map) map) map => {*:doc,layers:[for (l in doc.layers) {*:l,
+fn map_objects(doc:map,ids,transform: fn (map) map) map => {*:doc,layers:[for (l in doc.layers) {*:l,
     objects:[for (o in l.objects) if (editable(l) and contains(ids,o.id)) transform(o) else o]}]}
-pub fn replace_object(doc,id,patch) => map_objects(doc,[id],(o)=>{*:o,*:patch})
-fn move_objects(doc,ids,dx,dy) map => map_objects(doc,ids,(o)=>{*:o,x:o.x+dx,y:o.y+dy})
+pub fn replace_object(doc:map,id,patch) => map_objects(doc,[id],(o)=>{*:o,*:patch})
+fn move_objects(doc:map,ids,dx,dy) map => map_objects(doc,ids,(o)=>{*:o,x:o.x+dx,y:o.y+dy})
 fn set_layer(doc,id,patch) => {*:doc,layers:[for (l in doc.layers) if (l.id == id) {*:l,*:patch} else l]}
 pub fn record_edit(st,doc,status="Illustration updated.") => {*:st,doc:doc,hist:history.history_snapshot(st.hist,st.doc,doc),
     drag:null,editing:null,error:"",status:status}

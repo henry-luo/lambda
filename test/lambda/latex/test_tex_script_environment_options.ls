@@ -37,12 +37,13 @@ let cases=[
  "\\catcode`\\%=13 \\begin{itemize}[a%b]ignored\n c]x\\end{itemize}"
 ];
 let checked=[for(body in cases) check(body)^];
+// This former source-mapping guard already matches native with the old reader.
 let guarded=check("\\begin{itemize}[a\\noexpand\\foo b]x\\end{itemize}")^;
 let boundary_source="\\begin{document}A\\catcode`\\]=11 \\def\\x{\\foo]bar} \\catcode`\\]=12 \\begin{itemize}[a\\x]z\\end{itemize}\\end{document}";
 let boundary=digest.digest(expanded(boundary_source,"<boundary>")^)^;
 let path=root ++ "script_list_option_main.tex";
 let included=digest.digest(expanded(input(path,"text")^,path)^)^;
 {cases:len(checked),failures:[for(case in checked where not case.passed) case],
- guarded:{issue:guarded.issue,unsupported:guarded.unsupported},
+ guarded:{issue:guarded.issue,unsupported:guarded.unsupported,matches_native:guarded.passed},
  token_boundary:{issue:boundary.issue,unsupported:boundary.unsupported},
  included:{issue:included.issue,matches_native:included.ast==input(path,"latex")^}}

@@ -220,7 +220,7 @@ pub fn clear(s) map^ {
 }
 
 // mark(session, rect) -> the session with `rect` (or the whole layer for null) to present again.
-pub fn mark(s, rect = null) map => ({*: s, dirty: union(s.dirty, if (rect == null) whole(s.layer) else clipped(s.layer, rect))})
+pub fn mark(s:map, rect = null) map => ({*: s, dirty: union(s.dirty, if (rect == null) whole(s.layer) else clipped(s.layer, rect))})
 
 fn background(s) array^ => strokes.in_space([s.paper[0], s.paper[1], s.paper[2], 1.0], s.layer.blend_space)^
 

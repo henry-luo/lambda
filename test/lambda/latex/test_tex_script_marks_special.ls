@@ -5,7 +5,9 @@ fn matches(source) any^ {
     let expanded = profile.expand_with_kernel(source, kernel,
         {echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;
     let text = join([for (token in expanded.output) render(token)], "");
-    expanded.issue == null and len(expanded.messages) == 0 and text == (parse(source, {type: "tex"})^).text
+    let native = parse(source, {type: "tex"})^;
+    // Native expansion retains kernel messages for ordinary document runs.
+    expanded.issue == null and expanded.messages == native.messages and text == native.text
 }
 let sources = [
     "\\begin{document}A\\special{color push}B\\end{document}",

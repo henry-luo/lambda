@@ -4,5 +4,5 @@
 ["é", 233, 233]
 "=== array slice integral floats ==="
 [[20, 30], [30, 40], []]
-"=== fractional float indices reject ==="
-[error, error]
+"=== fractional float indices are absent ==="
+[null, null]

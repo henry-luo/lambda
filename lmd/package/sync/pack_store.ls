@@ -1,11 +1,11 @@
-// SQLite holds disposable locators; pack bytes become durable before the transaction commits.
+// SQLite holds descriptors only; scoped file spools carry every pending payload.
 import sqlite: lambda.io.sqlite
 import disk: lambda.io.disk
 import wire: .object_wire
 import pack: .pack
 pub pn prepare(tx) any^ {
     sqlite.execute(tx,"CREATE TABLE IF NOT EXISTS pack_locations (id BLOB PRIMARY KEY, pack TEXT NOT NULL, offset INTEGER NOT NULL, size INTEGER NOT NULL) WITHOUT ROWID")^
-    sqlite.execute(tx,"CREATE TABLE IF NOT EXISTS pack_pending (id BLOB PRIMARY KEY) WITHOUT ROWID")^
+    sqlite.execute(tx,"CREATE TABLE IF NOT EXISTS pack_pending (id BLOB PRIMARY KEY, lane TEXT NOT NULL, offset INTEGER NOT NULL, size INTEGER NOT NULL) WITHOUT ROWID")^
     sqlite.execute(tx,"CREATE TABLE IF NOT EXISTS pack_dirty (pack TEXT PRIMARY KEY) WITHOUT ROWID")^
     sqlite.execute(tx,"CREATE TABLE IF NOT EXISTS pack_obsolete (pack TEXT PRIMARY KEY) WITHOUT ROWID")^
 }
@@ -23,8 +23,8 @@ pub pn read_range(root, name, offset, size) any^ {
 }
 pub pn read(keys, id) any^ {
     if (pending(keys,id)^) {
-        let row = sqlite.query(keys.tx,"SELECT kind, box FROM objects WHERE id = ?",[id])^[0]
-        return wire.encode({id:id,kind:row[0],box:row[1]})^
+        let row = sqlite.query(keys.tx,"SELECT lane, offset, size FROM pack_pending WHERE id = ?",[id])^[0]
+        return disk.spool_read(keys.spools[row[0]],row[1],row[2])^
     }
     let found = location(keys,id)^
     return if (found == null) null else read_range(keys.objects,found.pack ++ ".pack",found.offset,found.size)^
@@ -52,30 +52,40 @@ pub pn persist(tx, keys, records) any^ {
     }
     return encoded.id
 }
-pub pn flush(tx, keys) any^ {
-    repack(tx,keys)^
-    let rows = sqlite.query(tx,"SELECT o.id, o.kind, o.box FROM pack_pending p JOIN objects o ON p.id = o.id ORDER BY o.id")^
-    var records = []
-    var size = 4
-    for (row in rows) {
-        let record = {id:row[0],kind:row[1],box:row[2]}
-        let length = len(record.box)^+37
-        if (len(records)^ > 0 and (size+length > pack.target or len(records)^ == pack.count_limit)) {
-            persist(tx,keys,records)^
-            records = []; size = 4
-        }
-        records = [*records,record]; size = size+length
+fn lane(kind) any^ => if (kind == "chunk" or kind == "chunk_raw") "data" else
+    if (contains(["state","maintenance","locator"],kind)^) "private" else "shared"
+pn flush_lane(tx, keys, selected) any^ {
+    let rows = sqlite.query(tx,"SELECT id, offset, size FROM pack_pending WHERE lane = ? ORDER BY offset",[selected])^
+    if (len(rows)^ == 0) { return true }
+    let entries = [for (row in rows) {id:row[0],offset:row[1],length:row[2]}]
+    disk.spool_write(keys.spools[selected],pack.footer(keys,entries)^)^
+    let id = disk.spool_publish(keys.spools[selected],".pack")^
+    for (entry in entries) {
+        sqlite.execute(tx,"INSERT OR REPLACE INTO pack_locations VALUES (?, ?, ?, ?)",
+            [entry.id,id,entry.offset,entry.length])^
     }
-    if (len(records)^ > 0) { persist(tx,keys,records)^ }
+    sqlite.execute(tx,"DELETE FROM pack_pending WHERE lane = ?",[selected])^
     return true
 }
-pub pn stage(tx, keys, id) any^ {
-    sqlite.execute(tx,"INSERT OR IGNORE INTO pack_pending VALUES (?)",[id])^
-    let size = sqlite.query(tx,"SELECT COALESCE(SUM(length(o.box) + 37),0), COUNT(*) FROM pack_pending p JOIN objects o ON p.id = o.id")^[0]
-    if (size[0] >= pack.target or size[1] >= pack.count_limit) { flush(tx,keys)^ }
-    return id
+pub pn flush(tx, keys) any^ {
+    repack(tx,keys)^
+    for (selected in ["data","shared","private"]) { flush_lane(tx,keys,selected)^ }
+    return true
+}
+pub pn stage(tx, keys, record) any^ {
+    let selected = lane(record.kind)
+    let spool = keys.spools[selected]
+    let size = sqlite.query(tx,"SELECT COALESCE(SUM(size),0), COUNT(*) FROM pack_pending WHERE lane = ?",[selected])^[0]
+    if (size[1] == 0) { disk.spool_write(spool,binary("LPK1")^)^ }
+    let bytes = wire.encode(record)^
+    let offset = disk.spool_write(spool,bytes)^
+    sqlite.execute(tx,"INSERT INTO pack_pending VALUES (?, ?, ?, ?)",[record.id,selected,offset,len(bytes)^])^
+    if (size[0]+len(bytes)^ >= pack.target or size[1]+1 >= pack.count_limit) { flush_lane(tx,keys,selected)^ }
+    return record.id
 }
 pub pn remove(tx, keys, id) any^ {
+    // seal before dropping a pending range so every footer still covers its full body.
+    if (pending(keys,id)^) { flush(tx,keys)^ }
     let found = location(keys,id)^
     sqlite.execute(tx,"DELETE FROM pack_pending WHERE id = ?",[id])^
     sqlite.execute(tx,"DELETE FROM pack_locations WHERE id = ?",[id])^

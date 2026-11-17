@@ -28,6 +28,11 @@ System-function results follow the cardinality and domain of the operation:
   value, such as an absent index or `reduce([])`.
 - Non-admissive invalid input, invalid options, parsing failure, and I/O
   failure return or raise `error`; they are not represented by `null` or `[]`.
+- `slice`, `take`, `drop`, `find`, `replace`, and `split` are total queries:
+  invalid non-error inputs return `null` (S7.10.7), while valid empty results
+  retain their usual `[]` or `""` shape. A valid replacement with no matches
+  returns its source. See the
+  [implementation and qualification](../vibe/impl/Lambda_Impl_Numerical_Query_Conventions.md).
 - Admissive system-function cases use the result-domain absence when that is
   the documented meaning: `arr[-1]`, `argmin([])`, and `argmax([])` return
   `null`, while `varg(non_integer)` returns `null`.
@@ -158,6 +163,13 @@ A `null` argument makes a numeric function's result `null`, as `null + 1` is:
 `abs(null)`, `round(null)`, `math.sqrt(null)`, `math.pow(2, null)` and
 `min(null, 3)` are all `null`, so `f(x) or default` rescues an absent input. A
 non-numeric argument, such as a string, is still an `error`.
+
+Numerical domain outcomes use `nan` or signed infinity where the result type
+admits them; incompatible types or shapes and failed structured computations
+remain errors (S4.2.5). For example, real `sqrt(-1)` is `nan`, while a singular
+`math.solve` fails. Some NaN handling paths still need migration; the
+[convention audit](../vibe/impl/Lambda_Impl_Numerical_Query_Conventions.md)
+records the verified gaps.
 
 ### Rounding & Sign (global)
 
@@ -605,11 +617,11 @@ find("a1b22", digits)            // named
 find("a1b22", \("\d"+))             // inline — same result
 ```
 
-These functions operate on strings, so a **symbol-domain pattern**
-(for example `\('\a'+)`) is a domain error rather than a content match:
+These functions operate on strings, so an incompatible **symbol-domain
+pattern** (for example `\('\a'+)`) returns `null` under S7.10.7:
 
 ```lambda
-find("abc", \('\a'+))         // error: symbol-domain patterns cannot search strings
+find("abc", \('\a'+))         // null: incompatible pattern domain
 ```
 
 String-valued system functions use `""` for a successful result with no
@@ -2112,6 +2124,10 @@ IO/grant boundary (D11.1.2, D11.2.1–D11.2.4):
 | `disk.read_stream(root, relative, options, consumer)` | Calls `pn(state, bytes)` for positive binary blocks; returns `{source, state, hash}` with observed metadata and SHA256. Options: `state`, optional `token`, `block_bytes` (default 65,536, maximum 8 MiB), `max_bytes` (default 256 MiB), `offset` (default 0) and `length` (default remaining bytes). Ranges retain held-file/revision checks; SHA256 covers the selected bytes, while source metadata describes the full file. |
 | `disk.write_stream(root, relative, options, producer)` | Options require `size`, 32-byte SHA256 `hash`, initial `state`, and optional `expected` observation token. Producer returns `{bytes, state, done}`; final `done:true` requires `bytes:null`. Exact length/hash precede atomic publication. Null expected token is create-only. |
 | `crypto.hash_stream(options, producer)` | Same producer contract, `size` and `state`; returns `{source:null, state, hash}` without file publication. |
+| `disk.spool(root, max_bytes, action)` | Calls `action(handle)` with a task-owned, scoped buffered scratch file. Returns the action result; errors discard unpublished bytes and escaped handles fail. Each published segment may contain at most `max_bytes` (1–64 GiB). |
+| `disk.spool_write(handle, bytes)` | Append a positive binary block up to 16 MiB; return its byte offset. A failed write invalidates the spool. |
+| `disk.spool_read(handle, offset, length)` | Read an already written range up to 16 MiB. Reads do not change append offsets or the incremental digest. |
+| `disk.spool_publish(handle, suffix)` | Finalize SHA256, copy to an anchored create-only file named by its lowercase hash plus a suffix of at most 16 lowercase letters/dots, and reset the spool. Publication checks a second digest and durable file/directory barriers. Failed publication invalidates the spool; an error can report uncertain durability. |
 
 Native streaming size bounds are 0–64 GiB. Each producer block is 1 byte–8 MiB.
 Consumer/producer procedures can suspend. The native scope roots callback state,

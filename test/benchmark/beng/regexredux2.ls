@@ -5,8 +5,7 @@
 
 let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 
-// This benchmark is almost entirely regex/replace builtin work, so typing only
-// reaches the two string locals.
+// Normalize text at the input boundary, then keep sequence/result locals typed.
 // 9 regex patterns to count matches
 // Lambda uses ("a"|"b") instead of [ab] for character alternation
 type pat1 = \("agggtaaa" | "tttaccct")
@@ -24,11 +23,11 @@ type header_pat = \(">" .*)
 
 pn main() {
     var __t0 = clock()
-    let text = input(INPUT_PATH, 'text') ^ { null }
+    let text = string(input(INPUT_PATH, 'text')^)
     var original_len = len(text)
 
     // step 1: remove FASTA headers and newlines to get bare sequence
-    var seq: string = replace(text, header_pat, "")
+    var seq: string = replace(text, header_pat, "") or ""
     seq = replace(seq, "\n", "")
     var clean_len = len(seq)
     let match_options = {ignore_case: true}
@@ -45,7 +44,7 @@ pn main() {
     print("agggtaa[cgt]|[acg]aataccct " ++ len(find(seq, pat9, match_options)) ++ "\n")
 
     // step 3: IUPAC code substitutions — each single letter expands to alternatives
-    var result: string = seq^
+    var result: string = seq
     result = replace(result, "B", "(c|g|t)")
     result = replace(result, "D", "(a|g|t)")
     result = replace(result, "H", "(a|c|t)")

@@ -14,6 +14,6 @@
       index: 3
     }],
   map_key_last: 3,
-  take_negative_is_error: true,
-  drop_negative_is_error: true
+  take_negative_is_null: true,
+  drop_negative_is_null: true
 }

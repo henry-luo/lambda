@@ -1242,7 +1242,21 @@
       ],
       "linker_flags": [],
       "build_dir": "build_cli",
-      "debug": false
+      "debug": false,
+      "file_rules": [
+        {
+          "files": [
+            "${input_root}/lambda/input/**",
+            "${input_root}/lambda/io/**",
+            "${input_root}/lambda/core/**",
+            "${input_root}/lambda/format/**",
+            "${input_root}/lambda/network/**"
+          ],
+          "defines": [
+            "LAMBDA_IO_STATIC_VALUES"
+          ]
+        }
+      ]
     },
     "macos-ime": {
       "extends": "cli",

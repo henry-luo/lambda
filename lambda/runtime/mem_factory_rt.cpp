@@ -20,8 +20,10 @@ static void ensure_rt_release_hooks(void) {
 
 static bool heap_stat_fn(void* a, MemStatSample* s) {
     gc_heap_t* gc = (gc_heap_t*)a;
-    s->bytes_reserved = (uint64_t)gc->total_allocated;
-    s->bytes_in_use = (uint64_t)gc->total_allocated;
+    gc_memory_stats_t memory = gc_heap_get_memory_stats(gc);
+    s->bytes_reserved = memory.object_reserved + memory.nursery_reserved + memory.tenured_reserved;
+    s->bytes_in_use = memory.object_used + memory.nursery_used + memory.tenured_used;
+    s->committed_bytes = memory.object_capacity + memory.nursery_capacity + memory.tenured_capacity;
     s->alloc_count = (uint64_t)gc->object_count;
     return true;
 }

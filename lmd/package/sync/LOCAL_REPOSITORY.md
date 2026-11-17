@@ -120,8 +120,15 @@ hosts cannot resume that intent. Other state and shared object formats remain.
 ## Objects and encryption
 
 `<database>.objects/` holds immutable packs named by SHA256 of their complete
-bytes plus `.pack`, alongside readable legacy loose `.object` files. SQLite stores a derived
-`objects` locator table and an encrypted generation-checked `heads` record.
+bytes plus `.pack`, alongside readable legacy loose `.object` files. SQLite stores
+object kinds, pack ranges and generation-checked head pointers. Encrypted head
+envelopes are immutable `<hash>.head` files; credentials are protected
+`credentials-<hash>.box` files beside `device.sqlite`, which stores their pointer.
+New repository and device databases contain no ciphertext payload columns.
+The metadata schema upgrade requires the newer package afterward; older hosts
+expect payload columns and cannot open an upgraded database. Pack formats and
+device identity keys are preserved, so this upgrade does not itself require
+pairing devices again.
 Paths, manifests, workspace state and private recovery journals are encrypted;
 SQL exposes object IDs, generic kinds, sizes and head generations. Editable
 working files remain ordinary files.
@@ -177,8 +184,23 @@ index authentication, record IDs and content authentication are checked during
 verification/recovery. Bounded native range reads retrieve a blob without parsing
 or reading the whole pack.
 
-`pack_locations` is a disposable offset index; `pack_pending` is transaction-local
-staging. Durable packs precede commit. Interrupted transactions may leave valid
+`pack_locations` is a disposable offset index; `pack_pending` holds only the ID,
+lane, offset and length of a record in a scoped native file spool. Ciphertext is
+never staged in SQL. Separate data, exportable-metadata and private-state lanes
+target 16 MiB and flush partial packs at the end of each repository scope. Native
+spools buffer file writes, support pending range reads, and publish through an
+anchored copy with an independent hash check. They avoid concatenating an entire
+pack in script memory. Eligible cloud exports reuse the same immutable pack bytes;
+legacy mixed/private packs fall back to filtered export. The HTTP adapter still
+holds one bounded pack body in memory per request.
+
+Legacy indexes are migrated transactionally after verifying their ciphertext
+against durable physical records. Head and credential envelopes move to immutable
+files before SQL pointers commit. Dropped legacy payload columns can leave bytes
+in SQLite free pages; this migration does not claim secure erasure or physical
+database compaction. Fresh databases avoid those historical payload pages.
+
+Durable packs precede commit. Interrupted transactions may leave valid
 unindexed packs; recovery discovers them without advancing the selected head.
 Rebuilding locators scans authenticated pack metadata and mixed legacy objects.
 Direct initialization outside normal repository scopes retains loose-file support.

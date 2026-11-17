@@ -398,6 +398,15 @@ def expect_cli_sibling_roots(module) -> None:
     includes = {(ROOT / path).resolve() for path in generator.config['includes']}
     if not set(module.sibling_roots()).issubset(includes):
         fail('CLI include overlay lost a sibling project root')
+    if 'LAMBDA_IO_STATIC_VALUES' in generator.config.get('defines', []):
+        fail('CLI input allocation policy must not change runtime sources')
+    if not any((ROOT / path).resolve() == module.sibling_roots()[0] / 'lambda/core'
+               for path in generator.config['source_dirs']):
+        fail('CLI source directories lost the shared core behind local compatibility headers')
+    rules = generator.config.get('file_rules', [])
+    if not any('LAMBDA_IO_STATIC_VALUES' in rule.get('defines', []) for rule in rules):
+        fail('CLI omitted the Input-owned source allocation policy')
+
 
 
 def expect_owned_test_source_resolution(module) -> None:

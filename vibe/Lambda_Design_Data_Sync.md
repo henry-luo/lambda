@@ -751,6 +751,48 @@ ranges. Repacking writes and verifies a new pack and publishes its locations
 before retiring an old one. Pack size remains a tuning choice; chunking,
 deduplication, encryption, and recovery contracts are part of the baseline.
 
+### 5.9 Streaming pack publication and metadata-only SQLite
+
+Encrypted payload bytes must never enter SQLite, including temporary blob
+staging. Stream newly encrypted records into a private, bounded file spool;
+retain only IDs, kinds, offsets and lengths in the transactional metadata index.
+Keep the current 16 MiB pack target and 32 MiB hard bound, independent of SQL
+result limits. Reads of unsealed records use spool ranges. Pack footers retain
+the authenticated recovery index. Policy remains Lambda Script; native code
+provides scoped buffered file IO, range reads, hashing and durable publication
+(S12.1.1v3, D11.1.2, D11.2.1–D11.2.4).
+
+Seal at a size/count boundary and at the end of a save/change batch. A partial
+pack must not wait indefinitely for more edits. Flush the authenticated footer,
+publish the immutable pack, then register its locations. The SQLite workspace
+head may commit only after all dependencies are durable. Failed scopes retain
+the previous head; already published packs are recoverable orphans. Concurrent
+pruning must exclude active writers and uploads. Cleanup never treats an orphan
+as proof that a workspace save completed.
+
+Use separate data and metadata lanes so ordinary cloud publication can reuse
+whole data packs without disclosing private local-state objects. Exportable
+metadata and private state must likewise remain distinguishable. Remote
+publication uploads required immutable packs first, followed by indexes and the
+authenticated workspace publication. Keep queued packs and upload concurrency
+bounded. Repacking copies authenticated records without decrypting/re-encrypting
+unchanged blobs; retire old locations only after the replacement is durable.
+
+SQLite stores object descriptors, pack lifecycle metadata, current-head pointers
+and recovery/upload bookkeeping. It must not duplicate ciphertext in `objects`,
+`heads` or credential tables. Authenticated head envelopes and device credentials
+belong in protected immutable/atomic files outside SQLite. Keep generation and
+authenticated-head binding checks. Migrate existing indexes from authenticated
+pack/object records, never drop the only usable copy, and preserve recovery
+across interruption. A migration must account for ciphertext left in SQLite
+free pages as well as visible columns.
+
+This follows restic's buffered temporary pack writer, authenticated trailing
+header and post-save index update, while preserving Lambda's live-edit and
+workspace transaction semantics. Sources: [pack writer](https://github.com/restic/restic/blob/master/internal/repository/pack/pack.go),
+[packer manager](https://github.com/restic/restic/blob/master/internal/repository/packer_manager.go),
+[repository format](https://restic.readthedocs.io/en/stable/100_references.html).
+
 ## 6. Directory and file synchronization
 
 Maintain an index from local entries to stable node IDs, their last accepted
@@ -1783,6 +1825,37 @@ SQLite locator catalog and encrypted local head, Gear chunking, complete scans,
 workspace reconciliation, installation journals, snapshots and recovery. Policy
 is Lambda Script (S12.1.1v3); C++ exposes crypto and file-anchor mechanisms through
 D11.1.2. [API and current limits](../lmd/package/sync/LOCAL_REPOSITORY.md).
+The [streaming pack implementation](impl/Lambda_Impl_Sync_Streaming_Packs.md)
+replaces SQL ciphertext staging with file spools and external head/credential
+envelopes (§5.9). SQLite contains descriptors and pointers; physical legacy free
+pages require separate compaction. The [memory tuning implementation](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17)
+adds scoped formatter/JSON/Mark owners, native backing pressure, eager MIR scratch
+retirement and GC region reclamation. Cloud restore groups by physical pack and
+imports at most 128 records before proceeding to the next pack. This preserves
+authentication/recovery and keeps script policy in Lambda Script (S12.1.1v3;
+D5.1.3–D5.1.5, D5.3.1, D8.3.4).
+
+In matched normal-release three-run local-S3 tests, 80 MiB / 128-file publication
+peak RSS falls from 1032 to 431 MiB and independent restore from 1500 to 441 MiB.
+Time medians are 8.878 s publication and 13.658 s restore, versus 8.513/13.712 s
+before; every restored file matches SHA256. These results precede a final fresh-
+VM residency fix; the implementation record distinguishes that fix's limited
+wrap-up check from the three-run arm. Repeated native owner counts/capacity are
+flat, but initial OS peak/idle budgets remain open. The final fresh-VM single-sample wrap-up check records
+10.022/13.884 s and 384.08/409.23 MiB RSS for 80 MiB publication/restore, with
+byte-exact recovery; repeat median/idle qualification is pending. HTTP still buffers one bounded
+pack body; file-backed upload is a follow-up. The
+[historical diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md) preserves the
+original owner attribution and profiling limits (D5.2.4).
+The [sync test performance implementation](impl/Lambda_Impl_Sync_Test_Performance.md#implementation--2026-11-17)
+reuses the already committed state for document replies and retains at most one
+expanded current-head view up to 1 MiB of canonical bytes. Fresh authenticated
+head generation/identity gates reuse; maintenance changes invalidate it and
+explicit verification rereads storage. Larger views use the existing hydration
+path. This is a GC-owned client optimization (D5.1.3, D5.3.1), with unchanged
+save recovery boundaries and wire bytes. Test fixture transaction batching is
+separate from production request durability (D11.1.2).
+
 Internet traversal, cloud adapters, polling deployment, broader key management
 and editor bindings remain subsequent acceptance work; this does not complete §12.1.
 

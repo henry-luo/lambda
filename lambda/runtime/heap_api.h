@@ -68,6 +68,8 @@ typedef enum HeapGcExternalKind {
 void* heap_gc_external_preflight(size_t bytes, int kind);
 void heap_gc_external_record_alloc(void* owner, size_t bytes, int kind);
 void heap_gc_external_record_release(void* owner, size_t bytes, int kind);
+// one charge per backing/heap, independent of the number of immutable views.
+bool heap_track_byte_storage(struct ByteStorage* storage, int kind);
 
 #ifdef __cplusplus
 }

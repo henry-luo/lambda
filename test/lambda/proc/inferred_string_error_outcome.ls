@@ -2,7 +2,8 @@
 pn check(source: string) {
     var line = "prefix"
     let snapshot = line
-    line = line ++ slice(source, 1.5, 3)
+    // conversions retain errors; query input rejection now yields null
+    line = line ++ int(source)
     let failed = line is error
     let message = line ^ { "recovered" }
     line = message ++ "!"

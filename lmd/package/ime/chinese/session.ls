@@ -22,7 +22,7 @@ pub fn frame(s) map => {type:"candidates",items:if (s.expanded) s.items else sli
     *:(if (s.expanded) {expanded:true,columns:s.settings.page_size} else {})}
 fn result(s,actions) map => {session:s,actions:actions}
 fn passed(s) map => result(s,[{type:"pass"}])
-fn cleared(s) map => {*:s,raw:"",caret:0,stops:[0],expanded:false,chosen:[],items:[],page:0,highlight:0,truncated:false,dirty:false}
+fn cleared(s:map) map => {*:s,raw:"",caret:0,stops:[0],expanded:false,chosen:[],items:[],page:0,highlight:0,truncated:false,dirty:false}
 fn compose_action(s) map => {type:"compose",text:preedit(s),
     caret:len(preedit(s)) - len(s.raw) + s.caret}
 
@@ -63,7 +63,7 @@ fn edit_raw(engine,s,from_at,to_at,text) map^ {
     if (not active(next)) cancel(next) else composing(engine,next)^
 }
 
-fn cancel(s) map {
+fn cancel(s:map) map {
     let next = cleared(s);
     result(next,[{type:"cancel"},frame(next)])
 }

@@ -23,6 +23,21 @@ fn known_objects(current, provider) => {
     let found = [for (item in (if (current.cloud_objects == null) [] else current.cloud_objects) where item.provider == provider) item];
     if (len(found) == 0) [] else found[0].ids
 }
+// Physical pack grouping bounds download owners; logical ID order can scatter one batch across every pack.
+pn install_objects(handle, credentials, config, ids, locations) any^ {
+    let ordered = sort([for (id in ids) {id:id,key:locations[hex.hex(id)^]}],(entry)=>entry.key)^
+    var offset = 0
+    while (offset < len(ordered)^) {
+        var end = offset+1
+        while (end < len(ordered)^ and end-offset < 128 and ordered[end].key == ordered[offset].key) {
+            end = end+1
+        }
+        let decoded = objects.read(config,credentials,slice(ordered,offset,end)^)^
+        local.import_objects(handle,decoded)^
+        offset = end
+    }
+    return len(ordered)^
+}
 pn install(handle, credentials, config, control, publication, verify=false) any^ {
     let bytes = transport.read(config,credentials,publication.bundle.key)^
     let payload = bundle.expand(config,credentials,publication,bundle.decode(credentials,publication,bytes)^)^
@@ -31,21 +46,11 @@ pn install(handle, credentials, config, control, publication, verify=false) any^
     var downloaded = 0
     let locations = map([for (entry in payload.locations) (hex.hex(entry.id)^,entry.key)])
     let pending = [for (id in payload.ids where verify or (not contains(have,id)^ and not contains(deferred,id)^)) id]
-    for (offset in range(0,len(pending)^,64)) {
-        let ids = slice(pending,offset,offset+64)^
-        let decoded = objects.read(config,credentials,[for (id in ids) {id:id,key:locations[hex.hex(id)^]}])^
-        local.import_objects(handle,decoded)^
-        downloaded = downloaded+len(decoded)^
-    }
+    downloaded = install_objects(handle,credentials,config,pending,locations)^
     // retain cold cache absences, but hydrate any chunk that the incoming live state now needs.
     let hot = local.incoming_hot_chunks(handle,payload.saved,if (payload.documents == null) [] else payload.documents)^
     let needed = [for (id in hot where contains(deferred,id)^ and not contains(have,id)^) id]
-    for (offset in range(0,len(needed)^,64)) {
-        let ids = slice(needed,offset,offset+64)^
-        let decoded = objects.read(config,credentials,[for (id in ids) {id:id,key:locations[hex.hex(id)^]}])^
-        local.import_objects(handle,decoded)^
-        downloaded = downloaded+len(decoded)^
-    }
+    downloaded = downloaded+install_objects(handle,credentials,config,needed,locations)^
     bundle.install_checkpoint(handle,credentials,schema.member(control,publication.actor,false)^,payload)^
     return {payload:payload,downloaded:downloaded}
 }
@@ -170,11 +175,10 @@ pn publish_paged(handle, credentials, config, remote, current, ids, old, previou
     let epoch = remote.epoch or 0
     let prior = local.cloud_locations(handle,provider(config)^,ids)^
     var physical = [for (entry in prior where entry.key != null) entry]
-    let pending = [for (entry in prior where entry.key == null) entry.id]
+    var pending = [for (entry in prior where entry.key == null) entry.id]
     var uploaded = 0
-    var offset = 0
-    while (offset < len(pending)^) {
-        let packed = local.export_pack(handle,slice(pending,offset)^)^
+    while (len(pending)^ > 0) {
+        let packed = local.export_pack(handle,pending)^
         let key = catalog.data_key("objects",packed.id,epoch)^
         let stored = transport.ensure(config,credentials,transport.descriptor(key,packed.bytes)^,packed.bytes)^
         if (stored.existing != null) {
@@ -182,7 +186,7 @@ pn publish_paged(handle, credentials, config, remote, current, ids, old, previou
                 raise error("sync cloud: pack collision")
         }
         physical = [*physical,*[for (id in packed.ids) {id:id,key:key}]]
-        offset = offset+len(packed.ids)^
+        pending = [for (id in pending where not contains(packed.ids,id)^) id]
         if (stored.uploaded) { uploaded = uploaded+1 }
     }
     let objects = inventory_pages.stage(config,credentials,[for (entry in physical) entry.key],epoch)^

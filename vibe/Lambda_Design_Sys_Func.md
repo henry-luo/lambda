@@ -3,7 +3,8 @@
 - **Status:** design proposal — return-value convention; RF7 (native
   procedures with `var` parameters) RATIFIED by USER 2026-11-11 as D7.6.3*,
   D7.6.4*, S9.1.3v4 and S9.2.1v2; RF8 (natives that only read their
-  arguments) RATIFIED by USER 2026-11-11 as D7.6.5*
+  arguments) RATIFIED by USER 2026-11-11 as D7.6.5*; RF3E (total query
+  functions) RATIFIED by USER 2026-11-17 as S7.1.2v2 and S7.10.7
 - **Date:** 2026-08-05
 - **Scope:** Lambda system functions and procedures that search, select,
   transform, or mutate collections and strings
@@ -26,6 +27,12 @@ The return value follows the cardinality and meaning of the operation:
 Admissive invalid type/value cases are an additional operation-level outcome:
 they use the empty/missing result in the middle column when the function's
 contract explicitly defines that graceful behavior.
+
+**Query-family rule (S7.10.7, USER 2026-11-17):** `slice`, `take`, `drop`,
+`find`, `replace`, and `split` return `null` for invalid non-error inputs.
+That missing outcome is distinct from a valid empty result. RF3E below
+defines the family; the table's non-admissive column does not apply to its
+input rejection paths.
 
 The last column is refined by the operation's admission policy. A system
 function may classify a bad type/value as **admissive** when the operation has
@@ -257,9 +264,39 @@ Reaching from the end is the separate `last` keyword in a subscript (`s[last - 2
 slice(s, index_of(s, c), k)  // null when the search missed
 ```
 
-A non-null, non-integral offset remains a non-admissive `error` (RF4).
+A non-null, non-integral or non-finite offset returns `null`
+(S7.1.2v2, S7.10.7, RF3E).
 
 *Rationale.* Python-style wrapping is precisely what made the old `-1` sentinel dangerous, and the danger outlives the sentinel: under wrapping, *any* underflowed computed index silently selects real members from the far end of the sequence instead of yielding absence. `arr[i - 1]` at `i = 0` returns the last element; a leaked not-found `-1` slices the tail. Clamping makes the two out-of-range directions behave alike, so an index bug degrades to an empty or absent result the caller can see, rather than to plausible wrong data. The cost is that Lambda gives up a familiar shorthand; §7.4 already paid that price for indexing, and a `slice` that wrapped while `arr[-1]` returned `null` would be the worse outcome — one concept with two contradictory spellings.
+
+### RF3E — Query system functions return null for invalid non-error inputs
+
+**Ruling (USER, 2026-11-17), S7.1.2v2 / S7.10.7.** `slice`, `take`, `drop`,
+`find`, `replace`, and `split` are total queries over non-error inputs. An
+unsupported source, invalid selector/count, incompatible pattern domain, or
+invalid runtime option value yields `null`, rather than a new ordinary error.
+Bounds that the operation accepts still clamp as before.
+
+```lambda
+slice("abc", 0.5, 2)       // null: invalid offset
+slice("abc", nan, 2)       // null: non-finite offset
+take([1, 2], -1)           // null: invalid count
+find(7, "x")              // null: unsupported source
+slice("abc", 2, 2)         // "": valid empty selection
+find("abc", "x")          // []: valid search with no matches
+replace("abc", "x", "y") // "abc": valid replacement with no matches
+```
+
+Only invalid queries acquire the null result. Successful collection results
+do not collapse, and a successful replacement with no matches is not an
+invalid query. This extends the accessor convention of S7.1.1v3 to the six
+named functions while preserving successful result shapes (S7.10.1v3).
+
+An existing error operand is not a query miss (S7.10.4). System faults keep
+S7.11. Parsing or constructing a pattern remains a checked input boundary;
+the query takes the resulting structured pattern. This runtime return rule
+does not change compile-time syntax, arity or option-name diagnostics.
+Implementation status: [convention audit](impl/Lambda_Impl_Numerical_Query_Conventions.md).
 
 ### RF4 — Non-admissive invalid input or operation returns `error`
 
@@ -267,7 +304,8 @@ Non-admissive failures must not be hidden by `null` or `[]`. Examples include:
 
 - malformed parser input or an unsupported parse format;
 - failed file/URL loading or other I/O failure;
-- an invalid pattern or option where no safe absence interpretation exists;
+- failed pattern construction, or an invalid option outside the total-query
+  family in S7.10.7;
 - mutating a read-only or unsupported view;
 - allocation failure or another operation that cannot produce its contract's
   result.
@@ -744,8 +782,8 @@ The `-1` holdouts are instructive rather than contradictory. Languages that acqu
 | Function/operation | Current behavior | Convention |
 |---|---|---|
 | `find(source, pattern)` | returns all match maps; no matches returns `[]` | conforms to zero-to-many |
-| `find(null, pattern)` | returns `[]` | conforms because Lambda treats `null` as empty iterable content |
-| `find(non_text, pattern)` | returns `error` | conforms |
+| `find(null, valid_pattern)` | returns `[]` | conforms because Lambda treats `null` as empty iterable content; invalid selectors return null (S7.10.7) |
+| `find(non_text, pattern)` | returns `null` | conforms to RF3E |
 | `split` | returns a collection of parts, including `[]` for accepted empty cases | conforms to zero-to-many |
 | `slice` / `take` / `drop` on collections | return an empty collection when the selected interval is empty | conforms to zero-to-many |
 | string `slice` / `chr` | return `""` when the successful string result has no characters | conforms to RF3B |
@@ -765,7 +803,7 @@ choice between mutation Model A and Model B:
 | `argmin([])`, `argmax([])` | return `null` for an empty collection | conforms to the admissive zero-or-one convention |
 | `index_of`, `last_index_of` | public result is `int | null`; private raw adapter keeps `-1` | `null` for no match or non-applicable broad input; `error` operands remain `error` |
 | `ord("")` / invalid UTF-8 / non-text | public result is `null`; private raw adapter keeps `-1` | `null` for no first code point or non-applicable broad input; `error` operands remain `error` |
-| `slice` / `substring` / `subview` with a `null` offset | now returns `null` | conforms to RF3D; non-null non-integral offsets remain `error` |
+| `slice` / `substring` / `subview` with a `null` offset | returns `null` | conforms to RF3D; invalid `slice` offsets also return `null` under RF3E |
 | `slice` / `substring` / `subview` with a negative offset | now clamps to `0` | conforms to RF3D; previously wrapped from the end, contradicting §7.4 |
 | `chr(null)` / invalid code point | returns `""` | conforms to RF3B; error operands and wrong argument shapes remain `error` |
 | `input` invalid target/options or failed input | returns an error-bearing `RetItem` and publishes the runtime diagnostic | conforms to the effectful `T^E` contract |
@@ -851,8 +889,10 @@ semantics' "cannot be mistaken for success" test.
 3. Empty collection construction must preserve the intended container mode.
    In particular, an ArrayNum-producing vector overload returns a typed empty
    `Item.array_num`, not a generic array/list merely because its length is zero.
-4. Invalid operands must propagate or construct `ItemError`; they must not be
-   converted to empty collections or unchanged values.
+4. Preserve existing error operands. Invalid non-error inputs follow the
+   function's contract: RF3E queries return `null`; non-admissive operations
+   return an ordinary error. Do not substitute an empty collection or an
+   unchanged value for an invalid operation.
 5. Internal helpers may return owner pointers or boxed owners for rooting and
    COW writeback even when a future public mutation surface returns null/unit.
 6. Tests should cover the three-way distinction for every collection API:
@@ -958,3 +998,15 @@ lengths, real round trips, residuals, pivoting, views, multiple right-hand
 sides, empty/error/null distinctions, exact degeneracy, cancellation, extreme
 exponents, and libm native/boxed paths. Run them under both interpreter and
 JIT, including forced GC and freed-memory poisoning (D8.3.1, D6.3.3).
+
+## Appendix S — Superseded rulings
+
+### S.1 Query input rejection — superseded 2026-11-17
+
+~~A non-null, non-integral slice offset remains a non-admissive error.~~
+S7.1.2v2 and S7.10.7 now return null for invalid non-error slice inputs.
+
+~~An invalid pattern or option where no safe absence interpretation exists
+returns an error under RF4.~~ The six named query functions now use RF3E
+for invalid non-error inputs; pattern construction and non-admissive APIs
+retain their checked contracts.

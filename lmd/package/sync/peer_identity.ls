@@ -1,6 +1,7 @@
 // explicit device pins and encrypted enrollment; host grants remain authoritative (D11.2.3).
 import crypto: lambda.io.crypto
 import sqlite: lambda.io.sqlite
+import disk: lambda.io.disk
 import hex: lambda.security.tuf.metadata
 import codec: .codec
 import v: .schema
@@ -99,35 +100,47 @@ pub fn enroll(credentials, offer, expected_sender) any^ {
     return trust({*:credentials,space:payload.space,secret:payload.secret},offer.sender)^
 }
 
-pn store_credentials(tx, wrapping_key, credentials) any^ {
+pn legacy_credentials(tx) any^ { return contains(sqlite.query(tx,
+    "SELECT sql FROM sqlite_master WHERE name = 'credentials' AND type = 'table'")^[0][0],"box")^ }
+pn store_credentials(tx, directory, wrapping_key, credentials) any^ {
     validate(credentials)^
-    let context = "lambda-peer-credentials-1"
-    let box = crypto.seal(wrapping_key,codec.encode(credentials)^,context)^
-    sqlite.execute(tx,"INSERT OR REPLACE INTO credentials VALUES (1, ?)",[box])^
+    let box = crypto.seal(wrapping_key,codec.encode(credentials)^,"lambda-peer-credentials-1")^
+    let id = hex.hex(hash(box,'sha256')^)^
+    disk.install(directory,"credentials-" ++ id ++ ".box",box,null)^
+    if (legacy_credentials(tx)^) {
+        sqlite.execute(tx,"DROP TABLE credentials")^
+        sqlite.execute(tx,"CREATE TABLE credentials (id INTEGER PRIMARY KEY CHECK (id = 1), object TEXT NOT NULL)")^
+    }
+    sqlite.execute(tx,"INSERT OR REPLACE INTO credentials VALUES (1, ?)",[id])^
     return credentials.device
 }
-pn read_credentials(tx, wrapping_key) any^ {
-    let rows = sqlite.query(tx,"SELECT box FROM credentials WHERE id = 1")^
+pn read_credentials(tx, directory, wrapping_key) any^ {
+    let legacy = legacy_credentials(tx)^
+    let rows = sqlite.query(tx,if (legacy) "SELECT box FROM credentials WHERE id = 1"
+        else "SELECT object FROM credentials WHERE id = 1")^
     if (len(rows) != 1) raise error("sync peer: missing credentials")
-    let credentials = codec.decode(crypto.open(wrapping_key,rows[0][0],"lambda-peer-credentials-1")^,131072)^
+    let box = if (legacy) rows[0][0] else disk.capture(directory,"credentials-" ++ rows[0][0] ++ ".box",131072)^.bytes
+    if (not legacy and hex.hex(hash(box,'sha256')^)^ != rows[0][0]) raise error("sync peer: credential identity mismatch")
+    let credentials = codec.decode(crypto.open(wrapping_key,box,"lambda-peer-credentials-1")^,131072)^
     validate(credentials)^
+    if (legacy) { store_credentials(tx,directory,wrapping_key,credentials)^ }
     return credentials
 }
-// creation never overwrites an existing device; updates read under the same writer transaction.
+// creation never overwrites an existing device; updates serialize against its head pointer.
 pub pn save(directory, wrapping_key, credentials) any^ {
     open tx = (sqlite.create(directory ++ "/device.sqlite")^) {
-        sqlite.execute(tx,"CREATE TABLE credentials (id INTEGER PRIMARY KEY CHECK (id = 1), box BLOB NOT NULL)")^
-        return store_credentials(tx,wrapping_key,credentials)^
+        sqlite.execute(tx,"CREATE TABLE credentials (id INTEGER PRIMARY KEY CHECK (id = 1), object TEXT NOT NULL)")^
+        return store_credentials(tx,directory,wrapping_key,credentials)^
     }
 }
 pub pn load(directory, wrapping_key) any^ {
-    open tx = (sqlite.existing(directory ++ "/device.sqlite")^) { return read_credentials(tx,wrapping_key)^ }
+    open tx = (sqlite.existing(directory ++ "/device.sqlite")^) { return read_credentials(tx,directory,wrapping_key)^ }
 }
 pub pn update(directory, wrapping_key, operation) any^ {
     open tx = (sqlite.existing(directory ++ "/device.sqlite")^) {
-        let current = read_credentials(tx,wrapping_key)^
+        let current = read_credentials(tx,directory,wrapping_key)^
         let next = operation(current)^
-        store_credentials(tx,wrapping_key,next)^
+        store_credentials(tx,directory,wrapping_key,next)^
         return next
     }
 }

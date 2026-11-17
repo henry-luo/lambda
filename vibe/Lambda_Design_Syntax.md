@@ -3405,6 +3405,26 @@ reference grammars, interpreter and JIT implement the ruling. The regression
 suite covers error ordering, dynamic fields, ordinary element types, virtual
 files and forced precise garbage collection on both execution tiers.
 
+### 7.34 Map concatenation is ordered shallow merge (decided 2026-11-17)
+
+**Ruling (USER), S10.6.1v2.** Map `++` map merges the two maps. It is
+equivalent to `{*: left, *: right}`: visit left keys in their original order,
+then right keys; an existing key keeps its position and receives the later
+value. New right keys append. Values are replaced as whole values, so nested
+maps are not merged recursively. Neither operand changes (S9.1.2).
+
+```lambda
+{a: 1, b: 2} ++ {b: 20, c: 3}  // {a: 1, b: 20, c: 3}
+```
+
+This extends concatenation's left-to-right composition to maps without a new
+operator. It replaces the previous rejection of map `++` map; the existing
+spread expression remains equivalent. Sequence, text, path and null-identity
+rules retain their meanings. Maps and elements do not become scalar sequence
+operands.
+
+Implementation and qualification: [map concatenation](impl/Lambda_Impl_Map_Concat.md).
+
 ## Appendix S — Superseded Rulings
 
 Text that once stated a ruling and no longer does. It is kept for the
@@ -3746,3 +3766,10 @@ values (S2.6.3). The choice belongs at the destination and append site,
 never ambient state: a process-wide "suppress merging" flag leaks across
 allocations and early returns. The former flag on
 `EvalContext`/`InputAllocationContext` is retired. [LR09-R3; Design_Syntax §7.27]
+
+### S.7 Rejecting map concatenation — superseded 2026-11-17
+
+~~Maps and elements are not sequences, so map `++` map is an error; merge
+requires `{*: m1, *: m2}`.~~ S10.6.1v2 and §7.34 now define ordered shallow
+map merging with `++`. The exclusion of maps and elements from sequence
+operands remains.

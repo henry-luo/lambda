@@ -3086,3 +3086,347 @@ TEST_F(GCHeapTest, NativeSeenSetDeduplicatesPointers) {
 
     gc_native_seen_dispose(&seen);
 }
+
+TEST_F(GCHeapTest, CollectionReleasesEmptyRegionsAndPreservesLiveSlotAddresses) {
+    gc_set_collect_callback(gc, nullptr);
+    void* survivor = make_string("still live");
+    uint64_t root = string_item(survivor);
+    gc_register_root(gc, &root);
+    for (int round = 0; round < 3; round++) {
+        void* retired = nullptr;
+        for (int i = 0; i < 40000; i++) {
+            int cls = i % GC_NUM_SIZE_CLASSES;
+            size_t size = gc_object_zone_class_size(cls);
+            retired = gc_heap_bump_alloc(gc, sizeof(gc_header_t) + size,
+                size, LMD_TYPE_STRING, cls);
+            ASSERT_NE(retired, nullptr);
+            ASSERT_NE(gc_heap_calloc_class(gc, size, LMD_TYPE_STRING, cls), nullptr);
+        }
+        ASSERT_TRUE(gc_is_managed(gc, retired)); // also prime the range cache that trim must invalidate
+        gc_memory_stats_t before = gc_heap_get_memory_stats(gc);
+        gc_collect(gc, nullptr, 0);
+        EXPECT_FALSE(gc_is_managed(gc, retired));
+        gc_memory_stats_t after = gc_heap_get_memory_stats(gc);
+        EXPECT_LT(after.object_capacity, before.object_capacity / 2);
+        EXPECT_TRUE(gc_is_managed(gc, survivor));
+        EXPECT_EQ((void*)(uintptr_t)(root & UINT64_C(0x00FFFFFFFFFFFFFF)), survivor);
+        EXPECT_STREQ((char*)survivor + sizeof(int32_t), "still live");
+        EXPECT_LT(after.object_capacity, 5u * 1024 * 1024);
+    }
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, DataTrimRetainsSurvivorsAndBoundsFutureBlockSize) {
+    void* survivor = make_list(1, 8);
+    uint64_t root = list_item(survivor);
+    gc_register_root(gc, &root);
+    list_items(survivor)[0] = int_item(71);
+    ASSERT_NE(gc_data_alloc(gc, 20u * 1024 * 1024), nullptr);
+    gc_collect(gc, nullptr, 0);
+    gc_memory_stats_t stats = gc_heap_get_memory_stats(gc);
+    EXPECT_LE(stats.nursery_capacity, (size_t)GC_DATA_ZONE_BLOCK_SIZE);
+    EXPECT_EQ(list_items(survivor)[0], int_item(71));
+    EXPECT_LE(gc->tenured_data->block_size, (size_t)GC_DATA_ZONE_BLOCK_SIZE);
+    EXPECT_GE(stats.nursery_reserved, stats.nursery_capacity);
+    EXPECT_GE(stats.tenured_reserved, stats.tenured_capacity);
+    gc_unregister_root(gc, &root);
+}
+
+#include "../../lambda/runtime/context_capsule.h"
+#include "lambda/core/binary.h"
+#include <uv.h>
+
+class RuntimeMemoryLifetimeTest : public ::testing::Test {
+protected:
+    EvalContext runtime{};
+    void SetUp() override {
+        ASSERT_TRUE(eval_context_init(&runtime));
+        heap_init();
+        ASSERT_NE(runtime.heap, nullptr);
+    }
+    void TearDown() override {
+        if (runtime.heap) heap_destroy();
+        context_capsule_destroy_all(&runtime);
+        EXPECT_TRUE(eval_context_shutdown(&runtime));
+    }
+};
+
+TEST_F(RuntimeMemoryLifetimeTest, FormatterDestinationDoesNotAccumulateInRuntimePool) {
+    const size_t length = 1024 * 1024;
+    char* bytes = (char*)mem_alloc(length, MEM_CAT_CONTAINER);
+    ASSERT_NE(bytes, nullptr);
+    memset(bytes, 'x', length);
+    RootFrame roots(3);
+    Rooted<Item> source(roots, {.item = s2it(heap_strcpy(bytes, length))});
+    mem_free(bytes);
+    Rooted<Item> format(roots, {.item = y2it(heap_create_symbol("json", 4))});
+    Rooted<Item> output(roots, ItemNull);
+    PoolStats before{}, after{};
+    pool_get_detailed_stats(runtime.heap->pool, &before);
+    for (int i = 0; i < 64; i++) {
+        output.set(fn_format2(source.get(), format.get()));
+        ASSERT_EQ(get_type_id(output.get()), LMD_TYPE_STRING);
+        EXPECT_EQ(output.get().get_safe_string()->len, length + 2);
+        output.set(ItemNull);
+        heap_gc_collect();
+    }
+    pool_get_detailed_stats(runtime.heap->pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+}
+
+TEST_F(RuntimeMemoryLifetimeTest, BinaryPressureCollectsDiscardedBodiesAndAliasesChargeOnce) {
+    char* bytes = (char*)mem_alloc(2 * 1024 * 1024, MEM_CAT_CONTAINER);
+    ASSERT_NE(bytes, nullptr);
+    memset(bytes, 0x5a, 2 * 1024 * 1024);
+    RootFrame roots(2);
+    Rooted<Item> source(roots, ItemNull);
+    Rooted<Item> slice(roots, ItemNull);
+    for (int i = 0; i < 128; i++) {
+        Binary* body = heap_binary_from_bytes(bytes, 2 * 1024 * 1024);
+        ASSERT_NE(body, nullptr);
+        source.set({.item = x2it(body)});
+        slice.set({.item = x2it(heap_binary_slice(body, 1, 1024))});
+        EXPECT_EQ(binary_data(slice.get().get_safe_binary())[0], 0x5a);
+        source.set(ItemNull);
+        slice.set(ItemNull);
+    }
+    mem_free(bytes);
+    gc_external_stats_t stats = gc_heap_get_external_stats(runtime.heap->gc);
+    EXPECT_GT(stats.pressure_collections, 0u);
+    EXPECT_LE(stats.peak_bytes, (size_t)GC_EXTERNAL_PRESSURE_THRESHOLD);
+    EXPECT_EQ(stats.allocation_count, 128u);
+    heap_gc_collect();
+    EXPECT_EQ(gc_heap_get_external_stats(runtime.heap->gc).live_bytes, 0u);
+}
+
+static void release_test_storage(void* storage) { byte_storage_release((ByteStorage*)storage); }
+
+TEST_F(RuntimeMemoryLifetimeTest, NativeStorageCanOutliveHeapAndReleaseOnAnotherThread) {
+    ByteStorage* storage = byte_storage_alloc(4096, MEM_CAT_CONTAINER);
+    ASSERT_NE(storage, nullptr);
+    Binary* view = heap_binary_from_storage(storage, 0, 4096, false);
+    ASSERT_NE(view, nullptr);
+    EXPECT_EQ(gc_heap_get_external_stats(runtime.heap->gc).live_bytes, 4096u);
+    heap_destroy();
+    EXPECT_EQ(byte_storage_ref_count(storage), 1);
+    uv_thread_t worker;
+    ASSERT_EQ(uv_thread_create(&worker, release_test_storage, storage), 0);
+    ASSERT_EQ(uv_thread_join(&worker), 0);
+}
+
+TEST_F(RuntimeMemoryLifetimeTest, ParsedValuesOwnAllEscapingBytesAndSharedRuntimeShapes) {
+    RootFrame roots(3);
+    const char* json = "{\"a\":[1,\"value\"],\"b\":true}";
+    Rooted<Item> source(roots, {.item = s2it(heap_strcpy(json, strlen(json)))});
+    Rooted<Item> type(roots, {.item = y2it(heap_create_symbol("json", 4))});
+    Rooted<Item> value(roots, fn_parse2(source.get(), type.get()));
+    ASSERT_EQ(get_type_id(value.get()), LMD_TYPE_MAP);
+    heap_gc_collect();
+    Item rendered = fn_format2(value.get(), type.get());
+    ASSERT_EQ(get_type_id(rendered), LMD_TYPE_STRING);
+    EXPECT_STREQ(rendered.get_safe_string()->chars, "{\n  \"a\": [\n    1,\n    \"value\"\n  ],\n  \"b\": true\n}");
+}
+
+#include "../../lambda/mir/mir.h"
+#include "../../lambda/mir/mir-gen.h"
+
+static MIR_context_t memory_test_mir_context(MIR_item_t* function, bool generate) {
+    MIR_context_t ctx = MIR_init();
+    if (!ctx) return nullptr;
+    MIR_gen_init(ctx);
+    MIR_module_t module = MIR_new_module(ctx, "seal_test");
+    MIR_type_t result = MIR_T_I64;
+    *function = MIR_new_func(ctx, "answer", 1, &result, 0);
+    MIR_append_insn(ctx, *function, MIR_new_ret_insn(ctx, 1, MIR_new_int_op(ctx, 42)));
+    MIR_finish_func(ctx);
+    MIR_finish_module(ctx);
+    MIR_load_module(ctx, module);
+    if (generate) { MIR_link(ctx, MIR_set_gen_interface, nullptr); MIR_gen(ctx, *function); }
+    return ctx;
+}
+
+TEST(RuntimeMirLifetime, SealedCodeSurvivesLaterCompilationAndPendingCodeKeepsGenerator) {
+    MIR_item_t first = nullptr, later = nullptr;
+    MIR_context_t ctx = memory_test_mir_context(&first, true);
+    ASSERT_NE(ctx, nullptr);
+    auto entry = (int64_t (*)(void))first->u.func->machine_code;
+    ASSERT_NE(entry, nullptr);
+    bool initialized = true;
+    ASSERT_TRUE(jit_seal_generated_context(ctx, &initialized));
+    EXPECT_FALSE(initialized);
+    EXPECT_EQ(entry(), 42);
+    MIR_context_t next = memory_test_mir_context(&later, false);
+    ASSERT_NE(next, nullptr);
+    bool next_initialized = true;
+    EXPECT_FALSE(jit_seal_generated_context(next, &next_initialized));
+    EXPECT_TRUE(next_initialized);
+    MIR_link(next, MIR_set_gen_interface, nullptr);
+    ASSERT_NE(MIR_gen(next, later), nullptr);
+    EXPECT_TRUE(jit_seal_generated_context(next, &next_initialized));
+    EXPECT_EQ(entry(), 42);
+    EXPECT_FALSE(jit_seal_generated_context(ctx, &initialized));
+    MIR_finish(next);
+    MIR_finish(ctx);
+}
+
+#include "lib/mem_context.h"
+
+static void memory_test_input_owners(size_t* count, size_t* used) {
+    *count = *used = 0;
+    MemSnapshot* snapshot = mem_snapshot_capture(nullptr);
+    ASSERT_NE(snapshot, nullptr);
+    for (uint32_t i = 0; i < snapshot->count; i++) {
+        const MemStatSample* sample = &snapshot->samples[i];
+        if (sample->kind == MEM_KIND_ARENA && sample->role == MEM_ROLE_INPUT) {
+            (*count)++;
+            *used += sample->bytes_in_use;
+        }
+    }
+    mem_snapshot_free(snapshot);
+}
+
+TEST_F(RuntimeMemoryLifetimeTest, DiscardedParsesDoNotRetainInputArenas) {
+    const size_t payload = 65536;
+    char* bytes = (char*)mem_alloc(payload + 9, MEM_CAT_CONTAINER);
+    ASSERT_NE(bytes, nullptr);
+    memcpy(bytes, "{\"x\":\"", 6);
+    memset(bytes + 6, 'x', payload);
+    memcpy(bytes + 6 + payload, "\"}", 3);
+    RootFrame roots(3);
+    Rooted<Item> source(roots, {.item = s2it(heap_strcpy(bytes, payload + 8))});
+    mem_free(bytes);
+    Rooted<Item> type(roots, {.item = y2it(heap_create_symbol("json", 4))});
+    Rooted<Item> value(roots, fn_parse2(source.get(), type.get()));
+    ASSERT_EQ(get_type_id(value.get()), LMD_TYPE_MAP);
+    size_t before_count = 0, before_used = 0, after_count = 0, after_used = 0;
+    memory_test_input_owners(&before_count, &before_used);
+    gc_set_force_collect_interval(runtime.heap->gc, 1);
+    for (int i = 0; i < 64; i++) {
+        value.set(fn_parse2(source.get(), type.get()));
+        ASSERT_EQ(get_type_id(value.get()), LMD_TYPE_MAP);
+    }
+    gc_set_force_collect_interval(runtime.heap->gc, 0);
+    heap_gc_collect();
+    memory_test_input_owners(&after_count, &after_used);
+    EXPECT_EQ(after_count, before_count);
+    EXPECT_EQ(after_used, before_used);
+}
+
+struct MemoryTestSharedStorage {
+    ByteStorage* storage;
+    size_t charged;
+    bool valid;
+};
+
+static void memory_test_share_storage(void* data) {
+    MemoryTestSharedStorage* shared = (MemoryTestSharedStorage*)data;
+    EvalContext other{};
+    if (!eval_context_init(&other)) return;
+    heap_init();
+    if (other.heap) {
+        Binary* view = heap_binary_from_storage(shared->storage, 0, shared->storage->capacity, false);
+        shared->valid = view && binary_data(view)[0] == 0x5a;
+        shared->charged = gc_heap_get_external_stats(other.heap->gc).live_bytes;
+        heap_destroy();
+    }
+    context_capsule_destroy_all(&other);
+    eval_context_shutdown(&other);
+}
+
+TEST_F(RuntimeMemoryLifetimeTest, SharedBackingHasIndependentHeapAdmissionAndSafeOwnerRetirement) {
+    ByteStorage* storage = byte_storage_alloc(4096, MEM_CAT_CONTAINER);
+    ASSERT_NE(storage, nullptr);
+    memset(storage->data, 0x5a, storage->capacity);
+    RootFrame roots(1);
+    Rooted<Item> view(roots, {.item = x2it(heap_binary_from_storage(storage, 0, 4096, false))});
+    ASSERT_EQ(get_type_id(view.get()), LMD_TYPE_BINARY);
+    MemoryTestSharedStorage shared{storage, 0, false};
+    uv_thread_t worker;
+    ASSERT_EQ(uv_thread_create(&worker, memory_test_share_storage, &shared), 0);
+    ASSERT_EQ(uv_thread_join(&worker), 0);
+    EXPECT_TRUE(shared.valid);
+    EXPECT_EQ(shared.charged, 4096u);
+    EXPECT_EQ(gc_heap_get_external_stats(runtime.heap->gc).live_bytes, 4096u);
+    EXPECT_EQ(binary_data(view.get().get_safe_binary())[0], 0x5a);
+    view.set(ItemNull);
+    heap_gc_collect();
+    byte_storage_release(storage);
+    EXPECT_EQ(gc_heap_get_external_stats(runtime.heap->gc).live_bytes, 0u);
+}
+
+#include "lib/file.h"
+#include "lib/strbuf.h"
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
+// Test-only retained-host checkpoints keep profiling out of the script API and timed runs.
+static void memory_test_checkpoint(const char* path, const char* phase, gc_heap_t* gc) {
+    uint64_t rss = 0, footprint = 0;
+#ifdef __APPLE__
+    task_vm_info_data_t vm{};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vm, &count) == KERN_SUCCESS) {
+        rss = vm.resident_size;
+        footprint = vm.phys_footprint;
+    }
+#endif
+    gc_memory_stats_t memory = gc_heap_get_memory_stats(gc);
+    gc_external_stats_t external = gc_heap_get_external_stats(gc);
+    MemSnapshot* snapshot = mem_snapshot_capture(nullptr);
+    ASSERT_NE(snapshot, nullptr);
+    StrBuf* report = strbuf_new();
+    ASSERT_NE(report, nullptr);
+    strbuf_append_format(report,
+        "{\"phase\":\"%s\",\"rss\":%llu,\"footprint\":%llu,\"collections\":%zu,"
+        "\"object_capacity\":%zu,\"object_used\":%zu,\"nursery_capacity\":%zu,\"nursery_used\":%zu,"
+        "\"tenured_capacity\":%zu,\"tenured_used\":%zu,\"external_live\":%zu,\"external_peak\":%zu,"
+        "\"physical_live\":%llu,\"input_arenas\":[",
+        phase, (unsigned long long)rss, (unsigned long long)footprint, gc->collections,
+        memory.object_capacity, memory.object_used, memory.nursery_capacity, memory.nursery_used,
+        memory.tenured_capacity, memory.tenured_used, external.live_bytes, external.peak_bytes,
+        (unsigned long long)snapshot->physical_total_in_use);
+    bool comma = false;
+    for (uint32_t i = 0; i < snapshot->count; i++) {
+        const MemStatSample* sample = &snapshot->samples[i];
+        if (sample->kind != MEM_KIND_ARENA || sample->role != MEM_ROLE_INPUT) continue;
+        strbuf_append_format(report, "%s%llu", comma ? "," : "", (unsigned long long)sample->bytes_in_use);
+        comma = true;
+    }
+    strbuf_append_str(report, "]}\n");
+    EXPECT_EQ(append_binary_file(path, report->str, report->length), 0);
+    strbuf_free(report);
+    mem_snapshot_free(snapshot);
+}
+
+TEST(RuntimeMemoryProfile, DISABLED_RetainedSyncRepository) {
+    const char* script = getenv("LAMBDA_SYNC_PROFILE_SCRIPT");
+    const char* report = getenv("LAMBDA_SYNC_PROFILE_REPORT");
+    if (!script || !report) GTEST_SKIP() << "provide isolated fixture script and report paths under temp/";
+    Runtime runtime{};
+    runtime_init(&runtime);
+    Input* output = run_script_mir(&runtime, nullptr, (char*)script, true);
+    ASSERT_NE(output, nullptr);
+    EXPECT_NE(get_type_id(output->root), LMD_TYPE_ERROR);
+    EvalContext* owner = runtime_get_eval_context(&runtime);
+    ASSERT_TRUE(owner && owner->heap && owner->heap->gc);
+    memory_test_checkpoint(report, "returned", owner->heap->gc);
+    ASSERT_TRUE(eval_context_matches(owner));
+    heap_gc_collect();
+    memory_test_checkpoint(report, "collected", owner->heap->gc);
+    runtime_cleanup(&runtime);
+    pool_destroy(output->pool);
+}
+
+TEST_F(RuntimeMemoryLifetimeTest, OversizedBackingPreflightsOnceBeforeItsAllocation) {
+    const size_t length = GC_EXTERNAL_PRESSURE_THRESHOLD * 2;
+    char* bytes = (char*)mem_alloc(length, MEM_CAT_CONTAINER);
+    ASSERT_NE(bytes, nullptr);
+    memset(bytes, 0x5a, length);
+    size_t before = gc_heap_get_external_stats(runtime.heap->gc).pressure_collections;
+    Binary* body = heap_binary_from_bytes(bytes, length);
+    mem_free(bytes);
+    ASSERT_NE(body, nullptr);
+    EXPECT_EQ(binary_data(body)[length-1], 0x5a);
+    EXPECT_EQ(gc_heap_get_external_stats(runtime.heap->gc).pressure_collections, before + 1);
+}

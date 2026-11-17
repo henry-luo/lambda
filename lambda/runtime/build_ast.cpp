@@ -90,6 +90,8 @@ static int source_span_start_line(Transpiler* tp, SourceSpan span) {
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
 static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call);
 static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth = 0);
+static StaticBoundaryResult ast_value_boundary_relation(AstNode* source, Type* target,
+    Type* proof_type, int depth, bool inspect_expression);
 static Type* error_field_result_type(Transpiler* tp, AstNode* field, AstNodeType node_type);
 static bool complete_outcome_facts(Transpiler* tp, AstScript* script);
 
@@ -908,7 +910,7 @@ static Type* sys_func_array_of_argument_type(Transpiler* tp, Type* element) {
     return (Type*)out;
 }
 
-static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
+static Type* sys_func_success_shape_type(Transpiler* tp, SysFuncInfo* info,
         AstNode* arguments, AstNode* injected_argument) {
     Type* success = info && info->success_type ? info->success_type :
         info ? info->return_type : NULL;
@@ -948,6 +950,16 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
         if (lambda_numeric_kind_from_type(source) != LAMBDA_NUM_INVALID) return source;
         break;
     case SYS_RESULT_TEXT_SAME_AS_ARGUMENT:
+        if (info->invalid_returns_null) {
+            bool nullable = false;
+            Type* base = lambda_type_nullable_lane_base(source, &nullable);
+            if (base && (base->type_id == LMD_TYPE_STRING || base->type_id == LMD_TYPE_SYMBOL)) {
+                Type* result = sys_func_result_type_without_literal(tp, base);
+                return nullable ? lambda_type_nullable_normalized(tp->pool, result) : result;
+            }
+            if (source->type_id == LMD_TYPE_NULL) return &TYPE_NULL;
+            return lambda_type_union_normalized(tp->pool, &TYPE_STRING, &TYPE_SYMBOL);
+        }
         if (source->type_id == LMD_TYPE_STRING || source->type_id == LMD_TYPE_SYMBOL) {
             return sys_func_result_type_without_literal(tp, source);
         }
@@ -955,7 +967,9 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     case SYS_RESULT_TEXT_SPLIT:
         // fn_split/fn_split3 build String parts on their text and null-source
         // paths. ArrayNum and open sources retain the generic array contract.
-        if (sysfunc_text_split_element_type(info, source->type_id) == LMD_TYPE_STRING) {
+        if (AstNode* separator = sys_func_argument_at(arguments, injected_argument, 1);
+                separator && separator->type && sysfunc_text_split_element_type_for_args(
+                    info, source->type_id, separator->type->type_id) == LMD_TYPE_STRING) {
             TypeArray* out = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
                 sizeof(TypeArray));
             out->nested = &TYPE_STRING;
@@ -1016,7 +1030,8 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
         // S2.5.7v2: a function over a list returns an array, so a selection
         // that drops items keeps the source's collection type, never an item
         bool slice = info->result_kind == SYS_RESULT_SLICE_OF_ARGUMENT;
-        if (Type* result = sys_func_collection_result_type(tp, source, slice, slice)) {
+        if (Type* result = sys_func_collection_result_type(tp, source,
+                slice || info->invalid_returns_null, slice || info->invalid_returns_null)) {
             return result;
         }
         break;
@@ -1026,6 +1041,19 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
         break;
     }
     return success ? success : &TYPE_ANY;
+}
+
+static bool sys_query_call_cannot_return_null(Transpiler* tp, SysFuncInfo* info,
+    AstNode* arguments, AstNode* injected_argument);
+
+static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
+        AstNode* arguments, AstNode* injected_argument) {
+    Type* success = sys_func_success_shape_type(tp, info, arguments, injected_argument);
+    if (info && info->invalid_returns_null && success == &TYPE_ANY) success = &TYPE_ANY_NO_ERROR;
+    // S7.10.7: invalid inputs add absence, while proven valid calls stay precise.
+    return info && info->invalid_returns_null &&
+        !sys_query_call_cannot_return_null(tp, info, arguments, injected_argument)
+        ? lambda_type_nullable_normalized(tp->pool, success) : success;
 }
 
 static Type* sys_func_call_result_type(Transpiler* tp, SysFuncInfo* info,
@@ -1061,7 +1089,7 @@ static bool sys_conversion_has_error_free_numeric_input(Type* type) {
     }
 }
 
-static bool sys_split_text_call_cannot_return_error(AstNode* arguments,
+static bool sys_split_text_call_cannot_return_null(Transpiler* tp, AstNode* arguments,
         AstNode* injected_argument) {
     AstNode* source = sys_func_argument_at(arguments, injected_argument, 0);
     AstNode* separator = sys_func_argument_at(arguments, injected_argument, 1);
@@ -1072,10 +1100,16 @@ static bool sys_split_text_call_cannot_return_error(AstNode* arguments,
             (keep && (!keep->type || lambda_type_accepts_error(keep->type)))) {
         return false;
     }
-    // A null source returns an empty list before delimiter dispatch. Incoming
-    // ItemError operands were rejected above, so this call is total.
-    if (source->type->type_id == LMD_TYPE_NULL) return true;
-    if (!is_text_type_id(source->type->type_id)) return false;
+    if (keep && keep->type->type_id != LMD_TYPE_BOOL &&
+            keep->type->type_id != LMD_TYPE_NULL) return false;
+    // An empty source still needs a valid selector (S7.10.7).
+    if (source->type->type_id != LMD_TYPE_NULL && !is_text_type_id(source->type->type_id)) return false;
+    if (keep && separator->type->type_id == LMD_TYPE_NULL &&
+            keep->type->type_id != LMD_TYPE_NULL) {
+        Item value;
+        if (!ast_static_literal_item(tp, keep, &value) ||
+                get_type_id(value) != LMD_TYPE_BOOL || it2b(value)) return false;
+    }
     return separator->type->type_id == LMD_TYPE_NULL ||
         is_text_type_id(separator->type->type_id);
 }
@@ -1139,9 +1173,57 @@ static bool sys_trailing_args_are_constant_ints(Transpiler* tp, AstNode* argumen
     }
 }
 
+static bool sys_query_call_cannot_return_null(Transpiler* tp, SysFuncInfo* info,
+        AstNode* arguments, AstNode* injected_argument) {
+    AstNode* source = sys_func_argument_at(arguments, injected_argument, 0);
+    if (!source || !source->type) return false;
+    switch (info->fn) {
+    case SYSFUNC_SPLIT:
+    case SYSFUNC_SPLIT3:
+        return sys_split_text_call_cannot_return_null(tp, arguments, injected_argument);
+    case SYSFUNC_FIND:
+        return sys_operand_is_clean_text_or_null(source, true) &&
+            sys_operand_is_clean_text_or_null(
+                sys_func_argument_at(arguments, injected_argument, 1), true) &&
+            !lambda_type_accepts_null(sys_func_argument_at(arguments, injected_argument, 1)->type);
+    case SYSFUNC_SLICE:
+    case SYSFUNC_TAKE:
+    case SYSFUNC_DROP:
+        if (!(sys_operand_is_clean_text_or_null(source, true) ||
+                sys_operand_is_materialized_sequence(source) ||
+                sys_operand_base_is(source, LMD_TYPE_RANGE) ||
+                sys_operand_base_is(source, LMD_TYPE_BINARY)) ||
+                sys_operand_base_is(source, LMD_TYPE_NULL) ||
+                !sys_trailing_args_are_constant_ints(tp, arguments, injected_argument, 1)) return false;
+        if (info->fn != SYSFUNC_SLICE) {
+            int64_t count = 0;
+            if (!ast_constant_integer_value(tp,
+                    sys_func_argument_at(arguments, injected_argument, 1), &count) || count < 0) return false;
+        }
+        return true;
+    case SYSFUNC_REPLACE:
+        for (int i = 0; i < 3; i++) {
+            AstNode* arg = sys_func_argument_at(arguments, injected_argument, i);
+            if (!sys_operand_base_is(arg, LMD_TYPE_STRING) &&
+                    !sys_operand_base_is(arg, LMD_TYPE_SYMBOL)) return false;
+        }
+        return true;
+    default:
+        return false;
+    }
+}
+
 static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
         AstNode* arguments, AstNode* injected_argument) {
     if (!info || !info->may_return_error) return false;
+    if (info->invalid_returns_null) {
+        for (int i = 0; ; i++) {
+            AstNode* arg = sys_func_argument_at(arguments, injected_argument, i);
+            if (!arg) return false;
+            // Open inference alone is not an error outcome (S7.5.1v6).
+            if (ordinary_outcome_has_error(tp, arg)) return true;
+        }
+    }
     AstNode* first_arg = sys_func_argument_at(arguments, injected_argument, 0);
     if (!first_arg || !first_arg->type) return true;
     if (sys_conversion_literal_is_error_free(tp, info, first_arg)) return false;
@@ -1174,9 +1256,6 @@ static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
             first_arg->type->type_id != LMD_TYPE_NUM_SIZED;
     case SYSFUNC_BINARY:
         return first_arg->type->type_id != LMD_TYPE_BINARY;
-    case SYSFUNC_SPLIT:
-    case SYSFUNC_SPLIT3:
-        return !sys_split_text_call_cannot_return_error(arguments, injected_argument);
     case SYSFUNC_ANY:
     case SYSFUNC_ALL:
         // every sequence vector_length walks, and null, answers
@@ -1201,25 +1280,6 @@ static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
             (sys_operand_is_materialized_sequence(first_arg) ||
              sys_operand_base_is(first_arg, LMD_TYPE_NULL)));
     }
-    // LR07-18 rows. Each proof rules out the row's only rejection branches,
-    // so a provably clean call keeps its success type.
-    case SYSFUNC_SLICE:
-    case SYSFUNC_TAKE:
-    case SYSFUNC_DROP:
-        // only a fractional or non-finite offset or count rejects a text,
-        // materialized or range source
-        return !((sys_operand_is_clean_text_or_null(first_arg, true) ||
-                  sys_operand_is_materialized_sequence(first_arg) ||
-                  sys_operand_base_is(first_arg, LMD_TYPE_RANGE)) &&
-            sys_trailing_args_are_constant_ints(tp, arguments, injected_argument, 1));
-    case SYSFUNC_REPLACE:
-        // only a non-text argument rejects
-        for (int index = 0; index < 3; index++) {
-            AstNode* arg = sys_func_argument_at(arguments, injected_argument, index);
-            if (!sys_operand_base_is(arg, LMD_TYPE_STRING) &&
-                    !sys_operand_base_is(arg, LMD_TYPE_SYMBOL)) return true;
-        }
-        return false;
     case SYSFUNC_REAL:
     case SYSFUNC_IMAG:
         return !sys_operand_base_is(first_arg, LMD_TYPE_COMPLEX);
@@ -1782,9 +1842,13 @@ bool should_continue_transpiling(Transpiler* tp) {
 
 static Type* boundary_unwrap_type(Type* type) {
     type = unwrap_simple_type_type(type);
-    if (type && !is_global_simple_type(type) && type->kind == TYPE_KIND_CONSTRAINED) {
+    // S11.4.6v4 admits every constrained layer by its ultimate base.
+    while (type && type->type_id == LMD_TYPE_TYPE && !is_global_simple_type(type) &&
+            type->kind == TYPE_KIND_CONSTRAINED) {
         TypeConstrained* constrained = (TypeConstrained*)type;
-        type = unwrap_simple_type_type(constrained->base);
+        Type* base = unwrap_simple_type_type(constrained->base);
+        if (base == type) break;
+        type = base;
     }
     return type;
 }
@@ -1929,6 +1993,15 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
             return STATIC_BOUNDARY_REJECTED;
         return left == STATIC_BOUNDARY_DEFERRED || right == STATIC_BOUNDARY_DEFERRED ?
             STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_PROVEN;
+    }
+    if (boundary_type_is_extended(source, TYPE_KIND_BINARY)) {
+        TypeBinary* intersection = (TypeBinary*)source;
+        if (intersection->op == OPERATOR_INTERSECT || intersection->op == OPERATOR_OR) {
+            // Each intersection member is contained by either of its arms.
+            if (static_boundary_relation(intersection->left, target) == STATIC_BOUNDARY_PROVEN ||
+                    static_boundary_relation(intersection->right, target) == STATIC_BOUNDARY_PROVEN)
+                return STATIC_BOUNDARY_PROVEN;
+        }
     }
     if (boundary_type_is_extended(target, TYPE_KIND_BINARY)) {
         TypeBinary* target_binary = (TypeBinary*)target;
@@ -2114,7 +2187,7 @@ static StaticBoundaryResult ast_return_boundary_relation(AstFuncNode* function,
             break;
         }
     }
-    return lambda_ast_boundary_relation(source, target, proof_type);
+    return ast_value_boundary_relation(source, target, proof_type, 0, true);
 }
 
 static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self);
@@ -2310,16 +2383,158 @@ static bool propagated_fill_contract_admits(AstNode* value, Type* target) {
             STATIC_BOUNDARY_PROVEN;
 }
 
-StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
-        Type* proof_type) {
+struct MapFieldBoundaryProof {
+    bool may_be_absent;
+    StaticBoundaryResult present;
+};
+
+// S7.7.2v2: literal values retain their final contracts even when an early,
+// conservative storage shape boxed a forward call or a spread (D7.1.3).
+static MapFieldBoundaryProof ast_map_field_boundary(AstNode* source,
+        ShapeEntry* expected, int depth) {
+    MapFieldBoundaryProof proof = {true, STATIC_BOUNDARY_PROVEN};
     AstNode* value = boundary_unwrap_primary(source);
+    if (!value || depth > 64) return {true, STATIC_BOUNDARY_DEFERRED};
+    if (value->node_type != AST_NODE_MAP) {
+        Type* type = boundary_unwrap_type(value->type);
+        if (!lambda_type_is_concrete_attr_shape(type) || type->type_id != LMD_TYPE_MAP ||
+                ((TypeMap*)type)->has_spread) return {true, STATIC_BOUNDARY_DEFERRED};
+        ShapeEntry* field = typemap_shape_lookup_last((TypeMap*)type,
+            expected->name->str, (int)expected->name->length);
+        // Declared records are open: an undeclared key can still be present.
+        if (!field || field->ns) return {true, STATIC_BOUNDARY_DEFERRED};
+        return {field->is_optional, lambda_type_contract_is_subtype(field->type, expected->type)
+            ? STATIC_BOUNDARY_PROVEN : static_boundary_relation(field->type, expected->type)};
+    }
+    for (AstNode* item = ((AstMapNode*)value)->item; item; item = item->next) {
+        AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR ? (AstNamedNode*)item : NULL;
+        if (named && !named->is_spread) {
+            if (named->key || !named->name) {
+                proof.present = STATIC_BOUNDARY_DEFERRED;
+            } else if (named->name->len == expected->name->length &&
+                    memcmp(named->name->chars, expected->name->str, named->name->len) == 0) {
+                proof = {false, ast_value_boundary_relation(named->as, expected->type, NULL, depth + 1, true)};
+            }
+        } else {
+            MapFieldBoundaryProof spread = ast_map_field_boundary(named ? named->as : item,
+                expected, depth + 1);
+            // A later optional field can replace, or leave, the earlier value.
+            if (!spread.may_be_absent) proof = spread;
+            else if (spread.present != STATIC_BOUNDARY_PROVEN) proof.present = STATIC_BOUNDARY_DEFERRED;
+        }
+    }
+    return proof;
+}
+
+static bool ast_map_construction_is_total(AstNode* source, int depth) {
+    AstNode* value = boundary_unwrap_primary(source);
+    if (!value || depth > 64) return false;
+    if (value->node_type != AST_NODE_MAP) {
+        Type* type = boundary_unwrap_type(value->type);
+        return type && (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT);
+    }
+    for (AstNode* item = ((AstMapNode*)value)->item; item; item = item->next) {
+        AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR ? (AstNamedNode*)item : NULL;
+        if (named && !named->is_spread) {
+            Type* key = named->key ? boundary_unwrap_type(named->key->type) : NULL;
+            if (named->key && (!key || !is_text_type_id(key->type_id))) return false;
+        } else if (!ast_map_construction_is_total(named ? named->as : item, depth + 1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool ast_map_boundary_is_proven(AstNode* source, Type* target, int depth) {
+    target = boundary_unwrap_type(target);
+    if (!target || depth > 64) return false;
+    if (lambda_type_is_union(target)) {
+        TypeBinary* choice = (TypeBinary*)target;
+        return ast_map_boundary_is_proven(source, choice->left, depth + 1) ||
+            ast_map_boundary_is_proven(source, choice->right, depth + 1);
+    }
+    if (boundary_type_is_extended(target, TYPE_KIND_UNARY) &&
+            ((TypeUnary*)target)->op == OPERATOR_OPTIONAL)
+        return ast_map_boundary_is_proven(source, ((TypeUnary*)target)->operand, depth + 1);
+    if (target == &TYPE_MAP) return ast_map_construction_is_total(source, depth);
+    if (target->type_id != LMD_TYPE_MAP || !lambda_type_is_concrete_attr_shape(target) ||
+            type_nominal_record(target) || ((TypeMap*)target)->has_spread ||
+            ((TypeMap*)target)->js_meta) return false;
+    // Later fields cannot repair a failed spread or an invalid computed key.
+    if (!ast_map_construction_is_total(source, depth)) return false;
+    FOR_EACH_MAP_FIELD((TypeMap*)target, field) {
+        if (!field->name || field->ns || field->key_kind != NAME_KEY_STRING) return false;
+        MapFieldBoundaryProof proof = ast_map_field_boundary(source, field, depth + 1);
+        if (proof.present != STATIC_BOUNDARY_PROVEN ||
+                (proof.may_be_absent && !field->is_optional)) return false;
+    }
+    return true;
+}
+
+static bool ast_literal_boundary_is_proven(Type* source, Type* target, int depth) {
+    target = boundary_unwrap_type(target);
+    if (!target || depth > 64) return false;
+    if (lambda_type_is_union(target)) {
+        TypeBinary* choice = (TypeBinary*)target;
+        return ast_literal_boundary_is_proven(source, choice->left, depth + 1) ||
+            ast_literal_boundary_is_proven(source, choice->right, depth + 1);
+    }
+    Item value;
+    // S11.2.1: prove exact literal arms without changing storage compatibility.
+    return lambda_literal_contract_value(source, &value) &&
+        lambda_literal_contract_value(target, &value) && lambda_type_repr_equal(source, target);
+}
+
+static StaticBoundaryResult ast_value_boundary_relation(AstNode* source, Type* target,
+        Type* proof_type, int depth, bool inspect_expression) {
+    // An enclosing return scan may have found a failed spread/call. Successful
+    // field proofs must not erase that ordinary-error completion (S7.7.2v2).
+    if (proof_type && lambda_type_has_proven_error(proof_type))
+        return static_boundary_relation(proof_type, target);
+    AstNode* value = boundary_unwrap_primary(source);
+    Type* expected = boundary_unwrap_type(target);
+    // An any field admits a nested map without requiring a record layout.
+    if (expected && ((expected->type_id == LMD_TYPE_ANY && lambda_type_accepts_error(expected)) ||
+            (lambda_type_is_union(expected) &&
+             static_boundary_relation(&TYPE_ANY, expected) == STATIC_BOUNDARY_PROVEN)))
+        return static_boundary_relation(proof_type ? proof_type : value ? value->type : NULL, target);
+    if (inspect_expression && value && depth < 64 && value->node_type == AST_NODE_CONTENT &&
+            !((AstListNode*)value)->procedural_results) {
+        if (AstNode* result = ast_content_single_value(((AstListNode*)value)->item))
+            return ast_value_boundary_relation(result, target, proof_type, depth + 1, true);
+    }
+    if (inspect_expression && value && depth < 64 && value->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)value;
+        if (ast_value_boundary_relation(branch->then, target, NULL, depth + 1, true) == STATIC_BOUNDARY_PROVEN &&
+                ast_value_boundary_relation(branch->otherwise, target, NULL, depth + 1, true) == STATIC_BOUNDARY_PROVEN)
+            return STATIC_BOUNDARY_PROVEN;
+    }
     if (value && value->node_type == AST_NODE_ARRAY &&
             !((AstListNode*)value)->item && empty_array_contract_admits(target)) {
         return STATIC_BOUNDARY_PROVEN;
     }
     if (propagated_fill_contract_admits(value, target)) return STATIC_BOUNDARY_PROVEN;
+    if (value && value->node_type == AST_NODE_MAP && !lambda_type_accepts_error(target) &&
+            !ast_map_construction_is_total(value, depth)) return STATIC_BOUNDARY_DEFERRED;
+    if (inspect_expression && value && value->node_type == AST_NODE_MAP) {
+        if (ast_map_boundary_is_proven(value, target, depth)) return STATIC_BOUNDARY_PROVEN;
+        StaticBoundaryResult relation = static_boundary_relation(proof_type ? proof_type : value->type, target);
+        // A recipe can still say 'map' after a nested builder failed. Only the
+        // field-expression proof can certify the completed record value.
+        return relation == STATIC_BOUNDARY_PROVEN ? STATIC_BOUNDARY_DEFERRED : relation;
+    }
+    if (value && ((inspect_expression && lambda_type_contract_is_subtype(value->type, target)) ||
+            ast_literal_boundary_is_proven(value->type, target, depth))) return STATIC_BOUNDARY_PROVEN;
+    if (value && value->node_type == AST_NODE_MAP &&
+            (inspect_expression || ((TypeMap*)value->type)->has_spread) &&
+            ast_map_boundary_is_proven(value, target, depth)) return STATIC_BOUNDARY_PROVEN;
     return static_boundary_relation(proof_type ? proof_type : source ? source->type : NULL,
         target);
+}
+
+StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
+        Type* proof_type) {
+    return ast_value_boundary_relation(source, target, proof_type, 0, false);
 }
 
 static AstNode* boundary_unwrap_primary(AstNode* node) {
@@ -2339,7 +2554,8 @@ static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declar
     TypeMap* actual = (TypeMap*)rhs->type;
     if (!actual) return;
 
-    bool has_spread = false;
+    // Runtime-built literals keep spreads/computed keys in the AST, not slots.
+    bool has_spread = actual->has_spread;
     FOR_EACH_MAP_FIELD(actual, entry) {
         if (!entry->name) {
             has_spread = true;

@@ -2,7 +2,7 @@
 // both tiers. Golden written from the rulings, not from the runtime.
 // S10.6.1: `++` concatenates sequences (kind by S2.5.7), appends or prepends a
 // scalar as one item, concatenates text for two scalars, treats null as the
-// identity, and rejects maps. LR05-9: numeric arrays of different element
+// identity, and merges maps (S10.6.1v2). LR05-9: numeric arrays of different element
 // types concatenate by value.
 
 let L = (1, 2)

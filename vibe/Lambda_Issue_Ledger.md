@@ -63,6 +63,192 @@ Evidence: `temp/online-visual-round74/`; report destination:
 `test/online/comparison/repairs.html#round-74`. Capture budgets and clocks stay
 unchanged (**D10.1.7**); no page-specific exception is introduced.
 
+## Reader record contracts and input boundaries — 2026-11-17
+
+<a id="reader-record-contracts"></a>
+
+**Admission repair: IMPLEMENTED; focused qualification passed.**
+The typed TeX reader exposed false ordinary-error effects under S7.7.2v2 /
+S11.4.1v5. A function returning a record assembled from a completed typed call
+or a known record spread acquired a deferred-return error: the checker read
+the literal's conservative storage recipe instead of its final field values.
+An annotated spread literal also reported required fields missing because
+its runtime-built shape has no static slots. The checker now proves return
+membership from field expressions and ordered spreads, and recognizes the
+dynamic shape when checking missing fields. Unknown keys, open sources and
+optional overwrites retain runtime admission; storage compatibility stays
+separate (D3.4.6, D7.1.3). Failed direct and nested spreads retain their error
+completion even when later fields satisfy the target shape.
+`record_return_boundary` covers accepted records and rejected dynamic data;
+paired negative fixtures require E208 at a clean relay of a failed builder.
+
+Explicit any fields admit contained errors under S11.4.3. Return proofs now
+retain that top-type membership. The interpreter also repeated a validator
+walk after successfully admitting every field, and that second walk rejected
+valid error data in any. Plain records now retain the completed field proof;
+nominal, binary, namespace and JavaScript-specific contracts keep additional
+validation, and conversion/layout checks remain. Positive interpreter/JIT/AUTO
+cases cover both nested map data and contained errors. IME, paint and sketch
+helpers with clean map returns now require map spread sources instead of
+concealing possible failures from untyped sources.
+
+The final release host passes 782 reader differential comparisons, 23 focused
+checks including scheduled GC, all 285 LaTeX compile checks, and the six
+negative interpreter/JIT/AUTO cases. Test262 is 40,261/40,261 fully passing.
+The Lambda aggregate remains non-green: exposed caller contracts pass focused
+rechecks, while a native PDF allocation abort, an editor assertion and the
+unavailable WebRTC dependency remain recorded qualification limits. Full
+corpus/recheck provenance is in the reader implementation record below.
+
+**Usability residue:** the reader needed explicit state types at spread
+bindings, and a shared `TextScan` constructor where branch-result joins lost
+field precision. `if (value is int)` does not yet prove an int admission in
+the staged narrowing probe; the category-code input boundary explicitly
+converts and recovers to the standard code. Qualified imported type names
+also require a local binding (`let Reader = reader.Reader`) before use in
+annotations, as documented in Lambda_Modules. These are recorded use cases,
+not reasons to add blanket `any^` results. Reproductions and qualification:
+[reader refactor record](impl/Lambda_Impl_Latex_Script_Engine.md#reader-records-and-error-boundaries--2026-11-17).
+
+<a id="tex-open-record-extra-storage"></a>
+
+**Open record admission erased overwritten extra fields — FIXED 2026-11-17.**
+The structured TeX State migration exposed loss of an extra field stored in
+an Item-backed null construction recipe. Admission now copies the actual
+physical lane; [resolution and regression](<Lambda_Issue_Ledger (fixed).md#tex-open-record-extra-storage-fixed>).
+
+<a id="tex-nullable-pointer-union"></a>
+
+**Nullable pointer admission lost its scalar tag — FIXED 2026-11-17.**
+The binary checksum contract exposed a MIR admission fast path that boxed a
+present nullable pointer using the destination union's meta-type instead of
+the producer's scalar tag. [Resolution and regression](<Lambda_Issue_Ledger (fixed).md#tex-nullable-pointer-union-fixed>).
+
+### Imported type bindings in record fields — OPEN compiler issue
+
+<a id="tex-imported-record-type"></a>
+
+**Found 2026-11-17, extending the TeX reader refactor.** An imported type
+bound locally works in a function annotation but fails as a record field type:
+
+```lambda
+import reader: lambda.doc.latex.tex_engine.reader
+let Reader = reader.Reader;
+type Box = {source: Reader}
+```
+
+The host reports E204 `unknown type 'Reader'` at the field. This prevents a
+stream contract from directly embedding the exported reader type, despite the
+local binding convention documented by `doc/Lambda_Modules.md`. Type
+annotations should resolve the same visible type binding (S11.1.6v3,
+S11.4.8v2); the intended reader return contract remains S11.4.2v3. No new
+semantics ruling is proposed. Diagnose the record-field type-pattern resolver
+before extending package types further; do not copy the Reader schema into
+other modules. The installed stream uses a map at this particular module
+boundary and admits it through the existing reader API, disclosing the
+possible validation error in the source-read result. Its own stream, trace,
+argument, and read results have named contracts.
+
+Reproduction and diagnostics: `temp/tex-structured/_imported_record_type.ls`
+and `imported-record.err`; release host SHA256
+`7702e32d4e435af9faa60eaa6ad6d8eefb29efb93a07891d28c73f8b55ead626`.
+
+### Guard narrowing after `is int` — OPEN enhancement
+
+<a id="reader-is-int-narrowing"></a>
+
+**Requested 2026-11-17.** The reader's category boundary still needs a checked
+conversion after a positive type guard:
+
+```lambda
+if (custom is int) {
+    let code = int(custom) ^ { standard };
+    // validate the category range using code
+}
+```
+
+Replacing that conversion with `let code: int = custom` inside the guarded
+branch still produces E241, then E208 when the binding is returned from a
+clean int function. This was reproduced on interpreter and JIT using the
+final reader-refactor release host; see
+temp/reader-refactor/narrowing-explicit-binding-fails.ls and
+narrowing-review-{interp,jit}.{out,err}.
+
+**Desired enhancement:** retain the positive `is int` fact for the tested,
+unchanged binding inside the branch. Direct reads, typed local bindings,
+arguments and returns should reuse that proof, without requiring conversion
+or inventing an admission-error alternative. A reassignment must invalidate
+the old fact, and a branch join must retain only facts established on every
+incoming path. This preserves strict admission (S11.4.1v5) and error membership
+(S11.4.3); it does not permit discarding unrelated error outcomes. S11.2.1
+already specifies narrowing of `~` in a type-match arm. General flow-sensitive
+narrowing remains an open design item in SO9; this entry identifies a concrete
+use case and does not claim an implementation or a new normative ruling.
+
+The reader's ambiguous capture recovery and independently optional result
+fields are package design cleanup, not additional Lambda language issues.
+
+<a id="reader-constrained-error-return"></a>
+
+**Constrained error unions:** the prior shared-core/compiler repair is
+[archived in the fixed ledger](<Lambda_Issue_Ledger (fixed).md#reader-constrained-error-return-fixed>).
+**Current checkout follow-up (2026-11-18): FIXED in Input LI-076.** The shared
+`lambda_type_accepts_error` and `lambda_type_accepts_null` walks again follow
+constrained bases (S11.4.2v3, S11.4.6v4). The unchanged
+`constrained_error_return` golden passes in AUTO, interpreter and JIT, including
+forced/poisoned GC in both explicit tiers. The native runtime/error suite passes
+340/340 with additional nested-nullability and top-exclusion assertions; 11
+related goldens pass per tier. The full Lambda baseline passes 7,604/7,604;
+the Input baseline passes 5,324 tests with three skipped cases. See
+[Input LI-076](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-076).
+Evidence: `temp/constrained-error-fix/`. No compiler or golden workaround.
+
+**Performance residue: OPEN.** Three interleaved same-host release/JIT pairs
+over 8,000 tokens preserve exact output. On the final pinned host, median
+process CPU is 0.1999 seconds for the previous reader and 0.3184 seconds for
+the first typed revision (1.59x). A later capture/EOF refactor measured
+0.3236 versus 0.3262 seconds (1.008x) against that first typed revision on
+the same host, with identical output; see release-token-bench-v2.json.
+This includes startup and JIT compilation; it does not isolate hot scanning,
+record admission, helper calls or changed scanner loops. Profile before
+attributing the cost or changing admission/storage rules (S7.7.2v2, D3.4.6).
+The scripts, per-sample output hashes and timings are in
+temp/reader-refactor/release-token-bench-final.json; scope and host identity are in
+the implementation record above.
+
+## Numerical domain outcomes and total queries — 2026-11-17
+
+<a id="numerical-query-conventions"></a>
+
+**Numerical changes: OPEN. Query migration: IMPLEMENTED.** The user ratified
+numerical domain results under S4.2.5 and total query input handling under
+S7.1.2v2 / S7.10.7. The original 66 audit observations agree between the
+interpreter and JIT on the pre-migration host. The query implementation now
+passes 60 focused interpreter/JIT/GC runs.
+
+Decimal rounding rejects NaN/infinity; norm and several statistics reject
+numeric NaN; sign converts NaN to zero. Unchecked unary vector math, clip
+and sign also hide invalid lane types as numerical values, extending the
+checked-coercion residue in LR03-5. Some scalar statistics accept invalid
+source types as empty data. Int power overflow escapes to a finite float
+instead of saturating under S4.1.2. The six query functions' input rejection
+paths, nullable result metadata and error effects are migrated separately.
+
+The numerical changes remain **OPEN** and are separate from query migration:
+
+| Area | Reproduction | Required result / repair |
+|---|---|---|
+| Decimal rounding | `round(decimal.nan)`, `round(decimal.inf)` return errors; `round(1e100m)` also fails | Preserve numerical NaN/infinity and valid finite integral results; repair the quantization/result boundary. |
+| Decimal infinity | `floor(decimal.inf)`, `ceil(decimal.inf)`, `trunc(decimal.inf)` return decimal NaN | Preserve signed infinity. |
+| NaN in reductions | `math.norm([nan,1])`, median, variance, deviation and quantile return errors | Accept numeric NaN; separate type checks from value classification in `vector_number_or_null` and norm. |
+| Sign | `sign(nan)` is zero; `sign([nan,1])` is `[0,1]` | Preserve NaN and use a result lane able to carry it. |
+| Invalid vector lanes | `math.sqrt(["bad",1])`, clip and sign produce numerical NaN or zero | Reject incompatible input types through checked conversion (LR03-5). |
+| Invalid scalar sources | `math.norm("bad")` is zero; median/variance return null | Distinguish unsupported types from valid empty collections. |
+| Int power closure | `9007199254740991 ** 2` is a finite float | Saturate to int infinity under S4.1.2/SI7; `fn_pow` currently bypasses int closure. |
+
+Reproductions, root-cause pointers, scope and next steps:
+[numerical/query convention audit](impl/Lambda_Impl_Numerical_Query_Conventions.md).
+
 ## HTTP debug/error logs can expose signed URL queries — 2026-11-17
 
 **Status:** Open; the trusted local S3 integration avoids capability URLs in
@@ -480,6 +666,19 @@ context-owned users together, preserve per-context microtask/macrotask order,
 then rerun the original complete concurrency reproduction and runtime gates.
 The provider API and evidence are recorded in LI-027; no Lambda source or
 build file was changed by the input owner.
+
+
+Reproduced again during sync memory qualification on 2026-11-17 with the normal
+release runtime: the 20-second shared chart/PDF phase passes, then
+`ModuleStateSlabsArePrivateToEachEvalContext` spins on one CPU during cleanup.
+The main thread waits in `pthread_join`; a surviving worker's sampled hot path
+repeatedly enters libuv time/pthread-once routines. This matches LI-027's original
+sequence; the exact list race remains unconfirmed. The run was stopped after
+more than six minutes, without changing the test. Earlier cache/image and
+cancellation cases passed. Evidence: `temp/sync-memory-impl/concurrency-release-final.log`,
+`concurrency-stall.sample`, `concurrency-stall-symbols.txt`. The complete optional
+concurrency suite remains unqualified; this does not invalidate the independently
+passing 7,590-case Lambda baseline or 112 release GC/lifetime cases.
 
 ## Input format integration handoffs — 2026-11-14
 
@@ -3084,7 +3283,7 @@ therefore sits in the city's composition of these (`block_buildings` →
 `temp/openroad/style_jit.ls` prints the first twelve buildings' styles.
 ## Repeated parse retains Input arenas during long-running sync — 2026-11-17
 
-**Status:** OPEN. Authority: **D5.2.5** (Input pool ownership), **D11.1.2**
+**Status:** PARTIAL — explicit JSON/Mark runtime parsing fixed; automatic and other-format Input lifetimes remain separate. Authority: **D5.2.5** (Input pool ownership), **D11.1.2**
 (host IO). `fn_parse2` returns an Input-owned tree from InputManager; the
 manager reuses a per-thread pool and registers each Input until cleanup.
 Sync codec decode repeatedly invokes JSON/Mark parse and canonical re-encoding,
@@ -3098,3 +3297,116 @@ attribution of all multi-GiB sync memory. Sync batch index updates reduce repeat
 page decoding; parser lifetime and bounded decoding remain unresolved. Do not
 free the Input while its returned Item can remain reachable. Details and further
 profiling targets: [sync performance investigation](impl/Lambda_Impl_Sync_Wasabi_Demo.md#file-count-versus-byte-count-investigation--2026-11-17).
+
+Further release attribution shows this is one component, not the main explanation
+for the full peak: both AUTO and interpreter publication runs retain 86.2 MiB in
+the parser-heavy `system` category before InputManager cleanup. MIR compiler
+state and missing binary GC pressure account for substantial additional memory.
+See [release memory diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md).
+
+The detailed follow-up counts **12,578 Mark versus 610 JSON parses** at 80 MiB
+publication. After warmup, an unchanged verification/cloud round adds about 4.77 MiB Mark
+arenas and 4.21 MiB formatter allocations. Scoped parsing must release Input
+bookkeeping and names as well as arenas, after transferring every escaping
+result owner. [Evidence and proposed P5](impl/Lambda_Impl_Sync_Memory_Tuning.md#p5--bound-parser-ownership-and-reduce-redundant-codec-validation).
+
+**Implementation follow-up (2026-11-17):** Implemented P5: explicit JSON/Mark parses use a scoped Input, transfer escaping values/names/shapes/scalar owners into runtime ownership, and destroy the parser owner. Native owner-count and Unicode/NUL key regressions pass. Five versus twenty-five unchanged rounds retain identical Input arena counts/bytes. Other formats and automatic dispatch retain their previous ownership. See [implementation qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+## Large workspace capture fails during a SQLite statement — 2026-11-17
+
+**Status:** FIXED by descriptor-only SQL staging and scoped file spools. The
+release 80 MiB / 128-file publication completes in 8.328 s and restores exactly;
+see [streaming packs](impl/Lambda_Impl_Sync_Streaming_Packs.md). Original failure:
+a release capture of 128 random files totaling 80 MiB fails
+before cloud publication. A separately copied and instrumented package confirms
+that `pack_store.flush` requests 17,066,092 ciphertext bytes plus 3,091 ID and
+kind bytes in one query, exceeding the SQLite result's 16,777,216-byte aggregate
+limit. Its 16 MiB pack threshold is checked after staging an object. The earlier
+attribution to the 64 MiB create/clone image limit was incorrect: capture uses
+an existing file-backed transaction (D11.1.2). The 1.17 s failure provides no
+sync timing. Fix the batching and preserve recovery; diagnostic output:
+`temp/sync-80-diagnosis/run2/err`.
+
+## Promoted MIR images retain large compiler working state — 2026-11-17
+
+**Status:** PARTIAL — eager compiler scratch and generated IR released; remaining context accounting is separate. Authority: **D8.3.3–D8.3.4** (promoted image ownership),
+**D5.2.4** (diagnostic tracking).
+
+After an isolated release 80 MiB / 128-file cloud publication, AUTO has 541.1 MiB
+of live native allocations in 4,859,872 blocks; strict interpreter has 178.4 MiB
+in 247,215 blocks. A separate allocation-stack run attributes 4,607,961 live
+blocks to MIR. Its bytes include stack-logging overhead and are not a production
+RSS figure. The retained working state includes register-allocation bitmaps,
+live ranges, SSA/definition tables and instruction/register/string data.
+`mvp_compile_function_image()` retains a private MIR context with each image;
+the existing generated-IR cleanup is absent on that path, and generator scratch
+is finished only by image destruction. Audit eager sealing/lazy thunks before
+shortening compiler scratch lifetime. No vendor modification is needed or made.
+Evidence and exact limits: [memory diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md).
+
+A public-allocator diagnostic now separates 173.35 MiB generator scratch,
+68.33 MiB generated IR, and 78.98 MiB remaining context data released at teardown
+for the 8 MiB publication. Early eager-image sealing remains unimplemented and
+needs lazy-mode, publication, cancellation and teardown qualification. A small
+0.11 MiB post-finish accounting residue also needs reconciliation; it is not the
+large peak's cause. [Proposed P3](impl/Lambda_Impl_Sync_Memory_Tuning.md#p3--seal-eager-mir-images-and-retire-compilation-scratch).
+
+**Implementation follow-up (2026-11-17):** Implemented P3: eagerly generated images release generated IR and generator scratch before publication; executable context/code remain owned by the image. Lazy, interpreter and keep-IR paths retain their required IR. Publication/lifetime/cancellation and 368 MIR/GC stress checks pass. The earlier small post-finish accounting residue is not claimed resolved. See [implementation qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+
+
+
+
+## Empty text conversion exposes a zero-length binary — 2026-11-17
+
+**Status:** OPEN, existing before sync memory fixes. **Authority:** S2.2.2v2
+(binary is solid; zero-length runtime results must be null).
+
+`binary("")` returns a binary with length zero, while `binary([])` returns null.
+`fn_binary` in `lambda/runtime/lambda-eval-num.cpp` lacks an empty-length guard
+on its text/virtual-output branches. The clean pre-fix release reproduces
+`[false,"binary",0]` for `[binary("") == null,string(type(binary(""))),len(binary(""))]`.
+Native zero-length storage descriptors also escape through database/other IO
+boundaries; this needs a consistent boundary migration, not a formatter or sync
+codec workaround. Existing RDB spool/session and UTF-8 fixtures rely on the
+current representation and must be reviewed against S2.2.2v2 when correcting it.
+
+This does not block sync memory ownership work: empty-file and nullable-binary
+sync cases pass. The added parse-name test compares the names as strings,
+including empty/NUL/Unicode keys, without depending on binary conversion.
+Evidence: `temp/sync-memory-impl/{_empty_binary.ls,empty-binary-before.out}`.
+
+
+<a id="batch-compiler-timing-analysis-field"></a>
+
+**Batch compiler timing reader rejects the emitted analysis field: FIXED.** See the [resolution](<Lambda_Issue_Ledger (fixed).md#batch-compiler-timing-analysis-field>).
+
+<a id="duplicate-document-resource-base"></a>
+
+**Duplicate document resource-base resolver blocks release LTO: FIXED.** See the [resolution](<Lambda_Issue_Ledger (fixed).md#duplicate-document-resource-base>).
+
+
+<a id="outdoor-default-home-admission"></a>
+
+## Outdoor demo default argument is rejected as an unhandled error — 2026-11-17
+
+**Status:** OPEN; found in the broader sync-fix qualification, outside sync's
+implementation. **Authority:** S7.5.5, S7.6.3v3, S12.1.1v3 (error reporting/propagation and procedures).
+
+`Scene3dTest.OutdoorGardenFogWindWaterAndCascades` fails before opening its scene:
+`test/demo/scene3d/mod_outdoors.ls:38` reports E228 on `lens=home()`, although
+`home` declares a `map` return. Importing `.mod_outdoors` subsequently reports
+E217. The isolated renderer rerun reproduces the compile error. A tiny import-only
+probe succeeds on preserved release `130e5cb5…` and fails on current release
+`2c072951…`; this narrows a separate engine/default-effect regression, without
+attributing it to the sync library (which the demo does not import). Whether the
+missing engagement belongs in this default expression or the compiler's default-
+argument effect analysis needs a separate contract investigation; no rendering,
+compiler or golden change was made to hide the failure.
+
+Observed with unchanged demo/compiler sources on Lambda `ae76dbf6d` plus the sync
+fixes. Evidence: `temp/sync-test-performance-impl/radiant-rerun.log` and the full
+`radiant-baseline.log`. The remaining 201 document resolver tests and 329 UI
+automation tests pass. This failure is separate from the Input LI-076 constrained
+error contract failure and is not a sync performance acceptance case.

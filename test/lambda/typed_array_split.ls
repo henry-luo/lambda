@@ -69,9 +69,9 @@ sum(parts[2])                          // 11
 split("a,b,c", ",")                    // ('a', 'b', 'c')
 
 // ============================================================
-// ERRORS
+// INVALID QUERIES
 // ============================================================
-'=== errors ==='
-split([1, 2, 3, 4, 5], 2)             // 5 not divisible by 2
-split(m2, 2, 5)                        // axis out of range
-split([1, 2, 3], 0)                   // n must be positive
+'=== invalid queries are absent ==='
+split([1, 2, 3, 4, 5], 2) is null      // 5 not divisible by 2
+split(m2, 2, 5) is null                 // axis out of range
+split([1, 2, 3], 0) is null            // n must be positive

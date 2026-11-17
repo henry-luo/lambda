@@ -1494,7 +1494,13 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
 
     collection->inline_event_handler_count += element_inline_event_handler_count(elem);
     // the template element owns handlers, while its contents stay inert.
-    if (radiant_source_is_inert_template(dom_root, elem)) return;
+    TypeElmt* source_type = (TypeElmt*)elem->type;
+    if (source_type && str_ieq_cstr(source_type->name.str, "template")) {
+        // source tags alone cannot distinguish inert HTML from active foreign elements.
+        DomElement* identity = dom_find_element_for_source(dom_root, elem);
+        if (identity && !strcmp(dom_element_namespace_uri(identity),
+                "http://www.w3.org/1999/xhtml")) return;
+    }
 
     // check for <body onload="...">
     if (is_body_element(elem)) {

@@ -1469,7 +1469,11 @@ File writes use the procedural `output(...)` function. See [Lambda Procedural Pr
 | `++`     | String concat | `"a" ++ "b"`  | `"ab"`         |
 | `++`     | Scalar concat | `42 ++ 10`    | `"4210"`       |
 | `++`     | Array concat  | `[1] ++ [2]`  | `[1, 2]`       |
+| `++`     | Map merge | `{a: 1, b: 2} ++ {b: 3, c: 4}` | `{a: 1, b: 3, c: 4}` |
 | `+`      | Element-wise array/list add | `[1] + [2]` | `[3]` |
+
+Map merge is shallow. Keys retain their first insertion position; new keys
+append in operand order, and later values override earlier values (S10.6.1v2).
 
 ---
 

@@ -6189,7 +6189,9 @@ static JsDomPropId dom_prop_id(const char* prop) {
 // this makes that node able to answer as a Document too (ESO101), which needs
 // the query to say *which* document -- a Lambda-only document never sets the
 // global, and a node knows its own.
+
 static Item dom_document_base_uri(DomDocument* doc) {
+    // share Input's resource-base traversal for inert templates and namespaces.
     Url* resolved = dom_document_resolve_url(doc);
     Item result = js_name_item(resolved ? url_get_href(resolved) : "about:blank");
     if (resolved) url_destroy(resolved);

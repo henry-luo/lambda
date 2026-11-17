@@ -93,6 +93,9 @@ void* gc_data_zone_alloc(gc_data_zone_t* dz, size_t size);
  */
 void gc_data_zone_reset(gc_data_zone_t* dz);
 
+// release empty overflow blocks and decommit unused tails at a collection boundary.
+void gc_data_zone_trim(gc_data_zone_t* dz);
+
 /**
  * Check if a pointer falls within any block of this data zone.
  */

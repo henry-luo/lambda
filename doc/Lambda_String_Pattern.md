@@ -239,7 +239,7 @@ as in `data?(\("ID-" "\d"+) | int)`.
 ## Pattern-Aware String Functions
 
 `find`, `replace` and `split` search within a string and require string-domain
-patterns; symbol patterns produce a domain error.
+patterns. An incompatible symbol pattern yields `null` (S7.10.7).
 
 ```lambda
 type Digits = \("\d"+)

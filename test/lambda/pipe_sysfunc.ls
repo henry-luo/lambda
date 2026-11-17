@@ -16,8 +16,8 @@
 // split via pipe
 '=5='; "a,b,c" |> split(",")
 
-// split with limit via pipe
-'=6='; "a-b-c-d" |> split("-", 2)
+// split with an explicit keep-delimiters flag via pipe
+'=6='; "a-b-c-d" |> split("-", false)
 
 // replace via pipe
 '=7='; "hello world" |> replace("world", "lambda")

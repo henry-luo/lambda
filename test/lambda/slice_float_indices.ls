@@ -25,7 +25,7 @@ let char_idx = 0 / 8;
     slice([10, 20, 30, 40], -2.0, -0.0)
 ]
 
-"=== fractional float indices reject ===";
+"=== fractional float indices are absent ===";
 [
     slice(s, 1.5, 2.5),
     slice([10, 20, 30], 1.5, 2.5)
