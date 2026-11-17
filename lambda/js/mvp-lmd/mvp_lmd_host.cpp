@@ -59,8 +59,13 @@ static Item host_output(Item self, Item* arguments, uint64_t count, bool line, F
         return err2it(err_create_heap(ERR_FILE_WRITE_ERROR, "MVP stdout write failed", NULL));
     return Item{.item = line ? ITEM_JS_UNDEFINED : ITEM_TRUE};
 }
-template<bool error_stream = false>
+template<bool error_stream = false, bool first_only = false>
 static Item host_console_log(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item self, Item, Item) {
+    if (first_only) {
+        // inspection methods share the native console's single-value logging contract.
+        Item value = count ? arguments[0] : make_js_undefined();
+        return host_output(self, &value, 1, true, error_stream ? stderr : NULL);
+    }
     return host_output(self, arguments, count, true, error_stream ? stderr : NULL);
 }
 static Item host_console_group(Context* context, MvpLmdProgram* program,
@@ -288,6 +293,8 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
             {LMD_HOST_CONSOLE, "debug", host_console_log<>, 0},
             {LMD_HOST_CONSOLE, "error", host_console_log<true>, 0},
             {LMD_HOST_CONSOLE, "warn", host_console_log<true>, 0},
+            {LMD_HOST_CONSOLE, "dir", host_console_log<false, true>, 1},
+            {LMD_HOST_CONSOLE, "table", host_console_log<false, true>, 1},
             {LMD_HOST_CONSOLE, "group", host_console_group, 0},
             {LMD_HOST_CONSOLE, "groupCollapsed", host_console_group, 0},
             {LMD_HOST_CONSOLE, "groupEnd", host_console_group_end, 0}

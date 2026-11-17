@@ -56,6 +56,15 @@ boundary). Existing Midtown design and evidence:
   (base 1.12, was 1.76); render stats show ~514 draws a frame vs ~590 base.
   Golden unchanged, three replays pass. USER deferred the live re-check
   ("Not now", 2026-11-16), so OR9 in town is unconfirmed.
+- **Old-style clean-up (USER, 2026-11-17):** parked cars left the five-part,
+  five-material path for the one-draw atlas (paint as a vertex tint, lamps
+  off: `mod_car_mesh.tintable`/`tinted`, material `m-parked`); city street
+  trees and the barrier ring use the countryside broadleaf (`g-broad`,
+  `m-tree`; the ring moved to `mod_scenery.TREES`, so it stands on the land and
+  is solid); removed the ball-crown tree, `m-glass`/`m-trim`/`m-headlamp`/
+  `m-taillamp`/`m-hill`, their look edits (35 per look, was 37) and four
+  unused constants; one `u.lin` replaces two copies. Golden and three headless
+  replays pass; shots checked.
 - **Next:** USER review of OR1–OR9; live town re-check when USER asks for it;
   JIT-tier building-style divergence (pre-existing, ledgered).
 - **Perf lessons:** per-element Lambda calls cost ~5–10 µs; array maths

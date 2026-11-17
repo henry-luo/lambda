@@ -17,8 +17,6 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
-
-
 ## HTTP debug/error logs can expose signed URL queries — 2026-11-17
 
 **Status:** Open; the trusted local S3 integration avoids capability URLs in
@@ -43,6 +41,273 @@ incorrectly reported that as out-of-memory. The fix uses the existing private
 shape fallback and copies temporary header names into its owning pool. Build and
 regression verification are in progress; see [the sync checkpoint](impl/Lambda_Impl_Sync_Wasabi_Demo.md).
 Runtime map shapes and precise roots follow D3.4.3 and D6.3.
+
+## Online resource-timing interface branding — 2026-11-17
+
+<a id="online-resource-timing-brand"></a>
+
+**Status:** FIXED for the existing fetch/XHR resource-timing profile.
+Host interfaces follow **D8.4.4 / D7.2.2** and precise record ownership
+**D6.3.3 / D6.4.1**; capture clocks remain unchanged (**D10.1.7**).
+
+Clay's consent bootstrap reads PerformanceResourceTiming and captures its
+prototype getters. The existing network path records real resource timings,
+but returned plain objects and never published the interface. The captured
+bootstrap consequently throws ReferenceError before initialization. This is an
+incomplete binding for an implemented data path, rather than missing network
+measurement infrastructure. The [Resource Timing interface](https://www.w3.org/TR/resource-timing/#performanceresourcetiming)
+extends [PerformanceEntry](https://www.w3.org/TR/performance-timeline/#the-performanceentry-interface).
+
+The existing timing-record/accessor helpers now accept native resource entries.
+A realm-rooted illegal constructor and prototype inherit from PerformanceEntry;
+readonly getters expose the recorded name, type, start, duration, initiator,
+fetch start and response end. Private metadata also drives filtering, ordering
+and JSON serialization when public properties are shadowed. The same producer
+continues feeding the existing observer and overflow buffers. No timing values,
+missing network phases or transfer-size fields are fabricated. Detailed timing
+phases and size metadata remain unsupported.
+
+Six focused native tests pass, covering branding, illegal construction, getter
+receivers, JSON, GC, public metadata shadowing, constructor replacement and the
+adjacent Window/StorageEvent controls. The actual local HTTP fetch/XHR fixture
+fails before the fix with ReferenceError and passes afterward in both AST and
+MIR with forced GC and zero retained allocations. The same updated fixture
+passes Chromium headless shell. The captured Clay bootstrap now reaches
+airgap.initialized true. No broad baseline is repeated after the green round51
+milestone. Live-page visual qualification is recorded in round55's checkpoint
+and the online comparison report; exception removal alone is not clearance.
+
+Artifacts: temp/online-visual-round55/ retains the before/after bootstrap,
+focused unit and HTTP logs, browser control, source hashes and release pin.
+
+## Online Window.document accessor binding — 2026-11-17
+
+<a id="online-window-document-accessor"></a>
+
+**Status:** FIXED for the owning Window's unforgeable accessor and captured
+getter invocation. Shared host behavior follows **D8.4.4 / D7.2.2**, and realm
+ownership **D6.4.1**. No capture time or admission change (**D10.1.7**).
+
+After the StorageEvent repair, the Coda/Superhuman consent bootstrap still
+throws TypeError. Function/declaration traces reduce this to a captured getter:
+it reads Object.getOwnPropertyDescriptor(window,"document").get, then invokes
+it during protection setup. The selection installer had published document as
+a writable, configurable data property, so the captured getter was undefined.
+The [HTML Window interface](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-window-object)
+requires a readonly LegacyUnforgeable document attribute.
+
+The Window interface now installs its own non-configurable native getter,
+returning the same stable proxy as bare document. The selection installer no
+longer replaces it with a data property. Window/document/closed getters share
+receiver validation; null/undefined receivers use their realm global as in
+WebIDL, while unrelated objects are rejected. There are no URL conditions.
+
+The focused descriptor/identity/readonly/receiver/GC case passes in Chromium
+headless shell and native MIR. All **six** selected native tests pass, including
+the previous StorageEvent and dispatch controls. Its initial standalone fixture
+had omitted production DOM interface setup and failed ReferenceError; installing
+the same collection/selection interfaces fixes the fixture without stubbing
+Document or weakening expectations. The captured 140,490-byte bootstrap changes
+from TypeError with airgap.initialized false to airgap.initialized true under the
+same script URL. Both selected live pages load with their bootstrap exceptions
+gone. Their PNGs are byte-identical to round52; neither page is cleared.
+The inventory remains **159 high, one critical and 907 low**. No broad baseline
+is repeated after the green round51 milestone. Evidence:
+`temp/online-visual-round53/`; qualified release pin
+`1e1b4b6069dbca539c6ebfb24b4afac7bd0e1ddf8018965bb422c133e8294b0f`.
+
+## Online StorageEvent bootstrap interface — 2026-11-17
+
+<a id="online-storage-event"></a>
+
+**Status:** FIXED for synthetic StorageEvent construction and payload access.
+Shared constructor behavior follows **D8.4.4 / D7.2.2** and traced event state
+**D6.3.3**. No capture-clock or script-admission change (**D10.1.7**).
+
+Coda and Superhuman's admitted classic Transcend bootstrap reads
+StorageEvent.prototype while collecting native property descriptors. The
+constructor was absent from the intrinsic catalog, causing an immediate
+ReferenceError before consent setup. The event now uses the existing typed
+Event host, with branded readonly payload getters, nullable DOMString members,
+USVString URL conversion, validated Storage identity and legacy initialization.
+Common payload validation, EventInit flags, tags and constructor wrappers are
+shared with the existing MessageEvent/CSP machinery. This follows the
+[HTML StorageEvent interface](https://html.spec.whatwg.org/multipage/webstorage.html#the-storageevent-interface);
+it does not add automatic cross-window storage broadcasting.
+
+Three new focused JsFormalMir cases cover defaults, dictionary order, coercion,
+invalid receivers/areas, readonly payloads, GC and initialization during dispatch.
+The identical three cases pass in Chromium headless shell; all **five** selected
+native cases, including two existing dispatch/message controls, pass. A startup
+reduction that previously threw ReferenceError now reveals its green panel.
+No baseline is repeated after the green round51 milestone.
+
+Both selected live captures load successfully. The StorageEvent error is gone,
+but the bootstrap now reaches a later TypeError. Coda's PNG is unchanged and
+Superhuman changes slightly; both remain high severity. The report remains
+159 high, one critical and 907 low. Evidence: `temp/online-visual-round52/`,
+qualified release pin
+`9ddf7cfb1c20d01f80e58d5affb1215b2e918ad60440882f164d68246f480c31`.
+The later exception is reproduced by the captured bootstrap in a minimal HTML
+host after retaining its script URL; its root cause remains unconfirmed.
+
+An independent Influx diagnosis confirms authored body visibility:hidden whose
+277,099-byte deferred module is skipped by the unchanged 131,072-byte admission
+limit. Its theme callback normally reveals the body. No limit increase or
+unhide is adopted. Primer's saved orange cover retains an authored mid-animation
+custom property, and Jetty's raw image is a transparent GIF until script updates
+it; neither establishes a native paint/sizing bug.
+
+## Online dynamically inserted script preparation — 2026-11-17
+
+<a id="online-dynamic-script-preparation"></a>
+
+**Status:** OPEN feature gap, reproduced on the qualified round50 renderer.
+**Task blocker:** no for independent layout repairs. Host/DOM ownership follows
+**D9.1.3v2**, shared tier contracts **D8.4.4**, and capture timing **D10.1.7**.
+No formal ruling or capture budget changes.
+
+A newly created classic script with text assigned through HTMLScriptElement.text
+and appended to document.head never executes. The standalone inline-script.html
+probe logs only DYNAMIC_APPEND_RETURNED. Chromium logs DYNAMIC_SCRIPT_RAN before
+that message and paints lime. The HTTP dynamic-settings.cjs reduction also
+receives its XHR response with status200 in both engines, then appends its source.
+Lambda logs SETTINGS_RESPONSE/SETTINGS_APPEND_RETURNED but never executes the
+finisher; its white startup cover stays present. Chromium runs the finisher and
+removes the cover. Thus this reduction is not a font wait, failed transport or
+nonzero timer requirement.
+
+The runner collects initial script elements and has a separate document.write
+insertion path. Ordinary DOM insertion has no matching script preparation and
+already-started model. Implement the shared
+[HTML script preparation lifecycle](https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element),
+including inert fragment-created scripts, clone/reinsertion rules and load
+ordering, rather than evaluating arbitrary inserted script text as a shortcut.
+This is a broader missing lifecycle feature outside the round's small layout
+repairs; no partial insertion evaluator or site-specific unhide is added.
+
+Archived Monese065 and Mode173 bootstraps create a VWO cover and load settings
+through XHR followed by this script-text/append pattern. They remain white in
+fresh captures. The reduced shared capability failure is confirmed; its exact
+contribution alongside remote settings and authored fallback timers on each live
+page is not independently isolated. Do not label their blank output solely a
+font failure or solely an intentional timer wait.
+
+Evidence: temp/online-visual-round51/{inline-script.html,inline-script.log,
+inline-browser.log,dynamic-settings.cjs,dynamic-settings-result.json}; pin
+c4820dc947adc9c460968a46f86aad343a1428682900eb50d91f038b7f496b50.
+
+## Online observer zero-area intersections — 2026-11-17
+
+<a id="online-observer-zero-area"></a>
+
+**Status:** FIXED in focused rendering controls. The shared DOM operation
+contract follows **D8.4.4**, owner boundary **D9.1.3v2**, and observer/callback
+state **D6.4.1**. **D10.1.7** capture time and script admission are unchanged.
+
+The online review's observer audit found that geometry sampling required both
+intersection dimensions to be positive. Connected, rendered zero-height or
+zero-width targets therefore never became intersecting; edge-adjacent boxes
+also remained false. A deferred panel waiting on its empty container's first
+intersection callback stayed completely absent. A collapsed CSS transform
+reproduces the same notification failure.
+
+The sampler now distinguishes principal-box existence from intersection area,
+accepts edge contact, and uses ratio one for an intersecting zero-area target.
+Disconnected nodes, display:none targets/ancestors, display:contents targets and
+skipped content remain ineligible. Existing target/record rooting and scheduling
+are retained. No observer is forced visible or dispatched synchronously.
+
+The [Intersection Observer update algorithm](https://w3c.github.io/IntersectionObserver/#update-intersection-observations-algo)
+and its entry definitions distinguish zero-area intersection from absence.
+All twelve fixture expectations pass in bundled Chromium headless shell.
+Seven new states fail before the repair, including the empty-to-populated 300px
+panel. After repair all **16** focused observer rendering controls pass: twelve
+new geometry/deferred-content cases and four existing sampling/resize/disconnect
+controls. Hidden, detached, offscreen and transparent-box controls are retained.
+
+A separate percentage root-margin hypothesis was **rejected and reverted**:
+Chromium's entries match the old axis-based calculation, despite the draft's
+width wording. No percentage-margin change is included. Saved-page diagnosis
+also identified initial opacity animations, non-serialized consent UI and an
+invalid serialized p/div replay; those observations are not native fixes.
+The three selected live pages load and capture successfully. Calendly's main
+heading, copy and signup actions are restored; an old-pin control gives the
+same PNG, so this clearance predates the current observer repair. Its stale
+manual-major annotation is removed. Sanity's current light-theme hero differs
+from its original dark-theme reference, and Primer remains major; neither is
+cleared. The severity inventory is 159 high, one critical and 907 low.
+No broad baseline is repeated after the round47 milestone. Evidence:
+`temp/online-visual-round50`; qualified release pin
+`c4820dc947adc9c460968a46f86aad343a1428682900eb50d91f038b7f496b50`.
+
+## Online console inspection bindings — 2026-11-17
+
+<a id="online-console-inspection"></a>
+
+**Status:** FIXED for the missing isolated-host bindings. D8.4.4 requires the
+shared JavaScript operation contract; D6.4.1 retains context-owned host state.
+No semantic ruling, capture clock or source-admission policy changes.
+
+Squarespace's admitted about-company script calls `console.table(data)` during
+its initial analytics setup. The call was undefined and aborted initialization.
+The native console already exposes table and dir through single-value logging,
+but the isolated MVP host's binding list omitted both. The existing host output
+adapter now has a shared first-value specialization for those methods, with
+arity one and the same undefined return. Embedder output routing is preserved.
+This exposes the existing inspection subset; tabular column selection and rich
+formatting are not newly implemented.
+
+Three focused document-render controls pass: existing console groups, table and
+dir. Both new cases fail on the previous pin. They cover an object, valid options,
+detached/no-argument calls, method length, window alias identity and completion
+pixels. The current live Squarespace exception disappears. Its hero remains
+visually absent at the selected frame, so no page clearance is claimed. Diagnostic
+observer callbacks set the reveal attributes to true and computed target styles
+are visible; the page also authors delayed 0.7s child transitions. Those observations
+do not by themselves prove the remaining painted-frame cause. D10.1.7 time is
+unchanged. Evidence: `temp/online-visual-round48` and its comparison repair report.
+The round47 baseline milestone was not repeated for this small binding repair.
+
+## Online DOM comment anchors — 2026-11-17
+
+<a id="online-dom-comment-anchors"></a>
+
+**Status:** FIXED in focused rendering controls. Shared JS operations follow
+D8.4.4; destination ownership and callback scopes follow D5.5.1 / D6.4.1.
+Input/Radiant ownership remains D9.1.1v4 / D9.1.3v2.
+
+Deep clone/import copied elements and text but silently dropped comments.
+Fragment roots passed through an element-only builder, losing top-level
+comments before cloning. Svelte uses those nodes as insertion anchors and
+subsequently called Node.firstChild with null. The shared clone now preserves
+comment backing in the destination document, reuses the backed child-insertion
+path and serves every Node kind through the catalog. The adapter's separate
+non-element cloning path is removed. Fragment construction shares one node
+factory across markup insertion, fragment parsing and iframe srcdoc.
+
+Six focused PNG tests cover clone/import/foreign-import, template/element HTML
+and insertAdjacentHTML; they verify comment order, identity, mutation isolation,
+destination ownership, shallow clones and standalone CharacterData. Four more
+mixed-fragment tests reproduce and qualify Input
+[LI-070](<../../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-070>).
+The network completion dependency is
+[RI-102](<../../radiant/vibe/Radiant_Issue_Ledger (fixed).md#ri-102>).
+All twenty combined HTTP/DOM rendering tests pass. Four document/iframe,
+three Input and one observer controls pass during implementation. The milestone
+release baseline reports 8,140 passed, 10 failed, 299 partial and 8 skipped.
+Its failures expose borrowed fragment text after the factory refactor; text
+occurrences now retain independent owned storage, matching the old insertion
+contract. All nine persistent failures pass focused rechecks, including eight
+layout fixtures at 100% element/text matches. The initial jQuery failure also
+passes directly. No clean repeated full baseline is claimed.
+Crates.io now renders its primary content; image error falls from 54.2222%
+to about 2.7368%, clearing one major candidate. Icons and API/loading-state
+differences remain. The severity inventory is 160 high / 1 critical / 906 low;
+the round47 online report records the final capture and qualification.
+Evidence: `temp/online-visual-round47`. No site condition, vendor edit, admission
+budget or D10.1.7 capture-clock change is used. The clone requirement is the
+[DOM cloning algorithm](https://dom.spec.whatwg.org/#concept-node-clone).
 
 ## Invalid select timeout silently disables the deadline — 2026-11-17
 

@@ -850,6 +850,17 @@ static bool observer_threshold_crossed(JsObserverState* observer,
     return false;
 }
 
+static bool observer_has_principal_box(DomNode* node) {
+    if (!node || !node->is_element() || !dom_is_connected(node)) return false;
+    DomElement* element = node->as_element();
+    if (element->view_type == RDT_VIEW_NONE ||
+        element->display.outer == CSS_VALUE_CONTENTS) return false;
+    for (DomNode* ancestor = node; ancestor && ancestor->is_element(); ancestor = ancestor->parent) {
+        if (ancestor->as_element()->display.inner == CSS_VALUE_NONE) return false;
+    }
+    return true;
+}
+
 static Item observer_new_intersection_entry(void) {
     RootFrame roots(4);
     Rooted<Item> entry_root(roots, js_new_object());
@@ -946,9 +957,12 @@ static void observer_sample_geometry(void) {
             if (skipped) left = top = right = bottom = 0.0f;
             float intersection_width = right > left ? right - left : 0.0f;
             float intersection_height = bottom > top ? bottom - top : 0.0f;
+            // edge contact and collapsed boxes still intersect; absent or skipped boxes do not.
+            bool intersecting = !skipped && observer_has_principal_box(target->node) &&
+                right >= left && bottom >= top;
             float area = width * height;
-            float ratio = area > 0.0f ? (intersection_width * intersection_height) / area : 0.0f;
-            bool intersecting = intersection_width > 0.0f && intersection_height > 0.0f;
+            float ratio = area > 0.0f ? (intersection_width * intersection_height) / area
+                : (intersecting ? 1.0f : 0.0f);
             if (target->sampled && target->last_intersecting == intersecting &&
                 !observer_threshold_crossed(observer, target->last_ratio, ratio)) continue;
             target->sampled = true;

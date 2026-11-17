@@ -22,6 +22,7 @@ pn main() {
 
     // parse_fragment parses in the context's document; its children move on append
     let frag = dom.parse_fragment(section, "<b>bold</b> and <i>italic</i>")
+    // capture all three nodes before moving <b>; only the held collection stays live.
     let frag_kids = len(dom.child_nodes(frag))
     dom.append_child(section, dom.first_child(frag))
 

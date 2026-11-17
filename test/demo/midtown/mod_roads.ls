@@ -10,8 +10,6 @@ import cells: .mod_cells
 
 pub let HALF = 4.8                    // asphalt, centreline to edge
 pub let LANE = 1.85                   // lane centre from the centreline
-pub let EDGE_LINE = 3.7               // the solid edge line
-pub let DRIVE = 6.0                   // the corridor driven at deck height: asphalt and gravel verge
 pub let REACH = 30.0                  // how far a road reshapes the land around it
 pub let SAMPLE = 4.0
 pub let GRADE = 0.07

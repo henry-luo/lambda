@@ -1,11 +1,10 @@
 // Mesh buffers for Midtown: {positions, normals, uvs, indices[, colors]}, merged per material and
-// turned into scene3d buffer geometry. Faces wind counter-clockwise seen from outside. Vehicles and
-// people are modelled facing +Z with the ground at y = 0.
+// turned into scene3d buffer geometry. Faces wind counter-clockwise seen from outside. People are
+// modelled facing +Z with the ground at y = 0; car bodies live in mod_car_mesh, trees in mod_scenery_mesh.
 import s: lambda.scene3d
 import prim: lambda.procart.primitive
 import v: lambda.scene3d.camera
 import t: lambda.scene3d.transform
-import shapes: lambda.scene3d.shape
 import u: .mod_util
 
 let UNIT_UV = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
@@ -165,6 +164,3 @@ pub fn light_pool() => quad([-6.0, 0.02, 8.0], [6.0, 0.02, 8.0], [6.0, 0.02, -4.
 pub fn signal_mast() => merge([post(0.0, 0.0, 0.0, 5.9, 0.13, 0.1, 8), cuboid(0.0, 5.62, -0.07, 3.75, 5.74, 0.07),
     cuboid(3.62, 4.25, -0.12, 4.0, 5.62, 0.12), cuboid(3.52, 4.15, -0.14, 4.1, 5.72, -0.12)])
 pub fn signal_lamp(slot) => (let y = 5.37 - slot * 0.42, cuboid(3.68, y - 0.15, 0.12, 3.94, y + 0.15, 0.16))
-pub fn trunk() => post(0.0, 0.0, 0.0, 2.6, 0.2, 0.14, 7)
-pub fn crown() any^ => (let ball = shapes.sphere(7, 10), placed({positions: ball.positions, normals: ball.normals, uvs: ball.uvs, indices: ball.indices},
-    t.compose([0.0, 3.9, 0.0], [0.0, 0.0, 0.0, 1.0], [3.8, 3.3, 3.8])))

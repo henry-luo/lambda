@@ -13,6 +13,8 @@ pub fn ease(rate, dt) => 1.0 - exp(0.0 - rate * dt)
 // wrap an angle into (-pi, pi]
 pub fn wrap(a) => a - TAU * round(a / TAU)
 pub fn sq(x) => x * x
+// an sRGB colour in linear light: vertex colours are shaded as linear values
+pub fn lin(c) => [for (x in c) math.pow(x, 2.2)]
 // Agents far from (x, z) take turns: tiers are [reach, every] pairs, farthest first; an agent beyond a tier's
 // reach steps every `every`th frame (by its number n), carrying the time it is owed, so distant traffic
 // costs a fraction of a frame and catches up exactly. `frame` null steps all.

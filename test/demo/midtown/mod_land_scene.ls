@@ -70,10 +70,11 @@ fn instanced(id, geometry_id, material, items, options = {}) any^ => (let tiled 
     [for (q in 0 to (TILES - 1), let mine = [for (e in tiled where e.tile == q) e.m] where len(mine) > 0)
         s.mesh(geometry_id, material, {id: id ++ "-" ++ string(q), instances: mine, *: options})])
 fn placed_copies(b, items) any^ => m.merge([for (p in items) m.yawed(b, p.x, p.y, p.z, p.heading)^])
+// the vegetation buffers, among the scene's shared resources because the city's street trees use them too
+pub fn tree_geometry() any^ => [geometry("g-pine", sm.pine())^, geometry("g-broad", sm.broadleaf())^, geometry("g-bush", sm.bush())^]
 pub fn scenery_elements() any^ {
     let lh = scenery.LIGHTHOUSE;
-    [s.resources([geometry("g-pine", sm.pine()), geometry("g-broad", sm.broadleaf()), geometry("g-bush", sm.bush()),
-        geometry("g-rock", sm.rock()), geometry("g-rotor", sm.turbine_rotor()), geometry("g-hull", sm.hull()), geometry("g-sails", sm.sails())]),
+    [s.resources([geometry("g-rock", sm.rock()), geometry("g-rotor", sm.turbine_rotor()), geometry("g-hull", sm.hull()), geometry("g-sails", sm.sails())]),
      *instanced("pines", "g-pine", "m-tree", [for (p in scenery.TREES where p.kind == "pine") p])^,
      *instanced("broadleaves", "g-broad", "m-tree", [for (p in scenery.TREES where p.kind == "broad") p])^,
      *instanced("hedges", "g-bush", "m-tree", scenery.BUSHES)^,
