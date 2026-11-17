@@ -9,6 +9,11 @@ D11.1.2 (IO boundary), S12.1.1v3 (procedures), S13.3.1v2 (task lifetime).
 
 ## Completion checkpoint
 
+- **2026-11-18 continuation:** the remaining four tests are profiled and an
+  implementation proposal is recorded in
+  [Remaining four tests](#remaining-four-tests--2026-11-18-analysis-and-proposal).
+  This continuation changes no sync implementation; prior results below remain
+  historical. LI-076 is fixed and the subsequent full Lambda baseline is clean.
 - User-authorized implementation complete, 2026-11-17, on `ae76dbf6d` plus the
   uncommitted changes. No commit requested. No diagnostic process/service remains.
 - Burst close ordering, scoped fixture batching with independent commit/replay,
@@ -374,3 +379,202 @@ All files above are under `temp/sync-test-performance-impl/`. The old diagnostic
 section and its sample/counter limitations remain historical evidence. Future
 work can target uncached history hydration and remaining native/compiler cost;
 this implementation does not require changing the saved-version/wire model.
+
+## Remaining four tests — 2026-11-18 analysis and proposal
+
+**Status:** analyzed; implementation proposed, not applied. Lambda starts at
+`1d3aae0a3`; Input includes the preceding LI-076 error/null metadata repair.
+The earlier completion checkpoint is historical: LI-076 is now fixed and the
+subsequent Lambda baseline passes **7,604/7,604**. This investigation changes
+only working documentation and temporary diagnostic copies.
+
+### Measurement and reproduced cost
+
+A fresh normal release was built with `make build-release-compile JOBS=8` and
+frozen as `temp/sync-test-phase2/lambda-release.exe`, SHA256
+`e94e30f5bf546a8d530731a277a6b8982cb33200e49aced5962750db729d1ea6`.
+Three serial AUTO runs per original test use fresh PID-scoped repositories;
+all **12/12** outputs match their unchanged goldens. These are whole-process
+workflow times, not individual file arrival latency. Full parallel debug-suite
+figures are not directly comparable (D5.2.4, D8.3.1–D8.3.4).
+
+| Original test | Release median | Three-run range | Median user + system CPU | Median peak RSS |
+|---|---:|---:|---:|---:|
+| `sync_peer_fast_cold` | 6.580 s | 6.572–6.662 s | 6.87 s | 279.5 MiB |
+| `sync_document_repository` | 5.309 s | 5.303–5.318 s | 5.63 s | 289.1 MiB |
+| `sync_peer_burst` | 4.822 s | 4.768–4.870 s | 2.57 s | 279.1 MiB |
+| `sync_retention_repository` | 3.835 s | 3.740–3.981 s | 3.47 s | 265.8 MiB |
+
+Stage-only and object/helper/barrier traces are separate instrumented executions.
+Their timings indicate where work occurs; do not add overlapping task timings,
+CPU time, object-read time and barrier time as exclusive wall-time components.
+A stage-only retention run took 5.488 s versus its ordinary 3.835 s median;
+that diagnostic outlier is retained, not substituted for the ordinary result.
+The syscall interposer executes every real barrier. No barrier fails and no
+unknown `fcntl` command is observed. Its `database` category includes paths
+under `.sqlite.objects`, so it does not identify SQLite main-file cost alone.
+
+| Traced original | `repo.get` calls | State reads / distinct state IDs | Same-object repeat reads within one scope | Full-sync calls / summed duration |
+|---|---:|---:|---:|---:|
+| Cold peer | 204 | 37 / 13 | 0 | 220 / 0.755 s |
+| Document | 621 | 28 / 13 | 272 | 282 / 0.910 s |
+| Burst | 29 | 5 / 3 | 0 | 639 / 2.110 s |
+| Retention | 564 | 13 / 7 | 225 | 437 / 1.493 s |
+
+The cold-peer trace reads 4.87 MB of canonical state in total; an individual
+state reaches 199,114 bytes despite the tiny file payloads. Its state reads
+include authentication and canonical decode, taking about 4.61 s in the traced
+execution. There are **no duplicate gets within a single repository scope**:
+a transaction-local object cache alone would not solve this cold-path cost.
+Repeated observations across separate scopes are the larger opportunity.
+
+The document trace reads 364 history pages representing seven distinct page
+IDs and 179 version payloads representing seven distinct version IDs. Its
+272 repeated gets within scopes account for about 0.424 s, an upper bound for
+that narrow memoization opportunity before cache-management cost. Retention's
+corresponding upper bound is about 0.248 s. These do not include the additional
+validation, restoration or projection performed after an object is returned.
+
+MIR helper counts corroborate large amounts of repeated work: cold peer has
+about 13.3 million equality-helper entries, 393 thousand format-helper entries
+and 7.1 million array pushes; document has about 12.6 million, 419 thousand and
+7.9 million respectively. Counters cover instrumented MIR, not all T0 calls.
+A wrapper around the non-exact scalar-comparison fallback produces no hot MIR
+frame entry in the two attribution runs; there is no evidence here to prioritize
+changing numeric equality or scalar portability checks (S4.1.1, S5.2.1v2).
+
+### Measured temporary counterfactuals
+
+Each experiment below has three serial normal-release runs and matching output;
+all **9/9** pass. These copies are under `temp/`, not changes to shipped code or
+checked-in tests. Their improvements are independent and are not additive.
+
+| Experiment | Original median | Experimental median / range | Meaning and limit |
+|---|---:|---:|---|
+| Cold peer: reuse one validated observation within each `fast.prepare` / `fast.accept` call | 6.580 s | **5.665 s**, 5.643–5.690 s | Every API invocation still starts cold; fresh authenticated head checks remain. No owner persists between calls. |
+| Document: resume an owner after the cold reopen and recovered-value check | 5.309 s | **3.761 s**, 3.754–3.793 s | Existing explicit cold opens, prepared-save recovery, external-edit merge, restore and verify assertions remain. Subsequent editor operations model a running owner. |
+| Burst: 50 ms idle instead of 500 ms in all three profiles | 4.822 s | **3.595 s**, 3.578–3.623 s | Diagnostic wait-floor experiment only: the elapsed assertion also changes. This does not retain the original 500 ms coverage and is not a proposed drop-in fix. |
+
+The cold experiment enables the existing bounded current-head cache only within
+one high-level operation and threads its observation into subsequent subcalls.
+It saves about **0.915 s (14%)** without converting the cold fixture into a
+persistent-owner test. Production implementation must avoid unintentionally
+retaining this temporary observation after the operation returns.
+
+The document fixture's reopened, unowned handle currently remains in use for
+many operations after recovery is already verified. The final restored save
+alone takes about 1.5 s in operation traces; a separate cold save commit takes
+about 0.44–0.56 s. Resuming the owner removes repeated cold work from later
+operations while retaining explicit recovery boundaries. Median peak RSS rises
+from 289.1 to 309.7 MiB in the experiment; GC/publication variance is visible in
+both arms, so no sustained-memory improvement is claimed. A memory acceptance
+gate is required rather than treating the canonical-cache byte limit as a
+whole-process RSS bound (D5.1.3, D5.2.4, D5.3.1).
+
+The burst fixture intentionally waits for 500 quiet milliseconds in each of
+three protocol variants: **at least 1.5 s of idle observation** is inherent in
+its present assertions. The 100 ms interval also quantizes the shorter-idle
+experiment. The old five-second close-order bug remains fixed; this is a
+different cost. Per-profile client waits are about 1.3–1.6 s, including exchange,
+materialization, callbacks and idle observation, not just network delivery.
+
+### Native scratch spool: avoid durability before publication
+
+`lambda/runtime/io_disk.cpp::spool_open` creates its temporary file with
+`file_anchor_create_regular`, then immediately calls `file_anchor_remove` to
+unlink it while the descriptor remains held. The shared create API intentionally
+syncs both the empty file and its parent: it is also used for durable lock/lease
+streams. Removal syncs the directory again. That gives **three full-sync
+barriers per scratch-file lifetime**, before useful pack publication.
+
+`pn_io_disk_spool_publish` later copies the complete spool into the guarded
+atomic writer and durably commits that final named file. The scratch inode and
+its transient name are not referenced by repository metadata. Applying the
+lock/lease durability contract to this temporary staging file amplifies cost;
+the final pack publication still requires its existing durability contract
+(D11.1.2, D9.1.1v4).
+
+MIR traces observe 18 / 26 / 72 / 38 spool publications for cold peer / document /
+burst / retention. For these successful paths, the create/unlink sequence suggests
+roughly **54 / 78 / 216 / 114 scratch-only barriers**. This is a source-derived
+removal budget, not a measured speedup or a count of redundant SQLite commits.
+The observed directory barriers alone total about 0.80 s in burst and 0.64 s in
+retention; scratch cleanup is one contributor, not their entire cause.
+
+Propose a dedicated Input-owned, guarded **anonymous scratch stream** API, used
+only by Lambda's spool adapter. It must preserve descriptor ownership, directory
+anchoring, create/remove authority, restrictive permissions, symlink and
+substitution checks, cancellation and scope invalidation. Its namespace changes
+need not be durable; the existing final pack write and directory sync must be.
+Do not weaken `file_anchor_create_regular`, `file_anchor_remove`, atomic-write
+commit, SQLite full sync or generic disk APIs. Handle failure before unlink and
+possible crash-orphan scratch files explicitly. The change is a small native OS
+API addition; pack and replication policy stays in Lambda Script (D9.1.1v4,
+D9.1.3v2, D11.1.2). No such implementation or bypass interposer was used here.
+
+### Proposed implementation order
+
+1. **Per-operation observation reuse in the fast protocol.** Thread one loaded
+   state/proof through `peer_fast.prepare/accept` and their helpers. Preserve
+   the authenticated generation and immutable-ID check at each later access;
+   a concurrent writer must invalidate the observation. Keep the full cold
+   fixture and forged-clock, atomic-group, duplicate and size-decline cases.
+   The measured 5.665 s is a useful first acceptance reference, not a promise
+   for every host. Also batch bounded bundle exports within one repository scope
+   rather than opening one scope per object; stop at the existing byte/frame
+   budget instead of accumulating up to 128 arbitrarily large objects.
+2. **Give scratch streams their correct publication boundary.** Add the narrow
+   native API above; qualify it independently before measuring all four cases.
+   Expect fewer barriers, especially for burst and retention. A sub-3-second
+   result for either is not established by this analysis. Later directory-sync
+   coalescing across pack/head publication is a separate, higher-risk proposal;
+   it must not cross an acknowledged SQLite/recovery boundary.
+3. **Separate document recovery checks from ongoing editor work.** Apply the
+   measured owner-resumption fixture shape, retaining its explicit cold reads.
+   In production, reduce repeated `documents.flush` work: unchanged document
+   roots/history should not be rebuilt on unrelated workspace changes. Return
+   the exact expanded, durable endpoint produced during flush alongside its
+   packed persistence form, so `local.mutate` need not immediately rehydrate it.
+   Preserve coverage/ACK state, retention observations and all separately durable
+   save preparation, install-intent and finalization steps.
+4. **Bound immutable metadata reuse and make history loading selective.** Reuse
+   authenticated history/version objects within a scope, keyed by repository,
+   key context, ID and expected kind, under an explicit byte/object budget.
+   Explicit physical verification bypasses reuse. Longer term, let status and
+   history pagination use headers without expanding every retained endpoint;
+   load the requested version for restore/merge. This needs a deliberate
+   session/history API change, not removal of validation from cold loads.
+5. **Optimize pruning after the above measurements.** Retention's resumed prune
+   loop takes about 0.6–0.75 s, snapshot restore about 0.38–0.41 s and three saves
+   about 0.23–0.55 s each in diagnostic runs. Reuse a validated content-root graph
+   only under its complete retention/snapshot/cache/installation binding; retain
+   fresh head/previous-head protection and the existing SQLite writer-lock and
+   per-target protection checks. Never increase the fixture's step budget to
+   hide restart/resume work. A new root or pin must force revalidation.
+6. **Consider a timer-test split last.** Keep a real 500 ms idle-expiry case,
+   including activity-reset behavior, and all v1/v2/v3 authenticated multi-round
+   exchanges. A protocol matrix may use shorter explicit options only if it no
+   longer claims to verify the 500 ms policy. Production's ten quiet seconds
+   remain an independent setting. No faster timer fixture is included in the
+   initial implementation recommendation.
+
+### Acceptance and artifacts
+
+For each implementation, compare at least three ordinary serial release runs
+with exact outputs, CPU and peak RSS. Keep instrumented runs separate. Require
+all sync goldens, strict interpreter/JIT checks, forced precise GC/poison,
+external-writer invalidation, same-kind/type/order negative cases, physical
+corruption and stale/pinned retention checks. Native scratch changes additionally
+need cancellation, unlink/publication failure, crash/restart cleanup and
+acknowledged-pack durability tests. Re-run local-S3 lost-response, interrupted
+upload and offline exact-restore acceptance. Do not relax checks, fixtures,
+wire formats or durability to obtain the timings (S2.3.1v2, S5.2.1v2, D11.1.2).
+
+Evidence: `temp/sync-test-phase2/{timing-results.json,summary.json,staged-results.json,
+diagnostic-summary.json,diagnostic-summary.txt,proof-results.json}` and per-case
+`out`, `err`, `calls.tsv`, `barriers.csv`. The runner, diagnostic-home and
+proof-home overlays retain every counterfactual source. The first sandboxed
+`time -l` attempt could not read `kern.clockrate`; valid timings use the permitted
+host accounting path. The interposer is launched directly, because macOS strips
+`DYLD_INSERT_LIBRARIES` through the protected `/usr/bin/time` executable. The
+normal debug host is restored after profiling. No sync implementation changed.

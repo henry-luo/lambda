@@ -3,7 +3,8 @@ import s: lambda.scene3d
 import o: lambda.scene3d.outdoor
 import meadow: ~~.procart.mod_meadow
 
-pub fn home() map => {*:meadow.home(),position:[23.0,12.0,25.0],target:[0.0,1.3,0.0],fov:43.0}
+// propagate camera preparation errors before spreading its fields.
+pub fn home() map^ => {*:meadow.home()^,position:[23.0,12.0,25.0],target:[0.0,1.3,0.0],fov:43.0}
 fn decorate(n,path,organ,options) element^ {
     let tag=name(n)
     let role=if (tag=='mesh' and n.id=="pond-water") "water"
@@ -35,7 +36,7 @@ fn tracks(n) array => [
     *(if (name(n)=='material' and n.id=="outdoor-water")
         [s.track(n.id++".water-phase",[0.0,8.0],[0.0,2.0*math.pi])] else []),
     *[for (child in ((content(n)) ^ { [] })) *tracks(child)]]
-pub fn viewport(model,options,lens=home()) element^ {
+pub fn viewport(model,options,lens=home()^) element^ {
     let base=decorate(meadow.viewport(model,{},false,lens)^,"root","",options)^
     let motion=tracks(base);
     <scene3d *:map(base),*content(base);s.clip("outdoor-motion",motion,{duration:8.0,autoplay:options.motion})>
