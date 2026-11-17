@@ -3200,7 +3200,8 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             return 1;
         }
         DomNode* source = (DomNode*)dom_unwrap_element_impl(args[0]);
-        if (!source || !source->is_element()) {
+        // the clone owner also handles text and comment nodes.
+        if (!source) {
             *out = ItemNull;
             return 1;
         }

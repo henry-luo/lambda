@@ -189,6 +189,30 @@ TEST_F(RadiantCoreTest, ExplicitHashAndEqualityCoverEveryInlineField) {
     EXPECT_NE(inline_prop_hash(&left), inline_prop_hash(&right));
 }
 
+TEST_F(RadiantCoreTest, InlineSharingPreservesIsolationRubyPositionAndLineStruts) {
+    struct Case { const char* name; InlineProp value; };
+    Case cases[] = {{"isolation", INLINE_PROP_DEFAULT}, {"ruby position", INLINE_PROP_DEFAULT},
+        {"explicit line strut", INLINE_PROP_DEFAULT}};
+    cases[0].value.isolation = CSS_VALUE_ISOLATE;
+    cases[1].value.ruby_position = CSS_VALUE_UNDER;
+    cases[2].value.content_strut_establishes_line = true;
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.name);
+        DomElement* parent = element();
+        DomElement* child = element();
+        *parent->ensure_inline(&tree) = INLINE_PROP_DEFAULT;
+        *child->ensure_inline(&tree) = entry.value;
+        EXPECT_FALSE(inline_prop_equal(parent->in_line, child->in_line));
+        EXPECT_NE(inline_prop_hash(parent->in_line), inline_prop_hash(child->in_line));
+        view_tree_commit_inline_prop(&tree, child, parent);
+        EXPECT_NE(parent->in_line, child->in_line);
+        EXPECT_FALSE(child->inline_prop_shared());
+        EXPECT_EQ(child->inl()->isolation, entry.value.isolation);
+        EXPECT_EQ(child->inl()->ruby_position, entry.value.ruby_position);
+        EXPECT_EQ(child->inl()->content_strut_establishes_line, entry.value.content_strut_establishes_line);
+    }
+}
+
 TEST_F(RadiantCoreTest, EqualParentAndChildPromoteThenCowAtEnsureGate) {
     DomElement* parent = element();
     DomElement* child = element();

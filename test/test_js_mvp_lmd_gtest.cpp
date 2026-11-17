@@ -1876,6 +1876,37 @@ TEST_F(JsFormalMir, NativeArrayCallablesUseThePublishedAbi) {
     ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, DynamicClassStaticWritesAcrossNativeSuperclassKeepPublicReceiver) {
+    ASSERT_EQ(run("true").item, ITEM_TRUE);
+    RootFrame roots(1);
+    Rooted<Item> base(roots, js_new_native_constructor([]() -> Item { return js_new_object(); }));
+    ASSERT_FALSE(item_is_error(js_set_global_property(js_name_item("NativeBase"), base.get(), 0)));
+    Item result = run(R"JS(
+        eval(`
+            const variants=[class extends NativeBase {},class extends NativeBase {constructor(){super()}}];
+            let ok=true;
+            for(const C of variants) {
+                const key=Symbol('static');
+                C.direct=7; C['computed']=11; C[key]=13;
+                ok=ok && Reflect.set(C,'reflected',17) && C.direct===7 && C.computed===11 &&
+                    C[key]===13 && C.reflected===17 && C.hasOwnProperty('direct') &&
+                    Object.hasOwn(C,key) && Object.prototype.valueOf.call(C)===C &&
+                    Object.getOwnPropertyDescriptor(C,'direct').writable;
+                let seen;
+                Object.defineProperty(NativeBase,'sink',{set(v){seen=[this,v]},configurable:true});
+                C.sink=19;
+                ok=ok && seen[0]===C && seen[1]===19 && !Object.hasOwn(C,'sink');
+                delete NativeBase.sink;
+                let object={}; Object.setPrototypeOf(object,C);
+                ok=ok && Object.getPrototypeOf(object)===C && !Object.hasOwn(NativeBase,'direct');
+            }
+            ok;
+        `);
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
 TEST_F(JsFormalMir, NamedPrimitivePropertiesAdmitTheirRealmPrototypes) {
     // each first entry must establish the needed intrinsic family from its own source.
     for (const char* source : kNamedPrimitivePropertySources) {
