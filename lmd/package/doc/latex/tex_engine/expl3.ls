@@ -2,6 +2,7 @@
 // Tokens keep their category codes and source identity; the TeX engine owns scope.
 import reader: .reader
 import stream: .stream
+pub type TokenList = {kind: string, count: int, prefix: map[], delimiters: map[], brace_delim: bool, long_ok: bool, protected_flag: bool, body: map[]}
 let CS_NEW = ["cs_new:Npn", "cs_new_protected:Npn"]
 let CS_LOCAL = ["cs_set:Npn", "cs_set_protected:Npn"]
 let CS_GLOBAL = ["cs_gset:Npn", "cs_gset_protected:Npn"]
@@ -35,69 +36,69 @@ let INT_TEST = ["int_if_zero:nTF", "int_if_zero:nT", "int_if_zero:nF",
     "int_if_odd:nTF", "int_if_odd:nT", "int_if_odd:nF",
     "int_if_even:nTF", "int_if_even:nT", "int_if_even:nF"]
 
-pub fn exists(name) => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(CS_NEW, name) or contains(CS_LOCAL, name) or
+pub fn exists(name) bool => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(CS_NEW, name) or contains(CS_LOCAL, name) or
     contains(CS_GLOBAL, name) or contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name) or
     contains(SEQ_NEW, name) or contains(SEQ_SET, name) or contains(SEQ_EXPAND, name) or
     contains(SEQ_SORT, name) or contains(SORT_RETURN, name) or contains(STR_COMPARE, name) or contains(TEXT_CASE, name) or
     contains(["ExplSyntaxOn", "ExplSyntaxOff", "ProvidesExplPackage", "ProvidesExplClass", "ProvidesExplFile", "tl_use:N", "int_eval:n", "fp_eval:n", "cs_new_eq:NN"], name)
-pub fn expandable(name) => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
-pub fn cs_definition(name) => contains(CS_NEW, name) or contains(CS_LOCAL, name) or contains(CS_GLOBAL, name)
-pub fn fresh(name) => contains(CS_NEW, name) or contains(TL_NEW, name) or contains(SEQ_NEW, name)
-pub fn global(name) => contains(CS_NEW, name) or contains(CS_GLOBAL, name) or contains(TL_NEW, name) or
+pub fn expandable(name) bool => contains(SEQ_EMPTY, name) or contains(INT_TEST, name) or contains(INT_COMPARE_EXPR, name) or contains(INT_COMPARE, name) or contains(INT_MATH, name) or contains(["tl_use:N", "int_eval:n", "fp_eval:n"], name) or contains(SEQ_EXPAND, name) or contains(STR_COMPARE, name) or contains(TEXT_CASE, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name) or contains(TL_EQUAL, name) or contains(TL_STRING, name) or contains(TL_COUNT, name)
+pub fn cs_definition(name) bool => contains(CS_NEW, name) or contains(CS_LOCAL, name) or contains(CS_GLOBAL, name)
+pub fn fresh(name) bool => contains(CS_NEW, name) or contains(TL_NEW, name) or contains(SEQ_NEW, name)
+pub fn global(name) bool => contains(CS_NEW, name) or contains(CS_GLOBAL, name) or contains(TL_NEW, name) or
     contains(SEQ_NEW, name) or contains(["tl_gset:Nn", "tl_gset:Nx", "tl_gclear:N", "tl_gput_left:Nn", "tl_gput_right:Nn",
         "tl_gput_left:Nx", "tl_gput_right:Nx",
         "seq_gset_from_clist:Nn", "seq_gclear:N", "seq_gput_left:Nn", "seq_gput_right:Nn", "seq_gsort:Nn", "seq_greverse:N"], name)
-pub fn protected(name) => contains(["cs_new_protected:Npn", "cs_set_protected:Npn", "cs_gset_protected:Npn"], name)
-pub fn token_assignment(name) => contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name)
-pub fn token_put(name) => contains(TL_PUT, name)
-pub fn token_empty(name) => contains(SEQ_EMPTY, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name)
-pub fn int_test(name) => contains(INT_TEST, name)
-pub fn int_compare_expr(name) => contains(INT_COMPARE_EXPR, name)
-pub fn int_compare(name) => contains(INT_COMPARE, name)
-pub fn int_math(name) => contains(INT_MATH, name)
-pub fn token_count(name) => contains(TL_COUNT, name)
-pub fn token_string(name) => contains(TL_STRING, name)
-pub fn token_equal(name) => contains(TL_EQUAL, name)
-pub fn token_blank(name) => contains(TL_BLANK, name)
-pub fn token_put_left(name) => contains(["tl_put_left:Nn", "tl_gput_left:Nn", "tl_put_left:Nx", "tl_gput_left:Nx"], name)
-pub fn sequence_sort(name) => contains(SEQ_SORT, name)
-pub fn sort_return(name) => contains(SORT_RETURN, name)
-pub fn string_compare(name) => contains(STR_COMPARE, name)
-pub fn text_case(name) => contains(TEXT_CASE, name)
-pub fn case_opaque(name) => contains(["ref", "pageref", "label", "cite", "nocite"], name)
-pub fn sequence_assignment(name) => contains(SEQ_NEW, name) or contains(SEQ_SET, name)
-pub fn sequence_reverse(name) => contains(["seq_reverse:N", "seq_greverse:N"], name)
-pub fn sequence_empty_assignment(name) => contains(["seq_new:N", "seq_clear:N", "seq_gclear:N"], name)
-pub fn sequence_from_clist(name) => contains(["seq_set_from_clist:Nn", "seq_gset_from_clist:Nn"], name)
-pub fn sequence_put_left(name) => contains(["seq_put_left:Nn", "seq_gput_left:Nn"], name)
-pub fn no_argument(name) => contains(["tl_new:N", "tl_clear:N", "tl_gclear:N"], name)
+pub fn protected(name) bool => contains(["cs_new_protected:Npn", "cs_set_protected:Npn", "cs_gset_protected:Npn"], name)
+pub fn token_assignment(name) bool => contains(TL_NEW, name) or contains(TL_SET, name) or contains(TL_PUT, name)
+pub fn token_put(name) bool => contains(TL_PUT, name)
+pub fn token_empty(name) bool => contains(SEQ_EMPTY, name) or contains(TL_EMPTY, name) or contains(TL_BLANK, name)
+pub fn int_test(name) bool => contains(INT_TEST, name)
+pub fn int_compare_expr(name) bool => contains(INT_COMPARE_EXPR, name)
+pub fn int_compare(name) bool => contains(INT_COMPARE, name)
+pub fn int_math(name) bool => contains(INT_MATH, name)
+pub fn token_count(name) bool => contains(TL_COUNT, name)
+pub fn token_string(name) bool => contains(TL_STRING, name)
+pub fn token_equal(name) bool => contains(TL_EQUAL, name)
+pub fn token_blank(name) bool => contains(TL_BLANK, name)
+pub fn token_put_left(name) bool => contains(["tl_put_left:Nn", "tl_gput_left:Nn", "tl_put_left:Nx", "tl_gput_left:Nx"], name)
+pub fn sequence_sort(name) bool => contains(SEQ_SORT, name)
+pub fn sort_return(name) bool => contains(SORT_RETURN, name)
+pub fn string_compare(name) bool => contains(STR_COMPARE, name)
+pub fn text_case(name) bool => contains(TEXT_CASE, name)
+pub fn case_opaque(name) bool => contains(["ref", "pageref", "label", "cite", "nocite"], name)
+pub fn sequence_assignment(name) bool => contains(SEQ_NEW, name) or contains(SEQ_SET, name)
+pub fn sequence_reverse(name) bool => contains(["seq_reverse:N", "seq_greverse:N"], name)
+pub fn sequence_empty_assignment(name) bool => contains(["seq_new:N", "seq_clear:N", "seq_gclear:N"], name)
+pub fn sequence_from_clist(name) bool => contains(["seq_set_from_clist:Nn", "seq_gset_from_clist:Nn"], name)
+pub fn sequence_put_left(name) bool => contains(["seq_put_left:Nn", "seq_gput_left:Nn"], name)
+pub fn no_argument(name) bool => contains(["tl_new:N", "tl_clear:N", "tl_gclear:N"], name)
 let TL_EXPANDED = ["tl_set:Nx", "tl_gset:Nx", "tl_put_left:Nx", "tl_put_right:Nx",
     "tl_gput_left:Nx", "tl_gput_right:Nx"]
-pub fn expanded_argument(name) => contains(TL_EXPANDED, name)
-pub fn expanded_argument_names() => TL_EXPANDED
-pub fn token_list(tokens) => {kind: "macro", count: 0, prefix: [], delimiters: [],
+pub fn expanded_argument(name) bool => contains(TL_EXPANDED, name)
+pub fn expanded_argument_names() string[] => TL_EXPANDED
+pub fn token_list(tokens: map[]) TokenList => {kind: "macro", count: 0, prefix: [], delimiters: [],
     brace_delim: false, long_ok: false, protected_flag: false, body: tokens}
-pub fn save_codes(codes) => {[chr(9)]: reader.catcode(chr(9), codes),
+pub fn save_codes(codes: map) map => {[chr(9)]: reader.catcode(chr(9), codes),
     [chr(32)]: reader.catcode(chr(32), codes), [chr(34)]: reader.catcode(chr(34), codes),
     [chr(58)]: reader.catcode(chr(58), codes), [chr(94)]: reader.catcode(chr(94), codes),
     [chr(95)]: reader.catcode(chr(95), codes), [chr(124)]: reader.catcode(chr(124), codes),
     [chr(126)]: reader.catcode(chr(126), codes)}
-pub fn syntax_codes(codes) => {*:codes, [chr(9)]: 9, [chr(32)]: 9, [chr(34)]: 12,
+pub fn syntax_codes(codes: map) map => {*:codes, [chr(9)]: 9, [chr(32)]: 9, [chr(34)]: 12,
     [chr(58)]: 11, [chr(94)]: 7, [chr(95)]: 11, [chr(124)]: 12, [chr(126)]: 10}
 
 fn space_token(token) => token.kind == "char" and token.cat == 10
-fn trim_first(tokens, at) any^ => if (at < len(tokens) and space_token(tokens[at])) trim_first(tokens, at + 1) else at
-fn trim_last(tokens, at, first) any^ => if (at > first and space_token(tokens[at - 1])) trim_last(tokens, at - 1, first) else at
+fn trim_first(tokens: map[], at: int) int => if (at < len(tokens) and space_token(tokens[at])) trim_first(tokens, at + 1) else at
+fn trim_last(tokens: map[], at: int, first: int) int => if (at > first and space_token(tokens[at - 1])) trim_last(tokens, at - 1, first) else at
 
 // Comma-list grouping removes outer braces only after trimming top-level spaces.
-fn clist_item(tokens) any^ {
-    let first = trim_first(tokens, 0)^;
-    let limit = trim_last(tokens, len(tokens), first)^;
+fn clist_item(tokens: map[]) map[] | null | error {
+    let first = trim_first(tokens, 0);
+    let limit = trim_last(tokens, len(tokens), first);
     if (first == limit) null
-    else stream.strip_outer(slice(tokens, first, limit)^)^
+    else stream.strip_outer(slice(tokens, first, limit))^
 }
 
-fn clist_split(tokens, index = 0, depth = 0, current = [], items = []) any^ {
+fn clist_split(tokens: map[], index: int = 0, depth: int = 0, current: map[] = [], items: array = []) array^ {
     if (index >= len(tokens)) {
         let item = clist_item(current)^;
         if (item == null) items else [*items, item]
@@ -116,4 +117,4 @@ fn clist_split(tokens, index = 0, depth = 0, current = [], items = []) any^ {
     }
 }
 
-pub fn from_clist(tokens) any^ => clist_split(tokens)
+pub fn from_clist(tokens: map[]) array^ => clist_split(tokens)

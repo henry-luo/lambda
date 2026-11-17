@@ -410,11 +410,11 @@ pn main() {
         len(find("ab xy AB", counted_word, {limit: 0})) ++ " " ++
         len(find("", counted_empty)) ++ " " ++ len(find("", "")) ++ " " ++
         len(find(null, counted_word)) ++ " " ++ len(find("éÉ", "é", {ignore_case: true})) ++ "\n")
-    print("count-errors: " ++ (len(find(failed_text("source"), counted_word)) ^ { ^.message }) ++ " " ++
+    print("count-outcomes: " ++ (len(find(failed_text("source"), counted_word)) ^ { ^.message }) ++ " " ++
         (len(find("ab", failed_text("pattern"))) ^ { ^.message }) ++ " " ++
         (len(find("ab", counted_word, failed_text("options"))) ^ { ^.message }) ++ " " ++
-        (type(len(find(42, counted_word))) == error) ++ " " ++
-        (type(len(find("ab", counted_word, {limit: -1}))) == error) ++ "\n")
+        (len(find(42, counted_word)) == 0) ++ " " ++
+        (len(find("ab", counted_word, {limit: -1})) == 0) ++ "\n")
     print("logical-normal: " ++ ((not (1 in [1]) or not (2 in [1])) and not (3 in [1])) ++ " " ++
         ((not (error("logic-first") in [1]) or not (error("logic-second") in [1])) ^ { ^.message }) ++ "\n")
     print("float-admit: " ++ admitted_dynamic_float(2) ++ " " ++ admitted_dynamic_float(2.5) ++ " " ++

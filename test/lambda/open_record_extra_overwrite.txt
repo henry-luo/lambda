@@ -1,0 +1,3 @@
+[null, "same", "same", "same"]
+[42, "kept", null]
+[true, true]

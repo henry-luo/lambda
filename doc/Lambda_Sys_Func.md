@@ -28,6 +28,11 @@ System-function results follow the cardinality and domain of the operation:
   value, such as an absent index or `reduce([])`.
 - Non-admissive invalid input, invalid options, parsing failure, and I/O
   failure return or raise `error`; they are not represented by `null` or `[]`.
+- `slice`, `take`, `drop`, `find`, `replace`, and `split` are total queries:
+  invalid non-error inputs return `null` (S7.10.7), while valid empty results
+  retain their usual `[]` or `""` shape. A valid replacement with no matches
+  returns its source. See the
+  [implementation and qualification](../vibe/impl/Lambda_Impl_Numerical_Query_Conventions.md).
 - Admissive system-function cases use the result-domain absence when that is
   the documented meaning: `arr[-1]`, `argmin([])`, and `argmax([])` return
   `null`, while `varg(non_integer)` returns `null`.
@@ -158,6 +163,13 @@ A `null` argument makes a numeric function's result `null`, as `null + 1` is:
 `abs(null)`, `round(null)`, `math.sqrt(null)`, `math.pow(2, null)` and
 `min(null, 3)` are all `null`, so `f(x) or default` rescues an absent input. A
 non-numeric argument, such as a string, is still an `error`.
+
+Numerical domain outcomes use `nan` or signed infinity where the result type
+admits them; incompatible types or shapes and failed structured computations
+remain errors (S4.2.5). For example, real `sqrt(-1)` is `nan`, while a singular
+`math.solve` fails. Some NaN handling paths still need migration; the
+[convention audit](../vibe/impl/Lambda_Impl_Numerical_Query_Conventions.md)
+records the verified gaps.
 
 ### Rounding & Sign (global)
 
@@ -605,11 +617,11 @@ find("a1b22", digits)            // named
 find("a1b22", \("\d"+))             // inline — same result
 ```
 
-These functions operate on strings, so a **symbol-domain pattern**
-(for example `\('\a'+)`) is a domain error rather than a content match:
+These functions operate on strings, so an incompatible **symbol-domain
+pattern** (for example `\('\a'+)`) returns `null` under S7.10.7:
 
 ```lambda
-find("abc", \('\a'+))         // error: symbol-domain patterns cannot search strings
+find("abc", \('\a'+))         // null: incompatible pattern domain
 ```
 
 String-valued system functions use `""` for a successful result with no

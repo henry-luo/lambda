@@ -1,32 +1,38 @@
 // Experimental native-compatible reconstruction of emitted TeX tokens.
 import utf8: lambda.io.utf8
+import reader: .reader
+pub type Segment = {out_start: int, length: int, src_start: int, synthesized: bool}
+pub type Fragment = {span: bool, direct: bool, adjacent: bool, gap: string?, body: string?}
+pub type Reconstruction = {text: string, segments: Segment[], definition_spans: map[],
+    issue: string?, prev_valid: bool, prev_file?: int?, prev_seq?: int?, prev_end: int,
+    track_tokens?: bool, token_spans?: map[], failed_index?: int}
 
-fn utf8_length(text) any^ => len(binary(text)^)
-fn source_text(sources, file, start, end) any^ {
+fn utf8_length(text: string) int^ => len(binary(text)^)
+fn source_text(sources: map[], file: int?, start: int, end: int) string | null | error {
     let found = [for (source in sources where source.id == file) source];
     if (len(found) == 0 or start < 0 or end < start) null
     else {
         let bytes = binary(found[0].data)^;
         // stale spans can end inside a UTF-8 character; canonicalize those tokens.
-        if (end > len(bytes)) null else utf8.decode(slice(bytes, start, end)^) ^ { null }
+        if (end > len(bytes)) null else utf8.decode(slice(bytes, start, end)) ^ { null }
     }
 }
-fn catcode(c) => if (c == "\\") 0 else if (c == "{") 1 else if (c == "}") 2
+fn catcode(c: string) int => if (c == "\\") 0 else if (c == "{") 1 else if (c == "}") 2
     else if (c == "$") 3 else if (c == "&") 4 else if (c == "#") 6
     else if (c == "^") 7 else if (c == "_") 8 else if (c == "%") 14
     else if (c == "~") 13 else if (c == " " or c == "\t") 10
     else if ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z")) 11 else 12
-fn whitespace(text) any^ => all([for (c in split(text, "")^) contains([" ", "\t", "\n", "\r"], c)])
-fn faithful(token, raw) any^ {
+fn whitespace(text: string) bool => all([for (c in (split(text, "") or [])^) contains([" ", "\t", "\n", "\r"], c)])
+fn faithful(token: map, raw: string?) bool^ {
     if (raw == null or raw == "") false
     else if (token.kind == "active") raw == token.value
     else if (token.kind == "control") raw == "\\" ++ token.value
     else if (token.kind != "char") false
-    else if (token.cat == 10) whitespace(raw)^
+    else if (token.cat == 10) whitespace(raw)
     else raw == token.value and (if (token.value == "@" or ord(token.value) >= 128)
         token.cat == 11 or token.cat == 12 else token.cat == catcode(token.value))
 }
-fn canonical(token) any^ {
+fn canonical(token: map) string | null | error {
     if (token.kind == "active") token.value
     else if (token.kind == "control") {
         if (token.value == "par") "\n\n"
@@ -44,28 +50,28 @@ fn canonical(token) any^ {
     else if (token.value == "_") "\\_" else if (token.value == "%") "\\%"
     else if (token.value == "~") "\\textasciitilde{}" else token.value
 }
-fn letter(c) => c != "" and ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "@")
-fn ending_letters(text, i) any^ => if (i > 0 and letter(slice(text, i - 1, i)^)) ending_letters(text, i - 1) else i
-fn slash_count(text, i, count = 0) any^ => if (i > 0 and slice(text, i - 1, i)^ == "\\")
+fn letter(c: string) bool => c != "" and ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "@")
+fn ending_letters(text: string, i: int) int => if (i > 0 and letter(reader.text_span(text, i - 1, i))) ending_letters(text, i - 1) else i
+fn slash_count(text: string, i: int, count: int = 0) int => if (i > 0 and reader.text_span(text, i - 1, i) == "\\")
     slash_count(text, i - 1, count + 1) else count
-fn needs_separator(text, next) any^ {
+fn needs_separator(text: string, next: string) bool {
     let end = len(text);
-    let begin = ending_letters(text, end)^;
-    next != "" and letter(slice(next, 0, 1)^) and begin < end and slash_count(text, begin)^ % 2 == 1
+    let begin = ending_letters(text, end);
+    next != "" and letter(reader.text_span(next, 0, 1)) and begin < end and slash_count(text, begin) % 2 == 1
 }
-fn append(st, data, src, synthetic) any^ {
+fn append(st: Reconstruction, data: string, src: int?, synthetic: bool) Reconstruction^ {
     if (data == "") st else {*:st, text: st.text ++ data,
         segments: [*st.segments, {out_start: utf8_length(st.text)^, length: utf8_length(data)^,
             src_start: src, synthesized: synthetic}]}
 }
-fn separate(st, data, origin) any^ {
-    if (not needs_separator(st.text, data)^) st
+fn separate(st: Reconstruction, data: string, origin: int?) Reconstruction^ {
+    if (not needs_separator(st.text, data)) st
     else if (origin == null) {*:st, issue: "tex-reconstruct-missing-origin"}
     else append(st, " ", origin, true)
 }
 
 // share emitted source spelling with source-aware digestion.
-pub fn source_fragment(t, sources, prev_valid = false, prev_file = null, prev_seq = null, prev_end = 0) any^ {
+pub fn source_fragment(t: map, sources: map[], prev_valid: bool = false, prev_file: int? = null, prev_seq: int? = null, prev_end: int = 0) Fragment^ {
     let span = t.kind == "source-span";
     let direct = span or (t.direct == true and t.file != null and t.file >= 0);
     let adjacent = direct and prev_valid and prev_file == t.file and t.seq == prev_seq + 1;
@@ -78,12 +84,12 @@ pub fn source_fragment(t, sources, prev_valid = false, prev_file = null, prev_se
 }
 
 // raw echoes occupy their full captured source span, not just the command token.
-pub fn effective_source_token(item) => if (item.echo_span == null) item else {
+pub fn effective_source_token(item: map) map => if (item.echo_span == null) item else {
     kind:"source-span", file:item.echo_span.file, start:item.echo_span.start, end:item.echo_span.end,
     seq:item.echo_span.first_seq, last_seq:item.echo_span.last_seq,
     read_offset:item.read_offset, emit_origin:item.emit_origin}
 
-fn rebuild(st, tokens, sources, main, index) any^ {
+fn rebuild(st: Reconstruction, tokens: map[], sources: map[], main: int, index: int) Reconstruction^ {
     if (st.issue != null or index >= len(tokens)) st
     else {
         let item = tokens[index];
@@ -123,8 +129,8 @@ fn rebuild(st, tokens, sources, main, index) any^ {
     }
 }
 
-pub fn reconstruct(result, track_tokens = false) any^ {
-    let built = rebuild({text: "", segments: [], definition_spans: [], issue: null, prev_valid: false,
+pub fn reconstruct(result: map, track_tokens: bool = false) Reconstruction^ {
+    let built = rebuild({text: "", segments: [], definition_spans: [], issue: null, prev_valid: false, prev_end: 0,
             *:if (track_tokens) {track_tokens: true, token_spans: []} else {}},
         result.output, result.sources, result.main_file, 0)^;
     let tail = result.trailing_source;
@@ -141,7 +147,7 @@ pub fn reconstruct(result, track_tokens = false) any^ {
     }
 }
 
-pub fn map_offset(segments, offset, index = 0) any^ {
+pub fn map_offset(segments: Segment[], offset: int, index: int = 0) int^ {
     if (len(segments) == 0) offset
     else if (index + 1 < len(segments) and segments[index + 1].out_start <= offset)
         map_offset(segments, offset, index + 1)

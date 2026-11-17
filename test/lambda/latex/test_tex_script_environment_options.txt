@@ -2,8 +2,9 @@
   cases: 23,
   failures: [],
   guarded: {
-    issue: "latex-digest-unsupported",
-    unsupported: "environment option source mapping"
+    issue: null,
+    unsupported: null,
+    matches_native: true
   },
   token_boundary: {
     issue: "latex-digest-unsupported",

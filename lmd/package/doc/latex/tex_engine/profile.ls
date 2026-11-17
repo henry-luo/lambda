@@ -3,12 +3,15 @@ import reader: .reader
 import stream: .stream
 import expansion: .expansion
 import registry: lambda.doc.latex.packages.registry
+let State = expansion.State;
+pub type Unavailable = {issue: string}
 
-fn kernel_reader(source) => {*:reader.reader(source), origin: "bundled",
+fn kernel_reader(source: string) map => {*:reader.reader(source), origin: "bundled",
     catcodes: {'{': 1, '}': 2, '$': 3, '&': 4, '#': 6, '^': 7, '_': 8, '\t': 10, '~': 13}}
 
-pub fn expand_with_kernel(source, kernel, options = null, budget = 20000000) any^ {
-    let given = if (options is map) options else {};
+pub fn expand_with_kernel(source: string, kernel: string, options: any ! error = null, budget: int = 20000000) State^ {
+    // Public options retain the existing non-map-to-default input policy.
+    let given = expansion.options_map(options);
     let configured = {*:given, latex: true, source_name: "<lambda-kernel>",
         adapters: if (given.adapters == null) registry.adapter_names() else given.adapters,
         chaptered: if (given.chaptered == null) registry.chaptered_classes() else given.chaptered};
@@ -24,7 +27,7 @@ pub fn expand_with_kernel(source, kernel, options = null, budget = 20000000) any
     }
 }
 
-pub fn expand(source, options = null, budget = 20000000) any^ {
+pub fn expand(source: string, options: any ! error = null, budget: int = 20000000) State | Unavailable | error {
     let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text") ^ { null };
     if (kernel == null) {issue: "tex-kernel-unavailable"}
     else expand_with_kernel(source, kernel, options, budget)

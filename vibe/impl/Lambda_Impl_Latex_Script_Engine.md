@@ -33,6 +33,80 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Capture follow-up, 2026-11-17:** `next` returns a nullable complete
+  `ReadStep`; capture functions return complete `SourceSpan` values or an
+  error. Private delimiter scans retain presence, endpoint and closure status;
+  public capture functions choose the prior recovery behavior. Expansion
+  handles capture failures at its input boundary. The E312 constrained-error
+  issue is fixed in the shared core and compiler; the reader now declares
+  its capture error constraint. S11.4.6v4 enforces its base at admission;
+  predicate filtering remains explicit. Capture handlers filter this type and
+  propagate unrelated errors. Normal and nullable success conversion, nested
+  aliases, filtered propagation and JIT return-effect planning are covered in
+  `test/lambda/constrained_error_return.ls`; all three tiers pass with forced
+  and poisoned GC on every allocation. The input baseline passes 5,312 tests
+  with three skips; Test262 passes 40,261/40,261. The final Lambda aggregate
+  reports 7,236/7,239, retaining the PDF suite abort, editor assertion and
+  unavailable WebRTC described in `temp/capture-error/lambda-summary-final-source.json`.
+  Both tiers match 352 token/state and 39 raw capture cases
+  from the preceding reader; 23 focused cases, two adjacent JIT goldens and
+  285 LaTeX compile checks pass. Test262 passed 40,261/40,261. The Lambda
+  baseline reported 7,235/7,238,
+  including the previously observed PDF native-test abort, editor assertion
+  and unavailable WebRTC dependency. Its script suite ran while the final
+  caller EOF checks and verbatim scanner were changed, so the aggregate is
+  mixed-source evidence; the focused cases were rerun after those edits.
+  Evidence is in temp/reader-refactor/{reader-v2-identity.json,
+  focused-v2-complete.json, adjacent-v2-final-jit.json, compile-v2-complete.json,
+  lambda-summary-v2.json, test262-v2.log} and the _compare{,_raw}_v2-final2
+  outputs. A same-host release comparison of 8,000 ordinary tokens gave
+  median CPU 0.3236s before and 0.3262s after this follow-up (1.008x),
+  including startup and JIT compilation; all outputs matched. Samples are in
+  release-token-bench-v2.json. The previous qualification below describes
+  the preceding revision, and the earlier reader performance issue remains open.
+
+- **Companion module contracts, 2026-11-17:** structured stream/trace/argument,
+  numeric scanner, reconstruction and expansion-state contracts are installed
+  across the engine. The migration exposed and fixed open-record extra-field
+  loss in runtime admission (D3.4.6/D4.2.5, S11.4.6v4). Remaining macro and
+  digestion helpers are tracked explicitly; see the
+  [structured-contract checkpoint](Lambda_Impl_Tex_Structured_Contracts.md).
+- **Reader refactor completed, 2026-11-17:** reader.ls uses typed scanner
+  records and explicit absence/capture outcomes, with no blanket any^ results.
+  Preserve reader snapshots and all current TeX/native boundaries (S1.6,
+  S1.8, S7.10.7, S12.1.2v3). Confined pn helpers cannot be invoked by the
+  fn API (S12.1.1v3), so an escaping mutable closure is not the interface.
+- **Reader worktree:** master at 1323612342784e3d8240a2d8342df89e271fecff,
+  plus the query/map changes qualified in the convention plan. Preserve
+  unrelated changes, including the review-document move. The original
+  reader and staged typed draft are in temp/reader-refactor/{baseline,candidate}.
+- **Reader installed:** all functions have concrete or nullable result types;
+  no function returns any^. Source slices coalesce at text_span, malformed
+  category overrides recover at catcode, and EOF/capture failures are structured
+  outcomes. Raw scanners and control-word/^^ decoding use local loops.
+- **Compiler repair:** S7.7.2v2 / S11.4.1v5 return proofs inspect final field
+  expressions and ordered spreads rather than conservative storage recipes.
+  Annotated spread literals no longer report supplied fields missing. Unknown
+  keys and optional overwrites still validate dynamically; storage compatibility
+  is unchanged. A final guard retains error completions from failed spreads.
+- **Caller boundaries:** UTF-8 source decoding in expansion.ls now supplies
+  explicit valid/text fields. digest.special_command has a string parameter.
+  Newly error-free cache/record constructors no longer carry redundant carets.
+- **Qualification:** the final release host passes all 782 previous/current
+  token/state and raw-capture comparisons across interpreter and JIT; all 285
+  LaTeX entry scripts compile; 23 focused reader/query/record checks pass,
+  including scheduled GC and poisoning. Direct/nested failed-spread negatives
+  pass on interpreter, JIT and AUTO. Test262 is 40,261/40,261 fully passing.
+  The Lambda baseline's exposed caller contracts have focused successful
+  rechecks; the aggregate remains non-green, including a native PDF allocation
+  abort. Full results and host/source identities are recorded below.
+- **Reader follow-up:** the full JIT sweep plus serial rechecks matches all
+  285 goldens; host provenance is retained below. The final interleaved release
+  measurement preserves output but costs 1.59x process CPU, including startup
+  and JIT compilation. Typing friction and this unisolated cost remain open
+  in the core ledger. The older port-wide checkpoint below is historical
+  context, not qualification of the remaining production migration.
+
 - **Goal:** complete the Script TeX expansion and LaTeX digestion port, qualify
   it against the native path, and coordinate production migration. S1.8,
   D10.2.2, D9.1.3v2 and D11.2.1 govern the current boundary.
@@ -5870,3 +5944,136 @@ mapping, broader malformed-input recovery, and production migration remain open.
 The adjacent `noexpand_ifx` JIT golden passed. The numeric conditional golden
 exceeded the harness's 60-second deadline, then matched when run directly in
 JIT mode without that deadline; this does not establish an aggregate gate.
+
+## Reader records and error boundaries — 2026-11-17
+
+The reader retains its snapshot API (S1.6). Stream switching, category-code
+changes and source reconstruction already depend on copied reader values.
+An escaping closure would not supply shared mutable state, and the current fn
+API cannot call nested pn scanners (S9.1.4v2, S12.1.1v3, D7.2.3). Local loops
+inside fn are permitted by S12.1.2v3 and keep the existing public boundary.
+
+`Reader`, `Token`, `ReadStep`, `SourceSpan` and `Capture` make those boundaries
+explicit. Internal `TextScan` and `LineStep` keep character/line scanning
+structured: EOF has a reader/token absence result, raw capture failures have
+an issue, and an empty character is the private end-of-text sentinel. Queries
+return absence under S7.10.7; text_span supplies the empty text default once.
+catcode validates optional overrides and supplies the standard category for
+invalid values. Its int conversion is the reader's only error handler.
+UTF-8 resource loading now produces valid/text at one decode_source boundary;
+invalid data still generates the existing TeX diagnostic. No downstream
+scanner accepts a general error result from these input helpers.
+
+The typed refactor exposed compiler admission defects. Early literal storage
+shapes deliberately remain conservative for forward calls (D7.1.3), but they
+are insufficient evidence of a final record return contract. Return admission
+now examines final field expressions and ordered spreads (S7.7.2v2,
+S11.4.1v5). Known literal union arms can establish their own membership
+(S11.2.1). Computed keys, unknown spread fields and optional overwrites retain
+dynamic admission. A failed spread remains an error even if later fields
+would satisfy the successful record contract. Physical storage compatibility
+and conversion retain their separate checks (D3.4.6); the existing MIR sidecars
+were retained without weakening their assertions.
+
+Explicit any fields still accept contained error data (S11.4.3). The return
+proof preserves this top-type membership instead of imposing the nested
+record's shape on any. Interpreter admission had a separate disagreement:
+after admitting every field, a redundant whole-record validator rejected an
+error stored in any. Plain record admission now retains the completed field
+proof. Nominal, binary, namespace and JavaScript-specific contracts retain
+their additional validation; field conversion and layout reification remain
+unchanged. The IME cleared/cancel, paint mark and sketch map_objects wrappers
+now require map sources, so their clean map returns do not conceal a possible
+invalid spread.
+
+`record_return_boundary` tests accepted state updates, snapshot preservation,
+branch returns and rejection of malformed dynamic data. The negative
+record_return_spread_error and record_return_nested_spread_error fixtures
+check that failed direct/nested spreads cannot cross a return contract
+excluding error. The positive fixture also checks nested data and contained
+errors in explicit any fields across interpreter, JIT and AUTO.
+`test_tex_script_reader_contracts` checks
+clean caller contracts, EOF, UTF-8 byte offsets, dynamic categories, malformed
+overrides, raw-capture issues, superscript decoding and long raw/control-word
+scans. The existing iterative-reader test drops a redundant caret on its
+statically admitted literal source. Three unrelated typed record/cache callers
+also drop carets where their constructor outcomes are now proven error-free;
+their data and goldens are unchanged.
+
+Two existing LaTeX assertions were stale before this refactor. The guarded
+environment-option case already succeeds with the previous reader; both
+readers match the native AST. It now asserts that equality explicitly. The
+marks/special case compared message count with zero despite the native
+kernel-message result; it now compares the complete native message list and
+text. The previous and installed readers both satisfy the corrected
+assertions. These corrections do not waive an engine/native difference.
+
+The remaining language friction is recorded in the central
+[issue ledger](../Lambda_Issue_Ledger.md#reader-record-contracts): spread bindings
+need explicit state annotations, mixed branch shapes benefit from one typed
+TextScan constructor, the staged `is int` narrowing probe still needs explicit
+admission, and imported type names need a local binding before annotation.
+These are bounded use cases for future work, not grounds to widen the reader
+back to any^.
+
+Qualification evidence is under temp/reader-refactor/. The baseline reader
+SHA256 is 1e39c1ecc2375d906b1d9e016e6cd79ea1c550dcf62c4aaa3230bdfc19daa6f2;
+the installed reader is bf6b0d547f020d4e7bf6142f3252bd0f4f681f8b73225b2b53147cdbf856158e.
+The first release host is pinned as lambda-release, SHA256
+98606dcc79c1d176b592a0a4ca0d85e086386020c4013f041cd5e862ed42a6a0.
+The final release host, including the plain-record admission repair, is
+lambda-release-final, SHA256
+7a943527779be0a108e277f5455e37acd1752d2e407af9380cc79ae41d5801d2.
+final-host.json also records the compiler/runtime source hashes. The reader
+hash remained unchanged throughout the release qualification.
+
+- Final-host differential: 352 token/state and 39 raw-capture cases agree with
+  the previous reader in each of interpreter and JIT (782 comparisons).
+  contracts-complete.json also records six passing failed-spread negatives
+  across interpreter/JIT/AUTO, and an AUTO positive record check with GC.
+- Final-host focused runs: 23/23 exact goldens, including reader, streams,
+  iterative scanning, verbatim/raw capture, read streams, source provenance,
+  query totals and record returns. Scheduled GC uses
+  LAMBDA_GC_FORCE_EVERY=1000 plus LAMBDA_GC_POISON_FREED=1 in both tiers;
+  see focused-complete.json. All 285 LaTeX entries also compile on this host
+  (compile-tex-complete.json).
+- The full JIT corpus ran on the first pinned release host: 279/285 matched
+  immediately; two stale assertions were corrected against native as described
+  above, and four cases timed out at 120 seconds under eight-worker contention.
+  The final host's serial follow-up passes all six exact goldens: environment
+  options 19.390s, expl3 integer math 40.906s, inline-without-group 26.694s,
+  inspection 28.432s, kernel messages 30.900s and marks/special 13.106s, all
+  within the original 120-second limit. This closes all six corpus rows,
+  giving 285/285 across the full sweep plus follow-up. The final-host follow-up
+  is recorded separately in release-followup-goldens.json; it does not claim
+  a second complete sweep after the final runtime admission change.
+- Final isolated make test262-baseline: 40,261/40,261 fully passing, no
+  regressions or non-fully-passing cases (test262-complete.log).
+- make test-lambda-baseline is not green: its raw result is 7,202/7,238,
+  including a native suite abort represented as one failed suite instead of
+  its full case count. After the map-parameter repairs, 33 failed individual
+  cases pass focused rechecks: 25 script cases in the 55-case spread-caller
+  selection, proc_native_var_proc, four DOM cases and three editing GC cases. See
+  baseline-followup.json and its four logs. MIR emission is 595/595,
+  MIR GC stress 368/368, and emission/ownership units 66/66 in the aggregate.
+- The remaining observed aggregate failures are proc_sync_rtc (unavailable
+  WebRTC dependency), EditBridgeSessionTest.ExecAppliesRichTextBlockCommands,
+  and PdfFileBuilder.RejectsDictionaryMetadataAllocationFailure. The PDF
+  allocation test aborts with an invalid free, both after 336 preceding native
+  successes and when selected alone; no full runtime-suite pass is claimed.
+  Logs are lambda-baseline-complete.log, runtime-errors-complete.log,
+  pdf-allocation-isolated.log and edit-bridge-complete.log. These are retained
+  qualification limits, not changes to the fixtures or harness.
+
+The final release measurement uses the same 8,000-token workload and host for
+both reader versions, alternating order over three pairs. All six outputs
+are [8000,8000], SHA256
+f7073a87a059c1d62b6730d9a57d49732ac0351aa220ac990878033686af6e9a.
+Previous-reader CPU samples are 0.2066, 0.1929 and 0.1999 seconds; typed-reader
+samples are 0.3163, 0.3184 and 0.3243 seconds. Medians are 0.1999 versus
+0.3184 seconds (1.59x). This includes process startup and JIT compilation;
+it does not establish hot-loop cost or isolate the cause. The earlier host
+showed 2.13x; that cross-host change is not causal evidence for a particular
+fix. Timings, wall time, per-sample hashes and scripts are retained in
+release-token-bench-final.json, run_token_bench_final.py and
+_tokens_bench_{baseline,candidate}.ls under temp/reader-refactor/.

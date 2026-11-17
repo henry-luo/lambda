@@ -43,6 +43,6 @@ pn main() {
     print([failures[0].message, failures[1].message]); print("\n")
     // S17.1.1/S8.2: a text separator excludes the numeric split overload.
     print([split_word("one two", 1), split_word(null, 0),
-        split_word([1, 2], 0) is error, split_word(problem, 0).message,
+        split_word([1, 2], 0) is null, split_word(problem, 0).message,
         split_parts([1, 2, 3, 4], 2)[0] == [1, 2]]); print("\n")
 }

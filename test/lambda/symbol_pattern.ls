@@ -25,7 +25,7 @@ fn classify(value) => match value {
 8; classify("456")
 9; classify('abc')
 
-'Test 3: Partial string operations reject symbol patterns'
-10; find("x123", symbol_digits)
-11; replace("x123", symbol_digits, "x")
-12; split("x123", symbol_digits)
+'Test 3: String queries return null for symbol patterns'
+10; find("x123", symbol_digits) is null
+11; replace("x123", symbol_digits, "x") is null
+12; split("x123", symbol_digits) is null

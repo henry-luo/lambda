@@ -26,7 +26,7 @@
 11
 '=== string split unaffected ==='
 ["a", "b", "c"]
-'=== errors ==='
-error
-error
-error
+'=== invalid queries are absent ==='
+true
+true
+true

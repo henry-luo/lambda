@@ -62,9 +62,9 @@ fn classify(value) => match value {
  (find("a1b22", Digits) |> ~.value) == ["1", "22"]]
 
 'symbol literal unions cannot search strings';
-[find("if", LiteralSymbols) is error,
- replace("if", LiteralSymbols, "x") is error,
- split("if", LiteralSymbols) is error]
+[find("if", LiteralSymbols) is null,
+ replace("if", LiteralSymbols, "x") is null,
+ split("if", LiteralSymbols) is null]
 
 'comments do not select domains or close islands';
 ["a1" is \(/* 'sym' ) */ "a" "\d"),

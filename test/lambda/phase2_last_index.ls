@@ -11,6 +11,6 @@
   replace_zero: replace("a,b,c", ",", "+", {limit: 0}),
   find_last: find("a,b,c", ",", {last: 1}),
   map_key_last: {last: 3}.last,
-  take_negative_is_error: take([1, 2], -1) is error,
-  drop_negative_is_error: drop([1, 2], -1) is error
+  take_negative_is_null: take([1, 2], -1) is null,
+  drop_negative_is_null: drop([1, 2], -1) is null
 }

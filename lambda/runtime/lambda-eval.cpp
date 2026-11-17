@@ -804,8 +804,8 @@ static bool join_operand_is_sequence(TypeId type_id) {
         type_id == LMD_TYPE_RANGE;
 }
 
-// A map or an element is not a concatenation operand (S10.6.1): merge is
-// `{*: m1, *: m2}`.
+// maps merge with maps; maps and elements are not scalar sequence operands
+// (S10.6.1v2).
 static bool join_operand_is_scalar(TypeId type_id) {
     return type_id <= LMD_TYPE_BINARY || type_id == LMD_TYPE_PATH;
 }
@@ -953,9 +953,8 @@ Item fn_join_fresh_array_item(Item left, Item element) {
 
 Item fn_join(Item left, Item right) {
     GUARD_ERROR2(left, right);
-    // S10.6.1: sequence ++ sequence concatenates, a scalar beside a sequence is
-    // one item, scalar ++ scalar is text, `null` is the identity, a map or an
-    // element is an error; a path on the left keeps S2.4.2v4.
+    // S10.6.1v2: maps merge, sequences concatenate, scalars form text and
+    // null is the identity; a path on the left keeps S2.4.2v4.
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
 
     // Handle path concatenation first (path must be on the left)
@@ -989,6 +988,25 @@ Item fn_join(Item left, Item right) {
             return runtime_error_itemf(ERR_TYPE_MISMATCH, "fn_join: path can only be concatenated with string, symbol, or relative path, got %s",
                 type_info[right_type].name);
         }
+    }
+
+    bool left_map = left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_VMAP;
+    bool right_map = right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_VMAP;
+    if ((left_map && right_type == LMD_TYPE_NULL) ||
+            (right_map && left_type == LMD_TYPE_NULL)) {
+        return cow_capture_value(left_map ? left : right);
+    }
+    if (left_map && right_map) {
+        // reuse spread's key order, override rules and snapshot captures;
+        // both source maps must survive allocation of the fresh destination.
+        RootFrame roots(3);
+        Rooted<Item> rooted_left(roots, left);
+        Rooted<Item> rooted_right(roots, right);
+        Rooted<Item> merged(roots, map_literal_begin());
+        if (get_type_id(merged.get()) == LMD_TYPE_ERROR) return merged.get();
+        merged.set(map_literal_spread(merged.get(), rooted_left.get()));
+        if (get_type_id(merged.get()) == LMD_TYPE_ERROR) return merged.get();
+        return map_literal_spread(merged.get(), rooted_right.get());
     }
 
     // S10.6.1: a sequence operand decides the shape of the result before any
@@ -8183,8 +8201,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     GUARD_ERROR3(str_item, start_item, end_item);
     TypeId str_tid = get_type_id(str_item);
     if (!is_text_type_id(str_tid)) {
-        log_debug("fn_substring: first argument must be a string or symbol");
-        return ItemError;
+        return ItemNull;
     }
 
     int64_t start = 0;
@@ -8192,8 +8209,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     LambdaSliceStatus status = lambda_slice_offsets(start_item, end_item, &start, &end);
     if (status == LAMBDA_SLICE_ABSENT) return ItemNull;
     if (status == LAMBDA_SLICE_INVALID) {
-        log_debug("fn_substring: start and end must be integer-valued numbers");
-        return ItemError;
+        return ItemNull;
     }
 
     // use type-aware accessors: String and Symbol have different struct layouts
@@ -8973,14 +8989,10 @@ Item fn_split(Item str_item, Item sep_item) {
     if (str_type == LMD_TYPE_ARRAY_NUM) {
         int64_t n = 0;
         if (!lambda_item_to_int64_exact(sep_item, &n)) {
-            log_error("split: section count must be an integer-valued number");
-            return ItemError;
+            return ItemNull;
         }
         return fn_array_split(str_item, n, 0);
     }
-
-    // null string splits to empty list
-    if (str_type == LMD_TYPE_NULL) return {.array = split_string_list()};
 
     // null separator means split on whitespace (Python convention)
     bool null_sep = (sep_type == LMD_TYPE_NULL);
@@ -8991,12 +9003,11 @@ Item fn_split(Item str_item, Item sep_item) {
         TypePattern* pattern = runtime_pattern_from_type(type);
         if (pattern) {
             if (pattern->is_symbol) {
-                log_error("fn_split: symbol-domain patterns cannot search strings");
-                return ItemError;
+                return ItemNull;
             }
+            if (str_type == LMD_TYPE_NULL) return {.array = split_string_list()};
             if (!is_text_type_id(str_type)) {
-                log_debug("fn_split: first argument must be a string for pattern split");
-                return ItemError;
+                return ItemNull;
             }
             List* ps = pattern_split(pattern, str_item, false);
             if (ps) split_adopt_string_lane(ps);
@@ -9004,11 +9015,11 @@ Item fn_split(Item str_item, Item sep_item) {
         }
     }
 
-    if ((!is_text_type_id(str_type)) ||
+    if ((str_type != LMD_TYPE_NULL && !is_text_type_id(str_type)) ||
         (!null_sep && !is_text_type_id(sep_type))) {
-        log_debug("fn_split: arguments must be strings or symbols");
-        return ItemError;
+        return ItemNull;
     }
+    if (str_type == LMD_TYPE_NULL) return {.array = split_string_list()};
 
     RootFrame roots(3);
     Rooted<Item> rooted_str(roots, str_item);
@@ -9110,16 +9121,13 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
         int64_t n = 0, axis = 0;
         if (!lambda_item_to_int64_exact(sep_item, &n) ||
                 !lambda_item_to_int64_exact(keep_item, &axis)) {
-            log_error("split: section count and axis must be integer-valued numbers");
-            return ItemError;
+            return ItemNull;
         }
         return fn_array_split(str_item, n, axis);
     }
 
+    if (keep_type != LMD_TYPE_BOOL && keep_type != LMD_TYPE_NULL) return ItemNull;
     bool keep_delim = (keep_type == LMD_TYPE_BOOL && it2b(keep_item));
-
-    // null string splits to empty list
-    if (str_type == LMD_TYPE_NULL) return {.array = split_string_list()};
 
     // pattern-based split with keep_delim
     if (sep_type == LMD_TYPE_TYPE) {
@@ -9127,12 +9135,11 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
         TypePattern* pattern = runtime_pattern_from_type(type);
         if (pattern) {
             if (pattern->is_symbol) {
-                log_error("fn_split3: symbol-domain patterns cannot search strings");
-                return ItemError;
+                return ItemNull;
             }
+            if (str_type == LMD_TYPE_NULL) return {.array = split_string_list()};
             if (!is_text_type_id(str_type)) {
-                log_debug("fn_split3: first argument must be a string for pattern split");
-                return ItemError;
+                return ItemNull;
             }
             List* ps = pattern_split(pattern, str_item, keep_delim);
             if (ps) split_adopt_string_lane(ps);
@@ -9147,11 +9154,11 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     }
 
     // keep_delim string split
-    if ((!is_text_type_id(str_type)) ||
+    if ((str_type != LMD_TYPE_NULL && !is_text_type_id(str_type)) ||
         (!is_text_type_id(sep_type))) {
-        log_debug("fn_split3: arguments must be strings or symbols");
-        return ItemError;
+        return ItemNull;
     }
+    if (str_type == LMD_TYPE_NULL) return {.array = split_string_list()};
 
     uint32_t str_len = str_item.get_len();
     uint32_t sep_len = sep_item.get_len();
@@ -9550,12 +9557,14 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
 
     // null string has nothing to replace
     if (str_type == LMD_TYPE_NULL) return ItemNull;
+    // S7.10.7: validate the text faces before null-pattern short-circuiting.
+    if (!is_text_type_id(str_type) ||
+            (new_type != LMD_TYPE_NULL && !is_text_type_id(new_type))) return ItemNull;
     // null search pattern means nothing to find — return string unchanged
     if (old_type == LMD_TYPE_NULL) return str_item;
     // null replacement — treat as empty string (delete matches)
     // note: transpiler converts "" to ITEM_NULL, so we must handle this without calling get_chars on null
     bool new_is_null = (new_type == LMD_TYPE_NULL);
-    if (new_is_null) new_type = LMD_TYPE_STRING;
 
     // Literal-only type aliases remain exact string needles for the search APIs.
     Item literal_pattern = {.item = 0};
@@ -9570,16 +9579,7 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
         TypePattern* pattern = runtime_pattern_from_type(type);
         if (pattern) {
             if (pattern->is_symbol) {
-                log_error("fn_replace: symbol-domain patterns cannot search strings");
-                return ItemError;
-            }
-            if (!is_text_type_id(str_type)) {
-                log_debug("fn_replace: first argument must be a string for pattern replace");
-                return ItemError;
-            }
-            if (!is_text_type_id(new_type)) {
-                log_debug("fn_replace: third argument must be a string for pattern replace");
-                return ItemError;
+                return ItemNull;
             }
             // an empty subject still holds an empty match, which a pattern
             // like \(d*) replaces (S17.6.1): "" becomes "-", as in JS
@@ -9605,12 +9605,7 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
         }
     }
 
-    if ((!is_text_type_id(str_type)) ||
-        (!is_text_type_id(old_type)) ||
-        (!is_text_type_id(new_type))) {
-        log_debug("fn_replace: all arguments must be strings or symbols");
-        return ItemError;
-    }
+    if (!is_text_type_id(old_type)) return ItemNull;
 
     const char* str_chars = str_item.get_chars();
     uint32_t str_len = str_item.get_len();
@@ -9715,12 +9710,17 @@ Item fn_replace4(Item str_item, Item old_item, Item new_item, Item options_item)
     GUARD_ERROR3(str_item, old_item, new_item);
     if (get_type_id(options_item) == LMD_TYPE_ERROR) return options_item;
     FindReplaceOptions options;
-    if (!parse_find_replace_options(options_item, &options)) return ItemError;
+    if (!parse_find_replace_options(options_item, &options)) return ItemNull;
     return fn_replace_impl(str_item, old_item, new_item, options);
 }
 
 static Item find_empty_result(bool count_only) {
     return count_only ? Item{.item = i2it(0)} : Item{.array = array()};
+}
+
+// len(null) is zero, including when the match-array allocation is fused away.
+static Item find_invalid_result(bool count_only) {
+    return count_only ? Item{.item = i2it(0)} : ItemNull;
 }
 
 static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions options,
@@ -9734,16 +9734,12 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         pattern_type = LMD_TYPE_STRING;
     }
 
-    // find() constructs an array (S2.5.7): `[]` for a null source or no match
-    if (source_type == LMD_TYPE_NULL) return find_empty_result(count_only);
-
-    if (!is_text_type_id(source_type)) {
-        log_debug("fn_find: first argument must be a string or symbol");
-        return ItemError;
+    if (source_type != LMD_TYPE_NULL && !is_text_type_id(source_type)) {
+        return find_invalid_result(count_only);
     }
 
-    const char* str_chars = source_item.get_chars();
-    uint32_t str_len = source_item.get_len();
+    const char* str_chars = source_type == LMD_TYPE_NULL ? "" : source_item.get_chars();
+    uint32_t str_len = source_type == LMD_TYPE_NULL ? 0 : source_item.get_len();
     // a pattern can match the empty subject (`"" is \(d*)`), so only the
     // literal search below may skip it
     if (!str_chars) { str_chars = ""; str_len = 0; }
@@ -9754,9 +9750,9 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         TypePattern* pattern = runtime_pattern_from_type(type);
         if (pattern) {
             if (pattern->is_symbol) {
-                log_error("fn_find: symbol-domain patterns cannot search strings");
-                return ItemError;
+                return find_invalid_result(count_only);
             }
+            if (source_type == LMD_TYPE_NULL) return find_empty_result(count_only);
             if ((options.has_limit && options.limit == 0) ||
                 (options.has_last && options.last == 0)) {
                 return find_empty_result(count_only);
@@ -9771,8 +9767,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
 
     // plain string search
     if (!is_text_type_id(pattern_type)) {
-        log_debug("fn_find: second argument must be a string, symbol, or pattern");
-        return ItemError;
+        return find_invalid_result(count_only);
     }
     if (str_len == 0) return find_empty_result(count_only);
 
@@ -9850,12 +9845,17 @@ Item fn_find2(Item source_item, Item pattern_item) {
     return fn_find_impl(source_item, pattern_item, options);
 }
 
-// find(str, pattern, options) -> [{value, index}, ...]
-Item fn_find3(Item source_item, Item pattern_item, Item options_item) {
+static Item find_with_options(Item source_item, Item pattern_item,
+        Item options_item, bool count_only) {
     GUARD_ERROR3(source_item, pattern_item, options_item);
     FindReplaceOptions options;
-    if (!parse_find_replace_options(options_item, &options)) return ItemError;
-    return fn_find_impl(source_item, pattern_item, options);
+    if (!parse_find_replace_options(options_item, &options)) return find_invalid_result(count_only);
+    return fn_find_impl(source_item, pattern_item, options, count_only);
+}
+
+// find(str, pattern, options) -> [{value, index}, ...] or null
+Item fn_find3(Item source_item, Item pattern_item, Item options_item) {
+    return find_with_options(source_item, pattern_item, options_item, false);
 }
 
 // a sole len consumer observes the same match window and errors, without
@@ -9867,10 +9867,7 @@ Item fn_len_find2(Item source_item, Item pattern_item) {
 }
 
 Item fn_len_find3(Item source_item, Item pattern_item, Item options_item) {
-    GUARD_ERROR3(source_item, pattern_item, options_item);
-    FindReplaceOptions options;
-    if (!parse_find_replace_options(options_item, &options)) return ItemError;
-    return fn_find_impl(source_item, pattern_item, options, true);
+    return find_with_options(source_item, pattern_item, options_item, true);
 }
 
 // normalize with 1 arg (defaults to NFC)
@@ -10932,14 +10929,25 @@ bool map_field_store(void* field_ptr, Item value, TypeId value_type) {
         break;
     }
     case LMD_TYPE_ERROR:
-        // store error as null to prevent cascading corruption
-        *(void**)field_ptr = NULL;
+        // shaped error reads consume the full Item, including its payload (S7.4.4).
+        *(Item*)field_ptr = value;
         break;
     default:
         log_error("map_field_store: unsupported type %d", value_type);
         return false;
     }
     return true;
+}
+
+// Preserve boxed values in constructor null/error recipes when copying an admitted field.
+static bool map_shape_store_value(void* slot, const ShapeEntry* field, Item value) {
+    if (!slot || !field) return false;
+    if (map_shape_field_store_native_lane(slot, field, value)) return true;
+    if (shape_entry_storage(field)->kind == LANE_STORAGE_ITEM) {
+        *(Item*)slot = value;
+        return true;
+    }
+    return map_field_store(slot, value, shape_entry_storage_type_id(field));
 }
 
 struct MutableCloneEntry {
@@ -11053,15 +11061,7 @@ static void clone_mutable_shape_data(TypeMap* map_type, Item dst_owner, Item src
             // contracts such as `string | error` use the raw Item lane even
             // though their semantic TypeId is LMD_TYPE_TYPE.
             void* dst_field = (char*)mutable_clone_owner_data(dst_owner) + entry->byte_offset;
-            if (map_shape_field_store_native_lane(dst_field, entry, field_clone)) {
-                // Nullable native slots must be reconstructed through their
-                // lane writer; map_field_store would treat ItemNull as a raw
-                // pointer and corrupt a packed lane during COW.
-            } else if (shape_entry_uses_raw_item_storage(entry)) {
-                *(Item*)dst_field = field_clone;
-            } else {
-                map_field_store(dst_field, field_clone, shape_entry_storage_type_id(entry));
-            }
+            map_shape_store_value(dst_field, entry, field_clone);
         }
         entry = typemap_next_field(map_type, entry);
     }
@@ -14654,9 +14654,7 @@ static bool map_relayout_to_contract(Map* map, TypeMap* contract) {
         // neither the read nor the store allocates, so the old buffer stays put
         Item value = map_shape_field_to_item(map->data, source);
         void* slot = (char*)new_data + field->byte_offset;
-        if (!map_shape_field_store_native_lane(slot, field, value)) {
-            map_field_store(slot, value, shape_entry_storage_type_id(field));
-        }
+        if (!map_shape_store_value(slot, field, value)) return false;
     }
     container_rebuild_data_install((Container*)map, &map->data, &map->data_cap,
         new_data, target->byte_size);
@@ -14691,10 +14689,17 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, RuntimeTypeEn
     }
 
     TypeMap* expected_map = (TypeMap*)expected;
+    // Plain record membership is fully established by the field admissions.
+    // A second schema walk can reject admitted error data in an any field.
+    bool fields_proven = !type_nominal_record(expected) && !binary_schema_from_type(expected) &&
+        !expected_map->has_spread && !expected_map->js_meta;
     FOR_EACH_MAP_FIELD(expected_map, expected_field) {
         if (!expected_field->name || !expected_field->name->str || !expected_field->type) {
+            fields_proven = false;
             continue;
         }
+        if (expected_field->ns || expected_field->key_kind != NAME_KEY_STRING ||
+                expected_field->flags || expected_field->accessor) fields_proven = false;
         if (cow_profile_enabled()) g_cow_profile.map_admit_fields_visited++;
         Map* candidate_map = rooted_candidate.get().map;
         TypeMap* candidate_type = candidate_map ? (TypeMap*)candidate_map->type : NULL;
@@ -14705,6 +14710,9 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, RuntimeTypeEn
             if (expected_field->is_optional) continue;
             return false;
         }
+        if (candidate_type->nominal || candidate_type->js_meta || candidate_field->ns ||
+                candidate_field->key_kind == NAME_KEY_PRIVATE ||
+                candidate_field->flags || candidate_field->accessor) fields_proven = false;
 
         rooted_field.set(_map_read_field(candidate_field, candidate_map->data));
         Item field_converted = ItemNull;
@@ -14783,7 +14791,7 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, RuntimeTypeEn
     // valid selections; nominal identity/constraints still need their check.
     bool dependent_fields_proven = runtime_contract_uses_binder(expected) &&
         !type_nominal_record(expected) && !binary_schema_from_type(expected);
-    if (!relation_proven && !dependent_fields_proven &&
+    if (!relation_proven && !fields_proven && !dependent_fields_proven &&
             !lambda_type_matches(rooted_candidate.get(), expected)) return false;
     Map* admitted = rooted_candidate.get().map;
     // The loop converts each field where it lies; fields written in another

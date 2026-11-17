@@ -53,6 +53,40 @@ operand was a true `integer`/`decimal`.
 
 ## 1. Principles
 
+### 1.1 Numerical domain outcomes (USER, 2026-11-17)
+
+**Ratified as S4.2.5.** Numerical operators and system functions prefer the
+result domain's NaN or signed infinity for numerical domain outcomes. For
+example, real `sqrt(-1)` gives NaN, `log(0)` gives negative infinity, and
+floating overflow gives signed infinity. NaN and infinity are numeric data,
+not evidence of an incompatible input type. An array computation puts these
+outcomes in its result lanes while retaining the result shape (S7.10.5v3).
+
+An incompatible type, incompatible shape, or failed structured computation
+still needs an ordinary error. A singular linear solve cannot supply the
+promised solution by substituting a scalar NaN. Explicit conversion and
+narrowing admission remain checked boundaries. Sized integer arithmetic
+retains S4.1.5's wrapping rule, and absent values keep their null contracts.
+
+NumPy is a reference for this distinction:
+
+- [Floating-point handling](https://numpy.org/doc/stable/reference/routines.err.html)
+  normally retains numerical results and issues warnings for invalid results,
+  divide-by-zero and overflow. `errstate` can request exceptions instead.
+- [Real square root](https://numpy.org/doc/stable/reference/generated/numpy.sqrt.html)
+  produces NaN for negative real inputs.
+- [Broadcasting](https://numpy.org/doc/stable/user/basics.broadcasting.html)
+  rejects incompatible shapes with `ValueError`.
+- [Linear solve](https://numpy.org/doc/stable/reference/generated/numpy.linalg.solve.html)
+  raises `LinAlgError` for a singular or non-square matrix.
+
+Lambda adopts the domain/structural distinction. This ruling does not adopt
+NumPy's mutable error settings or warning behavior. The audit and current
+implementation gaps are in
+[numerical and query conventions](impl/Lambda_Impl_Numerical_Query_Conventions.md).
+
+### 1.2 Existing number-model principles
+
 - **P1 — Type-directed FFI, never value-directed.** A Lambda value's foreign type (JS `number` vs `BigInt`, …) is a function of its Lambda *type*, never of its magnitude. (The rejected alternative is the snowflake-ID bug — §6.)
 - **P2 — Tier-hiding.** Hide representation tiers when the external contract is tier-independent (decimal's tiers hide; `integer` stays a distinct type *because its FFI face differs*).
 - **P3 — Two orthogonal axes, each uniform.** `==` is **equality**: value-precise across representations for values (ADR §5.2 Numbers [C8]: `1 == 1.0`, `2.5f32 == 2.5`), exact equality for types. `is` is **subsumption**: `x is T` ⟺ `type(x) ⊑ T`, and with a type on the left, `T1 is T2` ⟺ `T1 ⊑ T2` — where ⊑ is the exact-embedding lattice over scalar numeric types, **covariance over containers where values copy / invariance at `var`-param borrows** (§3.4, per the normative §9.2/C12), and membership for unions. No operator mixes the axes.

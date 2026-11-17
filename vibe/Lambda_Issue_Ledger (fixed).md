@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **316 anchored records**, preserving fixed, resolved,
+This archive contains **319 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -36,6 +36,113 @@ resolved/obsolete appendix. LR08-14 moved here from the active ledger on
 2026-11-03 after its 2026-10-29 fix and qualification; its original resolution
 summary and implementation record are retained below. LR02-35 moved here on
 2026-11-03 after S16.10.4 was ruled and implemented.
+
+## Nullable pointer admission lost its scalar tag — 2026-11-17
+
+<a id="tex-nullable-pointer-union-fixed"></a>
+
+**Status: FIXED.** D2.3.5 requires a scalar pointer to regain its scalar tag
+when crossing into Item transport. S11.4.6v4 preserves normal admission into
+an error/normal union. A present nullable binary pointer passed into
+`string | binary` instead crossed as an untagged pointer. Its first byte
+could be interpreted as another value kind: `binary(...)` in the callee saw
+bool instead of binary. Interpreter execution was correct; forced JIT failed
+with or without forced GC. This was exposed by preserving binary input in
+the typed MD5/PDF byte contracts.
+
+In `mvp_mir.cpp`'s native-nullable admission shortcut, the emitter replaced
+the source contract with the destination before boxing. A heterogeneous union
+has no single scalar tag. The present pointer now retains its proven source
+base while converting to the destination representation; the joined result
+still carries the destination contract. Absence follows the existing checked
+boundary path. No runtime check or error receiver was weakened.
+
+`test/lambda/nullable_pointer_union_admission.{ls,txt}` checks binary and
+string producers, rejection/recovery of null, and binary conversion through
+the union. It passes forced JIT with every-allocation poisoned GC. The
+structured TeX contract regression, including binary MD5/escaping, passes
+interpreter/JIT/AUTO with default and forced GC. Broader qualification is in
+[the structured-contract checkpoint](impl/Lambda_Impl_Tex_Structured_Contracts.md).
+
+## Open record admission erased overwritten extra fields — 2026-11-17
+
+<a id="tex-open-record-extra-storage-fixed"></a>
+
+**Status: FIXED.** Under S11.4.6v4, open record admission must preserve extra
+fields; D3.4.6 makes the physical lane descriptor authoritative and D4.2.5
+requires correct record reification. With `type Core = {core:int}`, returning
+`{*:value,extra:"same"}` as Core when `value.extra` was initially null instead
+returned `extra:null`, on interpreter and JIT. The source map retained its
+updated field until it crossed the named boundary. This broke TeX sequence
+comparator results when `step` gained its structured State return contract.
+
+Admission relayout decoded the live Item correctly but stored it through
+`map_field_store(..., LMD_TYPE_NULL)`, which writes null. Constructor null
+recipes deliberately use an Item lane that can retain later values. The
+runtime now shares a descriptor-based field writer between relayout and
+mutable deep-copy storage: native nullable lanes use their lane writer,
+`LANE_STORAGE_ITEM` copies the complete Item, and other lanes use the ordinary
+field store. Shaped error stores also preserve the complete error Item,
+including its message payload (S7.4.4), instead of writing a null word.
+No TeX-specific field exception or schema padding was retained.
+
+`test/lambda/open_record_extra_overwrite.{ls,txt}` checks string, integer, error-payload and
+nested-map extras and preservation of the original snapshot. It and the new
+TeX structured-contract golden pass interpreter/JIT/AUTO with default and
+every-allocation poisoned GC (12 checks). The reduced sequence sort returns
+`a,b,c` with the State contract enabled. Broader qualification is recorded in
+[the structured-contract checkpoint](impl/Lambda_Impl_Tex_Structured_Contracts.md).
+
+## Constrained error unions rejected by `raise` — 2026-11-17
+
+<a id="reader-constrained-error-return-fixed"></a>
+
+**Status:** FIXED; input and Test262 baselines pass, Lambda baseline has
+unrelated remaining failures described below.
+
+A function returning `int | CaptureError`, where `CaptureError` was a
+constrained `error`, incorrectly raised E312. The shared core's
+`lambda_type_accepts_error` did not follow constrained bases; the compiler's
+static boundary also unwrapped only one constraint layer. The core walk now
+recurses through constrained bases and compiler admission unwraps every layer.
+The reader again declares its capture error constraint.
+
+A constrained error arm also prevented `float | CaptureError` from selecting
+the normal float admission: an int success retained its int tag. Subtype
+analysis now proves a constrained source is contained by its base, so normal
+admission removes the error arm and preserves float conversion (S11.4.6v4).
+For a constrained `error | null` base, normal-arm extraction also follows the
+base and retains null rather than retaining the error alternative.
+The MIR planner now includes the emitter's possible normal-arm check in
+return effects, avoiding E501 for both implicit and explicit nullable
+constrained-error returns (D8.3.1, D6.3.2).
+
+A filtered handler followed by propagation also produced an `error & error`
+outcome that static return admission rejected. Under S10.1.1v5, an
+intersection is contained by either arm; admission now uses an arm that
+already proves the complete target, without inventing proof for other cases.
+
+S11.4.2v3 permits particular error unions. S11.4.6v4 currently enforces only
+constrained bases at admission: both matching and non-matching error values
+cross the return boundary, while a filtered handler checks its predicate.
+This is the existing formal rule, not full predicate enforcement at return.
+The reader's boundary handler therefore still handles the broad error channel.
+
+The paired `constrained_error_return` golden covers a direct return, relay,
+nested alias, normal and nullable float conversion, nullable return relays,
+typed filtered propagation and matching/non-matching filtered handlers in
+interpreter, JIT and AUTO, including forced/poisoned GC on every allocation.
+Core metadata checks, six reader contract/GC runs, 18 adjacent focused checks
+and all 285 LaTeX compile checks pass. The input baseline passes 5,312 tests
+in 109 suites with three skipped cases. The Lambda baseline reports 7,236/7,239: the PDF native suite
+aborted and is counted as one failed suite, while the editor assertion and
+unavailable WebRTC account for the other two failures. Its script suite is
+2,445/2,446, MIR emission 595/595 and MIR GC stress 368/368. Test262 passes
+40,261/40,261. Nine focused release checks pass across interpreter, JIT and
+AUTO, including forced/poisoned GC; the pinned release SHA256 is
+7702e32d4e435af9faa60eaa6ad6d8eefb29efb93a07891d28c73f8b55ead626.
+Evidence is in `temp/capture-error/`. The shared-core fix belongs
+to lambda-input under D9.1.1v4 and D9.1.3v2.
 
 ## Online DOM collection iterators — 2026-11-13
 

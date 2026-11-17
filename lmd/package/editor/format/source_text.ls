@@ -1,5 +1,6 @@
 // Source offsets are shared by property adapters; whitespace is JSON/XML space.
-pub fn raw(source: string, first: int, end_pos: int) string => slice(source, first, end_pos) ^ { "" }
+// invalid query offsets are absence, so recover before the plain-string boundary
+pub fn raw(source: string, first: int, end_pos: int) string => slice(source, first, end_pos) or ""
 pub fn char_at(source: string, at: int) string => raw(source, at, at + 1)
 pub fn skip_space(source: string, at: int) {
   var i = at

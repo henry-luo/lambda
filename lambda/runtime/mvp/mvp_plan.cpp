@@ -367,6 +367,15 @@ bool mvp_admission_proven(LambdaMvpModule* m, Type* source, Type* destination) {
     return relation == MAP_CONTRACT_EXACT_TRUSTED || relation == MAP_CONTRACT_STORAGE_COMPATIBLE;
 }
 
+// The emitter may still check the normal arm after excluding a boxed error.
+static bool mvp_return_admission_may_check(LambdaMvpModule* m, Type* source, Type* destination) {
+    if (!mvp_admission_proven(m, source, destination)) return true;
+    if (!source || !destination || !lambda_type_accepts_error(destination)) return false;
+    if (mvp_boundary_proven(source, &TYPE_ERROR) && mvp_boundary_proven(source, destination)) return false;
+    Type* normal = lambda_type_normal_admission_contract(m->tp->pool, destination);
+    return normal && normal != destination && !mvp_admission_proven(m, source, normal);
+}
+
 bool mvp_pure_key(AstNode* node, int depth, bool allow_pure_calls) {
     node = ast_unwrap_primary_to_leaf(node);
     if (!node || depth > 32) return false;
@@ -1443,18 +1452,10 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
         AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
         if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return &TYPE_ANY;
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
-        // reuse the registry relation already instantiated by shared AST
-        // typing; keep its error alternative on the boxed split result.
-        if (info->result_kind == SYS_RESULT_TEXT_SPLIT &&
-                lambda_array_contract_element(lambda_type_remove_error(m->tp->pool, n->type)) == &TYPE_STRING)
-            return n->type;
-        if (info->result_kind == SYS_RESULT_TEXT_SPLIT) {
-            Type* source = normal_domain(m, mvp_value_contract(m, mvp_call_argument(call, 0), depth + 1, dense_arrays));
-            Type* separator = normal_domain(m, mvp_value_contract(m, mvp_call_argument(call, 1), depth + 1, dense_arrays));
-            if (sysfunc_text_split_element_type_for_args(info, source->type_id, separator->type_id) == LMD_TYPE_STRING)
-                return call->propagate ? m->text_split_result
-                    : lambda_type_union_normalized(m->tp->pool, m->text_split_result, &TYPE_ERROR);
-        }
+        // S7.10.7: shared typing owns both the success relation and absence;
+        // rebuilding query effects here would reintroduce an error alternative.
+        if (info->invalid_returns_null) return call->propagate
+            ? lambda_type_remove_error(m->tp->pool, n->type) : n->type;
         if (info->fn == SYSFUNC_FILL) {
             Type* destination = mvp_contextual_contract(m, n);
             destination = lambda_type_remove_error(m->tp->pool, destination);
@@ -1481,16 +1482,6 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
         Type* base = lambda_type_nullable_lane_base(arg_contract, &optional);
         if (base == &TYPE_INT && sysfunc_native_math_type_preserving(info->fn, NULL)) return arg_contract;
         Type* successful_arg = lambda_type_remove_error(m->tp->pool, arg_contract);
-        if (info->result_kind == SYS_RESULT_SLICE_OF_ARGUMENT && successful_arg == &TYPE_STRING) {
-            // the registry's slice relation preserves text on success; invalid
-            // bounds remain checked; an absent offset yields null (S7.1.2).
-            Type* sliced = &TYPE_STRING;
-            for (int i = 1; i < mvp_call_argument_count(call); i++)
-                if (lambda_type_accepts_null(mvp_value_contract(m, mvp_call_argument(call, i), depth + 1, dense_arrays)))
-                    sliced = mvp_nullable_contract(m, &TYPE_STRING);
-            return call->propagate ? sliced :
-                lambda_type_union_normalized(m->tp->pool, sliced, &TYPE_ERROR);
-        }
         if (info->fn == SYSFUNC_SHR && mvp_int_range(m, n).finite) return &TYPE_INT;
         if (mvp_binary_bitwise(info->fn) && successful_arg && successful_arg->type_id == LMD_TYPE_INT &&
                 normal_domain(m,
@@ -4239,7 +4230,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 } else incoming = mvp_value_contract(m, result);
                 // implicit results cross the same checked return boundary as
                 // RETURN_STAM; an omitted effect cannot be repaired in lowering.
-                if (implicit) implicit_fails = !mvp_admission_proven(m, incoming, f->result_contract);
+                if (implicit) implicit_fails = mvp_return_admission_may_check(m, incoming, f->result_contract);
             }
             if (node->node_type == AST_NODE_PARAM) {
                 MvpBinding* b = mvp_binding(m, ((AstNamedNode*)node)->entry);
@@ -4433,7 +4424,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             }
             if (node->node_type == AST_NODE_RETURN_STAM) {
                 AstNode* v = ((AstReturnNode*)node)->value;
-                fails |= !mvp_admission_proven(m, mvp_value_contract(m, v), f->result_contract);
+                fails |= mvp_return_admission_may_check(m, mvp_value_contract(m, v), f->result_contract);
             }
             if ((node->node_type == AST_NODE_BINARY && ((AstBinaryNode*)node)->op != OPERATOR_TO) ||
                     node->node_type == AST_NODE_UNARY)

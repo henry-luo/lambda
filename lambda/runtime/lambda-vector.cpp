@@ -3099,6 +3099,9 @@ static Item vector_select_range(Item vec, int64_t start, int64_t end) {
 // string/symbol: delegates to fn_substring(str, 0, n)
 Item fn_take(Item vec, Item n_item) {
     GUARD_ERROR2(vec, n_item);
+    // S7.10.7: reject invalid counts before text/row lifting can rebuild null.
+    int64_t n = 0;
+    if (!lambda_item_to_int64_exact(n_item, &n) || n < 0) return ItemNull;
     VECTOR_NDIM_ROWS(vec, fn_take(vec, n_item));
 
     TypeId type = get_type_id(vec);
@@ -3110,10 +3113,7 @@ Item fn_take(Item vec, Item n_item) {
     VECTOR_TEXT_ITEMS(vec, fn_take(vec, n_item));  // a binary walks as its bytes
 
     int64_t len = vector_length(vec);
-    if (len < 0) return ItemError;
-
-    int64_t n = 0;
-    if (!vector_count_arg(n_item, "fn_take", &n)) return ItemError;
+    if (len < 0) return ItemNull;
     if (n > len) n = len;
     return vector_select_range(vec, 0, n);
 }
@@ -3122,6 +3122,8 @@ Item fn_take(Item vec, Item n_item) {
 // string/symbol: delegates to fn_substring(str, n, len)
 Item fn_drop(Item vec, Item n_item) {
     GUARD_ERROR2(vec, n_item);
+    int64_t n = 0;
+    if (!lambda_item_to_int64_exact(n_item, &n) || n < 0) return ItemNull;
     VECTOR_NDIM_ROWS(vec, fn_drop(vec, n_item));
 
     TypeId type = get_type_id(vec);
@@ -3134,10 +3136,7 @@ Item fn_drop(Item vec, Item n_item) {
     VECTOR_TEXT_ITEMS(vec, fn_drop(vec, n_item));  // a binary walks as its bytes
 
     int64_t len = vector_length(vec);
-    if (len < 0) return ItemError;
-
-    int64_t n = 0;
-    if (!vector_count_arg(n_item, "fn_drop", &n)) return ItemError;
+    if (len < 0) return ItemNull;
     if (n > len) n = len;
     return vector_select_range(vec, n, len);
 }
@@ -3162,6 +3161,9 @@ Item for_window(Array* out, Item offset, Item limit, int64_t flags) {
 // Works for arrays, lists, strings, and binaries
 Item fn_slice(Item vec, Item start_item, Item end_item) {
     GUARD_ERROR3(vec, start_item, end_item);
+    int64_t start = 0, end = 0;
+    if (lambda_slice_offsets(start_item, end_item, &start, &end) != LAMBDA_SLICE_OK)
+        return ItemNull;
     VECTOR_NDIM_ROWS(vec, fn_slice(vec, start_item, end_item));
     TypeId type = get_type_id(vec);
 
@@ -3176,16 +3178,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     // materialize every source byte and bypass that path for each small slice.
 
     int64_t len = type == LMD_TYPE_BINARY ? fn_len(vec) : vector_length(vec);
-    if (len < 0) return ItemError;
-
-    int64_t start = 0;
-    int64_t end = 0;
-    LambdaSliceStatus status = lambda_slice_offsets(start_item, end_item, &start, &end);
-    if (status == LAMBDA_SLICE_ABSENT) return ItemNull;
-    if (status == LAMBDA_SLICE_INVALID) {
-        log_error("fn_slice: start and end must be integer-valued numbers");
-        return ItemError;
-    }
+    if (len < 0) return ItemNull;
     // negative offsets clamp, they do not wrap from the end
     lambda_clamp_slice_range(len, &start, &end);
 
@@ -3208,13 +3201,15 @@ Item fn_slice3(Item vec, Item start_item, Item end_item) {
 // slice(vec, start) - extract elements from start to the end
 Item fn_slice2(Item vec, Item start_item) {
     GUARD_ERROR2(vec, start_item);
+    TypeId source_type = get_type_id(vec);
+    if (source_type == LMD_TYPE_NULL ||
+            (!is_text_type_id(source_type) && source_type != LMD_TYPE_BINARY &&
+             !is_vector_type(source_type))) return ItemNull;
     VECTOR_NDIM_ROWS(vec, fn_slice2(vec, start_item));
-    if (get_type_id(vec) == LMD_TYPE_NULL) return ItemNull;
 
     int64_t len = fn_len(vec);
     if (len < 0) {
-        log_error("fn_slice2: first argument must be sliceable");
-        return ItemError;
+        return ItemNull;
     }
     return fn_slice(vec, start_item, (Item){ .item = i2it(len) });
 }
@@ -3884,25 +3879,21 @@ static ArrayNum* arr_num_slice_axis(ArrayNum* src, int ndim, int64_t* shp, int64
 Item fn_array_split(Item arr_item, int64_t n, int64_t axis) {
     GUARD_ERROR1(arr_item);
     if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
-        log_error("split: expected typed numeric array");
-        return ItemError;
+        return ItemNull;
     }
     ArrayNum* arr = arr_item.array_num;
     if (!arr) return ItemError;
-    if (n <= 0) { log_error("split: section count must be positive, got %lld", (long long)n); return ItemError; }
+    if (n <= 0) return ItemNull;
 
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int ndim = array_num_get_shape_strides(arr, shp, str);
-    if (ndim < 1) return ItemError;
+    if (ndim < 1) return ItemNull;
     if (axis < 0) axis += ndim;
     if (axis < 0 || axis >= ndim) {
-        log_error("split: axis %lld out of range for %d-D array", (long long)axis, ndim);
-        return ItemError;
+        return ItemNull;
     }
     if (shp[axis] % n != 0) {
-        log_error("split: axis %lld length %lld not divisible by %lld sections",
-                  (long long)axis, (long long)shp[axis], (long long)n);
-        return ItemError;
+        return ItemNull;
     }
     int64_t chunk = shp[axis] / n;
 

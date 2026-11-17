@@ -467,6 +467,56 @@ TEST(TypeContractMetadataTest, InternalTopExclusionsStayDistinctFromAny) {
         "any \\ {error, null}");
 }
 
+TEST(TypeContractMetadataTest, ConstrainedErrorChannelsFollowTheirBase) {
+    TypeConstrained constrained = {};
+    constrained.type_id = LMD_TYPE_TYPE;
+    constrained.kind = TYPE_KIND_CONSTRAINED;
+    constrained.base = &TYPE_ERROR;
+    EXPECT_TRUE(lambda_type_accepts_error((Type*)&constrained));
+
+    TypeConstrained nested = constrained;
+    nested.base = (Type*)&constrained;
+    EXPECT_TRUE(lambda_type_accepts_error((Type*)&nested));
+
+    TypeUnary optional = {};
+    optional.type_id = LMD_TYPE_TYPE;
+    optional.kind = TYPE_KIND_UNARY;
+    optional.op = OPERATOR_OPTIONAL;
+    optional.operand = (Type*)&nested;
+    TypeBinary choice = {};
+    choice.type_id = LMD_TYPE_TYPE;
+    choice.kind = TYPE_KIND_BINARY;
+    choice.op = OPERATOR_UNION;
+    choice.left = &TYPE_INT;
+    choice.right = (Type*)&nested;
+    EXPECT_TRUE(lambda_type_accepts_error((Type*)&optional));
+    EXPECT_TRUE(lambda_type_accepts_error((Type*)&choice));
+    EXPECT_TRUE(lambda_type_contract_is_subtype((Type*)&nested, &TYPE_ERROR));
+    EXPECT_FALSE(lambda_type_contract_is_subtype(&TYPE_ERROR, (Type*)&nested));
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    EXPECT_EQ(lambda_type_normal_admission_contract(pool, (Type*)&choice), &TYPE_INT);
+
+    TypeUnary nullable_error = optional;
+    nullable_error.operand = &TYPE_ERROR;
+    TypeConstrained maybe_error = constrained;
+    maybe_error.base = (Type*)&nullable_error;
+    TypeBinary nullable_choice = choice;
+    nullable_choice.left = &TYPE_FLOAT;
+    nullable_choice.right = (Type*)&maybe_error;
+    Type* normal = lambda_type_normal_admission_contract(pool, (Type*)&nullable_choice);
+    ASSERT_NE(normal, nullptr);
+    EXPECT_TRUE(lambda_type_contract_is_subtype(&TYPE_FLOAT, normal));
+    EXPECT_TRUE(lambda_type_accepts_null(normal));
+    EXPECT_FALSE(lambda_type_accepts_error(normal));
+    pool_destroy(pool);
+
+    constrained.base = &TYPE_INT;
+    EXPECT_FALSE(lambda_type_accepts_error((Type*)&nested));
+    EXPECT_FALSE(lambda_type_accepts_error((Type*)&optional));
+    EXPECT_FALSE(lambda_type_accepts_error((Type*)&choice));
+}
+
 TEST(TypeContractMetadataTest, MapStorageDoesNotEstablishNominalIdentity) {
     TypeNominal record = {};
     TypeNominal foreign = {};
@@ -1608,6 +1658,13 @@ protected:
         }
     }
 };
+
+TEST_F(NegativeScriptTest, RecordReturnProofRetainsFailedSpread) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/record_return_spread_error.ls", false,
+        "error[E208]");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/record_return_nested_spread_error.ls", false,
+        "error[E208]");
+}
 
 // Syntax error tests
 TEST_F(NegativeScriptTest, InheritedFieldDiagnosticUsesTheWrittenField) {

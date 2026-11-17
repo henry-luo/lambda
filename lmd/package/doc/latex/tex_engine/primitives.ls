@@ -90,20 +90,20 @@ let EXPANDABLE = [
     "iffalse", "ifcase", "ifdefined", "ifcsname", "iffontchar", "ifpdfprimitive",
     "ifincsname", "unless", "fi", "else", "or"
 ]
-pub fn exists(name) => contains(PRIMITIVES, name)
-pub fn expandable(name) => contains(EXPANDABLE, name)
+pub fn exists(name) bool => contains(PRIMITIVES, name)
+pub fn expandable(name) bool => contains(EXPANDABLE, name)
 
 // the compatibility profile exposes the native engine's pdfTeX and e-TeX identities.
 let ENGINE_VERSIONS = {eTeXversion: 2, pdftexversion: 140}
 let ENGINE_REVISIONS = {eTeXrevision: ".6", pdftexrevision: "27"}
-pub fn engine_version(name) => if (name is string) ENGINE_VERSIONS[name] else null
-pub fn engine_revision(name) => if (name is string) ENGINE_REVISIONS[name] else null
+pub fn engine_version(name) int? => if (name is string) ENGINE_VERSIONS[name] else null
+pub fn engine_revision(name) string? => if (name is string) ENGINE_REVISIONS[name] else null
 
 // LaTeX names are enabled only in the LaTeX engine profile.
 let LATEX_PRIMITIVES = ["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand", "newenvironment", "renewenvironment", "begin", "end", "@@end", "newcounter", "setcounter", "addtocounter", "stepcounter", "refstepcounter", "newlength", "setlength", "addtolength", "settowidth", "settoheight", "settodepth", "documentclass", "LoadClass", "LoadClassWithOptions", "usepackage", "RequirePackage", "RequirePackageWithOptions", "DeclareOption", "ExecuteOptions", "ProcessOptions", "PassOptionsToPackage", "PassOptionsToClass", "@yargdef", "filename@parse", "@ifpackagewith", "@ifclasswith", "IfFileExists", "InputIfFileExists", "AtBeginDocument", "AtEndDocument", "AtEndOfPackage", "AtEndOfClass", "verb", "lstinline", "Verb", "mint", "mintinline", "lambdaconstructor", "ProvidesPackage", "ProvidesClass", "ProvidesFile", "NeedsTeXFormat", "include", "newif", "@ifnextchar", "kernel@ifnextchar", "@ifstar", "@for", "@tfor", "arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value", "(", ")", "[", "]", "lambda@Roman", "NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand", "NewDocumentEnvironment", "RenewDocumentEnvironment", "ProvideDocumentEnvironment", "DeclareDocumentEnvironment", "IfNoValueTF", "IfNoValueT", "IfNoValueF", "IfValueTF", "IfValueT", "IfValueF", "IfBooleanTF", "IfBooleanT", "IfBooleanF", "AddToHook", "IfFormatAtLeastTF", "lambda@xspace"]
 let LATEX_EXPANDABLE = ["@ifpackagewith", "@ifclasswith", "arabic", "roman", "Roman", "alph", "Alph", "fnsymbol", "value", "lambda@Roman", "IfNoValueTF", "IfNoValueT", "IfNoValueF", "IfValueTF", "IfValueT", "IfValueF", "IfBooleanTF", "IfBooleanT", "IfBooleanF", "IfFormatAtLeastTF", "lambda@xspace"]
-pub fn latex_exists(name) => contains(LATEX_PRIMITIVES, name)
-pub fn latex_expandable(name) => contains(LATEX_EXPANDABLE, name)
+pub fn latex_exists(name) bool => contains(LATEX_PRIMITIVES, name)
+pub fn latex_expandable(name) bool => contains(LATEX_EXPANDABLE, name)
 
 let INT_PARAMETERS = ["pretolerance", "tolerance", "linepenalty", "hyphenpenalty", "exhyphenpenalty", "clubpenalty", "widowpenalty", "displaywidowpenalty", "brokenpenalty", "binoppenalty", "relpenalty", "predisplaypenalty", "postdisplaypenalty", "interlinepenalty", "doublehyphendemerits", "finalhyphendemerits", "adjdemerits", "mag", "delimiterfactor", "looseness", "time", "day", "month", "year", "showboxbreadth", "showboxdepth", "hbadness", "vbadness", "pausing", "tracingonline", "tracingmacros", "tracingstats", "tracingparagraphs", "tracingpages", "tracingoutput", "tracinglostchars", "tracingcommands", "tracingrestores", "uchyph", "outputpenalty", "maxdeadcycles", "hangafter", "floatingpenalty", "globaldefs", "fam", "escapechar", "defaulthyphenchar", "defaultskewchar", "endlinechar", "newlinechar", "language", "lefthyphenmin", "righthyphenmin", "holdinginserts", "errorcontextlines", "tracingassigns", "tracinggroups", "tracingifs", "tracingscantokens", "tracingnesting", "predisplaydirection", "lastlinefit", "savingvdiscards", "savinghyphcodes", "TeXXeTstate", "pdfoutput", "pdfcompresslevel", "pdfdecimaldigits", "pdfminorversion", "pdfobjcompresslevel", "pdfpkresolution", "pdfdraftmode", "pdfgentounicode", "pdfadjustspacing", "pdfprotrudechars", "pdftracingfonts", "pdfimageresolution", "pdfinclusionerrorlevel"]
 
@@ -112,7 +112,7 @@ let DIMEN_PARAMETERS = ["parindent", "mathsurround", "lineskiplimit", "hsize", "
 let GLUE_PARAMETERS = ["lineskip", "baselineskip", "parskip", "abovedisplayskip", "belowdisplayskip", "abovedisplayshortskip", "belowdisplayshortskip", "leftskip", "rightskip", "topskip", "splittopskip", "tabskip", "spaceskip", "xspaceskip", "parfillskip", "thinmuskip", "medmuskip", "thickmuskip"]
 
 let TOKS_PARAMETERS = ["output", "everypar", "everymath", "everydisplay", "everyhbox", "everyvbox", "everyjob", "everycr", "errhelp", "everyeof", "pdfpagesattr", "pdfpageattr", "pdfpageresources", "pdfpkmode"]
-pub fn parameter_kind(name) => if (contains(INT_PARAMETERS, name)) "int"
+pub fn parameter_kind(name) string? => if (contains(INT_PARAMETERS, name)) "int"
     else if (contains(DIMEN_PARAMETERS, name)) "dimen"
     else if (contains(GLUE_PARAMETERS, name)) if (contains(["thinmuskip", "medmuskip", "thickmuskip"], name)) "mu" else "glue"
     else if (contains(TOKS_PARAMETERS, name)) "toks" else null

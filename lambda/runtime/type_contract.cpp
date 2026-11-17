@@ -585,6 +585,11 @@ static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth)
     expected = contract_subtype_unwrap(expected);
     if (!candidate || !expected) return false;
     if (candidate == expected) return true;
+    // A constrained type is contained by its base, including nested layers.
+    if (candidate->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(candidate) &&
+            candidate->kind == TYPE_KIND_CONSTRAINED) {
+        return contract_type_is_subtype(((TypeConstrained*)candidate)->base, expected, depth + 1);
+    }
     // S11.1.7: the empty type admits no value, so every type holds all of it --
     // and it holds nothing, so only itself is below it
     if (candidate == &TYPE_NONE) return true;
@@ -2301,6 +2306,14 @@ static Type* contract_remove_exclusions(Pool* pool, Type* type,
     }
     if ((exclusions & LAMBDA_TYPE_EXCLUDE_NULL) && type->type_id == LMD_TYPE_NULL) {
         return NULL;
+    }
+    if (preserve_refs && type->type_id == LMD_TYPE_TYPE &&
+            type->kind == TYPE_KIND_CONSTRAINED) {
+        // S11.4.6v4 applies the base at admission, including its normal arms.
+        Type* base = type_field_unwrap_simple_decl(((TypeConstrained*)type)->base);
+        if (!base || base == type) return type;
+        Type* remaining = contract_remove_exclusions(pool, base, exclusions, true);
+        return remaining == base ? type : remaining;
     }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
         TypeUnary* unary = (TypeUnary*)type;

@@ -17,6 +17,182 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+## Reader record contracts and input boundaries — 2026-11-17
+
+<a id="reader-record-contracts"></a>
+
+**Admission repair: IMPLEMENTED; focused qualification passed.**
+The typed TeX reader exposed false ordinary-error effects under S7.7.2v2 /
+S11.4.1v5. A function returning a record assembled from a completed typed call
+or a known record spread acquired a deferred-return error: the checker read
+the literal's conservative storage recipe instead of its final field values.
+An annotated spread literal also reported required fields missing because
+its runtime-built shape has no static slots. The checker now proves return
+membership from field expressions and ordered spreads, and recognizes the
+dynamic shape when checking missing fields. Unknown keys, open sources and
+optional overwrites retain runtime admission; storage compatibility stays
+separate (D3.4.6, D7.1.3). Failed direct and nested spreads retain their error
+completion even when later fields satisfy the target shape.
+`record_return_boundary` covers accepted records and rejected dynamic data;
+paired negative fixtures require E208 at a clean relay of a failed builder.
+
+Explicit any fields admit contained errors under S11.4.3. Return proofs now
+retain that top-type membership. The interpreter also repeated a validator
+walk after successfully admitting every field, and that second walk rejected
+valid error data in any. Plain records now retain the completed field proof;
+nominal, binary, namespace and JavaScript-specific contracts keep additional
+validation, and conversion/layout checks remain. Positive interpreter/JIT/AUTO
+cases cover both nested map data and contained errors. IME, paint and sketch
+helpers with clean map returns now require map spread sources instead of
+concealing possible failures from untyped sources.
+
+The final release host passes 782 reader differential comparisons, 23 focused
+checks including scheduled GC, all 285 LaTeX compile checks, and the six
+negative interpreter/JIT/AUTO cases. Test262 is 40,261/40,261 fully passing.
+The Lambda aggregate remains non-green: exposed caller contracts pass focused
+rechecks, while a native PDF allocation abort, an editor assertion and the
+unavailable WebRTC dependency remain recorded qualification limits. Full
+corpus/recheck provenance is in the reader implementation record below.
+
+**Usability residue:** the reader needed explicit state types at spread
+bindings, and a shared `TextScan` constructor where branch-result joins lost
+field precision. `if (value is int)` does not yet prove an int admission in
+the staged narrowing probe; the category-code input boundary explicitly
+converts and recovers to the standard code. Qualified imported type names
+also require a local binding (`let Reader = reader.Reader`) before use in
+annotations, as documented in Lambda_Modules. These are recorded use cases,
+not reasons to add blanket `any^` results. Reproductions and qualification:
+[reader refactor record](impl/Lambda_Impl_Latex_Script_Engine.md#reader-records-and-error-boundaries--2026-11-17).
+
+<a id="tex-open-record-extra-storage"></a>
+
+**Open record admission erased overwritten extra fields — FIXED 2026-11-17.**
+The structured TeX State migration exposed loss of an extra field stored in
+an Item-backed null construction recipe. Admission now copies the actual
+physical lane; [resolution and regression](<Lambda_Issue_Ledger (fixed).md#tex-open-record-extra-storage-fixed>).
+
+<a id="tex-nullable-pointer-union"></a>
+
+**Nullable pointer admission lost its scalar tag — FIXED 2026-11-17.**
+The binary checksum contract exposed a MIR admission fast path that boxed a
+present nullable pointer using the destination union's meta-type instead of
+the producer's scalar tag. [Resolution and regression](<Lambda_Issue_Ledger (fixed).md#tex-nullable-pointer-union-fixed>).
+
+### Imported type bindings in record fields — OPEN compiler issue
+
+<a id="tex-imported-record-type"></a>
+
+**Found 2026-11-17, extending the TeX reader refactor.** An imported type
+bound locally works in a function annotation but fails as a record field type:
+
+```lambda
+import reader: lambda.doc.latex.tex_engine.reader
+let Reader = reader.Reader;
+type Box = {source: Reader}
+```
+
+The host reports E204 `unknown type 'Reader'` at the field. This prevents a
+stream contract from directly embedding the exported reader type, despite the
+local binding convention documented by `doc/Lambda_Modules.md`. Type
+annotations should resolve the same visible type binding (S11.1.6v3,
+S11.4.8v2); the intended reader return contract remains S11.4.2v3. No new
+semantics ruling is proposed. Diagnose the record-field type-pattern resolver
+before extending package types further; do not copy the Reader schema into
+other modules. The installed stream uses a map at this particular module
+boundary and admits it through the existing reader API, disclosing the
+possible validation error in the source-read result. Its own stream, trace,
+argument, and read results have named contracts.
+
+Reproduction and diagnostics: `temp/tex-structured/_imported_record_type.ls`
+and `imported-record.err`; release host SHA256
+`7702e32d4e435af9faa60eaa6ad6d8eefb29efb93a07891d28c73f8b55ead626`.
+
+### Guard narrowing after `is int` — OPEN enhancement
+
+<a id="reader-is-int-narrowing"></a>
+
+**Requested 2026-11-17.** The reader's category boundary still needs a checked
+conversion after a positive type guard:
+
+```lambda
+if (custom is int) {
+    let code = int(custom) ^ { standard };
+    // validate the category range using code
+}
+```
+
+Replacing that conversion with `let code: int = custom` inside the guarded
+branch still produces E241, then E208 when the binding is returned from a
+clean int function. This was reproduced on interpreter and JIT using the
+final reader-refactor release host; see
+temp/reader-refactor/narrowing-explicit-binding-fails.ls and
+narrowing-review-{interp,jit}.{out,err}.
+
+**Desired enhancement:** retain the positive `is int` fact for the tested,
+unchanged binding inside the branch. Direct reads, typed local bindings,
+arguments and returns should reuse that proof, without requiring conversion
+or inventing an admission-error alternative. A reassignment must invalidate
+the old fact, and a branch join must retain only facts established on every
+incoming path. This preserves strict admission (S11.4.1v5) and error membership
+(S11.4.3); it does not permit discarding unrelated error outcomes. S11.2.1
+already specifies narrowing of `~` in a type-match arm. General flow-sensitive
+narrowing remains an open design item in SO9; this entry identifies a concrete
+use case and does not claim an implementation or a new normative ruling.
+
+The reader's ambiguous capture recovery and independently optional result
+fields are package design cleanup, not additional Lambda language issues.
+
+<a id="reader-constrained-error-return"></a>
+
+**Constrained error unions:** fixed; the shared-core and compiler repair is
+[archived in the fixed ledger](<Lambda_Issue_Ledger (fixed).md#reader-constrained-error-return-fixed>).
+
+**Performance residue: OPEN.** Three interleaved same-host release/JIT pairs
+over 8,000 tokens preserve exact output. On the final pinned host, median
+process CPU is 0.1999 seconds for the previous reader and 0.3184 seconds for
+the first typed revision (1.59x). A later capture/EOF refactor measured
+0.3236 versus 0.3262 seconds (1.008x) against that first typed revision on
+the same host, with identical output; see release-token-bench-v2.json.
+This includes startup and JIT compilation; it does not isolate hot scanning,
+record admission, helper calls or changed scanner loops. Profile before
+attributing the cost or changing admission/storage rules (S7.7.2v2, D3.4.6).
+The scripts, per-sample output hashes and timings are in
+temp/reader-refactor/release-token-bench-final.json; scope and host identity are in
+the implementation record above.
+
+## Numerical domain outcomes and total queries — 2026-11-17
+
+<a id="numerical-query-conventions"></a>
+
+**Numerical changes: OPEN. Query migration: IMPLEMENTED.** The user ratified
+numerical domain results under S4.2.5 and total query input handling under
+S7.1.2v2 / S7.10.7. The original 66 audit observations agree between the
+interpreter and JIT on the pre-migration host. The query implementation now
+passes 60 focused interpreter/JIT/GC runs.
+
+Decimal rounding rejects NaN/infinity; norm and several statistics reject
+numeric NaN; sign converts NaN to zero. Unchecked unary vector math, clip
+and sign also hide invalid lane types as numerical values, extending the
+checked-coercion residue in LR03-5. Some scalar statistics accept invalid
+source types as empty data. Int power overflow escapes to a finite float
+instead of saturating under S4.1.2. The six query functions' input rejection
+paths, nullable result metadata and error effects are migrated separately.
+
+The numerical changes remain **OPEN** and are separate from query migration:
+
+| Area | Reproduction | Required result / repair |
+|---|---|---|
+| Decimal rounding | `round(decimal.nan)`, `round(decimal.inf)` return errors; `round(1e100m)` also fails | Preserve numerical NaN/infinity and valid finite integral results; repair the quantization/result boundary. |
+| Decimal infinity | `floor(decimal.inf)`, `ceil(decimal.inf)`, `trunc(decimal.inf)` return decimal NaN | Preserve signed infinity. |
+| NaN in reductions | `math.norm([nan,1])`, median, variance, deviation and quantile return errors | Accept numeric NaN; separate type checks from value classification in `vector_number_or_null` and norm. |
+| Sign | `sign(nan)` is zero; `sign([nan,1])` is `[0,1]` | Preserve NaN and use a result lane able to carry it. |
+| Invalid vector lanes | `math.sqrt(["bad",1])`, clip and sign produce numerical NaN or zero | Reject incompatible input types through checked conversion (LR03-5). |
+| Invalid scalar sources | `math.norm("bad")` is zero; median/variance return null | Distinguish unsupported types from valid empty collections. |
+| Int power closure | `9007199254740991 ** 2` is a finite float | Saturate to int infinity under S4.1.2/SI7; `fn_pow` currently bypasses int closure. |
+
+Reproductions, root-cause pointers, scope and next steps:
+[numerical/query convention audit](impl/Lambda_Impl_Numerical_Query_Conventions.md).
+
 ## Online resource-timing interface branding — 2026-11-17
 
 <a id="online-resource-timing-brand"></a>

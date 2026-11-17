@@ -19,10 +19,10 @@ false
 "string-digits"
 9
 "other"
-'Test 3: Partial string operations reject symbol patterns'
+'Test 3: String queries return null for symbol patterns'
 10
-error
+true
 11
-error
+true
 12
-error
+true

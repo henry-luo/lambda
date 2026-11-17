@@ -2,7 +2,7 @@ import tex: lambda.doc.latex.tex_engine.reader
 
 fn collect(r, tokens = []) any^ {
     let step = tex.next(r);
-    if (step.token == null) tokens else collect(step.reader, [*tokens, step.token])
+    if (step == null) tokens else collect(step.reader, [*tokens, step.token])
 }
 fn compact(tokens) => [for (t in tokens) [t.kind, t.value, t.cat]]
 

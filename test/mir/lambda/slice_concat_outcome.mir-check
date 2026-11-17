@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S7.1.2/S7.9.3/D8.6.1: fuse text slices after Error classification, preserve null offsets as empty join fragments, and retain the checked offset helper.",
+  "description": "S7.1.2v2/S7.10.7/D8.6.1: fuse text slices after Error classification, preserve invalid offsets as empty join fragments, and retain the checked offset helper.",
   "checks": [
     {
       "in_func": "mvp_#_bracket",

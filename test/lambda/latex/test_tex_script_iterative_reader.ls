@@ -11,7 +11,7 @@ let long=reader.load_line(reader.reader("A" ++ spaces ++ "\r\nZ"))^;
 let after=reader.load_line(long)^;
 {first:long.line,first_length:len(long.line),first_next:long.next_line,first_byte:long.next_byte,
  second:after.line,second_start:after.line_start,second_byte:after.line_byte};
-let unicode=reader.load_line(reader.reader("é字🙂 A   \r\nZ\t \rQ\n"))^;
+let unicode=reader.load_line(reader.reader("é字🙂 A   \r\nZ\t \rQ\n"));
 let unicode2=reader.load_line(unicode)^;
 let unicode3=reader.load_line(unicode2)^;
 {lines:[unicode.line,unicode2.line,unicode3.line],starts:[unicode.line_start,unicode2.line_start,unicode3.line_start],

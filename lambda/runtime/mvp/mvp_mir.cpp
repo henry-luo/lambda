@@ -825,7 +825,10 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
         // each native nullable lane retains its own absence marker. Only
         // the present arm avoids the destination validator (S11.4.1v5).
         branch_null(c, v, checked);
-        MirValue present = value(c, v.reg, contract->type_id, v.rep, contract, (AstNode*)v.provenance_node);
+        // a heterogeneous destination needs the source pointer tag when boxing (D2.3.5).
+        Type* present_contract = v.rep == VALUE_REP_RAW_GC_POINTER ? pointer_base : contract;
+        MirValue present = value(c, v.reg, present_contract->type_id, v.rep,
+            present_contract, (AstNode*)v.provenance_node);
         present = convert(c, present, target);
         move(c, native_result, reg(c, present.reg), present.mir_type);
         jump(c, native_admitted); mark(c, checked);

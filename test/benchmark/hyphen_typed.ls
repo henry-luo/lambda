@@ -176,8 +176,8 @@ pn hyphenate_text(tables: HyphenTables, text: string, var results: WordCache, va
 }
 
 pub pn hyphenate(tables: HyphenTables, text: string) string^ {
-    var results: WordCache = word_cache_new()^
-    var markers: MarkerCache = marker_cache_new()^
+    var results: WordCache = word_cache_new()
+    var markers: MarkerCache = marker_cache_new()
     return hyphenate_text(tables, text, results, markers)
 }
 
@@ -185,8 +185,8 @@ pub pn run_hyphen_benchmark() {
     let tables: HyphenTables = load_hyphen_tables()^
     let _admitted_cases_169: string[][] = hyphen_cases
     let cases: string[][] = _admitted_cases_169^
-    var verify_results: WordCache = word_cache_new()^
-    var verify_markers: MarkerCache = marker_cache_new()^
+    var verify_results: WordCache = word_cache_new()
+    var verify_markers: MarkerCache = marker_cache_new()
     var index: int = 0
     while (index < len(cases)) {
         if ((hyphenate_text(tables, cases[index][0], verify_results, verify_markers) != cases[index][1])^) {
@@ -207,8 +207,8 @@ pub pn run_hyphen_benchmark() {
     let t0 = clock()
     while (round_index < 32) {
         // retain the canonical per-round cold caches and S9.1.3 var borrows.
-        var results: WordCache = word_cache_new()^
-        var markers: MarkerCache = marker_cache_new()^
+        var results: WordCache = word_cache_new()
+        var markers: MarkerCache = marker_cache_new()
         index = 0
         while (index < len(texts)) {
             let result: string = hyphenate_text(tables, texts[index], results, markers)^
