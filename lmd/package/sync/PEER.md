@@ -266,8 +266,9 @@ Network success and successful filesystem installation are separate outcomes.
 ## Bounds and deferred work
 
 Hellos are bounded to 16 KiB; session records to 256 KiB. Inventory pages contain
-at most 64 IDs, object text fragments at most 32 KiB, and encoded objects at most
-8 MiB. Each connection pins at most 100,000 portable objects and 8,192 checkpoint
+at most 64 IDs, object fragments at most 32 KiB, and binary object envelopes at most
+16 MiB (including framing for an 8 MiB chunk). New fragments carry binary
+`LRP1` records; receivers also accept legacy typed-JSON text fragments. Each connection pins at most 100,000 portable objects and 8,192 checkpoint
 frames, with 100,000 server requests and 1,000,000 encrypted records per direction.
 Handshake waits use 15 seconds; record waits use 30 seconds. Existing repository,
 typed-codec, scan and metadata-frame limits also apply.

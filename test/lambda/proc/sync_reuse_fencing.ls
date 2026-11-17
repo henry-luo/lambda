@@ -37,8 +37,10 @@ pn cut(store, credentials, remote, retained, label) any^ {
 pn main() {
     let area = "temp/sync-reuse-fencing-" ++ string(sys.proc.self.pid#)
     io.mkdir(area)^
-    let store = fixture.create(area ++ "/store.sqlite")^
-    let owner = identity.create("reuse-fencing",crypto.key()^)^
+    // Optional isolated S3 runs exercise the same protocol and negative cases.
+    let storage = sys.proc.self.env#.LAMBDA_CLOUD_TEST_STORAGE_FILE
+    let store = if (storage == null) fixture.create(area ++ "/store.sqlite")^ else s3.adapter(input(storage,'json')^)
+    let owner = identity.create(if (storage == null) "reuse-fencing" else "reuse-fencing-" ++ uuid()^,crypto.key()^)^
     let control = schema.signed(owner.seed,"lambda-cloud-control-1",{version:1,space:owner.space,
         owner:owner.device,generation:1,storage:"catalog-2",members:[{device:owner.device,active:true}]})^
     service.bootstrap(store,control)^

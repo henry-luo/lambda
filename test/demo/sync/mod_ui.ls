@@ -32,4 +32,4 @@ pub fn page(st) => <main id:"sync-demo",'data-mode':st.mode,
         else <div class:"waiting",<span class:"pulse"><span "Please wait…">;(button("cancel","Cancel"))>;
         if (st.note != null) <p id:"sync-error",role:"alert",st.note> else null;
         <footer <span "Sync folder"><code id:"sync-folder",st.folder>>>
-    <p class:"footnote","Files stay on your devices. This demo connects over your local network.">>
+    <p class:"footnote",if (st.status.cloud_enabled == true) "Files sync on your local network and back up to cloud storage." else "Files stay on your devices. This demo connects over your local network.">>

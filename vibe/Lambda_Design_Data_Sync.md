@@ -281,6 +281,23 @@ unchanged; older hosts cannot resume a version-2 pending intent. Finish the
 installation with the newer host before downgrading. Filesystem visibility and
 completed installation remain separate milestones (D11.1.2).
 
+A trusted device may run the stateless cloud handler in its own process against
+its configured S3-compatible account, instead of calling a hosted function.
+Each device needs its own storage credential. The handler still validates signed
+space membership and the client checks the pinned owner. Direct S3 requests keep
+capability URLs out of the local HTTP log. Cloud polling runs in a separate task;
+repository operations still use the LAN agent's serialized owner (S12.1.1v3,
+S13.1.2v2, S12.4.4v4, D11.1.2). The owner adds newly paired devices to cloud
+control; existing cloud revocations require their explicit administration path.
+
+Capture chooses a streamed manifest once the file exceeds one page's maximum
+number of minimum-sized chunks. Existing inline manifests remain readable.
+Verification that only needs completeness hashes without collecting the payload.
+Paged cloud publication reserves and exports bounded batches; large locator
+queries authenticate each private index page once. These choices do not change
+stored file bytes, conflict rules or the commit-before-acknowledgment contract
+(D11.1.2).
+
 Authenticate once per connection burst. Pin a separate immutable offer for each
 exchange round, transfer missing objects and existing CRDT records, commit before
 acknowledging, and install through the existing recovery journal. Reuse the
@@ -690,8 +707,10 @@ inserting bytes near the start need not invalidate every later chunk.
 Version the chunker algorithm and parameters in repository configuration so
 authorized writers can reproduce boundaries. Select and qualify an established
 implementation, using restic's Rabin-based design and FastCDC as references.
-Choose minimum, target, and maximum sizes through release measurements rather
-than adopting one provider's request limits as the document model.
+The selected default is 512 KiB minimum, roughly 1 MiB average and 8 MiB maximum,
+using a versioned normalized Gear chunker with sub-minimum cut-point skipping.
+Tune the distribution with release measurements. Preserve old algorithm/profile
+parameters in manifests; a profile change alone must not create a file revision.
 
 The conceptual pipeline is:
 
@@ -725,10 +744,11 @@ authenticated physical copies, including their storage generation and encryption
 descriptor. Index loss must be recoverable by scanning authenticated object or
 pack metadata with authorized keys.
 
-Immutable packing can amortize small-object request overhead where measurements
-justify it. Authenticate independently retrievable chunk records and record their
+Immutable packing is selected for local storage and ordinary cloud publication
+to amortize object and durability overhead (D11.1.2, D11.2.1–D11.2.4).
+Authenticate independently retrievable chunk records and record their
 ranges. Repacking writes and verifies a new pack and publishes its locations
-before retiring an old one. Physical packing is a tuning choice; chunking,
+before retiring an old one. Pack size remains a tuning choice; chunking,
 deduplication, encryption, and recovery contracts are part of the baseline.
 
 ## 6. Directory and file synchronization
@@ -1900,6 +1920,29 @@ Acceptance cases:
 
 ### 12.3 Efficiency and maintenance
 
+Use the [Restic and Syncthing performance references in Appendix B.1](#b1-performance-reference-restic-and-syncthing)
+to inform performance investigations. Establish relative performance with matched
+workloads, hardware, completion criteria and durability settings.
+
+The [2026-11-17 multi-file investigation](impl/Lambda_Impl_Sync_Multifile_Perf.md)
+finds repeated CRDT batch construction/serialization and quadratic pack-buffer
+copying. Lambda Script changes use exact accumulated packet sizes, measured
+capture group widths, balanced pack assembly and combined cloud observation
+commits (S12.1.1v3, D11.1.2). Three matched release samples per arm reduce median
+local-S3 publication for **8 MiB / 128 files from 4.835 to 3.610 s**, and median
+peak RSS from **1939.7 to 895.2 MiB**. The single-file control stays near 1.54 s.
+Authentication, packet byte limits and durable publication remain enforced.
+The remaining many-file memory footprint is excessive; these local results do
+not qualify WAN/Wasabi performance or resolve Input ownership (D5.2.5).
+
+The LAN controller also carries the initial authenticated validation cache through
+resume and first scan. Every access authenticates the head and matches its
+generation and immutable ID before reuse; an advanced or forged head cannot use
+the old proof. A populated-repository diagnostic reduces those startup stages
+from 7.575 to 2.197 s. Full cumulative 8.41 MB / 108-file demo backups still take
+approximately 5–6 s; their larger remaining scan/publication cost is recorded
+separately from the fresh benchmark.
+
 The native reference implementation now supplies paged immutable saved endpoints,
 calendar retention, explicit pins, retirement manifests, resumable local pruning
 and independent verified-copy cache eviction. Selection remains pure Lambda
@@ -2232,6 +2275,58 @@ content availability. Signal local pending work independently of remote heads.
 These references guide independent protocol and storage contracts. Their
 algorithms, message encodings, retention semantics, and proof assumptions are
 not interchangeable merely because they all synchronize or version data.
+
+### B.1 Performance reference: Restic and Syncthing
+
+**Reference checked: 2026-11-17.** These published results are important prior-art
+evidence for performance investigations. They do not establish a speed ratio
+against Lambda or a latency guarantee. No formal ruling changes; Lambda's native
+IO boundary remains D11.1.2, and authentication/key isolation remains
+D11.2.3–D11.2.4.
+
+| Tool / operation | Workload and environment | Reported result | Evidence |
+|---|---|---|---|
+| Restic backup | 1.720 GiB source data, 5,307 files; local repository | 12 s; approximately 147 MiB/s of source data, calculated from the reported size/time | [Official backup documentation example](https://github.com/restic/restic/blob/master/doc/040_backup.rst) |
+| Restic restore | Approximately 8.4 GB, 250,000 files; NVMe to NVMe | 34 s; author reports 247 MB/s | [Maintainer MichaelEischer's test, 2025-04-11](https://github.com/restic/restic/issues/5339) |
+| Syncthing initial sync | One incompressible 128 MB file; shaped LAN | 3.3 s median | [MeshHold transfer benchmark](https://meshhold.com/docs/reference/transfer-benchmark/) |
+| Syncthing initial sync | 5,000 files of approximately 20 KB each; shaped LAN | 44.5 s median | [MeshHold transfer benchmark](https://meshhold.com/docs/reference/transfer-benchmark/) |
+| Syncthing incremental sync | 50 files edited in an existing 5,000-file tree; shaped LAN | 2.4 s median | [MeshHold transfer benchmark](https://meshhold.com/docs/reference/transfer-benchmark/) |
+
+The Restic backup row is a documentation example with no controlled benchmark
+environment stated. Deduplication reduces the added data to 1.200 GiB and
+compression reduces stored data to 1.103 GiB; source throughput is not upload
+throughput. The restore row is a maintainer's individual measurement; the linked
+issue's reporter version does not establish the maintainer's tested version.
+Neither row measures cloud upload or file-change detection latency.
+
+MeshHold is a competitor; these results are not independently reproduced here.
+It tests Syncthing 2.1.3 in two same-host containers: 1 Gbit/s, 0.3 ms round-trip,
+five-run medians, alternating arm order. Completion checks file count and byte
+total, not byte-for-byte integrity. Incremental timing does not establish default
+watcher-to-arrival latency. [Benchmark methodology](https://meshhold.com/docs/reference/transfer-benchmark/).
+
+In a separate 5,000-file comparison, Syncthing takes **42.0 s with default fsync**,
+versus **11.4 s with fsync disabled**, approximately a 3.7-fold difference.
+This is distinct from the 44.5 s row. Disabling fsync changes durability;
+performance comparisons must preserve that guarantee.
+[MeshHold fsync comparison](https://meshhold.com/docs/reference/transfer-benchmark/#most-of-syncthings-number-is-fsync).
+
+For historical context, Lambda's release measurements immediately after packing
+and before the [multi-file follow-up](impl/Lambda_Impl_Sync_Multifile_Perf.md) are **1.524 s** for a
+fresh 8 MiB single-file publication and **4.943 s** for 8 MiB across 128 files in
+the same harness. The separate cumulative demo backs up **8.41 MB / 108 files in
+6.273 s**, with sender-offline restore in **7.375 s**. These are single local-S3
+samples, not WAN/Wasabi measurements or medians. The additional **3.419 s** in
+the matched 128-file case points to per-file processing and metadata overhead.
+See the [pack implementation measurements and remaining memory limit](impl/Lambda_Impl_Sync_Packs.md).
+
+A matched comparison should use the same corpus and machine, Restic against the
+same local S3 endpoint, and Syncthing for the equivalent direct-peer case.
+Measure fresh, unchanged and incremental work separately; record startup and
+watcher delays, capture/hash/chunk time, publication, restore, peak memory,
+compression/deduplication, concurrency, and durable completion. Verify restored
+bytes and retain durability/authentication guarantees. Bulk throughput cannot be
+linearly extrapolated into an 8 MB job's end-to-end latency.
 
 ## Appendix S. Superseded wording
 

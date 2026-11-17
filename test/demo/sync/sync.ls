@@ -23,7 +23,8 @@ pn wrapping_key(value) any^ {
     let account = pairing.account(value)^
     let saved = secret.get(SERVICE,account)^
     if (saved != null) { return hex.unhex(saved)^ }
-    if (exists(profile.directory(PATHS,value)^ ++ "/device.sqlite"))
+    let active = profile.active(PATHS,profile.load(PATHS)^)
+    if (exists(profile.directory(active,value)^ ++ "/device.sqlite"))
         raise error("The device key is unavailable. Unlock the login Keychain and try again.")
     let key = crypto.key()^
     secret.set(SERVICE,account,hex.hex(key)^)^

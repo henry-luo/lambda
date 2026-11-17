@@ -8,13 +8,23 @@ import chunks: .chunks
 import blob: .blob
 import v: .schema
 import owner: .task_owner
-let kinds = ["chunk","manifest","state","snapshot","checkpoint","document","version","history","retention","maintenance","cache","file_page","locator","chunk_raw"]
+import wire: .object_wire
+import pack: .pack
+import packs: .pack_store
+let kinds = wire.kinds
 
 pub pn access(path, keys, action) any^ {
     if (keys.owner != null and keys.owner != self()) {
         return owner.cached(keys.owner,pn (cache)=> { return access(path,{*:keys,cached_head:cache},action)^ })^
     }
-    open tx = (sqlite.existing(path)^) { return action(tx,{*:keys,objects:path ++ ".objects"}) }
+    open tx = (sqlite.existing(path)^) {
+        packs.prepare(tx)^
+        let scoped = {*:keys,objects:path ++ ".objects",tx:tx}
+        packs.cleanup(tx,scoped)^
+        let result = action(tx,scoped)^
+        packs.flush(tx,scoped)^
+        return result
+    }
 }
 
 pub fn keys(secret, space, path=null) any^ {
@@ -30,8 +40,8 @@ fn context(keys, kind, id) any^ => if (kind == "chunk_raw")
 pub fn object_id(keys, kind, digest) any^ => crypto.mac(keys.identity,context(keys,kind,digest)^)^
 pub fn identity(keys, kind, value) any^ => object_id(keys,kind,codec.digest(value)^)^
 
-fn authenticated(keys, record) any^ {
-    v.fields(record,["id","kind","box"])^
+fn authenticated(keys, record, source="object") any^ {
+    v.fields(record,["id","kind","box"]) ^ { raise error("sync repository: " ++ source ++ " invalid physical record") }
     if (not (record.id is binary) or len(record.id) != 32 or
         not contains(kinds,record.kind)^)
         raise error("sync repository: invalid object header")
@@ -41,8 +51,8 @@ fn authenticated(keys, record) any^ {
 }
 pub fn is_chunk(kind) => kind == "chunk" or kind == "chunk_raw"
 fn object_plaintext(kind, value) any^ => if (kind == "chunk_raw") binary(value)^ else codec.encode(value)^
-fn decode(keys, record) any^ => if (record.kind == "chunk_raw") authenticated(keys,record)^ else
-    codec.decode(authenticated(keys,record)^)^
+fn decode(keys, record) any^ => if (record.kind == "chunk_raw") authenticated(keys,record,"decode raw")^ else
+    codec.decode(authenticated(keys,record,"decode metadata")^)^
 pub fn validate_record(keys, record) any^ {
     authenticated(keys,record)^
     return true
@@ -53,18 +63,16 @@ fn filename(id) any^ {
     return hex.hex(id)^ ++ ".object"
 }
 pn read_record(keys, id) any^ {
-    let item = disk.capture(keys.objects,filename(id)^,8388608)^
-    let bytes = item.bytes
-    if (len(bytes)^ < 69 or slice(bytes,0,4)^ != binary("LRP1")^ or bytes[4] >= len(kinds))
-        raise error("sync repository: invalid physical envelope")
-    let found = {id:slice(bytes,5,37)^,kind:kinds[bytes[4]],box:slice(bytes,37,len(bytes)^)^}
+    let packed = packs.read(keys,id)^
+    let bytes = if (packed == null) disk.capture(keys.objects,filename(id)^,wire.maximum)^.bytes else packed
+    let found = wire.decode(bytes)^
     if (found.id != id) raise error("sync repository: object filename mismatch")
-    return {record:found,plaintext:authenticated(keys,found)^}
+    return {record:found,plaintext:authenticated(keys,found,"read")^}
 }
 pub pn record(keys, id) any^ {
     return read_record(keys,id)^.record
 }
-pub pn present(keys, id) any^ { return disk.inspect(keys.objects,filename(id)^)^ != null }
+pub pn present(keys, id) any^ { return packs.present(keys,id)^ or disk.inspect(keys.objects,filename(id)^)^ != null }
 pub pn get(tx, keys, id, kind=null) any^ {
     let stored = read_record(keys,id)^
     if (kind != null and stored.record.kind != kind) raise error("sync repository: object kind mismatch")
@@ -79,27 +87,25 @@ pn index_record(tx, chosen) any^ {
 }
 
 pn persist_record(tx, keys, proposed) any^ {
-    let plaintext = authenticated(keys,proposed)^
-    let path = filename(proposed.id)^
-    var chosen = proposed
-    if (disk.inspect(keys.objects,path)^ == null) {
-        // ciphertext stays opaque bytes instead of being expanded through the text codec.
-        let encoded = binary("LRP1")^ ++ binary([index_of(kinds,proposed.kind)^])^ ++ proposed.id ++ proposed.box
-        if (len(encoded)^ > 8388608) raise error("sync repository: physical object limit")
-        let written:any^ = disk.install(keys.objects,path,encoded,null)
-        // Another writer or a post-publication sync error requires authenticated readback.
-        if (written is error and disk.inspect(keys.objects,path)^ == null) raise written
+    let plaintext = authenticated(keys,proposed,"persist")^
+    if (present(keys,proposed.id)^) {
+        let existing = read_record(keys,proposed.id)^
+        if (existing.record.kind != proposed.kind or existing.plaintext != plaintext)
+            raise error("sync repository: immutable ID reused")
+        return index_record(tx,existing.record)^
     }
-    let existing = read_record(keys,proposed.id)^
-    chosen = existing.record
-    if (chosen.kind != proposed.kind or existing.plaintext != plaintext) raise error("sync repository: immutable ID reused")
-    return index_record(tx,chosen)^
+    index_record(tx,proposed)^
+    if (keys.tx != null) { return packs.stage(tx,keys,proposed.id)^ }
+    // Direct initialization remains compatible with legacy callers outside a repository scope.
+    let encoded = wire.encode(proposed)^
+    disk.install(keys.objects,filename(proposed.id)^,encoded,null)^
+    return proposed.id
 }
 
 pub pn store_object(tx, keys, kind, value) any^ {
     let plaintext = object_plaintext(kind,value)^
     let id = object_id(keys,kind,hash(plaintext,'sha256')^)^
-    if (disk.inspect(keys.objects,filename(id)^)^ != null) {
+    if (present(keys,id)^) {
         let stored = read_record(keys,id)^
         if (stored.record.kind != kind or stored.plaintext != binary(plaintext)^) raise error("sync repository: immutable ID reused")
         return index_record(tx,stored.record)^
@@ -113,6 +119,7 @@ pub pn initialize(tx, keys) any^ {
     disk.resolve(keys.objects)^
     if (len(disk.entries(keys.objects,"",100000)^) != 0) raise error("sync repository: object directory must be empty at creation")
     io.chmod(keys.objects,"700")^
+    packs.prepare(tx)^
     sqlite.execute(tx,"CREATE TABLE objects (id BLOB PRIMARY KEY NOT NULL, kind TEXT NOT NULL, box BLOB NOT NULL) WITHOUT ROWID")^
     sqlite.execute(tx,"CREATE TABLE heads (name TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL, box BLOB NOT NULL) WITHOUT ROWID")^
     return null
@@ -148,12 +155,16 @@ pub pn commit_head(tx, keys, generation, current) any^ {
     return {generation:generation+1,id:id,state:current}
 }
 
+// A legacy inline manifest is bounded to one page worth of minimum-sized chunks.
+pub fn legacy_capture_limit(config) => min(262144,config.minimum * 256)
+
 pn store_chunks(tx, keys, pieces, kind="chunk") any^ {
     return [for (piece in pieces) {id:store_object(tx,keys,kind,piece)^,size:len(piece)^}]
 }
 pub pn content(tx, keys, bytes, config=chunks.default_profile) any^ {
     if (bytes != null and not (bytes is binary)) raise error("sync repository: expected binary content")
-    let references = store_chunks(tx,keys,chunks.split(bytes,config)^)^
+    let references = store_chunks(tx,keys,chunks.split(bytes,config)^,
+        if (config.algorithm == chunks.default_profile.algorithm) "chunk_raw" else "chunk")^
     let digest = hash(bytes,'sha256')^
     let manifest = store_object(tx,keys,"manifest",{version:1,profile:config,size:len(bytes),hash:digest,chunks:references})^
     return blob.reference(manifest,len(bytes),digest)^
@@ -172,14 +183,14 @@ pn stream_chunks(tx, keys, acc, bytes, final=false) any^ {
 }
 pub pn content_file(tx, keys, root, path, config=chunks.default_profile, maximum=268435456, token=null) any^ {
     let initial = {chunker:chunks.start(config)^,pending:[],pages:[]}
-    let captured = disk.read_stream(root,path,{state:initial,max_bytes:maximum,token:token},
+    let captured = disk.read_stream(root,path,{state:initial,max_bytes:maximum,token:token,block_bytes:1048576},
         pn (acc,bytes)=> { return stream_chunks(tx,keys,acc,bytes)^ })^
     let complete = stream_chunks(tx,keys,captured.state,null,true)^
     let manifest = store_object(tx,keys,"manifest",{version:2,profile:config,size:captured.source.size,
         hash:captured.hash,pages:complete.pages})^
     return {source:captured.source,content:blob.reference(manifest,captured.source.size,captured.hash)^}
 }
-fn validate_chunks(entries, maximum=1048576) any^ {
+fn validate_chunks(entries, maximum=8388608) any^ {
     if (not (entries is array)) raise error("sync repository: expected chunk descriptors")
     for (descriptor in entries) {
         v.fields(descriptor,["id","size"])^
@@ -247,7 +258,7 @@ pn content_next(tx, keys, descriptors, acc) any^ {
     return {bytes:bytes,state:{next:acc.next+1,
         bytes:if (acc.collect) acc.bytes ++ bytes else null,collect:acc.collect},done:false}
 }
-pub pn availability(tx, keys, reference, evicted=[]) any^ {
+pub pn availability(tx, keys, reference, evicted=[], collect=true) any^ {
     let manifest = content_manifest(tx,keys,reference)^
     let missing = [for (descriptor in manifest.chunks where
         not present(keys,descriptor.id)^ and contains(evicted,descriptor.id)^) descriptor.id]
@@ -258,7 +269,7 @@ pub pn availability(tx, keys, reference, evicted=[]) any^ {
         }
         return {complete:false,missing:missing,bytes:null}
     }
-    let checked = crypto.hash_stream({size:reference.size,state:{next:0,bytes:binary([])^,collect:reference.size <= 8388608}},
+    let checked = crypto.hash_stream({size:reference.size,state:{next:0,bytes:binary([])^,collect:collect and reference.size <= 8388608}},
         pn (acc)=> { return content_next(tx,keys,manifest.chunks,acc)^ })^
     if (checked.hash != reference.hash) raise error("sync repository: reconstructed content mismatch")
     return {complete:true,missing:[],bytes:checked.state.bytes}
@@ -268,7 +279,7 @@ pub pn payload(tx, keys, reference) any^ {
     return availability(tx,keys,reference)^.bytes
 }
 pub pn install_content(tx, keys, reference, root, path, expected=null) any^ {
-    if (reference.size <= 8388608) { return disk.install(root,path,payload(tx,keys,reference)^,expected)^ }
+    if (reference.size <= legacy_capture_limit(chunks.default_profile)) { return disk.install(root,path,payload(tx,keys,reference)^,expected)^ }
     let manifest = content_manifest(tx,keys,reference)^
     disk.write_stream(root,path,{size:reference.size,hash:reference.hash,expected:expected,
         state:{next:0,bytes:null,collect:false}},pn (acc)=> { return content_next(tx,keys,manifest.chunks,acc)^ })^
@@ -293,6 +304,19 @@ pub pn export_objects(tx, keys, ids) any^ {
     return records
 }
 
+pub pn export_pack(tx, keys, ids) any^ {
+    var selected = []
+    var size = 4
+    var position = 0
+    while (position < len(ids)^ and len(selected)^ < 128) {
+        let record = export_objects(tx,keys,[ids[position]])^[0]
+        let length = len(record.box)^+37
+        if (len(selected)^ > 0 and size+length > pack.target) { break }
+        selected = [*selected,record]; size = size+length; position = position+1
+    }
+    return {*:pack.encode(keys,selected)^,ids:[for (record in selected) record.id]}
+}
+
 pub pn import_objects(tx, keys, records) any^ {
     if (not (records is array) or len(records) > 128) raise error("sync repository: object batch limit")
     var i = 0
@@ -308,6 +332,7 @@ pub pn import_objects(tx, keys, records) any^ {
 
 // synchronous removal stays inside the caller's SQLite writer scope; retry after a crash is idempotent.
 pub pn remove_object(tx, keys, id) any^ {
+    packs.remove(tx,keys,id)^
     let path = filename(id)^
     let observed = disk.inspect(keys.objects,path)^
     if (observed != null) {
@@ -321,21 +346,63 @@ pub pn remove_object(tx, keys, id) any^ {
 pub pn records(keys) any^ {
     let names = sort(disk.entries(keys.objects,"",100000)^,(entry)=>entry.name)^
     var result = []
-    var i = 0
-    while (i < len(names)) {
-        let entry = names[i]
-        if (entry.kind != 'file' or len(entry.name)^ != 71 or not ends_with(entry.name,".object")^)
-            raise error("sync repository: unexpected repository entry")
-        let id = hex.unhex(slice(entry.name,0,64)^)^
-        let stored = record(keys,id)^
-        if (filename(id)^ != entry.name) raise error("sync repository: noncanonical object name")
-        result = [*result,stored]
-        i = i+1
+    var position = 0
+    while (position < len(names)^) {
+        let entry = names[position]
+        position = position+1
+        if (entry.kind != 'file') raise error("sync repository: unexpected repository entry")
+        if (len(entry.name)^ == 69 and ends_with(entry.name,".pack")^) {
+            let id = slice(entry.name,0,64)^
+            let retired = if (keys.tx == null) [] else sqlite.query(keys.tx,"SELECT pack FROM pack_obsolete WHERE pack = ?",[id])^
+            if (len(retired)^ > 0) { continue }
+            let stored = pack.decode(keys,disk.capture(keys.objects,entry.name,pack.maximum)^.bytes,id)^
+            var physical_offset = 4
+            for (item in stored) {
+                authenticated(keys,item)^
+                if (keys.tx != null) {
+                    // Orphan recovery must locate authenticated blobs before rebuilding the object index.
+                    sqlite.execute(keys.tx,"INSERT OR IGNORE INTO pack_locations VALUES (?, ?, ?, ?)",
+                        [item.id,id,physical_offset,len(item.box)^+37])^
+                }
+                physical_offset = physical_offset+len(item.box)^+37
+            }
+            result = [*result,*[for (item in stored where not any([for (prior in result) prior.id == item.id])) item]]
+            continue
+        }
+        if (len(entry.name)^ == 71 and ends_with(entry.name,".object")^) {
+            let id = hex.unhex(slice(entry.name,0,64)^)^
+            let stored = wire.decode(disk.capture(keys.objects,entry.name,wire.maximum)^.bytes)^
+            if (stored.id != id or filename(id)^ != entry.name) raise error("sync repository: noncanonical object name")
+            authenticated(keys,stored)^
+            if (not any([for (prior in result) prior.id == id])) { result = [*result,stored] }
+            continue
+        }
+        raise error("sync repository: unexpected repository entry")
+    }
+    if (keys.tx != null) {
+        for (row in sqlite.query(keys.tx,"SELECT o.id, o.kind, o.box FROM pack_pending p JOIN objects o ON p.id = o.id")^) {
+            let item = {id:row[0],kind:row[1],box:row[2]}
+            authenticated(keys,item)^
+            if (not any([for (prior in result) prior.id == item.id])) { result = [*result,item] }
+        }
     }
     return result
 }
+
 pub pn rebuild_index(tx, keys) any^ {
     let stored = records(keys)^
+    sqlite.execute(tx,"DELETE FROM pack_locations")^
+    for (entry in disk.entries(keys.objects,"",100000)^ where ends_with(entry.name,".pack")^) {
+        let id = slice(entry.name,0,64)^
+        if (len(sqlite.query(tx,"SELECT pack FROM pack_obsolete WHERE pack = ?",[id])^)^ > 0) { continue }
+        let bytes = disk.capture(keys.objects,entry.name,pack.maximum)^.bytes
+        let n = wire.decode_u32(bytes,len(bytes)^-4)^
+        let locations = pack.index(keys,slice(bytes,len(bytes)^-n-4)^,len(bytes)^)^
+        for (location in locations) {
+            sqlite.execute(tx,"INSERT OR REPLACE INTO pack_locations VALUES (?, ?, ?, ?)",
+                [location.id,id,location.offset,location.length])^
+        }
+    }
     sqlite.execute(tx,"DELETE FROM objects")^
     var i = 0
     while (i < len(stored)) {
@@ -360,7 +427,7 @@ pub pn verify(tx, keys, evicted=[], removing=[]) any^ {
             raise error("sync repository: locator index mismatch")
         if (item.kind == "manifest" and not contains(removing,item.id)^) {
             let value = decode(keys,item)^
-            availability(tx,keys,blob.reference(item.id,value.size,value.hash)^,evicted)^
+            availability(tx,keys,blob.reference(item.id,value.size,value.hash)^,evicted,false)^
         }
         i = i+1
     }

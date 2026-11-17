@@ -134,10 +134,42 @@ pub pn upsert(store, prefix, root, id, value, depth=0) any^ {
         *slice(node.children,selected+1)^]
     return concat(store,prefix,children)^
 }
+pn update_many(store, prefix, root, entries, depth=0) any^ {
+    if (len(entries)^ == 0) { return root }
+    if (depth > 64) raise error("sync pages: invalid update")
+    if (root == null) { return build(store,prefix,entries)^ }
+    let node = read(store,prefix,root)^
+    if (node.kind == 'leaf') {
+        if (len([for (entry in entries where v.lookup(node.entries,entry.id)^ != entry) entry]) == 0) { return root }
+        let replacements = map([for (entry in entries) (entry.id,entry)])
+        return build(store,prefix,[*[for (entry in node.entries where replacements[entry.id] == null) entry],*entries])^
+    }
+    var children = []
+    var changed = false
+    // Route the whole batch through each affected page once, retaining untouched subtrees.
+    for (index in 0 to (len(node.children)^-1)) {
+        let child = node.children[index]
+        let selected = [for (entry in entries where
+            (index == 0 or entry.id > node.children[index-1].last) and
+            (index == len(node.children)^-1 or entry.id <= child.last)) entry]
+        let next = update_many(store,prefix,child,selected,depth+1)^
+        if (next == child) { children = [*children,child] }
+        else {
+            changed = true
+            let replacement = read(store,prefix,next)^
+            children = [*children,*if (replacement.kind == 'branch') replacement.children else [next]]
+        }
+    }
+    return if (changed) concat(store,prefix,children)^ else root
+}
 pub pn upsert_many(store, prefix, root, entries) any^ {
-    var result = root
-    for (entry in ordered(entries)^) { result = upsert(store,prefix,result,entry.id,entry.value)^ }
-    return result
+    // Match sequential upserts: repeated keys keep their final value.
+    var unique_entries = {}
+    for (entry in ordered(entries)^) {
+        if (not (entry.id is string) or len(entry.id)^ == 0) raise error("sync pages: invalid update")
+        unique_entries = {*:unique_entries,[entry.id]:entry}
+    }
+    return update_many(store,prefix,root,ordered([for (key at unique_entries) unique_entries[key]])^ )^
 }
 pub pn page(store, prefix, root, cursor=null, limit=64) any^ {
     if (not v.natural(limit)^ or limit < 1 or limit > 128) raise error("sync pages: invalid limit")

@@ -4114,7 +4114,7 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
         "progress", "progress_ms", NULL};
     static const char* const fetch_options[] = {"method", "body", "headers", "timeout", "user_agent",
         "follow_redirects", "verify_tls", "max_bytes", "to", "resume", "progress", "progress_ms", NULL};
-    static const char* const disk_read_options[] = {"state", "token", "block_bytes", "max_bytes", NULL};
+    static const char* const disk_read_options[] = {"state", "token", "block_bytes", "max_bytes", "offset", "length", NULL};
     static const char* const hash_stream_options[] = {"state", "size", NULL};
     static const char* const disk_write_options[] = {"state", "expected", "size", "hash", NULL};
     static const char* const physics_options[] = {"steps", "sample_every", "bodies", "commands", NULL};

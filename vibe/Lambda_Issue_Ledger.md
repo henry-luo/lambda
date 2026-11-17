@@ -17,6 +17,33 @@
 > Semantic and design rulings are cited by `S#` / `D#` per CLAUDE.md rule 17;
 > where no formal ruling covers a point, the vibe ledger ID is given.
 
+
+
+## HTTP debug/error logs can expose signed URL queries — 2026-11-17
+
+**Status:** Open; the trusted local S3 integration avoids capability URLs in
+HTTP requests. Remote-function clients still pass presigned URLs to `io.fetch`.
+The input target logger's `rdb_redact_uri` masks password fields but not arbitrary
+query credentials, and `fetch_error` can include the full URL. Signed S3 query
+parameters can therefore appear in debug/error logs. Fix requires a shared URL
+redaction policy across the Lambda and lambda-input owners; it is not resolved
+by changing the logging configuration (D11.1.2). Never copy credentials or
+signed URLs into issue evidence.
+
+## HTTP header map allocation fails after large sync capture — 2026-11-17
+
+**Status:** Investigating. After a 1 MiB random-file capture, both a direct and
+background `io.fetch` to the local S3 backend return code 309 while constructing
+the response headers. The same request succeeds in a fresh process. Reproducer:
+`temp/wasabi-integration/http-after-scan.ls`; test data and credentials are
+isolated. The diagnostic release build confirmed that the shared shape tree rejects
+the first header transition after capture; whether the graph or per-node fanout
+limit was reached has not been distinguished. The old fetch code
+incorrectly reported that as out-of-memory. The fix uses the existing private
+shape fallback and copies temporary header names into its owning pool. Build and
+regression verification are in progress; see [the sync checkpoint](impl/Lambda_Impl_Sync_Wasabi_Demo.md).
+Runtime map shapes and precise roots follow D3.4.3 and D6.3.
+
 ## Invalid select timeout silently disables the deadline — 2026-11-17
 
 **Status:** FIXED in the working tree; AUTO/interpreter/JIT regression checks pass.
@@ -2731,3 +2758,19 @@ u64 key passed through a function with a default parameter. The divergence
 therefore sits in the city's composition of these (`block_buildings` →
 `parcel` → `building` → `pick_style`), not in the primitives. Repro:
 `temp/openroad/style_jit.ls` prints the first twelve buildings' styles.
+## Repeated parse retains Input arenas during long-running sync — 2026-11-17
+
+**Status:** OPEN. Authority: **D5.2.5** (Input pool ownership), **D11.1.2**
+(host IO). `fn_parse2` returns an Input-owned tree from InputManager; the
+manager reuses a per-thread pool and registers each Input until cleanup.
+Sync codec decode repeatedly invokes JSON/Mark parse and canonical re-encoding,
+including repeated reads of immutable index pages. Unreachable script results
+therefore do not imply reclamation of these parser allocations by script GC.
+
+Release minimal reproducer: `temp/wasabi-integration/_parse_retention.ls` parses
+the same 78,892-byte JSON array once or 100 times. Peak RSS is 29,212,672 or
+52,822,016 bytes respectively. This is a demonstrated retention path, not an
+attribution of all multi-GiB sync memory. Sync batch index updates reduce repeated
+page decoding; parser lifetime and bounded decoding remain unresolved. Do not
+free the Input while its returned Item can remain reachable. Details and further
+profiling targets: [sync performance investigation](impl/Lambda_Impl_Sync_Wasabi_Demo.md#file-count-versus-byte-count-investigation--2026-11-17).

@@ -9,6 +9,8 @@ import connectivity: .connectivity
 import local: .local
 import owner: .task_owner
 import timing: .timing
+import cloud: .cloud
+import cloud_local: .cloud_local
 
 pn watch_events(watch, parent) any^ {
     while (true) {
@@ -77,6 +79,22 @@ pn incoming(listener, directory, key, handle, credentials, parent, options) any^
             worker:child,direction:'incoming',result:result})^
     }
 }
+// Cloud network waits happen outside the repository owner; each repository transaction is serialized.
+pn cloud_worker(handle, credentials, storage, parent) any^ {
+    while (true) {
+        receive()^
+        let result = cloud_local.connect(storage,credentials) ^ { ^ }
+        if (result is error) { send(parent,{type:'cloud_done',failed:true,code:result.code})^; continue }
+        let config = result^
+        let synced = cloud.synchronize(handle,credentials,config) ^ { ^ }
+        if (synced is error) { send(parent,{type:'cloud_done',failed:true,code:synced.code})^; continue }
+        let installed = agent.materialize(handle) ^ { ^ }
+        if (installed is error) { send(parent,{type:'cloud_done',failed:true,code:installed.code})^; continue }
+        let current = local.status(handle)^.state
+        send(parent,{type:'cloud_done',failed:false,saved:cloud.covered(current,cloud.provider(config)^)^,
+            token:exchange.token(current)^})^
+    }
+}
 fn update_peer(peers, id, value) => [for (item in peers) if (item.id == id) {*:item,*:value} else item]
 fn merge_paths(old, fresh) any^ => unique([*old,*fresh])^
 pn report(options, value) any^ {
@@ -84,8 +102,8 @@ pn report(options, value) any^ {
     if (options.observer != null) options.observer(value)^
     return value
 }
-pub pn run(directory, key, options) any^ {
-    let initial = agent.resume_agent(directory,key)^
+pub pn run(directory, key, options, storage=null) any^ {
+    let initial = agent.resume_agent(directory,key,true)^
     let root = local.status(initial.handle)^.state.root
     // Register first so external writes racing inventory remain queued by the OS.
     let watch = disk.watch(root)^
@@ -103,6 +121,10 @@ pub pn run(directory, key, options) any^ {
     let timer = start(batch_timer,[me])
     let browser = start(discovery,[initial.credentials,me])
     let receiver = start(incoming,[listener,directory,key,handle,initial.credentials,me,options])
+    let cloud_task = if (storage == null) null else start(cloud_worker,[handle,initial.credentials,storage,me])
+    var cloud_busy = false
+    var cloud_token = null
+    var next_cloud = 0
     let workers = [for (member in initial.credentials.members)
         {id:member.id,task:start(outgoing,[directory,key,handle,initial.credentials,member,me,options])}]
     var peers = [for (worker in workers) {*:worker,url:null,busy:false,delivered:null,retry_at:0}]
@@ -117,7 +139,7 @@ pub pn run(directory, key, options) any^ {
     var token = first_token
     var turns = 0
     var current = {phase:'discovering',connected:false,transport:'offline',peer:null,
-        sessions:0,attempts:0,retries:0,error_code:null,fallback_reason:null,cloud_saved:false,
+        sessions:0,attempts:0,retries:0,error_code:null,fallback_reason:null,cloud_saved:false,cloud_enabled:storage != null,
         advertising:not (advertisement is error),discovery_error:if (advertisement is error) advertisement.code else null,
         capabilities:connectivity.capabilities()^,progress:null,monitor:'os',scans:1,
         incremental_scans:0,watch_events:0,connections:0,active_connections:0,rounds:0}
@@ -128,7 +150,7 @@ pub pn run(directory, key, options) any^ {
         if (event.type == 'monitor_error') raise event.failure
         if (event.type == 'tick') { send(ticker,true)^; turns = turns+1 }
         else if (event.type == 'filesystem') {
-            current = {*:current,watch_events:current.watch_events+1}
+            current = {*:current,watch_events:current.watch_events+1,cloud_saved:false}
             if (batch_started == null) { batch_started = timing.milliseconds() }
             full = full or event.rescan
             pending_paths = if (full) [] else merge_paths(pending_paths,event.paths)^
@@ -142,13 +164,19 @@ pub pn run(directory, key, options) any^ {
                 {*:item,url:url,delivered:if (url != item.url) null else item.delivered}
             }]
             send(browser,true)^
+        } else if (event.type == 'cloud_done') {
+            cloud_busy = false; next_cloud = timing.milliseconds()+options.cloud_ms
+            token = exchange.current_token(handle)^
+            cloud_token = if (not event.failed and event.saved) event.token else null
+            current = {*:current,cloud_saved:cloud_token != null and token == cloud_token,
+                *:if (not event.failed) {error_code:null,fallback_reason:null} else {error_code:event.code,fallback_reason:"cloud backup unavailable"}}
         } else if (event.type == 'connected') {
             sessions = [*sessions,{worker:event.worker,peer:event.peer,role:event.role,profile:event.profile}]
             current = {*:current,connected:true,phase:'syncing',peer:event.peer,connections:current.connections+1}
         } else if (event.type == 'round') {
             peers = update_peer(peers,event.peer,{delivered:event.token})
             token = exchange.current_token(handle)^
-            current = {*:current,transport:'peer',phase:'idle',peer:event.peer,sessions:current.sessions+1,
+            current = {*:current,cloud_saved:current.cloud_saved and token == cloud_token,transport:'peer',phase:'idle',peer:event.peer,sessions:current.sessions+1,
                 rounds:current.rounds+1,error_code:null,fallback_reason:event.warning,progress:event.progress,
                 installation:event.installation,review:event.review,installed_frontier:event.installed_frontier}
         } else if (event.type == 'ended') {
@@ -191,7 +219,8 @@ pub pn run(directory, key, options) any^ {
                 if (full) { next_verify = timing.milliseconds()+options.verify_ms }
                 full = false; pending_paths = []; batch_started = null; scan_retry_at = 0
                 token = exchange.current_token(handle)^
-                current = {*:current,captured_frontier:token.clock}
+                current = {*:current,captured_frontier:token.clock,
+                    cloud_saved:if (storage == null) false else current.cloud_saved and token == cloud_token}
                 captured_this_turn = true
             }
         }
@@ -200,6 +229,9 @@ pub pn run(directory, key, options) any^ {
             send(item.task,{url:item.url})^
             peers = update_peer(peers,item.id,{busy:true})
             current = {*:current,phase:'connecting',peer:item.id,attempts:current.attempts+1}
+        }
+        if (cloud_task != null and not cloud_busy and timing.milliseconds() >= next_cloud) {
+            send(cloud_task,true)^; cloud_busy = true
         }
         let due = if (batch_started == null) null else max(batch_due,scan_retry_at)
         if (due != armed_at) { send(timer,{at:due})^; armed_at = due }
@@ -212,8 +244,8 @@ pub pn run(directory, key, options) any^ {
         if (event.type != 'tick' or turns%10 == 0 or captured_this_turn) report(options,current)^
         if (options.stop_after > 0 and current.sessions >= options.stop_after) { break }
     }
-    for (task in [watcher,ticker,timer,browser,receiver,*[for (worker in workers) worker.task]]) { cancel(task) }
-    for (task in [watcher,ticker,timer,browser,receiver,*[for (worker in workers) worker.task]]) { wait(task) ^ { null } }
+    for (task in [watcher,ticker,timer,browser,receiver,*if (cloud_task == null) [] else [cloud_task],*[for (worker in workers) worker.task]]) { cancel(task) }
+    for (task in [watcher,ticker,timer,browser,receiver,*if (cloud_task == null) [] else [cloud_task],*[for (worker in workers) worker.task]]) { wait(task) ^ { null } }
     send(broker,{stop:true})^
     wait(broker)^
     disk.unwatch(watch)^

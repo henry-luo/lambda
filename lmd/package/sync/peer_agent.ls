@@ -46,18 +46,18 @@ pub pn revoke(directory, wrapping_key, id) any^ {
     identity.update(directory,wrapping_key,(current)=> identity.revoke(current,id))^
     return true
 }
-pub pn open_agent(directory, wrapping_key) any^ {
+pub pn open_agent(directory, wrapping_key, cache_enabled=false) any^ {
     let credentials = identity.load(directory,wrapping_key)^
-    let handle = local.open_repository(directory ++ "/repo.sqlite",credentials.secret,credentials.space)^
+    let handle = local.open_repository(directory ++ "/repo.sqlite",credentials.secret,credentials.space,cache_enabled)^
     return {handle:handle,credentials:credentials}
 }
 // resume a durable install before scanning; a raced install keeps its recovery capture.
-pub pn resume_agent(directory, wrapping_key) any^ {
-    let opened = open_agent(directory,wrapping_key)^
+pub pn resume_agent(directory, wrapping_key, cache_enabled=false) any^ {
+    let opened = open_agent(directory,wrapping_key,cache_enabled)^
     let pending = resume_installation(opened.handle)^
     if (pending.state.installation != null)
         raise error("Sync needs review of an interrupted installation. Local files and recovery versions are preserved.")
-    return opened
+    return {*:opened,handle:local.with_cache(opened.handle,pending)}
 }
 pub pn resume_installation(handle) any^ {
     if (handle.keys.owner != null and handle.keys.owner != self()) {

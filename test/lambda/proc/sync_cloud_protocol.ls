@@ -13,8 +13,10 @@ pn call(store, credentials, kind, body, issued=moment) any^ {
 pn main() {
     let area = "temp/sync-cloud-protocol-" ++ string(sys.proc.self.pid#)
     io.mkdir(area)^
-    let store = fixture.create(area ++ "/store.sqlite")^
-    let a = identity.create("cloud-protocol",crypto.key()^)^
+    // Optional isolated S3 runs exercise the same protocol and negative cases.
+    let storage = sys.proc.self.env#.LAMBDA_CLOUD_TEST_STORAGE_FILE
+    let store = if (storage == null) fixture.create(area ++ "/store.sqlite")^ else s3.adapter(input(storage,'json')^)
+    let a = identity.create(if (storage == null) "cloud-protocol" else "cloud-protocol-" ++ uuid()^,crypto.key()^)^
     let b = identity.create(a.space,a.secret)^
     let stranger = identity.create(a.space,a.secret)^
     let signed = schema.signed(a.seed,"lambda-cloud-control-1",{version:1,space:a.space,owner:a.device,generation:1,
@@ -45,7 +47,7 @@ pn main() {
     let incomplete = schema.signed(a.seed,"lambda-cloud-publication-1",{*:body,receipts:[schema.digest("missing")^]})^
     let rejected = call(store,a,"commit",{publication:incomplete,expected:committed.etag}) ^ { ^ }
     let forged = call(store,a,"commit",{publication:{*:next,signature:b'00'},expected:committed.etag}) ^ { ^ }
-    let read = call(fixture.adapter(area ++ "/store.sqlite"),b,"pull",{})^
+    let read = call(store,b,"pull",{})^
     let revoked = schema.signed(a.seed,"lambda-cloud-control-1",{*:signed.body,generation:2,
         members:[{device:a.device,active:true},{device:b.device,active:false}]})^
     let changed = call(store,a,"membership",{control:revoked,expected:read.control_etag})^
