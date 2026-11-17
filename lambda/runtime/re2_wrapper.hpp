@@ -112,8 +112,8 @@ TypePattern* runtime_pattern_from_type(Type* type);
 
 // A runtime map shape for builtin results (find's {value, index}, io.grep's
 // records): the given fields in order. It lives in the execution pool and is
-// never registered in a module type list (D8.3.5). `names` must be static.
-TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int count);
+// never registered in a module type list (D8.3.5). Set copy_names for transient names.
+TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int count, bool copy_names = false);
 
 /**
  * Find all non-overlapping matches of pattern in string.

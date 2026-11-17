@@ -862,6 +862,14 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_disk_read_stream", PROFILE_FILE_IO_FPTR(pn_io_disk_read_stream), NULL, NULL, false, 0},
     {SYSPROC_IO_DISK_WRITE_STREAM, "io_disk_write_stream", 4, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_disk_write_stream", PROFILE_FILE_IO_FPTR(pn_io_disk_write_stream), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_SPOOL, "io_disk_spool", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_spool", PROFILE_FILE_IO_FPTR(pn_io_disk_spool), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_SPOOL_WRITE, "io_disk_spool_write", 2, &TYPE_INT, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_spool_write", PROFILE_FILE_IO_FPTR(pn_io_disk_spool_write), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_SPOOL_READ, "io_disk_spool_read", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_spool_read", PROFILE_FILE_IO_FPTR(pn_io_disk_spool_read), NULL, NULL, false, 0},
+    {SYSPROC_IO_DISK_SPOOL_PUBLISH, "io_disk_spool_publish", 2, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_disk_spool_publish", PROFILE_FILE_IO_FPTR(pn_io_disk_spool_publish), NULL, NULL, false, 0},
     {SYSPROC_IO_DISK_WATCH, "io_disk_watch", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_disk_watch", PROFILE_SQLITE_FPTR(pn_io_disk_watch), NULL, NULL, false, 0, true},
     {SYSPROC_IO_DISK_CHANGES, "io_disk_changes", 2, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
@@ -4119,7 +4127,7 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
         "progress", "progress_ms", NULL};
     static const char* const fetch_options[] = {"method", "body", "headers", "timeout", "user_agent",
         "follow_redirects", "verify_tls", "max_bytes", "to", "resume", "progress", "progress_ms", NULL};
-    static const char* const disk_read_options[] = {"state", "token", "block_bytes", "max_bytes", NULL};
+    static const char* const disk_read_options[] = {"state", "token", "block_bytes", "max_bytes", "offset", "length", NULL};
     static const char* const hash_stream_options[] = {"state", "size", NULL};
     static const char* const disk_write_options[] = {"state", "expected", "size", "hash", NULL};
     static const char* const physics_options[] = {"steps", "sample_every", "bodies", "commands", NULL};

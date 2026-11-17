@@ -167,7 +167,7 @@ const char radiant_dom_interface_decl[] =
     "    remove_attribute_ns: pn(a0: any, a1: any) any, remove_attribute: pn(a0: any) any,\n"
     "    toggle_attribute: pn(a0: any, a1: any) any, has_attribute: fn(a0: any) any,\n"
     "    set_pointer_capture: pn(id: any) any, release_pointer_capture: pn(id: any) any, has_pointer_capture: fn(id: any) bool,\n"
-    "    get_attribute_names: fn() any, matches: fn(a0: any) any,\n"
+    "    get_attribute_names: fn() any, has_attributes: fn() bool, matches: fn(a0: any) any,\n"
     "    webkit_matches_selector: fn(a0: any) any, ms_matches_selector: fn(a0: any) any,\n"
     "    query_selector: fn(a0: any) any, query_selector_all: fn(a0: any) any,\n"
     "    closest: fn(a0: any) any, get_elements_by_tag_name: fn(a0: any) any,\n"

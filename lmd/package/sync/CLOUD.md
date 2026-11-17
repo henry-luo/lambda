@@ -254,8 +254,9 @@ The function sees encrypted data; only the owner client can authorize promotion
 
 ## Bounds and verification
 
-Function requests are at most 128 KiB; responses at most 1 MiB. Objects and
-checkpoint envelopes are bounded to 8 MiB; each publication references at most
+Function requests are at most 128 KiB; responses at most 1 MiB. Physical packs
+are bounded to 32 MiB, targeting 16 MiB. Logical chunks are at most 8 MiB;
+checkpoint envelopes retain the 8 MiB bound. Each publication references at most
 8,191 repository objects plus its bundle in legacy catalog v1. Catalog v2 uses
 immutable 64-entry/32-child metadata pages and signed receipt roots, with up to
 65,536 repository object paths plus the bundle per publication. Individual
@@ -263,6 +264,19 @@ workspace/checkpoint envelopes still have the 8 MiB bound. File contents use
 streamed chunk manifests; existing codec/repository metadata limits apply. Upload restarts operate at object granularity. Saved history has paged
 ancestry; aggregate publication inventories and individual
 endpoints retain these bounds and are never silently truncated.
+
+Ordinary catalog-v2 publication groups independently encrypted records into
+binary `LPK1` packs. Checkpoint payload v5 carries the logical-ID-to-physical-key
+mapping inside its encryption; the signed receipt tree binds all physical pack
+keys and the bundle. A receiver validates both bindings and the pack's encrypted
+offset index before importing authenticated records. It reads each physical pack
+once per selected batch. Cache pins retain one key per logical ID, including
+repeated keys when several IDs share one pack. Pruning treats a referenced pack
+as a physical dependency; it must not remove it while any retained publication
+or reservation uses it (D11.2.1–D11.2.4). Maintenance normally reuses retained
+packs; legacy replacement paths can still write individual binary records.
+Legacy catalog-v1 and payload v1–v4 remain readable. All participating writers
+must update to read the new chunk profile and v5 payloads.
 
 Focused fixtures are `sync_cloud_crypto`, `sync_cloud_protocol` and
 `sync_cloud_repository`. The [process gate](../../../test/sync_cloud/test_cloud.py)

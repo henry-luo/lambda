@@ -6163,6 +6163,78 @@ TEST_F(RadiantDocumentTest, DetachedFontDiscoveryDeliversCachedFacesAfterTheHost
     EXPECT_EQ(document->resource_manager->ui_context, &ui);
 }
 
+TEST_F(RadiantDocumentTest, HasAttributesTracksLiveHtmlAndNamespacedAttributes) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><div id=result></div><script>
+        const element=document.createElement('div'), notes=[];
+        const method=Element.prototype.hasAttributes;
+        notes.push(typeof method==='function',method.length===0,!element.hasAttributes());
+        element.expando=1; notes.push(!element.hasAttributes());
+        element.setAttribute('data-empty',''); notes.push(element.hasAttributes());
+        element.removeAttribute('data-empty'); notes.push(!element.hasAttributes());
+        element.id='live'; notes.push(element.hasAttributes());
+        element.removeAttribute('id'); notes.push(!element.hasAttributes());
+        const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+        notes.push(!svg.hasAttributes());
+        svg.setAttributeNS('http://www.w3.org/1999/xlink','xlink:href','#target');
+        notes.push(svg.hasAttributes());
+        svg.removeAttributeNS('http://www.w3.org/1999/xlink','href');
+        notes.push(!svg.hasAttributes());
+        const template=document.createElement('template');
+        template.innerHTML='<span data-marker=""></span><!--part-->';
+        const walker=document.createTreeWalker(template.content,129);
+        notes.push(walker.nextNode().hasAttributes(),walker.nextNode().nodeType===8);
+        for(const invalid of [document,document.createTextNode('text'),{}]) {
+            let rejected=false; try{method.call(invalid)}catch(e){rejected=e instanceof TypeError}
+            notes.push(rejected);
+        }
+        document.getElementById('result').setAttribute('data-checks',notes.join(','));
+    </script>)HTML");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-checks"),
+        "true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true");
+}
+
+TEST_F(RadiantDocumentTest, ImportedFragmentUpgradesNestedCustomElementsBeforePropertyBinding) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><div id=result></div><script>
+        let constructed=0,connected=0,disconnected=0;
+        class Probe extends HTMLElement {
+            constructor(){super();this.state=new Map();constructed++}
+            set value(v){this.state.set('value',v)}
+            get value(){return this.state.get('value')}
+            connectedCallback(){connected++}
+            disconnectedCallback(){disconnected++}
+        }
+        customElements.define('import-probe',Probe);
+        const template=document.createElement('template');
+        template.innerHTML='<section><import-probe></import-probe><div><import-probe></import-probe></div></section>';
+        const notes=[constructed===0];
+        const empty=document.importNode(template.content,false);
+        notes.push(empty.childNodes.length===0,constructed===0);
+        notes.push(document.importNode(document.createTextNode('kept'),true).data==='kept',
+            document.importNode(document.createComment('anchor'),false).data==='anchor');
+        const fragment=document.importNode(template.content,true);
+        notes.push(constructed===2,connected===0,disconnected===0);
+        const first=fragment.querySelector('import-probe'); first.value='bound';
+        notes.push(first.value==='bound',first instanceof Probe,!first.isConnected);
+        const section=fragment.firstChild; document.body.appendChild(fragment);
+        queueMicrotask(()=>{
+            notes.push(constructed===2,connected===2,first.isConnected,first.value==='bound');
+            section.remove();
+            queueMicrotask(()=>{
+                notes.push(constructed===2,disconnected===2,!first.isConnected);
+                document.getElementById('result').setAttribute('data-checks',notes.join(','));
+            });
+        });
+    </script>)HTML");
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-checks"),
+        "true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true");
+}
+
 TEST_F(RadiantDocumentTest, FetchPreloadRetainsBytesWithoutImageDecodingOrScriptExecution) {
     ASSERT_NE(load_script_source(R"HTML(<link rel="preload" as="fetch"
         href="https://example.test/preload.js"><div id="result"></div>)HTML"), nullptr);
@@ -8393,6 +8465,7 @@ TEST_F(RadiantDocumentTest, BaseReplacementPreservesTheLoadersUrlCarrier) {
     Url* source = url_parse_path_or_url("test/html/layout_base_url_lifetime.html", base);
     url_destroy(base);
     ASSERT_NE(source, nullptr);
+    lam::Temp<char> original_url(mem_strdup(url_get_href(source), MEM_CAT_TEMP));
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
     DocumentJsHostConfig host = {}; host.ui_context = &ui;
@@ -8405,10 +8478,100 @@ TEST_F(RadiantDocumentTest, BaseReplacementPreservesTheLoadersUrlCarrier) {
     // the CLI retains this carrier until its separate cleanup after DOM retirement.
     ASSERT_EQ(loaded_url, source);
     ASSERT_EQ(document->input->url, source);
-    EXPECT_STREQ(url_get_href(source), "file:///");
+    EXPECT_STREQ(url_get_href(source), original_url.get());
+    Url* resource_base = dom_document_resolve_url(document);
+    ASSERT_NE(resource_base, nullptr);
+    EXPECT_STREQ(url_get_href(resource_base), "file:///");
+    url_destroy(resource_base);
     ui.document = lam::up(document);
     layout_html_doc(&ui, document, false);
     expect_box("result", 0, 0, 40, 20);
+}
+
+TEST_F(RadiantDocumentTest, HtmlBaseResolvesResourcesWithoutChangingDocumentIdentity) {
+    create_dir("temp/base-url-controls");
+    create_dir("temp/base-url-controls/assets");
+    write_text_file("temp/base-url-controls/assets/entry.css",
+        "body{margin:0}#result{width:37px;height:23px;background:#12ab34}#picture{display:block}");
+    write_text_file("temp/base-url-controls/assets/entry.js",
+        "document.getElementById('result').setAttribute('data-script','loaded');");
+    write_text_file("temp/base-url-controls/assets/value.js", "export const value='loaded';");
+    write_text_file("temp/base-url-controls/assets/image.svg",
+        "<svg xmlns='http://www.w3.org/2000/svg' width='7' height='9'><rect width='7' height='9' fill='blue'/></svg>");
+    Url* cwd = get_current_dir();
+    ASSERT_NE(cwd, nullptr);
+    Url* original = url_parse_path_or_url("test/html/navigation.html", cwd);
+    Url* assets = url_parse_path_or_url("temp/base-url-controls/assets/", cwd);
+    url_destroy(cwd);
+    ASSERT_NE(original, nullptr);
+    ASSERT_NE(assets, nullptr);
+    const char* hrefs[] = {"../../temp/base-url-controls/assets/", url_get_href(assets),
+        "", "data:text/plain,ignored", "javascript:ignored", "http://[invalid"};
+    for (size_t index = 0; index < sizeof(hrefs) / sizeof(*hrefs); index++) {
+        SCOPED_TRACE(hrefs[index]);
+        if (document) { ui.document = nullptr; free_document(document); document = nullptr; }
+        const char* expected_base = url_get_href(index < 2 ? assets : original);
+        Url* target = url_parse_with_base("target.html", index < 2 ? assets : original);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><head><base target='_blank'><template><base href='file:///inert/'></template>"
+            "<base id=base href=\"%s\"><base href='file:///later/'>"
+            "<link rel=stylesheet href=\"%sentry.css\"></head><body>"
+            "<div id=result><img id=picture src=\"%simage.svg\"></div><a id=link href=target.html></a>"
+            "<script src=\"%sentry.js\" defer></script>"
+            "<script type=module>import {value} from '%svalue.js';"
+            "document.getElementById('result').setAttribute('data-module',value);</script>"
+            "<script>document.getElementById('result').setAttribute('data-urls',"
+            "[document.URL===\"%s\",location.href===\"%s\",document.baseURI===\"%s\","
+            "document.getElementById('link').href===\"%s\"].join(','));</script></body>",
+            hrefs[index], index < 2 ? "" : url_get_href(assets),
+            index < 2 ? "" : url_get_href(assets), index < 2 ? "" : url_get_href(assets),
+            index < 2 ? "./" : url_get_href(assets), url_get_href(original), url_get_href(original),
+            expected_base, url_get_href(target));
+        char fixture[160];
+        str_fmt(fixture, sizeof(fixture), "temp/base-url-controls/case-%zu.html", index);
+        write_text_file(fixture, source->str);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        EXPECT_STREQ(result->get_attribute("data-urls"), "true,true,true,true");
+        EXPECT_STREQ(result->get_attribute("data-script"), "loaded");
+        EXPECT_STREQ(result->get_attribute("data-module"), "loaded");
+        EXPECT_STREQ(url_get_href(document->url), url_get_href(original));
+        expect_box("result", 0, 0, 37, 23);
+        expect_box("picture", 0, 0, 7, 9);
+        url_destroy(target);
+    }
+    url_destroy(assets);
+    url_destroy(original);
+}
+
+TEST_F(RadiantDocumentTest, TemplateMetadataIsInertAndForeignElementsStayActive) {
+    create_dir("temp/base-url-controls");
+    create_dir("temp/base-url-controls/assets");
+    write_text_file("temp/base-url-controls/assets/inert.css",
+        "#result{background:red!important}");
+    write_text_file("temp/base-url-controls/assets/inert.js", "globalThis.inertExternal=true;");
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><head><template>
+        <link rel=stylesheet href=../../temp/base-url-controls/assets/inert.css>
+        <style>#result{background:red!important}</style>
+        <script>globalThis.inertInline=true;</script>
+        <script src=../../temp/base-url-controls/assets/inert.js></script>
+        </template><style>body{margin:0}#result{width:37px;height:23px;background:green}</style>
+        </head><body><div id=result></div><svg width=0 height=0><template>
+        <style>#result{color:rgb(1,2,3)}</style><script>globalThis.foreignRan=true;</script>
+        </template></svg><script>
+        const result=document.getElementById('result'),style=getComputedStyle(result);
+        result.setAttribute('data-checks',[globalThis.inertInline===undefined,
+            globalThis.inertExternal===undefined,globalThis.foreignRan===true,
+            style.backgroundColor==='rgb(0, 128, 0)',style.color==='rgb(1, 2, 3)',
+            document.styleSheets.length===2].join(','));
+        </script></body>)HTML");
+    write_text_file("temp/base-url-controls/inert-case.html", source->str);
+    DomElement* result = layout_script_source(source);
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-checks"), "true,true,true,true,true,true");
+    expect_box("result", 0, 0, 37, 23);
 }
 
 TEST_F(RadiantDocumentTest, ResponsiveImageMinimaRetainBoxAndAuthoredFloors) {
@@ -9220,6 +9383,47 @@ TEST_F(RadiantDocumentTest, ZoomedListBulletsShareTextTransformsAndScrollClippin
     for (unsigned y=20;y<60;y++) for (unsigned x=20;x<100;x++) {
         const uint8_t* pixel=(const uint8_t*)ui.surface->pixels+y*ui.surface->pitch+x*4;
         EXPECT_FALSE(pixel[0]>180 && pixel[1]<40 && pixel[2]>180) << x << "," << y;
+    }
+}
+
+TEST_F(RadiantDocumentTest, FinalGridPercentageHeightsRemainDefiniteForNestedFlexImages) {
+    for (const char* maximum : {"100%", "calc(100%)", "var(--cap)"})
+    for (const char* percent : {"100%", "50%", "calc(50% + 165px)"}) {
+        SCOPED_TRACE(percent);
+        SCOPED_TRACE(maximum);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0;--cap:100%%}#result{display:grid;grid-template-columns:300px 300px}"
+            "#left{height:330px}#outer{width:100%%;height:%s;aspect-ratio:1;overflow:hidden}"
+            "#flex{display:flex;width:100%%;height:100%%;align-items:flex-end;justify-content:flex-end}"
+            "#item{height:100%%}#image{display:block;width:100%%;height:100%%;max-width:%s;object-fit:cover}"
+            "</style><div id=result><div id=left></div><div id=outer><div id=flex><div id=item>"
+            "<img id=image src=\"data:image/svg+xml,%%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300'%%3E%%3Cpath d='M0 0H200V300H0Z' fill='orange'/%%3E%%3C/svg%%3E\">"
+            "</div></div></div></div>", percent, maximum);
+        DomElement* result = layout_script_source(source,1200,800);
+        ASSERT_NE(result,nullptr);
+        DomElement* left = dom_find_element_by_id(result,"left");
+        DomElement* image = dom_find_element_by_id(result,"image");
+        DomElement* outer = dom_find_element_by_id(result,"outer");
+        ASSERT_NE(left,nullptr); ASSERT_NE(image,nullptr); ASSERT_NE(outer,nullptr);
+        const struct State { float height, column_width; } states[] = {
+            {330,300},{450,300},{360,300},{330,300},{330,150},{330,300}};
+        for (const State& state : states) {
+            float height = state.height;
+            SCOPED_TRACE(height);
+            SCOPED_TRACE(state.column_width);
+            char value[32]; str_fmt(value,sizeof(value),"%gpx",height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(left,"height",value));
+            str_fmt(value,sizeof(value),"300px %gpx",state.column_width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result,"grid-template-columns",value));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float expected = strcmp(percent,"100%") == 0 ? height
+                : height * 0.5f + (percent[0] == 'c' ? 165.0f : 0.0f);
+            EXPECT_NEAR(outer->height,expected,0.05f);
+            EXPECT_NEAR(image->height,expected,0.05f);
+            EXPECT_NEAR(image->width,fminf(expected * (2.0f/3.0f),state.column_width),0.05f);
+        }
+        ui.document = nullptr; free_document(document); document = nullptr;
     }
 }
 
@@ -15556,6 +15760,50 @@ TEST_F(RadiantDocumentTest, ImagePercentagesUseAutomaticContainingBlocksUsedWidt
         EXPECT_NEAR(element->x, zero ? 0.0f : 10.0f, 0.1f) << id;
         EXPECT_NEAR(element->width, zero ? 0.0f : 380.0f, 0.1f) << id;
         EXPECT_NEAR(element->height, zero ? 0.0f : 125.928f, 0.1f) << id;
+    }
+}
+
+TEST_F(RadiantDocumentTest, FontFamilyVariablesExpandWithinListsAndPreserveInvalidFallbacks) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source, R"HTML(<!doctype html><style>
+        @font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}
+        body{margin:0}#result{font:20px/20px serif;--faces:"Ahem","Arial"}
+        span{display:inline-block}
+        #literal{font-family:Ahem,monospace}#whole{font-family:var(--faces)}
+        #list{font-family:var(--faces),monospace}
+        #fallback{font-family:var(--missing,"Ahem"),monospace}
+        #after{font-family:missing-face,var(--faces),monospace}
+        #invalid{font-family:var(--missing),Ahem}
+        </style><div id=result>
+        <div id=literal><span id=literal-text>XXXXX</span></div>
+        <div id=whole><span id=whole-text>XXXXX</span></div>
+        <div id=list><span id=list-text>XXXXX</span></div>
+        <div id=fallback><span id=fallback-text>XXXXX</span></div>
+        <div id=after><span id=after-text>XXXXX</span></div>
+        <div id=invalid><span id=invalid-text>XXXXX</span></div>
+        <div><span id=serif-text>XXXXX</span></div></div>)HTML");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    const char* cases[] = {"literal-text", "whole-text", "list-text", "fallback-text", "after-text"};
+    for (const char* id : cases) {
+        DomElement* text = dom_find_element_by_id(document->root, id);
+        ASSERT_NE(text, nullptr);
+        EXPECT_FLOAT_EQ(text->width, 100.0f) << id;
+    }
+    DomElement* invalid = dom_find_element_by_id(document->root, "invalid-text");
+    DomElement* serif = dom_find_element_by_id(document->root, "serif-text");
+    ASSERT_TRUE(invalid && serif);
+    EXPECT_FLOAT_EQ(invalid->width, serif->width);
+    EXPECT_NE(serif->width, 100.0f);
+    DomElement* result = dom_find_element_by_id(document->root, "result");
+    ASSERT_NE(result, nullptr);
+    ASSERT_TRUE(dom_cssom_set_inline_property(result, "--faces", "monospace"));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    ASSERT_TRUE(dom_cssom_set_inline_property(result, "--faces", "\"Ahem\",\"Arial\""));
+    ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+    for (const char* id : cases) {
+        DomElement* text = dom_find_element_by_id(document->root, id);
+        ASSERT_NE(text, nullptr);
+        EXPECT_FLOAT_EQ(text->width, 100.0f) << id;
     }
 }
 

@@ -36,12 +36,14 @@ fn scalar_values(value, depth=0) any^ {
     if (value is map) { return [for (key at value) *[*scalar_values(key,depth+1)^,*scalar_values(value[key],depth+1)^]] }
     let tag = string(type(value))
     if (not contains(scalars,tag)^) raise error("sync codec: unsupported value type")
-    // Finite int53 spellings are exact; poison retains the lossless round-trip check (S4.1.1, S4.2.2).
-    return if (contains(["null","bool","u64"],tag)^ or
+    // Binary hex is exact for every byte; numeric poison keeps the lossless check (S4.1.1, S4.2.2).
+    return if (contains(["null","bool","u64","binary"],tag)^ or
         (tag == "int" and value >= -9007199254740991 and value <= 9007199254740991)) [] else [value]
 }
 fn validate_scalars(value) any^ {
     let originals = scalar_values(value)^
+    // exact primitive tuples need no Mark round-trip or retained Input arena.
+    if (len(originals)^ == 0) { return true }
     // one parsed document per value avoids one retained Input arena per scalar.
     let decoded = parse(format(originals,'mark')^,'mark')^
     if (not (decoded is array) or len(decoded)^ != len(originals)^)
@@ -76,6 +78,7 @@ fn scalar_tuples(tuple, depth=0) any^ {
 }
 fn decoded_scalars(tuple) any^ {
     let selected = scalar_tuples(tuple)^
+    if (len(selected)^ == 0) { return {} }
     let values = parse("[" ++ join([for (item in selected) item[1]],",")^ ++ "]",'mark')^
     if (not (values is array) or len(values)^ != len(selected)^) raise error("sync codec: invalid scalar literal")
     var result = {}

@@ -163,10 +163,29 @@ candidates remain bounded to 8,192 and history traversal to 65,536 pages.
 Ancestry, arrival and retirement metadata remain retained under existing envelope
 bounds; this phase does not implement metadata epoch retirement or
 unlimited histories. Catalog v2 retains active ciphertext paths across cuts; only
-the audit upgrade requires a complete fresh copy. Packing, broader throughput
+the audit upgrade requires a complete fresh copy. Broader throughput
 tuning, fine sharing/key rotation, browser/GUI wiring and hosted deployment
 qualification remain separate work.
 
 Implementation, exact qualification and residue:
 [retention milestone](<../../../vibe/impl/Lambda_Impl_Sync_Retention (done).md>) and
 [recovery/scale milestone](<../../../vibe/impl/Lambda_Impl_Sync_Recovery_Scale (done).md>).
+
+## Packed physical storage
+
+Authority: D11.1.2, D11.2.1–D11.2.4. Logical retention continues to select
+object IDs independently of storage layout. Local pruning batches removals per
+pack, writes its retained members to a new immutable pack, commits new locators,
+then permits predecessor deletion in a subsequent repository scope. Interrupted
+cleanup leaves extra bytes for recovery, not missing committed data. Rebuild and
+recovery can rediscover unreachable bytes; they do not recreate forgotten user
+history references.
+
+Cloud dependencies and cache pins identify physical pack keys, while encrypted
+checkpoints map logical IDs to those packs. A shared pack remains protected while
+any selected history or cache reservation needs it. Ordinary maintenance reuses
+retained packs whole, so dead members of a shared cloud pack are not immediately
+reclaimed. The audited fresh-generation replacement path rewrites the retained
+logical graph, allowing old shared packs to be reaped; legacy replacement paths
+can emit individual binary records. This physical-granularity limit must not be
+described as immediate per-blob cloud erasure.

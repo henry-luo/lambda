@@ -13,6 +13,8 @@ import retention: .maintenance_state
 import codec: .codec
 import v: .schema
 import hex: lambda.security.tuf.metadata
+import objects: .cloud_objects
+import wire: .object_wire
 import inventory_pages: .cloud_inventory
 
 fn jobs(current) => if (current.cloud_jobs == null) [] else current.cloud_jobs
@@ -51,7 +53,7 @@ pub pn prepare(handle, credentials, config, audit=null) any^ {
     let have = local.inventory(handle)^
     let pinned = unique([for (pin in remote.pins) for (id in pin.objects) hex.unhex(id)^])
     for (id in pinned where not contains(have,id)^) {
-        let record = codec.decode(transport.read(config,credentials,pin_key(remote,id)^)^)^
+        let record = objects.select(repo.keys(credentials.secret,credentials.space)^,transport.read(config,credentials,pin_key(remote,id)^)^,id)^
         if (record.id != id) raise error("sync cloud: cache reservation object mismatch")
         local.import_objects(handle,[record])^
     }
@@ -101,12 +103,12 @@ pub pn step(handle, credentials, config, budget=32) any^ {
     if (not started.committed) {
         for (offset in range(job.next,end,1)) {
             let id = job.payload.ids[offset]
-            let encoded = codec.encode(local.export_objects(handle,[id])^[0])^
+            let encoded = wire.encode(local.export_objects(handle,[id])^[0])^
             let key = bundle.object_key(id,job.plan.epoch)^
             let copied = transport.ensure(config,credentials,transport.descriptor(key,encoded)^,encoded)^
             if (copied.existing != null) {
                 if (not copied.existing.ok) raise error("sync cloud: replacement copy unavailable")
-                let existing = codec.decode(copied.existing.body)^
+                let existing = objects.select(repo.keys(credentials.secret,credentials.space)^,copied.existing.body,id)^
                 if (existing.id != id) raise error("sync cloud: replacement copy mismatch")
                 local.import_objects(handle,[existing])^
             }
@@ -142,7 +144,9 @@ pub pn step(handle, credentials, config, budget=32) any^ {
 pub fn pin_keys(remote) any^ => unique([for (pin in remote.pins) for (key in
     (if (pin.keys == null) [for (id in pin.objects) catalog.data_key("objects",id,remote.epoch or 0)^] else pin.keys)) key])
 pub fn pin_key(remote, id) any^ {
-    let found = [for (key in pin_keys(remote)^ where ends_with(key,"/" ++ hex.hex(id)^)^) key]
+    let found = [for (pin in remote.pins) for (index in 0 to (len(pin.objects)^-1)
+        where pin.objects[index] == hex.hex(id)^) (if (pin.keys == null)
+            catalog.data_key("objects",pin.objects[index],remote.epoch or 0)^ else pin.keys[index])]
     if (len(found)^ == 0) raise error("sync cloud: pinned physical copy unavailable")
     return found[0]
 }
@@ -179,10 +183,10 @@ pn step_paged(handle, credentials, config, job, budget) any^ {
         var copied = task.copied
         for (entry in slice(task.payload.locations,task.next,end)^) {
             if (catalog.epoch(entry.key)^ == task.plan.epoch) {
-                let encoded = codec.encode(local.export_objects(handle,[entry.id])^[0])^
+                let encoded = wire.encode(local.export_objects(handle,[entry.id])^[0])^
                 let stored = transport.ensure(config,credentials,transport.descriptor(entry.key,encoded)^,encoded)^
                 if (stored.existing != null) {
-                    let existing = if (stored.existing.ok) codec.decode(stored.existing.body)^ else null
+                    let existing = if (stored.existing.ok) objects.select(repo.keys(credentials.secret,credentials.space)^,stored.existing.body,entry.id)^ else null
                     if (existing == null or existing.id != entry.id) raise error("sync cloud: replacement copy unavailable")
                     local.import_objects(handle,[existing])^
                 }

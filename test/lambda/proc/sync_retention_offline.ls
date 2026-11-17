@@ -6,6 +6,7 @@ import core: lambda.sync.core
 import workspace: lambda.sync.workspace
 import helpers: ~~.mod_sync_local_helpers
 import crypto: lambda.io.crypto
+import packs: lambda.sync.pack_store
 
 pn main() {
     let area = "temp/sync-retention-offline-" ++ string(sys.proc.self.pid#)
@@ -29,6 +30,7 @@ pn main() {
     local.scan(a)^
     let orphan = repo.access(a.path,a.keys,pn (tx,k)=> {
         repo.store_object(tx,k,"snapshot",{version:1,label:"unpublished recovery",workspace:core.snapshot(middle.endpoint.replica)^})^
+        packs.flush(tx,k)^
         raise error("interrupt before publishing the recovery root")
     }) ^ { ^ }
     maintenance.configure(a,retention.daily("UTC",0,1000))^

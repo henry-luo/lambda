@@ -776,28 +776,26 @@ static Map* fetch_headers_map(char** lines, int count, const char* type_name, co
         if (type_name && type_value) put(type_name, strlen(type_name), type_value, strlen(type_value));
     }
     Map* result = NULL;
-    Input* tree = runtime_shape_tree();
-    TypeMap* shape = NULL;
-    if (names && values && tree) {
+    TypeId* types = (TypeId*)mem_calloc((size_t)(used > 0 ? used : 1), sizeof(TypeId), MEM_CAT_EVAL);
+    if (names && values && types) {
         RootSpan span((size_t)(used > 0 ? used : 1));
         Item* slots = span.items();
         bool ok = span.valid();
         for (int i = 0; ok && i < used; i++) {
-            shape = type_tree_add_map_field_chars(tree, shape, names[i], (uint32_t)strlen(names[i]),
-                LMD_TYPE_STRING, NULL);
+            types[i] = LMD_TYPE_STRING;
+            if (!names[i] || !values[i]) { ok = false; break; }
             String* text = heap_strcpy(values[i], (int64_t)strlen(values[i]));
-            if (!shape || !text) ok = false;
+            if (!text) ok = false;
             else slots[i] = (Item){.item = s2it(text)};
         }
-        if (ok && used == 0) {
-            shape = context && context->pool
-                ? (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap)) : NULL;
-        }
-        if (ok && shape) {
+        // The shared builder falls back to a private shape when the shape graph is full.
+        TypeMap* shape = ok ? runtime_result_shape((const char* const*)names, types, used, true) : NULL;
+        if (shape) {
             result = map_alloc_for_type(shape, 0);
             if (result && used > 0) map_fill_items(result, slots, used);
         }
     }
+    mem_free(types);
     for (int i = 0; i < used; i++) { mem_free(names[i]); mem_free(values[i]); }
     mem_free(names);
     mem_free(values);

@@ -72,7 +72,7 @@ pn replica_dependencies(tx, keys, replica, seen=[], depth=0, retired=[], source=
             v.descriptor(reference)^
             if (not contains(checked,reference)^) {
                 let complete = if (contains(verified,reference)^) true else
-                    repo.availability(tx,keys,reference,group.evicted)^.complete
+                    repo.availability(tx,keys,reference,group.evicted,false)^.complete
                 if (complete) { checked = [*checked,reference] }
             }
         }
@@ -103,10 +103,18 @@ fn installed_packets(current, peer_clock=null) any^ {
             c.clock_meet(current.base.checkpoint.frontier,peer_clock)^)^ else endpoint
 }
 
-pub pn open_repository(path, secret, space) any^ {
-    let handle = {path:path,keys:repo.keys(secret,space)^,writer:uuid()^}
-    status(handle)^
-    return handle
+pub fn with_cache(handle, observed) => if (observed.repository_cache == null) handle else
+    {*:handle,keys:{*:handle.keys,cached_head:observed.repository_cache}}
+
+pub pn open_repository(path, secret, space, cache_enabled=false) any^ {
+    let handle = {path:path,keys:{*:repo.keys(secret,space)^,cache_enabled:cache_enabled},writer:uuid()^}
+    var loaded = status(handle)^
+    if (loaded.state.chunker == chunks.legacy_profile) {
+        // Only future captures change profile; manifests retain every existing chunk boundary.
+        loaded = mutate(with_cache(handle,loaded),pn (tx,k,value)=> { return {*:value,chunker:chunks.default_profile} })^
+    }
+    // reuse is still gated by the authenticated head's generation and immutable ID on every access.
+    return with_cache(handle,loaded)
 }
 
 pub pn create(path, secret, space, root, device, config=chunks.default_profile) any^ {
@@ -252,7 +260,7 @@ pub pn materialize(handle, max_steps=1000) any^ {
     var active = handle
     let prepared = prepare_install(active)^
     if (prepared.state.installation == null or max_steps == 0) { return prepared }
-    if (prepared.repository_cache != null) { active = {*:active,keys:{*:active.keys,cached_head:prepared.repository_cache}} }
+    active = with_cache(active,prepared)
     return advance_install(active,max_steps)^
 }
 
@@ -283,6 +291,9 @@ pub pn missing_objects(handle, ids) any^ {
 }
 pub pn export_objects(handle, ids) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> { return repo.export_objects(tx,k,ids)^ })^
+}
+pub pn export_pack(handle, ids) any^ {
+    return repo.access(handle.path,handle.keys,pn (tx,k)=> { return repo.export_pack(tx,k,ids)^ })^
 }
 pub pn import_objects(handle, records) any^ {
     repo.access(handle.path,handle.keys,pn (tx,k)=> {
@@ -510,7 +521,7 @@ pub pn record_cloud(handle, provider, actor, sequence, publication, captured, ob
 pub pn cloud_locations(handle, provider, ids) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> {
         let current = repo.load(tx,k)^.state
-        return [for (id in ids) {id:id,key:locations.lookup(tx,k,current,provider,id)^}]
+        return locations.lookup_many(tx,k,current,provider,ids)^
     })^
 }
 pub pn incoming_hot_chunks(handle, saved, document_roots=[]) any^ {
@@ -540,7 +551,7 @@ pub pn register_snapshots(handle, ids) any^ {
     })^
 }
 
-pub pn record_cloud_control(handle, provider, generation, digest) any^ {
+pub pn record_cloud_control(handle, provider, generation, digest, backup=null) any^ {
     if (not v.actor(provider)^ or not v.actor(digest)^ or not v.natural(generation)^ or generation < 1)
         raise error("sync local: invalid cloud control")
     return mutate(handle,pn (tx,k,current)=> {
@@ -549,8 +560,10 @@ pub pn record_cloud_control(handle, provider, generation, digest) any^ {
         if (len(seen) > 0 and (generation < seen[0].generation or
             (generation == seen[0].generation and digest != seen[0].digest)))
             raise error("sync local: cloud control rollback/fork")
-        return {*:current,cloud_controls:[*[for (item in old where item.provider != provider) item],
+        let next = {*:current,cloud_controls:[*[for (item in old where item.provider != provider) item],
             {provider:provider,generation:generation,digest:digest}]}
+        // one authenticated pull observation needs one durable local state publication.
+        return with_catalog_backup(next,provider,backup)
     })^
 }
 
@@ -605,7 +618,11 @@ pub pn shared_inventory(handle) any^ {
 pub pn record_catalog_backup(handle, provider, id) any^ {
     if (id == null) { return true }
     return mutate(handle,pn (tx,k,current)=> {
-        let old = if (current.cloud_catalogs == null) [] else current.cloud_catalogs
-        return {*:current,cloud_catalogs:[*[for (entry in old where entry.id != provider) entry],{id:provider,snapshot:id}]}
+        return with_catalog_backup(current,provider,id)
     })^
+}
+fn with_catalog_backup(current, provider, id) {
+    if (id == null) { return current }
+    let old = if (current.cloud_catalogs == null) [] else current.cloud_catalogs
+    return {*:current,cloud_catalogs:[*[for (entry in old where entry.id != provider) entry],{id:provider,snapshot:id}]}
 }

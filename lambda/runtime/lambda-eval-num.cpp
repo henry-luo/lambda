@@ -1706,6 +1706,8 @@ static int format_native_numeric_scalar(Item item, char* buffer, size_t capacity
 
 Item fn_binary(Item item) {
     GUARD_ERROR1(item);
+    RootFrame argument_roots(1);
+    Rooted<Item> held_argument(argument_roots, item);
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_BINARY) {
         return item;

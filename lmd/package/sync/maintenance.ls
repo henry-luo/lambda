@@ -231,7 +231,7 @@ pub pn restore_file(handle, entry, id) any^ {
             if (len(matching) == 0) raise error("sync history: saved editing endpoint unavailable")
             return {document:revision.document.document,version:matching[0].id}
         }
-        let payload = repo.availability(tx,k,revision.content,reach.cache_ids(current))^
+        let payload = repo.availability(tx,k,revision.content,reach.cache_ids(current),false)^
         if (not payload.complete) raise error("sync cache: hydrate retained history before restoring")
         return {document:null,content:revision.content}
     })^

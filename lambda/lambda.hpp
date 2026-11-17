@@ -414,6 +414,7 @@ typedef enum SysFunc {
     SYSPROC_IO_DISK_READ_STREAM,
     SYSPROC_IO_DISK_WRITE_STREAM,
     SYSPROC_IO_CRYPTO_HASH_STREAM,
+    SYSPROC_IO_DISK_SPOOL, SYSPROC_IO_DISK_SPOOL_WRITE, SYSPROC_IO_DISK_SPOOL_READ, SYSPROC_IO_DISK_SPOOL_PUBLISH,
     SYSPROC_IO_RTC_CAPABILITIES, SYSPROC_IO_RTC_CREATE, SYSPROC_IO_RTC_DESCRIPTION,
     SYSPROC_IO_RTC_REMOTE, SYSPROC_IO_RTC_SEND, SYSPROC_IO_RTC_RECEIVE, SYSPROC_IO_RTC_CLOSE,
     SYSPROC_IO_RTC_STATUS,
@@ -1473,6 +1474,10 @@ extern "C" {
     Item pn_io_crypto_hash_stream(Item options, Item producer);
     Item pn_io_disk_read_stream(Item root, Item relative, Item options, Item consumer);
     Item pn_io_disk_write_stream(Item root, Item relative, Item options, Item producer);
+    Item pn_io_disk_spool(Item root, Item limit, Item action);
+    Item pn_io_disk_spool_write(Item handle, Item bytes);
+    Item pn_io_disk_spool_read(Item handle, Item offset, Item length);
+    Item pn_io_disk_spool_publish(Item handle, Item suffix);
     Item pn_io_disk_erase(Item root, Item relative, Item expected);
     Item pn_io_disk_directory(Item root, Item relative);
     Item pn_io_disk_resolve(Item root);

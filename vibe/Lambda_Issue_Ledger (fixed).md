@@ -18,7 +18,7 @@
 
 ## Archive index
 
-This archive contains **319 anchored records**, preserving fixed, resolved,
+This archive contains **324 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -5163,3 +5163,113 @@ AUTO/interpreter/JIT. Exact-name discovery finds enrolled peers in the original
 stale-service environment; initial exchange and three-peer fan-out pass. No
 unrelated service registration was removed. See the linked implementation record
 for final source/binary identities and the native qualification scope.
+
+
+## Binary ByteStorage bytes are invisible to GC allocation pressure — 2026-11-17
+
+<a id="sync-binary-pressure"></a>
+
+**Status:** FIXED (2026-11-17). Authority:
+**D5.1.3**, **D5.2.1**, **D5.3.1** (allocation ownership and collection).
+
+`heap_binary_from_bytes()` allocates a native `ByteStorage` body, but
+`heap_binary_from_storage()` only adds the small descriptor to the GC heap.
+These paths do not charge backing bytes to external allocation pressure.
+Finalization frees the body, but dead binaries can accumulate without triggering
+a collection. Repeatedly concatenate a retained 1 MiB binary with itself and
+hash each result, retaining only the last digest: 1 versus 128 iterations takes
+31.7 versus 289.8 MiB peak RSS, with **zero GC collections in both runs** and
+`external_peak=0`. The container allocation peak rises to 256.1 MiB. Large-file
+streaming therefore does not bound pending dead-buffer memory. Account each
+physical backing allocation once, with precisely rooted preflight and correct
+shared-view release; do not charge each alias independently.
+Evidence: `temp/sync-memory-diagnosis/{_binary_pressure.ls,binary-pressure.json}`;
+[full diagnosis](impl/Lambda_Impl_Sync_Memory_Diagnosis.md).
+
+Follow-up closes the finalization question: OS heap inspection falls from
+271,170,000 to 4,848,208 allocated bytes after an explicit collection, but
+252 MiB remains resident in empty malloc regions. Finalizers release the dead
+storage; early pressure is needed to prevent the burst and cached high water.
+[Detailed evidence](impl/Lambda_Impl_Sync_Memory_Diagnosis.md#5-reclamation-and-os-residency-are-separate).
+
+**Resolution:** Physical backing leases now charge each heap admission once, before allocation at precisely rooted collection boundaries; aliases share the charge. Cross-thread release and heap teardown disarm the lease safely. The 128- and 1,024-body 2 MiB release reproducers both peak near 33.5 MiB, versus 288.4 MiB for the former before the fix. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+## Release build calls undeclared DOM document URL resolver — 2026-11-17
+
+<a id="sync-release-resolver"></a>
+
+**Status:** FIXED (2026-11-17). Authority:
+**D9.1.1v4** (owner build boundary).
+
+`make build-release-compile` reaches `lambda/dom/dom.cpp`, then fails at the two
+calls to undeclared `dom_document_resolve_url` (lines 1769 and 6140 in this tree).
+The second call also produces an `Item` to `Url*` conversion diagnostic from the
+suggested alternative name. No DOM source or sibling source was changed in the
+investigation. The existing release host is preserved. Build evidence:
+`temp/sync-memory-diagnosis/build.log`, `temp/build_split-runtime.log`.
+
+**Resolution:** Input exports the missing resource-base resolver and preserves the document URL carrier. Lambda uses the extracted source-identity API for inert templates. Normal and CLI release builds pass; 24 Input native cases pass. Input owner record: LI-072. The independent Radiant loader URL mutation is RI-107. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+## Runtime format result accumulates in the heap-lifetime pool — 2026-11-17
+
+<a id="sync-format-owner"></a>
+
+**Status:** FIXED (2026-11-17). Authority: **D5.1.5**
+(destination lifetime), **D5.2.5** (owner cleanup).
+
+`fn_format2()` calls `format_data_with_json_options()` with
+`context->heap->pool`, then copies its returned String into the GC heap. The
+pool copy and builder allocation remain until runtime teardown. Repeatedly
+formatting and discarding 64 one-MiB ASCII JSON strings retains **80 MiB of live
+pool allocations** inside **160.75 MiB reserved capacity**, despite eight
+automatic collections and a subsequent explicit collection. The hash result
+still matches an independent quoted-source expectation. In 80 MiB cloud
+publication, formatter counters account for **53.91 of 56.11 MiB** live runtime
+pool bytes; unchanged sync continues to add formatted results.
+Use the existing scoped formatter owner at the native return boundary, preserving
+rooted source/options and the lifetime through the GC copy. Do not free only the
+published GC string or change per-format wire semantics.
+[Evidence](impl/Lambda_Impl_Sync_Memory_Diagnosis.md#1-formatting-retains-a-second-result-outside-the-gc),
+[proposed P1](impl/Lambda_Impl_Sync_Memory_Tuning.md#p1--release-formatter-output-ownership-promptly).
+
+**Resolution:** The result formatter uses a scoped temporary pool held through the rooted GC copy. Sixty-four discarded 1 MiB formatted results add zero retained runtime-pool bytes; normal release peak falls from 110 MiB to about 45.7 MiB. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+## GC capacity telemetry omits retained regions — 2026-11-17
+
+<a id="sync-gc-capacity"></a>
+
+**Status:** FIXED (2026-11-17). Authority:
+**D5.2.1**, **D5.2.4**, **D5.3.1** (attribution and non-moving regions).
+
+`mem_factory_rt.cpp::heap_stat_fn()` assigns `gc->total_allocated` to both
+reserved and used bytes. This does not describe the committed object bump/slab
+regions or either data zone. A precise-root collection after repeated 80 MiB
+sync leaves about **2.28 MiB occupied** in **192.8 MiB committed GC regions**;
+context telemetry reports only the object allocation counter. Object regions
+and nursery overflow capacity remain retained. Correct attribution first, then
+reclaim wholly empty regions with free-list/range/page-index cleanup while
+preserving live object addresses. The collector capacity policy and report must
+not confuse OS reservation, commitment, occupancy and native external storage.
+[Evidence and proposal](impl/Lambda_Impl_Sync_Memory_Tuning.md).
+
+**Resolution:** Telemetry now distinguishes reserved, committed and used bytes. Collections release dead object regions and surplus data capacity, repairing free lists/ranges/caches first and preserving live object addresses. Fresh zero-backed VM regions avoid whole-extent prefaulting clears. The retained-host 5/25-round gate holds committed GC capacity at 16.23 MiB; overall OS footprint budgets are qualified separately. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).
+
+
+## Runtime-only CLI markup sources fail the current declaration boundary — 2026-11-17
+
+<a id="sync-cli-owner-build"></a>
+
+**Status:** FIXED (2026-11-17). Authority:
+**D9.1.1v4** (Input owner/build boundary).
+
+`make build-cli` fails while compiling Input-owned markup block sources,
+including `block_asciidoc.cpp` and `block_document.cpp`: `list_push` is undeclared
+and the compiler suggests `list_push_io`. The CLI manifest/API declaration
+boundary needs root-cause repair through the relevant owner. No macro alias,
+sibling source patch or masked build success was added. Evidence:
+`temp/sync-memory-detail/build-cli.log`, `temp/build_lambda-cli.log`.
+
+**Resolution:** CLI file rules select the existing static-value contract for Input-owned sources only; the generator preserves scoped variant rules. Shared core directory resolution includes the Input implementation rather than only Lambda compatibility headers. Clean CLI release and parser/codec smoke checks pass; generator regressions pass. See [implementation and qualification](impl/Lambda_Impl_Sync_Memory_Tuning.md#implementation-and-qualification--2026-11-17).

@@ -422,6 +422,8 @@ DOM_OP(DERIVED, get_element_by_id, query, 2, "fn(root: any, id: string) -> any",
        "first of [for (d in descendants(root) where node_type(d) == 1 and get_attribute(d, \"id\") == id) d]", html_element, "", "getElementById")
 DOM_OP(DERIVED, has_attribute,   attr, 2, "fn(n: any, name: string) -> bool", dom_fp_has_attribute, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "get_attribute(n, name) != null", html_element, "", "hasAttribute")
+DOM_OP(DERIVED, has_attributes,  attr, 1, "fn(n: any) -> bool", dom_fp_has_attributes, DOM_F_NEUTRAL | DOM_F_FASTPATH,
+       "len(attribute_names(n)) > 0", html_element, "", "hasAttributes")
 
 // --- 5.5 serialization
 DOM_OP(DERIVED, inner_html,      parse, 1, "fn(n: any) -> string", dom_fp_inner_html, DOM_F_NEUTRAL | DOM_F_FASTPATH,

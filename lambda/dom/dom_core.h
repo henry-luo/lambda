@@ -143,6 +143,7 @@ Item dom_core_closest(Item n, Item selector);
 Item dom_validity_state_flag(Item state, Item name);
 Item dom_core_get_element_by_id(Item n, Item id_item);
 Item dom_fp_has_attribute(Item n, Item name);
+Item dom_fp_has_attributes(Item n);
 Item dom_fp_inner_html(Item n);
 Item dom_fp_outer_html(Item n);
 

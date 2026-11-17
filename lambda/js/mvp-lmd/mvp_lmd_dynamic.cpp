@@ -551,6 +551,14 @@ Item mvp_lmd_dynamic_unwrap_function(Item function) {
         return function;
     return ((Item*)function.function->closure_env)[0];
 }
+static Item dynamic_public_receiver(Item value) {
+    // a class shell owns its static properties; its captured AST function is only the body.
+    if (get_type_id(value) == LMD_TYPE_FUNC &&
+            function_has_abi(value.function, FN_ENTRY_ABI_MVP_LMD) &&
+            value.function->requires_runtime_context && ((MvpLmdCallable*)value.function)->constructor)
+        return value;
+    return mvp_lmd_dynamic_unwrap_function(value);
+}
 bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
         int operation, Item* completion, JsPropertyDescriptor* descriptor) {
     if (!mvp_lmd_foreign_candidate(owner, true)) return false;
@@ -572,7 +580,7 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
     uint64_t home = 0, descriptor_home = 0;
     Rooted<Item> object(roots, mvp_lmd_dynamic_unwrap_function(owner)), name(roots, key),
         argument(roots, lambda_item_adopt_scalar_home(value, &home)),
-        target(roots, mvp_lmd_dynamic_unwrap_function(receiver)), result(roots, ItemNull),
+        target(roots, dynamic_public_receiver(receiver)), result(roots, ItemNull),
         getter(roots, descriptor ? descriptor->getter : ItemNull),
         setter(roots, descriptor ? descriptor->setter : ItemNull),
         data(roots, descriptor ? lambda_item_adopt_scalar_home(descriptor->value, &descriptor_home) : ItemNull);
@@ -687,7 +695,7 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
     case LMD_FOREIGN_GET_PROTOTYPE:
         result.set(js_get_prototype_of(object.get())); break;
     case LMD_FOREIGN_SET_PROTOTYPE:
-        result.set(js_reflect_set_prototype_of(object.get(), mvp_lmd_dynamic_unwrap_function(argument.get()))); break;
+        result.set(js_reflect_set_prototype_of(object.get(), dynamic_public_receiver(argument.get()))); break;
     case LMD_FOREIGN_EXTENSIBLE:
         result.set(js_reflect_is_extensible(object.get())); break;
     case LMD_FOREIGN_PREVENT:
@@ -874,7 +882,7 @@ Item mvp_lmd_dynamic_call_native(MvpLmdProgram* program, Item underlying, Item r
         js_fn_ast_script((JsFunction*)underlying.function) != NULL;
     // AST bodies observe the public receiver/newTarget, including an MVP class
     // shell. Native extension adapters alone need their underlying capabilities.
-    Rooted<Item> callee(roots, underlying), self(roots, ast ? receiver : mvp_lmd_dynamic_unwrap_function(receiver)),
+    Rooted<Item> callee(roots, underlying), self(roots, ast ? receiver : dynamic_public_receiver(receiver)),
         // class registration and native HTMLElement construction observe the public shell.
         new_target(roots, ast || mvp_lmd_class_record(target) ? target :
             mvp_lmd_dynamic_unwrap_function(target)), result(roots, ItemNull);

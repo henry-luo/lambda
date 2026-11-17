@@ -21,10 +21,10 @@ pub pn dependencies(tx, keys, record, cached=[]) any^ {
     let replicas = [record.endpoint.replica,record.origin.replica,
         record.session.base.replica,*if (record.prepared == null) [] else [record.prepared.saved.replica]]
     for (replica in replicas) {
-        for (reference in blob.required(replica)^) { repo.availability(tx,keys,reference)^ }
+        for (reference in blob.required(replica)^) { repo.availability(tx,keys,reference,[],false)^ }
     }
     for (saved in record.session.versions) {
-        for (reference in blob.required(saved.replica)^) { repo.availability(tx,keys,reference,cached)^ }
+        for (reference in blob.required(saved.replica)^) { repo.availability(tx,keys,reference,cached,false)^ }
     }
     return true
 }

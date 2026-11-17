@@ -15,7 +15,7 @@ pn main() {
     let before = local.status(b)^
     let prepared = local.prepare_install(b)^
     let journal = prepared.state.installation
-    let path = hex.hex(journal.source.state)^ ++ ".object"
+    let path = h.physical(b,journal.source.state)^
     let physical = disk.capture(b.keys.objects,path,8388608)^
     disk.erase(b.keys.objects,path,physical.token)^
     let reopened = local.open_repository(b.path,secret,"install-source")^

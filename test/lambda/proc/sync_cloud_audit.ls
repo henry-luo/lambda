@@ -13,8 +13,10 @@ pn call(store, credentials, kind, body) any^ {
 pn main() {
     let area = "temp/sync-cloud-audit-" ++ string(sys.proc.self.pid#)
     io.mkdir(area)^
-    let store = fixture.create(area ++ "/store.sqlite")^
-    let owner = identity.create("audit-test",crypto.key()^)^
+    // Exercise the same audit and recovery failures against an isolated S3 service.
+    let storage = sys.proc.self.env#.LAMBDA_CLOUD_TEST_STORAGE_FILE
+    let store = if (storage == null) fixture.create(area ++ "/store.sqlite")^ else s3.adapter(input(storage,'json')^)
+    let owner = identity.create(if (storage == null) "audit-test" else "audit-test-" ++ uuid()^,crypto.key()^)^
     let other = identity.create(owner.space,owner.secret)^
     let control = schema.signed(owner.seed,"lambda-cloud-control-1",{version:1,space:owner.space,
         owner:owner.device,generation:1,storage:"catalog-2",members:[{device:owner.device,active:true},{device:other.device,active:true}]})^

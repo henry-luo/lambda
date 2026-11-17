@@ -122,9 +122,10 @@ signature binds both public keys. Explicit invitation acceptance pins the invite
 discovery or learning an address grants no access. Enrollment offers use ephemeral
 X25519, HKDF-SHA256 and AES-256-GCM to carry the space key to the intended recipient,
 and P-256/SHA-256 to authenticate the whole offer. Private credentials are an authenticated
-encrypted row in `device.sqlite`. Enroll each device separately; copying this
-database clones its cryptographic identity. Membership mutations load the current row and
-write its replacement in the same SQLite scope; obsolete file snapshots cannot
+encrypted `credentials-<hash>.box` file; `device.sqlite` stores its current pointer.
+Enroll each device separately; copying both the database and credential files
+clones its cryptographic identity. Membership mutations load the current pointer,
+durably write a new envelope and commit its pointer in the same SQLite scope; obsolete file snapshots cannot
 blindly replace current membership. Cross-process writer contention is not qualified
 ([LI-015](../../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-015)); run
 administrative mutations sequentially. Contention and uncertain commits surface
@@ -266,8 +267,9 @@ Network success and successful filesystem installation are separate outcomes.
 ## Bounds and deferred work
 
 Hellos are bounded to 16 KiB; session records to 256 KiB. Inventory pages contain
-at most 64 IDs, object text fragments at most 32 KiB, and encoded objects at most
-8 MiB. Each connection pins at most 100,000 portable objects and 8,192 checkpoint
+at most 64 IDs, object fragments at most 32 KiB, and binary object envelopes at most
+16 MiB (including framing for an 8 MiB chunk). New fragments carry binary
+`LRP1` records; receivers also accept legacy typed-JSON text fragments. Each connection pins at most 100,000 portable objects and 8,192 checkpoint
 frames, with 100,000 server requests and 1,000,000 encrypted records per direction.
 Handshake waits use 15 seconds; record waits use 30 seconds. Existing repository,
 typed-codec, scan and metadata-frame limits also apply.

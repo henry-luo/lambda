@@ -97,6 +97,16 @@ Discovery refreshes every ten seconds; a changed/reappearing address requests
 catch-up. Verification also requests anti-entropy. Failed delivery retries after
 `retry_ms`; committed local changes remain in the repository until acknowledged.
 
+An optional trusted local cloud service uses the same signed cloud handler and
+S3 adapter in the agent process. A separate worker polls the bucket every
+`cloud_ms` (30 seconds by default); repository operations remain serialized by
+the same owner, while network waits do not hold its transaction (S12.4.4v4,
+S13.1.2v2, D11.1.2). The local host signs S3 transfers directly and does not pass
+presigned capability URLs to the HTTP logger. Every participating device needs
+its own trusted storage credentials. This mode does not require a hosted HTTP
+function and only operates while that device is running. `cloud_saved` covers
+the current token separately from peer delivery and pending installation.
+
 LAN status adds `monitor:'os'`, full/incremental scan counts, watcher-event counts,
 connection/round counts, active connections, negotiated channel role/profile,
 pending batches and peer availability.

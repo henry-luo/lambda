@@ -1251,7 +1251,7 @@ static String* make_heap_string(const char* src, size_t len) {
     return heap_strcpy(src, len);
 }
 
-TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int count) {
+TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int count, bool copy_names) {
     // Impl_Map_Transition_Coverage P3: every result map of one field list --
     // each regex match, each grep record -- shares the runtime tree's node for
     // it, found by following one edge per field from the root, instead of a
@@ -1266,14 +1266,18 @@ TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int
         }
         if (node && count > 0) return node;
     }
+    if (!context || !context->pool) return NULL;
     Pool* pool = context->pool;
     ShapeEntry* first = NULL;
     ShapeEntry* prev = NULL;
     int64_t byte_size = 0;
     for (int i = 0; i < count; i++) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
+        if (!entry) return NULL;
         StrView* name = (StrView*)((char*)entry + sizeof(ShapeEntry));
-        name->str = names[i];
+        // Private shapes outlive transient HTTP header buffers.
+        name->str = copy_names ? pool_strdup(pool, names[i]) : names[i];
+        if (!name->str) return NULL;
         name->length = strlen(names[i]);
         entry->name = name;
         shape_entry_set_type(entry, type_info[types[i]].type);
@@ -1284,6 +1288,7 @@ TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int
         prev = entry;
     }
     TypeMap* mt = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!mt) return NULL;
     mt->shape = first;
     mt->last = prev;
     mt->length = count;

@@ -585,7 +585,7 @@ class PremakeGenerator:
 
         # Override top-level keys if the variant specifies them
         overlay_keys = ['output', 'source_dirs', 'source_files', 'exclude_source_files',
-                        'includes', 'object_dir']
+                        'includes', 'object_dir', 'file_rules']
         for key in overlay_keys:
             if key in variant_config:
                 vlog(f"DEBUG: Variant override: {key} = {variant_config[key]}")
@@ -1506,6 +1506,21 @@ class PremakeGenerator:
             self._create_language_project(lib, source_files, source_patterns, dependencies,
                                           language, lib_name)
 
+    def _emit_file_rules(self, rules):
+        for rule in rules:
+            for pattern in rule['files']:
+                # Premake file filters match workspace-relative source paths.
+                if os.path.isabs(pattern):
+                    pattern = Path(os.path.relpath(pattern, Path(__file__).resolve().parent.parent)).as_posix()
+                self.premake_content.append(f'    filter {json.dumps("files:" + pattern)}')
+                for key, directive in (('defines', 'defines'), ('build_options', 'buildoptions'),
+                                       ('includes', 'includedirs')):
+                    values = rule.get(key, [])
+                    if values:
+                        self.premake_content.append(
+                            f'        {directive} {{ ' + ', '.join(json.dumps(v) for v in values) + ' }')
+        self.premake_content.append('    filter {}')
+
     def _create_language_project(self, lib: Dict[str, Any], source_files: List[str],
                                source_patterns: List[str], dependencies: List[str],
                                language: str, project_name: str) -> None:
@@ -2139,16 +2154,7 @@ class PremakeGenerator:
 
         if lib.get('optimize'):
             self.premake_content.append(f'    optimize "{lib["optimize"]}"')
-        for rule in lib.get('file_rules', []):
-            for pattern in rule['files']:
-                self.premake_content.append(f'    filter {json.dumps("files:" + pattern)}')
-                for key, directive in (('defines', 'defines'), ('build_options', 'buildoptions'),
-                                       ('includes', 'includedirs')):
-                    values = rule.get(key, [])
-                    if values:
-                        self.premake_content.append(
-                            f'        {directive} {{ ' + ', '.join(json.dumps(v) for v in values) + ' }')
-        self.premake_content.append('    filter {}')
+        self._emit_file_rules(lib.get("file_rules", []))
         self._emit_library_build_dependencies(self._executable_external_dependencies(lib))
 
         # Add macOS frameworks for library projects
@@ -4159,6 +4165,8 @@ class PremakeGenerator:
             '    ',
             ''
         ])
+
+        self._emit_file_rules(self.config.get("file_rules", []))
 
         # Memtrack poison enforcement: force-include lib/mem.h and define MEMTRACK_POISON_RAW_ALLOC
         # for lambda/ and radiant/ source files (not lib/ — which implements the allocator itself)

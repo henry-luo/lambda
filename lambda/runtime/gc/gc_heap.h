@@ -264,6 +264,8 @@ typedef struct gc_bump_block {
     // block's allocation sequence from its base, making every mark visit
     // O(slots-before-it) and each collection O(n^2) in live bump objects.
     // NULL only if its allocation failed; callers then fall back to the scan.
+    size_t live_slots;             // collection-only region liveness
+    bool retire;                   // removed from indexes before unmapping
     uint8_t* alloc_bits;
 } gc_bump_block_t;
 
@@ -436,6 +438,19 @@ gc_tune_stats_t gc_heap_get_tune_stats(const gc_heap_t* gc);
 // Snapshot counters for native payloads whose lifetime is owned by a
 // GC-traced wrapper. These counters never determine reachability.
 gc_external_stats_t gc_heap_get_external_stats(const gc_heap_t* gc);
+
+typedef struct gc_memory_stats {
+    size_t object_reserved;
+    size_t nursery_reserved;
+    size_t tenured_reserved;
+    size_t object_capacity; // committed VM plus requested large-object backing
+    size_t object_used;
+    size_t nursery_capacity;
+    size_t nursery_used;
+    size_t tenured_capacity;
+    size_t tenured_used;
+} gc_memory_stats_t;
+gc_memory_stats_t gc_heap_get_memory_stats(const gc_heap_t* gc);
 
 // A caller invokes preflight before a legal MAY_GC native allocation, then
 // records the successfully allocated payload. Release follows the physical

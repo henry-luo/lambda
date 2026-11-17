@@ -23,7 +23,6 @@ pub fn execute(replica, actor, commands) any^ {
         let command = commands[i]
         if (not contains(['create','move','delete','restore','publish'],command.kind)^)
             raise error("sync workspace: unknown command")
-        let events = tree.events(result)^
         var event = null
         if (command.kind == 'create') {
             v.record(command,["kind","type","parent","name"],["content","document","as","saved_at"])^
@@ -38,6 +37,8 @@ pub fn execute(replica, actor, commands) any^ {
             }
         } else {
             let entry = resolve(command.entry,aliases)^
+            // creates carry explicit parents/content and do not need a history projection.
+            let events = tree.events(result)^
             if (command.kind == 'move') {
                 v.record(command,["kind","entry"],["parent","name"])^
                 let entries = tree.placements(events)^.entries

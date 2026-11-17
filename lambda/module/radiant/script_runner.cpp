@@ -1473,8 +1473,13 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
  * source in document order. External source admission follows the complete
  * walk so independent requests can overlap before ordered consumption.
  */
-static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* collection, Url* base_url,
-                                      int depth) {
+static Url* script_document_base_url(DomDocument* document, Url* fallback) {
+    return document && document->url ? dom_document_resolve_url(document)
+        : fallback ? url_clone(fallback) : nullptr;
+}
+
+static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* collection,
+                                      DomElement* dom_root, Url* base_url, int depth) {
     if (!elem) return;
 
     // guard against stack overflow from deeply nested DOM (fuzzer-found): this
@@ -1488,6 +1493,14 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
     }
 
     collection->inline_event_handler_count += element_inline_event_handler_count(elem);
+    // the template element owns handlers, while its contents stay inert.
+    TypeElmt* source_type = (TypeElmt*)elem->type;
+    if (source_type && str_ieq_cstr(source_type->name.str, "template")) {
+        // source tags alone cannot distinguish inert HTML from active foreign elements.
+        DomElement* identity = dom_find_element_for_source(dom_root, elem);
+        if (identity && !strcmp(dom_element_namespace_uri(identity),
+                "http://www.w3.org/1999/xhtml")) return;
+    }
 
     // check for <body onload="...">
     if (is_body_element(elem)) {
@@ -1614,7 +1627,7 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
         Item child = elem->items[i];
         TypeId tid = get_type_id(child);
         if (tid == LMD_TYPE_ELEMENT) {
-            collect_scripts_recursive(child.element, collection, base_url, depth + 1);
+            collect_scripts_recursive(child.element, collection, dom_root, base_url, depth + 1);
         }
     }
 }
@@ -2095,7 +2108,9 @@ static void execute_document_written_scripts(void* context, DomElement* element)
     JsScriptTaskCollection written;
     if (!script_task_collection_init(&written)) return;
     written.resource_policy = doc->resource_policy;
-    collect_scripts_recursive(dom_element_to_element(element), &written, doc->url, 0);
+    Url* resource_base = script_document_base_url(doc, doc->url);
+    collect_scripts_recursive(dom_element_to_element(element), &written, doc->root, resource_base, 0);
+    if (resource_base) url_destroy(resource_base);
     load_external_script_sources(&written, doc->resource_manager, nullptr);
     JsScriptSchedulerQueues queues;
     if (script_scheduler_queues_init(&queues)) {
@@ -2475,7 +2490,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         return;
     }
     script_tasks.resource_policy = dom_doc->resource_policy;
-    collect_scripts_recursive(html_root, &script_tasks, base_url, 0);
+    Url* resource_base = script_document_base_url(dom_doc, base_url);
+    collect_scripts_recursive(html_root, &script_tasks, dom_doc->root, resource_base, 0);
+    if (resource_base) url_destroy(resource_base);
     prefetch_external_script_sources(&script_tasks, dom_doc->resource_manager, timing);
     load_external_script_sources(&script_tasks, dom_doc->resource_manager, timing);
     log_script_task_diagnostics(&script_tasks);
@@ -2545,12 +2562,13 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     runtime->dom_doc = (void*)dom_doc;
     runtime->resource_policy = dom_doc->resource_policy;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
-    const char* document_base_url = dom_doc->url ? url_get_href(dom_doc->url) :
-        (base_url ? url_get_href(base_url) : nullptr);
+    resource_base = script_document_base_url(dom_doc, base_url);
+    const char* document_base_url = resource_base ? url_get_href(resource_base) : nullptr;
     // history updates replace Url storage; module resolution retains the
     // document's original base in its document-lifetime pool (D5.5.1).
     runtime->js_document_base_url = document_base_url
         ? pool_strdup(dom_doc->document_pool, document_base_url) : nullptr;
+    if (resource_base) url_destroy(resource_base);
     // Browser documents use the AST executor throughout one DOM realm. This
     // avoids a throwaway parse merely to select a backend and keeps callbacks
     // on one closure ABI.
@@ -2590,7 +2608,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 
     // Initialize the JS event loop so setTimeout/setInterval timers are queued
     // rather than silently dropped. The loop is drained after script execution.
-    js_xhr_set_base_url(base_url ? url_get_href(base_url) : nullptr);
+    js_xhr_set_base_url(runtime->js_document_base_url);
     js_event_loop_init();
     // auto-close belongs to the bound document Runtime; applying it before
     // creation loses the setting and lets recursive page timers block layout.

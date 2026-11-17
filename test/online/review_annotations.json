@@ -1,5 +1,5 @@
 {
-  "reviewed_at": "2026-11-16T20:56:35.739011+00:00",
+  "reviewed_at": "2026-11-17T07:52:37.126041+00:00",
   "interpretation": "Manual major visual omissions retained independently of coarse image thresholds; root causes remain unconfirmed unless recorded in the issue ledgers.",
   "reviews": [
     {
@@ -190,6 +190,13 @@
       "label": "saas_landing_416",
       "url": "https://www.hellobonsai.com/reviews",
       "manual_major_remaining": "The live main heading and portrait cards remain absent. Saved-DOM card sizing is repaired; the independent live visibility cause remains unconfirmed."
+    },
+    {
+      "label": "unreal_docs",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine",
+      "manual_major_remaining": "Initial styles and documentation content are restored, but Lambda retains that document while preserved and freshly checked Chromium references show the application 403 route. Navigation/header and application state remain substantially different; the lower dark-background pixel score does not establish parity.",
+      "reviewed_at": "2026-11-17T07:52:37.126041+00:00",
+      "evidence": "comparison/repairs.html#round-62"
     }
   ]
 }

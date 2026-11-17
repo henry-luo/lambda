@@ -24,9 +24,8 @@ Existing files are captured into version history; the demo uses the real sync
 repository, rather than a disposable sample tree.
 
 If discovery fails, allow local-network/incoming connections for Lambda and
-check that the network permits devices to reach one another. No cloud function,
-S3 bucket, STUN service or WebRTC dependency preparation is needed for this LAN
-profile. Initial support is the native macOS host.
+check that the network permits devices to reach one another. No cloud function, S3 bucket, STUN service or WebRTC dependency preparation is
+needed for the LAN-only profile. Initial support is the native macOS host.
 
 The agent scans on startup to capture changes made while it was stopped, then
 uses OS directory notifications. It batches changes for about 50 ms, with a
@@ -35,6 +34,34 @@ delivery to online peers. Connections are reused for changes in either direction
 and close after ten quiet seconds. Startup/rediscovery exchanges catch up
 without a new filesystem event. Recovery and occasional verification retain full
 scans; receiving files also performs the captures needed for safe installation.
+
+## Optional cloud backup
+
+The demo can use its local stateless cloud handler with an S3-compatible bucket;
+no hosted function is required. The profile accepts `s3-endpoint`, `s3-bucket`,
+`s3-region`, `s3-access-key` and `s3-secret-key`. All five are required when
+cloud backup is enabled. The credentials in this profile are plaintext: keep the
+profile private and grant the storage account only the required bucket scope.
+Each device needs its own configuration and authorized storage credentials.
+
+The agent checks cloud approximately every 30 seconds while the window is open,
+and reports whether the current state is cloud-saved. Backup stores encrypted
+repository objects and version history; it is distinct from LAN delivery. A new
+paired device is added to cloud control by the cloud owner on its next check.
+Local peer revocation and cloud revocation remain separate operations (D11.2.3).
+New captures use 512 KiB minimum / roughly 1 MiB average / 8 MiB maximum
+content-defined chunks. Encrypted blobs are grouped into immutable pack files
+locally and during normal cloud publication. Existing snapshots remain readable;
+all devices need an updated executable/package set for the new profile and cloud
+payload. Upgrading the profile does not itself create a saved file version.
+Existing version-1 identities need explicit re-enrollment; old repositories and
+history remain intact. See [crypto transition](../../../lmd/package/sync/PEER.md#crypto-suite-transition).
+The migration helper stages a fresh agent and space, verifies its initial capture,
+and only then selects it in the profile; the old agent and history remain in
+their original directory. Existing legacy peers are not automatically migrated
+or re-paired, and the demo does not yet provide a relink flow for such profiles.
+A fresh profile can pair into the new space. The captured current files start a
+new history; the old snapshots are not imported (D11.2.3–D11.2.4).
 
 ## Identity and storage
 

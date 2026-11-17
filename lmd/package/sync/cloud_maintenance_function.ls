@@ -33,8 +33,17 @@ pn dependencies(store, prefix, publication) any^ {
     }
     return ordered
 }
-fn pin_record(id, actor, objects, keys) any^ => {id:id,actor:actor,objects:sort(unique(objects))^,
-    *:if (keys == null) {} else {keys:sort(unique(keys))^}}
+fn pin_key_for(object_id, objects, keys) any^ {
+    let found = unique([for (index in 0 to (len(objects)^-1) where objects[index] == object_id) keys[index]])^
+    if (len(found)^ != 1) raise error("sync cloud: ambiguous reserved physical key")
+    return found[0]
+}
+fn pin_record(id, actor, objects, keys) any^ {
+    let ordered = sort(unique(objects))^
+    // Multiple logical blobs can share a pack; keep the positional mapping and duplicate keys.
+    return {id:id,actor:actor,objects:ordered,
+        *:if (keys == null) {} else {keys:[for (object_id in ordered) pin_key_for(object_id,objects,keys)^]}}
+}
 pub pn handle(store, prefix, control, envelope, milliseconds) any^ {
     let kind = envelope.kind
     let body = envelope.body
@@ -88,7 +97,7 @@ pub pn handle(store, prefix, control, envelope, milliseconds) any^ {
             [for (id in body.objects) catalog.data_key("objects",id,value.epoch)^] else body.keys
         if (keys != null and (not (keys is array) or len(keys)^ != len(body.objects)^ or
             not all([for (index in 0 to (len(keys)^-1)) schema.data_key(keys[index])^ and
-                starts_with(keys[index],"objects/")^ and ends_with(keys[index],"/" ++ body.objects[index])^])))
+                starts_with(keys[index],"objects/")^])))
             raise error("sync cloud: invalid reserved physical keys")
         let pin = pin_record(body.id,envelope.actor,body.objects,keys)^
         if (old != null) {

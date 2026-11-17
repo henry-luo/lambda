@@ -40,12 +40,13 @@ pn accept_pair(listener, ticket, paths, value, key, notify) any^ {
 }
 pub pn host(paths, value, key, notify, lifetime_ms=120000) any^ {
     let saved = profile.create(paths,value,key)^
-    let credentials = identity.load(profile.directory(paths,value)^,key)^
+    let active = profile.active(paths,saved)
+    let credentials = identity.load(profile.directory(active,value)^,key)^
     let ticket = pairing.create(value,now().unix,lifetime_ms)^
     let listener = pairing.listen()^
     let advertisement = discovery.advertise(pairing.name(value,credentials.device)^,listener.port)^
     notify({type:"pairing",user:saved.user,code:pairing.display(ticket.code)^,deadline:ticket.deadline})^
-    let result = accept_pair(listener,ticket,paths,value,key,notify) ^ { ^ }
+    let result = accept_pair(listener,ticket,active,value,key,notify) ^ { ^ }
     discovery.close(advertisement) ^ { null }
     ws.close(listener) ^ { null }
     if (result is error) raise result
@@ -101,7 +102,9 @@ pub pn run(paths, key, notify, options={}) any^ {
     let saved = profile.load(paths)^
     if (saved == null) raise error("Create a sync folder or link this device first.")
     notify({type:"running",user:saved.user,folder:saved.folder})^
-    return connectivity.run(profile.directory(paths,saved.user)^,key,null,
+    let storage = profile.storage(saved)^
+    let active = profile.active(paths,saved)
+    return connectivity.run(profile.directory(active,saved.user)^,key,if (storage == null) null else {storage:storage},
         {*:{mdns:true,rtc:false},*:options},
         pn (status)=> { notify({type:"status",status:status})^ })^
 }

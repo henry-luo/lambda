@@ -498,6 +498,8 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
             strbuf_free(member_name);
         }
     }
+    // the image's code and BSS survive; compilation scratch ends before publication.
+    jit_seal_generated_context(satellite_context, &image->mir_gen_initialized);
     *out_image = image;
     return true;
 
@@ -1198,7 +1200,7 @@ void lambda_mvp_compile_script(Transpiler* tp, Script* script, const char* scrip
     // so the MIR IR is dead weight — release it, keeping only the executable
     // code. MIR-interp scripts keep their IR: there it IS the executable.
     if (tp->jit_context && tp->main_func && !use_mir_interp_for_script) {
-        jit_release_generated_ir(ctx);
+        jit_seal_generated_context(ctx, &tp->mir_gen_initialized);
     }
 
     if (out_mir_module_count) *out_mir_module_count = mir_module_count;

@@ -161,26 +161,8 @@ static const JubeModuleDef raster_module = {
     "type image_raster { r: any, g: any, b: any, a: any }\n", &raster_binding, 1
 };
 
-struct RasterByteAccounting {
-    void* token;
-    ByteStorageReleaseFn release;
-    void* context;
-};
-static void raster_release_bytes(void* data, size_t capacity, void* opaque) {
-    RasterByteAccounting* accounting = (RasterByteAccounting*)opaque;
-    heap_gc_external_record_release(accounting->token, capacity, GC_EXTERNAL_KIND_OTHER);
-    accounting->release(data, capacity, accounting->context);
-    mem_free(accounting);
-}
 static bool raster_track_bytes(ByteStorage* storage, void*) {
-    if (storage->release_data == raster_release_bytes) return true;
-    RasterByteAccounting* accounting = (RasterByteAccounting*)mem_alloc(sizeof(RasterByteAccounting), MEM_CAT_CONTAINER);
-    if (!accounting) return false;
-    // account shared backing once, until its last tile/span owner releases it (D5.1.4).
-    accounting->token = heap_gc_external_preflight(storage->capacity, GC_EXTERNAL_KIND_OTHER);
-    accounting->release = storage->release_data; accounting->context = storage->release_context;
-    heap_gc_external_record_alloc(accounting->token, storage->capacity, GC_EXTERNAL_KIND_OTHER);
-    storage->release_data = raster_release_bytes; storage->release_context = accounting;
+    if (!heap_track_byte_storage(storage, GC_EXTERNAL_KIND_OTHER)) return false;
     storage->flags |= BYTE_STORAGE_FLAG_READ_ONLY;
     return true;
 }

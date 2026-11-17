@@ -2,6 +2,7 @@
 #include "lib/host_paths.h"
 #include "lambda/io/mark_output_builder.hpp"
 #include "lambda/format/format.h"
+#include "lambda/format/format-utils.hpp"
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
@@ -6716,6 +6717,18 @@ Item fn_parse3(Item str_item, Item grammar_item, Item rule_item) {
     return fn_parse_grammar(str_item, grammar_item.type, rule_item);
 }
 
+static Item copy_parsed_value(Item value);
+
+class ScopedValueParse {
+    Pool* pool_;
+public:
+    Input* input;
+    ScopedValueParse() : pool_(pool_create()), input(pool_ ? Input::create(pool_) : NULL) {}
+    ~ScopedValueParse() { if (pool_) pool_destroy(pool_); }
+    ScopedValueParse(const ScopedValueParse&) = delete;
+    ScopedValueParse& operator=(const ScopedValueParse&) = delete;
+};
+
 Item fn_parse2(Item str_item, Item type) {
     GUARD_ERROR2(str_item, type);
     // symbol-to-string option conversions allocate; retain earlier conversions through parser dispatch.
@@ -6864,6 +6877,23 @@ Item fn_parse2(Item str_item, Item type) {
         String* text = heap_strcpy(str ? str->chars : (const char*)binary_data(binary),
             str ? str->len : binary_length(binary));
         return text ? (Item){.item = s2it(text)} : ItemError;
+    }
+
+    if (type_str && (!strcmp(type_str->chars, "json") || !strcmp(type_str->chars, "mark"))) {
+        ScopedValueParse owner;
+        parse_options.source_positions = source_positions;
+        parse_options.io = context ? eval_context_security_io(context) : NULL;
+        bool parsed = owner.input && input_parse_value_n(owner.input,
+            str ? str->chars : (const char*)binary_data(binary),
+            str ? str->len : binary_length(binary), type_str->chars, &parse_options);
+        arraylist_free(adapter_names);
+        arraylist_free(raw_names);
+        arraylist_free(chaptered_names);
+        if (!parsed) return runtime_error_itemf(ERR_OUT_OF_MEMORY, "parse: could not create value parser");
+        // Copy diagnostics and every escaping value before the temporary Input is released.
+        if (owner.input->parse_failed || get_type_id(owner.input->root) == LMD_TYPE_ERROR)
+            return input_parse_error_item("parse", owner.input, type_str);
+        return copy_parsed_value(owner.input->root);
     }
 
     // create a dummy URL for the parser infrastructure (no actual file)
@@ -7121,8 +7151,12 @@ Item fn_format2(Item item, Item type) {
         }
         selected_json_options = &json_options;
     }
+    // the formatter's staging result ends after the GC-owned return copy.
+    ScopedFormatPool output_owner("runtime.format");
+    if (!output_owner.get()) return runtime_error_itemf(ERR_OUT_OF_MEMORY,
+        "format: could not allocate output owner");
     String* result = format_data_with_json_options(source.get(), rooted_type.get(),
-        rooted_flavor.get(), context->heap->pool, selected_json_options);
+        rooted_flavor.get(), output_owner.get(), selected_json_options);
     if (!result) {
         return runtime_error_itemf(ERR_FORMAT_ERROR, "format: could not format a %s value",
             get_type_name(get_type_id(item)));
@@ -10957,6 +10991,7 @@ struct MutableCloneEntry {
 
 struct MutableCloneContext {
     HashMap* visited;
+    bool owned_parse;
 };
 
 static TypeMap* mutable_shape_type(TypeId container_type, Type* type) {
@@ -11123,6 +11158,7 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
     for (int64_t i = 0; i < src->length; i++) {
         src = rooted_src.get();
         rooted_child.set(clone_mutable_item(src->items[i], clone_ctx));
+        if (clone_ctx->owned_parse && get_type_id(rooted_child.get()) == LMD_TYPE_ERROR) return rooted_child.get();
         // array_push can collect while relocating the destination backing.
         array_push_verbatim(rooted_dst.get(), rooted_child.get());
     }
@@ -11144,7 +11180,44 @@ static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ct
     return copy;
 }
 
+// Parsed value trees reuse the clone traversal, but rebuild shapes in the runtime owner.
+static Item clone_parsed_attributes(Item source, MutableCloneContext* clone_ctx) {
+    bool element = get_type_id(source) == LMD_TYPE_ELEMENT;
+    RootFrame roots(3);
+    Rooted<Item> destination(roots, ItemNull);
+    Rooted<Item> child(roots, ItemNull);
+    Rooted<Item> key(roots, ItemNull);
+    if (element) {
+        TypeElmt* type = (TypeElmt*)source.element->type;
+        String* tag = heap_strcpy(type->name.str, type->name.length);
+        if (!tag) return ItemError;
+        destination.set(elmt_dynamic_begin({.item = s2it(tag)}));
+    } else destination.set(map_literal_begin());
+    if (get_type_id(destination.get()) == LMD_TYPE_ERROR) return destination.get();
+    mutable_clone_register(clone_ctx, source.container, destination.get());
+    TypeMap* type = (TypeMap*)(element ? source.element->type : source.map->type);
+    for (ShapeEntry* field = type->shape; field; field = typemap_next_field(type, field)) {
+        if (!field->name || field->byte_offset < 0) continue;
+        child.set(clone_mutable_item(_map_read_field(field, mutable_clone_owner_data(source)), clone_ctx));
+        if (get_type_id(child.get()) == LMD_TYPE_ERROR) return child.get();
+        String* name = heap_strcpy(field->name->str, field->name->length);
+        if (!name) return ItemError;
+        key.set({.item = s2it(name)});
+        Item status = map_literal_put(destination.get(), key.get(), child.get());
+        if (get_type_id(status) == LMD_TYPE_ERROR) return status;
+    }
+    if (element) {
+        for (int64_t i = 0; i < source.element->length; i++) {
+            child.set(clone_mutable_item(source.element->items[i], clone_ctx));
+            if (get_type_id(child.get()) == LMD_TYPE_ERROR) return child.get();
+            array_push_verbatim((Array*)destination.get().element, child.get());
+        }
+    }
+    return destination.get();
+}
+
 static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
+    if (clone_ctx->owned_parse) return clone_parsed_attributes(src_item, clone_ctx);
     Map* src = src_item.map;
     if (!src || !src->type) return ItemNull;
     TypeMap* source_type = mutable_shape_type(LMD_TYPE_MAP, (Type*)src->type);
@@ -11182,6 +11255,7 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
 }
 
 static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx) {
+    if (clone_ctx->owned_parse) return clone_parsed_attributes(src_item, clone_ctx);
     Element* src = src_item.element;
     if (!src || !src->type) return ItemNull;
     if (container_is_virtual_list(src)) return ItemError;
@@ -11205,6 +11279,7 @@ static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx)
     for (int64_t i = 0; i < src->length; i++) {
         src = rooted_src.get();
         rooted_child.set(clone_mutable_item(src->items[i], clone_ctx));
+        if (clone_ctx->owned_parse && get_type_id(rooted_child.get()) == LMD_TYPE_ERROR) return rooted_child.get();
         // array_push can collect while relocating the destination backing.
         array_push_verbatim((Array*)rooted_dst.get(), rooted_child.get());
     }
@@ -11230,8 +11305,48 @@ static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx) {
     case LMD_TYPE_ARRAY_NUM: return clone_mutable_array_num(value.array_num, clone_ctx);
     case LMD_TYPE_MAP: return clone_mutable_map(value, clone_ctx);
     case LMD_TYPE_ELEMENT: return clone_mutable_element(value, clone_ctx);
-    default: return value;
+    default: break;
     }
+    if (!clone_ctx->owned_parse) return value;
+    switch (get_type_id(value)) {
+    case LMD_TYPE_STRING: {
+        String* src = value.get_safe_string();
+        String* copy = heap_strcpy(src->chars, src->len);
+        return copy ? (Item){.item = s2it(copy)} : ItemError;
+    }
+    case LMD_TYPE_SYMBOL: {
+        Symbol* src = value.get_symbol();
+        Symbol* copy = name_key_symbol(src->chars, src->len);
+        return copy ? (Item){.item = y2it(copy)} : ItemError;
+    }
+    case LMD_TYPE_BINARY: {
+        Binary* src = value.get_safe_binary();
+        Binary* copy = heap_binary_from_bytes((const char*)binary_data(src), binary_length(src));
+        return copy ? (Item){.item = x2it(copy)} : ItemError;
+    }
+    case LMD_TYPE_DTIME: return push_k(value.get_datetime());
+    case LMD_TYPE_DECIMAL: {
+        Decimal* src = value.get_decimal();
+        mpd_t* payload = mpd_new(decimal_fixed_context());
+        if (!payload) return ItemError;
+        uint32_t status = 0;
+        mpd_qcopy(payload, decimal_mpd(src), &status);
+        if (status) { mpd_del(payload); return ItemError; }
+        Decimal* copy = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
+        if (!copy) { mpd_del(payload); return ItemError; }
+        return decimal_take_mpd(copy, src->storage_kind, payload) ? (Item){.item = c2it(copy)} : ItemError;
+    }
+    default: return scalar_storage_read(value, false);
+    }
+}
+
+static Item copy_parsed_value(Item value) {
+    MutableCloneContext clone_ctx = mutable_clone_context_new();
+    if (!clone_ctx.visited) return ItemError;
+    clone_ctx.owned_parse = true;
+    Item copied = clone_mutable_item(value, &clone_ctx);
+    mutable_clone_context_free(&clone_ctx);
+    return copied;
 }
 
 Item fn_mutable_value(Item value) {

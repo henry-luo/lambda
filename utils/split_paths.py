@@ -86,7 +86,8 @@ def project_source_path(relative, root=None, roots=None):
         if path.parts[1] == 'core' or path == Path('lambda/lambda.h'):
             local = root / path
             candidate = input_root / path
-            if local.is_symlink() or (not local.exists() and candidate.exists()) or \
+            if (path == Path('lambda/core') and candidate.is_dir()) or \
+                    local.is_symlink() or (not local.exists() and candidate.exists()) or \
                     ('*' in path.name and candidate.parent.is_dir()):
                 return candidate
     if path.parts and path.parts[0] == 'test':
