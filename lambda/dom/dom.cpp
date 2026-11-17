@@ -1728,7 +1728,6 @@ void dom_register_named_elements(DomElement* root) {
 }
 
 static DomDocument* js_document_proxy_doc_from_item(Item item);
-static Url* dom_document_resolve_url(DomDocument* doc);
 
 // ============================================================================
 // DOM Context Management
@@ -6137,7 +6136,7 @@ static JsDomPropId dom_prop_id(const char* prop) {
 // this makes that node able to answer as a Document too (ESO101), which needs
 // the query to say *which* document -- a Lambda-only document never sets the
 // global, and a node knows its own.
-static Url* dom_document_resolve_url(DomDocument* doc) {
+Url* dom_document_resolve_url(DomDocument* doc) {
     if (doc && doc->root) {
         SelectorQueryScratch query;
         if (query.parse_list("base[href]")) {

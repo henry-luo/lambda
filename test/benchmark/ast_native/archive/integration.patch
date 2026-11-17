@@ -1,0 +1,179 @@
+diff --git a/lambda/runtime/ast.hpp b/lambda/runtime/ast.hpp
+index c341748dc..19b273502 100644
+--- a/lambda/runtime/ast.hpp
++++ b/lambda/runtime/ast.hpp
+@@ -1487,6 +1487,7 @@ struct Script : Input {
+     // never retain worker results across their receiving runtime instances.
+     struct InterpSatelliteQueue* interp_satellite_queue;
+     ArrayList* interp_satellite_images;
++    struct AstNativeState* ast_native_state; // execution-owned experimental native bodies
+     // Execution-local T0 lookups into this MIR module's exports (entry
+     // address or `_gvar_` slot per declaration); never shared by clones.
+     ArrayList* interp_mir_exports;
+diff --git a/lambda/runtime/interp.cpp b/lambda/runtime/interp.cpp
+index b53cd0f63..bc4d76b08 100644
+--- a/lambda/runtime/interp.cpp
++++ b/lambda/runtime/interp.cpp
+@@ -8,6 +8,7 @@
+ // `items[]`/`data` pointer may ever be cached across an allocating call.
+ 
+ #include "interp.hpp"
++#include "ast_native.hpp"
+ #include "mvp/mvp.hpp"
+ #include "lambda/io/mark_output_builder.hpp"
+ #include "output_demand.hpp"
+@@ -460,6 +461,7 @@ INTERP_DISABLED_MIR_HOOK(void, interp_satellite_cancel_script, (Script*), )
+ 
+ bool lambda_tier_parse(const char* text, LambdaTier* out) {
+     if (!text || !out) return false;
++    if (strcmp(text, "ast-native") == 0) { *out = LAMBDA_TIER_AST_NATIVE; return true; }
+     if (strcmp(text, "jit") == 0)    { *out = LAMBDA_TIER_JIT;    return true; }
+     if (strcmp(text, "interp") == 0) { *out = LAMBDA_TIER_INTERP; return true; }
+     if (strcmp(text, "auto") == 0)   { *out = LAMBDA_TIER_AUTO;   return true; }
+@@ -7609,8 +7611,9 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
+                 &method_index, NULL, subject);
+             uint64_t iterations = 0;
+             for (;;) {
+-                result = output_destination ? interp_emit_output(frame, fn_node->body, output_destination)
+-                    : eval_expr(frame, fn_node->body);
++                if (output_destination) result = interp_emit_output(frame, fn_node->body, output_destination);
++                else if (st->mode != EvalMode::RUNTIME || !ast_native_execute(frame, &result))
++                    result = eval_expr(frame, fn_node->body);
+                 if (frame->signal == EvalSignal::TAIL_CALL_JIT) {
+                     Function* callable = frame->callable_slot
+                         ? (Function*)(uintptr_t)*frame->callable_slot : NULL;
+@@ -9549,3 +9552,8 @@ Item interp_run_script(Runner* runner, bool run_main) {
+ Item interp_run_repl_fragment(Runner* runner, const InterpReplFragmentRun* run) {
+     return interp_run_nodes(runner, false, run);
+ }
++
++// Native bodies use only admitted leaves here; no expression subtree is interpreted.
++Item interp_native_leaf(InterpFrame* frame, AstNode* node) {
++    return eval_expr(frame, node);
++}
+diff --git a/lambda/runtime/interp.hpp b/lambda/runtime/interp.hpp
+index 329144a72..9f38d7997 100644
+--- a/lambda/runtime/interp.hpp
++++ b/lambda/runtime/interp.hpp
+@@ -23,6 +23,7 @@
+ typedef enum LambdaTier {
+     LAMBDA_TIER_JIT = 0,   // today's eager whole-module MIR Direct pipeline
+     LAMBDA_TIER_INTERP,    // T0 only; unsupported scripts fail, never compile MIR
++    LAMBDA_TIER_AST_NATIVE, // experimental macOS ARM64 scalar bodies plus T0 wrappers
+     LAMBDA_TIER_AUTO,      // T0 + per-function satellite promotion (P2)
+ } LambdaTier;
+ 
+diff --git a/lambda/runtime/runner.cpp b/lambda/runtime/runner.cpp
+index 49d047c16..eb469ecb9 100644
+--- a/lambda/runtime/runner.cpp
++++ b/lambda/runtime/runner.cpp
+@@ -1,3 +1,4 @@
++#include "ast_native.hpp"
+ #include <time.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -1182,6 +1183,7 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
+     // Satellite work and private code images belong exclusively to this run.
+     instance->interp_satellite_queue = NULL;
+     instance->interp_satellite_images = NULL;
++    instance->ast_native_state = NULL;
+     instance->interp_mir_exports = NULL;
+     if (!instance->cache_mir_artifact) {
+         // AST reuse borrows parser/analysis facts only. A MIR context
+@@ -1500,6 +1502,7 @@ static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
+     LambdaTier tier = lambda_tier_selected();
+     request.execution_mode = tier == LAMBDA_TIER_AUTO
+         ? (is_import ? "auto-module" : "auto-script")
++        : tier == LAMBDA_TIER_AST_NATIVE ? "ast-native-experiment"
+         : tier == LAMBDA_TIER_INTERP
+             ? (is_import ? "interp-module" : "interp-script")
+             : (is_import ? "module" : "script");
+@@ -1550,6 +1553,7 @@ static bool lambda_cache_promote_ast_shell_mir(Runtime* runtime, Script* script)
+     image->ast_promotion_overlay = NULL;
+     image->interp_satellite_queue = NULL;
+     image->interp_satellite_images = NULL;
++    image->ast_native_state = NULL;
+     image->interp_mir_exports = NULL;
+     image->interp_slab = NULL;
+     image->module_initialized = false;
+@@ -1713,7 +1717,8 @@ static bool lambda_prepare_ast_interpreter(Transpiler* tp) {
+ }
+ 
+ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
+-    if (lambda_tier_selected() != LAMBDA_TIER_INTERP) return false;
++    if (lambda_tier_selected() != LAMBDA_TIER_INTERP &&
++            lambda_tier_selected() != LAMBDA_TIER_AST_NATIVE) return false;
+     // explicit T0 is an execution constraint, including cached import templates
+     interp_run_stats()->scripts_excluded++;
+     const char* kind = interp_node_kind_name(tp->interp_reject_kind);
+@@ -1721,7 +1726,8 @@ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
+         path ? path : "<unknown>", kind);
+     char message[256];
+     snprintf(message, sizeof(message),
+-        "LAMBDA_EXEC_BACKEND=interp cannot execute %s; MIR fallback is disabled", kind);
++        "LAMBDA_EXEC_BACKEND=%s cannot execute %s; MIR fallback is disabled",
++        lambda_tier_selected() == LAMBDA_TIER_AST_NATIVE ? "ast-native" : "interp", kind);
+     LambdaError* error = err_create(ERR_NOT_IMPLEMENTED, message, NULL);
+     if (error) {
+         if (tp->errors) arraylist_append(tp->errors, error);
+@@ -1750,7 +1756,7 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
+     }
+     // an AUTO-planned cache image can contain task satellites; recheck the pin
+     if (!script->ast_frontend_only && lambda_tier_selected() != LAMBDA_TIER_INTERP) {
+-        return true;
++        return ast_native_prepare(script);
+     }
+     Transpiler transpiler = {};
+     memcpy(&transpiler, script, sizeof(Script));
+@@ -1763,7 +1769,7 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
+         script_adopt_transpiler(script, &transpiler);
+         log_info("module-ast-prebuild: activated Lambda AST template path=%s",
+             script->reference ? script->reference : "<unknown>");
+-        return true;
++        return ast_native_prepare(script);
+     }
+     if (interp_reject_forced_fallback(&transpiler, script->reference)) return false;
+ #ifdef LAMBDA_NO_MIR
+@@ -1980,7 +1986,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
+ #endif
+ 
+     // D8.3.1: only AUTO may fall back when the walker rejects a script.
+-    if (lambda_tier_selected() == LAMBDA_TIER_INTERP ||
++    if (lambda_tier_selected() == LAMBDA_TIER_AST_NATIVE ||
++            lambda_tier_selected() == LAMBDA_TIER_INTERP ||
+             lambda_tier_selected() == LAMBDA_TIER_AUTO) {
+         profile_time_t plan0, plan1;
+         if (profiling || compiler_timing) profile_get_time(&plan0);
+@@ -1990,6 +1997,13 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
+         if (supported) {
+             tp->interp_supported = true;
+             script_adopt_transpiler(script, tp);
++            if (!ast_native_prepare(script)) {
++                // A failed explicit native setup must not look like successful T0 admission.
++                tp->interp_supported = script->interp_supported = false;
++                tp->error_count++;
++                return;
++            }
++            if (profiling || compiler_timing) profile_get_time(&plan1);
+             if (compiler_timing) {
+                 LambdaCompilerTiming* timing = &g_last_lambda_compiler_timing;
+                 timing->parse_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_PARSE, p0, p1) * 1000.0);
+@@ -3403,6 +3417,10 @@ void runtime_init(Runtime* runtime) {
+     runtime->loaded_script_index = RuntimeLoadedScriptIndex::create(64);
+     runtime->max_errors = 10;  // default error threshold
+     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
++    // Keep benchmark levels on one binary; the artifact key already includes this value.
++    const char* mir_level = shell_getenv("LAMBDA_MIR_OPT_LEVEL");
++    if (mir_level && mir_level[0] >= '0' && mir_level[0] <= '3' && !mir_level[1])
++        runtime->optimize_level = (unsigned int)(mir_level[0] - '0');
+     runtime->dry_run = false;  // default: real IO
+ #ifndef LAMBDA_NO_RESOURCE_CACHE
+     InputScriptCache* script_cache = input_manager_global_script_cache();
+@@ -3569,6 +3587,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
+     // releasing an execution shell, then release every private MIR context
+     // that was already published into its Function entries.
+     interp_satellite_cancel_script(script);
++    ast_native_destroy(script);
+     if (script->interp_mir_exports) {
+         // plain records (no GC values): each read builds its Function afresh
+         for (int i = 0; i < script->interp_mir_exports->length; i++) {

@@ -3403,6 +3403,10 @@ void runtime_init(Runtime* runtime) {
     runtime->loaded_script_index = RuntimeLoadedScriptIndex::create(64);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
+    // Keep benchmark levels on one binary; the artifact key already includes this value.
+    const char* mir_level = shell_getenv("LAMBDA_MIR_OPT_LEVEL");
+    if (mir_level && mir_level[0] >= '0' && mir_level[0] <= '3' && !mir_level[1])
+        runtime->optimize_level = (unsigned int)(mir_level[0] - '0');
     runtime->dry_run = false;  // default: real IO
 #ifndef LAMBDA_NO_RESOURCE_CACHE
     InputScriptCache* script_cache = input_manager_global_script_cache();

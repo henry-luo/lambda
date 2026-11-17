@@ -1,0 +1,318 @@
+#include "ast_native.hpp"
+#include "interp.hpp"
+#include "lambda-error.h"
+#include "lambda-root-frame.hpp"
+#include "lib/arraylist.h"
+#include "lib/log.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <time.h>
+#if defined(__aarch64__) && defined(__APPLE__) && !defined(LAMBDA_NO_MIR)
+#include "mir_emitter_shared.hpp"
+#include <sys/mman.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <libkern/OSCacheControl.h>
+extern "C" void* import_resolver(const char*);
+extern "C" void ensure_jit_imports_initialized(void);
+#define AST_NATIVE_AVAILABLE 1
+#endif
+
+struct AstNativeImage {
+    const AstFuncNode* fn;
+    void* code;
+    size_t mapped, bytes;
+    uint32_t slots;
+};
+struct AstNativeState {
+    ArrayList* images;
+    uint64_t accepted, rejected, calls, interpreted, bytes, mapped, compile_ns;
+};
+
+#ifdef AST_NATIVE_AVAILABLE
+// x19/x20 keep non-GC frame/root-region addresses; every Item crosses calls in roots.
+struct NativeEmitter {
+    uint32_t* code;
+    uint32_t count, capacity, slots;
+    bool ok;
+    ArrayList* returns;
+};
+static uint64_t native_now() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
+static void emit(NativeEmitter* e, uint32_t word) {
+    if (!e->ok) return;
+    if (e->count == e->capacity) {
+        uint32_t capacity = e->capacity ? e->capacity * 2 : 128;
+        void* code = realloc(e->code, capacity * sizeof(uint32_t));
+        if (!code) { e->ok = false; return; }
+        e->code = (uint32_t*)code; e->capacity = capacity;
+    }
+    e->code[e->count++] = word;
+}
+static void imm(NativeEmitter* e, unsigned reg, uint64_t value) {
+    emit(e, 0xd2800000 | ((value & 0xffff) << 5) | reg);
+    for (unsigned shift = 1; shift < 4; shift++)
+        emit(e, 0xf2800000 | (shift << 21) | (((value >> (shift * 16)) & 0xffff) << 5) | reg);
+}
+static void call(NativeEmitter* e, void* address) {
+    imm(e, 16, (uintptr_t)address); emit(e, 0xd63f0200); // blr x16
+}
+static void load(NativeEmitter* e, unsigned reg, uint32_t slot) {
+    if (slot > 4095) { e->ok = false; return; }
+    emit(e, 0xf9400280 | (slot << 10) | reg);
+}
+static void save(NativeEmitter* e, uint32_t slot) {
+    if (slot > 4095) { e->ok = false; return; }
+    emit(e, 0xf9000280 | (slot << 10));
+}
+static uint32_t branch(NativeEmitter* e, bool conditional = false) {
+    uint32_t pos = e->count; emit(e, conditional ? 0x34000000 : 0x14000000); return pos;
+}
+static void patch(NativeEmitter* e, uint32_t pos, uint32_t target, bool conditional = false) {
+    if (!e->ok) return;
+    int64_t delta = (int64_t)target - pos;
+    int64_t limit = conditional ? (1LL << 18) : (1LL << 25);
+    if (delta < -limit || delta >= limit) { e->ok = false; return; }
+    e->code[pos] |= conditional ? ((uint32_t)delta & 0x7ffff) << 5 : (uint32_t)delta & 0x3ffffff;
+}
+static void finish_branch(NativeEmitter* e) {
+    uint32_t pos = branch(e);
+    if (!arraylist_append(e->returns, (void*)(uintptr_t)(pos + 1))) e->ok = false;
+}
+static Item native_call(Item* values, uint64_t argc) {
+    if (get_type_id(values[0]) != LMD_TYPE_FUNC) return lambda_non_callable_error();
+    List args = {};
+    args.length = argc; args.items = values + 1;
+    return fn_call(values[0].function, &args);
+}
+static int native_truth(Item value) { return is_truthy(value) == BOOL_TRUE; }
+static int native_error(Item value) { return item_is_error(value); }
+
+static bool scalar_type(Type* type) {
+    if (!type) return false;
+    return type->type_id == LMD_TYPE_INT || type->type_id == LMD_TYPE_FLOAT ||
+        type->type_id == LMD_TYPE_BOOL || type->type_id == LMD_TYPE_NULL;
+}
+static bool admits(AstNode* n, unsigned depth = 0) {
+    if (!n) return true;
+    if (depth > 128) return false;
+    n = ast_unwrap_primary_to_leaf(n);
+    switch (n->node_type) {
+    case AST_NODE_PRIMARY: return scalar_type(n->type);
+    case AST_NODE_IDENT: return ((AstIdentNode*)n)->interp_frame_slot_read;
+    case AST_NODE_BINARY: {
+        AstBinaryNode* b = (AstBinaryNode*)n;
+        if (!(b->op == OPERATOR_ADD || b->op == OPERATOR_SUB || b->op == OPERATOR_MUL ||
+                b->op == OPERATOR_DIV || b->op == OPERATOR_IDIV || b->op == OPERATOR_MOD ||
+                b->op == OPERATOR_EQ || b->op == OPERATOR_NE || b->op == OPERATOR_LT ||
+                b->op == OPERATOR_LE || b->op == OPERATOR_GT || b->op == OPERATOR_GE)) return false;
+        return admits(b->left, depth + 1) && admits(b->right, depth + 1);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* c = (AstCallNode*)n;
+        AstFuncNode* fn = ast_direct_call_function(c);
+        if (!fn || fn->captures || c->interp_self_tail_call || c->propagate || c->pipe_inject ||
+                c->interp_has_named_args || c->interp_has_spread_args ||
+                !c->function || ast_unwrap_primary_to_leaf(c->function)->node_type != AST_NODE_IDENT) return false;
+        TypeFunc* t = (TypeFunc*)fn->type;
+        if (!t || t->is_variadic || ast_linked_node_count(c->argument) != t->param_count) return false;
+        for (AstNamedNode* p = fn->param; p; p = (AstNamedNode*)p->next)
+            if (!p->entry || p->entry->is_var_param || p->entry->is_binder) return false;
+        for (AstNode* a = c->argument; a; a = a->next) if (!admits(a, depth + 1)) return false;
+        return true;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* b = (AstIfNode*)n;
+        return admits(b->cond, depth + 1) && admits(b->then, depth + 1) && admits(b->otherwise, depth + 1);
+    }
+    case AST_NODE_RETURN_STAM: return admits(((AstReturnNode*)n)->value, depth + 1);
+    case AST_NODE_CONTENT: {
+        AstListNode* list = (AstListNode*)n;
+        if (list->declare) return false;
+        AstNode* last = NULL;
+        for (AstNode* p = list->item; p; p = p->next) {
+            // This first slice handles statement blocks with explicit returns only.
+            AstNode* u = ast_unwrap_primary_to_leaf(p);
+            if (u->node_type != AST_NODE_RETURN_STAM && u->node_type != AST_NODE_IF_EXPR) return false;
+            if (u->node_type == AST_NODE_IF_EXPR && !ast_block_item_is_statement(u, false)) return false;
+            if (!admits(u, depth + 1)) return false;
+            last = u;
+        }
+        return last && last->node_type == AST_NODE_RETURN_STAM;
+    }
+    default: return false;
+    }
+}
+static uint32_t expression(NativeEmitter* e, AstNode* n) {
+    uint32_t result = e->slots++;
+    if (!n) { imm(e, 0, ITEM_NULL); save(e, result); return result; }
+    n = ast_unwrap_primary_to_leaf(n);
+    switch (n->node_type) {
+    case AST_NODE_PRIMARY: case AST_NODE_IDENT:
+        emit(e, 0xaa1303e0); imm(e, 1, (uintptr_t)n);
+        call(e, (void*)interp_native_leaf); save(e, result); break;
+    case AST_NODE_BINARY: {
+        AstBinaryNode* b = (AstBinaryNode*)n;
+        uint32_t l = expression(e, b->left), r = expression(e, b->right);
+        const char* helper = em_boxed_binary_helper(b->op);
+        void* address = helper ? import_resolver(helper) : NULL;
+        if (!address) { e->ok = false; break; }
+        load(e, 0, l); load(e, 1, r); call(e, address); save(e, result); break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* c = (AstCallNode*)n;
+        uint32_t argc = ast_linked_node_count(c->argument), base = e->slots;
+        e->slots += argc + 1;
+        emit(e, 0xaa1303e0); imm(e, 1, (uintptr_t)ast_unwrap_primary_to_leaf(c->function));
+        call(e, (void*)interp_native_leaf); save(e, base);
+        uint32_t i = 1;
+        for (AstNode* a = c->argument; a; a = a->next, i++) {
+            uint32_t slot = expression(e, a); load(e, 0, slot); save(e, base + i);
+        }
+        imm(e, 0, base * 8); emit(e, 0x8b000280); // add x0,x20,x0
+        imm(e, 1, argc); call(e, (void*)native_call); save(e, result); break;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* b = (AstIfNode*)n;
+        uint32_t condition = expression(e, b->cond);
+        load(e, 0, condition); call(e, (void*)native_error);
+        uint32_t not_error = branch(e, true);
+        load(e, 0, condition); save(e, result); uint32_t error_end = branch(e);
+        patch(e, not_error, e->count, true);
+        load(e, 0, condition); call(e, (void*)native_truth);
+        uint32_t otherwise = branch(e, true);
+        uint32_t yes = expression(e, b->then); load(e, 0, yes); save(e, result);
+        uint32_t end = branch(e); patch(e, otherwise, e->count, true);
+        uint32_t no = expression(e, b->otherwise); load(e, 0, no); save(e, result);
+        patch(e, end, e->count); patch(e, error_end, e->count); break;
+    }
+    case AST_NODE_CONTENT: {
+        for (AstNode* p = ((AstListNode*)n)->item; p; p = p->next) expression(e, p);
+        imm(e, 0, ITEM_NULL); save(e, result); break;
+    }
+    case AST_NODE_RETURN_STAM: {
+        uint32_t value = expression(e, ((AstReturnNode*)n)->value);
+        load(e, 0, value); save(e, 0); finish_branch(e); break;
+    }
+    default: e->ok = false;
+    }
+    return result;
+}
+static AstNativeImage* compile(AstFuncNode* fn) {
+    NativeEmitter e = {}; e.ok = true; e.slots = 1; e.returns = arraylist_new(8);
+    if (!e.returns) return NULL;
+    emit(&e, 0xa9be7bfd); emit(&e, 0xa90153f3); emit(&e, 0x910003fd);
+    emit(&e, 0xaa0003f3); emit(&e, 0xaa0103f4);
+    uint32_t value = expression(&e, fn->body); load(&e, 0, value); save(&e, 0);
+    for (int i = 0; i < e.returns->length; i++)
+        patch(&e, (uint32_t)(uintptr_t)e.returns->data[i] - 1, e.count);
+    load(&e, 0, 0); emit(&e, 0xa94153f3); emit(&e, 0xa8c27bfd); emit(&e, 0xd65f03c0);
+    AstNativeImage* image = NULL;
+    if (e.ok && e.slots <= 4095) {
+        image = (AstNativeImage*)calloc(1, sizeof(AstNativeImage));
+        if (image) {
+            size_t page = (size_t)sysconf(_SC_PAGESIZE);
+            image->bytes = e.count * 4; image->mapped = (image->bytes + page - 1) / page * page;
+            image->code = mmap(NULL, image->mapped, PROT_READ | PROT_WRITE | PROT_EXEC,
+                MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+            if (image->code == MAP_FAILED) { free(image); image = NULL; }
+            else {
+                pthread_jit_write_protect_np(0);
+                memcpy(image->code, e.code, image->bytes);
+                pthread_jit_write_protect_np(1);
+                sys_icache_invalidate(image->code, image->bytes);
+                image->fn = fn; image->slots = e.slots;
+            }
+        }
+    }
+    free(e.code); arraylist_free(e.returns); return image;
+}
+static void visit(AstNode* node, void* opaque) {
+    AstNativeState* state = (AstNativeState*)opaque;
+    if (!node) return;
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_PROC) {
+        AstFuncNode* fn = (AstFuncNode*)node;
+        TypeFunc* type = (TypeFunc*)fn->type;
+        // Error-channel bodies have implicit statement propagation, outside this scalar slice.
+        bool functional = node->node_type == AST_NODE_FUNC && type && !type->is_proc && !type->can_raise;
+        AstNativeImage* image = functional && !fn->captures && fn->analysis && admits(fn->body)
+            ? compile(fn) : NULL;
+        if (image && arraylist_append(state->images, image)) {
+            state->accepted++; state->bytes += image->bytes; state->mapped += image->mapped;
+        } else {
+            if (image) { munmap(image->code, image->mapped); free(image); }
+            state->rejected++;
+        }
+        return; // nested definitions are outside this experiment's admission
+    }
+    interp_visit_children(node, visit, opaque);
+}
+#endif
+
+bool ast_native_prepare(Script* script) {
+    if (lambda_tier_selected() != LAMBDA_TIER_AST_NATIVE) return true;
+#ifdef AST_NATIVE_AVAILABLE
+    if (script->ast_native_state) return true;
+    AstNativeState* state = (AstNativeState*)calloc(1, sizeof(AstNativeState));
+    if (!state) return false;
+    state->images = arraylist_new(8);
+    if (!state->images) { free(state); return false; }
+    uint64_t start = native_now();
+    // Runtime helper lookup also serves non-MIR emitters; initialize its shared table.
+    ensure_jit_imports_initialized();
+    visit(script->ast_root, state);
+    state->compile_ns = native_now() - start;
+    script->ast_native_state = state;
+    log_info("ast-native: admitted=%llu rejected=%llu bytes=%llu compile_ns=%llu",
+        state->accepted, state->rejected, state->bytes, state->compile_ns);
+    return true;
+#else
+    log_error("ast-native: this experiment requires macOS ARM64 with MIR helpers");
+    return false;
+#endif
+}
+bool ast_native_execute(InterpFrame* frame, Item* result) {
+#ifdef AST_NATIVE_AVAILABLE
+    AstNativeState* state = frame->module->ast_native_state;
+    if (!state) return false;
+    for (int i = 0; i < state->images->length; i++) {
+        AstNativeImage* image = (AstNativeImage*)state->images->data[i];
+        if (image->fn != frame->fn) continue;
+        RootFrame roots(image->slots);
+        if (!roots.valid()) { *result = ItemError; return true; }
+        __atomic_fetch_add(&state->calls, 1, __ATOMIC_RELAXED);
+        *result = ((Item (*)(InterpFrame*, uint64_t*))image->code)(frame, roots.words());
+        return true;
+    }
+    __atomic_fetch_add(&state->interpreted, 1, __ATOMIC_RELAXED);
+#endif
+    return false;
+}
+void ast_native_destroy(Script* script) {
+    AstNativeState* state = script->ast_native_state;
+    if (!state) return;
+    const char* path = getenv("LAMBDA_AST_NATIVE_REPORT");
+    if (path && *path) {
+        FILE* f = fopen(path, "a");
+        if (f) {
+            char line[512];
+            int n = snprintf(line, sizeof(line), "{\"accepted\":%llu,\"rejected\":%llu,\"calls\":%llu,\"interpreted_calls\":%llu,\"code_bytes\":%llu,\"mapped_bytes\":%llu,\"compile_ns\":%llu}\n",
+                state->accepted, state->rejected, state->calls, state->interpreted,
+                state->bytes, state->mapped, state->compile_ns);
+            if (n > 0 && (size_t)n < sizeof(line)) fwrite(line, 1, n, f);
+            fclose(f);
+        }
+    }
+    for (int i = 0; i < state->images->length; i++) {
+        AstNativeImage* image = (AstNativeImage*)state->images->data[i];
+#ifdef AST_NATIVE_AVAILABLE
+        munmap(image->code, image->mapped);
+#endif
+        free(image);
+    }
+    arraylist_free(state->images); free(state); script->ast_native_state = NULL;
+}

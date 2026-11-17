@@ -1,0 +1,257 @@
+--- a/mir-gen.c
++++ b/mir-gen.c
+@@ -207,6 +207,7 @@
+ struct gen_ctx {
+   MIR_context_t ctx;
+   unsigned optimize_level; /* 0:fast gen; 1:RA+combiner; 2: +GVN/CCP (default); >=3: everything  */
++  unsigned fast_l0; /* isolated experimental allocator, only at level zero */
+   MIR_item_t curr_func_item;
+ #if !MIR_NO_GEN_DEBUG
+   FILE *debug_file;
+@@ -8533,10 +8534,170 @@
+   }
+ }
+ 
++/* Share assignment setup; the compact variant keeps the ordinary L0 priority. */
++static void fast_l0_order (gen_ctx_t gen_ctx, int ranges_p) {
++  MIR_reg_t max_var = get_max_var (gen_ctx);
++  reg_info_t *infos = VARR_ADDR (reg_info_t, curr_cfg->reg_info);
++  func_stack_slots_num = 0;
++  VARR_TRUNC (MIR_reg_t, reg_renumber, 0);
++  VARR_TRUNC (allocno_info_t, sorted_regs, 0);
++  for (MIR_reg_t var = 0; var <= max_var; var++) {
++    VARR_PUSH (MIR_reg_t, reg_renumber, MIR_NON_VAR);
++    if (var <= MAX_HARD_REG) continue;
++    if (bitmap_bit_p (addr_regs, var)) {
++      int slots;
++      MIR_type_t type = MIR_reg_type (gen_ctx->ctx, var - MAX_HARD_REG, curr_func_item->u.func);
++      MIR_reg_t loc = get_new_stack_slot (gen_ctx, type, &slots);
++      VARR_SET (MIR_reg_t, reg_renumber, var, loc);
++      continue;
++    }
++    if (!ranges_p && infos[var].freq == 0) continue;
++    infos[var].live_length = ranges_p ? 0 : 1;
++    if (ranges_p)
++      for (live_range_t lr = VARR_GET (live_range_t, var_live_ranges, var); lr; lr = lr->next)
++        infos[var].live_length += lr->finish - lr->start + 1;
++    allocno_info_t entry = {var, FALSE, infos};
++    VARR_PUSH (allocno_info_t, sorted_regs, entry);
++  }
++  qsort (VARR_ADDR (allocno_info_t, sorted_regs), VARR_LENGTH (allocno_info_t, sorted_regs),
++         sizeof (allocno_info_t), allocno_info_compare_func);
++}
++
++/* Experimental whole-function homes: no liveness fixed point, live ranges,
++   interference bitmaps or stack-slot coloring.  Existing reload/ABI code stays. */
++static int fast_l0_p (gen_ctx_t gen_ctx) {
++  return optimize_level == 0 && gen_ctx->fast_l0 != 0 && bitmap_empty_p (tied_regs);
++}
++
++static void fast_l0_assign (gen_ctx_t gen_ctx) {
++  MIR_context_t ctx = gen_ctx->ctx;
++  MIR_reg_t var;
++  MIR_func_t func = curr_func_item->u.func;
++  bitmap_t occupied = temp_bitmap;
++  bitmap_t globals = _MIR_get_module_global_var_hard_regs (ctx, curr_func_item->module);
++  insn_var_iterator_t iter;
++  int op_num, slots;
++
++  func_stack_slots_num = 0;
++  bitmap_clear (func_used_hard_regs);
++  bitmap_copy (occupied, call_used_hard_regs[MIR_T_UNDEF]);
++  if (globals != NULL) bitmap_ior (occupied, occupied, globals);
++  /* Explicit machine operands and early clobbers must never alias a fixed home. */
++  for (MIR_insn_t insn = DLIST_HEAD (MIR_insn_t, func->insns); insn != NULL;
++       insn = DLIST_NEXT (MIR_insn_t, insn)) {
++    MIR_reg_t clobber1, clobber2;
++    FOREACH_IN_INSN_VAR (gen_ctx, iter, insn, var, op_num)
++      if (var <= MAX_HARD_REG) bitmap_set_bit_p (occupied, var);
++    FOREACH_OUT_INSN_VAR (gen_ctx, iter, insn, var, op_num)
++      if (var <= MAX_HARD_REG) bitmap_set_bit_p (occupied, var);
++    target_get_early_clobbered_hard_regs (insn, &clobber1, &clobber2);
++    if (clobber1 != MIR_NON_VAR) bitmap_set_bit_p (occupied, clobber1);
++    if (clobber2 != MIR_NON_VAR) bitmap_set_bit_p (occupied, clobber2);
++  }
++  fast_l0_order (gen_ctx, FALSE);
++  for (size_t i = 0; i < VARR_LENGTH (allocno_info_t, sorted_regs); i++) {
++    var = VARR_GET (allocno_info_t, sorted_regs, i).reg;
++    MIR_type_t type = MIR_reg_type (ctx, var - MAX_HARD_REG, func);
++    MIR_reg_t loc = MIR_NON_VAR;
++    if (gen_ctx->fast_l0 == 2 && !bitmap_bit_p (addr_regs, var))
++      loc = get_hard_reg (gen_ctx, type, occupied);
++    if (loc == MIR_NON_VAR) {
++      loc = get_new_stack_slot (gen_ctx, type, &slots);
++    } else {
++      setup_used_hard_regs (gen_ctx, type, loc);
++      for (int n = 0; n < target_locs_num (loc, type); n++)
++        bitmap_set_bit_p (occupied, target_nth_loc (loc, type, n));
++    }
++    VARR_SET (MIR_reg_t, reg_renumber, var, loc);
++  }
++}
++
++/* Probe only words touched by this pseudo's live ranges, skipping empty prefixes. */
++static int compact_l0_conflict (bitmap_t points, bitmap_t occupied, live_range_t ranges) {
++  size_t length = VARR_LENGTH (bitmap_el_t, occupied);
++  bitmap_el_t *a = VARR_ADDR (bitmap_el_t, points), *b = VARR_ADDR (bitmap_el_t, occupied);
++  for (live_range_t lr = ranges; lr; lr = lr->next) {
++    size_t last = (size_t) lr->finish / BITMAP_WORD_BITS;
++    if (last >= length) last = length;
++    for (size_t word = (size_t) lr->start / BITMAP_WORD_BITS;
++         word <= last && word < length; word++)
++      if ((a[word] & b[word]) != 0) return TRUE;
++  }
++  return FALSE;
++}
++
++/* Transpose occupancy: one bitmap of live points per location, rather than
++   one bitmap of locations per point. Preserve L0 ordering and stack coloring. */
++static void compact_l0_assign (gen_ctx_t gen_ctx) {
++  MIR_alloc_t alloc = gen_alloc (gen_ctx);
++  MIR_context_t ctx = gen_ctx->ctx;
++  bitmap_t points = temp_bitmap2, conflicts = conflict_locs1;
++  bitmap_t globals = _MIR_get_module_global_var_hard_regs (ctx, curr_func_item->module);
++  int slots;
++
++  fast_l0_order (gen_ctx, TRUE);
++  start_mem_loc = func_stack_slots_num + MAX_HARD_REG + 1;
++  bitmap_clear (func_used_hard_regs);
++  while (VARR_LENGTH (bitmap_t, used_locs) <= MAX_HARD_REG)
++    VARR_PUSH (bitmap_t, used_locs, bitmap_create2 (alloc, 128));
++  for (size_t i = 0; i < VARR_LENGTH (bitmap_t, used_locs); i++)
++    bitmap_clear (VARR_GET (bitmap_t, used_locs, i));
++  for (MIR_reg_t reg = 0; reg <= MAX_HARD_REG; reg++)
++    for (live_range_t lr = VARR_GET (live_range_t, var_live_ranges, reg); lr; lr = lr->next)
++      bitmap_set_bit_range_p (VARR_GET (bitmap_t, used_locs, reg),
++                             lr->start, lr->finish - lr->start + 1);
++  for (size_t i = 0; i < VARR_LENGTH (allocno_info_t, sorted_regs); i++) {
++    MIR_reg_t reg = VARR_GET (allocno_info_t, sorted_regs, i).reg;
++    live_range_t lr = VARR_GET (live_range_t, var_live_ranges, reg);
++    if (lr == NULL) continue;
++    bitmap_clear (points);
++    for (; lr; lr = lr->next)
++      bitmap_set_bit_range_p (points, lr->start, lr->finish - lr->start + 1);
++    bitmap_clear (conflicts);
++    if (globals != NULL) bitmap_copy (conflicts, globals);
++    live_range_t ranges = VARR_GET (live_range_t, var_live_ranges, reg);
++    for (size_t loc = 0; loc <= MAX_HARD_REG; loc++)
++      if (compact_l0_conflict (points, VARR_GET (bitmap_t, used_locs, loc), ranges))
++        bitmap_set_bit_p (conflicts, loc);
++    MIR_type_t type = MIR_reg_type (ctx, reg - MAX_HARD_REG, curr_func_item->u.func);
++    MIR_reg_t loc = get_hard_reg (gen_ctx, type, conflicts);
++    if (loc == MIR_NON_VAR) {
++      /* Stack interference matters only after hard registers are exhausted. */
++      for (size_t slot = start_mem_loc; slot < VARR_LENGTH (bitmap_t, used_locs); slot++)
++        if (compact_l0_conflict (points, VARR_GET (bitmap_t, used_locs, slot), ranges))
++          bitmap_set_bit_p (conflicts, slot);
++      loc = get_stack_loc (gen_ctx, start_mem_loc, type, conflicts, &slots);
++    } else {
++      setup_used_hard_regs (gen_ctx, type, loc);
++    }
++    VARR_SET (MIR_reg_t, reg_renumber, reg, loc);
++    slots = target_locs_num (loc, type);
++    for (int n = 0; n < slots; n++) {
++      MIR_reg_t part = target_nth_loc (loc, type, n);
++      while (VARR_LENGTH (bitmap_t, used_locs) <= part)
++        VARR_PUSH (bitmap_t, used_locs, bitmap_create2 (alloc, 128));
++      bitmap_t occupied = VARR_GET (bitmap_t, used_locs, part);
++      for (live_range_t range = ranges; range; range = range->next)
++        bitmap_set_bit_range_p (occupied, range->start, range->finish - range->start + 1);
++    }
++  }
++}
++
+ static void reg_alloc (gen_ctx_t gen_ctx) {
+   MIR_reg_t reg, max_var = get_max_var (gen_ctx);
+   const int simplified_p = ONLY_SIMPLIFIED_RA || optimize_level < 2;
+ 
++  if (fast_l0_p (gen_ctx)) {
++    if (gen_ctx->fast_l0 == 3) {
++      build_live_ranges (gen_ctx);
++      compact_l0_assign (gen_ctx);
++    } else {
++      fast_l0_assign (gen_ctx);
++    }
++    rewrite (gen_ctx);
++    if (gen_ctx->fast_l0 == 3) free_func_live_ranges (gen_ctx);
++    return;
++  }
+   build_live_ranges (gen_ctx);
+   assign (gen_ctx);
+   DEBUG (2, {
+@@ -9297,6 +9458,9 @@
+   size_t code_len = 0;
+   double start_time = real_usec_time ();
+   uint32_t bbs_num;
++  const char *profile = getenv ("LAMBDA_MIR_FAST_PROFILE");
++  double cfg_end = 0, machine_end = 0, ra_end = 0;
++  unsigned fast_path = 0;
+ 
+   gen_assert (func_item->item_type == MIR_func_item && func_item->data == NULL);
+   if (func_item->u.func->machine_code != NULL) {
+@@ -9434,8 +9598,10 @@
+       print_CFG (gen_ctx, TRUE, FALSE, TRUE, TRUE, NULL);
+     });
+   }
++  if (profile != NULL) cfg_end = real_usec_time ();
+   target_machinize (gen_ctx);
+   make_io_dup_op_insns (gen_ctx);
++  if (profile != NULL) machine_end = real_usec_time ();
+   DEBUG (2, {
+     fprintf (debug_file, "+++++++++++++MIR after machinize:\n");
+     print_CFG (gen_ctx, FALSE, FALSE, TRUE, TRUE, NULL);
+@@ -9457,9 +9623,14 @@
+     }
+   }
+   consider_all_live_vars (gen_ctx);
+-  calculate_func_cfg_live_info (gen_ctx, TRUE);
++  if (fast_l0_p (gen_ctx) && gen_ctx->fast_l0 != 3)
++    initiate_live_info (gen_ctx, TRUE);
++  else
++    calculate_func_cfg_live_info (gen_ctx, TRUE);
+   print_live_info (gen_ctx, "Live info before RA", optimize_level > 0, TRUE);
++  fast_path = fast_l0_p (gen_ctx) ? gen_ctx->fast_l0 : 0;
+   reg_alloc (gen_ctx);
++  if (profile != NULL) ra_end = real_usec_time ();
+   DEBUG (2, {
+     fprintf (debug_file, "+++++++++++++MIR after RA:\n");
+     print_CFG (gen_ctx, TRUE, FALSE, TRUE, FALSE, NULL);
+@@ -9513,6 +9684,24 @@
+              (real_usec_time () - start_time) / 1000.0);
+   });
+   _MIR_restore_func_insns (ctx, func_item);
++  if (profile != NULL) {
++    /* Structured measurement output; disabled during execution timing samples. */
++    double end = real_usec_time ();
++    FILE *out = fopen (profile, "a");
++    if (out != NULL) {
++      uint64_t mapping = 1469598103934665603ULL;
++      for (size_t i = 0; i < VARR_LENGTH (MIR_reg_t, reg_renumber); i++)
++        mapping = (mapping ^ VARR_GET (MIR_reg_t, reg_renumber, i)) * 1099511628211ULL;
++      char record[512];
++      int len = snprintf (record, sizeof (record),
++          "{\"level\":%u,\"fast\":%u,\"cfg_us\":%.3f,\"machine_us\":%.3f,"
++          "\"ra_us\":%.3f,\"emit_cleanup_us\":%.3f,\"gen_us\":%.3f,\"code_bytes\":%zu,\"mapping_hash\":\"%016llx\"}\n",
++          optimize_level, fast_path, cfg_end - start_time,
++          machine_end - cfg_end, ra_end - machine_end, end - ra_end, end - start_time, code_len, (unsigned long long) mapping);
++      if (len > 0 && (size_t) len < sizeof (record)) fwrite (record, 1, len, out);
++      fclose (out);
++    }
++  }
+   /* ??? We should use atomic here but c2mir does not implement them yet.  */
+   func_item->u.func->machine_code = machine_code;
+   return func_item->addr;
+@@ -9662,6 +9851,13 @@
+   if (gen_ctx == NULL) util_error (gen_ctx, "no memory");
+ 
+   gen_ctx->ctx = ctx;
++  gen_ctx->fast_l0 = 0;
++#if defined(__aarch64__)
++  const char *fast = getenv ("LAMBDA_MIR_FAST_L0");
++  if (fast != NULL && strcmp (fast, "stack") == 0) gen_ctx->fast_l0 = 1;
++  if (fast != NULL && strcmp (fast, "static") == 0) gen_ctx->fast_l0 = 2;
++  if (fast != NULL && strcmp (fast, "compact") == 0) gen_ctx->fast_l0 = 3;
++#endif
+   optimize_level = 2;
+   gen_ctx->target_ctx = NULL;
+   gen_ctx->data_flow_ctx = NULL;

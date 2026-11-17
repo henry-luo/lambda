@@ -809,3 +809,7 @@ Renamed 2026-10-03. Current binaries no longer read the old names.
 Archived binaries in the git-ignored `test/benchmark/exe/` (see its `MANIFEST.md`) read only the old names. `run_benchmarks.py` and `run_paired_benchmarks.py` set both names.
 
 Other knobs: `LAMBDA_TEST_DIR` and `WPT_COMMIT` for `setup-test.sh`, `TREE_SITTER_LIBDIR` (§7.3), and `LAMBDA_ROOT`. The Makefile sets `LAMBDA_ROOT` for the render and layout Node runners. Set it yourself when you run `test/render/test_radiant_render.js` directly, because that script resolves its root through the `test/render` symlink.
+
+`LAMBDA_MIR_OPT_LEVEL=0..3` selects the MIR generator level (default 2).
+The retired ARM64 AST emitter is archived under `test/benchmark/ast_native/`
+and excluded from all builds (D8.3.1v3).

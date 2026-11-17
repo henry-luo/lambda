@@ -1,0 +1,9 @@
+#pragma once
+#include "transpiler.hpp"
+struct InterpFrame;
+struct AstNativeState;
+// Experimental scalar-body backend; the existing interpreter owns activation policy.
+bool ast_native_prepare(Script* script);
+bool ast_native_execute(InterpFrame* frame, Item* result);
+void ast_native_destroy(Script* script);
+Item interp_native_leaf(InterpFrame* frame, AstNode* node);
