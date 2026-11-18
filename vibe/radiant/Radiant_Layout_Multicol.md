@@ -11,7 +11,7 @@ Bring Radiant's multi-column layout from a post-layout redistribution model to a
 - out-of-flow positioning in fragmented multicol containers
 - stable relayout when fragmentainer size or child structure changes
 
-This proposal is based on the current `wpt-css-multicol` suite result and the present implementation in [`radiant/layout_multicol.cpp`](/Users/henryluo/Projects/lambda/radiant/layout_multicol.cpp) and [`radiant/layout_block.cpp`](/Users/henryluo/Projects/lambda/radiant/layout_block.cpp).
+This proposal is based on the current `wpt-css-multicol` suite result and the present implementation in [`radiant/layout_multicol.cpp`](../../radiant/radiant/layout_multicol.cpp) and [`radiant/layout_block.cpp`](../../radiant/radiant/layout_block.cpp).
 
 ## Current Test Result
 

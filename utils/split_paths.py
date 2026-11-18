@@ -1,4 +1,4 @@
-"""Resolve source and header paths owned by the sibling projects."""
+"""Resolve source and header paths owned by the project submodules."""
 
 import os
 import shlex
@@ -30,8 +30,8 @@ def optional_library_available(library):
 
 def sibling_roots():
     root = Path(__file__).resolve().parent.parent
-    return (Path(os.environ.get('LAMBDA_INPUT_ROOT', root.parent / 'lambda-input')).resolve(),
-            Path(os.environ.get('RADIANT_ROOT', root.parent / 'radiant')).resolve())
+    return (Path(os.environ.get('LAMBDA_INPUT_ROOT', root / 'lambda-input')).resolve(),
+            Path(os.environ.get('RADIANT_ROOT', root / 'radiant')).resolve())
 
 
 def thorvg_openmp_archives(required=False):

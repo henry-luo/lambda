@@ -9,20 +9,21 @@ let names=["bloated-workbook.xlsx","contacts.xlsx","customer-lists.xlsx","employ
     "exceljs-1904.xlsx","excelize-Book1.xlsx","excelize-MergeCell.xlsx","excelize-SharedStrings.xlsx","files-sample-1000rows.xlsx",
     "formatted-report.xlsx","hidden-frozen.xlsx","inventory.xlsx","merged-formats.xlsx","messy-data.xlsx",
     "numbers-stored-as-text.xlsx","protected-sample.xlsx","sales-orders.xlsx","sample-budget.xlsx","workbook-protected.xlsx"]
-let loaded=[for (name in names) files.import_xlsx(base ++ name) ^ { ^ }]
-let event=files.import_xlsx(base ++ "event-schedule.xlsx")^
+// The date assertions use the same imported models as the corpus check.
+let loaded=map([for (name in names) (name,files.import_xlsx(base ++ name) ^ { ^ })])
+let event=loaded["event-schedule.xlsx"]^
 let schedule=event.book.sheets[0]
 let fmt=files.import_xlsx("test/input/xlsx/number-formats.xlsx")^.book.sheets[0]
 let protected=x.convert(base ++ "protected-sample.xlsx")^
 let workbook=x.convert(base ++ "workbook-protected.xlsx")^
 let hidden=x.convert(base ++ "hidden-frozen.xlsx")^
-let dated=files.import_xlsx(base ++ "exceljs-1904.xlsx")^
+let dated=loaded["exceljs-1904.xlsx"]^
 let invalid=x.convert("test/input/xlsx/bad-case-relationship.xlsx") ^ { ^ }
 let restored=files.restore(parse(format(event.book,'json')^,'json')^)^
 let get=(sheet,row,col) any^ => f.cell(sheet,row,col)^
 let shown=(sheet,row,col) any^ => v.formatted(f.display(sheet,row,col)^,get(sheet,row,col).style)^;
 [
- len(loaded)==20 and all([for (book in loaded) book is map]),
+ len(loaded)==20 and all([for (name,book in loaded) book is map]),
  invalid is error and contains(invalid.message,"Missing package part xl/SharedStrings.xml"),
  dated.book.sheets[0].date1904==true,
  shown(dated.book.sheets[0],3,1)=="1904-01-01",

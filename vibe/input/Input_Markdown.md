@@ -269,7 +269,7 @@ bounded matching. The [emoji sample](../../test/input/markdown_emoji.md) and
   `emoji_shortcode_match()`, and emits either a symbol or a custom image.
   [Content-layer symbol resolution](../../lambda/input/css/css_symbol_hook.cpp),
   `css_symbol_resolve()`, supplies both HTML formatting and
-  [Radiant symbol resolution](../../radiant/symbol_resolver.cpp), `resolve_symbol()`.
+  [Radiant symbol resolution](../../radiant/radiant/symbol_resolver.cpp), `resolve_symbol()`.
   [Markup formatting](../../lambda/format/format-markup.cpp),
   `MarkupEmitter::format_item()`, writes symbols as `:name:`; `md_emit_image()`
   in the Markdown formatter preserves custom image aliases.
@@ -291,7 +291,7 @@ bounded matching. The [emoji sample](../../test/input/markdown_emoji.md) and
   [diagram presentation](../../lmd/package/graph/document.ls):
   `parse_graph_mermaid()`, `to_html()`, and `from_mermaid()` provide the shared
   diagram pipeline.
-- [Native Markdown loader](../../radiant/cmd_layout.cpp) renders math and Mermaid
+- [Native Markdown loader](../../radiant/radiant/cmd_layout.cpp) renders math and Mermaid
   through one retained runtime, following **D6.4.1** for loader context binding.
 - [Document viewer](../../lmd/package/doc/doc_viewer.ls) renders Mermaid fences
   and numbered notes. The [editor adapter](../../lmd/package/edit/markdown.ls)

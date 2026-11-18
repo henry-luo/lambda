@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
-INPUT = Path(os.environ.get('LAMBDA_INPUT_ROOT', ROOT.parent / 'lambda-input')).resolve()
+INPUT = Path(os.environ.get('LAMBDA_INPUT_ROOT', ROOT / 'lambda-input')).resolve()
 FIXTURE = INPUT / 'test/run_native_tests.py'
 
 

@@ -126,7 +126,7 @@ process drivers reap children; `cleanup.json` records the final process check.
   attempts while retaining the same membership and rejecting enrollment.
 - **RI-020 — Unrelated aggregate test-build failure.** The Radiant-owned native
   input-value test references `_process_css_resource` without its target linking
-  that implementation. Recorded in the [owning ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#ri-020)
+  that implementation. Recorded in the [owning ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-020)
   with evidence `build-test.log`. The intended independent-test dependency
   closure remains unconfirmed. No sibling source or test workaround was applied;
   the unaffected demo UI target and separate Lambda baseline pass.

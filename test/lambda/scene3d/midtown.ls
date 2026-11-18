@@ -19,7 +19,8 @@ import rt: ~~.~~.demo.midtown.mod_route
 import scenery: ~~.~~.demo.midtown.mod_scenery
 
 fn r2(x) => round(x * 100.0) / 100.0
-fn drive(car, controls, seconds) any^ => reduce([car, *[for (i in 1 to int(seconds * 60.0)^) i]], (c, i) any^ => v.step(c, controls, 1.0 / 60.0))
+fn drive_ticks(car, controls, ticks) any^ => reduce([car, *[for (i in 1 to ticks) i]], (c, i) any^ => v.step(c, controls, 1.0 / 60.0))
+fn drive(car, controls, seconds) any^ => drive_ticks(car, controls, int(seconds * 60.0)^)
 let GAS = {*: v.IDLE, throttle: 1.0}
 
 // ---- the city
@@ -41,7 +42,11 @@ let tower = [for (b in city.BUILDINGS where b.kind == "T") b][0]
 let crash = drive(v.spawn((tower.x0 + tower.x1) / 2.0, tower.z0 - 30.0, 0.0), GAS, 4.0)
 let ramp = city.RAMPS[0]
 let run_up = v.spawn(ramp.x - sin(ramp.heading) * 32.0, ramp.z - cos(ramp.heading) * 32.0, ramp.heading)
-let flight = [for (k in 0 to 40) drive(run_up, GAS, k * 0.1)];
+// Every flight sample shares the same fixed-step prefix. Keep the original
+// seconds-to-tick rounding for each sample when advancing from its predecessor.
+let flight_ticks = [for (k in 0 to 40) int((k * 0.1) * 60.0)^]
+let flight = reduce([[run_up], *[for (k in 1 to 40) k]], (samples, k) any^ =>
+    [*samples, drive_ticks(samples[k - 1], GAS, flight_ticks[k] - flight_ticks[k - 1])^]);
 {launch: [r2(v.speed(fast)), fast.gear, v.gear_label(fast)], braked: [r2(v.speed(stopped)), r2(stopped.z - fast.z)],
  turn: [r2(turning.heading), r2(v.speed(turning))],
  crash: [r2(crash.z + v.HALF_LENGTH - tower.z0), r2(v.speed(crash)) < 1.0, crash.damage > 10.0],

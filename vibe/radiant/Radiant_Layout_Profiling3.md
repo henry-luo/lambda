@@ -184,7 +184,7 @@ The `MAX_INPUT_FILES` C++ limit is 1024. With 2,649 baseline test files, the pra
 
 **Problem A: `html_tree.txt` written every file unconditionally.**
 
-In `load_lambda_html_doc()` ([radiant/cmd_layout.cpp](../../radiant/cmd_layout.cpp)), after parsing HTML, the code unconditionally serializes the entire parsed element tree to `./html_tree.txt`:
+In `load_lambda_html_doc()` ([radiant/cmd_layout.cpp](../../radiant/radiant/cmd_layout.cpp)), after parsing HTML, the code unconditionally serializes the entire parsed element tree to `./html_tree.txt`:
 
 ```cpp
 StrBuf* htm_buf = strbuf_new();
@@ -201,13 +201,13 @@ For the small test file above, this consumed **13.7 ms out of 16.4 ms total load
 
 **Problem B: `print_view_tree` called TWICE per file in batch mode.**
 
-1. Inside `layout_html_doc()` ([radiant/layout.cpp](../../radiant/layout.cpp)):
+1. Inside `layout_html_doc()` ([radiant/layout.cpp](../../radiant/radiant/layout.cpp)):
    ```cpp
    print_view_tree((ViewElement*)doc->view_tree->root, doc->url);  // no output_path
    ```
    → writes `./view_tree.txt` + `./test_output/view_tree_{name}.txt` + `./test_output/view_tree_{name}.json` + `/tmp/view_tree.json`
 
-2. Inside `layout_single_file()` ([radiant/cmd_layout.cpp](../../radiant/cmd_layout.cpp)):
+2. Inside `layout_single_file()` ([radiant/cmd_layout.cpp](../../radiant/radiant/cmd_layout.cpp)):
    ```cpp
    print_view_tree((ViewElement*)doc->view_tree->root, doc->url, output_path);
    ```
@@ -260,7 +260,7 @@ Running 900 files: ~3.62s system CPU for I/O. With 2,649 files: ~5.5s system CPU
 **Impact:** ★★★☆☆ Medium (part of 4.3)
 **Effort:** Small
 
-In `print_view_tree_json()` ([radiant/view_pool.cpp](../../radiant/view_pool.cpp)), two files are written unconditionally:
+In `print_view_tree_json()` ([radiant/view_pool.cpp](../../radiant/radiant/view_pool.cpp)), two files are written unconditionally:
 ```cpp
 // Write to test_output/view_tree_{name}.json
 snprintf(buf, sizeof(buf), "./test_output/view_tree_%s.json", last_slash + 1);

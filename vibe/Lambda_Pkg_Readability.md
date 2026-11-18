@@ -110,7 +110,7 @@ Two choices account for most of the difference. Each record caches its `textCont
 ./lambda.exe run test/lambda/readability/_corpus.ls
 ```
 
-`READABILITY_PAGES=<dir>` and `READABILITY_PAGE=<name>` select another corpus or one page. Result on 2026-10-21: **130/130** pages pass every check. The corpus lives in the git-ignored `ref/`, so the runner is a manual gate (`_` prefix); moving the pages into `../lambda-test` would make it automatic (RD-O8).
+`READABILITY_PAGES=<dir>` and `READABILITY_PAGE=<name>` select another corpus or one page. Result on 2026-10-21: **130/130** pages pass every check. The corpus lives in the git-ignored `ref/`, so the runner is a manual gate (`_` prefix); moving the pages into the `lambda-test` submodule would make it automatic (RD-O8).
 
 **Synthetic pages** — `test/lambda/readability/pages/<name>/` holds eight small pages (bylines and title separators, `<br>` chains, JSON-LD, lazy images and media, tables, short pages with retries and RTL, unlikely candidates and roles, nested `<div>`s and sibling joining). Their `expected.html` and `expected-metadata.json` were produced by Readability.js 0.6.0 under the same harness settings, with `node utils/generate_readability_expected.js` (jsdom from the `ref/readability/source` checkout); `pages.ls` checks all eight through the shared comparator (`mod_compare.ls`). A new page needs only its `source.html` before the script runs.
 
@@ -140,7 +140,7 @@ The conformance runs found four Lambda runtime defects; each was fixed at its ro
 - **RD-O5 — `img.src` and `srcset`.** Readability reads the IDL properties; jsdom resolves `src` against the base, the in-house JSDOMParser does not. The port reads the attribute, as JSDOMParser does; the corpus passes either way.
 - **RD-O6 — comments.** Readability keeps comment nodes in the article; Mozilla's harness removes them from the input first. The package keeps them (it ports the library, not the harness); the runner removes them.
 - **RD-O7 — structural sharing.** Passes rebuild whole trees; returning untouched subtrees unchanged would cut the cost of the twenty-odd cleanup passes, which dominate on large pages such as wikipedia-2.
-- **RD-O8 — corpus home.** Moving the 28 MB test-pages corpus into `../lambda-test` (linked by `setup-test.sh`) would let the corpus run as an automatic gate.
+- **RD-O8 — corpus home.** Moving the 28 MB test-pages corpus into the `lambda-test` submodule (linked by `setup-test.sh`) would let the corpus run as an automatic gate.
 
 ## Appendix A. History: the 2026-02 port
 

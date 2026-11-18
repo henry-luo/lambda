@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Ensure Lambda uses the selected sibling projects for source ownership."""
+"""Ensure Lambda uses the selected project submodules for source ownership."""
 
 import os
 from pathlib import Path
 import sys
 
 root = Path(__file__).resolve().parent.parent
-input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', root.parent / 'lambda-input')).resolve()
-radiant_root = Path(os.environ.get('RADIANT_ROOT', root.parent / 'radiant')).resolve()
-for forbidden in (root / 'lib', root / 'radiant', root / 'lambda/input',
+input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', root / 'lambda-input')).resolve()
+radiant_root = Path(os.environ.get('RADIANT_ROOT', root / 'radiant')).resolve()
+for forbidden in (root / 'lib', root / 'lambda/input',
                   root / 'lambda/io', root / 'lambda/network', root / 'lambda/format'):
     if forbidden.exists() or forbidden.is_symlink():
         print(f'SPLIT_ROOTS: {forbidden} must not exist in Lambda', file=sys.stderr)
@@ -20,7 +20,7 @@ for source_tree in (root / 'lambda', root / 'test', root / 'utils'):
             link = Path(directory) / name
             if link.is_symlink() and link.suffix in source_suffixes and any(
                     link.resolve().is_relative_to(owner) for owner in (input_root, radiant_root)):
-                print(f'SPLIT_ROOTS: sibling source link in Lambda: {link}', file=sys.stderr)
+                print(f'SPLIT_ROOTS: external source link in Lambda: {link}', file=sys.stderr)
                 raise SystemExit(1)
 for owned in (input_root / 'lib', radiant_root / 'radiant'):
     if not owned.is_dir():
@@ -33,4 +33,4 @@ for source_tree in (input_root / 'lib', input_root / 'lambda', radiant_root / 'r
             if link.is_symlink() and link.resolve().is_relative_to(root):
                 print(f'SPLIT_ROOTS: reverse link into Lambda: {link}', file=sys.stderr)
                 raise SystemExit(1)
-print('SPLIT_ROOTS: source ownership follows the sibling project roots')
+print('SPLIT_ROOTS: source ownership follows the configured project roots')

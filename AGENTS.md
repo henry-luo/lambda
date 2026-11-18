@@ -134,7 +134,7 @@ make test-radiant-baseline    # Full Radiant baseline suite; run at major milest
 
 **Test cadence:** Be token efficient. Avoid running the full Lambda or Radiant baseline suites after every incremental change. Run them at major milestones or at the end of a work session. For incremental changes, run focused unit tests relevant to the changed code.
 
-**Test data**: run `./setup-test.sh` once per checkout — it links `test/<corpus>` to the sibling `../lambda-test` repo and fetches the pinned WPT into `ref/wpt`; suites using those corpora fail without it. All make targets: `make help` and [`doc/dev/Make_Guide.md`](doc/dev/Make_Guide.md).
+**Test data**: run `./setup-test.sh` once per checkout — it links `test/<corpus>` to the `lambda-test` submodule and fetches the pinned WPT into `ref/wpt`; suites using those corpora fail without it. All make targets: `make help` and [`doc/dev/Make_Guide.md`](doc/dev/Make_Guide.md).
 
 **Test map**: [`test/README.md`](test/README.md) — which gate covers which source area, every harness with its fixture dirs and golden convention, and single-test commands. Every `.ls` in a golden-driven test directory needs its golden; name helper, module and playground scripts `_*` or `mod_*`.
 

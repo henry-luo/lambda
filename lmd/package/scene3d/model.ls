@@ -134,25 +134,34 @@ fn check_effect(n, all_nodes) bool^ {
     }
 }
 
+// Typed streams can use the numeric mask kernels. Other arrays still check
+// every item for an admissible real numeric type.
+fn geometry_components(values) bool^ =>
+    if (values is float[] or values is int[])
+        all(values ge -3.4028234e38)^ and all(values le 3.4028234e38)^
+    else all([for (x in values) numeric(x)])
+fn geometry_indices(values, vertices) bool^ =>
+    if (values is int[]) all(values ge 0)^ and all(values lt vertices)^
+    else all([for (x in values) numeric(x) and x >= 0 and x < vertices and floor(x) == x])
+
 pub fn check_geometry(n) bool^ {
     let checked_uv_mode = if (n["drawable-uvs"] != null and not contains(['source', 'surface'], n["drawable-uvs"])) raise fail("invalid drawable-uvs mode")
     let checked_type = if (not contains(['box', 'plane', 'buffer'], n.type)) raise fail("unknown geometry type")
     if (n.type == 'buffer') {
         let p = n.positions
-        let checked_positions = if (not (p is array) or len(p) == 0 or len(p) % 3 != 0 or len(p) > 786432 or not all([for (x in p) numeric(x)]))
+        let checked_positions = if (not (p is array) or len(p) == 0 or len(p) % 3 != 0 or len(p) > 786432 or not geometry_components(p)^)
             raise fail("invalid geometry positions")
+        let vertices = len(p) / 3
         let checked_arrays = [for (key in ["normals", "uvs", "uvs1", "colors", "tangents", "point-sizes"] where n[key] != null)
             if (not (n[key] is array) or not contains((if (key == "point-sizes") [len(p) / 3] else if (contains(["uvs", "uvs1"], key)) [len(p) / 3 * 2] else if (key == "tangents") [len(p) / 3 * 4] else if (key == "colors") [len(p), len(p) / 3 * 4] else [len(p)]), len(n[key])) or
-                not all([for (x in n[key]) numeric(x)])) raise fail("invalid geometry components") else true]
+                not geometry_components(n[key])^) raise fail("invalid geometry components") else true]
         let checked_colors = if (n.colors != null and any([for (x in n.colors) x < 0 or x > 1])) raise fail("vertex color out of range")
         // glTF tangents: a unit direction and a handedness of exactly ±1
         let checked_tangents = if (n.tangents != null and any([for (i in ((0 to (len(p) / 3 - 1)) ^ { [] }), let t = slice(n.tangents, i * 4, i * 4 + 4))
             abs(t[3]) != 1 or abs(t[0] * t[0] + t[1] * t[1] + t[2] * t[2] - 1) > 0.01])) raise fail("invalid geometry tangent")
-        let checked_indices = if (n.indices != null and (not (n.indices is array) or
-            not all([for (x in n.indices) numeric(x) and x >= 0 and x < len(p) / 3 and floor(x) == x])))
+        let checked_indices = if (n.indices != null and (not (n.indices is array) or not geometry_indices(n.indices, vertices)^))
             raise fail("geometry index out of bounds")
         let checked_sizes = if (n["point-sizes"] != null and any([for (x in n["point-sizes"]) x <= 0])) raise fail("point-sizes needs one positive number per vertex")
-        let vertices = len(p) / 3
         let skin = n["skin-indices"], weights = n["skin-weights"]
         let checked_skin = if (skin != null or weights != null) {
             if (not (skin is array) or not (weights is array) or len(skin) != vertices * 4 or len(weights) != len(skin) or

@@ -79,6 +79,9 @@ PDF_TEST_CONFIG ?= debug_native
 # stale binaries. The concurrency and Node preliminary suites stay excluded.
 LAMBDA_BASELINE_SELECTION = --target=lambda --category=baseline --lambda-owned --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest
 LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --list-build-targets)
+LAMBDA_FULL_EXTRA_TESTS = test_js_c_parser_gtest,test_js_regex_router_poc_gtest,test_js_coerce_gtest,test_js_mir_emission_gtest,test_js_script_gtest,test_js_opt_gtest,test_js_bt_regex_gtest,test_npm_package_json_gtest,test_js_mvp_lmd_gtest,test_js_test262_prelim_gtest,test_lambda_std_gtest
+LAMBDA_FULL_EXTRA_SELECTION = --target=lambda --lambda-owned --include-test=$(LAMBDA_FULL_EXTRA_TESTS)
+LAMBDA_FULL_EXTRA_TEST_PROJECTS = $(shell node test/test_run.js $(LAMBDA_FULL_EXTRA_SELECTION) --list-build-targets)
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -196,7 +199,7 @@ TREE_SITTER_RUBY_LIB = lambda/tree-sitter-ruby/libtree-sitter-ruby.a
 # RE2 is built by the JSON-owned Premake target; these identify its vendored
 # source for patch verification. Like MIR, the patches under
 # patches/re2-*.patch are ALREADY APPLIED to the vendored source.
-RE2_SRC_DIR = $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input)/lib/re2
+RE2_SRC_DIR = $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),lambda-input)/lib/re2
 RE2_UPSTREAM_COMMIT = 3a8436ac436124a57a4e22d5c8713a2d42b381d7
 
 # MIR JIT library. The source is vendored in-tree at lambda/mir (see
@@ -580,7 +583,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
-	@echo "  test-lambda-full - Lambda baseline plus concurrency, extended-script, DOM-node and validator-input gates"
+	@echo "  test-lambda-full - Lambda baseline plus focused JavaScript, concurrency, extended-runtime and input gates"
 	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-mir-gc-stress - Run batched GC stress and reviewed backend-parity probes"
 	@echo "  test-mir-gc-stress-full - Force GC for every MIR corpus fixture"
@@ -1648,6 +1651,10 @@ test-chat-clients: build
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
+	@echo "Building focused suites assigned to the full Lambda gate..."
+	$(call run_make_with_error_summary,lambda-full-extra,debug_native,,$(LAMBDA_FULL_EXTRA_TEST_PROJECTS))
+	@echo "Running focused suites assigned to the full Lambda gate..."
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_FULL_EXTRA_SELECTION) --parallel
 	@echo "Running Lambda LaTeX script tests..."
 	@./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/latex_*'
 	@$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE=debug test-input-baseline
@@ -3061,27 +3068,27 @@ check-input-archive-headers: build-lambda-data
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_archive_headers.py
 
 check-input-isolation: build-lambda-data test-input-isolation-check
-	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest)
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest)
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py
 
 check-radiant-input-value-isolation: build-lambda-data test-input-isolation-check
-	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_radiant_input_value_gtest)
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_radiant_input_value_gtest)
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-input-value
 
 check-radiant-svg-hit-isolation: build-lambda-data test-input-isolation-check
-	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_radiant_svg_hit_gtest)
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_radiant_svg_hit_gtest)
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-svg-hit
 
 check-radiant-source-path-isolation: build-lambda-data test-input-isolation-check
-	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_radiant_source_path_gtest)
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_radiant_source_path_gtest)
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-source-path
 
 check-radiant-state-store-isolation: build-lambda-data test-input-isolation-check
-	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_state_store_gtest)
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_state_store_gtest)
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-state-store
 
 check-radiant-package-layout-isolation: build-lambda-data test-input-isolation-check
-	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_layout_custom_gtest)
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_layout_custom_gtest)
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-package-layout
 
 build-lambda-rt:
@@ -3093,11 +3100,11 @@ build-radiant:
 build-lambda-static:
 	$(MAKE) build-lambda-split SPLIT_PROFILE=debug
 
-# Every normal host links separately built sibling providers.
+# Every normal host links separately built project providers.
 SPLIT_PROFILE ?= debug
 SPLIT_OUTPUT ?= lambda-static.exe
-SPLIT_INPUT_ROOT = $(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))
-SPLIT_RADIANT_ROOT = $(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))
+SPLIT_INPUT_ROOT = $(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),lambda-input))
+SPLIT_RADIANT_ROOT = $(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),radiant))
 # Match the host's release LTO mode for the separately built first-party archives.
 # Their build signatures include these flags, so changing profile rebuilds objects.
 SPLIT_LINUX_LTO_FLAG = $(shell $(PYTHON) -c 'import json; c=json.load(open("$(DEFAULT_CONFIG)")); name=c.get("platforms",{}).get("linux",{}).get("compiler",c.get("compiler","clang")); print("-flto" if "gcc" in name or "g++" in name else "-flto=full")')
@@ -3129,7 +3136,7 @@ build-lambda-split: $(MIR_LIB)
 
 .PHONY: test-split-fetch
 test-split-fetch: build-lambda-split
-	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" $(PYTHON) test/test_fetch_lifetime.py ./lambda-static.exe
+	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),lambda-input))" $(PYTHON) test/test_fetch_lifetime.py ./lambda-static.exe
 	$(PYTHON) test/test_split_host_snapshot.py ./lambda-static.exe
 
 # Build the Lambda host and only the native projects selected by the Lambda

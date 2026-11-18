@@ -17,7 +17,7 @@ from check_radiant_archive_ownership import makefile_objects
 
 TEST_TARGETS = ("test_input_dom_native_gtest", "test_input_blob_url_gtest", "test_input_model_gtest", "test_input_roundtrip_gtest",
                 "test_markup_modular_gtest", "test_format_markup_gtest", "test_input_math_gtest", "test_dir_gtest",
-                "test_wpt_html_parser_gtest", "test_markdown_gtest", "test_yaml_suite_gtest")
+                "test_wpt_html_parser_gtest", "test_markdown_gtest")
 RADIANT_TEST = "test_radiant_input_value_gtest"
 RADIANT_SVG_TEST = "test_radiant_svg_hit_gtest"
 RADIANT_LAYOUT_TEST = "test_layout_custom_gtest"
@@ -36,7 +36,7 @@ RADIANT_SOURCE_PATH_FILES = {Path("radiant/source_path.cpp"), Path("radiant/sour
                              Path("radiant/source_path_value.cpp"), Path("radiant/source_path_value.hpp"),
                              Path("radiant/source_position_host.cpp"), Path("radiant/source_position_host.hpp")}
 FIXTURES = ("test/demo/scene3d/assets/loading", "test/scene3d/assets", "test/html/wpt",
-            "test/markup/md", "test/yaml")
+            "test/markup/md")
 BASELINE_MODE_TARGETS = {"test_wpt_html_parser_gtest", "test_markdown_gtest"}
 
 

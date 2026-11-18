@@ -127,7 +127,7 @@ Enroll each device separately; copying both the database and credential files
 clones its cryptographic identity. Membership mutations load the current pointer,
 durably write a new envelope and commit its pointer in the same SQLite scope; obsolete file snapshots cannot
 blindly replace current membership. Cross-process writer contention is not qualified
-([LI-015](../../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-015)); run
+([LI-015](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-015)); run
 administrative mutations sequentially. Contention and uncertain commits surface
 as errors; reopen and inspect status rather than blindly retrying. Caller-supplied wrapping keys are never protocol fields.
 

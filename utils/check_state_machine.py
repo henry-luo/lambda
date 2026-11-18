@@ -13,7 +13,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RADIANT_ROOT = os.environ.get("RADIANT_ROOT") or os.path.join(os.path.dirname(ROOT), "radiant")
+RADIANT_ROOT = os.environ.get("RADIANT_ROOT") or os.path.join(ROOT, "radiant")
 HEADER_PATH = os.path.join(RADIANT_ROOT, "radiant", "event.hpp")
 SOURCE_PATH = os.path.join(RADIANT_ROOT, "radiant", "state_schema.cpp")
 

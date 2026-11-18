@@ -171,6 +171,9 @@ test/layout
 test/render
 test/js262
 test/pdf
+test/jquery-ui
+test/markdown
+test/media
 test/fuzzy/lambda/crashes/
 test/fuzzy/radiant/results/crashes/
 test/fuzzy/radiant/results/timeouts/

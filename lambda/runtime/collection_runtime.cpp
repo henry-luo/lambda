@@ -76,16 +76,18 @@ static bool list_reserve_capacity(List* list, int64_t required_capacity,
 
     RootFrame roots(1);
     Rooted<List*> rooted_list(roots, list);
-    Item* new_items = (Item*)heap_data_alloc(new_size);
+    Item* new_items = (Item*)heap_data_alloc_uninit(new_size);
     list = rooted_list.get();
     if (!new_items) return false;
 
     // Collection may compact the old buffer. Reload the rooted owner before
     // copying so a runtime growth path never dereferences nursery storage.
     old_items = list->items;
-    if (old_items && previous_capacity > 0) {
-        memcpy(new_items, old_items, (size_t)previous_capacity * slot_size);
-    }
+    // only the uncopied slots need zeroing, including spare slots a JS
+    // caller can expose later when it grows the logical length.
+    size_t copied_size = old_items ? (size_t)previous_capacity * slot_size : 0;
+    if (copied_size) memcpy(new_items, old_items, copied_size);
+    memset((char*)new_items + copied_size, 0, new_size - copied_size);
     list_relocate_owned_tail(list, old_items, previous_capacity, new_items, new_capacity);
     list_release_js_runtime_items(list);
     list->items = new_items;

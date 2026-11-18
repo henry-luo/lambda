@@ -1,7 +1,7 @@
 # Radiant Issue Ledger
 
 **Historical Lambda-hosted ledger.** New Radiant issues belong in the
-[Radiant project ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md)
+[Radiant project ledger](../../radiant/vibe/Radiant_Issue_Ledger.md)
 under the ownership boundary in D9.1.1v4 and D9.1.3v2. Native records link
 to their new location; mixed and resolved records remain here. The historical
 claims require re-verification.
@@ -18,7 +18,7 @@ and their verification evidence.
 
 ### RAD13-L1 — Scene3D gaming profiles remain incomplete
 
-The native gaming profile issue moved to [RAD13-L1 in the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-l1). The four Lambda Script gameplay-algorithm scopes remain Lambda work and are still KIV in the historical record.
+The native gaming profile issue moved to [RAD13-L1 in the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-l1). The four Lambda Script gameplay-algorithm scopes remain Lambda work and are still KIV in the historical record.
 
 <a id="rad07-l3"></a>
 
@@ -62,7 +62,7 @@ faintness even with the same font and the Chrome rasterizer.
 
 **Root cause.** [`svg_box.ls:glyph`](../../lmd/package/doc/math/svg_box.ls) emits
 the measured glyph as `<path>`, losing its font/glyph identity. Separately,
-[`svg_text_run_path`](../../radiant/render_svg_inline.cpp) converts ordinary
+[`svg_text_run_path`](../../radiant/radiant/render_svg_inline.cpp) converts ordinary
 SVG text to paths. `svg_text_prepare_paint_geometry` supplies those paths to
 `svg_text_draw_style_content`, which paints them as geometry before the
 existing native-glyph fallback. Neither case uses the native font smoothing
@@ -137,294 +137,294 @@ against the tree. Item numbers are stable IDs: `RAD06-3` is item 3 under `RAD06`
 ### RAD01 — View & DOM Model
 
 1. ~~**The zero-field invariant is convention-enforced, not compiler-enforced.**~~ Resolved: `static_assert`s in `view.hpp` pin every view class to the size of its DOM struct.
-2. <a id="rad01-2"></a> **`native_element` is a transitional copy, not an alias.** `DomElement::native_element` is marked `TODO(Phase 4): Remove; use dom_element_to_element()` (`dom_element.hpp:307`), and the embedded `Element` is currently *copied* from the source element in `dom_element_init` rather than aliased. Until removed, there are two notions of "the element" to keep in sync. **Ownership review, 2026-11-09:** the implementation is input-owned and has changed; see [LI-003](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-003) for the unverified current question.
-3. **[RAD01-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad01-3).**
+2. <a id="rad01-2"></a> **`native_element` is a transitional copy, not an alias.** `DomElement::native_element` is marked `TODO(Phase 4): Remove; use dom_element_to_element()` (`dom_element.hpp:307`), and the embedded `Element` is currently *copied* from the source element in `dom_element_init` rather than aliased. Until removed, there are two notions of "the element" to keep in sync. **Ownership review, 2026-11-09:** the implementation is input-owned and has changed; see [LI-003](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-003) for the unverified current question.
+3. **[RAD01-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad01-3).**
 
 4. **Source-position bridge maturity.** The header warns that functions may be no-op `return false` pending `render_map` path recording (`event.hpp`); editor round-trip fragility is concentrated here and depends on a weak/incremental `render_map` dependency.
-5. **[RAD01-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad01-5).**
+5. **[RAD01-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad01-5).**
 
 ### RAD02 — CSS Style Resolution & Computed Style
 
-1. **[RAD02-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-1).**
+1. **[RAD02-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-1).**
 
-2. **[RAD02-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-2).**
+2. **[RAD02-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-2).**
 
-3. **[RAD02-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-3).**
+3. **[RAD02-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-3).**
 
-4. **[RAD02-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-4).**
+4. **[RAD02-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-4).**
 
 5. **Two inheritance code paths.** Radiant hand-rolls the `inheritable_props[]` loop (`resolve_css_style.cpp:3971`) even though the CSS side exposes `style_tree_apply_inheritance` (`css_style_node.hpp`). Two implementations of "inherit unset properties" can drift apart.
-6. **[RAD02-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-6).**
+6. **[RAD02-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-6).**
 
-7. **[RAD02-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-7).**
+7. **[RAD02-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-7).**
 
-8. **[RAD02-8 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-8).**
+8. **[RAD02-8 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad02-8).**
 
 ### RAD03 — Layout Driver, Block Layout & Block Formatting Context
 
-1. **[RAD03-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-1).**
+1. **[RAD03-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-1).**
 
-2. **[RAD03-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-2).**
+2. **[RAD03-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-2).**
 
-3. **[RAD03-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-3).**
+3. **[RAD03-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-3).**
 
-4. **[RAD03-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-4).**
+4. **[RAD03-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-4).**
 
-5. **[RAD03-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-5).**
+5. **[RAD03-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-5).**
 
-6. **[RAD03-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-6).**
+6. **[RAD03-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad03-6).**
 
 ### RAD04 — Box Model, Containing Blocks & the Layout Cache
 
-1. **[RAD04-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-1).**
+1. **[RAD04-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-1).**
 
-2. **[RAD04-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-2).**
+2. **[RAD04-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-2).**
 
-3. **[RAD04-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-3).**
+3. **[RAD04-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-3).**
 
-4. <a id="rad04-4"></a> **Cache invalidation is coarse and by-construction.** The `LayoutCache` is cleared wholesale on style re-resolution (`layout.cpp:816`) and nulled on pool swap (`view_pool.cpp:587`, `event.cpp:3845`), but there is no descendant-aware invalidation — a parent trusts that any changed descendant re-resolved its own style and thereby cleared its own cache. A mutation that changes layout inputs without triggering a child's style re-resolution could serve a stale measurement. *Improvement:* a dirty-propagation assertion tying cache validity to `layout_dirty`. The native portion is recorded as [RAD04-4R](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-4r); the event-dispatch boundary remains mixed.
-5. **[RAD04-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-5).**
+4. <a id="rad04-4"></a> **Cache invalidation is coarse and by-construction.** The `LayoutCache` is cleared wholesale on style re-resolution (`layout.cpp:816`) and nulled on pool swap (`view_pool.cpp:587`, `event.cpp:3845`), but there is no descendant-aware invalidation — a parent trusts that any changed descendant re-resolved its own style and thereby cleared its own cache. A mutation that changes layout inputs without triggering a child's style re-resolution could serve a stale measurement. *Improvement:* a dirty-propagation assertion tying cache validity to `layout_dirty`. The native portion is recorded as [RAD04-4R](../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-4r); the event-dispatch boundary remains mixed.
+5. **[RAD04-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-5).**
 
-6. **[RAD04-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-6).**
+6. **[RAD04-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-6).**
 
-7. **[RAD04-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-7).**
+7. **[RAD04-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad04-7).**
 
 ### RAD05 — Intrinsic Sizing
 
-1. **[RAD05-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-1).**
+1. **[RAD05-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-1).**
 
-2. **[RAD05-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-2).**
+2. **[RAD05-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-2).**
 
-3. **[RAD05-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-3).**
+3. **[RAD05-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-3).**
 
-4. **[RAD05-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-4).**
+4. **[RAD05-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-4).**
 
-5. **[RAD05-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-5).**
+5. **[RAD05-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-5).**
 
-6. **[RAD05-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-6).**
+6. **[RAD05-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-6).**
 
-7. **[RAD05-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-7).**
+7. **[RAD05-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad05-7).**
 
 ### RAD06 — Inline & Text Layout
 
-1. **[RAD06-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-1).**
+1. **[RAD06-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-1).**
 
-2. **[RAD06-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-2).**
+2. **[RAD06-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-2).**
 
-3. **[RAD06-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-3).**
+3. **[RAD06-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-3).**
 
-4. **[RAD06-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-4).**
+4. **[RAD06-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-4).**
 
-5. **[RAD06-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-5).**
+5. **[RAD06-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-5).**
 
-6. **[RAD06-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-6).**
+6. **[RAD06-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-6).**
 
-7. **[RAD06-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-7).**
+7. **[RAD06-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-7).**
 
-8. **[RAD06-8 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-8).**
+8. **[RAD06-8 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-8).**
 
-9. **[RAD06-9 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-9).**
+9. **[RAD06-9 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-9).**
 
-10. **[RAD06-10 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-10).**
+10. **[RAD06-10 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad06-10).**
 
 ### RAD07 — Fonts
 
-1. **[RAD07-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-1).**
+1. **[RAD07-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-1).**
 
-2. **[RAD07-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-2).**
+2. **[RAD07-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-2).**
 
-3. **[RAD07-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-3).**
+3. **[RAD07-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-3).**
 
-4. **[RAD07-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-4).**
+4. **[RAD07-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-4).**
 
-5. **[RAD07-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-5).**
+5. **[RAD07-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-5).**
 
-6. **[RAD07-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-6).**
+6. **[RAD07-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-6).**
 
-7. **[RAD07-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-7).**
+7. **[RAD07-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad07-7).**
 
 ### RAD08 — Flexbox Layout
 
-1. **[RAD08-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-1).**
+1. **[RAD08-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-1).**
 
-2. **[RAD08-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-2).**
+2. **[RAD08-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-2).**
 
-3. **[RAD08-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-3).**
+3. **[RAD08-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-3).**
 
-4. **[RAD08-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-4).**
+4. **[RAD08-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-4).**
 
-5. **[RAD08-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-5).**
+5. **[RAD08-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-5).**
 
-6. **[RAD08-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-6).**
+6. **[RAD08-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-6).**
 
-7. **[RAD08-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-7).**
+7. **[RAD08-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-7).**
 
-8. **[RAD08-8 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-8).**
+8. **[RAD08-8 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad08-8).**
 
 ### RAD09 — CSS Grid Layout
 
-1. **[RAD09-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad09-1).**
+1. **[RAD09-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad09-1).**
 
 2. **Track/area CSSOM and grammar remain partial.** Shared grid-definition and decoded-area grammar now supply parse-time/substituted-value validation, component cascade, owned projection and CSSOM mutation. Calculated repeat counts have owner-font, inheritance, variable/defaulting, specified/computed and mutation controls. Pseudo-element reads and broader owner-unit/track grammar remain open.
-3. **[RAD09-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad09-3).**
+3. **[RAD09-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad09-3).**
 
-4. **[RAD09-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad09-4).**
+4. **[RAD09-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad09-4).**
 
-5. **[RAD09-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad09-5).**
+5. **[RAD09-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad09-5).**
 
 ### RAD10 — Table Layout
 
-1. **[RAD10-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad10-1).**
+1. **[RAD10-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad10-1).**
 
-2. **[RAD10-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad10-2).**
+2. **[RAD10-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad10-2).**
 
-3. **[RAD10-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad10-3).**
+3. **[RAD10-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad10-3).**
 
-4. **[RAD10-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad10-4).**
+4. **[RAD10-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad10-4).**
 
 ### RAD11 — Positioned, Floats, Multi-column, Lists & Counters
 
-1. **[RAD11-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-1).**
+1. **[RAD11-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-1).**
 
-2. **[RAD11-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-2).**
+2. **[RAD11-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-2).**
 
-3. **[RAD11-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-3).**
+3. **[RAD11-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-3).**
 
-4. **[RAD11-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-4).**
+4. **[RAD11-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-4).**
 
-5. **[RAD11-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-5).**
+5. **[RAD11-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-5).**
 
-6. **[RAD11-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-6).**
+6. **[RAD11-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad11-6).**
 
 ### RAD12 — Paint IR, Display List & Backend Abstraction
 
-1. **[RAD12-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-1).**
+1. **[RAD12-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-1).**
 
-2. **[RAD12-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-2).**
+2. **[RAD12-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-2).**
 
-3. **[RAD12-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-3).**
+3. **[RAD12-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-3).**
 
-4. **[RAD12-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-4).**
+4. **[RAD12-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-4).**
 
-5. **[RAD12-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-5).**
+5. **[RAD12-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-5).**
 
-6. **[RAD12-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-6).**
+6. **[RAD12-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad12-6).**
 
 ### RAD13 — Render Walk, Painters & Export
 
-1. **[RAD13-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-1).**
+1. **[RAD13-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-1).**
 
-2. **[RAD13-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-2).**
+2. **[RAD13-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-2).**
 
-3. **[RAD13-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-3).**
+3. **[RAD13-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-3).**
 
-4. **[RAD13-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-4).**
+4. **[RAD13-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-4).**
 
-5. **[RAD13-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-5).**
+5. **[RAD13-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-5).**
 
-6. **[RAD13-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-6).**
+6. **[RAD13-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-6).**
 
-7. **[RAD13-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-7).**
+7. **[RAD13-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad13-7).**
 
 ### RAD14 — SVG, Vector Graphics & Diagram Layout
 
-1. **[RAD14-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-1).**
+1. **[RAD14-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-1).**
 
 2. **Graph layout is Dagre-inspired, not a faithful port** (`lmd/package/graph/dagre.ls`). It still lacks network-simplex ranking, dummy nodes, Brandes-Kopf x-assignment, clusters, parallel-edge separation, and self-loop routing. *Improvement:* normalize long edges through dummy ranks before repeated crossing-reduction sweeps.
-3. **[RAD14-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-3).**
+3. **[RAD14-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-3).**
 
-4. **[RAD14-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-4).**
+4. **[RAD14-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-4).**
 
-5. **[RAD14-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-5).**
+5. **[RAD14-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-5).**
 
-6. **[RAD14-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-6).**
+6. **[RAD14-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-6).**
 
-7. **[RAD14-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-7).**
+7. **[RAD14-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-7).**
 
-8. **[RAD14-8 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-8).**
+8. **[RAD14-8 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad14-8).**
 
 ### RAD15 — Events & Input Dispatch
 
 1. *(Resolved.)* The duplicated layer-mode webview block is gone; `target_block_view` has one `WEBVIEW_MODE_LAYER` inject block.
-2. **[RAD15-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad15-2).**
+2. **[RAD15-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad15-2).**
 
 3. **Legacy contenteditable key path has unfinished stubs.** `event.cpp:9303/9311/9316/9488/9492` carry `TODO: delete selected text` / `TODO: insert character at caret` in a legacy key handler superseded by the editing-controller/transaction path (comment at `event.cpp:9411`). The dead path should be removed so the transaction path is the only key→edit route.
-4. <a id="rad15-4"></a> **`handle_event` monolith.** `event.cpp` is ~9,554 lines / 440KB and `handle_event` is a ~2,900-line switch; `event_sim.cpp` is ~5,902 lines. High cognitive load. Splitting per-`EventType` handlers into separate translation units would help without changing the single-funnel contract. `event.cpp` is Lambda-owned; the native event-simulation portion is recorded as [RAD15-4R](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad15-4r).
-5. **[RAD15-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad15-5).**
+4. <a id="rad15-4"></a> **`handle_event` monolith.** `event.cpp` is ~9,554 lines / 440KB and `handle_event` is a ~2,900-line switch; `event_sim.cpp` is ~5,902 lines. High cognitive load. Splitting per-`EventType` handlers into separate translation units would help without changing the single-funnel contract. `event.cpp` is Lambda-owned; the native event-simulation portion is recorded as [RAD15-4R](../../radiant/vibe/Radiant_Issue_Ledger.md#rad15-4r).
+5. **[RAD15-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad15-5).**
 
 ### RAD16 — Animation & Frame Scheduling
 
-1. **[RAD16-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-1).**
+1. **[RAD16-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-1).**
 
-2. **[RAD16-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-2).**
+2. **[RAD16-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-2).**
 
-3. **[RAD16-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-3).**
+3. **[RAD16-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-3).**
 
-4. **[RAD16-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-4).**
+4. **[RAD16-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-4).**
 
-5. **[RAD16-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-5).**
+5. **[RAD16-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-5).**
 
-6. **[RAD16-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-6).**
+6. **[RAD16-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-6).**
 
-7. **[RAD16-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-7).**
+7. **[RAD16-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad16-7).**
 
 ### RAD17 — Interaction State: DocState, State Machine & Schema
 
-1. **[RAD17-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad17-1).**
+1. **[RAD17-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad17-1).**
 
-2. **[RAD17-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad17-2).**
+2. **[RAD17-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad17-2).**
 
-3. **[RAD17-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad17-3).**
+3. **[RAD17-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad17-3).**
 
 4. **Selectionchange coalescing spans document and text-control drains.** `selection_mutation_seq`/`selection_event_seq` plus the per-text-control `tc_selectionchange_head` linked-list drain form a subtle ordering surface with no single owner.
-5. **[RAD17-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad17-5).**
+5. **[RAD17-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad17-5).**
 
 ### RAD18 — Editing, Selection & DOM Ranges
 
-1. **[RAD18-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-1).**
+1. **[RAD18-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-1).**
 
-2. **[RAD18-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-2).**
+2. **[RAD18-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-2).**
 
-3. **[RAD18-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-3).**
+3. **[RAD18-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-3).**
 
-4. **[RAD18-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-4).**
+4. **[RAD18-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-4).**
 
-5. **[RAD18-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-5).**
+5. **[RAD18-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad18-5).**
 
 6. **Single-range selection.** `DOM_SELECTION_MAX_RANGES == 1`; extra `addRange()` calls are silently ignored, as required by the Selection API. This is not a conformance gap. **Ownership review, 2026-11-09:** the current Radiant header defines this internal capacity as 4, so the historical capacity claim is stale; public Selection behavior was not reverified.
 7. **Editor matrix boundary.** CodeMirror, ProseMirror light DOM, and Editor.js have pinned offline authoritative-state probes. The capability manifest is the source of truth for their supported configurations and explicit exclusions, including Editor.js ordinary paragraph paste, which upstream delegates to browser-native structural editing and this gate intentionally does not restore. An editor render or one typing probe is not treated as blanket compatibility.
 
 ### RAD19 — Form Controls & Text-Control Editing
 
-1. **[RAD19-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-1).**
+1. **[RAD19-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-1).**
 
-2. **[RAD19-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-2).**
+2. **[RAD19-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-2).**
 
-3. **[RAD19-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-3).**
+3. **[RAD19-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-3).**
 
-4. **[RAD19-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-4).**
+4. **[RAD19-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-4).**
 
-5. **[RAD19-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-5).**
+5. **[RAD19-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-5).**
 
-6. **[RAD19-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-6).**
+6. **[RAD19-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-6).**
 
-7. **[RAD19-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-7).**
+7. **[RAD19-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-7).**
 
-8. **[RAD19-8 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-8).**
+8. **[RAD19-8 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad19-8).**
 
 ### RAD20 — Application Shell, Browsing & Document Loading
 
-1. **[RAD20-1 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-1).**
+1. **[RAD20-1 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-1).**
 
-2. **[RAD20-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-2).**
+2. **[RAD20-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-2).**
 
-3. **[RAD20-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-3).**
+3. **[RAD20-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-3).**
 
-4. **[RAD20-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-4).**
+4. **[RAD20-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-4).**
 
-5. **[RAD20-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-5).**
+5. **[RAD20-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-5).**
 
-6. **[RAD20-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-6).**
+6. **[RAD20-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad20-6).**
 
 7. **Loader coverage gaps.** Top-level SVG and images are viewers with no zoom/pan yet (the wrapper CSS pins `img.rdt-image-document` to `max-width: none`, `cmd_layout.cpp:3714`); XML without an `<?xml-stylesheet?>` silently degrades to source text; wiki runs neither scripts nor a math pass. These are intentional current limits, not bugs, but they are incomplete relative to HTML.
 
@@ -441,21 +441,21 @@ against the tree. Item numbers are stable IDs: `RAD06-3` is item 3 under `RAD06`
 ### RAD22 — Media & Embedded Webview
 
 1. **Webview IPC to the Lambda runtime is a TODO on every platform.** `window.__lambda.invoke()` messages are received and logged but never dispatched: `webview_child_mac.mm:160`, `webview_child_linux.cpp:97`, and `webview_layer_linux.cpp:113` all carry `// TODO: ... dispatch to Lambda runtime`. The macOS layer handler (`webview_layer_mac.mm:70-76`) only sets `dirty` and does not even log the payload. The entire injected bridge (`_callbacks`, `on()`) is inert. *Improvement:* wire the JSON `{command, payload}` into the RAD21 runtime.
-2. **[RAD22-2 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-2).**
+2. **[RAD22-2 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-2).**
 
-3. **[RAD22-3 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-3).**
+3. **[RAD22-3 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-3).**
 
-4. **[RAD22-4 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-4).**
+4. **[RAD22-4 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-4).**
 
-5. **[RAD22-5 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-5).**
+5. **[RAD22-5 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-5).**
 
-6. **[RAD22-6 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-6).**
+6. **[RAD22-6 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-6).**
 
-7. **[RAD22-7 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-7).**
+7. **[RAD22-7 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-7).**
 
-8. **[RAD22-8 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-8).**
+8. **[RAD22-8 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-8).**
 
-9. **[RAD22-9 moved to the Radiant ledger](../../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-9).**
+9. **[RAD22-9 moved to the Radiant ledger](../../radiant/vibe/Radiant_Issue_Ledger.md#rad22-9).**
 
 ## Resolved issues
 
@@ -477,7 +477,7 @@ loader with the shared document-transform loader and removed its explicit CMU
 and KaTeX font-stylesheet loading. The replacement
 [`wrap_standalone`](../../lmd/package/doc/latex/latex.ls) embedded layout/math CSS but
 no font declarations or stylesheet links. The shared loader in
-[`load_lambda_document_doc`](../../radiant/cmd_layout.cpp) collects the
+[`load_lambda_document_doc`](../../radiant/radiant/cmd_layout.cpp) collects the
 generated HTML's CSS without adding those package assets.
 
 [`local_font_families`](../../lmd/package/math/css.ls) named Computer

@@ -114,22 +114,27 @@ fn plan(part,b,definition,geometry,seed) map^ {
     {id:id,binding:b,definition:definition,geometry:geometry,indices:faces,atlas:atlas,mapped:mapped,columns:columns,tile:tile,
         width:columns*tile,height:rows*tile,vertices:if (atlas) tris*3 else if (mapped) len(geometry.positions) div 3 else 0}
 }
-// one padded triangle per atlas tile; reflected barycentrics keep both sides of the diagonal filled.
-fn atlas_point(job,x,y) array {
+// Each tile shares the reflected barycentric weights. Its three vertices are
+// fixed across every pixel in that tile.
+fn atlas_weights(tile: int) array => [for (y in 0 to tile-1,x in 0 to tile-1) {
+    let u=clamp((float(x)-1.0)/float(tile-3)),v=clamp((float(y)-1.0)/float(tile-3))
+    let a=if (u+v>1.0) 1.0-v else u,b=if (u+v>1.0) 1.0-u else v;
+    [1.0-a-b,a,b]}]
+fn atlas_point(job,triangles,weights,x,y) array {
     let tile=job.tile,index=(y div tile)*job.columns+(x div tile)
-    let ids=job.indices
-    let triangle=min(index,len(ids) div 3-1)
-    let u=clamp((float(x%tile)-1.0)/float(tile-3)),v=clamp((float(y%tile)-1.0)/float(tile-3))
-    let a=if (u+v>1.0) 1.0-v else u,b=if (u+v>1.0) 1.0-u else v
-    let points=[for (i in 0 to 2) point(job.geometry,ids[triangle*3+i])];
-    [for (i in 0 to 2) points[0][i]*(1.0-a-b)+points[1][i]*a+points[2][i]*b]
+    let vertices=triangles[min(index,len(triangles)-1)]
+    let w=weights[(y%tile)*tile+(x%tile)];
+    [for (i in 0 to 2) vertices[0][i]*w[0]+vertices[1][i]*w[1]+vertices[2][i]*w[2]]
 }
 fn texture(job,seed) element^ {
     let p=prepare(job.definition,seed)^
     let b=job.binding
+    let weights=if (job.atlas) atlas_weights(job.tile) else []
+    let triangles=if (job.atlas) [for (triangle in 0 to (len(job.indices)^ div 3)-1)
+        [for (i in 0 to 2) point(job.geometry,job.indices[triangle*3+i])^]] else []
     // image rows start at the top; native texture UVs start at the bottom.
     let pixels=reshape([for (row in 0 to (job.height-1),x in 0 to (job.width-1),let y=job.height-1-row,
-        let point=if (job.atlas) atlas_point(job,x,y) else [(float(x)+0.5)/job.width,(float(y)+0.5)/job.height],
+        let point=if (job.atlas) atlas_point(job,triangles,weights,x,y) else [(float(x)+0.5)/job.width,(float(y)+0.5)/job.height],
         let q=if (job.atlas) [for (i,value in point) value/b.scale[i]+b.offset[i]] else point,
         let rgb=sample(p,q,not job.atlas)) *[for (channel in [*rgb,1.0]) u8(round(clamp(channel)*255.0))]], [job.height,job.width,4])
     let bytes=image.encode(image.from_array(pixels)^,{format:'png'})^;

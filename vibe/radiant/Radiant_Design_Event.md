@@ -543,7 +543,7 @@ There are today two completely disjoint event flows:
 
 | Stage | File | Notes |
 |-------|------|-------|
-| GLFW callbacks (cursor pos, mouse button, scroll, key, char, focus) | [radiant/window.cpp](../../radiant/window.cpp) ~ line 735 | Build a `RdtEvent` (mouse / key / scroll / text) and queue. |
+| GLFW callbacks (cursor pos, mouse button, scroll, key, char, focus) | [radiant/window.cpp](../../radiant/radiant/window.cpp) ~ line 735 | Build a `RdtEvent` (mouse / key / scroll / text) and queue. |
 | Main dispatch | `rdt_event_handle()` / `event_context_init()` in [radiant/event.cpp](../../radiant/event.cpp) ~ line 1107 | Allocates an `EventContext`, snapshots `DocState` (hover/active/focus/selection). |
 | Hit-testing | `target_html_doc` → `target_block_view` → `target_inline_view` → `target_text_view` | Walks the **view tree** (not the DOM tree) to find the topmost `View*` under the cursor. |
 | Mouse-down → click classification | event.cpp ~ line 2833 (`mousedown`) and ~ line 3336 (`click`) | A `click` is synthesised on mouse-up if the up target matches the down target. |

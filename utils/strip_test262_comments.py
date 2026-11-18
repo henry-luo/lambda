@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Strip JS comments from test262 test and harness files to reduce I/O and speed up parsing.
 
-Creates a parallel directory structure under ../lambda-test/js262/ containing
+Creates a parallel directory structure under lambda-test/js262/ containing
 comment-stripped versions of all .js test and harness files. The YAML frontmatter
 (/*--- ... ---*/) is preserved since the metadata parser depends on it.
 
@@ -15,7 +15,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 SRC_ROOT = "ref/test262"
-DST_ROOT = "../lambda-test/js262"
+DST_ROOT = "lambda-test/js262"
 
 # Directories containing .js files to strip
 STRIP_DIRS = ["test", "harness"]

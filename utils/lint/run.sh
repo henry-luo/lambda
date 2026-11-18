@@ -26,8 +26,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SGCONFIG="$ROOT/sgconfig.yml"
 RULES_DIR="$ROOT/utils/lint/rules"
 REPORT_DIR="$ROOT/test_output/lint"
-INPUT_ROOT="$(cd "${LAMBDA_INPUT_ROOT:-$ROOT/../lambda-input}" && pwd)"
-RADIANT_ROOT="$(cd "${RADIANT_ROOT:-$ROOT/../radiant}" && pwd)"
+INPUT_ROOT="$(cd "${LAMBDA_INPUT_ROOT:-$ROOT/lambda-input}" && pwd)"
+RADIANT_ROOT="$(cd "${RADIANT_ROOT:-$ROOT/radiant}" && pwd)"
 SCAN_ROOTS=(lambda test "$INPUT_ROOT/lib" "$INPUT_ROOT/lambda/core/lambda_typed.hpp" "$RADIANT_ROOT/radiant")
 
 # Structural checks: "<id>:<command>". Each runs after the pattern pass and

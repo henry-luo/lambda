@@ -104,10 +104,10 @@ A scan failure never publishes a deletion inferred from an unavailable root.
 one-second idle accept wait. A busy session can delay its timer. Its `rounds`
 limits listener iterations, while zero runs continuously; `ready` writes the
 selected listener port. The input/lib context-unlink fix resolves the earlier
-shutdown stall ([LI-016](../../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-016));
+shutdown stall ([LI-016](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-016));
 the combined command is included in the real-S3 gate on every execution tier.
 Use one active agent writer per private directory. Concurrent administration remains unqualified under
-[LI-015](../../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-015);
+[LI-015](../../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-015);
 do not run administrative mutations concurrently or retry uncertain commits.
 
 `sync.cloud_saved` covers the current workspace frontier at the configured

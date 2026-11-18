@@ -22,7 +22,7 @@ const { docSchema } = await import('../src/schemas/doc.ts')
 const { runFixtureCase } = await import('../test/helpers/fixture-runner.ts')
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const CHROMIUM = path.resolve(__dirname, '../../../../lambda-test/editing')
+const CHROMIUM = path.resolve(__dirname, '../../../lambda-test/editing')
 const REPORT = path.resolve(__dirname, '../../../vibe/editing/Chromium_Divergence_Report.md')
 const CATEGORIES = process.argv.slice(2).length ? process.argv.slice(2)
   : ['inserting', 'deleting', 'execCommand', 'style', 'input', 'selection', 'pasteboard']

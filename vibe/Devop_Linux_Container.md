@@ -166,10 +166,10 @@ Liberation and other test fonts registered with fontconfig:
 ```bash
 container run --detach --name lambda-linux-radiant --cpus 8 --memory 16G \
   --volume /Users/henryluo/Projects/lambda-linux:/lambda \
-  --volume /Users/henryluo/Projects/lambda-test/layout:/lambda/test/layout:ro \
-  --volume /Users/henryluo/Projects/lambda-test/render:/lambda/test/render:ro \
-  --volume /Users/henryluo/Projects/lambda-test/pdf:/lambda/test/pdf:ro \
-  --volume /Users/henryluo/Projects/lambda-test/jquery-ui:/lambda-test/jquery-ui:ro \
+  --volume /Users/henryluo/Projects/lambda/lambda-test/layout:/lambda/test/layout:ro \
+  --volume /Users/henryluo/Projects/lambda/lambda-test/render:/lambda/test/render:ro \
+  --volume /Users/henryluo/Projects/lambda/lambda-test/pdf:/lambda/test/pdf:ro \
+  --volume /Users/henryluo/Projects/lambda/lambda-test/jquery-ui:/lambda/test/jquery-ui:ro \
   --volume /Users/henryluo/Projects/lambda/ref/wpt:/lambda/ref/wpt:ro \
   --workdir /lambda lambda-linux-arm64:latest sleep infinity
 container exec lambda-linux-radiant bash -lc \

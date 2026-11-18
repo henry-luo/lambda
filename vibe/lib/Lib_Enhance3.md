@@ -63,12 +63,12 @@ re-implements the 3-byte→4-char loop with its own copy of the alphabet string.
 | [lambda/js/js_globals.cpp:13240](../../lambda/js/js_globals.cpp) | `js_btoa` (inline `b64_encode_table`) | JS `btoa()` |
 | [lambda/js/js_buffer.cpp:840](../../lambda/js/js_buffer.cpp) | inline encode + decode | `Buffer.toString` — **also base64url** (alphabet at :841) |
 | [lambda/js/js_crypto.cpp:312](../../lambda/js/js_crypto.cpp) | `bytes_to_base64_string` | HMAC digest output |
-| [radiant/render_svg.cpp:204](../../radiant/render_svg.cpp) | `svg_append_base64` | raster fallback images |
+| [radiant/render_svg.cpp:204](../../radiant/radiant/render_svg.cpp) | `svg_append_base64` | raster fallback images |
 | [radiant/webdriver/webdriver_actions.cpp:386](../../radiant/webdriver/webdriver_actions.cpp) | `base64_encode_data` | screenshot encoding |
 
 Two callers already use lib correctly (decode side):
-[radiant/render_svg_inline.cpp:2674](../../radiant/render_svg_inline.cpp),
-[radiant/surface.cpp:445](../../radiant/surface.cpp).
+[radiant/render_svg_inline.cpp:2674](../../radiant/radiant/render_svg_inline.cpp),
+[radiant/surface.cpp:445](../../radiant/radiant/surface.cpp).
 
 The two `serve/` files (`ipc_proto.cpp` + `asgi_bridge.cpp`) are *near-verbatim
 duplicates of each other* — including their own private `b64_decode` that
@@ -270,7 +270,7 @@ Three independent parsers exist:
 
 - [lambda/input/css/css_properties.cpp:1231](../../lambda/input/css/css_properties.cpp) `css_parse_hex_to_rgba` — 3/4/6/8-digit, alpha-aware
 - [radiant/graph_theme.cpp:28](../../radiant/graph_theme.cpp) `parse_hex_color` (6-digit) + `format_hex_color` (inverse)
-- [radiant/resolve_htm_style.cpp:63](../../radiant/resolve_htm_style.cpp) — HTML `bgcolor` via `strtol(.., 16)` + component split
+- [radiant/resolve_htm_style.cpp:63](../../radiant/radiant/resolve_htm_style.cpp) — HTML `bgcolor` via `strtol(.., 16)` + component split
 
 A `lib/color.h` (`color_parse_hex(str, &rgba)` / `color_format_hex`) would unify
 these, but the three callers disagree on supported digit counts, alpha handling,

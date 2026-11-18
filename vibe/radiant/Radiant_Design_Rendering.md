@@ -740,23 +740,23 @@ Line anchors are audit conveniences; confirm the named symbol when lines move.
 
 | Boundary | Source and symbols |
 |---|---|
-| Paint types and gateway | [render.hpp](../../radiant/render.hpp): `PaintOp`, `PaintCmd`, `PaintList`, `PaintRecordTarget`, `paint_record_lower_pending` |
-| Paint lifetime/lowering | [paint_ir.cpp](../../radiant/paint_ir.cpp): `PaintList::init`, `paint_list_borrow_commands`, `paint_ir_lower_raster_internal`, `paint_ir_lower_svg_stream` |
-| Walk and raster routing | [render_walk.cpp](../../radiant/render_walk.cpp), [render_raster_walk.cpp](../../radiant/render_raster_walk.cpp): `render_walk_children`, `render_raster_dispatch_block` |
-| Frame and output | [render_output.cpp](../../radiant/render_output.cpp): `RenderFrameScope`, `render_output_render_raster_target`, `render_output_replay_display_list`, `render_output_render_tiled_png` |
-| List storage/copy/validation | [display_list_storage.cpp](../../radiant/display_list_storage.cpp): `DisplayListCursor`, `dl_reference_fragment`, `dl_clone_item_payload`, `dl_copy_range`, `DisplayList::clear`, `dl_validate_recording`, `dl_validate_append`, `dl_validate_chunk` |
-| Geometry recording | [display_list_record_vector.cpp](../../radiant/display_list_record_vector.cpp): `dl_record_path_item`, `dl_fill_path`, `dl_stroke_path` |
-| Replay | [display_list_replay.cpp](../../radiant/display_list_replay.cpp), [display_list_replay_vector.cpp](../../radiant/display_list_replay_vector.cpp), [tile_pool.cpp](../../radiant/tile_pool.cpp): `dl_replay`, `dl_replay_vector_item`, `dl_replay_tile` |
-| Retained fragments/resources | [retained_display_list.cpp](../../radiant/retained_display_list.cpp), [render_block.cpp](../../radiant/render_block.cpp): `retained_dl_cache_capture`, `retained_dl_cache_capture_resources`, `retained_dl_append_fragment`, `render_block_try_retained_fragment`, `dl_resource_summary_capture`, `dl_resource_summary_current` |
-| SVG production/layers | [render_svg_inline.cpp](../../radiant/render_svg_inline.cpp): `render_svg_path`, `render_svg_to_display_list_primitives`, `svg_layer_render_passes`, `svg_layer_capture`, `svg_layer_paint` |
+| Paint types and gateway | [render.hpp](../../radiant/radiant/render.hpp): `PaintOp`, `PaintCmd`, `PaintList`, `PaintRecordTarget`, `paint_record_lower_pending` |
+| Paint lifetime/lowering | [paint_ir.cpp](../../radiant/radiant/paint_ir.cpp): `PaintList::init`, `paint_list_borrow_commands`, `paint_ir_lower_raster_internal`, `paint_ir_lower_svg_stream` |
+| Walk and raster routing | [render_walk.cpp](../../radiant/radiant/render_walk.cpp), [render_raster_walk.cpp](../../radiant/radiant/render_raster_walk.cpp): `render_walk_children`, `render_raster_dispatch_block` |
+| Frame and output | [render_output.cpp](../../radiant/radiant/render_output.cpp): `RenderFrameScope`, `render_output_render_raster_target`, `render_output_replay_display_list`, `render_output_render_tiled_png` |
+| List storage/copy/validation | [display_list_storage.cpp](../../radiant/radiant/display_list_storage.cpp): `DisplayListCursor`, `dl_reference_fragment`, `dl_clone_item_payload`, `dl_copy_range`, `DisplayList::clear`, `dl_validate_recording`, `dl_validate_append`, `dl_validate_chunk` |
+| Geometry recording | [display_list_record_vector.cpp](../../radiant/radiant/display_list_record_vector.cpp): `dl_record_path_item`, `dl_fill_path`, `dl_stroke_path` |
+| Replay | [display_list_replay.cpp](../../radiant/radiant/display_list_replay.cpp), [display_list_replay_vector.cpp](../../radiant/radiant/display_list_replay_vector.cpp), [tile_pool.cpp](../../radiant/radiant/tile_pool.cpp): `dl_replay`, `dl_replay_vector_item`, `dl_replay_tile` |
+| Retained fragments/resources | [retained_display_list.cpp](../../radiant/radiant/retained_display_list.cpp), [render_block.cpp](../../radiant/radiant/render_block.cpp): `retained_dl_cache_capture`, `retained_dl_cache_capture_resources`, `retained_dl_append_fragment`, `render_block_try_retained_fragment`, `dl_resource_summary_capture`, `dl_resource_summary_current` |
+| SVG production/layers | [render_svg_inline.cpp](../../radiant/radiant/render_svg_inline.cpp): `render_svg_path`, `render_svg_to_display_list_primitives`, `svg_layer_render_passes`, `svg_layer_capture`, `svg_layer_paint` |
 | Mutation invalidation | [dom.cpp](../../lambda/dom/dom.cpp): `dom_svg_layer_note_mutation`, `dom_mutation_notify` |
-| Vector backend | [rdt_vector_tvg.cpp](../../radiant/rdt_vector_tvg.cpp): `RdtVectorImpl`, `tvg_draw_paint_now`, `rdt_picture_draw` |
-| Shared path storage | [rdt_path.cpp](../../radiant/rdt_path.cpp), [rdt_path_internal.hpp](../../radiant/rdt_path_internal.hpp): `rdt_path_clone`, `rdt_path_hash`, `path_append_entry` |
+| Vector backend | [rdt_vector_tvg.cpp](../../radiant/radiant/rdt_vector_tvg.cpp): `RdtVectorImpl`, `tvg_draw_paint_now`, `rdt_picture_draw` |
+| Shared path storage | [rdt_path.cpp](../../radiant/radiant/rdt_path.cpp), [rdt_path_internal.hpp](../../radiant/radiant/rdt_path_internal.hpp): `rdt_path_clone`, `rdt_path_hash`, `path_append_entry` |
 | Native path copies | [vendored tvgShape.h](../../mac-deps/thorvg/src/renderer/tvgShape.h): `ShapeImpl::append`, `ShapeImpl::duplicate`; inspected only, never edited by this work |
-| SVG export | [render_svg.cpp](../../radiant/render_svg.cpp): `svg_lower_paint_list`, `svg_make_backend` |
-| PDF adapter | [render_pdf.cpp](../../radiant/render_pdf.cpp), [radiant_pdf_walk.cpp](../../lambda/module/radiant/radiant_pdf_walk.cpp), [radiant_pdf_graphic.cpp](../../lambda/module/radiant/radiant_pdf_graphic.cpp): `render_lambda_pdf`, `pdf_walk_graphic`, `pdf_vector_resource` |
-| Published pages | [layout_paged.cpp](../../radiant/layout_paged.cpp): `paged_publish_box_paint`, `paged_flow_compose_pages` |
-| Profiling | [render_profiler.cpp](../../radiant/render_profiler.cpp), [render_output.cpp](../../radiant/render_output.cpp): `RenderProfiler`, record/replay timing and retained capture ordering |
+| SVG export | [render_svg.cpp](../../radiant/radiant/render_svg.cpp): `svg_lower_paint_list`, `svg_make_backend` |
+| PDF adapter | [render_pdf.cpp](../../radiant/radiant/render_pdf.cpp), [radiant_pdf_walk.cpp](../../lambda/module/radiant/radiant_pdf_walk.cpp), [radiant_pdf_graphic.cpp](../../lambda/module/radiant/radiant_pdf_graphic.cpp): `render_lambda_pdf`, `pdf_walk_graphic`, `pdf_vector_resource` |
+| Published pages | [layout_paged.cpp](../../radiant/radiant/layout_paged.cpp): `paged_publish_box_paint`, `paged_flow_compose_pages` |
+| Profiling | [render_profiler.cpp](../../radiant/radiant/render_profiler.cpp), [render_output.cpp](../../radiant/radiant/render_output.cpp): `RenderProfiler`, record/replay timing and retained capture ordering |
 
 ## Appendix B. Measured storage transition
 

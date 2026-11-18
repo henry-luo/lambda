@@ -2,7 +2,7 @@
   "schema_version": 1,
   "corpus": "chromium-editing",
   "upstream_revision": "c1d95c342fe4541d24be5833dabe3698c7a2a40d",
-  "root": "../lambda-test/editing",
+  "root": "lambda-test/editing",
   "inventory": "selected",
   "require_clean_worktree": true,
   "runner": "test_chromium_contenteditable_gtest.exe",

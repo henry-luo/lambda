@@ -9,7 +9,7 @@ Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 
 Input parsers, formatters and shared-library unit tests live in `../lambda-input/test`; native layout, rendering, media and host-interface tests live in `../radiant/test` (D9.1.1v4, D9.1.3v2). Lambda keeps runtime, scripting, DOM adapters and integration tests here. Existing Lambda aggregate entries resolve the owner-local sources through `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` and continue to write their executables under this checkout's `test/` directory.
 
-Run `make -C ../lambda-input test-input-baseline` and `make -C ../radiant test-radiant-baseline` for the native owner suites. The input target prepares its pinned YAML corpus and uses the sibling `lambda-test` Markdown corpus; Radiant uses that checkout's layout and media corpora. Public-network input tests are a separate `test-network-online` target. Lambda's `test-lambda-baseline` and `test-radiant-baseline` select Lambda-owned sources and integration scripts; they do not run sibling-owned unit tests. The full Lambda gate also invokes the input owner's baseline.
+Run `make -C lambda-input test-input-baseline` and `make -C radiant test-radiant-baseline` for the native owner suites. The input target reads its YAML corpus from `lambda-test/yaml` and uses the shared Markdown corpus; Radiant uses that checkout's layout and media corpora (D9.1.1v4). Public-network input tests are a separate `test-network-online` target. Lambda's `test-lambda-baseline` and `test-radiant-baseline` select Lambda-owned sources and integration scripts; they do not run owner-repository unit tests. The full Lambda gate also invokes the input owner's baseline.
 
 ## Ground rules
 
@@ -270,7 +270,7 @@ still require native checks. Design: [Radiant Fullscreen](../vibe/radiant/Radian
 | `make test` | every suite except `jube`, and minus `test_radiant_online_view_gtest`. This is not `test-all`, despite what `make help` says |
 | `make test-all` / `test-all-baseline` / `test-extended` | all suites / `--category=baseline` / `--category=extended`. `test-extended` also runs `dom-ui-run`. |
 | `make test-lambda-baseline` | Lambda-owned `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`, and `test/lambda/latex` script cases) |
-| `make test-lambda-full` | the above, LaTeX script cases, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, and the four relocated unit suites retained by the full gate |
+| `make test-lambda-full` | the above, nine focused JavaScript GTest suites, LaTeX script cases, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, and the four relocated unit suites retained by the full gate |
 | `make -C ../lambda-input test-input-baseline` | input-owned native library, parser, formatter, model, CSS, archive and offline network suites, including HTML, Markdown and YAML corpora |
 | `make -C ../radiant test-radiant-baseline` | Radiant-owned native layout, rendering, media and host-interface unit suites |
 | `make test-radiant-baseline` | Lambda-owned Radiant integration checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks run through `test/test_run.js` within a shared worker budget; layout partials, skips and baseline verdicts are retained |
@@ -526,18 +526,18 @@ test. Time the gate with a release host (`make build-release-compile`, then
 
 ## 5. External test data
 
-Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides `../lambda-test`). It clones `ref/wpt` at a pinned commit and links each top-level dir of `../lambda-test` as `test/<name>`.
+Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides the `lambda-test` submodule). It clones `ref/wpt` at a pinned commit and links each top-level corpus directory from `lambda-test/` as `test/<name>`, except YAML, which the input suite reads directly from `lambda-test/yaml`.
 
 | Path | Source | In git? | Used by |
 |---|---|---|---|
-| `test/js262` | `../lambda-test/js262` | ignored link | `test_js_test262_gtest` |
-| `test/layout` | `../lambda-test/layout` | ignored link | `make layout`, page-load, fuzzy, radiant-view, UI fonts (`test/layout/data/font`) |
-| `test/render`, `test/pdf` | `../lambda-test/{render,pdf}` | ignored links | `make test-render`, `test_pdf_render_visual_gtest` |
-| `test/markdown`, `test/media`, `test/jquery-ui` | `../lambda-test/*` | **tracked** links | source-pos tests, `test_video_gtest`, UI `dom` fixtures |
-| `../lambda-test/editing` | read directly | not linked (`test/editing` is a tracked dir) | `test_chromium_contenteditable_gtest` |
+| `test/js262` | `lambda-test/js262` | ignored link | `test_js_test262_gtest` |
+| `test/layout` | `lambda-test/layout` | ignored link | `make layout`, page-load, fuzzy, radiant-view, UI fonts (`test/layout/data/font`) |
+| `test/render`, `test/pdf` | `lambda-test/{render,pdf}` | ignored links | `make test-render`, `test_pdf_render_visual_gtest` |
+| `test/markdown`, `test/media`, `test/jquery-ui` | `lambda-test/*` | ignored links | source-pos tests, `test_video_gtest`, UI `dom` fixtures |
+| `lambda-test/editing` | read directly | not linked (`test/editing` is a tracked dir) | `test_chromium_contenteditable_gtest` |
 | `ref/wpt` | WPT clone at the commit pinned in `setup-test.sh` | ignored | WPT runners |
 | `ref/test262`, `ref/node` | manual checkout (`setup-test.sh` does not fetch them) | ignored | Test262, Node official tests (`make node-shim`) |
-| `test/yaml` | git submodule | submodule | Lambda's legacy YAML test paths; the input owner's baseline prepares its own pinned corpus |
+| `lambda-test/yaml` | YAML Test Suite snapshot at the pinned upstream revision | tracked source | `make -C lambda-input test-input-baseline` runs `test_yaml_suite_gtest` directly from this path |
 
 ## 6. Updating goldens and baselines
 

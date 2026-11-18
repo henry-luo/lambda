@@ -19,7 +19,7 @@ Bring Radiant's `<input>` and `<textarea>` editing experience to parity with a m
 - **Accessibility** focus ring, `:focus-visible`, ARIA value reflection, `change` event on commit.
 - **Automation** drive every behavior above from `event_sim` JSON tests under [test/ui/](../../test/ui/).
 
-This proposal supersedes the text-editing portion of [Radiant_Form2.md](Radiant_Form2.md) §2e–2f and folds in what has actually shipped in [radiant/text_control.hpp](../../radiant/text_control.hpp), [radiant/event.cpp](../../radiant/event.cpp), [radiant/render_form.cpp](../../radiant/render_form.cpp), and [radiant/clipboard.hpp](../../radiant/clipboard.hpp).
+This proposal supersedes the text-editing portion of [Radiant_Form2.md](Radiant_Form2.md) §2e–2f and folds in what has actually shipped in [radiant/text_control.hpp](../../radiant/text_control.hpp), [radiant/event.cpp](../../radiant/event.cpp), [radiant/render_form.cpp](../../radiant/radiant/render_form.cpp), and [radiant/clipboard.hpp](../../radiant/radiant/clipboard.hpp).
 
 ---
 
@@ -31,13 +31,13 @@ This proposal supersedes the text-editing portion of [Radiant_Form2.md](Radiant_
 |------|------|--------------|
 | DOM tagging | [lambda/input/css/dom_element.cpp](../../lambda/input/css/dom_element.cpp) | Recognizes `<input>`, `<textarea>`; sets `:checked`, `:disabled` |
 | Form model | [radiant/form_control.hpp](../../radiant/form_control.hpp) | `FormControlProp`, `FormControlType`, intrinsic-size constants |
-| Text-control API | [radiant/text_control.hpp](../../radiant/text_control.hpp), [text_control.cpp](../../radiant/text_control.cpp) | `tc_set_value`, `tc_set_selection_range`, UTF‑8↔UTF‑16, lazy init, focus tracking, ViewState ownership and prop-cache rebind |
-| Selection / caret | [radiant/dom_range.cpp](../../radiant/dom_range.cpp), [dom_range_resolver.cpp](../../radiant/dom_range_resolver.cpp), `state->caret` / `state->selection` in [radiant/event.cpp](../../radiant/event.cpp) | Cross-view selection, glyph-precise caret |
-| Layout | [radiant/layout_form.cpp](../../radiant/layout_form.cpp), [intrinsic_sizing.cpp](../../radiant/intrinsic_sizing.cpp) | Replaced-element sizing for inputs/textarea |
-| Render | [radiant/render_form.cpp](../../radiant/render_form.cpp) | Border, value text, placeholder, caret, selection highlight |
-| Window/events | [radiant/window.cpp](../../radiant/window.cpp), [event.cpp](../../radiant/event.cpp), [event.hpp](../../radiant/event.hpp) | GLFW callbacks, `RDT_EVENT_KEY_DOWN`, `RDT_EVENT_TEXT_INPUT`, mouse |
-| Clipboard | [radiant/clipboard.hpp](../../radiant/clipboard.hpp), [clipboard.cpp](../../radiant/clipboard.cpp) | In-process canonical store + GLFW/NSPasteboard/X11/OLE bridge |
-| Automation | [radiant/event_sim.cpp](../../radiant/event_sim.cpp), [event_sim.hpp](../../radiant/event_sim.hpp) | JSON-driven `click`, `type`, `key_press`, `key_combo`, `assert_value`, `assert_selection`, `assert_caret` |
+| Text-control API | [radiant/text_control.hpp](../../radiant/text_control.hpp), [text_control.cpp](../../radiant/radiant/text_control.cpp) | `tc_set_value`, `tc_set_selection_range`, UTF‑8↔UTF‑16, lazy init, focus tracking, ViewState ownership and prop-cache rebind |
+| Selection / caret | [radiant/dom_range.cpp](../../radiant/radiant/dom_range.cpp), [dom_range_resolver.cpp](../../radiant/radiant/dom_range_resolver.cpp), `state->caret` / `state->selection` in [radiant/event.cpp](../../radiant/event.cpp) | Cross-view selection, glyph-precise caret |
+| Layout | [radiant/layout_form.cpp](../../radiant/radiant/layout_form.cpp), [intrinsic_sizing.cpp](../../radiant/radiant/intrinsic_sizing.cpp) | Replaced-element sizing for inputs/textarea |
+| Render | [radiant/render_form.cpp](../../radiant/radiant/render_form.cpp) | Border, value text, placeholder, caret, selection highlight |
+| Window/events | [radiant/window.cpp](../../radiant/radiant/window.cpp), [event.cpp](../../radiant/event.cpp), [event.hpp](../../radiant/radiant/event.hpp) | GLFW callbacks, `RDT_EVENT_KEY_DOWN`, `RDT_EVENT_TEXT_INPUT`, mouse |
+| Clipboard | [radiant/clipboard.hpp](../../radiant/radiant/clipboard.hpp), [clipboard.cpp](../../radiant/radiant/clipboard.cpp) | In-process canonical store + GLFW/NSPasteboard/X11/OLE bridge |
+| Automation | [radiant/event_sim.cpp](../../radiant/radiant/event_sim.cpp), [event_sim.hpp](../../radiant/radiant/event_sim.hpp) | JSON-driven `click`, `type`, `key_press`, `key_combo`, `assert_value`, `assert_selection`, `assert_caret` |
 | JS bridge | `lambda/js/js_dom.cpp` (see [text_control.hpp](../../radiant/text_control.hpp)) | `value`, `selectionStart/End`, `setSelectionRange`, `setRangeText`, `selectionchange` |
 
 ### 2.2 What Already Works
@@ -271,7 +271,7 @@ Modifier abbreviations: **Mod** = Cmd on macOS, Ctrl elsewhere. **Alt** = Option
 
 ### 3.6 Clipboard
 
-The plumbing in [radiant/clipboard.hpp](../../radiant/clipboard.hpp) is already capable. Tighten:
+The plumbing in [radiant/clipboard.hpp](../../radiant/radiant/clipboard.hpp) is already capable. Tighten:
 
 - Cut / Copy emit `text/plain` (UTF-8) only for inputs/textarea. Future: `text/html` from rich-text editors.
 - Paste prefers `text/plain`; if the source has only `text/html`, strip tags via existing HTML parser.
@@ -287,8 +287,8 @@ Wire OS preedit through to `te::ime_*`:
   - Implements `setMarkedText:selectedRange:replacementRange:` → `te::ime_update`.
   - Implements `insertText:replacementRange:` → `te::ime_commit`.
   - Returns `firstRectForCharacterRange:` from `te_x_at_offset` + caret rect (so the OS can position the candidate window).
-  - File: [radiant/ime_mac.mm](../../radiant/ime_mac.mm) (new).
-- **Windows:** subclass the GLFW HWND to handle `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION`, `WM_IME_ENDCOMPOSITION` and drive `IMM_*` for caret rect. File: [radiant/ime_win.cpp](../../radiant/ime_win.cpp) (new).
+  - File: [radiant/ime_mac.mm](../../radiant/radiant/ime_mac.mm) (new).
+- **Windows:** subclass the GLFW HWND to handle `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION`, `WM_IME_ENDCOMPOSITION` and drive `IMM_*` for caret rect. File: [radiant/ime_win.cpp](../../radiant/radiant/ime_win.cpp) (new).
 - **Linux:** XIM/IBus via GLFW is non-trivial; a stub that forwards `RDT_EVENT_TEXT_INPUT` codepoints (current behaviour) is acceptable for v1.
 
 **Render preedit:** when `form->preedit_len > 0`, render `value[0..caret] + preedit + value[caret..]` and underline the preedit range. The committed value isn't mutated until `ime_commit`.
@@ -297,7 +297,7 @@ Wire OS preedit through to `te::ime_*`:
 
 ### 3.8 Rendering Updates
 
-In [radiant/render_form.cpp](../../radiant/render_form.cpp):
+In [radiant/render_form.cpp](../../radiant/radiant/render_form.cpp):
 
 1. **Password masking** — when `form->control_subtype == PASSWORD`, render U+25CF for each codepoint and feed the same width to caret-X math. Provide a small "reveal last char" timer (1 s after most-recent insert) to match desktop Safari/Chrome.
 2. **Placeholder** — show only when `current_value_len == 0` *and* not composing. Use the resolved `::placeholder` color or fallback `#75757580`.
@@ -324,7 +324,7 @@ Set `needs_restyle = true` on transitions.
 
 ### 3.10 Native Context Menu
 
-A new lightweight popup (reuse `<select>` dropdown infrastructure in [render_form.cpp](../../radiant/render_form.cpp)) with: Cut, Copy, Paste, Delete, Select All. Items are enabled/disabled based on selection / clipboard contents. Right-click event (already plumbed via mouse-button callback) opens it; Esc / outside click closes.
+A new lightweight popup (reuse `<select>` dropdown infrastructure in [render_form.cpp](../../radiant/radiant/render_form.cpp)) with: Cut, Copy, Paste, Delete, Select All. Items are enabled/disabled based on selection / clipboard contents. Right-click event (already plumbed via mouse-button callback) opens it; Esc / outside click closes.
 
 ### 3.11 Constraint Validation (v1 minimum)
 
@@ -355,7 +355,7 @@ Reused / new (all routed through the existing `dispatch_lambda_handler` machiner
 
 ## 4. UI Automation Tests (`test/ui/`)
 
-The existing JSON-driven runner in [event_sim.cpp](../../radiant/event_sim.cpp) already supports `type`, `key_press`, `key_combo`, `assert_value`, `assert_selection`, `assert_caret`, `click`, `select_option`, `check`, `wait`. We extend it minimally and add a focused suite.
+The existing JSON-driven runner in [event_sim.cpp](../../radiant/radiant/event_sim.cpp) already supports `type`, `key_press`, `key_combo`, `assert_value`, `assert_selection`, `assert_caret`, `click`, `select_option`, `check`, `wait`. We extend it minimally and add a focused suite.
 
 ### 4.1 Runner Additions
 
@@ -473,14 +473,14 @@ Each phase is independently shippable and adds test coverage in `test/ui/form/`.
 |---|---|
 | [radiant/form_control.hpp](../../radiant/form_control.hpp) | Add `EditHistory`, `value_at_focus`, `scroll_x/y`, `caret_blink_t`, `caret_on`, `preedit_*`. |
 | `radiant/text_edit.hpp` / `text_edit.cpp` | **New** — `te::*` operations, hit-testing, undo. |
-| [radiant/text_control.cpp](../../radiant/text_control.cpp) | Extend `tc_set_value` to push history; honour `maxlength`. |
+| [radiant/text_control.cpp](../../radiant/radiant/text_control.cpp) | Extend `tc_set_value` to push history; honour `maxlength`. |
 | [radiant/event.cpp](../../radiant/event.cpp) | Replace per-key branches with `te::*` calls; add dblclick / tripleclick / drag-mode tracking; right-click → context menu. |
-| [radiant/render_form.cpp](../../radiant/render_form.cpp) | Password mask, placeholder polish, focus-visible ring, auto-scroll, IME preedit underline, context menu. |
-| [radiant/clipboard.cpp](../../radiant/clipboard.cpp) | No structural change; ensure paste path passes through `te::paste`. |
+| [radiant/render_form.cpp](../../radiant/radiant/render_form.cpp) | Password mask, placeholder polish, focus-visible ring, auto-scroll, IME preedit underline, context menu. |
+| [radiant/clipboard.cpp](../../radiant/radiant/clipboard.cpp) | No structural change; ensure paste path passes through `te::paste`. |
 | `radiant/ime_mac.mm` | **New** — `NSTextInputClient` shim. |
 | `radiant/ime_win.cpp` | **New** — IMM bridge. |
 | `radiant/ime_stub.cpp` | **New** — Linux/headless fallback. |
-| [radiant/event_sim.cpp](../../radiant/event_sim.cpp) | Add `dblclick`, `tripleclick`, `mouse_drag`, `paste_text`, `copy`, `cut`, `assert_clipboard`, `assert_focused`, `assert_pseudo`, `ime_compose`, `ime_commit`. |
+| [radiant/event_sim.cpp](../../radiant/radiant/event_sim.cpp) | Add `dblclick`, `tripleclick`, `mouse_drag`, `paste_text`, `copy`, `cut`, `assert_clipboard`, `assert_focused`, `assert_pseudo`, `ime_compose`, `ime_commit`. |
 | [build_lambda_config.json](../../build_lambda_config.json) | Register new sources; per-platform IME file. |
 | [test/ui/form/](../../test/ui/) | New `page_*.html` + `*.json` suite. |
 | `Makefile` | Add `make ui-form`. |

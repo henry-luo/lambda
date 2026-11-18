@@ -1,3 +1,9 @@
-[submodule "test/yaml"]
-	path = test/yaml
-        url = https://github.com/yaml/yaml-test-suite.git
+[submodule "lambda-input"]
+	path = lambda-input
+	url = https://github.com/henry-luo/lambda-input.git
+[submodule "radiant"]
+	path = radiant
+	url = https://github.com/henry-luo/radiant.git
+[submodule "lambda-test"]
+	path = lambda-test
+	url = https://github.com/henry-luo/lambda-test.git

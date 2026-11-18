@@ -516,11 +516,11 @@ while timing. The benchmark rejects known debug hosts.
 | Row slice, spacers and global indices | [mod_ui.ls](../test/demo/finder/mod_ui.ls): `file_rows`, `column`, `finder_scrollport`; [finder.css](../test/demo/finder/finder.css) |
 | Captured locations, previews and operations | [mod_io.ls](../test/demo/finder/mod_io.ls): `entry_info`, `read_location`, `archive_member`, `preview`, `plan`, `perform`, `reload` |
 | Thumbnail lifecycle | [mod_thumbnails.ls](../test/demo/finder/mod_thumbnails.ls): `measure`, `schedule`, `tick`, `cancel_jobs`, `release` |
-| Native state cleanup | [state_store.cpp](../radiant/state_store.cpp): `state_map_erase_matching`, `state_store_tree_contains_node`, orphan pruning |
-| Final auto grid extent | [layout_grid_multipass.cpp](../radiant/layout_grid_multipass.cpp): `layout_grid_content`; [layout_grid.cpp](../radiant/layout_grid.cpp): `layout_grid_row_border_box_extent` |
-| Cursor inheritance and gap CSSOM | [css_prop_table.cpp](../radiant/css_prop_table.cpp): `css_property_runtime_inherited`, `computed_decl`; [css_properties.cpp](../lambda/input/css/css_properties.cpp): `css_project_shorthand_longhand` |
-| Embedded preview resizing | [layout_block.cpp](../radiant/layout_block.cpp): `layout_iframe_track_source`, `layout_iframe_embedded_doc`, `layout_ensure_iframe_document`; [event.cpp](../radiant/event.cpp): `navigation_commit_iframe_document` |
-| Embedded document retirement | [view_pool.cpp](../radiant/view_pool.cpp): `release_embedded_document`; [ui_context.cpp](../radiant/ui_context.cpp): `radiant_defer_document_destroy`, `radiant_drain_document_destruction` |
+| Native state cleanup | [state_store.cpp](../radiant/radiant/state_store.cpp): `state_map_erase_matching`, `state_store_tree_contains_node`, orphan pruning |
+| Final auto grid extent | [layout_grid_multipass.cpp](../radiant/radiant/layout_grid_multipass.cpp): `layout_grid_content`; [layout_grid.cpp](../radiant/radiant/layout_grid.cpp): `layout_grid_row_border_box_extent` |
+| Cursor inheritance and gap CSSOM | [css_prop_table.cpp](../radiant/radiant/css_prop_table.cpp): `css_property_runtime_inherited`, `computed_decl`; [css_properties.cpp](../lambda/input/css/css_properties.cpp): `css_project_shorthand_longhand` |
+| Embedded preview resizing | [layout_block.cpp](../radiant/radiant/layout_block.cpp): `layout_iframe_track_source`, `layout_iframe_embedded_doc`, `layout_ensure_iframe_document`; [event.cpp](../radiant/event.cpp): `navigation_commit_iframe_document` |
+| Embedded document retirement | [view_pool.cpp](../radiant/radiant/view_pool.cpp): `release_embedded_document`; [ui_context.cpp](../radiant/radiant/ui_context.cpp): `radiant_defer_document_destroy`, `radiant_drain_document_destruction` |
 | Text-selection policy | [mouse.ls](../lmd/package/dom/mouse.ls): `selection_value`, `selection_operation` |
 | Benchmark protocol | [benchmark.py](../test/demo/finder/benchmark.py): instrumented copies, alternating runs and marker aggregation |
 

@@ -83,9 +83,11 @@ pub fn spawn(per_path = 7) => [for (p in 0 to 1, q in 0 to (per_path - 1), let n
 // the gap to the nearest vehicle ahead in this car's lane: any route car or the player, within 40 m
 // ahead and 2.4 m to the side, at the same height (a car on the bridge never queues behind the river)
 fn leader_gap(a, others) {
-    let f = u.forward(a.heading), r = u.right(a.heading)
-    let near = [for (o in others where abs(o.x - a.x) < 42.0 and abs(o.z - a.z) < 42.0 and o.id != a.id) o]
-    let gaps = [for (o in near, let dx = o.x - a.x, let dz = o.z - a.z, let df = dx * f[0] + dz * f[1], let dl = dx * r[0] + dz * r[1]
+    let fx = sin(a.heading), fz = cos(a.heading)
+    // Cull in world space before projecting, using the same deltas for both.
+    let gaps = [for (o in others, let dx = o.x - a.x, let dz = o.z - a.z
+        where abs(dx) < 42.0 and abs(dz) < 42.0 and o.id != a.id)
+        for (df in [dx * fx + dz * fz], let dl = dx * (0.0 - fz) + dz * fx
         where df > 0.0 and df < 40.0 and abs(dl) < 2.4 and abs((o.y or 0.0) - (a.y or 0.0)) < 3.0 and cos(o.heading - a.heading) > 0.0)
         df - a.hl - o.hl];
     if (len(gaps) == 0) 99.0 else max(0.0, min(gaps) - 3.0)

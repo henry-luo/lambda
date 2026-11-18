@@ -13,7 +13,7 @@ Today Radiant has only a *minimal* clipboard surface:
 
 | Layer | What exists | File |
 |-------|-------------|------|
-| Native | `glfwSetClipboardString` / `glfwGetClipboardString` plain-text only | [radiant/state_store.cpp](../../radiant/state_store.cpp) (`clipboard_copy_text`, `clipboard_get_text`, `clipboard_copy_html` — falls back to text) |
+| Native | `glfwSetClipboardString` / `glfwGetClipboardString` plain-text only | [radiant/state_store.cpp](../../radiant/radiant/state_store.cpp) (`clipboard_copy_text`, `clipboard_get_text`, `clipboard_copy_html` — falls back to text) |
 | Event loop | Hard-coded Cmd+C / Cmd+X / Cmd+V handling for `<input>` and `<textarea>` | [radiant/event.cpp](../../radiant/event.cpp#L3762-L3835), [radiant/event.cpp](../../radiant/event.cpp#L4132-L4151) |
 | JS DOM | None — `navigator.clipboard`, `ClipboardEvent`, `DataTransfer.clipboardData`, and `document.execCommand('copy'\|'cut'\|'paste')` are all absent |
 | WPT coverage | 0% — `ref/wpt/clipboard-apis/` (~36 tests) is not exercised |

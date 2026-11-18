@@ -104,7 +104,7 @@ INPUT_TEST_SOURCES = (
     "test/test_input_sourcepos_gtest.cpp", "test/test_markup_modular_gtest.cpp",
     "test/test_input_rdb_gtest.cpp", "test/test_format_markup_gtest.cpp",
     "test/test_input_test_helpers.cpp", "test/test_input_math_gtest.cpp", "test/test_dir_gtest.cpp",
-    "test/wpt/test_wpt_html_parser_gtest.cpp", "test/markup/test_markdown_gtest.cpp", "test/test_yaml_suite_gtest.cpp",
+    "test/wpt/test_wpt_html_parser_gtest.cpp", "test/markup/test_markdown_gtest.cpp",
 )
 RUNTIME_AREAS = (("lambda", "runtime"), ("lambda", "js"),
                  ("lambda", "dom"), ("lambda", "module"))

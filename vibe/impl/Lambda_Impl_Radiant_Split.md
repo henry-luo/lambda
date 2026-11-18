@@ -76,9 +76,9 @@
   media, fullscreen, and CSS/DOM tests with their helpers and required data.
   Owner-local runners link the sibling archives; the input test utility archive
   is built by input, and Lambda resolves moved sources and archive link closure.
-  Input fetches the pinned YAML corpus independently and uses shared Markdown;
-  Radiant uses shared layout and media data. Full integration tests remain in
-  Lambda.
+  Input reads its pinned YAML snapshot and uses shared Markdown; Radiant uses
+  shared layout and media data. Full
+  integration tests remain in Lambda.
 - **Verification:** all 125 removed Lambda test source/helper paths have an
   owner copy (97 input, 28 Radiant); Lambda generator checks and 516 focused
   migrated Lambda cases passed. The input owner run covered 5,209 cases:
