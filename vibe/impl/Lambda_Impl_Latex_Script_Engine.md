@@ -33,6 +33,19 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Missing numeric relation, 2026-11-18:** numeric conditionals now record
+  the native `tex-missing-relation` diagnostic, insert `=`, and replay the
+  triggering token for the right operand instead of stopping. Existing expansion
+  errors and end-of-input retain their separate paths. The new regression
+  compares text, messages, and complete diagnostics with native for ten
+  `ifnum`/`ifdim` cases, including nested and negated conditions, expanded
+  operands and missing numbers (S1.8, D10.2.2). It and the missing-number
+  golden pass in interpreter and JIT. The larger numeric-conditional golden
+  timed out at 60 seconds in concurrent harness runs in both tiers; a serial
+  direct JIT run matches its golden. Logs are `temp/tex-relation-*.log` and
+  `temp/tex-relation-numeric-jit.out`. The broader port, malformed end-of-input
+  recovery, and production migration remain open.
+
 - **Missing-number recovery, 2026-11-17:** the shared integer scanner now
   records TeX's `tex-missing-number` diagnostic, returns zero and replays the
   triggering token instead of stopping expansion. The installed regression
@@ -40,9 +53,9 @@ The existing native engine design and historical Phase IV work are in
   four expl3 expressions and an included file. A separate 31-case caller audit
   finds no silent mismatch; `\\ignorespaces` remains explicitly unsupported.
   A further 29-case JIT audit matches 24 cases and explicitly stops on five
-  cases requiring unit, brace, relation or macro-parameter recovery. A missing
-  `\ifnum` relation and numeric overflow/division recovery remain separate
-  open work. The new regression and the expansion, numeric-conditional,
+  cases requiring unit, brace, relation or macro-parameter recovery. The
+  subsequent checkpoint addresses a missing `\ifnum` relation; numeric
+  overflow/division recovery remains open. The new regression and the expansion, numeric-conditional,
   expl3-integer-sign and stream goldens pass in both interpreter and JIT;
   the new regression also passes scheduled collection every 100,000 allocations
   with freed-memory poisoning in both tiers (12 checks). These runs used the

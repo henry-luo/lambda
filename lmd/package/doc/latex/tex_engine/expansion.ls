@@ -3508,14 +3508,18 @@ fn numeric_conditional(st: State, name, budget, negate) State^ {
     else if (name == "ifodd") finish_scanned_conditional(left.state, depth, (left.value % 2) != 0, negate)
     else {
         let relation = expanded_nonspace(left.state, budget)^;
-        if (not (other(relation.token, "<") or other(relation.token, "=") or other(relation.token, ">")))
-            fail(put_back(relation.state, relation.token), "tex-missing-relation")
+        if (relation.state.issue != null) relation.state
+        else if (relation.token == null) fail(relation.state, "tex-missing-relation")
         else {
-            let right = if (name == "ifdim") scan_dimen(relation.state, budget)^ else scan_number(relation.state, budget)^;
+            let valid = other(relation.token, "<") or other(relation.token, "=") or other(relation.token, ">");
+            // TeX inserts an equals sign and replays the token as the right operand.
+            let ready = if (valid) relation.state else record_diagnostic(
+                put_back(relation.state, relation.token), "tex-missing-relation", "Missing = inserted for \\ifnum")^;
+            let right = if (name == "ifdim") scan_dimen(ready, budget)^ else scan_number(ready, budget)^;
             if (right.state.issue != null) right.state
             else finish_scanned_conditional(right.state, depth,
-                if (relation.token.value == "<") left.value < right.value
-                else if (relation.token.value == ">") left.value > right.value else left.value == right.value, negate)
+                if (valid and relation.token.value == "<") left.value < right.value
+                else if (valid and relation.token.value == ">") left.value > right.value else left.value == right.value, negate)
         }
     }
 }
