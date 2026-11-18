@@ -68,6 +68,18 @@ function compareImages(left, right) {
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g,
     (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
 
+function captureTimingError(capture) {
+    const left = capture?.lambda_settle_ms ?? '';
+    const right = capture?.browser_settle_ms ?? '';
+    if (left === '' && right === '') return '';
+    if (left === '' || right === '' ||
+        !Number.isSafeInteger(Number(left)) || !Number.isSafeInteger(Number(right)) ||
+        Number(left) < 0 || Number(right) < 0 || Number(left) !== Number(right)) {
+        return 'Capture settling windows differ or are invalid; recapture both renderers with the same window.';
+    }
+    return '';
+}
+
 function reviewHtml(rows, output, snapshots, generatedAt) {
     const image = (file) => escapeHtml(path.relative(output, path.join(snapshots, file)));
     const severityCounts = Object.fromEntries(['critical', 'high', 'low'].map((severity) =>
@@ -86,6 +98,8 @@ ${rows.map((row) => `<article data-search="${escapeHtml(row.label + ' ' + row.ur
 <h2><span class="severity ${row.severity}">${row.severity.toUpperCase()}</span> ${escapeHtml(row.label)} — ${row.status === 'compared' ?
     `${(row.mean_error * 100).toFixed(1)}% mean error; ${(row.changed_area * 100).toFixed(1)}% area${row.major_candidate ? ' · MAJOR CANDIDATE' : ''}` : escapeHtml(row.status)}</h2>
 <a href="${escapeHtml(row.url)}">${escapeHtml(row.url)}</a><small>${escapeHtml(row.error)}</small>
+${row.lambda_settle_ms !== undefined || row.browser_settle_ms !== undefined ?
+    `<small>Post-load window: Lambda ${escapeHtml(row.lambda_settle_ms)} ms · Chromium ${escapeHtml(row.browser_settle_ms)} ms.</small>` : ''}
 ${row.severity_reason ? `<small>${escapeHtml(row.severity_reason)}</small>` : ''}
 <small>Lambda ${row.lambda_width || '?'} × ${row.lambda_height || '?'} · ${escapeHtml(row.lambda_attempt_utc || 'capture date not recorded')}
  / Chromium ${row.browser_width || '?'} × ${row.browser_height || '?'} · ${escapeHtml(row.browser_attempt_utc || 'capture date not recorded')}</small>
@@ -119,9 +133,15 @@ function main(args = process.argv.slice(2)) {
         const row = {label: page.label, url: page.url, status: 'compared', error: '',
             lambda_snapshot: capture?.lambda_snapshot || '', browser_snapshot: capture?.browser_snapshot || '',
             lambda_attempt_utc: capture?.lambda_attempt_utc || '', browser_attempt_utc: capture?.browser_attempt_utc || ''};
+        if ((capture?.lambda_settle_ms ?? '') !== '' || (capture?.browser_settle_ms ?? '') !== '') {
+            row.lambda_settle_ms = capture?.lambda_settle_ms ?? '';
+            row.browser_settle_ms = capture?.browser_settle_ms ?? '';
+        }
         if (!capture || capture.url !== page.url || capture.lambda_ok !== 'true' || capture.browser_ok !== 'true') {
             return {...row, status: 'capture_unavailable', error: capture?.lambda_error || capture?.browser_error || 'missing or stale capture'};
         }
+        const timingError = captureTimingError(capture);
+        if (timingError) return {...row, status: 'capture_policy_mismatch', error: timingError};
         try {
             const left = PNG.sync.read(fs.readFileSync(path.join(snapshots, row.lambda_snapshot)));
             const right = PNG.sync.read(fs.readFileSync(path.join(snapshots, row.browser_snapshot)));
@@ -163,4 +183,4 @@ function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) main();
-module.exports = {coarseImage, compareImages, pngLibrary};
+module.exports = {coarseImage, compareImages, pngLibrary, captureTimingError};

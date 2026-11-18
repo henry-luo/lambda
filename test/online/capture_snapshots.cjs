@@ -9,6 +9,7 @@ const puppeteer = require('puppeteer');
 const {readCsvObjects, readPageCatalog, serializeCsv} = require('../../utils/online_pages.cjs');
 
 const viewport = {width: 1200, height: 800};
+const DEFAULT_CAPTURE_SETTLE_MS = 1000;
 const resultColumns = [
     'label', 'url', 'lambda_ok', 'lambda_exit_code', 'lambda_elapsed_ms',
     'lambda_error', 'browser_ok', 'browser_elapsed_ms', 'browser_error',
@@ -16,11 +17,14 @@ const resultColumns = [
     'lambda_output_log', 'lambda_load_ok', 'browser_http_status', 'browser_final_url',
     'browser_retry_after', 'lambda_attempt_utc', 'browser_attempt_utc',
     'lambda_timeout_ms', 'browser_timeout_ms', 'browser_log',
+    'lambda_settle_ms', 'browser_settle_ms',
 ];
 
-function positiveInteger(value, name) {
+function integerOption(value, name, minimum = 1) {
     const number = Number(value);
-    if (!Number.isSafeInteger(number) || number <= 0) throw new Error(`${name} must be a positive integer`);
+    if ((typeof value === 'string' && value.trim() === '') || !Number.isSafeInteger(number) || number < minimum) {
+        throw new Error(`${name} must be a ${minimum === 0 ? 'nonnegative' : 'positive'} integer`);
+    }
     return number;
 }
 
@@ -36,7 +40,7 @@ function defaultRenderTimeoutMs(root, env) {
     const header = 'lambda/module/radiant/script_timeout.hpp';
     let seconds = constant(header, 'RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS');
     if (env.LAMBDA_JS_EXEC_TIMEOUT_SECONDS) {
-        seconds = Math.min(positiveInteger(env.LAMBDA_JS_EXEC_TIMEOUT_SECONDS,
+        seconds = Math.min(integerOption(env.LAMBDA_JS_EXEC_TIMEOUT_SECONDS,
             'LAMBDA_JS_EXEC_TIMEOUT_SECONDS'),
         constant(header, 'RADIANT_SCRIPT_EXEC_TIMEOUT_ENV_MAX_SECONDS'));
     }
@@ -44,22 +48,28 @@ function defaultRenderTimeoutMs(root, env) {
         'ONLINE_VIEW_CLEANUP_GRACE_SECONDS')) * 1000;
 }
 
-function parseOptions(args, root, env = process.env) {
+function parseOptions(args, root, env = process.env, defaultSettleMs) {
+    const settle = env.RADIANT_ONLINE_SETTLE_MS ?? env.LAMBDA_POST_LOAD_SETTLE_MS ?? defaultSettleMs;
     const options = {
         root, env, failedOnly: false, renderer: 'both', labels: null,
-        jobs: positiveInteger(env.RADIANT_ONLINE_CAPTURE_JOBS || 4, 'RADIANT_ONLINE_CAPTURE_JOBS'),
-        navigationTimeoutMs: positiveInteger(env.RADIANT_ONLINE_CAPTURE_TIMEOUT_MS || 20000,
+        settleMs: settle === undefined ? undefined : integerOption(settle, 'capture settle window', 0),
+        jobs: integerOption(env.RADIANT_ONLINE_CAPTURE_JOBS || 4, 'RADIANT_ONLINE_CAPTURE_JOBS'),
+        navigationTimeoutMs: integerOption(env.RADIANT_ONLINE_CAPTURE_TIMEOUT_MS || 20000,
             'RADIANT_ONLINE_CAPTURE_TIMEOUT_MS'),
-        lambdaTimeoutMs: positiveInteger(env.RADIANT_ONLINE_RENDER_TIMEOUT_MS ||
+        lambdaTimeoutMs: integerOption(env.RADIANT_ONLINE_RENDER_TIMEOUT_MS ||
             defaultRenderTimeoutMs(root, env), 'RADIANT_ONLINE_RENDER_TIMEOUT_MS'),
     };
     for (const arg of args) {
         if (arg === '--failed-only') options.failedOnly = true;
         else if (arg.startsWith('--renderer=')) options.renderer = arg.slice('--renderer='.length);
         else if (arg.startsWith('--labels=')) options.labels = new Set(arg.slice('--labels='.length).split(','));
+        else if (arg.startsWith('--settle-ms=')) options.settleMs = integerOption(arg.slice('--settle-ms='.length), '--settle-ms', 0);
         else throw new Error(`unknown option: ${arg}`);
     }
     if (!['both', 'lambda', 'browser'].includes(options.renderer)) throw new Error('invalid --renderer');
+    if (options.settleMs !== undefined && options.settleMs > options.navigationTimeoutMs) {
+        throw new Error('capture settle window must not exceed the navigation deadline');
+    }
     return options;
 }
 
@@ -95,7 +105,14 @@ function selectWork(pages, previous, options, snapshotsDir) {
         const needed = (tool) => (options.renderer === 'both' || options.renderer === tool) &&
             (!options.failedOnly || reusable[`${tool}_ok`] !== 'true' ||
                 !hasPng(path.join(snapshotsDir, `${page.label}-${tool}.png`)));
-        return {page, lambda: needed('lambda'), browser: needed('browser')};
+        const work = {page, lambda: needed('lambda'), browser: needed('browser')};
+        if (options.renderer === 'both' && options.settleMs !== undefined && (work.lambda || work.browser)) {
+            // a retry at a new window also refreshes its successful counterpart to keep a comparable pair.
+            for (const tool of ['lambda', 'browser']) {
+                if (String(reusable[`${tool}_settle_ms`] ?? '') !== String(options.settleMs)) work[tool] = true;
+            }
+        }
+        return work;
     }).filter((work) => work.lambda || work.browser);
 }
 
@@ -143,7 +160,9 @@ async function runLambdaRender(page, outputPath, options, snapshotsDir) {
                 '-vw', String(viewport.width), '-vh', String(viewport.height),
             ], {
                 cwd: options.root, detached: process.platform !== 'win32', stdio: ['ignore', fd, fd],
-                env: {...options.env, LAMBDA_LOG_FILE: engineLog, LAMBDA_LOG_LEVEL: 'INFO',
+                env: {...options.env,
+                    ...(options.settleMs === undefined ? {} : {LAMBDA_POST_LOAD_SETTLE_MS: String(options.settleMs)}),
+                    LAMBDA_LOG_FILE: engineLog, LAMBDA_LOG_LEVEL: 'INFO',
                     VIEW_MEM_STAGES: '1', VIEW_MEM_STATS: '1',
                     RADIANT_VIEW_TIMING_PATH: path.join(snapshotsDir, `${page.label}-timing.tsv`)},
             });
@@ -174,7 +193,8 @@ async function runLambdaRender(page, outputPath, options, snapshotsDir) {
         (!diagnostic.loadComplete ? 'missing document load completion' : '') ||
         (!hasPng(outputPath) ? 'Lambda did not write a valid PNG' : '');
     return {ok: !error, error, exitCode: exitCode ?? -1, signal: signal || '',
-        elapsedMs: elapsedMs(start), timeoutMs: options.lambdaTimeoutMs, loadOk: diagnostic.loadComplete,
+        elapsedMs: elapsedMs(start), timeoutMs: options.lambdaTimeoutMs, settleMs: options.settleMs ?? '',
+        loadOk: diagnostic.loadComplete,
         outputLog: path.basename(outputLog), log: path.basename(engineLog)};
 }
 
@@ -255,6 +275,21 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
         finalUrl = response.url();
         retryAfter = response.headers()['retry-after'] || '';
         if (status < 200 || status >= 300) throw new Error(`HTTP ${status}`);
+        if (options.settleMs > 0) {
+            let timeout;
+            try {
+                // sample the next rendering opportunity after the same post-load window as Lambda.
+                await Promise.race([
+                    tab.evaluate((ms) => new Promise((resolve) => {
+                        setTimeout(() => requestAnimationFrame(resolve), ms);
+                    }), options.settleMs),
+                    new Promise((_, reject) => {
+                        timeout = setTimeout(() => reject(new Error('capture settle window exceeded navigation deadline')),
+                            Math.max(1, deadline - Date.now()));
+                    }),
+                ]);
+            } finally { clearTimeout(timeout); }
+        }
         await tab.screenshot({path: outputPath, type: 'png', timeout: options.navigationTimeoutMs});
         result = {ok: hasPng(outputPath), error: hasPng(outputPath) ? '' : 'invalid browser PNG',
             elapsedMs: elapsedMs(start), timeoutMs: options.navigationTimeoutMs, status, finalUrl, retryAfter};
@@ -295,7 +330,7 @@ async function captureBrowser(browser, pageCase, outputPath, options, diagnostic
             if (tab) await tab.close().catch(() => {});
         }
     }
-    return {...result, log: diagnosticPath ? path.basename(diagnosticPath) : ''};
+    return {...result, settleMs: options.settleMs ?? '', log: diagnosticPath ? path.basename(diagnosticPath) : ''};
 }
 
 function updateRow(row, tool, result) {
@@ -304,6 +339,7 @@ function updateRow(row, tool, result) {
     row[`${tool}_elapsed_ms`] = result.elapsedMs.toFixed(1);
     row[`${tool}_attempt_utc`] = new Date().toISOString();
     row[`${tool}_timeout_ms`] = result.timeoutMs ?? '';
+    row[`${tool}_settle_ms`] = result.settleMs ?? '';
     if (tool === 'lambda') {
         row.lambda_exit_code = result.exitCode;
         row.lambda_signal = result.signal;
@@ -326,7 +362,7 @@ function promoteSnapshot(staged, destination, ok) {
 
 async function main(args = process.argv.slice(2)) {
     const root = path.resolve(__dirname, '../..');
-    const options = parseOptions(args, root);
+    const options = parseOptions(args, root, process.env, DEFAULT_CAPTURE_SETTLE_MS);
     const snapshotsDir = path.join(root, 'test/online/snapshots');
     fs.mkdirSync(snapshotsDir, {recursive: true});
     fs.mkdirSync(path.join(root, 'temp'), {recursive: true});
@@ -405,5 +441,5 @@ if (require.main === module) main().catch((error) => {
     process.exitCode = 1;
 });
 
-module.exports = {parseOptions, selectWork, defaultRenderTimeoutMs, readLambdaDiagnostics,
+module.exports = {DEFAULT_CAPTURE_SETTLE_MS, parseOptions, selectWork, defaultRenderTimeoutMs, readLambdaDiagnostics,
     runLambdaRender, captureBrowser, hasPng, updateRow, promoteSnapshot};

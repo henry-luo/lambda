@@ -112,6 +112,27 @@ test('failed-only selection preserves the successful renderer and rejects stale 
     assert.equal(work[0].lambda, true);
 });
 
+test('a failed-only retry refreshes a counterpart only when its capture window changes', () => {
+    const pages = [{label: 'timed', url: 'https://example.com/'}];
+    fs.writeFileSync(path.join(scratch, 'timed-lambda.png'), tinyPng);
+    fs.writeFileSync(path.join(scratch, 'timed-browser.png'), tinyPng);
+    const row = {url: pages[0].url, lambda_ok: 'true', browser_ok: 'false'};
+    const previous = new Map([['timed', row]]);
+    const options = {failedOnly: true, renderer: 'both', settleMs: 1000};
+    let work = selectWork(pages, previous, options, scratch);
+    assert.equal(work[0].lambda, true, 'legacy successful side needs the newly selected window');
+    assert.equal(work[0].browser, true);
+    row.lambda_settle_ms = '1000';
+    work = selectWork(pages, previous, options, scratch);
+    assert.equal(work[0].lambda, false, 'matching successful side stays reusable');
+    assert.equal(work[0].browser, true);
+    row.lambda_settle_ms = '';
+    work = selectWork(pages, previous, {...options, renderer: 'browser'}, scratch);
+    assert.equal(work[0].lambda, false, 'explicit single-renderer selection is preserved');
+    row.browser_ok = 'true';
+    assert.deepEqual(selectWork(pages, previous, options, scratch), [], 'failed-only does not migrate successful pages');
+});
+
 test('late download failures remain failures after load-completion telemetry', async () => {
     const log = path.join(scratch, 'late-error.log');
     fs.writeFileSync(log, 'x'.repeat(70000) + '\nFailed to download HTML from URL: https://example.com/\n' +

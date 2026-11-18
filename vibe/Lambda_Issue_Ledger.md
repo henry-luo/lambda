@@ -21,6 +21,168 @@
 Scratch spool durability amplification was fixed and moved to the
 [fixed ledger](<Lambda_Issue_Ledger (fixed).md#durable-scratch-spool-amplification>).
 
+<a id="lr12-61"></a>
+## LR12-61 — Identical CSS-dependent metadata forces layout again
+
+**Status:** FIXED, 2026-11-18. Shared DOM/host invalidation belongs to Lambda
+under **D9.5.6v2**. Attribute text retains its document ownership (**D5.5.1**).
+
+The dependency-aware metadata path rejected any attribute referenced by CSS,
+even when a data/aria value was identical to its stored value. Both setAttribute
+and dataset therefore dirtied native styles on repeated state publication. Ten
+unchanged writes interleaved with geometry reads cause eleven layouts, while
+an otherwise identical no-write control needs one.
+
+The helper now checks value identity before asking whether a CSS dependency
+requires ordinary invalidation. Namespaced and case-sensitive paths retain their
+existing guards. Changed CSS-dependent values still use normal invalidation.
+Observer and custom-element delivery is preserved: callbacks can still change
+style, and pending reflow prevents metadata publication from consuming that work.
+There is no new cache, property exception or timing/admission-budget change.
+
+Five metadata tests and four existing observer startup controls pass. The saved
+round85 renderer fails the new identity reduction. Controls retain all ten
+MutationObserver old values, changed selector-dependent widths and paint. A
+custom-element callback changes width on each identical metadata write; all ten
+callbacks and the measured 110–200px widths remain observable through both APIs.
+The online qualification is recorded separately; reduced layout counts do not
+establish a reliable live-page capture-time improvement.
+
+Evidence: test/online/render_dataset_metadata.test.cjs and
+[round86 repair record](../test/online/comparison/repairs.html#round-86).
+
+<a id="lr12-60"></a>
+## LR12-60 — Dataset metadata writes force avoidable geometry layouts
+
+**Status:** FIXED, 2026-11-18. The shared DOM/host adapter remains Lambda-owned
+under **D9.5.6v2**; metadata and retained attribute text use the existing document
+ownership under **D5.5.1**.
+
+The dataset setter wrote directly through the general attribute path, bypassing
+`dom_set_non_style_metadata`, which `setAttribute` already uses. Unrelated
+application metadata consequently dirtied native styles and forced layout on
+following geometry reads. Ten identical or changed writes cause eleven layouts
+through dataset, compared with one through setAttribute. Both APIs still queue
+ten MutationObserver records, including correct old values.
+
+The dataset setter now uses the same dependency-aware helper. It retains normal
+invalidation when selectors or computed values depend on the data attribute,
+and retains observer/custom-element delivery for metadata. There is no new
+cache heuristic, selector exception, source budget or timing change.
+
+Three focused comparisons cover repeated identical metadata, changed metadata
+and CSS-dependent values. Each checks observer names/old values, live widths,
+paint and actual layout-profile counts against setAttribute. The saved renderer
+fails both metadata cases; all three pass after repair. Four existing observer
+startup controls also pass. The Dock capture result and bounded qualification
+are recorded in the online round85 repair report; this issue does not claim
+that every Dock timeout was caused by dataset writes.
+
+Evidence: test/online/render_dataset_metadata.test.cjs and
+[round85 repair record](../test/online/comparison/repairs.html#round-85).
+
+<a id="lr12-59"></a>
+## LR12-59 — Event dispatch continues after host execution termination
+
+**Status:** FIXED, 2026-11-18. **D7.4.3** requires cooperative interruption and
+ordinary frame unwinding; a host CPU-budget termination is not an isolated
+application exception. The document binding remains Lambda-owned under
+**D9.5.6v2**.
+
+Squarespace's selected-window capture exceeds the parent deadline after logging
+roughly 22 MB of repeated load-listener timeout errors. Dispatch correctly
+isolates ordinary listener throws, but applied that policy to the sticky host
+execution interrupt too. A reduction with one looping load listener and 500
+followers logs 501 timeout exceptions before the fix.
+
+Listener invocation and propagation now stop when the existing host interrupt
+is pending. Dispatch restores passive/position/path state and returns the
+cooperative error after cleanup; a later dispatch immediately returns that same
+termination status. Ordinary exceptions still report and allow the next
+listener. The reduced timeout and ordinary-exception controls pass on the
+release host; the latter paints the following listener's green update. No CPU
+or wall-time budget is increased. Squarespace now writes a complete PNG within
+the existing parent deadline; its admitted script still reaches the existing
+CPU budget and the page remains high. Evidence: temp/online-visual-round83/.
+
+<a id="lr12-58"></a>
+## LR12-58 — Selected CSS frames lose effects at loader layout checkpoints
+
+**Status:** FIXED, 2026-11-18. Lambda owns the document/runtime binding at the
+native layout seam (**D9.1.1v4 / D9.5.6v2**). Snapshot selection precedes encoding
+under **D10.1.7**.
+
+A document with an 80 ms CSS animation and an otherwise idle script still paints
+its initial frame after an explicit 250 ms settling window. Width and opacity
+reductions fail too. Script-free selection, default initial frames and no-fill
+restoration provide controls. Two lifecycle omissions combine: without a script
+geometry read, no first layout establishes the CSS timeline before settlement;
+subsequent loader checkpoints pass a document argument without temporarily
+binding it to the UI context. Native CSS sampling reads that context, so a
+finish-triggered reflow restores authored values without the retained effect.
+An instrumented release run confirmed that virtual time reached 266.667 ms and
+the effect finished at 83.333 ms; lack of clock advancement was not the cause.
+
+Explicit positive-window exports now establish geometry before their ordinary
+drain. Initial and pending geometry layouts share one temporary document-binding
+helper, restoring the previous UI document after the native call. Existing zero
+and unspecified native export frames are preserved. No timer budget or encoding
+clock change is introduced. Twenty selected-frame checks, with Chromium pixel
+controls, and sixteen capture/comparison checks pass. The saved renderer fails
+all three color/width/opacity regressions. Evidence: temp/online-visual-round83/.
+
+<a id="lr12-57"></a>
+## LR12-57 — Bounded script admission leaves production hydration incomplete
+
+**Status:** OPEN, 2026-11-18; capability/admission gap, not a confirmed JavaScript
+semantic defect. Browser-host admission belongs to Lambda (**D9.5.6v2**).
+
+Rogo's current document admits its Turbopack runtime, whose queue push override
+is installed, while the Next bootstrap queue is not consumed. Two fetched
+required dependencies are 158,957 and 207,242 bytes, exceeding the existing
+128 KiB pre-layout async/defer admission cap. Their HTTP requests succeed. A
+reduced own-array-push override passes both AST and MIR execution, excluding that
+suspected dispatch defect. Increasing source budgets has not been qualified as
+a fix; the later runtime requirements and rendering outcome remain unproven.
+
+This explains an admission barrier, not complete browser-framework parity.
+Do not bypass admission or pretend that a longer snapshot window executes
+skipped bundles. The current online page remains high. Exact chunk sizes and
+bootstrap probes are retained under temp/online-visual-round83/ and round82/.
+
+Round89 records a second concrete admission barrier on Affinity. Initial markup
+keeps the four hero artwork panels inside `.Du9A7g` at opacity0 until client
+startup supplies its visible class. All four stored image files are complete
+(239238,338211,821357,567800 bytes); image availability alone does not reveal
+that wrapper. Three required deferred bundles contain289144,174026 and323493
+bytes, each above the unchanged128KiB pre-layout cap. This establishes a startup
+admission barrier, without claiming that raising it would complete framework
+execution. RI-136 independently repairs its native navigation coordinates;
+the artwork omission and high review remain. Source, script/cache inventory and
+qualified capture are in `temp/online-visual-round89/affinity/` and
+`affinity-qualified/`. No opacity override or budget increase is adopted.
+
+
+<a id="lr12-56"></a>
+## LR12-56 — Web Animations excludes a supported shorthand before native parsing
+
+**Status:** FIXED, 2026-11-18. The Lambda DOM adapter owns property admission
+(**D9.1.1v4 / D9.5.6v2**); native interpolation belongs to Radiant.
+
+The enumerable-key filter examined the background shorthand's animation type
+before invoking the native parser. That type is NONE even when its color
+component maps to an implemented track. The adapter now queries the shared
+native target normalizer used by RI-128, retaining the authored name/value for
+normal dictionary conversion and shorthand parsing. No second property table
+or page exception is added. Explicit shorthand and longhand seeks both paint
+the Chromium-matched endpoint in the focused loopback tests.
+
+Automatic Web Animations playback is still incomplete, as recorded in the HTML
+support matrix. A longhand control reproduces the same unadvanced sample;
+the shorthand test therefore uses the supported explicit currentTime seek.
+No automatic-playback fix is claimed. The aggregate focused run passes 29
+checks; logs are under temp/online-visual-round79/.
+
 <a id="lr12-55"></a>
 ## LR12-55 — TreeWalker discards NodeFilter and lets cleanup delete all text
 

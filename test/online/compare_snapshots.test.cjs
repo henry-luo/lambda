@@ -1,6 +1,15 @@
 const assert = require('node:assert/strict');
 const {test} = require('node:test');
-const {compareImages} = require('./compare_snapshots.cjs');
+const {compareImages, captureTimingError} = require('./compare_snapshots.cjs');
+
+test('only matched explicit capture windows can be compared with each other', () => {
+    assert.equal(captureTimingError({}), '');
+    assert.equal(captureTimingError({lambda_settle_ms: '0', browser_settle_ms: '0'}), '');
+    assert.equal(captureTimingError({lambda_settle_ms: '1000', browser_settle_ms: '1000'}), '');
+    for (const [left, right] of [['1000', ''], ['', '1000'], ['0', '1000'], ['-1', '-1'], ['bad', 'bad']]) {
+        assert.match(captureTimingError({lambda_settle_ms: left, browser_settle_ms: right}), /recapture both renderers/);
+    }
+});
 
 function image(width, height, pixel) {
     const data = Buffer.alloc(width * height * 4);
