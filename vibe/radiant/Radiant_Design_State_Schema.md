@@ -49,18 +49,18 @@ These resolve the original open questions and govern the rest of this document:
 
 ### 1.1 Where we are today
 
-The state-machine boundary in [radiant/state_machine.cpp](../../radiant/state_machine.cpp)
+The state-machine boundary in [radiant/state_machine.cpp](../../radiant/radiant/state_machine.cpp)
 is **two-layered and imperative**:
 
 1. **Transition functions** — `focus_transition`, `caret_transition`, `selection_transition`,
    `hover_transition`, `active_transition`, `drag_transition`
-   ([state_machine.cpp:32–223](../../radiant/state_machine.cpp)). Each is a `switch` over a
+   ([state_machine.cpp:32–223](../../radiant/radiant/state_machine.cpp)). Each is a `switch` over a
    `*TransitionKind` enum that calls the relevant writer
    (`focus_set`, `selection_extend`, `doc_state_set_hover_target`, …), then calls
    `radiant_state_assert_valid()` and `radiant_state_validate_interaction()`.
 
 2. **Invariant validators** — `radiant_state_validate_interaction()`
-   ([state_machine.cpp:814](../../radiant/state_machine.cpp)) plus nine `validate_*` helpers
+   ([state_machine.cpp:814](../../radiant/radiant/state_machine.cpp)) plus nine `validate_*` helpers
    (`validate_focus_invariants`, `validate_selection_invariants`,
    `validate_view_state_registry`, …). These contain **~96 distinct hand-coded
    `report_fail()` checks** — e.g. *"focused document does not have exactly one :focus target"*,
@@ -149,7 +149,7 @@ partitioned by **family**:
 | Family enum | Backing state in `DocState`/`ViewState` | Source |
 |---|---|---|
 | `SM_FAMILY_DOCUMENT` | `DocLifecycleState lifecycle` | state_store.hpp |
-| `SM_FAMILY_FOCUS` | `FocusState* focus` | [state_store_internal.hpp](../../radiant/state_store_internal.hpp) |
+| `SM_FAMILY_FOCUS` | `FocusState* focus` | [state_store_internal.hpp](../../radiant/radiant/state_store_internal.hpp) |
 | `SM_FAMILY_SELECTION` | `DomSelection* dom_selection` + `SelectionState* selection` + `CaretState* caret` | state_store_internal.hpp |
 | `SM_FAMILY_IME` | `EditingInteractionState.composition` | [state_store.hpp:226](../../radiant/state_store.hpp) |
 | `SM_FAMILY_HOVER` | `View* hover_target` + `ViewState.flags.hovered` | state_store.hpp |
@@ -212,7 +212,7 @@ enum ContextMenuFsmState { CM_CLOSED, CM_OPEN };
 
 Today there are three different mutation surfaces:
 
-1. raw `EventType` values ([event.hpp:8](../../radiant/event.hpp):
+1. raw `EventType` values ([event.hpp:8](../../radiant/radiant/event.hpp):
    `RDT_EVENT_MOUSE_DOWN`, `RDT_EVENT_KEY_DOWN`, …),
 2. the existing per-family transition APIs (`focus_transition`, `selection_transition`,
    `drag_transition`, …), and
@@ -558,7 +558,7 @@ already understand them.
 
 ### 5.5 Integration with the settle boundary and state dump
 
-- `radiant_state_settle()` ([state_machine.cpp:1177](../../radiant/state_machine.cpp))
+- `radiant_state_settle()` ([state_machine.cpp:1177](../../radiant/radiant/state_machine.cpp))
   continues to run the *state-resident* invariant pass at cascade end. It remains the old
   imperative pass until the later invariant-table migration proves parity.
 - The schema-version is emitted into the `session_start` record so replay/log consumers can

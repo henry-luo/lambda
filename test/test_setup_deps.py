@@ -8,8 +8,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUT = Path(os.environ.get('LAMBDA_INPUT_ROOT', ROOT.parent / 'lambda-input')).resolve()
-RADIANT = Path(os.environ.get('RADIANT_ROOT', ROOT.parent / 'radiant')).resolve()
+INPUT = Path(os.environ.get('LAMBDA_INPUT_ROOT', ROOT / 'lambda-input')).resolve()
+RADIANT = Path(os.environ.get('RADIANT_ROOT', ROOT / 'radiant')).resolve()
 
 
 def plan(project, platform):

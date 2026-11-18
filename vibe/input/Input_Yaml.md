@@ -318,7 +318,7 @@ Map {
 
 The parser is validated against the official [YAML Test Suite](https://github.com/yaml/yaml-test-suite) — a comprehensive, community-maintained set of YAML test cases covering the full YAML 1.2 specification.
 
-**Test suite location:** `test/yaml/`
+**Test suite location:** `lambda-input/test/yaml/`, prepared at the pinned revision by the input project's test-data setup.
 
 Each test case is a directory identified by a 4-character ID (e.g., `229Q`, `4Q9F`, `WZ62`) containing:
 

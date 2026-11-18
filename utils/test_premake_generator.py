@@ -538,13 +538,13 @@ def expect_only_variants_generate_legacy_main(module) -> None:
 def expect_radiant_property_ownership(module) -> None:
     generator = linux_validation_generator(module)
     targets = {target['name']: target for target in generator.config['targets']}
-    checker_path = ROOT.parent / 'radiant/scripts/check_input_facade.py'
+    checker_path = ROOT / 'radiant/scripts/check_input_facade.py'
     spec = importlib.util.spec_from_file_location('radiant_input_facade', checker_path)
     if spec is None or spec.loader is None:
         fail('could not load the Radiant input facade check')
     checker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checker)
-    violations = checker.check_facade(ROOT.parent / 'radiant')
+    violations = checker.check_facade(ROOT / 'radiant')
     if violations:
         fail('Radiant input facade: ' + '; '.join(violations))
     (ROOT / 'temp').mkdir(exist_ok=True)
@@ -591,16 +591,16 @@ def expect_radiant_property_ownership(module) -> None:
         fail('Radiant must not depend on the Lambda runtime archive')
     for name in ('event.cpp', 'editing_controller.cpp', 'editing_intent.cpp'):
         if not (ROOT / 'lambda/module/radiant' / name).is_file() or \
-                (ROOT.parent / 'radiant/radiant' / name).exists():
+                (ROOT / 'radiant/radiant' / name).exists():
             fail(f'event controller source has the wrong owner: {name}')
     for name in ('dom', 'js', 'module', 'runtime', 'mir', 'lambda-data.hpp'):
-        path = ROOT.parent / 'radiant/lambda' / name
+        path = ROOT / 'radiant/lambda' / name
         if path.exists() or path.is_symlink():
             fail(f'Radiant has a reverse Lambda source link: {name}')
     providers = {'radiant/view_prop_defaults.cpp', 'radiant/view_prop_ensure.cpp'}
     native_sources = subprocess.check_output(
-        [sys.executable, str(ROOT.parent / 'lambda-input/scripts/build_sources.py'),
-         'radiant', str(ROOT.parent / 'radiant')], text=True).split()
+        [sys.executable, str(ROOT / 'lambda-input/scripts/build_sources.py'),
+         'radiant', str(ROOT / 'radiant')], text=True).split()
     if providers.intersection(targets['lambda-data']['source_files']):
         fail('input archive owns a Radiant property provider')
     if 'radiant-properties' in targets or any(native_sources.count(path) != 1 for path in providers) or \
@@ -630,8 +630,8 @@ def expect_radiant_property_ownership(module) -> None:
 def expect_radiant_media_platform_selection(module) -> None:
     wrappers = {'radiant/rdt_video_mac_static.cpp', 'radiant/rdt_speech_mac_static.cpp'}
     stubs = {'radiant/rdt_video_stub.cpp', 'radiant/rdt_speech_stub.cpp'}
-    input_script = ROOT / '../lambda-input/scripts/build_sources.py'
-    radiant_root = ROOT / '../radiant'
+    input_script = ROOT / 'lambda-input/scripts/build_sources.py'
+    radiant_root = ROOT / 'radiant'
     for system, output in [('macos', 'mac'), ('linux', 'linux'), ('windows', 'windows')]:
         kwargs = {'target_architecture': 'arm64' if system == 'macos' else 'x86_64'}
         if system == 'linux':

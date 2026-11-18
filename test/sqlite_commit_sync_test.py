@@ -55,7 +55,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='sqlite-commit-sync-', dir=root / 'temp') as directory:
         folder = Path(directory).resolve()
         library = folder / 'interpose.dylib'
-        input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', root.parent / 'lambda-input'))
+        input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', root / 'lambda-input'))
         subprocess.run(['cc', '-I', str(input_root), '-Wno-deprecated-declarations', '-dynamiclib', '-o', str(library),
                         'test/sqlite_fullsync_interpose.c'], cwd=root, check=True)
         for tier in ('interp', 'jit'):

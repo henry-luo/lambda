@@ -203,8 +203,8 @@ the locations above.
   Lambda sibling ledger or an archive. Retired Lambda ledgers live in
   `vibe/impl/` with the `(retired)` suffix; their live residue is indexed here.
   `lambda-input` and Radiant are separate owners under D9.1.1v4 and D9.1.3v2:
-  record their new issues in [Lib and Input Issue Ledger](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md)
-  and [Radiant Issue Ledger](../../radiant/vibe/Radiant_Issue_Ledger.md),
+  record their new issues in [Lib and Input Issue Ledger](../lambda-input/vibe/Lib_Input_Issue_Ledger.md)
+  and [Radiant Issue Ledger](../radiant/vibe/Radiant_Issue_Ledger.md),
   respectively. Lambda's older Radiant ledger links moved native issues to
   their owner and retains mixed, Lambda-owned, input-owned and resolved
   records; historical claims still require review.

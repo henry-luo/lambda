@@ -680,7 +680,7 @@ The following are integration points in the 2026-10-13 implementation:
 | [`chart/text.ls`](../lmd/package/chart/text.ls), `radiant.measure_text` | Batched shaping/measurement precedent; share generic primitives |
 | [`math/font.ls`](../lmd/package/doc/math/font.ls), `radiant.math_metrics` | Font snapshot/geometry precedent; avoid copying math-specific policy |
 | [`Radiant_Design_Rendering.md`](radiant/Radiant_Design_Rendering.md) | Existing SVG/vector rendering pipeline |
-| [`audio.cpp`](../radiant/audio.cpp), [`midi_player.cpp`](../radiant/midi_player.cpp) | Shared document-owned slots; encoded-audio service plus copied MIDI buffers and streaming PCM |
+| [`audio.cpp`](../radiant/radiant/audio.cpp), [`midi_player.cpp`](../radiant/radiant/midi_player.cpp) | Shared document-owned slots; encoded-audio service plus copied MIDI buffers and streaming PCM |
 | [`dom_api.def`](../lambda/dom/dom_api.def), `audio_*` / `midi_*` operations | Shared host surface and effect declarations |
 | [`timeline/native_media.ls`](../lmd/package/chart/timeline/native_media.ls) | Existing generation-checked media lifecycle; share mechanisms without importing chart policy |
 

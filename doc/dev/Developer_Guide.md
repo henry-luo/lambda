@@ -10,7 +10,7 @@
 This guide is for developers working on the **Lambda and Radiant C++ runtime engine** itself — building the compiler, modifying the parser, extending the JIT backend, and developing the layout engine.
 
 Source references using the logical prefixes `lib/` and `radiant/` refer to
-the sibling `../lambda-input/lib/` and `../radiant/radiant/` directories.
+the `lambda-input/lib/` and `radiant/radiant/` submodules.
 
 It is **not** a guide for writing Lambda Script programs. For the Lambda language reference and scripting documentation, see the [Language Reference](../Lambda_Reference.md) and other docs under `doc/`.
 
@@ -33,8 +33,12 @@ It is **not** a guide for writing Lambda Script programs. For the Lambda languag
 ### Clone and Build
 
 ```bash
-# Clone lambda, lambda-input and radiant as sibling directories, then:
+# Clone Lambda with its submodules, then:
+git clone --recurse-submodules https://github.com/henry-luo/lambda.git
 cd lambda
+
+# For an existing clone, initialize or refresh the pinned submodules:
+git submodule update --init --recursive
 
 # 1. Install platform dependencies (pick one)
 ./setup-mac-deps.sh        # macOS
@@ -49,7 +53,8 @@ make build
 ```
 
 The build produces `lambda.exe` in the project root. To select a different
-interpreter, pass `PYTHON` to Make; the value is propagated to sibling builds.
+interpreter, pass `PYTHON` to Make; the value is propagated to the input and
+Radiant submodule builds.
 
 ---
 
@@ -65,7 +70,7 @@ The setup scripts install platform packages and prepare owner-built dependencies
 
 Pass `--dry-run` to inspect the package and build steps without changing the
 system. Lambda installs its development tools, then calls input's setup and
-Radiant's setup. `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` select sibling
+Radiant's setup. `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` can select alternate
 checkouts. Input and Radiant also provide their own `setup-<platform>-deps.sh`
 entry points; Radiant's invokes input's setup first. This follows the owner
 boundaries in D9.1.1v4 and D9.1.3v2. Use the project Make clean targets for
@@ -81,7 +86,7 @@ These libraries and tools are required on every platform.
 |------|---------|
 | C/C++ compiler (GCC or Clang) | Build toolchain (C++17) |
 | Make | Build orchestration |
-| Python 3 | Build configuration, sibling archive manifests, dependency preparation and checks |
+| Python 3 | Build configuration, submodule archive manifests, dependency preparation and checks |
 | Premake5 | Generates platform Makefiles from `build_lambda_config.json` and `build_deps_config.json` |
 | Node.js + npm | Tree-sitter CLI via `npx` for parser generation |
 | pkg-config | Library discovery |
@@ -98,8 +103,8 @@ These libraries and tools are required on every platform.
 | **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX reference grammar for `lambda-cst` only |
 | **tree-sitter-typescript** | Built from `lambda/tree-sitter-typescript/` | TypeScript reference grammar for `lambda-cst` only |
 | **MIR** | Built from `lambda/mir/` with its Makefile | JIT compiler backend (Medium Internal Representation) |
-| **RE2** | Vendored at `../lambda-input/lib/re2/`, built by input into `../lambda-input/build/lib/native/<configuration>/libre2.a` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
-| **utf8proc** | Built by input under `../lambda-input/build/deps/utf8proc/` | Unicode text processing and normalization |
+| **RE2** | Vendored at `lambda-input/lib/re2/`, built by input into `lambda-input/build/lib/native/<configuration>/libre2.a` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
+| **utf8proc** | Built by input under `lambda-input/build/deps/utf8proc/` | Unicode text processing and normalization |
 | **mpdecimal** | System package or built from source | Multi-precision decimal arithmetic |
 | **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |
 | **libcurl** | Built from source with mbedTLS | HTTP/HTTPS client library |
@@ -108,7 +113,7 @@ These libraries and tools are required on every platform.
 | **bzip2** | System package | bzip2-compressed tar input |
 | **liblzma (xz)** | System package | Native 7z LZMA/LZMA2 and xz-compressed tar input |
 | **zstd** | System package | Zstandard-compressed tar input |
-| **libarchive** | Selected sources in `../lambda-input/lib/zip/`, provenance in its `VENDOR.md` | Memory-only 7z/tar/RAR/RAR5 input; bounded embedding under **D11.1.2** |
+| **libarchive** | Selected sources in `lambda-input/lib/zip/`, provenance in its `VENDOR.md` | Memory-only 7z/tar/RAR/RAR5 input; bounded embedding under **D11.1.2** |
 
 #### Radiant Engine Libraries
 
@@ -134,10 +139,10 @@ These libraries and tools are required on every platform.
 ### Platform setup
 
 On macOS, setup uses Homebrew. On Linux, it uses apt and builds pinned mbedTLS
-and mpdecimal into `../lambda-input/build/deps/linux-support/` with Premake
+and mpdecimal into `lambda-input/build/deps/linux-support/` with Premake
 and Make. On Windows, setup requires an MSYS2 CLANG64 or MINGW64 shell and
 uses pacman. Input builds its pinned curl, ThorVG, Brotli and utf8proc into
-`../lambda-input/build/deps/`; Radiant setup installs its graphics packages.
+`lambda-input/build/deps/`; Radiant setup installs its graphics packages.
 
 Lambda's platform setup also prepares pinned libdatachannel v0.24.6 and its
 libjuice/usrsctp dependencies under `build/deps/connectivity/`, after input's
@@ -153,7 +158,7 @@ were checked with `--dry-run`; full setup and build runs need platform testing.
 ### Dependency Architecture
 
 `build_lambda_config.json` owns the host, runtime and test graph. Its
-`config_imports` loads `build_deps_config.json` and the sibling
+`config_imports` loads `build_deps_config.json` and the submodule
 `build_targets.json` manifests. `utils/generate_premake.py`
 (`PremakeGenerator`) generates the host configuration; input's
 `scripts/build_config.py` (`load_build_config`) merges selected imports and
@@ -185,11 +190,11 @@ dependencies use JSON recipes with Premake and Make. The input dependency
 pipeline was verified on macOS on 2026-11-10; Linux and Windows remain
 unverified. The standalone libpq configure step remains a conformance gap.
 
-The normal host build combines the generated Lambda build with the sibling
-archive builds:
+The normal host build combines the generated Lambda build with the input and
+Radiant submodule archive builds:
 
 ```
-build_lambda_config.json + sibling build_targets.json manifests
+build_lambda_config.json + submodule build_targets.json manifests
         │
         ▼  (utils/generate_premake.py)
 premake5.{mac,lin,win}.lua    ← DO NOT EDIT (auto-generated)
@@ -202,7 +207,7 @@ Lambda runtime/adapter archives + input and Radiant archives → lambda.exe
 ```
 
 Python drives the build-time steps around the native compiler: the host
-generator reads and merges the JSON manifests, sibling scripts expand source
+generator reads and merges the JSON manifests, submodule scripts expand source
 lists and prepare dependency configuration, and boundary and build-signature
 checks protect the selected inputs. Premake generates Makefiles; Make, the C/C++
 compiler and the linker build the executable. Python is not required to run
@@ -234,8 +239,8 @@ make test-all-baseline  # ALL baseline suites (must pass 100%)
 # Core suites — run these after any engine changes
 make test-lambda-baseline    # Lambda core functionality
 make test-radiant-baseline   # Radiant layout engine
-make -C ../lambda-input test-input-baseline   # Input owner unit baseline
-make -C ../radiant test-radiant-baseline     # Radiant owner unit baseline
+make -C lambda-input test-input-baseline     # Input owner unit baseline
+make -C radiant test-radiant-baseline        # Radiant owner unit baseline
 
 # Targeted suites
 make test-mir                # MIR JIT compilation tests
@@ -693,13 +698,13 @@ Radiant supports multiple render targets:
 
 Build, test and checkout behaviour that is easy to misread as a regression. Several agents usually share one clone, its main checkout and its git worktrees.
 
-The Lambda checkout expects sibling `../lambda-input` and `../radiant` projects;
-`LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` select other locations. `make build`
+The Lambda checkout contains `lambda-input/` and `radiant/` Git submodules;
+`LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` select alternate locations. `make build`
 builds their archives and links them into `lambda.exe`; `make build-lambda-split`
-defaults to `lambda-static.exe`. Lambda must not contain the old `lib`,
-`radiant`, `lambda/input`, `lambda/io`, `lambda/network` or `lambda/format`
-paths or source links into the selected owners. `utils/check_split_roots.py`
-checks these boundaries (D9.1.1v4, D9.1.3v2).
+defaults to `lambda-static.exe`. Lambda must not add copied owner source trees
+such as `lib/`, `lambda/input`, `lambda/io`, `lambda/network` or `lambda/format`,
+or source links into the selected owners. `utils/check_split_roots.py` checks
+these boundaries (D9.1.1v4, D9.1.3v2).
 
 ### 7.1 Test Data
 
@@ -728,7 +733,7 @@ ln -s "$MAIN/test/js262"   test/js262     # likewise test/layout, test/render, t
 ```
 
 - `test/layout` holds the fonts used by the UI-automation preflight. Without the link, the UI runner fails before it runs anything.
-- The split host uses RE2 from the selected input checkout's `build/lib/native/<configuration>/`; sibling archive outputs belong to those checkouts, not the Lambda worktree.
+- The split host uses RE2 from the selected input checkout's `build/lib/native/<configuration>/`; submodule archive outputs belong to those checkouts, not Lambda's root build directory.
 - The links show as `??`, because `build_*/`, `mac-deps/`, `node_modules/` and `ref/` only match directories. Stage files by name, and never `git add -A`.
 - Tracked links (`test/markdown`, `test/jquery-ui`, `test/media`) point to `../../lambda-test/*`, which does not resolve under `.claude/worktrees/<name>/`. Fixtures that use them fail in a worktree. Run those fixtures from the main checkout.
 - Worktree paths contain `.claude/`, so a dot appears in every absolute path. Before calling a failure pre-existing, run the base binary **from its own checkout's cwd**.
@@ -742,14 +747,13 @@ Removing a worktree:
 rm build_temp mac-deps node_modules ref test/js262
 git status --porcelain --ignore-submodules=none     # must be empty
 # from the main checkout
-git worktree remove --force <path>   # an initialized test/yaml submodule needs --force;
-                                     # a locked worktree needs --force --force
+git worktree remove --force <path>   # a locked worktree needs --force --force
 git branch -d <branch>
 ```
 
 ### 7.3 Build Gotchas
 
-- **Sibling archives:** `make build` invokes `build-lambda-split` with the debug profile and `lambda.exe` output. The split target builds input's `liblambda-lib.a` and `liblambda-input.a`, Radiant's `libradiant.a`, then links them with Lambda's runtime and adapter archives. Radiant gets input headers through `INPUT_ROOT`. The split build and smoke checks have been verified locally on macOS; that does not qualify distribution or other platforms (D9.1.1v4, D9.1.3v2).
+- **Submodule archives:** `make build` invokes `build-lambda-split` with the debug profile and `lambda.exe` output. The split target builds input's `liblambda-lib.a` and `liblambda-input.a`, Radiant's `libradiant.a`, then links them with Lambda's runtime and adapter archives. Radiant gets input headers through `INPUT_ROOT`. The split build and smoke checks have been verified locally on macOS; that does not qualify distribution or other platforms (D9.1.1v4, D9.1.3v2).
 - **Python selection:** the split build has been verified with macOS system Python 3.9. Pass `PYTHON` to Make to select another interpreter; compatibility with versions older than 3.9 has not been established.
 - **macOS `/usr/bin/make` is GNU Make 3.81.** It compares mtimes in whole seconds, so `sleep 2` between before/after steps. It has no `&:` grouped targets, so the tree-sitter-lambda generate rule becomes three independent targets. `make -j generate-grammar` can run `tree-sitter generate` concurrently; run it without `-j`.
 - **Same-second source swaps.** A `cp` that lands in the same second as the last build leaves the old object linked. Delete `build/obj/<project>/native/<debug|release>/<file>.o` and rebuild. Then confirm which binary you have, with `cmp` or a probe whose output differs between the two versions.

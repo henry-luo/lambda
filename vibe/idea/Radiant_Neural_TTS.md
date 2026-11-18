@@ -33,7 +33,7 @@ on the installed language packs, and Linux has no Radiant engine at all.
 Two quick wins need no new engine:
 
 - **Install a Premium voice** such as Zoe or Ava. The speech service ranks
-  voices by quality first ([`speech.cpp`](../../radiant/speech.cpp)), so a
+  voices by quality first ([`speech.cpp`](../../radiant/radiant/speech.cpp)), so a
   page that selects by language and gender picks it up automatically.
 - **Keep pitch near 1.0–1.2.** AVSpeech's `pitchMultiplier` shifts the
   rendered voice. Beyond about 1.2 the shift itself sounds artificial, whatever
@@ -108,7 +108,7 @@ English first, with platform voices for everything else.
 ## 4. Fitting the engine into Radiant
 
 **The engine interface already fits.**
-[`rdt_speech.h`](../../radiant/rdt_speech.h) renders a whole utterance,
+[`rdt_speech.h`](../../radiant/radiant/rdt_speech.h) renders a whole utterance,
 asynchronously, to mono float PCM plus boundary marks, from plain copied data
 (D5.5.2). The speech service already resamples each render to the bus rate and
 rescales its marks. It also queues utterances, schedules `at:`, fires events,

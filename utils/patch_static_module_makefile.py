@@ -34,8 +34,8 @@ def configured_archive_path(archive, root):
 
 def use_sibling_archives(content, root):
     """Replace provider links with owner archives and track their timestamps."""
-    input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root).parent / 'lambda-input')).resolve()
-    radiant_root = Path(os.environ.get('RADIANT_ROOT', Path(root).parent / 'radiant')).resolve()
+    input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root) / 'lambda-input')).resolve()
+    radiant_root = Path(os.environ.get('RADIANT_ROOT', Path(root) / 'radiant')).resolve()
     profile = '$(notdir $(OBJDIR))'
     archives = {
         'lambda-data-cpp': input_root / f'build/lib/{profile}/liblambda-input.a',

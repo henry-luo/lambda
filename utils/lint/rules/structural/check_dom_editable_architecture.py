@@ -22,7 +22,7 @@ def repo_root() -> Path:
 
 
 def production_sources(root: Path):
-    radiant = Path(os.environ.get('RADIANT_ROOT', root.parent / 'radiant')).resolve() / 'radiant'
+    radiant = Path(os.environ.get('RADIANT_ROOT', root / 'radiant')).resolve() / 'radiant'
     for source_root in (root / "lambda", root / "lmd/package/dom", root / "lmd/package/editor", radiant):
         for path in source_root.rglob("*"):
             if path.is_file() and path.suffix in SOURCE_SUFFIXES:
@@ -39,7 +39,7 @@ def main() -> int:
         if path.is_relative_to(root):
             rel = path.relative_to(root)
         else:
-            radiant = Path(os.environ.get('RADIANT_ROOT', root.parent / 'radiant')).resolve()
+            radiant = Path(os.environ.get('RADIANT_ROOT', root / 'radiant')).resolve()
             rel = path.relative_to(radiant)
         for symbol in RETIRED_NATIVE_SYMBOLS:
             if re.search(rf"\b{re.escape(symbol)}\b", text):

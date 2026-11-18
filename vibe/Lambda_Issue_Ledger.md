@@ -204,7 +204,7 @@ forced/poisoned GC in both explicit tiers. The native runtime/error suite passes
 340/340 with additional nested-nullability and top-exclusion assertions; 11
 related goldens pass per tier. The full Lambda baseline passes 7,604/7,604;
 the Input baseline passes 5,324 tests with three skipped cases. See
-[Input LI-076](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-076).
+[Input LI-076](../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-076).
 Evidence: `temp/constrained-error-fix/`. No compiler or golden workaround.
 
 **Performance residue: OPEN.** Three interleaved same-host release/JIT pairs
@@ -526,9 +526,9 @@ Six focused PNG tests cover clone/import/foreign-import, template/element HTML
 and insertAdjacentHTML; they verify comment order, identity, mutation isolation,
 destination ownership, shallow clones and standalone CharacterData. Four more
 mixed-fragment tests reproduce and qualify Input
-[LI-070](<../../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-070>).
+[LI-070](<../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-070>).
 The network completion dependency is
-[RI-102](<../../radiant/vibe/Radiant_Issue_Ledger (fixed).md#ri-102>).
+[RI-102](<../radiant/vibe/Radiant_Issue_Ledger (fixed).md#ri-102>).
 All twenty combined HTTP/DOM rendering tests pass. Four document/iframe,
 three Input and one observer controls pass during implementation. The milestone
 release baseline reports 8,140 passed, 10 failed, 299 partial and 8 skipped.
@@ -658,7 +658,7 @@ not block INI property editing. Evidence: `temp/edit-viewer/ini-control-
 
 **Status:** OPEN. D7.5.1 requires one scheduler per context; this blocks the
 standalone shared-module concurrency qualification described in input
-[LI-027](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-027).
+[LI-027](../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-027).
 
 Input now provides `LambdaUvLoop` instances with independent libuv loops,
 checkpoint handles and drain contexts. The native input tests cover four
@@ -695,14 +695,14 @@ The properties editor source-span scanner in
 checking escapes. The reproduction `../Lambda-opus/temp/edit-viewer/property-escape-probe.ls`
 imports `a\=b=c` and reports editor name `a\` and value `b=c`, although the
 properties key is `a=b` and its value is `c`. The input-owned parser is repaired
-in [LI-051](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-051); the
+in [LI-051](../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-051); the
 editor still needs an escape-aware source-span model and spelling preservation.
 The original observed output is in
 `../Lambda-opus/temp/edit-viewer/property-escape-probe.log`; this is a source
 inspection and historical reproduction, not a new Lambda integration run.
 
 The AsciiDoc heading and title handoff is resolved for the recorded editing
-case in [LI-044](<../../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-044>).
+case in [LI-044](<../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-044>).
 Input now parses the document title separately, maps body sections to their
 corresponding headings, and carries metadata through Markdown front matter.
 An isolated Lambda host linked existing Lambda/Radiant debug objects with the
@@ -730,7 +730,7 @@ Evidence: `temp/online-visual-round61/calmind-current-*`, `promotion.json`.
 
 **Status:** OPEN — exact cause and ownership are unconfirmed. The observation
 is in the Lambda script runner and event loop; it does not block the input
-resource-header fix in [LI-026](<../../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-026>).
+resource-header fix in [LI-026](<../lambda-input/vibe/Lib_Input_Issue_Ledger (fixed).md#li-026>).
 D9.1.1v4 covers ownership and D10.1.7 governs snapshot timing.
 
 With the input fix, two isolated native renders fetched the first-party CSS
@@ -754,7 +754,7 @@ Input's native DOM can expose a child stored inside a content array, for which
 `dom_backed_node_index` returns -1 because its result denotes a direct parent
 slot. The input-only control `../lambda-input/temp/ledger-dom-nested-index.log` confirms that
 index result; input-owned nested-array insertions and removals are tracked in
-[LI-052](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-052).
+[LI-052](../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-052).
 
 In `lambda/dom/dom.cpp`, the `dom_replace_child` branches that update Mark
 backing require a nonnegative direct index. For a nested child they fall
@@ -2173,7 +2173,7 @@ self-tests pass (`temp/js-parity-work/generator-after.log`). Independently
 built focused parity passes 27/27 runs, and selected AUTO passes 9/9
 (`three-mode-report.json` and `auto-report.json` in the same evidence folder).
 The next full Make attempt reaches the separate Radiant native-test linker
-blocker [RI-091](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-091): state-store
+blocker [RI-091](../radiant/vibe/Radiant_Issue_Ledger.md#ri-091): state-store
 and custom-layout test stubs collide with real archive providers. Full Make
 qualification remains blocked there. The Lambda aggregate completed
 7,492/7,529 with 151/151 server tests and only `ClientAndServer/auto` selected.
@@ -3241,7 +3241,7 @@ profile limit, not a newly implemented graphics/DOM feature or a fixed page.
 **Status:** FIXED for the selected console group methods. Host-native operation
 ownership **D9.5.6**, complete argument spans **D7.2.2**, realm ownership
 **D6.3**. Native Canvas matrix operations are separately recorded as
-[RI-075](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-075).
+[RI-075](../radiant/vibe/Radiant_Issue_Ledger.md#ri-075).
 
 Maven's slider initialization throws on `console.group`, before breakpoint
 setup. The console group implementation already exists, but the MVP host

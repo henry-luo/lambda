@@ -67,27 +67,28 @@ These are three ownership and dependency units. Internal archive subdivisions ar
 
 ## 3. Project and source ownership
 
-Proposed workspace shape:
+Workspace shape (the independently owned repositories are checked out as
+submodules inside Lambda):
 
 ```text
 Projects/
-  Lambda/                       # runtime, scripting integration, DOM/E2E tests
-  lambda-input/                 # agreed sibling project name
-    lib/                        # shared native support modules
-    include/                    # standalone public data and input headers
-    src/                        # data, input, format, Mark APIs, resource services
-    test/
-    doc/
-    vibe/
-  radiant/                      # illustrative sibling directory spelling
-    include/                    # public native engine and host contracts
-    src/                        # native engine, including platform sources
-    test/
-    doc/
-    vibe/
+  lambda/                       # runtime, scripting integration, DOM/E2E tests
+    lambda-input/               # input/data owner submodule
+      lib/                       # shared native support modules
+      include/                   # standalone public data and input headers
+      src/                       # data, input, format, Mark APIs, resource services
+      test/
+      doc/
+      vibe/
+    radiant/                    # native engine owner submodule
+      include/                   # public native engine and host contracts
+      src/                       # native engine, including platform sources
+      test/
+      doc/
+      vibe/
 ```
 
-Directory names under each project are provisional. Dependency locations are configurable; no production include or build command assumes a developer's absolute checkout path. Local sibling checkouts are a development convenience, not the distribution format.
+Directory names under each project are provisional. Dependency locations are configurable; no production include or build command assumes a developer's absolute checkout path. The submodule pins select compatible repository revisions; `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` allow local checkout overrides during development.
 
 | Current source area | Destination | Boundary condition |
 |---|---|---|
@@ -196,7 +197,7 @@ For reproducibility:
 - Lambda pins compatible Radiant and `lambda-input` revisions; Radiant pins or constrains its compatible input revision.
 - Resolve one `lambda-input` version for the whole executable. Reject incompatible selections early.
 - Record architecture, compiler/C++17 mode, build profile, sanitizer settings, public layout options, dependency revisions, and generated-schema versions with artifacts.
-- Allow explicit local source overrides for sibling development. CI and release builds use immutable revisions and record overrides in provenance.
+- Allow explicit local source overrides for cross-repository development. CI and release builds use immutable revisions and record overrides in provenance.
 - Run an installed-package smoke build outside both source trees. It must not succeed only because a private header is reachable through a broad workspace include path.
 
 Preserve Lambda's runtime-only and WASM profiles (D9.2.2–D9.2.3). Preserve the full engine's headless and windowed capabilities while removing the assumption in D9.2.1 that Radiant embeds rt. Window-system dependencies remain explicit; a headless capability exclusion reports a diagnostic instead of silently reducing behavior.
@@ -278,7 +279,7 @@ The stages below define delivery boundaries. A detailed implementation schedule 
 | 0. Record contracts and inventory | Coordinated spec revisions; source/provider, test-case, documentation, and dependency manifests | Every mixed area has an owner; existing baseline results and known failures are captured |
 | 1. Close the input boundary | Standalone data headers, providers, allocation/resource services, and `lambda-input` package | Clean build and parser/formatter/Mark/lib checks without Radiant or Lambda runtime; installed-header client links |
 | 2. Close the native engine boundary | Native APIs and host hooks; scripting adapters relocated logically into Lambda | Radiant native driver links only Radiant/input/platform dependencies; archive-wide audit finds no runtime provider dependency |
-| 3. Extract repositories | History-preserving source/doc moves, dependency pins, build metadata, and native test migrations | Fresh sibling checkouts build without source duplication or private cross-project includes; old-to-new inventories reconcile |
+| 3. Extract repositories | History-preserving source/doc moves, dependency pins, build metadata, and native test migrations | Fresh repository checkouts build without source duplication or private cross-project includes; old-to-new inventories reconcile |
 | 4. Integrate Lambda | Full CLI/runtime/DOM/Jube adapters consume the extracted libraries | Existing user commands and DOM/script behaviors pass focused integration and ownership gates |
 | 5. Qualify and remove transition paths | Independent CI, compatibility checks, documentation links, and removal of obsolete paths/globs | Required native and integrated gates pass, with no lost tests or hidden runtime dependency |
 
@@ -339,10 +340,12 @@ The transitional module-boundary check distinguishes the old runtime Class-F rat
 
 As of 2026-11-06, sibling `lambda-input` and `radiant` projects owned the moved source trees and native target manifests. A macOS split build links Lambda's static executable to archives built in the siblings; temporary source links, Lambda runtime dependencies in Radiant, and the existing vendor setup remain. Input archive dependency records exclude Lambda runtime sources and headers, and the complete input archives link into a native client. Radiant builds its native archives and a focused host-test subset directly, but its complete archive does not yet have standalone runtime closure. The detailed checkpoint and exact validation scope are in [`impl/Lambda_Impl_Radiant_Split.md`](impl/Lambda_Impl_Radiant_Split.md) (D6.3.3, D9.1.1v4, D9.1.3v2, D10.2.1).
 
+As of 2026-11-18, Lambda pins both owner repositories as root-level Git submodules at `lambda-input/` and `radiant/`. Build manifests and helper defaults resolve those checkouts from the Lambda root while retaining explicit root overrides. The split ownership and link contracts remain unchanged (D9.1.1v4, D9.1.3v2).
+
 The controlling rule is provider ownership (D9.1.3v2). A changed include path, opaque cast, runtime stub, or permissive linker option does not resolve a misplaced provider.
 
 On 2026-11-09, Radiant removed its whole-directory input migration links. Native sources resolve `lib/` and `lambda/` header prefixes through the configured input root, and the native archive links without Lambda runtime or DOM code. A build guard rejects directory links and input source files in a header facade. The remaining vendor artifacts still require separate packaging (D9.1.1v4, D9.1.3v2).
 
 Lambda no longer has top-level `lib` or `radiant` source links. Its build resolves logical paths from the selected sibling roots; input has no remaining source-tree symlinks into Lambda. The normal build links the sibling archives. Lambda's default Premake workspace does not generate sibling provider projects or the old monolithic host; owner metadata supplies the link closure. Specialized variants and white-box tests still compile selected sibling sources. Vendor provisioning and cross-platform archive integration remain open (D9.1.1v4, D9.1.3v2).
 
-On 2026-11-10, the build-toolchain audit found that input's dependency builds used CMake, Meson/Ninja and curl's Autotools `configure` workflow. Input now owns the pre-split JSON recipes and shared Premake/Make builder, with compiler probes for curl; the dependency targets build on macOS with those other tools blocked. The remaining cross-platform qualification is tracked as LI-011 in the [input issue ledger](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md). D9.1.5 remains partial: Lambda's standalone libpq recipe still invokes upstream `configure`, and the full cross-project pipeline requires further audit.
+On 2026-11-10, the build-toolchain audit found that input's dependency builds used CMake, Meson/Ninja and curl's Autotools `configure` workflow. Input now owns the pre-split JSON recipes and shared Premake/Make builder, with compiler probes for curl; the dependency targets build on macOS with those other tools blocked. The remaining cross-platform qualification is tracked as LI-011 in the [input issue ledger](../lambda-input/vibe/Lib_Input_Issue_Ledger.md). D9.1.5 remains partial: Lambda's standalone libpq recipe still invokes upstream `configure`, and the full cross-project pipeline requires further audit.

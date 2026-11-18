@@ -108,8 +108,8 @@ function testSourceOwner(source) {
     const relative = source.startsWith('test/') ? source : `test/${source}`;
     const owners = [
         ['lambda', ROOT_DIR],
-        ['lambda-input', path.resolve(ROOT_DIR, process.env.LAMBDA_INPUT_ROOT || '../lambda-input')],
-        ['radiant', path.resolve(ROOT_DIR, process.env.RADIANT_ROOT || '../radiant')],
+        ['lambda-input', path.resolve(ROOT_DIR, process.env.LAMBDA_INPUT_ROOT || 'lambda-input')],
+        ['radiant', path.resolve(ROOT_DIR, process.env.RADIANT_ROOT || 'radiant')],
     ];
     for (const [owner, root] of owners) {
         const candidate = path.resolve(root, relative);

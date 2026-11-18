@@ -2,12 +2,12 @@
   "config_imports": [
     "build_deps_config.json",
     {
-      "path": "../lambda-input/build_targets.json",
+      "path": "lambda-input/build_targets.json",
       "root_env": "LAMBDA_INPUT_ROOT",
       "root_path": "build_targets.json"
     },
     {
-      "path": "../radiant/build_targets.json",
+      "path": "radiant/build_targets.json",
       "root_env": "RADIANT_ROOT",
       "root_path": "build_targets.json"
     }
@@ -5303,19 +5303,6 @@
             "additional_sources": [],
             "binary": "test_pdf_render_visual_gtest.exe",
             "icon": "\ud83d\udcd5"
-          },
-          {
-            "source": "test_yaml_suite_gtest.cpp",
-            "name": "YAML Test Suite Conformance",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "binary": "test_yaml_suite_gtest.exe",
-            "icon": "\ud83d\udcdc"
           },
           {
             "source": "wpt/test_wpt_html_parser_gtest.cpp",

@@ -101,12 +101,12 @@ There are two ways to make speech audible:
 
 **Proposal: render to samples wherever the engine allows it,** and use speak-now
 only as a degraded fallback (Speech Dispatcher). This reuses the output path
-Radiant already has for music. [`midi_player.cpp`](../../radiant/midi_player.cpp)
+Radiant already has for music. [`midi_player.cpp`](../../radiant/radiant/midi_player.cpp)
 renders TinySoundFont output into a **miniaudio** device, which covers CoreAudio,
 WASAPI and ALSA/PulseAudio. The byte-decoded `dom.audio_*` path
-([`rdt_audio.h`](../../radiant/rdt_audio.h)) cannot carry speech across
+([`rdt_audio.h`](../../radiant/radiant/rdt_audio.h)) cannot carry speech across
 platforms: it is AVFoundation-only, and the Windows and Linux builds are stubs
-that return nothing ([`rdt_video_stub.cpp`](../../radiant/rdt_video_stub.cpp)).
+that return nothing ([`rdt_video_stub.cpp`](../../radiant/radiant/rdt_video_stub.cpp)).
 
 ### 3.2 Document sub-mixes on a window bus
 
@@ -160,7 +160,7 @@ Document sub-mix ── window bus ── miniaudio device, or the offline rende
   utterance asynchronously into PCM chunks plus boundary/mark records on an
   engine thread; cancel. Engines never touch the DOM or the Lambda heap.
 - **Radiant speech service**, modelled on `DocumentAudio` in
-  [`audio.cpp`](../../radiant/audio.cpp): token slots that never alias (as
+  [`audio.cpp`](../../radiant/radiant/audio.cpp): token slots that never alias (as
   `audio_slot_add` guarantees), a per-document utterance queue, PCM handed to
   the document sub-mix, events posted to the loop (D9.5.2). Text is copied into native
   storage at `speak` time (D5.5.2).

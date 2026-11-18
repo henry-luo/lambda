@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-INPUT_ROOT="${LAMBDA_INPUT_ROOT:-$ROOT/../lambda-input}"
-RADIANT_ROOT="${RADIANT_ROOT:-$ROOT/../radiant}"
+INPUT_ROOT="${LAMBDA_INPUT_ROOT:-$ROOT/lambda-input}"
+RADIANT_ROOT="${RADIANT_ROOT:-$ROOT/radiant}"
 platform="${1:?platform required}"
 case "${2:-}" in --dry-run) export SETUP_DRY_RUN=1 ;; '') ;; *) echo "Usage: setup-${platform}-deps.sh [--dry-run]" >&2; exit 2 ;; esac
 source "$INPUT_ROOT/scripts/setup_packages.sh"

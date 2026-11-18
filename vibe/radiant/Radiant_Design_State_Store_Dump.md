@@ -273,7 +273,7 @@ bool    radiant_state_dump_to_file(DocState* state, const char* path);
 5. Write `sb` to the dump file (and/or return the `String`).
 
 State grouping: iterate `state_map` once via `hashmap_iter`
-([`state_store.cpp`](../../radiant/state_store.cpp)) into a temporary
+([`state_store.cpp`](../../radiant/radiant/state_store.cpp)) into a temporary
 `node → flags/values` accumulator keyed by `DomNode*`, so the DFS can look up a
 node's states in O(1) instead of re-scanning per element.
 
@@ -296,7 +296,7 @@ array ends empty, the `flags` attribute is not set on the element.
 
 - **Mode: per-cascade time series.** A dump is emitted at the end of each event
   cascade (alongside the existing `radiant_state_settle` snapshot in
-  [`state_machine.cpp`](../../radiant/state_machine.cpp)), gated behind a
+  [`state_machine.cpp`](../../radiant/radiant/state_machine.cpp)), gated behind a
   verbosity/CLI flag so it is off by default. Each cascade appends one
   self-contained Mark tree to the series, tagged with the cascade id / sequence
   number so dumps can be correlated with the event-state log.
@@ -323,7 +323,7 @@ shows exactly what one event changed — structurally, not as text noise.
 
 The existing event-state log
 ([`radiant/event_state_log.hpp`](../../radiant/event_state_log.hpp)) and its
-`state.snapshot` record ([`radiant/state_machine.cpp`](../../radiant/state_machine.cpp)
+`state.snapshot` record ([`radiant/state_machine.cpp`](../../radiant/radiant/state_machine.cpp)
 `emit_state_snapshot`) remain as a **streaming JSONL event trace**. This Mark dump
 is complementary: a **full, tree-structured snapshot** of the entire state store
 at a point in time, optimized for human reading and structural diffing rather than

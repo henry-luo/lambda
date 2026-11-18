@@ -97,7 +97,7 @@ bits, all-zero known vector → `00000000-0000-4000-8000-000000000000`).
 ## 3. `lib/color.h` — CSS hex color parse/format ✅ (was round-3 §7, deferred)
 
 Round 3 deferred this "until a 4th caller appears or the two color structs are
-unified." **The 4th caller appeared** ([radiant/css_animation.cpp](../../radiant/css_animation.cpp)
+unified." **The 4th caller appeared** ([radiant/css_animation.cpp](../../radiant/radiant/css_animation.cpp)
 `parse_color_value`), so it graduated to actionable. The struct-divergence
 concern is sidestepped by keeping the lib API **byte-level** (`r,g,b,a` in/out)
 and letting each caller adapt into its own color struct.
@@ -106,8 +106,8 @@ Four parsers + two formatters consolidated:
 
 - [lambda/input/css/css_properties.cpp](../../lambda/input/css/css_properties.cpp) `css_parse_hex_to_rgba` (3/4/6/8-digit, alpha)
 - [radiant/graph_theme.cpp](../../radiant/graph_theme.cpp) `parse_hex_color` (6-digit) + `format_hex_color` (inverse)
-- [radiant/resolve_htm_style.cpp](../../radiant/resolve_htm_style.cpp) `parse_html_color` (HTML `bgcolor`, 3/6-digit)
-- [radiant/css_animation.cpp](../../radiant/css_animation.cpp) `parse_color_value` (hex branch; rgb()/named kept local)
+- [radiant/resolve_htm_style.cpp](../../radiant/radiant/resolve_htm_style.cpp) `parse_html_color` (HTML `bgcolor`, 3/6-digit)
+- [radiant/css_animation.cpp](../../radiant/radiant/css_animation.cpp) `parse_color_value` (hex branch; rgb()/named kept local)
 
 ### Shipped API (`lib/color.h`, header-only)
 
