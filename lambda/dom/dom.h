@@ -199,6 +199,7 @@ bool dom_is_html_canvas_element(Item item);
 Item dom_append_child_bridge(void* parent, Item child);
 // Internal parser staging updates both trees without publishing a script mutation.
 bool dom_parser_move_child(void* parent, void* child);
+void dom_clear_script_reactions(struct DomDocument* document);
 Item dom_remove_child_bridge(void* parent, Item child);
 bool dom_remove_backed_child(struct DomElement* parent, struct DomNode* child);
 Item dom_insert_before_bridge(void* parent, Item new_child, Item reference_child);

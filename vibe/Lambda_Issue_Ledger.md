@@ -603,12 +603,19 @@ it; neither establishes a native paint/sizing bug.
 
 <a id="online-dynamic-script-preparation"></a>
 
-**Status:** OPEN feature gap, reproduced on the qualified round50 renderer.
+**Status:** PARTIAL, 2026-11-18. DOM-created inline classic scripts now use the
+document's evaluator at post-connection. Atomic insertion snapshots candidates
+and checks that each is still in the preparation document when its turn comes.
+Fragment markup stays inert, started script clones retain the started bit,
+and nested classics defer their jobs until the enclosing script checkpoint.
+The standalone probe and same-origin XHR reduction now turn green. Tests cover
+AST and MIR execution. Dynamically scheduled external scripts, modules and
+their load ordering remain open.
 **Task blocker:** no for independent layout repairs. Host/DOM ownership follows
 **D9.1.3v2**, shared tier contracts **D8.4.4**, and capture timing **D10.1.7**.
 No formal ruling or capture budget changes.
 
-A newly created classic script with text assigned through HTMLScriptElement.text
+On the original renderer, a newly created classic script with text assigned through HTMLScriptElement.text
 and appended to document.head never executes. The standalone inline-script.html
 probe logs only DYNAMIC_APPEND_RETURNED. Chromium logs DYNAMIC_SCRIPT_RAN before
 that message and paints lime. The HTTP dynamic-settings.cjs reduction also
@@ -618,21 +625,14 @@ finisher; its white startup cover stays present. Chromium runs the finisher and
 removes the cover. Thus this reduction is not a font wait, failed transport or
 nonzero timer requirement.
 
-The runner collects initial script elements and has a separate document.write
-insertion path. Ordinary DOM insertion has no matching script preparation and
-already-started model. Implement the shared
-[HTML script preparation lifecycle](https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element),
-including inert fragment-created scripts, clone/reinsertion rules and load
-ordering, rather than evaluating arbitrary inserted script text as a shortcut.
-This is a broader missing lifecycle feature outside the round's small layout
-repairs; no partial insertion evaluator or site-specific unhide is added.
+The [HTML script preparation lifecycle](https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element)
+governs when a connected element runs. The loader's `document.write` callback
+still uses parser insertion and its own insertion cursor.
 
 Archived Monese065 and Mode173 bootstraps create a VWO cover and load settings
-through XHR followed by this script-text/append pattern. They remain white in
-fresh captures. The reduced shared capability failure is confirmed; its exact
-contribution alongside remote settings and authored fallback timers on each live
-page is not independently isolated. Do not label their blank output solely a
-font failure or solely an intentional timer wait.
+through XHR followed by this script-text/append pattern. Their original captures
+were white. The local reduction now works. These archived application captures
+still need requalification with their remote settings and authored timers.
 
 Evidence: temp/online-visual-round51/{inline-script.html,inline-script.log,
 inline-browser.log,dynamic-settings.cjs,dynamic-settings-result.json}; pin

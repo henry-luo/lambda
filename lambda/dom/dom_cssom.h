@@ -152,6 +152,7 @@ bool dom_cssom_edit_inline_property(void* element, const char* property, const c
  * @return Array Item of wrapped stylesheets, or ITEM_NULL
  */
 Item dom_cssom_get_document_stylesheets(void);
+Item dom_cssom_get_shadow_stylesheets(Item root);
 
 // =============================================================================
 // LinkStyle .sheet Access

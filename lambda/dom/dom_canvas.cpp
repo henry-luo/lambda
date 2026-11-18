@@ -14,6 +14,8 @@
 #include "../js/js_runtime.h"
 #include "dom.h"
 #include "dom_graphics.h"
+#include "dom_core.h"
+#include "dom_realm_hooks.h"
 #include "dom_canvas.h"
 #include "dom_webgl.h"
 #include "realm/dom_realm.h"
@@ -279,6 +281,16 @@ static Item js_canvas_context_reset_transform(Item, Item receiver, Item* args, i
     return js_canvas_context_matrix(receiver, args, argc, true, true);
 }
 
+static Item js_canvas_context_get_transform(Item, Item receiver, Item*, int, uint64_t*) {
+    void* element = js_canvas_context_element(receiver);
+    if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
+    float coefficients[6];
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::get_transform,
+            element, coefficients)) return js_canvas_draw_failed();
+    // The matrix returned to script owns its values independently of the context.
+    return dom_create_matrix_2d(coefficients);
+}
+
 static Item js_canvas_context_begin_path(Item callee, Item this_value,
                                          Item* args, int argc, uint64_t* result_home) {
     (void)callee; (void)args; (void)argc; (void)result_home;
@@ -373,21 +385,57 @@ static Item js_canvas_context_path_rect(Item callee, Item this_value,
         ? make_js_undefined() : js_canvas_draw_failed();
 }
 
-static Item js_canvas_context_arc(Item callee, Item this_value,
-                                  Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)result_home;
-    float values[5] = {};
-    for (int index = 0; index < 5; index++) {
-        Item error = js_canvas_number_arg(args, argc, index, &values[index]);
+static Item js_canvas_path_numbers(Item* args, int argc, int required, double* values) {
+    if (argc < required) return js_throw_type_error("Canvas path requires more arguments");
+    for (int index = 0; index < required; index++) {
+        Item error = js_canvas_number_value(args[index], &values[index]);
         if (item_is_error(error)) return error;
     }
-    if (!js_canvas_numbers_are_finite(values, 5)) return make_js_undefined();
-    if (values[2] < 0.0f) return js_throw_range_error("Canvas arc radius must be non-negative");
-    bool counter_clockwise = args && argc > 5 && js_is_truthy(args[5]);
-    void* element = js_canvas_context_element(this_value);
+    for (int index = 0; index < required; index++) {
+        if (!isfinite(values[index])) return make_js_undefined();
+    }
+    return ItemNull;
+}
+
+static Item js_canvas_path_ellipse(Item receiver, Item* args, int argc, bool circle) {
+    void* element = js_canvas_context_element(receiver);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::arc, element, values[0], values[1], values[2], values[3],
-                              values[4], counter_clockwise)
+    int required = circle ? 5 : 7;
+    double values[7] = {};
+    Item result = js_canvas_path_numbers(args, argc, required, values);
+    if (result.item != ITEM_NULL) return result;
+    double radius_y = circle ? values[2] : values[3];
+    if (values[2] < 0.0 || radius_y < 0.0)
+        return dom_raise_exception("IndexSizeError", "Canvas radii must be non-negative");
+    float bounds[] = {(float)values[0], (float)values[1], (float)values[2], (float)radius_y};
+    if (!js_canvas_numbers_are_finite(bounds, 4)) return make_js_undefined();
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::ellipse, element,
+                              bounds[0], bounds[1], bounds[2], bounds[3], circle ? 0.0 : values[4],
+                              values[required - 2], values[required - 1],
+                              argc > required && js_is_truthy(args[required]))
+        ? make_js_undefined() : js_canvas_draw_failed();
+}
+
+static Item js_canvas_context_arc(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    return js_canvas_path_ellipse(receiver, args, argc, true);
+}
+
+static Item js_canvas_context_ellipse(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    return js_canvas_path_ellipse(receiver, args, argc, false);
+}
+
+static Item js_canvas_context_arc_to(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    void* element = js_canvas_context_element(receiver);
+    if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
+    double values[5] = {};
+    Item result = js_canvas_path_numbers(args, argc, 5, values);
+    if (result.item != ITEM_NULL) return result;
+    if (values[4] < 0.0) return dom_raise_exception("IndexSizeError", "Canvas radius must be non-negative");
+    float points[5];
+    for (int index = 0; index < 5; index++) points[index] = (float)values[index];
+    if (!js_canvas_numbers_are_finite(points, 5)) return make_js_undefined();
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::arc_to, element,
+        points[0], points[1], points[2], points[3], points[4])
         ? make_js_undefined() : js_canvas_draw_failed();
 }
 
@@ -575,6 +623,7 @@ static void js_canvas_install_context_methods(Item context) {
         {"transform", js_canvas_context_transform, 6},
         {"setTransform", js_canvas_context_set_transform, 0},
         {"resetTransform", js_canvas_context_reset_transform, 0},
+        {"getTransform", js_canvas_context_get_transform, 0},
         {"beginPath", js_canvas_context_begin_path, 0},
         {"closePath", js_canvas_context_close_path, 0},
         {"moveTo", js_canvas_context_move_to, 2},
@@ -582,7 +631,9 @@ static void js_canvas_install_context_methods(Item context) {
         {"bezierCurveTo", js_canvas_context_bezier_curve_to, 6},
         {"quadraticCurveTo", js_canvas_context_quadratic_curve_to, 4},
         {"rect", js_canvas_context_path_rect, 4},
-        {"arc", js_canvas_context_arc, 6},
+        {"arc", js_canvas_context_arc, 5},
+        {"arcTo", js_canvas_context_arc_to, 5},
+        {"ellipse", js_canvas_context_ellipse, 7},
         {"fill", js_canvas_context_fill, 0},
         {"stroke", js_canvas_context_stroke, 0},
         {"clip", js_canvas_context_clip, 0},

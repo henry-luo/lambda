@@ -615,48 +615,6 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
     return dom_attribute_collection_bridge(elem);
 }
 
-static bool radiant_dom_label_contains_control(DomElement* label,
-                                               DomElement* control) {
-    if (!label || !control) return false;
-    for (DomNode* child = label->first_child; child; child = child->next_sibling) {
-        if (child == (DomNode*)control) return true;
-        if (child->is_element() && radiant_dom_label_contains_control(
-                child->as_element(), control)) return true;
-    }
-    return false;
-}
-
-static void radiant_dom_collect_labels(DomElement* root, DomElement* control,
-                                       Item result) {
-    if (!root || !control) return;
-    if (radiant_dom_is_tag(root, "label")) {
-        const char* label_for = root->get_attribute("for");
-        const char* control_id = control->get_attribute("id");
-        bool explicitly_for = label_for && label_for[0] && control_id &&
-            control_id[0] && strcmp(label_for, control_id) == 0;
-        bool wrapping = (!label_for || !label_for[0]) &&
-            radiant_dom_label_contains_control(root, control);
-        if (explicitly_for || wrapping) {
-            radiant_host_api->value->array_push(result,
-                radiant_dom_node_item((DomNode*)root));
-        }
-    }
-    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
-        if (child->is_element()) {
-            radiant_dom_collect_labels(child->as_element(), control, result);
-        }
-    }
-}
-
-static Item radiant_dom_labels_item(DomElement* control) {
-    Item result = radiant_dom_array_item();
-    if (!control || !control->doc || !control->doc->root) return result;
-    // A missing labels property sends libraries into a less-compatible manual
-    // ancestor path; expose the actual label association from the DOM tree.
-    radiant_dom_collect_labels(control->doc->root, control, result);
-    return result;
-}
-
 static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallback) {
     DomDocument* owner = radiant_host_api
         ? (DomDocument*)radiant_host_api->dom_catalog->node_owner_document(node) : nullptr;
@@ -669,24 +627,7 @@ static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallbac
 
 static bool radiant_dom_node_is_connected(DomNode* node) {
     DomDocument* doc = radiant_dom_node_document(node, false);
-    if (!node || !doc || !doc->root) return false;
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current == (DomNode*)doc->root) return true;
-    }
-    return false;
-}
-
-static Item radiant_dom_node_root_item(DomNode* node) {
-    if (!node) return ItemNull;
-    DomDocument* doc = radiant_dom_node_document(node, false);
-    if (doc && radiant_dom_node_is_connected(node)) {
-        // A connected engine tree omits an explicit Document parent, so expose
-        // the document proxy as the DOM root instead of stopping at <html>.
-        return dom_document_proxy_for_doc_bridge((void*)doc);
-    }
-    DomNode* root = node;
-    while (root->parent) root = root->parent;
-    return radiant_dom_node_item(root);
+    return doc && dom_shadow_including_contains(doc->root, node);
 }
 
 static bool radiant_dom_node_contains(DomNode* root, DomNode* other) {
@@ -874,6 +815,7 @@ typedef struct RadiantDomEventRecord {
     bool dispatching;
     bool in_passive_listener;
     bool trusted;
+    bool label_forwarded;
     bool time_event;
     bool has_payload;
     int event_phase;
@@ -1078,6 +1020,33 @@ RADIANT_C_API Item radiant_dom_event_create(const char* type, bool bubbles,
 
 RADIANT_C_API bool radiant_dom_event_is(Item item) {
     return radiant_dom_event_record(item) != nullptr;
+}
+
+Item radiant_dom_event_forward_label_click(Item source) {
+    const RadiantDomEventRecord* original = radiant_dom_event_record(source);
+    if (!original || original->label_forwarded || strcmp(original->type, "click") != 0 ||
+        (original->class_id != JS_CLASS_MOUSE_EVENT && original->class_id != JS_CLASS_POINTER_EVENT)) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> original_root(roots, source);
+    Rooted<Item> click(roots, radiant_dom_event_create("click", true, true, true, original->class_id));
+    RadiantDomEventRecord* record = radiant_dom_event_record(click.get());
+    if (!record) return ItemNull;
+    // Preserve device metadata and trust while starting a fresh dispatch state.
+    record->label_forwarded = true;
+    record->trusted = original->trusted;
+    record->timestamp = original->timestamp;
+    const char* fields[] = {
+        RADIANT_DOM_EVENT_PROTO_KEY, "view", "detail", "screenX", "screenY", "clientX", "clientY",
+        "pageX", "pageY", "x", "y", "button", "buttons", "ctrlKey", "shiftKey", "altKey", "metaKey",
+        "pointerId", "pointerType", "isPrimary", "width", "height", "pressure",
+        "tangentialPressure", "tiltX", "tiltY", "twist", "altitudeAngle", "azimuthAngle"
+    };
+    for (const char* name : fields) {
+        Item key = js_name_item(name);
+        if (vmap_backing_has(original_root.get().vmap, key))
+            vmap_backing_set(click.get().vmap, key, vmap_backing_get(original_root.get().vmap, key));
+    }
+    return click.get();
 }
 
 RADIANT_C_API bool radiant_dom_event_type_is(Item item, const char* type) {
@@ -2497,18 +2466,6 @@ static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
     const char* prop = fn_to_cstr(prop_name);
-    if (node && node->is_element() && prop && strcmp(prop, "labels") == 0) {
-        DomElement* elem = node->as_element();
-        if (radiant_dom_is_tag(elem, "input") ||
-            radiant_dom_is_tag(elem, "select") ||
-            radiant_dom_is_tag(elem, "textarea") ||
-            radiant_dom_is_tag(elem, "button") ||
-            radiant_dom_is_tag(elem, "output") ||
-            radiant_dom_is_tag(elem, "meter") ||
-            radiant_dom_is_tag(elem, "progress")) {
-            return radiant_dom_labels_item(elem);
-        }
-    }
     if (node && node->is_element() && dom_is_connected(node) && prop &&
         (strcmp(prop, "offsetWidth") == 0 || strcmp(prop, "offsetHeight") == 0 ||
          strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
@@ -2548,10 +2505,6 @@ RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
     if (operation == JUBE_DOM_CONTAINS) {
         DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
         return (Item){.item = b2it(radiant_dom_node_contains(node, other) ? 1 : 0)};
-    }
-    if (operation == JUBE_DOM_GET_ROOT_NODE) {
-        // Shadow DOM is deferred, so composed and non-composed roots coincide.
-        return radiant_dom_node_root_item(node);
     }
     return dom_element_operation_impl(elem_item, operation, args, argc);
 }
@@ -3053,7 +3006,8 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
     }
 
     if (operation == RADIANT_DOCUMENT_GET_ROOT_NODE) {
-        *out = doc ? dom_document_proxy_for_doc_bridge((void*)doc) : ItemNull;
+        *out = doc ? dom_element_operation_impl(dom_document_proxy_for_doc_bridge((void*)doc),
+            JUBE_DOM_GET_ROOT_NODE, args, argc) : ItemNull;
         return 1;
     }
 

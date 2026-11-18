@@ -2160,6 +2160,11 @@ RADIANT_C_API Item fn_radiant_keyboard_click(Item node_item) {
     return radiant_bool_item(elem && radiant_keyboard_click_from_package((void*)elem));
 }
 
+RADIANT_C_API Item fn_radiant_forward_label_click(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FORWARD_LABEL_CLICK");
+    return radiant_bool_item(elem && radiant_forward_label_click_from_package((void*)elem));
+}
+
 RADIANT_C_API Item fn_radiant_keyboard_command(Item node_item, Item name_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "KEYBOARD_COMMAND");
     const char* name = fn_to_cstr(name_item);
@@ -6181,6 +6186,7 @@ RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
 RADIANT_PROVIDE_ENGINE_1(mouse_focus, fn_radiant_mouse_focus)
 RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)
 RADIANT_PROVIDE_ENGINE_1(keyboard_click, fn_radiant_keyboard_click)
+RADIANT_PROVIDE_ENGINE_1(forward_label_click, fn_radiant_forward_label_click)
 RADIANT_PROVIDE_ENGINE_2(keyboard_command, fn_radiant_keyboard_command)
 RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
 RADIANT_PROVIDE_ENGINE_2(pointer_selection, fn_radiant_pointer_selection)

@@ -12952,7 +12952,7 @@ static MvpLmdExecution* mvp_lmd_execute_owned(const char* source, size_t length,
     if (module && !item_is_error(result)) result.item = ITEM_JS_UNDEFINED;
     if (execution_ms) *execution_ms = time_elapsed_ms_f(started, time_now_ns());
     result = lambda_item_resolve_pending_slot(result);
-    if (p->promises && !item_is_error(result)) {
+    if (p->promises && !item_is_error(result) && !(options && options->nested_classic_script)) {
         // retain the source completion across jobs, including the shared flush budget's next batch.
         RootFrame roots(1);
         if (!roots.valid()) return e;
@@ -13238,6 +13238,8 @@ Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t len
     options.typescript = typescript;
     options.native_harness = native_harness;
     options.terminal_script = runtime->js_terminal_script;
+    options.nested_classic_script = !options.module &&
+        (!execution_scope.is_outermost() || js_runtime_state.event_loop->callback_running);
     runtime->js_terminal_script = false;
     MvpLmdExecution* execution = mvp_lmd_execute_owned(source, length,
         &runtime->js_execution_ms, &host, &options, runtime);

@@ -715,6 +715,29 @@ previously reproduced JS03-L2 iframe failure. Evidence:
 
 ### JS13-L2 — ShadowRoot APIs do not provide full composed-tree rendering — **PARTIAL**
 
+The 2026-11-18 HTML support goal reproduced zero-height shadow descendants
+through both `innerHTML` and `appendChild()`. Reconciliation now follows the
+shadow-including ancestor chain for mutation connection and dirty layout.
+Raster and vector paint enter the shadow child list already used by layout,
+and stacking replay crosses the host boundary. Controls cover open and closed
+roots, document stylesheet isolation, empty-root suppression of light children,
+and a positive z-index inside a shadow tree. PNG, SVG and PDF paint the supplied
+text and fill. Painted slot projection, declarative roots and
+the original Lit applications remain unqualified (**D9.1.1v4 / D9.1.3v2**).
+The same goal added composed root lookup plus live named-slot queries for
+elements and text. Closed roots expose neither `host.shadowRoot` nor a light
+node's `assignedSlot`. Sequence reads cover nested fallback flattening and
+reflect slot renames and reordering. Manual assignment and `slotchange`
+remain open (**D9.1.3v2 / D6.3.3**).
+
+Inline shadow stylesheets now participate in the owning root's author cascade
+in source order. `ShadowRoot.styleSheets` is a live, same-object list using the
+same traversal. These sheets stay out of `document.styleSheets`. CSSOM edits,
+text changes, media changes, moves between roots and host insertion update the
+computed style and PNG paint. Selector parent relations stop at the shadow
+fragment boundary. Scoped linked and adopted sheets, shadow name registries,
+`:host` and `::slotted` remain open (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+
 Round sixty (2026-11-17) separates this residue from confirmed runtime bugs:
 after JS07-L1, JS13-L8 and JS13-L9, Archive.org's module and root Lit template
 update complete, and its shadow DOM contains the header/main/footer nodes.
@@ -733,8 +756,7 @@ user-authorized bug/incomplete-existing-feature milestone; it is not an online
 capture blocker and is not implemented in this round.
 
 `lambda/dom/dom.cpp::dom_core_attach_shadow` creates a stable fragment-backed
-root and exposes host/mode/focus behavior. Its source explicitly states that
-Radiant does not yet render a full shadow tree. WebAssembly.org's
+root and exposes host/mode/focus behavior. WebAssembly.org's
 `dark-mode-toggle.min.mjs` constructs its controls and stylesheet in
 `this.attachShadow({mode:"open"})`. Supporting that API object does not qualify
 its composed layout, shadow-scoped CSS or control rendering. The downloaded

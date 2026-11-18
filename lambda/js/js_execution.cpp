@@ -165,7 +165,12 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
         Item evaluation_error = js_interp_es_module_evaluation_error(runtime, script);
         if (item_is_error(evaluation_error)) result.set(evaluation_error);
     }
-    js_mir_finish_script_turn(runtime, result.get());
+    // A classic script inserted by an executing task leaves its queued jobs
+    // for that task's checkpoint, just like other reentrant JS entries.
+    if (es_module || (module_execution_scope.is_outermost() &&
+            !js_runtime_state.event_loop->callback_running)) {
+        js_mir_finish_script_turn(runtime, result.get());
+    }
     return result.get();
 }
 

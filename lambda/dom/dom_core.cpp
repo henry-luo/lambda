@@ -699,20 +699,8 @@ extern "C" Item dom_core_css_color_valid(Item value) {
 
 // The five element-traversal rows live in dom.cpp with the eight node links,
 // beside the script-visible walkers they share.
-// root_node IS its derivation: JUBE_DOM_GET_ROOT_NODE is answered on the
-// module side (radiant_dom_bridge.cpp), never by the core executor, so the
-// ordinal is null from a Lambda caller. Walking parent_node is the mechanism.
-// Without a document wrapper (ESO93) the walk ends at the document element.
 extern "C" Item dom_fp_root_node(Item n) {
-    Item cur = n;
-    // One link read per ancestor; this used to be a property-protocol lookup
-    // per ancestor, so a deep tree paid the 152-name bsearch and the linear
-    // chain on every step of the walk.
-    for (Item p = dom_core_parent_node(cur); get_type_id(p) != LMD_TYPE_NULL;
-         p = dom_core_parent_node(cur)) {
-        cur = p;
-    }
-    return cur;
+    return dom_core_get_root_node(n, ItemNull);
 }
 extern "C" Item dom_fp_document_element(Item n) {
     // The node's OWNING document's root element, read directly -- not the first

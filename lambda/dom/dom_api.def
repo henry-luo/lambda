@@ -138,6 +138,7 @@ DOM_OP(CORE, dispatch,         event, 2, "pn(n: any, event: any) -> bool",      
 // Keyboard policy chooses the target and timing; this engine seam only emits
 // the browser-shaped click and runs its shared default-action pipeline.
 DOM_OP(CORE, keyboard_click,   event, 1, "pn(n: any) -> bool",                              dom_engine_keyboard_click, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, forward_label_click, event, 1, "pn(n: any) -> bool",                            dom_engine_forward_label_click, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // Keyboard and overlay policy choose clipboard/selection command names. The
 // engine validates the live surface and performs only selection/edit/clipboard I/O.
 DOM_OP(CORE, keyboard_command, event, 2, "pn(n: any, name: string) -> bool",                dom_engine_keyboard_command, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
@@ -454,6 +455,7 @@ DOM_OP(DERIVED, selection_select_all_children, selection, 2, "pn(s: any, n: any)
        "set_base_and_extent(s, n, 0, n, len(child_nodes(n)))", none, "", "")
 
 // --- 5.7 forms and controls (cold: Lambda bodies, F30/F31)
+DOM_OP(CORE, label_control,     forms, 1, "fn(n: any) -> any", dom_core_label_control, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(DERIVED, form_of,         forms, 1, "fn(n: any) -> any", DOM_NO_BODY, DOM_F_NEUTRAL,
        "if (has_attribute(n, \"form\")) get_element_by_id(root_node(n), get_attribute(n, \"form\")) else closest(n, \"form\")", none, "", "")
 DOM_OP(DERIVED, radio_group,     forms, 1, "fn(n: any) -> array", DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_SNAPSHOT,
@@ -853,3 +855,5 @@ DOM_RAW(frame_request_once_native, timing, uint64_t, (void* owner, const char* e
 
 // filtered traversal appends without changing the published two-argument slot (D9.5.4).
 DOM_OP(CORE, create_tree_walker_filtered, tree, 3, "fn(root: any, what: any, filter: any) -> any", dom_create_tree_walker_filtered_bridge, 0, "", none, "", "")
+
+DOM_OP(CORE, show_dialog, forms, 1, "pn(n: any) -> null", dom_core_show_dialog, DOM_F_MUTATES, "", none, "", "")

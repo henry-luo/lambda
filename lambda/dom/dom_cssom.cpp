@@ -855,6 +855,7 @@ static const char* serialize_cssom_rule_css_text(CssRule* rule, Pool* pool,
 
 typedef enum CssomVArrayKind {
     CSSOM_VARRAY_STYLE_SHEETS,
+    CSSOM_VARRAY_SHADOW_STYLE_SHEETS,
     CSSOM_VARRAY_RULES,
 } CssomVArrayKind;
 
@@ -896,12 +897,34 @@ static CssRule* cssom_owner_rule_at(Item owner, int64_t index) {
         ? (*children.rules)[index] : nullptr;
 }
 
+static DomElement* cssom_shadow_list_root(Item owner) {
+    DomNode* node = (DomNode*)dom_unwrap_element(owner);
+    DomElement* root = node ? node->as_element() : nullptr;
+    return root && root->shadow_host_element() ? root : nullptr;
+}
+
+static DomElement* cssom_sync_shadow_list(Item owner) {
+    DomElement* root = cssom_shadow_list_root(owner);
+    if (root && root->doc && root->doc->js.inline_stylesheet_mutation_count) {
+        radiant_sync_mutated_inline_stylesheets(root->doc);
+    }
+    return root;
+}
+
 static int64_t cssom_varray_count(void* data) {
     CssomVArray* collection = (CssomVArray*)data;
     if (!collection) return 0;
     if (collection->kind == CSSOM_VARRAY_STYLE_SHEETS) {
         DomDocument* doc = (DomDocument*)dom_document_from_item(collection->owner);
+        if (doc && doc->js.inline_stylesheet_mutation_count) radiant_sync_mutated_inline_stylesheets(doc);
         return doc && doc->stylesheet_count > 0 ? doc->stylesheet_count : 0;
+    }
+    if (collection->kind == CSSOM_VARRAY_SHADOW_STYLE_SHEETS) {
+        DomElement* root = cssom_sync_shadow_list(collection->owner);
+        int64_t count = 0;
+        for (CssStylesheet* sheet = radiant_next_shadow_stylesheet(root, nullptr); sheet;
+             sheet = radiant_next_shadow_stylesheet(root, sheet->owner_element)) count++;
+        return count;
     }
     CssStylesheet* sheet = unwrap_stylesheet(collection->owner);
     if (sheet) return cssom_rule_list_count(sheet);
@@ -914,8 +937,17 @@ static VirtualOpStatus cssom_varray_get(void* data, int64_t index, Item* out) {
     if (!collection || !out || index < 0) return VIRTUAL_OP_MISSING;
     if (collection->kind == CSSOM_VARRAY_STYLE_SHEETS) {
         DomDocument* doc = (DomDocument*)dom_document_from_item(collection->owner);
+        if (doc && doc->js.inline_stylesheet_mutation_count) radiant_sync_mutated_inline_stylesheets(doc);
         if (!doc || index >= doc->stylesheet_count) return VIRTUAL_OP_MISSING;
         *out = dom_cssom_wrap_stylesheet(doc->stylesheets[index]);
+    } else if (collection->kind == CSSOM_VARRAY_SHADOW_STYLE_SHEETS) {
+        DomElement* root = cssom_sync_shadow_list(collection->owner);
+        CssStylesheet* sheet = radiant_next_shadow_stylesheet(root, nullptr);
+        for (; sheet && index > 0; index--) {
+            sheet = radiant_next_shadow_stylesheet(root, sheet->owner_element);
+        }
+        if (!sheet) return VIRTUAL_OP_MISSING;
+        *out = dom_cssom_wrap_stylesheet(sheet);
     } else {
         CssRule* rule = cssom_owner_rule_at(collection->owner, index);
         if (!rule) return VIRTUAL_OP_MISSING;
@@ -953,18 +985,34 @@ extern "C" const VArrayVtable dom_cssom_collection_varray_vtable = {
 
 static Item cssom_varray_new(Item owner, CssomVArrayKind kind,
                              const void* host_type) {
-    void* native = kind == CSSOM_VARRAY_STYLE_SHEETS
-        ? dom_document_from_item(owner) : virtual_host_data(owner);
-    CssomCacheKind cache_kind = kind == CSSOM_VARRAY_STYLE_SHEETS
-        ? CSSOM_CACHE_SHEET_LIST : CSSOM_CACHE_RULE_LIST;
+    DomDocument* document = nullptr;
+    void* native = nullptr;
+    CssomCacheKind cache_kind = CSSOM_CACHE_SHEET_LIST;
+    switch (kind) {
+        case CSSOM_VARRAY_STYLE_SHEETS:
+            document = (DomDocument*)dom_document_from_item(owner);
+            native = document;
+            break;
+        case CSSOM_VARRAY_SHADOW_STYLE_SHEETS:
+            if (DomElement* root = cssom_shadow_list_root(owner)) {
+                native = root;
+                document = root->doc;
+            }
+            break;
+        case CSSOM_VARRAY_RULES:
+            native = virtual_host_data(owner);
+            cache_kind = CSSOM_CACHE_RULE_LIST;
+            if (CssomWrapperEntry* entry = cssom_wrapper_entry(native,
+                unwrap_stylesheet(owner) ? CSSOM_CACHE_SHEET : CSSOM_CACHE_RULE)) {
+                document = entry->document;
+            }
+            break;
+    }
+    if (!native) return ItemNull;
     Item cached = cssom_cached_wrapper(native, cache_kind);
     if (cached.item != ITEM_NULL) return cached;
     RootFrame roots(1);
     Rooted<Item> owner_root(roots, owner);
-    CssomWrapperEntry* entry = cssom_wrapper_entry(native,
-        unwrap_stylesheet(owner_root.get()) ? CSSOM_CACHE_SHEET : CSSOM_CACHE_RULE);
-    DomDocument* document = kind == CSSOM_VARRAY_STYLE_SHEETS ? (DomDocument*)native
-        : entry ? entry->document : nullptr;
     if (!cssom_prepare_document(document)) return ItemNull;
     CssomVArray* collection = (CssomVArray*)mem_calloc(
         1, sizeof(CssomVArray), MEM_CAT_JS_RUNTIME);
@@ -2251,6 +2299,11 @@ extern "C" Item dom_cssom_get_document_stylesheets_for(Item doc_item) {
         (DomDocument*)dom_document_from_item(doc_item), doc_item);
 }
 
+extern "C" Item dom_cssom_get_shadow_stylesheets(Item root) {
+    return cssom_varray_new(root, CSSOM_VARRAY_SHADOW_STYLE_SHEETS,
+        dom_style_sheet_list_host_type());
+}
+
 // Item-uniform twin of stylesheet_index for the Lambda face; the native
 // (Item, int64_t) door stays for the module.
 extern "C" Item dom_cssom_stylesheet_rule_at(Item sheet_item, Item index_item) {
@@ -2265,6 +2318,7 @@ extern "C" Item dom_cssom_stylesheet_rule_at(Item sheet_item, Item index_item) {
 static CssStylesheet* cssom_element_sheet(DomElement* elem) {
     DomDocument* doc = elem ? elem->doc : nullptr;
     if (!doc) return nullptr;
+    if (doc->js.has_shadow_roots && dom_shadow_root(elem)) return radiant_shadow_inline_stylesheet(elem);
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* sheet = doc->stylesheets[i];
         if (sheet && sheet->owner_element == elem && !sheet->is_import_child) return sheet;

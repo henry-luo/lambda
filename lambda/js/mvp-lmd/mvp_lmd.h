@@ -43,6 +43,7 @@ struct MvpLmdOptions {
     bool native_harness = false; // harnessless Test262 batches use the shared callable helpers
     bool typescript = false;    // parser profile and the existing TS type() intrinsic
     bool terminal_script = false; // host promises no later Script entry into this realm
+    bool nested_classic_script = false; // caller owns the microtask checkpoint
 };
 MvpLmdExecution* mvp_lmd_execute_with_options(const char* source, size_t length,
     double* execution_ms, const MvpLmdHost* host, const MvpLmdOptions* options);
