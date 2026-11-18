@@ -789,6 +789,11 @@ extern "C" void heap_unregister_gc_weak(uint64_t* slot) {
     gc_unregister_weak(context->heap->gc, slot);
 }
 
+static void* heap_bump_alloc_class(gc_heap_t* gc, size_t size, TypeId type_id, int cls) {
+    size_t slot_size = sizeof(gc_header_t) + gc_object_zone_class_size(cls);
+    return gc_heap_bump_alloc(gc, slot_size, size, type_id, cls);
+}
+
 void* heap_alloc(int size, TypeId type_id) {
     if (type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
             type_id == LMD_TYPE_FLOAT) {
@@ -797,7 +802,12 @@ void* heap_alloc(int size, TypeId type_id) {
         abort();
     }
     gc_heap_t *gc = context->heap->gc;
-    void *data = gc_heap_alloc(gc, size, type_id);
+    // ranges and short text values dominate fresh small allocations in loops.
+    // share the existing precise bump lane and its recycling policy.
+    int cls = type_id == LMD_TYPE_RANGE || type_id == LMD_TYPE_SYMBOL ||
+        type_id == LMD_TYPE_STRING ? gc_object_zone_class_index(size) : -1;
+    void* data = cls < 0 ? gc_heap_alloc(gc, size, type_id)
+                        : heap_bump_alloc_class(gc, size, type_id, cls);
     if (!data) {
         log_error("failed to allocate memory for heap entry");
         return NULL;
@@ -882,9 +892,7 @@ extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
         abort();
     }
     gc_heap_t *gc = context->heap->gc;
-    size_t class_size = gc_object_zone_class_size(cls);
-    size_t slot_size = sizeof(gc_header_t) + class_size;
-    void* ptr = gc_heap_bump_alloc(gc, slot_size, size, type_id, cls);
+    void* ptr = heap_bump_alloc_class(gc, size, type_id, cls);
     if (!ptr) return NULL;
     if (is_container_type_id(type_id)) {
         ((Container*)ptr)->is_heap = 1;
@@ -1434,6 +1442,8 @@ void heap_destroy() {
 #endif
         if (context->heap->array_rep_cert_by_contract)
             hashmap_free(context->heap->array_rep_cert_by_contract);
+        if (context->heap->namespace_targets)
+            hashmap_free(context->heap->namespace_targets);
         // sys.* Mark data and its Input belong to this heap generation.
 #ifndef LAMBDA_NO_SYSINFO
         sysinfo_shutdown();

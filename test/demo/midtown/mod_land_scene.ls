@@ -41,10 +41,7 @@ pub fn materials(look) any^ => [
     std("m-sail", "#ffffff", {roughness: 0.8, side: 'double'}),
     s.material('basic', {id: "m-lantern", color: "#fff6dc", emissive: "#ffe7a8", 'emissive-intensity': lantern(look)})]
 
-// region buffers go to the geometry as they are (no element-by-element copy)
-fn geometry(id, b) element^ => s.geometry(b.positions, {id: id, normals: b.normals, indices: b.indices,
-    *: (if (b.uvs != null) {uvs: b.uvs} else {}), *: (if (b.colors != null) {colors: b.colors} else {})})
-fn mesh(id, b, material, options = {}) element^ => s.mesh(geometry("g-" ++ id, b), material, {id: id, *: options})
+fn mesh(id, b, material, options = {}) element^ => s.mesh(m.geometry("g-" ++ id, b), material, {id: id, *: options})
 fn flat(options = {}) => {'cast-shadow': false, *: options}
 fn structure(st) any^ {
     let k = "-" ++ string(st.start_k);
@@ -71,10 +68,10 @@ fn instanced(id, geometry_id, material, items, options = {}) any^ => (let tiled 
         s.mesh(geometry_id, material, {id: id ++ "-" ++ string(q), instances: mine, *: options})])
 fn placed_copies(b, items) any^ => m.merge([for (p in items) m.yawed(b, p.x, p.y, p.z, p.heading)^])
 // the vegetation buffers, among the scene's shared resources because the city's street trees use them too
-pub fn tree_geometry() any^ => [geometry("g-pine", sm.pine())^, geometry("g-broad", sm.broadleaf())^, geometry("g-bush", sm.bush())^]
+pub fn tree_geometry() any^ => [m.geometry("g-pine", sm.pine()), m.geometry("g-broad", sm.broadleaf()), m.geometry("g-bush", sm.bush())]
 pub fn scenery_elements() any^ {
     let lh = scenery.LIGHTHOUSE;
-    [s.resources([geometry("g-rock", sm.rock()), geometry("g-rotor", sm.turbine_rotor()), geometry("g-hull", sm.hull()), geometry("g-sails", sm.sails())]),
+    [s.resources([m.geometry("g-rock", sm.rock()), m.geometry("g-rotor", sm.turbine_rotor()), m.geometry("g-hull", sm.hull()), m.geometry("g-sails", sm.sails())]),
      *instanced("pines", "g-pine", "m-tree", [for (p in scenery.TREES where p.kind == "pine") p])^,
      *instanced("broadleaves", "g-broad", "m-tree", [for (p in scenery.TREES where p.kind == "broad") p])^,
      *instanced("hedges", "g-bush", "m-tree", scenery.BUSHES)^,

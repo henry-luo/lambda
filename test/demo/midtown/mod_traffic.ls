@@ -80,19 +80,23 @@ let BRAKE = 4.5
 fn stop_limit(distance) => sqrt(2.0 * BRAKE * max(0.0, distance))
 // the closest vehicle ahead in this car's path: same-direction traffic, anything at close range, and the player
 fn leader_limit(a, others) {
-    let f = u.forward(a.heading), r = u.right(a.heading)
-    let gaps = [for (o in others, let dx = o.x - a.x, let dz = o.z - a.z, let df = dx * f[0] + dz * f[1],
-            let dl = dx * r[0] + dz * r[1], let same = cos(o.heading - a.heading) > 0.5
-        where o.id != a.id and df > 0.0 and df < 32.0 and abs(dl) < 2.3 and (same or o.player == true or df < 9.0))
+    let fx = sin(a.heading), fz = cos(a.heading)
+    // The rotated 32 m by 2.3 m window fits inside this world-axis bound.
+    let gaps = [for (o in others, let dx = o.x - a.x, let dz = o.z - a.z
+        where abs(dx) < 33.0 and abs(dz) < 33.0 and o.id != a.id)
+        for (df in [dx * fx + dz * fz], let dl = dx * (0.0 - fz) + dz * fx
+        where df > 0.0 and df < 32.0 and abs(dl) < 2.3 and (cos(o.heading - a.heading) > 0.5 or o.player == true or df < 9.0))
         df - a.hl - o.hl];
     if (len(gaps) == 0) 99.0 else max(0.0, (min(gaps) - 2.0) * 0.9)
 }
 // a car about to turn left waits while oncoming traffic is close to the junction
 fn oncoming(a, others) {
-    let f = u.forward(a.heading), r = u.right(a.heading);
-    len([for (o in others, let dx = o.x - a.x, let dz = o.z - a.z, let df = dx * f[0] + dz * f[1],
-            let dl = dx * r[0] + dz * r[1]
-        where o.id != a.id and cos(o.heading - a.heading) < -0.7 and df > 2.0 and df < 34.0 and dl < -1.0 and dl > -9.0) o]) > 0
+    let fx = sin(a.heading), fz = cos(a.heading);
+    // The oncoming window extends 34 m forward and 9 m sideways.
+    len([for (o in others, let dx = o.x - a.x, let dz = o.z - a.z
+        where abs(dx) < 36.0 and abs(dz) < 36.0 and o.id != a.id)
+        for (df in [dx * fx + dz * fz], let dl = dx * (0.0 - fz) + dz * fx
+        where df > 2.0 and df < 34.0 and dl < -1.0 and dl > -9.0 and cos(o.heading - a.heading) < -0.7) o]) > 0
 }
 fn target_speed(a, others, t) {
     let turn = turn_sign(a.d, a.next)

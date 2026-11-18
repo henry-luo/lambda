@@ -4,10 +4,13 @@
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
 #include "lambda/io/mark_output_builder.hpp"
+#include "lib/hashmap_helpers.h"
 #include "lib/log.h"
 #include "lib/memtrack.h"
 #include "lib/math_utils.h"
+#include "lib/path_str.h"
 #include "lib/str.h"
+#include "lib/url.h"
 #include "../js/js_typed_array.h"
 #include <stdarg.h>
 #include <time.h>
@@ -1822,6 +1825,51 @@ extern "C" Symbol* fn_symbol(Item item) {
     }
 }
 
+struct NamespaceTargetEntry {
+    const char* spelling;
+    Target* target;
+};
+
+HASHMAP_DEFINE_CSTRKEY(namespace_targets, NamespaceTargetEntry, spelling,
+    hashmap_hash_cstr, hashmap_compare_cstr)
+
+static Target* symbol_target(Item url_item) {
+    TypeId tid = get_type_id(url_item);
+    const char* spelling = is_text_type_id(tid) ? url_item.get_chars() : nullptr;
+    HashMap* targets = nullptr;
+    // Absolute URLs resolve independently of the working directory. Keep
+    // relative spellings on the resolver path so a cwd change stays visible.
+    if (spelling && url_is_absolute_url(spelling)
+#ifdef _WIN32
+        && !path_str_win32_is_absolute(spelling)
+#endif
+    ) {
+        HashMap*& cache = context->heap->namespace_targets;
+        if (!cache) cache = namespace_targets_new(0);
+        targets = cache;
+        NamespaceTargetEntry key = {spelling, nullptr};
+        if (targets) {
+            const auto* found = (const NamespaceTargetEntry*)hashmap_get(targets, &key);
+            if (found) return found->target;
+        }
+    }
+
+    Target* target = item_to_target(url_item.item, nullptr);
+    if (!target) return nullptr;
+    // Namespace identity outlives transient URI/name operands (D5.6.1).
+    if (target->original) target->original = pool_strdup(context->pool, target->original);
+    if (target->type == TARGET_TYPE_PATH) target->path = path_clone(context->pool, target->path);
+    if (!pool_add_cleanup(context->pool, target_cleanup, target)) {
+        target_free(target);
+        return nullptr;
+    }
+    if (targets && target->original) {
+        NamespaceTargetEntry entry = {target->original, target};
+        hashmap_set(targets, &entry);
+    }
+    return target;
+}
+
 // symbol(name, url) - create a namespaced symbol
 // name: string or symbol - the local name
 // url: string or symbol - the namespace URL
@@ -1856,19 +1904,12 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
         return ItemError;
     }
 
-    // convert url to Target
-    Target* ns_target = item_to_target(url_item.item, nullptr);
+    Target* ns_target = symbol_target(rooted_url.get());
     if (!ns_target) {
         log_error("fn_symbol2: failed to convert url to Target");
         return ItemError;
     }
 
-    // namespace identity outlives transient URI/name operands (D5.6.1).
-    if (ns_target->original) ns_target->original = pool_strdup(context->pool, ns_target->original);
-    if (ns_target->type == TARGET_TYPE_PATH) ns_target->path = path_clone(context->pool, ns_target->path);
-    if (!pool_add_cleanup(context->pool, target_cleanup, ns_target)) {
-        target_free(ns_target); return ItemError;
-    }
     // create namespaced symbol
     Symbol* sym = (Symbol*)heap_alloc(sizeof(Symbol) + name_len + 1, LMD_TYPE_SYMBOL);
     if (!sym) {

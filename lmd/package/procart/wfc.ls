@@ -100,42 +100,51 @@ fn neighbour(c: int, d: int, w: int, h: int, wrap: bool) int^ {
 // all removals rather than repeated per sweep (the counting form of Gumin's propagator).
 fn sum_rows(model, rows) array => reduce([model.zero, *rows], (a, b) => a + b)
 
-fn counts_of(model, dom) array => [for (d in 0 to 3) sum_rows(model, [for (q in dom) model.masks[d][q]])]
+fn counts_of(model, dom) array => [for (d in 0 to 3, let mask = model.masks[d])
+    sum_rows(model, [for (q in dom) mask[q]])]
 
 // counts after a domain shrinks from `old` to `kept`: rebuild from the smaller side.
 fn recount(model, counts, old, kept) array {
     if (len(kept) * 2 <= len(old)) counts_of(model, kept)
-    else (let removed = except(old, kept), [for (d in 0 to 3) counts[d] - sum_rows(model, [for (q in removed) model.masks[d][q]])])
+    else (let removed = counts_of(model, except(old, kept)),
+        [for (d in 0 to 3) counts[d] - removed[d]])
 }
 
 // keep the patterns of cell c that every neighbour's domain still supports.
-fn revise(st, c: int, w: int, h: int, wrap: bool) array {
-    let supports = [for (d in 0 to 3, let m = neighbour(c, d, w, h, wrap) where ((m >= 0) ^ { false })) st.counts[m][opposite(d)]];
+fn revise(st, c: int, adjacent) array {
+    let supports = [for (d, m in ((adjacent[c]) ^ { [] }) where m >= 0) st.counts[m][opposite(d)]];
     if (len(supports) == 0) st.domains[c]
     // counts are non-negative, so their product is positive exactly where every neighbour supports p
     else (let joint = reduce(supports, (a, b) => a * b), [for (p in st.domains[c] where joint[p] > 0) p])
 }
 
-// replace cells at ascending indices: native slices between the updates, not a pass over every cell.
+// The local snapshot detaches on the first edit. Apply the remaining changes
+// to that same buffer rather than building two slices for every update.
 fn splice(cells, ups) array^ {
-    let starts = [0, *[for (u in ups) u[0] + 1]];
-    reduce([[], *[for (j, u in ups) j]], (acc, j) any^ => acc ++ slice(cells, starts[j], ups[j][0]) ++ [ups[j][1]]) ++
-        slice(cells, starts[len(ups)], len(cells))
+    var result = cells
+    let count = len(ups)^
+    var i: int = 0
+    while (i < count) {
+        let u = ups[i]
+        result[u[0]] = u[1]
+        i = i + 1
+    }
+    result
 }
 
 // arc consistency in synchronous sweeps: revise the neighbours of changed cells until nothing
 // shrinks. Returns {domains, counts}, or null on a contradiction.
-fn propagate(model, st, changed, w: int, h: int, wrap: bool) any^ {
-    let candidates = unique([for (c in changed) for (d in 0 to 3, let m = neighbour(c, d, w, h, wrap) where ((m >= 0) ^ { false })) m])
-    let shrunk = sort([for (c in candidates, let kept = revise(st, c, w, h, wrap) where ((len(kept) < len(st.domains[c])) ^ { false })) [c, kept]], (r) => r[0]);
+fn propagate(model, st, changed, adjacent) any^ {
+    let candidates = unique([for (c in changed) for (m in adjacent[c]^ where m >= 0) m])
+    let shrunk = sort([for (c in candidates, let kept = revise(st, c, adjacent) where ((len(kept) < len(st.domains[c])) ^ { false })) [c, kept]], (r) => r[0]);
     if (any([for (r in shrunk) len(r[1]) == 0])) null
     else if (len(shrunk) == 0) st
     else (let counts = [for (r in shrunk) [r[0], recount(model, st.counts[r[0]], st.domains[r[0]], r[1])]],
-        propagate(model, {domains: splice(st.domains, shrunk), counts: splice(st.counts, counts)}, shrunk |> ~[0], w, h, wrap))
+        propagate(model, {domains: splice(st.domains, shrunk), counts: splice(st.counts, counts)}, shrunk |> ~[0], adjacent))
 }
 
 // one observation: collapse a smallest undecided domain to one keyed, weighted pattern.
-fn observe(model, st, k: u64, w: int, h: int, wrap: bool) {
+fn observe(model, st, k: u64, adjacent) {
     let sizes = [for (dom in st.domains) len(dom)]
     let pending = [for (c, s in sizes where s > 1) c];
     if (len(pending) == 0) {done: true, state: st}
@@ -143,23 +152,22 @@ fn observe(model, st, k: u64, w: int, h: int, wrap: bool) {
         let c = ties[rng.below(rng.at(k, 0), len(ties))],
         let p = rng.weighted(rng.at(k, 1), st.domains[c], [for (q in st.domains[c]) model.weights[q]]),
         let collapsed = {domains: splice(st.domains, [[c, [p]]]), counts: splice(st.counts, [[c, [for (d in 0 to 3) model.masks[d][p]]]])},
-        {done: false, state: propagate(model, collapsed, [c], w, h, wrap)})
+        {done: false, state: propagate(model, collapsed, [c], adjacent)})
 }
 
-fn attempt(model, k: u64, w: int, h: int, wrap: bool) any^ {
-    let n = w * h
+fn attempt(model, k: u64, n: int, adjacent) any^ {
     let full = [for (p in 0 to (model.count - 1)) p]
     let initial = propagate(model, {domains: [for (c in 0 to (n - 1)) full], counts: [for (c in 0 to (n - 1)) model.full]},
-        [for (c in 0 to (n - 1)) c], w, h, wrap);
+        [for (c in 0 to (n - 1)) c], adjacent);
     if (initial == null) null
     else (let end = reduce([{done: false, state: initial}, *[for (i in 0 to n) i]], (st, i: int) any^ =>
-        if (st.done or st.state == null) st else observe(model, st.state, rng.at(k, i), w, h, wrap)),
+        if (st.done or st.state == null) st else observe(model, st.state, rng.at(k, i), adjacent)),
         if (end.state == null) null else end.state.domains)
 }
 
-fn attempts(model, k: u64, w: int, h: int, wrap: bool, i: int, limit: int) any^ {
+fn attempts(model, k: u64, n: int, adjacent, i: int, limit: int) any^ {
     if (i >= limit) null
-    else (let out = attempt(model, rng.at(k, i), w, h, wrap), if (out != null) out else attempts(model, k, w, h, wrap, i + 1, limit))
+    else (let out = attempt(model, rng.at(k, i), n, adjacent), if (out != null) out else attempts(model, k, n, adjacent, i + 1, limit))
 }
 
 // a width x height grid of pattern indices; periodic wraps the output. A contradiction
@@ -179,9 +187,14 @@ fn run_with(k: u64, model, options, use_native: bool) array^ {
     else if (use_native and native_weights(model.weights)) {
         let out = math.wfc(k, model.weights, model.masks, [w, h, options.periodic == true, retries])^;
         [for (y in 0 to (h - 1)) [for (x in 0 to (w - 1)) out[y * w + x]]]
-    } else (let out = attempts(model, k, w, h, options.periodic == true, 0, retries),
-         if (out == null) raise error("procart.wfc.run: contradiction in every one of " ++ string(retries) ++ " attempts")
-         else [for (y in 0 to (h - 1)) [for (x in 0 to (w - 1)) out[y * w + x][0]]])
+    } else {
+        // Wrap and edge checks depend only on the grid, even across retries.
+        let wrap = options.periodic == true
+        let adjacent = [for (c in 0 to (w * h - 1)) [for (d in 0 to 3) neighbour(c, d, w, h, wrap)^]]
+        let out = attempts(model, k, w * h, adjacent, 0, retries)
+        if (out == null) raise error("procart.wfc.run: contradiction in every one of " ++ string(retries) ++ " attempts")
+        else [for (y in 0 to (h - 1)) [for (x in 0 to (w - 1)) out[y * w + x][0]]]
+    }
 }
 
 pub fn run(k: u64, model, options) array^ => run_with(k, model, options, math.wfc is fn)^

@@ -23,13 +23,16 @@
 #define MIR_EAGER_FUNCTION_O1_THRESHOLD 1000ULL
 #endif
 
-// bound debug lowering growth before polymorphic checks become native code.
+// bound cold import lowering growth before polymorphic checks become native
+// code. Callers keep the specialized path for entry code and hot satellites.
 static inline bool mir_compact_lowering(uint32_t ast_nodes) {
-#ifdef NDEBUG
-    return false;
-#else
     return ast_nodes > 256;
-#endif
+}
+
+// cold code needs to start quickly. Keep the level 1 instruction-selection
+// passes and avoid global value numbering at the default level.
+static inline unsigned int mir_cold_optimize_level(unsigned int optimize_level) {
+    return optimize_level == 2 ? 1 : optimize_level;
 }
 
 static inline bool mir_large_interp_enabled(void);

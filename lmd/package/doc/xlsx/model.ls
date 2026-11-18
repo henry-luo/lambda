@@ -101,8 +101,7 @@ fn style_context(pkg,date1904) map^ {
         xfs:children(child(root_node,"cellXfs"),"xf"),dxfs:children(child(root_node,"dxfs"),"dxf"),
         formats:map([for (n in ((children(child(root_node,"numFmts"),"numFmt")) ^ { [] })) (attr(n,"numFmtId"),attr(n,"formatCode"))])}
 }
-fn style(ctx,id) any^ {
-    let xf=ctx.xfs[as_int(id,0)]
+fn style(ctx,xf) any^ {
     let font=ctx.fonts[as_int(attr(xf,"fontId"),0)]
     let fill=ctx.fills[as_int(attr(xf,"fillId"),0)]
     let align=child(xf,"alignment")
@@ -123,6 +122,10 @@ fn style(ctx,id) any^ {
      *:if (contains(["left","center","right"],horizontal)) {align:horizontal} else {},
      *:if (on(child(xf,"alignment")) and contains(["1","true"],lower(attr(align,"wrapText") or "0"))) {wrap:true} else {},
      *:if (format!="general") {format:format} else {}}
+}
+fn cell_style(styles,id) any^ {
+    let index=as_int(id,0);
+    if (index>=0 and index<len(styles.resolved)) styles.resolved[index]^ else styles.default_style^
 }
 // Differential styles contain only properties overridden by a matching rule.
 fn differential(node) any^ {
@@ -181,7 +184,7 @@ fn cell(node,shared,styles,part) map^ {
         else if (typ=="n" and value!="") (float(value) ^ {raise fail("invalid-package","Invalid numeric cell",part)})
         else value;
     {*:pos,type:typ,value:result,raw_value:value,has_value:child(node,"v")!=null,formula:if (formula==null) null else xml.tree_text(formula),
-        formula_type:attr(formula,"t"),formula_ref:attr(formula,"ref"),style:style(styles,attr(node,"s"))}
+        formula_type:attr(formula,"t"),formula_ref:attr(formula,"ref"),style:cell_style(styles,attr(node,"s"))}
 }
 fn worksheet(pkg,entry,shared,styles) map^ {
     let rel=opc.by_id(pkg.relationships,xml.attr(entry,"id",R))
@@ -245,7 +248,10 @@ pub fn read(source) map^ {
     else {
         let shared=strings(pkg)^
         let date1904=contains(["1","true"],lower(attr(child(book,"workbookPr"),"date1904") or "0"))
-        let styles=style_context(pkg,date1904)^
+        let raw_styles=style_context(pkg,date1904)^
+        // cells share workbook-level formats. Retain errors until a cell references the style.
+        let styles={dxfs:raw_styles.dxfs,resolved:[for (xf in raw_styles.xfs) style(raw_styles,xf) ^ { ^ }],
+            default_style:style(raw_styles,null) ^ { ^ }}
         let entries=children(child(book,"sheets"),"sheet")
         let sheets=[for (entry in entries) worksheet(pkg,entry,shared,styles)^];
         if (len(sheets)==0) raise fail("invalid-package","Workbook contains no worksheets",pkg.main)

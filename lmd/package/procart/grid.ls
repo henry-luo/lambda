@@ -96,6 +96,42 @@ pub fn keep_largest(tiles, floor_tile = 0, wall = 1) array^ {
 fn layer(dist, passable, w: int, h: int, d: int) array =>
     [for (c, v in dist) if (v >= 0 or not passable[c]) v else if (any([for (n in ((around(c, w, h)) ^ { [] })) dist[n] == d])) d + 1 else -1]
 
+fn distance_queue(marks: array, passable: array, w: int, h: int) array^ {
+    let n = len(marks)
+    var dist = marks
+    var queue = [for (i in 0 to n - 1) 0]
+    var tail: int = 0
+    var head: int = 0
+    // Seed all sources before visiting their neighbours. First discovery is
+    // the shortest distance and each reachable cell enters the queue once.
+    var i: int = 0
+    while (i < n) {
+        if (dist[i] == 0) {
+            queue[tail] = i
+            tail = tail + 1
+        }
+        i = i + 1
+    }
+    while (head < tail) {
+        let c: int = queue[head]
+        let next = dist[c] + 1
+        head = head + 1
+        let neighbours = around(c, w, h)
+        let count = len(neighbours)^
+        var k: int = 0
+        while (k < count) {
+            let j: int = neighbours[k]
+            if (passable[j] and dist[j] < 0) {
+                dist[j] = next
+                queue[tail] = j
+                tail = tail + 1
+            }
+            k = k + 1
+        }
+    }
+    dist
+}
+
 // steps from the nearest source [x, y] through 4-connected floor; -1 for walls and unreachable cells.
 pub fn distances(tiles, sources, floor_tile = 0) array^ {
     let h = len(tiles)
@@ -103,11 +139,14 @@ pub fn distances(tiles, sources, floor_tile = 0) array^ {
     let passable = [for (v in cells_of(tiles)) v == floor_tile]
     // a map, not `in` over the list: moisture passes every water cell as a source
     let starts = map([for (s in sources) for (x in [string(s[1] * w + s[0]), true]) x])
-    let first = [for (c, o in passable) if (o and starts[string(c)] == true) 0 else -1]
-    // each live round extends one layer; a finished map passes through unchanged
-    let done = reduce([[first, 0, false], *[for (i in 1 to len(passable)) i]], (st, i) => if (st[2]) st
-        else (let next = layer(st[0], passable, w, h, st[1]), [next, st[1] + 1, next == st[0]]));
-    rows(done[0], w, h)
+    let first = [for (c, o in passable) if (o and starts[string(c)] == true) 0 else -1];
+    if (len(passable) == w * h) rows(distance_queue(first, passable, w, h)^, w, h)
+    else {
+        // Preserve the layer semantics for ragged inputs.
+        let done = reduce([[first, 0, false], *[for (i in 1 to len(passable)) i]], (st, i) => if (st[2]) st
+            else (let next = layer(st[0], passable, w, h, st[1]), [next, st[1] + 1, next == st[0]]));
+        rows(done[0], w, h)
+    }
 }
 
 // --- drunkard's walk: carve until `fill` of the interior is floor ---
@@ -130,10 +169,10 @@ pub fn walk(k: u64, options) array^ {
         let dirs = steps_of(k, n)^
         let xs = [origin[0], *(math.cumsum([for (s in dirs) if (s == 0) 1 else if (s == 1) -1 else 0]) + origin[0])]
         let ys = [origin[1], *(math.cumsum([for (s in dirs) if (s == 2) 1 else if (s == 3) -1 else 0]) + origin[1])]
-        let visits = [for (i in 0 to n) [(fold_into(ys[i], ih) + 1) * d[0] + fold_into(xs[i], iw) + 1, i]]
-        let first = sort([for (v in visits group by v[0] as cell into g) [min(g |> ~[1]), cell]], (e) => e)
+        // Visits are already in timestamp order; unique keeps each first visit.
+        let first = unique([for (i in 0 to n) (fold_into(ys[i], ih) + 1) * d[0] + fold_into(xs[i], iw) + 1])
         let target = int(ceil(density * float(iw * ih)))
-        let carved = map([for (j, e in first where ((j < target) ^ { false })) for (x in [string(e[1]), true]) x]);
+        let carved = map([for (j, cell in first where ((j < target) ^ { false })) (string(cell), true)]);
         rows([for (c in 0 to (d[0] * d[1] - 1)) if (carved[string(c)] == true) 0 else 1], d[0], d[1])
     }
 }
@@ -282,26 +321,44 @@ fn walk_to_tree(k: u64, w: int, h: int, tree, s: int, chunk: int, from) array^ {
     else walk_to_tree(k, w, h, tree, path[chunk], chunk * 2, [*from, *slice(path, 0, chunk)])
 }
 
-// loop erasure: from the start, always leave a cell the way its final_visit visit left it.
+// Loop erasure follows the successor of each cell's last visit.
 fn erase_loops(positions) array {
     // later writes already select the last visit; grouping and max rebuild the same map.
     let final_visit = map([for (i,c in positions) for (x in [string(c),i]) x])
-    let end = positions[len(positions) - 1];
-    reduce([[[positions[0]], false], *[for (i in 1 to len(positions)) i]], (st, i) => if (st[1]) st
-        else (let c = st[0][len(st[0]) - 1], if (c == end) [st[0], true] else [[*st[0], positions[final_visit[string(c)] + 1]], false]))[0]
+    let end = positions[len(positions) - 1]
+    var cell = positions[0]
+    var path = [cell]
+    while (cell != end) {
+        cell = positions[final_visit[string(cell)] + 1]
+        path = [*path, cell]
+    }
+    path
 }
 
-fn wilson(k: u64, w: int, h: int) array {
+fn wilson(k: u64, w: int, h: int) array^ {
     let n = w * h
     let root = rng.below(rng.derive(k, "root"), n)
-    let first = [[for (c in 0 to (n - 1)) c == root], []]
-    let done = reduce([first, *[for (i in 1 to n) i]], (st, i: int) =>
-        (let passable = [for (c, t in st[0] where not t) c], if (len(passable) == 0) st
-        else (let path = erase_loops(walk_to_tree(rng.at(k, i), w, h, st[0], passable[0], 16, [])),
-            let on_path = map([for (c in path) for (x in [string(c), true]) x]),
-            [[for (c, t in st[0]) t or on_path[string(c)] == true],
-             [*st[1], *[for (j in ((1 to (len(path) - 1)) ^ { [] })) [path[j - 1], path[j]]]]])));
-    done[1]
+    var tree = [for (c in 0 to (n - 1)) c == root]
+    var edges = []
+    var start: int = 0
+    var draw: int = 1
+    // Settled cells stay in the tree. The next start is still the first
+    // unvisited cell in row-major order, with the same key per walk.
+    while (start < n) {
+        if (tree[start]) { start = start + 1 }
+        else {
+            let path = erase_loops(walk_to_tree(rng.at(k, draw), w, h, tree, start, 16, [])^)
+            let length = len(path)^
+            var j: int = 0
+            while (j < length) {
+                tree[path[j]] = true
+                j = j + 1
+            }
+            edges = [*edges, *[for (j in 1 to length - 1) [path[j - 1], path[j]]]]
+            draw = draw + 1
+        }
+    }
+    edges
 }
 
 // a spanning tree's edges [a, b] between cells numbered y * width + x.
