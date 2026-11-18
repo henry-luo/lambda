@@ -64,9 +64,11 @@ for corpus_dir in "$LAMBDA_TEST_DIR"/*; do
 
     if [ -L "$link_path" ]; then
         existing_target=$(readlink "$link_path")
-        if [ "$existing_target" = "$expected_target" ]; then
+        # a trailing slash still names the same corpus directory
+        target_without_slash=${existing_target%/}
+        if [ "$target_without_slash" = "$expected_target" ]; then
             echo "Link exists: test/$corpus_name"
-        elif [ "$existing_target" = "../../lambda-test/$corpus_name" ]; then
+        elif [ "$target_without_slash" = "../../lambda-test/$corpus_name" ]; then
             # Migrate only the old standard link from before the submodule move.
             ln -sfn "$expected_target" "$link_path"
             echo "Updated link: test/$corpus_name -> $expected_target"
