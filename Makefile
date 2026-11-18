@@ -3639,7 +3639,7 @@ commit-lambda:
 
 # Follow the submodule revisions recorded by Lambda and each nested repository.
 pull-lambda:
-	@git pull --recurse-submodules=on-demand
+	@git pull --no-edit --recurse-submodules=on-demand
 	@git submodule update --init --recursive
 
 # Publish ./site to gh-pages branch
