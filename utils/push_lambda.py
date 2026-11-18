@@ -70,6 +70,11 @@ def prepare(node):
         target = git(repo, "config", "--get", f"branch.{branch}.merge", check=False)
         if not remote or remote == "." or not target.startswith("refs/heads/"):
             raise ValueError(f"configure a remote upstream for {repo} branch {branch}")
+        if remote != "origin":
+            git(repo, "fetch", remote, "--prune")
+        upstream = git(repo, "rev-parse", "--verify", "@{upstream}", check=False)
+        if not upstream or not is_ancestor(repo, upstream, "HEAD"):
+            raise ValueError(f"integrate the upstream changes before publishing: {repo} ({branch})")
     return dirty
 
 

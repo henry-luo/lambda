@@ -13,7 +13,8 @@ non-ignored changes, including untracked files, in each initialized submodule
 and then Lambda. It pushes each attached branch to its configured upstream,
 from nested submodules outward, before committing and pushing its parent.
 `MESSAGE` is also accepted. The same message is used for each new commit. Review every repository's changes
-before running it. It fetches each `origin` first and stops on errors; pushes
+before running it. It fetches each `origin` and attached branch's upstream and
+checks that upstream commits are integrated before any push. It stops on errors; pushes
 already completed cannot be rolled back automatically. It does not run tests.
 
 For a detached submodule with changes or an unpublished commit, the target
