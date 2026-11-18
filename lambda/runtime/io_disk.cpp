@@ -95,7 +95,8 @@ struct DiskStream {
 };
 bool stream_matches(DiskAnchor* disk, FILE* source, const FileRevision& before) {
     FileRevision held = file_revision_stream(source), named;
-    return file_revision_equal(&held, &before) && file_anchor_validate(disk->anchor) &&
+    // Stat walks from the checked anchor, including its namespace validation.
+    return file_revision_equal(&held, &before) &&
         file_anchor_stat(disk->anchor, disk->relative, &named) && file_revision_equal(&named, &before);
 }
 Item stream_result(Item state, Item source, const uint8_t* hash) {
@@ -274,8 +275,10 @@ extern "C" Item pn_io_disk_read_stream(Item root, Item relative, Item options, I
     if (remaining > maximum || !positioned)
         return io_fs_error(ERR_INVALID_STATE, "io.disk.read_stream: invalid or oversized range");
     stream.digest = digest_ctx_new(DIGEST_SHA256);
-    stream.buffer = (char*)mem_alloc((size_t)block_bytes, MEM_CAT_EVAL);
-    if (!stream.digest || !stream.buffer) return ItemError;
+    // Small ranges in a pack need only the bytes they will actually read.
+    if (remaining > 0) stream.buffer = (char*)mem_alloc(
+        (size_t)(remaining < block_bytes ? remaining : block_bytes), MEM_CAT_EVAL);
+    if (!stream.digest || (remaining > 0 && !stream.buffer)) return ItemError;
     while (remaining > 0) {
         if (lambda_task_cancel_requested(lambda_task_running()))
             return io_fs_error(ERR_CANCELLED, "io.disk.read_stream: cancelled");
@@ -295,7 +298,8 @@ extern "C" Item pn_io_disk_read_stream(Item root, Item relative, Item options, I
         remaining -= (int64_t)count;
     }
     uint8_t digest[32];
-    if (!stream_matches(&disk, stream.source, before) || !digest_finalize(stream.digest, digest, sizeof(digest)))
+    // The final callback already checked the revision with no intervening yield.
+    if (!digest_finalize(stream.digest, digest, sizeof(digest)))
         return io_fs_error(ERR_IO_ERROR, "io.disk.read_stream: final validation failed");
     outcome.set(disk_row(disk.relative, before));
     return stream_result(state.get(), outcome.get(), digest);

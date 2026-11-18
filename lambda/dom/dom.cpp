@@ -579,13 +579,22 @@ extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
 
 static thread_local bool dom_geometry_flush_in_progress = false;
 
+static bool dom_layout_document_snapshot(UiContext* uicon, DomDocument* doc, bool reflow) {
+    // loader checkpoints precede the host binding; native style/effect sampling needs this document.
+    DomDocument* saved_document = uicon->document;
+    uicon->document = lam::up(doc);
+    bool laid_out = dom_engine_layout_document(uicon, doc, reflow);
+    uicon->document = lam::up(saved_document);
+    return laid_out;
+}
+
 static bool dom_flush_pending_document_layout(UiContext* uicon, DomDocument* doc) {
     uint64_t before = doc->view_tree ? doc->view_tree->document_layout_count : 0;
     bool mutations = doc->js.mutation_count > 0;
     bool pending_scroll = doc->pending_scroll_into_view_target.address;
     // the engine checkpoint validates viewport/font/native style inputs too;
     // the mutation ledger alone cannot determine whether geometry is current.
-    if (!dom_engine_layout_document(uicon, doc, true)) return false;
+    if (!dom_layout_document_snapshot(uicon, doc, true)) return false;
     return mutations || pending_scroll ||
         (doc->view_tree && doc->view_tree->document_layout_count != before);
 }
@@ -627,8 +636,6 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
         return dom_has_committed_geometry_snapshot(doc);
     }
 
-    DomDocument* saved_document = uicon->document;
-    uicon->document = lam::up(doc);
     dom_geometry_flush_in_progress = true;
 
     // Standalone callers synchronously flush style and layout. The host loop
@@ -638,11 +645,10 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     } else if (doc->root && dom_engine_document_ensure_state(
                    doc, "dom_geometry_flush")) {
         ScriptRunnerHostLayoutScope host_layout;
-        dom_engine_layout_document(uicon, doc, false);
+        dom_layout_document_snapshot(uicon, doc, false);
     }
 
     dom_geometry_flush_in_progress = false;
-    uicon->document = lam::up(saved_document);
     return dom_has_committed_geometry_snapshot(doc);
 }
 
@@ -7640,9 +7646,11 @@ extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const
         if (*character >= 'A' && *character <= 'Z') return false;
     const char* local_name = nullptr;
     const char* uri = dom_element_attribute_namespace_uri(element, name, &local_name);
-    if ((uri && *uri) || dom_engine_attribute_has_css_dependency(element->doc, element, name))
-        return false;
     const char* old_value = element->get_attribute(name);
+    // identical metadata cannot change CSS matching; observers may still perform their own writes.
+    bool same_value = old_value && strcmp(old_value, value) == 0;
+    if ((uri && *uri) || (!same_value &&
+            dom_engine_attribute_has_css_dependency(element->doc, element, name))) return false;
     if (!dom_element_set_non_style_metadata(element, name, value)) return false;
     dom_after_set_attribute(element, name, value);
     if (dom_edit_transaction_defer_mutation(element->doc, DOM_JS_MUTATION_ATTRIBUTE,
@@ -15384,6 +15392,8 @@ extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item va
     char attr_name[256];
     camel_to_data_attr(prop, attr_name, sizeof(attr_name));
 
+    // dataset and setAttribute share dependency-aware metadata writes and observer delivery.
+    if (dom_set_non_style_metadata(elem, attr_name, val_str)) return value;
     const char* old_value = elem->get_attribute(attr_name);
     elem->set_attribute(attr_name, val_str);
     // Dataset writes must expose their data-* name so MutationObserver
@@ -15923,6 +15933,7 @@ static Item js_web_keyframe_property_names(Item frame, Pool* pool,
                 !strcmp(name, "composite")) continue;
         char css_name[128];
         dom_style_camel_to_css_prop(name, css_name, sizeof(css_name));
+        // Resolve aliases the same way as when parsing the keyframe value.
         const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(
             css_property_code_from_name(css_name));
         if (!metadata || metadata->animation_type == ANIM_VAL_NONE) continue;

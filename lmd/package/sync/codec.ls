@@ -5,6 +5,8 @@ let casts = {i8:(v) any^ =>i8(v),u8:(v) any^ =>u8(v),i16:(v) any^ =>i16(v),u16:(
     i32:(v) any^ =>i32(v),u32:(v) any^ =>u32(v),i64:(v) any^ =>i64(v),u64:(v) any^ =>u64(v),
     f16:(v) any^ =>f16(v),f32:(v) any^ =>f32(v)}
 let scalars = ["null","bool","int","float","integer","decimal","symbol","binary","datetime",*sized]
+let direct_tuples = ["string","null","bool","int","u64"]
+let mark_free = ["null","bool","u64","binary"]
 let exact_values = ["null","bool","string","symbol","binary","int","integer",
     "i8","u8","i16","u16","i32","u32","i64","u64"]
 
@@ -33,11 +35,12 @@ fn scalar_values(value, depth=0) any^ {
     if (depth > 128) raise error("sync codec: nesting limit")
     if (value is string) { return [] }
     if (value is array) { return [for (item in value) *scalar_values(item,depth+1)^] }
-    if (value is map) { return [for (key at value) *[*scalar_values(key,depth+1)^,*scalar_values(value[key],depth+1)^]] }
+    // The ordered entry iterator already supplies the stored value.
+    if (value is map) { return [for (key,member in value) *[*scalar_values(key,depth+1)^,*scalar_values(member,depth+1)^]] }
     let tag = string(type(value))
     if (not contains(scalars,tag)^) raise error("sync codec: unsupported value type")
     // Binary hex is exact for every byte; numeric poison keeps the lossless check (S4.1.1, S4.2.2).
-    return if (contains(["null","bool","u64","binary"],tag)^ or
+    return if (contains(mark_free,tag)^ or
         (tag == "int" and value >= -9007199254740991 and value <= 9007199254740991)) [] else [value]
 }
 fn validate_scalars(value) any^ {
@@ -54,6 +57,10 @@ fn validate_scalars(value) any^ {
     }
     return true
 }
+fn tuple_pair(pair) any^ {
+    if (not (pair is array) or len(pair) != 2) raise error("sync codec: invalid map entry")
+    return pair
+}
 fn scalar_tuples(tuple, depth=0) any^ {
     if (depth > 128) raise error("sync codec: nesting limit")
     if (not (tuple is array) or len(tuple)^ != 2 or not (tuple[0] is string))
@@ -62,17 +69,9 @@ fn scalar_tuples(tuple, depth=0) any^ {
     if (tag == "array" or tag == "map") {
         if (not (tuple[1] is array)) raise error("sync codec: invalid container")
         if (tag == "array") { return [for (item in tuple[1]) *scalar_tuples(item,depth+1)^] }
-        var result = []
-        var index = 0
-        while (index < len(tuple[1])^) {
-            let pair = tuple[1][index]
-            if (not (pair is array) or len(pair)^ != 2) raise error("sync codec: invalid map entry")
-            result = [*result,*scalar_tuples(pair[0],depth+1)^,*scalar_tuples(pair[1],depth+1)^]
-            index = index+1
-        }
-        return result
+        return [for (pair in tuple[1], field in tuple_pair(pair)^) *scalar_tuples(field,depth+1)^]
     }
-    if (contains(["string","null","bool","int","u64"],tag)^) { return [] }
+    if (contains(direct_tuples,tag)^) { return [] }
     if (not contains(scalars,tag)^ or not (tuple[1] is string)) raise error("sync codec: unknown type")
     return [tuple]
 }
@@ -87,7 +86,7 @@ fn decoded_scalars(tuple) any^ {
         let parsed = values[index]
         if (not (parsed is array) or len(parsed)^ != 1) raise error("sync codec: invalid scalar literal")
         let item = selected[index]
-        result = {*:result,[item[0] ++ ":" ++ item[1]]:scalar_value(item[0],parsed[0])^}
+        result[item[0] ++ ":" ++ item[1]] = scalar_value(item[0],parsed[0])^
         index = index+1
     }
     return result
@@ -98,13 +97,13 @@ fn pack(value, depth) any^ {
     if (value is string) { return ["string",value] }
     if (value is array) { return ["array",[for (item in value) pack(item,depth+1)^]] }
     if (value is map) {
-        return ["map",[for (key at value) [pack(key,depth+1)^,pack(value[key],depth+1)^]]]
+        return ["map",[for (key,member in value) [pack(key,depth+1)^,pack(member,depth+1)^]]]
     }
     let tag = string(type(value))
     if (tag == "u64") { return [tag,string(value)] }
     if (not contains(scalars,tag)) raise error("sync codec: unsupported value type")
     let literal = if (tag == "null") "[null]" else if (tag == "bool")
-        (if (value) "[true]" else "[false]") else if (tag == "int") "[" ++ string(value) ++ "]"
+        (if (value) "[true]" else "[false]") else if (tag == "int" or tag == "binary") "[" ++ string(value) ++ "]"
         else format([value],'mark')^
     return [tag,literal]
 }
@@ -129,12 +128,12 @@ fn unpack(tuple, depth, decoded) any^ {
         var result = {}
         var i = 0
         while (i < len(payload)^) {
-            let pair = payload[i]
-            if (not (pair is array) or len(pair)^ != 2) raise error("sync codec: invalid map entry")
+            let pair = tuple_pair(payload[i])^
             let key = unpack(pair[0],depth+1,decoded)^
             if (not (key is string or key is symbol) or contains(result,key)^)
                 raise error("sync codec: invalid or duplicate map key")
-            result = {*:result,[key]:unpack(pair[1],depth+1,decoded)^}
+            // The fresh map owns its fields, so adding a key needs no prefix copy.
+            result[key] = unpack(pair[1],depth+1,decoded)^
             i = i+1
         }
         return result
@@ -191,9 +190,9 @@ pub fn decode(encoded, max_bytes=8388608) any^ {
     if (not (encoded is string or encoded is binary)) raise error("sync codec: expected encoded bytes or text")
     let bytes = binary(encoded)^
     if (len(bytes)^ > max_bytes) raise error("sync codec: size limit")
-    // syntax markers are ASCII bytes; repeated Unicode scalar indexing rescans prefixes.
-    preflight(bytes)^
-    let envelope = parse(encoded,'json')^
+    // The JSON parser already bounds nesting and rejects unbalanced syntax.
+    // Keep the codec's diagnostics for inputs rejected by that parser.
+    let envelope = parse(encoded,'json') ^ { preflight(bytes)^; raise ^ }
     if (not (envelope is array) or len(envelope) != 2 or envelope[0] != version)
         raise error("sync codec: incompatible encoding")
     let value = unpack(envelope[1],0,decoded_scalars(envelope[1])^)^

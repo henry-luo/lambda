@@ -81,7 +81,7 @@ Environment variables:
   LAMBDA_TEST_OUTPUT_DIR    Override the directory containing result artifacts
   LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count/load)
   LAMBDA_TEST_HEAVY_LOAD     Set to 1 to bias idle timeout upward for full-suite parallel runs
-  LAMBDA_TEST_MAX_CONCURRENT Cap nested GTest fan-out (default: CPU-scaled, heavy-load caps at 4)
+  LAMBDA_TEST_MAX_CONCURRENT Cap nested GTest fan-out (default: CPU and suite reservation)
   LAMBDA_UI_TEST_JOBS        Override UI automation parallelism in suite runs
 `);
         process.exit(0);
@@ -226,7 +226,7 @@ function getTestIdleTimeoutMs(baseName) {
 
 // nested UI/layout/scene pools already reserve CPU workers; an inflated outer
 // budget oversubscribes their compilation and layout work on the same cores.
-function getMaxConcurrent(allowParallel = parallelExecution) {
+function getMaxConcurrent(allowParallel = parallelExecution, sharedHost = true) {
     if (!allowParallel) return 1;
     const cpuScaled = Math.max(1, os.cpus().length - 1);
     const requested = parseInt(process.env.LAMBDA_TEST_MAX_CONCURRENT || '', 10);
@@ -237,7 +237,7 @@ function getMaxConcurrent(allowParallel = parallelExecution) {
     // baseline runner below the CPU count when its heavy-load mode is active;
     // otherwise the nested pools compete for memory and child processes can
     // die before emitting their result protocol.
-    return process.env.LAMBDA_TEST_HEAVY_LOAD === '1'
+    return sharedHost && process.env.LAMBDA_TEST_HEAVY_LOAD === '1'
         ? Math.min(cpuScaled, 4)
         : cpuScaled;
 }
@@ -245,6 +245,15 @@ function getMaxConcurrent(allowParallel = parallelExecution) {
 const MAX_CONCURRENT = getMaxConcurrent();
 // sequential suites still allow bounded workers inside an opted-in test binary.
 const MAX_CASE_CONCURRENT = getMaxConcurrent(true);
+const MAX_EXCLUSIVE_CASE_CONCURRENT = getMaxConcurrent(true, false);
+
+function caseBudget(testInfo) {
+    if (!testInfo.exclusive) return MAX_CASE_CONCURRENT;
+    // Exclusive suites run after the shared queue drains. Honor an explicit
+    // request for more nested workers within the host and caller limits.
+    return Math.min(MAX_EXCLUSIVE_CASE_CONCURRENT,
+        Math.max(MAX_CASE_CONCURRENT, testInfo.caseWorkerSlots || 1));
+}
 const heartbeatSeconds = parseInt(process.env.LAMBDA_TEST_HEARTBEAT || '30', 10);
 const HEARTBEAT_MS = (Number.isFinite(heartbeatSeconds) ? Math.max(10, heartbeatSeconds) : 30) * 1000;
 
@@ -659,9 +668,10 @@ function scheduleTests(tests) {
  */
 function runTest(testInfo) {
     const requestedWorkers = Number(process.env[testInfo.caseWorkersEnv] || testInfo.caseWorkers || 1);
-    const availableSlots = Math.min(MAX_CASE_CONCURRENT, testInfo.allocatedSlots || MAX_CASE_CONCURRENT);
+    const budget = caseBudget(testInfo);
+    const availableSlots = Math.min(budget, testInfo.allocatedSlots || budget);
     const caseWorkerSlots = Math.max(1, Math.min(availableSlots, testInfo.caseWorkerSlots || 1));
-    const caseWorkers = Math.max(1, Math.min(MAX_CASE_CONCURRENT,
+    const caseWorkers = Math.max(1, Math.min(budget,
         Math.floor(availableSlots / caseWorkerSlots), Math.floor(requestedWorkers) || 1));
     if (testInfo.isGtest && !testInfo.caseWorker && !testInfo.listCases &&
         !process.env.GTEST_TOTAL_SHARDS && (caseWorkers > 1 || testInfo.isolatedCwd || testInfo.caseWorkerSlots > 1)) {
@@ -1324,7 +1334,7 @@ async function runScheduledTests(tests) {
             console.log(`   ${label} Starting ${testInfo.baseName}...`);
         }
 
-        const result = await runTimedTest({ ...testInfo, allocatedSlots: MAX_CASE_CONCURRENT });
+        const result = await runTimedTest({ ...testInfo, allocatedSlots: caseBudget(testInfo) });
         results.set(testInfo.baseName, result);
 
         if (!rawOutput) {

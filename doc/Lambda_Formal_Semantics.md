@@ -2351,8 +2351,9 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   as `@[random, clock, print]`. It bounds the call, including effects
   reached through other callables. Omitting it permits any effect.
   A restricted caller admits a callee only when its bound fits. The same
-  check applies when a callback crosses a typed boundary. A restricted
-  caller needs an effect summary for an opaque call through a legacy `fn`
+  check applies when a callback crosses a typed boundary. A legacy `fn` type
+  alone gives no resource-read guarantee. A restricted caller needs an effect
+  summary for an opaque call through a legacy `fn`
   helper (S7.4.5v4). Host policy still governs each operation (D11.1.2).
   The result and error contract is independent of this bound.
   [Design_Procedural §1.1]

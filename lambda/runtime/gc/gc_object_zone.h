@@ -51,7 +51,7 @@ typedef struct gc_object_slab {
     MemVmRegion* region;        // owning VM extent; released with the slab
     size_t slot_size;           // bytes per slot (header + user data, aligned)
     size_t slot_count;          // total slots in this slab
-    size_t live_slots;             // collection-only region liveness
+    size_t live_slots;             // allocated slots not yet swept
     bool retire;                   // removed from indexes before unmapping
     size_t next_fresh;          // next un-used slot index (sequential allocation)
     struct gc_object_slab* next;// next slab in chain for this size class

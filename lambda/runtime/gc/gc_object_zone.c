@@ -308,6 +308,8 @@ void gc_object_zone_destroy(gc_object_zone_t* oz) {
     mem_free(oz);
 }
 
+static size_t* region_live_slots(gc_object_zone_t* oz, gc_header_t* header);
+
 void* gc_object_zone_reuse(gc_object_zone_t* oz, int cls, size_t size,
                           uint16_t type_tag, gc_header_t** all_objects) {
     gc_header_t* header = oz->free_lists[cls];
@@ -318,6 +320,8 @@ void* gc_object_zone_reuse(gc_object_zone_t* oz, int cls, size_t size,
     // bit would make a later sweep classify their storage as a slab.
     gc_init_object_header(header, size, type_tag,
         header->gc_flags & GC_FLAG_BUMP, all_objects);
+    size_t* live = region_live_slots(oz, header);
+    if (live) (*live)++;
     oz->total_slots_allocated++;
     return (void*)(header + 1);
 }
@@ -334,6 +338,7 @@ static inline __attribute__((always_inline)) void* gc_object_zone_alloc_small(
     if (!slab) return NULL;
     gc_header_t* header = (gc_header_t*)(slab->base + slab->next_fresh * slab->slot_size);
     slab->next_fresh++;
+    slab->live_slots++;
     gc_init_object_header(header, size, type_tag, 0, all_objects);
 
     oz->total_slots_allocated++;
@@ -367,6 +372,8 @@ void gc_object_zone_free(gc_object_zone_t* oz, gc_header_t* header) {
     }
 
     // push to free list (reuse header->next as free list link)
+    size_t* live = region_live_slots(oz, header);
+    if (live) (*live)--;
     header->gc_flags = (header->gc_flags & GC_FLAG_BUMP) | GC_FLAG_FREED;
     header->next = oz->free_lists[cls];
     oz->free_lists[cls] = header;
@@ -395,31 +402,40 @@ static bool range_search(const gc_object_zone_t* oz, uint8_t* p,
     return true;
 }
 
-int gc_object_zone_owns_or_foreign(gc_object_zone_t* oz, void* ptr, void** foreign_owner) {
-    if (foreign_owner) *foreign_owner = NULL;
-    if (!oz || !ptr) return 0;
-    uint8_t* p = (uint8_t*)ptr;
-
+static bool range_lookup(gc_object_zone_t* oz, uint8_t* p) {
     // Fast rejection: check against global min/max address bounds
     if (p < oz->min_addr || p >= oz->max_addr) return 0;
 
-    gc_range_owner_t owner = oz->recent_owner;
     gc_slab_range_t range = oz->recent_range;
     if (!range.base || p < range.base || p >= range.end) {
         const gc_range_page_t* indexed = oz->page_index ? page_index_find(oz, p) : NULL;
         if (oz->page_index && !indexed) return 0;   // a complete index: no page, no range
         if (indexed && !indexed->shared) {
             if (p < indexed->base || p >= indexed->end) return 0;
-            owner = indexed->owner;
+            oz->recent_owner = indexed->owner;
             range = (gc_slab_range_t){indexed->base, indexed->end};
-        } else if (!range_search(oz, p, &owner, &range)) {
+        } else if (!range_search(oz, p, &oz->recent_owner, &range)) {
             return 0;
         }
         // cache ownership, never liveness: exact-slot and allocation-watermark checks still run.
         oz->recent_range = range;
-        oz->recent_owner = owner;
     }
-    uint8_t* range_base = range.base;
+    return true;
+}
+
+// Allocation and sweep already know this address is a slot header.
+static size_t* region_live_slots(gc_object_zone_t* oz, gc_header_t* header) {
+    if (!range_lookup(oz, (uint8_t*)header)) return NULL;
+    gc_range_owner_t owner = oz->recent_owner;
+    return owner.slab ? &owner.slab->live_slots : &((gc_bump_block_t*)owner.foreign)->live_slots;
+}
+
+int gc_object_zone_owns_or_foreign(gc_object_zone_t* oz, void* ptr, void** foreign_owner) {
+    if (foreign_owner) *foreign_owner = NULL;
+    if (!oz || !ptr) return 0;
+    uint8_t* p = (uint8_t*)ptr;
+    if (!range_lookup(oz, p)) return 0;
+    gc_range_owner_t owner = oz->recent_owner;
 
     // Non-slab ranges (bump blocks) are not object-zone slots; gc_heap.c owns
     // their exact-slot check, starting from the owner found by this lookup.
@@ -430,13 +446,11 @@ int gc_object_zone_owns_or_foreign(gc_object_zone_t* oz, void* ptr, void** forei
     }
 #ifndef NDEBUG
     // Trimming removes ranges and cached owners before releasing their regions.
-    if (slab->base != range_base) {
+    if (slab->base != oz->recent_range.base) {
         log_error("gc_object_zone_owns: stale slab range base=%p slab=%p",
-            (void*)range_base, (void*)slab);
+            (void*)oz->recent_range.base, (void*)slab);
         abort();
     }
-#else
-    (void)range_base;
 #endif
 
     // Exact Item roots must name an allocated user slot, never an interior slab
@@ -461,24 +475,8 @@ static bool range_owner_retired(gc_range_owner_t owner) {
 void gc_object_zone_trim(gc_heap_t* gc) {
     gc_object_zone_t* oz = gc->object_zone;
     if (!oz) return;
-    for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
-        for (gc_object_slab_t* slab = oz->slabs[cls]; slab; slab = slab->next) {
-            slab->live_slots = 0;
-            slab->retire = false;
-        }
-    }
-    for (gc_bump_block_t* b = gc->bump_blocks; b; b = b->next) {
-        b->live_slots = 0;
-        b->retire = false;
-    }
-    for (gc_header_t* h = gc->all_objects; h; h = h->next) {
-        gc_range_owner_t owner;
-        gc_slab_range_t range;
-        if (range_search(oz, (uint8_t*)h, &owner, &range)) {
-            if (owner.slab) owner.slab->live_slots++;
-            else ((gc_bump_block_t*)owner.foreign)->live_slots++;
-        }
-    }
+    // Allocation and sweep maintain region counts, so trim visits regions
+    // without walking every surviving object again during a collection.
     bool any_retired = false;
     for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
         bool warm = false;
@@ -526,7 +524,8 @@ void gc_object_zone_trim(gc_heap_t* gc) {
     oz->page_index_count = 0;
     for (size_t i = 0; i < kept; i++)
         page_index_add_range(oz, oz->slab_ranges[i].base, oz->slab_ranges[i].end, oz->range_owners[i]);
-    memset(gc->mark_cache, 0, sizeof(gc->mark_cache));
+    // Owning slots may disappear only when a slab or bump block is unmapped.
+    memset(gc->object_cache, 0, sizeof(gc->object_cache));
     for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
         oz->fresh_slabs[cls] = NULL;
         gc_object_slab_t** link = &oz->slabs[cls];

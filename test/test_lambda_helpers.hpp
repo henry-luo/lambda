@@ -420,8 +420,10 @@ inline void test_lambda_batch_against_files(const char* const* scripts,
             strbuf_append_format(manifest, "%s%s\n", procedural ? "run " : "", scripts[start + i]);
         char path[160];
         snprintf(path, sizeof(path), "temp/tier_batch_%d_%p.txt", (int)getpid(), (void*)results);
-        int written = write_text_file_atomic(path, manifest->str);
+        // the child opens this private batch manifest only after the writer closes.
+        int written = write_binary_file(path, manifest->str, manifest->length);
         strbuf_free(manifest);
+        if (written != 0) remove(path);
         ASSERT_EQ(written, 0) << path;
         const char* args[] = {LAMBDA_EXE, "test-batch", "--no-log", "--timeout=60", nullptr};
         LambdaTestCompilerEnv environment(tier);

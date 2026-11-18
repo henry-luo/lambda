@@ -340,7 +340,9 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
     }
     if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     if (!satellite_context) {
-        satellite_context = jit_init(runtime->optimize_level);
+        // asynchronous promotions benefit only after their image publishes.
+        satellite_context = jit_init(snapshot ? mir_cold_optimize_level(runtime->optimize_level)
+                                             : runtime->optimize_level);
         // Must mirror jit_init's own branch. Claiming a generator that was
         // never initialized made teardown call MIR_gen_finish on a garbage
         // gen_ctx and segfault in finish_data_flow.
@@ -873,6 +875,12 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
     // must not lower a bounded kernel merely by sharing its module (D8.3.1).
     selection.optimize_level = mir_eager_optimize_level(
         pass->mir_largest_function_instruction_count, selection.optimize_level);
+    // eager import graphs generate many functions before the entry can run.
+    // standalone entry kernels retain the ordinary optimizer budget.
+    if (!pass->tp->is_main ||
+            (pass->tp->direct_imports && pass->tp->direct_imports->length > 0)) {
+        selection.optimize_level = mir_cold_optimize_level(selection.optimize_level);
+    }
     if (!use_interp && !pass->tp->requires_native_mir_exports &&
             selection.interface_kind == MIR_LINK_INTERP) {
         use_interp = true;
@@ -881,7 +889,7 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
             document_context ? " [document]" : "");
     }
     if (!use_interp && selection.optimize_level != opt_level) {
-        log_info("lambda-mir: policy selected opt=%u for large module (was %u)",
+        log_info("lambda-mir: compile policy selected opt=%u (was %u)",
             selection.optimize_level, opt_level);
         MIR_gen_set_optimize_level(pass->ctx, selection.optimize_level);
     }

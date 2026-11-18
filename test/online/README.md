@@ -20,7 +20,29 @@ From the repository root, run:
 node test/online/capture_snapshots.cjs
 node test/online/capture_snapshots.cjs --failed-only
 node test/online/capture_snapshots.cjs --failed-only --renderer=lambda --labels=arduino_docs
+node test/online/capture_snapshots.cjs --labels=python,webkit_blog --settle-ms=1000
 ```
+
+`--settle-ms=N` selects an explicit post-load window for both renderers, followed
+by a rendering opportunity. Lambda uses its virtual timer frame; Chromium waits
+the same interval after load. This aligns the requested interval, while network
+loading and live content can still differ. The online capture command defaults
+to **1000 ms on both sides**. Zero selects the initial post-load frame.
+`RADIANT_ONLINE_SETTLE_MS` supplies the same option through the environment.
+The explicit option takes precedence over that environment default. Native
+exports also honor the existing `LAMBDA_POST_LOAD_SETTLE_MS` host setting; their
+unspecified initial-frame default is unchanged.
+
+Each attempt records `lambda_settle_ms` or `browser_settle_ms`. The comparator
+refuses a pair with different explicit windows or only one recorded window;
+recapture both sides together when changing this setting. A `--failed-only` retry
+with both renderers selected also refreshes a successful counterpart if its
+recorded window differs. Explicit single-renderer runs retain that selection. Historical pairs with
+both fields empty retain their legacy status. Frame-selection refreshes keep
+their old images and a separate audit in `comparison/capture_frame_updates.json`;
+they are distinguished from engine repairs and changed-page design refreshes.
+The selected window must fit the existing browser navigation deadline. It does
+not increase script CPU or network-resource budgets (**D10.1.7**).
 
 The script saves matching 1200 × 800 Lambda and Chromium PNGs under
 `test/online/snapshots/`. It also writes `capture_results.csv` there. Set
@@ -33,8 +55,9 @@ attempts can have an empty timeout field. Complex pages can complete after the
 default parent deadline because native layout does not count toward the script
 CPU watchdog. Use the render-timeout override for a longer bounded capture.
 
-Retries run only the failed or missing renderer side and preserve successful
-images and the other manifest rows. Results are saved after each renderer
+Failed-only retries preserve successful sides whose selected window still
+matches; a changed window refreshes both sides when both renderers are selected.
+Other manifest rows are preserved. Results are saved after each renderer
 attempt. `--renderer=browser` retries only Chromium; `--labels=a,b` limits the
 page cases. HTTP rejections, TLS failures, crashes and timeouts remain failures.
 
@@ -60,6 +83,7 @@ node --test test/online/render_session.test.cjs
 node --test test/online/render_stylesheet.test.cjs
 node --test test/online/render_clip.test.cjs
 node --test test/online/render_observers.test.cjs test/online/render_observer_zero_area.test.cjs
+node --test test/online/render_dataset_metadata.test.cjs
 node --test test/online/render_grid.test.cjs
 node --test test/online/render_rem.test.cjs
 node --test test/online/render_grid_absolute.test.cjs
@@ -69,14 +93,19 @@ node --test test/online/render_nested_pseudo.test.cjs
 node --test test/online/render_intrinsic_width_value.test.cjs
 node --test test/online/render_positioned_order.test.cjs
 node --test test/online/render_video_percentage.test.cjs
+node --test test/online/render_video_first_frame.test.cjs
 node --test test/online/render_canvas_transform.test.cjs
 node --test test/online/render_console_groups.test.cjs
 node --test test/online/render_svg_percentage_intrinsics.test.cjs
+node --test test/online/render_svg_comment.test.cjs
 node --test test/online/render_compact_conditions.test.cjs
 node --test test/online/render_grid_flow_variable.test.cjs
 node --test test/online/render_abs_percentage_height.test.cjs
 node --test test/online/render_css_resource_discovery.test.cjs
 node --test test/online/render_nested_ratio_height.test.cjs
+node --test test/online/render_intrinsic_image_basis.test.cjs
+node --test test/online/render_lab_colors.test.cjs
+node --test test/online/render_text_background_ancestor.test.cjs
 ```
 
 The session tests exercise real Lambda HTTP rendering, layout and both batch
@@ -1903,3 +1932,239 @@ All other report rows, browser references, every annotation, catalog and capture
 policy remain intact. The preceding broad checkpoint is retained without
 another full baseline run. See [the repair record](comparison/repairs.html#round-78).
 The goal remains active.
+
+Round seventy-nine fixes **RI-127** (render export ignored the existing selected
+post-load window, including script-free CSS frame preparation) and **RI-128 /
+LR12-56** (background keyframes discarded the supported color component before
+native parsing). Variables, omitted-color reset, source order and important
+exclusion use the shared parser; Web Animations explicit seeks use the same
+target admission. Other background components and automatic Web playback remain
+outside this repair. Defaults still select the initial export frame (D10.1.7).
+
+All **29 focused checks** and integer lint pass. A saved pre-repair renderer
+fails the shorthand explicit seek while passing its longhand control. The
+Radiant milestone gate passes **8,169 / 8,488, 299 partial,
+20 skipped, zero failures**. No full Lambda language baseline is repeated.
+
+Python and WebKit are paired at the new opt-in **1000ms** window. Python's
+carousel returns in both captures (**0.65%**), resolving its manual review while
+preserving its history. WebKit's grid returns, but large article images remain
+missing (**7.11%**); a manual review keeps it high. This is separately audited
+[capture-frame calibration](comparison/capture_frame_updates.json), not an
+unchanged-policy engine-driven clearance. Live content can also change.
+Previous pairs are archived; the design-change audit is unchanged.
+
+Inventory: **147 high, 1 critical, 919 low** (124 automatic, 23 manual).
+All other 1,065 report rows, catalog, default clocks, deadlines and thresholds
+remain intact. See [the repair record](comparison/repairs.html#round-79).
+The goal remains active.
+
+Round eighty fixes **RI-129**: intrinsic inline-image flow discarded the measured
+box's resolved width and ratio-derived percentage-height basis. Clay's 95px
+logo strip became 1494.8px and pushed its pricing cards below the viewport.
+The existing formatter now retains those axes without a ratio clamp or site
+condition. Six reduced cases cover two ratios, fixed/block-image controls,
+automatic height and content growth. Before: three fail/three pass; Chromium
+confirms all six. After: **50 focused checks** and integer lint pass. The
+preceding round79 broad gate is retained without another full suite.
+
+The identical saved source restores the logos and four pricing cards
+(**12.54% → 10.37%**). Smaller heading/spacing details remain. Clay's normal live
+capture stays blank/high (**12.61%**): an authored anti-flicker class waits
+4000ms, while the unchanged export frame is zero. Separate script TypeErrors
+are observed but not attributed to this sizing bug. No timing/style exception,
+reference refresh or page clearance is claimed.
+
+Inventory remains **147 high, 1 critical, 919 low** (124 automatic, 23 manual).
+All other 1,066 rows, browser images, annotations, catalog, audits and capture
+policy remain intact. See [the repair record](comparison/repairs.html#round-80).
+The goal remains active.
+
+Round eighty-one completes **LI-078** in the existing shared color engine:
+absolute Lab and rectangular Lab mixing now retain their computed model through
+transport/serialization and used sRGB conversion. Weight/alpha/currentColor
+handling is shared; Bradford adaptation serves both conversion directions.
+Rogo's authored Lab feature query can now select its subtle sRGB gradient
+instead of its bright white fallback. No feature-test or site exception is used.
+LCH, relative colors, wider spaces, gamut mapping and Lab gradient interpolation
+remain outside this increment.
+
+Before: all five new paint cases fail; Chromium confirms all five. After:
+**15 focused render/condition/stylesheet checks, 10 input parser color checks
+and 10 shared color-library checks pass**. Existing assertions/tolerances are
+unchanged. The preceding round79 milestone is retained without another full
+baseline run.
+
+Rogo's identical-source error falls **13.28% → 1.90%**; the live background is
+repaired (**14.64% → 3.97%**). Navigation, most of the headline, copy and action
+still do not appear, so a new manual review keeps it high. No clearance is
+claimed. Inventory remains **147 high, 1 critical, 919 low** (123 automatic,
+24 manual). All other 1,066 rows, prior reviews, browser images, catalog,
+audits, clocks and budgets remain intact. See
+[the repair record](comparison/repairs.html#round-81). The goal remains active.
+
+Round eighty-two fixes **RI-130**: the text-background painter checked only the
+immediate text parent, so transparent text lost a gradient owned by an ancestor.
+Raster/vector recording now shares an owner traversal with owner-space offsets
+and outer-to-inner paint order. It reuses existing glyph masks and layer paint;
+no fallback color or page condition is introduced.
+
+Eight reduced cases have **five failures / three passing controls before** and
+independent Chromium confirmation. After: **31 focused raster checks, four SVG
+checks and integer lint pass**. The preceding round79 broad gate is retained;
+PDF and wider fragment/descendant-transform behavior are not independently
+qualified.
+
+Wiza's identical saved-source heading and copy return (**6.23% → 4.77%**).
+Its normal live capture remains blank/high, so no page clearance is claimed.
+Inventory remains **147 high, 1 critical, 919 low** (123 automatic, 24 manual).
+Other rows, references, reviews, catalog, audits and capture policy are intact.
+See [the repair record](comparison/repairs.html#round-82). The goal stays active.
+
+Round eighty-three fixes **LR12-58**: positive selected windows establish CSS
+timelines before draining, and initial/pending loader geometry layouts share a
+temporary document binding. A later reflow had restored authored values while
+CSS effect sampling saw no host document. Color, width and opacity regressions
+are repaired; default/zero frames and no-fill restoration are preserved
+(**D9.5.6v2 / D10.1.7**).
+
+**RI-131** fixes native stack exhaustion when a balance line-count probe
+reentered balancing for its own atomic inline-flow owner. Nested/sibling owners
+remain independent. **LR12-59** makes host termination unwind event dispatch
+(**D7.4.3**), while ordinary listener exceptions still allow later listeners.
+Vooma and Squarespace now write PNGs; Squarespace remains visually high and its
+admitted app still reaches the existing CPU budget. **RI-132** corrects three
+baseline regressions from the preceding intrinsic-width change: callers that
+already selected their content width now use the existing assigned-width flag.
+All three frozen reference cases pass without reference/threshold changes.
+
+**45 focused checks pass**: twenty selected-frame checks with fourteen Chromium
+controls, four atomic-balance checks, two interrupt controls, sixteen harness
+checks and three lifecycle checks. Integer lint passes. One fresh milestone
+Radiant gate passes **8,169/8,488, 299 partial, 20 skipped,
+zero failures**, with its curated selection unchanged. The first milestone run
+exposed the three regressions above; its evidence is preserved, and the gate
+is repeated once after fixing them and relinking the runners.
+
+The online command now defaults to **1000 ms on both renderers**. Changed-window
+failed-only retries refresh the counterpart when both renderers are selected.
+Native export defaults, deadlines, admission budgets and thresholds are intact.
+
+All **147 prior high pages** were attempted: **145 paired refreshes** are
+published, **2 calibrations remain pending** after a bounded retry and
+retain their previous successful pairs. Failed attempts are recorded separately.
+Old images/hashes and review history remain in the frame-calibration audit;
+the URL list and design-change audit are unchanged.
+
+**19 calibration clearances** follow visual review. They are not counted as
+unchanged-policy engine clearances. Major omissions remain high even below the
+coarse threshold, and rechecked review text reflects the latest pair while
+preserving earlier assessments. Inventory: **128 high, 1 critical,
+938 low** (102 automatic, 26 manual). The 920 unselected report
+rows remain intact; earlier low pairs retain historical timing.
+See [the repair record](comparison/repairs.html#round-83). The goal stays active.
+
+Round eighty-four fixes **RI-133**: valid SVG images beginning with XML comments
+were rejected by shared signature detection. Bounded comment skipping now admits
+them through the existing loader. **18 focused checks pass** (six prefix cases,
+twelve intrinsic/percentage controls); two valid-prefix cases fail on the saved
+renderer. Live WebKit's three SVG signature rejections are gone.
+
+Its two large article photos remain high: they are queued correctly, but valid
+HTTP 200 downloads take 2.45/2.71 seconds, beyond the existing one-second resource
+window. One native WebKit capture is refreshed at its existing 1000 ms frame;
+its browser reference is retained. No waiting/admission policy is changed.
+Superhuman's unsupported color paths and Nightwatch's remaining animation/hero
+mismatch are investigated without site overrides or claimed clearances.
+
+Inventory remains **128 high, 1 critical, 938 low**. The 1066 unselected report
+rows, URL list and both reference audits are unchanged. The fresh round83 broad
+gate is retained; only focused checks run for this narrow repair. See the
+[repair record](comparison/repairs.html#round-84). The goal remains active.
+
+Round eighty-five fixes **LR12-60**: dataset writes now reuse setAttribute's
+CSS-dependency-aware metadata helper. Ten unrelated metadata writes cause one
+layout instead of eleven, retaining observer records/old values and normal
+CSS-dependent updates. **Seven focused checks pass**; the saved renderer fails
+two reduced metadata cases. Temporary traces are removed, and no budget,
+threshold or admission policy changes. The recent round83 broad gate is retained.
+
+Dock writes a PNG in **149.0 seconds** within its unchanged 150-second deadline,
+but still reaches the script CPU limit. This single success has about one second
+of headroom; capture reliability is unproven. Its main content remains absent,
+so it moves from critical to high. A matched 1000 ms browser reference and the
+old failed attempt/reference are recorded in the frame audit.
+
+Inventory: **129 high, zero critical, 938 low**, with **1067 comparisons**. The
+extra high case is the previously critical Dock page; all 128 prior high rows and
+1066 unselected report rows are unchanged. No high-severity clearance is claimed.
+URL/review/design audits and other references stay intact. See the
+[repair record](comparison/repairs.html#round-85). The goal stays active.
+
+Dock’s recorded 1000 ms window is requested on both sides; script interruption
+means native completion of that interval is not guaranteed. Its partial capture
+remains high and is not used as a timing-parity clearance.
+
+Round eighty-six fixes **LR12-61**: rewriting an identical data/aria value now
+retains geometry even when CSS references that attribute. Changed values still
+invalidate normally, and observers/custom-element callbacks remain active.
+**Nine focused checks pass**. Ten unchanged writes drop from eleven layouts to
+one; callback-driven width changes remain observable from 110 to 200 pixels.
+
+The single current-renderer Dock retry times out at the unchanged 150-second
+limit. Its prior successful round85 comparison is retained, with the new failure
+and renderer pin [recorded separately](snapshots/comparison_review/round86-dock-retry.json).
+No reliable capture-time improvement or visual clearance is claimed. Inventory
+remains **129 high, zero critical, 938 low**, based on last successful captures;
+all 1067 rows/pairs, manifest fields and audits are unchanged. No comparator or
+broad baseline is repeated for this focused adapter change. See the
+[repair record](comparison/repairs.html#round-86). The goal stays active.
+
+Round eighty-seven fixes **RI-134**: video snapshots rejected an asynchronous
+player's LOADING state before asking the existing decoder for an available
+first frame. Complete-file first frames now paint while playback opens, keeping
+poster precedence, immutable pixels and existing clocks. **21 focused checks
+pass**; both paused/autoplay pixel regressions fail on the saved renderer.
+No codec, wait, streaming implementation or resource policy is added.
+
+Mymind's large halo is restored against its preserved 1000 ms browser reference.
+Its major review is resolved; minor spacing/playback-overlay differences remain.
+Inventory: **128 high, zero critical, 939 low**. Only its native capture/review
+changes; all 1066 unselected rows, browser references, URL inventory and both
+reference audits are preserved. The recent round83 broad gate is retained.
+Dock's last tested retry remains failed, with its older successful pair retained
+under round86's explicit qualification. See the
+[repair record](comparison/repairs.html#round-87). The goal remains active.
+
+Round eighty-eight fixes **RI-135**: retained descendants did not refresh
+inherited text shadows after an early layout. Implicit inheritance and explicit
+`inherit`/`unset` now copy the parent's computed shadows into owned storage,
+preserving parent-relative offsets and child overrides (**D5.5.1**).
+**17 focused native checks pass**; six new cases fail on the saved renderer.
+Independent Chromium controls agree with all nine new cases; layout lint passes.
+
+Boldare's entire outlined headline returns in an unmodified live capture at
+its existing 1000 ms request. The major manual review is resolved with history
+retained. Mean error is **1.13%**, changed area **2.32%**; small animated
+decorations remain outside this major-only pass. Inventory: **127 high, zero
+critical, 940 low**. All 1066 other rows, browser images/metadata, URLs and both
+reference audits are preserved. No admission budget or capture policy changes.
+The recent round83 broad gate is retained. Dock's last tested retry still
+failed; its older successful pair remains under round86's explicit qualification.
+See the [repair record](comparison/repairs.html#round-88). The goal remains active.
+
+Round eighty-nine fixes **RI-136**: flex items flattened through boxless DOM
+wrappers now use the actual flex box's padding/border offsets. Affinity's
+navigation is readable and aligned. **20 focused native checks pass**; all
+eight new controls fail on the saved renderer and agree with Chromium.
+Layout integer-cast lint passes; the round83 broad gate is retained.
+
+Affinity remains high because four large artwork panels are still absent.
+Their cached files do not reveal the initially opacity-zero wrapper; required
+deferred bundles exceed current admission (LR12-57). No unhide, admission or
+capture-policy change is adopted. Its current native capture uses the existing
+1000ms request; browser data and all1066 other rows remain unchanged. Inventory:
+**127 high, zero critical, 940 low**. Both reference audits are preserved;
+Dock's latest tested failure remains explicitly qualified under round86.
+See the [repair record](comparison/repairs.html#round-89).
+Autonomous work stopped when the user cleared the goal.

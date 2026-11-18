@@ -10,8 +10,13 @@ import u: .mod_util
 let UNIT_UV = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
 pub let EMPTY = {positions: [], normals: [], uvs: [], indices: []}
 pub fn merge(parts) => prim.merge(parts)
-pub fn geometry(id, b) element => s.geometry([for (x in b.positions) x], {id: id, normals: b.normals, indices: b.indices,
-    *: (if (b.uvs != null) {uvs: b.uvs} else {}), *: (if (b.colors != null) {colors: b.colors} else {})})
+// Vertex buffers are values, so geometry can retain the original positions.
+pub fn geometry(id, b) element {
+    let positions = (b.positions ^ { [] });
+    s.geometry(if (positions is array) positions else [for (x in positions) x],
+        {id: id, normals: b.normals, indices: b.indices,
+         *: (if (b.uvs != null) {uvs: b.uvs} else {}), *: (if (b.colors != null) {colors: b.colors} else {})})
+}
 
 // a planar quad a b c d, counter-clockwise from its front
 pub fn quad(a, b, c, d, uv = UNIT_UV) {

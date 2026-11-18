@@ -49,6 +49,7 @@ typedef struct Heap {
     LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
     uint32_t map_contract_cache_next;
     struct hashmap* array_rep_cert_by_contract;
+    struct hashmap* namespace_targets;  // absolute namespace URLs owned by pool
     // Identity of this heap incarnation, assigned once at heap_init from a
     // process-wide counter and never reused. Root registrations die with the
     // heap; a RootVector compares this to know its blocks must re-register

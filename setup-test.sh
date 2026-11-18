@@ -16,6 +16,7 @@ die() {
 
 command -v git >/dev/null 2>&1 || die "git is required"
 [ -d "$LAMBDA_TEST_DIR" ] || die "lambda-test project not found: $LAMBDA_TEST_DIR"
+LAMBDA_TEST_DIR=$(CDPATH= cd -- "$LAMBDA_TEST_DIR" && pwd)
 
 mkdir -p "$REF_DIR"
 
@@ -56,12 +57,19 @@ for corpus_dir in "$LAMBDA_TEST_DIR"/*; do
     [ "$corpus_name" = ".git" ] && continue
     [ "$corpus_name" = "yaml" ] && continue
     link_path="$ROOT_DIR/test/$corpus_name"
-    expected_target="../lambda-test/$corpus_name"
+    expected_target="$LAMBDA_TEST_DIR/$corpus_name"
+    if [ "$LAMBDA_TEST_DIR" = "$ROOT_DIR/lambda-test" ]; then
+        expected_target="../lambda-test/$corpus_name"
+    fi
 
     if [ -L "$link_path" ]; then
         existing_target=$(readlink "$link_path")
         if [ "$existing_target" = "$expected_target" ]; then
             echo "Link exists: test/$corpus_name"
+        elif [ "$existing_target" = "../../lambda-test/$corpus_name" ]; then
+            # Migrate only the old standard link from before the submodule move.
+            ln -sfn "$expected_target" "$link_path"
+            echo "Updated link: test/$corpus_name -> $expected_target"
         else
             die "conflicting symlink: test/$corpus_name -> $existing_target"
         fi

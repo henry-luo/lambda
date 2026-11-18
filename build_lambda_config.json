@@ -43,6 +43,10 @@
     {
       "script": "utils/generate_update_verifier.py",
       "args": []
+    },
+    {
+      "script": "utils/generate_sync_connectivity_config.py",
+      "args": []
     }
   ],
   "source_dirs": [
@@ -6000,7 +6004,8 @@
               "gtest",
               "gtest_main"
             ],
-            "binary": "test_editing_gc_gtest.exe"
+            "binary": "test_editing_gc_gtest.exe",
+            "worker_slots": 2
           },
           {
             "source": "test_edit_bridge_gtest.cpp",
@@ -6163,7 +6168,7 @@
             ],
             "parallel": false,
             "case_workers": 2,
-            "case_worker_slots": 4,
+            "case_worker_slots": 6,
             "worker_slots": 8,
             "case_batch_size": 150,
             "icon": "\ud83d\udc11"

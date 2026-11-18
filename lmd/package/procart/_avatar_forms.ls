@@ -207,10 +207,15 @@ fn origin(joints,id) array^ => if (id==null) [0.0,0.0,0.0] else
 pub fn generate(doc) map^ {
  let p=plan(doc),joints=rig(doc,p),parts=anatomy(doc,p)^
  let resources=geometry.build(unique(parts |> ~.shape))^
- let bounds=map([for (g in resources,let points=[for (i in ((0 to (len(g.positions) div 3-1)) ^ { [] })) slice(g.positions,i*3,i*3+3)])
-  (g.id,{lo:[for (axis in 0 to 2) min(points |> ~[axis])],hi:[for (axis in 0 to 2) max(points |> ~[axis])]})])
- let corners=[for (p in parts,let b=bounds[p.geometry],let matrix=t.matrix(p.position,p.rotation,p.scale)^)
-  for (x in [b.lo[0],b.hi[0]],y in [b.lo[1],b.hi[1]],z in [b.lo[2],b.hi[2]]) origin(joints,p.joint)+t.point(matrix,[x,y,z])^]
- let lo=[for (axis in 0 to 2) min(corners |> ~[axis])],hi=[for (axis in 0 to 2) max(corners |> ~[axis])];
+ let bounds=map([for (g in resources,let end=(len(g.positions)^ div 3)-1,
+  let axes=[for (axis in 0 to 2) [for (i in 0 to end) g.positions[i*3+axis]]])
+  (g.id,{lo:[for (axis in axes) min(axis)],hi:[for (axis in axes) max(axis)]})])
+ // Share origins across parts and project each box's extrema directly.
+ let origins=map([for (j in joints) (j.id,origin(joints,j.id)^)])
+ let boxes=[for (p in parts,let b=bounds[p.geometry],let at=origins[p.joint],
+  let world=t.bounds(t.matrix(p.position,p.rotation,p.scale)^,b.lo,b.hi)^)
+  {lo:at+world.lo,hi:at+world.hi}]
+ let lo=[for (axis in 0 to 2) min([for (box in boxes) box.lo[axis]])]
+ let hi=[for (axis in 0 to 2) max([for (box in boxes) box.hi[axis]])];
  {document:doc,joints:joints,parts:parts,resources:resources,plan:p,lo:lo,hi:hi,scale:doc.parameters.height/(hi[1]-lo[1])}
 }

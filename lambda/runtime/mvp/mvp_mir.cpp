@@ -9658,8 +9658,19 @@ bool mvp_emit_function(LambdaMvpModule* m, MvpFunction* fn) {
     }
     // construct caller witnesses once for owners repeatedly indexed through inlined accessors.
     AstIndex* index = &m->tp->ast_index;
-    for (AstNodeId id = 0; id < index->count; id++) {
-        if (mvp_node_owner(m, id) != fn->id || index->nodes[id]->node_type != AST_NODE_CALL_EXPR) continue;
+    AstNodeId first = 0, end = index->count;
+    uint32_t overlay_count = 0;
+    ast_index_function_overlay_nodes(index, fn->id, &overlay_count);
+    // D8.2.4: an ordinary function's calls lie in its indexed source range.
+    if (!overlay_count && fn->id < index->function_count &&
+            index->functions[fn->id].node == fn->ast &&
+            index->functions[fn->id].first_node < index->functions[fn->id].end_node &&
+            index->functions[fn->id].end_node <= end) {
+        first = index->functions[fn->id].first_node;
+        end = index->functions[fn->id].end_node;
+    }
+    for (AstNodeId id = first; id < end; id++) {
+        if (index->nodes[id]->node_type != AST_NODE_CALL_EXPR || mvp_node_owner(m, id) != fn->id) continue;
         AstCallNode* call = (AstCallNode*)index->nodes[id];
         MvpFunction* callee = mvp_function(m, ast_direct_call_function(call));
         if (!callee || !inline_eligible(&c, callee, true)) continue;

@@ -15,8 +15,9 @@ let pts = [[0.3, 0.7, 1.1], [-5.25, 3.5, 0.125], [100.9, -42.1, 7.7], [255.5, 25
 [len(p), sort(slice(p, 0, 256)) == [for (i in 0 to 255) i], slice(p, 0, 256) == slice(p, 256, 512)];
 
 "3 ranges and means over 2000 points";
-let xs = [for (i in 0 to 1999) [rng.between(rng.at(rng.key(5), 3 * i), -50.0, 50.0),
-    rng.between(rng.at(rng.key(5), 3 * i + 1), -50.0, 50.0), rng.between(rng.at(rng.key(5), 3 * i + 2), -50.0, 50.0)]]
+let points_key = rng.key(5)
+let xs = [for (i in 0 to 1999) [rng.between(rng.at(points_key, 3 * i), -50.0, 50.0),
+    rng.between(rng.at(points_key, 3 * i + 1), -50.0, 50.0), rng.between(rng.at(points_key, 3 * i + 2), -50.0, 50.0)]]
 fn bounded(vs) => all([for (v in vs) v >= -1.0 and v <= 1.0]) and abs(math.mean(vs)) < 0.06
 let kernels = [(x: float, y: float, z: float) any^ => noise.value2(p, x, y), (x: float, y: float, z: float) any^ => noise.perlin2(p, x, y), (x: float, y: float, z: float) any^ => noise.simplex2(p, x, y),
     (x: float, y: float, z: float) any^ => noise.value3(p, x, y, z), (x: float, y: float, z: float) any^ => noise.perlin3(p, x, y, z), (x: float, y: float, z: float) any^ => noise.simplex3(p, x, y, z),
@@ -49,10 +50,12 @@ let plain = noise.make(rng.key(2))^;
 // PG2/PG5: batching changes storage, never a point value or its signed zero.
 "6 row batching agrees with point sampling";
 fn zero_signs(f) => [for (row in f) [for (v in row) if (v == 0.0) 1.0 / v else v]];
+// Vary grid sizes against the same immutable octave tables.
+let row_key = rng.key(17);
 all([for (kind in ['simplex', 'perlin', 'value', 'white', 'cellular'])
-    for (fractal in ['none', 'fbm', 'ridged', 'billow']) for (octaves in [1, 3])
+    for (fractal in ['none', 'fbm', 'ridged', 'billow'])
+    for (octaves in [1, 3], let gen = noise.make(row_key, {kind: kind, fractal: fractal, octaves: octaves})^)
     for (size in [[0, 0], [0, 3], [5, 0], [1, 1], [5, 1], [1, 5], [7, 5]])
-    (let gen = noise.make(rng.key(17), {kind: kind, fractal: fractal, octaves: octaves})^,
-     let batched = noise.field(gen, size[0], size[1]),
+    (let batched = noise.field(gen, size[0], size[1]),
      let points = [for (y in 0 to (size[1] - 1)) [for (x in 0 to (size[0] - 1)) noise.sample(gen, float(x), float(y))]],
      batched == points and zero_signs(batched) == zero_signs(points))])

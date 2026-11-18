@@ -2698,7 +2698,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     }
 
     for (int i = 0; i < snap_count; i++) {
-        if (_STOP_IMM) break;
+        if (_STOP_IMM || js_execution_interrupt_pending()) break;
         NodeListeners* live_nl = find_listeners(key);
         EventListener* live = nl_find_snapshot_listener(live_nl, snap[i]);
         // re-check tombstone in case a prior listener removed this one
@@ -2740,6 +2740,11 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         // native dispatcher reports it, so retain its return in this frame.
         result_root.set(dom_realm_call_into(callback_root.get(), this_root.get(),
             args, 1, result_root.home()));
+        if (js_execution_interrupt_pending()) {
+            // host termination unwinds dispatch; ordinary listener exceptions remain isolated (D7.4.3).
+            event_set_bool(event_root.get(), "__in_passive", was_passive);
+            break;
+        }
         if (item_is_error(result_root.get())) {
             err_root.set(js_error_lane_payload(result_root.get()));
             log_event_exception_detail(is_idl_handler
@@ -2759,6 +2764,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 }
 
 Item dom_dispatch_event(Item elem_item, Item event_item) {
+    JS_RETURN_IF_ERROR(js_execution_interrupt_status());
     RootFrame roots(4);
     Rooted<Item> elem_root(roots, elem_item);
     Rooted<Item> event_root(roots, event_item);
@@ -2880,8 +2886,8 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
         dom_realm_set(global_root.get(), event_key, event_root.get());
     }
 
-    #define _STOP_PROP event_flag_get(event_item, "__stop_prop")
-    #define _STOP_IMM event_flag_get(event_item, "__stop_imm")
+    #define _STOP_PROP (js_execution_interrupt_pending() || event_flag_get(event_item, "__stop_prop"))
+    #define _STOP_IMM (js_execution_interrupt_pending() || event_flag_get(event_item, "__stop_imm"))
     // F18: masks are captured once for this cascade. A miss means the
     // corresponding store cannot contribute at any path node this dispatch.
     bool js_live = dom_event_type_has_js_listeners(type);
@@ -2976,6 +2982,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 
     // dispatchEvent returns false only when the event is cancelable AND
     // preventDefault was called.
+    JS_RETURN_IF_ERROR(js_execution_interrupt_status());
     Item cancelable = event_get_item(event_item, "cancelable");
     bool ret_false = prevented && js_is_truthy(cancelable);
     return (Item){.item = ret_false ? ITEM_FALSE : ITEM_TRUE};

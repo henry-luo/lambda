@@ -1,8 +1,8 @@
 // Markdown emoji policy: vibe/input/Input_Markdown.md; Input-owned nodes follow D9.1.4.
 import markdown: lambda.editor.format.markdown
 
-let configured_input_root = sys.proc.self.env.LAMBDA_INPUT_ROOT
-let input_root = if (type(configured_input_root) == string and configured_input_root != "") configured_input_root else "../lambda-input"
+let configured_input_root = sys.proc.self.env.LAMBDA_INPUT_ROOT#
+let input_root = if (type(configured_input_root) == string and configured_input_root != "") configured_input_root else "lambda-input"
 let catalog = input(input_root ++ "/lib/emoji_shortcodes_data.json", 'json')^
 let aliases = [*[for (alias at catalog.unicode) alias], *[for (alias at catalog.images) alias]]
 let source = join([for (alias in aliases) ":" ++ alias ++ ":"], " ") ++ "\n"

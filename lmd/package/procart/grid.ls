@@ -72,21 +72,63 @@ fn label_round(lab, passable, w: int, h: int) array {
 
 fn settle(lab, passable, w: int, h: int) array^ => (let next = label_round(lab, passable, w, h), if (next == lab) lab else settle(next, passable, w, h))
 
+// Visit each rectangular floor cell once, assigning its label at first discovery.
+fn region_queue(passable: array, w: int, h: int) map^ {
+    let n = len(passable)
+    var labels: int[] = [for (c in 0 to (n - 1)) -1]
+    var queue: int[] = [for (c in 0 to (n - 1)) 0]
+    var sizes: int[] = [for (c in 0 to (n - 1)) 0]
+    var region: int = 0
+    var start: int = 0
+    while (start < n) {
+        if (passable[start] and labels[start] < 0) {
+            labels[start] = region
+            queue[0] = start
+            var head: int = 0
+            var tail: int = 1
+            while (head < tail) {
+                let cell: int = queue[head]
+                let neighbours = around(cell, w, h)
+                let count = len(neighbours) ^ { 0 }
+                var i: int = 0
+                while (i < count) {
+                    let next: int = neighbours[i]
+                    if (passable[next] and labels[next] < 0) {
+                        labels[next] = region
+                        queue[tail] = next
+                        tail = tail + 1
+                    }
+                    i = i + 1
+                }
+                head = head + 1
+            }
+            sizes[region] = tail
+            region = region + 1
+        }
+        start = start + 1
+    }
+    {labels: rows(labels, w, h), sizes: [for (i in 0 to (region - 1)) sizes[i]]}
+}
+
 // labels[y][x] is the region id of a floor cell (numbered in row-major order of first appearance), -1 elsewhere.
-pub fn regions(tiles, floor_tile = 0) map {
+pub fn regions(tiles, floor_tile = 0) map^ {
     let h = len(tiles)
     let w = if (h == 0) 0 else len(tiles[0])
-    let passable = [for (v in cells_of(tiles)) v == floor_tile]
-    let roots = settle([for (c, o in passable) if (o) c else -1], passable, w, h)
-    let ids = unique([for (r in roots where r >= 0) r])
-    let id_of = map([for (i, r in ids) for (x in [string(r), i]) x])
-    let labels = [for (r in roots) if (r < 0) -1 else id_of[string(r)]];
-    {labels: rows(labels, w, h), sizes: [for (i in 0 to (len(ids) - 1)) len([for (l in labels where l == i) l])]}
+    let passable = [for (v in cells_of(tiles)) v == floor_tile];
+    if (len(passable) == w * h) region_queue(passable, w, h)
+    else {
+        // Retain the existing shape and indexing semantics for ragged inputs.
+        let roots = settle([for (c, o in passable) if (o) c else -1], passable, w, h)
+        let ids = unique([for (r in roots where r >= 0) r])
+        let id_of = map([for (i, r in ids) for (x in [string(r), i]) x])
+        let labels = [for (r in roots) if (r < 0) -1 else id_of[string(r)]];
+        {labels: rows(labels, w, h), sizes: [for (i in 0 to (len(ids) - 1)) len([for (l in labels where l == i) l])]}
+    }
 }
 
 // the largest region (the first of equal ones) stays floor; every other floor cell becomes wall.
 pub fn keep_largest(tiles, floor_tile = 0, wall = 1) array^ {
-    let r = regions(tiles, floor_tile);
+    let r = regions(tiles, floor_tile)^;
     if (len(r.sizes) == 0) tiles
     else (let biggest = [for (i, s in r.sizes where s == max(r.sizes)) i][0],
         [for (y, row in tiles) [for (x, v in row) if (v == floor_tile and r.labels[y][x] != biggest) wall else v]])
@@ -96,6 +138,42 @@ pub fn keep_largest(tiles, floor_tile = 0, wall = 1) array^ {
 fn layer(dist, passable, w: int, h: int, d: int) array =>
     [for (c, v in dist) if (v >= 0 or not passable[c]) v else if (any([for (n in ((around(c, w, h)) ^ { [] })) dist[n] == d])) d + 1 else -1]
 
+fn distance_queue(marks: array, passable: array, w: int, h: int) array^ {
+    let n = len(marks)
+    var dist = marks
+    var queue = [for (i in 0 to n - 1) 0]
+    var tail: int = 0
+    var head: int = 0
+    // Seed all sources before visiting their neighbours. First discovery is
+    // the shortest distance and each reachable cell enters the queue once.
+    var i: int = 0
+    while (i < n) {
+        if (dist[i] == 0) {
+            queue[tail] = i
+            tail = tail + 1
+        }
+        i = i + 1
+    }
+    while (head < tail) {
+        let c: int = queue[head]
+        let next = dist[c] + 1
+        head = head + 1
+        let neighbours = around(c, w, h)
+        let count = len(neighbours)^
+        var k: int = 0
+        while (k < count) {
+            let j: int = neighbours[k]
+            if (passable[j] and dist[j] < 0) {
+                dist[j] = next
+                queue[tail] = j
+                tail = tail + 1
+            }
+            k = k + 1
+        }
+    }
+    dist
+}
+
 // steps from the nearest source [x, y] through 4-connected floor; -1 for walls and unreachable cells.
 pub fn distances(tiles, sources, floor_tile = 0) array^ {
     let h = len(tiles)
@@ -103,11 +181,14 @@ pub fn distances(tiles, sources, floor_tile = 0) array^ {
     let passable = [for (v in cells_of(tiles)) v == floor_tile]
     // a map, not `in` over the list: moisture passes every water cell as a source
     let starts = map([for (s in sources) for (x in [string(s[1] * w + s[0]), true]) x])
-    let first = [for (c, o in passable) if (o and starts[string(c)] == true) 0 else -1]
-    // each live round extends one layer; a finished map passes through unchanged
-    let done = reduce([[first, 0, false], *[for (i in 1 to len(passable)) i]], (st, i) => if (st[2]) st
-        else (let next = layer(st[0], passable, w, h, st[1]), [next, st[1] + 1, next == st[0]]));
-    rows(done[0], w, h)
+    let first = [for (c, o in passable) if (o and starts[string(c)] == true) 0 else -1];
+    if (len(passable) == w * h) rows(distance_queue(first, passable, w, h)^, w, h)
+    else {
+        // Preserve the layer semantics for ragged inputs.
+        let done = reduce([[first, 0, false], *[for (i in 1 to len(passable)) i]], (st, i) => if (st[2]) st
+            else (let next = layer(st[0], passable, w, h, st[1]), [next, st[1] + 1, next == st[0]]));
+        rows(done[0], w, h)
+    }
 }
 
 // --- drunkard's walk: carve until `fill` of the interior is floor ---
@@ -130,10 +211,10 @@ pub fn walk(k: u64, options) array^ {
         let dirs = steps_of(k, n)^
         let xs = [origin[0], *(math.cumsum([for (s in dirs) if (s == 0) 1 else if (s == 1) -1 else 0]) + origin[0])]
         let ys = [origin[1], *(math.cumsum([for (s in dirs) if (s == 2) 1 else if (s == 3) -1 else 0]) + origin[1])]
-        let visits = [for (i in 0 to n) [(fold_into(ys[i], ih) + 1) * d[0] + fold_into(xs[i], iw) + 1, i]]
-        let first = sort([for (v in visits group by v[0] as cell into g) [min(g |> ~[1]), cell]], (e) => e)
+        // Visits are already in timestamp order; unique keeps each first visit.
+        let first = unique([for (i in 0 to n) (fold_into(ys[i], ih) + 1) * d[0] + fold_into(xs[i], iw) + 1])
         let target = int(ceil(density * float(iw * ih)))
-        let carved = map([for (j, e in first where ((j < target) ^ { false })) for (x in [string(e[1]), true]) x]);
+        let carved = map([for (j, cell in first where ((j < target) ^ { false })) (string(cell), true)]);
         rows([for (c in 0 to (d[0] * d[1] - 1)) if (carved[string(c)] == true) 0 else 1], d[0], d[1])
     }
 }
@@ -257,51 +338,53 @@ fn prim(k: u64, w: int, h: int) array {
 
 // Wilson: loop-erased random walks give a uniform spanning tree. A walk folded at the
 // border pauses there, which only adds erased self-loops: every tree keeps weight (1/4)^(n-1).
-fn walk_from(k: u64, w: int, h: int, s: int, length: int) array^ {
-    let dirs = steps_of(k, length)^
-    let xs = [s % w, *math.cumsum([for (d in dirs) if (d == 0) 1 else if (d == 1) -1 else 0]) + s % w]
-    let ys = [s div w, *math.cumsum([for (d in dirs) if (d == 2) 1 else if (d == 3) -1 else 0]) + s div w];
-    [for (i in 0 to length) fold_into(ys[i], h) * w + fold_into(xs[i], w)]
-}
-
-fn first_tree_hit(path:array,tree:array) int?^ {
-    let count=len(path)^
-    var i:int=0
-    while (i<count) {
-        if (tree[path[i]]) { return i }
-        i=i+1
-    }
-    null
-}
-
-// stop at the first hit; later positions in the same chunk cannot affect the erased walk.
-fn walk_to_tree(k: u64, w: int, h: int, tree, s: int, chunk: int, from) array^ {
-    let path = walk_from(rng.at(k, chunk), w, h, s, chunk)^
-    let hit = first_tree_hit(path,tree)^;
-    if (hit != null) [*from, *slice(path, 0, hit + 1)]
-    else walk_to_tree(k, w, h, tree, path[chunk], chunk * 2, [*from, *slice(path, 0, chunk)])
-}
-
-// loop erasure: from the start, always leave a cell the way its final_visit visit left it.
-fn erase_loops(positions) array {
-    // later writes already select the last visit; grouping and max rebuild the same map.
-    let final_visit = map([for (i,c in positions) for (x in [string(c),i]) x])
-    let end = positions[len(positions) - 1];
-    reduce([[[positions[0]], false], *[for (i in 1 to len(positions)) i]], (st, i) => if (st[1]) st
-        else (let c = st[0][len(st[0]) - 1], if (c == end) [st[0], true] else [[*st[0], positions[final_visit[string(c)] + 1]], false]))[0]
-}
-
-fn wilson(k: u64, w: int, h: int) array {
+fn wilson(k: u64, w: int, h: int) array^ {
     let n = w * h
     let root = rng.below(rng.derive(k, "root"), n)
-    let first = [[for (c in 0 to (n - 1)) c == root], []]
-    let done = reduce([first, *[for (i in 1 to n) i]], (st, i: int) =>
-        (let passable = [for (c, t in st[0] where not t) c], if (len(passable) == 0) st
-        else (let path = erase_loops(walk_to_tree(rng.at(k, i), w, h, st[0], passable[0], 16, [])),
-            let on_path = map([for (c in path) for (x in [string(c), true]) x]),
-            [[for (c, t in st[0]) t or on_path[string(c)] == true],
-             [*st[1], *[for (j in ((1 to (len(path) - 1)) ^ { [] })) [path[j - 1], path[j]]]]])));
-    done[1]
+    var tree = [for (c in 0 to (n - 1)) c == root]
+    var successor: int[] = [for (c in 0 to (n - 1)) 0]
+    var edges = [for (c in 1 to (n - 1)) []]
+    var edge_count: int = 0
+    var start: int = 0
+    var draw: int = 1
+    while (start < n) {
+        if (tree[start]) { start = start + 1 }
+        else {
+            var cell: int = start
+            var chunk: int = 16
+            let key = rng.at(k, draw)
+            while (not tree[cell]) {
+                // Keep the original keyed chunks. Unfolded coordinates accumulate
+                // inside each chunk; its last folded cell starts the next one.
+                let units = rng.units(rng.at(key, chunk), chunk)^
+                var x: int = cell % w
+                var y: int = cell div w
+                var i: int = 0
+                while (i < chunk and not tree[cell]) {
+                    let d = int(floor(units[i] * 4.0))^
+                    x = x + (if (d == 0) 1 else if (d == 1) -1 else 0)
+                    y = y + (if (d == 2) 1 else if (d == 3) -1 else 0)
+                    let next = fold_into(y, h) * w + fold_into(x, w)
+                    successor[cell] = next
+                    cell = next
+                    i = i + 1
+                }
+                chunk = chunk * 2
+            }
+            // Reading each cell's last departure erases the loops. Every
+            // successor consulted here has been overwritten by this walk.
+            var here: int = start
+            while (here != cell) {
+                let next: int = successor[here]
+                edges[edge_count] = [here, next^]
+                edge_count = edge_count + 1
+                tree[here] = true
+                here = next^
+            }
+            draw = draw + 1
+        }
+    }
+    edges
 }
 
 // a spanning tree's edges [a, b] between cells numbered y * width + x.

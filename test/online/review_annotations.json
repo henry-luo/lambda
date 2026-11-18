@@ -5,12 +5,25 @@
     {
       "label": "saas_landing_365",
       "url": "https://supabase.com/customers",
-      "manual_major_remaining": "Customer stories and cards remain absent after the theme repair."
+      "manual_major_remaining": "Customer-stories heading, supporting copy and all customer cards remain absent.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "Customer stories and cards remain absent after the theme repair.",
+          "manual_major_remaining": "Customer-stories heading, supporting copy and all customer cards remain absent."
+        }
+      ]
     },
     {
       "label": "saas_landing_505",
       "url": "https://cofounder.co/",
-      "manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent."
+      "manual_major_remaining": "",
+      "resolved_previous_manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent.",
+      "resolved_at": "2026-11-18T04:43:31.020Z",
+      "resolution": "Main heading, copy, actions and large illustrated scene agree; animated notification details differ.",
+      "resolution_evidence": "comparison/repairs.html#round-83",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_677",
@@ -20,17 +33,41 @@
     {
       "label": "saas_landing_121",
       "url": "https://banky.io/",
-      "manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent."
+      "manual_major_remaining": "Entire hero heading, supporting copy and primary actions remain absent.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "Hero background is restored but the main heading, copy and actions remain absent.",
+          "manual_major_remaining": "Entire hero heading, supporting copy and primary actions remain absent."
+        }
+      ]
     },
     {
       "label": "saas_landing_473",
       "url": "https://www.popcorn.space/",
-      "manual_major_remaining": "Hero heading, copy, actions and device imagery remain absent; the mostly light reference hides this from the coarse score."
+      "manual_major_remaining": "Main heading, copy and action are restored, but the large device illustration remains absent at the bottom of the hero.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "Hero heading, copy, actions and device imagery remain absent; the mostly light reference hides this from the coarse score.",
+          "manual_major_remaining": "Main heading, copy and action are restored, but the large device illustration remains absent at the bottom of the hero."
+        }
+      ]
     },
     {
       "label": "saas_landing_134",
       "url": "https://cequence.io/",
-      "manual_major_remaining": "The main hero heading, copy and action remain absent despite the correct illustration and background."
+      "manual_major_remaining": "Entire left-column hero heading, copy and primary action are absent.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The main hero heading, copy and action remain absent despite the correct illustration and background.",
+          "manual_major_remaining": "Entire left-column hero heading, copy and primary action are absent."
+        }
+      ]
     },
     {
       "label": "saas_landing_399",
@@ -52,27 +89,64 @@
     {
       "label": "saas_landing_432",
       "url": "https://nightwatch.laravel.com/",
-      "manual_major_remaining": "The neutral background palette is repaired, but the main hero heading, copy and actions remain absent."
+      "manual_major_remaining": "Supporting copy, both primary actions and the large dashboard panel remain absent beneath a blurred heading.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The neutral background palette is repaired, but the main hero heading, copy and actions remain absent.",
+          "manual_major_remaining": "Supporting copy, both primary actions and the large dashboard panel remain absent beneath a blurred heading."
+        }
+      ]
     },
     {
       "label": "kotlin_docs",
       "url": "https://kotlinlang.org/docs/home.html",
-      "manual_major_remaining": "The header, navigation and documentation content remain absent; the captured loading spinner prevents the uniform-image heuristic from retaining this major omission."
+      "manual_major_remaining": "Documentation and navigation remain absent behind a loading spinner.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The header, navigation and documentation content remain absent; the captured loading spinner prevents the uniform-image heuristic from retaining this major omission.",
+          "manual_major_remaining": "Documentation and navigation remain absent behind a loading spinner."
+        }
+      ]
     },
     {
       "label": "saas_landing_436",
       "url": "https://www.craft.do/",
-      "manual_major_remaining": "Hero heading, button, spacing and product placement are restored after the flex sizing and CSS math-gap repairs. Large paper decorations still render without their authored URL-based image masks, an unsupported consumer recorded as RI-041."
+      "manual_major_remaining": "Large paper decorations still lack their authored URL image masks (RI-041), although heading, action and product panel are present.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "Hero heading, button, spacing and product placement are restored after the flex sizing and CSS math-gap repairs. Large paper decorations still render without their authored URL-based image masks, an unsupported consumer recorded as RI-041.",
+          "manual_major_remaining": "Large paper decorations still lack their authored URL image masks (RI-041), although heading, action and product panel are present."
+        }
+      ]
     },
     {
       "label": "saas_landing_679",
       "url": "https://www.empathy.com/news-room",
-      "manual_major_remaining": "The main news portrait remains absent. The fresh layout falls below the automated changed-area threshold while this large media omission persists."
+      "manual_major_remaining": "The large primary news photograph remains a blank placeholder; right-column cards and headline are present.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The main news portrait remains absent. The fresh layout falls below the automated changed-area threshold while this large media omission persists.",
+          "manual_major_remaining": "The large primary news photograph remains a blank placeholder; right-column cards and headline are present."
+        }
+      ]
     },
     {
       "label": "saas_landing_335",
       "url": "https://www.mavenclinic.com/",
-      "manual_major_remaining": "The hero photograph now fills its region, but the main heading, copy and action remain absent; retained after visual review despite falling below the changed-area threshold."
+      "manual_major_remaining": "",
+      "resolved_previous_manual_major_remaining": "The hero photograph now fills its region, but the main heading, copy and action remain absent; retained after visual review despite falling below the changed-area threshold.",
+      "resolved_at": "2026-11-18T04:43:31.020Z",
+      "resolution": "Hero photograph, heading, supporting copy and primary actions now agree; cookie UI differs.",
+      "resolution_evidence": "comparison/repairs.html#round-83",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "maven_central",
@@ -82,7 +156,15 @@
     {
       "label": "saas_landing_087",
       "url": "https://greenlistapp.com/",
-      "manual_major_remaining": "CSSOM rule retention restores the green palette and header, but the main hero heading, copy, action and illustrations remain absent; retained after visual review despite the low coarse score."
+      "manual_major_remaining": "Large hero illustrations, supporting copy and connect action are absent.",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "CSSOM rule retention restores the green palette and header, but the main hero heading, copy, action and illustrations remain absent; retained after visual review despite the low coarse score.",
+          "manual_major_remaining": "Large hero illustrations, supporting copy and connect action are absent."
+        }
+      ]
     },
     {
       "label": "saas_landing_271",
@@ -123,7 +205,7 @@
     {
       "label": "saas_landing_563",
       "url": "https://superhuman.com/",
-      "manual_major_remaining": "The main hero heading, copy and product/person imagery remain absent. The earlier footer overlap is no longer visible; high severity is retained for the missing main hero content.",
+      "manual_major_remaining": "Foreground text and translucent-card fills differ substantially across the main hero: black native text/borders replace the white/light browser presentation.",
       "review_history": [
         {
           "reviewed_at": "2026-11-13T12:36:31.193216+00:00",
@@ -132,12 +214,25 @@
         }
       ],
       "reviewed_at": "2026-11-13T13:10:49.900130+00:00",
-      "evidence": "comparison/repairs.html#round-23"
+      "evidence": "comparison/repairs.html#round-23",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The main hero heading, copy and product/person imagery remain absent. The earlier footer overlap is no longer visible; high severity is retained for the missing main hero content.",
+          "manual_major_remaining": "Foreground text and translucent-card fills differ substantially across the main hero: black native text/borders replace the white/light browser presentation."
+        }
+      ]
     },
     {
       "label": "saas_landing_093",
       "url": "https://www.zendesk.com/",
-      "manual_major_remaining": "The main hero is present, but the primary logo, product navigation and header actions remain absent in a large empty header. Retained as a major functional omission after visual review."
+      "manual_major_remaining": "",
+      "resolved_previous_manual_major_remaining": "The main hero is present, but the primary logo, product navigation and header actions remain absent in a large empty header. Retained as a major functional omission after visual review.",
+      "resolved_at": "2026-11-18T04:43:31.020Z",
+      "resolution": "Main hero image, heading, copy and form agree; announcement bar and cookie UI differ.",
+      "resolution_evidence": "comparison/repairs.html#round-83",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_565",
@@ -147,7 +242,12 @@
     {
       "label": "saas_landing_442",
       "url": "https://www.useorigin.com/",
-      "manual_major_remaining": "The blue hero background is visible after inline CSS URL discovery, but the primary heading, copy, action and product image remain absent. Retained after visual review despite the lower changed-area score; remaining visibility/initialization cause is unisolated."
+      "manual_major_remaining": "",
+      "resolved_previous_manual_major_remaining": "The blue hero background is visible after inline CSS URL discovery, but the primary heading, copy, action and product image remain absent. Retained after visual review despite the lower changed-area score; remaining visibility/initialization cause is unisolated.",
+      "resolved_at": "2026-11-18T04:43:31.020Z",
+      "resolution": "Main navigation, heading, copy and primary action agree; cookie overlay and product media frame differ without a confirmed major static omission.",
+      "resolution_evidence": "comparison/repairs.html#round-83",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_481",
@@ -161,42 +261,90 @@
     {
       "label": "saas_landing_170",
       "url": "https://thecape.agency/",
-      "manual_major_remaining": "The hero heading, description, primary action and large geometric illustration remain absent. Only the dark section height has changed; visual review rejects automatic clearance and the remaining cause is unisolated.",
+      "manual_major_remaining": "Entire hero headline, copy, primary action and large illustration remain absent.",
       "reviewed_at": "2026-11-13T13:10:49.900130+00:00",
-      "evidence": "comparison/repairs.html#round-23"
+      "evidence": "comparison/repairs.html#round-23",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The hero heading, description, primary action and large geometric illustration remain absent. Only the dark section height has changed; visual review rejects automatic clearance and the remaining cause is unisolated.",
+          "manual_major_remaining": "Entire hero headline, copy, primary action and large illustration remain absent."
+        }
+      ]
     },
     {
       "label": "saas_landing_160",
       "url": "https://overflow.io/",
-      "manual_major_remaining": "The large colored hero background is restored by RI-085, making the heading readable. The brand, primary navigation and header actions remain absent. The saved source retains the authored navbar opacity0 loading rule; its live initialization cause is not assigned to this filter repair.",
+      "manual_major_remaining": "Entire top navigation and brand remain absent while the main hero is present.",
       "reviewed_at": "2026-11-13T22:41:48.359621+00:00",
-      "evidence": "comparison/repairs.html#round-37"
+      "evidence": "comparison/repairs.html#round-37",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The large colored hero background is restored by RI-085, making the heading readable. The brand, primary navigation and header actions remain absent. The saved source retains the authored navbar opacity0 loading rule; its live initialization cause is not assigned to this filter repair.",
+          "manual_major_remaining": "Entire top navigation and brand remain absent while the main hero is present."
+        }
+      ]
     },
     {
       "label": "python",
       "url": "https://www.python.org/",
-      "manual_major_remaining": "Search-button wrapping is repaired, but the live carousel code example and explanatory content remain absent despite a below-threshold coarse score.",
+      "manual_major_remaining": "",
       "reviewed_at": "2026-11-16T16:54:52.046004+00:00",
-      "evidence": "comparison/repairs.html#round-44"
+      "evidence": "comparison/repairs.html#round-44",
+      "resolved_at": "2026-11-18T02:19:25.047873+00:00",
+      "resolution": "The existing selected-frame option is honored by export. Both renderers captured at an explicit 1000ms post-load window show the carousel code and explanation; smaller header details remain.",
+      "resolution_evidence": "comparison/repairs.html#round-79",
+      "resolved_previous_manual_major_remaining": "Search-button wrapping is repaired, but the live carousel code example and explanatory content remain absent despite a below-threshold coarse score.",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "saas_landing_446",
       "url": "https://www.affinity.studio/",
-      "manual_major_remaining": "The variable-font headline weight is repaired, but the four large decorative corner images remain absent. Retained after visual review despite crossing below the coarse image threshold.",
+      "manual_major_remaining": "Four large hero artwork panels remain absent around the heading; navigation labels are now readable and aligned after RI-136.",
       "reviewed_at": "2026-11-16T17:25:55.095666+00:00",
-      "evidence": "comparison/repairs.html#round-45"
+      "evidence": "comparison/repairs.html#round-45",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The variable-font headline weight is repaired, but the four large decorative corner images remain absent. Retained after visual review despite crossing below the coarse image threshold.",
+          "manual_major_remaining": "Four large hero artwork panels are absent around the heading, and the main navigation breaks into vertical fragments."
+        },
+        {
+          "rechecked_at": "2026-11-18T08:01:50.295Z",
+          "evidence": "comparison/repairs.html#round-89",
+          "previous_manual_major_remaining": "Four large hero artwork panels are absent around the heading, and the main navigation breaks into vertical fragments.",
+          "manual_major_remaining": "Four large hero artwork panels remain absent around the heading; navigation labels are now readable and aligned after RI-136."
+        }
+      ]
     },
     {
       "label": "saas_landing_416",
       "url": "https://www.hellobonsai.com/reviews",
-      "manual_major_remaining": "The live main heading and portrait cards remain absent. Saved-DOM card sizing is repaired; the independent live visibility cause remains unconfirmed."
+      "manual_major_remaining": "",
+      "resolved_previous_manual_major_remaining": "The live main heading and portrait cards remain absent. Saved-DOM card sizing is repaired; the independent live visibility cause remains unconfirmed.",
+      "resolved_at": "2026-11-18T04:43:31.020Z",
+      "resolution": "Main heading, supporting copy and both portrait/video cards are restored and agree.",
+      "resolution_evidence": "comparison/repairs.html#round-83",
+      "resolved_capture_settle_ms": 1000
     },
     {
       "label": "unreal_docs",
       "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine",
-      "manual_major_remaining": "Initial styles and documentation content are restored, but Lambda retains that document while preserved and freshly checked Chromium references show the application 403 route. Navigation/header and application state remain substantially different; the lower dark-background pixel score does not establish parity.",
+      "manual_major_remaining": "Native initial documentation differs from Chromium application 403 state.",
       "reviewed_at": "2026-11-17T07:52:37.126041+00:00",
-      "evidence": "comparison/repairs.html#round-62"
+      "evidence": "comparison/repairs.html#round-62",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "Initial styles and documentation content are restored, but Lambda retains that document while preserved and freshly checked Chromium references show the application 403 route. Navigation/header and application state remain substantially different; the lower dark-background pixel score does not establish parity.",
+          "manual_major_remaining": "Native initial documentation differs from Chromium application 403 state."
+        }
+      ]
     },
     {
       "label": "saas_landing_678",
@@ -204,6 +352,122 @@
       "manual_major_remaining": "The header is partly present, but the large main heading and article/media region remain absent. A small score change crossed below the coarse threshold without resolving that visual omission.",
       "reviewed_at": "2026-11-17T12:36:43.827186+00:00",
       "evidence": "comparison/repairs.html#round-70"
+    },
+    {
+      "label": "webkit_blog",
+      "url": "https://webkit.org/blog/",
+      "manual_major_remaining": "Two large article photos remain absent. Their PNG requests are queued correctly, but independent transfers exceed the existing one-second resource window; SVG prefix rejection is repaired separately (RI-133).",
+      "reviewed_at": "2026-11-18T02:19:25.047873+00:00",
+      "evidence": "comparison/repairs.html#round-79",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "The selected-frame repair restores the article grid, but two large first-column article images remain absent. Retained after visual review despite a below-threshold coarse score; the image acquisition/paint cause is not yet confirmed.",
+          "manual_major_remaining": "Two large first-column article images are still absent."
+        },
+        {
+          "rechecked_at": "2026-11-18T05:48:53.833Z",
+          "evidence": "comparison/repairs.html#round-84",
+          "previous_manual_major_remaining": "Two large first-column article images are still absent.",
+          "manual_major_remaining": "Two large article photos remain absent. Their PNG requests are queued correctly, but independent transfers exceed the existing one-second resource window; SVG prefix rejection is repaired separately (RI-133)."
+        }
+      ]
+    },
+    {
+      "label": "saas_landing_426",
+      "url": "https://rogo.ai/",
+      "manual_major_remaining": "Headline, supporting copy and primary action are now restored, but the main navigation and large patterned hero background remain absent; headline wrapping differs substantially.",
+      "reviewed_at": "2026-11-18T02:59:04.553163+00:00",
+      "evidence": "comparison/repairs.html#round-81",
+      "rechecks": [
+        {
+          "rechecked_at": "2026-11-18T04:43:31.020Z",
+          "evidence": "comparison/repairs.html#round-83",
+          "previous_manual_major_remaining": "Lab color computation restores the subtle hero background, but the main navigation, remainder of the headline, supporting copy and primary action remain absent in the unchanged live capture. Retained after visual review despite a below-threshold coarse score.",
+          "manual_major_remaining": "Headline, supporting copy and primary action are now restored, but the main navigation and large patterned hero background remain absent; headline wrapping differs substantially."
+        }
+      ]
+    },
+    {
+      "label": "saas_landing_003",
+      "url": "https://boards.boldare.com/",
+      "manual_major_remaining": "",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83",
+      "resolved_previous_manual_major_remaining": "Large headline words are missing: ONLINE and most of FOR REMOTE TEAMS. Lower coarse score does not establish parity.",
+      "resolved_at": "2026-11-18T07:44:36.718Z",
+      "resolution": "RI-135 restores inherited text shadows after retained layouts; ONLINE and FOR REMOTE TEAMS are fully readable and the main composition agrees with the preserved browser reference. Small animated decorations and text-raster details remain outside this major-only pass.",
+      "resolution_evidence": "comparison/repairs.html#round-88",
+      "resolved_capture_settle_ms": 1000
+    },
+    {
+      "label": "saas_landing_202",
+      "url": "https://mymind.com/",
+      "manual_major_remaining": "",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83",
+      "resolved_previous_manual_major_remaining": "Large colored circular hero background is missing; major composition differs despite intact foreground content.",
+      "resolved_at": "2026-11-18T07:18:53.910Z",
+      "resolution": "RI-134 restores the large halo video through the existing first-frame decoder; headline, supporting copy, navigation and primary actions remain present. Remaining spacing and native playback-overlay differences are below this major-only review scope.",
+      "resolution_evidence": "comparison/repairs.html#round-87",
+      "resolved_capture_settle_ms": 1000
+    },
+    {
+      "label": "saas_landing_258",
+      "url": "https://www.opus.so/about-us",
+      "manual_major_remaining": "Native capture shows a WebAssembly-dependent security checkpoint instead of the actual page.",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83"
+    },
+    {
+      "label": "saas_landing_293",
+      "url": "https://www.figma.com/figjam/",
+      "manual_major_remaining": "Large product screenshot and decorative hero composition remain absent.",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83"
+    },
+    {
+      "label": "saas_landing_309",
+      "url": "https://prismic.io/pricing",
+      "manual_major_remaining": "Pricing cards and customer logos remain absent below the heading; the primary pricing content does not match.",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83"
+    },
+    {
+      "label": "saas_landing_299",
+      "url": "https://www.dropbox.com/",
+      "manual_major_remaining": "The complete main hero content and product screenshot remain absent.",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83"
+    },
+    {
+      "label": "saas_landing_378",
+      "url": "https://andopen.co/",
+      "manual_major_remaining": "Large colored hero shapes remain absent, changing the main composition; the embedded demonstration also shows a different frame.",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83"
+    },
+    {
+      "label": "saas_landing_382",
+      "url": "https://frame.io/customers",
+      "manual_major_remaining": "The entire main customer-image montage remains absent below the header.",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83"
+    },
+    {
+      "label": "saas_landing_494",
+      "url": "https://sierra.ai/",
+      "manual_major_remaining": "The main hero headline over the photograph remains absent; header and media are present.",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83"
+    },
+    {
+      "label": "saas_landing_542",
+      "url": "https://www.diabrowser.com/",
+      "manual_major_remaining": "The giant DIA headline, introductory line and main download action remain absent.",
+      "reviewed_at": "2026-11-18T04:43:31.020Z",
+      "evidence": "comparison/repairs.html#round-83"
     }
   ]
 }

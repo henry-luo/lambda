@@ -715,8 +715,8 @@ External corpora live in the `lambda-test` submodule (`js262`, `layout`, `markdo
 ```
 
 - Clones WPT blob-less into `ref/wpt` and checks out the pinned commit (`WPT_COMMIT=<sha>` overrides). It refuses to switch commits if `ref/wpt` has local changes.
-- Links each top-level corpus directory of `lambda-test/` as `test/<name> -> ../lambda-test/<name>`. It skips existing paths and stops on a symlink that points somewhere else.
-- `test/jquery-ui`, `test/markdown` and `test/media` are **tracked** links. `test/js262`, `test/layout`, `test/render` and `test/pdf` are git-ignored.
+- Links the selected corpus directories under `test/`. The default links point to `../lambda-test/<name>`. Setup updates standard links from before the submodule move, preserves existing files and directories, and reports conflicting symlinks.
+- `test/jquery-ui`, `test/markdown`, `test/media`, `test/js262`, `test/layout`, `test/render` and `test/pdf` are git-ignored links.
 - Other reference checkouts under `ref/` (e.g. `ref/test262`) are not fetched by the script.
 
 ### 7.2 Working in a Git Worktree

@@ -177,7 +177,7 @@ static void test_pure_fixtures_across_tiers(const char* const* fixtures,
     const size_t tier_count = sizeof(tiers) / sizeof(tiers[0]);
     size_t count = fixture_count + (demo ? 1 : 0);
     if (count == 0) return;
-    size_t batch_size = count > 2 * test_batch_worker_limit(count) ? 3 : 1;
+    size_t batch_size = count > 2 * test_batch_worker_limit(count) ? 2 : 1;
     size_t batch_count = (count + batch_size - 1) / batch_size;
     size_t job_count = batch_count * tier_count;
     char (*paths)[2][512] = (char (*)[2][512])calloc(count, sizeof(*paths));
@@ -205,11 +205,25 @@ static void test_pure_fixtures_across_tiers(const char* const* fixtures,
     }
     LambdaTierFixture* jobs = (LambdaTierFixture*)calloc(job_count, sizeof(LambdaTierFixture));
     ASSERT_NE(jobs, nullptr);
-    ThreadPool* pool = tp_create((int)test_batch_worker_limit(job_count));
+    // Only grouped tier fixtures use the larger exclusive budget. A single
+    // fixture can be a complete demo with much higher peak model memory.
+    size_t maximum_workers = batch_size > 1 ? 6 : 4;
+    ThreadPool* pool = tp_create((int)test_batch_worker_limit(job_count, maximum_workers));
+    // schedule eager compilation early for larger sets so a cold JIT batch
+    // does not outlast the other tiers after the worker pool drains.
+    size_t eager_jobs = batch_size > 1 ? batch_count : 0;
+    size_t first_remaining_tier = eager_jobs ? 1 : 0;
+    size_t remaining_tiers = tier_count - first_remaining_tier;
     for (size_t i = 0; i < job_count; i++) {
-        size_t start = (i / tier_count) * batch_size;
+        size_t batch = i, tier = 0;
+        if (i >= eager_jobs) {
+            size_t remaining = i - eager_jobs;
+            batch = remaining / remaining_tiers;
+            tier = first_remaining_tier + remaining % remaining_tiers;
+        }
+        size_t start = batch * batch_size;
         size_t size = count - start < batch_size ? count - start : batch_size;
-        jobs[i] = {scripts + start, expected + start, size, tiers[i % tier_count], check_errors};
+        jobs[i] = {scripts + start, expected + start, size, tiers[tier], check_errors};
         if (!pool || !tp_submit(pool, test_lambda_tier_fixture, &jobs[i])) {
             if (pool) tp_wait_all(pool);
             test_lambda_tier_fixture(&jobs[i]);

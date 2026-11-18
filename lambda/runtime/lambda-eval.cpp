@@ -16461,6 +16461,11 @@ Item map_literal_put(Item owner, Item key, Item value) {
     return rooted_owner.get();
 }
 
+static bool map_literal_capture_field(Item owner, Item key, Item value) {
+    cow_capture_value(value);
+    return !item_is_error(value) && !item_is_error(map_literal_put(owner, key, value));
+}
+
 Item map_literal_spread(Item owner, Item source) {
     TypeId source_type = get_type_id(source);
     if (source_type != LMD_TYPE_MAP && source_type != LMD_TYPE_VMAP &&
@@ -16474,6 +16479,29 @@ Item map_literal_spread(Item owner, Item source) {
     Rooted<Item> rooted_source(roots, source);
     Rooted<Item> rooted_key(roots, ItemNull);
     Rooted<Item> rooted_value(roots, ItemNull);
+    if (source_type == LMD_TYPE_MAP) {
+        TypeMap* shape = (TypeMap*)source.map->type;
+        if (shape && shape->is_transition_shared_shape && !shape->js_meta && !shape->has_spread) {
+            // each shared shape field already identifies its packed slot and
+            // unique name. Skip building and looking up a temporary key list.
+            FOR_EACH_MAP_FIELD(shape, field) {
+                if (!field->name) continue;
+                if (field->ns) {
+                    Symbol* key = name_key_symbol_ns(field->name->str, field->name->length, field->ns);
+                    if (!key) return ItemError;
+                    rooted_key.set({.item = y2it(key)});
+                } else {
+                    String* key = heap_create_name(field->name->str, field->name->length);
+                    if (!key) return ItemError;
+                    rooted_key.set({.item = s2it(key)});
+                }
+                rooted_value.set(_map_field_value(shape, rooted_source.get().map->data, field));
+                if (!map_literal_capture_field(rooted_owner.get(), rooted_key.get(), rooted_value.get()))
+                    return ItemError;
+            }
+            return rooted_owner.get();
+        }
+    }
     SymbolKeyList* keys = item_keys(rooted_source.get());
     int64_t key_count = symbol_key_list_len(keys);
     for (int64_t index = 0; index < key_count; index++) {
@@ -16487,11 +16515,7 @@ Item map_literal_spread(Item owner, Item source) {
         } else {
             rooted_value.set(fn_index(rooted_source.get(), rooted_key.get()));
         }
-        // A spread contributes each selected field to the fresh literal.
-        cow_capture_value(rooted_value.get());
-        if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR ||
-                get_type_id(map_literal_put(rooted_owner.get(), rooted_key.get(),
-                    rooted_value.get())) == LMD_TYPE_ERROR) {
+        if (!map_literal_capture_field(rooted_owner.get(), rooted_key.get(), rooted_value.get())) {
             symbol_key_list_free(keys);
             return ItemError;
         }

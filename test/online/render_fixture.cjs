@@ -11,11 +11,11 @@ function renderFixtures(name) {
     const scratch = fs.mkdtempSync(path.join(root, 'temp/render-' + name + '-test-'));
     const PNG = pngLibrary(root);
     after(() => fs.rmSync(scratch, {recursive: true, force: true}));
-    return async (label, source) => {
+    return async (label, source, env = process.env) => {
         const html = path.join(scratch, label + '.html');
         const png = path.join(scratch, label + '.png');
         fs.writeFileSync(html, source);
-        const result = await runLambdaRender({label, url: html}, png, parseOptions([], root), scratch);
+        const result = await runLambdaRender({label, url: html}, png, parseOptions([], root, env), scratch);
         assert.equal(result.ok, true, result.error);
         const image = PNG.sync.read(fs.readFileSync(png));
         return {image, log: fs.readFileSync(path.join(scratch, result.outputLog), 'utf8')};

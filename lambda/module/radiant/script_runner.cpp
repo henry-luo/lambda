@@ -2774,6 +2774,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
                     result = ItemError;
                 }
             }
+            if (dom_doc->js.auto_close_event_loop && dom_doc->js.virtual_clock_enabled &&
+                    dom_doc->js.post_load_settle_ms > 0.0) {
+                // establish CSS timelines before the selected interval, even when scripts never read geometry.
+                dom_ensure_geometry_snapshot(dom_doc);
+            }
             js_event_loop_drain();
             log_mem_stage("js: after event loop drain");
             log_info("execute_document_scripts: timer queue drained");

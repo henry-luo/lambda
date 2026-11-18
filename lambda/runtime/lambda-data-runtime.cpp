@@ -911,24 +911,18 @@ Item array_num_get_borrowed(ArrayNum *array, int64_t index) {
     return array_num_read_item(array, array_num_element_offset(array, index));
 }
 
-// S9.2.2: numeric row reads are values; only internal path borrows alias storage.
-Item array_num_get(ArrayNum* array, int64_t index) {
-    Item value = array_num_get_borrowed(array, index);
-    return get_type_id(value) == LMD_TYPE_ARRAY_NUM
-        ? array_num_snapshot(value.array_num) : value;
-}
-
 // preserve exact lanes and logical dimensions while materializing strided views.
-Item array_num_snapshot(ArrayNum* source) {
-    if (!source) return ItemNull;
+static Item array_num_snapshot_range(ArrayNum* source, int64_t start,
+        int64_t length, int first_axis) {
     RootFrame roots(2);
     Rooted<ArrayNum*> src(roots, source);
-    Rooted<ArrayNum*> dst(roots, array_num_new(source->get_elem_type(), source->length));
+    // the lane copy below initializes the entire destination before it escapes.
+    Rooted<ArrayNum*> dst(roots, array_num_new_uninit(source->get_elem_type(), length));
     if (!dst.get() || !array_num_copy_same_type_bytes(dst.get(), 0,
-            src.get(), 0, src.get()->length)) return ItemError;
-    dst.get()->rep_cert = src.get()->rep_cert;
-    if (src.get()->is_ndim && src.get()->extra && array_num_rank(src.get()) > 1) {
-        int rank = ((ArrayNumShape*)(uintptr_t)src.get()->extra)->ndim;
+            src.get(), start, length)) return ItemError;
+    if (first_axis == 0) dst.get()->rep_cert = src.get()->rep_cert;
+    int rank = array_num_rank(src.get()) - first_axis;
+    if (rank > 1) {
         size_t bytes = sizeof(ArrayNumShape) + 2 * (size_t)rank * sizeof(int64_t);
         ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(bytes);
         if (!shape) return ItemError;
@@ -938,7 +932,7 @@ Item array_num_snapshot(ArrayNum* source) {
         shape->is_f_contig = rank == 1;
         int64_t stride = 1;
         for (int axis = rank - 1; axis >= 0; axis--) {
-            array_num_shape_dims(shape)[axis] = array_num_shape_dims(original)[axis];
+            array_num_shape_dims(shape)[axis] = array_num_shape_dims(original)[first_axis + axis];
             array_num_shape_strides(shape)[axis] = stride;
             stride *= array_num_shape_dims(shape)[axis];
         }
@@ -946,6 +940,29 @@ Item array_num_snapshot(ArrayNum* source) {
         dst.get()->extra = (int64_t)(uintptr_t)shape;
     }
     return {.array_num = dst.get()};
+}
+
+Item array_num_snapshot(ArrayNum* source) {
+    if (!source) return ItemNull;
+    return array_num_snapshot_range(source, 0, source->length, 0);
+}
+
+// S9.2.2v2: numeric row reads have snapshot semantics. Copy the logical
+// row directly so a value read never needs a temporary alias or view shape.
+Item array_num_get(ArrayNum* array, int64_t index) {
+    if (array && !((uintptr_t)array >> 56) && array->type_id == LMD_TYPE_ARRAY_NUM &&
+            array->is_ndim && array->extra) {
+        ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)array->extra;
+        if (shape->ndim >= 2) {
+            int64_t* dims = array_num_shape_dims(shape);
+            if (index < 0 || index >= dims[0]) return ItemNull;
+            int64_t length = array->length / dims[0];
+            return array_num_snapshot_range(array, index * length, length, 1);
+        }
+    }
+    Item value = array_num_get_borrowed(array, index);
+    return get_type_id(value) == LMD_TYPE_ARRAY_NUM
+        ? array_num_snapshot(value.array_num) : value;
 }
 
 ArrayNum* array_int() {

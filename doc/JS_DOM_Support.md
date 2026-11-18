@@ -46,6 +46,12 @@ The DOM lives in `lambda/dom/` and is realm-neutral: the same nodes are driven b
 - **Script loading limit**: parser-discovered scripts and the document.write path are implemented. Dynamically appended inline classic scripts are not prepared/executed, including sources returned by XHR. Completing the HTML preparation, inert-fragment and started-state lifecycle remains open (**D9.1.3v2 / D8.4.4 / D10.1.7**); see [the reproduced gap](../vibe/Lambda_Issue_Ledger.md#online-dynamic-script-preparation).
 - **Initial geometry observation**: standalone exports obtain the first layout through the shared DOM checkpoint even when page scripts never read geometry. Host-driven commit guards and the selected virtual frame remain authoritative (**D9.1.1v4 / D9.1.3v2 / D10.1.7**); this does not claim complete observer conformance.
 - **CSSOM and layout**: `element.style` get/set with camelCase mapping, `getComputedStyle` over the full cascade, stylesheet objects, `classList` and `dataset`, `getBoundingClientRect`, `offsetWidth`/`clientHeight` and `scrollTop`/`scrollLeft` computed from a lazy layout pass.
+
+Dataset writes share `setAttribute`'s CSS dependency checks: unrelated metadata
+retains geometry, while CSS-dependent values invalidate it. Mutation observers
+still receive the writes and old values (**D9.5.6v2**; [LR12-60](../vibe/Lambda_Issue_Ledger.md#lr12-60)). Rewriting an identical
+metadata value also retains geometry when CSS references it; callback-driven
+style changes still invalidate layout ([LR12-61](../vibe/Lambda_Issue_Ledger.md#lr12-61)).
 - **Collection iteration**: DOM and CSSOM collection value iterators share the realm's `Array.prototype.values`, including `CSSStyleDeclaration`. The factory defers length reads, observes live collection changes and preserves branded getter errors through proxies. AUTO, AST and MIR share this behavior (**D8.4.4 / D9.5.5**); broader CSSOM and realm-crossing conformance remains open.
 - **Document**: `document.cookie`, `readyState`, `title`, `URL`/`location`, `write`, `innerHTML`/`outerHTML` (parsing HTML fragments), forms and form controls, selection and ranges, clipboard.
 
