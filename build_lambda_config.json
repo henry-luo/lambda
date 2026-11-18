@@ -6785,7 +6785,7 @@
           {
             "source": "test/test_js_test262_gtest.cpp",
             "name": "Test262 Runner Preflight",
-            "category": "baseline",
+            "category": "extended",
             "runner_only": true,
             "runner_name": "test_js_test262_prelim_gtest",
             "runner_args": [
@@ -6803,6 +6803,7 @@
           {
             "source": "test/test_lambda_std_gtest.cpp",
             "name": "Lambda Structured Tests",
+            "category": "extended",
             "dependencies": [
               "lambda-lib"
             ],
