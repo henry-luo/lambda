@@ -6,6 +6,23 @@ Complete reference for all `make` targets in the Lambda project.
 
 Run `make help` for a quick summary, or see below for full details.
 
+## Publishing repositories
+
+`make push-lambda message='Describe the changes'` stages and commits all
+non-ignored changes, including untracked files, in each initialized submodule
+and then Lambda. It pushes each attached branch to its configured upstream,
+from nested submodules outward, before committing and pushing its parent.
+`MESSAGE` is also accepted. The same message is used for each new commit. Review every repository's changes
+before running it. It fetches each `origin` first and stops on errors; pushes
+already completed cannot be rolled back automatically. It does not run tests.
+
+For a detached submodule with changes or an unpublished commit, the target
+selects the unique nearest ancestor among `origin` branches and pushes to that
+branch. If no such branch exists or the choice is ambiguous, it stops; switch
+to the intended branch and configure its upstream before retrying. An unchanged
+detached commit already reachable from an `origin` branch needs no push. All
+pushes are non-forced. Resolve conflicts and initialize every submodule first.
+
 ---
 
 ## Build Targets

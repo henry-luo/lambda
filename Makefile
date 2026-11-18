@@ -505,7 +505,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
+.PHONY: push-lambda all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-radiant-baseline test-radiant-full test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-headless build-headless lambda-nomir build-nomir lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
@@ -550,6 +550,7 @@ help:
 	@echo "  all           - Build all projects"
 	@echo ""
 	@echo "Maintenance:"
+	@echo "  push-lambda   - Commit and push submodules, then Lambda (message='...')"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
 	@echo "  clean-grammar - Remove generated Lambda CST grammar files"
@@ -3625,6 +3626,11 @@ bench-compile:
 # Count lines of code in the repository
 count-loc:
 	@./utils/count_loc.sh
+
+# Export the message rather than interpolating it into shell code.
+export message MESSAGE
+push-lambda:
+	@$(PYTHON) utils/push_lambda.py
 
 # Publish ./site to gh-pages branch
 gh-pages:
