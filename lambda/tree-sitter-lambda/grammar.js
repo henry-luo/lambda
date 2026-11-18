@@ -40,6 +40,22 @@ function comma_sep(rule) {
   return optional(comma_sep1(rule));
 }
 
+function statement_sequence($, closed, rest) {
+  const open = $._open_stam;
+  const separator = choice(';', $._stmt_boundary);
+  return choice(open, closed, seq(open, separator, rest),
+    seq(closed, optional(separator), rest));
+}
+
+function callable_type($, kind) {
+  const parameter = field('declare', $.fn_param);
+  const result = field('type', alias($._fn_return_type, $.return_type));
+  const typed_result = kind === 'pn'
+    ? choice(result, seq('->', result, optional($.procedure_effects))) : result;
+  return seq(field('kind', kind), optional(seq('(', comma_sep(parameter), ')',
+    optional(seq($._fn_return, typed_result)))));
+}
+
 // S16.10.1v2 (Design_Syntax Appendix K.1): a word that can BEGIN a construct
 // never names a binding, so the grammar reserves it (`reserved` below). These
 // words stay legal DATA names (S16.10.2, S16.10.3) through `_keyword_name`,
@@ -266,10 +282,12 @@ function parameter_body($) {
 function fn_declaration($, name) {
   return seq(
     optional(field('pub', 'pub')),
-    field('kind', choice('fn', 'pn', 'function')),
-    field('name', name),
-    parameter_list($),
-    optional(field('type', $.return_type)),
+    choice(
+      seq(field('kind', choice('fn', 'function')), field('name', name),
+        parameter_list($), optional(field('type', $.return_type))),
+      seq(field('kind', 'pn'), field('name', name), parameter_list($),
+        optional(field('type', $.return_type)), optional($.procedure_effects)),
+    ),
     field('body', $._body_block),
   );
 }
@@ -474,7 +492,7 @@ module.exports = grammar({
   rules: {
     // ======================= Document and statements =======================
 
-    document: $ => optional($.content),
+    document: $ => optional(alias($._document_stam_seq, $.content)),
 
     // §7.17: `comment` is declared BOTH here and in `externals`. The scanner
     // emits it wherever it runs, so a line break in front of a comment is
@@ -504,12 +522,12 @@ module.exports = grammar({
     // `index_expr` needs a primary), so juxtaposition changes nothing;
     // `let x = a [0]` is ONE item on one line, so accepting a split across
     // lines would change meaning.
-    _stam_seq: $ => choice(
-      $._open_stam,
-      $._closed_stam,
-      seq($._open_stam, choice(';', $._stmt_boundary), $._stam_seq),
-      seq($._closed_stam, optional(choice(';', $._stmt_boundary)), $._stam_seq),
-    ),
+    _stam_seq: $ => statement_sequence($, $._closed_stam, $._stam_seq),
+
+    // S16.7.7: the generative block is a closed tail at script level only.
+    _document_stam_seq: $ => statement_sequence($,
+      choice($._closed_stam, $.generative_block), $._document_stam_seq),
+    generative_block: $ => seq('function', '(', ')', field('body', $._body_block)),
 
     _closed_stam: $ => choice(
       $.fn_stam,
@@ -1030,6 +1048,9 @@ module.exports = grammar({
     // S12.1.4v2: `function` declares a colour-polymorphic `fn` — pure iff its
     // `function`-typed arguments are.
     fn_stam: $ => fn_declaration($, choice($.identifier, $.symbol)),
+    procedure_effects: $ => seq('@', choice($._effect_name,
+      seq('{', comma_sep1($._effect_name), '}'))),
+    _effect_name: _ => choice('random', 'clock', 'print'),
     fn_expr_stam: $ => fn_expr_declaration($, choice($.identifier, $.symbol)),
     // S16.10.2: a method's name is a data name, reached only through a
     // receiver (`x.state()`), so inside an object type it admits keywords.
@@ -1268,7 +1289,7 @@ module.exports = grammar({
       field('pattern', $.view_pattern),
       optional(seq(parameter_list($), optional(field('type', $.return_type)))),
       optional(field('state', $.state_decl)),
-      field('body', $._body_block),
+      field('body', choice($._body_block, $.generative_block)),
       repeat(field('handler', $.event_handler)),
     ),
 
@@ -1412,15 +1433,7 @@ module.exports = grammar({
     // return type -- `fn ()`, `fn () int`, never `fn int`. The return type
     // starts on the `)` line: `_fn_return` is emitted only there, and a name
     // opening the next line is an error (S16.2.3v3).
-    fn_type: $ => prec.right(seq(
-      field('kind', choice('fn', 'pn')),
-      optional(seq(
-        '(', optional(seq(field('declare', $.fn_param),
-          repeat(seq(',', field('declare', $.fn_param))))), ')',
-        optional(seq($._fn_return,
-          field('type', alias($._fn_return_type, $.return_type)))),
-      )),
-    )),
+    fn_type: $ => prec.right(choice(callable_type($, 'fn'), callable_type($, 'pn'))),
 
     range_type: $ => prec.left('range_to', seq(
       field('start', choice($._non_null_literal, $.signed_literal_type)), 'to',

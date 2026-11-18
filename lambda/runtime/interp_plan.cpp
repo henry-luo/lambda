@@ -1569,13 +1569,10 @@ static void plan_handler(PlanCtx* outer, AstViewNode* view,
     // handler plan or the first callee expression can exhaust the scratch
     // window while the model is still live.
     uint32_t body_need = 1 + plan_need(handler->body);
-    if (view->body && view->body->node_type == AST_NODE_CONTENT) {
-        for (AstNode* item = ((AstListNode*)view->body)->item;
-                item; item = item->next) {
-            if (!is_view_handler_body_binding(item->node_type)) continue;
-            uint32_t declaration_need = 1 + plan_need(item);
-            if (declaration_need > body_need) body_need = declaration_need;
-        }
+    for (AstNode* item = view_handler_body_bindings(view); item; item = item->next) {
+        if (!is_view_handler_body_binding(item->node_type)) continue;
+        uint32_t declaration_need = 1 + plan_need(item);
+        if (declaration_need > body_need) body_need = declaration_need;
     }
     if (body_need > pc.max_scratch) pc.max_scratch = body_need;
     plan_finish(&pc);

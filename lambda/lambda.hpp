@@ -1066,8 +1066,10 @@ extern "C" {
     // the call would be a `pn` call that `fn` context cannot make.
     Item lambda_fn_colour_guard(Function* fn, const Item* args, int argc,
         uint32_t guard);
-    Item lambda_fn_colour_arg_check(Item argument);
+    uint32_t lambda_function_effect_mask(const Function* fn);
+    Item lambda_fn_colour_arg_check(Item argument, uint32_t guard);
     Item lambda_fn_colour_guard_list(Item callee, List* args, uint32_t guard);
+    Item lambda_apply_args_guarded(Item callee, Item args, uint32_t guard);
     // Env-aware form used only by binder-carrying function entries.  The
     // legacy ABI remains a NULL-env wrapper for every existing boundary.
     Item lambda_type_check_env(Item value, Type* expected, Type** env,
@@ -1421,7 +1423,7 @@ extern "C" {
     // Finish a mapping pipe or `that` collection in its source's kind
     // (S10.1.2v2, S10.1.5v2).
     Item pipe_end(Array* result, Item source);
-    Item fn_pipe_call(Item collection, Item func);
+    Item fn_pipe_call(Item collection, Item func, uint32_t guard);
 
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);
@@ -1589,6 +1591,9 @@ extern "C" {
     // view/edit template apply
     Item fn_apply1(Item target);
     Item fn_apply2(Item target, Item options);
+    Item fn_apply1_effects(Item target, uint32_t allowed);
+    Item fn_apply2_effects(Item target, Item options, uint32_t allowed);
+    Item fn_input_template_url(Item target, Item options);
 
 
     // datetime constructors

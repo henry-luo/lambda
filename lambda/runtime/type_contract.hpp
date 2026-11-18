@@ -246,6 +246,7 @@ void lambda_type_format_name(const Type* type, char* buffer, size_t capacity);
 // The same, for the expected side of a boundary diagnostic: a literal contract
 // names its value (`1 | 2`, `"a"`) rather than its carrier.
 void lambda_type_format_contract_name(const Type* type, char* buffer, size_t capacity);
+void lambda_format_effect_suffix(uint32_t effects, char* buffer, size_t capacity);
 
 // Re-represent an exactly admitted numeric value for a concrete boundary
 // contract. This is deliberately separate from `lambda_type_matches()`, whose

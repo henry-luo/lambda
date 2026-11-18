@@ -4853,8 +4853,8 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call, b
             // a statically resolved polymorphic slot still needs its runtime
             // colour check before the callee enters (S12.1.4v4).
             MirValue boxed = convert(c, v, VALUE_REP_ITEM);
-            MIR_reg_t checked = em_call_1(&c->em, "lambda_fn_colour_arg_check", MIR_T_I64,
-                MIR_T_I64, reg(c, boxed.reg), true);
+            MIR_reg_t checked = em_call_2(&c->em, "lambda_fn_colour_arg_check", MIR_T_I64,
+                MIR_T_I64, reg(c, boxed.reg), MIR_T_I64, imm(c, call->fn_colour_guard), true);
             check_item_result(c, checked, &failure);
             v = value(c, checked, boxed.semantic_type, VALUE_REP_ITEM, boxed.semantic_contract, arg);
         }
@@ -5483,7 +5483,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
             LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
     }
     MvpFunction* f = mvp_function(c->module, ast_direct_call_function(node));
-    if (f) {
+    if (f && !(node->fn_colour_guard & LAMBDA_COLOUR_GUARD_CALLEE)) {
         if (f->result_contract == &TYPE_STRING) {
             MirValue joined = string_concat(c, node, NULL, NULL, NULL);
             if (joined.reg) return joined;
@@ -5493,6 +5493,36 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
     AstNode* target = ast_unwrap_primary_to_leaf(node->function);
     if (!target || target->node_type != AST_NODE_SYS_FUNC) return dynamic_call(c, node);
     SysFuncInfo* info = ((AstSysFuncNode*)target)->fn_info;
+    if (node->fn_colour_guard && (info->fn == SYSFUNC_CALL || info->fn == SYSPROC_CALL)) {
+        MirValue callee = convert(c, expression(c, mvp_call_argument(node, 0)), VALUE_REP_ITEM);
+        MirValue args = convert(c, expression(c, mvp_call_argument(node, 1)), VALUE_REP_ITEM);
+        MIR_reg_t result = em_call_3(&c->em, "lambda_apply_args_guarded", MIR_T_I64,
+            MIR_T_I64, reg(c, callee.reg), MIR_T_I64, reg(c, args.reg),
+            MIR_T_I64, imm(c, node->fn_colour_guard), true);
+        return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+    }
+    if (node->input_url_only && info->func_ptr) {
+        MirValue source = convert(c, expression(c, mvp_call_argument(node, 0)), VALUE_REP_ITEM);
+        AstNode* options = mvp_call_argument(node, 1);
+        MirValue opts = options ? convert(c, expression(c, options), VALUE_REP_ITEM) : MirValue{};
+        MIR_reg_t result = em_call_2(&c->em, "fn_input_template_url", MIR_T_I64,
+            MIR_T_I64, reg(c, source.reg), MIR_T_I64, options ? reg(c, opts.reg) : imm(c, ITEM_NULL), true);
+        return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+    }
+    if (node->template_effects) {
+        MirValue source = convert(c, expression(c, mvp_call_argument(node, 0)), VALUE_REP_ITEM);
+        MIR_reg_t result;
+        if (info->fn == SYSFUNC_APPLY2) {
+            MirValue opts = convert(c, expression(c, mvp_call_argument(node, 1)), VALUE_REP_ITEM);
+            result = em_call_3(&c->em, "fn_apply2_effects", MIR_T_I64,
+                MIR_T_I64, reg(c, source.reg), MIR_T_I64, reg(c, opts.reg),
+                MIR_T_I64, imm(c, node->template_effects), true);
+        } else {
+            result = em_call_2(&c->em, "fn_apply1_effects", MIR_T_I64,
+                MIR_T_I64, reg(c, source.reg), MIR_T_I64, imm(c, node->template_effects), true);
+        }
+        return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+    }
     if (info->fn == SYSPROC_PRINT) {
         Type* contract = mvp_value_contract(c->module, node);
         return value(c, em_print_arguments(&c->em, node->argument, true,
@@ -7780,8 +7810,9 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
             // match whose own ~ is bound locally (S10.1.2v4/S10.1.7v2).
             MirValue subject = convert(c, expression(c, pipe->left), VALUE_REP_ITEM);
             MirValue callable = convert(c, expression(c, pipe->right), VALUE_REP_ITEM);
-            return value(c, em_call_2(&c->em, "fn_pipe_call", MIR_T_I64,
-                MIR_T_I64, reg(c, subject.reg), MIR_T_I64, reg(c, callable.reg), true),
+            return value(c, em_call_3(&c->em, "fn_pipe_call", MIR_T_I64,
+                MIR_T_I64, reg(c, subject.reg), MIR_T_I64, reg(c, callable.reg),
+                MIR_T_I64, imm(c, pipe->pipe_effect_guard), true),
                 LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
         }
         MirValue subject = convert(c, expression(c, pipe->left), VALUE_REP_ITEM);
@@ -9751,8 +9782,8 @@ bool mvp_emit_function(LambdaMvpModule* m, MvpFunction* fn) {
             MvpBinding* binding = mvp_binding(m, state->entry);
             if (binding) move(&c, binding->reg, reg(&c, incoming.reg));
         }
-        if (fn->handler && fn->view->body && fn->view->body->node_type == AST_NODE_CONTENT)
-            for (AstNode* declaration = ((AstListNode*)fn->view->body)->item; declaration; declaration = declaration->next)
+        if (fn->handler)
+            for (AstNode* declaration = view_handler_body_bindings(fn->view); declaration; declaration = declaration->next)
                 if (is_view_handler_body_binding(declaration->node_type)) expression(&c, declaration, true);
         MirValue result = expression(&c, fn->ast->body);
         return_value(&c, result, fn->ast->body);

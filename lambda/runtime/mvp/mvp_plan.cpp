@@ -403,7 +403,8 @@ bool mvp_pure_key(AstNode* node, int depth, bool allow_pure_calls) {
     if (allow_pure_calls && node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         AstNode* target = ast_unwrap_primary_to_leaf(call->function);
-        if (!target || target->node_type != AST_NODE_SYS_FUNC || ((AstSysFuncNode*)target)->fn_info->is_proc) return false;
+        if (!target || target->node_type != AST_NODE_SYS_FUNC || call->template_effects ||
+                call->fn_colour_guard || sys_func_effect_bound(((AstSysFuncNode*)target)->fn_info)) return false;
         for (int i = 0; i < mvp_call_argument_count(call); i++)
             if (!mvp_pure_key(mvp_call_argument(call, i), depth + 1, true)) return false;
         return true;
@@ -427,12 +428,15 @@ bool mvp_index_key(LambdaMvpModule* m, AstNode* node, int depth) {
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         MvpFunction* function = mvp_function(m, ast_direct_call_function(call));
+        TypeFunc* signature = function ? lambda_type_func_signature(function->ast->type) : NULL;
         // a Lambda `fn` is pure wherever it was compiled (S12.1.1v3), so a sibling
         // a satellite reaches through its boxed entry qualifies on the same AST
         // facts; only a JS export has no Lambda AST to check.
         if (!function || function->js_export_name || function->ast->captures || function->method_owner ||
                 function->ast->is_async || function->ast->is_generator ||
-                lambda_type_func_is_proc(function->ast->type) || mvp_variadic_function(function) ||
+                lambda_signature_value_is_proc(signature) ||
+                (signature && (signature->is_colour_poly || signature->effect_captures)) ||
+                mvp_variadic_function(function) ||
                 mvp_function_binder_count(function) || mvp_call_argument_count(call) != function->abi.param_count)
             return false;
         // a capture-free pure call with plain supplied arguments cannot write

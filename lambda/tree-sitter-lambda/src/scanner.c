@@ -509,7 +509,24 @@ bool tree_sitter_lambda_external_scanner_scan(
             if (is_identifier_start(lexer->lookahead)) {
                 char word[16];
                 unsigned n = read_word(lexer, word);
-                if (n != 2 || memcmp(word, "as", 2) != 0) return false;
+                bool binder = n == 2 && memcmp(word, "as", 2) == 0;
+                bool template_body = n == 8 && memcmp(word, "function", 8) == 0;
+                if (template_body) {
+                    bool line = false;
+                    template_body = skip_handler_trivia(lexer, &line) &&
+                        lexer->lookahead == '(';
+                    if (template_body) {
+                        lexer->advance(lexer, false);
+                        template_body = skip_handler_trivia(lexer, &line) &&
+                            lexer->lookahead == ')';
+                    }
+                    if (template_body) {
+                        lexer->advance(lexer, false);
+                        template_body = skip_handler_trivia(lexer, &line) &&
+                            lexer->lookahead == '{';
+                    }
+                }
+                if (!binder && !template_body) return false;
             }
         }
         lexer->result_symbol = TYPE_CARET;
@@ -558,6 +575,13 @@ bool tree_sitter_lambda_external_scanner_scan(
     // the next line it could as well begin a new statement, so neither reading
     // is taken: no token, and the parse fails. A keyword that names no type
     // keeps its own reading (`as` is the parameter's binder).
+    if (valid_symbols[FN_RETURN] && !slash_pending && !saw_newline &&
+            lexer->lookahead == '-') {
+        lexer->advance(lexer, false);
+        if (lexer->lookahead != '>') return false;
+        lexer->result_symbol = FN_RETURN;
+        return true;
+    }
     if (valid_symbols[FN_RETURN] && !slash_pending &&
             is_identifier_start(lexer->lookahead)) {
         char word[16];
@@ -599,7 +623,7 @@ bool tree_sitter_lambda_external_scanner_scan(
         // type plus a new value. Let that existing grammar branch consume it.
         if (valid_symbols[FN_TYPE_END] && !valid_symbols[TYPE_END] &&
                 is_identifier_start(c)) return false;
-        if (c == ':' || c == '(' || c == '?') return false;
+        if (c == ':' || c == '(' || c == '?' || c == '@') return false;
         if (c == '+' || c == '*') {
             enum TokenType op = c == '+' ? BIN_PLUS : BIN_STAR;
             return !saw_newline && valid_symbols[op]
