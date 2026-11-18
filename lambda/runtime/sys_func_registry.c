@@ -18,6 +18,23 @@
 #include <setjmp.h>
 #include "../lambda.hpp"
 #include "sys_func_registry.h"
+
+LambdaEffectMask sys_func_effect_bound(const SysFuncInfo* info) {
+    if (!info) return LAMBDA_EFFECT_UNRESTRICTED;
+    // These legacy rows have functional calling conventions but acquire resources.
+    if (info->fn == SYSFUNC_INPUT1 || info->fn == SYSFUNC_INPUT2)
+        return LAMBDA_EFFECT_UNRESTRICTED;
+    if (!info->is_proc) return 0;
+    if (info->declared_effects) return info->declared_effects;
+    switch (info->fn) {
+    case SYSPROC_UUID: return LAMBDA_EFFECT_RANDOM;
+    case SYSPROC_NOW:
+    case SYSPROC_TODAY:
+    case SYSPROC_CLOCK: return LAMBDA_EFFECT_CLOCK;
+    case SYSPROC_PRINT: return LAMBDA_EFFECT_PRINT;
+    default: return LAMBDA_EFFECT_UNRESTRICTED;
+    }
+}
 #include "lambda-error.h"
 #include "concurrency.h"
 #include "runtime-state.h"
@@ -2701,7 +2718,11 @@ JitImport jit_runtime_imports[] = {
     {"lambda_error_stamp_site", FPTR(lambda_error_stamp_site)},
     {"lambda_raise_operand", FPTR(lambda_raise_operand)},
     {"lambda_fn_colour_arg_check", FPTR(lambda_fn_colour_arg_check)},
+    {"fn_apply1_effects", FPTR(fn_apply1_effects)},
+    {"fn_apply2_effects", FPTR(fn_apply2_effects)},
+    {"fn_input_template_url", PROFILE_FILE_IO_FPTR(fn_input_template_url)},
     {"lambda_fn_colour_guard_list", FPTR(lambda_fn_colour_guard_list)},
+    {"lambda_apply_args_guarded", FPTR(lambda_apply_args_guarded)},
     {"lambda_type_check_env", FPTR(lambda_type_check_env)},
     {"lambda_type_check_env_status", FPTR(lambda_type_check_env_status)},
     {"lambda_type_check_captured_env_status", FPTR(lambda_type_check_captured_env_status)},

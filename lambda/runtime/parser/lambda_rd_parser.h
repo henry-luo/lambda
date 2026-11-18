@@ -157,6 +157,8 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_SUBTYPE,
     LAMBDA_TOK_GT_EQ,
     LAMBDA_TOK_ARROW,
+    LAMBDA_TOK_RETURN_ARROW,
+    LAMBDA_TOK_EFFECT_AT,
     LAMBDA_TOK_ELLIPSIS,
 } LambdaTokenKind;
 
@@ -338,6 +340,8 @@ typedef enum LambdaReductionForm {
     LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN,
     // GM5v2: `grammar Name { body }`; detail = name, secondary = body span
     LAMBDA_REDUCTION_FORM_GRAMMAR,
+    LAMBDA_REDUCTION_FORM_GENERATIVE_BLOCK,
+    LAMBDA_REDUCTION_FORM_PROCEDURE_EFFECTS,
 } LambdaReductionForm;
 
 enum {
@@ -370,6 +374,7 @@ enum {
     // S8.1.1v2: the `of` axis -- the for binding walks IntKeys only
     LAMBDA_REDUCTION_FLAG_INT_ONLY = 1u << 22,
     LAMBDA_REDUCTION_FLAG_BINARY_FIELD = 1u << 23,
+    LAMBDA_REDUCTION_FLAG_GENERATIVE_VIEW = 1u << 24,
 };
 
 // A reduction value is whatever the sink returned for it. A sink must never
@@ -406,6 +411,9 @@ typedef struct LambdaParseSink {
 
 void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length);
 LambdaToken lambda_lexer_next(LambdaLexer* lexer);
+// Read one trailing effect clause at the start of a type-pattern slice.
+bool lambda_rd_parse_effect_clause(const char* source, size_t length,
+    uint32_t* effects, size_t* consumed, const char** message);
 bool lambda_token_is_data_name(LambdaTokenKind kind);
 // Skip a brace-delimited body from just after its `{` to the matching `}`
 // (left unconsumed). False when the body is unterminated or a quote is bad.

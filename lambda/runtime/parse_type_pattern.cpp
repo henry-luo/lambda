@@ -6,6 +6,7 @@
 #include "re2_wrapper.hpp"
 #include "lambda-error.h"
 #include "binary_schema.hpp"
+#include "parser/lambda_rd_parser.h"
 #include "lib/log.h"
 #include "lib/str.h"
 #include "lib/strview.h"
@@ -822,12 +823,16 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
     // `)` line (S16.2.3v3); an `as` there is the parameter's binder.
     const char* after_close = lx->p;
     StrView return_word = has_signature ? peek_word(lx) : StrView{NULL, 0};
-    if (return_word.length && !word_is(return_word, "as")) {
+    bool return_arrow = is_proc && has_signature && lx->end - lx->p >= 2 &&
+        lx->p[0] == '-' && lx->p[1] == '>';
+    if (return_arrow || (return_word.length && !word_is(return_word, "as"))) {
         if (memchr(after_close, '\n', (size_t)(lx->p - after_close))) {
             fail_code(lx, ERR_INVALID_LITERAL,
                 "a function type's return type starts on the line of its ')'");
             return NULL;
         }
+        // A procedure type's explicit arrow also admits a grouped result.
+        if (return_arrow) lx->p += 2;
         AstNode* returned = parse_binder(lx, false);
         if (!returned) { return NULL; }
         ast_node->body = returned;
@@ -841,6 +846,16 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
                 return NULL;
             }
         }
+    }
+    if (return_arrow && at(lx, '@')) {
+        size_t consumed = 0;
+        const char* message = NULL;
+        if (!lambda_rd_parse_effect_clause(lx->p, (size_t)(lx->end - lx->p),
+                &fn_type->declared_effects, &consumed, &message)) {
+            fail_code(lx, ERR_INVALID_TYPE_SYNTAX, message);
+            return NULL;
+        }
+        lx->p += consumed;
     }
     // A return type takes its own suffix (`fn () int?` returns `int?`), so one
     // left over would bind to the function type -- `fn ()?` against

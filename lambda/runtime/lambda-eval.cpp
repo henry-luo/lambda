@@ -1704,10 +1704,32 @@ void lambda_function_set_type(Function* fn, void* fn_type) {
 // S12.1.1/S11.1.5: a function value's colour is its signature's effect bit.
 // Hosted entries reuse this storage under their own layout, so only a Lambda
 // signature is read; a value without one is not a Lambda `pn`.
-static bool lambda_function_is_proc(const Function* fn) {
-    if (!fn || fn->entry_abi >= FN_ENTRY_ABI_HOSTED_FIRST) return false;
+static LambdaEffectMask lambda_function_effects(const Function* fn,
+        bool check_resources = false, int depth = 0) {
+    if (!fn) return 0;
+    if (fn->entry_abi >= FN_ENTRY_ABI_HOSTED_FIRST)
+        return check_resources ? LAMBDA_EFFECT_UNRESTRICTED : 0;
+    if (depth >= LAMBDA_MAX_FUNCTION_ARGS * 4) return LAMBDA_EFFECT_UNRESTRICTED;
     const TypeFunc* signature = (const TypeFunc*)fn->fn_type;
-    return signature && signature->type_id == LMD_TYPE_FUNC && signature->is_proc;
+    if (!signature || signature->type_id != LMD_TYPE_FUNC) return 0;
+    if (check_resources && signature->may_acquire_resources) return LAMBDA_EFFECT_UNRESTRICTED;
+    if (signature->is_proc && !signature->declared_effects) return LAMBDA_EFFECT_UNRESTRICTED;
+    LambdaEffectMask effects = lambda_signature_procedure_bound(signature);
+    if (signature->effect_captures) {
+        if (!fn->closure_env) return LAMBDA_EFFECT_UNRESTRICTED;
+        const Item* captures = (const Item*)fn->closure_env;
+        for (const uint8_t* slot = signature->effect_captures; *slot; ++slot) {
+            if (*slot > fn->closure_field_count) return LAMBDA_EFFECT_UNRESTRICTED;
+            Item captured = captures[*slot - 1];
+            if (get_type_id(captured) == LMD_TYPE_FUNC)
+                effects |= lambda_function_effects(captured.function, check_resources, depth + 1);
+        }
+    }
+    return effects;
+}
+
+uint32_t lambda_function_effect_mask(const Function* fn) {
+    return lambda_function_effects(fn);
 }
 
 // S11.1.5: `function` admits both colours; every other function type admits
@@ -1715,12 +1737,20 @@ static bool lambda_function_is_proc(const Function* fn) {
 // `is` and boundary admission so the two cannot disagree.
 static bool lambda_function_admitted(Item item, TypeId actual_id, Type* expected) {
     if (actual_id != LMD_TYPE_FUNC) return false;
-    return expected == &TYPE_FUNC ||
-        lambda_function_is_proc(item.function) == lambda_type_func_is_proc(expected);
+    if (expected == &TYPE_FUNC) return true;
+    TypeFunc* target = lambda_type_func_signature(expected);
+    LambdaEffectMask effects = lambda_function_effects(item.function);
+    bool is_proc = effects != 0;
+    if (is_proc != (target && target->is_proc)) return false;
+    return !is_proc || !target->declared_effects ||
+        lambda_procedure_effects_fit(effects, target->declared_effects);
 }
 
-static bool lambda_item_is_proc(Item item) {
-    return get_type_id(item) == LMD_TYPE_FUNC && lambda_function_is_proc(item.function);
+static bool lambda_procedure_exceeds(Function* fn, uint32_t guard) {
+    // The existing input family keeps its functional ABI. A restricted
+    // caller still needs a proof that the target performs no acquisition.
+    return (lambda_function_effects(fn, guard & LAMBDA_EFFECT_GUARD_RESOURCES) &
+        ~lambda_effect_guard_allowed(guard)) != 0;
 }
 
 // one wording for both tiers: the JIT checks a direct call's argument without
@@ -1739,18 +1769,24 @@ static Item lambda_fn_colour_error(const char* detail) {
 extern "C" Item lambda_fn_colour_guard(Function* fn, const Item* args, int argc,
         uint32_t guard) {
     if (!fn || !guard) return ItemNull;
-    if ((guard & LAMBDA_COLOUR_GUARD_CALLEE) && lambda_function_is_proc(fn)) {
+    LambdaEffectMask allowed = lambda_effect_guard_allowed(guard);
+    if ((guard & LAMBDA_COLOUR_GUARD_CALLEE) && lambda_procedure_exceeds(fn, guard)) {
         return lambda_fn_colour_error(fn->name ? fn->name : "anonymous procedure");
     }
     if (fn->entry_abi >= FN_ENTRY_ABI_HOSTED_FIRST) return ItemNull;
     const TypeFunc* signature = (const TypeFunc*)fn->fn_type;
     if (!signature || signature->type_id != LMD_TYPE_FUNC ||
-            !signature->is_colour_poly || !args) return ItemNull;
+            !signature->is_colour_poly) return ItemNull;
     int index = 0;
-    for (const TypeParam* param = signature->param; param && index < argc &&
-            index < 16; param = param->next, index++) {
-        if ((guard & (1u << index)) && lambda_type_param_is_colour_poly(param) &&
-                lambda_item_is_proc(args[index])) {
+    for (const TypeParam* param = signature->param; param && index < 16;
+            param = param->next, index++) {
+        if (!lambda_type_param_is_colour_poly(param)) continue;
+        if (!args || index >= argc || args[index].item == ITEM_MISSING_ARGUMENT) {
+            if ((guard & LAMBDA_EFFECT_GUARD_DEFAULTS) &&
+                    (param->default_callback_effects & ~allowed))
+                return lambda_fn_colour_error("a default callback exceeds the caller's effect bound");
+        } else if ((guard & (1u << index)) && get_type_id(args[index]) == LMD_TYPE_FUNC &&
+                lambda_procedure_exceeds(args[index].function, guard)) {
             return lambda_fn_colour_error(LAMBDA_COLOUR_ARG_DETAIL);
         }
     }
@@ -1768,8 +1804,9 @@ extern "C" Item lambda_fn_colour_guard_list(Item callee, List* args, uint32_t gu
 
 // The direct-call form: the caller already resolved the callee, so each
 // guarded argument is known to fill a polymorphic slot (S12.1.4v2(3)).
-extern "C" Item lambda_fn_colour_arg_check(Item argument) {
-    return lambda_item_is_proc(argument)
+extern "C" Item lambda_fn_colour_arg_check(Item argument, uint32_t guard) {
+    return get_type_id(argument) == LMD_TYPE_FUNC &&
+            lambda_procedure_exceeds(argument.function, guard)
         ? lambda_fn_colour_error(LAMBDA_COLOUR_ARG_DETAIL) : argument;
 }
 
@@ -2205,7 +2242,7 @@ Item fn_call_emit(Function* fn, List* args, List* destination) {
 // what selects the error convention (S12.3.4: fn returns, pn raises). The
 // TARGET's colour is read from its TypeFunc and checked here whenever the
 // static side could not (S12.1.4).
-static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_proc,
+static Item lambda_dynamic_apply(Item callee, Item args_item, uint32_t guard,
         const char* caller) {
     Function* fn = get_type_id(callee) == LMD_TYPE_FUNC
         ? (Function*)(uintptr_t)callee.item : NULL;
@@ -2216,7 +2253,8 @@ static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_pro
     // S12.1.4: a pn target reached from fn context. Static analysis catches
     // this when the callee is statically known; a dynamic callee can only be
     // caught here.
-    if (!caller_is_proc && lambda_function_is_proc(fn)) {
+    if ((guard & LAMBDA_COLOUR_GUARD_CALLEE) &&
+            lambda_procedure_exceeds(fn, guard)) {
         return runtime_error_itemf(ERR_PROC_IN_FN,
             "%s: cannot call a procedure (pn) from a function (fn)", caller);
     }
@@ -2225,32 +2263,42 @@ static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_pro
     // generic and the packed-numeric array faces are accepted; an `array[num]`
     // is what an all-numeric literal like `[1, 2]` actually builds.
     TypeId args_type = get_type_id(args_item);
+    List* args;
     if (args_type == LMD_TYPE_ARRAY) {  // lists are ARRAY at runtime
-        return fn_call_into(fn, it2list(args_item), NULL);
-    }
-    if (args_type == LMD_TYPE_ARRAY_NUM) {
+        args = it2list(args_item);
+    } else if (args_type == LMD_TYPE_ARRAY_NUM) {
         // Packed numerics carry no Item[] to hand the dynamic ABI, so widen
         // through the boundary accessor that already boxes each element.
         ArrayNum* packed = (ArrayNum*)(uintptr_t)args_item.item;
-        List* widened = list();
+        args = list();
         for (int64_t i = 0; i < packed->length; i++) {
             // Widening must be length-preserving, and this is an argument
             // list: append verbatim (LR09-R3).
-            array_push_verbatim((Array*)widened, array_num_get(packed, i));
+            array_push_verbatim((Array*)args, array_num_get(packed, i));
         }
-        return fn_call_into(fn, widened, NULL);
+    } else {
+        return runtime_error_itemf(ERR_INVALID_OPERATION,
+            "%s: second argument must be an array of arguments, got %s",
+            caller, get_type_name(args_type));
     }
-    return runtime_error_itemf(ERR_INVALID_OPERATION,
-        "%s: second argument must be an array of arguments, got %s",
-        caller, get_type_name(args_type));
+    Item refused = lambda_fn_colour_guard(fn, args->items, (int)args->length,
+        guard & ~LAMBDA_COLOUR_GUARD_CALLEE);
+    if (item_is_error(refused)) return refused;
+    return fn_call_into(fn, args, NULL);
 }
 
 extern "C" Item fn_apply_args(Item callee, Item args_item) {
-    return lambda_dynamic_apply(callee, args_item, false, "call");
+    return lambda_dynamic_apply(callee, args_item,
+        LAMBDA_COLOUR_GUARD_CALLEE | LAMBDA_COLOUR_GUARD_ARGS | LAMBDA_EFFECT_GUARD_DEFAULTS,
+        "call");
 }
 
 extern "C" Item pn_apply_args(Item callee, Item args_item) {
-    return lambda_dynamic_apply(callee, args_item, true, "call");
+    return lambda_dynamic_apply(callee, args_item, 0, "call");
+}
+
+extern "C" Item lambda_apply_args_guarded(Item callee, Item args, uint32_t guard) {
+    return lambda_dynamic_apply(callee, args, guard, "call");
 }
 
 static Item lambda_dynamic_public_non_function_error(Function* fn) {
@@ -2633,11 +2681,14 @@ static void runtime_value_summary(Item item, char* buffer, size_t capacity) {
         return;
     }
     if (type_id == LMD_TYPE_FUNC) {
-        // name the colour: a function-contract mismatch is a colour mismatch
+        // A procedure may be refused by its bound even when its colour fits.
         const char* name = item.function ? item.function->name : NULL;
-        snprintf(buffer, capacity, "%s%s%s",
-            lambda_function_is_proc(item.function) ? "pn" : "fn",
-            name && *name ? " " : "", name ? name : "");
+        LambdaEffectMask effects = lambda_function_effects(item.function);
+        char suffix[40] = {};
+        if (effects != LAMBDA_EFFECT_UNRESTRICTED)
+            lambda_format_effect_suffix(effects, suffix, sizeof(suffix));
+        snprintf(buffer, capacity, "%s%s%s%s", effects ? "pn" : "fn",
+            name && *name ? " " : "", name ? name : "", suffix);
         return;
     }
     snprintf(buffer, capacity, "%s", get_type_name(type_id));
@@ -5771,7 +5822,7 @@ static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_p
     return ok;
 }
 
-Item fn_input2(Item target_item, Item type) {
+static Item input_resource(Item target_item, Item type, bool template_url_only) {
     GUARD_ERROR2(target_item, type);
     RootFrame input_roots(4);
     Rooted<Item> input_target_root(input_roots, target_item);
@@ -5833,6 +5884,13 @@ Item fn_input2(Item target_item, Item type) {
     // Convert target Item to Target struct
     Url* cwd = context ? (Url*)context->cwd : NULL;
     Target* target = fs_target ? nullptr : item_to_target(target_item.item, cwd);
+    // Match the admitted resource class before a cache hit or acquisition.
+    if (template_url_only && (!target ||
+            (target->scheme != TARGET_SCHEME_HTTP && target->scheme != TARGET_SCHEME_HTTPS))) {
+        if (target) target_free(target);
+        return runtime_error_item(ERR_PROC_IN_FN,
+            "input: a generative template requires an HTTP(S) URL", NULL);
+    }
     if (!fs_target && !target) {
         return runtime_error_itemf(ERR_INVALID_URL, "input: failed to resolve target");
     }
@@ -5968,6 +6026,14 @@ Item fn_input2(Item target_item, Item type) {
         return lambda_type_check(result, schema_type, "input schema");
     }
     return input ? result : ItemError;
+}
+
+Item fn_input2(Item target, Item options) {
+    return input_resource(target, options, false);
+}
+
+Item fn_input_template_url(Item target, Item options) {
+    return input_resource(target, options, true);
 }
 
 // declared extern "C" to allow calling from C code (path.c)

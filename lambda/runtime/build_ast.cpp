@@ -347,6 +347,21 @@ static bool jube_signature_params(const char* signature, const char** open,
     return *open && *close && *close > *open;
 }
 
+static bool jube_signature_effects(const char* signature, uint32_t* effects) {
+    const char* open;
+    const char* close;
+    if (!jube_signature_params(signature, &open, &close)) return true;
+    const char* marker = strrchr(close, '@');
+    if (!marker) return true;
+    const char* message = NULL;
+    size_t size = strlen(marker);
+    size_t consumed = 0;
+    if (!jube_signature_is_proc(signature) ||
+            !lambda_rd_parse_effect_clause(marker, size, effects, &consumed, &message)) return false;
+    while (consumed < size && isspace((unsigned char)marker[consumed])) ++consumed;
+    return consumed == size;
+}
+
 static const char* jube_skip_space(const char* p, const char* end) {
     while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
     return p;
@@ -466,6 +481,12 @@ static void register_jube_sys_funcs(void) {
             record->info.native_arg_count = 0;
             record->info.success_type = record->info.return_type;
             record->info.may_return_error = false;
+            if (!jube_signature_effects(fn->signature, &record->info.declared_effects)) {
+                log_error("JUBE_AST: %s: invalid procedure effect clause", record->name);
+                memset(record, 0, sizeof(*record));
+                out--;
+                continue;
+            }
             if (!jube_signature_var_params(fn, record->info.arg_count,
                     &record->info.var_mask, record->var_bounds)) {
                 // D7.6.3: fail closed. An fn, a variadic entry or a value-typed
@@ -2104,7 +2125,16 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     if (source->type_id == LMD_TYPE_FUNC && target->type_id == LMD_TYPE_FUNC &&
             target != &TYPE_FUNC) {
         if (source == &TYPE_FUNC) return STATIC_BOUNDARY_DEFERRED;
-        if (lambda_type_func_is_proc(source) != lambda_type_func_is_proc(target)) {
+        TypeFunc* source_fn = lambda_type_func_signature(source);
+        TypeFunc* target_fn = lambda_type_func_signature(target);
+        // The final body walk establishes a colour-polymorphic value's own effects.
+        if (source_fn && (source_fn->is_colour_poly || source_fn->effect_captures))
+            return STATIC_BOUNDARY_DEFERRED;
+        if (lambda_signature_value_is_proc(source_fn) != lambda_signature_value_is_proc(target_fn)) {
+            return STATIC_BOUNDARY_REJECTED;
+        }
+        if (source_fn && target_fn && target_fn->declared_effects &&
+                !lambda_procedure_effects_fit(source_fn->declared_effects, target_fn->declared_effects)) {
             return STATIC_BOUNDARY_REJECTED;
         }
     }
@@ -3700,7 +3730,9 @@ void init_function_placeholder(Transpiler* tp, AstFuncNode* fn_node) {
     fn_node->type = alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     fn_type->is_anonymous = is_anonymous;
+    fn_type->has_effect_summary = true;
     fn_type->is_proc = is_proc;
+    fn_type->declared_effects = fn_node->declared_effects;
     fn_type->param = NULL;
     fn_type->param_count = 0;
     fn_type->required_param_count = 0;
@@ -4866,6 +4898,10 @@ static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocat
     type->inferred_return = sys_func_success_result_type(tp, info, NULL, NULL);
     set_function_return_contract(type, info->return_type, true);
     type->is_proc = info->is_proc;
+    type->has_effect_summary = true;
+    LambdaEffectMask bound = sys_func_effect_bound(info);
+    type->declared_effects = bound == LAMBDA_EFFECT_UNRESTRICTED ? 0 : bound;
+    type->may_acquire_resources = !info->is_proc && bound == LAMBDA_EFFECT_UNRESTRICTED;
     type->can_raise = info->can_raise;
     type->may_return_error = info->may_return_error;
     ((AstSysFuncNode*)node)->fn_info = info;
@@ -9973,12 +10009,10 @@ static void lambda_ast_note_fixed_array_lengths(Transpiler* tp, AstFuncNode* fn)
     walk_lambda_ast(fn->body, fixed_array_invalidate_cb, &scan, true);
 }
 
-// --- S12.1.4v2: call colours ------------------------------------------------
+// --- S12.1.4v7: call colours and effect bounds -----------------------------
 // Resolved once every declaration is complete, so a forward or recursive
-// callee's parameters are known. In `fn` context a call that is statically a
-// `pn` call is a compile error, one whose colour is only known at run time is
-// marked with LAMBDA_COLOUR_GUARD_* bits for the tiers, and `pn` context needs
-// nothing. Pipe-to-callable and system-HOF callbacks are not covered yet.
+// callee's parameters are known. Diagnose known mismatches immediately and
+// mark calls that need run-time checks with a shared guard word for both tiers.
 
 typedef enum CallColour {
     CALL_COLOUR_FN,
@@ -9989,47 +10023,82 @@ typedef enum CallColour {
     CALL_COLOUR_PASSTHROUGH,
 } CallColour;
 
+enum {
+    LSF_CONTENT_BRANCH = 1u << 0,
+    LSF_CONTENT_GENERATIVE = 1u << 1,
+    LSF_CONTENT_GENERATIVE_VIEW = 1u << 2,
+};
+
 typedef struct CallColourWalk {
     Transpiler* tp;
     AstFuncNode* function;  // innermost enclosing function; NULL at module level
     // S16.7.6: a procedural REPL session's module level is a `pn` body
     bool module_is_proc;
     bool functional_element = false;
+    LambdaEffectMask allowed_effects = 0;
+    bool render_entry = false;
+    bool restricted_resources = false;
 } CallColourWalk;
+
+static bool colour_walk_scoped_effects(const CallColourWalk* walk) {
+    return walk->allowed_effects || walk->restricted_resources ||
+        (walk->function && ((TypeFunc*)walk->function->type)->is_colour_poly);
+}
+
+static uint32_t colour_walk_guard_scope(const CallColourWalk* walk) {
+    uint32_t guard = lambda_effect_guard_pack(walk->allowed_effects);
+    if (colour_walk_scoped_effects(walk)) guard |= LAMBDA_EFFECT_GUARD_RESOURCES;
+    return guard;
+}
+
+static NameEntry* polymorphic_callback_binding(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node || node->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    if (!entry || !entry->node || entry->node->node_type != AST_NODE_PARAM ||
+            !lambda_type_param_is_colour_poly(lambda_type_param(entry->node->type))) return NULL;
+    AstFuncNode* owner = ast_scope_function(entry->scope);
+    return owner && ((TypeFunc*)owner->type)->is_colour_poly ? entry : NULL;
+}
 
 static bool colour_walk_is_passthrough(CallColourWalk* walk, AstNode* node) {
     if (walk->functional_element) return false;
     AstFuncNode* fn = walk->function;
-    if (!fn || !((TypeFunc*)fn->type)->is_colour_poly) return false;
-    node = ast_unwrap_primary(node);
-    if (!node || node->node_type != AST_NODE_IDENT) return false;
-    NameEntry* entry = ((AstIdentNode*)node)->entry;
-    AstNode* binding = entry ? entry->node : NULL;
-    TypeParam* parameter = binding && binding->node_type == AST_NODE_PARAM
-        ? lambda_type_param(binding->type) : NULL;
-    if (!parameter) return false;
-    // only this function's own parameter; a captured outer one is not its caller's
-    for (AstNamedNode* param = fn->param; param;
-            param = (AstNamedNode*)((AstNode*)param)->next) {
-        if ((AstNode*)param == binding) {
-            return lambda_type_param_is_colour_poly(parameter);
+    if (!fn) return false;
+    NameEntry* entry = polymorphic_callback_binding(node);
+    if (!entry) return false;
+    if (ast_scope_function(entry->scope) == fn) return true;
+    const uint8_t* effect_slot = ((TypeFunc*)fn->type)->effect_captures;
+    if (effect_slot) {
+        int slot = 1;
+        for (FnCapture* capture = fn->captures; capture; capture = capture->next, ++slot) {
+            if (slot == *effect_slot) {
+                if (capture->entry == entry) return true;
+                if (!*++effect_slot) break;
+            }
         }
     }
     return false;
 }
 
-static CallColour colour_walk_value(CallColourWalk* walk, AstNode* value) {
-    if (colour_walk_is_passthrough(walk, value)) return CALL_COLOUR_PASSTHROUGH;
+static Type* colour_walk_value_type(AstNode* value) {
     Type* type = value ? value->type : NULL;
     if (type && !is_global_simple_type(type) && type->kind == TYPE_KIND_PARAM) {
         TypeParam* param = (TypeParam*)type;
         type = param->contract_type ? param->contract_type :
             param->full_type ? param->full_type : type;
     }
-    type = boundary_unwrap_type(type);
+    return boundary_unwrap_type(type);
+}
+
+static CallColour colour_walk_value(CallColourWalk* walk, AstNode* value) {
+    if (colour_walk_is_passthrough(walk, value)) return CALL_COLOUR_PASSTHROUGH;
+    Type* type = colour_walk_value_type(value);
     if (!type) return CALL_COLOUR_UNKNOWN;
     if (TypeFunc* signature = lambda_type_func_signature(type)) {
-        return signature->is_proc ? CALL_COLOUR_PN : CALL_COLOUR_FN;
+        if (signature->effect_captures || (colour_walk_scoped_effects(walk) && signature->may_acquire_resources))
+            return CALL_COLOUR_UNKNOWN;
+        return lambda_signature_value_is_proc(signature) ? CALL_COLOUR_PN : CALL_COLOUR_FN;
     }
     // `function`, `any` and composite types may hold a `pn`; anything else is
     // statically no function at all
@@ -10053,11 +10122,21 @@ static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
     int index = 0;
     for (AstNamedNode* param = callee->param; param && index < LAMBDA_MAX_FUNCTION_ARGS;
             param = (AstNamedNode*)((AstNode*)param)->next, index++) {
-        if (!lambda_type_param_is_colour_poly(lambda_type_param(param->type))) continue;
+        TypeParam* contract = lambda_type_param(param->type);
+        if (!lambda_type_param_is_colour_poly(contract)) continue;
         AstNode* value = resolved[index];
+        if (!value && index >= shift) {
+            if (contract->default_callback_effects & ~walk->allowed_effects)
+                record_semantic_error_span(walk->tp, call->source_span, ERR_PROC_IN_FN,
+                    "a default callback exceeds the caller's effect bound");
+            continue;
+        }
         CallColour colour = value ? colour_walk_value(walk, value) :
             (index < shift ? CALL_COLOUR_UNKNOWN : CALL_COLOUR_FN);
         if (colour == CALL_COLOUR_PN) {
+            TypeFunc* signature = lambda_type_func_signature(colour_walk_value_type(value));
+            if (signature && lambda_procedure_effects_fit(lambda_signature_procedure_bound(signature),
+                    walk->allowed_effects)) continue;
             record_semantic_error_span(walk->tp, value->source_span, ERR_PROC_IN_FN,
                 "passing a procedure (pn) to parameter '%.*s' makes this call of "
                 "'%.*s' a pn call, which a function (fn) cannot make",
@@ -10069,12 +10148,13 @@ static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
             guard |= 1u << index;
         }
     }
-    call->fn_colour_guard = guard;
+    call->fn_colour_guard = guard ? guard | colour_walk_guard_scope(walk) : 0;
 }
 
 static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
     AstNode* callee = ast_unwrap_primary(call->function);
     if (!callee) return;
+    bool scoped_effects = colour_walk_scoped_effects(walk);
     if (callee->node_type == AST_NODE_SYS_FUNC) {
         // A built-in procedure (`print`, `output`, `today`) or a host-module
         // one (a `pn(...)` row such as a DOM effect) is a pn like any other
@@ -10082,7 +10162,33 @@ static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
         // both colours (`call`) has already resolved to its `fn` row here, so
         // `is_proc` is the answer.
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
-        if (info && info->is_proc) {
+        if (info && (info->fn == SYSFUNC_CALL || info->fn == SYSPROC_CALL)) {
+            AstNode* target = call->pipe_inject ? call->pipe_receiver : call->argument;
+            TypeFunc* signature = lambda_type_func_signature(colour_walk_value_type(target));
+            if (signature && !lambda_signature_value_is_proc(signature) &&
+                    !(scoped_effects && signature->may_acquire_resources) &&
+                    !signature->is_colour_poly && !signature->effect_captures) return;
+            if ((scoped_effects && signature && signature->may_acquire_resources) ||
+                    (lambda_signature_value_is_proc(signature) && !lambda_procedure_effects_fit(
+                    lambda_signature_procedure_bound(signature), walk->allowed_effects))) {
+                record_semantic_error_span(walk->tp, call->source_span, ERR_PROC_IN_FN,
+                    walk->allowed_effects ? "call: the procedure exceeds the caller's effect bound" :
+                    "call: cannot call a procedure (pn) from a function (fn)");
+            }
+            bool passthrough = colour_walk_is_passthrough(walk, target);
+            if (scoped_effects || passthrough) {
+                call->fn_colour_guard = LAMBDA_COLOUR_GUARD_ARGS |
+                    LAMBDA_EFFECT_GUARD_DEFAULTS | colour_walk_guard_scope(walk);
+                if (!passthrough) call->fn_colour_guard |= LAMBDA_COLOUR_GUARD_CALLEE;
+            }
+            return;
+        }
+        if (info && (info->fn == SYSFUNC_INPUT1 || info->fn == SYSFUNC_INPUT2) &&
+                (walk->allowed_effects & LAMBDA_EFFECT_URL_INPUT)) {
+            call->input_url_only = true;
+        } else if (info && (scoped_effects
+                ? (sys_func_effect_bound(info) & ~walk->allowed_effects) != 0
+                : info->is_proc)) {
             record_semantic_error_span(walk->tp, call->source_span, ERR_PROC_IN_FN,
                 "'%s' is a procedure (pn) and cannot be called from a function (fn)",
                 info->name ? info->name : "<system function>");
@@ -10090,15 +10196,23 @@ static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
         return;
     }
     if (AstFuncNode* direct = ast_direct_call_function(call)) {
-        if (direct->node_type == AST_NODE_PROC) {
-            // S12.1.1: `fn` context, including a `function` body (C20-3),
-            // never calls a statically-known procedure
+        TypeFunc* signature = (TypeFunc*)direct->type;
+        if (scoped_effects && signature->may_acquire_resources) {
+            record_semantic_error_span(walk->tp, call->source_span, ERR_PROC_IN_FN,
+                "this call acquires resources outside the current callable's effect bound");
+            return;
+        }
+        if (lambda_signature_value_is_proc(signature) && !lambda_procedure_effects_fit(
+                lambda_signature_procedure_bound(signature), walk->allowed_effects)) {
             record_semantic_error_span(walk->tp, call->source_span, ERR_PROC_IN_FN,
                 "'%.*s' is a procedure (pn) and cannot be called from a function (fn)",
                 direct->name ? (int)direct->name->len : 0,
                 direct->name ? direct->name->chars : "");
-        } else if (((TypeFunc*)direct->type)->is_colour_poly) {
+        } else if (signature->is_colour_poly) {
             colour_walk_poly_call(walk, call, direct);
+        }
+        if (signature->effect_captures) {
+            call->fn_colour_guard |= LAMBDA_COLOUR_GUARD_CALLEE | colour_walk_guard_scope(walk);
         }
         return;
     }
@@ -10106,19 +10220,280 @@ static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
     // effect it is allowed (C20-3)
     if (colour_walk_is_passthrough(walk, callee)) return;
     CallColour callee_colour = colour_walk_value(walk, callee);
+    TypeFunc* callee_signature = lambda_type_func_signature(colour_walk_value_type(callee));
+    // This syntax also covers statically known conversions such as u64(x).
+    // They have no callable parameters or guard-generated error outcome.
+    if (!callee_signature && callee_colour == CALL_COLOUR_FN) return;
     // a dynamic callee's slots are unknown here, so every argument that may be
     // a `pn` is offered to the run-time check, which tests the real signature
-    uint32_t guard = callee_colour == CALL_COLOUR_FN ? 0 : LAMBDA_COLOUR_GUARD_CALLEE;
+    uint32_t guard = callee_colour == CALL_COLOUR_FN && !scoped_effects
+        ? 0 : LAMBDA_COLOUR_GUARD_CALLEE;
+    if (scoped_effects || !callee_signature || callee_signature->is_colour_poly)
+        guard |= LAMBDA_EFFECT_GUARD_DEFAULTS;
     int index = 0;
     if (call->pipe_inject) guard |= 1u << index++;
     for (AstNode* arg = call->argument; arg && index < 16; arg = arg->next, index++) {
         CallColour colour = colour_walk_value(walk, arg);
         if (colour == CALL_COLOUR_PN || colour == CALL_COLOUR_UNKNOWN) guard |= 1u << index;
     }
-    call->fn_colour_guard = guard;
+    call->fn_colour_guard = guard ? guard | colour_walk_guard_scope(walk) : 0;
 }
 
 static void colour_walk_constraint(Transpiler* tp, AstNode* constraint);
+
+static LambdaEffectMask known_callable_effects(TypeFunc* signature) {
+    if (!lambda_signature_value_is_proc(signature)) return 0;
+    LambdaEffectMask bound = lambda_signature_procedure_bound(signature);
+    return bound ? bound : LAMBDA_EFFECT_UNRESTRICTED;
+}
+
+static LambdaEffectMask callback_default_effects(TypeParam* parameter) {
+    if (!parameter->default_value) return 0;
+    Type* type = colour_walk_value_type(parameter->default_value);
+    TypeFunc* signature = lambda_type_func_signature(type);
+    if (signature && !signature->effect_captures && !signature->may_acquire_resources)
+        return known_callable_effects(signature);
+    if (type && type->type_id == LMD_TYPE_NULL) return 0;
+    // A value with a deferred callable contract cannot prove a tighter bound.
+    return LAMBDA_EFFECT_UNRESTRICTED;
+}
+
+static AstNode* non_injected_pipe_target(AstNode* node) {
+    if (node->node_type != AST_NODE_PIPE) return NULL;
+    AstPipeNode* pipe = (AstPipeNode*)node;
+    if (pipe->op != OPERATOR_PIPE || has_current_item_ref(pipe->right)) return NULL;
+    AstNode* target = ast_unwrap_primary(pipe->right);
+    return target && target->node_type != AST_NODE_CALL_EXPR ? target : NULL;
+}
+
+static LambdaEffectMask named_call_effects(AstCallNode* call) {
+    AstNode* callee = ast_unwrap_primary(call->function);
+    if (!callee) return 0;
+    if (callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        if (info && (info->fn == SYSFUNC_CALL || info->fn == SYSPROC_CALL)) {
+            AstNode* target = call->pipe_inject ? call->pipe_receiver : call->argument;
+            return known_callable_effects(lambda_type_func_signature(colour_walk_value_type(target)));
+        }
+        return sys_func_effect_bound(info);
+    }
+    AstFuncNode* direct = ast_direct_call_function(call);
+    TypeFunc* signature = direct ? (TypeFunc*)direct->type : call_function_signature(call);
+    LambdaEffectMask effects = known_callable_effects(signature);
+    if (!signature || !signature->is_colour_poly) return effects;
+    // An explicitly supplied callback contributes its own known effects.
+    // A pass-through parameter remains a dependency of the caller's signature.
+    AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    resolve_call_boundary_arguments(call, call->pipe_receiver, resolved);
+    int index = 0;
+    for (TypeParam* param = signature->param; param && index < LAMBDA_MAX_FUNCTION_ARGS;
+            param = param->next, ++index) {
+        if (lambda_type_param_is_colour_poly(param)) {
+            effects |= resolved[index]
+                ? known_callable_effects(lambda_type_func_signature(colour_walk_value_type(resolved[index])))
+                : callback_default_effects(param);
+        }
+    }
+    return effects;
+}
+
+static bool collect_generative_effects(AstNode* node, void* data) {
+    switch (node->node_type) {
+    // A nested callable owns its effects. Pure literal positions are
+    // validated separately and give the surrounding body no permission.
+    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
+    case AST_NODE_ELEMENT: case AST_NODE_OBJECT_LITERAL:
+        return false;
+    case AST_NODE_CALL_EXPR: {
+        LambdaEffectMask effects = named_call_effects((AstCallNode*)node);
+        if (effects != LAMBDA_EFFECT_UNRESTRICTED)
+            *(LambdaEffectMask*)data |= effects;
+        break;
+    }
+    case AST_NODE_PIPE: {
+        AstNode* target = non_injected_pipe_target(node);
+        LambdaEffectMask effects =
+            known_callable_effects(lambda_type_func_signature(colour_walk_value_type(target)));
+        if (effects != LAMBDA_EFFECT_UNRESTRICTED) *(LambdaEffectMask*)data |= effects;
+        break;
+    }
+    default:
+        break;
+    }
+    return true;
+}
+
+static bool collect_resource_calls(AstNode* node, void* data) {
+    if (*(bool*)data) return false;
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) return false;
+    AstCallNode* call = node->node_type == AST_NODE_CALL_EXPR ? (AstCallNode*)node : NULL;
+    AstNode* callee = call ? ast_unwrap_primary(call->function) : non_injected_pipe_target(node);
+    if (!callee) return true;
+    if (callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        if (info && !info->is_proc && sys_func_effect_bound(info) == LAMBDA_EFFECT_UNRESTRICTED)
+            *(bool*)data = true;
+        if (call && info && (info->fn == SYSFUNC_CALL || info->fn == SYSPROC_CALL))
+            callee = call->pipe_inject ? call->pipe_receiver : call->argument;
+        else return !*(bool*)data;
+    }
+    if (polymorphic_callback_binding(callee)) return true; // guarded by the caller
+    AstFuncNode* definition = call ? ast_direct_call_function(call) : NULL;
+    TypeFunc* signature = lambda_type_func_signature(
+        definition ? definition->type : colour_walk_value_type(callee));
+    // A legacy fn type alone cannot prove absence of resource input. An
+    // opaque indirect call could invoke one of those readers in the helper's
+    // own lexical context, beyond the restricted caller's dispatch guard.
+    if (signature) {
+        if (signature->may_acquire_resources || (!signature->is_proc &&
+                !signature->has_effect_summary)) *(bool*)data = true;
+    } else {
+        CallColourWalk ordinary = {};
+        if (colour_walk_value(&ordinary, callee) == CALL_COLOUR_UNKNOWN) *(bool*)data = true;
+    }
+    return !*(bool*)data;
+}
+
+typedef struct CallbackCaptureWalk {
+    AstFuncNode* closure;
+    bool slots[UINT8_MAX];
+} CallbackCaptureWalk;
+
+static void note_callback_capture(CallbackCaptureWalk* walk, AstNode* value) {
+    NameEntry* entry = polymorphic_callback_binding(value);
+    if (!entry) return;
+    int slot = 0;
+    for (FnCapture* capture = walk->closure->captures; capture && slot < UINT8_MAX;
+            capture = capture->next, ++slot) {
+        if (capture->entry == entry && !capture->lambda_live_local) {
+            walk->slots[slot] = true;
+            return;
+        }
+    }
+}
+
+static bool collect_callback_captures(AstNode* node, void* data) {
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC || node->node_type == AST_NODE_ELEMENT ||
+            node->node_type == AST_NODE_OBJECT_LITERAL) return false;
+    CallbackCaptureWalk* walk = (CallbackCaptureWalk*)data;
+    if (node->node_type == AST_NODE_PIPE) note_callback_capture(walk, non_injected_pipe_target(node));
+    if (node->node_type != AST_NODE_CALL_EXPR) return true;
+    AstCallNode* call = (AstCallNode*)node;
+    note_callback_capture(walk, call->function);
+    AstNode* callee = ast_unwrap_primary(call->function);
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        if (info && (info->fn == SYSFUNC_CALL || info->fn == SYSPROC_CALL))
+            note_callback_capture(walk, call->pipe_inject ? call->pipe_receiver : call->argument);
+    }
+    TypeFunc* signature = call_function_signature(call);
+    if (signature && signature->is_colour_poly) {
+        AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {};
+        int count = resolve_call_boundary_arguments(call, call->pipe_receiver, resolved);
+        int slot = 0;
+        for (TypeParam* param = signature->param; param && slot < count;
+                param = param->next, ++slot) {
+            if (lambda_type_param_is_colour_poly(param)) note_callback_capture(walk, resolved[slot]);
+        }
+    }
+    return true;
+}
+
+static void infer_callback_captures(Transpiler* tp, AstIndex* index) {
+    for (AstFunctionId id = 0; id < index->function_count; ++id) {
+        AstNode* node = index->functions[id].node;
+        if (!node || (node->node_type != AST_NODE_FUNC && node->node_type != AST_NODE_FUNC_EXPR))
+            continue;
+        AstFuncNode* closure = (AstFuncNode*)node;
+        if (!closure->captures) continue;
+        CallbackCaptureWalk walk = {closure, {}};
+        for (AstNamedNode* param = closure->param; param; param = (AstNamedNode*)param->next)
+            walk_lambda_ast(param->as, collect_callback_captures, &walk, true);
+        walk_lambda_ast(closure->body, collect_callback_captures, &walk, true);
+        uint8_t indices[UINT8_MAX + 1];
+        int count = 0;
+        for (int i = 0; i < UINT8_MAX; ++i)
+            if (walk.slots[i]) indices[count++] = (uint8_t)(i + 1);
+        if (!count) continue;
+        // A retained descriptor indexes the existing snapshot environment.
+        // No separate capture or GC reference is required to check a call.
+        indices[count++] = 0;
+        uint8_t* retained = (uint8_t*)pool_alloc(tp->pool, (size_t)count);
+        memcpy(retained, indices, (size_t)count);
+        ((TypeFunc*)closure->type)->effect_captures = retained;
+    }
+}
+
+static void infer_generative_effects(AstIndex* index) {
+    bool changed;
+    // The finite bounds only grow. Revisit recursive and forward calls
+    // until every caller includes the effects of its resolved callees.
+    do {
+        changed = false;
+        for (AstFunctionId id = 0; id < index->function_count; ++id) {
+            AstNode* node = index->functions[id].node;
+            if (!node || (node->node_type != AST_NODE_FUNC &&
+                    node->node_type != AST_NODE_FUNC_EXPR)) continue;
+            AstFuncNode* fn = (AstFuncNode*)node;
+            TypeFunc* signature = (TypeFunc*)fn->type;
+            if (!signature->may_acquire_resources) {
+                for (AstNamedNode* param = fn->param;
+                        param; param = (AstNamedNode*)param->next)
+                    walk_lambda_ast(param->as, collect_resource_calls, &signature->may_acquire_resources, true);
+                walk_lambda_ast(fn->body, collect_resource_calls, &signature->may_acquire_resources, true);
+                changed |= signature->may_acquire_resources;
+            }
+            if (!signature->is_colour_poly) continue;
+            LambdaEffectMask effects = signature->intrinsic_effects;
+            for (AstNamedNode* param = fn->param; param;
+                    param = (AstNamedNode*)param->next) {
+                walk_lambda_ast(param->as, collect_generative_effects, &effects, true);
+            }
+            walk_lambda_ast(fn->body, collect_generative_effects, &effects, true);
+            if (signature->intrinsic_effects != effects) {
+                signature->intrinsic_effects = effects;
+                changed = true;
+            }
+        }
+    } while (changed);
+    for (AstFunctionId id = 0; id < index->function_count; ++id) {
+        AstNode* node = index->functions[id].node;
+        if (!node || (node->node_type != AST_NODE_FUNC && node->node_type != AST_NODE_FUNC_EXPR))
+            continue;
+        TypeFunc* signature = (TypeFunc*)node->type;
+        if (!signature->is_colour_poly) continue;
+        for (TypeParam* param = signature->param; param; param = param->next)
+            if (lambda_type_param_is_colour_poly(param))
+                param->default_callback_effects = callback_default_effects(param);
+    }
+}
+
+static bool bounded_body_writes_outside(AstNode* node, AstFuncNode* function) {
+    NameEntry* binding = NULL;
+    switch (node->node_type) {
+    case AST_NODE_START:
+    case AST_NODE_CRUD_STAM:
+    case AST_NODE_OPEN_STAM:
+    case AST_NODE_PIPE_FILE_STAM:
+        return true;
+    case AST_NODE_ASSIGN_STAM:
+        binding = ((AstAssignStamNode*)node)->target_entry;
+        break;
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstIdentNode* owner = ast_compound_root_ident(((AstCompoundAssignNode*)node)->object);
+        binding = owner ? owner->entry : NULL;
+        break;
+    }
+    default:
+        return false;
+    }
+    // An inout binding writes through to its caller even if its name is local.
+    return !binding || binding->is_var_param ||
+        ast_scope_function(binding->scope) != function;
+}
 
 static bool colour_walk_visit(AstNode* node, void* data) {
     CallColourWalk* walk = (CallColourWalk*)data;
@@ -10127,14 +10502,46 @@ static bool colour_walk_visit(AstNode* node, void* data) {
         // S12.1.1v3: construction stays pure even inside a procedural statement.
         CallColourWalk literal = *walk;
         literal.functional_element = true;
+        literal.restricted_resources = colour_walk_scoped_effects(walk);
+        literal.allowed_effects = 0;
+        literal.render_entry = false;
         walk_lambda_ast(node, colour_walk_visit, &literal, true);
+        return false;
+    }
+    if (node->node_type == AST_NODE_CONTENT && !walk->render_entry &&
+            (node->syntax_flags & (LSF_CONTENT_GENERATIVE | LSF_CONTENT_GENERATIVE_VIEW))) {
+        // S16.7.7 grants effects to the block, not to its lexical neighbours.
+        CallColourWalk block = *walk;
+        block.module_is_proc = false;
+        block.allowed_effects = (node->syntax_flags & LSF_CONTENT_GENERATIVE_VIEW)
+            ? LAMBDA_EFFECT_RENDER : LAMBDA_EFFECT_GENERATIVE;
+        block.render_entry = true;
+        walk_lambda_ast(node, colour_walk_visit, &block, true);
         return false;
     }
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) {
         AstFuncNode* fn = (AstFuncNode*)node;
         CallColourWalk inner = {walk->tp, fn, false};
+        inner.allowed_effects = lambda_signature_procedure_bound((TypeFunc*)fn->type);
+        if (inner.allowed_effects) {
+            for (AstNamedNode* param = fn->param; param;
+                    param = (AstNamedNode*)param->next) {
+                walk_lambda_ast(param->as, colour_walk_visit, &inner, true);
+            }
+        }
         walk_lambda_ast(fn->body, colour_walk_visit, &inner, true);
+        return false;
+    }
+    if (node->node_type == AST_NODE_VIEW) {
+        AstViewNode* view = (AstViewNode*)node;
+        CallColourWalk body = {walk->tp, NULL, false};
+        for (AstStateEntry* state = view->state; state; state = state->next_state)
+            walk_lambda_ast(state->value, colour_walk_visit, &body, true);
+        walk_lambda_ast(view->body, colour_walk_visit, &body, true);
+        CallColourWalk handler = {walk->tp, NULL, true};
+        for (AstEventHandler* event = view->handler; event; event = event->next_handler)
+            walk_lambda_ast(event->body, colour_walk_visit, &handler, true);
         return false;
     }
     if (node->node_type == AST_NODE_OBJECT_TYPE) {
@@ -10143,10 +10550,38 @@ static bool colour_walk_visit(AstNode* node, void* data) {
             colour_walk_constraint(walk->tp, constraint);
         }
     }
-    bool in_proc = !walk->functional_element && (walk->function
+    bool in_proc = !walk->allowed_effects && !walk->functional_element && (walk->function
         ? walk->function->node_type == AST_NODE_PROC : walk->module_is_proc);
-    if (node->node_type == AST_NODE_CALL_EXPR && !in_proc) {
-        colour_walk_call(walk, (AstCallNode*)node);
+    if (walk->allowed_effects && bounded_body_writes_outside(node, walk->function)) {
+        record_semantic_error_span(walk->tp, node->source_span, ERR_PROC_IN_FN,
+            "this side effect exceeds the current callable's effect bound");
+        return false;
+    }
+    if (!in_proc) {
+        if (AstNode* target = non_injected_pipe_target(node)) {
+            LambdaEffectMask effects =
+                known_callable_effects(lambda_type_func_signature(colour_walk_value_type(target)));
+            if (effects & ~walk->allowed_effects) {
+                record_semantic_error_span(walk->tp, node->source_span, ERR_PROC_IN_FN,
+                    "the pipe target exceeds the current callable's effect bound");
+            }
+            ((AstPipeNode*)node)->pipe_effect_guard =
+                1u | LAMBDA_EFFECT_GUARD_DEFAULTS | colour_walk_guard_scope(walk);
+            if (!colour_walk_is_passthrough(walk, target))
+                ((AstPipeNode*)node)->pipe_effect_guard |= LAMBDA_COLOUR_GUARD_CALLEE;
+        }
+    }
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
+            SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+            if (info && (info->fn == SYSFUNC_APPLY1 || info->fn == SYSFUNC_APPLY2)) {
+                call->template_effects = in_proc || walk->render_entry
+                    ? LAMBDA_EFFECT_RENDER : walk->allowed_effects;
+            }
+        }
+        if (!in_proc) colour_walk_call(walk, call);
     }
     return true;
 }
@@ -10190,6 +10625,8 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
         AstScript* script, ArrayList* functions) {
     if (!tp || !script || tp->error_count != 0) return false;
     if (!lambda_ast_analyze_indexed_captures(tp, script)) return false;
+    infer_callback_captures(tp, &tp->ast_index);
+    infer_generative_effects(&tp->ast_index);
     if (!complete_outcome_facts(tp, script)) return false;
     // A pn member is bound by the runtime member lane so calls can lower it,
     // but S12.3.3v2/D3.1.4 forbid retaining that bound closure as a value.
@@ -11605,31 +12042,6 @@ static TypeMethod* direct_lookup_object_method(Transpiler* tp,
     return NULL;
 }
 
-// S12.1.4: `call(f, args)` takes its colour from `f`. Resolve that statically
-// whenever `f` names a known function — a compile error beats the runtime one,
-// and the runtime check cannot see a closure whose `fn_type` was never
-// populated. A dynamically-computed `f` falls through to the runtime check.
-static void validate_effect_polymorphic_call(Transpiler* tp, SourceSpan span,
-        AstNode* function, AstNode* arguments) {
-    AstNode* callee = ast_unwrap_primary(function);
-    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return;
-    SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
-    if (!info || (info->fn != SYSFUNC_CALL && info->fn != SYSPROC_CALL)) return;
-    if (tp->current_scope && tp->current_scope->is_proc) return;  // pn context: any target
-    AstNode* target = ast_unwrap_primary(arguments);
-    if (!target || target->node_type != AST_NODE_IDENT) return;
-    AstIdentNode* ident = (AstIdentNode*)target;
-    AstNode* binding = ident->entry ? ident->entry->node : NULL;
-    TypeFunc* signature = binding ? lambda_type_func_signature(binding->type) : NULL;
-    if (signature && signature->is_proc) {
-        record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
-            "call: '%.*s' is a procedure (pn) and cannot be called from a "
-            "function (fn)",
-            ident->name ? (int)ident->name->len : 0,
-            ident->name ? ident->name->chars : "");
-    }
-}
-
 enum { LSF_CALL_PIPE_INJECT = 1u << 0 };
 
 // LSF_CALL: aux holds the written argument count; a pipe right-hand side
@@ -12066,7 +12478,6 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     }
     // After resolution: the callee is an IDENT until the builder rewrites it
     // to the AST_NODE_SYS_FUNC, so this must run here, not on the inputs.
-    validate_effect_polymorphic_call(tp, span, call->function, call->argument);
     (void)mark_call_borrow_outcomes(tp, call);
 }
 
@@ -17001,7 +17412,6 @@ enum { LSF_OBJECT_PARTS, LSF_OBJECT_BASE, LSF_OBJECT_LAYOUT, LSF_OBJECT_TAIL };
 enum { LSF_OBJECT_FIELD_DEFAULT, LSF_OBJECT_FIELD_LAYOUT, LSF_OBJECT_FIELD_TAIL };
 
 // LSF_CONTENT: the body of a braced `if`/`else` branch, which has a scope.
-enum { LSF_CONTENT_BRANCH = 1u << 0 };
 
 // LSF_BINARY: `that`, whose right side reads a bare name as a field, and the
 // pipe stages `|>` and `|:`, whose right side never does (S10.1.7v2).
@@ -17109,6 +17519,8 @@ static AstNode* syntax_view_finish(LambdaSyntaxSink* sink,
     view->source_span = reduction->span;
     view->param = (AstNamedNode*)syntax_child(reduction, 0);
     view->body = syntax_child(reduction, 1);
+    view->is_generative = (reduction->flags & LAMBDA_REDUCTION_FLAG_GENERATIVE_VIEW) != 0;
+    if (view->is_generative) view->body->syntax_flags |= LSF_CONTENT_GENERATIVE_VIEW;
     void** tail = syntax_tail((AstNode*)view, sizeof(AstViewNode));
     tail[LSF_VIEW_RETURN] = syntax_child(reduction, 2);
     tail[LSF_VIEW_ERROR] = syntax_child(reduction, 3);
@@ -17444,6 +17856,10 @@ static void syntax_context(LambdaSyntaxSink* sink,
         break;
     case LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN:
         syntax_function_begin(sink, reduction);
+        break;
+    case LAMBDA_REDUCTION_FORM_PROCEDURE_EFFECTS:
+        if (!sink->function_depth) sink->failed = true;
+        else sink->function_nodes[sink->function_depth - 1]->declared_effects = reduction->flags;
         break;
     case LAMBDA_REDUCTION_FORM_FUNCTION_END:
         if (!sink->function_depth) sink->failed = true;
@@ -17815,6 +18231,9 @@ static AstNode* syntax_statement(LambdaSyntaxSink* sink,
     AstNode* child0 = syntax_child(reduction, 0);
     uint32_t flags = reduction->flags;
     switch (reduction->form) {
+    case LAMBDA_REDUCTION_FORM_GENERATIVE_BLOCK:
+        child0->syntax_flags |= LSF_CONTENT_GENERATIVE;
+        return child0;
     case LAMBDA_REDUCTION_FORM_RETURN:
     case LAMBDA_REDUCTION_FORM_BREAK:
     case LAMBDA_REDUCTION_FORM_CONTINUE:
@@ -18363,6 +18782,7 @@ static AstFuncNode* resolver_function_begin(LambdaResolver* r, AstFuncNode* fn) 
         if (declares_name) lambda_ast_register_name(tp, (AstNode*)target);
     }
     TypeFunc* fn_type = (TypeFunc*)target->type;
+    fn_type->declared_effects = fn->declared_effects;
     if (!fn->name) fn_type->is_anonymous = true;
     fn_type->is_public = (facts & LSF_FN_PUBLIC) != 0 || fn_type->is_public;
     if (facts & LSF_FN_COLOUR_POLY) fn_type->is_colour_poly = true;
@@ -20134,6 +20554,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     }
     case LSF_CONTENT: {
         AstListNode* content = (AstListNode*)node;
+        // The script result contains the block value. Its local bindings
+        // belong to the block's own functional scope.
+        NameScope* generative_scope =
+            (node->syntax_flags & (LSF_CONTENT_GENERATIVE | LSF_CONTENT_GENERATIVE_VIEW))
+            ? lambda_ast_enter_scope(tp, false) : NULL;
         for (AstNode** link = &content->item; *link && !r->failed;
                 link = &(*link)->next) {
             AstNode* item = *link;
@@ -20146,6 +20571,10 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         }
         resolve_diagnostics(r, node);
         resolve_content(r, content);
+        if (generative_scope) {
+            content->vars = generative_scope;
+            lambda_ast_leave_scope(tp, generative_scope);
+        }
         break;
     }
     case LSF_VIEW: {

@@ -1077,6 +1077,75 @@ TEST(RadiantViewTest, LocalNavigationPublishesDelayedRemoteImageWithoutBlocking)
 #endif
 }
 
+TEST(RadiantViewTest, GenerativeTemplateRerendersAndReusesQueryKeys) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "temp/effect_refresh.ls";
+    const char* events = "temp/effect_refresh_events.json";
+    const char* audit = "temp/effect_refresh_requests.log";
+    const char* event_source = R"({"events":[
+        {"type":"assert_text","target":{"selector":"#refresh"},"contains":"rev=0"},
+        {"type":"click","target":{"selector":"#refresh"}},
+        {"type":"assert_text","target":{"selector":"#refresh"},"contains":"rev=1"},
+        {"type":"click","target":{"selector":"#refresh"}},
+        {"type":"assert_text","target":{"selector":"#refresh"},"contains":"rev=0"}
+    ]})";
+    ASSERT_EQ(write_binary_file(events, event_source, strlen(event_source)), 0);
+    const RadiantViewHttpResource resources[] = {
+        {"GET /read?rev=0 ", "text/plain", "rev=0", sizeof("rev=0") - 1},
+        {"GET /read?rev=1 ", "text/plain", "rev=1", sizeof("rev=1") - 1},
+    };
+    for (const char* backend : {"interp", "jit", "auto"}) {
+        SCOPED_TRACE(backend);
+        unlink(audit);
+        RadiantViewImageServer server = {};
+        ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+            sizeof(resources) / sizeof(resources[0]), audit));
+        RadiantViewServerScope server_scope = {server.pid};
+        char source[1024];
+        // S12.1.3v6: effects execute only in the three body activations.
+        int size = snprintf(source, sizeof(source), R"LS(
+edit <probe> state serial_no: 0 function() {
+    let response = input("http://127.0.0.1:%d/read?rev=" ++ string(serial_no), 'text') ^ { "input-failed" }
+    let rendered = print("effect-render:" ++ string(serial_no) ++ "\n");
+    <button id:"refresh", response>
+}
+on click(evt) { serial_no = 1 - serial_no }
+function() { apply(<probe>, {mode: "edit"}) }
+)LS", server.port);
+        ASSERT_GT(size, 0);
+        ASSERT_LT((size_t)size, sizeof(source));
+        ASSERT_EQ(write_binary_file(page, source, (size_t)size), 0);
+        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", backend}, {nullptr, nullptr}};
+        ShellResult result = test_radiant_view_run_logged_headless(page, events, env,
+            nullptr, nullptr, 15000, g_radiant_view_executable);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "Assertions: 3 passed, 0 failed"), nullptr) << output;
+        const char* first = strstr(output, "effect-render:");
+        const char* second = first ? strstr(first + 1, "effect-render:") : nullptr;
+        const char* third = second ? strstr(second + 1, "effect-render:") : nullptr;
+        EXPECT_TRUE(first && strncmp(first, "effect-render:0", sizeof("effect-render:0") - 1) == 0) << output;
+        EXPECT_TRUE(second && strncmp(second, "effect-render:1", sizeof("effect-render:1") - 1) == 0) << output;
+        EXPECT_TRUE(third && strncmp(third, "effect-render:0", sizeof("effect-render:0") - 1) == 0) << output;
+        EXPECT_TRUE(third && !strstr(third + 1, "effect-render:")) << output;
+        shell_result_free(&result);
+
+        // S7.4.5v4: returning to the first query key does not fetch it again.
+        lam::Temp<char> requests(read_text_file(audit));
+        ASSERT_NE(requests.get(), nullptr);
+        const char* zero = strstr(requests.get(), resources[0].request);
+        ASSERT_NE(zero, nullptr);
+        const char* one = strstr(zero + 1, resources[1].request);
+        ASSERT_NE(one, nullptr);
+        EXPECT_EQ(strstr(zero + 1, resources[0].request), nullptr);
+        EXPECT_EQ(strstr(one + 1, resources[1].request), nullptr);
+    }
+#endif
+}
+
 TEST(RadiantViewTest, ResourceTimingBuffersTrackFetchAndXhrAcrossGc) {
 #ifdef _WIN32
     GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
