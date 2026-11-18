@@ -5,7 +5,7 @@ import session: lambda.editor.session
 
 pub let interval_ms = 120000
 let suffix = ".autosave.word.json"
-pub fn initial() => {started:false,root:sys.home# ++ "/.lambda/word",document_id:"",task:null}
+pub fn initial() => {started:false,root:sys.home ++ "/.lambda/word",document_id:"",task:null}
 
 pub pn clock(root) {
     while (true) {
@@ -52,7 +52,7 @@ pub pn write_snapshot(root,document_id,file_state,doc) map^ {
     let path = root ++ "/" ++ document_id ++ "--" ++ replace(stamp,":","-") ++ "--" ++ uuid()^ ++ suffix
     let value = {format:"lambda-word-autosave",version:1,document_id:document_id,
         // recovery can run from another working directory; keep the source file's absolute identity.
-        original_path:if (file_state.path=="") "" else session.resolve_path(sys.proc.self.cwd#,file_state.path),
+        original_path:if (file_state.path=="") "" else session.resolve_path(sys.proc.self.cwd,file_state.path),
         disk_text:file_state.disk_text,saved_at:stamp,
         snapshot:files.archive(doc,file_state.envelope.title)}
     io.mkdir(root)^
@@ -69,10 +69,10 @@ pub pn clear_versions(root,document_id,saved_path) {
     // retire this document's entire chain, including bad copies; keep other documents' versions.
     var failed = false
     let entries = versions(root,document_id) ^ { return false }
-    let verified_path = session.resolve_path(sys.proc.self.cwd#,saved_path)
+    let verified_path = session.resolve_path(sys.proc.self.cwd,saved_path)
     for (entry in entries) {
         // a Save As target can name a recovery file through either a relative or absolute path.
-        if (session.resolve_path(sys.proc.self.cwd#,entry.path)!=verified_path) {
+        if (session.resolve_path(sys.proc.self.cwd,entry.path)!=verified_path) {
             io.delete(entry.path) ^ { failed=true }
         }
     }

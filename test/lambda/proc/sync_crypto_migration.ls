@@ -5,7 +5,7 @@ import crypto: lambda.io.crypto
 import sqlite: lambda.io.sqlite
 import codec: lambda.sync.codec
 pn main() {
-    let directory = "temp/sync-crypto-migration-" ++ string(sys.proc.self.pid#)
+    let directory = "temp/sync-crypto-migration-" ++ string(sys.proc.self.pid)
     io.mkdir(directory)^
     let current = identity.create("migration",crypto.key()^)^
     let legacy = {*:current,version:1}

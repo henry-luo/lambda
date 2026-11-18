@@ -1,5 +1,5 @@
 import ws: lambda.io.websocket
-let ENV = sys.proc.self.env#
+let ENV = sys.proc.self.env
 pn main() {
     let listener = ws.listen(0, {origins: [ENV.WEBSOCKET_TEST_ORIGIN], protocols: ["chat.v1"]})^
     output(string(listener.port), ENV.WEBSOCKET_TEST_PORT_FILE, {format: 'text'})^

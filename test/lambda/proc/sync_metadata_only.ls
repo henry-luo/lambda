@@ -7,7 +7,7 @@ import crypto: lambda.io.crypto
 import identity: lambda.sync.peer_identity
 import codec: lambda.sync.codec
 pn main() {
-    let area = "temp/sync-metadata-only-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-metadata-only-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let secret = crypto.key()^
     let handle = local.create(area ++ "/repo",secret,"metadata-only",area ++ "/tree","device")^

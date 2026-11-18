@@ -9,7 +9,7 @@ pn call(store, credentials, kind, body, at=1000000) any^ {
     return service.handle(store,schema.request(credentials,kind,body,at,schema.digest([kind,body,at])^)^,at)^
 }
 pn main() {
-    let area = "temp/sync-rendezvous-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-rendezvous-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     let store = fixture.create(area ++ "/store.sqlite")^
     let a0 = identity.create("rendezvous-test",crypto.key()^)^

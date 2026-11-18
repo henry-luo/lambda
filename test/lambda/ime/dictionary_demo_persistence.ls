@@ -3,7 +3,7 @@ import model: lambda.ime.chinese.dictionary
 
 pn main() {
     let engine = ime.load("zh-Hans",{directory:"test/ime/fixture"})^
-    let root = "temp/ime_chinese/dictionary-" ++ string(sys.proc.self.pid#)
+    let root = "temp/ime_chinese/dictionary-" ++ string(sys.proc.self.pid)
     let path = root ++ "/custom.json"
     let original = input("test/ime/fixture/lexicon.txt","binary")^
     io.mkdir(root)^

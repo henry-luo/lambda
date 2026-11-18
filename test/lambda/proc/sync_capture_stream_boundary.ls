@@ -5,7 +5,7 @@ import chunks: lambda.sync.chunks
 import crypto: lambda.io.crypto
 import disk: lambda.io.disk
 pn main() {
-    let area = "temp/sync-capture-boundary-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-capture-boundary-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let config = {*:chunks.default_profile,minimum:16,target:32,maximum:64}
     let handle = local.create(area ++ "/repo.sqlite",crypto.key()^,"boundary",area ++ "/tree","device",config)^

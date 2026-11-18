@@ -17,10 +17,10 @@ let f = \.x
   .'q';
 let g = \.
   1.2;
-let h = /.
+let h = \.file.localhost.
   1;
 let i = \[1]
   .name;
-let j = http
+let j = \.http
   .host.x;
 [a, b, c, d, e, f, g, h, i, j]

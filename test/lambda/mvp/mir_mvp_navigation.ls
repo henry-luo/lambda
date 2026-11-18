@@ -17,7 +17,7 @@ pn main() {
     let detached = tree.child
     print([parent(detached) is null, root(detached) == detached]); print("\n")
     print([parent(17) is null, root(17) == 17, parent(null) is null, root(null) is null]); print("\n")
-    print([parent(\.a.b), root(\.a.b), parent(/.a.b), root(/.a.b)]); print("\n")
-    print([\.a.b.~~, /.a.b./]); print("\n")
+    print([parent(\.a.b), root(\.a.b), parent(\.file.localhost.a.b), root(\.file.localhost.a.b)]); print("\n")
+    print([\.a.b.~~, \.file.localhost.a.b./]); print("\n")
     print([for (key in [1, 2]) \.row[key].name.~~]); print("\n")
 }

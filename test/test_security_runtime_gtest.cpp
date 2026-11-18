@@ -4,6 +4,7 @@
 #include "../lambda/runtime/security_context.h"
 #include "../lambda/runtime/context_capsule.h"
 #include "../lambda/runtime/doc_context.hpp"
+#include "../lambda/runtime/sysinfo.h"
 #include "../lambda/runtime/write_set.hpp"
 #include "../lambda/runtime/interp.hpp"
 #include "../lambda/runtime/lambda-error.h"
@@ -16,6 +17,9 @@
 #include "lib/file_utils.h"
 #include "lib/log.h"
 #include "lib/strbuf.h"
+#include "lib/str.h"
+#include "lib/shell.h"
+#include "lib/url.h"
 #include "lib/atomic.h"
 #include "lib/rdb.h"
 #include "../lambda/runtime/module_registry.h"
@@ -39,6 +43,30 @@ struct SecurityRuntimeCapture {
     bool restrict_after_data_read;
     const char* read_started_path;
     const char* read_release_path;
+};
+
+struct ScopedContextEnvironment {
+    char cwd[4096];
+    char* home;
+    char* scratch;
+    bool armed;
+    ~ScopedContextEnvironment() {
+        if (armed) {
+            chdir(cwd);
+            if (home) setenv("HOME", home, 1); else unsetenv("HOME");
+            if (scratch) setenv("TMPDIR", scratch, 1); else unsetenv("TMPDIR");
+        }
+        mem_free(home); mem_free(scratch);
+    }
+    bool capture() {
+        if (!getcwd(cwd, sizeof(cwd))) return false;
+        const char* old_home = getenv("HOME");
+        const char* old_scratch = getenv("TMPDIR");
+        home = old_home ? mem_strdup(old_home, MEM_CAT_TEMP) : nullptr;
+        scratch = old_scratch ? mem_strdup(old_scratch, MEM_CAT_TEMP) : nullptr;
+        armed = (!old_home || home) && (!old_scratch || scratch);
+        return armed;
+    }
 };
 
 class SecurityRuntimeTest : public ::testing::TestWithParam<LambdaTier> {
@@ -185,7 +213,7 @@ protected:
     bool rewrite_source(StrBuf* source) {
         (void)strbuf_replace_all(source, "@ROOT@", directory);
         if (!strstr(source->str, "@PATH@")) return true;
-        StrBuf* path = strbuf_create("(file./)");
+        StrBuf* path = strbuf_create("(\\.file.localhost)");
         if (!path) return false;
         bool ok = true;
         for (const char* part = directory + 1; ok && *part;) {
@@ -280,6 +308,20 @@ TEST_P(SecurityRuntimeTest, RealOutputCreatesNewFilesAndChallengesExistingFiles)
     EXPECT_TRUE(approved.committed);
     expect_text("new/report.txt", "second");
     mem_free(second);
+}
+
+TEST_P(SecurityRuntimeTest, PathNodeKindLeavesFilePayloadUnread) {
+    ASSERT_TRUE(eval_context_bind_security_directory(runtime_get_eval_context(&runtime), directory));
+    seed("data.json", "{\"n\":41}");
+    run("pn main() { let p = \\.'data.json'; output(p# is file, \"kind.json\", 'json')^ }\n");
+    expect_text("kind.json", "true");
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
+
+    char* script = file_path_join(directory, "content.ls");
+    run("pn main() { let p = \\.'data.json'; let d = p#; output(d.n, \"number.json\", 'json')^ }\n", script);
+    mem_free(script);
+    expect_text("number.json", "41");
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 1);
 }
 
 TEST_P(SecurityRuntimeTest, HostDirectoryResolvesRelativeDataAndTaskPathsWithoutChangingProcessCwd) {
@@ -703,7 +745,7 @@ TEST_P(SecurityRuntimeTest, OutsidePathsAndSystemForcesCannotUseAnAmbientProvide
 
 TEST_P(SecurityRuntimeTest, ARepeatedDocumentForceStillChecksCurrentAuthority) {
     seed("data.json", "{\"answer\":42}");
-    seed("entry.ls", "let p = @PATH@[\"data.json\"]\nlet first = p#\np#\n");
+    seed("entry.ls", "let p = @PATH@[\"data.json\"]\nlet first = p#answer\np#answer\n");
     capture.restrict_after_data_read = true;
     expect_failed(load_file());
     EXPECT_EQ(atomic_load32(&capture.data_reads), 1);
@@ -953,6 +995,300 @@ TEST_P(SecurityRuntimeTest, InMemoryDocumentIterationNeedsNoExternalAuthority) {
     EXPECT_EQ(atomic_load32(&capture.enumerations), 0);
 }
 
+TEST_P(SecurityRuntimeTest, SuppliedDocumentReferenceSurvivesFurtherInput) {
+    run("temp('supplied_input', {body: {answer: 42}})^\n");
+    ASSERT_NE(last_run, nullptr);
+    ASSERT_NE(doc_context_set_supplied(last_run->root), nullptr);
+    ASSERT_TRUE(security_file_broker_restrict(broker, SECURITY_LOAD_SOURCE));
+    run("let ref = \\.~doc; let other = temp('other_input', {answer: 99})^; "
+        "[~doc.body.answer, (ref ++ \\.body.answer)#, other.answer, ~doc.body.answer]\n");
+    ASSERT_NE(last_run, nullptr);
+    ArrayReader values = ArrayReader::fromItem(last_run->root);
+    ASSERT_EQ(values.length(), 4);
+    EXPECT_EQ(values.get(0).asInt(), 42);
+    EXPECT_EQ(values.get(1).asInt(), 42);
+    EXPECT_EQ(values.get(2).asInt(), 99);
+    EXPECT_EQ(values.get(3).asInt(), 42);
+    Path* captured = doc_context_get_supplied()->path;
+    run("temp('replacement_input', {answer: 7})^\n");
+    ASSERT_NE(doc_context_set_supplied(last_run->root), nullptr);
+    Item old_document = fn_force((Item){.path = captured});
+    EXPECT_EQ(MapReader::fromItem(old_document).get("body").asMap().get("answer").asInt(), 42);
+    run("~doc.answer\n");
+    EXPECT_EQ(it2i(last_run->root), 7);
+}
+
+TEST_P(SecurityRuntimeTest, WorkingDirectoryReferenceUsesEvaluationSnapshot) {
+    run("\\.~cwd\n");
+    ASSERT_NE(last_run, nullptr);
+    ASSERT_EQ(get_type_id(last_run->root), LMD_TYPE_PATH);
+    Path* original = last_run->root.path;
+    char previous[4096];
+    ASSERT_NE(getcwd(previous, sizeof(previous)), nullptr);
+    ASSERT_EQ(chdir(directory), 0);
+    run("\\.~cwd\n");
+    int restore_result = chdir(previous);
+    ASSERT_EQ(restore_result, 0);
+    ASSERT_NE(last_run, nullptr);
+    ASSERT_EQ(get_type_id(last_run->root), LMD_TYPE_PATH);
+    EXPECT_TRUE(path_equal(original, last_run->root.path));
+}
+
+TEST_P(SecurityRuntimeTest, TemporaryDirectoryUsesEvaluationSnapshot) {
+    const char* original_value = getenv("TMPDIR");
+    char* original = original_value ? mem_strdup(original_value, MEM_CAT_TEMP) : nullptr;
+    run("null\n");
+    ASSERT_EQ(setenv("TMPDIR", directory, 1), 0);
+    run("\\.~temp\n");
+    if (original) setenv("TMPDIR", original, 1);
+    else unsetenv("TMPDIR");
+    ASSERT_NE(last_run, nullptr);
+    ASSERT_EQ(get_type_id(last_run->root), LMD_TYPE_PATH);
+    StrBuf* actual = strbuf_new();
+    ASSERT_NE(actual, nullptr);
+    path_to_os_path(last_run->root.path, actual);
+    const char* expected = original ? original : "/tmp";
+    size_t length = strlen(expected);
+    while (length > 1 && expected[length - 1] == '/') length--;
+    EXPECT_EQ(actual->length, length);
+    EXPECT_EQ(strncmp(actual->str, expected, length), 0);
+    strbuf_free(actual);
+    mem_free(original);
+}
+
+TEST_P(SecurityRuntimeTest, ContextDirectoriesResolveDistinctSentinels) {
+    seed("cwd/cwd_marker", "");
+    seed("home/home_marker", "");
+    seed("scratch/temp_marker", "");
+    char* cwd = file_path_join(directory, "cwd");
+    char* home = file_path_join(directory, "home");
+    char* scratch = file_path_join(directory, "scratch");
+    ASSERT_NE(cwd, nullptr); ASSERT_NE(home, nullptr); ASSERT_NE(scratch, nullptr);
+
+    // Restore process state even if a fixture assertion aborts this test.
+    ScopedContextEnvironment previous = {};
+    ASSERT_TRUE(previous.capture());
+    ASSERT_EQ(chdir(cwd), 0);
+    ASSERT_EQ(setenv("HOME", home, 1), 0);
+    ASSERT_EQ(setenv("TMPDIR", scratch, 1), 0);
+    mem_free(cwd); mem_free(home); mem_free(scratch);
+
+    // Evaluation snapshots precede the first context-root observation.
+    runtime_cleanup(&runtime); runtime_live = false;
+    start_runtime();
+    run("[~cwd.cwd_marker is file, ~home.home_marker is file, "
+        "~temp.temp_marker is file, "
+        "~home[\\.home_marker] is file, (\\.~home ++ \\.home_marker)# is file, "
+        "(\\.~home ++ \\.missing_child) is path]\n");
+    ASSERT_NE(last_run, nullptr);
+    ArrayReader values = ArrayReader::fromItem(last_run->root);
+    ASSERT_EQ(values.length(), 6);
+    for (int64_t i = 0; i < values.length(); i++) EXPECT_TRUE(values.get(i).asBool());
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
+}
+
+TEST_P(SecurityRuntimeTest, DirectorySnapshotsAreIndependentAcrossEvaluations) {
+    seed("home_a/first", ""); seed("home_b/second", "");
+    seed("temp_a/first", ""); seed("temp_b/second", "");
+    char* home_a = file_path_join(directory, "home_a");
+    char* home_b = file_path_join(directory, "home_b");
+    char* temp_a = file_path_join(directory, "temp_a");
+    char* temp_b = file_path_join(directory, "temp_b");
+    ASSERT_NE(home_a, nullptr); ASSERT_NE(home_b, nullptr);
+    ASSERT_NE(temp_a, nullptr); ASSERT_NE(temp_b, nullptr);
+    ScopedContextEnvironment previous = {};
+    ASSERT_TRUE(previous.capture());
+    ASSERT_EQ(setenv("HOME", home_a, 1), 0);
+    ASSERT_EQ(setenv("TMPDIR", temp_a, 1), 0);
+    runtime_cleanup(&runtime); runtime_live = false;
+    start_runtime();
+    run("null\n");
+    ASSERT_EQ(setenv("HOME", home_b, 1), 0);
+    ASSERT_EQ(setenv("TMPDIR", temp_b, 1), 0);
+    run("[~home.first is file, ~temp.first is file]\n");
+    ASSERT_NE(last_run, nullptr);
+    ArrayReader original = ArrayReader::fromItem(last_run->root);
+    ASSERT_EQ(original.length(), 2);
+    EXPECT_TRUE(original.get(0).asBool()); EXPECT_TRUE(original.get(1).asBool());
+
+    // A new evaluation sees the changed environment; the old one retains its snapshot.
+    runtime_cleanup(&runtime); runtime_live = false;
+    start_runtime();
+    run("[~home.second is file, ~temp.second is file]\n");
+    ASSERT_NE(last_run, nullptr);
+    ArrayReader next = ArrayReader::fromItem(last_run->root);
+    ASSERT_EQ(next.length(), 2);
+    EXPECT_TRUE(next.get(0).asBool()); EXPECT_TRUE(next.get(1).asBool());
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
+    mem_free(home_a); mem_free(home_b); mem_free(temp_a); mem_free(temp_b);
+}
+
+TEST_P(SecurityRuntimeTest, ProcessContextUsesSystemProviderPermissions) {
+    // S2.4.8 requires the alias and the original provider to share denial.
+    run("~proc.pid\n");
+    ASSERT_NE(last_run, nullptr);
+    ASSERT_EQ(get_type_id(last_run->root), LMD_TYPE_ERROR);
+    LambdaError* alias_error = it2err(last_run->root);
+    ASSERT_NE(alias_error, nullptr);
+    int alias_code = alias_error->code;
+    run("sys.proc.self.pid\n");
+    ASSERT_NE(last_run, nullptr);
+    ASSERT_EQ(get_type_id(last_run->root), LMD_TYPE_ERROR);
+    LambdaError* original_error = it2err(last_run->root);
+    ASSERT_NE(original_error, nullptr);
+    EXPECT_EQ(alias_code, original_error->code);
+    EXPECT_EQ(alias_code, ERR_FILE_ACCESS_DENIED);
+    run("\\.~proc.pid is path\n");
+    ASSERT_NE(last_run, nullptr);
+    EXPECT_EQ(last_run->root.item, b2it(BOOL_TRUE));
+    run("(\\.~proc.pid)#\n");
+    ASSERT_NE(last_run, nullptr);
+    ASSERT_EQ(get_type_id(last_run->root), LMD_TYPE_ERROR);
+    EXPECT_EQ(it2err(last_run->root)->code, alias_code);
+}
+
+TEST_P(SecurityRuntimeTest, CachedModuleRetainsDefiningScriptReference) {
+    seed("helper.ls", "pub fn source() => \\.~script\n");
+    seed("entry.ls", "import helper: .helper\nhelper.source() == (@PATH@ ++ \\.'helper.ls')\n");
+    Input* first = load_file();
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(first->root.item, b2it(BOOL_TRUE));
+    runtime_cleanup(&runtime); runtime_live = false;
+    start_runtime();
+    InputScriptCacheStats before = {}, after = {};
+    input_script_cache_get_stats(input_manager_global_script_cache(), &before);
+    Input* second = load_file();
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second->root.item, b2it(BOOL_TRUE));
+    input_script_cache_get_stats(input_manager_global_script_cache(), &after);
+    EXPECT_GT(after.ast_hits + after.mir_hits, before.ast_hits + before.mir_hits);
+}
+
+TEST_P(SecurityRuntimeTest, InlineSourceRetainsItsDefiningFile) {
+    seed("entry.ls", "null\n");
+    run("[~script is file, \\.~script == (@PATH@ ++ \\.'entry.ls'), "
+        "(\\.~script)# is file]\n");
+    ASSERT_NE(last_run, nullptr);
+    ArrayReader values = ArrayReader::fromItem(last_run->root);
+    ASSERT_EQ(values.length(), 3);
+    for (int64_t i = 0; i < values.length(); i++) EXPECT_TRUE(values.get(i).asBool());
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
+    run("[~script == null, \\.~script == null]\n", (char*)"<inline-source>");
+    ASSERT_NE(last_run, nullptr);
+    values = ArrayReader::fromItem(last_run->root);
+    ASSERT_EQ(values.length(), 2);
+    for (int64_t i = 0; i < values.length(); i++) EXPECT_TRUE(values.get(i).asBool());
+}
+
+TEST_P(SecurityRuntimeTest, InlineSourceFileUrlRetainsItsDefiningFile) {
+    seed("source file.ls", "null\n");
+    char* filename = file_path_join(directory, "source file.ls");
+    ASSERT_NE(filename, nullptr);
+    char* url = url_from_local_path(filename);
+    mem_free(filename);
+    ASSERT_NE(url, nullptr);
+    run("[~script is file, \\.~script == (@PATH@ ++ \\.'source file.ls'), "
+        "(\\.~script)# is file]\n", url);
+    mem_free(url);
+    ASSERT_NE(last_run, nullptr);
+    ArrayReader values = ArrayReader::fromItem(last_run->root);
+    ASSERT_EQ(values.length(), 3);
+    for (int64_t i = 0; i < values.length(); i++) EXPECT_TRUE(values.get(i).asBool());
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
+
+    // A remote authority must survive capture without probing the filesystem.
+    Pool* pool = runtime_get_eval_context(&runtime)->pool;
+    int metadata_before = atomic_load32(&capture.metadata_reads);
+    Path* remote = lambda_context_path(pool, LAMBDA_CONTEXT_PATH_SCRIPT,
+        "file://other-host/share/source%20file.ls");
+    Path* expected = path_new_authority(pool, PATH_SCHEME_FILE, "other-host");
+    expected = path_extend(pool, expected, "share");
+    expected = path_extend(pool, expected, "source file.ls");
+    ASSERT_NE(remote, nullptr);
+    EXPECT_TRUE(path_equal(remote, expected));
+    EXPECT_EQ(atomic_load32(&capture.metadata_reads), metadata_before);
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
+}
+
+TEST_P(SecurityRuntimeTest, WindowsUncCapturePreservesRemoteAuthority) {
+    run("null\n");
+    Pool* pool = runtime_get_eval_context(&runtime)->pool;
+    int metadata_before = atomic_load32(&capture.metadata_reads);
+    Path* captured = lambda_context_windows_unc_path(pool,
+        "\\\\context-test.invalid\\share\\folder\\..\\source file.ls");
+    Path* expected = path_new_authority(pool, PATH_SCHEME_FILE, "context-test.invalid");
+    expected = path_extend(pool, expected, "share");
+    expected = path_extend(pool, expected, "source file.ls");
+    ASSERT_NE(captured, nullptr);
+    EXPECT_TRUE(path_equal(captured, expected));
+    EXPECT_FALSE(path_file_authority_is_local(captured));
+    StrBuf* projected = strbuf_new();
+    ASSERT_NE(projected, nullptr);
+    path_to_windows_path(captured, projected);
+    EXPECT_STREQ(projected->str, "\\\\context-test.invalid\\share\\source file.ls");
+    strbuf_free(projected);
+    EXPECT_EQ(atomic_load32(&capture.metadata_reads), metadata_before);
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
+    char* local_hostname = shell_get_hostname();
+    ASSERT_NE(local_hostname, nullptr);
+    if (strcmp(local_hostname, "localhost") != 0) {
+        Path* loopback = lambda_context_windows_unc_path(pool, "\\\\localhost\\share\\file");
+        Path* local_share = path_new_authority(pool, PATH_SCHEME_FILE, local_hostname);
+        local_share = path_extend(pool, local_share, "share");
+        local_share = path_extend(pool, local_share, "file");
+        ASSERT_NE(loopback, nullptr);
+        EXPECT_TRUE(path_equal(loopback, local_share));
+    }
+    mem_free(local_hostname);
+}
+
+TEST_P(SecurityRuntimeTest, SuppliedDocumentPathLoadsOnlyWhenForced) {
+    seed("document.json", "{\"answer\": 17}");
+    run("null\n");
+    char* filename = file_path_join(directory, "document.json");
+    ASSERT_NE(filename, nullptr);
+    RootFrame roots(1);
+    Rooted<Item> target(roots, (Item){.item = s2it(heap_strcpy(filename, strlen(filename)))});
+    mem_free(filename);
+    ASSERT_NE(doc_context_set_supplied_target(target.get()), nullptr);
+    run("\\.~doc is path\n");
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 0);
+    run("~doc.answer\n");
+    ASSERT_NE(last_run, nullptr);
+    EXPECT_EQ(it2i(last_run->root), 17);
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 1);
+}
+
+TEST_P(SecurityRuntimeTest, DocumentTransformPublishesSuppliedDocument) {
+    seed("helper.ls", "pub fn render(source, options) => [~doc.answer, (\\.~doc)#.answer]\n");
+    seed("document.json", "{\"answer\": 17}");
+    char* filename = file_path_join(directory, "document.json");
+    ASSERT_NE(filename, nullptr);
+    LambdaDocumentTransformConfig config = {"json", ".helper", "render",
+        LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false};
+    Input* result = run_lambda_document_transform_with_options(&runtime, filename, &config, nullptr, 0);
+    ASSERT_NE(result, nullptr);
+    if (get_type_id(result->root) == LMD_TYPE_ERROR) {
+        LambdaError* error = it2err(result->root);
+        FAIL() << "transform failed: " << (error && error->message ? error->message : "unknown")
+            << ", denied=" << atomic_load32(&capture.denied_reads)
+            << ", source reads=" << atomic_load32(&capture.source_reads);
+    }
+    ArrayReader values = ArrayReader::fromItem(result->root);
+    ASSERT_EQ(values.length(), 2);
+    EXPECT_EQ(values.get(0).asInt(), 17);
+    EXPECT_EQ(values.get(1).asInt(), 17);
+    EXPECT_EQ(atomic_load32(&capture.data_reads), 1);
+    config.source = LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED;
+    result = run_lambda_document_transform_with_options(&runtime, filename, &config, nullptr, 0);
+    mem_free(filename);
+    ASSERT_NE(result, nullptr);
+    values = ArrayReader::fromItem(result->root);
+    ASSERT_EQ(values.length(), 2);
+    EXPECT_EQ(values.get(0).asInt(), 17);
+    EXPECT_EQ(values.get(1).asInt(), 17);
+}
+
 TEST_P(SecurityRuntimeTest, DocumentHeadsArePrivateAndSurviveAnotherContextsTeardown) {
     run("temp('shared_head', [7])^\n");
     EvalContext* owner = runtime_get_eval_context(&runtime);
@@ -1033,5 +1369,55 @@ TEST_P(SecurityRuntimeTest, PendingEditsKeepTheirOwnersRootsThroughPeerExecution
 }
 
 INSTANTIATE_TEST_SUITE_P(InterpreterAndJit, SecurityRuntimeTest,
+    ::testing::Values(LAMBDA_TIER_INTERP, LAMBDA_TIER_JIT));
+
+class ProcessContextEnvironmentTest : public ::testing::TestWithParam<LambdaTier> {
+protected:
+    Runtime runtime = {};
+    LambdaTestNativeCompiler compiler;
+    void SetUp() override {
+        log_init(nullptr);
+        compiler.select(GetParam());
+        runtime_init(&runtime);
+    }
+    void TearDown() override { runtime_cleanup(&runtime); }
+};
+
+TEST_P(ProcessContextEnvironmentTest, BoundAndDirectReadsKeepLongNames) {
+    char name[301];
+    memset(name, 'L', sizeof(name) - 1); name[sizeof(name) - 1] = 0;
+    struct RestoreVariable {
+        const char* name;
+        char* previous;
+        bool changed;
+        ~RestoreVariable() {
+            if (changed) {
+                if (previous) shell_setenv(name, previous); else shell_unsetenv(name);
+            }
+            mem_free(previous);
+        }
+    } restore = {name, nullptr, false};
+    const char* prior = shell_getenv(name);
+    if (prior) {
+        restore.previous = mem_strdup(prior, MEM_CAT_TEMP);
+        ASSERT_NE(restore.previous, nullptr);
+    }
+    ASSERT_TRUE(shell_setenv(name, "fixture"));
+    restore.changed = true;
+    StrBuf* source = strbuf_new(); ASSERT_NE(source, nullptr);
+    strbuf_append_format(source,
+        "let proc = ~proc\n;[proc.env[\"%s\"] == \"fixture\", "
+        "sys.proc.self.env.'%s' == \"fixture\"]\n", name, name);
+    Script* script = nullptr;
+    Input* result = run_script_mir(&runtime, source->str, (char*)"<long-env-test>", false, &script);
+    strbuf_free(source);
+    compiler.expect_mvp_admitted(script);
+    ASSERT_NE(result, nullptr);
+    ArrayReader values = ArrayReader::fromItem(result->root);
+    ASSERT_EQ(values.length(), 2);
+    EXPECT_TRUE(values.get(0).asBool()); EXPECT_TRUE(values.get(1).asBool());
+}
+
+INSTANTIATE_TEST_SUITE_P(InterpreterAndJit, ProcessContextEnvironmentTest,
     ::testing::Values(LAMBDA_TIER_INTERP, LAMBDA_TIER_JIT));
 #endif

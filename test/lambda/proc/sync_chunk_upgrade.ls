@@ -3,7 +3,7 @@ import repo: lambda.sync.repository
 import chunks: lambda.sync.chunks
 import crypto: lambda.io.crypto
 pn main() {
-    let area = "temp/sync-chunk-upgrade-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-chunk-upgrade-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let secret = crypto.key()^
     let handle = local.create(area ++ "/repo",secret,"upgrade",area ++ "/tree","a",chunks.legacy_profile)^

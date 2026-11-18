@@ -29,7 +29,7 @@ import xml: .xml
 
 let PROJECT_ROOT = "."
 // Transformed browsers retain the source directory as their URL, so bundle the icon font.
-let ICON_FONT = media.data_uri(input(sys.lambda.home# ++ "/package/doc/icons/seti.woff", 'binary')^, "font/woff")^
+let ICON_FONT = media.data_uri(input(sys.lambda.home ++ "/package/doc/icons/seti.woff", 'binary')^, "font/woff")^
 
 // --------------------------------------------------------------------------
 // Filesystem and selection helpers
@@ -53,7 +53,7 @@ fn directory_entries(source) any^ {
 }
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
 fn absolute_file_path(path) any^ => if (starts_with(path, "/") or path[1] == ":") path
-  else sys.proc.self.cwd# ++ "/" ++ path
+  else sys.proc.self.cwd ++ "/" ++ path
 
 // Keep the root list identity stable so document selection does not recreate
 // the mounted directory-row components.

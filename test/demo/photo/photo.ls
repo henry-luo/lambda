@@ -14,9 +14,9 @@ import present: .mod_present
 import layers: .mod_layers
 
 let BASE = url_resolve(resources.entry_uri()^,".")
-let START_PATH = sys.proc.self.env.PHOTO_SOURCE#
+let START_PATH = sys.proc.self.env.PHOTO_SOURCE
 let INITIAL = files.open_image(if (START_PATH is string and START_PATH != "")
-    url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",START_PATH) else url_resolve(BASE,"assets/coast.jpg"))^
+    url_resolve("file://" ++ sys.proc.self.cwd ++ "/",START_PATH) else url_resolve(BASE,"assets/coast.jpg"))^
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"photo")
 fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
 fn replace_recipe(session_value,recipe) => {*:session_value,dirty:true,hist:if (session_value.tool == "crop")
@@ -41,7 +41,7 @@ fn add_layer(session_value,kind,text="Your story") any^ {
         selected:layer.id,inspector_open:false}
 }
 pn change_source(owner,session_value,path) any^ {
-    let source = files.open_image(url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",path))^
+    let source = files.open_image(url_resolve("file://" ++ sys.proc.self.cwd ++ "/",path))^
     present.thumbnails(owner,source)^
     present.dialog(owner,"")
     present.message(owner,"Image opened. Your original stays untouched.")

@@ -11,9 +11,9 @@ fn first_index(log, pred) => (let hits = [for (i, m in log where ((pred(m)) ^ { 
 
 pn main() {
     // a folder per process: the T0 and JIT runs of this test may overlap
-    let root = "temp/archive_test/service-" ++ string(sys.proc.self.pid#)
+    let root = "temp/archive_test/service-" ++ string(sys.proc.self.pid)
     if (exists(root)) io.delete(root)^
-    let base = "file://" ++ sys.proc.self.cwd# ++ "/test/"
+    let base = "file://" ++ sys.proc.self.cwd ++ "/test/"
     let lib = archive.library(root, {config: {defaults: {per_host_delay_ms: 0, jobs: 2, thumbnail: false}}})^
     let me = self()
     let svc = start(archive.service, [lib, pn (m) => { send(me, m)^ }])

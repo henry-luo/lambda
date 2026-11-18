@@ -41,7 +41,7 @@ pn main() {
         sqlite.execute(db, "DELETE FROM entries") ^ { mixed = true }
         put d.n = 2
     }
-    print(mixed and temp.'sqlite_document_guard'#n == 2); print("\n")
+    print(mixed and \.temp.'sqlite_document_guard'#n == 2); print("\n")
     var rejected = false
     sqlite.execute(db, "INSERT INTO entries(id, text) VALUES (3, NULL)") ^ { rejected = true }
     print(rejected); print("\n")

@@ -674,18 +674,20 @@ AstNode* parse_paren_type(Lexer* lx) {
 static const char* const error_element_pattern_semicolon =
     "';' only separates statements; an element pattern takes ',' between "
     "attributes and content, and nothing between a bare tag and its content";
-AstNode* parse_element_type(Lexer* lx) {
-    AstElementNode* ast_node = (AstElementNode*)new_node(lx, AST_NODE_ELMT_TYPE,
+static AstElementNode* make_element_pattern(Lexer* lx, StrView tag) {
+    AstElementNode* node = (AstElementNode*)new_node(lx, AST_NODE_ELMT_TYPE,
         sizeof(AstElementNode), LSF_TP_ELEMENT);
-    StrView tag = take_qualified_tag(lx);
-    if (!tag.length) { fail(lx, "expected an element tag"); return NULL; }
-    // the tag is lexical; the element type carries it until resolution
-    // completes the shape and registers the type
     TypeElmt* type = (TypeElmt*)alloc_type(lx->tp->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     String* pooled = name_pool_create_strview(lx->tp->name_pool, tag);
-    type->name.str = pooled->chars;
-    type->name.length = pooled->len;
-    ast_node->type = (Type*)type;
+    type->name = {pooled->chars, pooled->len};
+    node->type = type;
+    return node;
+}
+
+AstNode* parse_element_type(Lexer* lx) {
+    StrView tag = take_qualified_tag(lx);
+    if (!tag.length) { fail(lx, "expected an element tag"); return NULL; }
+    AstElementNode* ast_node = make_element_pattern(lx, tag);
 
     AstNode* prev_item = NULL;
     bool had_attributes = false;
@@ -890,6 +892,8 @@ AstNode* parse_primary(Lexer* lx) {
         node->literal_value_kind = AST_PRIMARY_LITERAL_VALUE_BOOL;
         return (AstNode*)node;
     }
+    // S2.2.4: file in a type slot is the structural tag contract <file>.
+    if (strview_equal(&w, "file")) return make_element_pattern(lx, w);
     int base_index = lambda_base_type_index(w);
     if (base_index >= 0) {
         AstTypeNode* node = (AstTypeNode*)new_node(lx, AST_NODE_TYPE,

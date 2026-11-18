@@ -1,7 +1,7 @@
 import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let message_preload=parse("",{type:"tex"})^.messages;
 fn report(source) any^ {
  let doc="\\begin{document}" ++ source ++ "\\end{document}";

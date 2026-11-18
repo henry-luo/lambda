@@ -19,7 +19,7 @@ pn recover(handle, parent) any^ {
     return repo.access(handle.path,handle.keys,pn (tx,k)=> { return repo.recover(tx,k)^ })^
 }
 pn main() {
-    let area = "temp/sync-scratch-race-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-scratch-race-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let handle = local.create(area ++ "/repo",crypto.key()^,"scratch-race",area ++ "/tree","device")^
     let name = ".lambda-spool-0123456789abcdef0123456789abcdef"

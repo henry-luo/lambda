@@ -10,6 +10,7 @@
 #include "grammar/grammar.hpp"
 #include "binary_schema.hpp"
 #include "security_context.h"
+#include "sysinfo.h"
 #include "interp.hpp"  // interp_visit_children: the complete Lambda child traversal
 #include "lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -16788,6 +16789,46 @@ static AstNode* direct_path_node(Transpiler* tp, SourceSpan span,
     return (AstNode*)path;
 }
 
+// S2.4.8 context roots capture the defining source and provider addresses.
+static AstNode* direct_context_root(Transpiler* tp, SourceSpan span,
+        LambdaToken token, bool access) {
+    StrView text = source_span_text(tp, token.span);
+    if (strview_equal(&text, "~user")) {
+        AstPathSegment step = {};
+        step.name = name_pool_create_strview(tp->name_pool, strview_init("user", 4));
+        AstPathNode* path = (AstPathNode*)direct_path_node(tp, span, PATH_SCHEME_SYS,
+            NULL, &step, 1, NULL);
+        path->access = access;
+        if (access) path->type = &TYPE_ANY;
+        return path;
+    }
+    if (!strview_equal(&text, "~proc")) {
+        AstPathNode* path = (AstPathNode*)direct_path_node(tp, span, PATH_SCHEME_FILE,
+            NULL, NULL, 0, NULL);
+        path->context_path = strview_equal(&text, "~cwd") ? LAMBDA_CONTEXT_PATH_CWD :
+            strview_equal(&text, "~home") ? LAMBDA_CONTEXT_PATH_HOME :
+            strview_equal(&text, "~script") ? LAMBDA_CONTEXT_PATH_SCRIPT :
+            strview_equal(&text, "~doc") ? LAMBDA_CONTEXT_PATH_DOCUMENT : LAMBDA_CONTEXT_PATH_TEMP;
+        // Inline bytes may still have a real source file; synthetic names do not.
+        if (path->context_path == LAMBDA_CONTEXT_PATH_SCRIPT && tp->reference &&
+                tp->reference[0] != '<') {
+            path->context_source = name_pool_create_strview(tp->name_pool,
+                strview_init(tp->reference, strlen(tp->reference)));
+        }
+        path->access = access;
+        path->type = &TYPE_ANY;
+        return path;
+    }
+    AstPathSegment steps[2] = {};
+    steps[0].name = name_pool_create_strview(tp->name_pool, strview_init("proc", 4));
+    steps[1].name = name_pool_create_strview(tp->name_pool, strview_init("self", 4));
+    AstPathNode* path = (AstPathNode*)direct_path_node(tp, span, PATH_SCHEME_SYS,
+        NULL, steps, 2, NULL);
+    path->access = access;
+    if (access) path->type = &TYPE_ANY;
+    return path;
+}
+
 // A computed `[k]` step of a path literal, with the static steps written after
 // it. Typed `any`: a key that names nothing makes the whole literal null.
 static AstNode* direct_path_index_node(Transpiler* tp, SourceSpan span,
@@ -16812,8 +16853,16 @@ static bool direct_is_path_literal(AstNode* node) {
 // S2.4.1v2: the roots `/` and `\` are complete paths; steps extend them.
 static AstNode* direct_path_root(Transpiler* tp, SourceSpan span,
         LambdaToken root) {
-    return direct_path_node(tp, span, root.kind == LAMBDA_TOK_SLASH
+    bool access = root.kind == LAMBDA_TOK_SLASH;
+    AstPathNode* path = (AstPathNode*)direct_path_node(tp, span, access
         ? PATH_SCHEME_LOGICAL : PATH_SCHEME_REL, NULL, NULL, 0, NULL);
+    path->access = access;
+    if (access) path->type = &TYPE_ANY;
+    return path;
+}
+
+static bool direct_path_access(AstNode* node) {
+    return node->node_type == AST_NODE_PATH_EXPR && ((AstPathNode*)node)->access;
 }
 
 // S2.4.2v5: `[k]` on a path literal is a key step of that literal (`\[1]` is
@@ -16821,7 +16870,8 @@ static AstNode* direct_path_root(Transpiler* tp, SourceSpan span,
 // the literal, since its AST is a PRIMARY wrapper.
 static AstNode* direct_path_index_step(Transpiler* tp, SourceSpan span,
         AstNode* object, AstNode* key) {
-    if (!direct_is_path_literal(object) || !key || key->next) return NULL;
+    if (!direct_is_path_literal(object) || direct_path_access(object) || !key || key->next)
+        return NULL;
     return direct_path_index_node(tp, span, object, key, NULL, 0, NULL);
 }
 
@@ -16834,11 +16884,24 @@ static AstNode* syntax_path_member_step(LambdaSyntaxSink* sink,
         SourceSpan span, AstNode* object, LambdaToken step_token) {
     Transpiler* tp = sink->tp;
     if (!object) return NULL;
-    PathScheme scheme = PATH_SCHEME_REL;
-    if (!direct_is_path_literal(object) &&
-            !direct_path_scheme(ast_node_source(tp, object), &scheme)) {
-        return NULL;
+    if (step_token.kind == LAMBDA_TOK_TILDE_CONTEXT) {
+        AstPathNode* base = object->node_type == AST_NODE_PATH_EXPR
+            ? (AstPathNode*)object : NULL;
+        if (base && !base->access && base->scheme == PATH_SCHEME_REL &&
+                base->segment_count == 0) {
+            AstNode* path = direct_context_root(tp, span, step_token, false);
+            syntax_move_attachments(sink, object, path);
+            return path;
+        }
+        syntax_attach_diagnostic(sink, object, ERR_INVALID_LITERAL,
+            step_token.span, "a context root must begin an escaped path");
+        object->type = &TYPE_ERROR;
+        return object;
     }
+    PathScheme scheme = PATH_SCHEME_REL;
+    bool literal = direct_is_path_literal(object);
+    if (!literal && !direct_path_scheme(ast_node_source(tp, object), &scheme)) return NULL;
+    bool access = !literal || direct_path_access(object);
     AstPathSegment step;
     const char* step_error = NULL;
     bool valid = direct_path_step(tp, step_token, &step, &step_error);
@@ -16848,18 +16911,38 @@ static AstNode* syntax_path_member_step(LambdaSyntaxSink* sink,
         path = direct_path_index_node(tp, span, base->base_path,
             base->segment_expr, base->segments, base->segment_count,
             valid ? &step : NULL);
-    } else if (object->node_type == AST_NODE_PATH_EXPR) {
+    } else if (literal) {
         AstPathNode* base = (AstPathNode*)object;
-        path = direct_path_node(tp, span, base->scheme, base->authority,
-            base->segments, base->segment_count, valid ? &step : NULL);
+        PathScheme escaped_scheme;
+        if (base->scheme == PATH_SCHEME_REL && base->segment_count == 0 &&
+                valid && step.type == LPATH_SEG_NORMAL &&
+                direct_path_scheme(direct_token_text(tp, step_token), &escaped_scheme)) {
+            // Only an unquoted scheme at the capture head selects a provider.
+            path = direct_path_node(tp, span, escaped_scheme, NULL, NULL, 0, NULL);
+            ((AstPathNode*)path)->needs_authority = escaped_scheme == PATH_SCHEME_FILE;
+        } else if (base->needs_authority && valid && step.type == LPATH_SEG_NORMAL) {
+            path = direct_path_node(tp, span, base->scheme, step.name, NULL, 0, NULL);
+        } else {
+            path = direct_path_node(tp, span, base->scheme, base->authority,
+                base->segments, base->segment_count, valid ? &step : NULL);
+            ((AstPathNode*)path)->context_path = base->context_path;
+            ((AstPathNode*)path)->context_source = base->context_source;
+            if (base->context_path) path->type = &TYPE_ANY;
+            ((AstPathNode*)path)->file_slash = base->file_slash ||
+                (base->needs_authority && valid && step.type == LPATH_SEG_ROOT);
+        }
         if (base->type == &TYPE_ERROR) valid = false;
     } else if (scheme == PATH_SCHEME_FILE && valid && step.type == LPATH_SEG_NORMAL) {
-        // S2.4.5v2: after `file.` a name selects the host (`file.host.a`),
-        // while `./` selects the current machine (`file./.a`).
         path = direct_path_node(tp, span, scheme, step.name, NULL, 0, NULL);
     } else {
         path = direct_path_node(tp, span, scheme, NULL, NULL, 0,
             valid ? &step : NULL);
+        ((AstPathNode*)path)->file_slash = scheme == PATH_SCHEME_FILE &&
+            valid && step.type == LPATH_SEG_ROOT;
+    }
+    if (access) {
+        ((AstPathNode*)path)->access = true;
+        path->type = &TYPE_ANY;
     }
     if (!valid) path->type = &TYPE_ERROR;
     // The scheme token is part of the path literal, not a value-name read;
@@ -17417,6 +17500,8 @@ static AstNode* syntax_atom(LambdaSyntaxSink* sink,
         return build_current_item_syntax(tp, token.span, false);
     case LAMBDA_TOK_TILDE_KEY:
         return build_current_item_syntax(tp, token.span, true);
+    case LAMBDA_TOK_TILDE_CONTEXT:
+        return direct_context_root(tp, token.span, token, true);
     case LAMBDA_TOK_PARENT:
         return build_current_parent_navigation_syntax(tp, token.span);
     case LAMBDA_TOK_CARET:

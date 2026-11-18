@@ -77,6 +77,8 @@ enum TokenType {
     // `123abc` and `0b1010` LEXICAL errors instead of silent splits into a
     // number plus a juxtaposed statement.
     NUM_BOUNDARY,
+    TILDE_BOUNDARY,
+    TILDE_WORD_BOUNDARY,
     // S2.4.1v2: emitted (zero-width) after a bare path root `/` or `\` only when
     // whitespace, a step (`.`, `[`), a separator, a closer, or the end follows.
     // Withholding it makes `/b` -- the retired `/a` spelling -- an error instead
@@ -420,6 +422,18 @@ bool tree_sitter_lambda_external_scanner_scan(
     }
     // §7.16 must inspect the character IMMEDIATELY after the literal, so it is
     // tested before any whitespace is skipped.
+    if (valid_symbols[TILDE_WORD_BOUNDARY]) {
+        if (is_identifier_continue(lexer->lookahead)) { return false; }
+        lexer->mark_end(lexer);
+        lexer->result_symbol = TILDE_WORD_BOUNDARY;
+        return true;
+    }
+    if (valid_symbols[TILDE_BOUNDARY]) {
+        if (is_identifier_start(lexer->lookahead)) { return false; }
+        lexer->mark_end(lexer);
+        lexer->result_symbol = TILDE_BOUNDARY;
+        return true;
+    }
     if (valid_symbols[NUM_BOUNDARY]) {
         if (is_identifier_start(lexer->lookahead)) { return false; }
         lexer->mark_end(lexer);

@@ -123,6 +123,8 @@ typedef enum LambdaTokenKind {
     // `#` means force everywhere (S1.7); `~word` is the fused focal-accessor
     // family, of which `~~` (LAMBDA_TOK_PARENT) is the other member.
     LAMBDA_TOK_TILDE_KEY,
+    // S2.4.8 context roots are separate from the pipe's focal accessors.
+    LAMBDA_TOK_TILDE_CONTEXT,
     // `~` fused with a word that is not in the accessor table. It exists so the
     // parser can name the table instead of reporting a bare lexical error.
     LAMBDA_TOK_TILDE_ACCESSOR,

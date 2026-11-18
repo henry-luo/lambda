@@ -4,7 +4,7 @@
 // Three.js to compare.
 import P: .mod_pbr
 
-let key = sys.proc.self.env.PBR_CASE# or "direct"
+let key = sys.proc.self.env.PBR_CASE or "direct"
 let d = P.description(if (P.CASES[key] != null) key else "direct");
 <html
     <head <style "html,body{margin:0;background:#202428} scene3d{display:block}">>

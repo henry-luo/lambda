@@ -8,7 +8,7 @@ import codec: lambda.sync.codec
 import protocol: lambda.sync.protocol
 import transport: lambda.sync.cloud_transport
 pn main() {
-    let area = "temp/sync-cloud-repository-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-cloud-repository-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^
     io.mkdir(area ++ "/b")^
     let a = identity.create("cloud-repository",crypto.key()^)^

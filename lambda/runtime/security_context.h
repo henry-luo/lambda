@@ -22,6 +22,8 @@ bool eval_context_bind_security_directory(EvalContext* owner, const char* direct
 Url* eval_context_current_directory(EvalContext* owner);
 // Runtime C adapters query the active owner; the core path layer never sees TLS.
 const SecurityIOClient* lambda_current_security_io(void);
+// Project a file location through the active evaluation's directory.
+void* lambda_local_path_for_provider(Path* path);
 bool lambda_security_path_cache_get(Path* path, const SecurityAuthorityStamp* stamp, uint64_t* value);
 bool lambda_security_path_cache_store(Path* path, const SecurityAuthorityStamp* stamp, uint64_t value);
 

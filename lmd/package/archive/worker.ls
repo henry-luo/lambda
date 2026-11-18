@@ -97,7 +97,7 @@ pn main_info(req, steps) map^ {
 }
 
 pn main() {
-    let req = input(sys.proc.self.env.LAMBDA_ARCHIVE_REQUEST#, 'json')^
+    let req = input(sys.proc.self.env.LAMBDA_ARCHIVE_REQUEST, 'json')^
     let dir = req.staging
     let steps = [for (o in ORDER where o in req.outputs) o]
     if (req.kind != null and req.kind != "page") {

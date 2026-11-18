@@ -3,7 +3,7 @@ import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 let root = "test/lambda/latex/fixtures/local_packages/";
 let main = root ++ "script_unless_main.tex";
 let child = "script_unless_child.tex";
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let resources = {local:{'script_unless_child.tex':{data:input(root ++ child,"text")^}}, bundled:{}};
 let script = profile.expand_with_kernel(input(main,"text")^, kernel,
     {source_name:main, echo_definitions:true, adapters:[], resources:resources}, 100000)^;

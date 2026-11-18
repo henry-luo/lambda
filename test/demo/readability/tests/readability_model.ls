@@ -2,7 +2,7 @@
 // per-tab reader mode, appearance settings and keyboard shortcuts.
 import model: ~~.mod_model
 
-let pages = model.load_pages("file://" ++ sys.proc.self.cwd# ++ "/test/demo/readability/")^;
+let pages = model.load_pages("file://" ++ sys.proc.self.cwd ++ "/test/demo/readability/")^;
 [for (p in pages) {id: p.id, readerable: p.readerable, article: p.article != null}];
 [for (p in pages where p.readerable) {title: p.article.title, byline: p.article.byline,
     site: p.article.site_name, date: model.date_label(p.article.published_time), minutes: model.minutes(p.article)}]

@@ -7,7 +7,7 @@ import session: lambda.sync.peer_session
 import hex: lambda.security.tuf.metadata
 import ws: lambda.io.websocket
 pn main() {
-    let environment = sys.proc.self.env#
+    let environment = sys.proc.self.env
     let request = input(environment.LAMBDA_SYNC_REQUEST,'json')^
     let current = agent.open_agent(request.directory,hex.unhex(environment.LAMBDA_SYNC_KEY)^)^
     local.scan(current.handle)^

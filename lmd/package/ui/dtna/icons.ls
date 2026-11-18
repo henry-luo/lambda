@@ -3,7 +3,7 @@ import c: lambda.ui.core.component
 import tokens: .tokens
 
 // pinned, licensed SVG data is Input-owned; no mutable catalog or native widget state.
-let assets = input(sys.lambda.home# ++ "/package/ui/dtna/icon_assets.json",'json')^
+let assets = input(sys.lambda.home ++ "/package/ui/dtna/icon_assets.json",'json')^
 let aliases = {["chevron-down"]:"down",info:"info-circle",warning:"warning"}
 fn icon_name(props) any^ {
     let requested = c.text(c.option(props,"name","info"));

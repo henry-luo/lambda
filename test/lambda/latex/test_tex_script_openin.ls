@@ -2,7 +2,7 @@ import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
 let root="test/lambda/latex/fixtures/local_packages/";
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let source=input(root ++ "script_openin.tex","text")^;
 let resources={local:{'script_provenance.sty':{data:input(root ++ "script_provenance.sty","text")^},
     'script_provenance.tex':{data:input(root ++ "script_provenance.tex","text")^},

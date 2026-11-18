@@ -7,7 +7,7 @@ import resources: .mod_resources
 import art: .mod_demo_art
 
 let CSS = input(url_resolve(resources.entry_uri()^, "index.css"), 'text')^
-let EXE = sys.proc.self.argv#[0]
+let EXE = sys.proc.self.argv[0]
 
 // the catalog of `lambda demo` (LAMBDA_DEMOS in lambda/main.cpp), in showcase order;
 // `cat` files each demo under one CATEGORIES entry and `sub` is its store subtitle

@@ -8,7 +8,7 @@ import locale: .locale
 
 // imported XML belongs to Input; the per-instance SVG root carries decorative semantics.
 let illustrations = map([for (name in ["empty-default","empty-simple","result-403","result-404","result-500"])
-    (name,content(input(sys.lambda.home# ++ "/package/ui/dtna/illustrations/" ++ name ++ ".svg",'xml')^)[0])])
+    (name,content(input(sys.lambda.home ++ "/package/ui/dtna/illustrations/" ++ name ++ ".svg",'xml')^)[0])])
 fn illustration(name, height) {
     let source = illustrations[name];
     <svg *:map(source),class:"dtna-illustration",["aria-hidden"]:"true",focusable:"false",

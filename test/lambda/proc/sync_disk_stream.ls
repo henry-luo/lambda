@@ -6,7 +6,7 @@ pn produce(acc) any^ {
     return {bytes:acc.parts[acc.next],state:{*:acc,next:acc.next+1},done:false}
 }
 pn main() {
-    let area = "temp/sync-disk-stream-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-disk-stream-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     disk.install(area,"source",binary("abcdefg")^,null)^
     let initial = disk.inspect(area,"source")^

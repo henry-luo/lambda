@@ -2,7 +2,7 @@ import local: lambda.sync.local
 import crypto: lambda.io.crypto
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-event-capture-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-event-capture-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree/a/sub")^
     io.mkdir(area ++ "/tree/b")^
     output("first",area ++ "/tree/a/sub/file.txt")^

@@ -1946,12 +1946,22 @@
     }
   },
   {
+    "type": "context_expr",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "continue_stam",
     "named": true,
     "fields": {}
   },
   {
     "type": "current_error_expr",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "current_expr",
     "named": true,
     "fields": {}
   },
@@ -4326,6 +4336,10 @@
         "required": true,
         "types": [
           {
+            "type": "context_expr",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -5099,6 +5113,10 @@
         },
         {
           "type": "char_pattern_island",
+          "named": true
+        },
+        {
+          "type": "context_expr",
           "named": true
         },
         {
@@ -6762,10 +6780,6 @@
     "named": false
   },
   {
-    "type": "current_expr",
-    "named": true
-  },
-  {
     "type": "current_parent_expr",
     "named": true
   },
@@ -7039,6 +7053,14 @@
   },
   {
     "type": "}",
+    "named": false
+  },
+  {
+    "type": "~",
+    "named": false
+  },
+  {
+    "type": "~key",
     "named": false
   }
 ]

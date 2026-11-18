@@ -1,10 +1,10 @@
 // Resolve bundled assets from the entry script without changing cwd (D9.1.2).
 pub fn entry_path() string^ {
-    let paths = [for (argument in sys.proc.self.argv# where ((ends_with(argument, ".ls")) ^ { false })) argument]
+    let paths = [for (argument in sys.proc.self.argv where ((ends_with(argument, ".ls")) ^ { false })) argument]
     if (len(paths) == 0) raise error("Demo: no Lambda entry path in command line")
     else paths[0]
 }
-pub fn entry_uri() string^ => url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",entry_path()^)
+pub fn entry_uri() string^ => url_resolve("file://" ++ sys.proc.self.cwd ++ "/",entry_path()^)
 
 // Embedded slide hosts need the deck's resource base, independently of the host script.
 fn slide_object(node,base) any^ => if (not (node is element)) node

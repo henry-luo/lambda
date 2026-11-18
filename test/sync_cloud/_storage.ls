@@ -2,7 +2,7 @@
 import s3: lambda.sync.s3
 import schema: lambda.sync.cloud_schema
 pn main() {
-    let environment = sys.proc.self.env#
+    let environment = sys.proc.self.env
     let config = parse(environment.LAMBDA_CLOUD_STORAGE,'json')^
     let key = "qualification/" ++ schema.digest(uuid()^)^
     let first = s3.write(config,key,"abc")^

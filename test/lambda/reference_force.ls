@@ -5,7 +5,7 @@
 
 // `path` is a scalar type DISJOINT from `symbol`; `reference` is the alias
 // `symbol | path` (URI = URN | URL).
-let p = /.etc.hosts;
+let p = \.file.localhost.etc.hosts;
 type(p);
 (p is path);
 (p is symbol);
@@ -15,7 +15,7 @@ type(p);
 ("s" is reference);
 
 // S6.2.1v2 band: … < symbol < path < string < …
-sort([/.b, "s", 1, 'z', /.a]);
+sort([\.file.localhost.b, "s", 1, 'z', \.file.localhost.a]);
 
 "===== THE FORCE STEP # (PTH31-PTH34) =====";
 

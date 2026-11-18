@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 67.5.0 (2026-11-18)
+**Spec version:** 68.0.0 (2026-11-18)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1672,6 +1672,13 @@ loosely.
   or time movement gives the same state. Export during a wall-clock animation
   is not covered. [Radiant_SVG2 §DOM export and virtual-frame snapshots]
 
+- **D10.1.8* — A file node loads on demand.** Lambda exposes the same node through direct provider access and path dereference.
+  A reference stores its address without acquiring its target.
+  A file-kind test can request metadata. It must leave the payload unread.
+  Document access requests content through the input service under the evaluation's authority.
+  Deferred reads preserve the observable node and the provider's error contract.
+  [S2.4.3v4, S2.4.4v2, D9.1.2v2, D11.1.2; Type_Path §2.2]
+
 ### D10.2 Document packages
 
 - **D10.2.1* — The DOM behavior package owns the editing policy.** The full
@@ -1865,6 +1872,7 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D9.4.6 | In place on macOS. Linux is generated but not verified. Windows is not covered. |
 | D9.5.3 | Not active since guest-language hosting was removed (2026-10-07). |
 | D9.5.5 | Partial: distinct VArray/Velmt TypeIds and carrier dispatch are in place. Some live collections are pending. |
+| D10.1.8 | Local filesystem implementation on interpreter and MIR, 2026-11-18. Scoped tests confirm a file-kind check reads zero payloads. [Path node access](../vibe/impl/Lambda_Impl_Path_Node_Access.md). |
 | D10.1.7 | In place for the current inventory (2026-10-18). |
 | D10.2.1 | In place (2026-09-07). |
 | D10.2.2 | Partial: expansion is the only front end. The layout-metrics hook is pending. |
@@ -2014,7 +2022,7 @@ in the [implementation history §3](../vibe/impl/Lambda_Impl_Formal_Design_Histo
 | D9.1–D9.2 | SM1–SM17; Radiant_Split §2–§6 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md`, `Lambda_Design_Radiant_Split.md` |
 | D9.3 | RG14; DF15; ER-D2; MC1; Demo_Mail ML11 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Demo_Mail.md` |
 | D9.4–D9.5 | JA1–JA16 (D9.4.6: JA5.1); Native_Module §6–§10; Lang_Hosting §5–§13; DOM4 D4j–D4l; Radiant_Split §4 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_Type_Virtual.md`, `Lambda_Jube_DOM4.md`, `Lambda_Design_Radiant_Split.md` |
-| D10.1 | Mark file extensions; XHTML admission; SVG parsing admission and DOM export | `input/Input_System.md`, `input/Input_XML.md`, `radiant/Radiant_SVG2.md` |
+| D10.1 | Mark file extensions; XHTML admission; SVG parsing admission and DOM export; lazy file nodes | `Lambda_Type_Path.md`, `input/Input_System.md`, `input/Input_XML.md`, `radiant/Radiant_SVG2.md` |
 | D10.2 | UA and document editing; TeX engine; Pkg_Math §8, §11 | `radiant/Radiant_Design_Editable.md` §20, `radiant/Radiant_Design_Edit_Mode.md` §2.1, `latex/Lambda_Design_TeX_Engine.md`, `Lambda_Pkg_Math.md` |
 | D11.1 | JA10, JA16 | `Lambda_Design_Jube_Architecture.md` |
 | D11.2 | App_Safety §4.1, §6.4, §7.1, §7.3, §8.3 | `Lambda_Design_App_Safety.md` |

@@ -17,7 +17,7 @@ pn owning(root, parent) any^ {
     while (true) { disk.changes(watch,60000)^ }
 }
 pn main() {
-    let area = "temp/sync-disk-watch-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-disk-watch-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/nested")^
     let watch = disk.watch(area)^
     output("one",area ++ "/nested/file.txt")^

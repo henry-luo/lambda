@@ -1,6 +1,6 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import utf8: lambda.io.utf8
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 fn render(t) => if(t.kind=="control") "\\" ++ t.value else t.value
 fn render_tokens(tokens,source,index=0) any^ {
  if(index>=len(tokens)) "" else {

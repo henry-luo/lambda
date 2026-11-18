@@ -7,6 +7,9 @@
 #include "lib/memtrack.h"
 #include "lib/log.h"
 #include "lib/arraylist.h"
+#ifndef LAMBDA_NO_FILE_IO
+#include "lib/file.h"
+#endif
 #include <string.h>
 
 // The runtime layer owns the active evaluator for runners and fixtures.
@@ -185,6 +188,11 @@ bool eval_context_init(EvalContext* owner) {
         return false;
     }
     context = owner;
+#ifndef LAMBDA_NO_FILE_IO
+    if (!owner->working_directory[0]) {
+        file_getcwd_into(owner->working_directory, sizeof(owner->working_directory));
+    }
+#endif
     // Rebind the reusable context to this thread's side-stack roots.
     if (!lambda_side_stack_bind_for((Context*)owner)) {
         context = nullptr;
@@ -229,6 +237,10 @@ EvalContext* runtime_get_eval_context(Runtime* runtime) {
             return NULL;
         }
         memset(runtime->eval_context, 0, sizeof(EvalContext));
+#ifndef LAMBDA_NO_FILE_IO
+        file_getcwd_into(runtime->eval_context->working_directory,
+            sizeof(runtime->eval_context->working_directory));
+#endif
     }
     runtime_module_state_owner(runtime->eval_context, runtime);
     runtime->eval_context->runtime = runtime;

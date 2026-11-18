@@ -49,6 +49,8 @@ struct Document {
     String* location;   // canonical spelling (S2.4.2v4); the context key
     Path* path;         // the location as a path, for `&` to extend
     Item head;          // head root value
+    Item deferred_target; // source held until the supplied document is read
+    bool deferred;      // load the target on first force
     uint32_t generation;
     // PTH67v2: "a version a binding or cursor still holds must stay readable
     // after a later commit". The node table addresses nodes by POINTER, so a
@@ -64,6 +66,10 @@ struct Document {
 
 // Look a location up without loading. NULL when it has never been forced.
 Document* doc_context_lookup(const char* location, size_t length);
+// S2.4.8: the supplied document has a private address in this evaluation.
+Document* doc_context_set_supplied(Item head);
+Document* doc_context_set_supplied_target(Item target);
+Document* doc_context_get_supplied(void);
 
 // Install `head` as the location's head and register every container reachable
 // from it. Replaces any existing entry (this is what `commit` does, PTH62).
@@ -94,3 +100,6 @@ void doc_context_commit_head(Document* doc, Item head);
 // S2.4.4 / D6.4.2–D6.4.4: clear only the active evaluator's document capsule.
 // Heap teardown also releases its heads and precise roots before heap storage.
 void doc_context_reset(void);
+
+// Bind the document head exposed by an open target.
+Item open_document_target(Item target);

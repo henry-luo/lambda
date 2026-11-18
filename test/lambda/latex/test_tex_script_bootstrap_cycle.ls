@@ -1,6 +1,6 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let empty={local:{},bundled:{}};
 let available={local:{},bundled:{'demo.sty':{data:"\\def\\foo{OK}"},'expl3.sty':{data:"\\def\\ExplSyntaxOn{OK}"}}};
 let unchanged={local:{},bundled:{'demo.sty':{data:"\\relax"}}};

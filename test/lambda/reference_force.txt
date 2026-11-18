@@ -6,7 +6,7 @@ true
 true
 false
 false
-[1, 'z', /.a, /.b, "s"]
+[1, 'z', \.file.localhost.a, \.file.localhost.b, "s"]
 "===== THE FORCE STEP # (PTH31-PTH34) ====="
 path
 "reference fixture"

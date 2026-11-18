@@ -23,7 +23,7 @@ import tone: lambda.editor.raster.tone
 import guides: lambda.editor.raster.guides
 
 let BASE = url_resolve(resources.entry_uri()^,".")
-let SOURCE = sys.proc.self.env.PHOTOS_SOURCE#
+let SOURCE = sys.proc.self.env.PHOTOS_SOURCE
 let INITIAL = editor.open_session(editor.new_document()^ )^
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"photos")
 fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
@@ -363,7 +363,7 @@ view <photos_session>() any^ state session:base_session(~.initial,"Coast")^,
     documents:(workspaces.add(workspaces.create(),base_session(~.initial,"Coast"))^) { ~.rendered }
 on photos_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
-    let path = if (SOURCE is string and SOURCE != "") url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",SOURCE)
+    let path = if (SOURCE is string and SOURCE != "") url_resolve("file://" ++ sys.proc.self.cwd ++ "/",SOURCE)
         else url_resolve(BASE,"../photo/assets/coast.jpg")
     { let __error_outcome_3 = replace_document(session,"open",path) ^ { ^ }; if (__error_outcome_3 is error) { session = {*:session,error:__error_outcome_3.message,status:__error_outcome_3.message} } else match __error_outcome_3 { case any { session = ~ } } }
     session = publish(evt.target,session,documents)

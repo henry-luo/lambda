@@ -16,7 +16,7 @@ pn main() {
     var too_large = false
     files.export_png("temp/photo-test-export.png",source,{*:restored,output_width:16384,output_height:16384}) ^ { too_large = true }
     var source_protected = false
-    files.export_png("temp/photo-test-source.png",{*:source,path:url_resolve("file://" ++ sys.proc.self.cwd# ++ "/","temp/photo-test-source.png")},recipe) ^ { source_protected = true }
+    files.export_png("temp/photo-test-source.png",{*:source,path:url_resolve("file://" ++ sys.proc.self.cwd ++ "/","temp/photo-test-source.png")},recipe) ^ { source_protected = true }
     var recipe_extension = false
     files.write_recipe("temp/photo-test-export.png",source,recipe) ^ { recipe_extension = true }
     return [restored == recipe, exported == [2,2,4],

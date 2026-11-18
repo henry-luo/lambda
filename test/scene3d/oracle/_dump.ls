@@ -3,7 +3,7 @@
 import P: ~~.mod_pbr
 
 pn main() any^ {
-    let dir = sys.proc.self.env.PBR_ORACLE_DIR# or "temp/pbr_oracle"
+    let dir = sys.proc.self.env.PBR_ORACLE_DIR or "temp/pbr_oracle"
     if (not exists(dir)) io.mkdir(dir)^
     for (key, c in P.CASES) {
         output(P.description(string(key)), dir ++ "/" ++ string(key) ++ ".json", {format: 'json'})^

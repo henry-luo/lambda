@@ -7,6 +7,6 @@ pn connect(uri) any^ {
 }
 
 pn main() {
-    let result: any^=connect(sys.proc.self.env.DBENCH_TEST_URI#)
+    let result: any^=connect(sys.proc.self.env.DBENCH_TEST_URI)
     print(result is error)
 }

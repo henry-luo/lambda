@@ -226,11 +226,20 @@ static inline MIR_reg_t em_bind_rmw_handle(MirEmitter* em, MIR_reg_t owner,
 // constructors and the activation's owning pool (D2.3.5, D5.1.2).
 static inline MIR_reg_t em_literal_path(MirEmitter* em, AstPathNode* node) {
     MIR_reg_t pool = em_load_at(em, em->frame.runtime, offsetof(Context, pool), MIR_T_P, "path_pool");
-    MIR_reg_t path = node->authority
+    const char* authority = node->authority ? node->authority->chars : nullptr;
+    MIR_reg_t path = node->context_path
+        ? em_call_3(em, "lambda_context_path", MIR_T_P, MIR_T_P, MIR_new_reg_op(em->ctx, pool),
+            MIR_T_I64, MIR_new_int_op(em->ctx, node->context_path), MIR_T_P,
+            MIR_new_int_op(em->ctx, (intptr_t)(node->context_source ? node->context_source->chars : NULL)), true)
+        : (authority || node->file_slash)
         ? em_call_3(em, "path_new_authority", MIR_T_P, MIR_T_P, MIR_new_reg_op(em->ctx, pool),
-            MIR_T_I64, MIR_new_int_op(em->ctx, node->scheme), MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)node->authority->chars), true)
+            MIR_T_I64, MIR_new_int_op(em->ctx, node->scheme), MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)authority), true)
         : em_call_2(em, "path_new", MIR_T_P, MIR_T_P, MIR_new_reg_op(em->ctx, pool),
             MIR_T_I64, MIR_new_int_op(em->ctx, node->scheme), true);
+    MIR_reg_t result = path;
+    MIR_label_t missing = node->context_path && node->segment_count ? em_new_label(em) : NULL;
+    if (missing) em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ,
+        MIR_new_label_op(em->ctx, missing), MIR_new_reg_op(em->ctx, result), MIR_new_int_op(em->ctx, 0)));
     for (int i = 0; i < node->segment_count; i++) {
         AstPathSegment* part = &node->segments[i];
         const char* unary = part->type == LPATH_SEG_WILDCARD ? "path_wildcard" :
@@ -243,6 +252,12 @@ static inline MIR_reg_t em_literal_path(MirEmitter* em, AstPathNode* node) {
             MIR_T_P, MIR_new_reg_op(em->ctx, pool), MIR_T_P, MIR_new_reg_op(em->ctx, path),
             part->type == LPATH_SEG_INT ? MIR_T_I64 : MIR_T_P,
             MIR_new_int_op(em->ctx, part->type == LPATH_SEG_INT ? part->int_value : (intptr_t)(part->name ? part->name->chars : "")), true);
+    }
+    if (missing) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, path)));
+        em_emit_label(em, missing);
+        return result;
     }
     return path;
 }

@@ -16,7 +16,7 @@ pn blocked_read(area, parent) any^ {
     })^
 }
 pn main() {
-    let area = "temp/sync-stream-cancel-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-stream-cancel-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     disk.install(area,"source",binary("x")^,null)^
     let writer = start(blocked_write,[area,self()])

@@ -4,7 +4,7 @@ import locations: lambda.sync.location_index
 import crypto: lambda.io.crypto
 import hex: lambda.security.tuf.metadata
 pn main() {
-    let area = "temp/sync-locations-batch-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-locations-batch-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let secret = crypto.key()^
     let handle = local.create(area ++ "/repo.sqlite",secret,"locations",area ++ "/tree","device")^

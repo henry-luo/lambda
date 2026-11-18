@@ -59,6 +59,11 @@ typedef struct AstPathSegment {
 typedef struct AstPathNode : AstNode {
     PathScheme scheme;           // logical, file, http, https, sys, or relative
     String* authority;            // named file authority, if present
+    bool needs_authority;        // next name is the captured file hostname
+    bool file_slash;             // file./ supplied an empty authority
+    bool access;                 // evaluate the plan as ordinary provider access
+    int context_path;            // S2.4.8 directory selected at evaluation time
+    String* context_source;      // defining script's location, retained by the AST
     int segment_count;           // number of path segments
     AstPathSegment* segments;    // array of segment info (allocated in pool)
 } AstPathNode;

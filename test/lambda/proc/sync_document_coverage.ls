@@ -8,7 +8,7 @@ import core: lambda.sync.core
 import documents: lambda.sync.documents
 import protocol: lambda.sync.protocol
 pn main() {
-    let area = "temp/sync-document-coverage-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-document-coverage-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/agent")^
     io.mkdir(area ++ "/tree")^
     let key = crypto.key()^

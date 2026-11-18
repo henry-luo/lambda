@@ -3,7 +3,7 @@ import fixture: .mod_sync_cloud_store
 import codec: lambda.sync.codec
 
 pn main() {
-    let area = "temp/sync-metadata-pages-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-metadata-pages-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     let store = fixture.create(area ++ "/index.sqlite")^
     let entries = [for (index in 0 to 256) {id:"key-" ++ string(index+10000),value:index}]

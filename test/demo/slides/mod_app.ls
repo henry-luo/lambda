@@ -450,7 +450,7 @@ pub pn command(owner,st,action,base) any^ {
         let ext = if (st.dialog == "print") ".pdf" else if (st.dialog == "export") ".html" else ".slides"
         let pptx = st.dialog=="open" and ends_with(lower(path),".pptx")
         if ((not pptx and not ends_with(lower(path),ext))^) raise error("Slides: choose a " ++ ext ++ (if (st.dialog=="open") " or .pptx" else "") ++ " file path")
-        let uri = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",path)^;
+        let uri = url_resolve("file://" ++ sys.proc.self.cwd ++ "/",path)^;
         if (pptx) {
             let seq = st.open_seq+1
             let task = start(importer.run,[dom.root_node(owner),{path:path,seq:seq,label:"Slides",helper:"_open_document.ls",
@@ -550,12 +550,12 @@ pub pn read_insert(owner,st) map^ {
     }])}
 }
 pub pn capture_slide(st,index) string^ {
-    let prefix = "temp/slides/capture-" ++ string(sys.proc.self.pid#) ++ "-" ++ string(st.serial)
+    let prefix = "temp/slides/capture-" ++ string(sys.proc.self.pid) ++ "-" ++ string(st.serial)
     io.mkdir("temp") ^ {null}
     io.mkdir("temp/slides") ^ {null}
     let page = slide.snapshot(<presentation *:map(st.doc),base_uri:st.base,*content(st.doc)>,{slide:index,cue:'final'})^
     output(format(page,'html'),prefix ++ ".html",{atomic:true})^
-    let rendered = io.exec(sys.proc.self.argv#[0],["--no-log","render",prefix ++ ".html","-o",prefix ++ ".png",
+    let rendered = io.exec(sys.proc.self.argv[0],["--no-log","render",prefix ++ ".html","-o",prefix ++ ".png",
         "--viewport-width",c.fmt(st.plan.width),"--viewport-height",c.fmt(st.plan.height)],{timeout_ms:30000})^;
     if (rendered.exit_code != 0) raise error("Slides: could not render the slide picture")
     return media.data_uri(input(prefix ++ ".png",'binary')^,"image/png")^

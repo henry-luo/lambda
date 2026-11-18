@@ -1,7 +1,7 @@
 import music: lambda.music
 import dom
 let PERFORMANCE=music.performance(music.load("test/music/study.musicxml")^)^
-let FONT=sys.lambda.home#++"/package/music/soundfonts/TimGM6mb.sf2"
+let FONT=sys.lambda.home++"/package/music/soundfonts/TimGM6mb.sf2"
 view <music_lifecycle> state token:null,saved:null,report:"ready" {
     <section
         for (action in ["open","play","seek","speed","mute","solo","stop","remove","read","stale"])

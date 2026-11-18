@@ -15,7 +15,7 @@ fn archive_member(node,members,index=0) element^ {
     }
 }
 pub fn read_location(path,st=null) map^ {
-    let target = model.absolute(path,sys.proc.self.cwd#)
+    let target = model.absolute(path,sys.proc.self.cwd)
     let known = known_entry(st,target)
     let saved = [for (location in st.locations or [] where ((location.path == target) ^ { false })) location.locator][0]
     let entry = if (known != null or saved != null or target == "/") known
@@ -74,7 +74,7 @@ fn member_preview(entry) map^ {
     } else if (contains(["md","markdown"],ext)) {
         let parsed = input(entry.source,'markdown')^;
         {kind:"document",html:format(<html lang:"en",<head <meta charset:"UTF-8">
-            <link rel:"stylesheet",href:uri.url(sys.lambda.home# ++ "/package/doc/markdown.css")>>;
+            <link rel:"stylesheet",href:uri.url(sys.lambda.home ++ "/package/doc/markdown.css")>>;
             <body *content(parsed)^>>,'html')^}
     } else if (contains(["Text document","Source code","Data file"],entry.kind) and entry.size <= 131072) text_preview(entry.source)^
     else {kind:"generic",message:"No preview available for this archive member."}

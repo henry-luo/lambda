@@ -25,7 +25,7 @@ import slide_html: lambda.slide.html
 let BASE = url_resolve(resources.entry_uri()^, ".")
 // PHOTO_ALBUM_DIR (relative to cwd) selects another corpus, such as the test fixture
 let DIR = corpus.directory(slice(BASE, 7))
-let DIR_URL = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/", DIR)
+let DIR_URL = url_resolve("file://" ++ sys.proc.self.cwd ++ "/", DIR)
 let MANIFEST = input(DIR ++ "photos.json", 'json')^
 let PRESENT = [for (p in MANIFEST.photos) {photo:exists(DIR ++ "photos/" ++ p.file), thumb:exists(DIR ++ "thumbs/" ++ p.file)}]
 let LIB = L.build(MANIFEST, PRESENT, DIR_URL)^

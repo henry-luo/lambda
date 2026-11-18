@@ -1,6 +1,6 @@
 import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let message_preload=parse("",{type:"tex"})^.messages;
 fn render(token) => if (token.kind == "control") "\\" ++ token.value else token.value
 fn check(source) any^ {

@@ -2,7 +2,7 @@ import local: lambda.sync.local
 import host: lambda.sync.document_host
 import crypto: lambda.io.crypto
 pn main() {
-    let area = "temp/sync-document-gc-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-document-gc-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     output("a",area ++ "/tree/note")^
     let secret = crypto.key()^

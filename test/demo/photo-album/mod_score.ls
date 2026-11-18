@@ -14,7 +14,7 @@ let KICK = 36, HAT = 42, CRASH = 49
 let C = [36, [60, 64, 67]], G = [43, [59, 62, 67]], AM = [45, [57, 60, 64]], FM = [41, [57, 60, 65]]
 let PROGRESSIONS = [[C, G, AM, FM], [AM, FM, C, G]]
 
-pub let SOUNDFONT = sys.lambda.home# ++ "/package/music/soundfonts/TimGM6mb.sf2"
+pub let SOUNDFONT = sys.lambda.home ++ "/package/music/soundfonts/TimGM6mb.sf2"
 
 // a fixed per-note wobble in -3..3, so velocities are never flat yet every rendering is identical
 fn wobble(i) => (i * 7919 + 13) % 7 - 3

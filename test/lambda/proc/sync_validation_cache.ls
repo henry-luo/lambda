@@ -1,7 +1,7 @@
 import local: lambda.sync.local
 import crypto: lambda.io.crypto
 pn main() {
-    let area = "temp/sync-validation-cache-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-validation-cache-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let secret = crypto.key()^
     let raw = local.create(area ++ "/repo.sqlite",secret,"validation-cache",area ++ "/tree","device")^

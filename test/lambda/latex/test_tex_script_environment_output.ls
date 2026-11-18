@@ -1,5 +1,5 @@
 import profile: lambda.doc.latex.tex_engine.profile
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 fn render(token) => if (token.kind == "control") "\\" ++ token.value else token.value
 fn matches(source) any^ {
     let expanded = profile.expand_with_kernel(source, kernel,

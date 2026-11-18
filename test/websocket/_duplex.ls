@@ -1,7 +1,7 @@
 import ws: lambda.io.websocket
 pn bulk(socket, text) { ws.send(socket, text)^ }
 pn main() {
-    let socket = ws.open(sys.proc.self.env.WEBSOCKET_TEST_URL#, {max_message_bytes: 16777216})^
+    let socket = ws.open(sys.proc.self.env.WEBSOCKET_TEST_URL, {max_message_bytes: 16777216})^
     var text = "x"
     for (i in 1 to 23) { text = text ++ text }
     let sending = start(bulk, [socket, text])

@@ -1,5 +1,5 @@
 import profile: lambda.doc.latex.tex_engine.profile
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 fn report(source, kernel_source = kernel) any^ {
     let result = profile.expand_with_kernel(source, kernel_source, {source_name: "main.tex"}, 100000)^;
     {text: join([for (t in result.output) t.value], ""), issue: result.issue,

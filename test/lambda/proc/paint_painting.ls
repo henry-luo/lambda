@@ -17,7 +17,7 @@ pn painted() map^ {
 }
 
 pn main() {
-    let root = "temp/paint_painting-" ++ string(sys.proc.self.pid#)
+    let root = "temp/paint_painting-" ++ string(sys.proc.self.pid)
     io.mkdir(root)^
     let s = painted()^
     let path = root ++ "/study.painting"

@@ -11,10 +11,10 @@ pn call(store, credentials, kind, body) any^ {
     return service.handle(store,schema.request(credentials,kind,body,1000000,schema.digest([kind,body])^)^,1000000)^
 }
 pn main() {
-    let area = "temp/sync-cloud-audit-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-cloud-audit-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     // Exercise the same audit and recovery failures against an isolated S3 service.
-    let storage = sys.proc.self.env#.LAMBDA_CLOUD_TEST_STORAGE_FILE
+    let storage = sys.proc.self.env.LAMBDA_CLOUD_TEST_STORAGE_FILE
     let store = if (storage == null) fixture.create(area ++ "/store.sqlite")^ else s3.adapter(input(storage,'json')^)
     let owner = identity.create(if (storage == null) "audit-test" else "audit-test-" ++ uuid()^,crypto.key()^)^
     let other = identity.create(owner.space,owner.secret)^

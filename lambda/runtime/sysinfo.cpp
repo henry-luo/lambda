@@ -16,12 +16,15 @@
 #include "lambda/io/mark_builder.hpp"
 #include "context_capsule.h"
 #include "transpiler.hpp"
+#include "io_resource.hpp"
+#include "doc_context.hpp"
 #include "lib/log.h"
 #include "lib/mem_factory.h"
 #include "lib/strbuf.h"
 #include "lib/str.h"
 #include "lib/file.h"
 #include "lib/shell.h"
+#include "lib/url.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -136,6 +139,7 @@ static Item resolve_time(void);
 static Item resolve_lambda(void);
 static Item resolve_home(void);
 static Item resolve_temp(void);
+static Item resolve_user(const char** segments, int count);
 
 // ============================================================================
 // Initialization
@@ -273,6 +277,9 @@ extern "C" Item sysinfo_resolve_path(Path* path) {
     }
     else if (strcmp(category, "proc") == 0) {
         return resolve_proc(segments + 1, seg_count - 1);
+    }
+    else if (strcmp(category, "user") == 0) {
+        return resolve_user(segments + 1, seg_count - 1);
     }
     else if (strcmp(category, "time") == 0) {
         if (seg_count == 1) return resolve_time();
@@ -518,14 +525,9 @@ static double get_system_uptime(void) {
 
 static const char* get_home_dir(void) {
 #ifdef _WIN32
-    static char home[MAX_PATH] = {0};
-    if (home[0] == 0) {
-        const char* userprofile = shell_getenv("USERPROFILE");
-        if (userprofile) {
-            str_copy(home, sizeof(home), userprofile, strlen(userprofile));
-        }
-    }
-    return home;
+    // Each evaluation snapshots the current profile, not the first process value.
+    const char* userprofile = shell_getenv("USERPROFILE");
+    return userprofile ? userprofile : "";
 #else
     const char* home = shell_getenv("HOME");
     if (home) return home;
@@ -539,16 +541,211 @@ static const char* get_home_dir(void) {
 
 static const char* get_temp_dir(void) {
 #ifdef _WIN32
-    static char temp[MAX_PATH] = {0};
-    if (temp[0] == 0) {
-        GetTempPathA(sizeof(temp), temp);
-    }
-    return temp;
+    // Keep the Windows API buffer thread-local and refresh it for each snapshot.
+    static thread_local char temp[4096];
+    DWORD length = GetTempPathA(sizeof(temp), temp);
+    return length && length < sizeof(temp) ? temp : nullptr;
 #else
     const char* temp = shell_getenv("TMPDIR");
     if (temp) return temp;
     return "/tmp";  // TMP_PATH_OK: sysinfo reports the OS-standard tmpdir
 #endif
+}
+
+extern "C" void lambda_context_capture_directories(void) {
+    if (!context || context->context_directories_initialized) return;
+    const char* home = get_home_dir();
+    const char* temporary = get_temp_dir();
+    if (home && strlen(home) < sizeof(context->home_directory))
+        str_copy(context->home_directory, sizeof(context->home_directory), home, strlen(home));
+    if (temporary && strlen(temporary) < sizeof(context->temporary_directory))
+        str_copy(context->temporary_directory, sizeof(context->temporary_directory), temporary, strlen(temporary));
+    context->context_directories_initialized = true;
+}
+
+static bool context_path_separator(char ch, bool windows) {
+    return ch == '/' || (windows && ch == '\\');
+}
+
+static Path* context_append_components(Pool* pool, Path* path,
+        const char* value, bool windows) {
+    while (path && *value) {
+        while (context_path_separator(*value, windows)) value++;
+        const char* start = value;
+        while (*value && !context_path_separator(*value, windows)) value++;
+        size_t length = value - start;
+        if (!length || (length == 1 && start[0] == '.')) continue;
+        if (length == 2 && start[0] == '.' && start[1] == '.')
+            path = path_select_parent(pool, path);
+        else
+            path = path_extend_len(pool, path, start, length);
+    }
+    return path;
+}
+
+// A UNC server is a file authority, never a local directory component.
+extern "C" Path* lambda_context_windows_unc_path(Pool* pool, const char* source) {
+    if (!pool || !source || !context_path_separator(source[0], true) ||
+            !source[1] || !context_path_separator(source[1], true)) return nullptr;
+    const char* host = source + 2;
+    const char* end = host;
+    while (*end && !context_path_separator(*end, true)) end++;
+    if (end == host || !*end || (end - host == 1 && (*host == '?' || *host == '.')))
+        return nullptr;
+    char* hostname = pool_dup_n(pool, host, end - host);
+    if (!hostname) return nullptr;
+    char* current = nullptr;
+    if (str_ieq_cstr(hostname, "localhost")) {
+        // The `localhost` provider is local, so a UNC share needs the host name.
+        current = shell_get_hostname();
+        if (!current || !*current || strcmp(current, "localhost") == 0) {
+            mem_free(current);
+            return nullptr;
+        }
+        hostname = current;
+    }
+    Path* root = path_new_authority(pool, PATH_SCHEME_FILE, hostname);
+    mem_free(current);
+    if (!root) return nullptr;
+    return context_append_components(pool, root, end, true);
+}
+
+// S2.4.8 captures directory addresses without probing their targets.
+extern "C" Path* lambda_context_path(Pool* pool, int kind, const char* source) {
+    if (kind == LAMBDA_CONTEXT_PATH_DOCUMENT) {
+        Document* doc = doc_context_get_supplied();
+        return doc ? doc->path : nullptr;
+    }
+    lambda_context_capture_directories();
+    char cwd[4096];
+    const char* value = kind == LAMBDA_CONTEXT_PATH_SCRIPT ? source :
+        kind == LAMBDA_CONTEXT_PATH_HOME ? (context ? context->home_directory : get_home_dir()) :
+        kind == LAMBDA_CONTEXT_PATH_TEMP ? (context ? context->temporary_directory : get_temp_dir()) :
+        context && context->working_directory[0] ? context->working_directory :
+        file_getcwd_into(cwd, sizeof(cwd)) ? cwd : nullptr;
+    if (!pool || !value || !*value) return nullptr;
+    Path* path = nullptr;
+    char* url_path = nullptr;
+    if (kind == LAMBDA_CONTEXT_PATH_SCRIPT && strncmp(value, "file:", 5) == 0) {
+        // A source URL carries an authority and encoded path, not native components.
+        Url* url = url_parse(value);
+        if (!url || !url->is_valid || url->scheme != URL_SCHEME_FILE) {
+            if (url) url_destroy(url);
+            return nullptr;
+        }
+        const char* host = url_get_hostname(url);
+        bool named = host && *host && strcmp(host, "localhost") != 0;
+        path = path_new_authority(pool, PATH_SCHEME_FILE, named ? host : "localhost");
+        if (named) {
+            const char* pathname = url_get_pathname(url);
+            size_t length = 0;
+            if (pathname) url_path = url_decode_component(pathname, strlen(pathname), &length);
+            if (url_path && memchr(url_path, '\0', length)) {
+                mem_free(url_path);
+                url_path = nullptr;
+            }
+        } else {
+            url_path = url_to_local_path(url);
+        }
+        url_destroy(url);
+        if (!path || !url_path) { mem_free(url_path); return nullptr; }
+        value = url_path;
+    }
+    if (!path) path = path_new_authority(pool, PATH_SCHEME_FILE, "localhost");
+#ifdef _WIN32
+    if (!url_path && context_path_separator(value[0], true) && value[1] &&
+            context_path_separator(value[1], true))
+        return lambda_context_windows_unc_path(pool, value);
+    bool windows = true;
+    bool absolute = context_path_separator(value[0], windows) || (value[0] && value[1] == ':');
+#else
+    bool windows = false;
+    bool absolute = context_path_separator(value[0], windows);
+#endif
+    if (!absolute) {
+        path = lambda_context_path(pool, LAMBDA_CONTEXT_PATH_CWD, nullptr);
+        if (!path) { mem_free(url_path); return nullptr; }
+    }
+#ifdef _WIN32
+    if (value[0] && value[1] == ':') {
+        path = path_extend_len(pool, path, value, 1);
+        value += 2;
+    }
+#endif
+    path = context_append_components(pool, path, value, windows);
+    mem_free(url_path);
+    return path;
+}
+
+static Item user_field_at(void* data, int64_t index) {
+    (void)data;
+    const char* field = index == 0 ? "name" : index == 1 ? "home" : nullptr;
+    return field ? resolve_user(&field, 1) : ItemNull;
+}
+
+static Item user_key_at(void* data, int64_t index) {
+    (void)data;
+    const char* name = index == 0 ? "name" : index == 1 ? "home" : nullptr;
+    return name ? (Item){.item = y2it(name_key_symbol(name, strlen(name)))} : ItemNull;
+}
+
+static Item user_get(void* data, Item key) {
+    (void)data;
+    if (!is_text_type_id(get_type_id(key))) return ItemNull;
+    const char* name = key.get_chars();
+    size_t length = key.get_len();
+    if (!name) return ItemNull;
+    if (length == 4 && memcmp(name, "name", 4) == 0) return user_field_at(data, 0);
+    if (length == 4 && memcmp(name, "home", 4) == 0) return user_field_at(data, 1);
+    return ItemNull;
+}
+
+static int64_t user_count(void* data) { (void)data; return 2; }
+
+static SymbolKeyList* user_keys(void* data) {
+    (void)data;
+    SymbolKeyList* keys = symbol_key_list_new(2);
+    if (!keys) return nullptr;
+    symbol_key_list_append(keys, name_key_symbol("name", 4));
+    symbol_key_list_append(keys, name_key_symbol("home", 4));
+    return keys;
+}
+
+static VMapVtable user_vtable = {user_get, io_resource_set, user_count, user_keys,
+    user_key_at, user_field_at, io_resource_destroy, io_resource_trace};
+
+static Item resolve_user(const char** segments, int count) {
+    if (!count) {
+        SysinfoCache* cache = sysinfo_cache(true);
+        if (!cache) return ItemNull;
+        VMap* user = io_resource_handle_new(&user_vtable, nullptr, cache);
+        if (!user) return ItemError;
+        // COW snapshots the virtual fields before any Lambda mutation.
+        user->cow_state |= COW_STATE_SHARED;
+        return (Item){.vmap = user};
+    }
+    if (strcmp(segments[0], "name") == 0 && count == 1) {
+        Input* input = get_input();
+        if (!input) return ItemNull;
+#ifdef _WIN32
+        char name[256];
+        DWORD size = sizeof(name);
+        if (!GetUserNameA(name, &size)) return ItemNull;
+#else
+        struct passwd* account = getpwuid(getuid());
+        if (!account || !account->pw_name) return ItemNull;
+        const char* name = account->pw_name;
+#endif
+        MarkBuilder builder(input);
+        return builder.createStringItem(name);
+    }
+    if (strcmp(segments[0], "home") == 0) {
+        Pool* pool = eval_context_get_pool();
+        Path* path = lambda_context_path(pool, LAMBDA_CONTEXT_PATH_HOME, nullptr);
+        for (int i = 1; path && i < count; i++) path = path_extend(pool, path, segments[i]);
+        return path ? fn_force((Item){.path = path}) : ItemNull;
+    }
+    return ItemNull;
 }
 
 // ============================================================================
@@ -679,6 +876,28 @@ static Item resolve_memory(void) {
     return cache->memory_info;
 }
 
+static char** process_environment(void) {
+#ifdef _WIN32
+    return _environ;
+#else
+    extern char** environ;
+    return environ;
+#endif
+}
+
+// The environment is a Lambda map, so direct path reads use the same key equality.
+static const char* process_environment_value(const char* name) {
+    if (!name || !*name) return nullptr;
+    size_t length = strlen(name);
+    const char* value = nullptr;
+    // Map construction replaces earlier entries when a name occurs twice.
+    for (char** entry = process_environment(); entry && *entry; entry++) {
+        if (strncmp(*entry, name, length) == 0 && (*entry)[length] == '=')
+            value = *entry + length + 1;
+    }
+    return value;
+}
+
 static Item resolve_proc(const char** segments, int count) {
     SysinfoCache* cache = sysinfo_cache(true);
     if (!cache) return ItemNull;
@@ -696,14 +915,8 @@ static Item resolve_proc(const char** segments, int count) {
         MarkBuilder builder(input);
         MapBuilder proc = builder.map();
 
-        // Add self info directly for now
-        MapBuilder self = builder.map();
-        self.put("pid", (int64_t)getpid());
-
-        Item cwd = create_cwd_item(builder);
-        if (get_type_id(cwd) == LMD_TYPE_STRING) self.put("cwd", cwd);
-
-        proc.put("self", self.final());
+        const char* self_path[] = {"self"};
+        proc.put("self", resolve_proc(self_path, 1));
 
         cache->proc_info = proc.final();
         cache->proc_time = time(nullptr);
@@ -720,6 +933,12 @@ static Item resolve_proc(const char** segments, int count) {
 
             Item cwd = create_cwd_item(builder);
             if (get_type_id(cwd) == LMD_TYPE_STRING) self.put("cwd", cwd);
+
+            // A bound process object must expose the same fields as direct paths.
+            const char* argv_path[] = {"self", "argv"};
+            const char* env_path[] = {"self", "env"};
+            self.put("argv", resolve_proc(argv_path, 2));
+            self.put("env", resolve_proc(env_path, 2));
 
             return self.final();
         }
@@ -759,16 +978,12 @@ static Item resolve_proc(const char** segments, int count) {
                     MarkBuilder builder(input);
                     MapBuilder env = builder.map();
 
-                    extern char** environ;
-                    for (char** e = environ; *e; e++) {
+                    for (char** e = process_environment(); e && *e; e++) {
                         char* eq = strchr(*e, '=');
-                        if (eq) {
-                            size_t name_len = eq - *e;
-                            char name[256];
-                            if (name_len < sizeof(name)) {
-                                str_copy(name, sizeof(name), *e, name_len);
-                                env.put(name, eq + 1);
-                            }
+                        if (eq && eq != *e) {
+                            // Pool the complete key so bound and direct reads agree.
+                            String* name = builder.createName(*e, eq - *e);
+                            env.put(name, builder.createStringItem(eq + 1));
                         }
                     }
 
@@ -776,7 +991,7 @@ static Item resolve_proc(const char** segments, int count) {
                 }
                 else if (count >= 3) {
                     // sys.proc.self.env.VARNAME
-                    const char* var = shell_getenv(segments[2]);
+                    const char* var = process_environment_value(segments[2]);
                     if (var) {
                         MarkBuilder builder(input);
                         return builder.createStringItem(var);

@@ -24,9 +24,9 @@ import demo: .mod_demo
 let BASE = url_resolve(resources.entry_uri()^, "./")
 let CSS = workspace_shell.css ++ input(url_resolve(BASE, "mail.css"), 'text')^
 let THEME = workspace_shell.variables({primary:"#0a6cdc",text:"#1d1d1f",text_secondary:"#86868b",border:"#e3e3e6",background:"#ffffff"})^
-let CWD = sys.proc.self.cwd#
-let HOME = sys.proc.self.env.HOME#
-let ROOT_SETTING = sys.proc.self.env.MAIL_DEMO_ROOT#
+let CWD = sys.proc.self.cwd
+let HOME = sys.proc.self.env.HOME
+let ROOT_SETTING = sys.proc.self.env.MAIL_DEMO_ROOT
 let CUSTOM_ROOT = ROOT_SETTING != null and ROOT_SETTING != ""
 let ROOT = if (not CUSTOM_ROOT) HOME ++ "/Library/Application Support/Lambda Mail"
     else if (starts_with(ROOT_SETTING, "/")) ROOT_SETTING else CWD ++ "/" ++ ROOT_SETTING

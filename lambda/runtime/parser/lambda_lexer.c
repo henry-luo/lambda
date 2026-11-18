@@ -681,6 +681,15 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
             if (lexer_word_equals(lexer->source, word_start, lexer->offset, "key")) {
                 return lexer_make_token(LAMBDA_TOK_TILDE_KEY, start, line, column, lexer->offset);
             }
+            if (lexer_word_equals(lexer->source, word_start, lexer->offset, "proc") ||
+                    lexer_word_equals(lexer->source, word_start, lexer->offset, "cwd") ||
+                    lexer_word_equals(lexer->source, word_start, lexer->offset, "home") ||
+                    lexer_word_equals(lexer->source, word_start, lexer->offset, "script") ||
+                    lexer_word_equals(lexer->source, word_start, lexer->offset, "doc") ||
+                    lexer_word_equals(lexer->source, word_start, lexer->offset, "user") ||
+                    lexer_word_equals(lexer->source, word_start, lexer->offset, "temp")) {
+                return lexer_make_token(LAMBDA_TOK_TILDE_CONTEXT, start, line, column, lexer->offset);
+            }
             // An unknown accessor is a lexical error, never a binding lookup.
             return lexer_make_token(LAMBDA_TOK_TILDE_ACCESSOR, start, line, column, lexer->offset);
         }

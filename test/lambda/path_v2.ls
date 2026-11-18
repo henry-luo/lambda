@@ -3,20 +3,20 @@ let data = [[1, 2], [3, 4]]
 let indexed = [10, 20]
 let record = {name: 30};
 [
-  /.a.b,
+  \.file.localhost.a.b,
   \.a.b,
   \.~~.a,
-  file./,
-  file./.a,
-  file.'other-host'.a,
-  http.hostname.a,
+  \.file.localhost,
+  \.file.localhost.a,
+  \.file.'other-host'.a,
+  \.http.hostname.a,
   \.a.1,
   \.a.'1',
   indexed.1,
   record.'name',
   record./.name,
-  /.a.b == /.a.b,
-  /.a.b == file./.a.b,
+  \.file.localhost.a.b == \.file.localhost.a.b,
+  \.file.localhost.a.b == \.file.other_host.a.b,
   len(data |> ~~),
   len(data |> ~.~~),
   len(data |> ~./)

@@ -10,6 +10,7 @@
 #include "recovery_frame.h"
 #include "lambda-stack.h"
 #include "concurrency.h"
+#include "doc_context.hpp"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
 #include "lib/log.h"
@@ -491,6 +492,13 @@ Input* run_lambda_document_transform_with_options(Runtime* runtime,
     Rooted<Item> result(roots, ItemNull);
     if (item_is_error(document.get())) {
         output->root = document.get();
+        return output;
+    }
+    Document* supplied = transform->source == LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED
+        ? doc_context_set_supplied(document.get())
+        : doc_context_set_supplied_target(target.get());
+    if (!supplied) {
+        output->root = ItemError;
         return output;
     }
     if (option_count > 0 || transform->source == LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED) {

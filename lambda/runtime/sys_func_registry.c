@@ -21,6 +21,7 @@
 #include "lambda-error.h"
 #include "concurrency.h"
 #include "runtime-state.h"
+#include "sysinfo.h"
 #include "side_stack.h"
 #include "recovery_frame.h"
 #include "../js/js_test262_fast_paths.h"
@@ -2553,6 +2554,7 @@ JitImport jit_runtime_imports[] = {
     // Path functions
     // ========================================================================
     {"path_new", FPTR(path_new)},
+    {"lambda_context_path", FPTR(lambda_context_path)},
     {"path_new_authority", FPTR(path_new_authority)},
     {"path_extend", FPTR(path_extend)},
     {"path_extend_int", FPTR(path_extend_int)},
@@ -2989,7 +2991,8 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE, JIT_EXCEPTION_SETS, 0}},
     {"js_error_lane_payload", FPTR(js_error_lane_payload),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+     // Generic error carriers may materialize a JS Error through a constructor.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
@@ -4033,7 +4036,6 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // re-enter JS. This diagnostic import is absent from release MIR.
         "js_opt_trace_record",
 #endif
-        "js_error_lane_payload",
         "js_get_new_target",
 
 #endif // LAMBDA_NO_JS

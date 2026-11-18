@@ -45,7 +45,7 @@ pn main() {
     // clearing keeps the medium and paper
     let cleared = paint.clear(s2)^
     // a painting file keeps the pigment layer: bands, substrate and every film sample
-    let root = "temp/paint_pigment_session-" ++ string(sys.proc.self.pid#)
+    let root = "temp/paint_pigment_session-" ++ string(sys.proc.self.pid)
     io.mkdir(root)^
     let file = root ++ "/oil.painting"
     paint.save_painting(s2, file)^

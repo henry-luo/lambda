@@ -14,7 +14,7 @@ import remote: lambda.sync.cloud_local
 import cache: lambda.sync.cache
 import maintenance: lambda.sync.cloud_maintenance
 pn execute(request, key, environment) any^ {
-    let paths = profile.paths(sys.proc.self.cwd#,request.profile,request.root)^
+    let paths = profile.paths(sys.proc.self.cwd,request.profile,request.root)^
     let notify = pn (event)=> { output(event,request.events,{format:'json',atomic:true})^ }
     if (request.action == "create") { return profile.create(paths,request.user,key)^ }
     if (request.action == "legacy_fixture") {

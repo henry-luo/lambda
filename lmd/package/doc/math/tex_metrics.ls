@@ -9,7 +9,7 @@ fn fix_word(data, offset) any^ {
 }
 
 fn tfm_data(file) binary | error {
-    let data = input(sys.lambda.home# ++ "/package/doc/math/fonts/tex/" ++ file, 'binary')^
+    let data = input(sys.lambda.home ++ "/package/doc/math/fonts/tex/" ++ file, 'binary')^
     if (len(data) < 24 or len(data) != halfword(data, 0) * 4)
         error("math: invalid TeX TFM: " ++ file)
     else data

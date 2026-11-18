@@ -356,6 +356,9 @@ module.exports = grammar({
     $._not_paren,
     // §7.16: a numeric literal may not run straight into an identifier.
     $._num_boundary,
+    // S2.4.8: a fused unknown tilde word is an error, not two expressions.
+    $._tilde_boundary,
+    $._tilde_word_boundary,
     // S2.4.1v2: zero-width, emitted after a bare path root `/` or `\` only when
     // a step or the end of the path follows, so `/b` (the retired `/a`
     // spelling) is an error rather than `/` plus a juxtaposed statement `b`.
@@ -839,6 +842,7 @@ module.exports = grammar({
       $._parenthesized_expr,
       $.fn_expr,
       $.current_expr,
+      $.context_expr,
       $.current_parent_expr,
       $.current_error_expr,
       $.variadic,
@@ -929,7 +933,7 @@ module.exports = grammar({
       prec.left(110, seq(
         field('object', choice($.primary_expr, $.member_expr)),
         alias($._member_dot, '.'),
-        field('field', choice($._data_name, $.integer, $.path_wildcard)),
+        field('field', choice($._data_name, $.integer, $.path_wildcard, $.context_expr)),
       )),
       prec.left('member', seq(
         field('object', choice($.primary_expr, $.member_expr)),
@@ -968,7 +972,11 @@ module.exports = grammar({
     // PTH47: the current key/index accessor is `~key`; `~#` is retired so that
     // `#` means force everywhere (S1.7). `~key` is a fused token -- `~ key`
     // with a space stays two tokens.
-    current_expr: _ => token(choice('~key', '~')),
+    current_expr: $ => choice(seq(token('~key'), $._tilde_word_boundary),
+      seq(token('~'), $._tilde_boundary)),
+    // S2.4.8 context roots are independent of the current pipe item.
+    context_expr: $ => seq(token(choice('~proc', '~cwd', '~home', '~temp', '~script', '~user', '~doc')),
+      $._tilde_word_boundary),
     current_error_expr: _ => prec(0, token('^')),
 
     _at: _ => token(prec(2, 'at')),

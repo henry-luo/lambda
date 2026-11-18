@@ -6,7 +6,7 @@ import workspace: lambda.sync.workspace
 import host: lambda.sync.document_host
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-warm-protocol-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-warm-protocol-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^; io.mkdir(area ++ "/b")^
     let alice = identity.create("warm-protocol",crypto.key()^)^
     // The receiver's admission uses the authenticated session peer, not a shared writer ID.

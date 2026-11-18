@@ -75,7 +75,7 @@ pn open_startup(st,node) {
 }
 pub pn startup(st,node) {
     let ready = start_autosave(st,node)
-    let request = opening.document_argument(sys.proc.self.argv#) ^ { {error:^.message} }
+    let request = opening.document_argument(sys.proc.self.argv) ^ { {error:^.message} }
     return open_startup({*:ready,startup_request:request,
         dialog:if (ready.dialog.kind=="recover") {*:ready.dialog,startup_path:request.path} else ready.dialog},node)
 }

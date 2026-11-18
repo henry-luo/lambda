@@ -21,6 +21,50 @@
 Scratch spool durability amplification was fixed and moved to the
 [fixed ledger](<Lambda_Issue_Ledger (fixed).md#durable-scratch-spool-amplification>).
 
+<a id="lr09-35"></a>
+## LR09-35 — Disk watch can miss the first creation in the Lambda baseline
+
+**Status:** OPEN, 2026-11-18. Two unrestricted macOS Lambda baseline runs
+reported `proc_sync_disk_watch` as `[false, true, ...]`: the newly registered
+watch missed the first creation, while the remaining nine checks passed. Three
+isolated unrestricted reruns passed. The installed libuv is 1.51.0: its macOS
+watch initialization queues a separate-thread reschedule and returns, while
+the later stream starts at the current event ID. That creates a plausible
+registration window for the observed missed first change; the exact schedule
+still needs a focused reproduction. [libuv 1.51.0 source](https://github.com/libuv/libuv/blob/v1.51.0/src/unix/fsevents.c).
+Do not change the golden or suppress the failure. This affects task-owned
+native I/O under S13.3.1v2 and D9.3.4.
+
+<a id="lr07-73"></a>
+## LR07-73 — Windows UNC context directories are projected as local paths
+
+**Status:** OPEN, 2026-11-18. Under S2.4.5v6, Windows projects every explicit
+named host to its UNC namespace, including the current machine; `localhost`
+remains the local provider. UNC `localhost` capture maps to the actual host
+name. `shell_get_hostname` uses `GetComputerNameA` on Windows, which returns a
+NetBIOS name; Microsoft documents Windows NetBIOS names as uppercase, so a
+successful lookup for a machine named `localhost` should yield a distinct
+named spelling. The helper returns lowercase `localhost` on lookup failure,
+and capture declines that ambiguous result. Portable parser and projection
+tests pass on the host; the provider and OS APIs still need a Windows run
+under S2.4.5v6 and S2.4.8. [Computer naming rules](https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/naming-conventions-for-computer-domain-site-ou) · [GetComputerNameA](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getcomputernamea)
+
+<a id="lr07-72"></a>
+## LR07-72 — GC effect audit conflates unrelated function names
+
+**Status:** OPEN, 2026-11-18. The `utils/check_gc_effects.py` call graph
+groups definitions by unqualified name. Its traversal follows unrelated
+functions with common names such as `write` and `set`, producing thousands
+of spurious paths and preventing `make test-gc-rooting` from completing.
+The check also follows both sides of constant-argument branches, so those
+reports need separate review. Resolve symbols and call sites without weakening
+the D6.3.2 and D6.3.3 effect and root requirements. The companion
+`check_gc_root_hazards.py` also treats persistent root registration with an
+error-path rollback as a transient pair in `doc_context_install`,
+`lambda_security_path_cache_store`, and `write_set_record`. The unrelated baseline
+failure was previously recorded in the static-module design.
+[Static-module checkpoint](Lambda_Design_Static_Modules.md)
+
 <a id="lr12-55"></a>
 ## LR12-55 — TreeWalker discards NodeFilter and lets cleanup delete all text
 

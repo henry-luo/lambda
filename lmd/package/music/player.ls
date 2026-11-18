@@ -248,7 +248,7 @@ pub fn create(source,options = {}) element^ {
     let checked=c.require(source.kind=="music-score" or source.kind=="music-performance","player expects score or performance")^
     let performance=if (source.kind=="music-score") perf.build(source,options.performance or {})^ else source
     let sheet=if (source.kind=="music-score") engrave.finish(geometry.layout(source,options.layout or {})^)^ else null
-    let font=options.soundfont or (sys.lambda.home#++"/package/music/soundfonts/TimGM6mb.sf2")
+    let font=options.soundfont or (sys.lambda.home++"/package/music/soundfonts/TimGM6mb.sf2")
     let warnings=c.warnings(issues,options)^;
     apply(<music_player performance:performance,soundfont:font,
         positions:if (sheet==null) {} else sheet.events,

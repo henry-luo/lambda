@@ -1,5 +1,5 @@
 import profile: lambda.doc.latex.tex_engine.profile
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 fn report(source) any^ {
  let result = profile.expand_with_kernel(source, kernel, {script_expl3: true}, 100000)^;
  {text: join([for (t in result.output) if (t.kind == "control") "\\" ++ t.value else t.value], ""), issue: result.issue, unsupported: result.unsupported}

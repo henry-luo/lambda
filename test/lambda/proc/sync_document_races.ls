@@ -6,7 +6,7 @@ import workspace: lambda.sync.workspace
 import c: lambda.sync.core
 import t: lambda.sync.text
 pn main() {
-    let area = "temp/sync-document-races-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-document-races-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     output("ab",area ++ "/tree/note")^
     let secret = crypto.key()^

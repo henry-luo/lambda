@@ -3,7 +3,7 @@
 // with a light send, `reverb` sets it from 0 to 1, and other values are refused.
 import dom
 
-let font = sys.lambda.home# ++ "/package/music/soundfonts/TimGM6mb.sf2"
+let font = sys.lambda.home ++ "/package/music/soundfonts/TimGM6mb.sf2"
 let tune = {kind: "music-performance", seconds: 1.0,
     events: [{seconds: 0.0, status: 144, a: 60, b: 100}, {seconds: 0.5, status: 128, a: 60, b: 0}]}
 

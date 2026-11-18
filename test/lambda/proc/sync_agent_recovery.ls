@@ -4,7 +4,7 @@ import local: lambda.sync.local
 import crypto: lambda.io.crypto
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-agent-recovery-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-agent-recovery-" ++ string(sys.proc.self.pid)
     io.delete(area) ^ { null }
     for (name in ["a","b"]) { io.mkdir(area ++ "/" ++ name ++ "/agent")^; io.mkdir(area ++ "/" ++ name ++ "/tree")^ }
     let a_key = crypto.key()^

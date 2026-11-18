@@ -1,7 +1,7 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
 let root="test/lambda/latex/fixtures/local_packages/";
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let source=input(root ++ "script_provenance.tex","text")^;
 let style=input(root ++ "script_provenance.sty","text")^;
 let x=profile.expand_with_kernel(source,kernel,{echo_definitions:true,adapters:[],resources:{local:{'script_provenance.sty':{data:style}},bundled:{}}},100000)^;

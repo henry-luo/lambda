@@ -3,7 +3,7 @@ import install: lambda.sync.installation
 import crypto: lambda.io.crypto
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-install-batch-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-install-batch-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^; io.mkdir(area ++ "/b")^
     let secret = crypto.key()^
     let a = local.create(area ++ "/a.sqlite",secret,"install-batch",area ++ "/a","a")^

@@ -6,7 +6,7 @@ pn main() {
     let engine = f.engine()^
     let initial = ime.session(engine,{fuzzy:["z=zh"],page_size:2})^
     let learned = k.choose(engine,k.typed(engine,initial,"beijing")^,"背景")^
-    let root = "temp/ime_chinese/user-" ++ string(sys.proc.self.pid#)
+    let root = "temp/ime_chinese/user-" ++ string(sys.proc.self.pid)
     io.mkdir(root)^
     let path = root ++ "/user.json"
     ime.save_user(learned.session.user,path)^

@@ -10,7 +10,7 @@ fn near(a, b, tolerance) => all([for (k in 0 to 2) abs(int(a[k]) - int(b[k])) <=
 pn main() {
     let dir = "test/demo/photo-album/fixture/"
     let manifest = input(dir ++ "photos.json", 'json')^
-    let base = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/", dir)
+    let base = url_resolve("file://" ++ sys.proc.self.cwd ++ "/", dir)
     let lib = L.build(manifest, [for (p in manifest.photos) {photo:true, thumb:true}], base)^
     let ctx = {lib:lib, dir:dir, dir_url:base}
     // four landscape-ish fixture photos in a 2 x 2 grid on charcoal, no bands

@@ -1,7 +1,7 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
 let root = "test/lambda/latex/fixtures/local_packages/";
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 fn parsed(name) any^ {
  let source=input(root ++ name ++ ".tex", "text")^;
  let style=input(root ++ name ++ ".sty", "text")^;

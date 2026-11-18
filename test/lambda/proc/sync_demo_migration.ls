@@ -7,9 +7,9 @@ import sqlite: lambda.io.sqlite
 import codec: lambda.sync.codec
 import disk: lambda.io.disk
 pn main() {
-    let area = sys.proc.self.cwd# ++ "/temp/sync-demo-migrate-" ++ string(sys.proc.self.pid#)
-    let paths = profile.paths(sys.proc.self.cwd#,area ++ "/profile",area ++ "/tree")^
-    let other = profile.paths(sys.proc.self.cwd#,area ++ "/other",area ++ "/other-tree")^
+    let area = sys.proc.self.cwd ++ "/temp/sync-demo-migrate-" ++ string(sys.proc.self.pid)
+    let paths = profile.paths(sys.proc.self.cwd,area ++ "/profile",area ++ "/tree")^
+    let other = profile.paths(sys.proc.self.cwd,area ++ "/other",area ++ "/other-tree")^
     io.mkdir(paths.root)^; io.mkdir(paths.folder)^; io.mkdir(other.root)^; io.mkdir(other.folder)^
     let user = "migration-test"
     let key = crypto.key()^

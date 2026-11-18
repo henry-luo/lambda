@@ -3632,26 +3632,6 @@ Item item_attr(Item data, const char* key) {
         Path* path = data.path;
         if (!path) return ItemNull;
 
-        // Only sys.* paths delegate attribute access into their resolved content.
-        // This delegation used to run for every path, which was wrong in both
-        // directions: it shadowed a file path's own structural properties when the
-        // content loaded, and once a loader failure began reporting as an error
-        // rather than a null root, the bail-out below poisoned the first property
-        // access on any path whose content could not load. fn_member gates the same
-        // delegation on the scheme; the two must agree.
-        if (path_get_scheme(path) == PATH_SCHEME_SYS) {
-            Item current = path_resolve_for_iteration(path);
-            if (current.item == ItemError.item) return ItemNull;
-            if (path->result != 0) {
-                Item resolved = {.item = path->result};
-                TypeId resolved_type = get_type_id(resolved);
-                if (resolved_type == LMD_TYPE_MAP || resolved_type == LMD_TYPE_ELEMENT) {
-                    // Access attribute from resolved content
-                    return item_attr(resolved, key);
-                }
-            }
-        }
-
         // Built-in properties come from the shared helper so this lane can
         // never diverge from fn_member's again: the old inline copy lacked
         // path/extension/scheme/depth/mode, so the statically-typed lane (and

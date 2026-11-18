@@ -16,7 +16,7 @@ fn publication(credentials, key, receipt, sequence=1, previous=null) any^ =>
         bundle:{key:key,bytes:3,checksum:s3.checksum("abc")^},inventory:schema.digest([])^,
         dependencies:schema.dependency_digest(receipt.keys)^,receipts:[receipt.id]})^
 pn main() {
-    let area = "temp/sync-retention-cloud-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-retention-cloud-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     let store = fixture.create(area ++ "/store.sqlite")^
     let a = identity.create("retention-cloud",crypto.key()^)^

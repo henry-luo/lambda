@@ -42,7 +42,7 @@ pn check(area, a, b, alice, bob, verify_bounds=false) any^ {
     return all([*result,declined == null])
 }
 pub pn run(cached, verify_bounds=false) any^ {
-    let area = "temp/sync-peer-fast-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-peer-fast-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^; io.mkdir(area ++ "/b")^
     let alice = identity.create("peer-fast",crypto.key()^)^
     let bob = identity.create(alice.space,alice.secret)^

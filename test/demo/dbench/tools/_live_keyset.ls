@@ -3,9 +3,9 @@ import rdb: lambda.io.rdb
 import sql: ~~.mod_sql
 
 pn main() {
-    let driver=sys.proc.self.env.DBENCH_TEST_DRIVER#
-    let uri=sys.proc.self.env.DBENCH_TEST_URI#
-    let table=sys.proc.self.env.DBENCH_TEST_TABLE#
+    let driver=sys.proc.self.env.DBENCH_TEST_DRIVER
+    let uri=sys.proc.self.env.DBENCH_TEST_URI
+    let table=sys.proc.self.env.DBENCH_TEST_TABLE
     let page=sql.table_page(driver,table,["a","b","marker"],
         [{column:"marker",op:"=",value:"wanted"}],[],["a","b"],1,2,null,[1,"a"])^
     open session = (rdb.database(uri,driver)^) {

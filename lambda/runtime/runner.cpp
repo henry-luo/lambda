@@ -46,6 +46,7 @@
 #include "edit_bridge.h"
 #include "interp.hpp"
 #include "runtime-state.h"
+#include "sysinfo.h"
 #include "lambda/input/input.hpp"
 #include "lib/file.h"
 #include "lib/mem_factory.h"
@@ -2449,6 +2450,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     new_script->reference = mem_strdup(lookup_path, MEM_CAT_SYSTEM);
     new_script->is_loading = true;
     new_script->profile = &lambda_profile;
+    new_script->cache_source_inline = source != NULL;
 #ifndef LAMBDA_NO_RESOURCE_CACHE
     uint32_t compilation_unit_id = input_script_compilation_unit_id(
         input_script_lease_input(raw_lease));
@@ -2456,7 +2458,6 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // physical module-state ID is assigned only when registered in this
     // Runtime, keeping the EvalContext table compact across cache reuse.
     new_script->cache_compilation_unit_id = compilation_unit_id;
-    new_script->cache_source_inline = source != NULL;
     #endif
     runtime_register_script(runtime, new_script);
 #if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)
@@ -3198,6 +3199,10 @@ void runner_setup_context(Runner* runner) {
         runtime_context_publish_owners(rt, ctx);
     }
     path_register_pool_provider(runner_path_pool_provider);
+#ifndef LAMBDA_NO_SYSINFO
+    // Context roots use the evaluation's directory snapshot, even if the environment later changes.
+    lambda_context_capture_directories();
+#endif
     // S2.4.7: a path's query step prints its type through the runtime printer
     path_register_type_printer(lambda_path_type_printer);
     path_register_enumeration_resolver(lambda_path_enumerate);

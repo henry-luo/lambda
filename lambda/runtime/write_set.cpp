@@ -866,7 +866,7 @@ extern "C" Item fn_open_begin(Item target) {
     }
     // PTH75v3: `#` is implied on an `open` target, so the alias is the opened
     // DOCUMENT, not the lazy address. `&v` recovers the address.
-    Item opened = get_type_id(target) == LMD_TYPE_PATH ? fn_force(target) : target;
+    Item opened = open_document_target(target);
     if (item_is_error(opened)) return opened;
     const DocNodeEntry* entry = doc_context_find_node(
         (const void*)(uintptr_t)opened.item);

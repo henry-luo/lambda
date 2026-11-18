@@ -4,7 +4,7 @@ import local: lambda.sync.local
 import crypto: lambda.io.crypto
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-lan-schedule-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-lan-schedule-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/agent")^
     io.mkdir(area ++ "/tree")^
     let key = crypto.key()^

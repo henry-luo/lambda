@@ -1,5 +1,5 @@
 import profile: lambda.doc.latex.tex_engine.profile
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 fn report(source) any^ {
     let result = profile.expand_with_kernel(source, kernel, {script_expl3: true, echo_definitions: true}, 100000)^;
     let text = join([for (token in result.output) token.value], "");

@@ -1,5 +1,5 @@
 import profile: lambda.doc.latex.tex_engine.profile
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 fn report(label,source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{resources:{local:{},bundled:{}}},100000)^;
  let pseudo=[for(s in r.sources where s.name == "\\scantokens") {id:s.id,data:s.data}];

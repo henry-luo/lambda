@@ -2,7 +2,7 @@
 import codec: .codec
 import hex: lambda.security.tuf.metadata
 pub pn invoke(action, result_variable=null) any^ {
-    let environment = sys.proc.self.env#
+    let environment = sys.proc.self.env
     let request = input(environment.LAMBDA_SYNC_REQUEST,'json')^
     let result = action(request,hex.unhex(environment.LAMBDA_SYNC_KEY)^,environment)^
     let destination = if (result_variable == null) null else environment[result_variable]

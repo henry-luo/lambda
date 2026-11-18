@@ -21,7 +21,7 @@ let LEVEL = data.load_level(BASE, "E1M1")^
 let WORLD = world.prepare(LEVEL)
 let GAME = sim.initialize(WORLD, {*: game_state.new_game(LEVEL, RULES, VISUALS), level_name: "E1M1"})
 let SCENE = scene.prepare(WORLD, GAME)
-let PROFILE = sys.proc.self.env.DOOM_PROFILE# == "1"
+let PROFILE = sys.proc.self.env.DOOM_PROFILE == "1"
 
 fn internal_focus(evt) => dom.closest(evt.relatedTarget, "#doom") != null
 

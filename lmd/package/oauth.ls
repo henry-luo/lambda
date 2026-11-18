@@ -58,7 +58,7 @@ pn token_request(provider, client, fields) map^ {
 
 // the system browser: open on macOS, start on Windows, xdg-open elsewhere
 pub pn open_browser(url) null^ {
-    let platform = sys.os.platform#
+    let platform = sys.os.platform
     if (platform == "darwin") { io.exec("open", [url])^ }
     else if (platform == "windows") { io.exec("cmd", ["/c", "start", "", url])^ }
     else { io.exec("xdg-open", [url])^ }

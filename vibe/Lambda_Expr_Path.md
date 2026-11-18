@@ -1,172 +1,35 @@
-# Lambda Path Mapping
+# Lambda path mapping
 
-> **Status:** decided; current syntax/runtime scope implemented
->
-> **Ratified:** 2026-09-21
->
-> **Scope:** the source spelling, normalization, qualification, and forcing
-> boundary of Lambda path values. The full unified-reference rationale and
-> decision ledger are in [Lambda_Type_Path.md](Lambda_Type_Path.md).
->
-> **Formal linkage:** §1–§3 implement
-> [S2.4.1v2–S2.4.5v2](../doc/Lambda_Formal_Semantics.md#s24-paths) and
-> [S16.9.4](../doc/Lambda_Formal_Semantics.md#s169-declarations-elements-paths);
-> §4 implements [S2.4.4](../doc/Lambda_Formal_Semantics.md#s24-paths);
-> parent, root, and composition use
-> [S10.4](../doc/Lambda_Formal_Semantics.md#s104-parent-navigation),
-> [S10.5](../doc/Lambda_Formal_Semantics.md#s105-root-navigation), and
-> [S10.6.1](../doc/Lambda_Formal_Semantics.md#s106-concatenation).
-> Resolver ownership follows
-> [D6.4.1](../doc/Lambda_Formal_Design.md#d64-context-and-globals).
+**Ratified 2026-11-18.** S2.4, S8.2.1v5, S10.6.1v3 and S16.9.4v2 govern the source forms below. D10.1.8 governs deferred file access. The implementation plan tracks the transition from the earlier path-value model. [Path design](Lambda_Type_Path.md) · [Implementation plan](impl/Lambda_Impl_Path_Node_Access.md)
 
-## 1. Path model
-
-A path is an immutable, typed address plan:
-
-```text
-Path = (root, ordered operation*)
-Operation = NameKey | IntKey | DynamicKey | Wildcard | Root | Parent
-```
-
-It is a lazy target handle, not the target's value. Path literals construct and
-normalize this plan without reading a file, listing a directory, or making a
-network request. Static paths, names, symbols, and dynamic member expressions
-share the key vocabulary but retain their respective evaluation contracts
-(S2.4.2v5, S2.4.3v3).
-
-`NameKey("1")` and `IntKey(1)` are distinct: `a.'1'` and `a.1` therefore
-remain different paths. A bracket step supplies a computed key without
-forcing the path: `p[k]` is the same path operation as `p.k`
-(S2.4.2v5).
-
-## 2. Roots and source spelling
-
-Every path begins with one root form and then uses ordinary dotted or indexed
-steps:
-
-| Form | Example | Meaning |
+| Expression | Result | Target work |
 |---|---|---|
-| Logical rooted | `/.a.b` | Resolve from the logical `/` root. |
-| Relative | `\.a.b` | Resolve from the active relative base. |
-| Relative parent | `\.~~.a` | Resolve one directory/level above that base. |
-| Local file provider | `file./.a.b` | Address `/a/b` on the current machine. |
-| Named provider | `file.host.a.b`, `http.host.a` | Address the named provider authority directly. |
+| `/.users.peter.doc` | The node at local `/users/peter/doc` under the default mount | Resolve the demanded node |
+| `file.users.peter.doc` | The node at `/peter/doc` on host `users` | Use the named authority |
+| `file./.users.peter.doc` | The same local node as `file.localhost.users.peter.doc` | Resolve the demanded node |
+| `file.localhost.users.peter.doc is file` | Whether the local entry is a file | Metadata suffices |
+| `file.localhost.users.peter.doc.body` | The body when the document exposes one | Read content as needed |
+| `\.file.localhost.users.peter.doc` | An absolute `path` | Capture only |
+| `\.body.0` | A relative `path` | Capture only |
+| `p#` | The concrete target of path `p` | Same observations as direct access |
+| `p ++ \.body` | A composed `path` when `p` is a path | Apply normalized relative steps |
+| `node ++ \.body` | Type error for a concrete node | No traversal |
+| `node[\.body.0]` | The value of `node.body[0]` | Read from the supplied receiver |
 
-The empty rooted and relative paths are `/` and `\`. A segment that is not a
-simple name is quoted; for example, `/.var.log.'app.log'` and
-`http.'api.example'.v1`. `*` selects one path segment and `**` is its
-closure — the base and every segment beneath it (S8.2.5); either may sit
-anywhere in a path (S2.4.6).
+## File authorities
 
-The following pre-ratification spellings are retired and have no compatibility
-meaning: `/a`, `.a`, `..a`, `value ..`, and `value .._..`. In particular, `.`
-is not a relative-path root; `\` is. This is the S16.9.4 respelling that
-prevents relative paths from colliding with member syntax.
+The first name after `file.` is the authority. `file.hostname.path` corresponds to `file://hostname/path`. RFC 8089 gives `localhost` the same meaning as the empty authority in `file:///path`. Lambda maps `file:///path` to `file./.path` and `file://localhost/path` to `file.localhost.path`. Both spellings select the same local node and capture equal addresses. Printing a captured path preserves its `file./` or `file.localhost` spelling. `local` is an ordinary hostname. On Windows, a named authority selects a UNC share even when it is the current host: `file.myhost.C.path` selects `\\\\myhost\\C\\path`, while `file.localhost.C.path` selects `C:\\path`. A UNC `localhost` server captures the current machine's named authority. The short form `/.path` uses the logical root, which maps to the local filesystem by default. [S2.4.5v6](../doc/Lambda_Formal_Semantics.md#s24-paths) · [RFC 8089 §2](https://www.rfc-editor.org/rfc/rfc8089.html#section-2)
 
-### 2.1 Root and parent operations
+## Reading and composing
 
-`~~` is the parent operation, never a root. Within a relative path it is
-written `\.~~`; on an expression it is postfix:
+A path has a typed root and ordered operations. Quoted names, integer indexes, parent, root, wildcard and query steps retain their meanings. The escape records the scheme only for a bare registered scheme head. `\['file'].users` captures a relative entry named `file`. A dynamic key is evaluated when the reference is built. Address construction, equality and composition require no lookup of the named target. [S2.4.1v3–S2.4.4v2](../doc/Lambda_Formal_Semantics.md#s24-paths)
 
-```lambda
-\.~~.config            // relative parent, then config
-\.~~.~~.config         // two relative parent steps
-value.~~.name           // parent of value, then name
-value./.name            // root of value's hierarchy, then name
-~~.name                 // exactly ~.~~.name
-```
+With `let p = \.file.localhost.users.peter.doc` and `let d = p#`, the expressions `d.body`, `d[\.body]` and `(p ++ \.body)#` all select the same member. An empty relative selector takes zero steps. On a missing member, traversal yields the ordinary absent-read result. External operations retain the provider's permission and error contract. [S7.1.1v3](../doc/Lambda_Formal_Semantics.md#s71-reads-are-total-writes-are-checked) · [S8.2.1v5](../doc/Lambda_Formal_Semantics.md#s82-the-key-space)
 
-The postfix `./` operation selects the current path/provider anchor or the
-root relation supplied by a value occurrence. It is not a second slash-based
-path syntax. Parent/root navigation on ordinary values uses evaluation
-lineage, not observable parent or root pointers stored in Lambda values
-(S10.4.3, S10.5.3).
+Directory enumeration returns entry nodes. `\.src.**#` can enumerate a tree and `\.src?file#` can test file kinds without parsing files. A later step that asks for document content can then open the selected files. [S2.4.6v2–S2.4.7v2](../doc/Lambda_Formal_Semantics.md#s24-paths)
 
-### 2.2 Normalization and composition
+## Named context roots
 
-Path operations normalize left-to-right. A parent removes a preceding child;
-at a relative root an unmatched parent is retained, while a logical or
-provider root clamps. A root operation drops descendants while preserving its
-logical or provider/authority anchor:
+S2.4.8 gives three common directories short names. `~cwd` selects the working directory, `~home` selects `~user.home`, and `~temp` selects the temporary directory. Each supports ordinary member access. `~user.name` yields the account name. `~proc` exposes the current process, including its environment and argument vector. `~proc.cwd` retains the provider's string type. [S17.3.1v2](../doc/Lambda_Formal_Semantics.md#s173-process-information)
 
-```lambda
-/.a.b.~~             == /.a
-/.a.b./.c            == /.c
-\.a.~~.~~.b          == \.~~.b
-file.host.a./.b      == file.host.b
-```
-
-`base ++ relative_suffix` applies the relative suffix through that same
-normalizer. A rooted or absolute suffix is not accepted where a relative one
-is required:
-
-```lambda
-/.home.user ++ \.docs.file     == /.home.user.docs.file
-/.home.user ++ \.~~.shared     == /.home.shared
-```
-
-Equality, hashing, canonical printing, qualification, and composition all
-observe the normalized plan, never its construction history (S2.4.2v5).
-
-## 3. Qualification
-
-Logical `/` is a resolver root, not an intrinsic filesystem root. Its
-immutable, evaluation-owned resolver qualifies it to a provider/authority;
-for example, a default local policy may map `/.a.b` to `file./.a.b`. An
-explicit provider path bypasses that logical mount:
-
-```text
-/.a.b       --default local mount--> file./.a.b
-file./.a.b --already explicit------> file./.a.b
-```
-
-These two paths remain structurally distinct even when they qualify to the
-same target. Resolver selection is deterministic: it honors visibility,
-exports, sandboxing, and capabilities, and never probes one provider then
-falls back to another because a target is missing (S2.4.4, S2.4.5v2).
-
-## 4. Forcing external targets
-
-Qualification is pure address canonicalization. Forcing is the separate,
-effectful operation that asks the selected file, URL, or other provider for
-the target. This boundary preserves lazy composition and prevents address
-resolution from becoming implicit I/O (S2.4.3v3, S2.4.4).
-
-For local filesystem targets, the forcing model is:
-
-- a directory yields child **path values**, rather than eagerly loaded child
-  contents;
-- a file yields the value produced by the appropriate input/content loader;
-- `*` and `**` force directory enumeration — one level, or the closure
-  including the base — into child path values, deduplicated by path
-  equality; the remaining steps continue per match, and a step applied to a
-  file match enters that file, so `**` never crosses the file boundary by
-  itself (S2.4.6, [Type_Path §6.4](Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826)); and
-- provider failure follows that provider's declared error/effect contract;
-  it never changes the chosen path root or triggers provider fallback.
-
-Metadata may be requested independently of content forcing. This permits a
-caller to inspect a path's name, type, size, timestamp, or link status without
-reading a large file. These properties are an implementation convenience, not
-additional operations in the path's semantic identity.
-
-## Appendix A. Implementation notes
-
-This appendix is informative; the rulings above and S2.4 remain authoritative.
-
-- The runtime represents a path as a pool-owned persistent spine: a root and
-  typed operation nodes. Construction, parent/root selection, wildcard steps,
-  and `++` share one normalizing path operation rather than rebuilding spines
-  in individual callers.
-- Forced content may be cached on the path, and lazily populated `PathMeta`
-  records hold filesystem metadata. Directory and wildcard results retain
-  child paths with their metadata; file content is loaded only when forced.
-  Neither cache nor metadata may affect path equality, hashing, printing, or
-  qualification.
-- The shipped default qualifies logical paths to local `file./` paths. A named
-  file authority is valid as a path value but is rejected before OS-path
-  projection unless it is the current machine; general mounts and remote file
-  transport remain deferred.
-
-The detailed implementation audit and test matrix live in
-[Lambda_Impl_Path (done).md](impl/Lambda_Impl_Path%20(done).md).
+A report generator illustrates why there are three distinct locations. When launched from `work/` to process `reports/annual.xml`, a helper defined in `lib/render.ls` sees the working directory through `~cwd`, the report's document root through `~doc`, and its own source file through `~script`. Opening a template preserves the report selection. The escape can carry the helper's location back to its caller. In a pipe, `~home` still selects the user's directory and `~.home` reads the current item's member. [S2.4.8](../doc/Lambda_Formal_Semantics.md#s24-paths) · [S10.1.2v5](../doc/Lambda_Formal_Semantics.md#s101-union-pipe-and-filter)

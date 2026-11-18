@@ -1717,9 +1717,9 @@ test-gc-rooting-core: build
 	@LAMBDA_GC_FORCE_SEED=1592594996 LAMBDA_GC_FORCE_ONE_IN=3 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_random.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_random.txt
-	@echo "Running LambdaJS MIR-interpreter exact-root forced-GC gate..."
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
-		./lambda.exe js --mir-interp --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_interp.txt
+	@echo "Running LambdaJS AST exact-root forced-GC gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 JS_EXEC_BACKEND=ast \
+		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_interp.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_interp.txt
 	@echo "Running Lambda MIR-Direct exact-root forced-GC gate..."
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \

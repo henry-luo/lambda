@@ -4,7 +4,7 @@ import chunks: lambda.sync.chunks
 import crypto: lambda.io.crypto
 import disk: lambda.io.disk
 pn main() {
-    let area = "temp/sync-pack-large-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-pack-large-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^; io.mkdir(area ++ "/restore")^
     var bytes = binary("0123456789abcdef")^
     while (len(bytes)^ < 8388608) { bytes = bytes ++ bytes }

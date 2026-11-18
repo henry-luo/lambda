@@ -5,7 +5,7 @@ import crypto: lambda.io.crypto
 import disk: lambda.io.disk
 import sqlite: lambda.io.sqlite
 pn main() {
-    let area = "temp/sync-startup-cache-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-startup-cache-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let secret = crypto.key()^
     let initial = local.create(area ++ "/repo",secret,"startup-cache",area ++ "/tree","device")^

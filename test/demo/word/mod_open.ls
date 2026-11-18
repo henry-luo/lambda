@@ -2,7 +2,7 @@
 import importer: ~~.mod_import
 import paths: lambda.io.path
 
-pub fn document_argument(args,base=sys.proc.self.cwd#,home=sys.home#) any^ {
+pub fn document_argument(args,base=sys.proc.self.cwd,home=sys.home) any^ {
     let options = [for (i,arg in args where ((arg=="--doc" or starts_with(arg,"--doc=")) ^ { false })) i];
     if (len(options)==0) null
     else if (len(options)>1) raise error("Word: use --doc only once")

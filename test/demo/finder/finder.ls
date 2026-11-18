@@ -10,9 +10,9 @@ import updates: lambda.ui.core.publish
 import splitter: lambda.ui.core.splitter
 
 let BASE = url_resolve(resources.entry_uri()^,".")
-let CWD = sys.proc.self.cwd#
+let CWD = sys.proc.self.cwd
 // read the system path before joining sidebar destinations or expanding ~ (S2.4.3v3).
-let HOME = sys.home#
+let HOME = sys.home
 let START = model.absolute(slice(url_resolve(BASE,"files/"),7),CWD)
 let PLACES = [{id:"demo",name:"Demo Files",icon:"folder",path:START},
     {id:"home",name:"Home",icon:"home",path:HOME},

@@ -17,8 +17,8 @@ let BASE = url_resolve(resources.entry_uri()^, "./")
 let CSS = workspace_shell.css ++ input(url_resolve(BASE, "archive.css"), 'text')^
 let THEME = workspace_shell.variables({primary:"#2d6cdf",text:"#1f2328",text_secondary:"#6a6f76",border:"#dedad3",background:"#f4f2ee",font_size:14})^
 let CONFIG = input(url_resolve(BASE, "archive.yaml"), 'yaml')^
-let CWD = sys.proc.self.cwd#
-let ROOT_SETTING = sys.proc.self.env.ARCHIVE_DEMO_ROOT#
+let CWD = sys.proc.self.cwd
+let ROOT_SETTING = sys.proc.self.env.ARCHIVE_DEMO_ROOT
 let ROOT = if (ROOT_SETTING != null and ROOT_SETTING != "") ROOT_SETTING else "temp/archive"
 let ROOT_ABS = if (starts_with(ROOT, "/")) ROOT else CWD ++ "/" ++ ROOT
 let ENV = {root_url: "file://" ++ ROOT_ABS}

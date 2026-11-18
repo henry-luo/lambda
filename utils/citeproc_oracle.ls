@@ -15,12 +15,12 @@ fn evaluate(fixture, locales) map^ {
 }
 
 pn main() {
-    let fixtures = input(sys.proc.self.env.CSL_ORACLE_INPUT#, "json")^
-    let locales = locale.compile({'en-US': input(sys.lambda.home# ++ "/package/doc/latex/citeproc/locales/locales-en-US.xml", "text")^,
-        'de-DE': input(sys.lambda.home# ++ "/package/doc/latex/citeproc/locales/locales-de-DE.xml", "text")^,
-        'fr-FR': input(sys.lambda.home# ++ "/package/doc/latex/citeproc/locales/locales-fr-FR.xml", "text")^})^
+    let fixtures = input(sys.proc.self.env.CSL_ORACLE_INPUT, "json")^
+    let locales = locale.compile({'en-US': input(sys.lambda.home ++ "/package/doc/latex/citeproc/locales/locales-en-US.xml", "text")^,
+        'de-DE': input(sys.lambda.home ++ "/package/doc/latex/citeproc/locales/locales-de-DE.xml", "text")^,
+        'fr-FR': input(sys.lambda.home ++ "/package/doc/latex/citeproc/locales/locales-fr-FR.xml", "text")^})^
     let results = [for (fixture in fixtures) evaluate(fixture, locales) ^ {
         {id: fixture.id, citations: [], bibliography: [], diagnostics: [c.error_issue(^)]}
     }]
-    output(results, sys.proc.self.env.CSL_ORACLE_OUTPUT#, "json")^
+    output(results, sys.proc.self.env.CSL_ORACLE_OUTPUT, "json")^
 }

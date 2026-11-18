@@ -6,28 +6,28 @@ import filesystem: lambda.io.file_info
 import icons: lambda.ui.workspace.file_icons
 import storage: .mod_io
 
-pub fn places() => [{id:"home",name:"Home",icon:"home",path:sys.home#},
+pub fn places() => [{id:"home",name:"Home",icon:"home",path:sys.home},
     *[for (id,caption in {desktop:"Desktop",documents:"Documents",downloads:"Downloads"})
-        {id:string(id),name:caption,icon:string(id),path:browser.absolute(caption,sys.home#)}],
-    {id:"project",name:"Project",icon:"folder",path:sys.proc.self.cwd#},
+        {id:string(id),name:caption,icon:string(id),path:browser.absolute(caption,sys.home)}],
+    {id:"project",name:"Project",icon:"folder",path:sys.proc.self.cwd},
     {id:"computer",name:"Computer",icon:"computer",path:"/"}]
 pub fn selectable(entry) any^ => entry!=null and (entry.dir or storage.supported_path(entry.path))
 pub fn rows(d) any^ => browser.visible(d.browser)
 pub fn selected(d) any^ => browser.focused(d.browser)
 // selected paths come from Finder's snapshot; trimming their display names would change leading spaces.
-pub fn target(d) any^ => selected(d).path or (if (trim(d.path)!="") browser.absolute(trim(d.path),d.browser.path,sys.home#) else null)
+pub fn target(d) any^ => selected(d).path or (if (trim(d.path)!="") browser.absolute(trim(d.path),d.browser.path,sys.home) else null)
 pub fn can_open(d) any^ => d.loading!=true and (if (trim(d.path)!="") storage.supported_path(d.path) else selectable(selected(d)))
 
 pub fn navigate(d,path,cursor=-1) {
-    let absolute = browser.absolute(path,d.browser.path,sys.home#)
+    let absolute = browser.absolute(path,d.browser.path,sys.home)
     let loaded = { let __error_outcome_1 = filesystem.read_folder(absolute) ^ { ^ }; if (__error_outcome_1 is error) { {error:__error_outcome_1.message} } else match __error_outcome_1 { case any { {entries:~} } } };
     if (loaded.error!=null) {*:d,error:loaded.error,open_path:null}
     else {*:d,browser:browser.listing(d.browser,absolute,loaded.entries,cursor),path:"",error:null,go:false,open_path:null}
 }
 pub fn initial(path="",last_folder=null) any^ {
-    let documents = browser.absolute("Documents",sys.home#)
-    let start = last_folder or (if (path!="") browser.parent(browser.absolute(path,sys.proc.self.cwd#))
-        else if (exists(documents)) documents else sys.proc.self.cwd#)
+    let documents = browser.absolute("Documents",sys.home)
+    let start = last_folder or (if (path!="") browser.parent(browser.absolute(path,sys.proc.self.cwd))
+        else if (exists(documents)) documents else sys.proc.self.cwd)
     let d = {kind:"open",browser:browser.initial(start),path:"",error:null,go:false,open_path:null};
     navigate(d,start)
 }

@@ -1,6 +1,6 @@
 import message_test: .mod_tex_test_messages
 import profile: lambda.doc.latex.tex_engine.profile
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let baseline = parse("", {type:"tex"})^.messages;
 fn report(label, source) any^ {
  let r=profile.expand_with_kernel(source,kernel,{resources:{local:{},bundled:{}}},100000)^;

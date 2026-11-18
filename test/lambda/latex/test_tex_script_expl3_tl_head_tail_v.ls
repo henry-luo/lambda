@@ -3,7 +3,7 @@ import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import expansion: lambda.doc.latex.tex_engine.expansion
 import expansion: lambda.doc.latex.tex_engine.expansion
 import digest: lambda.doc.latex.tex_engine.digest
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let baseline=parse("",{type:"tex"})^.messages;
 fn check(body, constructor = false) any^ {
  let source="\\ExplSyntaxOn" ++ body ++ "\\ExplSyntaxOff";

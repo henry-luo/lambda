@@ -9,7 +9,7 @@ import crypto: lambda.io.crypto
 import packs: lambda.sync.pack_store
 
 pn main() {
-    let area = "temp/sync-retention-offline-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-retention-offline-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^
     io.mkdir(area ++ "/b")^
     output("base",area ++ "/a/file")^

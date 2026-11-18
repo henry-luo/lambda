@@ -37,9 +37,9 @@ pn collect() {
 
 pn main() {
     // a folder per process: the T0 and JIT runs of this test may overlap
-    let root = "temp/archive_test/media-" ++ string(sys.proc.self.pid#)
+    let root = "temp/archive_test/media-" ++ string(sys.proc.self.pid)
     if (exists(root)) io.delete(root)^
-    let site = "file://" ++ sys.proc.self.cwd# ++ "/" ++ SITE
+    let site = "file://" ++ sys.proc.self.cwd ++ "/" ++ SITE
     let lib = archive.library(root, {config: {defaults: {per_host_delay_ms: 0}}})^
     let dir_of = (s) any^ => root ++ "/snapshots/" ++ s.id
     let c = start(collect)

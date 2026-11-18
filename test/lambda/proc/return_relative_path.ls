@@ -5,7 +5,7 @@ pn relative() {
     return \.a.b
 }
 pn rooted() {
-    return /.a.b
+    return \.file.localhost.a.b
 }
 pn bare() {
     return \

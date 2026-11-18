@@ -9,7 +9,7 @@ import crypto: lambda.io.crypto
 import sqlite: lambda.io.sqlite
 
 pn main() {
-    let area = "temp/sync-retention-gc-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-retention-gc-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     let path = area ++ "/repo.sqlite"
     let keys = repo.keys(crypto.key()^,"retention-gc",path)^

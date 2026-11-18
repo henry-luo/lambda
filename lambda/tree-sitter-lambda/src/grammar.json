@@ -4034,6 +4034,10 @@
           },
           {
             "type": "SYMBOL",
+            "name": "context_expr"
+          },
+          {
+            "type": "SYMBOL",
             "name": "current_parent_expr"
           },
           {
@@ -4668,6 +4672,10 @@
                     {
                       "type": "SYMBOL",
                       "name": "path_wildcard"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "context_expr"
                     }
                   ]
                 }
@@ -5831,20 +5839,86 @@
       ]
     },
     "current_expr": {
-      "type": "TOKEN",
-      "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "STRING",
-            "value": "~key"
-          },
-          {
-            "type": "STRING",
-            "value": "~"
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "TOKEN",
+              "content": {
+                "type": "STRING",
+                "value": "~key"
+              }
+            },
+            {
+              "type": "SYMBOL",
+              "name": "_tilde_word_boundary"
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "TOKEN",
+              "content": {
+                "type": "STRING",
+                "value": "~"
+              }
+            },
+            {
+              "type": "SYMBOL",
+              "name": "_tilde_boundary"
+            }
+          ]
+        }
+      ]
+    },
+    "context_expr": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "TOKEN",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "~proc"
+              },
+              {
+                "type": "STRING",
+                "value": "~cwd"
+              },
+              {
+                "type": "STRING",
+                "value": "~home"
+              },
+              {
+                "type": "STRING",
+                "value": "~temp"
+              },
+              {
+                "type": "STRING",
+                "value": "~script"
+              },
+              {
+                "type": "STRING",
+                "value": "~user"
+              },
+              {
+                "type": "STRING",
+                "value": "~doc"
+              }
+            ]
           }
-        ]
-      }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_tilde_word_boundary"
+        }
+      ]
     },
     "current_error_expr": {
       "type": "PREC",
@@ -13095,6 +13169,14 @@
     {
       "type": "SYMBOL",
       "name": "_num_boundary"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_tilde_boundary"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_tilde_word_boundary"
     },
     {
       "type": "SYMBOL",

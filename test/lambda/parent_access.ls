@@ -15,7 +15,7 @@ let deep = {name: "leaf", parent: {name: "mid", parent: {name: "top", parent: nu
 
 // Test 3: parent access on path - get parent directory
 "Path parent access: single"
-let p = /.home.user.documents
+let p = \.file.localhost.home.user.documents
 p.~~
 
 "Path parent access: double"

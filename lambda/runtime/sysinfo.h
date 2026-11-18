@@ -18,6 +18,20 @@ extern "C" {
 
 // Forward declarations
 typedef struct Path Path;
+typedef struct Pool Pool;
+
+typedef enum LambdaContextPath {
+    LAMBDA_CONTEXT_PATH_NONE,
+    LAMBDA_CONTEXT_PATH_CWD,
+    LAMBDA_CONTEXT_PATH_HOME,
+    LAMBDA_CONTEXT_PATH_TEMP,
+    LAMBDA_CONTEXT_PATH_SCRIPT,
+    LAMBDA_CONTEXT_PATH_DOCUMENT,
+} LambdaContextPath;
+
+Path* lambda_context_path(Pool* pool, int kind, const char* source);
+Path* lambda_context_windows_unc_path(Pool* pool, const char* source);
+void lambda_context_capture_directories(void);
 
 /**
  * Lazily initialize sysinfo data for the current evaluation context.

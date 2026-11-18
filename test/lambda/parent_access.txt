@@ -4,9 +4,9 @@
   parent: null
 }
 "Parent name via memberrootDouble parent fieldtopPath parent access: single"
-/.home.user
+\.file.localhost.home.user
 "Path parent access: double"
-/.home
+\.file.localhost.home
 "Chained parent field value"
 20
 "Double parent field value"

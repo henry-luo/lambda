@@ -2970,6 +2970,12 @@ TEST_F(NegativeScriptTest, SemanticError_FilterBodyWithoutCurrentItem) {
         "error[E238]: filter body must mention `~`");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_ContextRootDoesNotBindFilterItem) {
+    // S2.4.8 roots are independent of the current item required by S10.1.6v2.
+    ExpectErrorMessage("test/lambda/negative/semantic/filter_context_root_only.ls",
+        "error[E238]: filter body must mention `~`");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_ForGroupKeyNeedsName) {
     // FC9/S14.1.2v2: a computed group key gets no generated or empty name
     ExpectErrorMessage("test/lambda/negative/semantic/for_group_key_name.ls",

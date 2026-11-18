@@ -958,6 +958,9 @@ Item fn_join(Item left, Item right) {
     // null is the identity; a path on the left keeps S2.4.2v4.
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
 
+    if (right_type == LMD_TYPE_PATH && left_type != LMD_TYPE_PATH)
+        return runtime_error_itemf(ERR_TYPE_MISMATCH, "'++' requires a path before a relative path");
+
     // Handle path concatenation first (path must be on the left)
     if (left_type == LMD_TYPE_PATH) {
         Path* left_path = left.path;
@@ -4699,8 +4702,35 @@ static uint64_t pin_query_type(Item type_val) {
 // Printer for a path's query step (registered with the path layer): the type's
 // canonical spelling, which path equality and hashing compare.
 extern "C" void lambda_path_type_printer(uint64_t type_item, void* strbuf) {
-    print_item((StrBuf*)strbuf, (Item){.item = type_item});
+    Item value = {.item = type_item};
+    Type* contract = runtime_boundary_unwrap_type(value.type);
+    if (contract && contract != &TYPE_ELMT && contract->type_id == LMD_TYPE_ELEMENT) {
+        const TypeElmt* tag = (const TypeElmt*)contract;
+        // Tag-only queries have the tag in their path identity, including file.
+        if (tag->name.length && !tag->ns && !tag->shape && !tag->content_list) {
+            StrBuf* out = (StrBuf*)strbuf;
+            strbuf_append_char(out, '<');
+            strbuf_append_str_n(out, tag->name.str, tag->name.length);
+            strbuf_append_char(out, '>');
+            return;
+        }
+    }
+    print_item((StrBuf*)strbuf, value);
 }
+
+struct ProviderNode {
+    Path* path;
+    Path* children;
+    bool directory;
+    bool loaded;
+    Item document;
+};
+extern const VelmtVtable provider_node_vtable;
+static ProviderNode* provider_node_data(Item item) {
+    return get_type_id(item) == LMD_TYPE_VELMT && item.velmt->vtable == &provider_node_vtable
+        ? (ProviderNode*)item.velmt->data : nullptr;
+}
+static Item provider_step(ProviderNode* node, Item type, bool inclusive, LPathSegmentType step);
 
 Item fn_query(Item data, Item type_val, int direct) {
     TypeId type_tid = get_type_id(type_val);
@@ -4713,6 +4743,12 @@ Item fn_query(Item data, Item type_val, int direct) {
         uint64_t pinned = pin_query_type(type_val);
         Path* step = pinned ? path_query(context->pool, data.path, pinned, direct != 0) : NULL;
         return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
+    }
+    if (ProviderNode* node = provider_node_data(data)) {
+        RootFrame roots(2);
+        Rooted<Item> source(roots, data);
+        Rooted<Item> type(roots, type_val);
+        return provider_step(node, type.get(), direct != 0, LPATH_SEG_QUERY);
     }
     // use array (not list) to avoid automatic string merging. The walk can
     // allocate -- a virtual carrier's keys and values, a boxed field -- so the
@@ -4805,6 +4841,11 @@ extern "C" Item fn_step_items(Item data) {
         Path* step = path_wildcard(context->pool, data.path);
         return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
     }
+    if (ProviderNode* node = provider_node_data(data)) {
+        RootFrame roots(1);
+        Rooted<Item> source(roots, data);
+        return provider_step(node, ItemNull, false, LPATH_SEG_WILDCARD);
+    }
     RootFrame roots(2);
     Rooted<Item> source(roots, data);
     Rooted<Array*> result(roots, array_plain());
@@ -4818,6 +4859,11 @@ extern "C" Item fn_step_closure(Item data) {
     if (get_type_id(data) == LMD_TYPE_PATH) {
         Path* step = path_wildcard_recursive(context->pool, data.path);
         return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
+    }
+    if (ProviderNode* node = provider_node_data(data)) {
+        RootFrame roots(1);
+        Rooted<Item> source(roots, data);
+        return provider_step(node, ItemNull, false, LPATH_SEG_WILDCARD_REC);
     }
     RootFrame roots(2);
     Rooted<Item> source(roots, data);
@@ -4839,6 +4885,11 @@ extern "C" Item fn_navigate_value(Item object, int root) {
         Path* result = root ? path_select_root(context->pool, path)
                             : path_select_parent(context->pool, path);
         return result ? (Item){.item = (uint64_t)(uintptr_t)result} : ItemNull;
+    }
+    if (ProviderNode* node = provider_node_data(object)) {
+        Path* location = root ? path_select_root(context->pool, node->path)
+            : path_select_parent(context->pool, node->path);
+        return location ? fn_force({.path = location}) : ItemNull;
     }
     if (!item_is_list(object)) return root ? object : ItemNull;
     RootFrame roots(3);
@@ -5340,7 +5391,7 @@ String* fn_string(Item itm) {
         Path* path = (Path*)itm.item;
         if (!path) return &STR_NULL;
         StrBuf* sb = strbuf_new();
-        path_to_string(path, sb);
+        path_to_source(path, sb);
         String* result = heap_strcpy(sb->str, sb->length);
         strbuf_free(sb);
         return result;
@@ -5927,10 +5978,8 @@ extern "C" Item fn_input1(Item url) {
 // ============================================================================
 // The force step `#` (PTH31-PTH39)
 // ============================================================================
-// Everything left of `#` is address resolution and performs no I/O (PTH38);
-// only `#` crosses from the reference to its target. `p#` on a provider path is
-// sugar for `input(p)` plus navigation (PTH53v2), so no new I/O path enters the
-// runtime.
+// S2.4.3v4: both explicit dereference and bare provider access use this
+// walker. Constructing a captured address makes no provider request.
 
 // A path may run from a provider to the deepest node of a document with no `#`
 // at the boundary, so the walk that finds the boundary needs somewhere to stash
@@ -5955,7 +6004,7 @@ static String* force_location_key(Path* path) {
 static Item force_apply_step(Item value, Path* step) {
     switch (PATH_GET_SEG_TYPE(step)) {
     case LPATH_SEG_INT:
-        return fn_index(value, (Item){.item = i2it((int32_t)step->int_value)});
+        return fn_index(value, (Item){.item = i2it(step->int_value)});
     case LPATH_SEG_NORMAL: {
         if (!step->name) return ItemNull;
         String* name = heap_strcpy(step->name, strlen(step->name));
@@ -5971,9 +6020,10 @@ static Item force_apply_step(Item value, Path* step) {
     case LPATH_SEG_QUERY:
         return fn_query(value, (Item){.item = step->query_type},
             (step->flags & PATH_FLAG_QUERY_SELF) ? 1 : 0);
+    case LPATH_SEG_PARENT:
+    case LPATH_SEG_ROOT:
+        return fn_navigate_value(value, PATH_GET_SEG_TYPE(step) == LPATH_SEG_ROOT);
     default:
-        // A parent/root step is a path operation, not an in-document
-        // navigation; it belongs to the prefix, which the walk below guarantees.
         return ItemNull;
     }
 }
@@ -5993,14 +6043,11 @@ static Item force_document(Path* doc_path, bool* raised) {
         }
         // A document snapshot is context-owned; a new provider force still
         // needs authority before an already-captured head may be reused.
-        if (scheme != PATH_SCHEME_TEMP) {
-            Target* target = item_to_target((uint64_t)(uintptr_t)doc_path, NULL);
-            StrBuf* path = target && target->scheme == TARGET_SCHEME_FILE
-                ? (StrBuf*)target_to_local_path(target, NULL) : nullptr;
+        if (scheme != PATH_SCHEME_TEMP && scheme != PATH_SCHEME_DOCUMENT) {
+            StrBuf* path = (StrBuf*)lambda_local_path_for_provider(doc_path);
             int32_t kind;
             bool allowed = path && security_io_input_kind(io, path->str, &kind, nullptr);
             if (path) strbuf_free(path);
-            if (target) target_free(target);
             if (!allowed) {
                 *raised = true;
                 return runtime_error_itemf(ERR_FILE_ACCESS_DENIED,
@@ -6008,17 +6055,35 @@ static Item force_document(Path* doc_path, bool* raised) {
             }
         }
     }
+    RootFrame roots(3);
+    Rooted<Item> location(roots, ItemNull), head(roots, ItemNull), target(roots, ItemNull);
     String* key = force_location_key(doc_path);
     if (!key) return ItemNull;
+    // Provider resolution can collect before the location is published.
+    location.set((Item){.item = s2it(key)});
     Document* existing = doc_context_lookup(key->chars, key->len);
+    if (existing && existing->deferred) {
+        // Capturing the supplied address does not parse its path-based source.
+        head.set(fn_input1(existing->deferred_target));
+        if (item_is_error(head.get())) { *raised = true; return head.get(); }
+        String* retained_key = location.get().get_string();
+        if (!doc_context_install(existing->path, retained_key->chars, retained_key->len,
+                head.get(), 0)) {
+            *raised = true;
+            return ItemError;
+        }
+        existing->deferred = false;
+        existing->deferred_target = ItemNull;
+    }
     if (existing) return existing->head;
+    if (path_get_scheme(doc_path) == PATH_SCHEME_TEMP ||
+            path_get_scheme(doc_path) == PATH_SCHEME_DOCUMENT) return ItemNull;
 
-    Item head;
     if (path_get_scheme(doc_path) == PATH_SCHEME_SYS) {
         // PTH37: an in-memory reference is a TOTAL read — absence is null
         // (S7.1.1v3), never a raise.
-        head = path_resolve_for_iteration(doc_path);
-        if (head.item == ItemError.item) return ItemNull;
+        head.set(path_resolve_for_iteration(doc_path));
+        if (head.get().item == ItemError.item) return ItemNull;
     } else {
         // PTH36: `input`/`fetch` are pn-family effectful readers, so an
         // unreadable document RAISES (S7.4.5) rather than answering null.
@@ -6027,13 +6092,182 @@ static Item force_document(Path* doc_path, bool* raised) {
         *raised = true;
         return ItemError;
 #else
-        head = fn_input1((Item){.item = (uint64_t)(uintptr_t)doc_path});
+        target.set((Item){.path = doc_path});
+        if (io && !path_is_absolute(doc_path)) {
+            StrBuf* local = (StrBuf*)lambda_local_path_for_provider(doc_path);
+            if (!local) {
+                *raised = true;
+                return runtime_error_itemf(ERR_IO_ERROR, "cannot project relative document address");
+            }
+            target.set((Item){.item = s2it(heap_strcpy(local->str, local->length))});
+            strbuf_free(local);
+        }
+        head.set(fn_input1(target.get()));
 #endif
-        if (head.item == ItemError.item) { *raised = true; return ItemError; }
+        if (head.get().item == ItemError.item) { *raised = true; return ItemError; }
     }
-    if (head.item == ItemNull.item) return ItemNull;
-    doc_context_install(doc_path, key->chars, key->len, head, 0);
-    return head;
+    if (head.get().item == ItemNull.item) return ItemNull;
+    key = location.get().get_string();
+    if (!doc_context_install(doc_path, key->chars, key->len, head.get(), 0)) {
+        *raised = true;
+        return ItemError;
+    }
+    return head.get();
+}
+
+// S2.4.4v2: a provider node owns a metadata-only address until a content read.
+static Item provider_document(ProviderNode* node) {
+    if (node->loaded && !eval_context_security_io(context)) return node->document;
+    bool raised = false;
+    Item observed = force_document(node->path, &raised);
+    if (raised || item_is_error(observed)) return observed;
+    if (!node->loaded) node->document = observed;
+    node->loaded = true;
+    return node->document;
+}
+
+static VirtualOpStatus provider_tag(void* data, Item* out) {
+    const char* tag = ((ProviderNode*)data)->directory ? "dir" : "file";
+    Symbol* symbol = fn_name_symbol_from_chars(tag, strlen(tag));
+    *out = symbol ? Item{.item = y2it(symbol)} : ItemError;
+    return symbol ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
+}
+
+static VirtualOpStatus provider_named_child(void* data, Item key, Item* out) {
+    ProviderNode* node = (ProviderNode*)data;
+    if (!is_text_type_id(get_type_id(key))) return VIRTUAL_OP_MISSING;
+    RootFrame roots(3);
+    Rooted<Item> name(roots, key);
+    Rooted<Item> doc(roots, ItemNull);
+    Rooted<Item> result(roots, ItemNull);
+    if (node->directory) {
+        Path* child = path_extend_len(context->pool, node->path, key.get_chars(), key.get_len());
+        *out = child ? fn_force({.path = child}) : ItemNull;
+    } else {
+        doc.set(provider_document(node));
+        if (item_is_error(doc.get())) {
+            *out = doc.get();
+            return VIRTUAL_OP_ERROR;
+        }
+        result.set(fn_member(doc.get(), name.get()));
+        if (get_type_id(result.get()) == LMD_TYPE_NULL &&
+                (get_type_id(doc.get()) == LMD_TYPE_ELEMENT || get_type_id(doc.get()) == LMD_TYPE_VELMT)) {
+            // A file can expose the parsed root's named child, for example HTML's body.
+            TypeElmt tag = {};
+            tag.type_id = LMD_TYPE_ELEMENT;
+            tag.name = {name.get().get_chars(), (size_t)name.get().get_len()};
+            TypeType pattern = {};
+            pattern.type_id = LMD_TYPE_TYPE;
+            pattern.type = &tag;
+            result.set(fn_child_query(doc.get(), {.type = &pattern}));
+            // HTML input wraps its root element in a document container.
+            Item root_tag = ItemNull;
+            if (get_type_id(result.get()) == LMD_TYPE_NULL &&
+                    element_tag_for(doc.get(), &root_tag) == VIRTUAL_OP_OK &&
+                    root_tag.get_len() == 9 && memcmp(root_tag.get_chars(), "#document", 9) == 0)
+                result.set(fn_query(doc.get(), {.type = &pattern}, 0));
+        }
+        *out = result.get();
+    }
+    return item_is_error(*out) ? VIRTUAL_OP_ERROR :
+        get_type_id(*out) == LMD_TYPE_NULL ? VIRTUAL_OP_MISSING : VIRTUAL_OP_OK;
+}
+
+static Item provider_directory_addresses(ProviderNode* node) {
+    return node->children ? path_resolve_for_iteration(node->children) : ItemError;
+}
+
+static VirtualOpStatus provider_child(void* data, int64_t index, Item* out) {
+    ProviderNode* node = (ProviderNode*)data;
+    if (index < 0) return VIRTUAL_OP_MISSING;
+    if (node->directory) {
+        Item entries = provider_directory_addresses(node);
+        if (item_is_error(entries)) *out = entries;
+        else {
+            Item entry = item_at(entries, index);
+            *out = get_type_id(entry) == LMD_TYPE_PATH ? fn_force(entry) : ItemNull;
+        }
+    } else {
+        Item document = provider_document(node);
+        *out = item_is_error(document) ? document : fn_index(document, {.item = i2it(index)});
+    }
+    return item_is_error(*out) ? VIRTUAL_OP_ERROR :
+        get_type_id(*out) == LMD_TYPE_NULL ? VIRTUAL_OP_MISSING : VIRTUAL_OP_OK;
+}
+
+static int64_t provider_child_count(void* data) {
+    ProviderNode* node = (ProviderNode*)data;
+    if (node->directory) return fn_len(provider_directory_addresses(node));
+    return fn_len(provider_document(node));
+}
+
+static VirtualOpStatus provider_prepare(void* data, Item* out) {
+    ProviderNode* node = (ProviderNode*)data;
+    *out = node->directory ? provider_directory_addresses(node) : provider_document(node);
+    return item_is_error(*out) ? VIRTUAL_OP_ERROR : VIRTUAL_OP_OK;
+}
+
+const VelmtVtable provider_node_vtable = {
+    {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VELMT, {VIRTUAL_PRINT_METADATA},
+        [](void* data) { mem_free(data); },
+        [](void* data, gc_heap* heap) { gc_mark_item(heap, ((ProviderNode*)data)->document.item); },
+        nullptr},
+    {provider_tag, nullptr, {provider_named_child, nullptr, nullptr, nullptr,
+        [](void*) -> int64_t { return 0; },
+        [](void*, int64_t, Item*) { return VIRTUAL_OP_MISSING; }, nullptr},
+        {provider_child_count, provider_child, nullptr, nullptr, provider_prepare}}
+};
+
+static Item provider_node(Path* path, bool directory) {
+    ProviderNode* node = (ProviderNode*)mem_calloc(1, sizeof(ProviderNode), MEM_CAT_EVAL);
+    if (!node) return ItemError;
+    node->path = path;
+    node->children = directory ? path_wildcard(context->pool, path) : nullptr;
+    node->directory = directory;
+    node->document = ItemNull;
+    Item item = velmt_new(&provider_node_vtable, node, nullptr, nullptr);
+    if (get_type_id(item) != LMD_TYPE_VELMT) { mem_free(node); return ItemError; }
+    return item;
+}
+
+static bool filesystem_path(Path* path) {
+    PathScheme scheme = path_get_scheme(path);
+    return scheme == PATH_SCHEME_FILE || scheme == PATH_SCHEME_LOGICAL ||
+        scheme == PATH_SCHEME_REL || scheme == PATH_SCHEME_PARENT;
+}
+
+static Item provider_lookup(Path* path) {
+#ifdef LAMBDA_NO_FILE_IO
+    return runtime_error_itemf(ERR_IO_ERROR, "filesystem provider is excluded");
+#else
+    if (path_get_scheme(path) == PATH_SCHEME_FILE && !path_file_authority_is_available(path))
+        return runtime_error_itemf(ERR_IO_ERROR, "remote file authority is unavailable");
+    StrBuf* buf = (StrBuf*)lambda_local_path_for_provider(path);
+    if (!buf) return runtime_error_itemf(ERR_IO_ERROR, "cannot project filesystem address");
+    int32_t kind;
+    SecurityIOResult status;
+    bool found = security_io_input_kind(eval_context_security_io(context), buf->str, &kind, &status);
+    strbuf_free(buf);
+    if (found) return provider_node(path_qualify_default(context->pool, path),
+        kind == SECURITY_OBJECT_DIRECTORY);
+    if (status.system_error == ENOENT || status.system_error == ENOTDIR) return ItemNull;
+    return runtime_error_itemf(ERR_FILE_ACCESS_DENIED, "filesystem node is unavailable");
+#endif
+}
+
+static Item provider_step(ProviderNode* node, Item type, bool inclusive, LPathSegmentType step) {
+    if (node->directory) {
+        Pool* pool = context->pool;
+        Path* path = step == LPATH_SEG_QUERY
+            ? path_query(pool, node->path, pin_query_type(type), inclusive)
+            : step == LPATH_SEG_WILDCARD ? path_wildcard(pool, node->path)
+                : path_wildcard_recursive(pool, node->path);
+        return path ? fn_force({.path = path}) : ItemError;
+    }
+    Item document = provider_document(node);
+    if (item_is_error(document)) return document;
+    if (step == LPATH_SEG_QUERY) return fn_query(document, type, inclusive);
+    return step == LPATH_SEG_WILDCARD ? fn_step_items(document) : fn_step_closure(document);
 }
 
 // ============================================================================
@@ -6111,6 +6345,7 @@ Item fn_address_of(Item value) {
     // PTH41: scalars never carry identity — a scalar read yields an Item, and an
     // identity on it would have to be manufactured per read. PTH52v3: a local
     // COW copy carries nothing either, so it is simply absent from the table.
+    if (ProviderNode* node = provider_node_data(value)) return {.path = node->path};
     const void* container = (const void*)(uintptr_t)value.item;
     const DocNodeEntry* entry = doc_context_find_node(container);
     if (!entry || !entry->doc || !entry->doc->path) return ItemNull;
@@ -6195,9 +6430,9 @@ static int force_seen_compare(const void* a, const void* b, void* udata) {
 // canonical spelling (S2.4.2v5); document values are a run and never deduped.
 static void force_wild_push_one(Array* result, struct hashmap* seen, Item value) {
     if (get_type_id(value) == LMD_TYPE_NULL) return;
-    if (get_type_id(value) == LMD_TYPE_PATH) {
+    if (ProviderNode* node = provider_node_data(value)) {
         StrBuf* sb = strbuf_new();
-        path_to_string((Path*)(uintptr_t)value.item, sb);
+        path_to_string(node->path, sb);
         ForceSeenKey probe = {sb->str, sb->length};
         bool fresh = hashmap_get(seen, &probe) == NULL;
         if (fresh) {
@@ -6223,33 +6458,32 @@ static void force_wild_push(Array* result, struct hashmap* seen, Item value) {
     }
 }
 
-// Collects one wildcard path's matches into `result`; false when a force
-// raised, whose error is the whole force's (S7.4.5).
-static bool force_wild_collect(Path* path, Array* result, struct hashmap* seen) {
+// A wildcard run exposes the first provider failure with its original error.
+static Item force_wild_collect(Path* path, Array* result, struct hashmap* seen) {
     Path* wild = NULL;
     for (Path* probe = path; probe && probe->parent; probe = probe->parent) {
         LPathSegmentType type = PATH_GET_SEG_TYPE(probe);
         if (type == LPATH_SEG_WILDCARD || type == LPATH_SEG_WILDCARD_REC ||
                 type == LPATH_SEG_QUERY) wild = probe;
     }
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Item> value(roots, ItemNull);
     Rooted<Item> matches(roots, ItemNull);
+    Rooted<Item> entry(roots, ItemNull);
     if (!wild) {
         value.set(fn_force((Item){.item = (uint64_t)(uintptr_t)path}));
-        if (value.get().item == ItemError.item || get_type_id(value.get()) == LMD_TYPE_ERROR) return false;
+        if (item_is_error(value.get())) return value.get();
         force_wild_push(result, seen, value.get());
-        return true;
+        return ItemNull;
     }
     // the steps after the wildcard, leaf-first
     Path* trailing[FORCE_MAX_TRAILING_STEPS];
     int trailing_count = 0;
     for (Path* probe = path; probe != wild; probe = probe->parent) {
         if (trailing_count >= FORCE_MAX_TRAILING_STEPS) {
-            set_runtime_error(ERR_IO_ERROR,
+            return runtime_error_itemf(ERR_IO_ERROR,
                 "'#' reference has more than %d steps past its wildcard",
                 FORCE_MAX_TRAILING_STEPS);
-            return false;
         }
         trailing[trailing_count++] = probe;
     }
@@ -6258,39 +6492,42 @@ static bool force_wild_collect(Path* path, Array* result, struct hashmap* seen) 
         // the wildcard lands inside a document (or a provider value): force the
         // prefix and enumerate in memory
         value.set(fn_force((Item){.item = (uint64_t)(uintptr_t)prefix}));
-        if (value.get().item == ItemError.item || get_type_id(value.get()) == LMD_TYPE_ERROR) return false;
+        if (item_is_error(value.get())) return value.get();
         value.set(force_apply_step(value.get(), wild));
+        if (item_is_error(value.get())) return value.get();
         for (int i = trailing_count - 1; i >= 0 && value.get().item != ItemNull.item; i--) {
             value.set(force_apply_step(value.get(), trailing[i]));
-            if (value.get().item == ItemError.item) return false;
+            if (item_is_error(value.get())) return value.get();
         }
         force_wild_push(result, seen, value.get());
-        return true;
+        return ItemNull;
     }
     Pool* pool = context->pool;
-    // S2.4.7: over a directory `?T` is the proper closure and `.?T` the
-    // inclusive one, kept where the path value is T; no file is read
+    // S2.4.7v2: directory queries test entry nodes without demanding payloads.
     bool query = PATH_GET_SEG_TYPE(wild) == LPATH_SEG_QUERY;
     bool keep_base = query && (wild->flags & PATH_FLAG_QUERY_SELF);
     Item query_type = {.item = query ? wild->query_type : 0};
     matches.set(path_resolve_for_iteration(query ? path_wildcard_recursive(pool, prefix) : wild));
-    if (matches.get().item == ItemError.item) return false;
+    if (item_is_error(matches.get())) return matches.get();
     int64_t count = fn_len(matches.get());
     for (int64_t i = query && !keep_base ? 1 : 0; i < count; i++) {
         Item match = item_at(matches.get(), i);
         if (get_type_id(match) != LMD_TYPE_PATH) continue;
-        if (query && fn_is(match, query_type) != BOOL_TRUE) continue;
+        entry.set(provider_lookup(match.path));
+        if (item_is_error(entry.get())) return entry.get();
+        if (query && fn_is(entry.get(), query_type) != BOOL_TRUE) continue;
         if (trailing_count == 0) {
-            force_wild_push_one(result, seen, match);   // a reference, nothing read
+            force_wild_push_one(result, seen, entry.get());
             continue;
         }
         Path* full = (Path*)(uintptr_t)match.item;
         for (int j = trailing_count - 1; j >= 0; j--) {
             full = path_append_op(pool, full, trailing[j]);
         }
-        if (!force_wild_collect(full, result, seen)) return false;
+        Item failure = force_wild_collect(full, result, seen);
+        if (item_is_error(failure)) return failure;
     }
-    return true;
+    return ItemNull;
 }
 
 // The matches of a wildcard or query path as one array, never collapsed.
@@ -6299,17 +6536,17 @@ static Item force_wildcard_matches(Path* path) {
     Rooted<Array*> result(roots, array_plain());
     struct hashmap* seen = hashmap_new(sizeof(ForceSeenKey), 16, 0, 0,
         force_seen_hash, force_seen_compare, NULL, NULL);
-    bool ok = force_wild_collect(path, result.get(), seen);
+    Item failure = force_wild_collect(path, result.get(), seen);
     size_t iter = 0;
     void* entry = NULL;
     while (hashmap_iter(seen, &iter, &entry)) mem_free(((ForceSeenKey*)entry)->chars);
     hashmap_free(seen);
-    return ok ? (Item){.array = result.get()} : ItemError;
+    return item_is_error(failure) ? failure : (Item){.array = result.get()};
 }
 
 static Item force_wildcard(Path* path) {
     Item matches = force_wildcard_matches(path);
-    return matches.item == ItemError.item ? ItemError : list_collapse_value(matches);
+    return item_is_error(matches) ? matches : list_collapse_value(matches);
 }
 
 // `for`, `len` and printing enumerate a query path, or a wildcard with steps
@@ -6331,6 +6568,8 @@ Item fn_force(Item ref) {
     }
     Path* path = ref.path;
     if (!path) return ItemNull;
+    if (path_get_scheme(path) == PATH_SCHEME_FILE && !path_file_authority_is_available(path))
+        return runtime_error_itemf(ERR_IO_ERROR, "remote file authority is unavailable");
     if (path_has_wildcards(path)) return force_wildcard(path);
 
     // PTH34: force the longest prefix that names a document, then apply the
@@ -6339,6 +6578,21 @@ Item fn_force(Item ref) {
     Path* trailing[FORCE_MAX_TRAILING_STEPS];
     int trailing_count = 0;
     Path* doc_path = path_longest_existing_prefix(path);
+    if (path_get_scheme(path) == PATH_SCHEME_DOCUMENT) {
+        // The captured root identifies the document selected at capture time.
+        doc_path = path;
+        while (doc_path->parent && !path_is_root(doc_path)) doc_path = doc_path->parent;
+    } else if (path_get_scheme(path) == PATH_SCHEME_SYS) {
+        Path* first = path;
+        while (first->parent && !path_is_root(first->parent)) first = first->parent;
+        // The virtual user exposes a normal value hierarchy after its root.
+        if (first->name && strcmp(first->name, "user") == 0) doc_path = first;
+    } else if (path_get_scheme(path) == PATH_SCHEME_TEMP) {
+        for (Path* prefix = path; prefix && !path_is_root(prefix); prefix = prefix->parent) {
+            String* key = force_location_key(prefix);
+            if (key && doc_context_lookup(key->chars, key->len)) { doc_path = prefix; break; }
+        }
+    }
     if (!doc_path) {
         // No cheap existence probe (http) or nothing exists: the whole path is
         // the document, and forcing it reports the real failure.
@@ -6355,16 +6609,44 @@ Item fn_force(Item ref) {
     }
 
     bool raised = false;
-    Item value = force_document(doc_path, &raised);
-    if (raised) return ItemError;
-
-    // The walk above collected leaf-first; navigation runs root-first.
-    for (int i = trailing_count - 1; i >= 0; i--) {
-        if (value.item == ItemNull.item) return ItemNull;
-        value = force_apply_step(value, trailing[i]);
-        if (value.item == ItemError.item) return ItemError;
+    RootFrame roots(1);
+    Rooted<Item> value(roots, filesystem_path(doc_path) ? provider_lookup(doc_path)
+        : force_document(doc_path, &raised));
+    if (raised || item_is_error(value.get())) return value.get();
+    if (trailing_count) {
+        ProviderNode* node = provider_node_data(value.get());
+        if (node && node->directory) return provider_lookup(path);
     }
-    return value;
+    for (int i = trailing_count - 1; i >= 0; i--) {
+        if (get_type_id(value.get()) == LMD_TYPE_NULL || item_is_error(value.get())) break;
+        value.set(force_apply_step(value.get(), trailing[i]));
+    }
+    return value.get();
+}
+
+Item open_document_target(Item target) {
+    RootFrame roots(1);
+    Rooted<Item> value(roots, get_type_id(target) == LMD_TYPE_PATH ? fn_force(target) : target);
+    ProviderNode* node = provider_node_data(value.get());
+    return node && !node->directory ? provider_document(node) : value.get();
+}
+
+// A relative selector walks from this receiver, independent of the ambient base.
+static Item follow_relative_path(Item item, Path* path) {
+    if (path_is_absolute(path)) return ItemNull;
+    ArrayList* steps = arraylist_new(8);
+    for (Path* step = path; step; step = step->parent) {
+        if (path_is_root(step) && PATH_GET_SEG_TYPE(step) != LPATH_SEG_ROOT) break;
+        arraylist_append(steps, step);
+    }
+    RootFrame roots(1);
+    Rooted<Item> value(roots, item);
+    for (int i = steps->length - 1; i >= 0; i--) {
+        if (item_is_error(value.get()) || get_type_id(value.get()) == LMD_TYPE_NULL) break;
+        value.set(force_apply_step(value.get(), (Path*)arraylist_get(steps, i)));
+    }
+    arraylist_free(steps);
+    return value.get();
 }
 
 // parse(str, format) - parse a string into Lambda data structures
@@ -7228,6 +7510,8 @@ Item fn_index(Item item, Item index_item) {
     if (item_type == LMD_TYPE_NULL) {
         return ItemNull;
     }
+    if (item_type != LMD_TYPE_PATH && get_type_id(index_item) == LMD_TYPE_PATH)
+        return follow_relative_path(item, index_item.path);
     if (item_type == LMD_TYPE_VMAP) {
         // S8.2.4v3: a type key is a query on every container, a VMap included;
         // taken as a map key it read `null` for `m[int]`
@@ -7239,12 +7523,7 @@ Item fn_index(Item item, Item index_item) {
         if (vm && (vm->host_type || vm->vtable)) return vmap_get_by_item(vm, index_item);
         return ItemNull;
     }
-    if (item_type == LMD_TYPE_PATH) {
-        // S2.4.2v5: a subscript on a path is the dotted step, `(/)[1]` is `/.1`.
-        // It used to force the target and index its content instead, so
-        // `p[1]` and `p.1` named different things.
-        return fn_member(item, index_item);
-    }
+    if (item_type == LMD_TYPE_PATH) return fn_path_key(item, index_item);
 
     // Arithmetic-derived semantic integers are decimal-backed Items. Sequence
     // access must consume their exact value instead of rejecting the storage tag.
@@ -7733,24 +8012,9 @@ Item fn_path_step(Item path_item, int64_t step_type, const char* name,
 Item fn_member(Item item, Item key) {
     TypeId type_id = get_type_id(item);
 
-    // For paths (like sys.os), resolve the path content first
     if (type_id == LMD_TYPE_PATH) {
         Path* path = item.path;
         if (path) {
-            // Check if it's a sys path - these should be resolved to their content
-            if (path_get_scheme(path) == PATH_SCHEME_SYS) {
-                if (eval_context_security_io(context)) return runtime_error_itemf(ERR_FILE_ACCESS_DENIED,
-                    "system information is unavailable in this resource scope");
-                if (path->result == 0) {
-                    Item resolved = path_resolve_for_iteration(path);
-                    if (resolved.item == ItemError.item) return ItemNull;
-                }
-                if (path->result != 0) {
-                    // Recurse with resolved content
-                    return fn_member({.item = path->result}, key);
-                }
-            }
-
             // path metadata and structural property access
             if (is_text_type_id(key._type_id)) {
                 const char* k = key.get_chars();
@@ -7919,7 +8183,12 @@ Item fn_member(Item item, Item key) {
     case LMD_TYPE_VELMT: {
         Item projected = ItemNull;
         if (jube_member_projected_get(item, key, &projected)) return projected;
-        if (is_text_type_id(get_type_id(key))) return velmt_attr_get(item.velmt, key);
+        RootFrame roots(2);
+        Rooted<Item> owner(roots, item);
+        Rooted<Item> member(roots, key);
+        if (is_text_type_id(get_type_id(member.get())))
+            return velmt_attr_get(owner.get().velmt, member.get());
+        if (provider_node_data(owner.get())) return fn_index(owner.get(), member.get());
         return ItemNull;
     }
     case LMD_TYPE_ARRAY:
@@ -11927,6 +12196,12 @@ Item cow_capture_value_profiled(Item value) {
 }
 
 
+static bool cow_rmw_container_unshared(Item value) {
+    Container* container = cow_item_container(value);
+    return container && !container->is_static && !container->is_immortal &&
+        !(container->cow_state & COW_STATE_SHARED);
+}
+
 // CW34 (COW §11.11): bind a read-modify-write handle. `value` was just read
 // from `root` through `count` intermediate keys (at most two). The handle
 // may alias the place -- no share-mark, so its writes land in place and the
@@ -11938,9 +12213,7 @@ Item cow_capture_value_profiled(Item value) {
 Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item key2) {
     Item current = root;
     for (int64_t link = 0; ; link++) {
-        Container* container = cow_item_container(current);
-        if (!container || container->is_static || container->is_immortal ||
-                (container->cow_state & COW_STATE_SHARED)) {
+        if (!cow_rmw_container_unshared(current)) {
             return cow_bind_var(value);
         }
         if (link >= count) break;
@@ -11952,7 +12225,7 @@ Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item k
 // the direct-parent case cannot index, allocate or reenter; retain the same
 // sharing policy while exposing that narrower call effect (D5.4.4, D6.3.2).
 Item cow_bind_rmw_root(Item root, Item value) {
-    return cow_bind_rmw_handle(root, value, 0, ItemNull, ItemNull);
+    return cow_rmw_container_unshared(root) ? value : cow_bind_var(value);
 }
 
 static Item cow_shape_child(ShapeEntry* entry, void* data) {

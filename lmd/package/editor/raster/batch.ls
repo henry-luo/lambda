@@ -33,7 +33,7 @@ pn run_job(action,job) any^ {
     return {source:job.source,target:job.target,layer:chosen,report:saved.report}
 }
 pub pn run(action,jobs,options={}) any^ {
-    let base = "file://" ++ sys.proc.self.cwd# ++ "/"
+    let base = "file://" ++ sys.proc.self.cwd ++ "/"
     // preflight the entire list before opening or publishing any job.
     let ready = preflight(action,jobs,base,options)^
     var results = []

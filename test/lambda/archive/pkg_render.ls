@@ -11,9 +11,9 @@ fn titles(hits) => [for (h in hits) h.snapshot.title]
 
 pn main() {
     // a folder per process: the T0 and JIT runs of this test may overlap
-    let root = "temp/archive_test/render-" ++ string(sys.proc.self.pid#)
+    let root = "temp/archive_test/render-" ++ string(sys.proc.self.pid)
     if (exists(root)) io.delete(root)^
-    let articles = "file://" ++ sys.proc.self.cwd# ++ "/test/demo/readability/articles/"
+    let articles = "file://" ++ sys.proc.self.cwd ++ "/test/demo/readability/articles/"
     let lib = archive.library(root, {config: {defaults: {per_host_delay_ms: 0,
         formats: ["html", "readable", "markdown", "pdf"]}}})^
     let trees = archive.add(lib, articles ++ "meridian-trees.html", {tags: ["city"]})^

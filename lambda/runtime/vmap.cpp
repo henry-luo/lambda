@@ -539,8 +539,9 @@ extern "C" Item vmap_set(Item vmap_item, Item key, Item value) {
 
 extern "C" Item vmap_clone_for_cow(Item source) {
     if (get_type_id(source) != LMD_TYPE_VMAP || !source.vmap) return ItemError;
-    RootFrame roots(2);
+    RootFrame roots(4);
     Rooted<Item> rooted_source(roots, source);
+    Rooted<Item> rooted_key(roots, ItemNull), rooted_value(roots, ItemNull);
     VMap* src = rooted_source.get().vmap;
     // Host projections and task handles can expose mutable external state; no
     // snapshot hook means a Lambda COW write must reject before any host setter.
@@ -557,11 +558,13 @@ extern "C" Item vmap_clone_for_cow(Item source) {
     int64_t count = src->vtable->count(src->data);
     for (int64_t index = 0; index < count; index++) {
         src = rooted_source.get().vmap;
-        Item key = src->vtable->key_at(src->data, index);
-        Item value = src->vtable->value_at(src->data, index);
-        cow_mark_shared(key);
-        cow_mark_shared(value);
-        if (get_type_id(vmap_set(rooted_clone.get(), key, value)) == LMD_TYPE_ERROR) {
+        // A virtual value lookup can collect while the freshly produced key is live.
+        rooted_key.set(src->vtable->key_at(src->data, index));
+        src = rooted_source.get().vmap;
+        rooted_value.set(src->vtable->value_at(src->data, index));
+        cow_mark_shared(rooted_key.get());
+        cow_mark_shared(rooted_value.get());
+        if (get_type_id(vmap_set(rooted_clone.get(), rooted_key.get(), rooted_value.get())) == LMD_TYPE_ERROR) {
             return ItemError;
         }
     }

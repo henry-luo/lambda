@@ -35,7 +35,7 @@ fn directory_entries(path) {
     [for (entry in entries where not entry.is_dir) entry]
 }
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
-fn absolute_file_path(path) => sys.proc.self.cwd# ++ "/" ++ path
+fn absolute_file_path(path) => sys.proc.self.cwd ++ "/" ++ path
 
 // Keep the root list identity stable so document selection does not recreate
 // the mounted directory-row components.

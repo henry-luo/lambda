@@ -35,7 +35,7 @@ pub fn read_recipe(path, source) any^ {
 fn destination(path, source, extension) any^ {
     if (not (path is string) or not ends_with(lower(path),extension))
         raise error("Photo: choose a " ++ extension ++ " destination")
-    else if (url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",path) == source.path)
+    else if (url_resolve("file://" ++ sys.proc.self.cwd ++ "/",path) == source.path)
         raise error("Photo: choose a destination other than the source")
     else path
 }
@@ -60,7 +60,7 @@ pub pn finish_export(request,dimensions) any^ {
     var problem=null
     if ((len(request.recipe.layers)>0)^) {
         let svg=layers.svg(request.recipe,dimensions[1],dimensions[0],
-            url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",request.background))
+            url_resolve("file://" ++ sys.proc.self.cwd ++ "/",request.background))
         let html=<html <head <style "html,body{margin:0;padding:0;background:transparent}svg{display:block}">> <body svg>>
         let done=radiant.export_document(format(html,'html'),request.pending,
             {format:"png",width:dimensions[1],height:dimensions[0],local_resources:true,transparent:true})

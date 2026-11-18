@@ -17,7 +17,7 @@ pub fn from_bytes(manifest,lexicon,abbrev,syllable_text,profile = "zh-Hans") map
 
 pub pn load(profile = "zh-Hans",options = null) map^ {
     let opts = c.options(options,["directory"])^
-    let home = sys.lambda.home#
+    let home = sys.lambda.home
     let root = home ++ "/package/ime/chinese/data/"
     let installed = [for (name in ["zh-Hans","zh-Hant"] where exists(root ++ name ++ "/manifest.json")) name]
     let valid = c.require(profile is string and (opts.directory != null or profile in installed),
@@ -43,12 +43,12 @@ pub fn with_user(session,user) map^ => reducer.with_user(session,user)^
 
 pub pn load_user(path) map^ {
     let saved = input(path,"json")^
-    let text = input(sys.lambda.home# ++ "/package/ime/chinese/syllables.txt","text")^;
+    let text = input(sys.lambda.home ++ "/package/ime/chinese/syllables.txt","text")^;
     return learned.validate(saved,syllables.inventory(text))^
 }
 
 pub pn save_user(user,path) any^ {
-    let text = input(sys.lambda.home# ++ "/package/ime/chinese/syllables.txt","text")^
+    let text = input(sys.lambda.home ++ "/package/ime/chinese/syllables.txt","text")^
     let checked = learned.validate(user,syllables.inventory(text))^;
     return output(learned.data(checked),path,{format:"json",atomic:true})^
 }

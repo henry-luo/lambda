@@ -1,7 +1,7 @@
 import pages: lambda.sync.metadata_pages
 import fixture: .mod_sync_cloud_store
 pn main() {
-    let area = "temp/sync-metadata-batch-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-metadata-batch-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     fixture.create(area ++ "/store.sqlite")^
     let checks = fixture.scoped(area ++ "/store.sqlite",pn (store)=> {

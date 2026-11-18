@@ -55,7 +55,7 @@ pn local_path(owner, id) {
     let path = trim(dom.get_state(present.node(owner, id), "value"))
     if (path == "") { return "" }
     if (starts_with(path, "/")^) { return path }
-    return sys.proc.self.cwd# ++ "/" ++ path
+    return sys.proc.self.cwd ++ "/" ++ path
 }
 
 pn parent_dir(path) {
@@ -103,7 +103,7 @@ pn command(owner, st, action) any^ {
     if (action == "import") {
         let path = trim(dom.get_state(present.node(owner, "myb-path"), "value"))
         if (path == "" or not (ends_with(lower(path), ".myb") ^ { false })) raise error("Paint: choose a .myb brush file")
-        let file = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/", path)
+        let file = url_resolve("file://" ++ sys.proc.self.cwd ++ "/", path)
         let r = paint.brush_from_myb(input(file, 'json')^)^
         let name = replace(slice(path, (last_index_of(path, "/") ^ { -1 }) + 1, len(path)), ".myb", "")
         let added = {*: st, brushes: [*st.brushes, model.entry(name, r.brush)]}

@@ -6,7 +6,7 @@ import sqlite: lambda.io.sqlite
 import crypto: lambda.io.crypto
 import disk: lambda.io.disk
 pn main() {
-    let area = "temp/sync-packs-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-packs-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let handle = local.create(area ++ "/repo",crypto.key()^,"pack-test",area ++ "/tree","device")^
     let saved = repo.access(handle.path,handle.keys,pn (tx,k)=> {

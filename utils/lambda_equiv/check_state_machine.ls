@@ -218,7 +218,7 @@ pn validate(enums, rules, bindings) {
 }
 
 pn main() {
-    let configured_root = sys.proc.self.env.RADIANT_ROOT#
+    let configured_root = sys.proc.self.env.RADIANT_ROOT
     let radiant_root = if (type(configured_root) == string and configured_root != "") configured_root else "../radiant"
     let header = input(radiant_root ++ "/radiant/event.hpp", "text")^
     let source = input(radiant_root ++ "/radiant/state_schema.cpp", "text")^

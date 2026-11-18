@@ -14,11 +14,11 @@ import sc: .mod_scene
 import hud: .mod_hud
 import present: .mod_present
 
-let PROFILE = sys.proc.self.env.MIDTOWN_PROFILE# == "1"
+let PROFILE = sys.proc.self.env.MIDTOWN_PROFILE == "1"
 // MIDTOWN_SPAWN=x,z,heading starts the car elsewhere, for replays of a particular corner of the city
 fn spawn_at(text) => (let parts = [for (p in split(text or "", ",") ^ { [] }) float(p) ^ { null }],
     if (len(parts) == 3 and all([for (p in parts) p is number])) {x: parts[0], z: parts[1], heading: parts[2]} else present.START)
-let START = present.initial(spawn_at(sys.proc.self.env.MIDTOWN_SPAWN#))
+let START = present.initial(spawn_at(sys.proc.self.env.MIDTOWN_SPAWN))
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target), "midtown")
 
 // one frame: step the city, hand the result to the host, and ask for the next frame

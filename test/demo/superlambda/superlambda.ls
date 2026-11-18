@@ -40,7 +40,7 @@ fn overlay_title(mode) {
 // package's bundled SoundFont. The SoundFont is read and the session opened only when
 // a round first starts, so a page that is never played never touches the audio device.
 let SOUNDTRACK = score.performance()
-let SOUNDFONT = sys.lambda.home# ++ "/package/music/soundfonts/TimGM6mb.sf2"
+let SOUNDFONT = sys.lambda.home ++ "/package/music/soundfonts/TimGM6mb.sf2"
 let MUSIC = {token: null, on: true, playing: false, ticks: 0, failed: false}
 fn music_state(music) {
   if (music.failed) "unavailable" else if (music.playing) "playing" else if (music.on) "on" else "off"

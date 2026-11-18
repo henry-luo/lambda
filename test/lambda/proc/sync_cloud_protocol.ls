@@ -11,10 +11,10 @@ pn call(store, credentials, kind, body, issued=moment) any^ {
         "0000000000000000000000000000000000000000000000000000000000000001")^,moment)^
 }
 pn main() {
-    let area = "temp/sync-cloud-protocol-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-cloud-protocol-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     // Optional isolated S3 runs exercise the same protocol and negative cases.
-    let storage = sys.proc.self.env#.LAMBDA_CLOUD_TEST_STORAGE_FILE
+    let storage = sys.proc.self.env.LAMBDA_CLOUD_TEST_STORAGE_FILE
     let store = if (storage == null) fixture.create(area ++ "/store.sqlite")^ else s3.adapter(input(storage,'json')^)
     let a = identity.create(if (storage == null) "cloud-protocol" else "cloud-protocol-" ++ uuid()^,crypto.key()^)^
     let b = identity.create(a.space,a.secret)^

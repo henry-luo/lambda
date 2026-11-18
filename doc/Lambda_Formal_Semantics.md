@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 91.0.1 (2026-11-17)
+**Spec version:** 98.0.0 (2026-11-18)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -271,21 +271,24 @@ harnesses.
 
 ### S2.4 Paths
 
-- **S2.4.1v2*** Path values use dotted steps. `/` selects the logical global
-  reference root and `\` the active relative reference root (S16.9.4): a
-  resolver may qualify `/.a.b` as `file.hostname.a.b` (projected as `/a/b`) or
-  as `http.hostname.a.b`; `\.a.b` remains relative to the active base. `~~` is
+- **S2.4.1v3*** **The path escape captures an address.** `\.file.users.peter.doc`
+  is an absolute `path`. `\.a.b` is a relative `path`, resolved from the active
+  base when dereferenced. An unquoted registered scheme at the head of the
+  escaped chain selects its provider. A quoted or computed first key selects
+  an ordinary relative entry, as in `\['file'].users`. Logical `/` selects the
+  resolver's global root (S2.4.5v6). `~~` is
   the parent step, never a root: `\.~~.a` is parent-relative and `\.~~.~~.a`
   applies two parent steps. The retired `/a`, `..a`, bare-dot `.a.b`, and
   compound `_..` spellings do not exist. Quoted, wildcard, and dynamic steps
   retain their ordinary dotted/indexed forms. [PTH1v2, PTH2v4, PTH3, PTH4v2,
   PTH11, PTH17, S16.9.4]
-- **S2.4.2v5*** Every hierarchical reference is a typed root plus ordered
-  operations; a root alone is a complete path (`/`, `\`). Ordinary keys are
+- **S2.4.2v6*** Every hierarchical address is a typed root plus ordered
+  operations. A bare `/` selects the logical root node and `\` captures the
+  empty relative path. Ordinary keys are
   `NameKey` or non-negative `IntKey`, and an integer key may come first:
-  `\.1` and `/.1` are `IntKey(1)`. A subscript on a path is the dotted step
+  `\.1` and `/.1` each start with `IntKey(1)`. A subscript on a path is the dotted step
   with a computed key and never forces the target: `p[k]` ≡ `p.k`, so
-  `(/)[1]`, `/[1]`, and `/.1` are one path, as are `\[1]` and `\.1`. Inside
+  `(/)[1]`, `/[1]` and `/.1` select the same rooted node. `\[1]` and `\.1` capture the same path. Inside
   a path literal every step is a key step: `\[1].name` is `\.1.name`, never
   a property read. A dot is always followed by a step, so `\.` alone and
   `.[` anywhere (`/.[1]`, `\.[1]`) are errors. A dynamic subscript is
@@ -301,13 +304,17 @@ harnesses.
   hashing, printing, target resolution, and
   `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1v4,
   PTH7–PTH9, PTH12–PTH14, PTH13.1–PTH13.2, PTH25, PTH28v2]
-- **S2.4.3v3*** Paths, names, symbols, and member expressions use this one
-  reference scheme but retain distinct evaluation contracts. Paths are
-  static root-selected plans and produce lazy target handles; names are
-  statically namespace-qualified (`a` may become `ns.a`) and read bindings;
-  symbols are static `NameKey` reference values and do not implicitly read
-  bindings.
-  Member/index expressions apply typed keys to a runtime base and are dynamic.
+- **S2.4.3v4*** **An absolute access expression denotes its target node.**
+  Both rooted and explicit provider chains use ordinary value access.
+  If the target is a file,
+  `file.users.peter.doc is file` holds. In a type slot `file` denotes `<file>`. When its document exposes a body
+  element, `file.users.peter.doc.body is element` holds. Binding the file to
+  `d` gives the same `d.body`. The path escape captures the typed steps as a
+  first-class address. Postfix `#` dereferences it. Thus `\.file.users.peter.doc#`
+  denotes the same file as the bare access, and `(\.file.users.peter.doc ++ \.body)#`
+  denotes its body. A dereference ending at a file yields the file itself.
+  Names read their statically selected bindings. Symbols denote name keys.
+  Member and index expressions apply their steps to the evaluated base.
   Name-position parsing is maximal: once an element tag or attribute name has
   the namespace-qualified `ns.name` form, the complete dotted name is consumed
   before element content is considered, and whitespace does not terminate it.
@@ -321,71 +328,74 @@ harnesses.
   Static specialization and generic dynamic lookup must be semantically
   identical; the scheme introduces no mutable reference identity. [S1.6,
   S5.1.4v2, S8.2.2v3, S9.1.5v2, S16.9.3, S16.9.4, PTH13–PTH15, PTH16v3, PTH20]
-- **S2.4.4*** Each evaluation's immutable resolver deterministically maps
+- **S2.4.4v2*** Each evaluation's immutable resolver deterministically maps
   logical `/` prefixes, namespaces, and provider aliases to qualified roots.
   Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
   it never uses mutable process-global bindings or existence/failure-based
-  provider fallback. Address resolution performs no I/O; forcing an external
-  target is a separate operation with its declared effect/error contract.
+  provider fallback. Capturing, qualifying and composing an address perform no target I/O.
+  Bare access and dereference observe the same provider effect and error
+  contract. Resolve only as far as the observation requires. A file-kind
+  test may consult metadata and must leave payload bytes and parsing deferred.
+  Access to a member of the document may demand its contents.
   [S1.10, PTH16v3, PTH17–PTH19]
-- **S2.4.5v2*** Paths have three root forms: rooted `/.a.b`, relative `\.a.b`,
-  and absolute `SchemeName...`. Rooted paths qualify logical `/` through the
-  active resolver; absolute paths name their provider/authority directly and
-  bypass that mount. File absolutes use `file./.a.b` for `/a/b` on the current
-  machine and `file.hostname.a.b` for `/a/b` on a named machine; consequently
-  `file.a.b` selects host `a` and path key `b`. A registered scheme name
-  heading a dotted chain is reserved as an absolute-path root. Rooted and
-  absolute path values retain distinct root kinds even when they resolve to
-  the same qualified target. All three forms use the same typed operations.
-  [S5.1.4v2, PTH21–PTH28]
+- **S2.4.5v6*** **A file authority occupies the hostname position.**
+  `file.hostname.a.b` denotes the node at `file://hostname/a/b`. On the
+  default local mount, `/.a.b` denotes the local node at `/a/b`.
+  `file.localhost.a.b` selects that machine's file provider explicitly,
+  corresponding to `file://localhost/a/b`. `file./.a.b` is the alias for
+  `file:///a/b` and selects the same local node as `file.localhost.a.b`.
+  Their escaped forms compare equal and hash as the same local address.
+  Source printing preserves the written `file./` or `file.localhost`
+  authority spelling. `file.local.a` addresses host `local`.
+  On Windows, a named authority other than `localhost` selects a UNC share,
+  even when it names the current machine: `file.myhost.C.path` denotes
+  `\\\\myhost\\C\\path`. `file.localhost.C.path` denotes the local
+  `C:\\path` instead. A UNC reference written with server `localhost`
+  captures the current machine's named authority.
+  Logical `/` uses the evaluation's resolver. Explicit provider access
+  bypasses its mounts. Escaped references retain their selected
+  root for equality and composition. [PTH21–PTH28; RFC 8089 §2]
 
-- **S2.4.6** **A wildcard step may sit anywhere in a path, and a force
-  reads exactly the files that a spelled step enters.** `*` and `**` are
-  steps (S2.4.2v5), so `\.src.*.name` and `/.*.b` are ordinary lazy
-  references (S2.4.3v3): nothing is read until `#` (PTH32). Forcing a
-  wildcard enumerates the key domain the step lands in and continues the
-  remaining steps per match, set-at-a-time (S8.2.6). In the file-system
-  domain `*` is one level of directory entries and `**` the closure of `*`
-  (S8.2.5) — the base, then every entry beneath it, files and directories
-  alike, in pre-order and to any depth; a match that does not exist forces
-  to `null` (S7.1.1v3) and drops. A step applied to a file match enters that
-  file, exactly as `\.data.'x.json'.users` does (PTH34), and once a step has
-  entered a file the same spellings enumerate the parsed document. So
-  `\.src.**#` reads nothing, `\.src.**.name#` reads every file beneath src,
-  and `\.src.**.**#` is the explicit full-content search: `**` never crosses
-  the file boundary by itself. A wildcard result in the path domain is a
-  set, deduplicated by path equality (S2.4.2v5) in first-appearance order,
-  which makes `**.**` idempotent on the directory side; results inside a
-  document stay runs, which never deduplicate (S8.2.4v3). `#` is the line
-  between reference and value: steps before it extend the plan and may
-  enter files, steps after it act on values — `\.src.*#.name` is each path
-  value's `name` property, mapped over the run, and reads no file. *Why: a
-  single `**` that read every file beneath a tree would be an unbounded
-  implicit read (S2.4.4); the crossing must be spelled, and then its cost is
-  visible in the spelling.* (Ruled 2026-10-20, USER.) [PTH81–PTH84,
-  Type_Path §6.4]
-- **S2.4.7** **A query step on a path follows the wildcard rule: it never
-  crosses the file boundary by itself.** `?T` and `.?T` applied to a path
-  are path operations like `*` and `**` (S2.4.2v5, S2.4.6): `p?T` is a
-  reference until `#`, and its type operand is part of the path's identity.
-  Forcing applies the query to each match. Over a directory, `p?T` is the
-  proper closure `p.*.**` and `p.?T` the inclusive closure `p.**`
-  (S8.2.5), each kept where the path value is `T`; no file is read, so
-  `\.src?<div>#` is `null` and `\.src?path#` is every path beneath `src`.
-  Over a file the query is the step that enters it (PTH82), and is
-  S8.2.4v3's query on the parsed value: `\.data.'x.json'?int#` is every
-  `int` in `x.json`. So a query or wildcard applied to the matches of
-  another crosses the boundary, because each file match is entered by the
-  step applied to it: `\.src.**?T#` and `\.src.**.?T#` search the content
-  of every file beneath `src`, and `\.src?T.**#` and `\.src.?T.**#`
-  enumerate the content of every file the first query keeps.
-  `\.src.*?T#` searches the files directly in `src` and no deeper file.
-  Path-domain results deduplicate by path equality and document results
-  stay runs (S2.4.6). After `#` a query acts on values: `\.src.**#?T`
-  tests the path values and reads no file. *Why: `?T` and `.?T` are
-  recursive like `**`; a query that opened every file beneath a directory
-  would be the same unbounded implicit read S2.4.6 rules out.* (Ruled
-  2026-10-20, USER.) [PTH85, Type_Path §6.4]
+- **S2.4.6v2*** **A wildcard enumerates the hierarchy it reaches.** A wildcard
+  in a captured path records a step. On access or dereference, `*` enumerates
+  one level and `**` includes its base and all descendants (S8.2.5). Over a
+  directory the results are concrete entries. Recursive enumeration can
+  list files without reading their payloads. A further step that selects
+  document content enters each selected file on demand. Thus `\.src.**#`
+  needs only directory entries and `\.src.**.**#` also walks file contents.
+  Apply subsequent steps per match (S8.2.6). Directory traversal deduplicates
+  by normalized address in first-appearance order. Inside a document preserve
+  the result run, including repeats (S8.2.4v3). [PTH81–PTH84]
+- **S2.4.7v2*** **A query over directory entries tests their node kinds.**
+  A captured `?T` or `.?T` step includes its type operand in path identity.
+  On access or dereference, the query walks the proper or inclusive closure
+  respectively (S8.2.4v3, S8.2.5). For a directory, `\.src?file#` selects
+  files beneath it using metadata. A single directory query never searches
+  the contents of those files. A query applied to a file's contents uses
+  ordinary document query semantics. [PTH85]
+
+- **S2.4.8*** **A named context root selects a value in the evaluation.**
+  The fused words below can head an access expression wherever that expression
+  occurs. A following member or subscript applies to the selected value.
+
+  | Root | Value |
+  |---|---|
+  | `~cwd` | The evaluation's working-directory node. The CLI uses its working directory at invocation. |
+  | `~user` | A virtual object for the user running the evaluation. Its `.name` is the account name as a string and its `.home` is the home-directory node. |
+  | `~home` | The same directory node as `~user.home`. |
+  | `~doc` | The document root supplied to the evaluation, or `null` when none was supplied. Reading another input or calling an imported function preserves that selection. |
+  | `~script` | The source file containing this expression, or `null` for an expression without a source file. A function defined in an imported module sees that module's file. |
+  | `~temp` | The evaluation's temporary-directory node. |
+  | `~proc` | The value of `sys.proc.self`, with the same member values, types and access rules (S17.3.1v2). |
+
+  The escape captures an absolute reference with the context of its occurrence.
+  For example, `\.~script` in an imported function still addresses its defining
+  file when the caller dereferences it. Capture and composition perform no
+  target I/O. `(\.~home ++ \.config)#`, `~home.config` and `~home[\.config]`
+  select the same entry under the resolver's ordinary access rules
+  (S2.4.2v6–S2.4.4v2, S8.2.1v5). A context word is independent of the current
+  item. `~.home` reads its member and `~key` reads its key or index.
+  An unknown fused `~word` is a compile error. [Lambda_Expr_Path §Named context roots]
 
 ### S2.5 Lists and blocks
 
@@ -455,7 +465,7 @@ harnesses.
   expression (S2.5.2v2), a block (S2.5.3), content (S2.6), a query (S8.2.4v3) —
   because those compose values and content and must splice where they land.
   Everything that *processes* a sequence returns an array: the mapping pipe
-  and `|:` (S10.1.2v4, S10.1.6), `sort`, `reverse`, `unique`, `take`, `drop`,
+  and `|:` (S10.1.2v5, S10.1.6v2), `sort`, `reverse`, `unique`, `take`, `drop`,
   `slice`, the positional selections `[i to j]`, `[mask]` and `[[i, j]]`
   (S8.2.4v3), `zip`, `fill`, `split`, `find`, `varg()`, rest
   parameters, `content(e)`, `keys`/`values`/`names` (S8.4.1v2), and the
@@ -1431,7 +1441,13 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 ### S8.2 The key space
 
-- **S8.2.1v4*** Every container has a fixed key domain. The sequence face of
+- **S8.2.1v5*** **A relative path subscript navigates from its receiver.**
+  For a concrete node and a relative path value `r`, `node[r]` applies the
+  recorded steps from `node` and returns the selected value. For example,
+  `node[\.body.0]` reads `node.body[0]`. A path held in a variable works
+  like a literal. An absent member follows S7.1.1v3. Ordinary scalar keys
+  use the following domains.
+  Every container has a fixed key domain. The sequence face of
   arrays, lists, and ranges uses non-negative `IntKey`s. An `int`, `float`, or
   `decimal` subscript normalizes to an `IntKey` only when its value is finite,
   mathematically integral, exact in the index integer domain, and
@@ -1547,8 +1563,8 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   performs.** Consequences, not separate rules: `len("str")` = 3 (text walks
   by code point, S2.5.8); `len(5)` = **0** — a non-text scalar has no
   content, so `for (i in 5)` iterates nothing, while the mapping pipe and
-  `|:` treat a scalar as one member by their own rule (S10.1.2v4,
-  S10.1.6): a placement, not an iteration;
+  `|:` treat a scalar as one member by their own rule (S10.1.2v5,
+  S10.1.6v2): a placement, not an iteration;
   `len([[1,2],[3]])` = **2** (shallow — the count indexing needs);
   `len({a: null, b: 2})` = 2; `len(null)` = 0 (absence is the empty
   sequence); `len(err)` = **error** (iterating an error yields an error, not
@@ -1715,9 +1731,10 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 ### S10.1 Union, pipe, and filter
 
 - **S10.1.1v5*** **`|`, `&` and `!` are the type operators**: type expressions, match or-patterns, string patterns and value expressions alike (types are first-class); `|>` is the pipe. In type patterns and ordinary expressions, left-associative binary operators bind from tightest to loosest in this order: `to`, `&`, `!`, `|`. Inside a string or symbol pattern (S11.1.2v4) `|` is the only binary operator, as alternation, and `!` is prefix-only and complements a set of single characters. Intersecting or excluding patterns is `&` or `!` between whole patterns, `\(A) & \(B)` or `\(A) ! \(B)`. In a value expression a type operand is itself and any other operand reads as its literal type — a scalar as the singleton of its value, a container as the pattern its literal spells in type position (a range as its range type, S11.1.3) — and the result is always a type: `1 | 2` is the type admitting 1 or 2 (an enum), `1 | 1` is a type too, `int | null` is `int?`, and `1 & 2` is the **empty type** `none` (S11.1.7), which admits nothing — distinct from the null type, which admits `null`. A type operation never collapses to a value, so its result has the same meaning wherever it is written: `type t = 1 & 2`, `let v: 1 & 2` and `let x = 1 & 2` denote the same type, and so do `type T = [1, 2] | 3` and `let t = [1, 2] | 3`. **Binary-schema annotation exception (USER, 2026-10-15):** directly after `: binary` or a binary field's complete logical type, a trailing `& {…}` is physical-layout metadata (S11.5.1v2), not a type intersection. It does not change `&` in another type or value expression; `that` remains a predicate. Set algebra on containers is not an operator: it is the functions `unique(a, b, ...)` (≡ `unique(a ++ b ++ ...)`), `intersect(a, b, ...)` (the first operand's items held by every other) and `except(a, b)` (its items not held by the second), in first-operand order without duplicates, membership by `in` (S8.1.1), returning an array (S2.5.7v4) — text keeps its kind (S2.5.8). *Why: union is the concept Lambda needs everywhere; letting a container turn `|` into a merge made one operator mean "either" or "both" by operand kind, which C6 ruled out.* [C6, C6.4; SP17, SP18, SP20]
-- **S10.1.2v4** The pipe is dual-mode on a parse-time syntactic test: a body
-  with a **free `~`** is a mapping pipe (binds `~` per item; `~#` is the
-  current key/index); with no free `~` it is whole-value application
+- **S10.1.2v5*** The pipe is dual-mode on a parse-time syntactic test: a body
+  with a **free current-item or key reference** is a mapping pipe. It binds
+  `~` per item and `~key` to its key or index. The context roots in S2.4.8
+  do not count as either reference. A body without either reference selects whole-value application
   (`data |> sum` ≡ `sum(data)`; extra args append: `data |> take(3)` ≡
   `take(data, 3)`). A `~`-free non-callable body is a type error. The mapping
   pipe walks what `for … in` walks — an array or list by item, a map by
@@ -1726,8 +1743,8 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   source, a list included (S2.5.7v4: `(1, 2, 3) |> ~ * 2` is `[2, 4, 6]`),
   text excepted, which gives its own kind when every result item belongs to
   it (S2.5.8). A non-sequence scalar pipes as one value: `5 |> ~ + 1` is `6`.
-  Dual mode belongs to `|>` alone: the filter stage `|:` (S10.1.6) shares the
-  walk and the kind rule but is single-mode — its body must mention `~`. [C6]
+  Dual mode belongs to `|>` alone: the filter stage `|:` (S10.1.6v2) shares the
+  walk and the kind rule. Its body must refer to the current item or key. [C6]
 - **S10.1.3** `~` is lexically scoped to the RHS of its pipe; nested
   constructs shadow, **innermost-wins** — uniformly for pipes, `|:` filters,
   `that` provisos, match arms, and `last` (S7.2.2); reach an outer item via a
@@ -1746,24 +1763,24 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   contract does. A bare name in `p` may read a field of `x` (S10.1.7v4). It
   sits at the pipe precedence tier, left-associative, so
   `c |> f that p` applies the proviso to the piped result. Filtering the
-  members of a sequence is `|:` (S10.1.6): the former filter reading of
+  members of a sequence is `|:` (S10.1.6v2): the former filter reading of
   `that` (S10.1.5v2) is superseded, and an old filter site `xs that p` is
   still legal under the new meaning — the fixture sweep converts every one.
   The filter was spelled `where` before `that` (S10.3.1v3). [Expr_Pipe §F.5]
-- **S10.1.6** **`|:` is the filter stage of the pipe family.** `c |: p` walks
-  exactly what `c |> body` walks (S10.1.2v4) — an array or list by item, a map
+- **S10.1.6v2*** **`|:` is the filter stage of the pipe family.** `c |: p` walks
+  exactly what `c |> body` walks (S10.1.2v5) — an array or list by item, a map
   by value, an element by attribute values then children (S8.1.2v2), text by
   code point (S2.5.8), a non-sequence scalar as one member — binds `~` to the
-  member and `~#` to its key or index (S10.1.3), and keeps the members for
+  member and `~key` to its key or index (S10.1.3), and keeps the members for
   which `p` is truthy. **Its result kind is the pipe's, by reference**, not a
-  rule of its own: as S10.1.2v4 and S2.5.7v4 give the mapping pipe, `|:`
+  rule of its own: as S10.1.2v5 and S2.5.7v4 give the mapping pipe, `|:`
   returns an **array** of the survivors for every sequence source — a list
   included, so `(1, 2, 3) |: ~ > 2` is `[3]` and never collapses — `[]` when
   none survive (a map's keys are dropped, SO38); text gives its own kind,
   `""` when empty (S2.5.8); a non-sequence scalar gives itself or `null`. **`|:` is single-mode:** a body with no free
-  `~` is a compile error — `xs |: is_even` is rejected, the idiom is
+  current-item or key reference (S10.1.2v5) is a compile error — `xs |: is_even` is rejected, the idiom is
   `xs |: is_even(~)` — because `|>` reads a `~`-free body as whole-value
-  application (S10.1.2v4) and the two pipes must not read the same text two
+  application (S10.1.2v5) and the two pipes must not read the same text two
   ways; for the same reason its body never reads a bare name as a field
   (S10.1.7v4). Pipe precedence tier, left-associative: `c |: p |> f |: q` chains left
   to right. The spelling is set-builder "such that" (`{x ∈ S | P(x)}`,
@@ -1802,8 +1819,8 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
   A pipe-family body (`|>`, `|:`) reads bare names as ordinary names, even
   nested in one of these bodies. `|>` tells mapping from application by the
-  free `~` its text spells (S10.1.2v4), and `|:` must read that text the
-  same way (S10.1.6). A field supplied behind the text would also let a
+  free `~` its text spells (S10.1.2v5), and `|:` must read that text the
+  same way (S10.1.6v2). A field supplied behind the text would also let a
   misspelled `xs |: is_evne` pass E238 as a silent `[]`. For the same
   reason, a `~` that a nested body binds, spelled or implicit, is never free
   in an enclosing pipe body (S10.1.3): `xs |> match (1) { case int: ~ * 10 }`
@@ -1848,7 +1865,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 - **S10.3.1v3** `and or not is in to div that at eq ne lt le gt ge` — Lambda is
   a keyword-operator language; new operators prefer words over sigils. `where`
   is **not** among them: binary `where` was retired as the filter spelling
-  (first for `that`, S10.1.5v2; the filter is now `|:`, S10.1.6, and `that`
+  (first for `that`, S10.1.5v2; the filter is now `|:`, S10.1.6v2, and `that`
   is the proviso, S10.1.5v3), and `where` survives only as a `for`-header
   clause word. A `where` in infix position is the retired spelling and is a
   compile error naming `|:`, never a silent reinterpretation. [Grammar_Reduce2
@@ -1864,9 +1881,9 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   [PTH3, PTH5, PTH9]
 - **S10.4.2*** Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is
   bound, selects the innermost current-value context, and counts as a free
-  `~` for the S10.1.2v4 mapping-pipe test. Thus `~~.~~.a` means
+  `~` for the S10.1.2v5 mapping-pipe test. Thus `~~.~~.a` means
   `~.~~.~~.a`; it never denotes a relative path, whose form starts with `\.`.
-  [S10.1.2v4,
+  [S10.1.2v5,
   S10.1.3, PTH6]
 - **S10.4.3v2*** Contextual parent navigation is occurrence-based and
   carries lineage in the evaluation context as a navigation path, cursor, or
@@ -1894,7 +1911,11 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 ### S10.6 Concatenation
 
-- **S10.6.1v2** **`++` concatenates sequences, appends scalars, and merges maps.** Sequence
+- **S10.6.1v3*** **A path right operand selects address composition.**
+  The left operand must be a path and the suffix must be relative.
+  `\.a ++ \.b` yields `\.a.b` by S2.4.2v6. A concrete value on the
+  left is a type error, including when another arm would render text,
+  append a scalar or apply the null identity. For other operands, sequence
   `++` sequence concatenates, the kind following S2.5.7v4's operator rule: `(1, 2) ++ (3, 4)`
   is a list; any array or range operand gives an array. Sequence `++` scalar
   appends the scalar as one item and scalar `++` sequence prepends it:
@@ -1908,8 +1929,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   merge, equivalent to `{*: m1, *: m2}` (S12.3.5v2). Keys retain their first
   insertion position, new right-hand keys append in source order, and later
   values override earlier values. The operands retain their values (S9.1.2).
-  Maps and elements are not sequence operands. Paths keep S2.4.2v4's
-  `base ++ relative_suffix`. [Design_Syntax §7.27, §7.34]
+  Maps and elements are not sequence operands. [Design_Syntax §7.27, §7.34]
 
 ---
 
@@ -2980,12 +3000,11 @@ below by its section.
   `<div a:1, "text">` requires one; `<div a:1 "text">` and `<div, "text">`
   are errors. This retires the language's last optional delimiter, so
   S16.1.2v2 has no exception. [Design_Syntax §7.11]
-- **S16.9.4** **The relative path is spelled `\.a.b`** (rooted `/.a.b`
-  unchanged): `\` is the relative root as `/` is the logical one, and unlike
-  `./a.b` the spelling does not collide with S10.5.1's postfix root step.
-  Vacating `.name` is what widens S16.2.4v3. `import .mod` is unaffected —
-  its keyword introducer leaves no ambiguity to escape.
-  [Design_Syntax §7.15]
+- **S16.9.4v2*** **`\.` introduces a path reference in expression position.**
+  `\.name` captures a relative address and `\.file.users.peter.doc` captures
+  an absolute address (S2.4.1v3). The empty relative address is `\`, and
+  `\[k]` starts with a computed relative key. A trailing dot still needs a
+  step (S2.4.2v6). Import syntax follows S16.9.8. [Design_Syntax §7.15]
 - **S16.9.5** **`a?: T` marks an optional field** — the whole field may be
   absent — which is distinct from `a: T?`, where the field is present and
   its value nullable. The marker applies in every type-field position:
@@ -3131,11 +3150,12 @@ governs how an under-determined case here is resolved.
 
 ### S17.3 Process information
 
-- **S17.3.1** **`sys.proc.self.argv` is the sole argument-vector path.** It
+- **S17.3.1v2*** **`~proc.argv` and `sys.proc.self.argv` read the same argument vector.**
+  The `argv` member of the current process (S2.4.8)
   returns an array of the live command-line strings after Lambda's startup
   option filtering, beginning with the executable name; a subcommand and
   script path remain in their command-line positions when present.
-  No alias is defined. [Lambda_IO_Sysinfo §2; IL2-I25]
+  [Lambda_IO_Sysinfo §2; IL2-I25]
 
 ### S17.4 String search positions
 
@@ -3218,6 +3238,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
+| S2.4.8, S10.1.2v5, S10.1.6v2, S17.3.1v2 | The seven context roots and escaped references work on interpreter and JIT. Forced-GC fixtures and the Lambda baseline pass on the host. The no-sysinfo and non-host profiles need further qualification. [Path implementation plan §6](../vibe/impl/Lambda_Impl_Path_Node_Access.md#6-named-context-roots-word). |
+| S2.4.1v3, S2.4.2v6, S2.4.3v4, S2.4.4v2, S2.4.5v6, S2.4.6v2, S2.4.7v2, S8.2.1v5, S10.6.1v3, S16.9.4v2 | Decided 2026-11-18. Concrete local file access, escaped provider references and node-relative path subscripts work on interpreter and MIR. The implementation plan tracks migration and qualification. Earlier path results below cover the previous semantics. [Implementation plan](../vibe/impl/Lambda_Impl_Path_Node_Access.md). |
 | S4.2.5 | **Partially implemented; audited 2026-11-17.** Core scalar domain outcomes already remain numerical. Decimal rounding, NaN-aware reductions, sign, and checked vector input classification still need changes. All 66 focused observations agree between interpreter and JIT; these observations include the defects. [Audit](../vibe/impl/Lambda_Impl_Numerical_Query_Conventions.md). |
 | S7.1.2v2, S7.10.7 | **Implemented 2026-11-17.** Runtime input rejection, nullable result relations, error-flow effects and fused find counts are migrated. Sixty focused interpreter/JIT/GC runs pass; valid empty results and error operands retain their contracts. [Qualification](../vibe/impl/Lambda_Impl_Numerical_Query_Conventions.md). |
 | S3.1v2–S3.5, S7.5.3v2, S7.9.2v3 | **Implemented 2026-10-16 on interp, jit and auto.** Logical operators and `if` preserve the original encountered error and skip unselected operands/arms. `or` retains error types and acknowledges no hard channel. Item-returning operator helpers preserve diagnostic payloads; native scalar paths remain available when proven safe. Reference docs and intentional package/fixture recovery sites use explicit handlers. Collection-predicate and procedural-loop failure boundaries remain open (TE-22); sorting is retained. Record: [TE-22](../vibe/Lambda_Design_Type_Enforcement.md#te-22--errors-have-no-truth-value-decided-2026-10-16-user), [C2.4](../vibe/Lambda_Semantics_Formal.md#c24-errors-have-no-truth-value-2026-10-16--supersedes-the-error-part-of-c2). |
@@ -3428,7 +3450,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO38** Whether `|:` over a **map** should keep the surviving keys
   (yielding a map) rather than dropping them (yielding an array of values, the
   current behaviour recorded in S10.1.6). The pipe has the same question, and
-  the two should answer it together: `~#` binds the key in both, so the key is
+  the two should answer it together: `~key` binds the key in both, so the key is
   observable to the predicate but absent from the result. An S10 container-
   shape question. [S10.1.2v4, S10.1.6]
 - **SO36** Whether a `pn` call may appear nested inside an expression
@@ -3462,7 +3484,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | Section | Records | Where argued |
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
-| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29, PTH81–PTH84 (S2.4.6), PTH85 (S2.4.7); OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29, PTH81–PTH84 (S2.4.6), PTH85 (S2.4.7); Lambda_Expr_Path §Named context roots (S2.4.8); OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
 | S2.6.6v2 | PDF raw file and dictionary MVP | `Lambda_Design_PDF_Output.md` §2, §5 |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |

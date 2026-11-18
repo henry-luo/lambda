@@ -1,8 +1,8 @@
 # Lambda Path and Unified Reference Semantics
 
 **Date:** 2026-08-18
-**Status:** Decided; current syntax/runtime scope implemented
-**Decision IDs:** PTH1v2, PTH2v4, PTH3, PTH4v2, PTH5–PTH13, PTH13.1–PTH13.2, PTH14–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29, PTH81–PTH85
+**Status:** Concrete provider access and path references ratified 2026-11-18. The local filesystem model is implemented on interpreter and MIR. [Implementation plan](impl/Lambda_Impl_Path_Node_Access.md).
+**Decision IDs:** PTH1v3, PTH2v4, PTH3, PTH4v2, PTH5–PTH13, PTH13.1–PTH13.2, PTH14–PTH15, PTH16v3, PTH17–PTH20, PTH21v3, PTH22–PTH26, PTH27v5, PTH28v2, PTH29, PTH81–PTH86
 **Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S. Later the same day (USER): PTH2v4 (the relative root is `\`, like `/`, so `\[1]` is the relative index step and `\.` alone is an error), PTH13.1 (a subscript on a path is the dotted step, `(/)[1]` is `/.1`, and every step inside a path literal is a key step), and PTH13.2 (an integer key may be the first step, `\.1`, `/.1`), closing PTH-O1's residue (S2.4.2v5, S16.2.4v3). **2026-10-20 (USER):** PTH81–PTH84 (§6.4) — a wildcard step may sit anywhere, forcing continues per match, a step applied to a file match enters the file while `**` never crosses the boundary by itself, path-domain results deduplicate, `**` is the closure of `*` and includes its base, and `#` is the line between reference and value (S2.4.6, S8.2.5, S8.2.6); implemented on both tiers the same day
 **Open issue IDs:** PTH-O1
 
@@ -28,13 +28,14 @@ Lambda references plus root and parent navigation use one dotted key
 hierarchy:
 
 ```lambda
-/.a.b          // rooted reference; a file mount projects it to /a/b
+/.a.b          // rooted node; the default file mount selects /a/b
 \.a.b          // reference relative to the active reference base
 \.~~.a.b       // parent-relative reference; file projection is ../a/b
 \.~~.~~.a      // two parent steps; file projection is ../../a
-file./.a.b     // absolute file reference on the current machine
-file.host.a.b  // absolute file reference on machine host
-http.host.a.b  // absolute HTTP-provider reference
+file.localhost.a.b     // file node on the current machine
+file.host.a.b  // file node on machine host
+http.host.a.b  // HTTP provider value
+\.http.host.a.b // absolute path reference
 
 ~.a            // a of the current contextual value
 ~~.a           // parent of ~, then a
@@ -139,9 +140,12 @@ known and in what evaluation returns:
 
 | Source form | Reference class | Evaluation contract |
 |---|---|---|
-| `/.a.b` | Static rooted reference | Qualifies `/` through the resolver and produces a lazy `path`/target handle |
+| `/.a.b` | Rooted access | Reads the node from the logical root, local by default |
 | `\.a.b` | Static relative reference | Retains the active relative base and produces a lazy `path`/target handle |
-| `file./.a.b`, `file.host.a`, `http.host.a` | Static absolute reference | Names its provider/authority directly and produces a lazy `path`/target handle |
+| `file.localhost.a.b`, `file.host.a`, `http.host.a` | Absolute access | Returns the concrete node. File-kind observations use metadata (S2.4.3v4, D10.1.8) |
+| `\.file.users.peter.doc` | Escaped absolute reference | Captures a `path` without looking up the target |
+| `p#` | Path dereference | Evaluates the address and returns the target node |
+| `node[r]` with a relative path `r` | Relative traversal | Applies the steps from the supplied node (S8.2.1v5) |
 | `a` | Static binding reference | Resolves through lexical/import namespace selection and reads the binding |
 | `'a'` | Static name-key reference value | Produces the symbol key; it is not implicitly dereferenced |
 | `a.b` | Dynamic member reference | Resolves `a`, then applies `NameKey("b")` to that runtime value |
@@ -150,10 +154,13 @@ known and in what evaluation returns:
 | `a./`, `a./.b` | Dynamic root reference | Resolves `a` as an occurrence, selects its hierarchy root, then optionally continues |
 | `a.~~` | Dynamic parent reference | Resolves `a` as an occurrence, then selects its parent |
 
-Thus *static reference* means the root/key plan is known without inspecting a
-runtime base. It does not mean every form auto-dereferences or performs I/O.
-Names read bindings, symbols remain key values, and paths remain lazy target
-handles. These are distinct forcing policies over one address scheme.
+A bare absolute and its escaped counterpart use the same provider selection.
+With `let d = file.users.peter.doc` and `let p = \.file.users.peter.doc`,
+`d is file` and `p# is file` can both be answered from metadata. If the
+document exposes a body, `d.body`, `d[\.body]` and `(p ++ \.body)#` select it.
+The absolute address can also name a destination that has yet to be created.
+Duplicating or passing a reference never requires the target to exist
+(S2.4.3v4, S2.4.4v2, S8.2.1v5, S10.6.1v3, D10.1.8).
 
 Member expressions are semantically dynamic even when their key token is
 static: their base is a runtime value. An optimizer may prove a namespace,
@@ -217,8 +224,8 @@ filesystem root. The active `ResolverContext` deterministically qualifies a
 rooted reference through an immutable mount table:
 
 ```text
-mount / -> file./
-/.a.b   -> file./.a.b
+mount / -> file.localhost
+/.a.b   -> file.localhost.a.b
 
 mount / -> file.hostname
 /.a.b   -> file.hostname.a.b
@@ -250,54 +257,35 @@ may not be.
 
 ### 2.5 Absolute provider paths
 
-Lambda paths have three root forms:
+The hostname occupies the same position in a file URL and a Lambda access
+expression (S2.4.5v6). A named authority remains meaningful even when the
+provider cannot reach that machine. Selecting a host never falls back to
+looking for a local directory of the same name.
 
-| Form | Example | Root selection |
+| Lambda access | File URL on the default local mount | Meaning |
 |---|---|---|
-| Rooted | `/.a.b` | Starts at logical `/`, then uses the active mount table |
-| Relative | `\.a.b` | Starts at the active relative reference base |
-| Absolute | `file./.a.b`, `file.host.a.b`, `http.host.a.b` | Names the provider and authority directly |
+| `/.users.peter.doc` | `file:///users/peter/doc` | Ordinary local absolute access via the logical root |
+| `file.localhost.users.peter.doc` | `file://localhost/users/peter/doc` | Explicit local file access, independent of the mount |
+| `file./.users.peter.doc` | `file:///users/peter/doc` | Alias for explicit local file access |
+| `file.users.peter.doc` | `file://users/peter/doc` | Host `users`, with absolute path `/peter/doc` |
+| `file.local.peter.doc` | `file://local/peter/doc` | Host named `local` |
 
-An absolute path is already provider-qualified. It bypasses the logical `/`
-mount. Its first token is a registered `SchemeName`; provider-specific
-authority selection follows, then name, integer, quoted, wildcard, root,
-parent, and dynamic steps use the common operation semantics.
+RFC 8089 gives `localhost` the meaning of an empty file authority. Lambda's
+dotted grammar uses the root step `./` to represent the empty authority.
+`file./.path` corresponds to `file:///path`, and `file.localhost.path`
+corresponds to `file://localhost/path`. Both select the same local file. [RFC 8089 §2](https://www.rfc-editor.org/rfc/rfc8089.html#section-2)
 
-The file provider has two explicit authority forms:
+On Windows, `file.myhost.C.path` selects the UNC share `\\\\myhost\\C\\path`,
+including when `myhost` names the current machine. `file.localhost.C.path`
+selects the local `C:\\path`. A UNC address with `localhost` as its server
+captures the current machine's named authority (S2.4.5v6).
 
-| File form | Authority | Projection |
-|---|---|---|
-| `file./.a.b` | Current machine | Local filesystem root `/a/b` |
-| `file.hostname.a.b` | Machine named `hostname` | That machine's filesystem root `/a/b` |
-
-Here `./` is one postfix root operation, not a dot separator followed by a
-second rooted path. `file./` selects the file provider's current-machine root.
-An identifier immediately after `file.` instead selects an explicit host, so
-`file.a.b` means host `a`, path key `b`; local `/a/b` is spelled
-`file./.a.b`.
-
-The current-machine authority is resolved from the execution context and may
-differ between machines. An explicit hostname is stable across contexts, but
-forcing either form still obeys capabilities and provider availability
-(**S2.4.5v2**).
-
-A scheme name is reserved as a path root only when it heads a dotted absolute
-path. Thus `http.host.a` is an HTTP path rather than member access on a binding
-named `http`. This matches the existing AST interpretation of `http`, `https`,
-and `sys`; `file` joins the same set under this decision.
-
-Rooted and absolute path values retain different root kinds:
-
-```lambda
-/.a.b       // logical rooted path
-file./.a.b  // explicit file path on the current machine
-```
-
-They are structurally distinct path values even when the active mount makes
-both resolve to the same qualified target. Equality of resolved targets may
-therefore agree while equality of the unforced path values does not. This
-preserves context-free value equality (**S5.1.4**) without hiding the logical
-root's resolver dependency.
+The same authority rules apply inside the escape. `\.file.localhost.a.b`
+captures an address that can be compared or passed as an output destination
+without a filesystem lookup (S2.4.1v3, S2.4.4v2). `\.file./.a.b` captures
+the same address. Source printing preserves the written authority spelling.
+Composition and root selection keep that spelling. Both spellings use the
+same equality and hash identity (S2.4.5v6).
 
 ### 2.6 Resolution is not forcing
 
@@ -309,7 +297,7 @@ Reference resolution has two stages:
    or other provider for a value. In-memory reads follow **S7.1**; external
    effects retain their declared error/effect contract.
 
-This separation lets `/.a.b` resolve to `file./.a.b`,
+This separation lets `/.a.b` resolve to `file.localhost.a.b`,
 `file.hostname.a.b`, or `http.hostname.a.b` without reading a file or issuing
 a request. It also keeps the unified reference scheme from becoming an
 implicit-I/O loophole in the `fn`/`pn` effect model.
@@ -334,7 +322,9 @@ surface-shape consistency, not a new shared runtime meaning.
 The intended grammar, abstracting the existing set of legal member names, is:
 
 ```ebnf
-PathLiteral       ::= RootedPath | RelativePath | AbsolutePath
+PathLiteral       ::= EscapedAbsolute | RelativePath
+EscapedAbsolute   ::= "\." AbsolutePath
+AbsoluteAccess    ::= RootedPath | AbsolutePath
 
 RootedPath        ::= "/" PostfixStep*
 RelativePath      ::= "\" PostfixStep*
@@ -358,8 +348,8 @@ PostfixRootExpr   ::= PrimaryExpr "." "/" PostfixStep*
 ParentCurrentExpr ::= "~~"                 // desugars to ~.~~
 ```
 
-`/` and `\` are valid bare paths. `\./` and `file./` are also complete
-paths: the final slash is a root operation, not a trailing separator. Empty
+`/` reads the logical root node and `\` is the empty relative path.
+`file.localhost` denotes the root of the local file provider. Empty
 steps and a trailing dot separator are not valid: `/.`, `\.`, `\.a.`, and
 `/.a..b` are errors. A trailing dot is an incomplete expression, so a step on
 the next line continues it (S16.2.1): `\.` ⏎ `a` is `\.a`, as `\. a` is
@@ -367,7 +357,7 @@ the next line continues it (S16.2.1): `\.` ⏎ `a` is `\.a`, as `\. a` is
 (S16.2.4v3).
 
 An `IndexStep` is the dotted step with a computed key (**PTH13.1**,
-**S2.4.2v5**): `/[1]` is `(/)[1]`, the same path as `/.1`, and `\[1]` is
+**S2.4.2v5**): `/[1]` is `(/)[1]`, the same rooted access as `/.1`, and `\[1]` is
 `\.1`. The same holds for a path held in a variable, `p[1]` ≡ `p.1`; a
 subscript never forces the target. Inside a path literal every step is a key
 step, including the steps after a computed one: `\[1].name` is `\.1.name`,
@@ -391,7 +381,10 @@ let part = 'daily'
 /.var.log[part].'app.log'
 ```
 
-The absolute roots `file`, `http`, `https`, and `sys` use the same operations.
+In `\.file.users` the unquoted scheme head selects the file provider.
+A computed or quoted first step selects a relative key: `\['file'].users`.
+A path printer must preserve this distinction, including for dynamically
+constructed paths. The absolute roots use the same operations.
 For `file`, the operation immediately after the scheme distinguishes local
 root `./` from an explicit hostname. The implementation may keep parsing
 absolute forms through the ordinary
@@ -408,7 +401,7 @@ new canonical forms:
 |---|---|---|
 | Rooted keys `a/b` | `/.a.b` | `/a.b` |
 | Relative keys `a/b` | `\.a.b` | `.a.b` (S16.9.4) |
-| Absolute local-file keys `a/b` | `file./.a.b` | none |
+| Absolute local-file keys `a/b` | `file.localhost.a.b` | none |
 | Absolute remote-file keys `a/b` on `host` | `file.host.a.b` | none |
 | Absolute HTTP keys `host/a/b` | `http.host.a.b` | unchanged |
 | Root of `value` | `value./` | none |
@@ -448,19 +441,18 @@ hierarchy anchor (**S2.4.2v5**):
 
 1. At the logical-global root, the anchor is `/`.
 2. At an absolute provider path, the anchor retains the provider and selected
-   authority: `file./`, `file.hostname`, or `http.hostname`.
+   authority: `file.localhost`, `file.hostname`, or `http.hostname`.
 3. At a relative root, the anchor is not known until resolution. Static
    normalization discards preceding relative child steps but retains `\./`
    as the unresolved root-selection operation.
 
-Consequently:
+For captured references:
 
 ```lambda
-/.a.b./.c             == /.c
-\.a.b./.c             == \./.c
-file./.a.b./.c        == file./.c
-file.hostname.a./.b   == file.hostname.b
-http.hostname.a./.b   == http.hostname.b
+\.a.b./.c                      == \./.c
+\.file.localhost.a.b./.c       == \.file.localhost.c
+\.file.hostname.a./.b          == \.file.hostname.b
+\.http.hostname.a./.b          == \.http.hostname.b
 ```
 
 Parent steps are applied from left to right:
@@ -475,9 +467,9 @@ Parent steps are applied from left to right:
 Consequently:
 
 ```lambda
-/.a.b.~~          == /.a
-/.a.~~.b          == /.b
-/.~~              == /
+\.file.localhost.a.b.~~       == \.file.localhost.a
+\.file.localhost.a.~~.b       == \.file.localhost.b
+\.file.localhost.~~           == \.file.localhost
 
 \.a.~~            == \
 \.a.~~.~~.b       == \.~~.b
@@ -496,15 +488,18 @@ base from left to right. Root and parent steps therefore affect the base rather
 than being discarded as relative scheme markers:
 
 ```lambda
-/.home.user ++ \.docs.file      == /.home.user.docs.file
-/.home.user ++ \.~~.shared      == /.home.shared
-file.host.home ++ \.docs./.tmp  == file.host.tmp
+\.file.localhost.home.user ++ \.docs.file      == \.file.localhost.home.user.docs.file
+\.file.localhost.home.user ++ \.~~.shared      == \.file.localhost.home.shared
+\.file.host.home ++ \.docs./.tmp  == \.file.host.tmp
 \.work.build ++ \.~~.src        == \.work.src
 \.work.build ++ \.cache./.src   == \./.src
 ```
 
 A rooted or absolute suffix remains an error where composition requires a
-relative suffix. A bare `\` suffix is the identity.
+relative suffix. A bare `\` suffix is the identity. With a path on the right,
+a concrete receiver is a type error (S10.6.1v3). Use `node[r]` to traverse
+from that receiver. A bound relative selector has the same meaning as an
+inline escape, even when the ambient relative base points elsewhere (S8.2.1v5).
 
 ### 6.3 Provider and OS conversion
 
@@ -512,7 +507,7 @@ Logical source notation and provider notation remain separate. Explicit
 absolute paths project directly through their named provider:
 
 ```text
-file./.a.b      <-> /a/b on the current machine
+file.localhost.a.b      <-> /a/b on the current machine
 file.host.a.b   <-> /a/b on machine host
 http.host.a.b   <-> http://host/a/b
 https.host.a.b  <-> https://host/a/b
@@ -522,7 +517,7 @@ Rooted and relative paths first select their semantic base. When `/` is
 mounted to a local file provider:
 
 ```text
-/.a.b       -> file./.a.b -> /a/b
+/.a.b       -> file.localhost.a.b -> /a/b
 \.a.b       <-> ./a/b
 \.~~.a.b    <-> ../a/b
 ```
@@ -535,7 +530,7 @@ concerns and do not alter Lambda source syntax.
 ### 6.4 Wildcard steps and forcing (PTH81–PTH84; S2.4.6, S8.2.5, S8.2.6)
 
 `*` and `**` are steps like any other (**S2.4.2v5**), so a wildcard may sit
-anywhere: `\.src.*.name`, `/.*.b`, `\.src.**.**`. Building such a path reads
+anywhere in a captured path: `\.src.*.name`, `\.file.localhost.*.b`, `\.src.**.**`. Building such a path reads
 nothing (§2.6); it is a lazy reference with a query in it, and `#` forces it
 like any path (PTH32).
 
@@ -547,65 +542,14 @@ then every entry beneath it, files and directories alike, in pre-order, to
 any depth. A match that does not exist forces to `null` under **S7.1.1v3**
 and drops.
 
-**The file boundary (PTH82).** A step applied to a file match enters the
-file — the longest-prefix rule of PTH34, applied per match — so once a step
-has entered a file the same spellings enumerate the parsed document
-(**S8.2.5**). `**` never crosses the boundary by itself. Hence a force reads
-exactly the files that a spelled step enters:
-
-| Spelling | Reads | Yields |
-|---|---|---|
-| `\.src.**#` | nothing | the base and every path beneath it |
-| `\.src.**.name#` | every file beneath src | each file's `name` member; a directory's `name` child when it exists |
-| `\.src.**.*#` | every file | the top-level items of every file |
-| `\.src.**.**#` | every file | every value in every file — the explicit full-content search |
-
-*Why:* a single `**` that read every file beneath a tree would be an
-unbounded implicit read (**S2.4.4**, PTH19, PTH38) and would hit the
-performance wall on every recursive listing; the crossing must be spelled,
-and then its cost is visible in the spelling.
-
-**Path-domain results are sets (PTH83).** Paths have structural identity
-(**S2.4.2v5**), unlike document values (SI13, [Expr_Query
-§4.1](Lambda_Expr_Query.md#41-return-value--the-run-t-two-subscript-worlds-ruled-2026-09-26-user-s824v3)),
-so a wildcard result in the path domain is deduplicated by path equality in
-first-appearance order. Without this, `\.src.**.**` would list every file
-once per matched ancestor; with it, `**.**` is idempotent on the directory
-side, as XPath's `a//b//c` is on node-sets. Results inside a document stay
-runs and never deduplicate.
-
-**`#` is the line between reference and value (PTH84).** Steps before `#`
-extend the plan and may enter files; steps after it act on values. So
-`\.src.*#.name` forces the enumeration and reads each path value's `name`
-property, mapped over the run (**S8.2.6**), touching no file, while
-`\.src.*.name#` enters each file. The two spellings differ on purpose.
-
-Implementation (2026-10-20): `**` enumeration heads with its base and has no
-depth cap; a symlinked directory is listed but not entered, as globstar does,
-so a link to an ancestor cannot recurse forever. Before this, the base was
-excluded, recursion stopped at depth 16, and `#` refused any wildcard path.
-
-**Query steps follow the wildcard rule (PTH85; S2.4.7).** `?T` and `.?T`
-are recursive like `**`, so they get the same boundary. On a path they are
-lazy path operations whose type operand joins the path's identity. Forced
-over a directory, `p?T` is the proper closure `p.*.**` and `p.?T` the
-inclusive closure `p.**`, each filtered to the path values that are `T`;
-no file is read, so `\.src?<div>#` is `null` and `\.src?path#` lists every
-path beneath `src`. Forced over a file, the query is the step that enters
-it and searches the parsed value. Applied to another step's matches, it
-enters each file match, so these cross the boundary:
-
-| Spelling | Reads | Yields |
-|---|---|---|
-| `\.src?T#` | nothing | path values beneath `src` that are `T` |
-| `\.src.**?T#`, `\.src.**.?T#` | every file beneath `src` | every `T` inside them (and matching directory paths) |
-| `\.src?T.**#`, `\.src.?T.**#` | every file the query keeps | the closure of each kept file's content |
-| `\.src.*?T#` | the files directly in `src` | every `T` inside them |
-| `\.src.**#?T` | nothing | the path values that are `T`; after `#` the query acts on values |
-
-*Why:* a bare `?T` that opened every file beneath a directory would be the
-unbounded implicit read PTH82 rules out for `**`. Spelling a step that
-produces file matches first is what makes the cost visible.
+**File and directory results (S2.4.6v2, S2.4.7v2).** Directory enumeration
+produces concrete entries. `\.src.**#` enumerates them in preorder, including
+the base, and `\.src?file#` selects descendant files. Neither operation needs
+file payload bytes. `\.src.**.**#` also traverses file contents. Keep the
+first occurrence of each normalized directory-entry address and preserve
+document runs with their duplicates. The type operand of a captured query
+participates in its identity. Steps following `#` operate on the actual
+values returned, just as they do on a bound node (S2.4.3v4).
 
 ## 7. Root and parent navigation on expressions
 
@@ -713,7 +657,7 @@ invariant.
 The grammar should express the surface directly:
 
 - classify a registered `SchemeName` at the head of a dotted member chain as
-  an absolute path; the existing member grammar may remain the concrete parse
+  an absolute access expression, and the escaped chain as an absolute path value; the existing member grammar may remain the concrete parse
   route;
 - recognize `file` alongside `http`, `https`, and `sys` in that absolute-path
   classification;
@@ -751,8 +695,7 @@ The intended migration is:
 - retain `PATH_SCHEME_FILE`, `PATH_SCHEME_HTTP`, `PATH_SCHEME_HTTPS`, and
   `PATH_SCHEME_SYS` for explicit absolute paths;
 - add a distinct logical-root representation for `/`; `PATH_SCHEME_FILE`
-  cannot represent both `/.a` and `file./.a` because their path values and
-  canonical printers differ;
+  must distinguish logical root selection from explicit local provider selection;
 - represent provider authority explicitly: at minimum local/current-machine
   authority versus a named hostname for `file`;
 - add a root path-segment kind (for example `LPATH_SEG_ROOT`);
@@ -877,11 +820,10 @@ the language grammar and canonical printer should not retain both spellings.
 At minimum, implementation tests must cover:
 
 1. Bare and multi-step rooted/relative paths and canonical printing.
-2. `file./` current-machine paths and `file.hostname` named-machine paths,
+2. `file.localhost` current-machine paths and `file.hostname` named-machine paths,
    including canonical printing and provider projection.
 3. `http`, `https`, and `sys` absolute paths.
-4. Rooted and absolute paths remaining distinct values while a mount may make
-   their resolved targets coincide.
+4. Logical root selection following its mount while explicit local provider access bypasses it.
 5. Quoted, wildcard, recursive-wildcard, integer, root, and dynamic steps
    after all three path root forms.
 6. `value./`, chained `value./.a`, and root selection after another member or
@@ -924,7 +866,7 @@ At minimum, implementation tests must cover:
 
 | ID | Decision |
 |---|---|
-| **PTH1v2** | Rooted references use `/.a.b`; `/` is the logical global root bound by a resolver context, not intrinsically the filesystem root. |
+| **PTH1v3** | Rooted access uses `/.a.b`; `/` is the logical global root bound by a resolver context, not intrinsically the filesystem root. |
 | **PTH2v4** | Relative references use `\.a.b`. The relative root is `\`, as the logical root is `/`: it selects the active relative reference base, which a file provider projects to its current directory. Its steps are ordinary `.part` and `[key]` steps, so `\[1]` is `\.1` and `\.` alone is an error. *(v4, 2026-09-21, USER; S2.4.1v2.)* |
 | **PTH3** | `~~` is the one parent step and is never a path root. |
 | **PTH4v2** | Relative parent paths are `\.~~.a`; repeated parents are `\.~~.~~`. *(v2, 2026-09-21, S16.9.4.)* |
@@ -937,7 +879,7 @@ At minimum, implementation tests must cover:
 | **PTH11** | Printers emit only the new forms; old spellings are retired without permanent aliases. |
 | **PTH12** | The runtime represents parent traversal as a typed operation/segment, not solely `PATH_SCHEME_PARENT`; C2MIR remains frozen. |
 | **PTH13** | Every hierarchical address is a typed root plus ordered operations; ordinary keys are `NameKey` or `IntKey`. |
-| **PTH13.1** | A subscript on a path is the same key operation as the dotted step and never forces the target: `p[k]` ≡ `p.k`, so `(/)[1]`, `/[1]`, and `/.1` are one path, as are `\[1]` and `\.1`. Inside a path literal every step is a key step: `\[1].name` is `\.1.name`, never a property read. A dot is always followed by a step, so `.[` is an error anywhere (`/.[1]`, `\.[1]`). *(USER, 2026-09-21; S2.4.2v5.)* |
+| **PTH13.1** | A subscript on a path is the same key operation as the dotted step and never forces the target: `p[k]` ≡ `p.k`, so `(/)[1]`, `/[1]`, and `/.1` select one rooted node, while `\[1]` and `\.1` capture the same relative path. Inside a path literal every step is a key step: `\[1].name` is `\.1.name`, never a property read. A dot is always followed by a step, so `.[` is an error anywhere (`/.[1]`, `\.[1]`). *(USER, 2026-09-21; S2.4.2v5.)* |
 | **PTH13.2** | An integer key may be a path's first step: `\.1` and `/.1` are `IntKey(1)`. `.1` is the float 0.1 only outside a step position (S4.3.1). *(USER, 2026-09-21; S2.4.2v5; resolves PTH-O1's residue.)* |
 | **PTH14** | Names and symbols share `NameKey` identity in one scope; integer keys stay typed and `a.1` differs from `a.'1'`. |
 | **PTH15** | Paths, names, and symbols are static reference plans; member expressions have a runtime base and are dynamically resolved. Their forcing policies remain distinct. |
@@ -946,20 +888,21 @@ At minimum, implementation tests must cover:
 | **PTH18** | The resolver is isolate/EvalContext-owned and capability-aware; no mutable process-global namespace or existence-based provider fallback participates in semantics. |
 | **PTH19** | Address resolution is pure canonicalization and performs no I/O; external target forcing remains a separate effectful operation. |
 | **PTH20** | Static specialization and dynamic lookup use one semantic typed-key/provider protocol and must produce identical results. |
-| **PTH21v2** | Paths have three root forms: logical rooted `/.a`, relative `\.a`, and explicit absolute `SchemeName.a` such as `file./.a` or `http.host.a`. *(v2, 2026-09-21, S16.9.4.)* |
+| **PTH21v3** | Addresses have logical, relative and absolute roots. `\.http.host.a` captures an absolute reference and `http.host.a` reads its node (S2.4.5v6). |
 | **PTH22** | An absolute path names its provider and authority directly, bypasses the logical `/` mount, and uses the same typed operations as rooted and relative paths. |
 | **PTH23** | A registered scheme name at the head of a dotted chain is reserved as an absolute-path root; a dedicated grammar production is optional if AST classification is equivalent. |
 | **PTH24** | Rooted and absolute paths retain distinct root kinds and structural path values even when resolution maps them to the same qualified target. |
 | **PTH25** | `/` is the single root-selection operation: initial `/` selects the logical resolution root, while postfix `./` selects the root of its explicit base. |
 | **PTH26** | `value./` is a normal postfix navigation step at member precedence and may be followed by the same dotted/indexed operations as any other reference. |
-| **PTH27** | File absolutes spell the current machine as `file./` and a named machine as `file.hostname`; following operations address data beneath that filesystem root. |
+| **PTH27v5** | `file.hostname.path` corresponds to `file://hostname/path`. `file./.path` represents the empty authority in `file:///path` and aliases `file.localhost.path`. The source printer preserves either spelling. On Windows, a named host selects its UNC share even when it is the current host; `localhost` selects the local drive provider. `/.path` uses the logical root, local by default (S2.4.5v6, RFC 8089 §2). |
 | **PTH28v2** | A root operation discards descendant steps while preserving the logical or provider/authority anchor; unresolved relative root selection remains as `\./`. *(v2, 2026-09-21, S16.9.4.)* |
 | **PTH29** | Dynamic root navigation is occurrence-based and uses a navigation path or zipper; it never adds observable root/parent pointers to Lambda values. |
 | **PTH81** | A wildcard step may sit anywhere in a path and the path stays a lazy reference until `#`. Forcing enumerates the key domain the step lands in and continues the remaining steps per match, set-at-a-time (S8.2.6); `*` is one level, `**` the closure of `*` (S8.2.5) — the base, then every entry beneath it, files and directories alike, pre-order, any depth. *(USER, 2026-10-20; S2.4.6.)* |
 | **PTH82** | A step applied to a file match enters the file (PTH34 per match); `**` never crosses the file boundary by itself. A force reads exactly the files that a spelled step enters: `\.src.**#` reads nothing, `\.src.**.name#` reads every file, `\.src.**.**#` is the explicit full-content search. *(USER, 2026-10-20; S2.4.6.)* |
 | **PTH83** | A wildcard result in the path domain is a set, deduplicated by path equality in first-appearance order, so `**.**` is idempotent on the directory side; results inside a document stay runs and never deduplicate. *(USER, 2026-10-20; S2.4.6.)* |
-| **PTH84** | `#` is the line between reference and value: steps before it extend the plan and may enter files, steps after it act on values — `\.src.*#.name` reads each path's `name` property and no file; `\.src.*.name#` enters each file. *(USER, 2026-10-20; S2.4.6.)* |
-| **PTH85** | `?T` and `.?T` on a path are lazy path operations that never cross the file boundary by themselves: over a directory they are the proper and inclusive closures filtered to path values that are `T`, reading no file; over a file they enter it and query the parsed value. Applied to another step's file matches they enter those files, so `**?T`, `**.?T`, `?T.**` and `.?T.**` search file content. *(USER, 2026-10-20; S2.4.7.)* |
+| **PTH84v2** | Dereference returns the selected entries. Following steps use ordinary value access (S2.4.6v2). |
+| **PTH85v2** | A directory query filters concrete entry nodes by type and crosses into file payloads only when a further step requires them (S2.4.7v2). |
+| **PTH86** | Provider access returns its concrete node. The escape captures an absolute or relative address, `#` reads it, `++` composes a relative suffix, and `node[relativePath]` reads from its receiver (S2.4.1v3–S2.4.5v6, S8.2.1v5, S10.6.1v3, S16.9.4v2, D10.1.8). |
 
 ## 14. Open issues and non-decided options
 
@@ -1022,3 +965,71 @@ and `\[1]` the relative index step, which makes `\` — not `\.` — the root.
 | ID | Superseded wording | Replaced by |
 |---|---|---|
 | PTH2v3 | ~~Relative references use `\.a.b`; `\.` selects the active relative reference base, which a file provider projects to its current directory. *(v3, 2026-09-21, S16.9.4.)*~~ | PTH2v4 |
+
+### S.4 Directory traversal before concrete node access (2026-10-20)
+
+Superseded by S2.4.6v2 and S2.4.7v2 on 2026-11-18.
+
+**The file boundary (PTH82).** A step applied to a file match enters the
+file — the longest-prefix rule of PTH34, applied per match — so once a step
+has entered a file the same spellings enumerate the parsed document
+(**S8.2.5**). `**` never crosses the boundary by itself. Hence a force reads
+exactly the files that a spelled step enters:
+
+| Spelling | Reads | Yields |
+|---|---|---|
+| `\.src.**#` | nothing | the base and every path beneath it |
+| `\.src.**.name#` | every file beneath src | each file's `name` member; a directory's `name` child when it exists |
+| `\.src.**.*#` | every file | the top-level items of every file |
+| `\.src.**.**#` | every file | every value in every file — the explicit full-content search |
+
+*Why:* a single `**` that read every file beneath a tree would be an
+unbounded implicit read (**S2.4.4**, PTH19, PTH38) and would hit the
+performance wall on every recursive listing; the crossing must be spelled,
+and then its cost is visible in the spelling.
+
+**Path-domain results are sets (PTH83).** Paths have structural identity
+(**S2.4.2v5**), unlike document values (SI13, [Expr_Query
+§4.1](Lambda_Expr_Query.md#41-return-value--the-run-t-two-subscript-worlds-ruled-2026-09-26-user-s824v3)),
+so a wildcard result in the path domain is deduplicated by path equality in
+first-appearance order. Without this, `\.src.**.**` would list every file
+once per matched ancestor; with it, `**.**` is idempotent on the directory
+side, as XPath's `a//b//c` is on node-sets. Results inside a document stay
+runs and never deduplicate.
+
+**`#` is the line between reference and value (PTH84).** Steps before `#`
+extend the plan and may enter files; steps after it act on values. So
+`\.src.*#.name` forces the enumeration and reads each path value's `name`
+property, mapped over the run (**S8.2.6**), touching no file, while
+`\.src.*.name#` enters each file. The two spellings differ on purpose.
+
+Implementation (2026-10-20): `**` enumeration heads with its base and has no
+depth cap; a symlinked directory is listed but not entered, as globstar does,
+so a link to an ancestor cannot recurse forever. Before this, the base was
+excluded, recursion stopped at depth 16, and `#` refused any wildcard path.
+
+**Query steps follow the wildcard rule (PTH85; S2.4.7).** `?T` and `.?T`
+are recursive like `**`, so they get the same boundary. On a path they are
+lazy path operations whose type operand joins the path's identity. Forced
+over a directory, `p?T` is the proper closure `p.*.**` and `p.?T` the
+inclusive closure `p.**`, each filtered to the path values that are `T`;
+no file is read, so `\.src?<div>#` is `null` and `\.src?path#` lists every
+path beneath `src`. Forced over a file, the query is the step that enters
+it and searches the parsed value. Applied to another step's matches, it
+enters each file match, so these cross the boundary:
+
+| Spelling | Reads | Yields |
+|---|---|---|
+| `\.src?T#` | nothing | path values beneath `src` that are `T` |
+| `\.src.**?T#`, `\.src.**.?T#` | every file beneath `src` | every `T` inside them (and matching directory paths) |
+| `\.src?T.**#`, `\.src.?T.**#` | every file the query keeps | the closure of each kept file's content |
+| `\.src.*?T#` | the files directly in `src` | every `T` inside them |
+| `\.src.**#?T` | nothing | the path values that are `T`; after `#` the query acts on values |
+
+*Why:* a bare `?T` that opened every file beneath a directory would be the
+unbounded implicit read PTH82 rules out for `**`. Spelling a step that
+produces file matches first is what makes the cost visible.
+
+### S.5 Explicit current-machine authority (2026-11-18)
+
+PTH27 used `file./.a.b` for the current machine. PTH27v2 added `file.localhost.a.b` in line with RFC 8089 §2. PTH27v3 ratified both spellings. PTH27v4 preserves the written spelling in source output. PTH27v5 selects a UNC share for a named Windows host, including the current host (S2.4.5v6).

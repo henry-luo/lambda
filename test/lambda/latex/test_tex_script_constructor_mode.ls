@@ -1,6 +1,6 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 let options = {constructor_argument_mode: true, echo_definitions: true,
     adapters: [], resources: {local: {}, bundled: {}}};
 fn check(source) any^ {

@@ -15,7 +15,7 @@ let plans = [for (u in ["https://www.youtube.com/watch?v=x", "https://example.or
 [plans[3].settings.jobs, plans[3].settings.per_host_delay_ms, plans[3].formats]
 
 // a capture is enough for the derivations: no network, no files written
-let site = "file://" ++ sys.proc.self.cwd# ++ "/test/lambda/archive/site/"
+let site = "file://" ++ sys.proc.self.cwd ++ "/test/lambda/archive/site/"
 let capture = {source: input("test/lambda/archive/site/page.html", 'text')^, final_url: site ++ "page.html",
     manifest: [{url: site ++ "style.css", path: "style.css", status: "ok"}, {url: site ++ "img/pier.svg", path: "pier.svg", status: "ok"}],
     archived: "2026-10-22T00:00:00Z"}

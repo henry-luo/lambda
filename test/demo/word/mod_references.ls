@@ -24,7 +24,7 @@ pub fn visible_fields(kind,show_all=false) => [for (f in fields where ((show_all
     (kind=="book" and contains(["publisher","city"],f.key)) or
     (kind=="article-journal" and contains(["container","volume","issue","pages","doi"],f.key)) or
     (kind=="webpage" and contains(["container","url","accessed"],f.key))) ^ { false })) f]
-let resource_root = sys.lambda.home# ++ "/package/doc/latex/citeproc/"
+let resource_root = sys.lambda.home ++ "/package/doc/latex/citeproc/"
 let locale = input(resource_root ++ "locales/locales-en-US.xml",'text')^
 let compiled = map([for (s in styles) for (part in [s.value,
     cp.compile(input(resource_root ++ "styles/" ++ s.value ++ ".csl",'text')^,{'en-US':locale},{locale:"en-US"})^]) part])

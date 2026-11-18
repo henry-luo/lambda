@@ -3,7 +3,7 @@ import crypto: lambda.io.crypto
 import exchange: lambda.sync.peer_exchange
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-ack-staging-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-ack-staging-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^; io.mkdir(area ++ "/b")^
     let secret = crypto.key()^
     let a = local.create(area ++ "/a.sqlite",secret,"ack-staging",area ++ "/a","a")^

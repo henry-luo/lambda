@@ -34,7 +34,7 @@ pn run(program, args, what) bool^ {
 pub pn export_pdf(deck_path) string^ {
     let deck = input(deck_path, 'slides')^
     // assets resolve against the deck's own folder, whatever the caller's working directory
-    let deck_uri = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/", deck_path)^
+    let deck_uri = url_resolve("file://" ++ sys.proc.self.cwd ++ "/", deck_path)^
     let base = url_resolve(deck_uri, ".")^
     let plan = slide.compile(deck, {base_uri: base})^
     let stages = slide.slides(deck, {base_uri: base})^
@@ -47,8 +47,8 @@ pub pn export_pdf(deck_path) string^ {
     io.mkdir("temp") ^ { null }
     io.mkdir("temp/slide_export") ^ { null }
     io.mkdir(work) ^ { null }
-    // sys.proc.self.argv#[0] is the running executable, as in lambda.archive.workers
-    let exe = sys.proc.self.argv#[0]
+    // sys.proc.self.argv[0] is the running executable, as in lambda.archive.workers
+    let exe = sys.proc.self.argv[0]
     let pages = [for (i, stage in stages) work ++ "/slide_" ++ (if (i < 9) "0" else "") ++ string(i + 1)]
     for (i, stage in stages) {
         let page = <html lang: "en", <head *[<meta charset: "UTF-8">, <base href: base>, <style css>]>

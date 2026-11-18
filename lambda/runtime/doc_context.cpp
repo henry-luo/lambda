@@ -2,13 +2,16 @@
 // what it is for; this file is the storage.
 
 #include "doc_context.hpp"
+#include "sysinfo.h"
 
 #include "../lambda-data.hpp"
 #include "heap_api.h"
+#include "lambda-root-frame.hpp"
 #include "context_capsule.h"
 #include "lib/hashmap.h"
 #include "lib/hashmap_helpers.h"
 #include "lib/log.h"
+#include "lib/strbuf.h"
 #include "lib/mem.h"
 #include "lib/memtrack.h"
 
@@ -55,6 +58,8 @@ struct DocContextState {
     EvalContext* owner;
     HashMap* locations;
     HashMap* nodes;
+    Document* supplied;
+    uint64_t supplied_sequence;
 };
 static void doc_context_clear(void* data);
 static void doc_context_destroy(void* data) {
@@ -91,6 +96,53 @@ Document* doc_context_lookup(const char* location, size_t length) {
     DocLocationEntry probe = {location, length, NULL};
     const void* found = hashmap_get(state->locations, &probe);
     return found ? ((const DocLocationEntry*)found)->doc : NULL;
+}
+
+Document* doc_context_get_supplied(void) {
+    DocContextState* state = doc_context_state(false);
+    return state ? state->supplied : NULL;
+}
+
+#ifdef LAMBDA_NO_SYSINFO
+// Restricted profiles can still resolve their supplied in-memory document.
+extern "C" Path* lambda_context_path(Pool* pool, int kind, const char* source) {
+    (void)pool;
+    (void)source;
+    Document* doc = kind == LAMBDA_CONTEXT_PATH_DOCUMENT ? doc_context_get_supplied() : NULL;
+    return doc ? doc->path : NULL;
+}
+#endif
+
+Document* doc_context_set_supplied(Item head) {
+    RootFrame roots(1);
+    Rooted<Item> retained(roots, head);
+    DocContextState* state = doc_context_state(true);
+    Pool* pool = path_get_pool();
+    if (!state || !pool) return NULL;
+    StrBuf* identity = strbuf_new();
+    if (!identity) return NULL;
+    strbuf_append_format(identity, "%p-%llu", (void*)state,
+        (unsigned long long)++state->supplied_sequence);
+    Path* path = path_new_authority(pool, PATH_SCHEME_DOCUMENT, identity->str);
+    strbuf_free(identity);
+    if (!path) return NULL;
+    StrBuf* location = strbuf_new();
+    if (!location) return NULL;
+    path_to_string(path, location);
+    Document* doc = doc_context_install(path, location->str, location->length, retained.get(), 0);
+    strbuf_free(location);
+    if (doc) state->supplied = doc;
+    return doc;
+}
+
+Document* doc_context_set_supplied_target(Item target) {
+    RootFrame roots(1);
+    Rooted<Item> retained(roots, target);
+    Document* doc = doc_context_set_supplied(ItemNull);
+    if (!doc) return NULL;
+    doc->deferred_target = retained.get();
+    doc->deferred = true;
+    return doc;
 }
 
 void doc_context_register(Document* doc, const void* container,
@@ -202,6 +254,8 @@ Document* doc_context_install(Path* path, const char* location, size_t length,
         if (!owned) { mem_free(doc); return NULL; }
         memcpy(owned, location, length);
         doc->location = NULL;
+        doc->head = ItemNull;
+        doc->deferred_target = ItemNull;
         DocLocationEntry entry = {owned, length, doc};
         // The head is the context's own reference to the document. A `temp.`
         // head is GC-heap data with no other owner, so without this root a
@@ -210,9 +264,14 @@ Document* doc_context_install(Path* path, const char* location, size_t length,
         if (!heap_register_gc_root_for(state->owner, &doc->head.item)) {
             mem_free(owned); mem_free(doc); return NULL;
         }
+        if (!heap_register_gc_root_for(state->owner, &doc->deferred_target.item)) {
+            heap_unregister_gc_root_for(state->owner, &doc->head.item);
+            mem_free(owned); mem_free(doc); return NULL;
+        }
         hashmap_set(state->locations, &entry);
         if (hashmap_oom(state->locations)) {
             heap_unregister_gc_root_for(state->owner, &doc->head.item);
+            heap_unregister_gc_root_for(state->owner, &doc->deferred_target.item);
             mem_free(owned); mem_free(doc); return NULL;
         }
     }
@@ -268,12 +327,14 @@ void doc_context_commit_head(Document* doc, Item head) {
 
 static void doc_context_clear(void* data) {
     DocContextState* state = (DocContextState*)data;
+    state->supplied = NULL;
     if (state->locations) {
         size_t i = 0;  void* item = NULL;
         while (hashmap_iter(state->locations, &i, &item)) {
             DocLocationEntry* entry = (DocLocationEntry*)item;
             if (entry->doc) {
                 heap_unregister_gc_root_for(state->owner, &entry->doc->head.item);
+                heap_unregister_gc_root_for(state->owner, &entry->doc->deferred_target.item);
                 DocRetainChunk* chunk = entry->doc->retained;
                 while (chunk) {
                     DocRetainChunk* older = chunk->next;

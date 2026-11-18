@@ -4,7 +4,7 @@ import fs: lambda.sync.filesystem
 import crypto: lambda.io.crypto
 import disk: lambda.io.disk
 pn main() {
-    let area = "temp/sync-capture-errors-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-capture-errors-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     output("first",area ++ "/tree/file")^
     let h = local.create(area ++ "/repo.sqlite",crypto.key()^,"capture-errors",area ++ "/tree","a")^

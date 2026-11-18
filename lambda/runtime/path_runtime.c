@@ -69,10 +69,8 @@ bool path_is_directory(Path* path) {
 #ifdef LAMBDA_NO_FILE_IO
     return false;
 #else
-    Pool* pool = path_get_pool();
-    if (!pool) return false;
-    StrBuf* buf = strbuf_new();
-    path_to_os_path(path_qualify_default(pool, path), buf);
+    StrBuf* buf = (StrBuf*)lambda_local_path_for_provider(path);
+    if (!buf) return false;
     int32_t kind = -1;
     bool acquired = security_io_input_kind(lambda_current_security_io(), buf->str, &kind, NULL);
     strbuf_free(buf);
@@ -84,15 +82,13 @@ bool path_is_directory(Path* path) {
 Path* path_longest_existing_prefix(Path* path) {
     if (!path) return NULL;
     if (!path_provider_is_local(path)) return NULL;
-    Pool* pool = path_get_pool();
-    if (!pool) return NULL;
 #ifndef LAMBDA_NO_FILE_IO
     for (Path* probe = path; probe && !path_is_root(probe); probe = probe->parent) {
         // A wildcard segment is a query, not a location; it can only be the
         // whole reference, never a prefix the trailing steps navigate into.
         if (path_ends_with_wildcard(probe)) return probe == path ? probe : NULL;
-        StrBuf* buf = strbuf_new();
-        path_to_os_path(path_qualify_default(pool, probe), buf);
+        StrBuf* buf = (StrBuf*)lambda_local_path_for_provider(probe);
+        if (!buf) return NULL;
         int32_t kind;
         bool acquired = security_io_input_kind(lambda_current_security_io(), buf->str, &kind, NULL);
         strbuf_free(buf);
@@ -119,8 +115,8 @@ bool path_load_metadata(Path* path) {
         return false;
     }
 
-    StrBuf* path_buf = strbuf_new();
-    path_to_os_path(path_qualify_default(pool, path), path_buf);
+    StrBuf* path_buf = (StrBuf*)lambda_local_path_for_provider(path);
+    if (!path_buf) return false;
 
     FileStat fs;
     bool acquired = security_io_stat(io, path_buf->str, &fs, NULL);
@@ -172,7 +168,7 @@ Item path_resolve_for_iteration(Path* path) {
     PathScheme scheme = path_get_scheme(path);
     const SecurityIOClient* io = lambda_current_security_io();
     // In-memory document references need no external provider (S2.4.4).
-    if (scheme == PATH_SCHEME_TEMP) {
+    if (scheme == PATH_SCHEME_TEMP || scheme == PATH_SCHEME_DOCUMENT) {
         if (path_has_wildcards(path) && g_path_enumeration_resolver)
             return g_path_enumeration_resolver(path);
         return fn_force((Item)(uintptr_t)path);
@@ -209,8 +205,9 @@ Item path_resolve_for_iteration(Path* path) {
         return path->result;
     }
     if (g_path_enumeration_resolver && path_needs_runtime_enumeration(path)) {
-        Item matches = g_path_enumeration_resolver(path);
-        return path_snapshot_publish(path, io, &stamp, matches);
+        // A runtime query can return GC-managed concrete nodes. A pool-owned
+        // path cannot retain that array in its untraced result slot.
+        return g_path_enumeration_resolver(path);
     }
 
 #ifdef LAMBDA_NO_FILE_IO
@@ -225,8 +222,8 @@ Item path_resolve_for_iteration(Path* path) {
             return ITEM_ERROR;
         }
 
-        StrBuf* path_buf = strbuf_new();
-        path_to_os_path(path_qualify_default(path_get_pool(), parent), path_buf);
+        StrBuf* path_buf = (StrBuf*)lambda_local_path_for_provider(parent);
+        if (!path_buf) return ITEM_ERROR;
 
         bool recursive = PATH_GET_SEG_TYPE(path) == LPATH_SEG_WILDCARD_REC;
         Item result = path_enumerate_locations(parent, path_buf->str, recursive);
@@ -236,8 +233,8 @@ Item path_resolve_for_iteration(Path* path) {
     }
 
     // Convert path to OS path string
-    StrBuf* path_buf = strbuf_new();
-    path_to_os_path(path_qualify_default(path_get_pool(), path), path_buf);
+    StrBuf* path_buf = (StrBuf*)lambda_local_path_for_provider(path);
+    if (!path_buf) return ITEM_ERROR;
     const char* os_path = path_buf->str;
 
     // Check if directory or file

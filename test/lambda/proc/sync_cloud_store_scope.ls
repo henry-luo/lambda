@@ -1,6 +1,6 @@
 import fixture: .mod_sync_cloud_store
 pn main() {
-    let area = "temp/sync-fixture-scope-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-fixture-scope-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     let path = area ++ "/store.sqlite"
     let durable = fixture.create(path)^

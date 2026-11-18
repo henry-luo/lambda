@@ -37,13 +37,13 @@ pn wake(root,scope,seq,delay_ms) {
 pn run(root,scope,seq,request) {
     let folder = "temp/spelling"
     io.mkdir(folder)^
-    let path = folder ++ "/" ++ string(sys.proc.self.pid#) ++ "-" ++ scope ++ "-" ++ string(seq) ++ ".mark"
+    let path = folder ++ "/" ++ string(sys.proc.self.pid) ++ "-" ++ scope ++ "-" ++ string(seq) ++ ".mark"
     var failure = null
     var report = null
     output({units:request},path,'mark') ^ { failure = ^ }
     if ((failure==null)^) {
         var process_result = null
-        { let __error_outcome_1 = io.exec(sys.proc.self.argv#[0],["run","--no-log",sys.lambda.home# ++ "/package/doc/spelling/worker.ls"],
+        { let __error_outcome_1 = io.exec(sys.proc.self.argv[0],["run","--no-log",sys.lambda.home ++ "/package/doc/spelling/worker.ls"],
             {env:{LAMBDA_SPELLING_REQUEST:path},timeout_ms:30000,max_output_bytes:1048576}) ^ { ^ }; if (__error_outcome_1 is error) { failure = __error_outcome_1 } else match __error_outcome_1 { case any { process_result = ~ } } }
         if ((failure==null and (process_result.exit_code!=0 or process_result.timed_out or process_result.truncated))^) {
             failure = error("Spelling check could not finish.")

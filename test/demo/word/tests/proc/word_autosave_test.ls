@@ -10,7 +10,7 @@ pn main() {
     let root = "temp/word-autosave-" ++ uuid()^
     let backups = root ++ "/recovery"
     let target = root ++ "/document.word.json"
-    let absolute_target = session.resolve_path(sys.proc.self.cwd#,target)
+    let absolute_target = session.resolve_path(sys.proc.self.cwd,target)
     let base = document.blank()
     let doc = node('doc',[node('p',[text("Recovered 日本語 & edits")])])
     let other = node('doc',[node('p',[text("Another document")])])
@@ -54,9 +54,9 @@ pn main() {
     let conflict_versions = autosave.versions(backups,identity)^
     let as_path = root ++ "/copy.word.json"
     let as_result = files.save_document(saved_recovery.session,other,as_path)
-    let kept_target = autosave.clear_versions(backups,identity,session.resolve_path(sys.proc.self.cwd#,v3[0].path))
+    let kept_target = autosave.clear_versions(backups,identity,session.resolve_path(sys.proc.self.cwd,v3[0].path))
     let checks = [
-        autosave.interval_ms==120000 and autosave.initial().root==sys.home# ++ "/.lambda/word",
+        autosave.interval_ms==120000 and autosave.initial().root==sys.home ++ "/.lambda/word",
         skipped==clean and composing.editor.doc==doc and composing.status==st.status,
         len(v1)==1 and len(v2)==2 and v2[0].path!=v2[1].path,
         retained,

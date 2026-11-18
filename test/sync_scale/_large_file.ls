@@ -8,7 +8,7 @@ import workspace: lambda.sync.workspace
 import maintenance: lambda.sync.maintenance
 
 pn main() {
-    let area = sys.proc.self.env#.LAMBDA_SCALE_AREA
+    let area = sys.proc.self.env.LAMBDA_SCALE_AREA
     let agent = local.create(area ++ "/repo.sqlite",crypto.key()^,"large-file",area ++ "/tree","large")^
     local.scan(agent)^
     let snapshot = local.snapshot(agent,"large original")^.state.snapshots[0]

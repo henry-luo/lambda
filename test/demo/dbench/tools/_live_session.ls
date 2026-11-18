@@ -1,7 +1,7 @@
 import rdb: lambda.io.rdb
 pn main() {
-    let driver=sys.proc.self.env.DBENCH_TEST_DRIVER#
-    let uri=sys.proc.self.env.DBENCH_TEST_URI#
+    let driver=sys.proc.self.env.DBENCH_TEST_DRIVER
+    let uri=sys.proc.self.env.DBENCH_TEST_URI
     open session = (rdb.database(uri,driver)^) {
         let schema=rdb.schema(session)^
         print(len(schema)>0); print("\n")

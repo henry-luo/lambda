@@ -1,7 +1,7 @@
 import local: lambda.sync.local
 import crypto: lambda.io.crypto
 pn main() {
-    let area = "temp/sync-cloud-observation-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-cloud-observation-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     let handle = local.create(area ++ "/repo",crypto.key()^,"observation",area ++ "/tree","device")^
     let initial = local.status(handle)^

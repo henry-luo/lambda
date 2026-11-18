@@ -169,7 +169,7 @@ on click(evt) {
     } else if (action == "attach-file") {
         if ((st.attachment != null)^) { st = {*:st, note:"Send or remove the current attachment first."} }
         else {
-            let d = files.navigate(sys.proc.self.cwd#) ^ { ^ }
+            let d = files.navigate(sys.proc.self.cwd) ^ { ^ }
             st = if (d is error) {*:st, note:d.message} else {*:st, dialog:d, emoji:false}
         }
     } else if (action == "file-select") {

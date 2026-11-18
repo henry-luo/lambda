@@ -94,8 +94,9 @@ Process-related information is grouped under `sys.proc`, modeled after Linux's `
 | `sys.home` | User's home directory | `/Users/alice` |
 | `sys.temp` | System temp directory | `/tmp` or `/var/folders/...` |
 
-**Argument vector (S17.3.1, IL2-I25).** `sys.proc.self.argv` is the only
-argument-vector field. It includes the executable at index 0 and retains the
+**Argument vector (S17.3.1v2, IL2-I25).** The context root `~proc` aliases
+`sys.proc.self` (S2.4.8). Both `~proc.argv` and `sys.proc.self.argv` read
+the same argument vector. It includes the executable at index 0 and retains the
 CLI subcommand and script path when supplied; Lambda's consumed startup flags
 are absent. The former `args` field has no compatibility alias.
 
@@ -162,12 +163,9 @@ for pid in pids {
 ### 2.4 Current Working Directory
 
 ```lambda
-// Current working directory as a file path
-let cwd = sys.proc.self.cwd;      // file.projects.myapp
-let src = cwd ++ src;             // file.projects.myapp.src
-
-// Use in path operations
-let config = sys.proc.self.cwd ++ 'config.json';
+let cwd_text = ~proc.cwd          // same string as sys.proc.self.cwd
+let config = ~cwd.'config.json'   // directory member (S2.4.8)
+let address = \.~cwd ++ \.'config.json'
 ```
 
 ### 2.5 Environment Variables

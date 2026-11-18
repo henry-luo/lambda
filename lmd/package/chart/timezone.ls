@@ -1,7 +1,7 @@
 // IANA transitions and POSIX recurrences keep zone arithmetic independent of host settings.
 import numbers: .numbers
 
-let database = input(sys.lambda.home# ++ "/package/chart/timezone_data.json", 'json') ^ { ~ }
+let database = input(sys.lambda.home ++ "/package/chart/timezone_data.json", 'json') ^ { ~ }
 
 pub fn valid_zone(zone) any^ => if (zone is number) numbers.finite_number(zone) and floor(zone) == zone and abs(zone) <= 840
     else zone is string and not (database is error) and database.names[zone] != null

@@ -7,7 +7,7 @@ import codec: lambda.sync.codec
 import exchange: lambda.sync.peer_exchange
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-repository-cache-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-repository-cache-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     output("ab",area ++ "/tree/note")^
     let key = crypto.key()^

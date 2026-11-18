@@ -3,7 +3,7 @@ import front: .spelling.front_coded
 
 pub pn load(language="en-US") map^ {
     if (language!="en-US") raise error("Spelling: only en-US is installed")
-    let base = sys.lambda.home# ++ "/package/doc/spelling/data/"
+    let base = sys.lambda.home ++ "/package/doc/spelling/data/"
     let manifest = input(base ++ "manifest.json",'json')^
     let dictionary = front.read(base ++ "en-US.dict",manifest.entries)^;
     return {language:language,dictionary:dictionary,words:[]}

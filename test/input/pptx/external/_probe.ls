@@ -1,7 +1,7 @@
 import pptx: lambda.doc.pptx
 import slide: lambda.slide
 pn main() {
-    let converted = pptx.convert(sys.proc.self.env.LAMBDA_PPTX_SURVEY_PATH#) ^ { ^ }
+    let converted = pptx.convert(sys.proc.self.env.LAMBDA_PPTX_SURVEY_PATH) ^ { ^ }
     if (converted is error) {
         print(format({error:converted.message},'json')^)
     } else {

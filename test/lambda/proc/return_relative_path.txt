@@ -1,1 +1,1 @@
-[\.a.b, /.a.b, \]
+[\.a.b, \.file.localhost.a.b, \]

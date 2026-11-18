@@ -2,28 +2,28 @@
 [\.test.input.wild_tree?path, path]
 "identity: same spelling, other type, other closure"
 [true, false, false]
-"directory ?path: proper closure, nothing read"
-[\.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json']
-"directory .?path: inclusive closure"
-[\.test.input.wild_tree, \.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json']
-"directory ?int: no path value is an int"
+"directory ?file: proper closure, nothing read"
+[<file>, <file>, <file>]
+"directory .?file: inclusive closure"
+[<file>, <file>, <file>]
+"directory ?int: no entry is an int"
 []
 "**?int: every file beneath"
 [1, 2, 3]
 "**.?string: every file beneath"
 ["a", "b", "c"]
-"?path.**: every kept file entered"
+"?file.**: every kept file entered"
 [{
     name: "a",
     items: [1, 2]
-  }, "a", [1, 2], 1, 2, \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json', {
+  }, "a", [1, 2], 1, 2, {
     name: "b",
     items: [3]
   }, "b", [3], 3, {
     name: "c"
   }, "c"]
-".?path.**: base included"
-[\.test.input.wild_tree, \.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json', {
+".?file.**: base included"
+[{
     name: "a",
     items: [1, 2]
   }, "a", [1, 2], 1, 2, {
@@ -38,13 +38,13 @@
 [1, 2]
 "file .?int"
 [3]
-"after #: the query tests path values"
+"after #: the query tests concrete nodes"
 []
-"after #: .?path keeps the path values themselves"
-[\.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub]
+"after #: .?file keeps the file nodes themselves"
+[<file>, <file>, <file>]
 "a held path takes wildcard steps"
 [\.test.input.wild_tree.*, \.test.input.wild_tree.**]
 "for and len see what # yields"
-[[\.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json'], 3]
+[[<file>, <file>, <file>], 3]
 "a wildcard with steps after it iterates its matches"
 ["a"]

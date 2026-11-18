@@ -1,6 +1,6 @@
 "===== temp. DOCUMENTS (PTH44v2, PTH76) ====="
-temp.crud_a.m
-temp.crud_a.rows
+\.temp.crud_a.m
+\.temp.crud_a.rows
 true
 true
 "===== ONE STATEMENT, ONE TRANSACTION (PTH63v2) ====="

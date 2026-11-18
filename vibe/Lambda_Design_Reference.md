@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-15; revised 2026-09-16 and 2026-09-17 (three-tier update model: CRUD statements build a write-only next version, `commit`/`rollback`, MVCC — a commit advances the head, bindings and cursors keep their version; the immediate write-through `put` of 2026-09-16 is superseded)
 **Status:** PROPOSED — rulings taken in review, **not ratified** into the formal
-specs, nothing implemented
+specs as a whole. The revised file-access clauses below are ratified by S2.4.3v4 and S2.4.4v2 (2026-11-18)
 **Decision IDs:** PTH30–PTH80 (extends the path/reference series whose home is
 [`Lambda_Type_Path.md`](Lambda_Type_Path.md) §13)
 **Open issue IDs:** PTH-O2–PTH-O18 (PTH-O4, PTH-O7, PTH-O9, PTH-O11, PTH-O12, PTH-O14, PTH-O16 resolved; PTH-O15 deferred)
@@ -48,9 +48,9 @@ node API, remote transport.
 ```lambda
 type reference = symbol | path        // URI = URN | URL
 
-let p = server.dir.'page.html'        // a path is a reference and stays LAZY
+let p = \.file.server.dir.'page.html'        // a path is a reference and stays LAZY
 p.body.0                              // still a path: steps append, nothing is read
-p#                                    // force: the document at p        (like *ptr)
+p#                                    // the file node; its contents may still be deferred
 p#body.0                              // force, then navigate the value   (sugar for p#.body.0)
 p.body.0#                             // extend the path across the doc boundary, then force
 p#cfg.link#x                          // a forced member holding a path is itself lazy: force again
@@ -69,7 +69,7 @@ n === doc.a.b.c#                      // false; &n = doc.a.b.c@v0, &(doc.a.b.c#)
 &expr                                 // address-of: the node's reference, or null
 a === b                               // reference equality: &a != null and &a == &b (versions included)
 var t = temp('scratch', v)            // create an in-memory document now; t is a Tier-2 snapshot of its head
-open t = temp('scratch') { … }        // or work on it in Tier 3; its address is temp.'scratch'
+open t = temp('scratch') { … }        // or work on it in Tier 3; its address is \.temp.'scratch'
 
 refs |> ~#                            // force each; ~key is the current key/index (was ~#)
 ```
@@ -77,7 +77,7 @@ refs |> ~#                            // force each; ~key is the current key/ind
 The six rules:
 
 > **R1 — References are lazy values.** A path is never read by `.`, `[]`,
-> `for`, the pipe, or any other form. Only `#` forces (S2.4.3v3, S2.4.4).
+> `for`, the pipe, or any other form under this reference proposal. Bare absolute access already denotes its target (S2.4.3v4).
 
 > **R2 — `#` is the force step, postfix, at member precedence.** `p#name`,
 > `p#123`, `p#[e]` are sugar for `p#.name`, `p#.123`, `p#[e]`. Forcing a
@@ -96,8 +96,8 @@ The six rules:
 > attaches at forcing time, to the **head** version.
 
 > **R5 — The current key is `~key`.** `~#` is retired so that `#` means force
-> everywhere (S1.7). `~word` is the focal-accessor family, of which `~~` is
-> the existing member.
+> everywhere (S1.7). S2.4.8 context roots share the fused-word spelling.
+> The parent step retains its existing spelling `~~` (S10.4.2).
 
 > **R6 — Three tiers.** Tier 1: `let`/`for`/`#` read the head. Tier 2:
 > `var` values with copy-on-write (S9.1) — local, never a document write.
@@ -197,7 +197,7 @@ because they act on the forced value.
 ### 3.3 Longest-prefix forcing across document boundaries (PTH34)
 
 A path may run from a server to the deepest node of a document with no `#`
-at the boundary — `server.dir.file.node1.child3` is one reference. Forcing
+at the boundary — `\.file.server.dir.file.node1.child3` is one reference. Forcing
 it:
 
 > The resolver forces the **longest prefix that names a document** through
@@ -224,23 +224,23 @@ p#cfg.link#x     // force the nested reference, then read x
 
 | Reference | `#` yields | Absence / failure |
 |---|---|---|
-| absolute or rooted path to a provider (`file`, `http`, logical `/` mounted to one) | the parsed document — exactly `input(p)`, format auto-detected — then the trailing steps | **raises** `T^E`: `input`/`fetch` are pn-family effectful readers (S7.4.5), permitted in expression position; `p# ^ { ^ }` acknowledges |
+| address of an external node | the concrete node selected by S2.4.3v4; a file exposes its kind from metadata and can load its document on member access | **raises** `T^E`: `input`/`fetch` are pn-family effectful readers (S7.4.5), permitted in expression position; `p# ^ { ^ }` acknowledges |
 | `sys.*` path | the system value | `null` |
 | `temp.*` path | the stored temp document, then trailing steps | `null` |
 | relative path `\.a.b` | qualified through the active base (S2.4.1v2), then as above | as the qualified kind |
 | symbol | §6 | `null` |
 | non-reference operand | compile error when statically typed; `error()` otherwise (S7.10) | — |
 
-`p#` on a provider path is **sugar for `input(p)`** plus navigation; no new
-I/O path enters the runtime. `input(p, format)` remains the explicit-format
-spelling and `exists(p)` the no-force probe.
+For a file path, `p#` yields the file node. `input(p, format)` remains a
+content reader with the S14.3.1v3 contract. A predicate on the file's kind
+does not call the content reader (S2.4.3v4, S2.4.4v2, D10.1.8).
 
 ### 3.6 Resolution stays free of I/O (PTH38)
 
-Everything left of `#` is address resolution (S2.4.4, PTH16–PTH19): building
-`p.a.b`, qualifying `/`, comparing or hashing paths. Only `#` forces. This is
-what keeps the scheme from becoming an implicit-I/O loophole in the `fn`/`pn`
-effect model ([Type_Path §2.6](Lambda_Type_Path.md#26-resolution-is-not-forcing)).
+Capturing, qualifying, comparing and composing addresses require no target
+I/O. A bare absolute access and a dereference can each demand external
+metadata or content. Both use the provider's authority and error contract
+(S2.4.4v2).
 
 ### 3.7 Line-start class (PTH39)
 
@@ -514,10 +514,7 @@ The rulings:
   is the implementation's choice — per step included: `doc#a.b.c` may read
   only the first level of `doc` and keep `b.c` deferred — as long as every
   observed result is the same (S1.6).
-  `input(p)` ≡ `p#` (PTH53v2) inherits this, so S14.3.1's "input is eager"
-  becomes an implementation note (S14.3.1v2); `stream()` remains the
-  explicitly lazy *plan* value. PTH64 is what keeps S1.6: an eager and a
-  lazy reader raise at the same `commit`, because the cursor is semantic.
+  File nodes follow D10.1.8. Explicit `input` and `stream` follow S14.3.1v3.
   The error *site* for content errors under deferred reading is PTH-O13.
 - **Block exit (PTH66v4; S12.4.4v4).** An `open` block commits implicitly
   on successful exit, including a `return`, `break` or `continue` that leaves
@@ -633,8 +630,8 @@ document be read in the same evaluation without a `commit`:
 
 ```lambda
 var t = temp('scratch', v)     // create temp.'scratch' with head v; returns the head document
-t.rows.2 === temp.'scratch'#rows.2    // true: t shares the head nodes (Tier 2, unmodified)
-&t.rows.2                      // temp.'scratch'.rows.2
+t.rows.2 === temp.'scratch'.rows.2    // true: t shares the head nodes (Tier 2, unmodified)
+&t.rows.2                      // \.temp.'scratch'.rows.2
 t.rows.2.x = 1                 // Tier 2: local copy; the document is unchanged
 open t = temp('scratch') { put t.rows.2.x = 1; commit }   // Tier 3: the document changes
 ```
@@ -642,15 +639,13 @@ open t = temp('scratch') { put t.rows.2.x = 1; commit }   // Tier 3: the documen
 - `temp(name, content)` creates the document with `content` as its head
   and returns that head (a location-carrying value); it raises if the name
   exists. `temp(name)` returns the existing head, creating an empty
-  document (root `{}`) if there is none. The pairing is the one `input(p)`
-  and `p#` already have: the function acts, the dotted form `temp.'name'`
-  addresses. (`temp` therefore heads both a call and a scheme root; the
-  two are lexically distinct, `temp(` against `temp.`, and `sys.temp`, the
-  OS temporary directory, is unrelated.)
+  document (root `{}`) if there is none. `temp.'name'` reads the node and
+  `\.temp.'name'` captures its address (S2.4.3v4). The constructor and access
+  forms share a provider name. The parser distinguishes `temp(` from `temp.`.
 - The document lives as long as the evaluation's document context holds
   it; `temp.` references are meaningful only within that evaluation
   (cross-isolate lifetime is SO20).
-- `output(v, temp.'name')` remains available as the Tier-3 spelling, a
+- `output(v, \.temp.'name')` remains available as the Tier-3 spelling, a
   whole-document `put` that becomes visible at `commit` (PTH54v2).
 
 ### 4.5 `===` (PTH45)
@@ -716,8 +711,10 @@ accessor is respelled:
 {a: 1}     |> {key: ~key, val: ~}
 ```
 
-`~word` is the **focal-accessor family**: a fused token, `~` immediately
-followed by an identifier; `~~` is its existing member (S10.4.2). An unknown
+A fused `~word` can select a focal accessor or a named context root (S2.4.8).
+Only a focal accessor refers to the current item or its key (S10.1.2v5).
+The lexer recognizes `~` immediately
+followed by an identifier. The related `~~` spelling selects a parent (S10.4.2). An unknown
 accessor is a compile error, never a binding lookup; `~ key` with a space
 remains two tokens. The family was chosen over a sigil because it is an open
 namespace that can never collide with a user binding (no binding starts with
@@ -894,8 +891,8 @@ the identity model.
 - **S16 classes.** `#`, `===` → S16.2.2v3 continuation set; `&` → S16.2.3v3
   dual-role set. Both rulings need a v3 revision and the C parser's
   line-start tables updated in step.
-- **Goldens for `p#`.** `p#` and `input(p)` print identically on both tiers
-  (S1.6; tier parity is the standing gate).
+- **Goldens for `p#`.** Compare concrete access and captured dereference under
+  S2.4.3v4 on both tiers. Cover file-node kind separately from payload access.
 
 ---
 
@@ -909,7 +906,7 @@ the identity model.
 | **PTH33** ✓ | Fragment sugar: `p#name`, `p#123`, `p#'q'`, `p#[e]` ≡ `p#.name` etc.; no whitespace between `#` and the fragment. |
 | **PTH34** ✓ | Forcing resolves the longest document-naming prefix through its provider, then navigates the rest in memory; `a.b#c.d` ≡ `a.b.c.d#` ≡ `a.b#.c.d` (S1.6). |
 | **PTH35** ✓ | A forced member that holds a path is lazy: `p#cfg.link.x` extends it, `p#cfg.link#x` reads through it. |
-| **PTH36** | Forcing a provider path is `input(p)` (pn-family, raises `T^E`, S7.4.5) plus trailing navigation; `exists(p)` and `input(p, format)` unchanged. |
+| **PTH36v2** | Dereferencing a file address returns its file node. Select a document member to demand payload access (S2.4.3v4, S2.4.4v2). |
 | **PTH37** | Forcing an in-memory reference (`sys.*`, `temp.*`, a symbol) is a total read: absence is `null` (S7.1.1v3); forcing a non-reference is a static type error or `error()`. |
 | **PTH38** | Address resolution left of `#` performs no I/O (S2.4.4 restated for the operator). |
 | **PTH39** | `#` and `===` join the S16.2.2 continuation set (v3). |
@@ -922,7 +919,7 @@ the identity model.
 | **PTH77** ✓ | A directory is a document whose forced value is its listing and whose CRUD key domain is NameKey → child document (`put d.'f' = v` creates/replaces, `del d.'f'` removes; no positional clauses); `io.*` remain immediate store operations outside the write set. |
 | **PTH45v2** ✓ | `a === b` ≡ `&a != null and &a == &b` with generations included; identity-less operands compare false; no `!==`, no address comparison across contexts. |
 | **PTH46** | Iteration over a target is `for (v in p#)` / `refs \|> ~#`. |
-| **PTH47** ✓ | The current key/index accessor is `~key` (options: §5.3); `~#` is retired. `~word` is the fused focal-accessor family (`~~` included); unknown accessors are compile errors. |
+| **PTH47** ✓ | The current key/index accessor is `~key` (options: §5.3); `~#` is retired. The fused `~word` spelling also serves context roots under S2.4.8. Unknown accessors are compile errors. |
 | ~~PTH49v2~~ | Superseded 2026-09-17 by PTH60–PTH62: `put` builds the next version, which becomes visible only at `commit`. |
 | **PTH51v3** ✓ | A `var` binding of a forced value is a snapshot that shares nodes for reading; a plain `=` write through it copies locally (S9.1.2) and never touches a document. |
 | **PTH52v3** ✓ | Local copies carry nothing — no generation, no location: `&` is null, `===` false. Nothing is minted on a copy, so COW copy-versus-in-place is unobservable (S1.6). |
@@ -931,7 +928,7 @@ the identity model.
 | ~~PTH57~~ | Dropped 2026-09-17: a CRUD statement never changes what its target expression reads (PTH61). |
 | **PTH58** ✓ | The update keyword is `put`, not `set` (binding-name capture) and not an optional marker (two spellings). |
 | **PTH54v2** ✓ | `output(d, p)` ≡ `put p# = d` (a whole-document entry in the write set); persistence is the store's (PTH67). |
-| **PTH53v2** ✓ | `input(p)` ≡ `p#` (reads the head); `input(p, params)` is a distinct document in the context keyed by location plus params. |
+| **PTH53v3** | A file address dereferences to its file node. An explicit input reads content under S14.3.1v3. The parameterized input remains keyed by location and parameters (S2.4.3v4). |
 | **PTH50v3** ✓ | The head is what the next force yields; `#`/`input` bind it at the moment they run, `commit` advances it, and nothing already bound changes; external changes are unobserved until the next commit or an explicit reload. |
 | **PTH59** ✓ | Three tiers: Tier 1 (`let`/`for`/`#`/`input`) reads the head; Tier 2 (`var`, `=`, COW) is local value semantics and never a document write; Tier 3 (CRUD statements + transaction) builds the next version. The tiers do not mix. |
 | **PTH60v3** ✓ | CRUD statements `put target = v` (upsert), `put v before target` / `put v after target` (insert), `del target` (delete), `output(v, p)` (whole-document put): pn-family, statement position; value operands read the head; `before`/`after` are bindable clause words; edits may be comma-joined into one statement in written order. |
@@ -1022,7 +1019,7 @@ the identity model.
 - **PTH-O16 — RESOLVED 2026-09-17.** Withdrawn with PTH66v2: nothing is
   pending at evaluation end, so there is no default to configure.
 - **PTH-O7 — RESOLVED 2026-09-17.** `temp(name, content)` is the
-  constructor (PTH76); `output(v, temp.'name')` remains the Tier-3
+  constructor (PTH76); `output(v, \.temp.'name')` remains the Tier-3
   spelling. The provider form alone proved awkward: a Tier-3 write is
   unreadable until `commit`.
 - **PTH-O18 — set-oriented update statement (raised 2026-09-17, open to

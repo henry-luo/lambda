@@ -499,7 +499,7 @@ static bool token_starts_signature_return(LambdaTokenKind kind) {
 // `fn` starts no expression (S16.6.7v2), and `pn` starts one only as a
 // procedure arrow, which `parser_at_procedure_arrow` tests with its lookahead.
 static bool token_starts_expression(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_PATH_REL || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_PATH_REL || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_CONTEXT || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
 }
 
 typedef bool (*LambdaTokenKindPredicate)(LambdaTokenKind kind);
@@ -986,7 +986,7 @@ static LambdaParseValue parse_primary_type_slot(LambdaRdParser* parser) {
 // quoted symbol or `*`, an integer key, `**`, the parent `~~` and the root `/`.
 static bool token_is_path_step(LambdaTokenKind kind) {
     return token_is_key(kind) || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_SLASH ||
-        kind == LAMBDA_TOK_INTEGER || kind == LAMBDA_TOK_STAR_STAR;
+        kind == LAMBDA_TOK_INTEGER || kind == LAMBDA_TOK_STAR_STAR || kind == LAMBDA_TOK_TILDE_CONTEXT;
 }
 
 static bool parse_path_segment(LambdaRdParser* parser) {
@@ -1809,7 +1809,7 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
     if (!parser_enter(parser)) return 0;
     LambdaToken first = parser->current;
     LambdaParseValue value = 0;
-    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || (first.kind == LAMBDA_TOK_APPLY && parser->next.kind == LAMBDA_TOK_LPAREN) || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
+    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || (first.kind == LAMBDA_TOK_APPLY && parser->next.kind == LAMBDA_TOK_LPAREN) || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_TILDE_CONTEXT || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
         if (parser->pipe_rhs_depth && (first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY)) {
             parser->pipe_rhs_has_current = true;
         }

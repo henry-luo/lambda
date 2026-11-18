@@ -1,6 +1,6 @@
 import profile: lambda.doc.latex.tex_engine.profile
 import digest: lambda.doc.latex.tex_engine.digest
-let kernel = input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
+let kernel = input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex", "text")^;
 fn result(source) any^ {
     let expanded = profile.expand_with_kernel(source, kernel,
         {echo_definitions: true, adapters: [], resources: {local: {}, bundled: {}}}, 100000)^;

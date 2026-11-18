@@ -3,9 +3,9 @@ import paths: lambda.io.path
 
 pub fn resource_path(file) any^ {
     // CSS paths use forward slashes, including an absolute Windows home override.
-    let home = replace(sys.lambda.home#, "\\", "/")
+    let home = replace(sys.lambda.home, "\\", "/")
     let absolute = if (len(home) > 2 and slice(home, 1, 2) == ":") paths.normal_path(home)
-        else paths.resolve_path(replace(sys.proc.self.cwd#, "\\", "/"), home);
+        else paths.resolve_path(replace(sys.proc.self.cwd, "\\", "/"), home);
     absolute ++ "/package/" ++ file
 }
 

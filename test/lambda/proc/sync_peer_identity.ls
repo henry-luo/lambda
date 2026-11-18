@@ -21,7 +21,7 @@ pn main() {
     let tampered = session.unseal(bc,encrypted.bytes ++ b'00') ^ { ^ }
     let revoked = session.transcript(identity.revoke(a,bob.device.id),ah,bh.hello) ^ { ^ }
     let fake = session.finish(a,ah,{*:bh.hello,nonce:crypto.key()^},session.proof(enrolled,bh,ah.hello)^) ^ { ^ }
-    let directory = "temp/sync-peer-identity-" ++ string(sys.proc.self.pid#)
+    let directory = "temp/sync-peer-identity-" ++ string(sys.proc.self.pid)
     io.mkdir(directory)^
     let wrap = crypto.key()^
     identity.save(directory,wrap,a)^

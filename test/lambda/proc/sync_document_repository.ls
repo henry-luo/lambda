@@ -7,7 +7,7 @@ import workspace: lambda.sync.workspace
 
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-document-repository-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-document-repository-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     output("ab",area ++ "/tree/note")^
     output("",area ++ "/tree/empty")^

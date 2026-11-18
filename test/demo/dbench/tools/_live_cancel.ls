@@ -9,8 +9,8 @@ pn slow(uri,driver,owner) any^ {
     return null
 }
 pn main() {
-    let driver=sys.proc.self.env.DBENCH_TEST_DRIVER#
-    let uri=sys.proc.self.env.DBENCH_TEST_URI#
+    let driver=sys.proc.self.env.DBENCH_TEST_DRIVER
+    let uri=sys.proc.self.env.DBENCH_TEST_URI
     let task=start(slow,[uri,driver,self()])
     receive()^
     sleep(500)^

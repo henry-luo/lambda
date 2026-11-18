@@ -19,6 +19,6 @@ pn main() {
     send(child, "done")^
     wait(child)^
     let rows = sqlite.query(db, "SELECT n FROM task_rows")^
-    print(rows[0][0] == 7 and temp.'sqlite_other_task'#n == 2)
+    print(rows[0][0] == 7 and \.temp.'sqlite_other_task'#n == 2)
     sqlite.execute(db, "DROP TABLE task_rows")^
 }

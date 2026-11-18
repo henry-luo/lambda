@@ -2,7 +2,7 @@ import profile: lambda.doc.latex.tex_engine.profile
 import reconstruct: lambda.doc.latex.tex_engine.reconstruct
 import digest: lambda.doc.latex.tex_engine.digest
 let root="test/lambda/latex/fixtures/local_packages/";
-let kernel=input(sys.lambda.home# ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
+let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
 let resources={local:{'script_stream_data.dat':{data:input(root ++ "script_stream_data.dat","text")^},
     'script_stream_tokens.dat':{data:input(root ++ "script_stream_tokens.dat","text")^},
     'script_stream_cats.dat':{data:input(root ++ "script_stream_cats.dat","text")^},

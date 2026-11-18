@@ -7,6 +7,7 @@
 #include "../mir_container_access.hpp"
 #include "../mir_cow_analysis.hpp"
 #include "../mir_path.hpp"
+#include "../sysinfo.h"
 #include "../mir_function_value.hpp"
 #include "../output_demand.hpp"
 #include "lambda/io/mark_builder.hpp"
@@ -7433,9 +7434,38 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
         }
         return declared;
     }
-    case AST_NODE_PATH_EXPR:
-        return value(c, em_literal_path(&c->em, (AstPathNode*)node), LMD_TYPE_PATH,
-            VALUE_REP_RAW_GC_POINTER, &TYPE_PATH, node);
+    case AST_NODE_PATH_EXPR: {
+        AstPathNode* plan = (AstPathNode*)node;
+        if (plan->context_path == LAMBDA_CONTEXT_PATH_SCRIPT && !plan->context_source) {
+            MIR_reg_t absent = em_new_reg(&c->em, "script_absent", MIR_T_I64);
+            em_emit_insn(&c->em, MIR_new_insn(c->em.ctx, MIR_MOV,
+                MIR_new_reg_op(c->em.ctx, absent), MIR_new_int_op(c->em.ctx, ITEM_NULL)));
+            return value(c, absent, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+        }
+        MIR_reg_t path = em_literal_path(&c->em, plan);
+        if (plan->context_path) {
+            // A missing context has no address and yields null on either form.
+            MIR_reg_t result = em_new_reg(&c->em, "context_value", MIR_T_I64);
+            MIR_label_t done = em_new_label(&c->em);
+            move(c, result, imm(c, ITEM_NULL));
+            branch(c, MIR_BEQ, done, reg(c, path), imm(c, 0));
+            if (plan->access) {
+                MIR_reg_t forced = em_call_1(&c->em, "fn_force", MIR_T_I64,
+                    MIR_T_I64, reg(c, path), true);
+                move(c, result, reg(c, forced));
+            } else {
+                move(c, result, reg(c, path));
+            }
+            mark(c, done);
+            return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+        }
+        if (plan->access) {
+            MIR_reg_t result = em_call_1(&c->em, "fn_force", MIR_T_I64,
+                MIR_T_I64, reg(c, path), true);
+            return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
+        }
+        return value(c, path, LMD_TYPE_PATH, VALUE_REP_RAW_GC_POINTER, &TYPE_PATH, node);
+    }
     case AST_NODE_PATH_INDEX_EXPR:
         return value(c, em_computed_path(&c->em, (AstPathIndexNode*)node), LMD_TYPE_ANY,
             VALUE_REP_ITEM, &TYPE_ANY, node);

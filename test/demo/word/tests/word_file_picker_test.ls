@@ -2,7 +2,7 @@ import picker: ~~.mod_file_picker
 import browser: lambda.ui.workspace.file_browser
 import storage: ~~.mod_io
 
-let folder = browser.absolute("test/demo/word/tests",sys.proc.self.cwd#)
+let folder = browser.absolute("test/demo/word/tests",sys.proc.self.cwd)
 let d = picker.initial("",folder)
 let entries = [
     {name:"Folder",path:"/demo/Folder",dir:true,kind:"Folder",size:0},
@@ -57,6 +57,6 @@ let spaced = {*:sample,browser:browser.listing(sample.browser,"/demo",[
     picker.command(child,"back").browser.path==folder,
     picker.command(d,"activate",{path:folder ++ "/proc"}).browser.path==child.browser.path,
     picker.navigate(d,"import.md").error!=null,
-    len([for (p in picker.places() where p.id=="home" and p.path==sys.home#) p])==1,
+    len([for (p in picker.places() where p.id=="home" and p.path==sys.home) p])==1,
     picker.command(picker.choose(spaced,"/demo/ Notes # ü.md"),"open").open_path=="/demo/ Notes # ü.md"
 ]

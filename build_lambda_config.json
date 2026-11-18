@@ -3132,6 +3132,9 @@
           {
             "source": "lib/test_font_context_gtest.cpp",
             "name": "Font Context Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
             "libraries": [
               "gtest",
               "gtest_main"

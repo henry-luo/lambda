@@ -9,7 +9,7 @@ import agent: .mod_agent
 import model: .mod_model
 import ui: .mod_ui
 import resources: ~~.mod_resources
-let ENV = sys.proc.self.env#
+let ENV = sys.proc.self.env
 let PATHS = profile.paths(ENV.HOME,ENV.SYNC_DEMO_ROOT,ENV.SYNC_DEMO_DIR)^
 let SERVICE = "Lambda Sync Demo (" ++ PATHS.root ++ ")"
 let INITIAL = model.initial(PATHS.folder)^

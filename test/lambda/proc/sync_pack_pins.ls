@@ -10,7 +10,7 @@ pn call(store, credentials, kind, body) any^ {
     return service.handle(store,schema.request(credentials,kind,body,1000000,schema.digest([kind,body])^)^,1000000)^
 }
 pn main() {
-    let area = "temp/sync-pack-pins-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-pack-pins-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     let store = fixture.create(area ++ "/store")^
     let owner = identity.create("pack-pins",crypto.key()^)^

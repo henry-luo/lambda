@@ -191,8 +191,8 @@ pn open_card(st) any^ {
     return {*:record_edit(st, card, "Opened " ++ path ++ "."), dialog: null, view: "front", page: "front", sel: null}
 }
 fn file_url(path) any^ => (let p = trim(path),
-    let full = if (starts_with(p, "~/")) (sys.proc.self.env.HOME# or "") ++ slice(p, 1, len(p))
-        else if (starts_with(p, "/")) p else sys.proc.self.cwd# ++ "/" ++ p,
+    let full = if (starts_with(p, "~/")) (sys.proc.self.env.HOME or "") ++ slice(p, 1, len(p))
+        else if (starts_with(p, "/")) p else sys.proc.self.cwd ++ "/" ++ p,
     if (starts_with(p, "file://")) p else "file://" ++ full)
 
 pn command(st, verb, arg) {

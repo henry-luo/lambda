@@ -906,6 +906,21 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
 }
 
 ValidationResult* validate_against_element_type(SchemaValidator* validator, ConstItem item, TypeElmt* element_type) {
+    if (item.type_id() == LMD_TYPE_VELMT && !element_type->shape && !element_type->content_list) {
+        // Tag-only contracts, including file, observe virtual metadata only.
+        const Velmt* element = (const Velmt*)(uintptr_t)item.item;
+        Item tag = ItemNull;
+        if (element_type->name.length == 0 && !element_type->ns)
+            return validation_verdict(true);
+        if (velmt_tag(element, &tag) != VIRTUAL_OP_OK ||
+                !is_text_type_id(get_type_id(tag)) ||
+                (size_t)tag.get_len() != element_type->name.length ||
+                memcmp(tag.get_chars(), element_type->name.str, element_type->name.length))
+            return validation_verdict(false);
+        Item ns = ItemNull;
+        return validation_verdict(!element_type->ns &&
+            velmt_namespace_uri(element, &ns) == VIRTUAL_OP_MISSING);
+    }
     if (validator->is_fast_mode()) {
         ItemReader fast_reader(item);
         if (!fast_reader.isElement()) return validation_verdict(false);

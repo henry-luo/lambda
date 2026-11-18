@@ -3,7 +3,7 @@ import service: .cloud_function
 import s3: .s3
 import codec: .codec
 pn main() {
-    let environment = sys.proc.self.env#
+    let environment = sys.proc.self.env
     let config = parse(environment.LAMBDA_CLOUD_STORAGE,'json')^
     let request = codec.decode(input(environment.LAMBDA_CLOUD_EVENT,'text')^,131072)^
     let result = service.handle(s3.adapter(config),request,now().unix) ^ { ^ }

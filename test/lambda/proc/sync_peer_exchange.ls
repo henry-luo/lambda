@@ -4,7 +4,7 @@ import local: lambda.sync.local
 import crypto: lambda.io.crypto
 import c: lambda.sync.core
 pn main() {
-    let area = "temp/sync-peer-exchange-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-peer-exchange-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^
     io.mkdir(area ++ "/b")^
     let alice = identity.create("exchange",crypto.key()^)^

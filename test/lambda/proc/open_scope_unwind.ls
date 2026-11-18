@@ -50,25 +50,25 @@ pn main() {
     var message = ""
     raise_inside() ^ { message = ^.message }
     print(message == "stop"); print("\n")
-    print(temp.'open_matrix_raise'#n == 1); print("\n")
+    print(temp.'open_matrix_raise'.n == 1); print("\n")
     open target = temp.'open_matrix_raise' { put target.n = 2 }
-    print(temp.'open_matrix_raise'#n == 2); print("\n")
+    print(temp.'open_matrix_raise'.n == 2); print("\n")
     let b = temp('open_matrix_propagate', {n:1})^
     propagate_inside() ^ { null }
-    print(temp.'open_matrix_propagate'#n == 1); print("\n")
+    print(temp.'open_matrix_propagate'.n == 1); print("\n")
     open target = temp.'open_matrix_propagate' { put target.n = 2 }
-    print(temp.'open_matrix_propagate'#n == 2); print("\n")
+    print(temp.'open_matrix_propagate'.n == 2); print("\n")
     let returned = temp('open_matrix_return_error', {n:1})^
     return_error_inside() ^ { null }
-    print(temp.'open_matrix_return_error'#n == 1); print("\n")
+    print(temp.'open_matrix_return_error'.n == 1); print("\n")
     open target = temp.'open_matrix_return_error' { put target.n = 2 }
-    print(temp.'open_matrix_return_error'#n == 2); print("\n")
+    print(temp.'open_matrix_return_error'.n == 2); print("\n")
     let c = temp('open_matrix_recover', {n:1})^
     recover_inside()^
-    print(temp.'open_matrix_recover'#n == 9); print("\n")
+    print(temp.'open_matrix_recover'.n == 9); print("\n")
     let inner = temp('open_matrix_inner_block', {n:1})^
     recover_inner_block()
-    print(temp.'open_matrix_inner_block'#n == 3); print("\n")
+    print(temp.'open_matrix_inner_block'.n == 3); print("\n")
     let loop = temp('open_matrix_loop', {n:1})^
     open target = temp.'open_matrix_loop' {
         var i = 0
@@ -79,10 +79,10 @@ pn main() {
         }
         put target.n = i
     }
-    print(temp.'open_matrix_loop'#n == 2); print("\n")
+    print(temp.'open_matrix_loop'.n == 2); print("\n")
     let d = temp('open_matrix_nested', {n:1})^
     reject_nested() ^ { null }
-    print(temp.'open_matrix_nested'#n == 1); print("\n")
+    print(temp.'open_matrix_nested'.n == 1); print("\n")
     open target = temp.'open_matrix_nested' { put target.n = 2 }
-    print(temp.'open_matrix_nested'#n == 2)
+    print(temp.'open_matrix_nested'.n == 2)
 }

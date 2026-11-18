@@ -8,7 +8,7 @@ import codec: lambda.sync.codec
 import owner: lambda.sync.task_owner
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-installed-packets-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-installed-packets-" ++ string(sys.proc.self.pid)
     for (name in ["a","b","c"]) { io.mkdir(area ++ "/" ++ name)^ }
     let alice = identity.create("installed-packets",crypto.key()^)^
     let receiver = identity.create(alice.space,alice.secret)^

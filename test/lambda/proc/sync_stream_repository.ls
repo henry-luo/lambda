@@ -6,7 +6,7 @@ import disk: lambda.io.disk
 import reach: lambda.sync.reachability
 
 pn main() {
-    let area = "temp/sync-stream-repository-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-stream-repository-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     io.mkdir(area ++ "/export")^
     let config = {*:chunks.default_profile,minimum:16,target:32,maximum:64}

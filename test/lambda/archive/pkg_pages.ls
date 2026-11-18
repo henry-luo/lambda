@@ -25,10 +25,10 @@ pn collect() {
 
 pn main() {
     // a folder per process: the T0 and JIT runs of this test may overlap
-    let root = "temp/archive_test/pages-" ++ string(sys.proc.self.pid#)
+    let root = "temp/archive_test/pages-" ++ string(sys.proc.self.pid)
     if (exists(root)) io.delete(root)^
-    let site = "file://" ++ sys.proc.self.cwd# ++ "/test/lambda/archive/site/"
-    let articles = "file://" ++ sys.proc.self.cwd# ++ "/test/demo/readability/articles/"
+    let site = "file://" ++ sys.proc.self.cwd ++ "/test/lambda/archive/site/"
+    let articles = "file://" ++ sys.proc.self.cwd ++ "/test/demo/readability/articles/"
     // renderings (PDF, thumbnail) are pkg_render's; this test covers capture and derivation
     let lib = archive.library(root, {config: {defaults: {per_host_delay_ms: 0, thumbnail: false}}})^
     let c = start(collect)

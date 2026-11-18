@@ -15,7 +15,7 @@ import p: lambda.sync.protocol
 import mark: lambda.sync.mark
 
 pn main() {
-    let area = "temp/sync-document-admission-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-document-admission-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^
     io.mkdir(area ++ "/b")^
     let credentials = identity.create("document-admission",crypto.key()^)^

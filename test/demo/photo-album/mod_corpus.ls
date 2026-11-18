@@ -17,7 +17,7 @@ pub fn colour(pixels) any^ {
 
 // corpus directory from PHOTO_ALBUM_DIR (relative to cwd), else the demo's own directory
 pub fn directory(fallback) any^ {
-    let env = sys.proc.self.env.PHOTO_ALBUM_DIR#
+    let env = sys.proc.self.env.PHOTO_ALBUM_DIR
     let dir = if (env is string and env != "") env else fallback
     if (ends_with(dir, "/")) dir else dir ++ "/"
 }

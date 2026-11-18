@@ -5,7 +5,7 @@ import schema: lambda.sync.cloud_schema
 import codec: lambda.sync.codec
 import hex: lambda.security.tuf.metadata
 pn main() {
-    let environment = sys.proc.self.env#
+    let environment = sys.proc.self.env
     let request = input(environment.LAMBDA_SYNC_REQUEST,'json')^
     let agent = peer.open_agent(request.directory,hex.unhex(environment.LAMBDA_SYNC_KEY)^)^
     let key = "objects/" ++ schema.digest(uuid()^)^

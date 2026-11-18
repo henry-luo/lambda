@@ -15,7 +15,7 @@ pn after_round(event, handle, root, name) any^ {
     return true
 }
 pn main() {
-    let area = "temp/sync-peer-burst-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-peer-burst-" ++ string(sys.proc.self.pid)
     for (name in ["a","b"]) { io.mkdir(area ++ "/" ++ name ++ "/agent")^; io.mkdir(area ++ "/" ++ name ++ "/tree")^ }
     let ak = crypto.key()^
     let bk = crypto.key()^

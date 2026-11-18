@@ -2,7 +2,7 @@
 import chat: lambda.chat
 import config: .mod_config
 import launch: .mod_launch
-let ARGS = sys.proc.self.argv#
+let ARGS = sys.proc.self.argv
 
 pn serve(owner) {
     let result = chat.serve(0, config.root ++ "/history.json", pn (event) => { send(owner, event)^ }) ^ { ^ }

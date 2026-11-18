@@ -4,7 +4,7 @@ import ui: ~~.mod_ui
 
 fn named(st,name) => [for (e in st.entries where e.name == name) e][0]
 fn browse(st,name) map^ => files.navigate(st,named(st,name).path)^
-let base = model.absolute("test/input/zip",sys.proc.self.cwd#)
+let base = model.absolute("test/input/zip",sys.proc.self.cwd)
 let disk = files.navigate(model.initial(base),base)^
 let zip = named(disk,"sample.zip")
 let root = browse(disk,"sample.zip")^

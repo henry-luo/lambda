@@ -36,7 +36,7 @@ fn style_capture(options, base) {
     else {
         let requested = c.get(options, "style", "ieee")
         let bundled = c.has(["ieee", "apa", "chicago-author-date", "chicago-fullnote-bibliography"], requested)
-        let path = if (bundled) sys.lambda.home# ++ "/package/doc/latex/citeproc/styles/" ++ requested ++ ".csl"
+        let path = if (bundled) sys.lambda.home ++ "/package/doc/latex/citeproc/styles/" ++ requested ++ ".csl"
             else bib.resource_path(requested, base)
         let captured = xml_capture(path, null, "csl-style");
         {*:captured, source: path}
@@ -74,7 +74,7 @@ fn compile_options(options, base, language) {
     let style = style_capture(options, base)
     let locale_inputs = c.get(options, "locales", {})
     let bundled_captures = [for (lang in ["en-US", "de-DE", "fr-FR"])
-        {key: lang, captured: xml_capture(sys.lambda.home# ++ "/package/doc/latex/citeproc/locales/locales-" ++ lang ++ ".xml",
+        {key: lang, captured: xml_capture(sys.lambda.home ++ "/package/doc/latex/citeproc/locales/locales-" ++ lang ++ ".xml",
             null, "csl-locale")}]
     let bundled = c.dictionary([for (item in bundled_captures) {key: item.key, value: item.captured.xml}])
     let locale_captures = [for (lang, value in locale_inputs)

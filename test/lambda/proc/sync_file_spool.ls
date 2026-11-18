@@ -8,7 +8,7 @@ pn blocked_spool(area, parent) any^ {
     })^
 }
 pn main() {
-    let area = "temp/sync-spool-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-spool-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     let payload = binary("one-two-three")^
     let run = disk.spool(area,1024,pn (spool)=> {

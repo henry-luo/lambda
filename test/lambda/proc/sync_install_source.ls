@@ -5,7 +5,7 @@ import crypto: lambda.io.crypto
 import hex: lambda.security.tuf.metadata
 import h: ~~.mod_sync_local_helpers
 pn main() {
-    let area = "temp/sync-install-source-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-install-source-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/a")^; io.mkdir(area ++ "/b")^
     let secret = crypto.key()^
     let a = local.create(area ++ "/a.sqlite",secret,"install-source",area ++ "/a","a")^

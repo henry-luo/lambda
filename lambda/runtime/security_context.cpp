@@ -9,6 +9,8 @@
 #include "lib/memtrack.h"
 #include "lib/url.h"
 #include "lib/path_str.h"
+#include "lambda/io/target.h"
+#include "lambda/core/lambda-path.h"
 #include <string.h>
 
 extern __thread EvalContext* context;
@@ -47,6 +49,31 @@ bool eval_context_bind_security_directory(EvalContext* owner, const char* direct
 Url* eval_context_current_directory(EvalContext* owner) {
     const char* directory = (const char*)context_capsule_extension(owner, security_capsule_owner, 3);
     return directory ? url_parse_path_or_url(directory, nullptr) : get_current_dir();
+}
+
+void* lambda_local_path_for_provider(Path* path) {
+    Target* target = item_to_target((uint64_t)(uintptr_t)path, nullptr);
+    if (!target) return nullptr;
+    Url* cwd = context ? (Url*)context->cwd : nullptr;
+    StrBuf* result = (StrBuf*)target_to_local_path(target, cwd);
+    target_free(target);
+    if (result && lambda_current_security_io() && !path_is_absolute(path)) {
+        // The broker accepts a normalized name beneath the caller's admitted root.
+        size_t capacity = result->length + 3;
+        char* normalized = (char*)mem_alloc(capacity, MEM_CAT_TEMP);
+        int length = -1;
+        if (normalized) {
+#ifdef _WIN32
+            length = path_str_normalize_lexical_win32(result->str, normalized, (int)capacity, false);
+#else
+            length = path_str_normalize_lexical_posix(result->str, normalized, (int)capacity, false);
+#endif
+        }
+        strbuf_free(result);
+        result = length >= 0 ? strbuf_create(normalized) : nullptr;
+        if (normalized) mem_free(normalized);
+    }
+    return result;
 }
 
 struct SecurityPathEntry {

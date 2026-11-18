@@ -11,7 +11,7 @@ import crypto: lambda.io.crypto
 import s3: lambda.sync.s3
 
 pn main() {
-    let area = "temp/sync-paged-publication-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-paged-publication-" ++ string(sys.proc.self.pid)
     io.mkdir(area)^
     let store = fixture.create(area ++ "/store.sqlite")^
     let owner = identity.create("paged-publication",crypto.key()^)^

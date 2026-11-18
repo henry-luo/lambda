@@ -12,7 +12,7 @@ import reach: lambda.sync.reachability
 
 import h: ~~.mod_sync_local_helpers
 pub pn run(safety=false) any^ {
-    let area = "temp/sync-retention-repository-" ++ string(sys.proc.self.pid#)
+    let area = "temp/sync-retention-repository-" ++ string(sys.proc.self.pid)
     io.mkdir(area ++ "/tree")^
     output("a",area ++ "/tree/note")^
     let key = crypto.key()^

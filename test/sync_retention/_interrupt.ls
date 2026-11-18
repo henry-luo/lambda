@@ -7,7 +7,7 @@ import codec: lambda.sync.codec
 import hex: lambda.security.tuf.metadata
 
 pn main() {
-    let environment = sys.proc.self.env#
+    let environment = sys.proc.self.env
     let request = input(environment.LAMBDA_SYNC_REQUEST,'json')^
     let owner = agent.open_agent(request.directory,hex.unhex(environment.LAMBDA_SYNC_KEY)^)^
     return repo.access(owner.handle.path,owner.handle.keys,pn (tx,k)=> {

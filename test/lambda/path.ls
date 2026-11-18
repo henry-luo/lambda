@@ -2,72 +2,72 @@
 // Paths use /., ., and .~~ for logical, relative, and parent paths
 
 "Basic path expressions";
-/.etc.hosts;
-/.usr.local.bin
-http.api.example.com
-https.secure.api.example.com
-sys.config
+\.file.localhost.etc.hosts;
+\.file.localhost.usr.local.bin
+\.http.api.example.com
+\.https.secure.api.example.com
+\.sys.config
 
 "Path with 6+ segments (tests extended path_build)";
-/.home.user.documents.projects.lambda.test
+\.file.localhost.home.user.documents.projects.lambda.test
 
 "Path in let binding"
-let config_path = /.etc.config
+let config_path = \.file.localhost.etc.config
 config_path
 
 "Path in array";
-[/.a, /.b, http.x]
+[\.file.localhost.a, \.file.localhost.b, \.http.x]
 
 "Path in map"
-{input: /.data.input, output: /.data.output}
+{input: \.file.localhost.data.input, output: \.file.localhost.data.output}
 
 "Path with quoted segments (dots in filenames)";
-/.etc.'nginx.conf';
-/.home.user.'config.json'
-http.'api.github.com'.users
+\.file.localhost.etc.'nginx.conf';
+\.file.localhost.home.user.'config.json'
+\.http.'api.github.com'.users
 
 "Dynamic path segment with subscript"
 let segment = "config"
-let dynamic_path = /.etc[segment]
+let dynamic_path = \.file.localhost.etc[segment]
 dynamic_path
 
 "Wildcard patterns (single segment match)";
-/.src.*
-http.api.users.*
+\.file.localhost.src.*
+\.http.api.users.*
 
 "Wildcard patterns (recursive match)";
-/.src.**
-http.api.**
+\.file.localhost.src.**
+\.http.api.**
 
 "Quoted wildcard (literal asterisk, not a wildcard)";
-/.data.'*';
-/.data.'**'
+\.file.localhost.data.'*';
+\.file.localhost.data.'**'
 
 "Path type checking"
-type(/.etc.hosts)
+type(\.file.localhost.etc.hosts)
 
 "File content (lazy loading)"
-let hosts = /.etc.hosts;
+let hosts = \.file.localhost.etc.hosts;
 (len(hosts) > 0)
 
 "exists() function - directory exists"
-exists(/.etc)
+exists(\.file.localhost.etc)
 
 "exists() function - file exists"
-exists(/.etc.hosts)
+exists(\.file.localhost.etc.hosts)
 
 "exists() function - non-existent path"
-exists(/.this_path_does_not_exist)
+exists(\.file.localhost.this_path_does_not_exist)
 
 "len() on directory - counts entries";
-(len(/.etc) > 0)
+(len(\.file.localhost.etc) > 0)
 
 "Path iteration - for loop over directory"
-let etc_items = for (item in /.etc) item;
+let etc_items = for (item in \.file.localhost.etc) item;
 (len(etc_items) > 0)
 
 "Path iteration - collect types"
-let item_types = for (item in /.etc) type(item)
+let item_types = for (item in \.file.localhost.etc) type(item)
 item_types[0]
 
 "Relative path with . scheme"
@@ -146,30 +146,30 @@ parent_dir
 \.~~.Lambda.'README.md'
 
 "Path ++ string: append segment"
-let base = /.etc
+let base = \.file.localhost.etc
 base ++ "hosts"
 
 "Path ++ string: multiple appends"
-let p1 = /.home
+let p1 = \.file.localhost.home
 let p2 = p1 ++ "user"
 p2 ++ "documents"
 
 "Path ++ symbol: append symbol segment"
-let dir = /.var
+let dir = \.file.localhost.var
 dir ++ 'log'
 
 "Path ++ relative path: concat relative path"
-let abs = /.home.user
+let abs = \.file.localhost.home.user
 let rel = \.documents.file
 abs ++ rel
 
 "Path ++ parent path: concat parent path"
-let base_path = /.home.user.projects
+let base_path = \.file.localhost.home.user.projects
 let parent_rel = \.~~.shared.lib
 base_path ++ parent_rel
 
 "Path type preserved after ++"
-type(/.etc ++ "hosts")
+type(\.file.localhost.etc ++ "hosts")
 
 "Chained ++ operations";
-/.home ++ "user" ++ "documents" ++ "file.txt"
+\.file.localhost.home ++ "user" ++ "documents" ++ "file.txt"

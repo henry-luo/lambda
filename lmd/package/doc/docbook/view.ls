@@ -32,7 +32,7 @@ pub pn render_document_file(path,options = null) element^ {
     let snapshot = docbook.read(path)^
     let opts = config.checked(options)^
     let result = docbook.convert(snapshot,{*:opts,output:"single",target:"radiant"})^
-    let home = paths.resolve_path(sys.proc.self.cwd#,sys.lambda.home#)
+    let home = paths.resolve_path(sys.proc.self.cwd,sys.lambda.home)
     // Source views resolve CSS from the installation and captured images from memory.
     let urls = map([for (asset in result.assets) (paths.normal_path(asset.path),asset_url(asset,home)^)])
     let document = resolve_assets(result.document,urls,result.diagnostics)^;

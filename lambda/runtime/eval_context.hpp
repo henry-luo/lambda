@@ -82,6 +82,11 @@ typedef struct EvalContext : Context {
     ContextCapsuleDirectory capsule_directory;
     // borrowing realm controllers share slabs; their temporary selection cannot change the allocator.
     Runtime* module_state_allocator;
+    // The evaluation's working directory is fixed when its owner is created.
+    char working_directory[4096];
+    char home_directory[4096];
+    char temporary_directory[4096];
+    bool context_directories_initialized;
 } EvalContext;
 
 // D3.4.3/v5: the evaluation context's runtime shape tree (a capsule of the

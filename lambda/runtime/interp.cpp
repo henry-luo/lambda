@@ -17,6 +17,7 @@
 #include "write_set.hpp"
 #include "runtime-state.h"
 #include "security_context.h"
+#include "sysinfo.h"
 #include "recovery_frame.h"
 #include "lambda-stack.h"
 #include "concurrency.h"
@@ -6411,14 +6412,22 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // path_new, then one runtime step per segment. Path* is a container
         // pointer, so it is its own Item carrier.
         AstPathNode* path_node = (AstPathNode*)node;
+        // A source-less expression has no script address to force or extend.
+        if (path_node->context_path == LAMBDA_CONTEXT_PATH_SCRIPT && !path_node->context_source)
+            return ItemNull;
         Pool* pool = f->st->ctx->pool;
         Scratch acc(f);
-        Path* initial = path_node->authority
-            ? path_new_authority(pool, (int)path_node->scheme, path_node->authority->chars)
+        const char* authority = path_node->authority ? path_node->authority->chars : nullptr;
+        Path* initial = path_node->context_path
+            ? lambda_context_path(pool, path_node->context_path,
+                path_node->context_source ? path_node->context_source->chars : nullptr)
+            : (authority || path_node->file_slash)
+            ? path_new_authority(pool, (int)path_node->scheme, authority)
             : path_new(pool, (int)path_node->scheme);
+        if (path_node->context_path && !initial) return ItemNull;
         acc.set(interp_ptr_item(initial));
         interp_apply_path_steps(acc, path_node->segments, path_node->segment_count);
-        return acc.get();
+        return path_node->access ? fn_force(acc.get()) : acc.get();
     }
     case AST_NODE_PATH_INDEX_EXPR: {
         // S2.4.2v5: a computed `[k]` step of a path literal, then the static

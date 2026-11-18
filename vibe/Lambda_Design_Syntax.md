@@ -2146,7 +2146,14 @@ occurrence versus `[int]` array type). `occurrence_count` now takes the
 guarded same-line bracket, matching the C parser, which already reached
 this through `parse_type_slot`.
 
-### 7.15 Relative-path introducer: `\.a.b` (decided)
+### 7.15 Path escape and relative spelling: `\.a.b` (decided)
+
+**Current ruling (2026-11-18, S16.9.4v2).** `\.` captures a path in
+expression position. `\.a.b` captures relative steps and `\.file.host.a`
+captures an explicit provider address. Bare `/.a.b` and `file.host.a` select
+concrete nodes (S2.4.3v4, S2.4.5v6). `node[\.a.b]` applies a relative
+selector to its receiver (S8.2.1v5). The discussion below records the
+earlier choice of the relative spelling and its interaction with line starts.
 
 **Problem.** The relative path spelled `.a.b`, whose introducer is the
 member-access dot — the reason `.` sits in the dual-role set at all, and a
@@ -2187,7 +2194,7 @@ sub-classifies `.` by its next character, so this costs no new machinery.
 (A follow-on could retire integer member fields in favour of `[n]`
 indexing, which would let `.` leave the set completely — not ruled here.)
 
-**The mental model: `\` is the relative root, as `/` is the logical one**
+**September 2026 model for relative syntax**
 (USER, 2026-09-21; the earlier "escaped dot" model is in Appendix S.4).
 Both roots are complete paths on their own, and every step after either is
 an ordinary step: `.part` or `[key]`. So `\.a.b` is `\` then `.a` then

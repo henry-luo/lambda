@@ -1,35 +1,35 @@
 "Basic path expressions"
-/.etc.hosts
-/.usr.local.bin
-http.api.example.com
-https.secure.api.example.com
-sys.config
+\.file.localhost.etc.hosts
+\.file.localhost.usr.local.bin
+\.http.api.example.com
+\.https.secure.api.example.com
+\.sys.config
 "Path with 6+ segments (tests extended path_build)"
-/.home.user.documents.projects.lambda.test
+\.file.localhost.home.user.documents.projects.lambda.test
 "Path in let binding"
-/.etc.config
+\.file.localhost.etc.config
 "Path in array"
-[/.a, /.b, http.x]
+[\.file.localhost.a, \.file.localhost.b, \.http.x]
 "Path in map"
 {
-  input: /.data.input,
-  output: /.data.output
+  input: \.file.localhost.data.input,
+  output: \.file.localhost.data.output
 }
 "Path with quoted segments (dots in filenames)"
-/.etc.'nginx.conf'
-/.home.user.'config.json'
-http.'api.github.com'.users
+\.file.localhost.etc.'nginx.conf'
+\.file.localhost.home.user.'config.json'
+\.http.'api.github.com'.users
 "Dynamic path segment with subscript"
-/.etc.config
+\.file.localhost.etc.config
 "Wildcard patterns (single segment match)"
-/.src.*
-http.api.users.*
+\.file.localhost.src.*
+\.http.api.users.*
 "Wildcard patterns (recursive match)"
-/.src.**
-http.api.**
+\.file.localhost.src.**
+\.http.api.**
 "Quoted wildcard (literal asterisk, not a wildcard)"
-/.data.'*'
-/.data.'**'
+\.file.localhost.data.'*'
+\.file.localhost.data.'**'
 "Path type checking"
 path
 "File content (lazy loading)"
@@ -94,16 +94,16 @@ path
 "Parent path with quoted segment"
 \.~~.Lambda.'README.md'
 "Path ++ string: append segment"
-/.etc.hosts
+\.file.localhost.etc.hosts
 "Path ++ string: multiple appends"
-/.home.user.documents
+\.file.localhost.home.user.documents
 "Path ++ symbol: append symbol segment"
-/.var.log
+\.file.localhost.var.log
 "Path ++ relative path: concat relative path"
-/.home.user.documents.file
+\.file.localhost.home.user.documents.file
 "Path ++ parent path: concat parent path"
-/.home.user.shared.lib
+\.file.localhost.home.user.shared.lib
 "Path type preserved after ++"
 path
 "Chained ++ operations"
-/.home.user.documents.'file.txt'
+\.file.localhost.home.user.documents.'file.txt'

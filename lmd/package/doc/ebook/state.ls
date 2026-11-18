@@ -19,7 +19,7 @@ pub fn preferences(prefs) {
         texture:if (prefs.texture in textures) prefs.texture else "none",turn:if (prefs.turn in turns) prefs.turn else defaults.turn}
 }
 // The per-user reading-state directory; library hosts keep their own records beside it.
-pub fn directory() any^ => (let env = sys.proc.self.env#,
+pub fn directory() any^ => (let env = sys.proc.self.env,
     c.value(env.LAMBDA_EBOOK_STATE_DIR,c.value(env.XDG_STATE_HOME,
         c.value(env.LOCALAPPDATA,c.value(env.HOME,".") ++ "/.local/state")) ++ "/lambda/ebook"))
 pub pn restore(book,options) map {

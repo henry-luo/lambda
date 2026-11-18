@@ -445,6 +445,6 @@ fn get_title_or_default(title) {
 
 // Document text needs CMU CSS even when math is emitted as outlined SVG.
 pub fn font_stylesheet() {
-    let home = paths.resolve_path(sys.proc.self.cwd#, sys.lambda.home#);
+    let home = paths.resolve_path(sys.proc.self.cwd, sys.lambda.home);
     <link rel: "stylesheet", href: home ++ "/package/doc/latex/fonts/cmu-combined.css">
 }

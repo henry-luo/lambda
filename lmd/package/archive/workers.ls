@@ -11,12 +11,12 @@ fn tail_line(text) => if (text == null) "" else (let lines = [for (l in split(tr
 fn failed_all(outputs, message) => reduce([{}, *outputs], (acc, o) => {*: acc, [o]: {status: "failed", message: message}})
 
 // the lambda executable running this script, which the worker reuses
-pub pn executable() string { sys.proc.self.argv#[0] }
+pub pn executable() string { sys.proc.self.argv[0] }
 
 pub pn derive(staging, request, settings, notify) map^ {
     let request_path = staging ++ "/request.json"
     // the worker resolves assets/ against the folder as a file: URL, so it gets the absolute path
-    let dir = if (starts_with(staging, "/")) staging else sys.proc.self.cwd# ++ "/" ++ staging
+    let dir = if (starts_with(staging, "/")) staging else sys.proc.self.cwd ++ "/" ++ staging
     output({*: request, staging: dir}, request_path, 'json')^
     let progress = if (notify == null) null else pn (p) => {
         let parts = split(trim(p.line), " ")
@@ -25,7 +25,7 @@ pub pn derive(staging, request, settings, notify) map^ {
         }
     }
     // --no-log: a worker writing ./log.txt would replace the caller's log
-    let args = ["run", "--no-log", sys.lambda.home# ++ SCRIPT]
+    let args = ["run", "--no-log", sys.lambda.home ++ SCRIPT]
     let exec_options = {env: {LAMBDA_ARCHIVE_REQUEST: request_path}, timeout_ms: int(settings.render_timeout_s * 1000),
         progress: progress, progress_ms: int(settings.progress_ms)}
     var result = null
