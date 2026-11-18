@@ -12,9 +12,6 @@ import contour: lambda.chart.mesh_contour
 fn flat(f) array => [for (row in f) for (v in row) float(v)]
 fn rows(values, w: int, h: int) array => [for (y in 0 to (h - 1)) [for (x in 0 to (w - 1)) values[y * w + x]]]
 
-// one element replaced by native slices, for the sequential flow fold
-fn set_at(values, i: int, v) array^ => slice(values, 0, i) ++ [v] ++ slice(values, i + 1, len(values))
-
 // --- heightmaps ---
 // distance from the centre scaled per axis: 1.0 at the middle of every edge, so an island fills a rectangle.
 fn oval(w: int, h: int) array^ {
@@ -47,9 +44,13 @@ pub fn heightmap(k: u64, options) array^ {
 // excess slope (Olsen 2004). Mass is conserved; nothing leaves the map.
 fn shares(values, w: int, h: int, talus: float, rate: float) array =>
     [for (c, v in values) (let x = c % w, let y = c div w,
-        let drops = [if (x < w - 1) v - values[c + 1] else 0.0, if (y < h - 1) v - values[c + w] else 0.0,
-                     if (x > 0) v - values[c - 1] else 0.0, if (y > 0) v - values[c - w] else 0.0],
-        let excess = [for (d in drops) max(0.0, d - talus)],
+        // Form each directional excess directly, including the edge clamp
+        // for a negative talus, in the original summation order.
+        let edge = max(0.0, 0.0 - talus),
+        let excess = [if (x < w - 1) max(0.0, v - values[c + 1] - talus) else edge,
+                      if (y < h - 1) max(0.0, v - values[c + w] - talus) else edge,
+                      if (x > 0) max(0.0, v - values[c - 1] - talus) else edge,
+                      if (y > 0) max(0.0, v - values[c - w] - talus) else edge],
         let total = sum(excess),
         if (total <= 0.0) [0.0, 0.0, 0.0, 0.0] else (let moved = rate * max(excess), [for (e in excess) moved * e / total]))]
 
@@ -96,26 +97,28 @@ fn spread(p, w: int, amount: float) array {
 }
 
 // one droplet's height changes: [cell, delta] pairs.
-fn droplet(values, w: int, h: int, s, p, x: float, y: float, dx: float, dy: float, speed: float, water: float, sediment: float, life: int, out) array^ {
-    let here = surface(corners(values, w, x, y))
+fn droplet(values, w: int, h: int, s, x: float, y: float, dx: float, dy: float, speed: float, water: float, sediment: float, life: int, out) array^ {
+    if (life <= 0) { return out }
+    let pt = corners(values, w, x, y)
+    let here = surface(pt)
     let ndx = dx * s.inertia - here[1] * (1.0 - s.inertia)
     let ndy = dy * s.inertia - here[2] * (1.0 - s.inertia)
     let length = math.sqrt(ndx * ndx + ndy * ndy);
-    if (life <= 0 or length == 0.0) out
+    if (length == 0.0) out
     else (let ux = ndx / length, let uy = ndy / length, let nx = x + ux, let ny = y + uy,
         if (nx < 0.0 or ny < 0.0 or nx >= float(w - 1) or ny >= float(h - 1)) out
-        else (let fall = surface(corners(values, w, nx, ny))[0] - here[0], let pt = corners(values, w, x, y),
+        else (let fall = surface(corners(values, w, nx, ny))[0] - here[0],
             let capacity = max(0.0 - fall * speed * water * s.capacity, s.min_capacity),
             let change = if (sediment > capacity or fall > 0.0)
                     (if (fall > 0.0) min(fall, sediment) else (sediment - capacity) * s.deposit)
                 else 0.0 - min((capacity - sediment) * s.erode, 0.0 - fall),
-            droplet(values, w, h, s, p, nx, ny, ux, uy, math.sqrt(max(0.0, speed * speed - fall * s.gravity)), water * (1.0 - s.evaporate),
+            droplet(values, w, h, s, nx, ny, ux, uy, math.sqrt(max(0.0, speed * speed - fall * s.gravity)), water * (1.0 - s.evaporate),
                 sediment - change, life - 1, out ++ spread(pt, w, change))))
 }
 
 fn apply_batch(values, w: int, h: int, s, k: u64, first: int, stop: int) array {
     let deltas = [for (i in first to (stop - 1), let kd = rng.at(k, i))
-        for (d in ((droplet(values, w, h, s, null, rng.unit(rng.at(kd, 0)) * float(w - 1), rng.unit(rng.at(kd, 1)) * float(h - 1),
+        for (d in ((droplet(values, w, h, s, rng.unit(rng.at(kd, 0)) * float(w - 1), rng.unit(rng.at(kd, 1)) * float(h - 1),
             0.0, 0.0, 1.0, 1.0, 0.0, s.steps, [])) ^ { [] })) d]
     let summed = map([for (d in deltas group by d[0] as cell into g) for (x in [string(cell), sum(g |> ~[1])]) x]);
     // Droplets in one batch all dig the same snapshot, so their summed changes can overshoot and
@@ -170,9 +173,17 @@ fn around8(c: int, w: int, h: int) array {
 
 // Planchon-Darboux: raise every pit until water can run, by `epsilon` per step, to an outlet
 // (the map edge or the sea). Synchronous sweeps until nothing changes.
-fn fill_sweep(water, values, w: int, h: int, eps: float) array =>
-    [for (c, cur in water) if (cur == values[c]) cur
-        else max(values[c], min(cur, min([for (n in ((around8(c, w, h)) ^ { [] })) water[n]]) + eps))]
+fn fill_sweep(water, values, w: int, h: int, eps: float, rectangular: bool) array =>
+    [for (c, cur in water) if (cur == values[c]) cur else {
+        // Interior cells on a rectangular field have all eight offsets in
+        // range. The boundary path also covers ragged fields.
+        let x = if (rectangular and w > 0) c % w else 0
+        let interior = rectangular and x > 0 and x < w-1 and c >= w and c < (h-1)*w
+        let levels = if (interior) [water[c-w-1],water[c-w],water[c-w+1],
+            water[c-1],water[c+1],water[c+w-1],water[c+w],water[c+w+1]]
+            else [for (n in ((around8(c, w, h)) ^ { [] })) water[n]];
+        max(values[c], min(cur, min(levels) + eps))
+    }]
 
 pub fn fill(height, options = {}) array^ {
     let h = len(height)
@@ -180,9 +191,10 @@ pub fn fill(height, options = {}) array^ {
     let sea: float = if (options.sea_level == null) -1.0 else float(options.sea_level)
     let eps: float = if (options.epsilon == null) 1e-6 else float(options.epsilon)
     let values = flat(height)
+    let rectangular = len(values) == w * h
     let first = [for (c, v in values) if (outlet(c, w, h, v, sea)) v else 1e300]
     let done = reduce([[first, false], *[for (i in ((1 to w * h) ^ { [] })) i]], (st, i) => if (st[1]) st
-        else (let next = fill_sweep(st[0], values, w, h, eps), [next, next == st[0]]));
+        else (let next = fill_sweep(st[0], values, w, h, eps, rectangular), [next, next == st[0]]));
     rows(done[0], w, h)
 }
 
@@ -191,14 +203,25 @@ fn downhill(values, w: int, h: int) array =>
     [for (c, v in values) (let below = [for (n in ((around8(c, w, h)) ^ { [] }) where values[n] < v) [values[n], n]],
         if (len(below) == 0) -1 else sort(below, (e) => e)[0][1])]
 
-// cells drained through each cell, itself included: one pass from the highest cell down.
+// Each cell sends its accumulated flow to one lower neighbour. Only that
+// slot changes, and the caller can reuse the same downhill calculation.
+fn accumulate(values, down, w: int, h: int) array^ {
+    let order = [for (e in ((sort([for (c, v in values) [0.0 - v, c]], (e) => e)) ^ { [] })) e[1]]
+    var acc = [for (c in values) 1]
+    var i: int = 0
+    while (i < len(order)) {
+        let c = order[i]
+        let target = down[c]
+        if (target >= 0) { acc[target] = acc[target] + acc[c] }
+        i = i + 1
+    }
+    rows(acc, w, h)
+}
 pub fn accumulation(height) array^ {
     let h = len(height)
     let w = if (h == 0) 0 else len(height[0])
-    let values = flat(height)
-    let down = downhill(values, w, h)
-    let order = [for (e in ((sort([for (c, v in values) [0.0 - v, c]], (e) => e)) ^ { [] })) e[1]];
-    rows(reduce([[for (c in values) 1], *order], (acc, c) any^ => if (down[c] < 0) acc else set_at(acc, down[c], acc[down[c]] + acc[c])), w, h)
+    let values = flat(height);
+    accumulate(values, downhill(values, w, h), w, h)
 }
 
 // rivers on a filled surface: segments [x0, y0, x1, y1, flow] between cell centres, for land
@@ -211,7 +234,7 @@ pub fn rivers(height, options = {}) map {
     let filled = fill(height, {sea_level: sea})
     let values = flat(filled)
     let down = downhill(values, w, h)
-    let acc = accumulation(filled)
+    let acc = accumulate(values, down, w, h)
     let flows = flat(acc)
     let segments = [for (c, f in flows where ((f >= float(minimum_flow) and values[c] > sea and down[c] >= 0) ^ { false }))
         [float(c % w) + 0.5, float(c div w) + 0.5, float(down[c] % w) + 0.5, float(down[c] div w) + 0.5, int(f)]]

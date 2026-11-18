@@ -99,10 +99,21 @@ Type* mvp_contract(AstNode* node) {
 
 MvpFunction* mvp_function(LambdaMvpModule* m, AstFuncNode* ast) {
     if (!ast) return NULL;
-    for (uint32_t i = 0; i < m->function_count; i++)
-        if (m->functions[i].ast == ast || (m->satellite && m->functions[i].ast &&
-                m->functions[i].ast->body == ast->body && m->functions[i].ast->param == ast->param))
-            return &m->functions[i];
+    const AstIndex* index = &m->tp->ast_index;
+    AstNodeId node = ast_index_find(index, ast);
+    if (!m->satellite && node < index->count) {
+        // Ordinary functions keep their shared index identity through lowering.
+        AstFunctionId owner = index->owner_functions[node];
+        if (owner < m->function_count && m->functions[owner].ast == ast) return &m->functions[owner];
+    }
+    // Synthetic templates and rewritten satellite definitions have no identical
+    // indexed function node. A foreign node in an eager module is an import.
+    if (node < index->count || m->satellite || m->function_count != index->function_count) {
+        for (uint32_t i = 0; i < m->function_count; i++)
+            if (m->functions[i].ast == ast || (m->satellite && m->functions[i].ast &&
+                    m->functions[i].ast->body == ast->body && m->functions[i].ast->param == ast->param))
+                return &m->functions[i];
+    }
     for (int i = 0; m->imported_functions && i < m->imported_functions->length; i++) {
         MvpFunction* function = (MvpFunction*)m->imported_functions->data[i];
         if (function->ast == ast) return function;

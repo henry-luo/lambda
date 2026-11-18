@@ -1060,7 +1060,7 @@ TEST_F(GCHeapTest, AllocBasic) {
     gc_header_t* header = gc_get_header(ptr);
     ASSERT_NE(header, nullptr);
     EXPECT_EQ(header->type_tag, LMD_TYPE_STRING);
-    EXPECT_EQ(header->marked, 0);
+    EXPECT_EQ(header->mark_epoch, 0);
     EXPECT_EQ(header->gc_flags, 0);
     EXPECT_EQ(header->alloc_size, 32u);
 }
@@ -1151,7 +1151,7 @@ TEST_F(GCHeapTest, SweptBumpSlotsReuseAcrossAllSmallAllocationPaths) {
     EXPECT_EQ(gc->total_allocated, 0u);
     EXPECT_TRUE(gc_get_header(first)->gc_flags & GC_FLAG_FREED);
     gc_mark_item(gc, string_item(first));
-    EXPECT_EQ(gc_get_header(first)->marked, 0);
+    EXPECT_EQ(gc_get_header(first)->mark_epoch, 0);
     // Reuse must also preserve the allocation-replay ownership fallback.
     mem_free(gc->bump_blocks->alloc_bits);
     gc->bump_blocks->alloc_bits = nullptr;
@@ -1249,26 +1249,26 @@ TEST_F(GCHeapTest, BumpAllocationBitmapMarksOnlyExactAllocatedSlots) {
     ASSERT_TRUE(second_header->gc_flags & GC_FLAG_BUMP);
 
     gc_mark_item(gc, string_item(first));
-    EXPECT_EQ(first_header->marked, 1);
-    EXPECT_EQ(second_header->marked, 0);
-    first_header->marked = 0;
+    EXPECT_EQ(first_header->mark_epoch, gc->mark_epoch);
+    EXPECT_EQ(second_header->mark_epoch, 0);
+    first_header->mark_epoch = 0;
 
     gc_mark_item(gc, string_item(second));
-    EXPECT_EQ(first_header->marked, 0);
-    EXPECT_EQ(second_header->marked, 1);
-    second_header->marked = 0;
+    EXPECT_EQ(first_header->mark_epoch, 0);
+    EXPECT_EQ(second_header->mark_epoch, gc->mark_epoch);
+    second_header->mark_epoch = 0;
 
     // Range membership is insufficient: arbitrary data words can point into a
     // bump block, so marking must accept only bitmap-recorded user addresses.
     gc_mark_item(gc, string_item((uint8_t*)first + GC_BUMP_GRANULE));
-    EXPECT_EQ(first_header->marked, 0);
-    EXPECT_EQ(second_header->marked, 0);
+    EXPECT_EQ(first_header->mark_epoch, 0);
+    EXPECT_EQ(second_header->mark_epoch, 0);
 
     uint8_t* unused_user = gc->bump_cursor + sizeof(gc_header_t);
     ASSERT_LT(unused_user, gc->bump_end);
     gc_mark_item(gc, string_item(unused_user));
-    EXPECT_EQ(first_header->marked, 0);
-    EXPECT_EQ(second_header->marked, 0);
+    EXPECT_EQ(first_header->mark_epoch, 0);
+    EXPECT_EQ(second_header->mark_epoch, 0);
     EXPECT_FALSE(gc_is_managed(gc, unused_user));
 }
 
@@ -1299,12 +1299,12 @@ TEST_F(GCHeapTest, LargeObjectSetSurvivesGrowthAndBackwardShiftDeletion) {
     for (int i = 0; i < object_count; i++) {
         gc_header_t* header = gc_get_header(objects[i]);
         gc_mark_item(gc, roots[i]);
-        EXPECT_EQ(header->marked, 1) << "large object " << i;
-        header->marked = 0;
+        EXPECT_EQ(header->mark_epoch, gc->mark_epoch) << "large object " << i;
+        header->mark_epoch = 0;
 
         uint64_t interior = string_item((uint8_t*)objects[i] + 8);
         gc_mark_item(gc, interior);
-        EXPECT_EQ(header->marked, 0) << "interior pointer " << i;
+        EXPECT_EQ(header->mark_epoch, 0) << "interior pointer " << i;
     }
 
     // Deleting alternating entries creates holes throughout probe clusters.
@@ -1325,8 +1325,8 @@ TEST_F(GCHeapTest, LargeObjectSetSurvivesGrowthAndBackwardShiftDeletion) {
     for (int i = 1; i < object_count; i += 2) {
         gc_header_t* header = gc_get_header(objects[i]);
         gc_mark_item(gc, roots[i]);
-        EXPECT_EQ(header->marked, 1) << "survivor " << i;
-        header->marked = 0;
+        EXPECT_EQ(header->mark_epoch, gc->mark_epoch) << "survivor " << i;
+        header->mark_epoch = 0;
     }
 
     gc_unregister_root_range(gc, roots);
@@ -1907,15 +1907,27 @@ TEST_F(GCHeapTest, MarkSingleObject) {
     gc_header_t* header = gc_get_header(str);
 
     // object should start unmarked
-    EXPECT_EQ(header->marked, 0);
+    EXPECT_EQ(header->mark_epoch, 0);
 
     // mark it via tagged Item
     gc->mark_top = 0;
     gc_mark_item(gc, string_item(str));
 
     // should be marked and on the mark stack
-    EXPECT_EQ(header->marked, 1);
+    EXPECT_EQ(header->mark_epoch, gc->mark_epoch);
     EXPECT_GE(gc->mark_top, 1);
+}
+
+TEST_F(GCHeapTest, WrappingMarkEpochPreservesRootedObjects) {
+    uint64_t root = string_item(make_string("root across wraparound"));
+    gc_register_root(gc, &root);
+    for (int i = 0; i < UINT8_MAX + 1; i++) {
+        gc_collect(gc, nullptr, 0);
+        ASSERT_EQ(gc->object_count, 1u);
+    }
+    gc_unregister_root(gc, &root);
+    gc_collect(gc, nullptr, 0);
+    EXPECT_EQ(gc->object_count, 0u);
 }
 
 TEST_F(GCHeapTest, MarkInlineValueIgnored) {
@@ -1966,9 +1978,8 @@ TEST_F(GCHeapTest, MarkListTracesChildren) {
     // We had 3 objects total (str_a, str_b, list), all reachable
     EXPECT_EQ(gc->object_count, 3u);
 
-    // verify all headers are unmarked (reset after collection)
-    gc_header_t* list_h = gc_get_header(list);
-    EXPECT_EQ(list_h->marked, 0);  // marks are reset after sweep
+    // A completed trace does not mark anything in the next cycle.
+    EXPECT_NE(gc_get_header(list)->mark_epoch, gc->mark_epoch);
 
     gc_unregister_root(gc, &root);
 }
@@ -2163,8 +2174,8 @@ TEST_F(GCHeapTest, MarkWorklistGrowthFailureAbandonsCollectionWithoutMutation) {
     EXPECT_EQ(gc_data_zone_used(gc->data_zone), nursery_before);
     EXPECT_TRUE(gc_is_nursery_data(gc, ((LambdaGcListLayout*)parent)->items));
     EXPECT_TRUE(gc_is_nursery_data(gc, ((LambdaGcListLayout*)child)->items));
-    EXPECT_EQ(gc_get_header(parent)->marked, 0);
-    EXPECT_EQ(gc_get_header(child)->marked, 0);
+    EXPECT_NE(gc_get_header(parent)->mark_epoch, gc->mark_epoch);
+    EXPECT_NE(gc_get_header(child)->mark_epoch, gc->mark_epoch);
 
     gc_collect(gc, &root, 1);
     EXPECT_EQ(gc->collections, 1u);

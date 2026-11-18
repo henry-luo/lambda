@@ -41,25 +41,26 @@ pub fn choose(i, j, d, k) any^ {
 }
 
 // position and heading along the current run or turn
-pub fn pose(a) any^ {
+fn pose_at(a, s) any^ {
     let b = node(a.i, a.j), f = city.DIRS[a.d]
     let r = [0.0 - f[1], f[0]]
     let h = city.heading_of_dir(a.d);
     if (a.phase == "run") {
-        let back = city.PITCH - city.EDGE - a.s;
+        let back = city.PITCH - city.EDGE - s;
         {x: b[0] - f[0] * back + r[0] * city.LANE, z: b[1] - f[1] * back + r[1] * city.LANE, heading: h}
     } else {
         let turn = turn_sign(a.d, a.next)
-        if (turn == 0) {x: b[0] + f[0] * (a.s - city.EDGE) + r[0] * city.LANE, z: b[1] + f[1] * (a.s - city.EDGE) + r[1] * city.LANE, heading: h}
+        if (turn == 0) {x: b[0] + f[0] * (s - city.EDGE) + r[0] * city.LANE, z: b[1] + f[1] * (s - city.EDGE) + r[1] * city.LANE, heading: h}
         else {
             let radius = city.EDGE - turn * city.LANE
-            let phi = a.s / radius
+            let phi = s / radius
             let cx = b[0] - f[0] * city.EDGE + turn * r[0] * city.EDGE, cz = b[1] - f[1] * city.EDGE + turn * r[1] * city.EDGE;
             {x: cx + radius * (0.0 - turn * r[0] * cos(phi) + f[0] * sin(phi)),
              z: cz + radius * (0.0 - turn * r[1] * cos(phi) + f[1] * sin(phi)), heading: h - turn * phi}
         }
     }
 }
+pub fn pose(a) any^ => pose_at(a, a.s)
 
 // every block run that has a junction at both ends, as a spawn site
 let RUNS = [for (i in 0 to city.N, j in 0 to city.N, d in 0 to 3, let f = city.DIRS[d]
@@ -111,32 +112,32 @@ fn target_speed(a, others, t) {
     min([a.cruise, stop_v, corner, leader_limit(a, others)])
 }
 // advance along the path, carrying leftover distance into the next phase
-fn advance(a, distance) any^ {
+fn advance(a, distance, speed, bump, wait_time) any^ {
     let length = if (a.phase == "run") RUN else turn_length(turn_sign(a.d, a.next))
     let s = a.s + distance;
-    if (s < length) {*: a, s: s}
-    else if (a.phase == "run") advance({*: a, phase: "turn", s: 0.0}, s - length)
+    if (s < length) {*: a, s: s, speed: speed, bump: bump, wait: wait_time, *: pose_at(a, s)}
+    else if (a.phase == "run") advance({*: a, phase: "turn", s: 0.0}, s - length, speed, bump, wait_time)
     else {
         let f = city.DIRS[a.next]
         let i = a.i + int(f[0]), j = a.j + int(f[1])
         let trips = a.trips + 1;
         advance({*: a, phase: "run", s: 0.0, i: i, j: j, d: a.next, trips: trips,
-            next: choose(i, j, a.next, rng.derive(KEY, [a.n, trips]))}, s - length)
+            next: choose(i, j, a.next, rng.derive(KEY, [a.n, trips]))}, s - length, speed, bump, wait_time)
     }
 }
-pub fn step_car(a, others, t, dt, bumped) {
+pub fn step_car(a, others, t, dt, bumped) any^ {
     let bump = if (bumped) 2.0 else max(0.0, a.bump - dt)
     let goal = if (bump > 0.0) 0.0 else target_speed(a, others, t)
-    let speed = u.approach(a.speed, goal, (if (goal > a.speed) 2.6 else 8.0) * dt)
-    let moved = advance({*: a, speed: speed, bump: bump, wait: if (speed < 0.2) a.wait + dt else 0.0}, speed * dt);
-    {*: moved, *: pose(moved)}
+    let speed = u.approach(a.speed, goal, (if (goal > a.speed) 2.6 else 8.0) * dt);
+    // Publish the pose with the final path update after crossing any junctions.
+    advance(a, speed * dt, speed, bump, if (speed < 0.2) a.wait + dt else 0.0)^
 }
 // one tick for all traffic; player is {x, z, heading, hl, id, player: true}, hits lists the ids it struck
 // cars more than 250 m from the player step every other frame when a frame number is given
 pub let CADENCE = [[250.0, 2]]
 pub fn step(agents, player, t, dt, hits = [], frame = null) any^ {
     let others = [*agents, player];
-    u.staggered(agents, player.x, player.z, CADENCE, frame, dt, (a, owed) any^ => step_car(a, others, t, owed, contains(hits, a.id)))^
+    u.staggered(agents, player.x, player.z, CADENCE, frame, dt, (a, owed) any^ => step_car(a, others, t, owed, contains(hits, a.id))^)^
 }
 
 // the lane run nearest a free-driving car, as an agent record: Reset puts the car there and

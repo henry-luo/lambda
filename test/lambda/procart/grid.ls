@@ -33,8 +33,31 @@ let wk = grid.walk(rng.key(6), {width: 40, height: 20, fill: 0.35})^;
 
 "5 BSP partitions tile the rectangle";
 let leaves = grid.bsp(k, {width: 60, height: 40, min_size: 7})^
-let cover = [for (y in 0 to 39) for (x in 0 to 59) len([for (r in leaves where x >= r[0] and x < r[0] + r[2] and y >= r[1] and y < r[1] + r[3]) r])];
-[len(leaves), all([for (c in cover) c == 1]), all([for (r in leaves) r[2] >= 7 and r[3] >= 7])];
+fn covered_once(rectangles, w: int, h: int) bool^ {
+    // Count each rectangle's cells directly so overlap and holes are checked
+    // without scanning the complete rectangle list for every cell.
+    var cover: int[] = [for (i in 0 to (w * h - 1)) 0]
+    var r: int = 0
+    let count = len(rectangles)^
+    while (r < count) {
+        let box = rectangles[r]
+        let right = min(w, box[0] + box[2])
+        let bottom = min(h, box[1] + box[3])
+        var y = max(0, box[1])
+        while (y < bottom) {
+            var x = max(0, box[0])
+            while (x < right) {
+                let i = y * w + x
+                cover[i] = cover[i] + 1
+                x = x + 1
+            }
+            y = y + 1
+        }
+        r = r + 1
+    }
+    all([for (c in cover) c == 1])
+}
+[len(leaves), covered_once(leaves, 60, 40)^, all([for (r in leaves) r[2] >= 7 and r[3] >= 7])];
 [len(grid.bsp(k, {width: 60, height: 40, max_depth: 0})^), grid.bsp(k, {width: 60, height: 40, min_size: 0}) ^ { "min_size" }];
 
 "6 dungeons: one room per leaf, all floor connected";
@@ -57,7 +80,11 @@ grid.maze(k, {width: 3, height: 2, method: 'kruskal'})^;
 [grid.maze(k, {width: 200, height: 200}) ^ { "size" }, grid.maze(k, {width: 3, height: 2, method: 'x'}) ^ { "method" }];
 
 "8 Wilson draws uniformly from the 15 spanning trees of a 3 x 2 grid";
-let trees = [for (i in 0 to 2999) join([for (e in ((sort(grid.maze_edges(rng.at(rng.key(10), i), {width: 3, height: 2, method: 'wilson'})^ |>
-    (if (~[0] < ~[1]) ~ else [~[1], ~[0]]), (e) => e)) ^ { [] })) string(e[0]) ++ "-" ++ string(e[1])], " ")]
+let tree_seed = rng.key(10)
+let tree_options = {width: 3, height: 2, method: 'wilson'}
+// Compare canonical undirected edge lists directly, preserving duplicates
+// and full vertex indices without allocating an intermediate text key.
+let trees = [for (i in 0 to 2999) ((sort(grid.maze_edges(rng.at(tree_seed, i), tree_options)^ |>
+    (if (~[0] < ~[1]) ~ else [~[1], ~[0]]), (e) => e)) ^ { [] })]
 let counts = [for (t in trees group by t as tree into g) len(g)];
 [len(counts), sum([for (c in counts) (float(c) - 200.0) * (float(c) - 200.0) / 200.0]) < 36.1]

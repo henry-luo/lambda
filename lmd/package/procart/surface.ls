@@ -70,19 +70,21 @@ fn field(p,q,periodic) float^ {
 }
 pub fn sample(pattern,coordinate,periodic=false) array {
     let p=pattern.parameters,q=coordinate
-    let n=field(pattern,q,periodic)
+    let kind=pattern.generator
+    // These two patterns are geometric; neither consumes the noise field.
+    let n=if (kind == "leaf-veins" or kind == "scales") 0.0 else field(pattern,q,periodic)
     let phase=q[0]*p.frequency+p.warp*n
-    let signal=if (pattern.generator == "noise") 0.5+0.5*n
-        else if (pattern.generator == "stripes") 0.5+0.5*sin(2.0*math.pi*phase)
-        else if (pattern.generator == "marble") min(1.0,abs(sin(math.pi*phase))/p.width)
-        else if (pattern.generator == "bark") (abs(sin(math.pi*phase))**0.35)*(0.8+0.2*n)
-        else if (pattern.generator == "spots") clamp((abs(n)-p.width)*8.0+0.5)
-        else if (pattern.generator == "feathers") {
+    let signal=if (kind == "noise") 0.5+0.5*n
+        else if (kind == "stripes") 0.5+0.5*sin(2.0*math.pi*phase)
+        else if (kind == "marble") min(1.0,abs(sin(math.pi*phase))/p.width)
+        else if (kind == "bark") (abs(sin(math.pi*phase))**0.35)*(0.8+0.2*n)
+        else if (kind == "spots") clamp((abs(n)-p.width)*8.0+0.5)
+        else if (kind == "feathers") {
             let across=abs(fraction(q[0]*p.frequency)-0.5)
             let bar=abs(sin(math.pi*(q[1]*p.frequency-across*1.7+p.warp*n)));
             clamp(bar/(p.width*3.0))*clamp(across/(p.width*0.7))
         }
-        else if (pattern.generator == "scales") {
+        else if (kind == "scales") {
             let row=floor(q[1]*p.frequency),u=fraction(q[0]*p.frequency+0.5*(row%2.0))-0.5
             let z=fraction(q[1]*p.frequency),rim=abs(sqrt(u*u+(z-0.15)*(z-0.15))-0.55);
             clamp(rim/(p.width*1.5))

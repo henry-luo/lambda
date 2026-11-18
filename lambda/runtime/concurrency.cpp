@@ -223,6 +223,7 @@ struct LambdaScheduler {
     LambdaTask* root;
     uint64_t next_task_id;
     uint64_t event_sequence;
+    uint64_t root_wait_watchdog_ms;
     int mailbox_capacity;
     int live_count;
     // the live tasks a document owns, with their descendants (S13.3.1v2): the
@@ -732,6 +733,8 @@ static void scheduler_uv_drain(void) {
     if (attached_scheduler) lambda_scheduler_run_ready(attached_scheduler);
 }
 
+static const uint64_t scheduler_watchdog_ms = 5000;
+
 extern "C" LambdaScheduler* lambda_scheduler_create(int mailbox_capacity) {
     // The scheduler owns pure-Lambda loop readiness from its first task. If
     // initialization waits for a child timer, an initial drain can observe a
@@ -749,6 +752,16 @@ extern "C" LambdaScheduler* lambda_scheduler_create(int mailbox_capacity) {
         ? mailbox_capacity : LAMBDA_MAILBOX_DEFAULT_CAPACITY;
     scheduler->next_task_id = 1;
     scheduler->serial = scheduler_serial_next++;
+    scheduler->root_wait_watchdog_ms = scheduler_watchdog_ms;
+    // Integration tests cross the real root-wait watchdog on a shorter clock.
+    const char* setting = getenv("LAMBDA_TEST_ROOT_WAIT_WATCHDOG_MS");
+    if (setting && *setting) {
+        char* end = NULL;
+        unsigned long interval = strtoul(setting, &end, 10);
+        if (!*end && interval > 0 && interval <= scheduler_watchdog_ms) {
+            scheduler->root_wait_watchdog_ms = interval;
+        }
+    }
     if (uv_async_init(lambda_uv_loop(), &scheduler->wake, [](uv_async_t* handle) {
             LambdaScheduler* ready = handle ? (LambdaScheduler*)handle->data : NULL;
             if (ready) lambda_scheduler_run_ready(ready);
@@ -1072,6 +1085,7 @@ static bool scheduler_settle_weak(LambdaScheduler* scheduler) {
 // them can resume in any order; nothing is buried beneath this loop.
 static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) {
     if (!scheduler) return 0;
+    uint64_t watchdog_ms = awaited ? scheduler->root_wait_watchdog_ms : scheduler_watchdog_ms;
     uv_loop_t* loop = lambda_uv_loop();
     LambdaDrainWatchdogState watchdog_state = {false, false};
     uv_timer_t watchdog;
@@ -1105,7 +1119,7 @@ static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) 
             watchdog_state.fired = false;
             watchdog_state.grace_turn = false;
             if (uv_timer_start(&watchdog,
-                    scheduler_drain_watchdog_cb, 5000, 0) == 0) {
+                    scheduler_drain_watchdog_cb, watchdog_ms, 0) == 0) {
                 watchdog_started = true;
             }
         }
@@ -1119,7 +1133,7 @@ static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) 
         if (awaited && watchdog_state.fired && scheduler_loop_busy(loop, &watchdog)) {
             watchdog_state.fired = false;
             watchdog_state.grace_turn = false;
-            uv_timer_start(&watchdog, scheduler_drain_watchdog_cb, 5000, 0);
+            uv_timer_start(&watchdog, scheduler_drain_watchdog_cb, watchdog_ms, 0);
         }
         if (step == 0 && !uv_loop_alive(loop) && !scheduler->run_queue.first) break;
     }

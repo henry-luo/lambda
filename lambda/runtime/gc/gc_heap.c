@@ -48,7 +48,7 @@ void gc_heap_set_node_release_hook(void (*fn)(void*)) { g_gc_heap_node_release =
 #define GC_MARK_STACK_INITIAL 4096
 
 static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr);
-static int is_gc_object(gc_heap_t* gc, void* ptr);
+static inline int is_gc_object(gc_heap_t* gc, void* ptr);
 
 static volatile uint64_t gc_scalar_tag_allocations[3];
 
@@ -503,6 +503,7 @@ gc_heap_t* gc_heap_create(void) {
         return NULL;
     }
     gc->vm_context = mem_context_root();
+    gc->mark_epoch = 1;
 
     // create object zone (size-class free-list allocator)
     gc->object_zone = gc_object_zone_create(gc->vm_context, NULL);
@@ -1054,6 +1055,7 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
     // slots GC_FLAG_FREED and leaves them addressable, so a set bit continues
     // to mean "a real slot begins here" — exactly what the old scan reported.
     gc_bump_block_t* cur_block = gc->bump_blocks;
+    if (cur_block) cur_block->live_slots++;
     if (cur_block && cur_block->alloc_bits) {
         size_t off = (size_t)(cursor - cur_block->base);
         size_t bit = off / GC_BUMP_GRANULE;
@@ -1144,13 +1146,7 @@ void* gc_data_alloc_uninit(gc_heap_t* gc, size_t size) {
 
 int gc_is_managed(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
-    // check object zone
-    if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
-    // Large JS environments use the malloc-backed object path; omitting that
-    // ownership class made their scalar-tail rehome guard silently skip them.
-    if (gc_large_object_contains(gc, ptr)) return 1;
-    // check bump-allocated object structs
-    if (gc_bump_block_owns_exact(gc, ptr)) return 1;
+    if (is_gc_object(gc, ptr)) return 1;
     // check data zones
     if (gc_data_zone_owns(gc->data_zone, ptr)) return 1;
     if (gc_data_zone_owns(gc->tenured_data, ptr)) return 1;
@@ -1474,10 +1470,10 @@ static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
     return gc->mark_stack[--gc->mark_top];
 }
 
-static int gc_mark_header(gc_heap_t* gc, gc_header_t* header) {
-    if (!header || header->marked || (header->gc_flags & GC_FLAG_FREED)) return 0;
+static inline __attribute__((always_inline)) int gc_mark_header(gc_heap_t* gc, gc_header_t* header) {
+    if (header->mark_epoch == gc->mark_epoch || (header->gc_flags & GC_FLAG_FREED)) return 0;
     if (!mark_stack_push(gc, header)) return 0;
-    header->marked = 1;
+    header->mark_epoch = gc->mark_epoch;
     return 1;
 }
 
@@ -1599,35 +1595,35 @@ static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
     return 0;
 }
 
-// check if a pointer is to a GC-managed OBJECT (has GCHeader)
-static int is_gc_object(gc_heap_t* gc, void* ptr) {
-    if (!gc || !ptr) return 0;
-    // Marking asks this for every traced word; one range search answers both
-    // slab slots and bump blocks. Slots never straddle blocks and large objects
-    // never share a block's range, so a block hit is decided by that block alone.
+// Check exact object starts. Slab slots and bump blocks share one range
+// index, while large objects are individually freed and never cached.
+static int gc_lookup_object(gc_heap_t* gc, void* ptr, size_t bucket) {
     void* bump_block = NULL;
-    if (gc_object_zone_owns_or_foreign(gc->object_zone, ptr, &bump_block)) return 1;
-    if (bump_block) return gc_bump_block_slot_exact(gc, (gc_bump_block_t*)bump_block, (uint8_t*)ptr);
+    if (gc_object_zone_owns_or_foreign(gc->object_zone, ptr, &bump_block) ||
+            (bump_block && gc_bump_block_slot_exact(gc, (gc_bump_block_t*)bump_block, (uint8_t*)ptr))) {
+        gc->object_cache[bucket] = ptr;
+        return 1;
+    }
+    if (bump_block) return 0;
     if (gc_large_object_contains(gc, ptr)) return 1;
-    // every bump block registers its range with the object zone and a slot's
-    // user pointer lies inside it, so only a zone-less heap walks the blocks.
+    // Every bump block registers its range, so only a zone-less heap walks them.
     return !gc->object_zone && gc_bump_block_owns_exact(gc, ptr);
 }
 
-static void gc_mark_candidate(gc_heap_t* gc, void* ptr) {
-    if (!gc || !ptr) return;
-    size_t bucket = (((uintptr_t)ptr >> 4) ^ ((uintptr_t)ptr >> 12)) & (GC_MARK_CACHE_SIZE - 1);
-    // shared globals/prototypes recur on many edges; only validated marks bypass ownership lookup.
-    if (gc->collecting && gc->mark_cache[bucket] == ptr) return;
-    if (!is_gc_object(gc, ptr)) return;
-    gc_header_t* header = gc_get_header(ptr);
-    gc_mark_header(gc, header);
-    if (gc->collecting && header->marked && !(header->gc_flags & GC_FLAG_FREED))
-        gc->mark_cache[bucket] = ptr;
+static inline __attribute__((always_inline)) int is_gc_object(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr) return 0;
+    // Reuse verified ownership across sweeps. Mark and free bits still come
+    // from the live slot whenever a reference is traced.
+    size_t bucket = (((uintptr_t)ptr >> 4) ^ ((uintptr_t)ptr >> 12)) & (GC_OBJECT_CACHE_SIZE - 1);
+    return gc->object_cache[bucket] == ptr || gc_lookup_object(gc, ptr, bucket);
+}
+
+static inline __attribute__((always_inline)) void gc_mark_candidate(gc_heap_t* gc, void* ptr) {
+    if (is_gc_object(gc, ptr)) gc_mark_header(gc, (gc_header_t*)ptr - 1);
 }
 
 void gc_mark_item(gc_heap_t* gc, uint64_t item) {
-    gc_mark_candidate(gc, item_to_ptr(gc, item));
+    if (item) gc_mark_candidate(gc, item_to_ptr(gc, item));
 }
 
 void gc_mark_object_ptr(gc_heap_t* gc, void* ptr) {
@@ -1642,7 +1638,7 @@ static int gc_ephemeron_key_is_live(gc_heap_t* gc, uint64_t item) {
     // header whose death this collector can observe, so they remain live.
     if (!ptr || !is_gc_object(gc, ptr)) return 1;
     gc_header_t* header = gc_get_header(ptr);
-    return header && header->marked && !(header->gc_flags & GC_FLAG_FREED);
+    return header && header->mark_epoch == gc->mark_epoch && !(header->gc_flags & GC_FLAG_FREED);
 }
 
 static int gc_ephemeron_mark_value(gc_heap_t* gc, uint64_t item) {
@@ -1705,7 +1701,7 @@ static void gc_process_weak_slots(gc_heap_t* gc) {
         void* ptr = item_to_ptr(gc, *slot);
         if (!ptr || !is_gc_object(gc, ptr)) continue;
         gc_header_t* header = gc_get_header(ptr);
-        if (header && header->marked && !(header->gc_flags & GC_FLAG_FREED)) continue;
+        if (header && header->mark_epoch == gc->mark_epoch && !(header->gc_flags & GC_FLAG_FREED)) continue;
 
         gc_weak_clear_fn on_clear = gc->weak_slots[i].on_clear;
         void* context = gc->weak_slots[i].context;
@@ -2325,7 +2321,7 @@ static void gc_compact_data(gc_heap_t* gc) {
 #endif
 
     while ((current = gc_next_compaction_owner(gc, current, &cursor))) {
-        if (!current->marked || (current->gc_flags & GC_FLAG_FREED)) {
+        if (current->mark_epoch != gc->mark_epoch || (current->gc_flags & GC_FLAG_FREED)) {
             continue;
         }
 
@@ -2688,7 +2684,7 @@ static void gc_sweep(gc_heap_t* gc) {
             continue;
         }
 
-        if (current->marked) {
+        if (current->mark_epoch == gc->mark_epoch) {
             // survivor marks remain available through data compaction.
             alive_count++;
             prev = current;
@@ -2732,6 +2728,17 @@ static void gc_sweep(gc_heap_t* gc) {
 // ============================================================================
 
 // Collect from registered, side-stack, and explicit Item roots only.
+static void gc_advance_mark_epoch(gc_heap_t* gc) {
+    // A fresh mark epoch avoids a second survivor walk after every sweep.
+    // On wrap, clear stale epochs before reusing the first nonzero value.
+    if (++gc->mark_epoch == 0) {
+        for (gc_header_t* header = gc->all_objects; header; header = header->next) {
+            header->mark_epoch = 0;
+        }
+        gc->mark_epoch = 1;
+    }
+}
+
 void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
                 int extra_count, uint64_t* root_base, int64_t root_count) {
     if (!gc) return;
@@ -2742,7 +2749,6 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     }
     uint64_t gc_total_token = GC_PROFILE_ENTER("gc_collect_total");
     gc->collecting = 1;
-    memset(gc->mark_cache, 0, sizeof(gc->mark_cache));
 
     log_debug("gc_collect: starting collection #%zu (%zu objects, %zu bytes, data_zone=%zu)",
               gc->collections + 1, gc->object_count, gc->total_allocated,
@@ -2759,7 +2765,6 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
         GC_PROFILE_COUNT("gc_collect_slab_count", gc->object_zone->slab_count);
     }
 
-    // reset mark stack
     gc->mark_top = 0;
     gc->compaction_owner_count = 0;
     gc->compaction_owners_valid = true;
@@ -2819,14 +2824,12 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     if (gc->mark_failed) {
         // Incomplete reachability must never clear weak edges, move buffers,
         // or reclaim objects. Preserve the heap for a later collection attempt.
-        for (gc_header_t* header = gc->all_objects; header; header = header->next) {
-            header->marked = 0;
-        }
         gc->mark_top = 0;
         // an abandoned trace must discard its partial compaction worklist too.
         gc->compaction_owner_count = 0;
         gc->compaction_owners_valid = false;
         gc->mark_failed = 0;
+        gc_advance_mark_epoch(gc);
         gc->collecting = 0;
         log_error("gc-mark-worklist: allocation failed; collection abandoned");
         return;
@@ -2872,10 +2875,8 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     // no worklist entry remains live across collections.
     gc->compaction_owner_count = 0;
     gc->compaction_owners_valid = false;
+    gc_advance_mark_epoch(gc);
 
-    for (gc_header_t* header = gc->all_objects; header; header = header->next) {
-        header->marked = 0;
-    }
     if (gc->retired_tenured_data) {
         gc_data_zone_destroy(gc->retired_tenured_data);
         gc->retired_tenured_data = NULL;

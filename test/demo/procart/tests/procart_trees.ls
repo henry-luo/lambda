@@ -4,8 +4,10 @@ import plant: lambda.procart.plant
 import scene: lambda.procart.scene
 import native: lambda.scene3d
 let documents=map([for (item in T.CATALOG) (item.id,input("test/demo/procart/samples/"++item.file,'mark')^)])
-let st=T.initial(documents)^;
-[all([for (item in T.CATALOG) native.validate(T.viewport(T.command(st,item.id)^))^]),
+let st=T.initial(documents)^
+// Each selection supplies both the viewport check and later interaction checks.
+let selected=map([for (item in T.CATALOG) (item.id,T.command(st,item.id)^)]);
+[all([for (item in T.CATALOG) native.validate(T.viewport(selected[item.id]))^]),
  st.model.stats.branches==36,st.model.stats.leaves==560,
  plant.architecture(parse(format(st.document,'mark')^,'mark')^)^==st.skeleton];
 let coarse=T.command(st,"coarse")^,full=T.command(coarse,"full")^;
@@ -14,7 +16,7 @@ let coarse=T.command(st,"coarse")^,full=T.command(coarse,"full")^;
 let next=T.command(st,"next")^,back=T.command(next,"previous")^,pruned=T.command(st,"prune")^,grown=T.command(pruned,"grow")^;
 [next.seed==2027,next.skeleton!=st.skeleton,back.skeleton==st.skeleton,back.model==st.model,
  T.depth(pruned)==2,pruned.model.stats.branches==8,grown.model==st.model];
-let wind=T.command(st,"windswept")^,bent=T.command(wind,"bend-up")^,apex=T.command(st,"apex")^;
+let wind=selected.windswept,bent=T.command(wind,"bend-up")^,apex=selected.apex;
 [bent.skeleton!=wind.skeleton,apex.model.stats.branches==31,T.depth(T.command(apex,"grow")^)==6,
  native.validate(T.viewport(T.command(apex,"prune")^))^];
 let doc=<procart version:2,seed:2026,

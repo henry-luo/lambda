@@ -12,16 +12,18 @@ pub let CATALOG=[
  {id:"apex",title:"Growing apices",tag:"04 / DEVELOPMENT",note:"Parametric buds divide in parallel. A spatial turtle interprets the result as stems and leaves.",file:"tree-apex.mark"}]
 pub let DETAILS={full:{segments:10,section_stride:1,leaf_stride:1,leaf_scale:1.0},
     coarse:{segments:5,section_stride:3,leaf_stride:3,leaf_scale:1.45}}
+let PLINTH=shapes.geometry("cylinder",{segments:48},"tree-plinth")
 pub fn description(id) map => [for (item in CATALOG where item.id == id) item][0]
 pub fn home() map^ => camera.prepare({position:[8.0,6.0,10.0],target:[0.0,2.2,0.0],fov:36.0})
 pub fn stage_label(st,level) string => (if (st.document.generator == "plant.apex") "Generation " else "Level ")++string(level)
 pub fn viewport(st,options={}) element {
     let id=options.id or "tree-scene",preview=options.preview == true
-    let lens=home(),floor=shapes.geometry("cylinder",{segments:48},"tree-plinth")
-    let model={*:st.model,resources:[*st.model.resources,floor],parts:[
+    let lens=home()
+    let parts=if (st.leaves) st.model.parts else [for (part in st.model.parts where part.role != "leaf") part]
+    let model={*:st.model,resources:[*st.model.resources,PLINTH],parts:[
         {id:"plinth",kind:"plinth",role:"ground",geometry:"tree-plinth",color:"#d8d1bd",opacity:1.0,
             matrix:[0.0,-0.12,0.0,0.0,2.7,0.0,0.0,0.0,0.0,0.0,2.7,0.0,0.0,-0.1,0.0,1.0]},
-        *[for (part in st.model.parts where st.leaves or part.role != "leaf") part]]};
+        *parts]};
     let rendered=scene.to_scene3d(model,{id:id,camera:{id:id++"-camera"},position:lens.position,target:lens.target,fov:lens.fov,
         width:if (preview) 300 else 1000,height:if (preview) 160 else 320,background:"#eeeae0",
         lights:[native.light('hemisphere',{color:"#fff7df",'ground-color':"#7e896e",intensity:0.7}),
@@ -48,6 +50,15 @@ fn regenerate(st,doc) map^ {
         skeleton:if (level == depth(current)) sk else plant.architecture(specimen(doc,base,level))^}];
     remesh({*:current,stages:stages})^
 }
+// Pruning or growing changes the displayed depth, not the existing preview specimens.
+fn change_depth(st,doc,level) map^ {
+    let stage=[for (item in st.stages where item.level == level) item][0];
+    if (stage != null) {*:st,document:doc,skeleton:stage.skeleton,model:stage.model}
+    else {
+        let skeleton=plant.architecture(doc)^;
+        {*:st,document:doc,skeleton:skeleton,model:plant.mesh(skeleton,DETAILS[st.detail])^}
+    }
+}
 pub fn initial(documents) map^ {
     let doc=documents.broadleaf;
     regenerate({seed:doc.seed,id:"broadleaf",documents:documents,detail:"full",leaves:true},doc)^
@@ -69,7 +80,7 @@ pub fn command(st,action) map^ {
         let strength=if (action == "bend-up") min(1.5,p.force.strength+0.15) else if (action == "bend-down") max(0.0,p.force.strength-0.15) else p.force.strength
         let doc=specimen(<tree *:{*:map(source),seed:seed,parameters:{*:p,force:{*:p.force,strength:strength}}}>,st.documents[id],next);
         if (doc == st.document) st
-        else if (selected != null) {*:st,document:doc,skeleton:selected.skeleton,model:selected.model}
+        else if (id == st.id and (selected != null or action == "prune" or action == "grow")) change_depth(st,doc,next)^
         else regenerate({*:st,id:id,seed:seed},doc)^
     }
 }

@@ -844,7 +844,9 @@ static void jube_install_prototype_member(Item prototype, JubeMemberRecord* rec)
         RootFrame roots(2);
         Rooted<Item> prototype_root(roots, prototype);
         Rooted<Item> method_root(roots, jube_member_js_method_item(rec));
-        jube_internal_host_api()->value->property_set(prototype_root.get(),
+        // Interface publication defines an own method on the declaring
+        // prototype (D9.5.4); it does not perform a guest property assignment.
+        jube_internal_host_api()->value->property_set_own(prototype_root.get(),
             jube_name_item(rec->camel_name), method_root.get());
     }
 }

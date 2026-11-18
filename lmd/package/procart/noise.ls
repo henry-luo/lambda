@@ -18,7 +18,8 @@ fn lattice(v: float) int => int(floor(v))
 
 // --- value and white noise: one hashed value per lattice point ---
 fn hv2(p, x: int, y: int) float^ => float(p[p[x] + y]) / 127.5 - 1.0
-fn hv3(p, x: int, y: int, z: int) float^ => float(p[p[p[x] + y] + z]) / 127.5 - 1.0
+fn value_at(p, index: int) float^ => float(p[index]) / 127.5 - 1.0
+fn hv3(p, x: int, y: int, z: int) float^ => value_at(p, p[p[x] + y] + z)
 
 pub fn white2(p, x: float, y: float) float^ => hv2(p, band(lattice(x), 255), band(lattice(y), 255))
 pub fn white3(p, x: float, y: float, z: float) float^ =>
@@ -43,10 +44,13 @@ pub fn value3(p, x: float, y: float, z: float) float^ {
     let c = band(zi, 255)
     let u = fade(x - float(xi))
     let v = fade(y - float(yi))
-    let w = fade(z - float(zi));
-    lerp(lerp(lerp(hv3(p, a, b, c), hv3(p, a + 1, b, c), u), lerp(hv3(p, a, b + 1, c), hv3(p, a + 1, b + 1, c), u), v),
-        lerp(lerp(hv3(p, a, b, c + 1), hv3(p, a + 1, b, c + 1), u),
-            lerp(hv3(p, a, b + 1, c + 1), hv3(p, a + 1, b + 1, c + 1), u), v), w)
+    let w = fade(z - float(zi))
+    // Both z planes share the four x/y permutation lookups.
+    let x0 = p[a] + b, x1 = p[a + 1] + b
+    let aa = p[x0] + c, ba = p[x1] + c, ab = p[x0 + 1] + c, bb = p[x1 + 1] + c;
+    lerp(lerp(lerp(value_at(p, aa), value_at(p, ba), u), lerp(value_at(p, ab), value_at(p, bb), u), v),
+        lerp(lerp(value_at(p, aa + 1), value_at(p, ba + 1), u),
+            lerp(value_at(p, ab + 1), value_at(p, bb + 1), u), v), w)
 }
 
 // --- gradient (Perlin) noise ---

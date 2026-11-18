@@ -9,19 +9,22 @@
 #include <limits.h>
 #include <stdlib.h>
 
-// nested pools share the suite's allocation; more than four compiler children
-// can exhaust VM/file descriptors while other native suites share the host.
-inline size_t test_batch_worker_limit(size_t count) {
-    size_t limit = count < 4 ? count : 4;
-    const char* limits[] = {"AST_TUNE_BATCH_WORKERS", "LAMBDA_TEST_MAX_CONCURRENT"};
-    for (const char* name : limits) {
-        const char* value = getenv(name);
-        if (!value || !*value) continue;
-        char* end = nullptr;
-        unsigned long parsed = strtoul(value, &end, 10);
-        if (end != value && !*end && parsed > 0 && parsed < limit) limit = (size_t)parsed;
-    }
-    return limit;
+inline size_t test_batch_worker_env(const char* name, size_t fallback) {
+    const char* value = getenv(name);
+    if (!value || *value < '0' || *value > '9') return fallback;
+    char* end = nullptr;
+    errno = 0;
+    unsigned long parsed = strtoul(value, &end, 10);
+    return !errno && !*end && parsed > 0 ? (size_t)parsed : fallback;
+}
+
+// Pools with larger per-child workloads keep the default four-worker cap.
+inline size_t test_batch_worker_limit(size_t count, size_t maximum = 4) {
+    size_t allocated = test_batch_worker_env("LAMBDA_TEST_MAX_CONCURRENT", 4);
+    size_t limit = allocated < maximum ? allocated : maximum;
+    size_t profile = test_batch_worker_env("AST_TUNE_BATCH_WORKERS", limit);
+    if (profile < limit) limit = profile;
+    return count < limit ? count : limit;
 }
 
 struct TestBatchResult {

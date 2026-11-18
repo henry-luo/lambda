@@ -26,8 +26,9 @@ pn main() {
         let disk_before = input(area ++ "/tree/note",'text')^
         let prepared = host.prepare_save(restarted,opened.id)^
         let saved = host.commit_save(local.open_repository(handle.path,secret,"document-repository")^,opened.id)^
-        let record = model.get(local.status(restarted)^.state,opened.id)^
-        let heads = workspace.entry(local.status(restarted)^.state.endpoint.replica,opened.entry)^.heads
+        let committed = local.status(restarted)^.state
+        let record = model.get(committed,opened.id)^
+        let heads = workspace.entry(committed.endpoint.replica,opened.entry)^.heads
         let history = local.history(restarted,opened.entry)^
         host.apply_edits(restarted,opened.id,[{kind:'text',start:0,count:0,value:"U"}])^
         output("aLb!",area ++ "/tree/note")^
