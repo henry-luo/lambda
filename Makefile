@@ -505,7 +505,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: push-lambda pull-lambda all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
+.PHONY: push-lambda pull-lambda commit-lambda all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-radiant-baseline test-radiant-full test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-headless build-headless lambda-nomir build-nomir lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
@@ -552,6 +552,7 @@ help:
 	@echo "Maintenance:"
 	@echo "  push-lambda   - Commit and push submodules, then Lambda (message='...')"
 	@echo "  pull-lambda   - Pull Lambda and update all recursive submodules"
+	@echo "  commit-lambda - Commit Lambda and all recursive submodules (message='...')"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
 	@echo "  clean-grammar - Remove generated Lambda CST grammar files"
@@ -3632,6 +3633,9 @@ count-loc:
 export message MESSAGE
 push-lambda:
 	@$(PYTHON) utils/push_lambda.py
+
+commit-lambda:
+	@$(PYTHON) utils/commit_lambda.py
 
 # Follow the submodule revisions recorded by Lambda and each nested repository.
 pull-lambda:
