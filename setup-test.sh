@@ -80,3 +80,11 @@ for corpus_dir in "$LAMBDA_TEST_DIR"/*; do
         echo "Added link: test/$corpus_name -> $expected_target"
     fi
 done
+
+# The visual baseline and DevTools screenshot tests share the render package.
+if [ -f "$ROOT_DIR/test/render/package-lock.json" ]; then
+    command -v npm >/dev/null 2>&1 || die "npm is required for render test dependencies"
+    if ! npm ls --prefix "$ROOT_DIR/test/render" --omit=dev --depth=0 >/dev/null 2>&1; then
+        npm ci --prefix "$ROOT_DIR/test/render" --no-audit --no-fund
+    fi
+fi

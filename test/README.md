@@ -526,7 +526,7 @@ test. Time the gate with a release host (`make build-release-compile`, then
 
 ## 5. External test data
 
-Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides the `lambda-test` submodule). It clones `ref/wpt` at a pinned commit and links each top-level corpus directory from `lambda-test/` as `test/<name>`, except YAML, which the input suite reads directly from `lambda-test/yaml`.
+Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides the `lambda-test` submodule). It clones `ref/wpt` at a pinned commit and links each top-level corpus directory from `lambda-test/` as `test/<name>`, except YAML, which the input suite reads directly from `lambda-test/yaml`. It also installs the locked `test/render` npm dependencies used by the visual baseline and DevTools screenshot tests.
 
 Run `npm ci --prefix test/render` after linking the corpus to install the locked dependencies for the Radiant visual baseline and DevTools screenshot tests.
 
