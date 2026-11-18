@@ -3631,7 +3631,7 @@ count-loc:
 
 # Export the message rather than interpolating it into shell code.
 export message MESSAGE
-push-lambda:
+push-lambda: commit-lambda
 	@$(PYTHON) utils/push_lambda.py
 
 commit-lambda:
