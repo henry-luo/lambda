@@ -64,9 +64,11 @@ for corpus_dir in "$LAMBDA_TEST_DIR"/*; do
 
     if [ -L "$link_path" ]; then
         existing_target=$(readlink "$link_path")
-        if [ "$existing_target" = "$expected_target" ]; then
+        # a trailing slash still names the same corpus directory
+        target_without_slash=${existing_target%/}
+        if [ "$target_without_slash" = "$expected_target" ]; then
             echo "Link exists: test/$corpus_name"
-        elif [ "$existing_target" = "../../lambda-test/$corpus_name" ]; then
+        elif [ "$target_without_slash" = "../../lambda-test/$corpus_name" ]; then
             # Migrate only the old standard link from before the submodule move.
             ln -sfn "$expected_target" "$link_path"
             echo "Updated link: test/$corpus_name -> $expected_target"
@@ -80,3 +82,11 @@ for corpus_dir in "$LAMBDA_TEST_DIR"/*; do
         echo "Added link: test/$corpus_name -> $expected_target"
     fi
 done
+
+# The visual baseline and DevTools screenshot tests share the render package.
+if [ -f "$ROOT_DIR/test/render/package-lock.json" ]; then
+    command -v npm >/dev/null 2>&1 || die "npm is required for render test dependencies"
+    if ! npm ls --prefix "$ROOT_DIR/test/render" --omit=dev --depth=0 >/dev/null 2>&1; then
+        npm ci --prefix "$ROOT_DIR/test/render" --no-audit --no-fund
+    fi
+fi

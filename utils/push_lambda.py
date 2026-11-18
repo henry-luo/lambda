@@ -54,6 +54,19 @@ def detached_target(repo):
     return "refs/heads/" + nearest[0][0].removeprefix("refs/remotes/origin/")
 
 
+def commit_changes(repo, message):
+    git(repo, "add", "-A")
+    merge = git(repo, "rev-parse", "--git-path", "MERGE_HEAD")
+    merge_path = Path(merge) if os.path.isabs(merge) else repo / merge
+    staged = subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--quiet"]).returncode
+    if staged not in (0, 1):
+        raise ValueError(f"could not inspect staged changes: {repo}")
+    if staged or merge_path.exists():
+        git(repo, "commit", "-m", message)
+        return True
+    return False
+
+
 def prepare(node):
     repo, children = node
     dirty_child = any([prepare(child) for child in children])
@@ -91,14 +104,7 @@ def publish(node, message):
     remote = git(repo, "config", "--get", f"branch.{branch}.remote") if branch else "origin"
     target = git(repo, "config", "--get", f"branch.{branch}.merge") if branch else detached_target(repo)
     print(f"Publishing {repo} ({branch or 'detached'} -> {remote}/{target})", flush=True)
-    git(repo, "add", "-A")
-    merge = git(repo, "rev-parse", "--git-path", "MERGE_HEAD")
-    merge_path = Path(merge) if os.path.isabs(merge) else repo / merge
-    staged = subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--quiet"]).returncode
-    if staged not in (0, 1):
-        raise ValueError(f"could not inspect staged changes: {repo}")
-    if staged or merge_path.exists():
-        git(repo, "commit", "-m", message)
+    commit_changes(repo, message)
     git(repo, "push", remote, f"HEAD:{target}")
 
 
