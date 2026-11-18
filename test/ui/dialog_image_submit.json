@@ -1,0 +1,18 @@
+{
+  "name": "Native image submission paints and closes the dialog with a CSS-pixel point",
+  "html": "test/ui/dialog_image_submit.html",
+  "viewport": {"width": 200, "height": 120},
+  "events": [
+    {"type": "assert_pixel", "x": 12, "y": 16,
+     "min_r": 0, "max_r": 0, "min_g": 128, "max_g": 128, "min_b": 0, "max_b": 0},
+    {"type": "click", "x": 12, "y": 16},
+    {"type": "assert_attribute", "target": {"selector": "#result"},
+     "attribute": "data-offset", "equals": "12,16"},
+    {"type": "assert_attribute", "target": {"selector": "#result"},
+     "attribute": "data-value", "equals": "12,16", "assert_timeout": 1000},
+    {"type": "assert_attribute", "target": {"selector": "#result"},
+     "attribute": "data-focus", "equals": "BODY"},
+    {"type": "assert_pixel", "x": 12, "y": 16,
+     "min_r": 255, "max_r": 255, "min_g": 255, "max_g": 255, "min_b": 255, "max_b": 255}
+  ]
+}

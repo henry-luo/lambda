@@ -45,10 +45,12 @@ Item dom_create_matrix_2d(const float* coefficients);
 void dom_install_matrix_2d_members(Item prototype);
 
 enum class DomShadowProperty {
-    root, assigned_element_slot, assigned_text_slot, host, mode, delegates_focus, style_sheets
+    root, assigned_element_slot, assigned_text_slot, host, mode, delegates_focus, style_sheets, slot_assignment
 };
 Item dom_read_shadow_property(Item receiver, DomShadowProperty property);
 Item dom_slot_assigned_nodes(Item receiver, Item options, bool elements_only);
+Item dom_slot_assign(Item receiver, const Item* args, int count);
+void dom_install_html_hidden(Item prototype);
 
 enum class DomLabelProperty { labels, control, form };
 Item dom_read_label_property(Item receiver, const char* interface_name, DomLabelProperty property);

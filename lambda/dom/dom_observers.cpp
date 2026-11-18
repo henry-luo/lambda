@@ -2,6 +2,7 @@
 #include "realm/dom_realm.h"
 #include "dom_ops.h"
 #include "dom.h"
+#include "dom_events.h"
 #include "dom_engine.h"
 #include "dom_realm_hooks.h"
 #include "../js/js_runtime.h"
@@ -14,12 +15,13 @@
 #include "lib/log.h"
 #include "lib/str.h"
 #include "lib/mem_grow.hpp"
+#include "lib/arraylist.hpp"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-extern "C" void heap_register_gc_root(uint64_t* slot);
+#include "../runtime/heap_api.h"
 extern Item js_make_number(double d);
 
 
@@ -73,6 +75,8 @@ struct JsObserverRuntimeState {
     JsObserverState** observers = nullptr;
     int observer_count = 0;
     int observer_capacity = 0;
+    Item signal_slots;
+    bool signal_slots_rooted = false;
     bool delivery_scheduled = false;
     bool geometry_sample_scheduled = false;
     bool geometry_sampling = false;
@@ -469,6 +473,17 @@ static Item js_geometry_observer_observe(Item target_item) {
 
 static Item js_observer_deliver(void) {
     observer_delivery_scheduled = false;
+    JsObserverRuntimeState* state = js_observer_runtime_state();
+    RootFrame slot_roots(3);
+    Rooted<Item> slots(slot_roots, state->signal_slots);
+    Rooted<Item> slot(slot_roots, ItemNull), event(slot_roots, ItemNull);
+    // Snapshot the pending sets before author code can queue the next delivery.
+    state->signal_slots = ItemNull;
+    lam::ArrayList<JsObserverState*> pending(MEM_CAT_JS_RUNTIME, 0);
+    for (int i = 0; i < observer_count; i++) {
+        JsObserverState* observer = observers[i];
+        if (js_array_length(observer_pending(observer)) > 0) pending.push_back(observer);
+    }
     // JSCUO5: this deduplicates owner documents across every observed target.
     // It used to be a 2,048-pointer stack array sized from the two capacities;
     // with those gone it would be unbounded, so it grows on the heap instead.
@@ -476,8 +491,7 @@ static Item js_observer_deliver(void) {
     DomDocument** sweep_docs = nullptr;
     int sweep_doc_count = 0;
     int sweep_doc_capacity = 0;
-    for (int i = 0; i < observer_count; i++) {
-        JsObserverState* observer = observers[i];
+    for (JsObserverState* observer : pending) {
         RootFrame roots(3);
         Rooted<Item> records_root(roots, observer_pending(observer));
         Rooted<Item> object_root(roots, observer->object);
@@ -510,6 +524,13 @@ static Item js_observer_deliver(void) {
     }
     for (int i = 0; i < sweep_doc_count; i++) dom_retire_sweep(sweep_docs[i]);
     if (sweep_docs) mem_free(sweep_docs);
+    int64_t slot_count = js_array_length(slots.get());
+    for (int64_t i = 0; i < slot_count; i++) {
+        slot.set(js_elements_get_int(slots.get(), i));
+        if (!dom_unwrap_element(slot.get())) continue;
+        event.set(js_create_native_event("slotchange", true, false));
+        if (!item_is_error(event.get())) dom_dispatch_event(slot.get(), event.get());
+    }
     return make_js_undefined();
 }
 
@@ -517,6 +538,28 @@ static void observer_schedule_delivery(void) {
     if (observer_delivery_scheduled) return;
     observer_delivery_scheduled = true;
     dom_schedule_microtask(dom_realm_new_function(js_observer_deliver));
+}
+
+extern "C" void dom_observers_signal_slot_change(DomElement* slot) {
+    JsObserverRuntimeState* state = js_observer_runtime_state();
+    if (!state || !slot) return;
+    RootFrame roots(1);
+    Rooted<Item> wrapped(roots, dom_wrap_element(slot));
+    if (get_type_id(wrapped.get()) != LMD_TYPE_VELMT) return;
+    if (!state->signal_slots_rooted) {
+        if (!heap_try_register_gc_root(&state->signal_slots.item)) return;
+        state->signal_slots_rooted = true;
+    }
+    if (get_type_id(state->signal_slots) != LMD_TYPE_ARRAY) {
+        state->signal_slots = js_array_new(0);
+        if (get_type_id(state->signal_slots) != LMD_TYPE_ARRAY) return;
+    }
+    int64_t length = js_array_length(state->signal_slots);
+    for (int64_t i = 0; i < length; i++) {
+        if (js_elements_get_int(state->signal_slots, i).item == wrapped.get().item) return;
+    }
+    js_array_push(state->signal_slots, wrapped.get());
+    observer_schedule_delivery();
 }
 
 static void observer_queue_record(JsObserverState* observer, Item record) {
@@ -1052,6 +1095,11 @@ extern "C" void dom_observers_reset(void) {
 
 static void observer_state_release_all(JsObserverRuntimeState* state, bool free_array) {
     if (!state) return;
+    if (state->signal_slots_rooted) {
+        heap_unregister_gc_root(&state->signal_slots.item);
+        state->signal_slots = ItemNull;
+        state->signal_slots_rooted = false;
+    }
     for (int i = 0; i < state->observer_count; i++) {
         JsObserverState* observer = state->observers[i];
         if (!observer) continue;

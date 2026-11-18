@@ -108,6 +108,68 @@ test('dialog show and open reflection preserve modal state', async () => {
         .filter(line => /Dialog check failed|exception/.test(line)).join('\n'));
 });
 
+test('dialog form submission shares cancellation, value reflection and the queued close event', async () => {
+    const {log} = await render('dialog-form-submission', `<!doctype html>
+        <dialog id="dialog"><form method="dialog" id="form">
+            <input id="required" required><button id="button">Confirm</button>
+            <div id="host"></div>
+        </form></dialog>
+        <button id="external" form="form" formmethod="DiAlOg" value="outside">Outside</button>
+        <script>
+            const dialog = document.getElementById('dialog');
+            const form = document.getElementById('form');
+            const required = document.getElementById('required');
+            const button = document.getElementById('button');
+            const external = document.getElementById('external');
+            const submits = [];
+            let closes = 0, cancel = false, trusted = true;
+            form.addEventListener('submit', event => {
+                submits.push(event.submitter && event.submitter.id);
+                if (cancel) event.preventDefault();
+            });
+            dialog.addEventListener('close', event => {
+                closes++;
+                trusted = trusted && event.isTrusted && !event.bubbles && !event.cancelable;
+            });
+            dialog.returnValue = 'keep';
+            dialog.show();
+            form.requestSubmit(button);
+            const checks = {invalid:dialog.open && submits.length === 0};
+            button.formNoValidate = true;
+            cancel = true;
+            form.requestSubmit(button);
+            checks.canceled = dialog.open && dialog.returnValue === 'keep' && submits.length === 1;
+            cancel = false;
+            button.value = 'chosen';
+            button.click();
+            checks.clicked = !dialog.open && dialog.returnValue === 'chosen' &&
+                button.getAttribute('value') === 'chosen';
+            dialog.show();
+            form.submit();
+            checks.direct = !dialog.open && dialog.returnValue === 'chosen' && submits.length === 2;
+            required.value = 'valid';
+            form.method = 'post';
+            dialog.show();
+            form.requestSubmit(external);
+            checks.override = !dialog.open && dialog.returnValue === 'outside';
+            dialog.show();
+            const shadow = document.getElementById('host').attachShadow({mode:'open'});
+            shadow.innerHTML = '<form method="dialog"><button>Shadow submit</button></form>';
+            shadow.firstElementChild.requestSubmit();
+            checks.scope = dialog.open && dialog.returnValue === 'outside';
+            dialog.close();
+            checks.unqueued = closes === 0 && submits.join(',') === 'button,button,external';
+            setTimeout(() => {
+                checks.closeEvents = closes === 4 && trusted;
+                console.log('DIALOG_FORM', JSON.stringify(checks));
+            }, 0);
+        </script>`);
+    const match = log.match(/DIALOG_FORM (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {invalid:true,canceled:true,clicked:true,direct:true,
+        override:true,scope:true,unqueued:true,closeEvents:true});
+});
+
 test('dialog requestClose cancels synchronously and queues successful close events', async () => {
     const {image, log} = await render('dialog-request-close', `<!doctype html>
         <body style="margin:0"><div id="result" style="width:20px;height:20px;background:red"></div>
@@ -302,16 +364,385 @@ test('assigned blocks and text paint at the slot and fallbacks follow reassignme
                 '<slot name="named"><div class="unassigned"></div></slot>' +
                 '<slot name="empty"><div style="color:blue">Fallback text</div></slot></div>';
             const second = host.children[1];
+            const fallback = root.querySelector('slot').firstElementChild;
+            const hiddenBox = node => {
+                const box = node.getBoundingClientRect();
+                return box.x === 0 && box.y === 0 && box.width === 0 && box.height === 0 &&
+                    node.getClientRects().length === 0;
+            };
             second.slot = 'unused';
-            second.getBoundingClientRect();
+            const suppressed = hiddenBox(second) && hiddenBox(fallback);
             second.slot = 'named';
             const first = host.firstElementChild;
             const box = first.getBoundingClientRect();
-            if (box.x === 17 && box.y === 17 && document.elementFromPoint(18, 18) === first)
+            if (suppressed && box.x === 17 && box.y === 17 && document.elementFromPoint(18, 18) === first)
                 console.log('SLOT_GEOMETRY_READY');
         </script>`);
     assert.equal(image.data.equals(reference.image.data), true, 'projected and fallback content must match equivalent paint');
     assert.match(log, /SLOT_GEOMETRY_READY/);
+});
+
+test('slot redistribution preserves collapsed margins and replaces obsolete fallback boxes', async () => {
+    const {image, log} = await render('slot-margin', `<!doctype html>
+        <style>body{margin:0;background:white}.box{width:20px;height:15px;background:green}</style>
+        <div id="host"><div class="box" slot="primary"></div></div>
+        <script>
+            const host = document.getElementById('host');
+            const root = host.attachShadow({mode:'open'});
+            root.innerHTML = '<div style="margin:9px;padding:4px;background:yellow">' +
+                '<slot name="primary"><div style="width:20px;height:17px;background:red"></div></slot></div>';
+            const light = host.firstElementChild;
+            const fallback = root.querySelector('slot').firstElementChild;
+            const initial = light.getBoundingClientRect();
+            light.slot = 'missing';
+            const uncovered = fallback.getBoundingClientRect();
+            light.slot = 'primary';
+            const restored = light.getBoundingClientRect();
+            const obsolete = fallback.getBoundingClientRect();
+            if (initial.y === 13 && uncovered.y === initial.y && uncovered.height === 17 &&
+                restored.y === initial.y && restored.height === 15 && obsolete.height === 0 &&
+                fallback.getClientRects().length === 0) console.log('SLOT_MARGIN_READY');
+            else console.error('Slot margin mismatch: ' + [initial.y, uncovered.y, restored.y, obsolete.height]);
+        </script>`);
+    assert.equal(log.includes('SLOT_MARGIN_READY'), true, log.split('\n')
+        .filter(line => /Slot margin mismatch|exception/.test(line)).join('\n'));
+    assert.deepEqual(rgb(image, 14, 14), [0, 128, 0]);
+    assert.deepEqual(rgb(image, 14, 7), [255, 255, 255]);
+});
+
+test('manual slot assignment orders paint, hit testing and live geometry', async () => {
+    const {image, log} = await render('manual-slot-paint', `<!doctype html>
+        <style>body{margin:0;background:white}#host {padding:7px}
+        #host > div {width:20px;height:10px} #red{background:red} #blue{background:blue}</style>
+        <div id="host"><div id="red"></div><div id="blue" slot="primary"></div></div>
+        <script>
+            const host = document.getElementById('host');
+            const red = document.getElementById('red');
+            const blue = document.getElementById('blue');
+            const root = host.attachShadow({mode:'open', slotAssignment:'manual'});
+            root.innerHTML = '<slot name="primary"><div style="width:20px;height:10px;background:orange"></div></slot>' +
+                '<slot><div style="width:20px;height:10px;background:green"></div></slot>';
+            const primary = root.firstElementChild;
+            const secondary = root.lastElementChild;
+            const fallback = primary.firstElementChild;
+            const checks = {
+                initial:root.slotAssignment === 'manual' && blue.assignedSlot === null &&
+                    fallback.getBoundingClientRect().y === 7 && primary.assignedNodes({flatten:true})[0] === fallback
+            };
+            primary.assign(blue, red, blue);
+            checks.ordered = primary.assignedNodes().length === 2 && primary.assignedNodes()[0] === blue &&
+                primary.assignedElements()[1] === red && blue.assignedSlot === primary;
+            try { primary.assign(red, document.createDocumentFragment()); }
+            catch (error) {
+                checks.invalid = error instanceof TypeError && primary.assignedNodes()[0] === blue;
+            }
+            checks.boxes = blue.getBoundingClientRect().y === 7 && red.getBoundingClientRect().y === 17 &&
+                fallback.getClientRects().length === 0 && document.elementFromPoint(12, 12) === blue;
+            red.slot = 'ignored';
+            checks.unaffected = red.assignedSlot === primary;
+            secondary.assign(blue);
+            checks.moved = primary.assignedNodes().length === 1 && primary.assignedNodes()[0] === red &&
+                blue.assignedSlot === secondary && red.getBoundingClientRect().y === 7 &&
+                blue.getBoundingClientRect().y === 17;
+            secondary.assign();
+            checks.cleared = blue.assignedSlot === null && blue.getClientRects().length === 0 &&
+                secondary.firstElementChild.getBoundingClientRect().y === 17;
+            console.log('MANUAL_SLOTS', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/MANUAL_SLOTS (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {initial:true,ordered:true,invalid:true,boxes:true,unaffected:true,moved:true,cleared:true});
+    assert.deepEqual(rgb(image, 12, 12), [255, 0, 0]);
+    assert.deepEqual(rgb(image, 12, 22), [0, 128, 0]);
+});
+
+test('layout keeps nested projected slots in their source roots', async () => {
+    const {image, log} = await render('nested-slot-paint', `<!doctype html>
+        <style>body{margin:0;background:white}#light{width:18px;height:12px;background:green}</style>
+        <div id="outer"><div id="light"></div></div>
+        <script>
+            const outer = document.getElementById('outer');
+            const light = document.getElementById('light');
+            const outerRoot = outer.attachShadow({mode:'open', slotAssignment:'manual'});
+            outerRoot.innerHTML = '<div><slot><i style="display:block;width:17px;height:19px;background:red"></i></slot></div>';
+            const inner = outerRoot.firstElementChild;
+            const outerSlot = inner.firstElementChild;
+            const fallback = outerSlot.firstElementChild;
+            const innerRoot = inner.attachShadow({mode:'open', slotAssignment:'manual'});
+            innerRoot.innerHTML = '<section style="padding:7px"><slot></slot></section>';
+            const innerSlot = innerRoot.querySelector('slot');
+            innerSlot.assign(outerSlot);
+            const checks = {
+                fallback:innerSlot.assignedNodes({flatten:true})[0] === fallback &&
+                    fallback.getBoundingClientRect().height === 19
+            };
+            outerSlot.assign(light);
+            const box = light.getBoundingClientRect();
+            checks.projected = innerSlot.assignedNodes({flatten:true})[0] === light && box.x === 7 &&
+                box.y === 7 && box.width === 18 && box.height === 12 && document.elementFromPoint(13, 13) === light;
+            console.log('NESTED_SLOTS', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/NESTED_SLOTS (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {fallback:true,projected:true});
+    assert.deepEqual(rgb(image, 13, 13), [0, 128, 0]);
+});
+
+test('HTML slots default to display contents and display none suppresses their flattened subtree', async () => {
+    const {image, log} = await render('slot-display', `<!doctype html>
+        <style>body{margin:0;background:white}#light{width:18px;height:12px;background:green}</style>
+        <div id="host"><div id="light" slot="assigned"></div></div><slot id="outside"></slot>
+        <script>
+            const host = document.getElementById('host');
+            const light = document.getElementById('light');
+            const root = host.attachShadow({mode:'open'});
+            root.innerHTML = '<style>slot.off{display:none}</style><div style="padding:7px">' +
+                '<slot name="assigned"></slot><slot><div style="width:18px;height:15px;background:red"></div></slot>' +
+                '<div style="width:18px;height:11px;background:blue"></div></div>';
+            const [assigned,empty] = root.querySelectorAll('slot');
+            const fallback = empty.firstElementChild;
+            const after = empty.nextElementSibling;
+            const checks = {
+                defaults:getComputedStyle(assigned).display === 'contents' &&
+                    getComputedStyle(document.getElementById('outside')).display === 'contents' &&
+                    light.getBoundingClientRect().y === 7 && fallback.getBoundingClientRect().y === 19
+            };
+            assigned.style.display = 'none';
+            checks.inline = light.assignedSlot === assigned && light.getClientRects().length === 0 &&
+                fallback.getBoundingClientRect().y === 7 && document.elementFromPoint(10, 10) === fallback;
+            empty.className = 'off';
+            checks.scoped = fallback.getClientRects().length === 0 && after.getBoundingClientRect().y === 7 &&
+                document.elementFromPoint(10, 10) === after;
+            assigned.style.removeProperty('display');
+            checks.restored = light.getBoundingClientRect().y === 7 && after.getBoundingClientRect().y === 19 &&
+                document.elementFromPoint(10, 10) === light;
+            assigned.hidden = true;
+            checks.hidden = getComputedStyle(assigned).display === 'none' && light.getClientRects().length === 0 &&
+                after.getBoundingClientRect().y === 7;
+            console.log('SLOT_DISPLAY', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/SLOT_DISPLAY (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {defaults:true,inline:true,scoped:true,restored:true,hidden:true});
+    assert.deepEqual(rgb(image, 10, 10), [0, 0, 255]);
+    assert.deepEqual(rgb(image, 10, 20), [255, 255, 255]);
+});
+
+test('hidden until found retains its box and participates in the content-visibility cascade', async () => {
+    const {image, log} = await render('hidden-until-found', `<!doctype html>
+        <style>body{margin:0}#panel{width:30px;height:30px;background:blue}
+        #child{height:20px;background:red}</style>
+        <div id="panel"><div id="child" tabindex="0"></div></div>
+        <script>
+            const panel = document.getElementById('panel');
+            const child = document.getElementById('child');
+            const computed = getComputedStyle(panel);
+            const checks = {initial:panel.hidden === false && computed.contentVisibility === 'visible'};
+            panel.hidden = 'UnTiL-FoUnD';
+            checks.reflected = panel.hidden === 'until-found' && panel.getAttribute('hidden') === 'until-found';
+            checks.retained = computed.display === 'block' && computed.contentVisibility === 'hidden' &&
+                panel.getBoundingClientRect().height === 30 && document.elementFromPoint(10,10) === panel;
+            child.focus();
+            checks.focus = document.activeElement !== child;
+            panel.style.contentVisibility = 'visible';
+            checks.override = computed.contentVisibility === 'visible' && document.elementFromPoint(10,10) === child;
+            panel.style.removeProperty('content-visibility');
+            checks.restored = computed.contentVisibility === 'hidden';
+            console.log('HIDDEN_CASCADE', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/HIDDEN_CASCADE (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {initial:true,reflected:true,retained:true,focus:true,override:true,restored:true});
+    assert.deepEqual(rgb(image, 10, 10), [0, 0, 255]);
+});
+
+test('fragment navigation opens details and reveals until-found ancestors before scrolling', async () => {
+    const {log} = await render('reveal-fragment', `<!doctype html>
+        <div style="height:2200px"></div>
+        <details id="ancestor" hidden="until-found"><summary>Summary</summary>
+            <div id="target" hidden="until-found">Destination</div>
+        </details>
+        <div style="height:180px"></div>
+        <script>
+            const ancestor = document.getElementById('ancestor');
+            const target = document.getElementById('target');
+            const callbacks = [];
+            ancestor.addEventListener('beforematch', event => {
+                callbacks.push([event.target.id,event.target.hidden,ancestor.open,window.pageYOffset,
+                    event.isTrusted,event.bubbles,event.cancelable]);
+            });
+            location.hash = 'target';
+            const reveal = location.hash === '#target' && ancestor.open && !target.hidden && !ancestor.hidden;
+            const scrolled = window.pageYOffset > 0;
+            console.log('FRAGMENT_REVEAL', JSON.stringify({reveal,scrolled,callbacks}));
+        </script>`);
+    const match = log.match(/FRAGMENT_REVEAL (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {reveal:true,scrolled:true,callbacks:[
+        ['target','until-found',false,0,true,true,false],
+        ['ancestor','until-found',true,0,true,true,false]
+    ]});
+});
+
+test('slotchange signals assignment and fallback updates after mutation observers', async () => {
+    const {image, log} = await render('slot-change', `<!doctype html>
+        <body style="margin:0"><div id="result" style="width:20px;height:20px;background:red"></div>
+        <script>
+            const host = document.createElement('div');
+            const root = host.attachShadow({mode:'closed'});
+            root.innerHTML = '<slot></slot><slot></slot>';
+            const first = root.firstElementChild;
+            const last = root.lastElementChild;
+            const initiallyUnnamed = first.name === '';
+            first.name = 'a';
+            last.name = 'b';
+            const item = document.createElement('span');
+            const records = [];
+            let valid = true;
+            let next = false;
+            function check(condition, message) {
+                if (!condition) { valid = false; console.error('Slot change failed: ' + message); }
+            }
+            const observer = new MutationObserver(() => {
+                records.push('observer');
+                if (next) { next = false; first.appendChild(document.createTextNode('fallback')); }
+            });
+            observer.observe(host, {childList:true, attributes:true, subtree:true});
+            check(initiallyUnnamed && first.getAttribute('name') === 'a' && last.getAttribute('name') === 'b',
+                'slot name reflects its content attribute');
+            root.addEventListener('slotchange', event => {
+                records.push(event.target.name);
+                check(event.isTrusted && event.bubbles && !event.composed && !event.cancelable,
+                    'trusted event with shadow-boundary propagation');
+            });
+            host.addEventListener('slotchange', () => check(false, 'host outside shadow must not receive it'));
+            item.slot = 'a';
+            host.appendChild(item);
+            item.slot = 'b';
+            item.slot = 'a';
+            check(records.length === 0, 'no synchronous notification');
+            queueMicrotask(() => {
+                check(records.join(',') === 'observer,a,b', 'each signaled slot follows observer delivery');
+                check(first.assignedNodes()[0] === item && last.assignedNodes().length === 0, 'final assignment');
+                records.length = 0;
+                next = true;
+                host.removeChild(item);
+                queueMicrotask(() => {
+                    check(records.join(',') === 'observer,a', 'observer mutations signal a separate delivery');
+                    queueMicrotask(() => {
+                        check(records.join(',') === 'observer,a,a' && first.assignedNodes().length === 0 &&
+                            first.assignedNodes({flatten:true})[0].data === 'fallback', 'fallback signal and flattening');
+                        if (valid) document.getElementById('result').style.background = 'green';
+                    });
+                });
+            });
+        </script>`);
+    assert.deepEqual(rgb(image, 10, 10), [0, 128, 0], log.split('\n')
+        .filter(line => /Slot change failed|exception/.test(line)).join('\n'));
+});
+
+test('events route through closed slots and hide closed-tree entries from outside listeners', async () => {
+    const {image, log} = await render('slot-event-path', `<!doctype html>
+        <body style="margin:0"><div id="result" style="width:20px;height:20px;background:red"></div>
+        <div id="host"><span id="light">Assigned</span></div>
+        <script>
+            const host = document.getElementById('host');
+            const light = document.getElementById('light');
+            const root = host.attachShadow({mode:'closed'});
+            root.innerHTML = '<slot></slot><span>Internal</span>';
+            const slot = root.firstElementChild;
+            const internal = root.lastElementChild;
+            let valid = true;
+            let steps = [];
+            function check(condition, message) {
+                if (!condition) { valid = false; console.error('Slot event path failed: ' + message); }
+            }
+            slot.addEventListener('projected', event => {
+                steps.push('slot');
+                const path = event.composedPath();
+                check(event.target === light && path[0] === light && path[1] === slot && path[2] === root,
+                    'assigned node keeps its target and closed slot in the internal path');
+            });
+            host.addEventListener('projected', event => {
+                steps.push('host');
+                const path = event.composedPath();
+                check(event.target === light && path[0] === light && path[1] === host &&
+                    !path.includes(root) && !path.includes(slot), 'host sees just the public projection');
+            });
+            light.dispatchEvent(new Event('projected', {bubbles:true}));
+            check(steps.join(',') === 'slot,host', 'non-composed event can enter another root through its slot');
+
+            steps = [];
+            internal.addEventListener('internal', event => {
+                steps.push('inside');
+                check(event.target === internal && event.composedPath()[1] === root, 'internal target');
+            });
+            host.addEventListener('internal', event => {
+                steps.push('host');
+                check(event.target === host && event.eventPhase === Event.AT_TARGET &&
+                    event.composedPath()[0] === host, 'host sees the retargeted composed event');
+            });
+            document.addEventListener('internal', event => {
+                steps.push('document');
+                check(event.target === host, 'document sees the host');
+            });
+            const local = new Event('internal', {bubbles:true});
+            internal.dispatchEvent(local);
+            check(steps.join(',') === 'inside' && local.target === null, 'non-composed event stays in its source root');
+            steps = [];
+            internal.dispatchEvent(new Event('internal', {bubbles:true, composed:true}));
+            check(steps.join(',') === 'inside,host,document', 'composed event crosses its source root');
+            if (valid) document.getElementById('result').style.background = 'green';
+        </script>`);
+    assert.deepEqual(rgb(image, 10, 10), [0, 128, 0], log.split('\n')
+        .filter(line => /Slot event path failed|exception/.test(line)).join('\n'));
+});
+
+test('shadow event listeners get retargeted related targets and preserve the enclosing window event', async () => {
+    const {log} = await render('shadow-related-target', `<!doctype html>
+        <main><div id="first"></div><div id="second"></div></main>
+        <script>
+            const first = document.getElementById('first');
+            const second = document.getElementById('second');
+            const root = first.attachShadow({mode:'open'});
+            const otherRoot = second.attachShadow({mode:'closed'});
+            root.innerHTML = '<i></i><b></b>';
+            otherRoot.innerHTML = '<span></span>';
+            const target = root.firstElementChild;
+            const peer = root.lastElementChild;
+            const remote = otherRoot.firstElementChild;
+            const checks = {};
+
+            const local = new MouseEvent('local', {bubbles:true, composed:true, relatedTarget:peer});
+            const outer = new Event('outer');
+            first.addEventListener('outer', () => target.dispatchEvent(local));
+            root.addEventListener('local', event => {
+                checks.nested = window.event === outer && event.target === target && event.relatedTarget === peer;
+                first.appendChild(target);
+            });
+            first.addEventListener('local', () => { checks.escaped = true; });
+            first.dispatchEvent(outer);
+            checks.cleared = local.target === null && local.relatedTarget === null && window.event === undefined;
+
+            root.appendChild(target);
+            const across = new FocusEvent('across', {bubbles:true, composed:true, relatedTarget:remote});
+            root.addEventListener('across', event => {
+                checks.inside = event.target === target && event.relatedTarget === second && window.event === undefined;
+            });
+            document.addEventListener('across', event => {
+                checks.outside = event.target === first && event.relatedTarget === second && window.event === event;
+            });
+            target.dispatchEvent(across);
+            checks.publicTargets = across.target === first && across.relatedTarget === second;
+
+            first.addEventListener('suppressed', () => { checks.invoked = true; });
+            checks.suppressed = first.dispatchEvent(new FocusEvent('suppressed', {relatedTarget:target}));
+            console.log('SHADOW_RETARGET', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/SHADOW_RETARGET (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {nested:true,cleared:true,inside:true,outside:true,
+        publicTargets:true,suppressed:true});
 });
 
 test('inline shadow stylesheets stay in their tree through CSSOM and source changes', async () => {

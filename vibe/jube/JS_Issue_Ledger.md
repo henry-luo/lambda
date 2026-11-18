@@ -546,6 +546,42 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
+### JS13-L12 — Dialog form submission and submitter values — **PARTIAL**
+
+Native activation, `requestSubmit()` and direct `submit()` share dialog
+method and close handling. The form's nearest source-tree dialog gets the
+submitter's value or the image button's selected point. Closing clears
+descendant focus that is no longer rendered and queues the close event.
+The focused controls cover cancellation, validation, external submitters,
+shadow boundaries and the native pointer path (**D9.1.3v2 / D9.5.6v2 / D6.3.3**).
+
+The three pinned files cover dialog form submission, unusual actions and the
+close task. The latter files pass 2/2 and 1/1. The main file passes 6/8 when
+native WebDriver pointer actions supply the clicks. The public click helper
+requires `elementsFromPoint()`. An image subtest compares the submitted integer
+with a fractional native event offset. The no-submitter case expects the
+stored value to be cleared, as in Chromium 152. The HTML close algorithm
+preserves that value when submission supplies a null result. `SubmitEvent`
+branding and form-data event dispatch remain open.
+
+### JS13-L11 — Until-found reflection, rendering and fragment reveal — **PARTIAL**
+
+`HTMLElement.hidden` now reflects the HTML union setter. Until-found uses
+the UA content-visibility rule, and computed reads use the same cascade as
+layout. Same-document hash writes and anchor activation share the fragment
+reveal path. It snapshots flat-tree ancestors, opens closed details around
+their non-summary content, dispatches trusted `beforematch` and scrolls to
+the resulting box. A disconnected or boxless target does not cause scrolling
+(**D9.1.1v4 / D9.1.3v2 / D9.5.6v2**).
+
+The pinned hidden reflection and cascade suites pass all 26 cases. The
+fragment-navigation suite passes 10 and four more ancestor-mutation controls
+pass. Pinned `beforematch-element-removal-002.html` times out because it
+expects the next ancestor's event after the handler clears the current
+ancestor's hidden state. Chromium 152 continues in this case. The current
+HTML ancestor-revealing algorithm returns when that state changes. Text
+fragment and find-in-page reveal remain open.
+
 ### JS13-L10 — Initial script collection executes inert HTML template contents — **RESOLVED**
 
 Fixed 2026-11-17 under **D8.4.4 / D9.5.6v2**. The raw source walker collected
@@ -722,13 +758,40 @@ Raster and vector paint enter the shadow child list already used by layout,
 and stacking replay crosses the host boundary. Controls cover open and closed
 roots, document stylesheet isolation, empty-root suppression of light children,
 and a positive z-index inside a shadow tree. PNG, SVG and PDF paint the supplied
-text and fill. Painted slot projection, declarative roots and
-the original Lit applications remain unqualified (**D9.1.1v4 / D9.1.3v2**).
+text and fill. Declarative roots and the original Lit applications remain
+unqualified (**D9.1.1v4 / D9.1.3v2**).
 The same goal added composed root lookup plus live named-slot queries for
 elements and text. Closed roots expose neither `host.shadowRoot` nor a light
 node's `assignedSlot`. Sequence reads cover nested fallback flattening and
-reflect slot renames and reordering. Manual assignment and `slotchange`
-remain open (**D9.1.3v2 / D6.3.3**).
+reflect slot renames and reordering (**D9.1.3v2 / D6.3.3**).
+
+Named distribution and fallback changes now queue one `slotchange` per slot
+for delivery after mutation observers. Dispatch follows assigned slots,
+retargets both targets across shadow boundaries, and filters closed-tree
+entries from the frozen path. The legacy global event stays scoped outside
+shadow listeners. Document, element, and fragment queries share source-tree
+traversal, which keeps retained HTML template contents out of their enclosing
+query scope. Touch-target retargeting remains open
+(**D9.1.3v2 / D6.3.3 / D5.5.1**).
+
+Named slot projection now shares normal-flow margin adjacency, paint order
+and hit testing with the flattened tree. Assignment changes reconcile both
+branches from the host, and client rect reads exclude unassigned light nodes
+and hidden fallback. Focused PNG, flat SVG and flat PDF cases verify live
+reassignment. Broader layout modes and slot inheritance remain open
+(**D9.1.1v4 / D9.1.3v2**).
+
+Manual roots now expose `slotAssignment` and accept variadic Element and
+Text arguments to `HTMLSlotElement.assign()`. The lifecycle registry keeps
+ordered weak relations through detach and adoption. Manual and named
+assignments share the DOM, directionality, layout and paint traversal.
+Nested projection preserves each slot's source root. The pinned imperative
+API and slotchange suites pass (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+
+The HTML default for a slot is `display:contents`. Inline and scoped
+`display:none` suppress projected and fallback boxes while preserving the
+assignment APIs. Scoped stylesheet and `hidden` changes also update
+geometry and hit testing (**D9.1.1v4 / D9.1.3v2**).
 
 Inline shadow stylesheets now participate in the owning root's author cascade
 in source order. `ShadowRoot.styleSheets` is a live, same-object list using the

@@ -37,11 +37,8 @@ fn multipart(entries, boundary) {
 }
 
 fn validation_enabled(form, submitter) {
-    let form_skip = dom.get_attribute(form, "novalidate");
-    let submitter_skip = if (submitter == null) null
-        else dom.get_attribute(submitter, "formnovalidate");
-    (form_skip == null or form_skip == "") and
-        (submitter_skip == null or submitter_skip == "")
+    not dom.has_attribute(form, "novalidate") and
+        (submitter == null or not dom.has_attribute(submitter, "formnovalidate"))
 }
 
 // One submit pipeline for button activation and implicit Enter.
@@ -57,15 +54,17 @@ pub pn run(form, submitter) {
     else {
         // submit is cancelable and must precede serialization/navigation.
         let entries = dom.form_entries(form, submitter);
-        let method_name = lower(submit_attr(form, submitter,
-            "formmethod", "method", "get"));
+        let method_name = dom.form_submit_method(form, submitter);
         let enctype = lower(submit_attr(form, submitter,
             "formenctype", "enctype", "application/x-www-form-urlencoded"));
         let action = submit_attr(form, submitter,
             "formaction", "action", dom.form_url(form));
         let target = attr_or(form, "target", "_self");
 
-        if (method_name == "get") {
+        if (method_name == "dialog") {
+            dom.form_close_dialog(form, submitter)
+        }
+        else if (method_name == "get") {
             let query = urlencoded(entries);
             let separator = if (index_of(action, "?") == null) "?" else "&";
             let url = if (query == "") action else action ++ separator ++ query;

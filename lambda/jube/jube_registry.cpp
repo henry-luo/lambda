@@ -1,6 +1,7 @@
 #include "jube_registry.h"
 #include "../dom/dom_core.h"
 #include "../dom/dom_engine.h"
+#include "../dom/dom_history.h"
 #include "jube_interface.h"
 #include "lambda/input/input-script-cache.h"
 #include "../runtime/ast.hpp"

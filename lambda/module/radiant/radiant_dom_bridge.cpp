@@ -638,20 +638,6 @@ static bool radiant_dom_node_contains(DomNode* root, DomNode* other) {
     return false;
 }
 
-static DomElement* radiant_dom_find_by_id(DomElement* root, const char* id) {
-    if (!root || !id) return nullptr;
-    if (root->id && strcmp(root->id, id) == 0) return root;
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* found = radiant_dom_find_by_id(child->as_element(), id);
-            if (found) return found;
-        }
-        child = child->next_sibling;
-    }
-    return nullptr;
-}
-
 static Item radiant_dom_throw_named_error(const char* name, const char* message);
 
 // Document-level selector ops use the same per-call scratch query as the
@@ -666,54 +652,6 @@ static bool radiant_dom_prepare_document_query(SelectorQueryScratch* query, DomD
     }
     query->matcher = (SelectorMatcher*)dom_create_selector_matcher_bridge((void*)doc, query->pool);
     return true;
-}
-
-static DomElement* radiant_dom_selector_group_find_first(SelectorMatcher* matcher,
-                                                         CssSelectorGroup* group,
-                                                         DomElement* elem,
-                                                         bool include_elem) {
-    if (!matcher || !group || !elem) return nullptr;
-    if (include_elem && selector_matcher_matches_group(matcher, group, elem, nullptr)) return elem;
-
-    DomNode* child = radiant_dom_visible_child(elem, true);
-    while (child) {
-        if (child->is_element()) {
-            DomElement* found = radiant_dom_selector_group_find_first(
-                matcher, group, child->as_element(), true);
-            if (found) return found;
-        }
-        child = radiant_dom_visible_sibling(child, true);
-    }
-    return nullptr;
-}
-
-static bool radiant_dom_selector_group_result_contains(ArrayList* results, DomElement* elem) {
-    if (!results || !elem) return false;
-    for (int i = 0; i < results->length; i++) {
-        if ((DomElement*)results->data[i] == elem) return true;
-    }
-    return false;
-}
-
-static void radiant_dom_selector_group_collect_all(SelectorMatcher* matcher,
-                                                   CssSelectorGroup* group,
-                                                   DomElement* elem,
-                                                   ArrayList* results,
-                                                   bool include_elem) {
-    if (!matcher || !group || !elem || !results) return;
-    if (include_elem && selector_matcher_matches_group(matcher, group, elem, nullptr) &&
-            !radiant_dom_selector_group_result_contains(results, elem)) {
-        arraylist_append(results, elem);
-    }
-
-    DomNode* child = radiant_dom_visible_child(elem, true);
-    while (child) {
-        if (child->is_element()) {
-            radiant_dom_selector_group_collect_all(
-                matcher, group, child->as_element(), results, true);
-        }
-        child = radiant_dom_visible_sibling(child, true);
-    }
 }
 
 static Item radiant_dom_lookup_wrapper(DomNode* node) {
@@ -824,7 +762,7 @@ typedef struct RadiantDomEventRecord {
     // Native, untraced on purpose: see RadiantEvtKey in the header.
     RadiantEvtKey target;           // srcElement is an alias of this
     RadiantEvtKey current_target;
-    RadiantEvtKey* path;            // composedPath(), frozen at dispatch start
+    DomEventPathEntry* path;        // composedPath(), frozen at dispatch start
     int path_len;
 } RadiantDomEventRecord;
 
@@ -1213,19 +1151,58 @@ RADIANT_C_API void radiant_dom_event_set_target(Item event, Item target) {
     } else vmap_set_owner(receiver.get().vmap, value.get());
 }
 
-RADIANT_C_API void radiant_dom_event_set_path(Item event, const RadiantEvtKey* keys, int len) {
+RADIANT_C_API void radiant_dom_event_set_path(Item event, const DomEventPathEntry* entries, int len) {
     RadiantDomEventRecord* record = radiant_dom_event_record(event);
     if (!record) return;
     if (record->path) { mem_free(record->path); record->path = nullptr; record->path_len = 0; }
-    if (!keys || len <= 0) return;
-    record->path = (RadiantEvtKey*)mem_calloc((size_t)len, sizeof(RadiantEvtKey), MEM_CAT_JS_RUNTIME);
+    if (!entries || len <= 0) return;
+    record->path = (DomEventPathEntry*)mem_calloc((size_t)len, sizeof(DomEventPathEntry), MEM_CAT_JS_RUNTIME);
     if (!record->path) return;
-    memcpy(record->path, keys, sizeof(RadiantEvtKey) * (size_t)len);
+    memcpy(record->path, entries, sizeof(DomEventPathEntry) * (size_t)len);
     record->path_len = len;
 }
 
 RADIANT_C_API void radiant_dom_event_clear_path(Item event) {
     radiant_dom_event_set_path(event, nullptr, 0);
+}
+
+static Item radiant_dom_event_composed_path(Item receiver) {
+    RootFrame roots(3);
+    Rooted<Item> event(roots, receiver), result(roots, js_array_new(0)), entry(roots, ItemNull);
+    const RadiantDomEventRecord* record = radiant_dom_event_record(event.get());
+    if (!record || record->path_len <= 0) return result.get();
+    int current = record->path_len - 1;
+    int level = 0;
+    for (; current >= 0; current--) {
+        const DomEventPathEntry& path = record->path[current];
+        if (path.flags & DOM_EVENT_PATH_CLOSED_ROOT) level++;
+        if (path.key.kind == record->current_target.kind && path.key.ptr == record->current_target.ptr) break;
+        if (path.flags & DOM_EVENT_PATH_CLOSED_SLOT) level--;
+    }
+    if (current < 0) return result.get();
+    lam::Temp<bool> visible((bool*)mem_alloc((size_t)record->path_len * sizeof(bool), MEM_CAT_JS_RUNTIME));
+    if (!visible) return ItemError;
+    visible.get()[current] = true;
+    // DOM composedPath walks away from currentTarget while tracking nested closed trees.
+    const int directions[] = {-1, 1};
+    for (int step : directions) {
+        uint8_t enter = step < 0 ? DOM_EVENT_PATH_CLOSED_ROOT : DOM_EVENT_PATH_CLOSED_SLOT;
+        uint8_t leave = step < 0 ? DOM_EVENT_PATH_CLOSED_SLOT : DOM_EVENT_PATH_CLOSED_ROOT;
+        int depth = level;
+        int accessible = level;
+        for (int i = current + step; i >= 0 && i < record->path_len; i += step) {
+            uint8_t flags = record->path[i].flags;
+            if (flags & enter) depth++;
+            visible.get()[i] = depth <= accessible;
+            if ((flags & leave) && --depth < accessible) accessible = depth;
+        }
+    }
+    for (int i = 0; i < record->path_len; i++) {
+        if (!visible.get()[i]) continue;
+        entry.set(radiant_dom_event_key_to_item(record->path[i].key));
+        js_array_push(result.get(), entry.get());
+    }
+    return result.get();
 }
 
 RADIANT_C_API int radiant_dom_event_named_get(Item receiver, Item key, Item* out) {
@@ -1317,11 +1294,7 @@ RADIANT_C_API int radiant_dom_event_call(Item receiver, const char* name,
         return 1;
     }
     if (strcmp(name, "composedPath") == 0) {
-        Item copy = js_array_new(0);
-        for (int i = 0; i < record->path_len; i++) {
-            js_array_push(copy, radiant_dom_event_key_to_item(record->path[i]));
-        }
-        *out = copy;
+        *out = radiant_dom_event_composed_path(receiver);
         return 1;
     }
     if (strcmp(name, "initEvent") == 0) {
@@ -3022,7 +2995,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             return 1;
         }
         // handled flag preserves valid null lookup results without JS fallback.
-        *out = radiant_dom_node_item((DomNode*)radiant_dom_find_by_id(root, id));
+        *out = radiant_dom_node_item((DomNode*)dom_find_source_element_by_id(root, id));
         return 1;
     }
 
@@ -3061,7 +3034,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
         SelectorQueryScratch query;
         if (!radiant_dom_prepare_document_query(&query, doc, sel_text, ItemNull, out)) return 1;
-        DomElement* found = radiant_dom_selector_group_find_first(
+        DomElement* found = selector_matcher_query_group(
             query.matcher, query.group, root, true);
         *out = radiant_dom_node_item((DomNode*)found);
         return 1;
@@ -3084,8 +3057,8 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         Array* arr = arr_item.array;
         radiant_host_api->gc->register_root(&arr_item.item);
         if (results) {
-            radiant_dom_selector_group_collect_all(
-                query.matcher, query.group, root, results, true);
+            selector_matcher_query_group(
+                query.matcher, query.group, root, true, results);
             for (int i = 0; i < results->length; i++) {
                 array_push(arr, radiant_dom_node_item((DomNode*)results->data[i]));
             }

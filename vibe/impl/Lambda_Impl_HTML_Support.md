@@ -4,8 +4,9 @@
 
 - Goal: implement the confirmed HTML gaps from the 2026-11-18 audit, with
   ownership, focused verification, and updates to the public support matrix.
-- Checkout: `/Users/henry/Projects/lambda`, `master` at `43722fdbd`; Radiant
-  `187f4cf`, lambda-input `0c5b551`. Started from clean tracked trees.
+- Checkout: `/Users/henry/Projects/lambda`, `master` at `1bcd44f41`; Radiant
+  `6f38618`, lambda-input `1e48876`. The resumed goal started from clean tracked
+  trees with the previous milestones and slot paint changes committed.
 - Updated 2026-11-18. Use the main checkout's split build and keep scratch
   artifacts under `temp/html-support-audit/`.
 - Ownership follows **D9.1.1v4 / D9.1.3v2 / D9.5.6v2**. Lambda owns script
@@ -107,12 +108,12 @@
   `form-iframe-flake-current.log`,
   `current-form-verified.log` and `verified-layout-baseline.log` in the scratch directory.
 - Remaining audit work: dynamic external scripts and modules, shadow selector
-  and resource scope, slot projection and declarative roots,
+  and resource scope, broader slot layout and declarative roots,
   form pickers and datalist suggestions, gauge animation, label press state,
   select parser and post-connection timing and picker paint,
   form validation and vector control paint,
-  dialog top layer, focus, toggle events, native close gestures and form
-  submission, iframe sandbox behavior, media,
+  dialog top layer, opening and restoring focus, toggle events and native
+  close gestures, submit and form-data event interfaces, iframe sandbox behavior, media,
   canvas, responsive image auto sizing and viewport, and additional MathML
   and ruby cases. Web Workers and WebSocket are
   browser-host work. Review each area against its current owner evidence.
@@ -167,3 +168,145 @@
   HTML-control and stylesheet checks pass (`qualified-dialog-request-close.log`).
   The dialog and shadow sheet checks also pass with every-allocation GC and
   poisoned freed memory (`qualified-shadow-list-dialog-gc.log`).
+
+## Resumed slot projection milestone
+
+- The resumed host passed all 87 focused CLI checks. Named projected boxes and
+  fallback text match an equivalent light-tree PNG. The positive geometry and
+  point-hit checks pass (`qualified-shadow-slot-paint.log`).
+- The form, CSS Display and CSS Inline recorded suites meet baseline. CSS Lists
+  has one failure in `list-style-image-zoom-dynamic`; its body loses 16 px of
+  collapsed margin. The slot counter controls pass (`qualified-slot-layout.log`,
+  `qualified-slot-lists-detailed.log`).
+- A live shadow-slot reduction reproduced a stale client rect for a now
+  unassigned node and loss of the wrapper's collapsed margin after reassignment.
+  Distribution mutations now reset both branches through the host. Filtered
+  nodes expose no client rects. Normal-flow margin collapse follows the
+  flattened adjacency and the rendered parent's border and padding. A parent
+  that acquires a boundary during collapse records its original margin
+  (**D9.1.1v4 / D9.1.3v2**).
+- After the repair, all 88 focused CLI checks passed. Both slot paint and
+  geometry checks passed under every-allocation GC and heap poisoning. Flat
+  SVG and PDF contain the same assigned and fallback colors as PNG, and all
+  three report the same rects through reassignment. The focused layout gate
+  stayed at the resumed baseline, with only the pre-existing Lists zoom
+  failure (`qualified-slot-margin-edges*.log`, `slot-*-final-output.log`).
+
+## Named slot events and template query boundaries
+
+- Distribution snapshots compare native identities in assignment order. The
+  agent microtask snapshots pending observers and signal slots, delivers
+  observer records, then dispatches trusted bubbling `slotchange` events.
+  Work queued by callbacks remains pending for the next checkpoint. Event
+  paths follow assigned slots and preserve original boundaries during DOM
+  mutation. Target and related-target retargeting, phase changes, closed
+  path filtering and legacy global event visibility use the captured path
+  (**D9.1.3v2 / D6.3.3 / D5.5.1**).
+- Native Document queries and realm element and fragment queries share the
+  source-tree walker. Parsed nested template contents enter query scope only
+  through their own fragments. The nested shadow WPT fixtures now construct
+  the intended trees (**D9.1.3v2**).
+- The 71 focused CLI cases pass and the four new or updated controls pass
+  under every-allocation GC and poisoning. The 156 subtests across the
+  pinned assignment, event delivery, composed-path, mutation and retargeting
+  files pass.
+  The full input baseline passes 5,337 tests with three skips
+  (`qualified-shadow-events-aggregate.log`, `qualified-shadow-all-gc.log`,
+  `qualified-related-wpt-detailed-*.log`, `qualified-input-template-queries.log`).
+
+## Manual slot assignment and nested projection
+
+- `attachShadow()` accepts named and manual distribution modes. The native
+  lifecycle registry transfers weak manual bindings on adoption and releases
+  them when either endpoint retires. Variadic assignment validates the whole
+  request before replacing it. Assignment changes use the existing
+  `slotchange` queue and a host-scoped invalidation record
+  (**D9.1.3v2 / D5.5.1**).
+- A shared iterator drives assignment reads, directionality, layout and
+  painting. Layout enters a projected slot before changing leaf formatting
+  links, so nested distribution still uses the slot's source root
+  (**D9.1.1v4 / D9.1.3v2**).
+- All 35 selected imperative and lifecycle WPT subtests pass, including
+  cross-document node and slot moves. Both imperative PNG reftests match.
+  All 73 focused CLI controls pass and both manual paint controls pass under
+  every-allocation GC plus poisoning. The 752-entry focused layout inventory
+  retains only the existing Lists zoom failure
+  (`qualified-final-manual-wpt-manual-*.log`, `qualified-nested-slot-aggregate.log`,
+  `qualified-nested-slot-gc.log`, `qualified-manual-slot-layout.log`).
+
+## Slot display and HTML hidden states
+
+- Slots use the HTML `display:contents` default. `display:none` cuts off
+  the same flattened subtree for layout, paint, hit testing, and client rects.
+  Slot attribute and style edits reset the affected host projection. Named
+  and manual assignment remain visible to the DOM (**D9.1.1v4 / D9.1.3v2**).
+- `HTMLElement.hidden` reflects the HTML union setter. An until-found
+  element gets its concealment from the UA cascade, retains its own
+  box and suppresses descendant paint. Computed style follows the shared
+  property serializer, including an author override (**D9.1.3v2**).
+- The pinned hidden reflection and cascade tests pass all 26 subtests. Both
+  until-found paint reftests match. The full CLI sample passes 75 checks and
+  both new visibility checks pass under precise GC stress. The full Input
+  baseline after manual binding passes 5,337 cases with three skips. The
+  focused layout inventory still has only RI-139
+  (`qualified-cascade-wpt-hidden-*.log`, `qualified-hidden-cascade-aggregate.log`,
+  `qualified-hidden-cascade-gc.log`, `qualified-input-manual-slot-lifecycle.log`,
+  `qualified-html-hidden-slot-layout.log`).
+
+## Fragment navigation and ancestor reveal
+
+- Hash writes normalize the fragment and resolve the indicated source
+  element. Native anchor activation and hash writes share the DOM reveal
+  path. It pins the target and freezes the flat-tree ancestor work before
+  dispatch. Closed details open when the path crosses their non-summary
+  children. Event listeners can move the target, remove it, or change
+  the hidden state before the post-event check. Native scroll skips
+  targets that lose their boxes (**D9.1.1v4 / D9.1.3v2 / D9.5.6v2**).
+- The pinned element-fragment suite passes all 10 subtests and four other
+  ancestor controls pass. Chromium 152 passes the pinned
+  `beforematch-element-removal-002.html`, which expects continuation
+  after an until-found state changes. The current HTML algorithm aborts
+  that ancestor walk. The Lambda test times out waiting for the additional
+  event. Native viewport click replay passes both scroll and target geometry
+  assertions and logs a trusted event while the target is still hidden.
+- All 76 focused CLI cases pass. The four selected controls also pass with
+  every-allocation GC and poisoning. The Radiant layout lint passes
+  (`qualified-boxless-wpt-reveal-*.log`, `qualified-reveal-spec-residue.log`,
+  `qualified-reveal-chromium.log`, `qualified-reveal-native-anchor.log`,
+  `qualified-reveal-final-aggregate.log`, `qualified-reveal-final-gc.log`).
+
+## Next confirmed gap
+
+Dialog form submission still routes through ordinary navigation. Start with
+the shared DOM close path and the Lambda form behavior entry point. Verify
+button activation, `requestSubmit()`, direct `submit()`, and submitter
+overrides alongside the existing close-event controls. Image-button
+coordinates and the form-data event need their current ownership checked.
+
+### Dialog form submission and image buttons
+
+- The Lambda form behavior and JS submission methods now use a canonical
+  method lookup and a single dialog close operation. The chosen dialog is
+  the nearest source-tree ancestor of the form. Button value reflection and
+  the empty boolean validation attributes use the normal DOM paths
+  (**D9.1.3v2 / D9.5.6v2 / D6.3.3**).
+- The image submitter uses the shared image loader and painter and retains the
+  selected coordinate in integer CSS pixels. Open-attribute removal rechecks
+  focus before native input continues. `dialog_image_submit` passes all five
+  assertions normally and under forced GC. The image pixel matches in PNG,
+  flat SVG and flat PDF. The JPEG probe also paints and reports `12,16`.
+- The focused aggregate passes 77/77. Four focus replays pass 108 assertions.
+  Radiant's integer-cast lint passes. The 752-entry layout inventory has the
+  same pre-existing Lists zoom failure (RI-139) and no new failures.
+- The unusual-action WPT passes 2/2 and the close-task file passes 1/1. The
+  main file passes 6/8 with native pointer actions. The public click helper
+  requires `elementsFromPoint()`; the pointer recording otherwise exposes a
+  fractional event offset compared with HTML's integer selected point. The
+  direct-submit expectation follows Chromium 152, which clears the value.
+  The current HTML algorithm supplies a null result in this case and preserves
+  the dialog's value.
+- Scratch results include `qualified-dialog-form-final-aggregate.log`,
+  `qualified-dialog-image-ui-gc.log`, `qualified-dialog-form-layout.log`
+  and `qualified-native-action-dialog-form-layout.log`. See JS13-L12 and RI-140
+  for the remaining event, image sizing and fallback work. The next forms
+  increment is `SubmitEvent` branding and shared `formdata` dispatch.

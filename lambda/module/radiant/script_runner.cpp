@@ -757,9 +757,11 @@ driver.action_sequence = async function(sources, context) {
                     let x = action.x || 0, y = action.y || 0;
                     if (action.origin === 'pointer') { x += state.x; y += state.y; }
                     else if (action.origin && action.origin !== 'viewport') {
-                        const rect = action.origin.getBoundingClientRect();
-                        x += (Math.max(0, rect.left) + Math.min(innerWidth, rect.right)) / 2;
-                        y += (Math.max(0, rect.top) + Math.min(innerHeight, rect.bottom)) / 2;
+                        // WebDriver uses the floored center of the first in-view box.
+                        const rect = action.origin.getClientRects()[0];
+                        if (!rect) throw new Error('Pointer origin has no client rectangle');
+                        x += Math.floor((Math.max(0, rect.left) + Math.min(innerWidth, rect.right)) / 2);
+                        y += Math.floor((Math.max(0, rect.top) + Math.min(innerHeight, rect.bottom)) / 2);
                     }
                     state.x = x; state.y = y;
                 }

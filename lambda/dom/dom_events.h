@@ -162,6 +162,7 @@ Item js_create_native_mouse_event(const char* type,
 /** Override the timestamp for deterministic native-event simulation. */
 void js_event_set_timestamp(Item event, double timestamp_ms);
 void dom_event_set_movement(Item event, double movement_x, double movement_y);
+void dom_event_set_offset(Item event, double offset_x, double offset_y);
 
 /** PE6 (Radiant_Design_Paint_Engine.md): the W3C pen axes of a native PointerEvent. */
 typedef struct DomPointerAxes {

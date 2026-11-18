@@ -9,10 +9,12 @@
 #include "../js/js_runtime_state.hpp"
 #include "../module/radiant/radiant_history.hpp"
 #include "lambda/input/css/dom_element.hpp"
+#include "lambda/core/well_known_markup_names.h"
 #include "../runtime/transpiler.hpp"
 #include "lib/arraylist.h"
 #include "lib/log.h"
 #include "lib/mem.h"
+#include "lib/url.h"
 #include <math.h>
 #include <string.h>
 
@@ -226,16 +228,56 @@ JS_FORWARD_STATIC_ITEM(js_history_back, (void), js_history_go, ((Item){.item = i
 JS_FORWARD_STATIC_ITEM(js_history_forward, (void), js_history_go, ((Item){.item = i2it(1)}))
 JS_FORWARD_STATIC_ITEM(js_history_window_noop, (void), make_js_undefined, ())
 
-extern "C" Item js_history_set_location(Item value) {
-    DomDocument* document = js_history_document();
-    const char* url_text = fn_to_cstr(value);
-    if (!document || !url_text) return value;
-    RadiantHistoryTraversal traversal = {};
-    if (dom_engine_history_set_location(document, url_text, &traversal)) {
-        js_history_refresh_object();
-        dom_history_queue_events(&traversal, false);
+static DomElement* dom_history_find_fragment(DomElement* root, const char* name) {
+    if (DomElement* by_id = dom_find_source_element_by_id(root, name)) return by_id;
+    for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+        DomElement* element = node->as_element();
+        if (!dom_element_is_html_tag(element, MARKUP_NAME_A)) continue;
+        const char* anchor = element->get_attribute("name");
+        if (anchor && strcmp(anchor, name) == 0) return element;
     }
-    return value;
+    return nullptr;
+}
+
+static DomElement* dom_history_indicated_element(DomDocument* document) {
+    const char* hash = url_get_hash(document->url);
+    if (!hash || *hash != '#') return nullptr;
+    const char* fragment = hash + 1;
+    if (!*fragment) return document->root;
+    if (DomElement* exact = dom_history_find_fragment(document->root, fragment)) return exact;
+    size_t length = 0;
+    char* decoded = url_decode_component(fragment, strlen(fragment), &length);
+    DomElement* element = nullptr;
+    if (decoded && !memchr(decoded, '\0', length)) {
+        element = dom_history_find_fragment(document->root, decoded);
+        if (!element && str_ieq_cstr(decoded, "top")) element = document->root;
+    }
+    mem_free(decoded);
+    return element;
+}
+
+extern "C" Item js_history_set_location(Item value, bool hash_member) {
+    RootFrame roots(2);
+    Rooted<Item> input(roots, value), text(roots, ItemNull);
+    DomDocument* document = js_history_document();
+    if (!document) return input.get();
+    text.set(js_to_string(input.get()));
+    if (item_is_error(text.get())) return text.get();
+    const char* url_text = fn_to_cstr(text.get());
+    if (!url_text) return input.get();
+    // A Location.hash write supplies a fragment even when '#' is omitted.
+    char* fragment = hash_member && *url_text != '#'
+        ? mem_join3("#", 1, url_text, strlen(url_text), "", 0, MEM_CAT_DOM) : nullptr;
+    if (hash_member && *url_text != '#' && !fragment) return ItemError;
+    RadiantHistoryTraversal traversal = {};
+    bool changed = dom_engine_history_set_location(document, fragment ? fragment : url_text, &traversal);
+    mem_free(fragment);
+    if (changed) {
+        // Capture history URLs before beforematch can start another navigation.
+        dom_history_queue_events(&traversal, false);
+        dom_scroll_to_fragment_target(dom_history_indicated_element(document), true);
+    }
+    return input.get();
 }
 
 extern "C" void js_history_install_globals(void) {
