@@ -4,3 +4,6 @@
 [submodule "radiant"]
 	path = radiant
 	url = https://github.com/henry-luo/radiant.git
+[submodule "lambda-test"]
+	path = lambda-test
+	url = https://github.com/henry-luo/lambda-test.git
