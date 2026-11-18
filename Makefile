@@ -79,6 +79,9 @@ PDF_TEST_CONFIG ?= debug_native
 # stale binaries. The concurrency and Node preliminary suites stay excluded.
 LAMBDA_BASELINE_SELECTION = --target=lambda --category=baseline --lambda-owned --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest
 LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --list-build-targets)
+LAMBDA_FULL_JS_TESTS = test_js_c_parser_gtest,test_js_regex_router_poc_gtest,test_js_coerce_gtest,test_js_mir_emission_gtest,test_js_script_gtest,test_js_opt_gtest,test_js_bt_regex_gtest,test_npm_package_json_gtest,test_js_mvp_lmd_gtest
+LAMBDA_FULL_JS_SELECTION = --target=lambda --lambda-owned --include-test=$(LAMBDA_FULL_JS_TESTS)
+LAMBDA_FULL_JS_TEST_PROJECTS = $(shell node test/test_run.js $(LAMBDA_FULL_JS_SELECTION) --list-build-targets)
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -580,7 +583,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
-	@echo "  test-lambda-full - Lambda baseline plus concurrency, extended-script, DOM-node and validator-input gates"
+	@echo "  test-lambda-full - Lambda baseline plus focused JavaScript, concurrency, extended-runtime and input gates"
 	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-mir-gc-stress - Run batched GC stress and reviewed backend-parity probes"
 	@echo "  test-mir-gc-stress-full - Force GC for every MIR corpus fixture"
@@ -1648,6 +1651,10 @@ test-chat-clients: build
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
+	@echo "Building JavaScript suites assigned to the full Lambda gate..."
+	$(call run_make_with_error_summary,lambda-full-js,debug_native,,$(LAMBDA_FULL_JS_TEST_PROJECTS))
+	@echo "Running JavaScript suites assigned to the full Lambda gate..."
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_FULL_JS_SELECTION) --parallel
 	@echo "Running Lambda LaTeX script tests..."
 	@./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/latex_*'
 	@$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE=debug test-input-baseline

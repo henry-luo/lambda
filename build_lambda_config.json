@@ -6033,6 +6033,7 @@
           {
             "source": "test_npm_package_json_gtest.cpp",
             "name": " npm package.json Tests",
+            "category": "extended",
             "dependencies": [
               "lambda-data"
             ],
@@ -6367,6 +6368,7 @@
           {
             "source": "test/test_js_mir_emission_gtest.cpp",
             "name": "JS MIR Emission Tests",
+            "category": "extended",
             "dependencies": [
               "lambda-lib"
             ],
@@ -6381,6 +6383,7 @@
           {
             "source": "test/test_js_mvp_lmd_gtest.cpp",
             "name": "JS Lambda MVP Tests",
+            "category": "extended",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -6573,6 +6576,7 @@
           {
             "source": "test/test_js_c_parser_gtest.cpp",
             "name": "JavaScript C Parser Tests",
+            "category": "extended",
             "additional_sources": [
               "lambda/runtime/parser/source_parser.c",
               "lambda/js/parser/js_lexer.c",
@@ -6628,6 +6632,7 @@
           {
             "source": "test/test_js_script_gtest.cpp",
             "name": "JavaScript Script Ownership Tests",
+            "category": "extended",
             "dependencies": [
               "lambda-rt",
               "lambda-radiant-adapter",
@@ -6664,7 +6669,7 @@
           {
             "source": "test/test_js_opt_gtest.cpp",
             "name": "JavaScript Optimization Contract Tests",
-            "category": "baseline",
+            "category": "extended",
             "dependencies": [
               "lambda-lib"
             ],
@@ -6707,6 +6712,7 @@
           {
             "source": "test/test_js_bt_regex_gtest.cpp",
             "name": "JS Backtracking Regex Matcher Tests",
+            "category": "extended",
             "dependencies": [
               "lambda-data"
             ],
@@ -6720,6 +6726,7 @@
           {
             "source": "test/test_js_regex_router_poc_gtest.cpp",
             "name": "JS RegExp Router AST POC",
+            "category": "extended",
             "dependencies": [
               "lambda-rt"
             ],
@@ -6736,6 +6743,7 @@
           {
             "source": "test/test_js_coerce_gtest.cpp",
             "name": "JS Coercion Kernel Tests",
+            "category": "extended",
             "dependencies": [
               "lambda-lib"
             ],

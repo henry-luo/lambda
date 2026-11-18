@@ -270,7 +270,7 @@ still require native checks. Design: [Radiant Fullscreen](../vibe/radiant/Radian
 | `make test` | every suite except `jube`, and minus `test_radiant_online_view_gtest`. This is not `test-all`, despite what `make help` says |
 | `make test-all` / `test-all-baseline` / `test-extended` | all suites / `--category=baseline` / `--category=extended`. `test-extended` also runs `dom-ui-run`. |
 | `make test-lambda-baseline` | Lambda-owned `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`, and `test/lambda/latex` script cases) |
-| `make test-lambda-full` | the above, LaTeX script cases, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, and the four relocated unit suites retained by the full gate |
+| `make test-lambda-full` | the above, nine focused JavaScript GTest suites, LaTeX script cases, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, and the four relocated unit suites retained by the full gate |
 | `make -C ../lambda-input test-input-baseline` | input-owned native library, parser, formatter, model, CSS, archive and offline network suites, including HTML, Markdown and YAML corpora |
 | `make -C ../radiant test-radiant-baseline` | Radiant-owned native layout, rendering, media and host-interface unit suites |
 | `make test-radiant-baseline` | Lambda-owned Radiant integration checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks run through `test/test_run.js` within a shared worker budget; layout partials, skips and baseline verdicts are retained |
