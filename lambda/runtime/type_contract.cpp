@@ -1763,8 +1763,8 @@ void lambda_format_effect_suffix(uint32_t effects, char* buffer, size_t capacity
     buffer[0] = '\0';
     effects &= LAMBDA_EFFECT_GENERATIVE;
     if (!effects) return;
-    bool brace = (effects & (effects - 1)) != 0;
-    snprintf(buffer, capacity, "%s", brace ? " @{" : " @");
+    bool multiple = (effects & (effects - 1)) != 0;
+    snprintf(buffer, capacity, "%s", multiple ? " @[" : " @");
     bool first = true;
     for (LambdaEffectMask bit = 1; bit <= LAMBDA_EFFECT_GENERATIVE; bit <<= 1) {
         if (!(effects & bit)) continue;
@@ -1772,9 +1772,9 @@ void lambda_format_effect_suffix(uint32_t effects, char* buffer, size_t capacity
         snprintf(buffer + used, capacity - used, "%s%s", first ? "" : ", ", lambda_effect_name(bit));
         first = false;
     }
-    if (brace) {
+    if (multiple) {
         size_t used = strlen(buffer);
-        snprintf(buffer + used, capacity - used, "}");
+        snprintf(buffer + used, capacity - used, "]");
     }
 }
 

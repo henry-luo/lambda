@@ -1,0 +1,11 @@
+{
+  cases: 64,
+  supported: true,
+  tree: true,
+  text: true,
+  diagnostics: true,
+  guards: 12,
+  guarded: true,
+  foreign: 2,
+  foreign_ok: true
+}

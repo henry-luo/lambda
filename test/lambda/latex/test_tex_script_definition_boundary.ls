@@ -1,12 +1,4 @@
-import profile: lambda.doc.latex.tex_engine.profile
-import digest: lambda.doc.latex.tex_engine.digest
-let kernel=input(sys.lambda.home ++ "/package/doc/latex/tex_engine/kernel.tex","text")^;
-fn check(body) any^ {
- let source="\\begin{document}" ++ body ++ "\\end{document}";
- let r=profile.expand_with_kernel(source,kernel,{constructor_argument_mode:true,echo_definitions:true,adapters:[],resources:{local:{},bundled:{}}},100000)^;
- let d=digest.digest(r)^;let n=parse(source,{type:"latex"})^;
- {body:body,issue:d.issue,unsupported:d.unsupported,matches:if(d.ast==null)null else d.ast==n,actual:if(d.ast==null or d.ast==n)null else d.ast,native:if(d.ast==null or d.ast==n)null else n}
-}
+import compare: ._tex_definition_compare
 [for (body in [
  "\\def\\envname{x}\\renewenvironment{\\envname}{A}{B}X",
  "\\def\\envname{x}X",
@@ -34,4 +26,4 @@ fn check(body) any^ {
  "\\def\\q{A}\\count0=4 \\emph{X}",
  "\\def\\q{A}\\count0=4 \\def\\r{B}\\relax X",
  "\\def\\q{A}\\count0=4 \\par X"
-]) check(body)^]
+]) compare.check(body)^]

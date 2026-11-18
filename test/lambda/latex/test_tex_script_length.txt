@@ -1,0 +1,19 @@
+{
+  cases: 62,
+  supported: true,
+  text: true,
+  diagnostics: true,
+  messages: true
+}
+{
+  ast_cases: 2,
+  supported: true,
+  matches: true
+}
+{
+  foreign_cases: 2,
+  supported: true,
+  text: true,
+  diagnostics: true,
+  messages: true
+}

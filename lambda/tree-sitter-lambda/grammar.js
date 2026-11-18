@@ -1057,7 +1057,7 @@ module.exports = grammar({
     // `function`-typed arguments are.
     fn_stam: $ => fn_declaration($, choice($.identifier, $.symbol)),
     procedure_effects: $ => seq('@', choice($._effect_name,
-      seq('{', comma_sep1($._effect_name), '}'))),
+      seq('[', comma_sep1($._effect_name), ']'))),
     _effect_name: _ => choice('random', 'clock', 'print'),
     fn_expr_stam: $ => fn_expr_declaration($, choice($.identifier, $.symbol)),
     // S16.10.2: a method's name is a data name, reached only through a

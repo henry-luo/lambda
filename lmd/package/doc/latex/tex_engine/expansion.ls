@@ -40,7 +40,8 @@ fn result(input: map, definitions: map, groups: array, output: map[], count: int
         current_package: null, current_options: null, current_is_class: false, option_decls: [], pass_options: [],
         math_depth: 0, display_math: false, main_file: input.reader.file_id,
         echo_definitions: options.echo_definitions == true, echo_incomplete: false,
-        conditions: [], counts: {}, dimens: {}, skips: {}, muskips: {}, boxes: {}, box_serial: 0, toks: {}, lowercase: {}, uppercase: {}, code_tables: {sfcode: {}, mathcode: {}, delcode: {}},
+        conditions: [], counts: {}, dimens: {}, skips: {}, muskips: {}, boxes: {}, box_serial: 0, box_metrics: {}, box_metrics_reported: false, toks: {}, lowercase: {}, uppercase: {}, code_tables: {sfcode: {}, mathcode: {}, delcode: {}},
+        expression_arithmetic_error: false,
         parameters: {endlinechar: input.reader.endline, escapechar: 92, mag: 1000, tolerance: 10000,
             newlinechar: if (options.latex == true) -1 else 0}, after_assignment: null, token_text_scan: false,
         resources: options.resources, resources_seen: {}, resource_ids: {}, resource_count: 0, resource_bytes: 0,
@@ -357,6 +358,7 @@ fn prefixed(st: State, global, long_ok, protected_flag, budget) State^ {
         assign_paragraph_data(advanced, budget, cmd)
     else if (cmd == "nullfont" and not long_ok and not protected_flag) select_font(advanced, apply_global, 0)
     else if (cmd == "setbox" and not long_ok and not protected_flag) assign_box(advanced, apply_global, budget)
+    else if (box_dimension_name(cmd) and not long_ok and not protected_flag) assign_box_dimension(advanced, cmd, budget)
     else if (cmd == "count" and not long_ok and not protected_flag) assign_count(advanced, apply_global, budget, null)
     else if (cmd == "countdef" and not long_ok and not protected_flag) assign_countdef(advanced, apply_global, budget)
     else if (cmd == "dimen" and not long_ok and not protected_flag) assign_dimen(advanced, apply_global, budget, null)
@@ -639,21 +641,24 @@ fn digit(t, base) int | null | error {
     else null
 }
 
-fn digits(st, t, base, negative, budget, count = 0, value = 0) NumberScan^ {
+fn digits(st, t, base, negative, budget, count = 0, value = 0, overflow = false, return_token = false) NumberScan^ {
     let n = digit(t, base);
     if (st.issue != null) {state: st, value: 0}
+    else if (n == null and return_token) {state: st, value: value, token: t}
     else if (n == null) {
         let returned = after_numeric_scan(t);
         let after = if (count > 0 and expanded_space(st, t)^) st else put_back(st, returned);
         // TeX reports the missing operand and scans the returned token again.
         if (count == 0) {state: record_diagnostic(after, "tex-missing-number", "Missing number, treated as zero")^, value: 0}
         else {state: after, value: if (negative) -value else value}
-    } else if (value * base + n > 2147483647)
-        {state: fail(st, "tex-number-too-big"), value: 0}
-    else {
-        let read = expanded_next(st, budget);
+    } else {
+        let too_big = overflow or value * base + n > 2147483647;
+        // TeX clamps once but still consumes all following digits of the number.
+        let current = if (too_big and not overflow) record_diagnostic(st, "tex-number-too-big", "Number too big")^ else st;
+        let next_value = if (too_big) 2147483647 else value * base + n;
+        let read = expanded_next(current, budget);
         if (read.state.issue != null) {state: read.state, value: 0}
-        else digits(read.state, read.token, base, negative, budget, count + 1, value * base + n)^
+        else digits(read.state, read.token, base, negative, budget, count + 1, next_value, too_big, return_token)^
     }
 }
 
@@ -691,6 +696,10 @@ fn scan_number(st, budget) NumberScan^ {
             else {state: start.state, value: meaning(start.state, t).index};
         let value = dimen_value(index.state, index.value);
         {state: index.state, value: if (start.negative) -value else value}
+    }
+    else if (box_dimension_name(primitive(start.state, t))) {
+        let value = box_dimension(start.state, primitive(start.state, t), budget)^;
+        {state: value.state, value: if (start.negative) -value.value else value.value}
     }
     else if (primitives.parameter_kind(primitive(start.state, t)) == "dimen") {
         let value = dimen_value(start.state, "param:" ++ primitive(start.state, t));
@@ -788,39 +797,43 @@ fn expression_factor(st, budget, level = "int") any^ {
     else scan_number(put_back(first.state, first.token), budget)^
 }
 
-fn checked_integer(st, value) any^ =>
-    if (value > 2147483647 or value < -2147483647) {state: fail(st, "tex-arith-overflow"), value: 0}
+// Expression arithmetic defers its diagnostic until the whole expression is scanned.
+fn arithmetic_error(st: State, deferred) State => if (deferred)
+    {*:st, expression_arithmetic_error: true} else fail(st, "tex-arith-overflow")
+
+fn checked_integer(st, value, deferred = false) any^ =>
+    if (value > 2147483647 or value < -2147483647) {state: arithmetic_error(st, deferred), value: 0}
     else {state: st, value: value}
 
-fn rounded_fraction(st, numerator, denominator) any^ {
-    if (denominator == 0) {state: fail(st, "tex-arith-overflow"), value: 0}
+fn rounded_fraction(st, numerator, denominator, deferred = false) any^ {
+    if (denominator == 0) {state: arithmetic_error(st, deferred), value: 0}
     else {
         let a = abs(numerator);
         let b = abs(denominator);
         let whole = a div b;
         let rounded = whole + if (2 * (a % b) >= b) 1 else 0;
-        checked_integer(st, if ((numerator < 0) != (denominator < 0)) -rounded else rounded)
+        checked_integer(st, if ((numerator < 0) != (denominator < 0)) -rounded else rounded, deferred)
     }
 }
 
 fn expression_scaled(st, value, level, numerator, denominator) any^ {
     if (level == "glue" or level == "mu") {
-        let width = rounded_fraction(st, value.width * numerator, denominator)^;
-        let stretch = rounded_fraction(width.state, value.stretch * numerator, denominator)^;
-        let shrink = rounded_fraction(stretch.state, value.shrink * numerator, denominator)^;
+        let width = rounded_fraction(st, value.width * numerator, denominator, true)^;
+        let stretch = rounded_fraction(width.state, value.stretch * numerator, denominator, true)^;
+        let shrink = rounded_fraction(stretch.state, value.shrink * numerator, denominator, true)^;
         let result = {width: width.value, stretch: stretch.value,
             stretch_order: if (stretch.value == 0) 0 else value.stretch_order,
             shrink: shrink.value, shrink_order: if (shrink.value == 0) 0 else value.shrink_order};
         if (width.state.issue != null) {state: width.state, value: result}
         else if (stretch.state.issue != null) {state: stretch.state, value: result}
         else if (shrink.state.issue != null) {state: shrink.state, value: result}
-        else if (not glue.valid(result)) {state: fail(shrink.state, "tex-arith-overflow"), value: result}
+        else if (not glue.valid(result)) {state: arithmetic_error(shrink.state, true), value: glue.zero()}
         else {state: shrink.state, value: result}
     }
     else {
-        let result = rounded_fraction(st, value * numerator, denominator)^;
+        let result = rounded_fraction(st, value * numerator, denominator, true)^;
         if (result.state.issue == null and level == "dimen" and abs(result.value) >= 1073741824)
-            {state: fail(result.state, "tex-arith-overflow"), value: 0}
+            {state: arithmetic_error(result.state, true), value: 0}
         else result
     }
 }
@@ -829,12 +842,12 @@ fn expression_added(st, a, b, level, subtract) any^ {
     if (level == "glue" or level == "mu") {
         let result = glue.add(a, if (subtract) glue.negate(b) else b)^;
         if (glue.valid(result)) {state: st, value: result}
-        else {state: fail(st, "tex-arith-overflow"), value: result}
+        else {state: arithmetic_error(st, true), value: glue.zero()}
     }
     else {
-        let result = checked_integer(st, if (subtract) a - b else a + b)^;
+        let result = checked_integer(st, if (subtract) a - b else a + b, true)^;
         if (result.state.issue == null and level == "dimen" and abs(result.value) >= 1073741824)
-            {state: fail(result.state, "tex-arith-overflow"), value: 0}
+            {state: arithmetic_error(result.state, true), value: 0}
         else result
     }
 }
@@ -891,12 +904,16 @@ fn expression_sum(st, budget, level) any^ {
 }
 
 fn scan_expression(st, budget, level = "int") any^ {
-    let result = expression_sum(st, budget, level)^;
-    if (result.state.issue != null) result
+    let outer_error = st.expression_arithmetic_error == true;
+    let result = expression_sum({*:st, expression_arithmetic_error: false}, budget, level)^;
+    if (result.state.issue != null) {*:result, state: {*:result.state, expression_arithmetic_error: outer_error}}
     else {
         let end = expanded_nonspace(result.state, budget)^;
-        {state: if (primitive(end.state, end.token) == "relax") end.state else put_back(end.state, end.token),
-            value: result.value}
+        let stopped = if (primitive(end.state, end.token) == "relax") end.state else put_back(end.state, end.token);
+        let overflow = stopped.expression_arithmetic_error == true;
+        let restored = {*:stopped, expression_arithmetic_error: outer_error};
+        {state: if (overflow) record_diagnostic(restored, "tex-arith-overflow", "Arithmetic overflow")^ else restored,
+            value: if (overflow) if (level == "glue" or level == "mu") glue.zero() else 0 else result.value}
     }
 }
 
@@ -926,6 +943,35 @@ fn take_box(st, index, copy) any^ {
         {state:{*:st, boxes:set_count(st.boxes,index,null),
             groups:[for(i, scope in st.groups) if (i > barrier)
                 {*:scope, boxes:set_count(scope.boxes,index,null)} else scope]}, box:box}
+    }
+}
+
+fn box_dimension_name(name) => contains(["wd", "ht", "dp"], name)
+
+// box copies share identity; their dimensions belong to the object across register scopes.
+fn box_dimension(st: State, name, budget) NumberScan^ {
+    let index = scan_register(st, budget)^;
+    let box = index.state.boxes[string(index.value)];
+    let metrics = if (box == null) null else index.state.box_metrics[string(box.id)];
+    let value = if (metrics == null or metrics[name] == null) 0 else metrics[name];
+    let current = if (index.state.issue != null or box == null or index.state.box_metrics_reported == true) index.state
+        else record_diagnostic({*:index.state, box_metrics_reported: true}, "approximate-box-metrics",
+            "box dimensions are approximate: TeX's typesetting is not reproduced")^;
+    {state: current, value: value}
+}
+
+fn assign_box_dimension(st: State, name, budget) State^ {
+    let index = scan_register(st, budget)^;
+    if (index.state.issue != null) index.state
+    else {
+        let value = scan_dimen(optional_equals(index.state, budget)^, budget)^;
+        let box = value.state.boxes[string(index.value)];
+        if (value.state.issue != null or box == null) value.state
+        else {
+            let id = string(box.id);
+            let prior = value.state.box_metrics[id] or {};
+            {*:value.state, box_metrics: {*:value.state.box_metrics, *:map([id, {*:prior, *:map([name, value.value])}])}}
+        }
     }
 }
 
@@ -993,7 +1039,8 @@ fn fraction_digits(st, budget, values = []) NumberScan^ {
 }
 
 fn dimension_unit(st, budget, names = ["pt", "in", "pc", "cm", "mm", "bp", "dd", "cc", "nd", "nc", "sp"], index = 0) NameScan^ {
-    if (index >= len(names)) {state: fail(st, "tex-illegal-unit"), name: null}
+    // Failed keyword scans restore their tokens before TeX inserts the default unit.
+    if (index >= len(names)) {state: record_diagnostic(st, "tex-illegal-unit", "Illegal unit of measure (pt inserted)")^, name: "pt"}
     else {
         let word = scan_word(st, names[index], budget)^;
         if (word.state.issue != null or word.found) {state: word.state, name: if (word.found) names[index] else null}
@@ -1001,29 +1048,49 @@ fn dimension_unit(st, budget, names = ["pt", "in", "pc", "cm", "mm", "bp", "dd",
     }
 }
 
+fn infinite_order(st: State, budget) NumberScan^ {
+    var current: State = st
+    var order = 1
+    var found = true
+    // Consume arbitrary excess l tokens without growing the native stack.
+    while (found and current.issue == null) {
+        let next = scan_word(current, "l", budget)^;
+        found = next.found
+        current = if (found and order == 3) record_diagnostic(next.state, "tex-illegal-unit", "Illegal unit of measure (replaced by filll)")^ else next.state
+        if (found and order < 3) { order = order + 1 }
+    }
+    return {state: current, value: order}
+}
+
+// Native TeX reports an oversized dimension after consuming its unit and clamps it.
+fn dimension_result(st: State, magnitude, negative, order = 0) NumberScan^ {
+    let too_large = abs(magnitude) >= 1073741824;
+    let current = if (too_large) record_diagnostic(st, "tex-dimension-too-large", "Dimension too large")^ else st;
+    let value = if (too_large) 1073741823 else magnitude;
+    {state: current, value: if (negative) -value else value, order: order}
+}
+
 fn dimension_finish(st, whole, fraction, negative, budget, infinite, mu) NumberScan^ {
     let next = expanded_nonspace(st, budget)^;
     let cmd = primitive(next.state, next.token);
     let m = if (is_control(next.token)) meaning(next.state, next.token) else null;
     if (next.state.issue != null) {state: next.state, value: 0}
-    else if (cmd == "dimen" or m.kind == "dimension-register" or primitives.parameter_kind(cmd) == "dimen") {
-        let index = if (cmd == "dimen") scan_register(next.state, budget)^
+    else if (box_dimension_name(cmd) or cmd == "dimen" or m.kind == "dimension-register" or primitives.parameter_kind(cmd) == "dimen") {
+        let index = if (box_dimension_name(cmd)) box_dimension(next.state, cmd, budget)^
+            else if (cmd == "dimen") scan_register(next.state, budget)^
             else {state: next.state, value: if (m.kind == "dimension-register") m.index else "param:" ++ cmd};
-        let value = dimen_value(index.state, index.value);
+        let value = if (box_dimension_name(cmd)) index.value else dimen_value(index.state, index.value);
         let magnitude = whole * value + (abs(value) * fraction div 65536) * if (value < 0) -1 else 1;
-        if (abs(magnitude) >= 1073741824) {state: fail(index.state, "tex-dimension-too-large"), value: 0}
-        else {state: index.state, value: if (negative) -magnitude else magnitude, order: 0}
+        dimension_result(index.state, magnitude, negative)^
     }
     else {
         let available = put_back(next.state, next.token);
         let fil = if (infinite) scan_word(available, "fil", budget)^ else {state: available, found: false};
         if (fil.found) {
-            let first = scan_word(fil.state, "l", budget)^;
-            let second = if (first.found) scan_word(first.state, "l", budget)^ else first;
-            let order = if (not first.found) 1 else if (not second.found) 2 else 3;
+            let order = infinite_order(fil.state, budget)^;
             let amount = whole * 65536 + fraction;
-            if (amount >= 1073741824) {state: fail(second.state, "tex-dimension-too-large"), value: 0, order: 0}
-            else {state: second.state, value: if (negative) -amount else amount, order: order}
+            if (order.state.issue != null) {state: order.state, value: 0, order: 0}
+            else dimension_result(order.state, amount, negative, order.value)^
         }
         else {
         let em = if (mu) {state: fil.state, found: false} else scan_word(fil.state, "em", budget)^;
@@ -1037,14 +1104,14 @@ fn dimension_finish(st, whole, fraction, negative, budget, infinite, mu) NumberS
             let magnitude = whole * value + (abs(value) * fraction div 65536) * if (value < 0) -1 else 1;
             let after = expanded_next(px.state, budget)^;
             let end = if (charcat(after.token, 10)) after.state else put_back(after.state, after.token);
-            if (abs(magnitude) >= 1073741824) {state: fail(end, "tex-dimension-too-large"), value: 0}
-            else {state: end, value: if (negative) -magnitude else magnitude, order: 0}
+            dimension_result(end, magnitude, negative)^
         }
         else {
         let true_word = if (mu) {state: px.state, found: false} else scan_word(px.state, "true", budget)^;
         let found = if (mu) {
             let word = scan_word(true_word.state, "mu", budget)^;
-            {state: if (word.found) word.state else fail(word.state, "tex-illegal-unit"), name: "pt"}
+            {state: if (word.found or word.state.issue != null) word.state
+                else record_diagnostic(word.state, "tex-illegal-unit", "Illegal unit of measure (mu inserted)")^, name: "pt"}
         } else dimension_unit(true_word.state, budget)^;
         if (found.state.issue != null) {state: found.state, value: 0}
         else {
@@ -1055,28 +1122,19 @@ fn dimension_finish(st, whole, fraction, negative, budget, infinite, mu) NumberS
             let base_whole = adjusted_whole + adjusted_fraction div 65536;
             let base_fraction = adjusted_fraction % 65536;
             let ratio = dimension.unit(found.name);
-            let scaled = if (found.name == "sp") base_whole
-                else (base_whole * ratio[0] div ratio[1]) * 65536 +
+            let unit_whole = if (found.name == "sp") 0 else base_whole * ratio[0] div ratio[1];
+            // TeX's magnification quotient has its own limit before unit conversion.
+            let mag_overflow = mag != 1000 and adjusted_whole >= 1073741824;
+            let scaled = if (mag_overflow or (found.name != "sp" and unit_whole >= 16384)) 1073741824
+                else if (found.name == "sp") base_whole
+                else unit_whole * 65536 +
                     (ratio[0] * base_fraction + 65536 * ((base_whole * ratio[0]) % ratio[1])) div ratio[1];
             let after = expanded_next(found.state, budget)^;
             let end = if (charcat(after.token, 10)) after.state else put_back(after.state, after.token);
-            if (scaled >= 1073741824) {state: fail(end, "tex-dimension-too-large"), value: 0}
-            else {state: end, value: if (negative) -scaled else scaled, order: 0}
+            dimension_result(end, scaled, negative)^
         }
         }
         }
-    }
-}
-
-fn dimen_digits(st, token, budget, value = 0) NumberScan^ {
-    let n = digit(token, 10);
-    if (n == null) {state: st, value: value, token: token}
-    else if (value * 10 + n > 2147483647)
-        {state: fail(st, "tex-number-too-big"), value: 0, token: null}
-    else {
-        let read = expanded_next(st, budget)^;
-        if (read.state.issue != null) {state: read.state, value: 0, token: null}
-        else dimen_digits(read.state, read.token, budget, value * 10 + n)^
     }
 }
 
@@ -1089,6 +1147,10 @@ fn scan_dimen(st, budget, infinite = false, mu = false) NumberScan^ {
         let index = if (cmd == "dimen") scan_register(start.state, budget)^ else {state: start.state, value: m.index};
         let value = dimen_value(index.state, index.value);
         {state: index.state, value: if (start.negative) -value else value, order: 0}
+    }
+    else if (box_dimension_name(cmd)) {
+        let value = box_dimension(start.state, cmd, budget)^;
+        {state: value.state, value: if (start.negative) -value.value else value.value, order: 0}
     }
     else if (primitives.parameter_kind(cmd) == "dimen") {
         let value = dimen_value(start.state, "param:" ++ cmd);
@@ -1113,7 +1175,7 @@ fn scan_dimen(st, budget, infinite = false, mu = false) NumberScan^ {
         let first_digit = digit(start.token, 10);
         let literal = decimal_start or first_digit != null;
         let whole_scan = if (decimal_start) {state: start.state, value: 0, token: start.token}
-            else if (literal) dimen_digits(start.state, start.token, budget)^
+            else if (literal) digits(start.state, start.token, 10, false, budget, 0, 0, false, true)^
             else {
                 let scanned = scan_number(put_back(start.state, start.token), budget)^;
                 {state: scanned.state, value: scanned.value, token: null}
@@ -1423,6 +1485,9 @@ fn assign_count(st: State, global, budget, fixed_index) State^ {
 
 fn optional_by(st: State, budget) State^ => scan_word(st, "by", budget)^.state
 
+// A failed register operation leaves the old value in place.
+fn arithmetic_overflow(st: State) State^ => record_diagnostic(st, "tex-arith-overflow", "Arithmetic overflow")^
+
 fn arithmetic_glue(st: State, global, budget, operation, fixed_index, mu) State^ {
     let index = if (fixed_index == null) scan_register(st, budget)^ else {state: st, value: fixed_index};
     if (index.state.issue != null) index.state
@@ -1439,10 +1504,10 @@ fn arithmetic_glue(st: State, global, budget, operation, fixed_index, mu) State^
         else {
             let factor = scan_number(before, budget)^;
             if (factor.state.issue != null) factor.state
-            else if (operation == "divide" and factor.value == 0) fail(factor.state, "tex-arith-overflow")
+            else if (operation == "divide" and factor.value == 0) arithmetic_overflow(factor.state)^
             else {
                 let scaled = glue.scale(previous, factor.value, operation == "divide")^;
-                if (not glue.valid(scaled)) fail(factor.state, "tex-arith-overflow")
+                if (not glue.valid(scaled)) arithmetic_overflow(factor.state)^
                 else save_glue(factor.state, index.value, scaled, global, mu)
             }
         }
@@ -1471,14 +1536,17 @@ fn arithmetic(st: State, global, budget, operation) State^ {
             let previous = if (kind == "int") parameter_value(operand.state, cmd)
                 else if (is_dimen) dimen_value(operand.state, index.value) else count_value(operand.state, index.value);
             if (operand.state.issue != null) operand.state
-            else if (operation == "divide" and operand.value == 0) fail(operand.state, "tex-arith-overflow")
+            else if (operation == "divide" and operand.value == 0) arithmetic_overflow(operand.state)^
             else {
                 let value = if (operation == "advance") previous + operand.value
                     else if (operation == "multiply") previous * operand.value
                     else if ((previous < 0) != (operand.value < 0)) -(abs(previous) div abs(operand.value))
                     else abs(previous) div abs(operand.value);
-                let checked = checked_integer(operand.state, value)^;
+                let overflow = abs(value) > (if (is_dimen) 1073741823 else 2147483647);
+                let checked = if (overflow and operation == "multiply")
+                    {state: arithmetic_overflow(operand.state)^, value: 0} else checked_integer(operand.state, value)^;
                 if (checked.state.issue != null) checked.state
+                else if (overflow and operation == "multiply") checked.state
                 else if (is_dimen and abs(value) >= 1073741824) fail(checked.state, "tex-arith-overflow")
                 else if (kind == "int") save_parameter(checked.state, global, cmd, value)
                 else if (is_dimen) save_dimen(checked.state, index.value, value, global)
@@ -1606,6 +1674,11 @@ fn expand_the(st: State, budget, count_expansion = true, capture = false) State^
             if (index.state.issue != null) index.state
             else {*:index.state, input: the_push(index.state.input,
                 the_text(st, dimension.format(dimen_value(index.state, index.value))), capture)}
+        }
+        else if (box_dimension_name(primitive(read.state, read.token))) {
+            let value = box_dimension(read.state, primitive(read.state, read.token), budget)^;
+            if (value.state.issue != null) value.state
+            else {*:value.state, input: the_push(value.state.input, the_text(st, dimension.format(value.value)), capture)}
         }
         else if (primitive(read.state, read.token) == "skip" or primitive(read.state, read.token) == "muskip" or m.kind == "glue-register") {
             let mu = if (m.kind == "glue-register") m.mu else primitive(read.state, read.token) == "muskip";
@@ -4115,6 +4188,96 @@ fn counter_command_tokens(name, command, value = null) any^ {
     [control_token(command), opener, *text_tokens(name), closer,
         *(if (value == null) [] else [opener, *value, closer])]
 }
+// TeX allocates counts, dimensions and skips through adjacent counter slots.
+fn latex_allocate_register(st: State, tracker, full_diagnostic) any^ {
+    let next = count_value(st,tracker) + 1;
+    let exhausted = next >= count_value(st,20);
+    let index = if (exhausted) COUNT_REGISTER_LIMIT - 1 else next;
+    let allocated = if (not exhausted) save_count(st,tracker,index,true)^
+        else if (full_diagnostic) record_diagnostic(st,"tex-no-room","No room for a new register")^
+        else counter_diagnostic(st,"tex-no-room");
+    {state:allocated,index:index}
+}
+
+// Like native cs_from_arg, a braced target ends at the first end-group token.
+fn latex_length_group(st: State, tokens, target = null) any^ {
+    let read = stream.next(st.input)^;
+    let current = {*:st,input:read.stream};
+    let token = read.token;
+    let found = if (target == null and is_control(token)^) token else target;
+    if (token == null or charcat(token,2)) {
+        let raw = if (token == null) tokens else [*tokens,token];
+        if (found != null) {state:current,target:found,raw:raw}
+        else {state:record_diagnostic(current,"latex-missing-cs","Missing control sequence in definition")^,
+            target:control_token(chr(2) ++ "inaccessible"),raw:raw}
+    }
+    else latex_length_group(current,[*tokens,token],found)
+}
+
+fn latex_length_target(st: State) any^ {
+    let first = nonspace(st.input)^;
+    let current = {*:st,input:first.stream};
+    if (first.token == null) {state:current,target:control_token(chr(2) ++ "inaccessible"),raw:[]}
+    else if (charcat(first.token,1)) latex_length_group(current,[first.token])
+    else if (is_control(first.token)) {state:current,target:first.token,raw:[first.token]}
+    else {state:record_diagnostic(put_back(current,first.token),"latex-missing-cs",
+            "Missing control sequence in definition")^,
+        target:control_token(chr(2) ++ "inaccessible"),raw:[]}
+}
+
+// LaTeX lengths share TeX skip registers and the kernel allocation counters.
+fn latex_length_command(st: State, original, command, budget) State^ {
+    let traced = begin_main_trace(st,original)^;
+    let target = latex_length_target(traced)^;
+    let current = target.state;
+    let value = if (command == "newlength") {stream:current.input,tokens:[],raw:[],error:null}
+        else stream.raw_argument(current.input)^;
+    let scanned = {*:current,input:value.stream};
+    if (current.issue != null) current
+    else if (value.error != null) fail(scanned,value.error)
+    else {
+        let cs = target.target;
+        let meaning_value = meaning(scanned,cs);
+        let closed = end_main_trace(scanned,original)^;
+        let original_tokens = [original,*target.raw,*value.raw];
+        let emitted = if (closed.echo) {*:closed.state,output:[*closed.state.output,
+            {*:original,echo_span:closed.span,echo_count:len(original_tokens)},*slice(original_tokens,1,len(original_tokens))]}
+            else closed.state;
+        if (command == "newlength") {
+            if (not latex_definable(meaning_value)) record_diagnostic(emitted,"latex-already-defined",
+                "LaTeX Error: Command already defined (\\newlength)")
+            else {
+                let allocated = latex_allocate_register(emitted,12,true)^;
+                assign_meaning(allocated.state,key(cs),{kind:"glue-register",index:allocated.index,mu:false},true)
+            }
+        }
+        else {
+            let kind = if (meaning_value.kind == "primitive") primitives.parameter_kind(meaning_value.name) else null;
+            let assignable = contains(["register","dimension-register","glue-register"],meaning_value.kind) or
+                contains(["int","dimen","glue","mu"],kind);
+            let synthetic = [control_token(command),brace_token(true),cs,brace_token(false),
+                brace_token(true),*value.tokens,brace_token(false)];
+            let shown = if (closed.echo) emitted else {*:emitted,output:[*emitted.output,
+                *[for (token in synthetic) {*:token,emit_origin:emitted.input.last_main_offset}]]};
+            let assigned = if (not assignable) shown else {
+                let assignment = [*(if (command == "addtolength") [control_token("advance")] else []),
+                    cs,*stored_tokens(value.tokens),control_token("relax")];
+                step({*:shown,input:stream.push(shown.input,assignment)},budget)^
+            };
+            if (closed.echo) assigned
+            else {
+                // Native serializes the value after assignment with the current TeX print settings.
+                // Native stores active-character names with a U+0001 prefix.
+                let target_name = if (cs.kind == "active") chr(1) ++ cs.value else cs.value;
+                let raw = "\\" ++ command ++ "{\\" ++ target_name ++ "}{" ++ token_text(assigned,value.tokens)^ ++ "}";
+                let at = len(emitted.output);
+                let first = {*:assigned.output[at],reconstruct_text:raw,reconstruct_count:len(synthetic)};
+                {*:assigned,output:[*slice(assigned.output,0,at),first,*slice(assigned.output,at + 1,len(assigned.output))]}
+            }
+        }
+    }
+}
+
 fn latex_newcounter(st: State, original, budget) State^ {
     let traced = begin_main_trace(st, original)^;
     let named = latex_counter_name(traced, budget)^;
@@ -4130,13 +4293,9 @@ fn latex_newcounter(st: State, original, budget) State^ {
             counter_diagnostic(emitted, "latex-counter-defined")
         }
         else {
-            let next = count_value(current, 10) + 1;
-            let exhausted = next >= count_value(current, 20);
-            // the native allocator reserves the final register when allocation fails.
-            let index = if (exhausted) COUNT_REGISTER_LIMIT - 1 else next;
-            let allocated = if (exhausted) counter_diagnostic(current, "tex-no-room")
-                else save_count(current, 10, index, true)^;
-            let registered = assign_meaning(allocated, counter_key(named.name), {kind: "register", index: index}, true)^;
+            let allocated = latex_allocate_register(current,10,false)^;
+            let registered = assign_meaning(allocated.state, counter_key(named.name),
+                {kind: "register", index: allocated.index}, true)^;
             let body = counter_command_tokens(named.name, "arabic")^;
             let formatted = assign_meaning(registered, "control:the" ++ named.name,
                 latex_macro(0, false, false, false, [], body)^, true)^;
@@ -4314,6 +4473,37 @@ fn environment_output(st, original, raw, name, command, echo, span) map[]^ {
         {*:token, emit_origin: st.input.last_main_offset}]
 }
 
+// preserve raw environment bytes and resume the same reader after the terminator.
+fn latex_raw_environment(st: State, original, name, source: map) State^ {
+    let captured = reader.raw_environment(source.reader,name)^;
+    let diagnosed = if (captured.closed) st else record_diagnostic(st,"latex-missing-end",
+        "\\begin{" ++ name ++ "} has no matching \\end{" ++ name ++ "}")^;
+    let input = stream.replace_reader(diagnosed.input,source.index,captured.reader)^;
+    let span = {file:original.file,start:original.start,end:captured.end,
+        first_seq:original.seq,last_seq:source.reader.seq};
+    {*:diagnosed,input:input,output:[*diagnosed.output,
+        {*:original,echo_span:span,echo_count:1,raw_environment:name}]}
+}
+
+fn latex_begin_regular(st: State, original, argument, named, closed, budget, begin_hooks) State^ {
+    let m = meaning(st, control_token(named.name));
+    let custom = named.name != "document" and m.kind == "macro";
+    let opened = begin_environment(st, named.name, not custom)^;
+    if (custom) {
+        let current_env = latex_macro(0, false, false, false, [], text_tokens(named.name))^;
+        let with_name = assign_meaning(opened, "control:@currenvir", current_env, false)^;
+        {*:with_name, input: stream.push(with_name.input, [control_token(named.name)])}
+    }
+    else {
+        let emitted = environment_output(opened, original, argument.raw, named.name, "begin", closed.echo, closed.span)^;
+        let passed = {*:opened, output: [*opened.output, *emitted]};
+        if (named.name != "document")
+            // native scans passthrough environment arguments in either expansion mode.
+            if (passed.math_mode != true) constructor_arguments(passed, budget)^ else passed
+        else {*:passed, in_document: true, begin_hooks: [], input: stream.push(passed.input, begin_hooks)}
+    }
+}
+
 fn latex_begin(st: State, original, budget) State^ {
     let traced = begin_main_trace(st, original)^;
     let argument = stream.raw_argument(traced.input)^;
@@ -4323,24 +4513,16 @@ fn latex_begin(st: State, original, budget) State^ {
         let named = expand_argument_name(current, argument.tokens, budget)^;
         let closed = end_main_trace(named.state, original)^;
         if (closed.state.issue != null) closed.state
-        else {
-            let m = meaning(closed.state, control_token(named.name));
-            let custom = named.name != "document" and m.kind == "macro";
-            let opened = begin_environment(closed.state, named.name, not custom)^;
-            if (custom) {
-                let current_env = latex_macro(0, false, false, false, [], text_tokens(named.name))^;
-                let with_name = assign_meaning(opened, "control:@currenvir", current_env, false)^;
-                {*:with_name, input: stream.push(with_name.input, [control_token(named.name)])}
+        else if (reader.raw_environment_name(named.name)^) {
+            let source = stream.raw_reader(closed.state.input,original)^;
+            if (source == null) {
+                let diagnosed = record_diagnostic(closed.state,"latex-raw-environment",
+                    "environment " ++ named.name ++ " needs its own source text")^;
+                latex_begin_regular(diagnosed,original,argument,named,closed,budget,st.begin_hooks)
             }
-            else {
-                let emitted = environment_output(opened, original, argument.raw, named.name, "begin", closed.echo, closed.span)^;
-                let passed = {*:opened, output: [*opened.output, *emitted]};
-                if (named.name != "document")
-                    // native scans passthrough environment arguments in either expansion mode.
-                    if (passed.math_mode != true) constructor_arguments(passed, budget)^ else passed
-                else {*:passed, in_document: true, begin_hooks: [], input: stream.push(passed.input, st.begin_hooks)}
-            }
+            else latex_raw_environment(closed.state,original,named.name,source)
         }
+        else latex_begin_regular(closed.state,original,argument,named,closed,budget,st.begin_hooks)
     }
 }
 
@@ -5207,6 +5389,8 @@ fn step(st: State, budget) State^ {
         latex_document_hook(current, cmd == "AtBeginDocument")
     else if (st.latex and contains(["usepackage", "RequirePackage", "RequirePackageWithOptions"], cmd))
         latex_usepackage(current, t, budget)
+    else if (st.latex and contains(["newlength", "setlength", "addtolength"], cmd))
+        latex_length_command(current,t,cmd,budget)
     else if (st.latex and cmd == "DeclareOption") latex_declare_option(current, budget)
     else if (st.latex and cmd == "ExecuteOptions") latex_execute_options(current, budget)
     else if (st.latex and cmd == "ProcessOptions") latex_process_options(current)
@@ -5245,6 +5429,7 @@ fn step(st: State, budget) State^ {
         after_assignment(current, assign_font_family(current, budget, cmd))
     else if (cmd == "nullfont") after_assignment(current, select_font(current, assignment_global, 0))
     else if (cmd == "setbox") after_assignment(current, assign_box(current, assignment_global, budget))
+    else if (box_dimension_name(cmd)) after_assignment(current, assign_box_dimension(current, cmd, budget))
     else if (cmd == "count") after_assignment(current, assign_count(current, assignment_global, budget, null))
     else if (cmd == "countdef") after_assignment(current, assign_countdef(current, assignment_global, budget))
     else if (cmd == "dimen") after_assignment(current, assign_dimen(current, assignment_global, budget, null))

@@ -44,17 +44,10 @@ let sources = [
  "\\catcode`!=13\\def!{\\textit{X}}\\begin{document}!\\end{document}"
 ];
 let results=[for(source in sources) check(source)^];
-let guards=[
- {source:"\\def\\m{\\def~{X}{Y}}\\m\\begin{document}~\\end{document}", reason:"definition following group source mapping"}
-];
-fn guarded(case) any^ {
- let ex=profile.expand_with_kernel(case.source,kernel,options,100000)^;
- let result=digest.digest(ex)^;
- result.issue=="latex-digest-unsupported" and result.unsupported==case.reason
-}
+let recovered=check("\\def\\m{\\def~{X}{Y}}\\m\\begin{document}~\\end{document}")^;
 {cases:len(results),supported:all([for(r in results) r.supported]),
  text:all([for(r in results) r.text]),diagnostics:all([for(r in results) r.diagnostics]),
- tree:all([for(r in results) r.tree]),guards:all([for(case in guards) guarded(case)^])};
+ tree:all([for(r in results) r.tree]),following_group:recovered.supported and recovered.text and recovered.diagnostics and recovered.tree};
 let root="test/lambda/latex/fixtures/local_packages/";
 let path=root ++ "script-active-target-main.tex";
 let child="script-active-target-child.tex";

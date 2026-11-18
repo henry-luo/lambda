@@ -481,8 +481,9 @@
 }
 "count arithmetic zero divisor:"
 {
-  text: "",
-  issue: "tex-arith-overflow"
+  text: "3",
+  issue: null,
+  diagnostics: ["tex-arith-overflow"]
 }
 "count arithmetic overflow:"
 {
@@ -598,13 +599,15 @@
 }
 "dimension overflow:"
 {
-  text: "",
-  issue: "tex-dimension-too-large"
+  text: "16383.99998pt",
+  issue: null,
+  diagnostics: ["tex-dimension-too-large"]
 }
 "dimension missing unit:"
 {
-  text: "",
-  issue: "tex-illegal-unit"
+  text: ".5pt",
+  issue: null,
+  diagnostics: ["tex-illegal-unit"]
 }
 "dimension rounding reference:"
 {
@@ -669,12 +672,14 @@
 "glue division by zero:"
 {
   text: "",
-  issue: "tex-arith-overflow"
+  issue: null,
+  diagnostics: ["tex-arith-overflow"]
 }
 "glue overflow:"
 {
   text: "",
-  issue: "tex-arith-overflow"
+  issue: null,
+  diagnostics: ["tex-arith-overflow"]
 }
 "default character codes:"
 {
@@ -743,13 +748,15 @@
 }
 "expression divide by zero:"
 {
-  text: "",
-  issue: "tex-arith-overflow"
+  text: "0.0pt",
+  issue: null,
+  diagnostics: ["tex-arith-overflow"]
 }
 "dimension expression overflow:"
 {
-  text: "",
-  issue: "tex-arith-overflow"
+  text: "0.0pt",
+  issue: null,
+  diagnostics: ["tex-arith-overflow"]
 }
 "pdf checksum:"
 {

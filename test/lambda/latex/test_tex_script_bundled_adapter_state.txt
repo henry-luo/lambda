@@ -1,0 +1,17 @@
+[{
+    issue: null,
+    text: true,
+    diagnostics: true
+  }, {
+    issue: null,
+    text: true,
+    diagnostics: true
+  }, {
+    issue: null,
+    text: true,
+    diagnostics: true
+  }, {
+    issue: null,
+    text: true,
+    diagnostics: true
+  }]

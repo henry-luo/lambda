@@ -13,6 +13,7 @@ pub type Token = {
 }
 pub type ReadStep = {reader: Reader, token: Token}
 pub type SourceSpan = {reader: Reader, end: int}
+pub type RawEnvironmentSpan = {reader: Reader, end: int, closed: bool}
 let VERB_DELIMITER_ERROR = "verb delimiter"
 let VERB_UNTERMINATED_ERROR = "verb unterminated"
 let RAW_INLINE_DELIMITER_ERROR = "raw inline delimiter"
@@ -129,7 +130,7 @@ fn raw_spaces(source: string, index: int) int {
     return at
 }
 
-fn raw_group_end(source: string, index: int, opener: string, closer: string) DelimiterScan {
+pub fn raw_group_end(source: string, index: int, opener: string, closer: string) DelimiterScan {
     var at = index, depth = 1
     while (at < len(source)) {
         let c = ch(source, at);
@@ -165,6 +166,22 @@ fn raw_seek(r: Reader, index: int) Reader {
         line_start: start, line_end: trimmed, line_next: next, next_line: next,
         line_byte: line_byte, position_byte: byte_count(r.source, start, start + position),
         next_byte: line_byte + byte_count(r.source, start, next), loaded: true, eol_done: false, state: "mid"}
+}
+
+// native TeX preserves these environment bodies as source rather than executing them.
+pub fn raw_environment_name(name: string) bool => contains(["tikzpicture", "verbatim", "lstlisting", "minted",
+    "alltt", "Verbatim", "BVerbatim", "LVerbatim", "SaveVerbatim", "VerbatimOut", "fancyvrb", "comment",
+    "filecontents", "filecontents*", "luacode", "luacode*"], name)
+
+// scan for the exact source terminator without tokenizing the environment body.
+pub fn raw_environment(r: Reader, name: string) RawEnvironmentSpan {
+    let source = r.source;
+    let closing = "\\end{" ++ name ++ "}";
+    var at = r.line_start + r.position;
+    while (at < len(source) and text_span(source,at,at + len(closing)) != closing) { at = at + 1 }
+    let found = at < len(source);
+    let end = if (found) at + len(closing) else len(source);
+    {end:r.line_byte + byte_count(source,r.line_start,end),reader:raw_seek(r,end),closed:found}
 }
 
 // raw document commands scan source characters before TeX tokenization.

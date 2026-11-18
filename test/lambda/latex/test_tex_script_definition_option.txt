@@ -23,9 +23,9 @@
     actual: null,
     native: null
   }, {
-    issue: "latex-digest-unclosed-optional",
+    issue: null,
     unsupported: null,
-    matches: null,
+    matches: true,
     actual: null,
     native: null
   }, {

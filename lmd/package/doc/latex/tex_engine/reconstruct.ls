@@ -52,7 +52,7 @@ fn canonical(token: map) string | null | error {
 }
 fn letter(c: string) bool => c != "" and ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "@")
 fn ending_letters(text: string, i: int) int => if (i > 0 and letter(reader.text_span(text, i - 1, i))) ending_letters(text, i - 1) else i
-fn slash_count(text: string, i: int, count: int = 0) int => if (i > 0 and reader.text_span(text, i - 1, i) == "\\")
+pub fn slash_count(text: string, i: int, count: int = 0) int => if (i > 0 and reader.text_span(text, i - 1, i) == "\\")
     slash_count(text, i - 1, count + 1) else count
 fn needs_separator(text: string, next: string) bool {
     let end = len(text);
@@ -76,7 +76,9 @@ pub fn source_fragment(t: map, sources: map[], prev_valid: bool = false, prev_fi
     let direct = span or (t.direct == true and t.file != null and t.file >= 0);
     let adjacent = direct and prev_valid and prev_file == t.file and t.seq == prev_seq + 1;
     let gap = if (adjacent and t.start > prev_end) source_text(sources, t.file, prev_end, t.start)^ else "";
-    let raw = source_text(sources, t.file, t.start, t.end)^;
+    // synthetic parser events have no source range to read.
+    let raw = if (t.file == null or t.start == null or t.end == null) null
+        else source_text(sources, t.file, t.start, t.end)^;
     let parline = t.kind == "control" and t.value == "par" and raw != null and raw != "\\par";
     let use_source = span or (faithful(t, raw)^ and (direct or t.kind == "control" or t.cat != 10));
     {span:span,direct:direct,adjacent:adjacent,gap:gap,

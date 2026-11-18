@@ -154,9 +154,9 @@
     native: null
   }, {
     body: "\\def\\q{A}\\count0=4 {X}",
-    issue: "latex-digest-unsupported",
-    unsupported: "definition following group source mapping",
-    matches: null,
+    issue: null,
+    unsupported: null,
+    matches: true,
     actual: null,
     native: null
   }, {

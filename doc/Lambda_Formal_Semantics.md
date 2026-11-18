@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 100.0.0 (2026-11-18)
+**Spec version:** 101.0.0 (2026-11-18)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2011,7 +2011,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   `function`.** `fn` and `pn` value types are disjoint. `function` is the
   base type of both. `is fn` and `is pn` test callable value colour
   (S12.1.4v7). A `pn (...)` contract also checks a written effect bound
-  (S12.1.6v2). `function` or `function (...)` admits either colour. Since `fn` and `pn`
+  (S12.1.6v3). `function` or `function (...)` admits either colour. Since `fn` and `pn`
   are strictly narrower than `function`, a binder over a function value
   (S11.4.8v2) selects a coloured type, and the join of `fn` with `pn` is
   `function`. **A function type's signature always spells its parameter
@@ -2022,7 +2022,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   (S16.2.3v3), and it may itself be a signature:
   `fn (x: int) fn (y: int) int`. The `<:` relation over function-type
   operands stays pending under S11.1.4v2. A procedure type with an explicit
-  result has the spelling `pn (params) -> Result @ effects` (S12.1.6v2).
+  result has the spelling `pn (params) -> Result @ effects` (S12.1.6v3).
   Its effect clause is optional. Existing arrowless signatures remain valid. Its error contract follows S7.4.2v4. [C20-1, C20.2; signature:
   USER 2026-09-24]
 - **S11.1.6v3** **Two type families, split by concept: a run and an array.**
@@ -2255,7 +2255,7 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 ### S12.1 Purity and effect bounds
 
 - **S12.1.1v5*** `fn` is pure and deterministic under any schedule. A
-  `pn` may perform effects within its bound (S12.1.6v2). An `fn` can never
+  `pn` may perform effects within its bound (S12.1.6v3). An `fn` can never
   call a `pn`. It can call a `function` only at a pure instantiation
   (S12.1.4v7). Check known callees statically and dynamic ones before dispatch.
   A script's top level defaults to `fn` context. The top-level
@@ -2343,18 +2343,18 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   regenerate nothing. *One owner per state; the higher tier wins.*
   [Reactive_UI §2.7; user, 2026-10-13]
 
-- **S12.1.6v2*** **A procedure can declare an upper bound on its effects.**
+- **S12.1.6v3*** **A procedure can declare an upper bound on its effects.**
   A declaration spells `pn name(params) Result @ effects { ... }`. A callable
   type spells `type t = pn (params) -> Result @ effects`. The optional
   trailing clause follows the full result contract, including `T | E` or
-  `T^` (S7.4.2v4). Use `@clock` for a singleton or a nonempty set such as
-  `@{random, clock, print}`. It bounds the call, including effects reached through other
-  callables. Omitting it permits any effect. A restricted caller admits a
-  callee only when its bound fits. The same check applies when a callback
-  crosses a typed boundary. A legacy `fn` type alone gives no resource-read
-  guarantee. A restricted caller needs an effect summary for an opaque call
-  through a legacy helper (S7.4.5v4). Host policy still governs each
-  operation (D11.1.2). The result and error contract is independent of this bound.
+  `T^` (S7.4.2v4). Use `@clock` for a singleton or a nonempty bracketed list such
+  as `@[random, clock, print]`. It bounds the call, including effects
+  reached through other callables. Omitting it permits any effect.
+  A restricted caller admits a callee only when its bound fits. The same
+  check applies when a callback crosses a typed boundary. A restricted
+  caller needs an effect summary for an opaque call through a legacy `fn`
+  helper (S7.4.5v4). Host policy still governs each operation (D11.1.2).
+  The result and error contract is independent of this bound.
   [Design_Procedural §1.1]
 
 ### S12.2 Assignment
@@ -3339,7 +3339,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D4.2.6, D4.2.5 footnotes). |
 | S11.4.11 | **Conformant 2026-09-26 on both tiers.** The colour walk enters every constraint body, so a statically `pn` callee is E224 and a dynamic one is colour-guarded. Each `that` body is compiled as an `fn` of its own over its written scope, `that(~)`: the names it binds are its locals and the outer locals it reads are its captures. `is` and a match arm call it per layer, with the captures read where the type is named, so the whole body runs on every tier with no step budget, a body naming its own type recurses as an `fn` does, and an imported type's body runs in its declaring module, which exports the function to its importers (JIT) as T0 runs it there (AI17v3). The function's return contract admits an error, which fails the test, so a body whose value may be an error is not E208. The candidate starts a fresh context: `~~` is null and the root is the candidate. Before, T0 evaluated only an allow-list under a step budget ([LR03-24](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-24>)) and read an imported predicate's constants in the importer ([LR03-25](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-25>)); then both tiers expanded the body where `is` named the type, so a self-naming body crashed compilation ([LR03-28](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-28>)) and the JIT read an imported body's names in the importer ([LR03-27](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-27>)). Fixtures `constrained_type_predicate.ls` (pinned in `kTune27TierParity`), `constrained_type_recursive.ls` and `negative/semantic/predicate_calls_pn.ls`. Verified: `make test-lambda-baseline` 5967/5967; every golden 1008/1008 with the tier pinned to `jit` and to `interp`. Design record: TE-20. |
 | S11.4.12v2 | **Fatal-cycle clarification implemented 2026-11-03:** E240 stays a compile error in strict and relaxed modes on every tier; valid structural recursive type values remain usable. Qualification: 102/102 focused tier/GC runs, including five invalid-cycle forms in both modes, and 8,732/8,732 Lambda/input baseline checks. [Tier-fix qualification](<../vibe/impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>). **Original rule implemented 2026-10-21, apart from the residue below.** Top-level type aliases, named patterns and object types (binary layouts included) are bound before the resolve walk, beside top-level `fn`/`pn`, and their bodies still resolve in source order. A reference made from earlier in the module resolves a pending alias right there, in module scope, when the alias body has no `that` predicate, so annotations, object fields, union arms and match arms all see a completed type; patterns compile in dependency order the same way. A reference made while the alias is still resolving (recursion) holds its pre-bound wrapper, which carries the completed type: maps adopt the placeholder in place, unions and elements are published through the wrapper, and every other kind is published as its declaration completes or, for an alias of a later alias, once the walk ends. A post-walk pass reports E240 for a cycle that passes no field, attribute, content slot, array item or `that` body (function signatures count as non-structural), and refreshes layouts built against a placeholder. An unresolved type name is E204, in a type position and in a pattern. Fixtures: `type_forward_reference.ls`, `element_type_recursive.ls` (all three tiers), and `negative/semantic/{type_cycle_alias,type_cycle_occurrence,type_cycle_function,type_unknown_name,type_local_forward,string_pattern_cycle}.ls`. Four test files named no type and now fail E204, and were corrected: `fuzzy_crash_regression.ls` queried `?item` (now `?<item>`), `proc/cow_element_snapshot.ls` annotated `var doc: el` (now `element`), and the unrun validator schemas `schema_function.ls` and `schema_primitive.ls` named `void` and `char` (now `null` and `string`). The census's 13 root-first validator schemas and the shipped `eml_schema.ls`/`ics_schema.ls` now check what they declare; `lambda validate` rejects `{"a": "x"}` against `type Document = {a: Later}` before `type Later = int`. **Residue:** a reference to an alias whose body has a `that` predicate, from code placed before that alias, still sees the placeholder, so a parameter or object field typed with it is checked against an empty map (a false E207/E201); a `grammar` is not bound before the walk; an object base clause (`type B : A`) still needs `A` declared first. Design record: TE-23. |
-| S1.10v2, S7.4.5v4, S11.1.5v4, S12.1.1v5, S12.1.3v6, S12.1.4v7, S12.1.6v2, S16.7.7v2 | **Implemented 2026-11-18.** Both execution tiers check procedure bounds, generative calls and callback admission, including omitted defaults and escaped captures. The script entry block and passive generative template bodies run through the normal entry points. The host input cache reuses HTTP(S) acquisitions by query-inclusive URL. Future cache scope and invalidation remain open (SO52). [Implementation record](<../vibe/impl/Lambda_Impl_Effects (done).md>) |
+| S1.10v2, S7.4.5v4, S11.1.5v4, S12.1.1v5, S12.1.3v6, S12.1.4v7, S12.1.6v3, S16.7.7v2 | **Implemented 2026-11-18.** Both execution tiers check procedure bounds, generative calls and callback admission, including omitted defaults and escaped captures. The script entry block and passive generative template bodies run through the normal entry points. The host input cache reuses HTTP(S) acquisitions by query-inclusive URL. Future cache scope and invalidation remain open (SO52). [Implementation record](<../vibe/impl/Lambda_Impl_Effects (done).md>) |
 | S12.1.4v4 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`; local-state body admission is now covered by `test/lambda/fn_local_colour_poly.ls` (2026-11-02). **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.1.1) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
 | S2.5.3v3, S2.5.4v3, S12.1.2v3 | **Fn-local control and M1 handler integration, 2026-11-03.** Functional fallthrough collects normal values; procedural normal results replace earlier results, including null. No-result declarations, assignments and statement loops leave the accumulator unchanged. M1 handlers contribute their ordinary success/recovery result under S7.6.1v9. [Procedural design §2.4](../vibe/Lambda_Design_Procedural.md#24-return-and-block-results), [M1 qualification](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>). |
 | S9.1.3v3, S9.2.2v2 | Place-home publication and numeric-row/view snapshots implemented 2026-11-03 on both tiers; baseline 8,718/8,718. Scalar/nullable/import/error/GC and AUTO-promotion regressions: `vibe/impl/Lambda_Impl_Place_Borrow_Views (done).md`; LR12-10/LR12-14 archived. Broader borrowing checks keep their existing status. |

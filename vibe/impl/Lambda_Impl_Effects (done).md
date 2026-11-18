@@ -4,28 +4,35 @@
 values, script entry blocks and template dispatch run on both tiers.
 
 **Design authority.** S1.10v2, S7.4.5v4, S11.1.5v4, S12.1.1v5, S12.1.3v6,
-S12.1.4v7, S12.1.6v2, S16.7.7v2, D7.1.1v4–D7.1.3, D9.1.2v2 and D11.1.2.
+S12.1.4v7, S12.1.6v3, S16.7.7v2, D7.1.1v4–D7.1.3, D9.1.2v2 and D11.1.2.
 [Procedural design](../Lambda_Design_Procedural.md#11-checked-procedure-effects-and-generative-functions)
 and [reactive template design](../Lambda_Design_Reactive_UI.md#21-functional-presentation)
 record the decisions and open questions.
 
 ## Completion record
 
+S12.1.6v3 changed the effect-list delimiter to square brackets in both
+parsers and in formatted signatures. The revision passed 478 reference
+and 491 production parser cases, including nested callback declarations.
+Seven effects fixtures matched on interpreter, eager JIT and AUTO with
+forced and poisoning GC. The REPL printed `@clock` and `@[clock, print]`.
+The qualification below records the initial implementation.
+
 - **Checkout.** `master` at `fb10cbc84a` with the effects changes in the
   working tree on 2026-11-18. Verification used the split `debug_native`
   host, the local `lambda-input` checkout and local loopback servers.
 - **Callable contracts.** The parser, compiler and runtime accept `@clock`
-  and nonempty `@{random, clock, print}` after the complete result contract,
+  and nonempty `@[random, clock, print]` after the complete result contract,
   which retains `T | E` and `T^`. Omission permits arbitrary effects. Known
   calls use static admission, and unresolved boundaries, captured callbacks
   and omitted defaults use the same effect check in both execution tiers
-  (S11.1.5v4, S12.1.4v7, S12.1.6v2).
+  (S11.1.5v4, S12.1.4v7, S12.1.6v3).
 - **Render context.** The explicit script and template blocks collect results
   as functional blocks. `apply` checks the selected entry. Rendering and
   regeneration execute the selected template's body, and its handlers use
   state and model without evaluating body-local bindings. Opaque legacy
   resource readers need an effect summary to cross a restricted boundary
-  (S7.4.5v4, S12.1.3v6, S12.1.6v2, S16.7.7v2).
+  (S7.4.5v4, S12.1.3v6, S12.1.6v3, S16.7.7v2).
 - **Parser and tiers.** `make test-grammar-s16` passed 475 reference and 488
   production checks. Seven script goldens matched in interpreter, eager
   JIT and AUTO with every-allocation, poisoning GC. Three static refusal
@@ -49,7 +56,7 @@ record the decisions and open questions.
 
 ## 1. Delivery boundary
 
-Support the two signature forms from S11.1.5v4 and S12.1.6v2. The effect
+Support the two signature forms from S11.1.5v4 and S12.1.6v3. The effect
 clause follows the whole result/error contract. An omitted clause leaves
 the procedure unrestricted.
 
@@ -69,7 +76,7 @@ the call contracts they would build on.
 
 | Area | Decision |
 |---|---|
-| Procedure signatures | S12.1.6v2 adopts `@clock` and nonempty `@{random, clock, print}`. The return uses S7.4.2v4. The new procedure-type arrow is additive (S11.1.5v4). Group a nested callable result to attach a suffix to the outer signature. |
+| Procedure signatures | S12.1.6v3 adopts `@clock` and nonempty `@[random, clock, print]`. The return uses S7.4.2v4. The new procedure-type arrow is additive (S11.1.5v4). Group a nested callable result to attach a suffix to the outer signature. |
 | Function values | S12.1.4v7 gives intrinsically effectful functions and effectful capture instances `pn` colour. Body collection follows the `function` declaration. |
 | Operation mappings | `uuid()` supplies random, `now()`, `today()` and `clock()` supply clock, and `print()` supplies print. Seeded `math.random(seed)` remains pure. Additional mappings remain SO52. |
 | Template dispatch | S12.1.3v6 and S16.7.7v2 use an explicit generative body and a lexical `apply` allowance. Selected template bodies may read cached HTTP(S) URLs through the existing host policy. Regeneration calls the registered body. |
@@ -102,7 +109,7 @@ the call contracts they would build on.
   fits a wider receiving bound. An unrestricted callee requires an
   unrestricted procedural context. Resolve known mismatches statically.
   Preserve the procedural declaration boundary even when its effects are unused
-  (S12.1.1v5, S12.1.6v2).
+  (S12.1.1v5, S12.1.6v3).
 - Reuse the runtime check before dispatch in `lambda-eval.cpp`, with
   matching lowering in `interp.cpp` and `mvp/mvp_mir.cpp`. Guard using
   the selected callee and its bound actuals, including defaulted, named

@@ -1,0 +1,49 @@
+{
+  cases: [{
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }, {
+      issue: null,
+      text: true,
+      diagnostics: true
+    }],
+  fixture: {
+    issue: null,
+    digest_issue: null,
+    text: true,
+    ast: true
+  }
+}

@@ -1,0 +1,8 @@
+{
+  cases: 22,
+  expanded: true,
+  digested: true,
+  tree: true,
+  text: true,
+  diagnostics: true
+}

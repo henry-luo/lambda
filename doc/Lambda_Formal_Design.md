@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 69.0.0 (2026-11-18)
+**Spec version:** 69.0.1 (2026-11-18)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1012,7 +1012,7 @@ reflected and matched (S10.1, S11).*
   Template dispatch checks the selected body against the call site's render
   permission before execution. Regeneration uses the registered contract.
   The renderer executes a generative body only on a render entry.
-  [S12.1.1v5, S12.1.4v7, S12.1.6v2, S16.7.7v2, Design_Procedural §1.1]
+  [S12.1.1v5, S12.1.4v7, S12.1.6v3, S16.7.7v2, Design_Procedural §1.1]
 - **D7.1.2* — The bit is load-bearing.** The bit is:
   - the soundness gate of the constant folder;
   - the license for stream fusion and parallel execution;
@@ -1856,7 +1856,7 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D5.7.1, D5.7.2 | Draft design; no phase has started. |
 | D6.2.1 | In place for Lambda and LambdaJS (companion-lane ABI only; unified outcome metadata 2026-11-03). Removal of the ownerless-slot GC fallback is gated on its inventory. |
 | D6.2.3 | Lambda helper results need no re-home. LambdaJS keeps the conservative re-home path. The back-edge reclaim proof is open (DO24). |
-| D7.1.1v4 | **Implemented 2026-11-18.** The interpreter and MIR Direct enforce procedure effect bounds and generative call admission. The selected template is checked at `apply`, and regeneration uses its registered body (S12.1.3v6, S12.1.6v2, S16.7.7v2). [Implementation record](<../vibe/impl/Lambda_Impl_Effects (done).md>) |
+| D7.1.1v4 | **Implemented 2026-11-18.** The interpreter and MIR Direct enforce procedure effect bounds and generative call admission. The selected template is checked at `apply`, and regeneration uses its registered body (S12.1.3v6, S12.1.6v3, S16.7.7v2). [Implementation record](<../vibe/impl/Lambda_Impl_Effects (done).md>) |
 | D7.1.2, D7.2.3 | Confined parent-`fn` captures are qualified (2026-11-02). |
 | D7.1.3 | `may_await` and a fail-closed `may_defect` are in place. |
 | D7.3.1, D7.3.4 | Binder direct-edge variants and opt-in guard hoisting are in place. |

@@ -1,9 +1,9 @@
-// S12.1.6v2: a procedure bound follows the value across a callback contract.
+// S12.1.6v3: a procedure bound follows the value across a callback contract.
 type Clock = pn () -> float^ @clock
-type ClockAndPrint = pn () -> float @{clock, print}
+type ClockAndPrint = pn () -> float @[clock, print]
 pn tick() float @clock { clock() }
 pn decide(f: Clock) float^ @clock { f()^ }
-pn other() float @{clock, print} {
+pn other() float @[clock, print] {
     print("")
     tick()
 }

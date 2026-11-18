@@ -1,8 +1,8 @@
 # Lambda Local State, Control Flow and Procedures — Design
 
-**Revision:** 4 (2026-11-18). Checked procedure effects and generative `function` bodies are implemented (§1.1).
+**Revision:** 5 (2026-11-18). Procedure effect lists use square brackets (S12.1.6v3, §1.1).
 **Status:** `fn` local control and confined shared captures are **implemented and qualified in `codex/fn-local-state`** (Lambda/input baseline **8520/8520**). The indexed escape analysis covers aliases, containers, known return/retention summaries and transitive captures. Escaping closures preserve creation-time snapshots and reject writes of fn-owned captures. Qualification, conservative proof boundaries and existing `pn`/COW debt are recorded in the implementation plan. Comprehension extensions remain SO51. The resource model remains designed, not built.
-**Formal linkage:** call effects S12.1.1v5, S12.1.4v7, S12.1.6v2, D7.1.1v4; local control S12.1.2v3, S16.6.5v2; results S2.5.3v3–S2.5.4v3; local ownership S1.4v2, S9.1.7v2; inout/captures S9.1.3v2–S9.1.4v2, D7.2.3; assignment S12.2.1v3–S12.2.2; COW S9.1.2, D5.4.1–D5.4.5; optimization D7.1.2; control forms S16.6.6–S16.6.9v2; error completion S7.4.6v3; resources S12.4.1v3–S12.4.3; script top level S16.7.1, S16.7.6.
+**Formal linkage:** call effects S12.1.1v5, S12.1.4v7, S12.1.6v3, D7.1.1v4; local control S12.1.2v3, S16.6.5v2; results S2.5.3v3–S2.5.4v3; local ownership S1.4v2, S9.1.7v2; inout/captures S9.1.3v2–S9.1.4v2, D7.2.3; assignment S12.2.1v3–S12.2.2; COW S9.1.2, D5.4.1–D5.4.5; optimization D7.1.2; control forms S16.6.6–S16.6.9v2; error completion S7.4.6v3; resources S12.4.1v3–S12.4.3; script top level S16.7.1, S16.7.6.
 **Implementation plan:** [completed implementation record](<impl/Lambda_Impl_Function_Local_State (done).md>).
 **Spec mapping:** `Lambda_Procedural.md` §1–§5 (the 2026-01-23 proposal) → S12.1.2, S16.6.5, S12.2.1; `Lambda_Proc_Assignment.md` design principles 1–4 → S12.2.1; principle 5 and §4.3–§4.5 → S9.1.6, S9.3.2, S12.2.2; §4.6 and Phase 6 → superseded by S9.1.4 (Appendix S, S-1).
 **Scope:** local imperative computation in both callable colours, the continuing `fn`→`pn` prohibition, mutable-root ownership, confined procedure captures, and the procedural APIs for external effects. COW machinery, document updates and concurrency retain their own records.
@@ -14,7 +14,7 @@
 
 ## 1. Position: locally imperative, observably functional
 
-Lambda checks effects at callable boundaries. An `fn` is pure and deterministic under any schedule. A `pn` may declare which effects a caller must permit. A `function` can contribute selected generative effects and forward effects from its callback parameters (S12.1.1v5, S12.1.4v7, S12.1.6v2). Local variables and loops are available in both callable colours (S12.1.2v3).
+Lambda checks effects at callable boundaries. An `fn` is pure and deterministic under any schedule. A `pn` may declare which effects a caller must permit. A `function` can contribute selected generative effects and forward effects from its callback parameters (S12.1.1v5, S12.1.4v7, S12.1.6v3). Local variables and loops are available in both callable colours (S12.1.2v3).
 
 The governing principles are S1.10 and S9.1.2: colour what changes the caller's contract, and preserve observable value copies. An `fn` may use local working state while its call remains functional. It cannot write a caller's value or a captured binding; assigning `var work = input` gives an observable value copy. Explicit inout arguments and confined nested-`pn` captures are separately checked sharing boundaries (§5).
 
@@ -45,7 +45,7 @@ Three boundaries follow from the bit and are easy to miss:
 
 [Implementation record](<impl/Lambda_Impl_Effects (done).md>)
 
-**Decision, 2026-11-18.** S12.1.6v2 puts the optional effect clause after the entire return contract. These are signature schemata. `effects` stands for a set and `Result` for the existing result contract, which can use `T | E` or `T^` (S7.4.2v4).
+**Decision, 2026-11-18.** S12.1.6v3 puts the optional effect clause after the entire return contract. These are signature schemata. `effects` stands for a set and `Result` for the existing result contract, which can use `T | E` or `T^` (S7.4.2v4).
 
 ```text
 pn name(params) Result @ effects { ... }
@@ -54,9 +54,9 @@ type t = pn (params) -> Result @ effects
 
 Readers see the name and parameters first, then the result and its possible error. This follows Lambda's convention of putting annotations after what they qualify. A trailing clause occupies the same position in a named declaration and an anonymous callback type. A name-adjacent annotation could also go before the parameters in both forms, but it would interrupt the name and the argument list. The trailing position leaves room for future `@name` annotations. The syntax and meaning of any additional annotation need their own ruling.
 
-Write `@clock` for one effect or `@{random, clock, print}` for several. Braces delimit the effect list even inside a callback signature containing commas. An unannotated procedure is unrestricted.
+Write `@clock` for one effect or `@[random, clock, print]` for several. Square brackets follow Lambda’s list notation and delimit the effects inside a callback signature containing commas. An unannotated procedure is unrestricted.
 
-The bound is a maximum. A clock-only procedure may return a cached value or call another clock-only procedure. Adding a file write anywhere in that call chain would exceed its published bound. An unrestricted procedure remains available to callers that permit arbitrary effects. A procedure value keeps its bound across a module or callback boundary (S12.1.6v2, D7.1.1v4). Legacy `fn` helpers retain existing resource-read behavior. A restricted caller needs a summary excluding those reads, including when a helper makes an opaque call. Error acknowledgement and host permissions still follow S1.10v2 and D11.1.2.
+The bound is a maximum. A clock-only procedure may return a cached value or call another clock-only procedure. Adding a file write anywhere in that call chain would exceed its published bound. An unrestricted procedure remains available to callers that permit arbitrary effects. A procedure value keeps its bound across a module or callback boundary (S12.1.6v3, D7.1.1v4). Legacy `fn` helpers retain existing resource-read behavior. A restricted caller needs a summary excluding those reads, including when a helper makes an opaque call. Error acknowledgement and host permissions still follow S1.10v2 and D11.1.2.
 
 **Why extend `function`.** A helper that samples a clock contributes a clock effect even with no arguments. A helper that only applies its callback contributes the callback's effects. A helper that does both contributes their union (S12.1.4v7). An unrestricted `pn` may pass a file-writing callback to the callback-only helper. A clock-only caller cannot make the same call. Wrapping a known file write in a callback inside a `function` still gives that body its own file-write requirement and exceeds its generative allowance. The functional body's collection and local-control rules continue to apply.
 

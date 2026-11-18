@@ -750,7 +750,7 @@ static bool parser_at_counted_run(const LambdaRdParser* parser) {
 static bool parse_effect_clause(LambdaRdParser* parser, LambdaEffectMask* effects,
         uint32_t* end_byte) {
     parser_advance(parser); // '@'
-    bool set = parser_accept(parser, LAMBDA_TOK_LBRACE);
+    bool list = parser_accept(parser, LAMBDA_TOK_LBRACKET);
     LambdaEffectMask bound = 0;
     do {
         LambdaToken effect = parser->current;
@@ -762,10 +762,10 @@ static bool parse_effect_clause(LambdaRdParser* parser, LambdaEffectMask* effect
         bound |= bit;
         *end_byte = effect.span.end_byte;
         parser_advance(parser);
-    } while (set && parser_accept(parser, LAMBDA_TOK_COMMA));
-    if (set) {
+    } while (list && parser_accept(parser, LAMBDA_TOK_COMMA));
+    if (list) {
         *end_byte = parser->current.span.end_byte;
-        if (!parser_expect(parser, LAMBDA_TOK_RBRACE)) return false;
+        if (!parser_expect(parser, LAMBDA_TOK_RBRACKET)) return false;
     }
     *effects = bound;
     return parser->status == LAMBDA_PARSE_OK;

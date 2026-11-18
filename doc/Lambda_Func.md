@@ -35,7 +35,7 @@ Lambda uses three declaration forms for callables.
 | **Procedural** | `pn` | Mutable state, side effects, imperative |
 | **Colour-polymorphic** | `function` | Selected generative effects and effects supplied by callbacks |
 
-S12.1.6v2 gives procedures and procedure types an optional trailing
+S12.1.6v3 gives procedures and procedure types an optional trailing
 effect bound. S12.1.4v7 allows selected generative calls in `function`
 bodies. Templates can opt into these calls and cached URL input under
 S12.1.3v6. [Design and signature details](../vibe/Lambda_Design_Procedural.md#11-checked-procedure-effects-and-generative-functions)
@@ -709,11 +709,11 @@ function (S12.1.4v7).
 Procedural functions (`pn`) allow mutable state, side effects, and imperative control flow. See [Lambda Procedural Programming](Lambda_Procedural.md) for full documentation.
 
 Add `@clock` after the result type for a single effect or
-`@{random, clock, print}` for a set. Omitting the annotation permits any
-effect. An annotated procedure admits only callees whose effect bounds fit
-its own. The same rule applies when a procedure crosses a typed callback
-boundary. The optional effect clause follows the complete result contract,
-including an error union (S7.4.2v4, S12.1.6v2).
+`@[random, clock, print]` for a nonempty list of effects. Omitting the
+annotation permits any effect. An annotated procedure admits only callees
+whose effect bounds fit its own. The same rule applies at typed callback
+boundaries. The optional effect clause follows the complete result
+contract, including an error union (S7.4.2v4, S12.1.6v3).
 
 ```lambda
 type ClockReader = pn () -> float @clock

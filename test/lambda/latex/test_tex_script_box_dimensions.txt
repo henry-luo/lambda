@@ -1,0 +1,18 @@
+{
+  cases: 40,
+  supported: true,
+  text: true,
+  diagnostics: true,
+  messages: true
+}
+{
+  ast_cases: 8,
+  supported: true,
+  matches: true
+}
+{
+  issue: null,
+  text: true,
+  diagnostics: true,
+  messages: true
+}

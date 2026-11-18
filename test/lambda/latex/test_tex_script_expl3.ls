@@ -61,3 +61,9 @@ let fixture_style = input("test/lambda/latex/fixtures/local_packages/lmdexpl.sty
     {local: {'lmdexpl.sty': {data: fixture_style}}, bundled: {}})
 "integer with macro arguments:"; report("\\ExplSyntaxOn\\cs_new:Npn\\sum:nn#1#2{\\int_eval:n{#1+#2}}\\sum:nn{12}{-3}\\ExplSyntaxOff")
 "integer expression error:"; report("\\ExplSyntaxOn\\int_eval:n{1/0}")
+
+let overflow_source = "\\ExplSyntaxOn\\int_eval:n{1/0}";
+let overflow = profile.expand_with_kernel(overflow_source, kernel, {script_expl3:true, echo_definitions:true}, 100000)^;
+let native_overflow = parse(overflow_source, {type:"tex"})^;
+"integer expression recovery:"; {issue:overflow.issue, diagnostics:overflow.diagnostic_records == native_overflow.diagnostics,
+    messages:overflow.messages == native_overflow.messages}

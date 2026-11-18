@@ -1,0 +1,13 @@
+{
+  cases: 112,
+  supported: true,
+  tree: true,
+  text: true,
+  diagnostics: true,
+  generated: 12,
+  generated_ok: true
+}
+{
+  foreign: 2,
+  foreign_ok: true
+}

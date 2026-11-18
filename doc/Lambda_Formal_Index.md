@@ -10,7 +10,7 @@ not or only partly implemented (see the spec's Appendix A). To read a ruling
 in full — including lines too long for a viewer — run
 `python3 utils/formal_index.py D9.4.6` (an ID or a section such as `S4.5`).
 
-## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v100.0.0 (2026-11-18)
+## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v101.0.0 (2026-11-18)
 
 | ID | Line | Title |
 |---|---|---|
@@ -323,7 +323,7 @@ in full — including lines too long for a viewer — run
 | S12.1.3v6* | 2290 | A `view` or `edit` template may have a `function` body |
 | S12.1.4v7* | 2306 | A `function` combines its own generative effects with the effects of its polymorphic arguments |
 | S12.1.5v2 | 2332 | Presentation authority by state tier |
-| S12.1.6v2* | 2346 | A procedure can declare an upper bound on its effects |
+| S12.1.6v3* | 2346 | A procedure can declare an upper bound on its effects |
 | **§S12.2** | 2360 | *Assignment* |
 | S12.2.1v3* | 2362 | `let` bindings and parameters are immutable; |
 | S12.2.2 | 2371 | Element mutation is defined on both faces: `elem.attr = v` as map-field assignment; |
@@ -502,7 +502,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 3519 | How an element pattern spells *content must be empty* |
 | SO48 | 3520 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v69.0.0 (2026-11-18)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v69.0.1 (2026-11-18)
 
 | ID | Line | Title |
 |---|---|---|

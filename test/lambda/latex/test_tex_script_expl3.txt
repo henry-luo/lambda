@@ -280,8 +280,14 @@
 }
 "integer expression error:"
 {
-  text: "",
-  issue: "tex-arith-overflow",
+  text: "0",
+  issue: null,
   unsupported: null,
-  matches_native: null
+  matches_native: true
+}
+"integer expression recovery:"
+{
+  issue: null,
+  diagnostics: true,
+  messages: true
 }

@@ -33,6 +33,342 @@ The existing native engine design and historical Phase IV work are in
 
 ## Current checkpoint
 
+- **Generated `addtolength` digestion, 2026-11-18:** generated length
+  expansion matches native text, but its document node previously stopped at
+  `command source mapping` (**S1.8**, **D10.2.2**). The staged digester in
+  `temp/tex-addlength-digest/` reparses coalesced output with native lexical
+  rules, maps node offsets to the original emission, and includes following
+  argument groups. Its 80-case generated matrix and 30 following-group cases
+  match native. The probes also exposed definition control words whose TeX
+  category codes differ from native document scanning. The staged scanner
+  joins and splits source-backed fragments while retaining TeX definition
+  boundaries; the 32-case category-code matrix and 34 escaped-punctuation
+  comparisons match native. The 128-case consolidated regression and final
+  neighboring-golden checks remain to run before installation. The failed
+  all-native-catcode prototype is isolated in `temp/tex-native-definition/`.
+
+- **`setlength` digestion investigation, 2026-11-18:** native document
+  nodes read the raw emitted target and value (**S1.8**, **D10.2.2**). The
+  installed digester recognizes echoed
+  spans and individually reconstructed direct constructor tokens, checking
+  source boundaries and spelling before building the node. The staged direct
+  matrix matched 80 native trees; 24 nested comparisons and 36 symbol-target
+  comparisons also match; emissions without a verified mapping remain guarded.
+  Three previously guarded sample documents now reach subsequent parsing:
+  `timeline` matches its complete native tree; `foray_into_latex` and
+  `nursing_care_plan` reach existing math and environment guards. The new
+  `test_tex_script_length_digest` passed on the staged snapshot in both
+  tiers; the installed snapshot passes in interpreter and JIT with scheduled
+  GC poisoning, including the two included-source cases. The 31-file candidate
+  corpus in `temp/tex-length-digest-final/corpus-bundled/` finished with 18
+  matching trees, 13 explicit stops, and no differing completed expansion.
+  Generated-command qualification in `temp/tex-length-digest-generated/`
+  found native adds control-word spaces when serializing generated values.
+  Expansion now uses TeX token printing after assignment, and digestion maps
+  the emitted span. The 80-case generated matrix matches native text,
+  diagnostics and trees, as do active target and `escapechar` probes. The
+  112 direct and 12 generated permanent comparisons passed on the staged
+  implementation in both tiers. Installed expansion and digestion regressions
+  pass with scheduled GC poisoning in both JIT and interpreter.
+  The 31-file constructor candidate (`temp/tex-length-generated-candidate/`)
+  has 18 matching trees, 13 explicit stops and 30 matching completed expansions.
+  The installed-default snapshot (`temp/tex-length-generated-final/`) has
+  pre-existing mismatches in `booktabs`, `nursing_care_plan` and `slashbox`;
+  each was reproduced on the installed baseline. In `booktabs`, the default
+  constructor mode drops `\relax` from `\date{\relax}`. The candidate
+  constructor mode preserves it, but remains disabled pending full qualification.
+  A 24-case declaration and formatting probe confirms the candidate matches
+  native text, diagnostics and trees, while explicit false mode differs in seven
+  cases (`temp/tex-constructor-qualification/date_probe.out`). All 13 focused
+  package goldens match the candidate (`temp/tex-constructor-qualification/`).
+  A broader 140-fixture JIT qualification against the frozen candidate was
+  stopped after 62 fixtures finished when the goal was cleared; two further
+  subprocesses were interrupted. Results are in
+  `temp/tex-constructor-qualification-full/`. The installed constructor
+  default is unchanged until qualification is completed and reviewed.
+  The changed `counters_fixture` golden was checked directly with aligned
+  `adapters: []`: candidate text, diagnostics and full native tree match.
+
+- **Length commands, 2026-11-18:** `newlength`, `setlength` and
+  `addtolength` now use the native LaTeX target scanning, skip allocation and
+  TeX assignment paths (**S1.8**, **D10.2.2**). The staged 54-case matrix
+  matches native expansion text, diagnostic records and messages in both
+  constructor modes; counter, profile and constructor recovery goldens also
+  pass. `newlength` document digestion matches on direct probes; `setlength`
+  digestion now handles the mapped direct forms described above. The installed
+  `test_tex_script_length` adds the matrix, document and included-file checks;
+  JIT and interpreter runs pass, including scheduled GC with poisoning in
+  both tiers. A 31-sample candidate corpus with native-aligned bundled
+  resources and adapters finished under `temp/tex-length-corpus/corpus-bundled/`:
+  17 trees match, 13 stop at digestion guards and one at an unsupported
+  primitive. All 30 completed expansions match native text and diagnostics.
+  Its constructor default is only a frozen candidate and has not been enabled
+  in the installed engine.
+
+- **Sample corpus and paragraph boundaries, 2026-11-18:** the 31 files in
+  `test/latex/samples/` were run through the frozen constructor-default
+  candidate (`temp/tex-constructor-final/corpus/`, source/module manifest
+  included). Twenty-five runs returned and six aborted because a normalized
+  whitespace token has no source end; `paragraph_collect` now validates that
+  field before passing it to the shared reconstruction helper. Seven runs
+  returned different trees and three have text or diagnostic differences, so
+  this corpus does not qualify the default. The probe supplied an empty bundled
+  resource map while native can load bundled files: `math_proof` loads native
+  `ifthen.sty` while Script passes its adapter through. With all bundled
+  resources captured and `adapters: []` to match native's default options,
+  `math_proof` expansion text and diagnostics match. Two 31-file passes
+  with those resources and adapter settings completed in sessions 93733
+  (installed paragraph implementation snapshot) and 98005 (staged comment
+  fix), under `temp/tex-constructor-corpus{2,3}/corpus-bundled/`. Both snapshots
+  contain the adapter-marker regression described below; repeat qualification
+  after restoring the correct marker behavior. In particular,
+  `booktabs` and `complex_numbers` exposed double-counted control-word gaps
+  before blank lines. The installed digester now reconstructs consecutive
+  direct paragraph tokens as a single source span, checks mapped output when
+  present, and avoids adding the control gap twice. The staged
+  80-case whitespace matrix and both complete sample trees match native;
+  five neighboring paragraph, declaration and environment goldens pass in
+  JIT. The new 74-case native text/diagnostic/tree regression passes on the
+  installed modules in both JIT and interpreter.
+  The subsequent staged comment fix in `temp/tex-paragraph-follow/` also
+  matches `greek_russian` and `diagonal_table_cells`: direct source gaps must
+  retain comments, including comments that create an empty paragraph. Its
+  80 whitespace, 66 inline-comment and 90 comment-before-block comparisons,
+  plus five neighboring goldens, match native. The change is installed; the
+  146-case aggregate passes on the installed tree in both tiers. A corrected,
+  bundled-resource 31-file pass with restored adapter markers completed
+  (`temp/tex-constructor-corpus4/corpus-bundled/`): seven complete trees
+  matched, one differed and 23 were unsupported. The remaining successful
+  mismatch (`thai_polyglossia`) loses whitespace before a source-span
+  definition; `temp/tex-paragraph-span/` stages a fix that matches the sample.
+  Its 144-case definition-gap matrix matched native; the fix and its 108-case
+  regression pass in both tiers. `pulley_systems` and `spacetime_diagrams`
+  exposed raw TikZ bodies being expanded instead of preserved. The installed
+  raw-environment port matches native text and diagnostics on both samples
+  and direct, indirect, missing-end and included-source probes; raw document
+  digestion remains explicitly unsupported. Its 32-case name matrix, four
+  neighboring environment goldens, and staged GC probes in both tiers pass.
+  The 60-case installed regression and scheduled-GC probes with poisoning pass
+  in both tiers.
+  The refactored begin path preserves the original document hook list. A new
+  bundled-resource corpus snapshot completed
+  (`temp/tex-constructor-corpus5/corpus-bundled/`): eight trees matched, 23
+  were explicitly unsupported and none returned a differing successful tree.
+  `vietnamese_document` initially had expansion and diagnostic differences;
+  the probe also omitted `tex/binding/`, which native searches after the root.
+  Capturing both directories with native precedence makes its text and
+  diagnostics match (`vietnamese-bindings.out`). Of the other samples, 25
+  matched native text and diagnostics and five stopped before comparison.
+  `temp/tex-group-gaps/` explores digestion of retained raw spans using the
+  native header rules and reconstruction offsets. Its 128 direct raw cases
+  and malformed/generated-name guards match native where supported. A shared
+  group parser now restores direct source gaps
+  around group contents, including comments; this fixes tabs dropped in
+  unrelated groups and makes the full `pulley_systems` tree match. The group
+  change is installed after a 70-case comparison in both tiers and five
+  neighboring goldens. Synthetic parser events also no longer read
+  nonexistent source offsets. The 31-file bundled-resource candidate pass
+  completed with 17 matching trees and 14 unsupported
+  (`temp/tex-constructor-corpus6/corpus-bundled/`); its apparent Vietnamese
+  mismatch was the missing binding resource noted above. Generated probes found three
+  false-mode mismatches that also occur on the pre-group baseline;
+  constructor-mode results match native. Raw digestion is now installed:
+  its 78-case regression and revised expansion fixture pass in both tiers,
+  as do staged GC edge probes. Installed GC checks run in session 71951; a
+  follow-up iterative whitespace-scan check runs in sessions 2227 and 75972.
+  The corpus snapshot with both root and `binding/` resources and matching
+  adapters completed (`temp/tex-constructor-corpus7/`): 17 matching trees,
+  14 unsupported, and 26 matching native expansion texts and diagnostics;
+  five stopped before expansion comparison. Runtime, source, module and
+  captured-resource hashes still match its manifest. The
+  included-source raw tree matches
+  in constructor mode and remains guarded without it; malformed and ambiguous
+  raw spans retain a source-mapping guard. Recheck installed tests and corpus
+  before considering the qualification complete.
+  Other unsupported samples still need investigation. This pass does not
+  qualify the production migration (S1.8, D10.2.2).
+
+- **Constructor default qualification, 2026-11-18:** `temp/tex-constructor-default/lmd/`
+  is a frozen copy of the package tree with only the absent-option default
+  changed: LaTeX profiles use constructor-argument mode, and explicit `false`
+  retains the installed behavior. A direct probe reproduces the native state
+  difference and confirms all three option choices. The three-worker JIT sweep
+  of 155 default-mode engine fixtures completed: 144 matched their goldens,
+  ten differed and one aborted on the pre-fix positional result error;
+  `temp/tex-constructor-default/sweep/{manifest,progress}.json` records frozen
+  module, runtime and fixture hashes and each result. Module, runtime and
+  source hashes remain unchanged; the profile and definition-option goldens
+  were intentionally updated after the snapshot. The differing font, paragraph,
+  parenthesis, foreign and unexpanded-source cases have been checked against
+  complete native trees; the expansion and expl3 differences already occur
+  with the installed default. A fresh snapshot with the subsequent fixes and
+  default candidate is running the 11 changed fixtures and two new regressions
+  in session 63185 (`temp/tex-constructor-final/sweep/`). Recheck the live
+  session before restarting and classify any remaining differences. The
+  separate `temp/tex-constructor-seq/` candidate tests native-shaped sequence
+  insertion inside constructor arguments. Simply expanding the existing
+  sequence wrapper is insufficient: seven of eight native comparisons emit
+  an unexpanded `\\msg_expandable_error:nn` instead of the native macro
+  mismatch diagnostic. See `temp/tex-constructor-seq/probe.out`; do not enable
+  this candidate without implementing the underlying error expansion. The
+  bundled expl3 source defines the message chain around lines 11440–11469,
+  including a deliberately delimited `\\???` macro; the Script profile has
+  not yet ported that chain.
+  The sweep also exposed a pre-existing abort in `definition_option`: the
+  generic delimiter scan omitted `index` on an unclosed argument, violating
+  the positional parser result contract. The scan now carries that position;
+  the existing 28-case fixture matches its golden in JIT and interpreter.
+  The frozen sweep predates this fix and its corresponding failure is expected.
+  Echoed definitions can also end inside a balanced native argument: a staged
+  continuation now replays only adjacent direct tokens that both scanners
+  reproduce and stops at the exact parsed token boundary. The installed change
+  matches native text, diagnostics and trees for 22 cases in both tiers; the
+  prior 28-case definition-option fixture and adjacent definition suites pass.
+  Cases whose continuation contains consumed or differently tokenized source
+  remain guarded. A separate conditional probe found native recovers from an
+  unmatched `\\fi` while Script stops; `temp/tex-conditional/` stages recovery,
+  but it is not installed because document-end incomplete-condition diagnostics
+  also need correct state and source locations.
+  The counters package fixture demonstrates why a successful digest alone is
+  not sufficient: with the candidate default the script retains
+  `\\textcolor{red}{highlight}` while native expansion emits
+  `highlight`, producing a different tree without an unsupported result.
+  `temp/tex-constructor-default/counters-detail.out` has both complete trees
+  and reconstructed texts. The reduced `loaded-probe.out` traces the branch
+  to package state: the initial probe compared Script's default adapter
+  registry against native `parse` with no adapters, incorrectly concluding
+  that adapter-only entries lack loaded markers. Native `record_package`
+  confirms configured adapters receive markers; the erroneous marker change
+  has been reverted. `test_tex_script_adapter_state` now passes the same
+  `packages` list to native and Script and passes in both tiers, including the
+  complete local-package text and tree; a separate bundled-adapter fixture
+  also passes in both tiers. The frozen candidate sweeps
+  include the erroneous marker change and must not be used to qualify the
+  final default; the profile golden is restored. Recheck changed cases and
+  package behavior with matching options before promoting the default.
+  The expansion and expl3 fixture
+  differences observed so far are identical with the installed default and
+  reflect earlier recovery changes, rather than the candidate option.
+  S1.8 and D10.2.2 govern both investigations; production remains native.
+
+- **Definition-following groups, 2026-11-18:** the original consumed-
+  assignment offset reproductions now match native in both constructor modes;
+  the later definition-boundary fix already addressed those cases. The installed
+  digester now attaches following
+  groups using reconstructed segment offsets and the shared generic argument
+  scanner. Macro bodies retain parsed groups; environment-definition bodies
+  retain native raw groups; primitive delimited definitions leave later groups
+  in the inline stream. A 64-case direct matrix and 32 generated-token cases
+  matched native in both tiers on the earlier candidate, and an included-file
+  probe matched in both modes. Candidate v5 also matches 24 comment and
+  whitespace cases in JIT. Its staged 32-case/two-foreign-case fixture matches
+  interpreter and JIT, including forced collection with poisoning in both tiers.
+  Seven adjacent goldens match in both tiers. The installed join, boundary and
+  active-definition fixtures match in both tiers; the installed join fixture
+  also matches with scheduled collection and poisoning in each tier. A release host comparison on
+  30 unchanged definitions produced median process CPU of 9.704 s baseline
+  and 9.722 s candidate with matching output and native ASTs; timings include
+  startup and JIT and do not qualify overall port performance. The release host
+  and source hashes are in `bench-release-hashes.txt`; samples are in
+  `bench-release.json`. `test_tex_script_definition_boundary` has one expected
+  unsupported result now asserts native equality; `test_tex_script_active_definition`
+  likewise checks the recovered AST instead of the former guard. Candidate and
+  comparison evidence are in `temp/tex-definition-candidate/` (S1.8, D10.2.2).
+  Production migration remains open.
+
+- **Box dimensions, 2026-11-18:** the installed implementation models `\wd`,
+  `\ht` and `\dp` as
+  dimensions of an identity-shared box, independent of register-group
+  snapshots. It handles void boxes, assignments, prefixed assignments, scalar
+  and dimension reads, and the native one-time approximate-metrics diagnostic.
+  The staged 40-case expansion matrix matches native; its first 20 cases pass
+  interpreter and JIT, and 80 AST combinations match in each constructor
+  mode in JIT. An included-file text and diagnostic probe also matches. The
+  40-case/eight-AST shared-helper fixture passes interpreter and JIT, including
+  scheduled collection and poisoning in both tiers. The installed fixture adds
+  an included-source diagnostic comparison and passes both tiers with and
+  without scheduled collection and poisoning; the neighboring box-register,
+  box-digestion and box-movement goldens also match in both tiers. Evidence:
+  `temp/tex-box-candidate/` (S1.8, D10.2.2). The long-running expl3 probe had
+  already loaded the prior engine; its source hashes and expansion snapshot are
+  `temp/tex-real-expl3-700k-source-hashes.txt` and
+  `temp/tex-box-candidate/probe-baseline-expansion.ls`.
+
+- **Expression arithmetic recovery, 2026-11-18:** TeX integer, dimension,
+  glue and muglue expression arithmetic now retains an overflow flag until
+  the expression terminator, reports `tex-arith-overflow` once and returns
+  the appropriate zero. Nested explicit expressions save and restore their
+  caller's flag. Fifteen native comparisons cover overflow, zero division,
+  continued operands, nested expressions and conditionals. The expanded
+  numeric fixture matches in interpreter and JIT, including scheduled GC with
+  poisoning. The adjacent dimension fixture passes both tiers and expl3
+  integer-math passes JIT; its concurrent interpreter harness run timed out
+  at 60 seconds but a direct interpreter replay matches the golden. Evidence:
+  `temp/tex-expr-{interp,jit}.log`, `temp/tex-expr-gc-{interp,jit}.out` and
+  `temp/tex-expr-int-math-interp.out` (S1.8, D10.2.2). The three recovery
+  fixtures now share `_tex_script_recovery.ls`; all three match in interpreter
+  and JIT after extraction, and the numeric fixture also matches with forced
+  collection and poisoning (`temp/tex-helper-*`, `temp/tex-expr-helper-gc-*`).
+- **Bundled expl3 probe, 2026-11-18:** with the actual bundled TeX and Unicode
+  resources and the Script engine, a bounded 120,000-expansion JIT run reaches
+  `expl3-code.tex` line 8620 without diagnostics and stops at its budget;
+  `temp/tex-real-expl3-nolog.out` records its state. This debug-host correctness
+  probe does not complete the format or establish performance. The first probe
+  was interrupted after debug logging grew `log.txt` to 9.3 GB; subsequent probes
+  use the existing `--no-log` option without changing `log.conf`. A longer run
+  reached 700,000 expansions with no diagnostics, with `expl3-code.tex` at line
+  34066 and `UnicodeData.txt` open, then stopped at its explicit budget. Its
+  captured source hashes and expansion snapshot predate the box-dimension
+  installation above; see `temp/tex-real-expl3-700k.out` and the source-hash
+  manifest. This does not establish completion of the Unicode or format load.
+
+- **Dimension magnitude recovery, 2026-11-18:** oversized dimensions now
+  report `tex-dimension-too-large`, clamp to TeX's maximum scaled-point
+  magnitude and continue. Dimension digits reuse the integer scanner, including
+  its once-only oversized-number diagnostic and token retention. Magnification
+  and unit conversion check TeX's intermediate limits before scaling, avoiding
+  a Script integer overflow and runaway allocation reproduced by
+  `\mag=1\dimen0=2147483647truein`. The unit regression now includes 22
+  magnitude cases, with decimals, `sp`, converted units, negative register
+  values, glue, macros and extreme magnification. The 45-case combined fixture
+  and the numeric-overflow fixture pass interpreter and JIT; the combined
+  fixture also passes both tiers with scheduled collection and poisoning. The
+  existing numeric-math golden matches in a direct JIT run. Evidence:
+  `temp/tex-dimension-large-{final,gc}-{interp,jit}.log` and
+  `temp/tex-dimension-numeric-jit.out` (S1.8, D10.2.2). Broader TeX and document
+  parity and production migration remain open.
+
+- **Dimension-unit recovery, 2026-11-18:** absent or invalid units now report
+  `tex-illegal-unit`, insert `pt` or `mu`, and retain the tokens following a
+  failed keyword scan. Infinite glue consumes every excess `l` after `filll`,
+  diagnosing each while keeping order three; the scan is iterative. The
+  23-case regression compares native text, messages and full diagnostic records,
+  including partial units, macro expansion, math glue and 120 excess letters.
+  It and the numeric overflow regression pass in interpreter and JIT; the new
+  regression also passes both tiers with collection every 100,000 allocations
+  and freed-memory poisoning. Evidence: `temp/tex-unit-{final,gc}-{interp,jit}.log`
+  (S1.8, D10.2.2). The later checkpoint covers dimension magnitude recovery;
+  broader malformed-input recovery remains open.
+
+- **Register arithmetic recovery, 2026-11-18:** failed register
+  multiplication and division now record `tex-arith-overflow` and retain the
+  previous count, dimension, glue or muglue value. The native comparison adds
+  12 cases for zero divisors, multiplication limits, scope, and chained errors
+  to `test_tex_script_number_overflow`. That regression and the neighboring
+  missing-relation golden pass in interpreter and JIT. The combined regression
+  also passes both tiers with collection every 100,000 allocations and freed
+  memory poisoning; evidence is in `temp/tex-arithmetic-{final,gc}-{interp,jit}.log`
+  (S1.8, D10.2.2). Expression and advance overflow recovery remain separate work.
+
+- **Oversized integer literals, 2026-11-18:** decimal, octal and hexadecimal
+  integer scans now report `tex-number-too-big` once, clamp the magnitude to
+  2147483647, and consume the remaining digits, as native does. The new
+  regression compares text, messages and full diagnostics for 14 native cases,
+  including signs, exact limits, long literals, macros, conditionals and count
+  assignment. It and the missing-number and missing-relation goldens pass in
+  interpreter and JIT; logs are `temp/tex-overflow-{interp,jit}.log` (S1.8,
+  D10.2.2). Dimension scanning and arithmetic overflow remain separate work.
+
 - **Missing numeric relation, 2026-11-18:** numeric conditionals now record
   the native `tex-missing-relation` diagnostic, insert `=`, and replay the
   triggering token for the right operand instead of stopping. Existing expansion
@@ -2751,8 +3087,9 @@ offset; broader source reconstruction remains open.
 
 ## Script TeX rejects box dimension access — 2026-11-12
 
-**Status:** OPEN. **Full script TeX-port blocker:** yes, for `\wd`, `\ht` and
-`\dp`. Native production parsing is unaffected; S1.8 and D10.2.2 apply.
+**Status:** PARTIALLY FIXED for the expansion, state and document cases in the
+current checkpoint. Full corpus, malformed-input and production qualification
+remain open. Native production parsing is unaffected; S1.8 and D10.2.2 apply.
 
 With the staged box-register implementation,
 `\setbox0=\hbox{Hi}\setbox1=\copy0\wd1=2pt` stops at
@@ -2761,6 +3098,12 @@ With the staged box-register implementation,
 `../lambda-input/temp/expl3-script/box-dimensions-before.ls` and
 `box-dimensions-before-interp.out`. Correct support needs native-compatible
 shared-box mutation, scanning, scoped references, and dimension diagnostics.
+
+The Script engine now keeps dimensions by box identity so copied registers and
+saved scopes observe the same object mutation. Reads and assignments scan the
+same numeric and dimension operands as native, including the one-time
+approximate-metrics diagnostic. The current checkpoint records the differential
+fixtures, document-tree matrix and remaining qualification.
 
 
 ## Script TeX rejects paragraph pattern and shape assignments — 2026-11-12
@@ -2813,8 +3156,9 @@ unqualified; assignment-containing documents retain the broader guard above.
 
 ## Script LaTeX definition offsets omit following consumed assignments — 2026-11-12
 
-**Status:** OPEN. Blocks AST parity for affected documents; S1.8 and D10.2.2
-apply.
+**Status:** PARTIALLY FIXED for the cases covered by the later definition-
+boundary and following-group checkpoints. Broader source mapping and corpus
+qualification remain open; S1.8 and D10.2.2 apply.
 
 With `\def\x{Hi}\count0=0\begin{document}A\x B\end{document}`, Script
 digestion reports the definition body's argument end as byte 10, while native
@@ -2823,8 +3167,9 @@ reports 10 versus 21. The Script result is marked successful despite the AST
 mismatch. Reproduction and both trees are in
 `../lambda-input/temp/expl3-script/definition-assignment-mapping-probe.ls` and
 `.out`. A candidate for paragraph quantity reads also exposes this existing
-problem; the issue appears to be incomplete reconstruction of the native source
-map across consumed assignments. Exact general cause remains unconfirmed.
+problem. The later definition-boundary work maps the following reconstructed
+segment, and the current checkpoint records native equality for the original
+reproductions and the subsequent following-group work.
 
 
 ## Script TeX rejects font hyphen and skew characters — 2026-11-12
@@ -5438,18 +5783,18 @@ open issue below; broader foreign-source cases require further qualification.
 
 ## Expanded environment names shift an echoed definition boundary — 2026-11-13
 
-**Status:** PARTIALLY FIXED for qualified main-file definition boundaries;
-following groups still require source-aware argument merging. S1.8 and D10.2.2
-apply. Native maps the end of an echoed definition's final argument through
+**Status:** PARTIALLY FIXED for qualified definition boundaries and following
+groups. S1.8 and D10.2.2 apply. Native maps the end of an echoed definition's final argument through
 the next reconstructed segment when intervening TeX commands emit no text.
 The Script digester now applies that mapping for known emitted origins, while
 preserving source gaps. This fixes the expanded environment-name example and
 similar assignments, conditionals, generated text and following block commands.
-`test/lambda/latex/test_tex_script_definition_boundary.ls` compares 25 cases
-with native on interpreter and JIT. A following group that native would merge
-into the definition reports `definition following group source mapping` until
-that parsing behavior is ported. Focused existing goldens and sampled forced
-GC pass both backends. Evidence:
+`test/lambda/latex/test_tex_script_definition_boundary.ls` compares the original
+cases with native on interpreter and JIT. Following groups now use the shared
+argument scanner and reconstructed source map; the current checkpoint records
+the added coverage and remaining qualification. Some unqualified definition
+shapes still report `definition following group source mapping`. Focused
+existing goldens and sampled forced GC pass both backends. Evidence:
 `../lambda-input/temp/expl3-script/definition-boundary-v4-interp.out`.
 
 
