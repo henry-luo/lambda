@@ -1,4 +1,5 @@
 #include "lambda_rd_parser.h"
+#include "../call_effects.h"
 #include "lib/hash.h"
 #include <stdlib.h>
 #include <string.h>
@@ -746,6 +747,48 @@ static bool parser_at_counted_run(const LambdaRdParser* parser) {
     return before != ' ' && before != '\t' && before != '\n' && before != '\r';
 }
 
+static bool parse_effect_clause(LambdaRdParser* parser, LambdaEffectMask* effects,
+        uint32_t* end_byte) {
+    parser_advance(parser); // '@'
+    bool set = parser_accept(parser, LAMBDA_TOK_LBRACE);
+    LambdaEffectMask bound = 0;
+    do {
+        LambdaToken effect = parser->current;
+        const char* name = parser->lexer.source + effect.span.start_byte;
+        size_t length = effect.span.end_byte - effect.span.start_byte;
+        LambdaEffectMask bit = lambda_effect_named(name, length);
+        if (!bit) return parser_fail(parser, "expected a named effect (random, clock, or print)",
+            LAMBDA_TOK_IDENTIFIER);
+        bound |= bit;
+        *end_byte = effect.span.end_byte;
+        parser_advance(parser);
+    } while (set && parser_accept(parser, LAMBDA_TOK_COMMA));
+    if (set) {
+        *end_byte = parser->current.span.end_byte;
+        if (!parser_expect(parser, LAMBDA_TOK_RBRACE)) return false;
+    }
+    *effects = bound;
+    return parser->status == LAMBDA_PARSE_OK;
+}
+
+bool lambda_rd_parse_effect_clause(const char* source, size_t length,
+        uint32_t* effects, size_t* consumed, const char** message) {
+    LambdaParseError error = {0};
+    LambdaRdParser parser = {0};
+    parser.error = &error;
+    lambda_lexer_init(&parser.lexer, source, length);
+    parser.current = parser_next_significant(&parser);
+    parser.next = parser_next_significant(&parser);
+    uint32_t end_byte = 0;
+    if (parser.current.kind != LAMBDA_TOK_EFFECT_AT ||
+            !parse_effect_clause(&parser, effects, &end_byte)) {
+        *message = error.message ? error.message : "expected an effect clause";
+        return false;
+    }
+    *consumed = end_byte;
+    return true;
+}
+
 static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         bool allow_binder, uint32_t reduction_flags, bool binary_field) {
     LambdaToken first = parser->current;
@@ -761,6 +804,8 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
     // `fn int`.
     bool params_may_open = false;
     bool in_params = false;
+    bool signature_is_proc = false;
+    bool procedure_result = false;
     bool return_may_follow = false;
     bool counted_run_is_ambiguous =
         (reduction_flags & LAMBDA_REDUCTION_FLAG_RETURN_TYPE) != 0;
@@ -771,6 +816,16 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         }
         if (return_may_follow) {
             return_may_follow = false;
+            if (signature_is_proc && kind == LAMBDA_TOK_RETURN_ARROW) {
+                if (parser->current.nl_before) {
+                    return parser_fail(parser, error_signature_return_line_start,
+                        LAMBDA_TOK_SEMICOLON);
+                }
+                parser_advance(parser);
+                procedure_result = true;
+                need_atom = true;
+                continue;
+            }
             if (token_starts_signature_return(kind) && !parser_at_declaration_head(parser)) {
                 // a line-start name could as well begin a new statement
                 if (parser->current.nl_before) {
@@ -785,7 +840,8 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         // suffix `?` (LR02-26). `+`, `*` and `[` can begin a statement.
         if (parser->current.nl_before && !nesting && !need_atom) {
             if (kind != LAMBDA_TOK_PIPE && kind != LAMBDA_TOK_AMPERSAND &&
-                    kind != LAMBDA_TOK_BANG && kind != LAMBDA_TOK_QUESTION) {
+                    kind != LAMBDA_TOK_BANG && kind != LAMBDA_TOK_QUESTION &&
+                    !(kind == LAMBDA_TOK_EFFECT_AT && procedure_result)) {
                 break;
             }
         }
@@ -808,6 +864,7 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
             in_params = function_arguments;
             params_may_open = !function_arguments &&
                 (kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN);
+            if (params_may_open) signature_is_proc = kind == LAMBDA_TOK_PN;
             parser_advance(parser);
             need_atom = false;
             // S11.1.3: two literals joined by `to` are one range type, as the
@@ -834,6 +891,13 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         if (nesting) {
             if (!parser_push_type_delimiter(parser, closing_stack, &nesting, kind)) return 0;
             parser_advance(parser);
+            continue;
+        }
+        if (kind == LAMBDA_TOK_EFFECT_AT && procedure_result) {
+            uint32_t end_byte;
+            LambdaEffectMask effects;
+            if (!parse_effect_clause(parser, &effects, &end_byte)) return 0;
+            procedure_result = false;
             continue;
         }
         if (kind == LAMBDA_TOK_AS) {
@@ -1223,9 +1287,11 @@ typedef struct LambdaCallableSignature {
     bool raised;
 } LambdaCallableSignature;
 
+static bool parser_at_generative_block(const LambdaRdParser* parser);
+
 static bool parser_parse_return_types(LambdaRdParser* parser, LambdaParseValue* values, uint32_t* count, bool* raised_out) {
     bool raised = false;
-    if (token_starts_return_type(parser->current.kind)) {
+    if (token_starts_return_type(parser->current.kind) && !parser_at_generative_block(parser)) {
         // Keep the complete return source intact so the type-pattern parser
         // can issue its binder-specific semantic diagnostic (S4.2.2).
         LambdaParseValue returned = parse_type_slot_mode(parser, true,
@@ -1234,7 +1300,7 @@ static bool parser_parse_return_types(LambdaRdParser* parser, LambdaParseValue* 
         if (values && count) values[(*count)++] = returned;
         if (parser_accept(parser, LAMBDA_TOK_CARET)) {
             raised = true;
-            if (token_starts_return_type(parser->current.kind)) {
+            if (token_starts_return_type(parser->current.kind) && !parser_at_generative_block(parser)) {
                 parser_fail(parser,
                     "typed 'T^E' is removed; use 'T | E' for particular errors or 'T^' for any error",
                     LAMBDA_TOK_LBRACE);
@@ -2189,17 +2255,50 @@ static bool parser_parse_parameter_list(LambdaRdParser* parser, LambdaParseValue
         error_expected_parameter_close, parameters_out, variadic_out);
 }
 
-// S12.1.4v2: `function name(...)` declares a colour-polymorphic function.
-// `function` stays a base-type word everywhere else, so only that word followed
-// by a name on the same line starts a declaration.
-static bool parser_at_colour_poly_declaration(LambdaRdParser* parser) {
+static bool parser_at_function_word(const LambdaRdParser* parser) {
     LambdaToken word = parser->current;
     static const char keyword[] = "function";
     size_t length = sizeof(keyword) - 1;
     return word.kind == LAMBDA_TOK_BASE_TYPE &&
         word.span.end_byte - word.span.start_byte == length &&
-        memcmp(parser->lexer.source + word.span.start_byte, keyword, length) == 0 &&
-        token_is_key(parser->next.kind) && !parser->next.nl_before;
+        memcmp(parser->lexer.source + word.span.start_byte, keyword, length) == 0;
+}
+
+// S12.1.4v6: the declaration head requires a name on the same line.
+static bool parser_at_colour_poly_declaration(LambdaRdParser* parser) {
+    return parser_at_function_word(parser) && token_is_key(parser->next.kind) &&
+        !parser->next.nl_before;
+}
+
+// S16.7.7: recognize the full head before consuming an ordinary use of the type word.
+static bool parser_at_generative_block(const LambdaRdParser* parser) {
+    if (parser->next.kind != LAMBDA_TOK_LPAREN || !parser_at_function_word(parser))
+        return false;
+    LambdaRdParser probe = parser_probe(parser);
+    parser_advance(&probe);
+    parser_advance(&probe);
+    return probe.current.kind == LAMBDA_TOK_RPAREN && probe.next.kind == LAMBDA_TOK_LBRACE;
+}
+
+static LambdaParseValue parse_generative_body(LambdaRdParser* parser) {
+    LambdaToken first = parser->current;
+    parser_advance(parser);
+    parser_advance(parser);
+    parser_advance(parser);
+    LambdaParseValue body;
+    if (!parser_parse_braced(parser, first, LAMBDA_REDUCTION_FORM_GROUP_BEGIN,
+            LAMBDA_REDUCTION_FORM_GROUP_END, error_function_body_open,
+            error_function_body_close, &body)) return 0;
+    return body;
+}
+
+static LambdaParseValue parse_generative_block(LambdaRdParser* parser) {
+    LambdaToken first = parser->current;
+    LambdaParseValue body = parse_generative_body(parser);
+    if (!body) return 0;
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    return parser_reduce_one(parser, LAMBDA_REDUCE_STATEMENT,
+        LAMBDA_REDUCTION_FORM_GENERATIVE_BLOCK, span, first, body);
 }
 
 // `fn name`, `pn name` and `function name` open declarations and can never
@@ -2231,6 +2330,15 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser, bool 
     if (!parser_parse_callable_signature(parser, false, true, NULL,
             error_expected_parameter_name,
             error_expected_parameter_close, &signature)) return 0;
+    if (is_proc && parser->current.kind == LAMBDA_TOK_EFFECT_AT) {
+        LambdaToken marker = parser->current;
+        uint32_t end_byte;
+        LambdaEffectMask effects;
+        if (!parse_effect_clause(parser, &effects, &end_byte)) return 0;
+        parser_context_ex(parser, LAMBDA_REDUCTION_FORM_PROCEDURE_EFFECTS,
+            (SourceSpan){marker.span.start_byte, end_byte}, marker,
+            (LambdaToken){0}, effects, NULL, 0);
+    }
     LambdaParseValue children[5];
     uint32_t child_count = 0;
     if (signature.parameters) children[child_count++] = signature.parameters;
@@ -2307,7 +2415,11 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
         } while (parser_accept(parser, LAMBDA_TOK_COMMA));
     }
     LambdaParseValue body = 0;
-    if (!parser_parse_plain_braced(parser, error_view_body_open, error_view_body_close, &body)) return 0;
+    bool generative = parser_at_generative_block(parser);
+    if (generative) body = parse_generative_body(parser);
+    else if (!parser_parse_plain_braced(parser, error_view_body_open, error_view_body_close, &body))
+        return 0;
+    if (!body) return 0;
     while (parser->current.kind == LAMBDA_TOK_ON) {
         LambdaToken on = parser->current;
         parser_advance(parser);
@@ -2328,7 +2440,9 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
     }
     view_children[0] = parameters;
     view_children[1] = body;
-    LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW, LAMBDA_REDUCTION_FORM_VIEW, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, name, return_raised ? LAMBDA_REDUCTION_FLAG_RAISED : 0, view_children, view_child_count);
+    uint32_t flags = return_raised ? LAMBDA_REDUCTION_FLAG_RAISED : 0;
+    if (generative) flags |= LAMBDA_REDUCTION_FLAG_GENERATIVE_VIEW;
+    LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW, LAMBDA_REDUCTION_FORM_VIEW, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, name, flags, view_children, view_child_count);
     parser_context(parser, LAMBDA_REDUCTION_FORM_VIEW_END, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first);
     return result;
 }
@@ -2932,12 +3046,15 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
         }
         // a `function` declaration closes its tail like `fn`/`pn` below
         bool statement_declares_function = parser_at_colour_poly_declaration(parser);
-        LambdaParseValue statement = parse_statement(parser);
+        bool generative_block = terminator == LAMBDA_TOK_EOF &&
+            parser_at_generative_block(parser);
+        LambdaParseValue statement = generative_block
+            ? parse_generative_block(parser) : parse_statement(parser);
         if (parser->status != LAMBDA_PARSE_OK) return 0;
         parser_add_content(parser, &content, &has_content, &content_start, statement_token, statement);
         if (parser->current.kind == terminator || parser->current.kind == LAMBDA_TOK_EOF) break;
         bool closed_tail =
-            statement_first == LAMBDA_TOK_BREAK || statement_first == LAMBDA_TOK_CONTINUE || statement_first == LAMBDA_TOK_IMPORT || (parser->prev_kind == LAMBDA_TOK_RBRACE && (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN || statement_declares_function || statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_GRAMMAR || statement_first == LAMBDA_TOK_VIEW || statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE || statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF || statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB ||
+            generative_block || statement_first == LAMBDA_TOK_BREAK || statement_first == LAMBDA_TOK_CONTINUE || statement_first == LAMBDA_TOK_IMPORT || (parser->prev_kind == LAMBDA_TOK_RBRACE && (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN || statement_declares_function || statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_GRAMMAR || statement_first == LAMBDA_TOK_VIEW || statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE || statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF || statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB ||
             // PTH68v3 (§7.14): the transaction block ends in a braced body that
             // admits no postfix, so it is a CLOSED tail like `while` and `match`.
             statement_first == LAMBDA_TOK_OPEN));

@@ -763,6 +763,8 @@ typedef struct AstCallNode : AstNode {
     // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
     // colour must be checked at run time; 0 when statically resolved.
     uint32_t fn_colour_guard;
+    uint32_t template_effects;  // lexical allowance for an `apply` call
+    bool input_url_only;        // template input must resolve to HTTP(S)
     // S7.6.3: propagation's early outcome survives success-type narrowing.
     Type* propagated_error_type;
 } AstCallNode;
@@ -871,6 +873,7 @@ typedef struct AstBinaryNode : AstNode {
     AstNode *left, *right;
     StrView op_str;
     Operator op;
+    uint32_t pipe_effect_guard; // for arbitrary whole-value pipe callables
     bool interp_int_arithmetic; // predicted operands; runtime tags still guard the kernel
 } AstBinaryNode;
 
@@ -1497,6 +1500,7 @@ typedef struct AstFuncNode : AstNode {
     // defining module is fully built (lambda_ast_decide_cow_borrows), so a
     // caller in another module may rely on them.
     bool cow_param_effects_final;
+    uint32_t declared_effects;  // carried from syntax until TypeFunc is published
     Type* declared_return_type;
 } AstFuncNode;
 

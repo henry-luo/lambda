@@ -128,7 +128,12 @@ typedef struct SysFuncInfo {
     bool reads_args;
     // S7.10.7: invalid non-error inputs yield null, not an ordinary error.
     bool invalid_returns_null;
+    uint32_t declared_effects; // S12.1.6: optional bound in a host signature
 } SysFuncInfo;
+
+#include "call_effects.h"
+
+LambdaEffectMask sys_func_effect_bound(const SysFuncInfo* info);
 
 static inline bool sysfunc_arg_is_var(const SysFuncInfo* info, int index) {
     return info && index >= 0 && index < 32 && (info->var_mask & (1u << index));

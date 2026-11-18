@@ -3299,6 +3299,17 @@ TEST_F(NegativeScriptTest, SemanticError_DynamicProcedureCallFromFunction) {
         "call: cannot call a procedure (pn) from a function (fn)");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_CallableEffectBounds) {
+    const char* resource_error = "this call acquires resources outside the current callable's effect bound";
+    for (const char* script : {
+            "test/lambda/negative/semantic/effect_bound_resource_helper.ls",
+            "test/lambda/negative/semantic/effect_bound_opaque_resource_helper.ls"}) {
+        ExpectRejectedOnEveryTier(script, false, resource_error);
+    }
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/effect_default_pure.ls", false,
+        "a default callback exceeds the caller's effect bound");
+}
+
 // S12.1.1v2 (LR03-24): every `that` predicate is `fn` context -- a declared
 // type, a field and an object-level constraint, and an inline arm in a `pn`.
 // The colour walk never entered a type expression, so the JIT ran the effect

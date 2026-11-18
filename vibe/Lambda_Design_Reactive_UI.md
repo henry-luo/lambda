@@ -6,6 +6,7 @@
 > **Consolidated and reviewed:** 2026-10-08, against tree `62f3c21d2` and the
 > working changes present at review time.
 > **Revised:** 2026-10-13 — **D5.5.3** scope (copy at construction, retain downstream), presentation authority by state tier (§2.7), reconciliation within a regenerated result, and ownership of retained nodes (§5.3, §9.1, §9.4, §10.1, §11, §17, §18.1).
+> **Revised:** 2026-11-18. S12.1.3v6 admits generative `function` bodies. Generative calls are passive. Initial render permission follows S16.7.7v2.
 > **Scope:** the `view`/`edit` template model, state and model ownership,
 > pattern dispatch, events, observer-based regeneration, incremental presentation,
 > text interaction, drag-and-drop, prior art, alternatives, and unresolved design.
@@ -84,18 +85,42 @@ The sequence of the five source records explains the final shape:
 
 ### 2.1 Functional presentation
 
-A template body is a pure transformation of its model and current instance state
-into presentation content. It describes the desired result; application authors
-do not manually patch the generated DOM to implement ordinary reactive updates.
-The body obeys `fn` rules, and its handlers obey `pn` rules
-(**S12.1.1v2–S12.1.3**).
+A `view` or `edit` body produces presentation content from the matched model
+and instance state. It may be pure or use `function` semantics to call
+procedures with selected generative effects (S12.1.3v6, S12.1.4v7). For
+example, a body can bind a clock reading before constructing an element
+that displays it. Element attributes and content still evaluate in pure
+context (S12.1.1v5). Persistent state writes belong in `on` handlers.
+Model writes additionally require an editor's authority (§2.2).
 
-This separation is a language contract. A pure body cannot call a procedural
-operation, and procedural-only constructs do not become legal merely because the
-body is a UI template. Effects belong in handlers or another authorized procedural
-scope. The language's current one-bit effect system remains authoritative; the
-additional purity categories explored in the persistence design do not silently
-change this contract.
+**Each executed call performs its operation (S12.1.3v6).** A template
+that binds one random draw and displays it twice displays the same sample.
+Two calls draw twice, even during one render. A clock read can return the
+same timestamp twice at the clock's resolution. A reached `print` writes
+once, even if the generated elements match the previous render. A skipped
+branch or an instance that does not re-render produces no samples or output.
+
+The effects are passive. A clock read installs no timer, a random draw
+invalidates no state, and printing schedules no update. For a ticking
+display, a timer event or a state update drives regeneration. RDB series
+allocation belongs to procedural CRUD work. An editor can allocate an ID
+when it creates a record and display that ID on later renders.
+
+**Refresh with template state (S7.4.5v4, S12.1.3v6).** Suppose the body
+passes `"https://example.org/items?rev=" ++ string(serial_no)` to `input`.
+With `serial_no = 7`, unrelated renders can reuse the valid entry for
+`?rev=7`. A Refresh handler increments the state to 8. The next render
+looks up `?rev=8` and reads the resource if that entry is absent. A clock
+value in the query also selects a new entry whenever the sampled value
+differs. Reading the clock or URL schedules no refresh on its own.
+
+**Initial render and dispatch (S16.7.7v2, S12.1.3v6).** Opt in
+by writing `function() { ... }` after the template signature and state
+declarations. A script can put `apply(model)` inside its own top-level
+generative block. Dispatch checks the selected template's allowance before
+running it. Cached URL input occurs within the template and uses the host's
+permissions. Handlers read the matched model and state. They have their
+own locals and leave the generative body's locals to rendering.
 
 ### 2.2 Controlled mutation
 
@@ -169,7 +194,7 @@ following parts, in order:
 | Parameter list | Optional declaration surface; forwarding is discussed in the final section |
 | Return contract | Optional; the original declaration design requires the parameter parentheses when a return contract follows |
 | `state` clause | Optional, comma-separated named state bindings |
-| Body | Required functional body producing presentation content |
+| Body | Required functional body producing presentation content, with the effect contract of §2.1 |
 | `on` blocks | Zero or more procedural handlers after the body |
 
 The original declaration design defaults the result to an element. The broader
@@ -200,14 +225,10 @@ to follow their own language scope rules.
 
 ### 3.3 Body and handler restrictions
 
-The body follows functional statement semantics. In particular, `var`, assignment,
-`while`, `return`, `break`, and `continue` are not admitted by the template body
-when they are procedural-only under **S12.1.2**.
-
-Handlers may use procedural local variables, assignment, loops, and early return.
-They may perform other authorized effects under **S12.1.1v2**; the initial wording
-that restricted all handler effects to state/model mutation was too narrow for
-file-backed applications and DOM behavior.
+A generative body keeps functional collection and local-control semantics
+(S2.5.3v3, S12.1.2v3, S12.1.4v7). Its effect bound controls which procedures
+it may call. Handlers use procedural sequencing and may perform other
+authorized effects (S12.1.1v5, S12.1.3v6).
 
 A viewer's handler cannot assign to the matched model or its paths. An editor's
 handler can update the model through the document-editing authority. Both can
@@ -1207,8 +1228,8 @@ boundary and explicit editing authority.
 
 Elm's architecture separates model, update, and view. Lambda's templates adopt
 the same functional-view motivation but use procedural event handlers instead of
-requiring every update to be expressed as one pure reducer. **S12.1.3** explicitly
-identifies this architecture as enforced by the effect bit. See
+requiring every update to be expressed as one pure reducer. **S12.1.3v6** assigns persistent mutations to handlers and permits selected
+generative effects while producing presentation content. See
 [The Elm Architecture](https://guide.elm-lang.org/architecture/).
 
 The analogy does not automatically supply Elm's message types, command model,

@@ -2,6 +2,8 @@
 #include "lib/host_paths.h"
 #include "lambda/input/input-postscript.hpp"
 #include "lambda/core/mark_reader.hpp"
+#include "runtime/type_contract.hpp"
+#include "runtime/call_effects.h"
 #include "lambda/io/zip_archive.hpp"
 #include "lambda/io/fs_node.hpp"
 #include "lambda/format/format.h"
@@ -1261,10 +1263,12 @@ static void repl_print_binding(void* opaque, const char* name, size_t length,
         return;
     }
     if (get_type_id(value) == LMD_TYPE_FUNC) {
-        // the value printer shows a function's address; its colour is the fact
-        TypeFunc* signature = (TypeFunc*)((Function*)(uintptr_t)value.item)->fn_type;
-        printf("%.*s = %s\n", (int)length, name,
-            signature && signature->is_proc ? "pn" : "fn");
+        // Display the callable's actual colour, including captured callbacks.
+        uint32_t effects = lambda_function_effect_mask(value.function);
+        char suffix[40] = {};
+        if (effects != LAMBDA_EFFECT_UNRESTRICTED)
+            lambda_format_effect_suffix(effects, suffix, sizeof(suffix));
+        printf("%.*s = %s%s\n", (int)length, name, effects ? "pn" : "fn", suffix);
         return;
     }
     StrBuf* text = strbuf_new_cap(64);

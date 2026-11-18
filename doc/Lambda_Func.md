@@ -27,14 +27,18 @@ This document covers Lambda's function system, including pure functional (`fn`) 
 
 ## Function Overview
 
-Lambda supports two kinds of functions, plus a declaration form for
-higher-order functions whose purity depends on their arguments:
+Lambda uses three declaration forms for callables.
 
 | Kind | Keyword | Characteristics |
 |------|---------|-----------------|
 | **Functional** | `fn` | Pure calls; expressions or local imperative computation |
 | **Procedural** | `pn` | Mutable state, side effects, imperative |
-| **Colour-polymorphic** | `function` | Pure iff its `function`-typed arguments are |
+| **Colour-polymorphic** | `function` | Selected generative effects and effects supplied by callbacks |
+
+S12.1.6v2 gives procedures and procedure types an optional trailing
+effect bound. S12.1.4v7 allows selected generative calls in `function`
+bodies. Templates can opt into these calls and cached URL input under
+S12.1.3v6. [Design and signature details](../vibe/Lambda_Design_Procedural.md#11-checked-procedure-effects-and-generative-functions)
 
 ### Quick Comparison
 
@@ -666,9 +670,10 @@ For a pure fold, use the built-in `reduce` instead of a `pn`:
 
 An ordinary `fn` never runs a procedure: calling a `pn` from `fn` context is a
 compile error, or, when the callee only arrives as a value, a run-time error
-returned as the call's value. A script's top level is `fn` context too, so
-procedural calls belong in `pn main()`. A higher-order function that should accept both
-kinds is declared with `function`:
+returned as the call's value. A script's top level defaults to `fn`
+context. Use `pn main()` for general procedural work or a top-level
+`function() { ... }` block for random sampling, clock reads and printing
+(S16.7.7v2). A higher-order helper can use `function` to accept both kinds.
 
 ```lambda
 fn square(x: int) => x * x
@@ -679,27 +684,47 @@ function apply_all(f: function, xs) => for (x in xs) f(x)
 let squares = apply_all(square, [1, 2, 3])   // pure call: [1, 4, 9]
 ```
 
-- **A call's colour comes from its arguments.** A call is `pn` when an
-  argument in a `function`-typed parameter is a `pn`, and `fn` otherwise.
-  Parameters typed `fn (...)` or `pn (...)` keep their fixed colour.
+- **A call combines its own effects with its callbacks' effects.** A
+  `function`-typed parameter contributes the supplied or default callback's
+  requirements. Parameters typed `fn (...)` or `pn (...)` keep their fixed
+  colour. Calls through them contribute to the body's own requirements.
 - **`fn` context may make only the pure calls.** `apply_all(square, xs)` is
-  fine anywhere; `apply_all(log_square, xs)` is allowed only inside a `pn`, and
-  is a compile error in `fn` context. When the argument's colour is known only
-  at run time, the call returns an error value instead of running the `pn`.
-- **The body is checked as an `fn` body.** Local `var`, assignment, `while`
-  and early return are allowed (S12.1.2v3). Calls to known procedures remain
-  forbidden; its call effects come from its `function` parameters.
-- **Its value is `fn`.** `apply_all is fn` is `true`, so it can be passed
-  where an `fn (...)` is expected.
+  fine anywhere. A printing callback needs a context that admits its effect
+  bound. When the argument's bound is known only at run time, an inadmissible
+  call returns an error value before the callback executes.
+- **The body collects results like `fn`.** It can call procedures bounded
+  to the generative set in S12.1.4v7. Local control follows S12.1.2v3.
+- **A callback-only helper can pass an `fn` contract.** `apply_all is fn`
+  is `true`, and each invocation still checks its callbacks. Intrinsic
+  effects or effects of a captured callback give the resulting value
+  procedural colour under S12.1.4v7.
 
 `call(f, args)` behaves the same way: it is the built-in colour-polymorphic
-function (S12.1.4v3).
+function (S12.1.4v7).
 
 ---
 
 ## Procedural Functions
 
 Procedural functions (`pn`) allow mutable state, side effects, and imperative control flow. See [Lambda Procedural Programming](Lambda_Procedural.md) for full documentation.
+
+Add `@clock` after the result type for a single effect or
+`@{random, clock, print}` for a set. Omitting the annotation permits any
+effect. An annotated procedure admits only callees whose effect bounds fit
+its own. The same rule applies when a procedure crosses a typed callback
+boundary. The optional effect clause follows the complete result contract,
+including an error union (S7.4.2v4, S12.1.6v2).
+
+```lambda
+type ClockReader = pn () -> float @clock
+pn sample() float @clock { clock() }
+
+(sample is ClockReader)
+function() {
+    let reading = sample();
+    (reading is float)
+}
+```
 
 ---
 

@@ -4,6 +4,7 @@
 
 #include "transpiler.hpp"
 #include "type_contract.hpp"
+#include "call_effects.h"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
 #include "recovery_frame.h"
@@ -2324,7 +2325,7 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
 
 // fn_pipe_call: pass collection as first argument to a function
 // This handles the aggregate case where ~ is not used
-Item fn_pipe_call(Item collection, Item func_or_result) {
+Item fn_pipe_call(Item collection, Item func_or_result, uint32_t guard) {
     // If the right side is already evaluated (not using ~),
     // we assume it's a function that should receive the collection
     // For now, we check if it's a callable
@@ -2336,13 +2337,15 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
         RootFrame roots(2);
         Rooted<Item> rooted_collection(roots, collection);
         Rooted<Item> rooted_function(roots, func_or_result);
+        Item refused = lambda_fn_colour_guard(rooted_function.get().function, &collection, 1, guard);
+        if (item_is_error(refused)) return refused;
         uint64_t* result_home = lambda_side_number_alloc();
         if (!result_home) {
             lambda_stack_overflow_error("fn_pipe_call-result-home");
             return ItemError;
         }
         Function* fn = rooted_function.get().function;
-        if (fn && fn->ptr) {
+        if (fn) {
             Item result = fn_call1_into(fn, rooted_collection.get(), result_home);
             return lambda_item_adopt_scalar_home(result, result_home);
         }
@@ -2834,8 +2837,12 @@ Item fn_sort2(Item item, Item dir_item) {
             key_fn = rooted_key_fn.get().function;
             // A root slot stores the returned Item, while the parallel payload
             // home owns a wide scalar; sharing one word would overwrite it.
-            Item key_result = fn_call1_into(key_fn, result->items[i], &key_homes[i]);
-            key_result = lambda_item_adopt_scalar_home(key_result, &key_homes[i]);
+            Item key_result = lambda_fn_colour_guard(key_fn, &result->items[i], 1,
+                LAMBDA_COLOUR_GUARD_CALLEE | LAMBDA_EFFECT_GUARD_DEFAULTS | 1u);
+            if (!item_is_error(key_result)) {
+                key_result = fn_call1_into(key_fn, result->items[i], &key_homes[i]);
+                key_result = lambda_item_adopt_scalar_home(key_result, &key_homes[i]);
+            }
             if (get_type_id(key_result) == LMD_TYPE_ERROR) {
                 mem_free(key_slots);
                 mem_free(key_homes);
@@ -2915,7 +2922,11 @@ Item fn_reduce(Item collection, Item func_item) {
     for (int64_t i = 1; i < len; i++) {
         Item elem = vector_get(rooted_collection.get(), i);
         Function* fn = rooted_function.get().function;
-        Item acc = fn_call2_into(fn, rooted_acc.get(), elem, accumulator_home);
+        Item args[] = {rooted_acc.get(), elem};
+        Item refused = lambda_fn_colour_guard(fn, args, 2,
+            LAMBDA_COLOUR_GUARD_CALLEE | LAMBDA_EFFECT_GUARD_DEFAULTS | 3u);
+        if (item_is_error(refused)) return refused;
+        Item acc = fn_call2_into(fn, args[0], args[1], accumulator_home);
         acc = lambda_item_adopt_scalar_home(acc, accumulator_home);
         rooted_acc.set(acc);
         if (get_type_id(acc) == LMD_TYPE_ERROR) return acc;  // propagate error

@@ -1,4 +1,5 @@
 #include "type_contract.hpp"
+#include "call_effects.h"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-root-frame.hpp"
@@ -1757,8 +1758,34 @@ void lambda_type_format_name(const Type* type, char* buffer, size_t capacity) {
     lambda_type_format_name_inner(type, buffer, capacity, 0, false);
 }
 
+void lambda_format_effect_suffix(uint32_t effects, char* buffer, size_t capacity) {
+    if (!capacity) return;
+    buffer[0] = '\0';
+    effects &= LAMBDA_EFFECT_GENERATIVE;
+    if (!effects) return;
+    bool brace = (effects & (effects - 1)) != 0;
+    snprintf(buffer, capacity, "%s", brace ? " @{" : " @");
+    bool first = true;
+    for (LambdaEffectMask bit = 1; bit <= LAMBDA_EFFECT_GENERATIVE; bit <<= 1) {
+        if (!(effects & bit)) continue;
+        size_t used = strlen(buffer);
+        snprintf(buffer + used, capacity - used, "%s%s", first ? "" : ", ", lambda_effect_name(bit));
+        first = false;
+    }
+    if (brace) {
+        size_t used = strlen(buffer);
+        snprintf(buffer + used, capacity - used, "}");
+    }
+}
+
 void lambda_type_format_contract_name(const Type* type, char* buffer, size_t capacity) {
     lambda_type_format_name_inner(type, buffer, capacity, 0, true);
+    if (TypeFunc* signature = lambda_type_func_signature((Type*)type)) {
+        if (!capacity) return;
+        size_t used = strlen(buffer);
+        lambda_format_effect_suffix(lambda_signature_procedure_bound(signature),
+            buffer + used, capacity - used);
+    }
 }
 
 static uint8_t contract_top_exclusions(Type* type) {
