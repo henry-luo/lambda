@@ -1054,6 +1054,7 @@ typedef struct AstPatternSeqNode : AstNode {
 typedef struct AstViewNode : AstNode {
     String* name;               // optional template name (NULL for anonymous)
     bool is_edit;               // true for 'edit', false for 'view'
+    bool is_generative;         // body opts into bounded render effects
     AstNode* pattern;           // model pattern (type expression)
     AstNamedNode* param;        // optional parameters (linked list)
     AstNode* body;              // functional body
@@ -1209,7 +1210,14 @@ static inline bool is_declaration_node(const AstNode* node) {
     }
 }
 
-// A handler rebinds the view body's value declarations for its own model.
+// A legacy pure body shares its value declarations with handlers. An
+// explicit generative block has its own scope and executes only as a body.
+static inline AstNode* view_handler_body_bindings(const AstViewNode* view) {
+    return view && !view->is_generative && view->body &&
+        view->body->node_type == AST_NODE_CONTENT
+        ? ((AstListNode*)view->body)->item : NULL;
+}
+
 static inline bool is_view_handler_body_binding(int node_type) {
     return node_type == AST_NODE_LET_STAM || node_type == AST_NODE_PUB_STAM ||
         node_type == AST_NODE_VAR_STAM;

@@ -40,9 +40,11 @@ let density = [[1.0, 1.0, 0.25, 0.25], [1.0, 1.0, 0.25, 0.25]]
 let options = {width: 24.0, height: 12.0, radius: 2.0, max_radius: 4.0, density: density, attempts: 8}
 let points = sample.poisson(rng.key(7), options)^
 fn radius(p) any^ => min(4.0, 2.0 / math.sqrt(field.sample(density, p[0] / 24.0 * 3.0, p[1] / 12.0)))
-fn squared(a, b) => (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]);
-[len(points) > 10, all([for (i, p in points) for (j, q in points where j > i)
-    squared(p, q) >= max(radius(p), radius(q)) * max(radius(p), radius(q))]),
+fn squared(a, b) => (let dx = a[0] - b[0], let dy = a[1] - b[1], dx * dx + dy * dy)
+// A point's radius is reused for every pair it participates in.
+let radii = [for (p in points) radius(p)^];
+[len(points) > 10, all([for (i, p in points) for (j, q in points where j > i, let limit = max(radii[i], radii[j]))
+    squared(p, q) >= limit * limit]),
  points == sample.poisson(rng.key(7), options)^,
  sample.poisson(rng.key(7), {*: options, density: [[0.0]]})^ == []];
 "segment widths";

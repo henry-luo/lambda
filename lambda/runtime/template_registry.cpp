@@ -1,6 +1,8 @@
 // template_registry.cpp — Implementation of view/edit template registry and apply() dispatch
 #include "../lambda-data.hpp"
 #include "template_registry.h"
+#include "call_effects.h"
+#include "lambda-error.h"
 #include "render_map.h"
 #include "edit_bridge.h"
 #include "lambda-root-frame.hpp"
@@ -15,8 +17,6 @@
 
 extern __thread EvalContext* context;
 
-extern "C" Item interp_eval_view_template(Context* context, Script* module,
-                                           AstViewNode* view, Item model);
 extern "C" Item interp_eval_view_handler(Context* context, Script* module,
                                           AstViewNode* view,
                                           AstEventHandler* handler,
@@ -434,6 +434,7 @@ static void template_set_pattern(TemplateEntry* entry, const Type* pattern) {
 
 void template_registry_set_view_pattern(TemplateEntry* entry, AstViewNode* view) {
     if (!entry || !view) return;
+    entry->body_effects = view->is_generative ? LAMBDA_EFFECT_RENDER : 0;
     template_set_pattern(entry, view->pattern ? view->pattern->type : NULL);
     if (view->name) entry->specificity = TMPL_SPEC_NAMED;
 }
@@ -659,28 +660,9 @@ TemplateEntry* template_registry_match(TemplateRegistry* registry,
 // apply() system function implementation
 // ============================================================================
 
-// invoke a template body function
-static Item invoke_template(TemplateEntry* tmpl, Item target) {
-    if (!tmpl) return ItemNull;
-    if (!context) {
-        log_error("template invoke: no bound EvalContext");
-        return ItemError;
-    }
-    if (tmpl->interp_view) {
-        return interp_eval_view_template((Context*)context, tmpl->interp_module,
-            tmpl->interp_view, target);
-    }
-    if (!tmpl->body_func) return ItemNull;
-    // Host dispatch establishes the canonical context once; generated code
-    // receives it explicitly and never reloads `_lambda_rt`.
-    typedef Item (*template_body_fn)(Context*, Item);
-    template_body_fn fn = (template_body_fn)tmpl->body_func;
-    return lambda_item_resolve_pending_slot(fn((Context*)context, target));
-}
-
 static Item invoke_recorded_template(TemplateEntry* tmpl, Item target) {
     uint64_t invocation_start = render_map_invocation_begin();
-    Item result = invoke_template(tmpl, target);
+    Item result = lambda_item_resolve_pending_slot(template_invoke_body(tmpl, target));
     if (tmpl->template_ref) {
         render_map_record_invocation(target, tmpl->template_ref, result,
                                      ItemNull, -1, invocation_start);
@@ -689,7 +671,12 @@ static Item invoke_recorded_template(TemplateEntry* tmpl, Item target) {
     return result;
 }
 
-Item fn_apply1(Item target) {
+static Item check_template_effects(const TemplateEntry* tmpl, uint32_t allowed) {
+    return tmpl->body_effects & ~allowed ? runtime_error_item(ERR_PROC_IN_FN,
+        "apply: the selected template requires a generative render context", NULL) : ItemNull;
+}
+
+Item fn_apply1_effects(Item target, uint32_t allowed) {
     GUARD_ERROR1(target);
 
     if (!g_template_registry) {
@@ -703,6 +690,8 @@ Item fn_apply1(Item target) {
         return target;  // pass through if no template matches
     }
 
+    Item refused = check_template_effects(tmpl, allowed);
+    if (item_is_error(refused)) return refused;
     render_map_maybe_set_source_doc_root(target);
 
     // R7 step 3c — auto-bootstrap the source doc root on first apply so the
@@ -718,7 +707,7 @@ Item fn_apply1(Item target) {
     return invoke_recorded_template(tmpl, target);
 }
 
-Item fn_apply2(Item target, Item options) {
+Item fn_apply2_effects(Item target, Item options, uint32_t allowed) {
     GUARD_ERROR2(target, options);
 
     if (!g_template_registry) {
@@ -761,6 +750,9 @@ Item fn_apply2(Item target, Item options) {
         return target;  // pass through
     }
 
+    Item refused = check_template_effects(tmpl, allowed);
+    if (item_is_error(refused)) return refused;
+
     // initialize edit bridge when applying in edit mode
     if (edit_mode && !edit_bridge_active()) {
         edit_bridge_init(NULL);  // NULL input — standalone edit mode
@@ -776,4 +768,12 @@ Item fn_apply2(Item target, Item options) {
     }
 
     return invoke_recorded_template(tmpl, target);
+}
+
+Item fn_apply1(Item target) {
+    return fn_apply1_effects(target, 0);
+}
+
+Item fn_apply2(Item target, Item options) {
+    return fn_apply2_effects(target, options, 0);
 }

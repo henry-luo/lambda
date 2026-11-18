@@ -4,6 +4,9 @@ import disk: lambda.io.disk
 import wire: .object_wire
 import pack: .pack
 pub pn prepare(tx) any^ {
+    // A scoped repository only needs DDL when opening an older schema.
+    let tables = sqlite.query(tx,"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('pack_locations', 'pack_pending', 'pack_dirty', 'pack_obsolete')")^
+    if (len(tables) == 4) { return null }
     sqlite.execute(tx,"CREATE TABLE IF NOT EXISTS pack_locations (id BLOB PRIMARY KEY, pack TEXT NOT NULL, offset INTEGER NOT NULL, size INTEGER NOT NULL) WITHOUT ROWID")^
     sqlite.execute(tx,"CREATE TABLE IF NOT EXISTS pack_pending (id BLOB PRIMARY KEY, lane TEXT NOT NULL, offset INTEGER NOT NULL, size INTEGER NOT NULL) WITHOUT ROWID")^
     sqlite.execute(tx,"CREATE TABLE IF NOT EXISTS pack_dirty (pack TEXT PRIMARY KEY) WITHOUT ROWID")^
@@ -21,18 +24,24 @@ pub pn read_range(root, name, offset, size) any^ {
         block_bytes:1048576,state:null},pn (acc,bytes)=> { return acc ++ bytes })^
     return result.state
 }
+// Observe both locations in one query. Legacy pending tables expose only id,
+// so read spool coordinates separately, and only after a pending hit.
+pn lookup(keys, id) any^ {
+    if (keys.tx == null) { return [0,null,null,null] }
+    let rows = sqlite.query(keys.tx,"WITH object(id) AS (VALUES (?)) SELECT p.id IS NOT NULL, l.pack, l.offset, l.size FROM object LEFT JOIN pack_pending p USING (id) LEFT JOIN pack_locations l USING (id)",[id])^
+    return rows[0]
+}
 pub pn read(keys, id) any^ {
-    if (pending(keys,id)^) {
+    let found = lookup(keys,id)^
+    if (found[0] == 1) {
         let row = sqlite.query(keys.tx,"SELECT lane, offset, size FROM pack_pending WHERE id = ?",[id])^[0]
         return disk.spool_read(keys.spools[row[0]],row[1],row[2])^
     }
-    let found = location(keys,id)^
-    return if (found == null) null else read_range(keys.objects,found.pack ++ ".pack",found.offset,found.size)^
+    return if (found[1] == null) null else read_range(keys.objects,found[1] ++ ".pack",found[2],found[3])^
 }
 pub pn present(keys, id) any^ {
-    if (pending(keys,id)^) { return true }
-    let found = location(keys,id)^
-    return found != null and disk.inspect(keys.objects,found.pack ++ ".pack")^ != null
+    let found = lookup(keys,id)^
+    return found[0] == 1 or (found[1] != null and disk.inspect(keys.objects,found[1] ++ ".pack")^ != null)
 }
 pub pn persist(tx, keys, records) any^ {
     let encoded = pack.encode(keys,records)^

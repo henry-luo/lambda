@@ -67,7 +67,7 @@ typedef struct gc_header {
     struct gc_header* next;   // 8 bytes - next older object in all_objects list
     uint16_t type_tag;        // 2 bytes - TypeId of the allocation
     uint8_t  gc_flags;        // 1 byte  - GC_FLAG_FREED, generation, etc.
-    uint8_t  marked;          // 1 byte  - mark bit for mark-sweep
+    uint8_t  mark_epoch;      // 1 byte  - zero on allocation, current epoch when reached
     uint32_t alloc_size;      // 4 bytes - user allocation size (not including header)
 } gc_header_t;                // 16 bytes total, user pointer is 16-byte aligned
 
@@ -76,7 +76,7 @@ static inline void gc_init_object_header(gc_header_t* header, size_t size,
         uint16_t type_tag, uint8_t flags, gc_header_t** all_objects) {
     header->type_tag = type_tag;
     header->gc_flags = flags;
-    header->marked = 0;
+    header->mark_epoch = 0;
     header->alloc_size = (uint32_t)size;
     header->next = *all_objects;
     *all_objects = header;
@@ -264,7 +264,7 @@ typedef struct gc_bump_block {
     // block's allocation sequence from its base, making every mark visit
     // O(slots-before-it) and each collection O(n^2) in live bump objects.
     // NULL only if its allocation failed; callers then fall back to the scan.
-    size_t live_slots;             // collection-only region liveness
+    size_t live_slots;             // allocated slots not yet swept
     bool retire;                   // removed from indexes before unmapping
     uint8_t* alloc_bits;
 } gc_bump_block_t;
@@ -279,7 +279,7 @@ typedef struct gc_bump_block {
 #define GC_BUMP_BLOCK_INITIAL_SIZE  (4 * 1024 * 1024)   // 4 MB
 #define GC_BUMP_BLOCK_MAX_SIZE      (64 * 1024 * 1024)   // 64 MB cap
 
-#define GC_MARK_CACHE_SIZE 256
+#define GC_OBJECT_CACHE_SIZE 4096
 
 typedef struct gc_heap {
     MemContext* vm_context;         // context used by VM-owned GC extents
@@ -402,8 +402,10 @@ typedef struct gc_heap {
     size_t compaction_owner_count;
     size_t compaction_owner_capacity;
     bool compaction_owners_valid;   // allocation failure retains the complete heap walk
-    // validated marked object addresses for this collection only; never roots.
-    void* mark_cache[GC_MARK_CACHE_SIZE];
+    uint8_t mark_epoch;
+
+    // verified mapped slot addresses across collections; never roots.
+    void* object_cache[GC_OBJECT_CACHE_SIZE];
 } gc_heap_t;
 
 static inline gc_scope_checkpoint_t gc_scope_checkpoint_capture(gc_heap_t* gc) {

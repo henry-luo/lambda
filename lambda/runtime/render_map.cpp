@@ -83,7 +83,7 @@ static bool render_map_replace_tree_result(RenderMapEntry saved, Item tree_paren
                                            int tree_child_index, Item new_result);
 static void render_map_rebuild_source_path_index(Item root);
 
-static Item render_map_invoke_template(TemplateEntry* tmpl, Item source_item) {
+Item template_invoke_body(TemplateEntry* tmpl, Item source_item) {
     if (!tmpl || !context) return ItemError;
 
     // T0 templates have no MIR body pointer; use their registered activation
@@ -552,7 +552,7 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
             continue;
         }
         uint64_t invocation_start = render_map_invocation_begin();
-        Item new_result = render_map_invoke_template(tmpl, saved.key.source_item);
+        Item new_result = template_invoke_body(tmpl, saved.key.source_item);
 
         // record result before updating entry
         if (out_results && count < max_results) {

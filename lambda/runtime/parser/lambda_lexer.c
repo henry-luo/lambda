@@ -647,6 +647,7 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     PUNCT1('%', LAMBDA_TOK_PERCENT);
     // PTH32: `#` is free -- Lambda comments are `//` and `/* */`.
     PUNCT1('#', LAMBDA_TOK_HASH);
+    PUNCT1('@', LAMBDA_TOK_EFFECT_AT);
     default: break;
     }
 #undef PUNCT1
@@ -777,6 +778,10 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     }
     if (ch == '-') {
         lexer_advance_byte(lexer);
+        if (lexer_peek(lexer, 0) == '>') {
+            lexer_advance_byte(lexer);
+            return lexer_make_token(LAMBDA_TOK_RETURN_ARROW, start, line, column, lexer->offset);
+        }
         return lexer_make_token(LAMBDA_TOK_MINUS, start, line, column, lexer->offset);
     }
     return lexer_error_token(lexer, start, line, column);

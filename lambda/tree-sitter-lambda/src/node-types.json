@@ -1840,6 +1840,10 @@
           "named": true
         },
         {
+          "type": "generative_block",
+          "named": true
+        },
+        {
           "type": "grammar_stam",
           "named": true
         },
@@ -2645,6 +2649,16 @@
           }
         ]
       }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "procedure_effects",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -2685,6 +2699,16 @@
           }
         ]
       }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "procedure_effects",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -3175,6 +3199,26 @@
         "types": [
           {
             "type": "primary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "generative_block",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          },
+          {
+            "type": "empty_braces",
             "named": true
           }
         ]
@@ -5402,6 +5446,11 @@
     }
   },
   {
+    "type": "procedure_effects",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "propagate_expr",
     "named": true,
     "fields": {
@@ -6423,6 +6472,10 @@
           {
             "type": "empty_braces",
             "named": true
+          },
+          {
+            "type": "generative_block",
+            "named": true
           }
         ]
       },
@@ -6625,6 +6678,10 @@
     "named": false
   },
   {
+    "type": "->",
+    "named": false
+  },
+  {
     "type": ".",
     "named": false
   },
@@ -6678,6 +6735,10 @@
   },
   {
     "type": "?",
+    "named": false
+  },
+  {
+    "type": "@",
     "named": false
   },
   {
@@ -6746,6 +6807,10 @@
   },
   {
     "type": "case",
+    "named": false
+  },
+  {
+    "type": "clock",
     "named": false
   },
   {
@@ -6942,6 +7007,10 @@
     "named": false
   },
   {
+    "type": "print",
+    "named": false
+  },
+  {
     "type": "pub",
     "named": false
   },
@@ -6951,6 +7020,10 @@
   },
   {
     "type": "raise",
+    "named": false
+  },
+  {
+    "type": "random",
     "named": false
   },
   {

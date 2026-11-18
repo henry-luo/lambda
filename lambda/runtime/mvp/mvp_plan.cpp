@@ -99,10 +99,21 @@ Type* mvp_contract(AstNode* node) {
 
 MvpFunction* mvp_function(LambdaMvpModule* m, AstFuncNode* ast) {
     if (!ast) return NULL;
-    for (uint32_t i = 0; i < m->function_count; i++)
-        if (m->functions[i].ast == ast || (m->satellite && m->functions[i].ast &&
-                m->functions[i].ast->body == ast->body && m->functions[i].ast->param == ast->param))
-            return &m->functions[i];
+    const AstIndex* index = &m->tp->ast_index;
+    AstNodeId node = ast_index_find(index, ast);
+    if (!m->satellite && node < index->count) {
+        // Ordinary functions keep their shared index identity through lowering.
+        AstFunctionId owner = index->owner_functions[node];
+        if (owner < m->function_count && m->functions[owner].ast == ast) return &m->functions[owner];
+    }
+    // Synthetic templates and rewritten satellite definitions have no identical
+    // indexed function node. A foreign node in an eager module is an import.
+    if (node < index->count || m->satellite || m->function_count != index->function_count) {
+        for (uint32_t i = 0; i < m->function_count; i++)
+            if (m->functions[i].ast == ast || (m->satellite && m->functions[i].ast &&
+                    m->functions[i].ast->body == ast->body && m->functions[i].ast->param == ast->param))
+                return &m->functions[i];
+    }
     for (int i = 0; m->imported_functions && i < m->imported_functions->length; i++) {
         MvpFunction* function = (MvpFunction*)m->imported_functions->data[i];
         if (function->ast == ast) return function;
@@ -392,7 +403,8 @@ bool mvp_pure_key(AstNode* node, int depth, bool allow_pure_calls) {
     if (allow_pure_calls && node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         AstNode* target = ast_unwrap_primary_to_leaf(call->function);
-        if (!target || target->node_type != AST_NODE_SYS_FUNC || ((AstSysFuncNode*)target)->fn_info->is_proc) return false;
+        if (!target || target->node_type != AST_NODE_SYS_FUNC || call->template_effects ||
+                call->fn_colour_guard || sys_func_effect_bound(((AstSysFuncNode*)target)->fn_info)) return false;
         for (int i = 0; i < mvp_call_argument_count(call); i++)
             if (!mvp_pure_key(mvp_call_argument(call, i), depth + 1, true)) return false;
         return true;
@@ -416,12 +428,15 @@ bool mvp_index_key(LambdaMvpModule* m, AstNode* node, int depth) {
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         MvpFunction* function = mvp_function(m, ast_direct_call_function(call));
+        TypeFunc* signature = function ? lambda_type_func_signature(function->ast->type) : NULL;
         // a Lambda `fn` is pure wherever it was compiled (S12.1.1v3), so a sibling
         // a satellite reaches through its boxed entry qualifies on the same AST
         // facts; only a JS export has no Lambda AST to check.
         if (!function || function->js_export_name || function->ast->captures || function->method_owner ||
                 function->ast->is_async || function->ast->is_generator ||
-                lambda_type_func_is_proc(function->ast->type) || mvp_variadic_function(function) ||
+                lambda_signature_value_is_proc(signature) ||
+                (signature && (signature->is_colour_poly || signature->effect_captures)) ||
+                mvp_variadic_function(function) ||
                 mvp_function_binder_count(function) || mvp_call_argument_count(call) != function->abi.param_count)
             return false;
         // a capture-free pure call with plain supplied arguments cannot write

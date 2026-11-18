@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 91.0.1 (2026-11-17)
+**Spec version:** 100.0.0 (2026-11-18)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -83,10 +83,11 @@ answered from them first.
 - **S1.9 — Equality is the root relation.** `==` is total (two designed poison
   carve-outs); the sort order totally refines it; hashing respects it; two
   numbers are equal iff they print the same. [C8, C11]
-- **S1.10 — The effect doctrine.** *Color what changes the caller's contract;
-  infer what doesn't; put must-respond channels in types.* Purity is the
-  declared `fn`/`pn` bit; errors and resource ownership live in return types;
-  may-suspend is inferred and invisible. [Features §3.6]
+- **S1.10v2* — The effect doctrine.** *Color what changes the caller's contract;
+  infer what doesn't; put must-respond channels in types.* `fn` declares purity.
+  A procedure can bound its effects. A `function` call accounts for its own
+  effects and its callback arguments (S12.1.4v7). Errors and resource ownership
+  live in return types. May-suspend is inferred and invisible. [Features §3.6]
 
 ### The invariant ledger (SI)
 
@@ -1007,11 +1008,16 @@ System faults retain their separate runtime policy.* [TE-13.2, C14]
   contract, or produced by a failed deferred type check. Rich diagnostics are
   mandatory at every checked-channel failure (fault-channel records are
   pre-reserved and lean).* [C14, TE-4, TE-9]
-- **S7.4.5v2*** System `fn` failures and effectful-reader failures obey the
+- **S7.4.5v4*** System `fn` failures and effectful-reader failures obey the
   same ordinary-error discipline. *Absence in / no answer → `null`* (or `""`
   for string results); present-but-invalid → `error()` (§S7.10).
-  `input`/`fetch` remain pn-family effectful readers permitted in expression
-  position; their effect restrictions are unchanged. `e ^ { ^ }` returns
+  Resource `input` and `fetch` are pn-family operations permitted in
+  expression position. Resource `input` uses a cached acquisition. For a
+  URL, the query is part of the resource identity. Changing a query value
+  selects a separate cache entry. Each
+  executed `fetch` initiates a fresh operation, including repeated calls
+  with identical arguments. A cache hit has the same effect requirement
+  as a miss (S12.1.6, D9.1.2v2). `e ^ { ^ }` returns
   the same error value, with no conversion to a softer category. [C14, C14a,
   TE-13.2]
 - **S7.4.6v3*** **`raise v` completes the enclosing callable early with an
@@ -1981,13 +1987,11 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   nominal-base admission. Function-type variance is pending; until ruled,
   function-type operands are rejected. [S1.7, S6.1.1, S11.3.1v2, D4.2.1,
   D4.2.2]
-- **S11.1.5v2*** **Three function types: `fn`, `pn`, and their union
-  `function`.** `fn` and `pn` types are **disjoint** by effect bit;
-  `function` is the base type of both. `f is fn` and `f is pn` test the bit,
-  and `f is function` holds for every function value. A contract
-  `fn (...)` admits only pure functions and `pn (...)` only procedures —
-  admitting a `pn` at an `fn` contract would break S12.1.1v2's promise —
-  while `function` or `function (...)` admits either. Since `fn` and `pn`
+- **S11.1.5v4*** **Three function types: `fn`, `pn`, and their union
+  `function`.** `fn` and `pn` value types are disjoint. `function` is the
+  base type of both. `is fn` and `is pn` test callable value colour
+  (S12.1.4v7). A `pn (...)` contract also checks a written effect bound
+  (S12.1.6v2). `function` or `function (...)` admits either colour. Since `fn` and `pn`
   are strictly narrower than `function`, a binder over a function value
   (S11.4.8v2) selects a coloured type, and the join of `fn` with `pn` is
   `function`. **A function type's signature always spells its parameter
@@ -1997,7 +2001,9 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   present, the return type starts on the line of the signature's `)`
   (S16.2.3v3), and it may itself be a signature:
   `fn (x: int) fn (y: int) int`. The `<:` relation over function-type
-  operands stays pending under S11.1.4v2. [C20-1, C20.2; signature:
+  operands stays pending under S11.1.4v2. A procedure type with an explicit
+  result has the spelling `pn (params) -> Result @ effects` (S12.1.6v2).
+  Its effect clause is optional. Existing arrowless signatures remain valid. Its error contract follows S7.4.2v4. [C20-1, C20.2; signature:
   USER 2026-09-24]
 - **S11.1.6v3** **Two type families, split by concept: a run and an array.**
   The *occurrence* family — `T?`, `T*`, `T+`, `T{n,m}` (`T{n}` exactly,
@@ -2226,13 +2232,15 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 
 ## S12 Functions, Effects, Resources
 
-### S12.1 The one-bit effect system
+### S12.1 Purity and effect bounds
 
-- **S12.1.1v3** `fn`/`pn` is a declared, compiler-checked, one-bit effect
-  system: `fn` is pure and deterministic under any schedule; `pn` may have
-  effects; **`fn` can never call `pn`** — statically where the callee is
-  known, and at run time where it arrives as a value (S12.1.4v4(6)). **A
-  script's top level is `fn` context**: procedural code belongs in `main()`.
+- **S12.1.1v5*** `fn` is pure and deterministic under any schedule. A
+  `pn` may perform effects within its bound (S12.1.6v2). An `fn` can never
+  call a `pn`. It can call a `function` only at a pure instantiation
+  (S12.1.4v7). Check known callees statically and dynamic ones before dispatch.
+  A script's top level defaults to `fn` context. The top-level
+  `function() { ... }` block admits ambient randomness, clock reads and
+  printing (S16.7.7v2). Unrestricted procedural code belongs in `main()`.
   Element construction evaluates attributes and content in **`fn` context**,
   including a literal inside a `pn`. A procedure call therefore cannot be
   nested directly in `<elmt ...>`; execute it in a preceding procedural
@@ -2259,39 +2267,48 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   (S2.5.7v4, S11.4.1v5). Bare `return` returns `null`. No control transfer
   crosses a nested callable boundary. [USER, 2026-11-02;
   Design_Procedural §2, §6; TE-16.1]
-- **S12.1.3v2*** Reactive templates are the doctrine applied: template body =
-  pure `fn` transformation; mutation of persistent view state only in
-  `on` handlers (`pn`). Helpers may use `fn`-local working state under
-  S12.1.2v3 without writing view state. [Features §3.7; Design_Procedural §4]
-- **S12.1.4v4*** **Effect polymorphism: the `function` declaration.** A
-  function declared with the keyword `function` takes its colour from its
-  arguments rather than declaring one — *pure iff its function arguments are
-  pure*:
-
-  ```lambda
-  function apply_all(f: function, xs) => for (x in xs) f(x)
-  ```
-
-  (1) **Colour per call:** a call is `pn` if any argument bound to a
-  `function`-typed parameter is a `pn`, and `fn` otherwise; parameters typed
-  `fn (...)` or `pn (...)` keep their fixed colour and do not vote.
-  (2) **The body is checked as an `fn` body** (S12.1.2 applies, and no
-  statically-known `pn` may be called): its only effects are calls through
-  its polymorphic parameters — which is what makes (1) sound. (3) The colour
-  is resolved **statically** when every polymorphic argument's colour is
-  known and checked at **run time** otherwise; an `fn` caller passing a
-  statically-known `pn` is a compile error, with uniform ordinary-error
-  outcomes and acknowledgement for either colour (S12.3.4v2). (4) A closure that escapes a
-  `function` capturing a polymorphic parameter is typed `function`, and
-  calling it is resolved under (3). (5) **A `function`'s own value is `fn`**
-  (S11.1.5): it adds no effect of its own, so it may cross an `fn (...)`
-  contract; soundness comes from (6). (6) **S12.1.1v2 holds for dynamic
-  callees:** in `fn` context a call through a value is checked at run time —
-  a `pn` callee is refused, and a `function` callee refuses a `pn` in a
-  polymorphic slot — returning the error value. `call(f, args)` is the
-  built-in instance with one polymorphic parameter. *Colour what changes the
-  caller's contract* — the keyword makes the dependence visible in the
-  declaration. [C20-2–C20-6, C20.6, Features §3.6]
+- **S12.1.3v6*** **A `view` or `edit` template may have a `function` body.**
+  Write `function() { ... }` after the template signature and optional
+  state clause. This body admits ambient randomness, clock reads and
+  printing (S12.1.4v7). Its bindings are local to the block. Event handlers
+  run with access to template state and the matched model. Each executed
+  generative call takes a fresh sample or emits its output once, including on
+  re-render. The body may also read a URL
+  through cached `input` (S7.4.5v4). It may reuse a valid entry or acquire
+  the resource on a miss, subject to host policy (D11.1.2). Direct `fetch`
+  requires procedural context. A skipped body or branch performs no calls.
+  These operations are passive. They neither subscribe the template to
+  changes nor schedule a render. State changes and event handling govern
+  regeneration. An ordinary pure body is valid. Persistent view-state writes belong to
+  procedural `on` handlers. An `edit` handler also has model-write authority.
+  Element attributes and content retain their pure evaluation context
+  (S12.1.1v5). [Reactive_UI §2.1]
+- **S12.1.4v7*** **A `function` combines its own generative effects with
+  the effects of its polymorphic arguments.** Its body uses functional
+  control and result collection (S12.1.2v3, S2.5.3v3). It may directly call
+  procedures whose entire bound fits the language-selected generative set.
+  The initial set covers ambient random draws, clock readings and console
+  printing. Database series allocation advances persistent state and is an
+  ordinary procedural effect, as are general file, network and database I/O.
+  SO52 covers operation mappings and further candidates.
+  A call takes the union of the body's own effects, including effects reached
+  through helpers, and the bounds of the supplied or default callbacks in its
+  `function`-typed slots.
+  Only `function`-typed slots vote. Calls through fixed-colour parameters
+  count towards the body's own requirements. A pure instantiation requires
+  pure voting arguments and a body that makes no procedural calls of its own
+  (S12.1.1v5, S11.1.5v4). For example, `function apply_all(f: function, xs) => for (x in xs) f(x)`
+  is pure with a pure callback. A function that reads the clock is effectful
+  even when it has no parameters.
+  A callback-only combinator crosses an `fn (...)` contract with its call
+  guard. A value with intrinsic or captured effects has `pn` colour and
+  retains functional body semantics. The runtime checks the callable's
+  bound when it crosses a bounded procedure contract. Escaping closures
+  retain their own and captured callback requirements.
+  Check a known mismatch statically. For a dynamic call, reject an
+  inadmissible callee or callback before dispatch with the ordinary error
+  outcome (S12.3.4v2). `call(f, args)` follows the same rule.
+  [Design_Procedural §1.1]
 - **S12.1.5v2** **Presentation authority by state tier.** Presentation
   state has tiers, and each piece of state has one owner. An author template
   owns the high-level state it regenerates its result from; a lower tier of
@@ -2305,6 +2322,20 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   live elements and share canonical interaction state with JS; they
   regenerate nothing. *One owner per state; the higher tier wins.*
   [Reactive_UI §2.7; user, 2026-10-13]
+
+- **S12.1.6v2*** **A procedure can declare an upper bound on its effects.**
+  A declaration spells `pn name(params) Result @ effects { ... }`. A callable
+  type spells `type t = pn (params) -> Result @ effects`. The optional
+  trailing clause follows the full result contract, including `T | E` or
+  `T^` (S7.4.2v4). Use `@clock` for a singleton or a nonempty set such as
+  `@{random, clock, print}`. It bounds the call, including effects reached through other
+  callables. Omitting it permits any effect. A restricted caller admits a
+  callee only when its bound fits. The same check applies when a callback
+  crosses a typed boundary. A legacy `fn` type alone gives no resource-read
+  guarantee. A restricted caller needs an effect summary for an opaque call
+  through a legacy helper (S7.4.5v4). Host policy still governs each
+  operation (D11.1.2). The result and error contract is independent of this bound.
+  [Design_Procedural §1.1]
 
 ### S12.2 Assignment
 
@@ -2897,6 +2928,17 @@ below by its section.
   that entries carry out effects. A trailing expression statement echoes per
   S16.7.4. [Repl_Interp RI3]
 
+- **S16.7.7v2*** **A script can enter a generative context explicitly.**
+  A top-level `function() { ... }` block runs when script evaluation reaches
+  it, including when opening a page with `lambda view`. It contributes its
+  functional result to script content (S16.7.1, S2.5.3v3). Within the block,
+  the caller may use the ambient random, clock read and print effects of
+  S12.1.4v7. An `apply` call checks the selected template before entering
+  its body. In a top-level generative block or a generative template body,
+  `apply` also admits the selected template's cached URL input. The
+  permission belongs to rendering the selected body. Direct URL acquisition
+  in the template still follows host policy (D11.1.2). [Design_Procedural §1.1]
+
 ### S16.8 Lexical forms
 
 - **S16.8.1** **`not` is the one logical negation.** Unary `!` is removed
@@ -3275,6 +3317,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D4.2.6, D4.2.5 footnotes). |
 | S11.4.11 | **Conformant 2026-09-26 on both tiers.** The colour walk enters every constraint body, so a statically `pn` callee is E224 and a dynamic one is colour-guarded. Each `that` body is compiled as an `fn` of its own over its written scope, `that(~)`: the names it binds are its locals and the outer locals it reads are its captures. `is` and a match arm call it per layer, with the captures read where the type is named, so the whole body runs on every tier with no step budget, a body naming its own type recurses as an `fn` does, and an imported type's body runs in its declaring module, which exports the function to its importers (JIT) as T0 runs it there (AI17v3). The function's return contract admits an error, which fails the test, so a body whose value may be an error is not E208. The candidate starts a fresh context: `~~` is null and the root is the candidate. Before, T0 evaluated only an allow-list under a step budget ([LR03-24](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-24>)) and read an imported predicate's constants in the importer ([LR03-25](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-25>)); then both tiers expanded the body where `is` named the type, so a self-naming body crashed compilation ([LR03-28](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-28>)) and the JIT read an imported body's names in the importer ([LR03-27](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-27>)). Fixtures `constrained_type_predicate.ls` (pinned in `kTune27TierParity`), `constrained_type_recursive.ls` and `negative/semantic/predicate_calls_pn.ls`. Verified: `make test-lambda-baseline` 5967/5967; every golden 1008/1008 with the tier pinned to `jit` and to `interp`. Design record: TE-20. |
 | S11.4.12v2 | **Fatal-cycle clarification implemented 2026-11-03:** E240 stays a compile error in strict and relaxed modes on every tier; valid structural recursive type values remain usable. Qualification: 102/102 focused tier/GC runs, including five invalid-cycle forms in both modes, and 8,732/8,732 Lambda/input baseline checks. [Tier-fix qualification](<../vibe/impl/Lambda_Impl_Ledger_Tier_Fixes (done).md>). **Original rule implemented 2026-10-21, apart from the residue below.** Top-level type aliases, named patterns and object types (binary layouts included) are bound before the resolve walk, beside top-level `fn`/`pn`, and their bodies still resolve in source order. A reference made from earlier in the module resolves a pending alias right there, in module scope, when the alias body has no `that` predicate, so annotations, object fields, union arms and match arms all see a completed type; patterns compile in dependency order the same way. A reference made while the alias is still resolving (recursion) holds its pre-bound wrapper, which carries the completed type: maps adopt the placeholder in place, unions and elements are published through the wrapper, and every other kind is published as its declaration completes or, for an alias of a later alias, once the walk ends. A post-walk pass reports E240 for a cycle that passes no field, attribute, content slot, array item or `that` body (function signatures count as non-structural), and refreshes layouts built against a placeholder. An unresolved type name is E204, in a type position and in a pattern. Fixtures: `type_forward_reference.ls`, `element_type_recursive.ls` (all three tiers), and `negative/semantic/{type_cycle_alias,type_cycle_occurrence,type_cycle_function,type_unknown_name,type_local_forward,string_pattern_cycle}.ls`. Four test files named no type and now fail E204, and were corrected: `fuzzy_crash_regression.ls` queried `?item` (now `?<item>`), `proc/cow_element_snapshot.ls` annotated `var doc: el` (now `element`), and the unrun validator schemas `schema_function.ls` and `schema_primitive.ls` named `void` and `char` (now `null` and `string`). The census's 13 root-first validator schemas and the shipped `eml_schema.ls`/`ics_schema.ls` now check what they declare; `lambda validate` rejects `{"a": "x"}` against `type Document = {a: Later}` before `type Later = int`. **Residue:** a reference to an alias whose body has a `that` predicate, from code placed before that alias, still sees the placeholder, so a parameter or object field typed with it is checked against an empty map (a false E207/E201); a `grammar` is not bound before the walk; an object base clause (`type B : A`) still needs `A` declared first. Design record: TE-23. |
+| S1.10v2, S7.4.5v4, S11.1.5v4, S12.1.1v5, S12.1.3v6, S12.1.4v7, S12.1.6v2, S16.7.7v2 | **Implemented 2026-11-18.** Both execution tiers check procedure bounds, generative calls and callback admission, including omitted defaults and escaped captures. The script entry block and passive generative template bodies run through the normal entry points. The host input cache reuses HTTP(S) acquisitions by query-inclusive URL. Future cache scope and invalidation remain open (SO52). [Implementation record](<../vibe/impl/Lambda_Impl_Effects (done).md>) |
 | S12.1.4v4 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`; local-state body admission is now covered by `test/lambda/fn_local_colour_poly.ls` (2026-11-02). **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.1.1) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
 | S2.5.3v3, S2.5.4v3, S12.1.2v3 | **Fn-local control and M1 handler integration, 2026-11-03.** Functional fallthrough collects normal values; procedural normal results replace earlier results, including null. No-result declarations, assignments and statement loops leave the accumulator unchanged. M1 handlers contribute their ordinary success/recovery result under S7.6.1v9. [Procedural design §2.4](../vibe/Lambda_Design_Procedural.md#24-return-and-block-results), [M1 qualification](<../vibe/impl/Lambda_Impl_Type_Error_Handling (done).md#m1-handler-outcomes>). |
 | S9.1.3v3, S9.2.2v2 | Place-home publication and numeric-row/view snapshots implemented 2026-11-03 on both tiers; baseline 8,718/8,718. Scalar/nullable/import/error/GC and AUTO-promotion regressions: `vibe/impl/Lambda_Impl_Place_Borrow_Views (done).md`; LR12-10/LR12-14 archived. Broader borrowing checks keep their existing status. |
@@ -3404,6 +3447,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 
 **Sys funcs and surface**
 - **SO26** RF6 mutator convention: updated-owner vs unit; and `splice`'s public result (owner / unit / removed members).
+- **SO52** Which additional operations map to each effect, and what cache scope and invalidation govern resource input? How do future annotations compose with nested callable contracts? [Design_Procedural §1.1]
 - **SO27** Whether debug logging inside `fn` is a permitted non-observable effect — the purity boundary's one undefined edge; best pre-decided before users ask. [Features §3.6]
 - **SO44** Binder depth on function values: whether a binder (S11.4.8v2)
   over a function value selects its full signature (`fn (int) int`) where

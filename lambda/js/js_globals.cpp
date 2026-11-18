@@ -6624,10 +6624,10 @@ bool js_ordinary_reserved_constructor_slot_can_initialize(Item target, Item key,
 
 bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
     if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
-    // MAP_KIND_PLAIN means no ShapeEntry on this object carries descriptor
-    // attributes, so a hit in shape storage is always a plain data slot. It
-    // also excludes proxies, typed arrays, dataset views and every other exotic.
-    if (target.map->map_kind != MAP_KIND_PLAIN) return false;
+    // Ordinary objects that already contain an accessor can still add a
+    // different, absent key without allocating descriptor objects.
+    uint8_t kind = target.map->map_kind;
+    if (kind != MAP_KIND_PLAIN && kind != MAP_KIND_DESC) return false;
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     NameRef key_ref = it2s(key);
     if (!key_ref || property_key_kind(key_ref) != NAME_KEY_STRING) return false;
@@ -6643,6 +6643,8 @@ bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
     int name_len = (int)key_ref->len;
     ShapeEntry* entry = js_ordinary_shape_entry_for((TypeMap*)target.map->type,
         name_id, name_hash, name, name_len);
+    // Existing entries in descriptor storage still use the descriptor path.
+    if (entry && kind == MAP_KIND_DESC) return false;
     bool reserved_constructor_slot = entry && entry->byte_offset >= 0 &&
         map_ctor_offset_is_reserved(target.map, entry->byte_offset);
     if (entry && !reserved_constructor_slot && entry->byte_offset >= 0 &&

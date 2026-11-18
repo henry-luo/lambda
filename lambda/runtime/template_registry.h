@@ -38,6 +38,7 @@ typedef Item (*template_interp_body_fn)(Context* host, struct Script* module,
 typedef struct TemplateEntry {
     const char* name;           // template name (NULL for anonymous)
     bool is_edit;               // true for 'edit', false for 'view'
+    uint32_t body_effects;      // S12.1.3: declared allowance of the selected body
     fn_ptr body_func;           // compiled template body function pointer
     TemplateSpecificity specificity;  // computed specificity level
 
@@ -127,6 +128,9 @@ void template_registry_add(TemplateRegistry* registry,
                            const char* match_tag, int match_tag_len,
                            int match_attr_count,
                            int match_field_count);
+
+// Execute a registered body on the tier that owns it.
+Item template_invoke_body(TemplateEntry* entry, Item model);
 
 // Attach an element pattern's TypeElmt to an entry, deriving its attribute
 // predicate counts. Call after template_registry_add for element patterns.

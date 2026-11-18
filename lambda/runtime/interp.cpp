@@ -2685,6 +2685,24 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         if (sinfo && sinfo->fn == SYSFUNC_VMAP_NEW) {
             return argc == 0 ? vmap_new() : vmap_from_array((Item){.item = words[0]});
         }
+        // These effects are granted at the lexical call site, so an
+        // intervening pure function cannot inherit ambient render permission.
+        if (node->input_url_only && sinfo && sinfo->func_ptr) {
+            return fn_input_template_url((Item){.item = words[0]},
+                argc == 2 ? (Item){.item = words[1]} : ItemNull);
+        }
+        if (node->fn_colour_guard && sinfo &&
+                (sinfo->fn == SYSFUNC_CALL || sinfo->fn == SYSPROC_CALL)) {
+            return lambda_apply_args_guarded((Item){.item = words[0]}, (Item){.item = words[1]},
+                node->fn_colour_guard);
+        }
+        if (node->template_effects && sinfo) {
+            if (sinfo->fn == SYSFUNC_APPLY1)
+                return fn_apply1_effects((Item){.item = words[0]}, node->template_effects);
+            if (sinfo->fn == SYSFUNC_APPLY2)
+                return fn_apply2_effects((Item){.item = words[0]}, (Item){.item = words[1]},
+                    node->template_effects);
+        }
         Item sresult = eval_sys_call(f, sinfo, (const Item*)(void*)words, argc,
             node->type, node->interp_array_destination);
         if (sinfo && (sinfo->fn == SYSFUNC_ERROR || sinfo->fn == SYSFUNC_ERROR2)) {
@@ -2964,7 +2982,11 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
     List args = {};
     args.length = dispatch_argc;
     args.items = (Item*)(void*)words;
-    if (output_destination) {
+    // An effectful callee enters through its ordinary call path. The
+    // destination-writing helper assumes a pure callback.
+    TypeFunc* signature = fn->entry_abi < FN_ENTRY_ABI_HOSTED_FIRST ? (TypeFunc*)fn->fn_type : NULL;
+    if (output_destination && !lambda_signature_value_is_proc(signature) &&
+            !(signature && signature->effect_captures)) {
         if (emitted) *emitted = true;
         return fn_call_emit(fn, dispatch_argc ? &args : nullptr, output_destination);
     }
@@ -3868,14 +3890,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         interp_capture_call_argument(f, node->left, piped);
         Item callee = eval_expr(f, node->right);
         if (interp_frame_pending(f)) return callee;
-        if (get_type_id(callee) != LMD_TYPE_FUNC) {
-            return runtime_error_item(ERR_INVALID_CALL, "pipe target is not callable", NULL);
-        }
-        uint64_t home = 0;
-        List args = {};
-        args.length = 1;
-        args.items = (Item*)&piped;
-        return fn_call_into((Function*)(uintptr_t)callee.item, &args, &home);
+        return fn_pipe_call(piped, callee, node->pipe_effect_guard);
     }
 
     Item source = left.get();
@@ -9026,11 +9041,10 @@ static Item interp_eval_view_activation(Context* host, Script* module,
             }
         }
     }
-    if (setup_ok && handler && view->body &&
-            view->body->node_type == AST_NODE_CONTENT) {
+    if (setup_ok && handler) {
         // Handler scope inherits body lets; recompute them for this model as
         // MIR does, without rerendering the body or its markup.
-        for (AstNode* item = ((AstListNode*)view->body)->item;
+        for (AstNode* item = view_handler_body_bindings(view);
                 item; item = item->next) {
             if (!is_view_handler_body_binding(item->node_type)) continue;
             exec_declaration(frame, item);

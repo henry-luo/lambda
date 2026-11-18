@@ -205,7 +205,10 @@ static void test_pure_fixtures_across_tiers(const char* const* fixtures,
     }
     LambdaTierFixture* jobs = (LambdaTierFixture*)calloc(job_count, sizeof(LambdaTierFixture));
     ASSERT_NE(jobs, nullptr);
-    ThreadPool* pool = tp_create((int)test_batch_worker_limit(job_count));
+    // Only grouped tier fixtures use the larger exclusive budget. A single
+    // fixture can be a complete demo with much higher peak model memory.
+    size_t maximum_workers = batch_size > 1 ? 6 : 4;
+    ThreadPool* pool = tp_create((int)test_batch_worker_limit(job_count, maximum_workers));
     // schedule eager compilation early for larger sets so a cold JIT batch
     // does not outlast the other tiers after the worker pool drains.
     size_t eager_jobs = batch_size > 1 ? batch_count : 0;

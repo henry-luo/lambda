@@ -16489,6 +16489,7 @@ static Item js_web_keyframe_property_names(Item frame, Pool* pool,
                 !strcmp(name, "composite")) continue;
         char css_name[128];
         dom_style_camel_to_css_prop(name, css_name, sizeof(css_name));
+        // Resolve aliases the same way as when parsing the keyframe value.
         const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(
             css_property_code_from_name(css_name));
         if (!metadata || metadata->animation_type == ANIM_VAL_NONE) continue;

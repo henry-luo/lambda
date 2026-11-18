@@ -7,6 +7,4 @@
 [submodule "lambda-test"]
 	path = lambda-test
 	url = https://github.com/henry-luo/lambda-test.git
-[submodule "test/yaml"]
-	path = test/yaml
-	url = https://github.com/yaml/yaml-test-suite.git
+

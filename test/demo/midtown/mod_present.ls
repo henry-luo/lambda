@@ -118,7 +118,7 @@ pub fn advance(st, dt, t, lag = 0.0) any^ {
         let drive = st.started and st.auto == null
         let cap = govern(st.speed_cap, lag, v.forward_speed(st.car), dt)
         let auto = if (st.auto == null) null else if (st.auto.path != null) rt.step_car(st.auto, st.route, dt, false)^
-            else tr.step_car(st.auto, st.traffic, t, dt, false)
+            else tr.step_car(st.auto, st.traffic, t, dt, false)^
         let car = if (auto != null) auto_drive(st.car, st.auto, auto, dt)
             else v.step(st.car, if (drive) capped(controls(st), cap, st.car) else v.IDLE, dt, [*st.traffic, *st.route])
         // town traffic and people rest while the car is far out of town (no one is there to see them)

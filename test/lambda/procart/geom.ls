@@ -13,7 +13,9 @@ fn check(points) any^ {
     let boundary = len([for (h in m.halfedges where h == -1) h]);
     [len(points), used, len(t), len(m.hull),
      all([for (tri in t) math.orient2d(points[tri[0]], points[tri[1]], points[tri[2]]) > 0]),
-     all([for (tri in t) all([for (p in points) math.incircle(points[tri[0]], points[tri[1]], points[tri[2]], p) <= 0])]),
+     // Each triangle's three vertices are shared by all its circle probes.
+     all([for (tri in t, let a = points[tri[0]], let b = points[tri[1]], let c = points[tri[2]])
+        all([for (p in points) math.incircle(a, b, c, p) <= 0])]),
      all([for (e, h in m.halfedges) h == -1 or m.halfedges[h] == e]),
      len(t) == 2 * used - 2 - boundary]
 }
@@ -55,9 +57,10 @@ geom.voronoi(geom.delaunay([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])^, {
 [geom.centroid([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]]), geom.centroid([[0.0, 0.0], [3.0, 0.0], [0.0, 3.0]])];
 let relaxed = geom.lloyd(pts, {iterations: 3, bounds: [0.0, 0.0, 50.0, 30.0]})^
 // relaxation evens out the cells: their area variance falls
-fn area_variance(ps) any^ => math.variance([for (c in geom.voronoi(geom.delaunay(ps)^, {bounds: [0.0, 0.0, 50.0, 30.0]})^) area(c)]);
+let relaxed_cells = geom.voronoi(geom.delaunay(relaxed)^, {bounds: [0.0, 0.0, 50.0, 30.0]})^
+fn area_variance(polygons) any^ => math.variance([for (c in polygons) area(c)]);
 [len(relaxed) == len(pts), all([for (p in relaxed) p[0] >= 0.0 and p[0] <= 50.0 and p[1] >= 0.0 and p[1] <= 30.0]),
- area_variance(relaxed) < area_variance(pts) * 0.5];
+ area_variance(relaxed_cells) < area_variance(cells) * 0.5];
 geom.lloyd(pts, {iterations: 0})^ == pts;
 
 "7 rejected input";

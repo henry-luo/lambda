@@ -55,7 +55,10 @@ let flight = reduce([[run_up], *[for (k in 1 to 40) k]], (samples, k) any^ =>
 // ---- traffic: a simulated minute, never off the road and never inside another car
 "traffic";
 let player = {id: "player", player: true, x: 0.0, z: 900.0, heading: 0.0, hl: 2.25}
-fn overlaps(cars) any^ => len([for (i, a in cars, j, b in cars where i < j and u.dist(a.x, a.z, b.x, b.z)^ < 3.6) i])
+// Visit each unordered pair once, with the same exact final distance test.
+fn overlaps(cars, vertical=false) any^ => len([for (i, a in cars, j in (i+1) to (len(cars)-1), let b = cars[j]
+    where abs(a.x-b.x) < 3.6 and abs(a.z-b.z) < 3.6 and u.dist(a.x, a.z, b.x, b.z)^ < 3.6 and
+        (not vertical or abs(a.y-b.y) < 3.0)) i])
 let minute = reduce([{cars: tr.spawn(16), t: 0.0, worst: 0, off: 0}, *[for (i in 1 to 1800) i]], (sim, i) any^ =>
     (let cars = tr.step(sim.cars, player, sim.t, 1.0 / 30.0),
      {cars: cars, t: sim.t + 1.0 / 30.0, worst: max(sim.worst, overlaps(cars)), off: sim.off + len([for (a in cars where not city.on_road(a.x, a.z)^) a])}))
@@ -136,7 +139,7 @@ let grades = [for (k in 1 to (len(LOOP)^ - 1), let a = LOOP[k - 1], let b = LOOP
 let steps = [for (k in 1 to (len(LOOP)^ - 1), let a = LOOP[k - 1], let b = LOOP[k]) abs(world.ground(b.x, b.z)^ - world.ground(a.x, a.z)^)]
 let open_minute = reduce([{cars: rt.spawn(7), worst: 0}, *[for (i in 1 to 1800) i]], (sim, i) any^ =>
     (let cars = rt.step(sim.cars, player, 1.0 / 30.0)^,
-     {cars: cars, worst: max(sim.worst, len([for (i, a in cars, j, b in cars where i < j and u.dist(a.x, a.z, b.x, b.z)^ < 3.6 and abs(a.y - b.y) < 3.0) i]))}))
+     {cars: cars, worst: max(sim.worst, overlaps(cars, true))}))
 let toured = (let st0 = {*: present.initial({x: 667.62, z: -196.34, heading: 1.84}), started: true}, let on = present.engage_auto(st0)^,
     reduce([on, *[for (i in 1 to 1200) i]], (st, i) any^ => present.advance(st, 1.0 / 30.0, st.t + 1.0 / 30.0)^))
 let fished = (let wet = {*: present.initial({x: 471.0, z: -230.0, heading: 0.0}), started: true}, present.advance(wet, 1.0 / 60.0, 0.1)^);

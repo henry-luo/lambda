@@ -70,7 +70,8 @@ pub fn clip(label, tracks, options = {}) element^ => clips.clip(label, tracks, o
 pub fn track(path, times, values, kind = 'number', options = {}) element^ => clips.track(path, times, values, kind, options)
 pub fn load(source, options = {}) element^ => assets.load(source, options)^
 pub fn normalize(scene) element^ => model.normalize(scene)^
-pub fn validate(scene) bool^ { let checked = model.normalize(scene)^; true }
+// Validation shares admission with normalization without rebuilding the scene.
+pub fn validate(scene) bool^ => model.validate(scene)^
 pub fn transform(position = [0.0, 0.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0]) array^ =>
     transforms.matrix(position, rotation, scale)^
 pub fn multiply(a, b) array^ => transforms.multiply(a, b)^

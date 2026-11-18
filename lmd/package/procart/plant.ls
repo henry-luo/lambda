@@ -50,19 +50,20 @@ pub fn normalize(parameters={}) map^ {
 fn sample_frame(branch,fraction,frames:any) map {
     let x=fraction*float(len(branch.points)-1),index=min(len(branch.points)-2,int(floor(x))),u=x-float(index)
     let a=branch.points[index],b=branch.points[index+1]
-    let f=frames[index]
-    let h=v.unit(v.subtract(b,a)),l=v.unit(v.cross(f.n,h));
-    {frame:{position:v.add(a,v.times(v.subtract(b,a),u)),h:h,l:l,u:v.cross(h,l)},
+    let f=frames[index],delta=v.subtract(b,a)
+    let h=v.unit(delta),l=v.unit(v.cross(f.n,h));
+    {frame:{position:v.add(a,v.times(delta,u)),h:h,l:l,u:v.cross(h,l)},
      radius:branch.radii[index]+(branch.radii[index+1]-branch.radii[index])*u}
 }
 pub fn sample(branch,fraction) map => sample_frame(branch,fraction,primitive.frames(branch.points))
 fn branch(k:u64,parameters,level:int,id,parent,initial,radius,length_factor=1.0) array {
     let p=parameters.levels[level],key=rng.derive(k,id)
     let length=p.length*length_factor*rng.between(rng.derive(key,"length"),1.0-parameters.variation,1.0+parameters.variation)
-    let step=length/float(p.sections)
+    // Every section draws from the same keyed branch stream.
+    let step=length/float(p.sections),curve=rng.derive(key,"curve")
     let grown=reduce([[initial],*[for (i in 1 to p.sections) i]],(acc,i) => {
         let previous=acc[len(acc)-1]
-        let wobble=rng.at(rng.derive(key,"curve"),i)
+        let wobble=rng.at(curve,i)
         let yaw=rng.between(wobble,0.0-p.gnarliness,p.gnarliness)
         let pitch=rng.between(rng.at(wobble,1),0.0-p.gnarliness,p.gnarliness)
         let tilted=turtle.turned(turtle.turned(previous,previous.u,yaw),previous.l,pitch)
@@ -72,9 +73,10 @@ fn branch(k:u64,parameters,level:int,id,parent,initial,radius,length_factor=1.0)
     let result={id:id,parent:parent,level:level,points:grown |> ~.position,
         radii:[for (i in 0 to p.sections) radius*(1.0-p.taper*float(i)/float(p.sections))]}
     // all child attachments share the parent's immutable centerline frames.
-    let frames=if (p.children>0) primitive.frames(result.points) else [];
+    let frames=if (p.children>0) primitive.frames(result.points) else []
+    let azimuth=if (p.children>0) rng.between(rng.derive(key,"azimuth"),0.0,360.0) else 0.0;
     [result,*[for (j in 0 to (p.children-1),let fraction=p.start+(0.95-p.start)*(float(j)+0.5)/float(p.children),let attachment=sample_frame(result,fraction,frames),
-        let spin=rng.between(rng.derive(key,"azimuth"),0.0,360.0)+float(j)*p.twist,
+        let spin=azimuth+float(j)*p.twist,
         let rolled=turtle.turned(attachment.frame,attachment.frame.h,spin),
         let child=turtle.turned(rolled,rolled.l,parameters.levels[level+1].angle))
         *branch(k,parameters,level+1,id++"-"++string(j),id,child,min(parameters.levels[level+1].radius,attachment.radius*0.85),1.0-p.length_falloff*fraction)]]
@@ -83,8 +85,9 @@ pub fn skeleton(k:u64,parameters={}) map^ {
     let p=normalize(parameters)^
     let branches=branch(k,p,0,"root",null,turtle.frame(),p.levels[0].radius)
     // leaf attachments reuse each branch's transported frame table.
-    let leaves=[for (b in branches,let frames=primitive.frames(b.points) where ((b.level == len(p.levels)-1) ^ { false }))
-        for (i in 0 to (p.leaves.count-1),let key=rng.at(rng.derive(k,[b.id,"leaves"]),i),
+    let leaves=[for (b in branches where ((b.level == len(p.levels)-1) ^ { false }))
+        for (frames in [primitive.frames(b.points)], let leaf_key=rng.derive(k,[b.id,"leaves"]))
+        for (i in 0 to (p.leaves.count-1),let key=rng.at(leaf_key,i),
             let at=sample_frame(b,p.leaves.start+(1.0-p.leaves.start)*(float(i)+0.5)/float(p.leaves.count),frames),
             let rolled=turtle.turned(at.frame,at.frame.h,float(i)*137.507764+rng.between(rng.derive(key,"turn"),-16.0,16.0)),
             let f=turtle.turned(rolled,rolled.l,p.leaves.angle),let size=rng.between(key,1.0-p.leaves.size_variance,1.0+p.leaves.size_variance))
@@ -131,10 +134,13 @@ pub fn mesh(skeleton,detail={}) map^ {
     let id="plant-"++c.fingerprint([bark,skeleton.leaf_shape])
     let resources=[*(if (len(sampled)>0) [s.geometry(bark.positions,{id:id++"-bark",normals:bark.normals,uvs:bark.uvs,indices:bark.indices})] else []),
         *(if (len(leaves)>0) [s.geometry(leaf.positions,{id:id++"-leaf",normals:leaf.normals,uvs:leaf.uvs,indices:leaf.indices})] else [])]
-    let bark_paint=adjust.paint([],skeleton.bark)^;
+    let bark_paint=adjust.paint([],skeleton.bark)^
+    // A plant can instance hundreds of leaves from a handful of CSS paints.
+    let names=unique([for (l in leaves where l.color is string) l.color])
+    let paints=map([for (color in names) (color,adjust.paint([],color)^)]);
     {resources:resources,parts:[*(if (len(sampled)>0) [{id:"bark",geometry:id++"-bark",shape:id++"-bark",matrix:c.identity(),*:bark_paint,role:"bark",kind:"tree"}] else []),
         *[for (l in leaves) {id:l.id,geometry:id++"-leaf",shape:id++"-leaf",matrix:turtle.matrix(l.frame,l.length*d.leaf_scale,l.width*d.leaf_scale),
-            *:adjust.paint([],l.color)^,role:"leaf",kind:"tree"}]],
+            *:(if (l.color is string) paints[l.color] else adjust.paint([],l.color)^),role:"leaf",kind:"tree"}]],
      skeleton:skeleton,detail:d,stats:{branches:len(skeleton.branches),leaves:len(leaves),vertices:vertices,objects:(if (len(sampled)>0) 1 else 0)+len(leaves)}}
 }
 pub fn lods(skeleton,details) array^ {
