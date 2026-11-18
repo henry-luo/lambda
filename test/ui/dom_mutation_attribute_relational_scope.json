@@ -14,8 +14,14 @@
     },
     {
       "type": "assert_reconcile_mode",
-      "mode": "incremental",
-      "reason": "eligible"
+      "mode": "none",
+      "reason": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": { "selector": "#target" },
+      "attribute": "data-progress",
+      "equals": "done"
     },
     {
       "type": "assert_rect",
@@ -32,8 +38,14 @@
     },
     {
       "type": "assert_reconcile_mode",
-      "mode": "incremental",
-      "reason": "eligible"
+      "mode": "none",
+      "reason": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": { "selector": "#target" },
+      "attribute": "aria-label",
+      "equals": "ready"
     },
     {
       "type": "assert_rect",

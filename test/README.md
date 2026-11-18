@@ -528,6 +528,8 @@ test. Time the gate with a release host (`make build-release-compile`, then
 
 Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides the `lambda-test` submodule). It clones `ref/wpt` at a pinned commit and links each top-level corpus directory from `lambda-test/` as `test/<name>`, except YAML, which the input suite reads directly from `lambda-test/yaml`.
 
+Run `npm ci --prefix test/render` after linking the corpus to install the locked dependencies for the Radiant visual baseline and DevTools screenshot tests.
+
 | Path | Source | In git? | Used by |
 |---|---|---|---|
 | `test/js262` | `lambda-test/js262` | ignored link | `test_js_test262_gtest` |

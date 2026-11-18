@@ -104,20 +104,21 @@ fn erase_forwards(value, evt) any^ {
 }
 
 fn entry_is_visible(entry) any^ {
-  let entry_name = lower(entry["name"])
+  // Directory nodes expose metadata via member access (S2.4.3v4).
+  let entry_name = lower(entry.name)
   // Hide implementation artefacts without preventing normal source browsing:
   // dot entries, build/release output directories, and *.exe binaries.
   not starts_with(entry_name, ".") and
-    (not entry["is_dir"] or
+    (not entry.is_dir or
       (not starts_with(entry_name, "build") and not starts_with(entry_name, "release"))) and
-    (entry["is_dir"] or not ends_with(entry_name, ".exe"))
+    (entry.is_dir or not ends_with(entry_name, ".exe"))
 }
 
 fn entry_matches_filter(entry, filter_text) any^ {
   // Directories remain visible so a search result can be reached by expanding
   // its ancestry; the filter itself applies to file names.
   entry_is_visible(entry) and
-    (entry["is_dir"] or filter_text == "" or contains(lower(entry["name"]), lower(filter_text)))
+    (entry.is_dir or filter_text == "" or contains(lower(entry.name), lower(filter_text)))
 }
 
 fn document_format(extension) any^ {

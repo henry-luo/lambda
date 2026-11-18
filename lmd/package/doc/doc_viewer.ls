@@ -131,7 +131,8 @@ fn entry_is_visible(entry, parent_path) any^ {
   // archive members retain dotfiles and build-like names as part of the package.
   if (type(entry) == element) { true }
   else {
-    let entry_name = lower(entry["name"])
+    // Directory nodes expose metadata via member access (S2.4.3v4).
+    let entry_name = lower(entry.name)
     // Hide implementation artefacts without preventing normal source browsing:
     // dot entries, build/release output directories, and *.exe binaries.
     not starts_with(entry_name, ".") and
@@ -139,9 +140,9 @@ fn entry_is_visible(entry, parent_path) any^ {
       // own UI sources recursively creates another viewer inside this preview.
       not (parent_path == "." and entry_name == "lambda") and
       not (parent_path == "./test" and entry_name == "ui") and
-      (not entry["is_dir"] or
+      (not entry.is_dir or
         (not starts_with(entry_name, "build") and not starts_with(entry_name, "release"))) and
-      (entry["is_dir"] or not ends_with(entry_name, ".exe"))
+      (entry.is_dir or not ends_with(entry_name, ".exe"))
   }
 }
 
@@ -149,7 +150,7 @@ fn entry_matches_filter(entry, parent_path, filter_text) any^ {
   // Directories remain visible so a search result can be reached by expanding
   // its ancestry; the filter itself applies to file names.
   entry_is_visible(entry, parent_path) and
-    (entry_is_container(entry) or filter_text == "" or contains(lower(entry["name"]), lower(filter_text)))
+    (entry_is_container(entry) or filter_text == "" or contains(lower(entry.name), lower(filter_text)))
 }
 
 fn document_format(extension) any^ {
