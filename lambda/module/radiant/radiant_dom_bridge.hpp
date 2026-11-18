@@ -93,6 +93,7 @@ RADIANT_C_API Item radiant_dom_event_create(const char* type, bool bubbles,
                                             int class_id);
 RADIANT_C_API bool radiant_dom_event_is(Item item);
 RADIANT_C_API bool radiant_dom_event_type_is(Item item, const char* type);
+Item radiant_dom_event_forward_label_click(Item source);
 RADIANT_C_API bool radiant_dom_event_default_prevented(Item item);
 RADIANT_C_API bool radiant_dom_event_propagation_stopped(Item item);
 RADIANT_C_API bool radiant_dom_event_prevent_default(Item item);

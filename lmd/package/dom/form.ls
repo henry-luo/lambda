@@ -39,6 +39,20 @@ fn attr_int(elem, name, fallback) {
     if (text == null or text == "") fallback else int(text) ^ { fallback }
 }
 
+// The label's default forwards an uncanceled click when the original hit is
+// outside its interactive descendants. The engine carries the event metadata.
+view <label> {}
+on click(evt) {
+    let control = dom.label_control(~);
+    let target = if (dom.node_type(evt.target) == 1) evt.target else dom.parent_element(evt.target);
+    let interactive = dom.closest(target,
+        "a[href],audio[controls],button,details,embed,iframe,img[usemap],input:not([type=hidden]),label,select,textarea,video[controls]");
+    if (control == null or dom.same_node(control, target) or
+        (interactive != null and not dom.same_node(interactive, ~) and dom.contains(~, interactive))) { 'pass' }
+    else if (dom.forward_label_click(control)) { 'handled' }
+    else { 'pass' }
+}
+
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
 view <input type:'checkbox'> state checked, indeterminate {}

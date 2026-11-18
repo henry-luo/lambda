@@ -41,6 +41,17 @@ extern "C" Item dom_image_constructor_body(Item callee, Item this_value,
 /** `new DOMMatrix()` / `new DOMPoint()` — geometry values the realm exposes. */
 extern "C" Item dom_matrix_constructor(Item init);
 extern "C" Item dom_point_constructor(Item x, Item y, Item z, Item w);
+Item dom_create_matrix_2d(const float* coefficients);
+void dom_install_matrix_2d_members(Item prototype);
+
+enum class DomShadowProperty {
+    root, assigned_element_slot, assigned_text_slot, host, mode, delegates_focus, style_sheets
+};
+Item dom_read_shadow_property(Item receiver, DomShadowProperty property);
+Item dom_slot_assigned_nodes(Item receiver, Item options, bool elements_only);
+
+enum class DomLabelProperty { labels, control, form };
+Item dom_read_label_property(Item receiver, const char* interface_name, DomLabelProperty property);
 
 /** Body behind `Element.prototype.animate`. */
 extern "C" Item dom_element_animate(Item keyframes_item, Item options_item);

@@ -1249,6 +1249,12 @@ public:
         set(name, ItemNull);
     }
 
+    template<typename T>
+    void put_default(const char* name, T value) {
+        Item existing = ItemNull;
+        if (!radiant_dom_event_member_get(event_, name, &existing)) put(name, value);
+    }
+
     void put_element_class(const char* name, const DomElement* element) {
         if (!element || element->class_count == 0 || !element->class_names) {
             put(name, "");
@@ -1619,8 +1625,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     // mouse coordinates (from event context)
     if (evcon) {
-        mb.put("x", (double)evcon->event.mouse_button.x);
-        mb.put("y", (double)evcon->event.mouse_button.y);
+        mb.put_default("x", (double)evcon->event.mouse_button.x);
+        mb.put_default("y", (double)evcon->event.mouse_button.y);
     }
 
     // Package mouse policy needs the same standard MouseEvent decision inputs
@@ -1632,12 +1638,12 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
                   strcmp(event_name, "click") == 0 ||
                   strcmp(event_name, "dblclick") == 0)) {
         const MouseButtonEvent* mouse = &evcon->event.mouse_button;
-        mb.put("button", (int64_t)mouse->button);
-        mb.put("detail", (int64_t)mouse->clicks);
-        mb.put("shiftKey", (mouse->mods & RDT_MOD_SHIFT) != 0);
-        mb.put("ctrlKey",  (mouse->mods & RDT_MOD_CTRL) != 0);
-        mb.put("altKey",   (mouse->mods & RDT_MOD_ALT) != 0);
-        mb.put("metaKey",  (mouse->mods & RDT_MOD_SUPER) != 0);
+        mb.put_default("button", (int64_t)mouse->button);
+        mb.put_default("detail", (int64_t)mouse->clicks);
+        mb.put_default("shiftKey", (mouse->mods & RDT_MOD_SHIFT) != 0);
+        mb.put_default("ctrlKey",  (mouse->mods & RDT_MOD_CTRL) != 0);
+        mb.put_default("altKey",   (mouse->mods & RDT_MOD_ALT) != 0);
+        mb.put_default("metaKey",  (mouse->mods & RDT_MOD_SUPER) != 0);
     }
 
     // `scrollwheel` is behavior-only, after the public WheelEvent has had its
@@ -5996,9 +6002,7 @@ static void dom_js_record_reconcile(DomDocument* doc,
 }
 
 static bool dom_js_is_connected_to_document(DomDocument* doc, DomNode* node) {
-    if (!doc || !node) return false;
-    DomNode* root = static_cast<DomNode*>(doc->root);
-    return view_geometry_dom_is_descendant(node, root);
+    return doc && dom_shadow_including_contains(doc->root, node);
 }
 
 static DomElement* dom_js_record_cascade_root(DomDocument* doc,
@@ -7020,7 +7024,8 @@ static int dom_js_collect_repaint_roots(DomDocument* doc,
         DomElement* root = dom_js_record_cascade_root(doc, record);
         if (!root) continue;
 
-        for (DomNode* node = static_cast<DomNode*>(root); node; node = node->parent) {
+        for (DomNode* node = static_cast<DomNode*>(root); node;
+             node = dom_shadow_including_parent(node)) {
             if (!dom_js_add_unique_repaint_root(node, roots, capacity, &count)) {
                 if (overflow) *overflow = true;
                 return count;
@@ -10426,144 +10431,6 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
     log_debug("update_active_state: target=%p active=%d", changed, is_active);
 }
 
-// ============================================================================
-// Checkbox and Radio Button State Handling
-// ============================================================================
-
-/**
- * Check if an element is a checkbox input
- */
-static bool is_input_kind(View* view, FormInputKind expected_kind) {
-    if (!view || !view->is_element()) return false;
-    ViewElement* elem = lam::view_require_element(view);
-    if (elem->tag() != MARKUP_NAME_INPUT) return false;
-    return form_input_kind_is(elem->get_attribute("type"), expected_kind);
-}
-
-static bool is_checkbox(View* view) {
-    return is_input_kind(view, FORM_INPUT_KIND_CHECKBOX);
-}
-
-/**
- * Check if an element is a radio button input
- */
-static bool is_radio(View* view) {
-    return is_input_kind(view, FORM_INPUT_KIND_RADIO);
-}
-
-
-/**
- * Find the associated checkbox/radio input for a target element.
- * If target is already a checkbox/radio, returns it.
- * If target is inside a label, finds the checkbox/radio:
- *   - By "for" attribute matching input id
- *   - By finding an input child inside the label
- * @return The checkbox/radio input View, or NULL if not found
- */
-static View* find_checkbox_radio_input(View* target) {
-    if (!target) return nullptr;
-
-    log_debug("find_checkbox_radio_input: starting search from target=%p", target);
-
-    // Check if target itself is a checkbox/radio
-    if (is_checkbox(target) || is_radio(target)) {
-        log_debug("find_checkbox_radio_input: target is checkbox/radio");
-        return target;
-    }
-
-    // Walk up the tree looking for a label element
-    View* current = target;
-    View* label_element = nullptr;
-    while (current) {
-        if (current->is_element()) {
-            ViewElement* elem = lam::view_require_element(current);
-            log_debug("find_checkbox_radio_input: checking element tag=%d (%s)", elem->tag(), elem->node_name());
-            if (elem->tag() == MARKUP_NAME_LABEL) {
-                label_element = current;
-                log_debug("find_checkbox_radio_input: found label element");
-                break;
-            }
-            // If we hit a checkbox/radio directly, use it
-            if (is_checkbox(current) || is_radio(current)) {
-                log_debug("find_checkbox_radio_input: found checkbox/radio in ancestor chain");
-                return current;
-            }
-        }
-        current = current->parent;
-    }
-
-    if (!label_element) {
-        log_debug("find_checkbox_radio_input: no label found in ancestor chain");
-        return nullptr;
-    }
-
-    ViewElement* label = lam::view_require_element(label_element);
-
-    // Check for "for" attribute pointing to an input id
-    const char* for_attr = label->get_attribute("for");
-    if (for_attr && for_attr[0]) {
-        log_debug("find_checkbox_radio_input: label has for='%s'", for_attr);
-        // Need to find input with matching id in the document
-        // Walk from document root to find matching id
-        View* root = view_geometry_tree_root(label_element);
-
-        // Simple DFS to find element with matching id
-        View* search = root;
-        while (search) {
-            if (search->is_element()) {
-                ViewElement* elem = lam::view_require_element(search);
-                const char* id = elem->get_attribute("id");
-                if (id && strcmp(id, for_attr) == 0) {
-                    if (is_checkbox(search) || is_radio(search)) {
-                        return search;
-                    }
-                }
-            }
-            // Depth-first traversal
-            if (search->is_element()) {
-                ViewElement* search_elem = lam::view_require_element(search);
-                // Form controls can be visually hidden by widget CSS, so this
-                // must follow DOM children rather than only laid-out blocks.
-                if (search_elem->first_child) {
-                    search = static_cast<View*>(search_elem->first_child);
-                    continue;
-                }
-            }
-            if (search->next()) {
-                search = search->next();
-                continue;
-            }
-            search = search->parent;
-            while (search && !search->next()) {
-                search = search->parent;
-            }
-            if (search) search = search->next();
-        }
-    }
-
-    // No "for" attribute or not found - look for input child inside label
-    View* child = label->first_child;
-    while (child) {
-        if (is_checkbox(child) || is_radio(child)) {
-            return child;
-        }
-        // Check children recursively
-        if (child->is_element()) {
-            ViewElement* child_elem = lam::view_require_element(child);
-            View* nested = static_cast<View*>(child_elem->first_child);
-            while (nested) {
-                if (is_checkbox(nested) || is_radio(nested)) {
-                    return nested;
-                }
-                nested = nested->next();
-            }
-        }
-        child = child->next();
-    }
-
-    return nullptr;
-}
-
 // Resolve the activation control from a hit inside a button/input, then use
 // the form subtree's document order for implicit submission. The tree walk is
 // mechanism; submitter selection stays in the form behavior.
@@ -10644,9 +10511,8 @@ static bool dispatch_click_default_actions(EventContext* evcon, View* target) {
 
     bool handled = false;
     bool reconciled = false;
-    View* activation_target = find_checkbox_radio_input(target);
-    if (!activation_target) activation_target = target;
-    if (dispatch_lambda_handler(evcon, activation_target, "click", nullptr, &reconciled)) {
+    // Resolve label activation in the package so the control gets its own click.
+    if (dispatch_lambda_handler(evcon, target, "click", nullptr, &reconciled)) {
         evcon->need_repaint = true;
         handled = true;
     }
@@ -10704,6 +10570,19 @@ extern "C" bool radiant_keyboard_click_from_package(void* dom_node) {
     DomDocument* document = event_context_target_document(ctx->evcon);
     if (!elem || elem->doc != document) return false;
     return dispatch_package_keyboard_click(ctx->evcon, static_cast<View*>(elem));
+}
+
+extern "C" bool radiant_forward_label_click_from_package(void* dom_node) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    DomNode* node = static_cast<DomNode*>(dom_node);
+    DomElement* element = node ? node->as_element() : nullptr;
+    if (!ctx || !ctx->evcon || !element || !element->doc || form_control_is_html_disabled(element) ||
+        element->doc != event_context_target_document(ctx->evcon)) return false;
+    RootFrame roots(2);
+    Rooted<Item> click(roots, radiant_dom_event_forward_label_click(ctx->evcon->dom_event));
+    if (click.get().item == ITEM_NULL) return false;
+    Rooted<Item> target(roots, radiant_dom_wrap_node(element));
+    return !item_is_error(dom_dispatch_event(target.get(), click.get()));
 }
 
 static bool dispatch_package_keyboard_command(EventContext* evcon,

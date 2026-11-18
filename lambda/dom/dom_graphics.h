@@ -33,6 +33,7 @@ using DomCanvasStateSnapshot = RadiantCanvasStateSnapshot;
     OP(bool, save, (void* canvas_element)) \
     OP(bool, restore, (void* canvas_element)) \
     OP(bool, transform, (void* canvas_element, const float* coefficients, bool replace)) \
+    OP(bool, get_transform, (void* canvas_element, float* coefficients)) \
     OP(bool, scale, (void* canvas_element, float x, float y)) \
     OP(bool, translate, (void* canvas_element, float x, float y)) \
     OP(bool, rotate, (void* canvas_element, float radians)) \
@@ -43,7 +44,8 @@ using DomCanvasStateSnapshot = RadiantCanvasStateSnapshot;
     OP(bool, bezier_curve_to, (void* canvas_element, float cp1x, float cp1y, float cp2x, float cp2y, float x, float y)) \
     OP(bool, quadratic_curve_to, (void* canvas_element, float cpx, float cpy, float x, float y)) \
     OP(bool, rect, (void* canvas_element, float x, float y, float width, float height)) \
-    OP(bool, arc, (void* canvas_element, float x, float y, float radius, float start_angle, float end_angle, bool counter_clockwise)) \
+    OP(bool, ellipse, (void* canvas_element, float x, float y, float radius_x, float radius_y, double rotation, double start_angle, double end_angle, bool counter_clockwise)) \
+    OP(bool, arc_to, (void* canvas_element, float x1, float y1, float x2, float y2, float radius)) \
     OP(bool, clip, (void* canvas_element)) \
     OP(bool, fill, (void* canvas_element)) \
     OP(bool, stroke, (void* canvas_element)) \

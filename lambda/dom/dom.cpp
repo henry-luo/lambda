@@ -91,6 +91,7 @@ static bool dom_radio_group_has_checked(DomElement* element);
 #include "radiant/svg_geometry_context.hpp"
 #include "radiant/dom_mutation_state.hpp"
 #include "radiant/dom_mutation_record.hpp"
+#include "radiant/stylesheet_sync.hpp"
 #include "radiant/dom_backed_tree.hpp"
 #include "lambda/input/html5/html5_parser.h"
 #include "lib/hashmap.h"
@@ -250,18 +251,47 @@ extern "C" void dom_after_srcdoc_set(void* dom_elem);
 static bool dom_expando_flag_is(DomElement* elem, const char* name);
 static void dom_expando_flag_set(DomElement* elem, const char* name, Item value);
 
-static Item dom_dialog_set_return_value(DomElement* element, Item value) {
-    RootFrame roots(1);
-    Rooted<Item> converted(roots, js_to_string(value));
-    if (item_is_error(converted.get())) return converted.get();
+static Item dom_dialog_store_return_value(DomElement* element, Item text_value) {
     DomElementExt* storage = element->ensure_ext();
-    const char* text = fn_to_cstr(converted.get());
+    const char* text = fn_to_cstr(text_value);
     const char* copy = storage && element->doc
         ? pool_strdup(element->doc->document_pool, text ? text : "") : nullptr;
     if (!copy) return js_throw_type_error("Dialog return value storage is unavailable");
     storage->dialog_return_value = lam::own(copy);
-    return converted.get();
+    return text_value;
 }
+
+using DomGaugeField = double HtmlGaugeValues::*;
+
+static DomGaugeField dom_gauge_field(DomElement* element, const char* property) {
+    NameId tag = element->tag();
+    if (tag != MARKUP_NAME_PROGRESS && tag != MARKUP_NAME_METER) return nullptr;
+    if (!dom_element_is_html_tag(element, tag)) return nullptr;
+    if (!strcmp(property, "value")) return &HtmlGaugeValues::value;
+    if (!strcmp(property, "max")) return &HtmlGaugeValues::maximum;
+    if (tag == MARKUP_NAME_PROGRESS) return nullptr;
+    if (!strcmp(property, "min")) return &HtmlGaugeValues::minimum;
+    if (!strcmp(property, "low")) return &HtmlGaugeValues::low;
+    if (!strcmp(property, "high")) return &HtmlGaugeValues::high;
+    if (!strcmp(property, "optimum")) return &HtmlGaugeValues::optimum;
+    return nullptr;
+}
+
+static Item dom_set_gauge_field(Item element, Item property, Item value, bool positive) {
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, element), key(roots, property), original(roots, value);
+    Rooted<Item> converted(roots, js_to_number(original.get()));
+    JS_RETURN_IF_ERROR(converted.get());
+    double numeric = 0.0;
+    if (!item_try_to_double(converted.get(), &numeric) || !isfinite(numeric))
+        return dom_raise_type_error("Gauge values must be finite");
+    if (positive && numeric <= 0.0) return original.get();
+    converted.set(js_to_string(converted.get()));
+    JS_RETURN_IF_ERROR(converted.get());
+    dom_core_set_attribute(owner.get(), key.get(), converted.get());
+    return original.get();
+}
+
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
@@ -271,6 +301,9 @@ void dom_register_named_elements(DomElement* root);
 static bool dom_node_is_connected(DomNode* node);
 static DomElement* _nearest_select_for_node(DomNode* node);
 static void _select_ask_for_reset(DomElement* sel);
+static void dom_update_selected_content(DomElement* select, bool initialize = false);
+static void dom_initialize_selected_content(DomDocument* doc);
+static void dom_note_selected_content_mutation(DomNode* root, bool inserting);
 static bool _get_selectedness(DomElement* opt);
 static Item dom_svg_get_transform_list(DomElement* elem);
 static Item dom_svg_get_animated_class_name(DomElement* elem);
@@ -298,8 +331,27 @@ static String* dom_fragment_text(Item item) {
     return (s && s->len > 0) ? s : nullptr;
 }
 
-// fragment roots can be comments as well as layout elements; the element builder skips them.
-static DomNode* dom_build_fragment_node(Item item, DomDocument* doc, DomElement* context) {
+enum class DomFragmentScriptMode { inert, parser_inserted };
+
+static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMode mode) {
+    for (DomNode* node = root; node;) {
+        DomElement* element = node->as_element();
+        if (dom_element_is_html_tag(element, MARKUP_NAME_SCRIPT)) {
+            if (DomElementExt* state = element->ensure_ext()) {
+                state->script_already_started = mode == DomFragmentScriptMode::inert;
+                state->script_parser_pending = mode == DomFragmentScriptMode::parser_inserted;
+            }
+        }
+        // A parser-inserted template holds a separate, unscheduled source tree.
+        bool descend = element && (mode == DomFragmentScriptMode::inert ||
+            !dom_element_is_html_tag(element, MARKUP_NAME_TEMPLATE));
+        node = descend && element->first_child ? element->first_child.get() : dom_next_after_subtree(root, node);
+    }
+}
+
+// Fragment roots can be comments as well as layout elements; the element builder skips them.
+static DomNode* dom_build_fragment_node(Item item, DomDocument* doc, DomElement* context,
+                                       DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_STRING) {
         String* text = dom_fragment_text(item);
@@ -308,9 +360,10 @@ static DomNode* dom_build_fragment_node(Item item, DomDocument* doc, DomElement*
     }
     if (type != LMD_TYPE_ELEMENT || !item.element || !item.element->type) return nullptr;
     const char* tag = ((TypeElmt*)item.element->type)->name.str;
-    return dom_is_comment_tag(tag)
-        ? static_cast<DomNode*>(dom_comment_create_detached(item.element, doc))
-        : static_cast<DomNode*>(build_dom_tree_from_element_detached(item.element, doc, context));
+    if (dom_is_comment_tag(tag)) return dom_comment_create_detached(item.element, doc);
+    DomElement* root = build_dom_tree_from_element_detached(item.element, doc, context);
+    if (root) dom_set_fragment_script_state(root, script_mode);
+    return root;
 }
 
 // Reserved-attribute filter: attribute names starting with "__lambda_" are used
@@ -499,6 +552,94 @@ static void dom_mutation_notify_observers(DomJsMutationKind kind, DomNode* targe
     }
 }
 
+struct DomScriptReaction {
+    DomNodeRef script;
+    DomScriptReaction* next;
+    StrBuf* source;
+};
+
+static void dom_enqueue_script_reaction(DomDocument* document, DomNode* node) {
+    DomElement* script = node ? node->as_element() : nullptr;
+    if (!document->js.prepare_inline_script || document->scripting_disabled ||
+        !dom_element_is_html_tag(script, MARKUP_NAME_SCRIPT) || !dom_node_is_connected(node) ||
+        (script->ext && (script->ext->script_already_started || script->ext->script_parser_pending))) return;
+    auto* reaction = (DomScriptReaction*)mem_alloc(sizeof(DomScriptReaction), MEM_CAT_DOM);
+    if (!reaction) return;
+    reaction->script = dom_node_ref(script);
+    reaction->next = nullptr;
+    reaction->source = nullptr;
+    if (!dom_node_pin(document, reaction->script, DOM_NODE_PIN_EVENT_QUEUE)) {
+        mem_free(reaction);
+        return;
+    }
+    DomJsRuntime& js = document->js;
+    if (js.pending_scripts_tail) js.pending_scripts_tail->next = reaction;
+    else js.pending_scripts = reaction;
+    js.pending_scripts_tail = reaction;
+}
+
+static void dom_enqueue_connected_script_tree(DomDocument* document, DomNode* root) {
+    if (!document || !document->js.prepare_inline_script) return;
+    for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+        dom_enqueue_script_reaction(document, node);
+        DomElement* element = node->as_element();
+        if (element && element->shadow_root_element())
+            dom_enqueue_connected_script_tree(document, element->shadow_root_element());
+    }
+}
+
+static void dom_release_script_reaction(DomDocument* document, DomScriptReaction*& head) {
+    DomScriptReaction* reaction = head;
+    head = reaction->next;
+    dom_node_unpin(document, reaction->script, DOM_NODE_PIN_EVENT_QUEUE);
+    if (reaction->source) strbuf_free(reaction->source);
+    mem_free(reaction);
+}
+
+static void dom_drain_script_reactions(DomDocument* document) {
+    DomJsRuntime& js = document->js;
+    if (js.script_reaction_depth || !js.pending_scripts) return;
+    // Nested insertions own a fresh batch. The outer candidates remain pinned
+    // in document state until their turns, including across watchdog recovery.
+    DomScriptReaction* stop = js.running_scripts;
+    js.pending_scripts_tail->next = stop;
+    js.running_scripts = js.pending_scripts;
+    js.pending_scripts = js.pending_scripts_tail = nullptr;
+    while (js.running_scripts != stop) {
+        DomScriptReaction* reaction = js.running_scripts;
+        DomNode* node = dom_node_ref_validate(document, reaction->script);
+        DomElement* script = node ? node->as_element() : nullptr;
+        if (script && script->doc == document && !document->scripting_disabled &&
+            dom_node_is_connected(node) && js.prepare_inline_script)
+            js.prepare_inline_script(script, &reaction->source);
+        dom_release_script_reaction(document, js.running_scripts);
+    }
+}
+
+extern "C" void dom_clear_script_reactions(DomDocument* document) {
+    if (!document) return;
+    DomJsRuntime& js = document->js;
+    while (js.pending_scripts) dom_release_script_reaction(document, js.pending_scripts);
+    while (js.running_scripts) dom_release_script_reaction(document, js.running_scripts);
+    js.pending_scripts_tail = nullptr;
+    js.script_reaction_depth = 0;
+}
+
+class DomScriptReactionScope {
+public:
+    explicit DomScriptReactionScope(DomDocument* document)
+        : document_(document && document->js.prepare_inline_script ? document : nullptr) {
+        if (document_) document_->js.script_reaction_depth++;
+    }
+    ~DomScriptReactionScope() {
+        if (!document_) return;
+        --document_->js.script_reaction_depth;
+        dom_drain_script_reactions(document_);
+    }
+private:
+    DomDocument* document_;
+};
+
 // Record mutation detail for incremental cascade and layout decisions.
 static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
@@ -510,6 +651,15 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
 
+    if (kind == DOM_JS_MUTATION_ATTRIBUTE && attribute_name && strcmp(attribute_name, "open") == 0) {
+        DomElement* element = target ? target->as_element() : nullptr;
+        if (dom_element_is_html_tag(element, MARKUP_NAME_DIALOG) && element->ext &&
+            !element->has_attribute("open")) {
+            // Removing open ends the active close request, even when the handler reopens the dialog.
+            element->ext->dialog_cancel_dispatching = false;
+        }
+    }
+
     if (dom_edit_transaction_defer_mutation(doc, kind, target, parent,
                                             attribute_name, old_value)) {
         return;
@@ -518,6 +668,15 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name, presentation_property);
     dom_mutation_notify_observers(kind, target, parent, attribute_name, old_value);
     radiant_dom_mutation_finish(doc, kind);
+    if (doc->js.prepare_inline_script) {
+        if (kind == DOM_JS_MUTATION_TEXT) {
+            dom_enqueue_script_reaction(doc, target);
+            if (parent != target) dom_enqueue_script_reaction(doc, parent);
+        } else if (kind == DOM_JS_MUTATION_CHILD_REMOVE) {
+            dom_enqueue_script_reaction(doc, parent);
+        }
+        dom_drain_script_reactions(doc);
+    }
 }
 
 extern "C" void dom_custom_elements_registry_changed(void) {
@@ -893,18 +1052,15 @@ static bool dom_node_is_connected(DomNode* node) {
         }
     }
     if (!doc) doc = _js_current_document;
-    if (!doc || !doc->root) return false;
-
-    DomNode* root = static_cast<DomNode*>(doc->root);
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur == root) return true;
-    }
-    return false;
+    return doc && dom_shadow_including_contains(doc->root, node);
 }
 
 static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
                                   bool release_external = true) {
-    if (child && dom_node_is_connected(child)) dom_custom_element_tree_changed(child, false);
+    if (child && dom_node_is_connected(child)) {
+        dom_note_selected_content_mutation(child, false);
+        dom_custom_element_tree_changed(child, false);
+    }
     DocState* st = dom_state_for_nodes(child, child ? child->parent : nullptr);
     radiant_dom_pre_remove_state(st, child);
     if (child && js_document_active_element &&
@@ -952,7 +1108,14 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
     if (record_mutation) {
         dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
     }
-    if (node && dom_node_is_connected(node)) dom_custom_element_tree_changed(node, true);
+    if (node && dom_node_is_connected(node)) {
+        if (document && document->js.prepare_inline_script) {
+            dom_enqueue_script_reaction(document, parent);
+            dom_enqueue_connected_script_tree(document, node);
+        }
+        dom_note_selected_content_mutation(node, true);
+        dom_custom_element_tree_changed(node, true);
+    }
 }
 
 enum DomCustomElementTreeAction { DOM_CUSTOM_UPGRADE, DOM_CUSTOM_CONNECT, DOM_CUSTOM_DISCONNECT };
@@ -1811,6 +1974,7 @@ extern "C" void dom_set_document(void* dom_doc) {
         dom_storage_bind_document();
         js_history_install_globals();
         dom_install_testdriver_globals();
+        dom_initialize_selected_content(doc);
     }
     log_debug("dom_set_document: set document=%p", dom_doc);
 }
@@ -1962,20 +2126,28 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"body", "HTMLBodyElement"},
     {"button", "HTMLButtonElement"},
     {"canvas", "HTMLCanvasElement"},
+    {"datalist", "HTMLDataListElement"},
     // native details behavior also needs its WebIDL identity for page guards.
     {"details", "HTMLDetailsElement"},
+    {"dialog", "HTMLDialogElement"},
     {"embed", "HTMLEmbedElement"},
     {"form", "HTMLFormElement"},
     {"frame", "HTMLFrameElement"},
     {"iframe", "HTMLIFrameElement"},
     {"img", "HTMLImageElement"},
     {"input", "HTMLInputElement"},
+    {"label", "HTMLLabelElement"},
     {"link", "HTMLLinkElement"},
+    {"meter", "HTMLMeterElement"},
     {"object", "HTMLObjectElement"},
     {"option", "HTMLOptionElement"},
+    {"output", "HTMLOutputElement"},
     {"picture", "HTMLPictureElement"},
+    {"progress", "HTMLProgressElement"},
     {"select", "HTMLSelectElement"},
+    {"selectedcontent", "HTMLSelectedContentElement"},
     {"script", "HTMLScriptElement"},
+    {"slot", "HTMLSlotElement"},
     {"source", "HTMLSourceElement"},
     {"style", "HTMLStyleElement"},
     {"template", "HTMLTemplateElement"},
@@ -2158,6 +2330,8 @@ typedef enum DomCollectionVArrayKind {
     DOM_VARRAY_ATTRIBUTES,
     DOM_VARRAY_CLASS_LIST,
     DOM_VARRAY_REL_LIST,
+    DOM_VARRAY_DATALIST_OPTIONS,
+    DOM_VARRAY_CONTROL_LABELS,
 } DomCollectionVArrayKind;
 
 typedef struct DomCollectionVArray {
@@ -2230,6 +2404,8 @@ static bool dom_collection_varray_matches(DomElement* elem,
     const char* query = is_text_type_id(get_type_id(collection->query))
         ? collection->query.get_chars() : "";
     switch (collection->kind) {
+    case DOM_VARRAY_DATALIST_OPTIONS:
+        return dom_element_is_html_tag(elem, MARKUP_NAME_OPTION);
     case DOM_VARRAY_DOCUMENT_FORMS:
         return elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0;
     case DOM_VARRAY_DOCUMENT_LINKS:
@@ -2280,33 +2456,13 @@ static DomElement* dom_collection_varray_find_rec(DomNode* node,
     return nullptr;
 }
 
-static DomElement* dom_collection_varray_find_option_rec(DomNode* node,
-        bool allow_optgroup, bool selected_only, int64_t target, int64_t* seen) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            const char* tag = elem->tag_name;
-            if (tag && str_icmp_cstr(tag, "option") == 0) {
-                if (!selected_only || _get_selectedness(elem)) {
-                    if (*seen == target) return elem;
-                    (*seen)++;
-                }
-            } else if (tag && (str_icmp_cstr(tag, "select") == 0 ||
-                               str_icmp_cstr(tag, "hr") == 0)) {
-                // nested selects and horizontal rules own no options here
-            } else if (tag && str_icmp_cstr(tag, "optgroup") == 0) {
-                if (allow_optgroup) {
-                    DomElement* found = dom_collection_varray_find_option_rec(
-                        elem->first_child, false, selected_only, target, seen);
-                    if (found) return found;
-                }
-            } else {
-                DomElement* found = dom_collection_varray_find_option_rec(
-                    elem->first_child, allow_optgroup, selected_only, target, seen);
-                if (found) return found;
-            }
-        }
-        node = node->next_sibling;
+static DomElement* dom_find_select_option(DomElement* select, bool selected_only,
+                                          int64_t target, int64_t* seen) {
+    for (DomElement* option = dom_select_next_option(select, nullptr); option;
+         option = dom_select_next_option(select, option)) {
+        if (selected_only && !_get_selectedness(option)) continue;
+        if (*seen == target) return option;
+        (*seen)++;
     }
     return nullptr;
 }
@@ -2433,12 +2589,23 @@ static DomNode* dom_collection_varray_walk(void* data, int64_t target,
         if (collection->kind == DOM_VARRAY_SELECT_SELECTED_OPTIONS) {
             _select_normalize_native(owner);
         }
-        DomNode* found = (DomNode*)dom_collection_varray_find_option_rec(
-            owner->first_child, true,
+        DomNode* found = dom_find_select_option(owner,
             collection->kind == DOM_VARRAY_SELECT_SELECTED_OPTIONS,
             target, &seen);
         if (out_count) *out_count = seen;
         return found;
+    }
+    if (collection->kind == DOM_VARRAY_CONTROL_LABELS) {
+        // The same object observes the control's current tree, including moves and hiding.
+        if (radiant_is_labelable(owner)) {
+            DomNode* root = dom_source_tree_root(owner);
+            for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+                if (radiant_label_control(node->as_element()) == owner && seen++ == target)
+                    return node;
+            }
+        }
+        if (out_count) *out_count = seen;
+        return nullptr;
     }
     DomNode* first = collection->include_root
         ? (DomNode*)owner : dom_first_script_visible_child(owner);
@@ -2774,15 +2941,43 @@ extern "C" Item dom_live_form_elements_bridge(void* elem_ptr) {
         ItemNull, false, dom_html_form_controls_collection_host_type());
 }
 
-static Item dom_live_select_collection_bridge(DomElement* select,
-                                                bool selected_only) {
-    Item owner = select ? dom_wrap_element(select) : ItemNull;
-    return dom_collection_varray_new(owner,
-        selected_only ? DOM_VARRAY_SELECT_SELECTED_OPTIONS
-                      : DOM_VARRAY_SELECT_OPTIONS,
-        ItemNull, false,
-        selected_only ? dom_html_collection_host_type()
-                      : dom_html_options_collection_host_type());
+static Item dom_cached_live_collection(DomElement* element, const char* cache_name,
+                                       DomCollectionVArrayKind kind, const void* host_type) {
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, dom_wrap_element(element));
+    Rooted<Item> cache(roots, expando_get_or_create_map(element));
+    Rooted<Item> key(roots, js_name_item(cache_name));
+    Rooted<Item> result(roots, cache.get().item != ITEM_NULL ? dom_realm_get(cache.get(), key.get()) : ItemNull);
+    if (get_type_id(result.get()) != LMD_TYPE_VARRAY) {
+        result.set(dom_collection_varray_new(owner.get(), kind, ItemNull, false, host_type));
+        if (cache.get().item != ITEM_NULL) dom_realm_set(cache.get(), key.get(), result.get());
+    }
+    return result.get();
+}
+
+static Item dom_label_property(DomElement* element, DomLabelProperty property) {
+    if (property == DomLabelProperty::labels) {
+        return radiant_is_labelable(element)
+            ? dom_cached_live_collection(element, "__labels", DOM_VARRAY_CONTROL_LABELS, dom_node_list_host_type())
+            : ItemNull;
+    }
+    DomElement* related = property == DomLabelProperty::control
+        ? radiant_label_control(element) : radiant_label_form(element);
+    return related ? dom_wrap_element(related) : ItemNull;
+}
+
+extern "C" Item dom_core_label_control(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    return dom_label_property(node ? node->as_element() : nullptr, DomLabelProperty::control);
+}
+
+Item dom_read_label_property(Item receiver, const char* interface_name, DomLabelProperty property) {
+    DomNode* node = (DomNode*)dom_unwrap_element(receiver);
+    DomElement* element = node ? node->as_element() : nullptr;
+    const char* actual_interface = dom_element_html_tag(element) ? dom_html_interface_name(element) : nullptr;
+    if (!actual_interface || strcmp(actual_interface, interface_name) != 0)
+        return dom_raise_type_error("Illegal label property receiver");
+    return dom_label_property(element, property);
 }
 
 #define JS_DOM_DOCUMENT_LOOKUP_BRIDGE(name, kind, host_type_fn) \
@@ -3253,6 +3448,7 @@ static bool dom_rebind_subtree_document(DomNode* node,
         if (!dom_rebind_subtree_document(child, source, destination)) return false;
     }
     if (elem->shadow_root_element()) {
+        destination->js.has_shadow_roots = true;
         if (!dom_rebind_subtree_document(
                 (DomNode*)elem->shadow_root_element(), source, destination)) return false;
     }
@@ -4333,6 +4529,9 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
     if (!elem || !dom_element_is_connected(elem)) return js_name_item("");
     const char* js_prop = fn_to_cstr(prop_name);
     if (!js_prop) return js_name_item("");
+    // An immediate CSSOM read resolves the current tree's pending sheet text.
+    if (elem->doc && elem->doc->js.inline_stylesheet_mutation_count)
+        radiant_sync_mutated_inline_stylesheets(elem->doc);
 
     // Custom names are literal DOM strings: preserve case, length and punctuation before camel-case conversion.
     if (js_prop[0] == '-' && js_prop[1] == '-' && elem->doc && elem->doc->document_pool) {
@@ -4786,11 +4985,12 @@ static bool dom_is_script_focusable(DomElement* elem) {
 
 static void dom_dispatch_focus_events(DomElement* elem) {
     if (!elem) return;
-    Item elem_item = dom_wrap_element(elem);
-    Item focus_event = js_create_native_focus_event("focus", ItemNull);
-    dom_dispatch_event(elem_item, focus_event);
-    Item focusin_event = js_create_native_focus_event("focusin", ItemNull);
-    dom_dispatch_event(elem_item, focusin_event);
+    RootFrame roots(2);
+    Rooted<Item> element(roots, dom_wrap_element(elem));
+    Rooted<Item> event(roots, js_create_native_focus_event("focus", ItemNull));
+    dom_dispatch_event(element.get(), event.get());
+    event.set(js_create_native_focus_event("focusin", ItemNull));
+    dom_dispatch_event(element.get(), event.get());
 }
 
 static void dom_clear_focus_if_disabled_now(DomElement* changed_elem) {
@@ -5348,6 +5548,7 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     if (!elem || !html_str) return false;
     elem = dom_prepare_children_for_mutation(elem);
     if (!elem) return false;
+    DomScriptReactionScope script_reactions(elem->doc);
 
     dom_collapse_selection_before_child_replace(elem, "innerHTML");
 
@@ -5414,7 +5615,8 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
 }
 
 static DomElement* dom_parse_html_fragment(DomDocument* doc,
-                                              const char* html_str, DomElement* context) {
+                                              const char* html_str, DomElement* context,
+                                              DomFragmentScriptMode script_mode = DomFragmentScriptMode::inert) {
     if (!doc || !doc->input || !html_str) return nullptr;
 
     Html5Parser* parser = dom_create_fragment_parser(doc, context);
@@ -5427,7 +5629,7 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     DomElement* fragment = dom_document_fragment_create(doc);
     if (!fragment) return nullptr;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context);
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context, script_mode);
         if (child) ((DomNode*)fragment)->append_child(child);
     }
     return fragment;
@@ -5846,7 +6048,7 @@ static bool dom_append_document_text(DomDocument* doc, const char* text) {
     DomElement* parent = cursor && cursor->parent ? cursor->parent->as_element()
         : dom_document_body_element(doc);
     if (!parent) return false;
-    DomElement* fragment = dom_parse_html_fragment(doc, text, parent);
+    DomElement* fragment = dom_parse_html_fragment(doc, text, parent, DomFragmentScriptMode::parser_inserted);
     if (!fragment) return false;
     RootFrame roots(4);
     Rooted<Item> fragment_root(roots, dom_wrap_element(fragment));
@@ -6794,7 +6996,13 @@ static Item dom_focus_method(DomElement* elem, bool focus,
         // The first geometry flush can create the document state; focus must
         // use that owner rather than the null state observed before layout.
         state = elem->doc ? elem->doc->state : dom_current_state();
-        if (dom_is_script_focusable(elem)) {
+        bool focusable = dom_is_script_focusable(elem);
+        if (!focusable && dom_element_is_html_tag(elem, MARKUP_NAME_LABEL)) {
+            // A label without its own focusable area delegates to its labeled control.
+            elem = radiant_label_control(elem);
+            focusable = !form_control_is_html_disabled(elem) && dom_is_script_focusable(elem);
+        }
+        if (focusable) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;
             dom_engine_control_focus_programmatic(state, (View*)elem, false);
@@ -6844,19 +7052,7 @@ extern "C" bool dom_focus_editing_host_for_automation(void* dom_elem) {
 
 extern "C" Item dom_click_method_bridge(Item elem_item) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
-    if (!elem) return make_js_undefined();
-    if (elem->tag_name) {
-        const char* tag = elem->tag_name;
-        bool is_form_ctrl =
-            str_icmp_cstr(tag, "button") == 0 ||
-            str_icmp_cstr(tag, "input") == 0 ||
-            str_icmp_cstr(tag, "select") == 0 ||
-            str_icmp_cstr(tag, "textarea") == 0 ||
-            str_icmp_cstr(tag, "fieldset") == 0;
-        if (is_form_ctrl && elem->has_attribute("disabled")) {
-            return make_js_undefined();
-        }
-    }
+    if (!elem || form_control_is_html_disabled(elem)) return make_js_undefined();
     // D6.3.3: MouseEvent construction and dispatch can collect both JS carriers.
     RootFrame roots(2);
     Rooted<Item> element_root(roots, elem_item);
@@ -7164,9 +7360,6 @@ extern "C" bool dom_css_element_matches_range(void* element_ptr,
 static bool _get_selectedness(DomElement* opt);
 static void _set_selectedness(DomElement* opt, bool v);
 
-// Walk the descendants of `sel` and append each <option> to `arr`. Direct
-// optgroup descendants contribute options, but nested option/hr/select/optgroup
-// subtrees are not part of the owning select's option list.
 struct SelectOptionArrayRoots {
     Rooted<Item>* options;
     Rooted<Item>* wrapped;
@@ -7178,12 +7371,12 @@ static void _collect_option(DomElement* option, void* context) {
     js_array_push(roots->options->get(), roots->wrapped->get());
 }
 
-static void _collect_options(DomNode* node, Item arr) {
+static void _collect_options(DomElement* select, Item arr) {
     // Wrapping each option can collect; both the array and wrapper stay rooted.
     RootFrame roots(2);
     Rooted<Item> options(roots, arr), wrapped(roots, ItemNull);
     SelectOptionArrayRoots context = {&options, &wrapped};
-    radiant_select_walk_options(node, _collect_option, &context);
+    radiant_select_walk_options(select, _collect_option, &context);
 }
 
 // Get the option's text content (concatenated descendant text, trimmed
@@ -7440,7 +7633,7 @@ static void _select_set_selected_index(DomElement* sel, int idx) {
     if (!sel) return;
     RootFrame roots(1);
     Rooted<Item> arr(roots, js_array_new(0));
-    _collect_options(sel->first_child, arr.get());
+    _collect_options(sel, arr.get());
     int64_t n = js_array_length(arr.get());
     for (int64_t i = 0; i < n; i++) {
         DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
@@ -7451,16 +7644,18 @@ static void _select_set_selected_index(DomElement* sel, int idx) {
         sel, idx >= 0 && idx < n ? idx : -1,
         (int)n); // INT_CAST_OK: option count
     dom_expando_flag_set(sel, "__selDirty", (Item){.item = b2it(true)});
+    dom_update_selected_content(sel);
 }
 
 static void _select_select_only_option(DomElement* sel, DomElement* selected_opt) {
     if (!sel || !selected_opt) return;
-    Item arr = js_array_new(0);
-    _collect_options(sel->first_child, arr);
-    int64_t n = js_array_length(arr);
+    RootFrame roots(1);
+    Rooted<Item> arr(roots, js_array_new(0));
+    _collect_options(sel, arr.get());
+    int64_t n = js_array_length(arr.get());
     int selected_index = -1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
         if (opt) {
             bool selected = opt == selected_opt;
             _set_selectedness(opt, selected);
@@ -7469,21 +7664,20 @@ static void _select_select_only_option(DomElement* sel, DomElement* selected_opt
     }
     radiant_select_sync_native_index(sel, selected_index,
                                        (int)n); // INT_CAST_OK: option count
+    dom_update_selected_content(sel);
 }
 
 static int64_t _select_option_count_native(DomElement* select) {
     if (!select) return 0;
     int64_t count = 0;
-    (void)dom_collection_varray_find_option_rec(
-        select->first_child, true, false, -1, &count);
+    (void)dom_find_select_option(select, false, -1, &count);
     return count;
 }
 
 static DomElement* _select_option_at_native(DomElement* select, int64_t index) {
     if (!select || index < 0) return nullptr;
     int64_t seen = 0;
-    return dom_collection_varray_find_option_rec(
-        select->first_child, true, false, index, &seen);
+    return dom_find_select_option(select, false, index, &seen);
 }
 
 static void _select_normalize_native(DomElement* sel) {
@@ -7695,18 +7889,6 @@ extern "C" void dom_after_toggle_attribute_remove(void* elem_ptr,
     }
 }
 
-// Find the parent <select> of an <option>. Returns nullptr if none.
-static DomElement* _option_owner_select(DomElement* opt) {
-    if (!opt) return nullptr;
-    for (DomNode* p = opt->parent; p; p = p->parent) {
-        if (p->is_element()) {
-            DomElement* pe = (DomElement*)p;
-            if (pe->tag_name && str_icmp_cstr(pe->tag_name, "select") == 0) return pe;
-        }
-    }
-    return nullptr;
-}
-
 // Return the option's effective value (`value` attribute, or text content
 // if absent). Heap-allocated cstring caller must mem_free.
 static char* _option_value(DomElement* opt) {
@@ -7721,7 +7903,7 @@ static char* _select_value(DomElement* elem) {
     }
     RootFrame roots(1);
     Rooted<Item> options(roots, js_array_new(0));
-    _collect_options(elem->first_child, options.get());
+    _collect_options(elem, options.get());
     int64_t count = js_array_length(options.get());
     DomElement* first_non_disabled = nullptr;
     for (int64_t i = 0; i < count; i++) {
@@ -7761,10 +7943,10 @@ extern "C" Item dom_select_value_bridge(void* element) {
 // Return index of `opt` within its owner select's options list (-1 if not
 // in any select).
 static int _option_index_in_select(DomElement* opt) {
-    DomElement* sel = _option_owner_select(opt);
+    DomElement* sel = dom_select_option_owner(opt);
     if (!sel) return -1;
     Item arr = js_array_new(0);
-    _collect_options(sel->first_child, arr);
+    _collect_options(sel, arr);
     int64_t n = js_array_length(arr);
     for (int64_t i = 0; i < n; i++) {
         Item it = js_elements_get_int(arr, i);
@@ -7791,6 +7973,7 @@ static void _select_ask_for_reset(DomElement* sel) {
     int selected_index = -1, option_count = 0;
     if (radiant_select_reset(sel, &operations, &selected_index, &option_count))
         radiant_select_sync_native_index(sel, selected_index, option_count);
+    dom_update_selected_content(sel);
 }
 
 extern "C" void dom_after_default_selected_set(void* dom_elem, bool selected) {
@@ -7800,19 +7983,20 @@ extern "C" void dom_after_default_selected_set(void* dom_elem, bool selected) {
     if (dirty) return;
     // defaultSelected only drives live selectedness while the option is clean.
     _set_selectedness(elem, selected);
-    DomElement* sel = _option_owner_select(elem);
+    DomElement* sel = dom_select_option_owner(elem);
     if (sel) _select_ask_for_reset(sel);
 }
 JS_FORWARD_VOID( dom_after_select_multiple_removed, (void* dom_elem), _select_ask_for_reset, ((DomElement*)dom_elem))
 
 static int dom_select_apply_value(DomElement* elem, const char* value,
         bool sync_native_index) {
-    Item arr = js_array_new(0);
-    _collect_options(elem->first_child, arr);
-    int64_t n = js_array_length(arr);
+    RootFrame roots(1);
+    Rooted<Item> arr(roots, js_array_new(0));
+    _collect_options(elem, arr.get());
+    int64_t n = js_array_length(arr.get());
     int found = -1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
         if (!opt) continue;
         char* option_value = _option_value(opt);
         bool match = option_value && strcmp(option_value, value) == 0;
@@ -7820,7 +8004,7 @@ static int dom_select_apply_value(DomElement* elem, const char* value,
         if (match) { found = (int)i; break; } // INT_CAST_OK: option index
     }
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
         if (!opt) continue;
         _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
     }
@@ -7828,6 +8012,7 @@ static int dom_select_apply_value(DomElement* elem, const char* value,
         radiant_select_sync_native_index(elem, found,
             (int)n); // INT_CAST_OK: option count
     }
+    dom_update_selected_content(elem);
     return found;
 }
 
@@ -7853,7 +8038,7 @@ extern "C" void dom_select_set_length_bridge(void* dom_elem, Item value) {
     }
     if (new_len < 0) new_len = 0;
     Item arr = js_array_new(0);
-    _collect_options(elem->first_child, arr);
+    _collect_options(elem, arr);
     int64_t cur = js_array_length(arr);
     if (new_len > cur) {
         int to_add = new_len - (int)cur; // INT_CAST_OK: option count
@@ -7902,7 +8087,7 @@ static void dom_apply_option_selected(DomElement* elem, bool selected) {
     dom_expando_flag_set(elem, "__optDirty", (Item){.item = b2it(true)});
     // Explicit option.selected wins in non-multiple selects, then refreshes
     // cached selectedOptions exactly as the fallback setter did.
-    DomElement* sel = _option_owner_select(elem);
+    DomElement* sel = dom_select_option_owner(elem);
     if (sel && selected && !sel->has_attribute("multiple")) {
         _select_select_only_option(sel, elem);
     } else if (sel) {
@@ -7959,7 +8144,7 @@ typedef struct SelectValidityScan {
 static bool _select_validity_visit(DomElement* elem, void* context) {
     SelectValidityScan* scan = (SelectValidityScan*)context;
     if (_is_tag(elem, "select")) return false;
-    if (!_is_tag(elem, "option") || _option_owner_select(elem) != scan->select) {
+    if (!_is_tag(elem, "option") || dom_select_option_owner(elem) != scan->select) {
         return true;
     }
     if (!scan->first_option) {
@@ -8064,11 +8249,12 @@ static void _reset_form_control(DomElement* elem) {
     if (str_icmp_cstr(tag, "select") == 0) {
         // Reset selectedness of all options to their defaults, then run
         // ask-for-reset for non-multiple selects.
-        Item arr = js_array_new(0);
-        _collect_options(elem->first_child, arr);
-        int64_t n = js_array_length(arr);
+        RootFrame roots(1);
+        Rooted<Item> arr(roots, js_array_new(0));
+        _collect_options(elem, arr.get());
+        int64_t n = js_array_length(arr.get());
         for (int64_t i = 0; i < n; i++) {
-            DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
+            DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
             if (!opt) continue;
             // Default selectedness = presence of "selected" content attribute
             _set_selectedness(opt, opt->has_attribute("selected"));
@@ -8724,6 +8910,8 @@ typedef enum JsDomReflectKind {
     X("readonly", "readonly", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_TEXTAREA) \
     X("noValidate", "novalidate", BOOL, 0, DOM_TAG_FORM) \
     X("formNoValidate", "formnovalidate", BOOL, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("noModule", "nomodule", BOOL, 0, DOM_TAG_SCRIPT) \
+    X("defer", "defer", BOOL, 0, DOM_TAG_SCRIPT) \
     X("autofocus", "autofocus", BOOL, 0, DOM_TAG_ANY) \
     X("open", "open", BOOL, 0, DOM_TAG_DETAILS) \
     X("defaultChecked", "checked", BOOL, 0, DOM_TAG_INPUT) \
@@ -8742,6 +8930,7 @@ typedef enum JsDomReflectKind {
     X("cols", "cols", INT, 20, DOM_TAG_TEXTAREA) \
     X("src", "src", STR, 0, DOM_TAG_IMG | DOM_TAG_SCRIPT | DOM_TAG_IFRAME | DOM_TAG_EMBED | \
         DOM_TAG_SOURCE | DOM_TAG_TRACK | DOM_TAG_AUDIO | DOM_TAG_VIDEO | DOM_TAG_INPUT) \
+    X("type", "type", STR, 0, DOM_TAG_SCRIPT) \
     X("href", "href", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK | DOM_TAG_BASE) \
     /* stylesheet discovery reads the reflected content attribute. */ \
     X("rel", "rel", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK) \
@@ -9140,6 +9329,31 @@ extern "C" Item dom_core_parent_node(Item n) {
     return node ? dom_parent_node_or_null(node) : ItemNull;
 }
 
+static Item dom_optional_dictionary_boolean(Item options, const char* key) {
+    if (options.item == ITEM_NULL || is_js_undefined(options)) return (Item){.item = ITEM_FALSE};
+    if (!js_is_object_value(options)) return dom_raise_type_error("DOM options must be an object");
+    Item value = dom_realm_get_cstr(options, key);
+    return item_is_error(value) ? value : (Item){.item = b2it(js_is_truthy(value))};
+}
+
+extern "C" Item dom_core_get_root_node(Item n, Item options) {
+    RootFrame roots(2);
+    Rooted<Item> receiver(roots, n), dictionary(roots, options);
+    Item composed = dom_optional_dictionary_boolean(dictionary.get(), "composed");
+    if (item_is_error(composed)) return composed;
+    DomNode* node = (DomNode*)dom_unwrap_element(receiver.get());
+    if (!node) return receiver.get();
+    auto parent = js_is_truthy(composed) ?
+        static_cast<DomNode* (*)(DomNode*)>(dom_shadow_including_parent) : dom_source_parent;
+    DomNode* root = node;
+    while (DomNode* ancestor = parent(root)) root = ancestor;
+    // Radiant's document element omits its Document parent in native storage.
+    DomElement* element = root->as_element();
+    if (element && element->doc && element->doc->root == element)
+        return dom_parent_node_or_null(root);
+    return root == node ? receiver.get() : dom_wrap_element(root);
+}
+
 extern "C" Item dom_core_first_child(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     // CharacterData has no children, so text and comment nodes answer null
@@ -9415,7 +9629,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             }
             if (numeric) {
                 Item arr = js_array_new(0);
-                _collect_options(sel_elem->first_child, arr);
+                _collect_options(sel_elem, arr);
                 if (idx >= 0 && idx < js_array_length(arr)) {
                     return js_elements_get_int(arr, idx);
                 }
@@ -9453,6 +9667,19 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // Element properties below — safe to cast
     DomElement* elem = node->as_element();
+    if (!strcmp(prop, "labels") && (dom_element_is_html_tag(elem, MARKUP_NAME_INPUT) || radiant_is_labelable(elem)))
+        return dom_label_property(elem, DomLabelProperty::labels);
+    if ((!strcmp(prop, "control") || prop_id == JS_DOM_PROP_FORM) &&
+        dom_element_is_html_tag(elem, MARKUP_NAME_LABEL))
+        return dom_label_property(elem, prop_id == JS_DOM_PROP_FORM ? DomLabelProperty::form : DomLabelProperty::control);
+    DomGaugeField gauge_field = dom_gauge_field(elem, prop);
+    bool gauge_position = elem->tag() == MARKUP_NAME_PROGRESS && !strcmp(prop, "position");
+    if (gauge_field || gauge_position) {
+        HtmlGaugeValues gauge = {};
+        if (radiant_html_gauge_values(elem, &gauge)) {
+            return js_make_number(gauge_field ? gauge.*gauge_field : radiant_html_gauge_fraction(gauge));
+        }
+    }
     if (elem->tag_id == MARKUP_NAME_DIALOG && strcmp(prop, "returnValue") == 0) {
         return js_name_item(elem->ext && elem->ext->dialog_return_value
             ? elem->ext->dialog_return_value.get() : "");
@@ -9904,22 +10131,25 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // ------------------------------------------------------------------
     // F-5: HTMLSelectElement / HTMLOptionElement IDL properties
     // ------------------------------------------------------------------
+    if (prop_id == JS_DOM_PROP_OPTIONS && dom_element_is_html_tag(elem, MARKUP_NAME_DATALIST)) {
+        return dom_cached_live_collection(elem, "__datalistOptions", DOM_VARRAY_DATALIST_OPTIONS,
+                                            dom_html_collection_host_type());
+    }
+    if (elem->tag() == MARKUP_NAME_INPUT && !strcmp(prop, "list")) {
+        DomElement* list = radiant_input_datalist(elem);
+        return list ? dom_wrap_element(list) : ItemNull;
+    }
     if (_is_tag(elem, "select")) {
         if (prop_id == JS_DOM_PROP_OPTIONS) {
-            return dom_live_select_collection_bridge(elem, false);
+            return dom_cached_live_collection(elem, "__options", DOM_VARRAY_SELECT_OPTIONS,
+                                                dom_html_options_collection_host_type());
         }
         if (prop_id == JS_DOM_PROP_LENGTH) {
             return (Item){.item = i2it(_select_option_count_native(elem))};
         }
         if (prop_id == JS_DOM_PROP_SELECTED_OPTIONS) {
-            Item exp = expando_get_or_create_map((DomNode*)elem);
-            Item cache_key = js_name_item("__selectedOptions");
-            Item out = (exp.item != ITEM_NULL) ? dom_realm_get(exp, cache_key) : ItemNull;
-            if (get_type_id(out) != LMD_TYPE_VARRAY) {
-                out = dom_live_select_collection_bridge(elem, true);
-                if (exp.item != ITEM_NULL) dom_realm_set(exp, cache_key, out);
-            }
-            return out;
+            return dom_cached_live_collection(elem, "__selectedOptions", DOM_VARRAY_SELECT_SELECTED_OPTIONS,
+                                                dom_html_collection_host_type());
         }
         if (prop_id == JS_DOM_PROP_SELECTED_INDEX) {
             return (Item){.item = i2it(
@@ -9959,7 +10189,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             // Apply default-reset rule: in a non-multiple, size<=1 select
             // with no option having selectedness, the first non-disabled
             // direct-child option counts as selected.
-            DomElement* sel = _option_owner_select(elem);
+            DomElement* sel = dom_select_option_owner(elem);
             if (!sel || _select_is_dirty(sel)) return (Item){.item = b2it(false)};
             if (sel->has_attribute("multiple")) return (Item){.item = b2it(false)};
             int size = 0;
@@ -9969,7 +10199,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             // Walk options of sel; check none has selectedness; find first
             // non-disabled.
             Item arr = js_array_new(0);
-            _collect_options(sel->first_child, arr);
+            _collect_options(sel, arr);
             int64_t n = js_array_length(arr);
             int first_nd = -1;
             for (int64_t i = 0; i < n; i++) {
@@ -9987,7 +10217,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(_option_index_in_select(elem))};
         }
         if (prop_id == JS_DOM_PROP_FORM) {
-            DomElement* sel = _option_owner_select(elem);
+            DomElement* sel = dom_select_option_owner(elem);
             if (sel) {
                 // Walk up to find the form
                 for (DomNode* p = sel->parent; p; p = p->parent) {
@@ -10132,7 +10362,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_NO_VALIDATE && _is_tag(elem, "form")) {
         return (Item){.item = b2it(elem->has_attribute("novalidate"))};
     }
-    if (prop_id == JS_DOM_PROP_OPEN && _is_tag(elem, "details")) {
+    if (prop_id == JS_DOM_PROP_OPEN &&
+        (_is_tag(elem, "details") || dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))) {
         return (Item){.item = b2it(elem->has_attribute("open"))};
     }
     // name attribute (all listed form controls and form/fieldset)
@@ -10607,12 +10838,21 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
         return dom_document_proxy_set_property(prop_name, value);
     }
+    if (DomGaugeField gauge_field = dom_gauge_field(elem, prop)) {
+        bool positive = elem->tag() == MARKUP_NAME_PROGRESS && gauge_field == &HtmlGaugeValues::maximum;
+        return dom_set_gauge_field(elem_item, prop_name, value, positive);
+    }
     if (elem->tag_id == MARKUP_NAME_DIALOG && strcmp(prop, "returnValue") == 0) {
-        RootFrame roots(2);
+        RootFrame roots(3);
         Rooted<Item> target(roots, elem_item);
         Rooted<Item> original(roots, value);
-        Item converted = dom_dialog_set_return_value(elem, original.get());
-        return item_is_error(converted) ? converted : original.get();
+        Rooted<Item> converted(roots, js_to_string(original.get()));
+        if (item_is_error(converted.get())) return converted.get();
+        Item stored = dom_dialog_store_return_value(elem, converted.get());
+        return item_is_error(stored) ? stored : original.get();
+    }
+    if (prop_id == JS_DOM_PROP_OPEN && dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG)) {
+        return dom_core_toggle_attribute(elem_item, prop_name, Item{.item = b2it(js_is_truthy(value))});
     }
 
     if (const DomAriaElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
@@ -11125,7 +11365,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             bool dirty = dom_expando_flag_is(elem, "__optDirty");
             if (!dirty) {
                 _set_selectedness(elem, t);
-                DomElement* sel = _option_owner_select(elem);
+                DomElement* sel = dom_select_option_owner(elem);
                 if (sel) _select_ask_for_reset(sel);
             }
             return value;
@@ -11465,13 +11705,15 @@ static float dom_svg_number(Item value, float fallback) {
 }
 
 static RdtMatrix dom_svg_matrix_from_item(Item item) {
+    RootFrame roots(1);
+    Rooted<Item> object(roots, item);
     RdtMatrix matrix = rdt_matrix_identity();
-    matrix.e11 = dom_svg_number(dom_realm_get_cstr(item, "a"), 1.0f);
-    matrix.e21 = dom_svg_number(dom_realm_get_cstr(item, "b"), 0.0f);
-    matrix.e12 = dom_svg_number(dom_realm_get_cstr(item, "c"), 0.0f);
-    matrix.e22 = dom_svg_number(dom_realm_get_cstr(item, "d"), 1.0f);
-    matrix.e13 = dom_svg_number(dom_realm_get_cstr(item, "e"), 0.0f);
-    matrix.e23 = dom_svg_number(dom_realm_get_cstr(item, "f"), 0.0f);
+    matrix.e11 = dom_svg_number(dom_realm_get_cstr(object.get(), "a"), 1.0f);
+    matrix.e21 = dom_svg_number(dom_realm_get_cstr(object.get(), "b"), 0.0f);
+    matrix.e12 = dom_svg_number(dom_realm_get_cstr(object.get(), "c"), 0.0f);
+    matrix.e22 = dom_svg_number(dom_realm_get_cstr(object.get(), "d"), 1.0f);
+    matrix.e13 = dom_svg_number(dom_realm_get_cstr(object.get(), "e"), 0.0f);
+    matrix.e23 = dom_svg_number(dom_realm_get_cstr(object.get(), "f"), 0.0f);
     return matrix;
 }
 
@@ -11753,18 +11995,71 @@ extern "C" Item dom_point_constructor(Item x, Item y, Item z, Item w) {
     return result;
 }
 
-extern "C" Item dom_matrix_constructor(Item init) {
-    RdtMatrix matrix = rdt_matrix_identity();
-    if (get_type_id(init) == LMD_TYPE_ARRAY && js_array_length(init) >= 6) {
-        matrix.e11 = dom_svg_number(js_elements_get_int(init, 0), 1.0f);
-        matrix.e21 = dom_svg_number(js_elements_get_int(init, 1), 0.0f);
-        matrix.e12 = dom_svg_number(js_elements_get_int(init, 2), 0.0f);
-        matrix.e22 = dom_svg_number(js_elements_get_int(init, 3), 1.0f);
-        matrix.e13 = dom_svg_number(js_elements_get_int(init, 4), 0.0f);
-        matrix.e23 = dom_svg_number(js_elements_get_int(init, 5), 0.0f);
-    } else if (get_type_id(init) == LMD_TYPE_MAP) {
-        matrix = dom_svg_matrix_from_item(init);
+static const struct {
+    const char* coefficient;
+    const char* alias;
+} dom_matrix_2d_members[] = {
+    {"a", "m11"}, {"b", "m12"}, {"c", "m21"},
+    {"d", "m22"}, {"e", "m41"}, {"f", "m42"},
+};
+
+static Item dom_matrix_2d_alias(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
+    uint64_t index = js_fn_native((JsFunction*)callee.function)->target.bits;
+    const char* name = dom_matrix_2d_members[index].coefficient;
+    if (!argc) return dom_realm_get_name(receiver, name);
+    RootFrame roots(2);
+    Rooted<Item> target(roots, receiver);
+    Rooted<Item> value(roots, js_to_number(args[0]));
+    return item_is_error(value.get()) ? value.get() : dom_realm_set_name(target.get(), name, value.get());
+}
+
+static Item dom_matrix_2d_is_identity(void) {
+    RdtMatrix matrix = dom_svg_matrix_from_item(dom_realm_receiver());
+    bool identity = matrix.e11 == 1.0f && matrix.e22 == 1.0f &&
+        matrix.e12 == 0.0f && matrix.e21 == 0.0f && matrix.e13 == 0.0f && matrix.e23 == 0.0f;
+    return Item{.item = b2it(identity)};
+}
+
+static Item dom_matrix_2d_is_2d(void) { return Item{.item = b2it(true)}; }
+
+void dom_install_matrix_2d_members(Item prototype) {
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, prototype);
+    Rooted<Item> getter(roots, ItemNull);
+    Rooted<Item> setter(roots, ItemNull);
+    // Long coefficient names are writable aliases of the six affine entries.
+    for (size_t i = 0; i < sizeof(dom_matrix_2d_members) / sizeof(dom_matrix_2d_members[0]); i++) {
+        getter.set(js_new_native_payload_function(dom_matrix_2d_alias, i, 0));
+        setter.set(js_new_native_payload_function(dom_matrix_2d_alias, i, 1));
+        dom_realm_install_accessor(owner.get(), js_name_item(dom_matrix_2d_members[i].alias),
+            getter.get(), setter.get(), 0);
     }
+    getter.set(dom_realm_new_function(dom_matrix_2d_is_identity));
+    dom_realm_install_accessor(owner.get(), js_name_item("isIdentity"), getter.get(), ItemNull, 0);
+    getter.set(dom_realm_new_function(dom_matrix_2d_is_2d));
+    dom_realm_install_accessor(owner.get(), js_name_item("is2D"), getter.get(), ItemNull, 0);
+}
+
+Item dom_create_matrix_2d(const float* coefficients) {
+    RdtMatrix matrix = {coefficients[0], coefficients[2], coefficients[4],
+                        coefficients[1], coefficients[3], coefficients[5],
+                        0.0f, 0.0f, 1.0f};
+    return dom_svg_make_matrix_with_interface(matrix, "DOMMatrix");
+}
+
+extern "C" Item dom_matrix_constructor(Item init) {
+    if (get_type_id(init) == LMD_TYPE_ARRAY && js_array_length(init) >= 6) {
+        const float defaults[] = {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
+        RootFrame roots(1);
+        Rooted<Item> values(roots, init);
+        float coefficients[6];
+        for (int i = 0; i < 6; i++) {
+            coefficients[i] = dom_svg_number(js_elements_get_int(values.get(), i), defaults[i]);
+        }
+        return dom_create_matrix_2d(coefficients);
+    }
+    RdtMatrix matrix = get_type_id(init) == LMD_TYPE_MAP
+        ? dom_svg_matrix_from_item(init) : rdt_matrix_identity();
     return dom_svg_make_matrix_with_interface(matrix, "DOMMatrix");
 }
 
@@ -12749,7 +13044,7 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         log_error("dom_append_child_bridge: argument is not a DOM node");
         return ItemNull;
     }
-    if (dom_node_contains(child_node, (DomNode*)elem)) {
+    if (dom_shadow_including_contains(child_node, elem)) {
         // reject an ancestor before either tree can acquire a parent cycle.
         return dom_insertion_ancestor_error();
     }
@@ -12757,6 +13052,7 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         return dom_raise_named("HierarchyRequestError",
             "Document cannot have this child");
     }
+    DomScriptReactionScope script_reactions(elem->doc);
     if (child_node->is_element()) {
         DomElement* child_elem = child_node->as_element();
         if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
@@ -12820,13 +13116,14 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
         // keyed reconciler children and changes live-range behavior.
         return new_child_arg;
     }
-    if (dom_node_contains(new_child, parent_node)) {
+    if (dom_shadow_including_contains(new_child, parent_node)) {
         return dom_insertion_ancestor_error();
     }
     if (ref_child && ref_child->parent != parent_node) {
         log_error("dom_insert_before_bridge: reference node is not a child of target parent");
         return ItemNull;
     }
+    DomScriptReactionScope script_reactions(elem->doc);
     if (new_child->is_element()) {
         DomElement* new_elem = new_child->as_element();
         if (new_elem->tag_name && strcmp(new_elem->tag_name, "#document-fragment") == 0) {
@@ -12886,7 +13183,7 @@ extern "C" Item dom_remove_bridge(void* node_ptr) {
         DomNode* old_parent = node->parent;
         DomElement* owner_select = nullptr;
         if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_OPTION) {
-            owner_select = _option_owner_select(node->as_element());
+            owner_select = dom_select_option_owner(node->as_element());
         }
         // removal must notify live ranges before native sibling links change.
         dom_pre_remove(node);
@@ -13021,7 +13318,8 @@ static void dom_clone_content_attributes(DomElement* source, DomElement* clone) 
 
 static DomNode* dom_clone_node_into_document(DomNode* node,
                                               DomDocument* destination,
-                                              bool deep) {
+                                              bool deep,
+                                              bool (*include_child)(DomNode*) = nullptr) {
     if (!node || !destination) return nullptr;
     if (DomText* text = node->as_text()) {
         return DomText::create_detached_copy(destination, text->text, text->length);
@@ -13041,6 +13339,10 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
     DomElement* clone = dom_element_create(destination, elem->tag_name, _clean_elem.element);
     if (!clone) return nullptr;
     dom_clone_content_attributes(elem, clone);
+    // Script clones keep the preparation result and have no parser owner.
+    if (elem->ext && elem->ext->script_already_started) {
+        if (DomElementExt* state = clone->ensure_ext()) state->script_already_started = true;
+    }
     // CSSOM cloning preserves the declaration block, including names changed by serialization.
     if (CssRule* authored = dom_element_inline_declaration_block(elem))
         dom_element_commit_inline_declarations(clone, authored, elem->get_attribute("style"));
@@ -13049,12 +13351,34 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
     clone->tag_id = elem->tag_id;
     if (deep) {
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            DomNode* cloned_child = dom_clone_node_into_document(child, destination, true);
+            if (include_child && !include_child(child)) continue;
+            DomNode* cloned_child = dom_clone_node_into_document(child, destination, true, include_child);
             // keep comment, text and element order through the shared backed insertion path.
             if (!cloned_child || !dom_append_backed_child(clone, cloned_child, false)) return nullptr;
         }
     }
     return clone;
+}
+
+static bool dom_is_selected_content(DomElement* element) {
+    return element && !strcmp(element->local_name(), "selectedcontent") &&
+        !strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml");
+}
+
+static bool dom_selected_content_include_child(DomNode* node) {
+    if (dom_is_generated_pseudo_node(node)) return false;
+    DomElement* element = node->as_element();
+    if (!element) return true;
+    NameId tag = element->tag();
+    switch (tag) {
+        case MARKUP_NAME_SCRIPT:
+            return !dom_element_is_html_tag(element, tag) && !dom_element_is_svg(element);
+        case MARKUP_NAME_FRAME: case MARKUP_NAME_IFRAME:
+        case MARKUP_NAME_EMBED: case MARKUP_NAME_OBJECT:
+            return !dom_element_is_html_tag(element, tag);
+        default:
+            return true;
+    }
 }
 
 extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
@@ -13109,9 +13433,10 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
         dom_pre_remove(old_child);
         return old_child_arg;
     }
-    if (dom_node_contains(new_child, (DomNode*)elem)) {
+    if (dom_shadow_including_contains(new_child, elem)) {
         return dom_insertion_ancestor_error();
     }
+    DomScriptReactionScope script_reactions(elem->doc);
     if (new_child->is_element() &&
         dom_is_document_fragment_element(new_child->as_element())) {
         // DOM Standard replace inserts a fragment's children at the old
@@ -13301,6 +13626,7 @@ static Item dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
         mem_free(insertion_args);
         return status;
     }
+    DomScriptReactionScope script_reactions(parent->doc);
 
     // Web IDL converts every non-Node argument before changing the tree.  In
     // particular, a later throwing ToString must not leave earlier arguments
@@ -13489,11 +13815,15 @@ static Item dom_insert_adjacent_text_bridge(DomElement* elem, Item position_arg,
 extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return (Item){.item = ITEM_JS_UNDEFINED};
+    RootSpan converted((size_t)argc);
+    JS_RETURN_IF_ERROR(dom_convert_node_arguments(args, argc, &converted));
+    args = converted.items();
+    DomScriptReactionScope script_reactions(elem->doc);
     bool pending_node_notification = false;
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
-            if (dom_node_contains(child_node, (DomNode*)elem)) {
+            if (dom_shadow_including_contains(child_node, elem)) {
                 return dom_insertion_ancestor_error();
             }
             if (child_node->is_element()) {
@@ -13546,6 +13876,7 @@ static Item dom_replace_children(Item parent_item, Item* args, int argc) {
     JS_RETURN_IF_ERROR(status);
     DomElement* parent = (DomElement*)dom_unwrap_element(parent_root.get());
     if (!parent || !parent->doc) return make_js_undefined();
+    DomScriptReactionScope script_reactions(parent->doc);
     DomNode* insertion = argc == 1 ? (DomNode*)dom_unwrap_element(converted.items()[0]) : nullptr;
     bool is_fragment = insertion && insertion->is_element() &&
         dom_is_document_fragment_element(insertion->as_element());
@@ -13557,7 +13888,7 @@ static Item dom_replace_children(Item parent_item, Item* args, int argc) {
         insertion = (DomNode*)dom_unwrap_element(fragment_root.get());
         is_fragment = true;
     }
-    if (dom_node_contains(insertion, parent)) return dom_insertion_ancestor_error();
+    if (dom_shadow_including_contains(insertion, parent)) return dom_insertion_ancestor_error();
     bool document = parent == parent->doc->js.doc_node;
     int elements = 0, doctypes = 0;
     for (DomNode* child = is_fragment ? insertion->as_element()->first_child.get() : insertion;
@@ -13603,15 +13934,136 @@ static Item dom_replace_children(Item parent_item, Item* args, int argc) {
     return make_js_undefined();
 }
 
+static void dom_replace_selected_content(DomElement* target, DomElement* option) {
+    // Build the complete snapshot off-tree before publishing a child replacement.
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, dom_wrap_element(target));
+    Rooted<Item> fragment_root(roots, dom_create_document_fragment(target->doc));
+    DomElement* fragment = (DomElement*)dom_unwrap_element(fragment_root.get());
+    if (!fragment) return;
+    for (DomNode* child = option ? option->first_child.get() : nullptr; child; child = child->next_sibling) {
+        if (!dom_selected_content_include_child(child)) continue;
+        DomNode* clone = dom_clone_node_into_document(child, target->doc, true,
+                                                     dom_selected_content_include_child);
+        if (!clone || !dom_append_backed_child(fragment, clone, false)) {
+            log_error("selectedcontent: could not clone selected option children");
+            return;
+        }
+    }
+    Item argument = fragment_root.get();
+    if (item_is_error(dom_replace_children(target_root.get(), &argument, 1)))
+        log_error("selectedcontent: could not replace mirrored children");
+}
+
+static bool dom_selected_content_stops_at(DomElement* element) {
+    if (!element) return false;
+    NameId tag = element->tag();
+    return (tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_OPTION || tag == MARKUP_NAME_TEMPLATE) &&
+        dom_element_is_html_tag(element, tag);
+}
+
+static DomElement* dom_next_selected_content(DomElement* select, DomElement* previous) {
+    DomNode* node = previous ? dom_next_after_subtree(select, previous) : select->first_child.get();
+    while (node) {
+        DomElement* element = node->as_element();
+        if (dom_is_selected_content(element)) return element;
+        node = element && !dom_selected_content_stops_at(element) && element->first_child
+            ? element->first_child.get() : dom_next_after_subtree(select, node);
+    }
+    return nullptr;
+}
+
+static void dom_update_selected_content(DomElement* select, bool initialize) {
+    if (!dom_realm_active() || !select || !select->doc) return;
+    if (select->ext) {
+        select->ext->selected_content_pending = false;
+        select->ext->selected_content_reset_pending = false;
+    }
+    if (select->has_attribute("multiple")) return;
+    for (DomNode* ancestor = select->parent; ancestor; ancestor = ancestor->parent) {
+        if (dom_selected_content_stops_at(ancestor->as_element()) ||
+            dom_is_selected_content(ancestor->as_element())) return;
+    }
+    DomElement* mirror = dom_next_selected_content(select, nullptr);
+    if (!mirror) return;
+    if (initialize) _select_normalize_native(select);
+    int64_t seen = 0;
+    DomElement* selected = dom_find_select_option(select, true, 0, &seen);
+    for (; mirror; mirror = dom_next_selected_content(select, mirror)) {
+        if (selected || mirror->first_child) dom_replace_selected_content(mirror, selected);
+    }
+}
+
+static Item dom_deliver_selected_content(Item env_item) {
+    JS_ENV_UNPACK(env, env_item);
+    DomElement* select = (DomElement*)dom_unwrap_element(env[0]);
+    if (!select || !select->ext || !select->ext->selected_content_pending) return ItemNull;
+    bool reset = select->ext->selected_content_reset_pending;
+    select->ext->selected_content_pending = false;
+    select->ext->selected_content_reset_pending = false;
+    if (dom_node_is_connected(select)) {
+        if (reset) _select_ask_for_reset(select);
+        else dom_update_selected_content(select, true);
+    }
+    return ItemNull;
+}
+
+static void dom_queue_selected_content(DomElement* select, bool reset) {
+    if (!select || select->has_attribute("multiple") || !dom_next_selected_content(select, nullptr)) return;
+    DomElementExt* state = select->ensure_ext();
+    if (!state) return;
+    state->selected_content_reset_pending |= reset;
+    if (state->selected_content_pending) return;
+    state->selected_content_pending = true;
+    Item values[] = {dom_wrap_element(select)};
+    js_schedule_native_env(dom_schedule_microtask, dom_deliver_selected_content, 0, values, 1);
+}
+
+static void dom_note_selected_content_mutation(DomNode* root, bool inserting) {
+    if (!root || !root->is_element() || !dom_realm_active()) return;
+    for (DomNode* ancestor = root->parent; ancestor; ancestor = ancestor->parent) {
+        DomElement* element = ancestor->as_element();
+        // Changes to the snapshot or an option's own contents do not refresh it.
+        if (dom_is_selected_content(element) || dom_element_is_html_tag(element, MARKUP_NAME_OPTION))
+            return;
+    }
+    for (DomNode* node = root; node;) {
+        DomElement* element = node->as_element();
+        bool option = dom_element_is_html_tag(element, MARKUP_NAME_OPTION);
+        bool mirror = dom_is_selected_content(element);
+        if (option) dom_queue_selected_content(dom_select_option_owner(element), true);
+        if (mirror && inserting) dom_queue_selected_content(_nearest_select_for_node(node), false);
+        bool descend = element && !option && !mirror && !dom_element_is_html_tag(element, MARKUP_NAME_TEMPLATE);
+        node = descend && element->first_child ? element->first_child.get()
+            : dom_next_after_subtree(root, node);
+    }
+}
+
+static void dom_initialize_selected_content(DomDocument* doc) {
+    if (!doc || !doc->root || doc->js.selected_content_initialized) return;
+    doc->js.selected_content_initialized = true;
+    DomNode* root = doc->root;
+    for (DomNode* node = root; node;) {
+        DomElement* element = node->as_element();
+        if (dom_element_is_html_tag(element, MARKUP_NAME_SELECT)) dom_update_selected_content(element, true);
+        node = element && !dom_selected_content_stops_at(element) && element->first_child
+            ? element->first_child.get() : dom_next_after_subtree(root, node);
+    }
+}
+
 extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return (Item){.item = ITEM_JS_UNDEFINED};
+    RootSpan converted((size_t)argc);
+    JS_RETURN_IF_ERROR(dom_convert_node_arguments(args, argc, &converted));
+    args = converted.items();
+    DomScriptReactionScope script_reactions(elem->doc);
     DomNode* ref = elem->first_child;
     bool pending_node_notification = false;
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
-            if (dom_node_contains(child_node, (DomNode*)elem)) {
+            if (dom_shadow_including_contains(child_node, elem)) {
                 return dom_insertion_ancestor_error();
             }
             if (child_node->is_element() &&
@@ -14345,44 +14797,102 @@ extern "C" Item dom_core_insert_adjacent_text(Item n, Item where, Item text) {
 // both doors apply the same guard rather than each door applying its own.
 // ---------------------------------------------------------------------------
 
-// attachShadow(init) -> lightweight DocumentFragment-backed ShadowRoot.
-// Radiant does not render a full shadow tree yet, but WPT focus/editing tests
-// need a stable root object that supports appendChild/activeElement while the
-// light DOM stays addressable.
+// The fragment owns the shadow DOM without changing its source parentage.
 extern "C" Item dom_core_attach_shadow(Item n, Item init) {
-    // D6.3.3: wrapper decoration allocates; keep the root and its borrowed mode string alive.
-    RootFrame roots(5);
-    Rooted<Item> receiver_root(roots, n), init_root(roots, init), mode_root(roots, ItemNull),
-        shadow_root(roots, ItemNull), expando_root(roots, ItemNull);
+    RootFrame roots(3);
+    Rooted<Item> receiver_root(roots, n), init_root(roots, init), mode_root(roots, ItemNull);
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
-    const char* mode = "open";
-    bool delegates_focus = false;
-    if (get_type_id(init_root.get()) == LMD_TYPE_MAP) {
-        mode_root.set(dom_realm_get_cstr(init_root.get(), "mode"));
-        const char* mode_text = fn_to_cstr(mode_root.get());
-        if (mode_text && mode_text[0]) mode = mode_text;
-        delegates_focus = js_is_truthy(dom_realm_get_cstr(init_root.get(), "delegatesFocus"));
-    }
+    Item delegates_focus = dom_optional_dictionary_boolean(init_root.get(), "delegatesFocus");
+    if (item_is_error(delegates_focus)) return delegates_focus;
+    mode_root.set(dom_realm_get_cstr(init_root.get(), "mode"));
+    if (item_is_error(mode_root.get())) return mode_root.get();
+    mode_root.set(js_to_string(mode_root.get()));
+    if (item_is_error(mode_root.get())) return mode_root.get();
+    const char* mode = fn_to_cstr(mode_root.get());
+    bool closed = mode && strcmp(mode, "closed") == 0;
+    if (!closed && (!mode || strcmp(mode, "open") != 0))
+        return dom_raise_type_error("ShadowRoot mode must be open or closed");
+    if (elem->shadow_root_element())
+        return dom_raise_exception("NotSupportedError", "Element already has a shadow root");
 
     MarkBuilder builder(elem->doc ? elem->doc->input : nullptr);
     Item frag_item = builder.element("#document-fragment").final();
     DomElement* frag = dom_element_create(elem->doc, "#document-fragment", frag_item.element);
+    DomElementExt* state = frag ? frag->ensure_ext() : nullptr;
+    if (!state) return ItemError;
+    state->shadow_closed = closed;
+    state->shadow_delegates_focus = js_is_truthy(delegates_focus);
     frag->set_shadow_host_element(elem);
     elem->set_shadow_root_element(frag);
-    shadow_root.set(dom_wrap_element(frag));
+    if (elem->doc) elem->doc->js.has_shadow_roots = true;
 
-    dom_realm_set_cstr(shadow_root.get(), "host", receiver_root.get());
-    dom_realm_set_cstr(shadow_root.get(), "mode", js_name_item(mode));
-    dom_realm_set_cstr(shadow_root.get(), "delegatesFocus", (Item){.item = b2it(delegates_focus)});
+    // Attaching even an empty shadow root replaces the rendered light children.
+    dom_mutation_notify(DOM_JS_MUTATION_STYLE, elem, elem->parent);
+    return dom_wrap_element(frag);
+}
 
-    expando_root.set(expando_get_or_create_map((DomNode*)elem));
-    if (expando_root.get().item != ITEM_NULL) {
-        Item visible_root = (str_icmp_cstr(mode, "closed") == 0) ? ItemNull : shadow_root.get();
-        dom_realm_set_cstr(expando_root.get(), "shadowRoot", visible_root);
-        dom_realm_set_cstr(expando_root.get(), "__shadowRootInternal", shadow_root.get());
+Item dom_read_shadow_property(Item receiver, DomShadowProperty property) {
+    DomNode* node = (DomNode*)dom_unwrap_element(receiver);
+    DomElement* element = node ? node->as_element() : nullptr;
+    if (property == DomShadowProperty::root) {
+        if (!element || !dom_is_element(receiver)) return dom_raise_type_error("Element receiver required");
+        DomElement* shadow = element->shadow_root_element();
+        return shadow && !shadow->ext->shadow_closed ? dom_wrap_element(shadow) : ItemNull;
     }
-    return shadow_root.get();
+    if (property == DomShadowProperty::assigned_element_slot || property == DomShadowProperty::assigned_text_slot) {
+        bool text_receiver = property == DomShadowProperty::assigned_text_slot;
+        if (text_receiver ? !node || !node->is_text() : !element || !dom_is_element(receiver))
+            return dom_raise_type_error(text_receiver ? "Text receiver required" : "Element receiver required");
+        DomElement* slot = dom_find_assigned_slot(node);
+        DomElement* shadow = dom_shadow_root(slot);
+        return shadow && !shadow->ext->shadow_closed ? dom_wrap_element(slot) : ItemNull;
+    }
+    DomElement* host = element ? element->shadow_host_element() : nullptr;
+    if (!host) return dom_raise_type_error("ShadowRoot receiver required");
+    if (property == DomShadowProperty::host) return dom_wrap_element(host);
+    if (property == DomShadowProperty::mode) return js_name_item(element->ext->shadow_closed ? "closed" : "open");
+    if (property == DomShadowProperty::style_sheets) return dom_cssom_get_shadow_stylesheets(receiver);
+    return (Item){.item = b2it(element->ext->shadow_delegates_focus)};
+}
+
+static Item dom_collect_slot_nodes(DomElement* slot, bool flatten, bool elements_only, Item result) {
+    DomElement* host = dom_slot_assignment_host(slot);
+    bool assigned = false;
+    RootFrame roots(1);
+    Rooted<Item> entry(roots, ItemNull);
+    // An empty assignment falls back to the slot's source children for flattening only.
+    DomElement* sources[] = {host, slot};
+    for (DomElement* source : sources) {
+        bool use_fallback = source == slot;
+        if (!source || (use_fallback && (assigned || !flatten))) continue;
+        for (DomNode* child = dom_source_child(source, true); child;
+             child = dom_source_sibling(child, true)) {
+            if (!(use_fallback ? dom_node_is_slottable(child) : dom_slot_assignment_matches(slot, child))) continue;
+            assigned = true;
+            DomElement* element = child->as_element();
+            if (flatten && dom_element_is_html_tag(element, MARKUP_NAME_SLOT) && dom_shadow_root(child)) {
+                JS_RETURN_IF_ERROR(dom_collect_slot_nodes(element, true, elements_only, result));
+            } else if (!elements_only || element) {
+                entry.set(dom_wrap_element(child));
+                JS_RETURN_IF_ERROR(js_array_push(result, entry.get()));
+            }
+        }
+    }
+    return result;
+}
+
+Item dom_slot_assigned_nodes(Item receiver, Item options, bool elements_only) {
+    RootFrame roots(3);
+    Rooted<Item> node(roots, receiver), dictionary(roots, options), result(roots, ItemNull);
+    DomElement* slot = dom_op_element(node.get());
+    if (!dom_element_is_html_tag(slot, MARKUP_NAME_SLOT))
+        return dom_raise_type_error("HTMLSlotElement receiver required");
+    Item flatten = dom_optional_dictionary_boolean(dictionary.get(), "flatten");
+    if (item_is_error(flatten)) return flatten;
+    result.set(js_array_new(0));
+    if (!dom_shadow_root(slot)) return result.get();
+    return dom_collect_slot_nodes(slot, js_is_truthy(flatten), elements_only, result.get());
 }
 
 // compareDocumentPosition(other) -> bitmask per DOM §4.4. This was implemented
@@ -14421,16 +14931,24 @@ extern "C" Item dom_core_compare_document_position(Item n, Item other_item) {
     return (Item){.item = i2it(2)}; // other precedes
 }
 
-extern "C" Item dom_core_show_modal(Item n) {
+static Item dom_open_dialog(Item n, bool modal) {
     DomElement* elem = dom_op_element(n);
-    if (elem && elem->tag_id == MARKUP_NAME_DIALOG) {
-        // showModal opens the dialog and establishes modal top-layer state
-        elem->set_dialog_modal(true);
-        elem->set_attribute("open", "");
-        dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+    if (!dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))
+        return dom_raise_type_error("HTMLDialogElement receiver required");
+    if (elem->has_attribute("open")) {
+        if (elem->is_dialog_modal() == modal) return make_js_undefined();
+        return dom_raise_exception("InvalidStateError", "Dialog is already open in a different mode");
     }
+    if (modal && (!dom_node_is_connected(elem) || elem->is_popover_open()))
+        return dom_raise_exception("InvalidStateError", "Dialog cannot enter modal state");
+    if (!elem->set_attribute("open", "")) return ItemError;
+    elem->set_dialog_modal(modal);
+    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent, "open");
     return make_js_undefined();
 }
+
+extern "C" Item dom_core_show_dialog(Item n) { return dom_open_dialog(n, false); }
+extern "C" Item dom_core_show_modal(Item n) { return dom_open_dialog(n, true); }
 
 static Item dom_dispatch_dialog_close(Item env_item) {
     JS_ENV_UNPACK(env, env_item);
@@ -14440,24 +14958,58 @@ static Item dom_dispatch_dialog_close(Item env_item) {
     return dom_dispatch_event(target.get(), event.get());
 }
 
-extern "C" Item dom_core_close_dialog(Item n, Item value) {
-    DomElement* elem = dom_op_element(n);
-    if (!elem || elem->tag_id != MARKUP_NAME_DIALOG || !elem->has_attribute("open"))
-        return make_js_undefined();
-    RootFrame roots(2);
-    Rooted<Item> target(roots, n);
-    Rooted<Item> returned(roots, value);
-    if (!is_js_undefined(returned.get())) {
-        returned.set(dom_dialog_set_return_value(elem, returned.get()));
-        if (item_is_error(returned.get())) return returned.get();
+static Item dom_dialog_close_open(DomElement* elem, Item target, Item returned) {
+    if (!elem->has_attribute("open")) return make_js_undefined();
+    if (!is_js_undefined(returned)) {
+        Item stored = dom_dialog_store_return_value(elem, returned);
+        if (item_is_error(stored)) return stored;
     }
     // close changes modal state synchronously; its notification is a later task.
+    const char* open_value = elem->get_attribute("open");
     elem->set_dialog_modal(false);
     elem->remove_attribute("open");
-    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
-    Item values[] = {target.get()};
+    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent, "open", open_value);
+    Item values[] = {target};
     js_schedule_native_env(dom_schedule_task, dom_dispatch_dialog_close, 0, values, 1);
     return make_js_undefined();
+}
+
+extern "C" Item dom_core_close_dialog(Item n, Item value) {
+    DomElement* elem = dom_op_element(n);
+    if (!dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))
+        return dom_raise_type_error("HTMLDialogElement receiver required");
+    RootFrame roots(2);
+    Rooted<Item> target(roots, n), returned(roots, value);
+    if (!is_js_undefined(returned.get())) returned.set(js_to_string(returned.get()));
+    if (item_is_error(returned.get())) return returned.get();
+    return dom_dialog_close_open(elem, target.get(), returned.get());
+}
+
+extern "C" Item dom_core_request_close_dialog(Item receiver, Item value) {
+    DomElement* elem = dom_op_element(receiver);
+    if (!dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))
+        return dom_raise_type_error("HTMLDialogElement receiver required");
+    RootFrame roots(3);
+    Rooted<Item> target(roots, receiver), returned(roots, value), event(roots, ItemNull);
+    if (!is_js_undefined(returned.get())) returned.set(js_to_string(returned.get()));
+    if (item_is_error(returned.get())) return returned.get();
+    DomDocument* doc = elem->doc;
+    if (!elem->has_attribute("open") || !dom_node_is_connected(elem) ||
+        !dom_doc_has_browsing_context(doc)) return make_js_undefined();
+    DomElementExt* state = elem->ensure_ext();
+    if (!state) return ItemError;
+    if (state->dialog_cancel_dispatching) return make_js_undefined();
+
+    event.set(js_create_native_event("cancel", false, true));
+    if (item_is_error(event.get())) return event.get();
+    state->dialog_cancel_dispatching = true;
+    Item outcome = dom_dispatch_event(target.get(), event.get());
+    bool same_request = state->dialog_cancel_dispatching;
+    state->dialog_cancel_dispatching = false;
+    if (item_is_error(outcome)) return outcome;
+    if (outcome.item == ITEM_FALSE || !same_request || elem->doc != doc ||
+        !dom_node_is_connected(elem)) return make_js_undefined();
+    return dom_dialog_close_open(elem, target.get(), returned.get());
 }
 
 extern "C" Item dom_core_focus(Item n, Item options) {
@@ -14513,7 +15065,7 @@ extern "C" Item dom_core_select_named_item(Item n, Item name_item) {
     const char* name = fn_to_cstr(name_item);
     if (!name || !*name) return ItemNull;
     Item arr = js_array_new(0);
-    _collect_options(elem->first_child, arr);
+    _collect_options(elem, arr);
     int64_t count = js_array_length(arr);
     for (int64_t i = 0; i < count; i++) {
         Item item = js_elements_get_int(arr, i);
@@ -14552,7 +15104,7 @@ extern "C" Item dom_core_select_add(Item n, Item new_item, Item before_item) {
             int idx = _select_index_from_item(before_item);
             if (idx >= 0) {
                 Item arr = js_array_new(0);
-                _collect_options(elem->first_child, arr);
+                _collect_options(elem, arr);
                 if (idx < js_array_length(arr)) {
                     before_elem = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, idx));
                     append_at_end = false;
@@ -14635,7 +15187,7 @@ extern "C" Item dom_core_remove_node(Item n, Item index) {
     }
     if (idx < 0) return ItemNull;
     Item arr = js_array_new(0);
-    _collect_options(elem->first_child, arr);
+    _collect_options(elem, arr);
     if (idx >= js_array_length(arr)) return ItemNull;
     DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, idx));
     if (!opt || !opt->parent) return ItemNull;
@@ -14670,6 +15222,10 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     if (operation == JUBE_DOM_CONTAINS) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         return dom_core_contains_op(elem_item, args[0]);
+    }
+
+    if (operation == JUBE_DOM_GET_ROOT_NODE) {
+        return dom_core_get_root_node(elem_item, argc > 0 ? args[0] : ItemNull);
     }
 
     // Structural equality is a Node operation, so it must remain available to

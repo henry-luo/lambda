@@ -380,6 +380,7 @@ typedef struct JsScriptTask {
     JsScriptCompilePolicy compile_policy;
     JsScriptTaskStatus status;
     Element* script_element;
+    DomElement* inline_script; // bound by an in-flight DOM preparation reaction.
     char* type_attr;
     char* src_attr;
     char* resolved_url;
@@ -1724,7 +1725,7 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
                                             const char* source, size_t source_len,
                                             const char* filename, bool refresh_snapshot,
                                             uint64_t* result_home) {
-    if (!runtime || !preamble) return ItemError;
+    if (!runtime || (!preamble && !runtime->js_ast_backend && !js_ast_interpreter_forced())) return ItemError;
     if (!source) {
         source = "";
         source_len = 0;
@@ -1872,13 +1873,24 @@ static bool execute_browser_global_sync(Runtime* runtime, JsPreambleState* pream
     return true;
 }
 
-static bool script_scheduler_enqueue(JsScriptTaskCollection* collection,
+static DomElement* script_task_element(DomDocument* document, JsScriptTask* task) {
+    if (!task) return nullptr;
+    if (task->inline_script) return task->inline_script;
+    return document ? dom_find_element_for_source(document->root, task->script_element) : nullptr;
+}
+
+static bool script_scheduler_enqueue(DomDocument* document, JsScriptTaskCollection* collection,
                                      JsScriptSchedulerQueues* queues) {
     if (!collection || !queues) return false;
 
     for (int i = 0; i < collection->scripts->length; i++) {
         JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
-        if (!script_task_is_executable(task) && !script_task_has_load_failure(task)) continue;
+        bool scheduled = script_task_is_executable(task) || script_task_has_load_failure(task);
+        DomElement* element = script_task_element(document, task);
+        if (dom_element_is_html_tag(element, MARKUP_NAME_SCRIPT) && (scheduled || element->ext)) {
+            if (DomElementExt* state = element->ensure_ext()) state->script_parser_pending = scheduled;
+        }
+        if (!scheduled) continue;
 
         ArrayList* queue = nullptr;
         if (task->scheduling == JS_SCRIPT_SCHED_ASYNC) {
@@ -1899,11 +1911,10 @@ class DocumentCurrentScriptScope {
 public:
     DocumentCurrentScriptScope(Runtime* runtime, JsScriptTask* task)
         : roots(2), pending_head(roots, ItemNull), moving_child(roots, ItemNull), document(nullptr), previous(nullptr),
-          previous_cursor(nullptr), head(nullptr), active(false), ready(true) {
+          previous_cursor(nullptr), head(nullptr), active(false), parser_inserted(false), ready(true) {
         if (!runtime || !task || task->kind != JS_SCRIPT_TASK_CLASSIC) return;
         DomDocument* doc = (DomDocument*)runtime->dom_doc;
-        DomElement* script = doc
-            ? dom_find_element_for_source(doc->root, task->script_element) : nullptr;
+        DomElement* script = script_task_element(doc, task);
         if (!doc || !script) return;
         document = doc;
         if (task->parser_inserted && task->scheduling == JS_SCRIPT_SCHED_POST_DOM &&
@@ -1922,16 +1933,17 @@ public:
                 }
             }
         }
-        previous = dom_document_swap_current_script(document, script);
+        previous = dom_document_swap_current_script(document, dom_shadow_root(script) ? nullptr : script);
         previous_cursor = doc->js.write_cursor;
-        doc->js.write_cursor = script;
+        parser_inserted = task->parser_inserted;
+        if (parser_inserted) doc->js.write_cursor = script;
         active = true;
     }
 
     ~DocumentCurrentScriptScope() {
         if (active) {
             dom_document_swap_current_script(document, previous);
-            if (!previous) ((DomDocument*)document)->js.write_cursor = previous_cursor;
+            if (parser_inserted && !previous) ((DomDocument*)document)->js.write_cursor = previous_cursor;
         }
         if (head && pending_head.get().item != ItemNull.item) {
             DomElement* fragment = (DomElement*)dom_unwrap_element(pending_head.get());
@@ -1956,16 +1968,73 @@ private:
     DomNode* previous_cursor;
     DomElement* head;
     bool active;
+    bool parser_inserted;
     bool ready;
 };
 
 static void script_task_report_load_failure(Runtime* runtime, JsScriptTask* task,
         const char* filename) {
     DomDocument* doc = (DomDocument*)runtime->dom_doc;
-    DomElement* element = doc
-        ? dom_find_element_for_source(doc->root, task->script_element) : NULL;
+    DomElement* element = script_task_element(doc, task);
     dom_dispatch_resource_event(element, "error");
     log_error("script_runner: script source load failed: %s", filename);
+}
+
+static Item execute_classic_script_task(Runtime* runtime, JsPreambleState* preamble,
+                                       JsScriptTask* task, const char* filename, uint64_t* result_home) {
+    return execute_js_source_with_preamble(runtime, preamble, task->source, task->source_len,
+                                          filename, true, result_home);
+}
+
+static void prepare_connected_inline_script(DomElement* script, StrBuf** source_owner) {
+    DomDocument* document = script->doc;
+    if (!document || document->scripting_disabled || !dom_node_is_connected(script) ||
+        dom_element_attribute_value_ns(script, "", "src")) return;
+    DomElementExt* state = script->ensure_ext();
+    if (!state || state->script_parser_pending || state->script_already_started) return;
+    const char* type = dom_element_attribute_value_ns(script, "", "type");
+    char legacy_type[64];
+    if (!type) {
+        const char* language = dom_element_attribute_value_ns(script, "", "language");
+        if (language && *language) {
+            snprintf(legacy_type, sizeof(legacy_type), "text/%s", language);
+            type = legacy_type;
+        }
+    }
+    if (!is_supported_classic_script_type(type)) return;
+
+    Runtime* runtime = document->js.runtime;
+    if (!runtime && context && context->runtime && context->runtime->dom_doc == document)
+        runtime = context->runtime;
+    if (!runtime || !context || context->runtime != runtime) return;
+    auto* preamble = (JsPreambleState*)(document->js.preparing_script_preamble
+        ? document->js.preparing_script_preamble : document->js.preamble_state);
+
+    StrBuf* source = strbuf_new_cap(256);
+    if (!source) return;
+    // The reaction owns the source even when watchdog recovery interrupts evaluation.
+    *source_owner = source;
+    for (DomNode* child = dom_source_child(script, true); child; child = dom_source_sibling(child, true)) {
+        DomText* text = child->as_text();
+        if (text && text->text && text->length > 0) strbuf_append_str_n(source, text->text, text->length);
+    }
+    if (!source->length) return;
+    state->script_already_started = true;
+    if (script_runner_module_scripts_enabled() && dom_element_attribute_value_ns(script, "", "nomodule")) return;
+    append_classic_script_window_function_exports(source->str, source);
+    JsScriptTask task = {};
+    task.kind = JS_SCRIPT_TASK_CLASSIC;
+    task.inline_script = script;
+    task.source_len = source->length;
+    task.source = source->str;
+
+    static const char filename[] = "<dynamic-inline-script>";
+    DocumentCurrentScriptScope current_script(runtime, &task);
+    if (!current_script.valid()) return;
+    uint64_t result_home = 0;
+    Item result = execute_classic_script_task(runtime, preamble, &task, filename, &result_home);
+    script_runner_report_result(result, "dynamic inline", filename);
+    // The enclosing host task owns the microtask checkpoint.
 }
 
 static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
@@ -1979,6 +2048,13 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
     for (int i = 0; i < queue->length; i++) {
         if (item_is_error(js_execution_interrupt_status())) return false;
         JsScriptTask* task = (JsScriptTask*)arraylist_get(queue, i);
+        DomElement* script = script_task_element((DomDocument*)runtime->dom_doc, task);
+        if (dom_element_is_html_tag(script, MARKUP_NAME_SCRIPT)) {
+            if (DomElementExt* state = script->ensure_ext()) {
+                state->script_parser_pending = false;
+                state->script_already_started = task->external || task->source_len > 0;
+            }
+        }
         if (script_task_has_load_failure(task)) {
             char filename_buf[64];
             script_task_report_load_failure(runtime, task,
@@ -2044,9 +2120,7 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
             result = execute_js_module_source(
                 runtime, source, task->source_len, filename);
         } else {
-            result = execute_js_source_with_preamble(
-                runtime, preamble, source, task->source_len, filename,
-                true, &result_home);
+            result = execute_classic_script_task(runtime, preamble, task, filename, &result_home);
         }
 #ifndef NDEBUG
         if (timing_enabled) {
@@ -2114,7 +2188,7 @@ static void execute_document_written_scripts(void* context, DomElement* element)
     load_external_script_sources(&written, doc->resource_manager, nullptr);
     JsScriptSchedulerQueues queues;
     if (script_scheduler_queues_init(&queues)) {
-        if (script_scheduler_enqueue(&written, &queues)) {
+        if (script_scheduler_enqueue(doc, &written, &queues)) {
             execute_script_task_queue(writer->runtime, queues.post_dom, writer->preamble,
                 "document-write", writer->collection);
             // scheduled written scripts share the document's lifecycle queues and source owner.
@@ -2337,7 +2411,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         log_error("execute_document_scripts: failed to initialize scheduler queues");
         return ItemError;
     }
-    if (!script_scheduler_enqueue(collection, &queues)) {
+    if (!script_scheduler_enqueue(executing_document, collection, &queues)) {
         script_scheduler_queues_free(&queues);
         log_error("execute_document_scripts: failed to build scheduler queues");
         return ItemError;
@@ -2347,6 +2421,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     DocumentWriteScripts writer = {runtime, preamble, collection, &queues};
     executing_document->js.write_script_subtree = execute_document_written_scripts;
     executing_document->js.write_script_context = &writer;
+    executing_document->js.preparing_script_preamble = preamble;
+    executing_document->js.prepare_inline_script = prepare_connected_inline_script;
 
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_script_task_queue(
@@ -2689,6 +2765,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 #ifndef _WIN32
 	    } else {
 	        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
+	        dom_doc->js.prepare_inline_script = nullptr;
+	        dom_doc->js.preparing_script_preamble = nullptr;
+	        dom_clear_script_reactions(dom_doc);
 	        log_error("execute_document_scripts: recovered from crash in JS JIT code");
 	        result = ItemError;
 	        // recovered JS crashes can leave timer/runtime state inconsistent; let
@@ -2802,6 +2881,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     }
 #endif
     js_set_document_source_load_observer(NULL);
+    dom_doc->js.preparing_script_preamble = nullptr;
     if (timing) timing->event_loop_us += time_now_us() - phase_start_us;
 
     if (script_state_batch) {
@@ -3140,6 +3220,9 @@ static Runtime* script_runner_cleanup_js_state_impl(DomDocument* dom_doc, bool d
         log_error("script-runner: document runtime is pinned for retirement");
         return nullptr;
     }
+    dom_doc->js.prepare_inline_script = nullptr;
+    dom_doc->js.preparing_script_preamble = nullptr;
+    dom_clear_script_reactions(dom_doc);
     if (runtime && runtime != dom_doc->lambda_runtime) {
         // native callback roots must unregister before their evaluator and code retire (D6.3.3).
         dom_document_release_runtime_resources(dom_doc,

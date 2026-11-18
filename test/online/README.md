@@ -95,6 +95,8 @@ node --test test/online/render_positioned_order.test.cjs
 node --test test/online/render_video_percentage.test.cjs
 node --test test/online/render_video_first_frame.test.cjs
 node --test test/online/render_canvas_transform.test.cjs
+node --test test/online/render_html_controls.test.cjs
+node --test test/online/render_html_scripts.test.cjs
 node --test test/online/render_console_groups.test.cjs
 node --test test/online/render_svg_percentage_intrinsics.test.cjs
 node --test test/online/render_svg_comment.test.cjs

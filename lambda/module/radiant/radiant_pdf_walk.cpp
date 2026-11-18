@@ -1103,6 +1103,7 @@ static Item pdf_walk(Item path_item, Item options_item,
     RenderBackend backend = {};
     backend.ctx = lam::up(&ctx);
     backend.render_bound = pdf_walk_boundary;
+    backend.fill_rect = pdf_secondary_fill;
     backend.render_outline = pdf_walk_outline;
     backend.render_text = pdf_walk_text;
     backend.render_image = pdf_walk_image;

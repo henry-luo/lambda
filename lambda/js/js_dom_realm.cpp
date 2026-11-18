@@ -1043,6 +1043,94 @@ static void _install_media_interface(Item global) {
     }
 }
 
+static Item _dialog_show(Item, Item receiver, Item*, int, uint64_t*) {
+    return dom_core_show_dialog(receiver);
+}
+
+static Item _dialog_request_close(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    return dom_core_request_close_dialog(receiver, argc ? args[0] : make_js_undefined());
+}
+
+static void _install_dialog_interface(Item global) {
+    RootFrame roots(2);
+    Rooted<Item> prototype(roots, _iface_proto(global, "HTMLDialogElement"));
+    Rooted<Item> method(roots, js_new_native_payload_function(_dialog_show, 0, 0));
+    js_set_function_name(method.get(), js_name_item("show"));
+    js_set_key_cstr(prototype.get(), "show", method.get());
+    method.set(js_new_native_payload_function(_dialog_request_close, 0, 0));
+    js_set_function_name(method.get(), js_name_item("requestClose"));
+    js_set_key_cstr(prototype.get(), "requestClose", method.get());
+}
+
+static Item _shadow_property(Item callee, Item receiver, Item*, int, uint64_t*) {
+    auto property = static_cast<DomShadowProperty>(js_fn_native((JsFunction*)callee.function)->target.bits);
+    return dom_read_shadow_property(receiver, property);
+}
+
+static Item _slot_assigned_nodes(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
+    bool elements_only = js_fn_native((JsFunction*)callee.function)->target.bits != 0;
+    return dom_slot_assigned_nodes(receiver, argc > 0 ? args[0] : ItemNull, elements_only);
+}
+
+static void _install_shadow_interfaces(Item global) {
+    using Property = DomShadowProperty;
+    static const struct { const char* interface_name; const char* name; Property property; } fields[] = {
+        {"Element", "shadowRoot", Property::root},
+        {"Element", "assignedSlot", Property::assigned_element_slot},
+        {"Text", "assignedSlot", Property::assigned_text_slot},
+        {"ShadowRoot", "host", Property::host},
+        {"ShadowRoot", "mode", Property::mode},
+        {"ShadowRoot", "delegatesFocus", Property::delegates_focus},
+        {"ShadowRoot", "styleSheets", Property::style_sheets}
+    };
+    RootFrame roots(3);
+    Rooted<Item> realm(roots, global), prototype(roots, ItemNull), member(roots, ItemNull);
+    for (const auto& field : fields) {
+        prototype.set(_iface_proto(realm.get(), field.interface_name));
+        member.set(js_new_native_payload_function(_shadow_property, static_cast<uint64_t>(field.property), 0));
+        js_install_native_accessor(prototype.get(), js_name_item(field.name), member.get(), ItemNull, 0);
+    }
+    prototype.set(_iface_proto(realm.get(), "HTMLSlotElement"));
+    const char* methods[] = {"assignedNodes", "assignedElements"};
+    for (size_t i = 0; i < sizeof(methods) / sizeof(*methods); i++) {
+        member.set(js_new_native_payload_function(_slot_assigned_nodes, i, 0));
+        js_set_function_name(member.get(), js_name_item(methods[i]));
+        js_set_key_cstr(prototype.get(), methods[i], member.get());
+    }
+}
+
+static const struct {
+    const char* interface_name;
+    const char* name;
+    DomLabelProperty property;
+} html_label_fields[] = {
+    {"HTMLButtonElement", "labels", DomLabelProperty::labels},
+    {"HTMLInputElement", "labels", DomLabelProperty::labels},
+    {"HTMLMeterElement", "labels", DomLabelProperty::labels},
+    {"HTMLOutputElement", "labels", DomLabelProperty::labels},
+    {"HTMLProgressElement", "labels", DomLabelProperty::labels},
+    {"HTMLSelectElement", "labels", DomLabelProperty::labels},
+    {"HTMLTextAreaElement", "labels", DomLabelProperty::labels},
+    {"HTMLLabelElement", "control", DomLabelProperty::control},
+    {"HTMLLabelElement", "form", DomLabelProperty::form},
+};
+
+static Item _html_label_property(Item callee, Item receiver, Item*, int, uint64_t*) {
+    const auto& field = html_label_fields[js_fn_native((JsFunction*)callee.function)->target.bits];
+    return dom_read_label_property(receiver, field.interface_name, field.property);
+}
+
+static void _install_label_interfaces(Item global) {
+    RootFrame roots(3);
+    Rooted<Item> realm(roots, global), prototype(roots, ItemNull), getter(roots, ItemNull);
+    for (size_t index = 0; index < sizeof(html_label_fields) / sizeof(*html_label_fields); index++) {
+        const auto& field = html_label_fields[index];
+        prototype.set(_iface_proto(realm.get(), field.interface_name));
+        getter.set(js_new_native_payload_function(_html_label_property, index, 0));
+        js_install_native_accessor(prototype.get(), js_name_item(field.name), getter.get(), ItemNull, 0);
+    }
+}
+
 static void _install_node_interface_members(Item global) {
     static const char* const node_members[] = {
         "nodeName", "nodeType", "baseURI", "parentNode", "parentElement", "isConnected",
@@ -1222,6 +1310,7 @@ extern "C" void dom_install_collection_globals(void) {
         js_dom_install_interface(global, svg_ifaces[i]);
     }
     dom_install_value_constructor(global, "DOMMatrix", dom_matrix_constructor, true);
+    dom_install_matrix_2d_members(_iface_proto(global, "DOMMatrix"));
     dom_install_value_constructor(global, "DOMPoint", dom_point_constructor, true);
     js_dom_install_interface(global, "HTMLMediaElement");
     _link_iface_proto(global, "HTMLMediaElement", "HTMLElement");
@@ -1238,12 +1327,15 @@ extern "C" void dom_install_collection_globals(void) {
         _link_iface_proto(global, ctor_name, parent_name);
     }
     _install_media_interface(global);
+    _install_dialog_interface(global);
+    _install_label_interfaces(global);
     js_dom_install_interface(global, "CanvasRenderingContext2D");
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);
     _link_iface_proto(global, "DocumentFragment", "Node");
     js_dom_install_interface(global, "ShadowRoot");
     _link_iface_proto(global, "ShadowRoot", "DocumentFragment");
+    _install_shadow_interfaces(global);
     Item element_proto = _iface_proto(global, "Element");
     if (get_type_id(element_proto) == LMD_TYPE_MAP) {
         js_set_native_key(element_proto, js_name_item("animate"), dom_element_animate);

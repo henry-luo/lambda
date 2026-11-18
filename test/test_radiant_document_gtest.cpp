@@ -21408,7 +21408,11 @@ TEST_F(RadiantFormControls, PrimitiveSelectKeepsCompleteLabelsAndCurrentLogicalB
         strbuf_free(style);
         ASSERT_TRUE(option->set_attribute("label", label));
         ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
-        EXPECT_STREQ(dom_option_text(option), label);
+        StrBuf* option_label = strbuf_new();
+        ASSERT_NE(option_label, nullptr);
+        dom_option_label(option, option_label);
+        EXPECT_STREQ(option_label->str, label);
+        strbuf_free(option_label);
         bool vertical = strcmp(mode, "horizontal-tb") != 0;
         float decoration = !*edges ? 2 : strcmp(edges, "padding:0;border:0") == 0
             ? 0 : vertical ? 10 : 14;

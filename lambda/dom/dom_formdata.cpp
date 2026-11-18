@@ -538,7 +538,7 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
     // The same option-list traversal drives the public collection and form submission.
     FormDataSelectContext context = {&entries_root, select_elem, name,
         select_elem->has_attribute("multiple"), false};
-    radiant_select_walk_options(select_elem->first_child, fd_append_selected_option, &context);
+    radiant_select_walk_options(select_elem, fd_append_selected_option, &context);
 }
 
 // forward declaration (defined after fd_install_methods)
