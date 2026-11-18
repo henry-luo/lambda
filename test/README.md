@@ -9,7 +9,7 @@ Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 
 Input parsers, formatters and shared-library unit tests live in `../lambda-input/test`; native layout, rendering, media and host-interface tests live in `../radiant/test` (D9.1.1v4, D9.1.3v2). Lambda keeps runtime, scripting, DOM adapters and integration tests here. Existing Lambda aggregate entries resolve the owner-local sources through `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` and continue to write their executables under this checkout's `test/` directory.
 
-Run `make -C lambda-input test-input-baseline` and `make -C radiant test-radiant-baseline` for the native owner suites. The input target prepares its pinned YAML corpus and uses the `lambda-test` submodule's Markdown corpus; Radiant uses that checkout's layout and media corpora. Public-network input tests are a separate `test-network-online` target. Lambda's `test-lambda-baseline` and `test-radiant-baseline` select Lambda-owned sources and integration scripts; they do not run owner-repository unit tests. The full Lambda gate also invokes the input owner's baseline.
+Run `make -C lambda-input test-input-baseline` and `make -C radiant test-radiant-baseline` for the native owner suites. The input target reads its YAML corpus from `lambda-test/yaml` and uses the shared Markdown corpus; Radiant uses that checkout's layout and media corpora (D9.1.1v4). Public-network input tests are a separate `test-network-online` target. Lambda's `test-lambda-baseline` and `test-radiant-baseline` select Lambda-owned sources and integration scripts; they do not run owner-repository unit tests. The full Lambda gate also invokes the input owner's baseline.
 
 ## Ground rules
 
@@ -526,7 +526,7 @@ test. Time the gate with a release host (`make build-release-compile`, then
 
 ## 5. External test data
 
-Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides the `lambda-test` submodule). It clones `ref/wpt` at a pinned commit and links each top-level corpus directory from `lambda-test/` as `test/<name>`.
+Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides the `lambda-test` submodule). It clones `ref/wpt` at a pinned commit and links each top-level corpus directory from `lambda-test/` as `test/<name>`, except YAML, which the input suite reads directly from `lambda-test/yaml`.
 
 | Path | Source | In git? | Used by |
 |---|---|---|---|
@@ -537,7 +537,7 @@ Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides the `lam
 | `lambda-test/editing` | read directly | not linked (`test/editing` is a tracked dir) | `test_chromium_contenteditable_gtest` |
 | `ref/wpt` | WPT clone at the commit pinned in `setup-test.sh` | ignored | WPT runners |
 | `ref/test262`, `ref/node` | manual checkout (`setup-test.sh` does not fetch them) | ignored | Test262, Node official tests (`make node-shim`) |
-| YAML corpus | prepared by `lambda-input` | input-owned | `make -C lambda-input test-input-baseline` prepares its pinned corpus and runs `test_yaml_suite_gtest` |
+| `lambda-test/yaml` | YAML Test Suite snapshot at the pinned upstream revision | tracked source | `make -C lambda-input test-input-baseline` runs `test_yaml_suite_gtest` directly from this path |
 
 ## 6. Updating goldens and baselines
 

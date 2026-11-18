@@ -190,9 +190,10 @@ mismatches, with no execution errors. Qualification also includes input parser
 gates and the Radiant gate.
 
 The input baseline passes all 2112 checks: HTML5 WPT parser 364, CommonMark
-1343, YAML 391, ASCII Math 3, and LaTeX Math 11. The pinned YAML submodule is
-initialized in the worktree, and tracked corpus links resolve through the
-worktree's companion-corpus link. Log: `temp/ruby-m2-input-baseline.log`.
+1343, YAML 391, ASCII Math 3, and LaTeX Math 11. The YAML cases now use the
+tracked `lambda-test/yaml` snapshot (D9.1.1v4); the other tracked corpus links
+resolve through the worktree's companion-corpus link. Log:
+`temp/ruby-m2-input-baseline.log`.
 
 The full input run executes 4621 checks but is not green. Its sandboxed PDF
 component times out in four native WebGL cases, also marking unexecuted cases

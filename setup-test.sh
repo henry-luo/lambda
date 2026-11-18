@@ -54,7 +54,7 @@ for corpus_dir in "$LAMBDA_TEST_DIR"/*; do
 
     corpus_name=$(basename "$corpus_dir")
     [ "$corpus_name" = ".git" ] && continue
-
+    [ "$corpus_name" = "yaml" ] && continue
     link_path="$ROOT_DIR/test/$corpus_name"
     expected_target="../lambda-test/$corpus_name"
 
