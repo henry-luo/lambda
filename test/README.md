@@ -533,7 +533,7 @@ Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides the `lam
 | `test/js262` | `lambda-test/js262` | ignored link | `test_js_test262_gtest` |
 | `test/layout` | `lambda-test/layout` | ignored link | `make layout`, page-load, fuzzy, radiant-view, UI fonts (`test/layout/data/font`) |
 | `test/render`, `test/pdf` | `lambda-test/{render,pdf}` | ignored links | `make test-render`, `test_pdf_render_visual_gtest` |
-| `test/markdown`, `test/media`, `test/jquery-ui` | `lambda-test/*` | **tracked** links | source-pos tests, `test_video_gtest`, UI `dom` fixtures |
+| `test/markdown`, `test/media`, `test/jquery-ui` | `lambda-test/*` | ignored links | source-pos tests, `test_video_gtest`, UI `dom` fixtures |
 | `lambda-test/editing` | read directly | not linked (`test/editing` is a tracked dir) | `test_chromium_contenteditable_gtest` |
 | `ref/wpt` | WPT clone at the commit pinned in `setup-test.sh` | ignored | WPT runners |
 | `ref/test262`, `ref/node` | manual checkout (`setup-test.sh` does not fetch them) | ignored | Test262, Node official tests (`make node-shim`) |

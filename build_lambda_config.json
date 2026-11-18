@@ -43,6 +43,10 @@
     {
       "script": "utils/generate_update_verifier.py",
       "args": []
+    },
+    {
+      "script": "utils/generate_sync_connectivity_config.py",
+      "args": []
     }
   ],
   "source_dirs": [

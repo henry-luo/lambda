@@ -10,8 +10,9 @@
 #include <string.h>
 #include <pthread.h>
 #include <stdlib.h>
-#if __has_include(<rtc/rtc.h>)
-#define LAMBDA_HAVE_RTC 1
+// Track RTC availability even when an earlier build did not include rtc.h.
+#include "build/generated/sync_connectivity_config.h"
+#ifdef LAMBDA_HAVE_RTC
 #define RTC_STATIC
 #include <rtc/rtc.h>
 #endif
