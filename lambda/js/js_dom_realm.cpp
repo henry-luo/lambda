@@ -1072,6 +1072,10 @@ static Item _slot_assigned_nodes(Item callee, Item receiver, Item* args, int arg
     return dom_slot_assigned_nodes(receiver, argc > 0 ? args[0] : ItemNull, elements_only);
 }
 
+static Item _slot_assign(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    return dom_slot_assign(receiver, args, argc);
+}
+
 static void _install_shadow_interfaces(Item global) {
     using Property = DomShadowProperty;
     static const struct { const char* interface_name; const char* name; Property property; } fields[] = {
@@ -1081,6 +1085,7 @@ static void _install_shadow_interfaces(Item global) {
         {"ShadowRoot", "host", Property::host},
         {"ShadowRoot", "mode", Property::mode},
         {"ShadowRoot", "delegatesFocus", Property::delegates_focus},
+        {"ShadowRoot", "slotAssignment", Property::slot_assignment},
         {"ShadowRoot", "styleSheets", Property::style_sheets}
     };
     RootFrame roots(3);
@@ -1097,6 +1102,9 @@ static void _install_shadow_interfaces(Item global) {
         js_set_function_name(member.get(), js_name_item(methods[i]));
         js_set_key_cstr(prototype.get(), methods[i], member.get());
     }
+    member.set(js_new_native_payload_function(_slot_assign, 0, 0));
+    js_set_function_name(member.get(), js_name_item("assign"));
+    js_set_key_cstr(prototype.get(), "assign", member.get());
 }
 
 static const struct {
@@ -1329,6 +1337,7 @@ extern "C" void dom_install_collection_globals(void) {
     _install_media_interface(global);
     _install_dialog_interface(global);
     _install_label_interfaces(global);
+    dom_install_html_hidden(_iface_proto(global, "HTMLElement"));
     js_dom_install_interface(global, "CanvasRenderingContext2D");
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);

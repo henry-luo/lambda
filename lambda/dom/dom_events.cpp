@@ -128,18 +128,21 @@ static const char* dom_pick_submit_attr(DomElement* submitter, DomElement* form,
     return "";
 }
 
-static void dom_run_form_submit_navigation(DomElement* form, DomElement* submitter) {
-    if (!form) return;
+static Item dom_run_form_submission(DomElement* form, DomElement* submitter) {
+    if (!form || !dom_node_is_connected(form)) return make_js_undefined();
 
-    const char* method = dom_pick_submit_attr(submitter, form, "formmethod", "method");
-    if (!method || !*method) method = "get";
+    const char* method = dom_form_submission_method(form, submitter);
+    if (strcmp(method, "dialog") == 0) {
+        Item closed = dom_form_close_dialog(form, submitter);
+        return item_is_error(closed) ? closed : make_js_undefined();
+    }
 
     const char* target = dom_pick_submit_attr(submitter, form, "formtarget", "target");
     const char* action = dom_pick_submit_attr(submitter, form, "formaction", "action");
     if ((!action || !*action) && form->doc && form->doc->url) {
         action = url_get_href(form->doc->url);
     }
-    if (!action || !*action) return;
+    if (!action || !*action) return make_js_undefined();
 
     char* nav_url = nullptr;
     if (str_icmp_cstr(method, "get") == 0) {
@@ -160,6 +163,7 @@ static void dom_run_form_submit_navigation(DomElement* form, DomElement* submitt
         dom_navigate_submit_target(target, nav_url);
         mem_free(nav_url);
     }
+    return make_js_undefined();
 }
 
 static void event_apply_new_target_prototype(Item event) {
@@ -290,13 +294,15 @@ extern "C" Item dom_form_submit_bridge(Item form_item) {
     }
 
     // submit() intentionally bypasses validation and the cancelable submit event;
-    // requestSubmit() below keeps those checks before entering this shared navigation path.
-    dom_run_form_submit_navigation(form, nullptr);
-    return make_js_undefined();
+    // requestSubmit() below keeps those checks before entering this shared submission path.
+    return dom_run_form_submission(form, nullptr);
 }
 
 extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter_item) {
-    DomNode* node = (DomNode*)dom_unwrap_element(form_item);
+    RootFrame roots(3);
+    Rooted<Item> form_root(roots, form_item), submitter_root(roots, submitter_item);
+    Rooted<Item> event(roots, ItemNull);
+    DomNode* node = (DomNode*)dom_unwrap_element(form_root.get());
     DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
     if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return make_js_undefined();
@@ -304,26 +310,24 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter_it
 
     bool has_submitter = false;
     DomElement* submitter = nullptr;
-    JS_ASSIGN_OR_RETURN(submitter_result, dom_resolve_request_submitter(form, submitter_item,
+    JS_ASSIGN_OR_RETURN(submitter_result, dom_resolve_request_submitter(form, submitter_root.get(),
         &has_submitter, &submitter));
-    if (has_submitter && !submitter) return make_js_undefined();
+    if ((has_submitter && !submitter) || !dom_node_is_connected(form)) return make_js_undefined();
 
     dom_form_mark_user_validity(form);
 
     if (dom_should_validate_submit(form, submitter)) {
-        Item valid = dom_check_validity_bridge(form_item);
+        Item valid = dom_check_validity_bridge(form_root.get());
         if (!js_is_truthy(valid)) return make_js_undefined();
     }
 
-    RootFrame roots(1);
-    Rooted<Item> submit_event_root(roots, js_create_event("submit", true, true));
-    dom_realm_set_cstr(submit_event_root.get(), "isTrusted", (Item){.item = ITEM_TRUE});
-    dom_realm_set_cstr(submit_event_root.get(), "submitter", submitter ? dom_wrap_element(submitter) : ItemNull);
-    Item submit_ok = dom_dispatch_event(form_item, submit_event_root.get());
+    event.set(js_create_native_event("submit", true, true));
+    dom_realm_set_cstr(event.get(), "submitter", has_submitter ? submitter_root.get() : ItemNull);
+    Item submit_ok = dom_dispatch_event(form_root.get(), event.get());
+    if (item_is_error(submit_ok)) return submit_ok;
     if (submit_ok.item == ITEM_FALSE) return make_js_undefined();
 
-    dom_run_form_submit_navigation(form, submitter);
-    return make_js_undefined();
+    return dom_run_form_submission(form, submitter);
 }
 
 // ============================================================================
@@ -2257,6 +2261,13 @@ extern "C" void dom_event_set_movement(Item event, double movement_x, double mov
     event_set_double(retained.get(), "movementY", movement_y);
 }
 
+extern "C" void dom_event_set_offset(Item event, double offset_x, double offset_y) {
+    RootFrame roots(1);
+    Rooted<Item> retained(roots, event);
+    event_set_double(retained.get(), "offsetX", offset_x);
+    event_set_double(retained.get(), "offsetY", offset_y);
+}
+
 extern "C" Item js_create_native_pointer_event(const char* type,
     double client_x, double client_y,
     int button, int buttons,
@@ -2563,7 +2574,12 @@ extern "C" void js_restore_window_event_for_legacy(Item prev) {
 // ============================================================================
 
 // build propagation path from target to root
-static int build_path(Item target, void** path, bool* path_is_dom, int max_path) {
+static constexpr int DOM_EVENT_PATH_LIMIT = 128;
+// Only closed-tree flags are exposed to composedPath().
+static constexpr uint8_t DOM_EVENT_IN_SHADOW_TREE = 1 << 2;
+
+static int build_path(Item target, bool composed, void** path, bool* path_is_dom,
+    uint8_t* flags, int max_path) {
     int count = 0;
     void* key = get_event_target_key(target);
 
@@ -2590,20 +2606,70 @@ static int build_path(Item target, void** path, bool* path_is_dom, int max_path)
     }
 
     DomNode* node = (DomNode*)node_ptr;
+    DomDocument* doc = dom_node_ancestor_document(node);
+    const bool has_shadow = doc && doc->js.has_shadow_roots;
+    DomElement* original_shadow = has_shadow ? dom_shadow_root(node) : nullptr;
 
     // walk from target up to root
+    bool reached_document = false;
+    uint8_t slot_flag = 0;
     DomNode* current = node;
     while (current && count < max_path) {
+        DomElement* element = current->as_element();
+        DomElement* host = has_shadow && element ? element->shadow_host_element() : nullptr;
+        flags[count] = slot_flag | (host && element->ext->shadow_closed ? DOM_EVENT_PATH_CLOSED_ROOT : 0);
+        if (has_shadow && dom_shadow_root(current)) flags[count] |= DOM_EVENT_IN_SHADOW_TREE;
+        slot_flag = 0;
         path_is_dom[count] = true;
         path[count++] = (void*)current;
-        current = current->parent;
+        if (doc && current == doc->root) {
+            reached_document = true;
+            break;
+        }
+        if (host) {
+            // Non-composed events stop at their original shadow root. An intervening
+            // shadow tree entered through an assigned slot still leads to its host.
+            if (!composed && current == original_shadow) break;
+            current = host;
+            continue;
+        }
+        if (DomElement* slot = has_shadow ? dom_find_assigned_slot(current) : nullptr) {
+            DomElement* root = dom_shadow_root(slot);
+            if (root && root->ext->shadow_closed) slot_flag = DOM_EVENT_PATH_CLOSED_SLOT;
+            current = slot;
+        } else current = dom_source_parent(current);
     }
 
     // add document and window sentinels at the end (root of propagation)
-    if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_document_sentinel; }
-    if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
+    if (reached_document && count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_document_sentinel; }
+    if (reached_document && count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
 
     return count;
+}
+
+class DomEventPathPins {
+public:
+    explicit DomEventPathPins(DomDocument* document) : document_(document) {}
+    ~DomEventPathPins() {
+        for (int i = 0; i < count_; i++) dom_node_unpin(document_, refs_[i], DOM_NODE_PIN_EVENT_QUEUE);
+    }
+    void add(DomNode* node) {
+        if (!document_ || !node) return;
+        DomNodeRef ref = dom_node_ref(node);
+        if (dom_node_pin(document_, ref, DOM_NODE_PIN_EVENT_QUEUE)) refs_[count_++] = ref;
+    }
+private:
+    DomDocument* document_;
+    DomNodeRef refs_[DOM_EVENT_PATH_LIMIT];
+    int count_ = 0;
+};
+
+static DomNode* dom_event_retarget(DomNode* target, DomElement* shadow, DomNode* against) {
+    while (shadow && !dom_shadow_including_contains(shadow, against)) {
+        target = shadow->shadow_host_element();
+        shadow = dom_shadow_root(target);
+    }
+    return target;
 }
 
 // wrap a path key back into an Item for currentTarget
@@ -2765,11 +2831,12 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 
 Item dom_dispatch_event(Item elem_item, Item event_item) {
     JS_RETURN_IF_ERROR(js_execution_interrupt_status());
-    RootFrame roots(4);
+    RootFrame roots(5);
     Rooted<Item> elem_root(roots, elem_item);
     Rooted<Item> event_root(roots, event_item);
     Rooted<Item> global_root(roots, ItemNull);
     Rooted<Item> previous_global_event_root(roots, ItemNull);
+    Rooted<Item> related_target_root(roots, ItemNull);
     elem_item = elem_root.get();
     event_item = event_root.get();
     if (!dom_event_runtime_state_ensure()) return (Item){.item = ITEM_FALSE};
@@ -2815,11 +2882,6 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
         return dom_raise(n, m);
     }
 
-    // dispatch retargets constructor null placeholders on every dispatch.
-    // The target is native in the record (srcElement is its alias), so this
-    // needs no realm -- which is what lets a Lambda script dispatch at all.
-    dom_event_host_set_target(event_item, elem_item);
-
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
 
@@ -2850,41 +2912,96 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // before dispatchEvent) or by a previous re-dispatch.
 
     // build propagation path (target → ... → document → window)
-    void* path[128];
-    bool path_is_dom[128] = {};
+    void* path[DOM_EVENT_PATH_LIMIT];
+    bool path_is_dom[DOM_EVENT_PATH_LIMIT] = {};
+    uint8_t path_flags[DOM_EVENT_PATH_LIMIT] = {};
     // DOM node ids can numerically equal Lambda TypeIds, so carry origin
     // metadata with each path entry instead of reinterpreting a DomNode pointer
     // as a generic EventTarget container during bubbling.
-    int path_len = build_path(elem_item, path, path_is_dom, 128);
+    bool composed = js_is_truthy(event_get_item(event_item, "composed"));
+    int path_len = build_path(elem_item, composed, path, path_is_dom, path_flags, DOM_EVENT_PATH_LIMIT);
+    related_target_root.set(event_get_item(event_item, "relatedTarget"));
+    DomNode* related = (DomNode*)dom_unwrap_element(related_target_root.get());
+    DomElement* related_shadow = dom_shadow_root(related);
 
-    if (path_len == 0) {
+    // A related node inside the dispatcher can retarget to the dispatcher itself.
+    if (path_len == 0 || (related != target_node &&
+        dom_event_retarget(related, related_shadow, target_node) == target_node)) {
         dom_event_host_clear_path(event_item);
         event_set_bool(event_item, "__dispatch_flag", false);
-        return (Item){.item = ITEM_TRUE};
+        return (Item){.item = b2it(!event_flag_get(event_item, "__default_prevented"))};
     }
 
     // Store the exact path before invoking listeners: DOM mutations during
     // dispatch must not rewrite composedPath(), and generic targets/window
     // cannot be reconstructed from a DOM parent chain. It is stored as native
     // keys and projected to Items only when composedPath() is called.
-    RadiantEvtKey path_keys[128];
-    for (int i = 0; i < path_len; i++) path_keys[i] = path_key_of(path[i], path_is_dom[i]);
-    dom_event_host_set_path(event_item, path_keys, path_len);
+    DomEventPathEntry entries[DOM_EVENT_PATH_LIMIT];
+    DomNode* retargeted[DOM_EVENT_PATH_LIMIT];
+    DomNode* related_path[DOM_EVENT_PATH_LIMIT];
+    DomNode* adjusted_target = target_node;
+    DomDocument* doc = target_node ? dom_node_ancestor_document(target_node) : nullptr;
+    DomElement* target_shadow = doc && doc->js.has_shadow_roots ? dom_shadow_root(target_node) : nullptr;
+    DomEventPathPins path_pins(doc);
+    DomEventPathPins related_pins(dom_node_ancestor_document(related));
+    bool clear_targets = false;
+    for (int i = 0; i < path_len; i++) {
+        DomNode* participant = path_is_dom[i] ? (DomNode*)path[i] : nullptr;
+        DomNode* adjusted_related = dom_event_retarget(related, related_shadow, participant);
+        DomNode* visible = dom_event_retarget(adjusted_target, target_shadow, participant);
+        // Crossing a host with indistinguishable targets cannot expose the transition.
+        if (visible != adjusted_target && participant && participant == adjusted_related) {
+            path_len = i;
+            break;
+        }
+        if (visible != adjusted_target) {
+            adjusted_target = visible;
+            target_shadow = dom_shadow_root(visible);
+        }
+        if (i == 0 || (participant && participant == adjusted_target)) {
+            clear_targets = target_shadow || dom_shadow_root(adjusted_related);
+        }
+        entries[i] = {path_key_of(path[i], path_is_dom[i]), path_flags[i]};
+        path_pins.add(participant);
+        related_pins.add(adjusted_related);
+        retargeted[i] = adjusted_target;
+        related_path[i] = adjusted_related;
+    }
+    dom_event_host_set_path(event_item, entries, path_len);
 
-    // Legacy IE-style `window.event`: set to the in-flight event for the
-    // duration of dispatch, restored to its prior value (typically
-    // `undefined`) afterwards. Per HTML, the slot must read `undefined`
-    // when called inside a Shadow Tree listener (we don't model Shadow
-    // DOM headlessly, so we always set it).
+    // The initial target is native, so Lambda dispatch can do this without a JS realm.
+    dom_event_host_set_target(event_item, elem_root.get());
+    DomNode* visible_target = target_node;
+    DomNode* visible_related = related;
+
+    // Shadow listeners retain the enclosing global event. This decision uses
+    // the original invocation path even when listeners move its participants.
     Item event_key = js_name_item("event");
     bool publish_global_event = dom_realm_active();
     if (publish_global_event) {
-        Item global = dom_realm_global();
-        global_root.set(global);
-        Item prev_global_event = dom_realm_get(global_root.get(), event_key);
-        previous_global_event_root.set(prev_global_event);
-        dom_realm_set(global_root.get(), event_key, event_root.get());
+        global_root.set(dom_realm_global());
+        previous_global_event_root.set(dom_realm_get(global_root.get(), event_key));
     }
+    bool global_event_visible = false;
+    auto set_visible_targets = [&](int index) {
+        if (visible_target != retargeted[index]) {
+            visible_target = retargeted[index];
+            dom_event_host_set_target(event_item, dom_wrap_element(visible_target));
+        }
+        if (visible_related != related_path[index]) {
+            visible_related = related_path[index];
+            event_set_item(event_item, "relatedTarget", dom_wrap_element(visible_related));
+        }
+    };
+    auto prepare_invocation = [&](int index) {
+        set_visible_targets(index);
+        bool visible = (path_flags[index] & DOM_EVENT_IN_SHADOW_TREE) == 0;
+        if (publish_global_event && visible != global_event_visible) {
+            dom_realm_set(global_root.get(), event_key,
+                visible ? event_root.get() : previous_global_event_root.get());
+            global_event_visible = visible;
+        }
+    };
 
     #define _STOP_PROP (js_execution_interrupt_pending() || event_flag_get(event_item, "__stop_prop"))
     #define _STOP_IMM (js_execution_interrupt_pending() || event_flag_get(event_item, "__stop_imm"))
@@ -2901,7 +3018,9 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     for (int i = path_len - 1; i > 0; i--) {
         if (_STOP_PROP) break;
         if (js_live) {
-            fire_listeners(path[i], type, event_item, 1, path_is_dom[i]);
+            prepare_invocation(i);
+            int at_boundary = retargeted[i] && path[i] == retargeted[i] ? 2 : 0;
+            fire_listeners(path[i], type, event_item, 1, path_is_dom[i], at_boundary);
         }
     }
 
@@ -2910,6 +3029,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // still permits peers on this node; only immediate stop suppresses them.
     bool target_reached = !_STOP_PROP;
     if (target_reached) {
+        prepare_invocation(0);
         if (js_live) {
             fire_listeners(path[0], type, event_item, 1, path_is_dom[0], 2);
         }
@@ -2925,18 +3045,24 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     }
 
     // Phase 3: Bubble — from target parent up to root
-    if (bubbles) {
-        for (int i = 1; i < path_len; i++) {
-            if (_STOP_PROP) break;
-            if (js_live) {
-                fire_listeners(path[i], type, event_item, 3, path_is_dom[i]);
-            }
-            if (author_live && path_is_dom[i] && !_STOP_IMM) {
-                set_event_dispatch_position(path[i], path_is_dom[i], event_item, 3);
-                dom_engine_dispatch_author_template_participant(path[i], event_item, type);
-            }
+    for (int i = 1; i < path_len; i++) {
+        if (_STOP_PROP) break;
+        int at_boundary = retargeted[i] && path[i] == retargeted[i] ? 2 : 0;
+        if (!bubbles && !at_boundary) continue;
+        if (js_live || author_live) prepare_invocation(i);
+        if (js_live) {
+            fire_listeners(path[i], type, event_item, 3, path_is_dom[i], at_boundary);
+        }
+        if (author_live && path_is_dom[i] && !_STOP_IMM) {
+            set_event_dispatch_position(path[i], path_is_dom[i], event_item, 3, at_boundary);
+            dom_engine_dispatch_author_template_participant(path[i], event_item, type);
         }
     }
+
+    if (clear_targets) {
+        dom_event_host_set_target(event_item, ItemNull);
+        if (related) event_set_item(event_item, "relatedTarget", ItemNull);
+    } else set_visible_targets(path_len - 1);
 
     if (author_cascade) dom_event_host_author_template_dispatch_end(event_item);
     #undef _STOP_IMM

@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Image submitter in a dialog</title>
+<style>
+  html, body { margin: 0; }
+  dialog { position: absolute; inset: 0 auto auto 0; margin: 0; padding: 0; border: 0; }
+  input { display: block; border: 0; padding: 0; }
+</style>
+<dialog id="panel" open>
+  <form method="post">
+    <input id="submit" type="image" formmethod="dialog" width="40" height="40" alt="Close"
+      src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='40'%20height='40'%3E%3Crect%20width='40'%20height='40'%20fill='%23008000'/%3E%3C/svg%3E">
+  </form>
+</dialog>
+<output id="result"></output>
+<script>
+  const dialog = document.getElementById('panel');
+  const result = document.getElementById('result');
+  document.getElementById('submit').addEventListener('click', event => {
+      result.setAttribute('data-offset', event.offsetX + ',' + event.offsetY);
+  });
+  dialog.addEventListener('close', () => {
+      result.setAttribute('data-value', dialog.returnValue);
+      result.setAttribute('data-focus', document.activeElement.tagName);
+  });
+</script>

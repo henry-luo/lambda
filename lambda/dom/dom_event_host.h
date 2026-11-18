@@ -13,6 +13,11 @@ typedef enum DomEventTargetKeyKind {
     DOM_EVENT_KEY_CONTAINER,
 } DomEventTargetKeyKind;
 typedef struct DomEventTargetKey { DomEventTargetKeyKind kind; void* ptr; } DomEventTargetKey;
+enum DomEventPathFlag : uint8_t {
+    DOM_EVENT_PATH_CLOSED_ROOT = 1,
+    DOM_EVENT_PATH_CLOSED_SLOT = 2,
+};
+struct DomEventPathEntry { DomEventTargetKey key; uint8_t flags; };
 
 // native wrappers trace listener edges themselves; changes may update keepalive.
 struct DomGcEventOwner { void (*listeners_changed)(DomGcEventOwner*); };
@@ -31,7 +36,7 @@ struct DomGcEventOwner { void (*listeners_changed)(DomGcEventOwner*); };
     OP(int, named_set, (Item receiver, Item key, Item value, Item* out), (receiver, key, value, out), 0) \
     OP(void, set_target, (Item event, Item target), (event, target), (void)0) \
     OP(void, set_position_key, (Item event, DomEventTargetKey key, int event_phase), (event, key, event_phase), (void)0) \
-    OP(void, set_path, (Item event, const DomEventTargetKey* keys, int length), (event, keys, length), (void)0) \
+    OP(void, set_path, (Item event, const DomEventPathEntry* entries, int length), (event, entries, length), (void)0) \
     OP(void, clear_path, (Item event), (event), (void)0) \
     OP(void, set_lambda_dispatch_position, (Item event, Item current_target, int event_phase), (event, current_target, event_phase), (void)0) \
     OP(void, clear_lambda_dispatch_position, (Item event), (event), (void)0) \

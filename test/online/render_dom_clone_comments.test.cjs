@@ -3,6 +3,29 @@ const assert = require('node:assert/strict');
 const {renderFixtures, rgb} = require('./render_fixture.cjs');
 const render = renderFixtures('dom-clone-comments');
 
+test('DOM queries stop at parsed template content boundaries', async () => {
+    const {log} = await render('template-query-boundaries', `<!doctype html>
+        <main><template id="outer"><section id="in-outer"><template id="inner">
+            <b id="in-inner"></b></template></section></template></main>
+        <script>
+            var main=document.querySelector('main'),outer=document.getElementById('outer');
+            var checks={
+                document:document.querySelectorAll('template').length===1&&
+                    document.querySelector('#in-outer')===null&&document.getElementById('in-inner')===null,
+                element:main.querySelectorAll('template').length===1&&outer.querySelector('section')===null
+            };
+            var fragment=outer.content,inner=fragment.querySelector('template');
+            checks.fragment=fragment.querySelectorAll('template').length===1&&
+                fragment.getElementById('in-outer')===fragment.querySelector('section')&&
+                fragment.getElementById('in-inner')===null&&fragment.querySelector('b')===null;
+            checks.inner=inner.id==='inner'&&inner.content.getElementById('in-inner')===inner.content.querySelector('b');
+            console.log('TEMPLATE_QUERY',JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/TEMPLATE_QUERY (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {document:true,element:true,fragment:true,inner:true});
+});
+
 for (const operation of ['clone', 'import', 'foreign-import']) {
     test('DOM deep clone preserves comment anchors: ' + operation, async () => {
         const {image, log} = await render(operation, `<!doctype html>

@@ -130,7 +130,7 @@ using RadiantEvtKey = DomEventTargetKey;
 RADIANT_C_API void radiant_dom_event_set_target(Item event, Item target);
 RADIANT_C_API void radiant_dom_event_set_position_key(Item event, RadiantEvtKey key,
                                                       int event_phase);
-RADIANT_C_API void radiant_dom_event_set_path(Item event, const RadiantEvtKey* keys,
+RADIANT_C_API void radiant_dom_event_set_path(Item event, const DomEventPathEntry* entries,
                                               int len);
 RADIANT_C_API void radiant_dom_event_clear_path(Item event);
 RADIANT_C_API void radiant_dom_event_set_lambda_dispatch_position(

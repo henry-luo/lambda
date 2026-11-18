@@ -5876,6 +5876,7 @@ static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
         case DOM_JS_MUTATION_TREE_REPLACE: return "tree-replace";
         case DOM_JS_MUTATION_STYLE_REPAINT: return "style-repaint";
         case DOM_JS_MUTATION_CONTROL_VALUE: return "control-value";
+        case DOM_JS_MUTATION_SLOT_DISTRIBUTION: return "slot-distribution";
         case DOM_JS_MUTATION_UNKNOWN:
         default: return "unknown";
     }
@@ -6005,9 +6006,36 @@ static bool dom_js_is_connected_to_document(DomDocument* doc, DomNode* node) {
     return doc && dom_shadow_including_contains(doc->root, node);
 }
 
+static DomElement* dom_js_slot_distribution_host(DomDocument* doc, DomJsMutationRecord* record) {
+    if (record->kind == DOM_JS_MUTATION_SLOT_DISTRIBUTION)
+        return record->target ? record->target->as_element() : nullptr;
+    if (!doc->js.has_shadow_roots) return nullptr;
+    if (record->attribute != DOM_JS_MUTATION_ATTRIBUTE_SLOT_DISTRIBUTION &&
+        record->kind != DOM_JS_MUTATION_CHILD_INSERT && record->kind != DOM_JS_MUTATION_CHILD_REMOVE) {
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE || record->kind == DOM_JS_MUTATION_STYLE ||
+            record->kind == DOM_JS_MUTATION_INLINE_STYLE || record->kind == DOM_JS_MUTATION_STYLE_REPAINT) {
+            DomElement* element = record->target ? record->target->as_element() : nullptr;
+            // A selector or style write can hide or reveal the flattened subtree.
+            if (dom_element_is_html_tag(element, MARKUP_NAME_SLOT)) {
+                DomElement* root = dom_shadow_root(element);
+                return root ? root->shadow_host_element() : nullptr;
+            }
+        }
+        return nullptr;
+    }
+    DomElement* parent = record->parent ? record->parent->as_element() : nullptr;
+    if (parent && parent->shadow_root_element()) return parent;
+    DomElement* root = dom_shadow_root(record->parent);
+    return root ? root->shadow_host_element() : nullptr;
+}
+
 static DomElement* dom_js_record_cascade_root(DomDocument* doc,
                                               DomJsMutationRecord* record) {
     if (!doc || !record) return nullptr;
+
+    // Distribution changes can invalidate boxes from both the shadow and light trees.
+    DomElement* host = dom_js_slot_distribution_host(doc, record);
+    if (host && dom_js_is_connected_to_document(doc, host)) return host;
 
     DomNode* node = nullptr;
     if (record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
@@ -6334,7 +6362,7 @@ void radiant_notify_template_attribute(DomElement* element, const char* name, co
     if (element->specified_style) style_tree_foreach(element->specified_style,
         dom_js_style_has_attribute_value, &attribute_value);
     bool cursor_only = !attribute_value && !radiant_css_stylesheet_tree_has_match(
-        doc->services.ua_focus_stylesheet, dom_js_rule_has_non_cursor_attribute_dependency, &dependency) &&
+        doc->services.ua_stylesheet, dom_js_rule_has_non_cursor_attribute_dependency, &dependency) &&
         !radiant_css_document_rule_tree_has_match(doc,
         dom_js_rule_has_non_cursor_attribute_dependency, &dependency) && dependency.found;
     int count = doc->js.mutation_record_count;
@@ -6911,7 +6939,8 @@ static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
         if (record->kind != DOM_JS_MUTATION_STYLE &&
             record->kind != DOM_JS_MUTATION_INLINE_STYLE &&
             record->kind != DOM_JS_MUTATION_STYLE_REPAINT &&
-            record->kind != DOM_JS_MUTATION_ATTRIBUTE) {
+            record->kind != DOM_JS_MUTATION_ATTRIBUTE &&
+            !dom_js_slot_distribution_host(doc, record)) {
             continue;
         }
         DomElement* candidate = dom_js_record_cascade_root(doc, record);
@@ -8525,6 +8554,7 @@ typedef struct {
     int detail;
     double timestamp_ms;
     double movement_x, movement_y;
+    double offset_x, offset_y;
     View* related;
 } MouseEventBuildArgs;
 
@@ -8540,7 +8570,13 @@ static Item build_mouse_event_item(void* userdata) {
         js_event_set_timestamp(event.get(), args->timestamp_ms);
     }
     dom_event_set_movement(event.get(), args->movement_x, args->movement_y);
+    dom_event_set_offset(event.get(), args->offset_x, args->offset_y);
     return event.get();
+}
+
+static ViewBlock* radiant_mouse_click_block(EventContext* evcon, View* target) {
+    if (!evcon || evcon->target != target || evcon->event.type != RDT_EVENT_MOUSE_UP) return nullptr;
+    return lam::view_as_block(target);
 }
 
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
@@ -8554,13 +8590,20 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
 {
     MouseEventBuildArgs args = {
         type, client_x, client_y, button, buttons,
-        ctrl, shift, alt, meta, detail, timestamp_ms, 0, 0, related
+        ctrl, shift, alt, meta, detail, timestamp_ms, 0, 0, 0, 0, related
     };
     if (evcon && evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
         args.movement_x = evcon->event.mouse_position.movement_x;
         args.movement_y = evcon->event.mouse_position.movement_y;
     }
     bool is_click = type && strcmp(type, "click") == 0;
+    if (ViewBlock* block = is_click ? radiant_mouse_click_block(evcon, target) : nullptr) {
+        BoxEdges border = layout_boundary_border_edges(block->boundary());
+        float zoom = layout_effective_zoom(block);
+        if (!(zoom > 0.0f)) zoom = 1.0f;
+        args.offset_x = (evcon->offset_x - border.values[CSS_BOX_SIDE_LEFT]) / zoom;
+        args.offset_y = (evcon->offset_y - border.values[CSS_BOX_SIDE_TOP]) / zoom;
+    }
     bool prevented = radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
         &args, true, dispatched, !is_click, type);
     return prevented;
@@ -9738,7 +9781,7 @@ static bool css_rule_is_self_color_background_state(CssRule* rule,
 static bool document_has_pseudo_state_rules(DomDocument* doc,
                                             uint32_t pseudo_state) {
     if (!doc) return false;
-    CssStylesheet* defaults = doc->services.ua_focus_stylesheet;
+    CssStylesheet* defaults = doc->services.ua_stylesheet;
     for (size_t i = 0; defaults && i < defaults->rule_count; i++)
         if (css_rule_uses_pseudo_state(defaults->rules[i], pseudo_state)) return true;
     for (int i = 0; i < doc->stylesheet_count; i++) {
@@ -9766,7 +9809,7 @@ static bool active_rule_requires_layout(CssRule* rule, void* context) {
 
 static bool document_active_is_paint_only(DomDocument* doc) {
     bool found = false;
-    if (radiant_css_stylesheet_tree_has_match(doc->services.ua_focus_stylesheet,
+    if (radiant_css_stylesheet_tree_has_match(doc->services.ua_stylesheet,
             active_rule_requires_layout, &found)) return false;
     return !radiant_css_document_rule_tree_has_match(doc, active_rule_requires_layout, &found) && found;
 }
@@ -10462,6 +10505,23 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
     }
     if (!owner) return false;
 
+    if (elem->form_control() && elem->form->control_type == FORM_CONTROL_IMAGE) {
+        ViewBlock* block = radiant_mouse_click_block(evcon, target);
+        ImageSurface* image = render_media_image_surface(block);
+        if (image) {
+            DomElementExt* state = elem->ensure_ext();
+            if (state) {
+                LayoutContentBox content = layout_content_box(block);
+                Rect image_box = render_media_image_rect(block, image,
+                    {content.offset_x, content.offset_y, content.width, content.height}, 1.0f);
+                float zoom = layout_effective_zoom(block);
+                if (!(zoom > 0.0f)) zoom = 1.0f;
+                // Submission stores integer CSS pixels relative to the image edge.
+                state->form_image_selected_x = lroundf((evcon->offset_x - image_box.x) / zoom);
+                state->form_image_selected_y = lroundf((evcon->offset_y - image_box.y) / zoom);
+            }
+        }
+    }
     return radiant_dispatch_behavior_submit_activation(evcon, target);
 }
 
@@ -11943,13 +12003,25 @@ static bool navigation_apply_fragment(UiContext* uicon, DomDocument* document,
     DocState* state = (DocState*)document->state;
     if (!state) return false;
     navigation_clear_target_state((DomNode*)document->root, state);
-    if (fragment) {
+    DomNodeRef fragment_ref = dom_node_ref(fragment);
+    bool retained = fragment && dom_node_pin(document, fragment_ref, DOM_NODE_PIN_EVENT_QUEUE);
+    if (retained) {
         state_set_bool(state, fragment, STATE_TARGET, true);
         radiant_sync_pseudo_state((View*)fragment, PSEUDO_STATE_TARGET, true);
-        dom_scroll_into_view_bridge(fragment);
     }
-    doc_state_request_repaint(state);
     if (changed) dispatch_history_window_events(uicon, document, &traversal, false);
+    if (retained && fragment->doc == document) {
+        EventContext evcon = {};
+        evcon.ui_context = uicon;
+        evcon.target_document = document;
+        JsCtxScope scope = {};
+        uint64_t started = time_now_ns();
+        bool scripted = radiant_js_ctx_enter(&scope, &evcon);
+        dom_scroll_to_fragment_target(fragment, scripted);
+        if (scripted) radiant_js_ctx_exit(&scope, &evcon, started);
+    }
+    if (retained) dom_node_unpin(document, fragment_ref, DOM_NODE_PIN_EVENT_QUEUE);
+    doc_state_request_repaint(state);
     return true;
 }
 

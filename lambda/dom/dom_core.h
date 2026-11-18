@@ -18,6 +18,7 @@
 #include "dom_broadcast_channel.h"
 
 struct DomDocument;
+struct DomElement;
 
 #ifdef __cplusplus
 extern "C" {
@@ -301,6 +302,10 @@ Item dom_engine_embedded_document_root(Item a);
 Item dom_engine_embedding_element(Item a);
 Item dom_engine_form_boundary(void);
 Item dom_engine_form_entries(Item a, Item b);
+Item dom_core_form_close_dialog(Item form, Item submitter);
+Item dom_core_form_submit_method(Item form, Item submitter);
+const char* dom_form_submission_method(struct DomElement* form, struct DomElement* submitter);
+Item dom_form_close_dialog(struct DomElement* form, struct DomElement* submitter);
 Item dom_engine_form_url(Item a);
 Item dom_engine_hover_index(Item a);
 Item dom_engine_option_count(Item a);
