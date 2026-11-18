@@ -122,7 +122,7 @@ font-relative units. Native checks cover live style changes and query rollback.
 
 ## 1. Conformance Summary
 
-Layout conformance is measured against a real browser. A test page is laid out with `lambda layout`, and every element box, inline span and text run is compared with the same page captured in headless Chrome through Puppeteer. The comparison allows 5 px, or a proportional allowance of 2.5–7 % where text measurement errors accumulate (`test/layout/test_radiant_layout.js`). A test passes when all three metrics match; a *partial* baseline entry records per-metric scores that must not regress. The layout corpora live in the companion `lambda-test` repository, which the main repository links as `test/layout/`.
+Layout conformance is measured against a real browser. A test page is laid out with `lambda layout`, and every element box, inline span and text run is compared with the same page captured in headless Chrome through Puppeteer. The comparison allows 5 px, or a proportional allowance of 2.5–7 % where text measurement errors accumulate (`test/layout/test_radiant_layout.js`). A test passes when all three metrics match; a *partial* baseline entry records per-metric scores that must not regress. The layout corpora live in the `lambda-test` submodule and are linked as `test/layout/`.
 
 | Suite | Result | Source | Notes |
 |---|---|---|---|

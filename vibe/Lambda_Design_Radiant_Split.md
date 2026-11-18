@@ -230,7 +230,7 @@ Radiant needs a small native test/fixture driver that loads through `lambda-inpu
 
 Preserve stable test IDs, expected results, skips/partial classifications, fixture provenance, fonts/assets, timeouts, and diagnostic artifacts. Produce an old-to-new inventory at case level for mixed suites. No case may disappear simply because its previous executable no longer exists.
 
-The sibling `lambda-test` corpus is an existing fixture dependency, not a fourth code layer. Keep a single authoritative fixture source with pinned revisions and per-project subset manifests. Update setup scripts to provision only the required corpora, WPT assets, fonts, and references. Native Radiant CI must not need the Lambda code checkout to find its fixtures.
+The `lambda-test` repository is an existing fixture dependency, not a fourth code layer. Lambda pins it as a submodule and provides its corpora through test links. Keep a single authoritative fixture source with pinned revisions and per-project subset manifests. Update setup scripts to provision only the required corpora, WPT assets, fonts, and references. Native Radiant CI must not need the Lambda code checkout to find its fixtures.
 
 Lambda may retain an aggregate compatibility command that invokes the extracted native suites plus its own integration suites. Native test source ownership still moves; the aggregate command must report per-project results and must not execute a duplicate copy of every migrated case.
 

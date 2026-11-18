@@ -7,7 +7,7 @@ REF_DIR="$ROOT_DIR/ref"
 WPT_DIR="$REF_DIR/wpt"
 WPT_URL="https://github.com/web-platform-tests/wpt.git"
 WPT_COMMIT="${WPT_COMMIT:-4ea2132b9a14ad4baf33677ad1723789dd183d6b}"
-LAMBDA_TEST_DIR="${LAMBDA_TEST_DIR:-$ROOT_DIR/../lambda-test}"
+LAMBDA_TEST_DIR="${LAMBDA_TEST_DIR:-$ROOT_DIR/lambda-test}"
 
 die() {
     echo "setup-test.sh: $*" >&2
@@ -56,7 +56,7 @@ for corpus_dir in "$LAMBDA_TEST_DIR"/*; do
     [ "$corpus_name" = ".git" ] && continue
 
     link_path="$ROOT_DIR/test/$corpus_name"
-    expected_target="../../lambda-test/$corpus_name"
+    expected_target="../lambda-test/$corpus_name"
 
     if [ -L "$link_path" ]; then
         existing_target=$(readlink "$link_path")

@@ -708,14 +708,14 @@ these boundaries (D9.1.1v4, D9.1.3v2).
 
 ### 7.1 Test Data
 
-External corpora live in the sibling repo `../lambda-test` (`js262`, `layout`, `markdown`, `pdf`, `render`, …) and in the git-ignored `ref/`. Wire them up once per clone:
+External corpora live in the `lambda-test` submodule (`js262`, `layout`, `markdown`, `pdf`, `render`, …) and in the git-ignored `ref/`. Wire them up once per clone:
 
 ```bash
-./setup-test.sh     # needs ../lambda-test; override with LAMBDA_TEST_DIR=<dir>
+./setup-test.sh     # uses lambda-test; override with LAMBDA_TEST_DIR=<dir>
 ```
 
 - Clones WPT blob-less into `ref/wpt` and checks out the pinned commit (`WPT_COMMIT=<sha>` overrides). It refuses to switch commits if `ref/wpt` has local changes.
-- Links each top-level directory of `../lambda-test` as `test/<name> -> ../../lambda-test/<name>`. It skips existing paths and stops on a symlink that points somewhere else.
+- Links each top-level corpus directory of `lambda-test/` as `test/<name> -> ../lambda-test/<name>`. It skips existing paths and stops on a symlink that points somewhere else.
 - `test/jquery-ui`, `test/markdown` and `test/media` are **tracked** links. `test/js262`, `test/layout`, `test/render` and `test/pdf` are git-ignored.
 - Other reference checkouts under `ref/` (e.g. `ref/test262`) are not fetched by the script.
 
@@ -735,7 +735,7 @@ ln -s "$MAIN/test/js262"   test/js262     # likewise test/layout, test/render, t
 - `test/layout` holds the fonts used by the UI-automation preflight. Without the link, the UI runner fails before it runs anything.
 - The split host uses RE2 from the selected input checkout's `build/lib/native/<configuration>/`; submodule archive outputs belong to those checkouts, not Lambda's root build directory.
 - The links show as `??`, because `build_*/`, `mac-deps/`, `node_modules/` and `ref/` only match directories. Stage files by name, and never `git add -A`.
-- Tracked links (`test/markdown`, `test/jquery-ui`, `test/media`) point to `../../lambda-test/*`, which does not resolve under `.claude/worktrees/<name>/`. Fixtures that use them fail in a worktree. Run those fixtures from the main checkout.
+- Initialize submodules in each worktree with `git submodule update --init --recursive`. Tracked links (`test/markdown`, `test/jquery-ui`, `test/media`) point to `../lambda-test/*` inside that worktree.
 - Worktree paths contain `.claude/`, so a dot appears in every absolute path. Before calling a failure pre-existing, run the base binary **from its own checkout's cwd**.
 - **Never run `make release` in a worktree.** That includes anything that depends on it: `release-node-*`, `release-rdb-drivers` and `package-*`. Its `clean-all` also cleans vendored MIR and Tree-sitter archives. Use `make build-release-compile` instead. Build release modules with `make -C build/premake config=release_native <project>`.
 - The stash stack (`refs/stash`) is shared by every worktree. Prefer a WIP commit. If you do stash, use `git stash push -m <tag>` and `git stash apply <sha>`, never a bare `pop`.

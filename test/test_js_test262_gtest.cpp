@@ -118,7 +118,7 @@
 // =============================================================================
 
 static const char* TEST262_ROOT = "ref/test262";
-static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test files (symlink to ../lambda-test/js262)
+static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test files (symlink to lambda-test/js262)
 static std::string g_harness_dir = "ref/test262/harness";
 // Only tests under their timing gate belong in the baseline. Known exhaustive
 // slow tests live in t262_slow.txt and run in isolated slow batches.
@@ -4923,7 +4923,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[test262] Diagnose mode enabled: list=%s\n", g_batch_file.c_str());
     }
 
-    // Auto-detect stripped test files directory (test/js262 -> ../lambda-test/js262).
+    // Auto-detect stripped test files directory (test/js262 -> lambda-test/js262).
     configure_test262_source_paths();
 
     // Load baseline file for regression checking
