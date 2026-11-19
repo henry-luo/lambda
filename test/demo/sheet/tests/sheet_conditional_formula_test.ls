@@ -4,13 +4,19 @@ import files: ~~.mod_io
 import m: ~~.mod_model
 import f: ~~.mod_formula
 import cf: ~~.mod_conditional
+
+fn make_style() {
+    function calculate(s,r,c) any^ => cf.style(s,r,c,f.display(s,r,c)^,{})^
+    calculate
+}
 let src="test/input/xlsx/conditional-formulas.xlsx"
 let pkg=x.convert(src)^
 let book=files.read(src)^
+function() {
 let st=m.initial(book)^
 let sheet=m.indexed(st)
 let restored=files.restore(parse(format(book,'json')^,'json')^)^
-let style=(s,r,c) any^ => cf.style(s,r,c,f.display(s,r,c)^,{})^
+let style=make_style()
 let edited=m.set_value(m.select(st,2,1),"25")^
 let changed=m.indexed(edited)
 let anchor={row:1,col:2}
@@ -48,3 +54,5 @@ let broken={*:sheet,conditional_rules:[{ranges:[{top:1,left:2,bottom:1,right:2}]
  (f.conditional(sheet,"1/0",anchor,1,2) ^ { ^ }) is error,
  (f.conditional(sheet,"UNKNOWN(1)",anchor,1,2) ^ { ^ }) is error
 ]
+
+}

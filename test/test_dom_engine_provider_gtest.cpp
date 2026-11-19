@@ -897,6 +897,8 @@ static bool event_test_dispatch(bool present) {
     Item owner = host_test_item(1), second = host_test_item(2), third = host_test_item(3);
     Item output = third, values[] = {owner, second, third};
     const DomEventTargetKey keys[] = {{DOM_EVENT_KEY_NODE, &owner}, {DOM_EVENT_KEY_CONTAINER, &second}};
+    // path entries carry propagation flags in addition to their target keys.
+    const DomEventPathEntry path[] = {{keys[0], 0}, {keys[1], 0}};
     bool valid = true;
 #define EVENT_TEST_CALL(name, ...) valid &= event_test_call(present, EVENT_TEST_##name, dom_event_host_##name, __VA_ARGS__);
     for (unsigned flags = 0; flags < 8; flags++) {
@@ -914,7 +916,7 @@ static bool event_test_dispatch(bool present) {
     EVENT_TEST_CALL(named_set, owner, second, third, &output)
     EVENT_TEST_CALL(set_target, owner, second)
     EVENT_TEST_CALL(set_position_key, owner, keys[0], 3)
-    EVENT_TEST_CALL(set_path, owner, keys, 2)
+    EVENT_TEST_CALL(set_path, owner, path, 2)
     EVENT_TEST_CALL(clear_path, owner)
     EVENT_TEST_CALL(set_lambda_dispatch_position, owner, second, 3)
     EVENT_TEST_CALL(clear_lambda_dispatch_position, owner)

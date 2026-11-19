@@ -1,6 +1,17 @@
 // Formula syntax compiles into callable Lambda closures (S12.3.4v2).
 import ops: .mod_formula_functions
 import c: .mod_formula_common
+import dates: .mod_formula_date
+import lookup: .mod_formula_lookup
+// Carry the cache even when a formula fails and IFERROR continues evaluation.
+fn outcome(samples,value: any | error) => if (value is error) {samples:samples,failure:value,failed:true}
+    else {samples:samples,value:value,failed:false}
+fn unwrap(result) any^ => if (result.failed) raise result.failure else result.value
+type FormulaLambda = pn (packet) -> any^ @[clock, random]
+function run_lambda(target: FormulaLambda,packet) any^ => target(packet)^
+type FormulaPlan = pn (sheet, path, samples) -> any^ @[clock, random]
+function run_plan(plan: FormulaPlan,sheet,path,samples) any^ =>
+    plan(sheet,path,samples) ^ {outcome(samples,^)}
 let LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 fn letter(ch) any^ => ch!="" and contains(LETTERS,upper(ch))
 fn digit(ch) any^ => ch!="" and contains("0123456789",ch)
@@ -26,24 +37,42 @@ pub fn indexed_cell(sheet,key) => sheet.cell_index[key]
 pub fn cell(sheet,row,col) any^ => if (sheet.cell_index!=null) indexed_cell(sheet,address(row,col)^)
     else [for (c in sheet.cells where c.row==row and c.col==col) c][0]
 
-// Cells and ranges stay deferred until the compiled closure is called.
-fn reference(sheet,key,path) any^ {
+// References use the same calculation as their caller, including across sheets.
+function reference(sheet,key,path,samples) any^ {
     let p=position(key)^
     if (p.row>=sheet.rows or p.col>=sheet.cols) raise error("#REF!") else {
         let source=cell(sheet,p.row,p.col)
-        let computed=if (sheet.reference_only==true) null else value(sheet,p.row,p.col,path)^;
-        {kind:"cellref",value:computed,blank:source==null or source.raw=="",row:p.row,col:p.col,title:sheet.title}
+        let result=if (sheet.reference_only==true) outcome(samples,null) else cell_value(sheet,p.row,p.col,path,samples)^;
+        if (result.failed) result else outcome(result.samples,
+            {kind:"cellref",value:result.value,blank:source==null or source.raw=="",row:p.row,col:p.col,title:sheet.title})
     }
 }
-fn range_value(sheet,start,end,path) any^ {
+function range_values(sheet,row,col,rows,cols,path,samples) any^ {
+    var values=fill(rows*cols,null)
+    var current=samples
+    var i=0
+    while (i<rows*cols) {
+        let result=cell_value(sheet,row+i div cols,col+i%cols,path,current)^
+        if (result.failed) { return result }
+        current=result.samples
+        values[i]=result.value
+        i=i+1
+    }
+    return outcome(current,values)
+}
+function range_value(sheet,start,end,path,samples) any^ {
     let a=position(start)^
     let b=position(end)^
     if (max(a.row,b.row)>=sheet.rows or max(a.col,b.col)>=sheet.cols) raise error("#REF!")
     else {
         let rows=abs(a.row-b.row)+1
         let cols=abs(a.col-b.col)+1;
-        if (rows*cols>1000000) raise error("#VALUE!") else {kind:"range",rows:rows,cols:cols,row:min(a.row,b.row),col:min(a.col,b.col),title:sheet.title,
-            values:if (sheet.reference_only==true) [] else [for (r in min(a.row,b.row) to max(a.row,b.row), c in min(a.col,b.col) to max(a.col,b.col)) value(sheet,r,c,path)^]}
+        if (rows*cols>1000000) raise error("#VALUE!") else {
+            let result=if (sheet.reference_only==true) outcome(samples,[]) else
+                range_values(sheet,min(a.row,b.row),min(a.col,b.col),rows,cols,path,samples)^;
+            if (result.failed) result else outcome(result.samples,
+                {kind:"range",rows:rows,cols:cols,row:min(a.row,b.row),col:min(a.col,b.col),title:sheet.title,values:result.value})
+        }
     }
 }
 // A compiled reference resolves against the current workbook without storing it in saved cells.
@@ -55,12 +84,15 @@ fn target_sheet(sheet,title) any^ {
         if (len(matches)!=1) raise error("#REF!") else {
             let target=matches[0]
             let existing=sheet.workbook_indices[target.title];
-            {*:target,workbook:sheet.workbook,workbook_indices:sheet.workbook_indices,workbook_spills:sheet.workbook_spills,
+            {*:target,reference_only:sheet.reference_only,workbook:sheet.workbook,workbook_indices:sheet.workbook_indices,workbook_spills:sheet.workbook_spills,
                 *:(sheet.workbook_spills[target.title] or {}),cell_index:if (existing==null) index_cells(target) else existing}
         }
     }
 }
-fn constant_plan(v) => (sheet,path) => v
+fn constant_plan(v) {
+    pn plan(sheet,path,samples) any^ @[clock, random] { outcome(samples,v) }
+    plan
+}
 // Conditional formatting translates only relative reference components from its anchor.
 fn translated_reference(key,offset) any^ {
     if (offset==null) key else {
@@ -75,20 +107,69 @@ fn translated_reference(key,offset) any^ {
     }
 }
 fn binding_name(key) => if ((starts_with(key,"_XLPM.")) ^ {false}) (slice(key,6) ^ {key}) else key
-fn reference_plan(key,title=null) => (sheet,path) any^ =>
-    if (title==null and sheet.formula_bindings[binding_name(key)]!=null) sheet.formula_bindings[binding_name(key)].value
-    else reference(target_sheet(sheet,title)^,translated_reference(key,sheet.conditional_offset)^,path)^
-fn spill_plan(key,title=null) => (sheet,path) any^ => {
-    let target=target_sheet(sheet,title)^
-    let translated=translated_reference(key,sheet.conditional_offset)^
-    let source=target.spill_ranges[upper(replace(translated,"$",""))];
-    if (source==null) raise error("#REF!") else source
+fn reference_plan(key,title=null) {
+    pn plan(sheet,path,samples) any^ @[clock, random] {
+        if (title==null and sheet.formula_bindings[binding_name(key)]!=null) outcome(samples,sheet.formula_bindings[binding_name(key)].value)
+        else reference(target_sheet(sheet,title)^,translated_reference(key,sheet.conditional_offset)^,path,samples)^
+    }
+    plan
 }
-fn range_plan(start,end,title=null) => (sheet,path) any^ =>
-    range_value(target_sheet(sheet,title)^,translated_reference(start,sheet.conditional_offset)^,
-        translated_reference(end,sheet.conditional_offset)^,path)^
-fn thunk(plan,sheet,path) => () any^ => call(plan,[sheet,path])^
+fn spill_plan(key,title=null) {
+    pn plan(sheet,path,samples) any^ @[clock, random] {
+        let target=target_sheet(sheet,title)^
+        let translated=translated_reference(key,sheet.conditional_offset)^
+        let source=target.spill_ranges[upper(replace(translated,"$",""))];
+        if (source==null) raise error("#REF!") else outcome(samples,source)
+    }
+    plan
+}
+fn range_plan(start,end,title=null) {
+    pn plan(sheet,path,samples) any^ @[clock, random] {
+        range_value(target_sheet(sheet,title)^,translated_reference(start,sheet.conditional_offset)^,
+        translated_reference(end,sheet.conditional_offset)^,path,samples)^
+    }
+    plan
+}
+fn value_context(sheet) => if (sheet.reference_only==true) {*:sheet,reference_only:false} else sheet
+function arguments_value(plans,sheet,path,samples,mode="value",start=0,end=null) any^ {
+    let stop=if (end==null) len(plans) else end
+    var current=samples
+    var values=fill(stop-start,null)
+    var i=start
+    while (i<stop) {
+        let reference_only=mode=="reference" or mode=="aggregate" or (mode=="offset" and i==0)
+        let context=if (reference_only) {*:sheet,reference_only:true} else value_context(sheet)
+        // XLOOKUP evaluates its fallback only after the lookup misses.
+        let result=if (mode=="xlookup" and i==3) outcome(current,null) else run_plan(plans[i],context,path,current)^
+        if (result.failed and mode!="aggregate") { return result }
+        current=result.samples
+        values[i-start]=if (result.failed) {kind:"excel_error",message:result.failure.message} else result.value
+        i=i+1
+    }
+    return outcome(current,values)
+}
 fn scalar(value) => if (value is map and value.kind=="cellref") value.value else value
+// Split the cache by sheet and row blocks so inserting a sample copies only its path.
+fn sample_path(sheet) => [lower(sheet.title or ""),string(sheet.formula_row div 256),
+    string(sheet.formula_row%256),string(sheet.formula_col),sheet.call_scope or ""]
+fn cached_sample(cache,keys,index=0) any^ => if (index==len(keys) or cache==null) cache
+    else cached_sample(cache[keys[index]]^,keys,index+1)^
+fn store_sample(cache,keys,reading,index=0) any^ => if (index==len(keys)) reading
+    else { *:(cache or {}), *:map([keys[index],store_sample(cache[keys[index]]^,keys,reading,index+1)^]) }
+function volatile_value(name,sheet,samples) any^ {
+    let keys=sample_path(sheet)
+    let stored=if (sheet.conditional_mode==true) null else cached_sample(samples,keys)^
+    if (stored!=null) {*:stored,samples:samples} else {
+        let reading=if (name=="RAND" or name=="RANDOM") (c.random_sample() ^ {^})
+            else (dates.current_value(sheet.date1904==true,name=="TODAY",c.clock_sample()) ^ {^});
+        if (sheet.conditional_mode==true) outcome(samples,reading)
+        else {
+            // Cache the reading itself so subsequent formulas can add to the current cache.
+            let entry=if (reading is error) {failed:true,failure:reading} else {failed:false,value:reading};
+            {*:entry,samples:store_sample(samples,keys,entry)^}
+        }
+    }
+}
 // Excel broadcasts scalar, row, and column operands across a rectangular result.
 fn array_operator(target,args) any^ {
     let left=if (c.is_array_value(args[0])) args[0] else {rows:1,cols:1,values:[args[0]]}
@@ -102,11 +183,115 @@ fn array_operator(target,args) any^ {
             let a=left.values[(if (left.rows==1) 0 else r)*left.cols+(if (left.cols==1) 0 else c)],
             let b=right.values[(if (right.rows==1) 0 else r)*right.cols+(if (right.cols==1) 0 else c)])
             if (c.cell_error(a)) a else if (len(args)>1 and c.cell_error(b)) b
-            else (call(target,if (len(args)==1) [a] else [a,b]) ^ {{kind:"excel_error",message:^.message}})];
+            else (ops.dispatch(target,if (len(args)==1) [a] else [a,b]) ^ {{kind:"excel_error",message:^.message}})];
         {kind:"array",rows:rows,cols:cols,values:values}
     }
 }
-fn invoke(name,plans,sheet,path) any^ {
+// Lazy choices execute the selected plan with the cache left by the condition.
+function select_branch(name,plans,sheet,path,samples,index=0,selector=null) any^ {
+    if (index>=len(plans)) raise error("#N/A")
+    else if (name=="SWITCH" and index==len(plans)-1) run_plan(plans[index],sheet,path,samples)^
+    else {
+        let test=run_plan(plans[index],value_context(sheet),path,samples)^;
+        if (test.failed) test else {
+            let matched=(if (name=="SWITCH") c.equal(selector,scalar(test.value)) else c.truth(scalar(test.value))) ^ {^};
+            if (matched is error) outcome(test.samples,matched)
+            else if (matched) run_plan(plans[index+1],sheet,path,test.samples)^
+            else select_branch(name,plans,sheet,path,test.samples,index+2,selector) ^ {outcome(test.samples,^)}
+        }
+    }
+}
+function conditional_call(name,plans,sheet,path,samples) any^ {
+    if (name=="IFS") {
+        if (len(plans)%2!=0) raise error("#VALUE!") else select_branch(name,plans,sheet,path,samples)^
+    } else {
+        let first=run_plan(plans[0],value_context(sheet),path,samples)^;
+        if (name=="ISERROR") outcome(first.samples,first.failed)
+        else if (name=="ISNA") outcome(first.samples,first.failed and first.failure.message=="#N/A")
+        else if (name=="IFERROR" or name=="IFNA") {
+            if (first.failed and (name=="IFERROR" or first.failure.message=="#N/A"))
+                run_plan(plans[1],sheet,path,first.samples)^ else first
+        }
+        else if (first.failed) first
+        else if (name=="SWITCH")
+            select_branch(name,plans,sheet,path,first.samples,1,scalar(first.value)) ^ {outcome(first.samples,^)}
+        else if (name=="CHOOSE") {
+            let choice=trunc(c.numeric(scalar(first.value))^) ^ {^};
+            if (choice is error) outcome(first.samples,choice)
+            else if (choice<1 or choice>=len(plans)) outcome(first.samples,error("#VALUE!"))
+            else run_plan(plans[choice],sheet,path,first.samples)^
+        }
+        else {
+            let test=c.truth(scalar(first.value)) ^ {^};
+            if (test is error) outcome(first.samples,test) else {
+                let branch=if (test) 1 else 2
+                let result=if (branch==len(plans)) outcome(first.samples,false) else
+                    run_plan(plans[branch],sheet,path,first.samples)^;
+                if (result.failed or result.value!=null) result else outcome(result.samples,0)
+            }
+        }
+    }
+}
+// Filtering happens before evaluation so hidden rows and nested aggregates can be ignored.
+function aggregate_values(sheet,path,refs,options,samples) any^ {
+    var current=samples
+    var groups=fill(len(refs),null)
+    var i=0
+    while (i<len(refs)) {
+        let ref=refs[i]
+        if (ref is map and contains(["cellref","range"],ref.kind)^) {
+            let target=target_sheet(sheet,ref.title)^
+            let rows=if (ref.kind=="range") ref.rows else 1
+            let cols=if (ref.kind=="range") ref.cols else 1
+            let coords=[for (r in ref.row to ref.row+rows-1,c in ref.col to ref.col+cols-1,
+                let raw=upper(trim(cell(target,r,c).raw or ""))
+                where not (options.hidden and contains(target.hidden_rows or [],r)^) and
+                    not (options.nested and (starts_with(raw,"=SUBTOTAL(")^ or starts_with(raw,"=AGGREGATE(")^))) [r,c]]
+            var values=fill(len(coords),null)
+            var j=0
+            while (j<len(coords)) {
+                let coord=coords[j]
+                let result=cell_value(target,coord[0],coord[1],path,current)^
+                current=result.samples
+                if (result.failed and not options.errors) { return result }
+                values[j]=if (result.failed) null else result.value
+                j=j+1
+            }
+            groups[i]=values
+        } else {
+            let values=if (c.is_array_value(ref)) ref.values else [ref]
+            let errors=[for (value in values where c.cell_error(value)^) value]
+            if (len(errors)>0 and not options.errors) { return outcome(current,error(errors[0].message)) }
+            groups[i]=[for (value in values where not c.cell_error(value)^) value]
+        }
+        i=i+1
+    }
+    return outcome(current,[for (group in groups,value in group) value])
+}
+function aggregate_call(name,plans,sheet,path,samples) any^ {
+    let subtotal=name=="SUBTOTAL"
+    let leading=arguments_value(plans,sheet,path,samples,"value",0,if (subtotal) 1 else 2)^;
+    if (leading.failed) leading else {
+        let options=ops.aggregate_options(subtotal,scalar(leading.value[0]),scalar(leading.value[1])) ^ {^};
+        if (options is error) outcome(leading.samples,options) else {
+            let has_k=options.base>=14
+            let end=len(plans)-(if (has_k) 1 else 0)
+            if (has_k and end!=3) outcome(leading.samples,error("#VALUE!")) else {
+                let refs=arguments_value(plans,sheet,path,leading.samples,if (subtotal) "reference" else "aggregate",
+                    if (subtotal) 1 else 2,end)^;
+                if (refs.failed) refs else {
+                    let k=if (has_k) run_plan(plans[end],sheet,path,refs.samples)^ else outcome(refs.samples,null);
+                    if (k.failed) k else if (has_k and scalar(k.value)==null) outcome(k.samples,error("#VALUE!")) else {
+                        let values=aggregate_values(sheet,path,refs.value,options,k.samples) ^ {outcome(k.samples,^)};
+                        if (values.failed) values else
+                            outcome(values.samples,ops.aggregate_calculate(options.base,values.value,scalar(k.value)) ^ {^})
+                    }
+                }
+            }
+        }
+    }
+}
+function invoke(name,plans,sheet,path,samples) any^ {
     let basic=if (starts_with(name,"_XLFN.")) slice(name,6) else name
     let resolved=if (starts_with(basic,"_XLWS.")) slice(basic,6) else basic
     let entry=ops.FUNCTIONS[resolved];
@@ -114,91 +299,60 @@ fn invoke(name,plans,sheet,path) any^ {
         (sheet.workbook==null or len(sheet.workbook.defined_names or [])==0)) raise error("#NAME?")
     else if (entry==null) {
         let binding=sheet.formula_bindings[binding_name(resolved)]
-        let func=if (binding!=null) binding.value else defined_lambda(sheet,resolved,path)^;
-        if (func==null or func.kind!="lambda") raise error("#NAME!")
-        else invoke_lambda(func,[for (plan in plans) scalar(call(plan,[sheet,path])^)])^
+        let func=if (binding!=null) outcome(samples,binding.value) else defined_lambda(sheet,resolved,path,samples)^;
+        if (func.failed) func else if (func.value==null or func.value.kind!="lambda") outcome(func.samples,error("#NAME!"))
+        else {
+            let args=arguments_value(plans,sheet,path,func.samples)^;
+            if (args.failed) args else
+                invoke_lambda(func.value,[for (arg in args.value) scalar(arg)],sheet,args.samples) ^ {outcome(args.samples,^)}
+        }
     }
     else if (len(plans)<entry.min or len(plans)>entry.max) raise error("#VALUE!")
-    else if (entry.lazy=="subtotal") {
-        let code=scalar(call(plans[0],[sheet,path])^)
-        let refs=[for (i,plan in plans where i>0) call(plan,[{*:sheet,reference_only:true},path])^]
-        let resolver=(ref,skip_hidden,skip_nested,skip_errors) any^ => aggregate_values(sheet,path,ref,skip_hidden,skip_nested,skip_errors)^;
-        call(entry.target,[resolver,code,refs])^
-    }
-    else if (entry.lazy=="aggregate") {
-        let code=scalar(call(plans[0],[sheet,path])^)
-        let option=scalar(call(plans[1],[sheet,path])^)
-        let function_number=trunc(c.numeric(code)^)
-        let has_k=function_number>=14 and function_number<=19
-        let refs=[for (i,plan in plans where i>=2 and (not has_k or i<len(plans)-1)) {
-            let candidate=call(plan,[{*:sheet,reference_only:true},path]) ^ {null};
-            if (candidate==null or (candidate is map and candidate.kind=="array"))
-                (call(plan,[sheet,path]) ^ {{kind:"excel_error",message:^.message}}) else candidate
-        }]
-        let k=if (has_k and len(plans)>=4) scalar(call(plans[len(plans)-1],[sheet,path])^) else null
-        let resolver=(ref,skip_hidden,skip_nested,skip_errors) any^ => aggregate_values(sheet,path,ref,skip_hidden,skip_nested,skip_errors)^;
-        call(entry.target,[resolver,code,option,refs,k])^
-    }
-    else if (entry.reference_resolver==true) {
-        let args=[for (i,plan in plans) call(plan,[if (resolved=="OFFSET" and i==0) {*:sheet,reference_only:true} else sheet,path])^]
-        let resolver=(descriptor) any^ => resolve_reference(sheet,path,descriptor)^;
-        call(entry.target,[resolver,*args])^
-    }
-    else if (entry.reference_context==true) {
-        let args=[for (plan in plans) call(plan,[if (entry.references==true) {*:sheet,reference_only:true} else sheet,path])^];
-        call(entry.target,[{row:sheet.formula_row,col:sheet.formula_col,column_name:column},
-            *[for (arg in args) if (entry.references==true) arg else scalar(arg)]])^
-    }
-    else if (entry.lazy=="if") {
-        let condition=scalar(call(plans[0],[sheet,path])^)
-        let yes=thunk(plans[1],sheet,path)
-        let no=if (len(plans)>2) thunk(plans[2],sheet,path) else (() => false);
-        call(entry.target,[condition,yes,no])^
-    }
-    else if (entry.lazy=="iferror")
-        call(entry.target,[thunk(plans[0],sheet,path),thunk(plans[1],sheet,path)])^
-    else if (entry.lazy=="inspect") call(entry.target,[thunk(plans[0],sheet,path)])^
-    else if (entry.lazy=="thunks") call(entry.target,[for (plan in plans) thunk(plan,sheet,path)])^
-    else if (entry.lazy=="selector") {
-        let first=scalar(call(plans[0],[sheet,path])^)
-        let args=[first,*[for (i,plan in plans where i>0) thunk(plan,sheet,path)]];
-        call(entry.target,args)^
-    }
-    else if (entry.lazy=="xlookup") {
-        let args=[for (i,plan in plans) if (i==3) thunk(plan,sheet,path) else scalar(call(plan,[sheet,path])^)];
-        call(entry.target,args)^
-    }
+    else if (contains(["TODAY","NOW","RAND","RANDOM"],resolved)) volatile_value(resolved,sheet,samples)^
+    else if (entry.lazy=="subtotal" or entry.lazy=="aggregate") aggregate_call(resolved,plans,sheet,path,samples)^
+    else if (entry.lazy in ["if","iferror","inspect","thunks","selector"]) conditional_call(resolved,plans,sheet,path,samples)^
     else {
-        let args=[for (plan in plans) call(plan,[sheet,path])^];
-        let normalized=if (entry.references==true) args else [for (arg in args) scalar(arg)];
-        if (contains(["+","-","*","/","^","%","u+","u-","&","=","<>","<",">","<=",">="],resolved) and
-            any([for (arg in normalized) c.is_array_value(arg)])) array_operator(entry.target,normalized)^
-        else call(entry.target,if (entry.date_context==true) [sheet.date1904==true,*normalized] else normalized)^
-    }
-}
-// Filtering happens before evaluation so hidden errors can be ignored.
-fn aggregate_values(sheet,path,ref,skip_hidden,skip_nested,skip_errors) any^ {
-    if (c.cell_error(ref)) (if (skip_errors) [] else raise error(ref.message))
-    else if (ref is map and ref.kind=="array") {
-        let errors=[for (item in ref.values where c.cell_error(item)^) item];
-        if (len(errors)>0 and not skip_errors) raise error(errors[0].message)
-        else [for (item in ref.values where not c.cell_error(item)^) item]
-    }
-    else if (not (ref is map) or not contains(["cellref","range"],ref.kind)) [ref] else {
-        let target=target_sheet(sheet,ref.title)^
-        let rows=if (ref.kind=="range") ref.rows else 1
-        let cols=if (ref.kind=="range") ref.cols else 1
-        let values=[for (r in ref.row to ref.row+rows-1, c in ref.col to ref.col+cols-1,
-            let raw=upper(trim(cell(target,r,c).raw or ""))
-            where not (skip_hidden and contains(target.hidden_rows or [],r)^) and
-                not (skip_nested and (starts_with(raw,"=SUBTOTAL(")^ or starts_with(raw,"=AGGREGATE(")^)))
-            (value(target,r,c,path) ^ {^})];
-        if (not skip_errors and any([for (v in values) v is error])) raise [for (v in values where v is error) v][0]
-        else [for (v in values where not (v is error)) v]
+        let mode=if (resolved=="OFFSET") "offset" else if (entry.lazy=="xlookup") "xlookup"
+            else if (entry.reference_context==true and entry.references==true) "reference" else "value"
+        let result=arguments_value(plans,sheet,path,samples,mode)^;
+        if (result.failed) result else {
+            let args=result.value;
+            if (entry.reference_resolver==true) {
+                let descriptor=(if (resolved=="INDIRECT") ops.xl_indirect(args[0],if (len(args)>1) args[1] else true)
+                    else ops.xl_offset(args[0],args[1],args[2],args[3],args[4])) ^ {^};
+                if (descriptor is error) outcome(result.samples,descriptor)
+                else resolve_reference(sheet,path,descriptor,result.samples) ^ {outcome(result.samples,^)}
+            }
+            else if (entry.reference_context==true) {
+                let value=(if (resolved=="ADDRESS") ops.xl_address(column,scalar(args[0]),scalar(args[1]),
+                    if (len(args)>2) scalar(args[2]) else 1,if (len(args)>3) scalar(args[3]) else true,scalar(args[4]))
+                    else ops.dispatch(entry.target,[{row:sheet.formula_row,col:sheet.formula_col,column_name:column},
+                        *[for (arg in args) if (entry.references==true) arg else scalar(arg)]])) ^ {^};
+                outcome(result.samples,value)
+            }
+            else if (mode=="xlookup") {
+                let normalized=[for (arg in args) scalar(arg)]
+                let found=lookup.xlookup_index(normalized[0],normalized[1],normalized[2],
+                    if (len(args)>4) normalized[4] else 0,if (len(args)>5) normalized[5] else 1) ^ {^};
+                if (found is error) outcome(result.samples,found)
+                else if (found!=null) outcome(result.samples,normalized[2].values[found])
+                else if (len(args)<4) outcome(result.samples,error("#N/A")) else {
+                    let fallback=run_plan(plans[3],sheet,path,result.samples)^;
+                    if (not fallback.failed and fallback.value==null) outcome(fallback.samples,error("#N/A")) else fallback
+                }
+            }
+            else {
+                let normalized=if (entry.references==true) args else [for (arg in args) scalar(arg)]
+                let value=(if (contains(["+","-","*","/","^","%","u+","u-","&","=","<>","<",">","<=",">="],resolved) and
+                    any([for (arg in normalized) c.is_array_value(arg)])) array_operator(entry.target,normalized)
+                    else ops.dispatch(entry.target,if (entry.date_context==true) [sheet.date1904==true,*normalized] else normalized)) ^ {^};
+                outcome(result.samples,value)
+            }
+        }
     }
 }
 // Only cell/range references are accepted from INDIRECT; arbitrary text is never run as code.
-fn resolve_reference(sheet,path,descriptor) any^ {
+function resolve_reference(sheet,path,descriptor,samples) any^ {
     if (descriptor is string) {
         let t=tokens(descriptor)^
         let qualified=len(t)>=3 and t[1]=="!"
@@ -209,17 +363,23 @@ fn resolve_reference(sheet,path,descriptor) any^ {
         if (not (start is string) or (has_range and not (t[at+2] is string)) or len(t)!=(at+(if (has_range) 3 else 1))) raise error("#REF!") else {
             let first=position(start)^
             let target=target_sheet(sheet,title)^;
-            if (has_range) range_value(target,start,t[at+2],path)^ else reference(target,start,path)^
+            if (has_range) range_value(target,start,t[at+2],path,samples)^ else reference(target,start,path,samples)^
         }
     } else {
         let target=target_sheet(sheet,descriptor.title)^
         let first=address(descriptor.row,descriptor.col)^
         let final=address(descriptor.row+descriptor.rows-1,descriptor.col+descriptor.cols-1)^;
-        if (descriptor.rows==1 and descriptor.cols==1) reference(target,first,path)^
-        else range_value(target,first,final,path)^
+        if (descriptor.rows==1 and descriptor.cols==1) reference(target,first,path,samples)^
+        else range_value(target,first,final,path,samples)^
     }
 }
-fn call_plan(name,plans) => (sheet,path) any^ => invoke(name,plans,sheet,path)^
+fn call_plan(name,plans,site=null) {
+    pn plan(sheet,path,samples) any^ @[clock, random] {
+        let context=if (site==null) sheet else {*:sheet,call_scope:(sheet.call_scope or "") ++ "/" ++ string(site)};
+        invoke(name,plans,context,path,samples)^
+    }
+    plan
+}
 
 fn digits_end(source,at) any^ => if (at<len(source) and digit(slice(source,at,at+1))) digits_end(source,at+1)^ else at
 fn word_end(source,at,numeric) any^ => if (at>=len(source)) at else {
@@ -277,17 +437,17 @@ fn arguments(t,at,depth,args=[],after_comma=false) map^ {
     }
 }
 // LET bindings are lexical formula values; nested cells start with a fresh scope.
-fn let_run(bindings,body,sheet,path,index=0) any^ {
-    if (index>=len(bindings)) call(body,[sheet,path])^ else {
+function let_run(bindings,body,sheet,path,samples,index=0) any^ {
+    if (index>=len(bindings)) run_plan(body,sheet,path,samples)^ else {
         let binding=bindings[index]
-        let value=call(binding.plan,[sheet,path])^
-        let context={*:sheet,formula_bindings:{*:(sheet.formula_bindings or {}),*:map([binding.name,{value:value}])}};
-        let_run(bindings,body,context,path,index+1)^
+        let result=run_plan(binding.plan,value_context(sheet),path,samples)^
+        let context={*:sheet,formula_bindings:{*:(sheet.formula_bindings or {}),*:map([binding.name,{value:result.value}])}};
+        if (result.failed) result else let_run(bindings,body,context,path,result.samples,index+1)^
     }
 }
-fn let_plan(bindings,body) => (sheet,path) any^ => {
-    let run=() any^ => let_run(bindings,body,sheet,path)^;
-    call(ops.FUNCTIONS.LET.target,[run])^
+fn let_plan(bindings,body) {
+    pn plan(sheet,path,samples) any^ @[clock, random] { let_run(bindings,body,sheet,path,samples)^ }
+    plan
 }
 fn let_arguments(t,at,depth,bindings=[]) map^ {
     let name=if (t[at] is string) binding_name(t[at]) else t[at]
@@ -306,17 +466,20 @@ fn let_arguments(t,at,depth,bindings=[]) map^ {
     }
 }
 // Excel function values capture the lexical formula environment, never source code.
-fn invoke_lambda(func,args) any^ {
+function invoke_lambda(func,args,sheet,samples) any^ {
     if (len(args)!=len(func.params)) raise error("#VALUE!")
-    else call(func.target,[{values:args}])^
+    else run_lambda(func.target,{values:args,call_scope:sheet.call_scope,samples:samples})^
 }
-fn lambda_plan(params,body) => (sheet,path) any^ => {
-    let target=(packet) any^ => {
-        let bindings=map([for (i,param in params) *[param,{value:packet.values[i]}]])
-        let context={*:sheet,lambda_depth:(sheet.lambda_depth or 0)+1,formula_bindings:{*:(sheet.formula_bindings or {}),*:bindings}};
-        if (context.lambda_depth>64) raise error("#NUM!") else call(body,[context,path])^
-    };
-    call(ops.FUNCTIONS.LAMBDA.target,[{params:params,target:target}])^
+fn lambda_plan(params,body) {
+    pn plan(sheet,path,samples) any^ @[clock, random] {
+        pn target(packet) any^ @[clock, random] {
+            let bindings=map([for (i,param in params) *[param,{value:packet.values[i]}]])
+            let context={*:sheet,call_scope:packet.call_scope,lambda_depth:(sheet.lambda_depth or 0)+1,formula_bindings:{*:(sheet.formula_bindings or {}),*:bindings}};
+            if (context.lambda_depth>64) raise error("#NUM!") else run_plan(body,context,path,packet.samples)^
+        }
+        outcome(samples,{kind:"lambda",params:params,target:target})
+    }
+    plan
 }
 fn lambda_arguments(t,at,depth,params=[]) map^ {
     if (depth>64) raise error("#VALUE!")
@@ -331,24 +494,32 @@ fn lambda_arguments(t,at,depth,params=[]) map^ {
     }
 }
 // Workbook and sheet-scoped names remain data until their callable plan is requested.
-fn defined_lambda(sheet,name,path) any^ {
-    if (sheet.workbook==null) { return null }
+function defined_lambda(sheet,name,path,samples) any^ {
+    if (sheet.workbook==null) { return outcome(samples,null) }
     let definitions=sheet.workbook.defined_names or []
     let index=[for (i,item in (sheet.workbook.sheets or []) where lower(item.title)==lower(sheet.title or "")) i][0]
     let matching=[for (entry in definitions where upper(entry.name)==name and (entry.scope==null or entry.scope==index)) entry]
     let scoped=[for (entry in matching where entry.scope!=null) entry]
     let chosen=if (len(scoped)>0) scoped[0] else matching[0];
-    if (chosen==null) null else {
+    if (chosen==null) outcome(samples,null) else {
         let raw=if (starts_with(chosen.formula,"=")) slice(chosen.formula,1) else chosen.formula
         let t=tokens(raw)^
         let plan=expression(t,0,0)^;
-        if (plan.at!=len(t)) raise error("#VALUE!") else call(plan.plan,[sheet,path])^
+        if (plan.at!=len(t)) raise error("#VALUE!") else run_plan(plan.plan,sheet,path,samples)^
     }
 }
-fn apply_plan(plan,params) => (sheet,path) any^ => {
-    let func=call(plan,[sheet,path])^
-    let args=[for (param in params) scalar(call(param,[sheet,path])^)];
-    if (not (func is map) or func.kind!="lambda") raise error("#VALUE!") else invoke_lambda(func,args)^
+fn apply_plan(target_plan,params,site) {
+    pn plan(sheet,path,samples) any^ @[clock, random] {
+        let func=run_plan(target_plan,sheet,path,samples)^;
+        if (func.failed) func else {
+            let args=arguments_value(params,sheet,path,func.samples)^;
+            if (args.failed) args else if (not (func.value is map) or func.value.kind!="lambda")
+                outcome(args.samples,error("#VALUE!"))
+            else invoke_lambda(func.value,[for (arg in args.value) scalar(arg)],
+                {*:sheet,call_scope:(sheet.call_scope or "") ++ "/" ++ string(site)},args.samples) ^ {outcome(args.samples,^)}
+        }
+    }
+    plan
 }
 fn atom(t,at,depth) map^ {
     if (depth>64 or at>=len(t)) raise error("#VALUE!")
@@ -377,7 +548,7 @@ fn atom(t,at,depth) map^ {
     else if (contains(["LAMBDA","_XLFN.LAMBDA"],t[at]) and t[at+1]=="(") lambda_arguments(t,at+2,depth+1)^
     else if (t[at+1]=="(") {
         let args=arguments(t,at+2,depth+1)^;
-        {plan:call_plan(t[at],args.plans),at:args.at}
+        {plan:call_plan(t[at],args.plans,at),at:args.at}
     }
     else if (t[at+1]=="#") {
         let checked=position(t[at])^;
@@ -401,7 +572,7 @@ fn atom(t,at,depth) map^ {
 fn call_suffix(t,left,depth) map^ {
     if (depth>64) raise error("#VALUE!") else if (t[left.at]!="(") left else {
         let args=arguments(t,left.at+1,depth+1)^;
-        call_suffix(t,{plan:apply_plan(left.plan,args.plans),at:args.at},depth+1)^
+        call_suffix(t,{plan:apply_plan(left.plan,args.plans,left.at),at:args.at},depth+1)^
     }
 }
 fn primary(t,at,depth) map^ => call_suffix(t,atom(t,at,depth+1)^,depth+1)^
@@ -440,52 +611,86 @@ fn expression(t,at,depth) map^ {
     if (not contains(["=","<>","<",">","<=",">="],op)) left
     else { let right=concatenation(t,left.at+1,depth+1)^; {plan:call_plan(op,[left.plan,right.plan]),at:right.at} }
 }
-fn evaluate(sheet,raw,path,allow_array=false) any^ {
+function evaluate(sheet,raw,path,samples,allow_array=false) any^ {
     let t=tokens(slice(raw,1))^
-    let result=expression(t,0,0)^
-    if (result.at!=len(t)) raise error("#VALUE!") else {
-        let calculated=scalar(call(result.plan,[sheet,path])^);
-        if (calculated is map and calculated.kind=="lambda") raise error("#CALC!")
-        else if (not allow_array and (calculated is array or c.is_array_value(calculated))) raise error("#VALUE!")
-        else if (calculated is nan or calculated is inf or calculated == -inf) raise error("#NUM!")
-        else calculated
+    let parsed=expression(t,0,0)^;
+    if (parsed.at!=len(t)) raise error("#VALUE!") else {
+        let result=run_plan(parsed.plan,sheet,path,samples)^;
+        if (result.failed) result else {
+            let calculated=scalar(result.value);
+            if (calculated is map and calculated.kind=="lambda") outcome(result.samples,error("#CALC!"))
+            else if (not allow_array and (calculated is array or c.is_array_value(calculated)))
+                outcome(result.samples,error("#VALUE!"))
+            else if (calculated is nan or calculated is inf or calculated == -inf) outcome(result.samples,error("#NUM!"))
+            else outcome(result.samples,calculated)
+        }
     }
 }
-// The formula remains a parsed call plan; no spreadsheet text becomes Lambda source.
-pub fn conditional(sheet,formula,anchor,row,col) any^ {
+// Template formulas take fresh samples and share the worksheet readings reached by their references.
+pub function conditional_result(sheet,formula,anchor,row,col,samples) any^ {
     let source=if (starts_with(formula,"=")) formula else "=" ++ formula
-    let context={*:sheet,formula_row:row,formula_col:col,conditional_offset:{row:row-anchor.row,col:col-anchor.col}};
-    evaluate(context,source,[])^
+    let context={*:sheet,conditional_mode:true,call_scope:"",formula_row:row,formula_col:col,
+        conditional_offset:{row:row-anchor.row,col:col-anchor.col}};
+    evaluate(context,source,[],samples) ^ {outcome(samples,^)}
 }
+pub function conditional(sheet,formula,anchor,row,col) any^ =>
+    unwrap(conditional_result(sheet,formula,anchor,row,col,sheet.samples)^)^
 // Literal cells do not need formula parsing or dependency tracking.
 pub fn literal_value(raw) any^ {
     if (starts_with(raw,"'")) slice(raw,1)
     else if (trim(raw)=="") ""
     else { let parsed=float(raw) ^ {raw}; if (parsed is nan or parsed is inf or parsed == -inf) raw else parsed }
 }
-pub fn raw_value(sheet,row,col,path=[]) any^ {
-    let cell_address=address(row,col)
-    let key = lower(sheet.title or "") ++ "!" ++ cell_address
-    let raw = cell(sheet,row,col).raw or ""
-    let spill=if (sheet.spill_values==null or len(sheet.spill_values)==0) null else sheet.spill_values[cell_address];
-    if (raw=="" and spill!=null) (if (contains(path,spill.key)) raise error("#CYCLE!") else c.checked(spill.value)^)
-    else if (contains(path,key) or len(path)>64) raise error("#CYCLE!")
+function evaluate_cell(sheet,row,col,path,samples) any^ {
+    let cell_address=address(row,col)^
+    let key=lower(sheet.title or "") ++ "!" ++ cell_address
+    let source=cell(sheet,row,col)^
+    let raw=source.raw or ""
+    let spill=sheet.spill_values[cell_address];
+    if (raw=="" and spill!=null) {
+        if (contains(path,spill.key)) outcome(samples,error("#CYCLE!"))
+        else outcome(samples,c.checked(spill.value) ^ {^})
+    }
+    else if (contains(path,key) or len(path)>64) outcome(samples,error("#CYCLE!"))
     else if (starts_with(raw,"=")) {
-        let result = evaluate({*:sheet,conditional_offset:null,formula_bindings:null,formula_row:row,formula_col:col},raw,[*path,key],true) ^ { {formula_error:^.message} };
-        // Saved XLSX results are a display fallback until the workbook is edited.
-        if (result is map and result.formula_error!=null) {
-            if (cell(sheet,row,col).has_cached==true and contains(["#NAME?","#VALUE!","#REF!"],result.formula_error)) cell(sheet,row,col).cached
-            else raise error(result.formula_error)
-        } else result
+        let context={*:sheet,conditional_mode:false,conditional_offset:null,reference_only:false,formula_bindings:null,
+            formula_row:row,formula_col:col,call_scope:""}
+        let result=evaluate(context,raw,[*path,key],samples,true) ^ {outcome(samples,^)};
+        // Imported XLSX results can serve as a display fallback until edited.
+        if (result.failed and source.has_cached==true and contains(["#NAME?","#VALUE!","#REF!"],result.failure.message))
+            outcome(result.samples,source.cached)
+        else result
     }
-    else literal_value(raw)^
+    else outcome(samples,literal_value(raw) ^ {^})
 }
-pub fn value(sheet,row,col,path=[]) any^ {
-    let error_value=if (sheet.spill_errors==null or len(sheet.spill_errors)==0) null else sheet.spill_errors[address(row,col)];
-    if (error_value!=null) raise error(error_value) else {
-        let result=raw_value(sheet,row,col,path)^;
-        if (c.is_array_value(result)) c.checked(result.values[0])^ else c.checked(result)^
+function cell_value(sheet,row,col,path,samples) any^ {
+    let spill_error=sheet.spill_errors[address(row,col)^];
+    if (spill_error!=null) outcome(samples,error(spill_error)) else {
+        let result=evaluate_cell(sheet,row,col,path,samples)^;
+        if (result.failed) result else {
+            let value=if (c.is_array_value(result.value)) result.value.values[0] else result.value;
+            outcome(result.samples,c.checked(value) ^ {^})
+        }
     }
+}
+pub function raw_value(sheet,row,col,path=[]) any^ => unwrap(evaluate_cell(sheet,row,col,path,sheet.samples)^)^
+pub function value(sheet,row,col,path=[]) any^ => unwrap(cell_value(sheet,row,col,path,sheet.samples)^)^
+fn display_value(result) => if (not result.failed) result.value
+    else if ((starts_with(string(result.failure.message),"#") ^ {false})) result.failure.message else "#VALUE!"
+// One batch shares the samples taken by its roots and all their dependencies.
+pub function calculate_values(sheet,samples) any^ {
+    var current=samples
+    var values=fill(len(sheet.cells),null)
+    var i=0
+    while (i<len(sheet.cells)^) {
+        let source=sheet.cells[i]
+        let result=cell_value(sheet,source.row,source.col,[],current)^
+        current=result.samples
+        values[i]=display_value(result)
+        i=i+1
+    }
+    return {samples:current,values:map([*[for (i,source in sheet.cells) *[address(source.row,source.col)^,values[i]]],
+        *[for (key,item in sheet.spill_display) *[string(key),item]]])}
 }
 // Spill geometry is derived from formulas and never saved as authored cells.
 fn spill_intersects(a,b) => a.row<b.row+b.result.rows and b.row<a.row+a.result.rows and
@@ -509,10 +714,21 @@ pub fn may_spill(raw,book=null) any^ {
             contains(text,name)]) or (book!=null and any([for (entry in (book.defined_names or []))
             contains(text,upper(entry.name or "") ++ "(")])))
 }
-pub fn spill_pass(sheet) any^ {
-    let candidates=[for (source in sheet.cells,
-        let result=if (may_spill(source.raw,sheet.workbook)^) (raw_value(sheet,source.row,source.col) ^ {null}) else null
-        where c.is_array_value(result)) {row:source.row,col:source.col,result:result}]
+function spill_pass(sheet,samples) any^ {
+    var current=samples
+    let sources=[for (source in sheet.cells where may_spill(source.raw,sheet.workbook)^) source]
+    var evaluated=fill(len(sources),null)
+    var i=0
+    while (i<len(sources)) {
+        let source=sources[i]
+        let result=evaluate_cell(sheet,source.row,source.col,[],current)^
+        current=result.samples
+        if (not result.failed and c.is_array_value(result.value)^) {
+            evaluated[i]={row:source.row,col:source.col,result:result.value}
+        }
+        i=i+1
+    }
+    let candidates=[for (candidate in evaluated where candidate!=null) candidate]
     let blocked=[for (candidate in candidates where spill_blocked(sheet,candidates,candidate)^) candidate]
     let allowed=[for (candidate in candidates where not spill_blocked(sheet,candidates,candidate)^) candidate]
     let errors=map([for (candidate in blocked) *[address(candidate.row,candidate.col),"#SPILL!"]])
@@ -520,10 +736,10 @@ pub fn spill_pass(sheet) any^ {
     let values=map([for (candidate in allowed,r in 0 to candidate.result.rows-1,c in 0 to candidate.result.cols-1
         where r!=0 or c!=0) *[address(candidate.row+r,candidate.col+c),
         {value:candidate.result.values[r*candidate.result.cols+c],row:candidate.row,col:candidate.col,key:lower(sheet.title or "") ++ "!" ++ address(candidate.row,candidate.col)}]]);
-    {spill_values:values,spill_ranges:ranges,spill_errors:errors,
+    return {samples:current,spills:{spill_values:values,spill_ranges:ranges,spill_errors:errors,
         spill_display:map([for (candidate in allowed,r in 0 to candidate.result.rows-1,c in 0 to candidate.result.cols-1
             where r!=0 or c!=0) *[address(candidate.row+r,candidate.col+c),
-                spill_display_value(candidate.result.values[r*candidate.result.cols+c])]])}
+                spill_display_value(candidate.result.values[r*candidate.result.cols+c])]])}}
 }
 // A non-converging spill graph must report a cycle instead of publishing stale cells.
 fn unstable_spills(previous,next) any^ {
@@ -536,18 +752,36 @@ fn unstable_spills(previous,next) any^ {
         spill_errors:{*:next.spill_errors,*:map([for (key,item in changed) *[string(key),"#CYCLE!"]])},
         spill_display:map([for (key,item in values) *[string(key),spill_display_value(item.value)]])}
 }
-pub fn spills(sheet,previous=null,depth=0) any^ {
+pub function spills(sheet,samples=null,previous=null,depth=0) any^ {
     let prior=previous or {spill_values:{},spill_ranges:{},spill_errors:{},spill_display:{}}
-    let next=spill_pass({*:sheet,*:prior})^;
-    if (next==prior) next else if (depth>=63) unstable_spills(prior,next)^ else spills(sheet,next,depth+1)^
+    let pass=spill_pass({*:sheet,*:prior},samples)^;
+    if (pass.spills==prior) pass
+    else if (depth>=63) {samples:pass.samples,spills:unstable_spills(prior,pass.spills)^}
+    else spills(sheet,pass.samples,pass.spills,depth+1)^
 }
-// Recalculate all sheet spill maps together so cross-sheet references stabilize.
-pub fn workbook_spills(book,indices,previous=null,depth=0) any^ {
+// Spill geometry uses a workbook snapshot. Volatile calls retain their results across passes.
+pub function workbook_spills(book,indices,samples=null,previous=null,depth=0) any^ {
     let prior=previous or {}
-    let next=map([for (sheet in book.sheets) *[sheet.title,spill_pass({*:sheet,cell_index:indices[sheet.title],
-        workbook:book,workbook_indices:indices,workbook_spills:prior,*:(prior[sheet.title] or {})})^]]);
-    if (next==prior) next else if (depth>=63)
-        map([for (sheet in book.sheets) *[sheet.title,unstable_spills(prior[sheet.title],next[sheet.title])^]])
-    else workbook_spills(book,indices,next,depth+1)^
+    var current=samples
+    var results=fill(len(book.sheets),null)
+    var i=0
+    while (i<len(book.sheets)^) {
+        let sheet=book.sheets[i]
+        let base={*:sheet,cell_index:indices[sheet.title],workbook:book,workbook_indices:indices,
+            workbook_spills:prior,*:(prior[sheet.title] or {})}
+        let pass=spill_pass(base,current)^
+        current=pass.samples
+        results[i]=pass.spills
+        i=i+1
+    }
+    let next=map([for (i,sheet in book.sheets) *[sheet.title,results[i]]])
+    if (next==prior) { return {spills:next,samples:current} }
+    if (depth>=63) { return {samples:current,spills:map([for (sheet in book.sheets)
+        *[sheet.title,unstable_spills(prior[sheet.title],next[sheet.title])^]])} }
+    return workbook_spills(book,indices,current,next,depth+1)^
 }
-pub fn display(sheet,row,col) any^ => value(sheet,row,col) ^ {if (starts_with(string(^.message),"#")) ^.message else "#VALUE!"}
+pub function display(sheet,row,col) any^ {
+    let address_value=address(row,col)^;
+    if (sheet.calculated_values[address_value]!=null) sheet.calculated_values[address_value]
+    else display_value(cell_value(sheet,row,col,[],sheet.samples)^)
+}

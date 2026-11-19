@@ -36,7 +36,7 @@ pub fn handles_key(divider,key) {
     let axis=dom.get_attribute(divider,"data-sheet-resize");
     key in (if (axis=="column") ["ArrowLeft","ArrowRight","Home","End"] else ["ArrowUp","ArrowDown","Home","End"])
 }
-pub fn keyboard(st,divider,key,step=8) map^ {
+pub function keyboard(st,divider,key,step=8) map^ {
     let axis=dom.get_attribute(divider,"data-sheet-resize")
     let index=int(dom.get_attribute(divider,"data-index"))
     let direction=if (key=="ArrowDown") "ArrowRight" else if (key=="ArrowUp") "ArrowLeft" else key

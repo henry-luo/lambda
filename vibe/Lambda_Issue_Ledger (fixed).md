@@ -16,6 +16,19 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr12-62"></a>
+## LR12-62 — Interpreter object methods bypassed callable effect bounds
+
+**Status:** FIXED, 2026-11-19. S12.1.6v3 and D7.1.1v4 require effect
+admission before dispatch. The interpreter's specialized object-method path
+skipped the ordinary call guard. It now uses the same guard as MIR Direct on
+the bound method and evaluated arguments before executing the body.
+
+The regression runs a permitted `@clock` method and refuses an `@print`
+method from the same clock-only procedure. Interpreter, MIR Direct and AUTO
+all returned the expected result without printing under forced GC with heap
+poisoning. [Regression](../test/lambda/effect_method_bounds.ls)
+
 <a id="durable-scratch-spool-amplification"></a>
 ## Scratch spools durably create and unlink transient files — 2026-11-18
 
@@ -47,7 +60,7 @@ The final sync cases and local S3 interrupted-upload recovery also pass.
 
 ## Archive index
 
-This archive contains **327 anchored records**, preserving fixed, resolved,
+This archive contains **328 anchored records**, preserving fixed, resolved,
 closed and obsolete entries. Records closed by consolidation point to
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's

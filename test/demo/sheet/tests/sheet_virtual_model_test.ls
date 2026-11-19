@@ -5,6 +5,7 @@ import window: ~~.mod_window
 import grid: lambda.ui.core.virtual_grid
 
 let book=files.read("test/demo/sheet/tests/fixtures/large.sheet.json")^
+function() {
 let initial=m.initial(book)
 let all=m.select(m.select(initial,0,0),99999,999,true)
 let changed=m.set_value(all,"=1+2")^
@@ -31,3 +32,5 @@ let zoomed={*:cached,zoom:1.5};
     grid.offset(window.axes(resized)^.columns,1)^==300,
     grid.offset(window.axes(zoomed)^.columns,1)^==330
 ]
+
+}

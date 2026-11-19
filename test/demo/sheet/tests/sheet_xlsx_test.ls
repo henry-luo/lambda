@@ -7,12 +7,14 @@ import v: ~~.mod_view
 let source="test/input/xlsx/basic.xlsx"
 let pkg=xlsx.convert(source)^
 let imported=files.import_xlsx(source)^
+let imported1904=files.import_xlsx("test/input/xlsx/date1904.xlsx")^
+let read_book=files.read(source)^
+function() {
 let book=files.restore(imported.book)^
 let sheet=book.sheets[0]
 let st=m.initial(book)
 let edited=m.set_value(m.select(st,1,1),"20")^
 let undone=m.history(edited,false)^
-let imported1904=files.import_xlsx("test/input/xlsx/date1904.xlsx")^
 let book1904=files.restore(imported1904.book)^
 let state1904=m.initial(book1904)
 let added1904=m.add_sheet(state1904)^
@@ -24,7 +26,7 @@ let back=m.activate(notes_edit,0)^;
     pkg.sheets[0].cells[3].value=="Shared text",
     pkg.sheets[0].cells[6].formula=="SUM(B2,2)",
     pkg.diagnostics[0].code=="formula-recalculation" and pkg.sheets[1].merges[0]=={top:0,left:0,bottom:0,right:1},
-    files.read(source)^==book,
+    read_book==book,
     f.display(sheet,0,2)=="00123",
     f.display(sheet,1,1)==12.5,
     f.display(sheet,1,3)==14.5,
@@ -51,3 +53,5 @@ let back=m.activate(notes_edit,0)^;
     sheet.cells[0].style.bold and sheet.cells[0].style.color=="#ff0000" and sheet.cells[0].style.fill=="#00ff00",
     f.display(book.sheets[1],0,0)=="Second worksheet"
 ]
+
+}

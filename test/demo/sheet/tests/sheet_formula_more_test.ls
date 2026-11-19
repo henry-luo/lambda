@@ -1,10 +1,20 @@
 // Additional Excel functions exercise real formula calls and workbook date systems.
 import m: ~~.mod_model
 import f: ~~.mod_formula
+
+fn make_result(data) {
+    function calculate(expr) any^ => f.display(m.current(m.set_value(m.select(data,8,0),expr)),8,0)
+    calculate
+}
+fn make_result1904(data) {
+    function calculate(expr) any^ => f.display({*:m.current(m.set_value(m.select(data,8,0),expr)),date1904:true},8,0)
+    calculate
+}
+function() {
 let initial=m.initial(m.blank())
 let data=m.paste(m.select(initial,0,0),"1\t2\t45292\n2\t4\t45292\n3\t6\t45293\n4\t8\ttext\ntext\t10")
-let result=(expr) any^ => f.display(m.current(m.set_value(m.select(data,8,0),expr)),8,0)
-let result1904=(expr) any^ => f.display({*:m.current(m.set_value(m.select(data,8,0),expr)),date1904:true},8,0);
+let result=make_result(data)
+let result1904=make_result1904(data);
 [
  result("=SLOPE(B1:B4,A1:A4)")==2,
  result("=INTERCEPT(B1:B4,A1:A4)")==0,
@@ -74,3 +84,5 @@ let result1904=(expr) any^ => f.display({*:m.current(m.set_value(m.select(data,8
  result("=WORKDAY.INTL(DATE(2024,1,1),1,\"00x0011\")")=="#VALUE!",
  result("=WORKDAY(0,-1)")=="#NUM!"
 ]
+
+}

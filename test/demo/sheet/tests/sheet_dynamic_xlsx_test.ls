@@ -1,7 +1,9 @@
 // XLSX dynamic-array cached children remain derived from their formula anchor.
 import files: ~~.mod_io
 import m: ~~.mod_model
+
 let imported=files.import_xlsx("test/input/xlsx/dynamic-arrays.xlsx")^
+function() {
 let restored=files.restore(imported.book)^
 let st=m.initial(restored)^
 let scoped=m.activate(st,1)^
@@ -17,3 +19,5 @@ let updated=m.set_value(m.select(st,0,0),"=SEQUENCE(2,2,2)")^;
  contains(files.csv(m.indexed(updated))^,"\"3\""),
  contains(files.csv(m.indexed(updated))^,"\"4\",\"5\"")
 ]
+
+}

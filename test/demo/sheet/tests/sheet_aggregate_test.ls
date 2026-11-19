@@ -1,11 +1,17 @@
 // AGGREGATE honors options before evaluating referenced cells.
 import m: ~~.mod_model
 import f: ~~.mod_formula
+
+fn make_result(sheet) {
+    function calculate(expr) any^ => f.display({*:sheet,cells:[*sheet.cells,{row:8,col:1,raw:expr}]},8,1)
+    calculate
+}
+function() {
 let sheet={*:m.empty_sheet(),hidden_rows:[1],cells:[
  {row:0,col:0,raw:"1"},{row:1,col:0,raw:"2"},{row:2,col:0,raw:"=1/0"},
  {row:3,col:0,raw:"4"},{row:4,col:0,raw:"=SUBTOTAL(9,A1:A2)"},
  {row:5,col:0,raw:"=AGGREGATE(9,6,A1:A4)"}]}
-let result=(expr) any^ => f.display({*:sheet,cells:[*sheet.cells,{row:8,col:1,raw:expr}]},8,1);
+let result=make_result(sheet);
 [
  result("=AGGREGATE(9,0,A1:A6)")=="#DIV/0!",
  result("=AGGREGATE(9,2,A1:A6)")==7,
@@ -43,3 +49,5 @@ let result=(expr) any^ => f.display({*:sheet,cells:[*sheet.cells,{row:8,col:1,ra
  result("=AGGREGATE(18,0,A1:A2,0.5)")==1.5,
  result("=AGGREGATE(19,0,A1:A2,2)")==1.5
 ]
+
+}

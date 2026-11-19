@@ -3,6 +3,12 @@ pub fn is_array_value(value) => value is map and (value.kind=="range" or value.k
 // Per-cell errors survive inside arrays until a consuming operation inspects them.
 pub fn cell_error(value) => value is map and value.kind=="excel_error"
 pub fn checked(value) any^ => if (cell_error(value)) raise error(value.message) else value
+// UUID version 4 supplies 48 unbiased random bits before its version field.
+pub pn random_sample() any^ @random {
+    let digits=replace(uuid()^,"-","");
+    sum([for (i in 0 to 11) index_of("0123456789abcdef",slice(digits,i,i+1))*16.0 ** (11-i)])/(16.0 ** 12)
+}
+pub pn clock_sample() @clock { now().local }
 // Shared spreadsheet value coercion and comparisons.
 pub fn numeric(value) any^ {
     if (cell_error(value)) raise error(value.message)

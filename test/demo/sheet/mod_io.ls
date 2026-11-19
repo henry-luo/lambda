@@ -72,7 +72,7 @@ pub fn is_xlsx(path) any^ => ends_with(lower(path),".xlsx")
 pub fn read(path) map^ => if (is_xlsx(path)^) restore(xlsx.convert(path)^.book)^ else restore(input(path,'json')^)^
 pub fn import_xlsx(path) map^ => xlsx.convert(path)^
 fn quoted(value) => "\"" ++ replace(if (value is number) (format(value,'json') ^ {string(value)}) else string(value),"\"","\"\"") ++ "\""
-pub fn csv(sheet) string^ {
+pub function csv(sheet) string^ {
     let used=[for (c in sheet.cells where c.raw!="") c]
     let spills=[for (key,item in (sheet.spill_ranges or {}),let at=f.position(string(key))^)
         {row:at.row+item.rows-1,col:at.col+item.cols-1}]

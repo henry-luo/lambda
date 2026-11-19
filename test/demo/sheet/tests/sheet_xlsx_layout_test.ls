@@ -7,9 +7,11 @@ import c: ~~.mod_conditional
 import win: ~~.mod_window
 import layout: ~~.mod_grid_layout
 import grid: lambda.ui.core.virtual_grid
+
 let parsed=x.convert("test/input/xlsx/layout.xlsx")^
 let imported=files.import_xlsx("test/input/xlsx/layout.xlsx")^
 let clipped=files.import_xlsx("test/input/xlsx/layout-clipped.xlsx")^
+function() {
 let book=files.restore(imported.book)^
 let sheet=book.sheets[0]
 let restored=files.restore(parse(format(book,'json')^,'json')^)^
@@ -74,3 +76,5 @@ let bad=(replacement) any^ => files.restore({*:book,sheets:[{*:sheet,*:replaceme
  any([for (issue in clipped.diagnostics) issue.code=="conditional-range-clipped"]),
  files.restore(clipped.book) is map
 ]
+
+}

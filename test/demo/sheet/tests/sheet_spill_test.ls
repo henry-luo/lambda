@@ -1,6 +1,8 @@
 // Spills are derived grid values, not stored cells.
 import m: ~~.mod_model
 import f: ~~.mod_formula
+
+function() {
 let start=m.initial(m.blank())
 let filled=m.set_value(m.select(start,0,0),"=SEQUENCE(2,2)")^
 let dependent=m.set_value(m.select(filled,0,3),"=SUM(A1#)")^
@@ -31,3 +33,5 @@ let edited=m.set_value(m.select(filled,1,1),"99") ^ {^};
  padded.cache.values.B2=="#N/A",padded_ref.cache.values.A4=="#N/A",
  cyc.cache.values.A1=="#CYCLE!",cyc.cache.values.B1==null
 ]
+
+}

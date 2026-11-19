@@ -1,0 +1,17 @@
+{
+  "name": "Sheet volatile conditional formatting",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"wait", "ms":100},
+    {"type":"click", "target":{"selector":"#open"}},
+    {"type":"type", "target":{"selector":"#file-path"}, "text":"test/demo/sheet/tests/fixtures/volatile.sheet.json", "clear":true},
+    {"type":"click", "target":{"selector":"#dialog-confirm"}},
+    {"type":"assert_script", "js":"document.getElementById('cell-B1').getAttribute('style').includes('background-color:#00ff00')"},
+    {"type":"assert_script", "js":"document.getElementById('cell-C1').getAttribute('style').includes('background-color:#ffff00')"},
+    {"type":"assert_script", "js":"document.getElementById('cell-D1').getAttribute('style').includes('background-color:#0000ff')"},
+    {"type":"click", "target":{"selector":"#cell-C1"}},
+    {"type":"assert_script", "js":"document.getElementById('cell-B1').getAttribute('style').includes('background-color:#00ff00') && document.getElementById('cell-C1').getAttribute('style').includes('background-color:#ffff00') && document.getElementById('cell-D1').getAttribute('style').includes('background-color:#0000ff')"}
+  ]
+}
