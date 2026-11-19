@@ -311,7 +311,7 @@ See the [latest full benchmark report](test/benchmark/Overall_Result50.md) for p
 | [Formal Design](doc/Lambda_Formal_Design.md)          | Normative design/implementation specification — D-numbered rulings for the core runtime; the design authority when docs or implementation disagree |
 | [Documentation Convention](doc/Doc_Convention.md)     | How Lambda documentation is organized — document tiers, authority order, and style conventions |
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
-| [Design Records](vibe/)                                | Working design records by subsystem: `vibe/Lambda_Design_*.md`, `vibe/radiant/` and `vibe/jube/` |
+| [Design Records](vibe/)                                | Working design records by subsystem: `vibe/Lambda_Design_*.md`, `vibe/input/`, `vibe/radiant/` and `vibe/jube/`; owner ledgers are in `vibe/` |
 | [JS and DOM Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
 
 ## Platform Support

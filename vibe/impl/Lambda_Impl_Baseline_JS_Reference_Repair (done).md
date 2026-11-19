@@ -35,7 +35,7 @@ mechanism, retaining the original captures. Each control records the CSS Text
 specification, reason, browser identity, equivalent prefixed declaration and
 fixture SHA-256. The loader rejects a control when its source changes.
 This follows the previously qualified Radiant
-[RI-004 / RI-005 reference repair](<../../radiant/vibe/Radiant_Issue_Ledger (fixed).md#ri-005>).
+[RI-004 / RI-005 reference repair](<../Radiant_Issue_Ledger (fixed).md#ri-005>).
 The relevant external definitions are
 [CSS Text 3 indentation](https://drafts.csswg.org/css-text-3/#text-indent-property)
 and [match-parent](https://drafts.csswg.org/css-text-3/#valdef-text-align-match-parent).

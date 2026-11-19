@@ -682,7 +682,7 @@ Nine focused native document tests and two persistent HTTP regressions pass.
 The inert HTTP fixture asserts both non-execution and no dependency downloads;
 native/Chromium controls agree on six inert HTML and active SVG states.
 Evidence: `temp/online-visual-round62/`; owner records are in
-`../radiant/vibe/Radiant_Issue_Ledger (fixed).md#ri-110`.
+`../Radiant_Issue_Ledger (fixed).md#ri-110`.
 
 ### JS13-L8 — Missing Element.hasAttributes rejects dynamic Lit templates — **RESOLVED**
 

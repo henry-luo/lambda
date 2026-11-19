@@ -407,7 +407,7 @@ valid unsupported constructs and isolated-error recovery remain to implement.
   marked-ui,delete-ui}.log`. Home and End at a reference on a visual line edge
   still put text on the wrong side of the atom; the independent plain
   contenteditable reproduction and native cause are recorded in Radiant
-  [RI-090](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-090). The
+  [RI-090](../Radiant_Issue_Ledger.md#ri-090). The
   regression `test/ui/edit/edit_md_footnote_edges.json` remains failing until
   the owning Radiant fix; do not claim complete keyboard support. The full
   editor/RTF model selection passes 112/112; the full edit UI selection has
@@ -470,7 +470,7 @@ valid unsupported constructs and isolated-error recovery remain to implement.
   Python ZIP/XML inspection confirms only the chapter bytes changed, the
   EPUB mimetype is first and stored, and other member bytes match
   (`temp/edit-viewer/epub-chapter-oracle.log`). The ZIP helper retains the
-  changed member's mode. Input [LI-063](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-063)
+  changed member's mode. Input [LI-063](../Lib_Input_Issue_Ledger.md#li-063)
   records that constructed replacement files cannot retain their original
   ZIP timestamps, and reconstructed directories also lose metadata. This
   blocks a metadata-preserving package save. `lambda edit` does not yet use
@@ -605,19 +605,19 @@ valid unsupported constructs and isolated-error recovery remain to implement.
   suite (160/160 fixtures) pass afterward (`temp/edit-viewer/csv-vertical-
   {before,focused,full-ui}.log`). The aggregate baselines below predate this
   keyboard-only change. Source-preserving editing follows D9.3.4.
-- 2026-11-15 follow-up: Input [LI-056](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-056)
+- 2026-11-15 follow-up: Input [LI-056](../Lib_Input_Issue_Ledger.md#li-056)
   blocks TOML property editing because the parser accepts invalid escapes,
-  numbers and duplicate keys. [LI-057](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-057)
+  numbers and duplicate keys. [LI-057](../Lib_Input_Issue_Ledger.md#li-057)
   blocks YAML property editing because malformed scalars, aliases and flow
   collections can be accepted. Python `tomllib` and local `js-yaml` reject the
-  reproduced inputs, respectively. [LI-058](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-058)
+  reproduced inputs, respectively. [LI-058](../Lib_Input_Issue_Ledger.md#li-058)
   blocks calendar/contact property editing: unmatched boundaries can be accepted
-  and calendar events silently dropped. [LI-059](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-059)
+  and calendar events silently dropped. [LI-059](../Lib_Input_Issue_Ledger.md#li-059)
   records remaining RST literal code-block newline changes after LI-047; RST
-  literal blocks remain source-only. [LI-061](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-061)
+  literal blocks remain source-only. [LI-061](../Lib_Input_Issue_Ledger.md#li-061)
   blocks broadening Textile rich admission: its parser loses styled span
   attributes, which otherwise look like the harmless wrappers added by LI-045.
-  [LI-062](../../lambda-input/vibe/Lib_Input_Issue_Ledger.md#li-062)
+  [LI-062](../Lib_Input_Issue_Ledger.md#li-062)
   blocks rich man output because the Input reader retains `.TH` argument quotes
   in the visible title; independent `mandoc` gives the same title for quoted
   and unquoted forms. Preserving the original man header is a separate editor
@@ -775,7 +775,7 @@ valid unsupported constructs and isolated-error recovery remain to implement.
   with stylesheet provenance (RI-079), loads five consumed resources, excludes
   an inactive rule and preserves all authored URLs. Both complete executables
   pass 250/250 and 186/186.
-  [Radiant RI-089](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-089) is now
+  [Radiant RI-089](../Radiant_Issue_Ledger.md#ri-089) is now
   fixed: intrinsic min/max measurement retains the definite preferred width
   before applying measured limits. `width:auto` and the existing `fit-content`
   negotiation remain intact. The new native regression fails before and passes

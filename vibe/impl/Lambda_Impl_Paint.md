@@ -1,6 +1,6 @@
 # Lambda Paint — Implementation
 
-**Design:** [Lambda Paint Package](../Lambda_Pkg_Paint.md) (PT#) and [Radiant Paint Engine](../../radiant/vibe/Radiant_Design_Paint_Engine.md) (PE#). The user asked to proceed to implementation on 2026-11-09. This record tracks delivery, decisions taken while implementing, and evidence.
+**Design:** [Lambda Paint Package](../Lambda_Pkg_Paint.md) (PT#) and [Radiant Paint Engine](../radiant/Radiant_Design_Paint_Engine.md) (PE#). The user asked to proceed to implementation on 2026-11-09. This record tracks delivery, decisions taken while implementing, and evidence.
 
 ## Decisions taken during implementation
 
@@ -202,7 +202,7 @@
   **Next:** generalize the three-pigment layout described in PE9 and qualify
   the mobile layout assertion; do not weaken the assertion.
 - **2026-11-12 — M3 started.** The user authorized changes in Radiant after the
-  missing engine was recorded as [RI-033](../../radiant/vibe/Radiant_Issue_Ledger.md#ri-033--paint-engine-lacks-the-m3-wet-media-kernels).
+  missing engine was recorded as [RI-033](../Radiant_Issue_Ledger.md#ri-033--paint-engine-lacks-the-m3-wet-media-kernels).
   The owner now has a three-pigment wet step over a caller-owned f32 21-plane
   sheet (PE9, D5.5.2). The standalone paint suite passes 32/32; a focused
   ten-step two-pigment comparison against `procart.watercolor` differs by at
