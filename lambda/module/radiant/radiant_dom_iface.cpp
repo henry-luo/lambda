@@ -123,6 +123,7 @@ const char radiant_dom_interface_decl[] =
 #undef CSS_RULE_SHAPE_namespace
     "type dom_node {\n"
     "    node_name: string, node_type: int, base_uri: string,\n"
+    "    node_value: any, text_content: any,\n"
     "    parent_node: dom_node, parent_element: dom_node, is_connected: bool,\n"
     "    owner_document: document, first_child: dom_node, last_child: dom_node,\n"
     "    next_sibling: dom_node, previous_sibling: dom_node, child_nodes: any,\n"
@@ -1062,6 +1063,11 @@ static int radiant_node_property_set(Item receiver, const char* name, Item value
 NATIVE_PROPERTY_GET(radiant_element_inner_html, "innerHTML")
 NATIVE_PROPERTY_SET(radiant_element_inner_html_set, "innerHTML")
 NATIVE_PROPERTY_GET(radiant_element_dataset, "dataset")
+// libraries capture these declaring-interface accessors before wrapping DOM writes.
+NATIVE_PROPERTY_GET(radiant_node_value, "nodeValue")
+NATIVE_PROPERTY_SET(radiant_node_value_set, "nodeValue")
+NATIVE_PROPERTY_GET(radiant_node_text_content, "textContent")
+NATIVE_PROPERTY_SET(radiant_node_text_content_set, "textContent")
 // ---------------------------------------------------------------------------
 // DS1: member binds are generated from dom_api.def, not written here. A row
 // whose `iface` names this table expands to a BIND_ROW; every other row expands
@@ -1178,6 +1184,8 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_FIELD_JS("node_name", "nodeName", radiant_dom_member_node_name),
     BIND_FIELD_JS("base_uri", "baseURI", radiant_dom_member_base_uri),
     BIND_FIELD_JS("node_type", "nodeType", radiant_dom_member_node_type_any),
+    BIND_FIELD_SET_JS("node_value", "nodeValue", radiant_node_value, radiant_node_value_set),
+    BIND_FIELD_SET_JS("text_content", "textContent", radiant_node_text_content, radiant_node_text_content_set),
     BIND_FIELD_JS("parent_node", "parentNode", radiant_dom_member_parent_node_any),
     BIND_FIELD_JS("parent_element", "parentElement", radiant_dom_member_parent_element_any),
     BIND_FIELD_JS("is_connected", "isConnected", radiant_dom_member_is_connected_any),
@@ -1876,11 +1884,7 @@ NATIVE_PROPERTY_GET(radiant_attr_prefix, "prefix")
 NATIVE_PROPERTY_GET(radiant_attr_owner_element, "ownerElement")
 NATIVE_PROPERTY_GET(radiant_attr_specified, "specified")
 NATIVE_PROPERTY_GET(radiant_attr_value, "value")
-NATIVE_PROPERTY_GET(radiant_attr_node_value, "nodeValue")
-NATIVE_PROPERTY_GET(radiant_attr_text_content, "textContent")
 NATIVE_PROPERTY_SET(radiant_attr_value_set, "value")
-NATIVE_PROPERTY_SET(radiant_attr_node_value_set, "nodeValue")
-NATIVE_PROPERTY_SET(radiant_attr_text_content_set, "textContent")
 #undef NATIVE_PROPERTY_GET
 #undef NATIVE_PROPERTY_SET
 
@@ -1892,8 +1896,8 @@ static const JubeMemberBind radiant_attr_members[] = {
     BIND_FIELD_JS("owner_element", "ownerElement", radiant_attr_owner_element),
     BIND_FIELD("specified", radiant_attr_specified),
     BIND_FIELD_SET("value", radiant_attr_value, radiant_attr_value_set),
-    BIND_FIELD_SET_JS("node_value", "nodeValue", radiant_attr_node_value, radiant_attr_node_value_set),
-    BIND_FIELD_SET_JS("text_content", "textContent", radiant_attr_text_content, radiant_attr_text_content_set),
+    BIND_FIELD_SET_JS("node_value", "nodeValue", radiant_node_value, radiant_node_value_set),
+    BIND_FIELD_SET_JS("text_content", "textContent", radiant_node_text_content, radiant_node_text_content_set),
 };
 
 enum RadiantAttributeMapOperation { ATTRIBUTE_MAP_GET, ATTRIBUTE_MAP_SET, ATTRIBUTE_MAP_REMOVE };

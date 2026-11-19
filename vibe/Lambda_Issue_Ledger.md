@@ -33,6 +33,12 @@ member also has a pending promotion, and retain the image before installing
 the first entry. See the
 [retirement audit](impl/Lambda_Impl_Interpreter_MIR_Unification.md#remaining-candidates-from-the-second-pass).
 
+<a id="lr12-64"></a>
+
+## LR12-64 — FIXED
+
+Captured Node content accessors, registered detached mutation ownership and stable observer oldValues are qualified in the [fixed record](<Lambda_Issue_Ledger (fixed).md#lr12-64>).
+
 <a id="lr12-62"></a>
 The interpreter object-method effect-bound fix is recorded under S12.1.6v3
 and D7.1.1v4 in the [fixed ledger](<Lambda_Issue_Ledger (fixed).md#lr12-62>).

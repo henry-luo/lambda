@@ -1150,7 +1150,7 @@ static void _install_label_interfaces(Item global) {
 
 static void _install_node_interface_members(Item global) {
     static const char* const node_members[] = {
-        "nodeName", "nodeType", "baseURI", "parentNode", "parentElement", "isConnected",
+        "nodeName", "nodeType", "nodeValue", "textContent", "baseURI", "parentNode", "parentElement", "isConnected",
         "ownerDocument", "firstChild", "lastChild", "nextSibling", "previousSibling",
         "childNodes", "contains", "isEqualNode", "isSameNode", "compareDocumentPosition",
         "getRootNode", "hasChildNodes", "cloneNode", NULL};
