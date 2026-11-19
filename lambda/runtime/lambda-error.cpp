@@ -514,33 +514,25 @@ int err_get_source_line_count(const char* source) {
     return count;
 }
 
+static const char* err_source_line_start(const char* source, uint32_t line_number) {
+    if (!source || line_number == 0) return NULL;
+
+    for (uint32_t line = 1; source && line < line_number; line++) {
+        const char* newline = strchr(source, '\n');
+        source = newline ? newline + 1 : NULL;
+    }
+    return source;
+}
+
+static char* err_copy_source_line(const char* line_start, const char* newline) {
+    size_t len = newline ? (size_t)(newline - line_start) : strlen(line_start);
+    return mem_dup_n(line_start, len, MEM_CAT_SYSTEM);
+}
+
 // extract a single line from source (caller must free result)
 char* err_get_source_line(const char* source, uint32_t line_number) {
-    if (!source || line_number == 0) return NULL;
-    
-    uint32_t current_line = 1;
-    const char* line_start = source;
-    
-    // find the start of the requested line
-    while (*source && current_line < line_number) {
-        if (*source == '\n') {
-            current_line++;
-            line_start = source + 1;
-        }
-        source++;
-    }
-    
-    if (current_line != line_number) return NULL;  // line not found
-    
-    // find the end of the line
-    const char* line_end = line_start;
-    while (*line_end && *line_end != '\n') {
-        line_end++;
-    }
-    
-    // copy the line
-    size_t len = line_end - line_start;
-    return mem_dup_n(line_start, len, MEM_CAT_SYSTEM);
+    const char* start = err_source_line_start(source, line_number);
+    return start ? err_copy_source_line(start, strchr(start, '\n')) : NULL;
 }
 
 // extract source context around the error location
@@ -950,10 +942,13 @@ char* err_format_with_context_labeled(LambdaError* error, int context_lines,
         // empty gutter line
         pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%*s |\n", line_width, "");
         
-        // extract and print each context line
-        for (uint32_t line_num = start_line; line_num <= end_line && (size_t)pos < sizeof(buffer) - 256; line_num++) {
-            char* line_text = err_get_source_line(src, line_num);
-            if (!line_text) break;  // past end of source
+        // Locate the first context line once, then walk the excerpt in order.
+        const char* line_start = err_source_line_start(src, start_line);
+        for (uint32_t line_num = start_line; line_start && line_num <= end_line && (size_t)pos < sizeof(buffer) - 256; line_num++) {
+            const char* newline = strchr(line_start, '\n');
+            char* line_text = err_copy_source_line(line_start, newline);
+            if (!line_text) break;
+            line_start = newline ? newline + 1 : NULL;
             
             // print line number and content
             if (line_num == target_line) {

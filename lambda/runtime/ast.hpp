@@ -734,7 +734,8 @@ static inline uint8_t ast_handoff_ordinal(const AstNode* node) {
 // `include_rebind`: CW30 counts a whole-binding rebind (`arr = ...`) as a
 // write -- the loop must keep the entry-time value -- while the CW29 sweep
 // excludes it (a rebind is local to the callee under BOTH param semantics).
-static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
+template <typename VisitWrite>
+static inline bool ast_visit_body_writes(AstNode* node, const VisitWrite& visit,
         bool include_rebind, AstNode* stop_before = NULL) {
     // Borrow intervals stop at the last observer; later writes are irrelevant.
     for (; node && node != stop_before; node = node->next) {
@@ -745,17 +746,17 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             AstAssignStamNode* as = (AstAssignStamNode*)stmt;
             // a rebind publishes a new value into the binding; the loop must
             // keep walking the entry-time one, so it needs the snapshot too
-            if (include_rebind && as->target_entry == root) return true;
-            if (ast_body_may_write_entry(as->value, root, include_rebind)) return true;
+            if (include_rebind && visit(as->target_entry)) return true;
+            if (ast_visit_body_writes(as->value, visit, include_rebind)) return true;
             break;
         }
         case AST_NODE_INDEX_ASSIGN_STAM:
         case AST_NODE_MEMBER_ASSIGN_STAM: {
             AstCompoundAssignNode* ca = (AstCompoundAssignNode*)stmt;
             AstIdentNode* ident = ast_compound_root_ident(ca->object);
-            if (ident && ident->entry == root) return true;
-            if (ca->key && ast_body_may_write_entry(ca->key, root, include_rebind)) return true;
-            if (ca->value && ast_body_may_write_entry(ca->value, root, include_rebind)) return true;
+            if (ident && visit(ident->entry)) return true;
+            if (ca->key && ast_visit_body_writes(ca->key, visit, include_rebind)) return true;
+            if (ca->value && ast_visit_body_writes(ca->value, visit, include_rebind)) return true;
             break;
         }
         case AST_NODE_CALL_EXPR: {
@@ -767,7 +768,7 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
                 // Ignoring it lets an alias borrow survive a method write.
                 AstIdentNode* receiver = ast_compound_root_ident(
                     ((AstFieldNode*)callee_node)->object);
-                if (receiver && receiver->entry == root) return true;
+                if (receiver && visit(receiver->entry)) return true;
             }
             AstFuncNode* callee = NULL;
             if (callee_node && callee_node->node_type == AST_NODE_IDENT) {
@@ -794,78 +795,73 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             for (int position = 0; position < LAMBDA_MAX_FUNCTION_ARGS &&
                     (position < argument_count || param); position++) {
                 AstNode* arg = arguments[position];
-                AstIdentNode* arg_root = ast_compound_root_ident(arg);
-                if (arg_root && arg_root->entry == root && !pure_sys) {
-                    TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
-                    // an unknown callee, a `var` borrow, or a procedure whose
-                    // parameter list is not built yet (a later definition)
-                    // may mutate the root. A known plain `pn` parameter
-                    // cannot: its writes are local to the callee (S9.1.3,
-                    // CW29 snapshots it there).
-                    if (!callee || (pt && pt->is_var_param) || (callee_is_proc && !pt)) {
-                        return true;
-                    }
+                TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
+                // An unknown callee, a `var` borrow, or a forward `pn` may
+                // write through the argument. Plain parameters snapshot writes.
+                if (!pure_sys && (!callee || (pt && pt->is_var_param) || (callee_is_proc && !pt))) {
+                    AstIdentNode* arg_root = ast_compound_root_ident(arg);
+                    if (arg_root && visit(arg_root->entry)) return true;
                 }
                 // nested calls inside the argument expression
-                if (arg && ast_body_may_write_entry(arg, root, include_rebind,
+                if (arg && ast_visit_body_writes(arg, visit, include_rebind,
                         arg->next)) return true;
                 if (param) param = (AstNamedNode*)((AstNode*)param)->next;
             }
-            if (ast_body_may_write_entry(call->function, root, include_rebind)) return true;
+            if (ast_visit_body_writes(call->function, visit, include_rebind)) return true;
             break;
         }
         // composite statements and expressions that can hide any of the above
         case AST_NODE_CONTENT:
         case AST_NODE_LIST:
         case AST_NODE_ARRAY:
-            if (ast_body_may_write_entry(((AstArrayNode*)stmt)->item, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstArrayNode*)stmt)->item, visit, include_rebind)) return true;
             break;
         case AST_NODE_IF_EXPR: {
             AstIfNode* if_node = (AstIfNode*)stmt;
-            if (ast_body_may_write_entry(if_node->cond, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(if_node->then, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(if_node->otherwise, root, include_rebind)) return true;
+            if (ast_visit_body_writes(if_node->cond, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(if_node->then, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(if_node->otherwise, visit, include_rebind)) return true;
             break;
         }
         case AST_NODE_LOOP: {
             // one tag covers while / do-while / C-style for (D8.2.2); every
             // clause can hide a write, so all four are walked
             AstLoopControlNode* lc = (AstLoopControlNode*)stmt;
-            if (ast_body_may_write_entry(lc->init, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(lc->cond, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(lc->update, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(lc->body, root, include_rebind)) return true;
+            if (ast_visit_body_writes(lc->init, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(lc->cond, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(lc->update, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(lc->body, visit, include_rebind)) return true;
             break;
         }
         case AST_NODE_FOR_EXPR: {
             AstForNode* nested = (AstForNode*)stmt;
             for (AstNode* lv = nested->loop; lv; lv = lv->next) {
-                if (ast_body_may_write_entry(((AstLoopNode*)lv)->as, root, include_rebind)) return true;
+                if (ast_visit_body_writes(((AstLoopNode*)lv)->as, visit, include_rebind)) return true;
             }
-            if (ast_body_may_write_entry(nested->then, root, include_rebind)) return true;
+            if (ast_visit_body_writes(nested->then, visit, include_rebind)) return true;
             break;
         }
         case AST_NODE_MATCH_EXPR: {
             AstMatchNode* match = (AstMatchNode*)stmt;
-            if (ast_body_may_write_entry(match->scrutinee, root, include_rebind)) return true;
+            if (ast_visit_body_writes(match->scrutinee, visit, include_rebind)) return true;
             for (AstMatchArm* arm = match->first_arm; arm;
                     arm = (AstMatchArm*)((AstNode*)arm)->next) {
-                if (ast_body_may_write_entry(arm->body, root, include_rebind)) return true;
+                if (ast_visit_body_writes(arm->body, visit, include_rebind)) return true;
             }
             break;
         }
         case AST_NODE_BINARY:
-            if (ast_body_may_write_entry(((AstBinaryNode*)stmt)->left, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(((AstBinaryNode*)stmt)->right, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstBinaryNode*)stmt)->left, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstBinaryNode*)stmt)->right, visit, include_rebind)) return true;
             break;
         case AST_NODE_UNARY:
-            if (ast_body_may_write_entry(((AstUnaryNode*)stmt)->operand, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstUnaryNode*)stmt)->operand, visit, include_rebind)) return true;
             break;
         case AST_NODE_INDEX_EXPR:
         case AST_NODE_MEMBER_EXPR: {
             AstFieldNode* field = (AstFieldNode*)stmt;
-            if (ast_body_may_write_entry(field->object, root, include_rebind)) return true;
-            if (field->computed && ast_body_may_write_entry(field->field, root, include_rebind)) return true;
+            if (ast_visit_body_writes(field->object, visit, include_rebind)) return true;
+            if (field->computed && ast_visit_body_writes(field->field, visit, include_rebind)) return true;
             break;
         }
         // Declarations, returns and the remaining composites can hide a write
@@ -874,60 +870,67 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
         case AST_NODE_VAR_STAM:
         case AST_NODE_LET_STAM:
         case AST_NODE_PUB_STAM:
-            if (ast_body_may_write_entry(((AstVarDeclNode*)stmt)->declare, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstVarDeclNode*)stmt)->declare, visit, include_rebind)) return true;
             break;
         case AST_NODE_VARIABLE_DECLARATOR:
-            if (ast_body_may_write_entry(((AstDeclaratorNode*)stmt)->init, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstDeclaratorNode*)stmt)->init, visit, include_rebind)) return true;
             break;
         case AST_NODE_RETURN_STAM:
-            if (ast_body_may_write_entry(((AstReturnNode*)stmt)->value, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstReturnNode*)stmt)->value, visit, include_rebind)) return true;
             break;
         case AST_NODE_RAISE_STAM:
         case AST_NODE_RAISE_EXPR:
-            if (ast_body_may_write_entry(((AstRaiseNode*)stmt)->value, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstRaiseNode*)stmt)->value, visit, include_rebind)) return true;
             break;
         case AST_NODE_BLOCK:
-            if (ast_body_may_write_entry(((AstBlockNode*)stmt)->statements, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstBlockNode*)stmt)->statements, visit, include_rebind)) return true;
             break;
         case AST_NODE_SEQ:
         case AST_NODE_MAP:
         case AST_NODE_ELEMENT:
-            if (ast_body_may_write_entry(((AstArrayNode*)stmt)->item, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstArrayNode*)stmt)->item, visit, include_rebind)) return true;
             break;
         case AST_NODE_CONDITIONAL_EXPR: {
             AstIfNode* cond_node = (AstIfNode*)stmt;
-            if (ast_body_may_write_entry(cond_node->cond, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(cond_node->then, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(cond_node->otherwise, root, include_rebind)) return true;
+            if (ast_visit_body_writes(cond_node->cond, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(cond_node->then, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(cond_node->otherwise, visit, include_rebind)) return true;
             break;
         }
         case AST_NODE_KEY_EXPR:
         case AST_NODE_NAMED_ARG:
-            if (ast_body_may_write_entry(((AstNamedNode*)stmt)->as, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstNamedNode*)stmt)->as, visit, include_rebind)) return true;
             break;
         case AST_NODE_SPREAD:
-            if (ast_body_may_write_entry(((AstUnaryNode*)stmt)->operand, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstUnaryNode*)stmt)->operand, visit, include_rebind)) return true;
             break;
         case AST_NODE_PIPE:
-            if (ast_body_may_write_entry(((AstBinaryNode*)stmt)->left, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(((AstBinaryNode*)stmt)->right, root, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstBinaryNode*)stmt)->left, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(((AstBinaryNode*)stmt)->right, visit, include_rebind)) return true;
             break;
         case AST_NODE_HANDLER_EXPR:
         case AST_NODE_HANDLER_STAM: {
             AstHandlerNode* handler = (AstHandlerNode*)stmt;
-            if (ast_body_may_write_entry(handler->operand, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(handler->body, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(handler->filter, root, include_rebind)) return true;
+            if (ast_visit_body_writes(handler->operand, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(handler->body, visit, include_rebind)) return true;
+            if (ast_visit_body_writes(handler->filter, visit, include_rebind)) return true;
             break;
         }
         case AST_NODE_START:
-            if (ast_body_may_write_entry((AstNode*)((AstStartNode*)stmt)->call, root, include_rebind)) return true;
+            if (ast_visit_body_writes((AstNode*)((AstStartNode*)stmt)->call, visit, include_rebind)) return true;
             break;
         default:
             break;
         }
     }
     return false;
+}
+
+// Both a range query and a function-wide census use the same write rules.
+static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
+        bool include_rebind, AstNode* stop_before = NULL) {
+    return ast_visit_body_writes(node,
+        [root](NameEntry* entry) { return entry == root; }, include_rebind, stop_before);
 }
 
 // Decide, at for-node completion, which loop levels need the head snapshot.
