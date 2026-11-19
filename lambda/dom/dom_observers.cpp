@@ -1,6 +1,7 @@
 #include "dom_observers.h"
 #include "realm/dom_realm.h"
 #include "dom_ops.h"
+#include "dom_core.h"
 #include "dom.h"
 #include "dom_events.h"
 #include "dom_engine.h"
@@ -172,12 +173,8 @@ static JsObserverState* observer_from_this(void) {
 }
 
 static DomDocument* observer_node_document(DomNode* node) {
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current->is_element() && current->as_element()->doc) {
-            return current->as_element()->doc;
-        }
-    }
-    return (DomDocument*)dom_get_document();
+    // detached foreign nodes must be pinned in their registry owner, not the active document.
+    return (DomDocument*)dom_node_owner_document_bridge(node);
 }
 
 static bool observer_pin_node(DomDocument* doc, DomNode* node, DomNodeRef* out) {

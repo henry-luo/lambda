@@ -16,6 +16,47 @@
 > Semantic and design rulings remain cited by S# / D#; where no formal ruling
 > covers a point, the original vibe ledger ID is retained.
 
+<a id="lr12-64"></a>
+## LR12-64 — Captured Node content accessors and detached CharacterData writes
+
+**Status:** FIXED, 2026-11-19. Prototype publication belongs to
+Lambda under **D9.5.4 / D9.5.6v2**; native owners follow **D9.1.1v4 /
+D9.1.3v2**, and mutation storage follows **D5.5.1**.
+
+The archived production consent bootstrap probes Node.prototype.nodeValue;
+that descriptor is absent, as is textContent. Instance operations alone do
+not support libraries capturing the native getters/setters. Publish both
+through the existing Jube native-property path, sharing Attr's accessors.
+Central dispatch answers null/inert operations for container nodeValue and
+Document/DocumentType textContent, without re-entering its prototype getter.
+
+A focused reduction also confirms disconnected Text writes are dropped:
+native replacement obtains its allocation document only from ancestors.
+The shared DOM caller now passes the registered owner into native replacement
+(RI-145), including foreign documents. An owned copy preserves observer
+oldValue when the prior generated string is reclaimed. Observer registration
+also reuses the same shared document-owner resolver; its previous fallback
+pinned a detached foreign Text in the current document and silently rejected
+the observation. Comment setters reuse
+Input's backing mutation with its registered owner (LI-083). Container
+textContent reuses the existing replaceChildren aggregate operation so one
+childList record describes removal and insertion.
+
+Four AST/MIR rendering checks fail on the saved current release. Chromium
+confirms all38 captured-accessor assertions and both main/foreign detached
+writes with their observer oldValues. All21 focused native controls pass, including the four new AST/MIR cases;
+two existing DOM CLI fixtures retain their before/after goldens.
+No capture frame, script admission, page-specific condition or vendor change.
+Evidence: temp/online-visual-round90/. Coda's current live response is an
+application /api/initLoad403; no production-page clearance is attributed to
+this repair without a successful page comparison.
+
+Two Monese pages clear the major inventory as requalifications of the earlier
+inline-script lifecycle repair and current integrated source. This is not
+attributed to this new API repair. Browser references and the1000ms request
+remain unchanged; inventory125high. No broad baseline is repeated.
+
+
 <a id="lr12-62"></a>
 ## LR12-62 — Interpreter object methods bypassed callable effect bounds
 

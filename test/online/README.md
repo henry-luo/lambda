@@ -2170,3 +2170,39 @@ capture-policy change is adopted. Its current native capture uses the existing
 Dock's latest tested failure remains explicitly qualified under round86.
 See the [repair record](comparison/repairs.html#round-89).
 Autonomous work stopped when the user cleared the goal.
+
+Round ninety fixes **LR12-64 / RI-145 / LI-083**: standard captured Node
+content accessors, registry-owned detached text allocation, correct observer
+pinning for detached foreign nodes, stable oldValue strings and backed Comment
+writes. textContent shares the existing replace-all notification operation.
+**21 focused native checks pass**, including four new AST/MIR regressions that
+fail on the clean current release. Chromium agrees with the behavioral controls;
+two existing CLI fixtures retain their goldens and layout integer lint passes.
+No full baseline is repeated; this does not resolve independently logged
+baseline-runner failures (LR12-63).
+
+Two Monese pages now match their preserved browser references below0.4% mean
+error and clear the major inventory. These requalify the prior inline-script
+lifecycle repair and current integrated source; the new accessor repair is not
+claimed as their visual cause. Final native captures retain1000ms settling.
+Inventory: **125 high, zero critical,942 low**. Browser data, both audits and all
+1065 unselected report rows remain unchanged. Dock's latest failed retry remains
+qualified under round86. Coda's current API403 diagnostic is not promoted.
+See the [repair record](comparison/repairs.html#round-90). The goal remains active.
+
+Round ninety-one fixes **LI-084 / RI-146**: light-dark() and relative RGB/HSL
+use shared typed color computation, scoped channel math, retained context and
+authored color-scheme offers. Paint and CSSOM share cascade selection; implicit
+foreground inheritance now copies the parent's computed color rather than
+replaying its expression. Name IDs are appended perD5.6.1. **32 focused checks
+pass** (seven parser and25 PNG checks);20 new controls agree with Chromium,
+including19 computed-style mirrors. Integer lint passes; no full baseline is
+repeated. Broader relative models and automatic UA dark palettes remain open.
+
+Superhuman's white/light foreground is restored. Mean error drops10.73% to8.79%
+and changed area23.88% to19.56%, but portrait/overlay placement and clipped
+sign-in still retain its major review (RI-148). No new high-page clearance is
+claimed. The1000ms request, browser references, both audits, URLs, thresholds
+and all1066 unselected rows remain unchanged. Inventory: **125 high, zero
+critical,942 low**. Dock's latest failed retry remains qualified under round86.
+See the [repair record](comparison/repairs.html#round-91). The goal remains active.
