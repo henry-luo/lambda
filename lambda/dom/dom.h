@@ -177,7 +177,8 @@ DomElement* dom_find_element_by_id(DomElement* root, const char* id);
 /** Resolve and activate a popover target from a button activation. */
 void* dom_popover_target_for_button(void* button);
 int dom_popover_target_action(void* button);
-bool dom_activate_popover(void* popover, int action);
+bool dom_activate_popover(void* popover, int action, void* source);
+void dom_popover_pointer_event(void* document, void* target, const char* type, int32_t pointer_id);
 
 // =============================================================================
 // DOM Wrapping / Unwrapping

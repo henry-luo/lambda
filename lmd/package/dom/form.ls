@@ -472,10 +472,16 @@ on keydown(evt) {
 // contract where an app template owns the text — is deliberately not visible to
 // behavior templates: it fires before the value exists, and claiming it would
 // suppress the engine's own insert.
+// The click default is shared by trusted, keyboard and synthetic activation.
+pn activate_popover(control) {
+    if (dom.activate_popover(control)) { true } else { 'pass' }
+}
+
 view <input> state valid, invalid, keyboard_activation_armed: false {}
 on init(evt)  { validate.revalidate(~)^ aria.reflect(~) }
 on input(evt) { validate.revalidate(~)^ aria.reflect(~) }
 on blur(evt)  { keyboard_activation_armed = false; validate.revalidate(~)^ aria.reflect(~) }
+on click(evt) { activate_popover(~) }
 on edit_commit(evt) { editing.commit_change(~) }
 on beforeinput(evt) { editing.apply_fn(~, evt, false) }
 on keydown(evt) {
@@ -487,8 +493,8 @@ on keydown(evt) {
     // activation table below still sees them.
     let stepped = if (normalized == "number") stepper.key_default(~, evt, false) else 'pass';
     if ((stepped != 'pass')^) { return stepped }
-    let enter_activates = normalized == "submit" or normalized == "image" or normalized == "reset";
-    let space_timing = if (normalized == "checkbox" or normalized == "radio") "up" else null;
+    let enter_activates = normalized == "submit" or normalized == "image" or normalized == "reset" or normalized == "button";
+    let space_timing = if (enter_activates or normalized == "checkbox" or normalized == "radio") "up" else null;
     let verdict = keyboard.keydown_activation(~, evt, enter_activates, space_timing);
     keyboard_activation_armed = verdict == "arm"
     if (verdict == "arm") 'prevent-default' else verdict
@@ -552,11 +558,7 @@ view <form> state form_activation {}
 on submitactivation(evt) { submit.run(~, null) }
 
 view <button> state form_activation, keyboard_activation_armed: false {}
-// Popover activation is a click default, so synthetic and trusted clicks use
-// this one behavior instead of the retired JS-only activation hook.
-on click(evt) {
-    if (dom.activate_popover(~)) { true } else { 'pass' }
-}
+on click(evt) { if (dom.activate_button_command(~)) true else activate_popover(~) }
 on keydown(evt) {
     let verdict = keyboard.keydown_activation(~, evt, true, "up");
     keyboard_activation_armed = verdict == "arm"

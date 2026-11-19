@@ -267,7 +267,7 @@ static DomElement* host_test_prepare_children_mutation(DomElement* element, DomN
     return nullptr;
 }
 
-static unsigned host_control_calls[4];
+static unsigned host_control_calls[5];
 static bool host_test_control_disabled(void* state, void* node) {
     return state == &host_test_document && node == &host_test_node;
 }
@@ -277,6 +277,9 @@ static void host_test_control_record(void* state, void* node, unsigned operation
 }
 static void host_test_control_focus(void* state, void* node, bool keyboard) {
     if (keyboard) host_test_control_record(state, node, 0);
+}
+static void host_test_focus_popup_candidate(DomDocument* document, DomElement* element) {
+    host_test_control_record(document, element, 4);
 }
 template<unsigned operation> static void host_test_control_action(void* state, void* node) {
     host_test_control_record(state, node, operation);
@@ -617,7 +620,8 @@ static const DomHostEngineOps host_test_operations = {
     host_test_state_bool, host_test_document_request_repaint, host_test_queue_scroll, host_test_document_clear_reflow,
     host_test_layout_document, host_test_element_effective_zoom, host_test_element_has_vertical_rl_flow,
     host_test_element_specified_keyword, host_test_prepare_children_mutation,
-    host_test_control_disabled, host_test_control_focus, host_test_control_text,
+    host_test_control_disabled, host_test_control_focus, host_test_focus_popup_candidate,
+    host_test_control_text,
     host_test_control_action<1>, host_test_control_action<2>, host_test_scroll_begin,
     host_test_control_action<3>, host_test_document_tick, host_test_document_animation,
     host_test_svg_pause, host_test_svg_value, host_test_svg_paused, host_test_svg_set_time,
@@ -655,6 +659,7 @@ static bool host_test_dispatch(bool present) {
     if (dom_engine_prepare_children_mutation((DomElement*)&host_test_node,
             (DomNode*)&host_test_document) != (present ? (DomElement*)&host_test_node : nullptr)) return false;
     dom_engine_control_focus_programmatic(&host_test_document, &host_test_node, true);
+    dom_engine_focus_popup_candidate((DomDocument*)&host_test_document, (DomElement*)&host_test_node);
     dom_engine_control_invalidate_behavior(&host_test_document, &host_test_node);
     dom_engine_control_open_dropdown(&host_test_document, &host_test_node);
     dom_engine_scroll_cancel_smooth(&host_test_document, &host_test_node);
@@ -896,7 +901,10 @@ static bool event_test_call(bool present, unsigned operation,
 static bool event_test_dispatch(bool present) {
     Item owner = host_test_item(1), second = host_test_item(2), third = host_test_item(3);
     Item output = third, values[] = {owner, second, third};
-    const DomEventTargetKey keys[] = {{DOM_EVENT_KEY_NODE, &owner}, {DOM_EVENT_KEY_CONTAINER, &second}};
+    const DomEventPathEntry path[] = {
+        {{DOM_EVENT_KEY_NODE, &owner}, DOM_EVENT_PATH_CLOSED_ROOT},
+        {{DOM_EVENT_KEY_CONTAINER, &second}, 0},
+    };
     bool valid = true;
 #define EVENT_TEST_CALL(name, ...) valid &= event_test_call(present, EVENT_TEST_##name, dom_event_host_##name, __VA_ARGS__);
     for (unsigned flags = 0; flags < 8; flags++) {
@@ -913,8 +921,8 @@ static bool event_test_dispatch(bool present) {
     EVENT_TEST_CALL(named_get, owner, second, &output)
     EVENT_TEST_CALL(named_set, owner, second, third, &output)
     EVENT_TEST_CALL(set_target, owner, second)
-    EVENT_TEST_CALL(set_position_key, owner, keys[0], 3)
-    EVENT_TEST_CALL(set_path, owner, keys, 2)
+    EVENT_TEST_CALL(set_position_key, owner, path[0].key, 3)
+    EVENT_TEST_CALL(set_path, owner, path, 2)
     EVENT_TEST_CALL(clear_path, owner)
     EVENT_TEST_CALL(set_lambda_dispatch_position, owner, second, 3)
     EVENT_TEST_CALL(clear_lambda_dispatch_position, owner)

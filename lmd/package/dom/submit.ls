@@ -1,6 +1,6 @@
 // Form submission policy (HTML 4.10.21.3). Native supplies association,
-// validity events, entry construction, and the navigation waist; this module
-// chooses the submitter overrides and serialization format.
+// validity events, entry construction, and GET URL construction. This module
+// selects the submission method and serializes POST bodies.
 import dom
 import ue: lambda.dom.urlencode
 
@@ -36,52 +36,42 @@ fn multipart(entries, boundary) {
         "--" ++ boundary ++ "--\r\n"
 }
 
-fn validation_enabled(form, submitter) {
-    not dom.has_attribute(form, "novalidate") and
-        (submitter == null or not dom.has_attribute(submitter, "formnovalidate"))
-}
-
-// One submit pipeline for button activation and implicit Enter.
+// Button activation and implicit Enter use the same guarded submission stages.
 pub pn run(form, submitter) {
     if (form == null) { 'pass' }
-    else if (validation_enabled(form, submitter) and
-             not dom.check_validity(form)) {
-        'prevent-default'
-    }
-    else if (not dom.submit_event(form, submitter)) {
-        'prevent-default'
-    }
+    else if (not dom.form_prepare_submit(form, submitter)) { 'prevent-default' }
     else {
-        // submit is cancelable and must precede serialization/navigation.
-        let entries = dom.form_entries(form, submitter);
-        let method_name = dom.form_submit_method(form, submitter);
-        let enctype = lower(submit_attr(form, submitter,
-            "formenctype", "enctype", "application/x-www-form-urlencoded"));
-        let action = submit_attr(form, submitter,
-            "formaction", "action", dom.form_url(form));
-        let target = attr_or(form, "target", "_self");
+        let entries = dom.form_submit_entries(form, submitter);
+        if (entries != null) {
+            // Form data listeners can change navigation attributes synchronously.
+            let method_name = dom.form_submit_method(form, submitter);
+            let enctype = lower(submit_attr(form, submitter,
+                "formenctype", "enctype", "application/x-www-form-urlencoded"));
+            let action = submit_attr(form, submitter,
+                "formaction", "action", dom.form_url(form));
+            let target = dom.form_submit_target(form, submitter);
 
-        if (method_name == "dialog") {
-            dom.form_close_dialog(form, submitter)
-        }
-        else if (method_name == "get") {
-            let query = urlencoded(entries);
-            let separator = if (index_of(action, "?") == null) "?" else "&";
-            let url = if (query == "") action else action ++ separator ++ query;
-            dom.request_navigation({target: target, url: url,
-                method: "get", enctype: enctype, body: ""})
-        }
-        else if (enctype == "multipart/form-data") {
-            let boundary = dom.form_boundary();
-            dom.request_navigation({target: target, url: action,
-                method: method_name, enctype: enctype,
-                body: multipart(entries, boundary)})
-        }
-        else {
-            dom.request_navigation({target: target, url: action,
-                method: method_name,
-                enctype: "application/x-www-form-urlencoded",
-                body: urlencoded(entries)})
+            if (method_name == "dialog") {
+                dom.form_close_dialog(form, submitter)
+            }
+            else if (method_name == "get") {
+                let url = dom.form_get_url(form, submitter, entries);
+                if (url != null) {
+                    dom.request_navigation({target: target, url: url,
+                        method: "get", enctype: enctype, body: ""})
+                }
+            }
+            else if (enctype == "multipart/form-data") {
+                let boundary = dom.form_boundary();
+                dom.request_navigation({target: target, url: action,
+                    method: method_name, enctype: enctype,
+                    body: multipart(entries, boundary)})
+            }
+            else {
+                dom.request_navigation({target: target, url: action,
+                    method: method_name, enctype: "application/x-www-form-urlencoded",
+                    body: urlencoded(entries)})
+            }
         }
         'prevent-default'
     }

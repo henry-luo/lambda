@@ -426,6 +426,10 @@ static const EventHandlerAttribute EVENT_HANDLER_ATTRS[] = {
     // event-attribute fallback can otherwise expose a stale pre-reconcile fn.
     {"onselect",     "select"},
     {"onsubmit",     "submit"},
+    {"onformdata",   "formdata"},
+    {"oncommand",    "command"},
+    {"onbeforetoggle", "beforetoggle"},
+    {"ontoggle",     "toggle"},
     {"onreset",      "reset"},
     {"onscroll",     "scroll"},
     {nullptr,           nullptr}

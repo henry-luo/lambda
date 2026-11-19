@@ -28,6 +28,10 @@ extern "C" {
 Item dom_result_map(struct DomDocument* doc, const char* const* keys, const Item* vals, int count);
 Item dom_make_rect_data(struct DomDocument* doc, double x, double y, double width, double height);
 
+typedef void* (*DomPopoverRebuildMatch)(void* node, void* old_root, void* new_root);
+void dom_popover_follow_rebuild(void* document, void* old_root, void* new_root,
+                                DomPopoverRebuildMatch match);
+
 // Flags carried by every catalog row (see dom_api.def header).
 enum DomOpFlags {
     DOM_F_NEUTRAL  = 1u << 0,
@@ -165,13 +169,16 @@ Item dom_core_insert_adjacent_html(Item n, Item where, Item html);
 Item dom_core_insert_adjacent_text(Item n, Item where, Item text);
 Item dom_core_remove_node(Item n, Item index);
 Item dom_core_attach_shadow(Item n, Item init);
+Item dom_core_activate_button_command(Item receiver);
 Item dom_core_compare_document_position(Item a, Item b);
 Item dom_core_boundary_from_point(Item n, Item x, Item y, Item behavior);
 Item dom_core_text_control_boundary_from_point(Item n, Item x, Item y);
 Item dom_core_focus(Item n, Item options);
 Item dom_core_blur(Item n);
 Item dom_core_show_popover(Item n);
+Item dom_core_show_popover_options(Item n, Item options);
 Item dom_core_hide_popover(Item n);
+Item dom_core_toggle_popover(Item n, Item options);
 Item dom_core_show_modal(Item n);
 Item dom_core_show_dialog(Item n);
 Item dom_core_close_dialog(Item n, Item value);
@@ -306,6 +313,11 @@ Item dom_core_form_close_dialog(Item form, Item submitter);
 Item dom_core_form_submit_method(Item form, Item submitter);
 const char* dom_form_submission_method(struct DomElement* form, struct DomElement* submitter);
 Item dom_form_close_dialog(struct DomElement* form, struct DomElement* submitter);
+Item dom_form_submit_entries(struct DomElement* form, struct DomElement* submitter);
+Item dom_core_form_submit_entries(Item form, Item submitter);
+Item dom_core_form_prepare_submit(Item form, Item submitter);
+Item dom_core_form_get_url(Item form, Item submitter, Item entries);
+Item dom_core_form_submit_target(Item form, Item submitter);
 Item dom_engine_form_url(Item a);
 Item dom_engine_hover_index(Item a);
 Item dom_engine_option_count(Item a);

@@ -9,6 +9,10 @@
  */
 #pragma once
 
+struct DomNode;
+struct DomElement;
+DomNode* dom_retarget_node(DomNode* target, DomElement* shadow, DomNode* against);
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -136,6 +140,21 @@ Item js_ctor_message_event_fn(Item type, Item init);
 void js_message_event_install_prototype(Item prototype);
 Item js_ctor_storage_event_fn(Item type, Item init);
 void js_storage_event_install_prototype(Item prototype);
+Item js_ctor_submit_event_fn(Item type, Item init);
+Item js_ctor_form_data_event_fn(Item type, Item init);
+void js_form_event_install_prototype(Item prototype, bool form_data);
+Item js_create_native_form_data_event(Item form_data);
+Item dom_dispatch_form_submit_event(Item form, Item submitter);
+Item js_ctor_toggle_event_fn(Item type, Item init);
+void js_toggle_event_install_prototype(Item prototype);
+Item js_ctor_progress_event_fn(Item type, Item init);
+void js_progress_event_install_prototype(Item prototype);
+Item js_create_native_progress_event(const char* type, double loaded, double total);
+Item js_ctor_command_event_fn(Item type, Item init);
+void js_command_event_install_prototype(Item prototype);
+Item js_create_native_command_event(Item command, Item source);
+Item js_create_native_toggle_event(const char* type, bool old_open, bool new_open,
+                                   bool cancelable, Item source);
 Item js_ctor_security_policy_violation_event(Item type, Item init);
 void js_security_policy_violation_event_install_prototype(Item prototype);
 Item js_ctor_content_visibility_auto_state_change_event(Item type, Item init);
