@@ -16,6 +16,9 @@
 <script>
   const dialog = document.getElementById('panel');
   const result = document.getElementById('result');
+  dialog.addEventListener('formdata', event => {
+      result.setAttribute('data-coordinates', event.formData.get('x') + ',' + event.formData.get('y'));
+  });
   document.getElementById('submit').addEventListener('click', event => {
       result.setAttribute('data-offset', event.offsetX + ',' + event.offsetY);
   });

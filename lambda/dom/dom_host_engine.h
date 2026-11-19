@@ -47,6 +47,7 @@ enum DomScrollBehavior : uint8_t;
     OP(DomElement*, prepare_children_mutation, (DomElement* element, DomNode* changed_child), (element, changed_child), nullptr) \
     OP(bool, control_is_disabled, (void* state, void* element), (state, element), false) \
     OP(void, control_focus_programmatic, (void* state, void* element, bool from_keyboard), (state, element, from_keyboard), (void)0) \
+    OP(void, focus_popup_candidate, (DomDocument* document, DomElement* element), (document, element), (void)0) \
     OP(bool, control_store_text, (void* state, void* element, const char* value, uint32_t bytes, uint32_t utf16_units), (state, element, value, bytes, utf16_units), false) \
     OP(void, control_invalidate_behavior, (void* state, void* element), (state, element), (void)0) \
     OP(void, control_open_dropdown, (void* state, void* element), (state, element), (void)0) \

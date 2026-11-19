@@ -2152,7 +2152,7 @@ RADIANT_C_API Item fn_radiant_activate_popover(Item node_item) {
     void* popover = dom_popover_target_for_button((void*)button);
     if (!popover) return radiant_bool_item(false);
     int action = dom_popover_target_action((void*)button);
-    return radiant_bool_item(dom_activate_popover(popover, action));
+    return radiant_bool_item(dom_activate_popover(popover, action, button));
 }
 
 RADIANT_C_API Item fn_radiant_keyboard_click(Item node_item) {
@@ -5857,6 +5857,7 @@ static const DomHostEngineOps radiant_host_operations = {
     radiant_host_prepare_children_mutation,
     radiant_host_control_is_disabled,
     radiant_host_control_focus_programmatic,
+    radiant_focus_popup_candidate,
     radiant_host_control_store_text,
     radiant_host_control_invalidate_behavior,
     radiant_host_control_open_dropdown,
@@ -6091,12 +6092,18 @@ static const RadiantEventNavigationHostOps lambda_radiant_event_navigation_host_
     radiant_execute_location_navigation, radiant_schedule_async_iframe_load,
 };
 
+static void* lambda_radiant_match_rebuilt_popover(void* node, void* old_root, void* new_root) {
+    return view_state_corresponding_node((DomNode*)node, (DomNode*)old_root, (DomNode*)new_root, true);
+}
+
 static void lambda_radiant_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* new_root) {
     // Rebind event-owned references in the same order as the native rebuild used.
     radiant_frame_requests_follow_rebuild(document, old_root, new_root);
     radiant_pointer_capture_follow_rebuild(document, old_root, new_root);
     radiant_focus_events_follow_rebuild(document, old_root, new_root);
     radiant_navigation_requests_follow_rebuild(document, old_root, new_root);
+    radiant_host_api->dom_catalog->popover_follow_rebuild(
+        document, old_root, new_root, lambda_radiant_match_rebuilt_popover);
 }
 
 static const RadiantEventReconcileHostOps lambda_radiant_event_reconcile_host_ops = {

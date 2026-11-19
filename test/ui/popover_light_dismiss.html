@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Popover light dismiss with trusted pointer input</title>
+<style>
+  body { margin: 0; }
+  [popover] { inset: 0 auto auto 0; width: 64px; height: 40px; margin: 0; }
+  #hint { left: 92px; }
+  #manual { left: 184px; }
+  #trigger, #input-trigger, #outside { position: absolute; top: 80px; }
+  #trigger { left: 0; }
+  #input-trigger { left: 80px; }
+  #outside { left: 184px; }
+</style>
+<div id="panel" popover><button id="source" type="button">Hint source</button></div>
+<div id="hint" popover="hint">Hint</div>
+<div id="manual" popover="manual">Manual</div>
+<button id="trigger" type="button" commandfor="panel" command="toggle-popover">Panel</button>
+<input id="input-trigger" type="button" value="Input panel" popovertarget="panel">
+<button id="outside" type="button">Outside</button>
+<output id="result"></output>
+<script>
+  const panel = document.getElementById('panel');
+  const hint = document.getElementById('hint');
+  const manual = document.getElementById('manual');
+  const source = document.getElementById('source');
+  const outside = document.getElementById('outside');
+  const result = document.getElementById('result');
+  const snapshot = () => [panel, hint, manual].map(el => el.matches(':popover-open') ? '1' : '0').join('');
+  panel.showPopover();
+  hint.showPopover({source});
+  manual.showPopover();
+  outside.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true}));
+  outside.dispatchEvent(new PointerEvent('pointerup', {bubbles:true}));
+  result.setAttribute('data-synthetic', snapshot());
+  panel.addEventListener('beforetoggle', event => {
+    result.setAttribute('data-' + event.newState + '-by', event.source ? event.source.id : 'dismiss');
+  });
+  document.addEventListener('pointerup', event => {
+    result.setAttribute('data-pointerup', snapshot());
+    result.setAttribute('data-focus', document.activeElement.id || document.activeElement.tagName);
+    if (event.target === outside) event.preventDefault();
+  });
+  outside.addEventListener('mousedown', event => event.preventDefault());
+  document.addEventListener('click', () => result.setAttribute('data-click', snapshot()));
+</script>

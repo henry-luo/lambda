@@ -550,7 +550,7 @@ help:
 	@echo "  all           - Build all projects"
 	@echo ""
 	@echo "Maintenance:"
-	@echo "  push-lambda   - Commit and push submodules, then Lambda (message='...')"
+	@echo "  push-lambda   - Commit, merge upstream changes, then push submodules and Lambda (message='...')"
 	@echo "  pull-lambda   - Pull Lambda and update all recursive submodules"
 	@echo "  commit-lambda - Commit Lambda and all recursive submodules (message='...')"
 	@echo "  clean         - Remove build artifacts"

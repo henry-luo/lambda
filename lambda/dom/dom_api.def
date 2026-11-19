@@ -178,6 +178,7 @@ DOM_OP(CORE, focused,          focus, 1, "fn(n: any) -> bool",                  
 DOM_OP(CORE, request_navigation, navigation, 1, "pn(request: map) -> bool",                 dom_engine_request_navigation, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, navigation_destination, navigation, 3, "fn(src: any, url: string, root: any) -> map", dom_engine_navigation_destination, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, activate_popover, action, 1, "pn(n: any) -> bool",                             dom_engine_activate_popover, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, activate_button_command, action, 1, "pn(n: any) -> bool",                      dom_core_activate_button_command, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 // ---------------------------------------------------------------------------
 // CORE — text controls and editing — engine-provided (editing_dom_waist, tc_*)
@@ -323,7 +324,11 @@ DOM_OP(CORE, embedding_element, document, 1, "fn(n: any) -> any", dom_engine_emb
 DOM_OP(CORE, form_boundary, forms, 0, "fn() -> string", dom_engine_form_boundary, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, form_close_dialog, forms, 2, "pn(form: any, submitter: any) -> bool", dom_core_form_close_dialog, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, form_entries, forms, 2, "fn(form: any, submitter: any) -> array", dom_engine_form_entries, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, form_get_url, forms, 3, "fn(form: any, submitter: any, entries: array) -> string|null", dom_core_form_get_url, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, form_prepare_submit, forms, 2, "pn(form: any, submitter: any) -> bool", dom_core_form_prepare_submit, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, form_submit_entries, forms, 2, "pn(form: any, submitter: any) -> array|null", dom_core_form_submit_entries, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, form_submit_method, forms, 2, "fn(form: any, submitter: any) -> string", dom_core_form_submit_method, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, form_submit_target, forms, 2, "fn(form: any, submitter: any) -> string", dom_core_form_submit_target, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, form_url, forms, 1, "fn(form: any) -> string", dom_engine_form_url, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, hover_index, select, 1, "fn(n: any) -> int|null", dom_engine_hover_index, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, option_count, select, 1, "fn(n: any) -> int|null", dom_engine_option_count, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
@@ -548,8 +553,10 @@ DOM_OP(CORE, blur,   focus, 1, "pn(n: any) -> null", dom_core_blur, DOM_F_MUTATE
 // bridge instead, which is *not* equal to that derivation -- per HTML §6.4.4 it
 // no-ops on a disabled control. Binding the member would either bind a null slot
 // or make the row's derivation claim false. One name, two operations (DS6).
-DOM_OP(CORE, show_popover, forms, 1, "pn(n: any) -> null", dom_core_show_popover, DOM_F_MUTATES, "", html_element, "", "showPopover")
+DOM_OP(CORE, show_popover, forms, 1, "pn(n: any) -> null", dom_core_show_popover, DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, hide_popover, forms, 1, "pn(n: any) -> null", dom_core_hide_popover, DOM_F_MUTATES, "", html_element, "", "hidePopover")
+DOM_OP(CORE, show_popover_options, forms, 2, "pn(n: any, options: any) -> null", dom_core_show_popover_options, DOM_F_MUTATES, "", html_element, "show_popover", "showPopover")
+DOM_OP(CORE, toggle_popover, forms, 2, "pn(n: any, options: any) -> bool", dom_core_toggle_popover, DOM_F_MUTATES, "", html_element, "", "togglePopover")
 DOM_OP(CORE, show_modal,   forms, 1, "pn(n: any) -> null", dom_core_show_modal, DOM_F_MUTATES, "", html_element, "", "showModal")
 DOM_OP(CORE, set_custom_validity, forms, 2, "pn(n: any, message: string) -> null", dom_core_set_custom_validity, DOM_F_MUTATES, "", html_element, "", "setCustomValidity")
 
@@ -570,7 +577,7 @@ DOM_OP(CORE, select_show_picker, select, 1, "pn(n: any) -> null", dom_core_selec
 // Names are verbatim from the section they came from, so the migration was a
 // section rename at each call site and nothing else.
 // ---------------------------------------------------------------------------
-DOM_RAW(activate_popover_native, forms, bool, (void* popover, int action), dom_activate_popover, DOM_F_NATIVE)
+DOM_RAW(activate_popover_native, forms, bool, (void* popover, int action, void* source), dom_activate_popover, DOM_F_NATIVE)
 // The ordinal executor. A DOM_OP row is fixed-arity because a row is a Lambda
 // function, so the uniform `invoke` row has to pack its arguments into an array;
 // that packing is pure ceremony for a native caller, an allocation per method
@@ -604,6 +611,7 @@ DOM_RAW(location_navigate_bridge, navigation, Item, (void* doc, Item next_url, b
 DOM_RAW(navigate_submit_target, navigation, bool, (const char* target_name, const char* url), dom_navigate_submit_target, DOM_F_NATIVE)
 DOM_RAW(notify_mutation, notify, void, (int kind, void* target, void* parent), jube_host_dom_notify_mutation, DOM_F_NATIVE)
 DOM_RAW(owner_document_for_node, host, Item, (void* node), dom_owner_document_for_node, DOM_F_NATIVE)
+DOM_RAW(popover_follow_rebuild, tree, void, (void* doc, void* old_root, void* new_root, void* (*match)(void*, void*, void*)), dom_popover_follow_rebuild, DOM_F_NATIVE)
 DOM_RAW(popover_target_action, forms, int, (void* button), dom_popover_target_action, DOM_F_NATIVE)
 DOM_RAW(popover_target_for_button, forms, void*, (void* button), dom_popover_target_for_button, DOM_F_NATIVE)
 DOM_RAW(remove_bridge, tree, Item, (void* node), dom_remove_bridge, DOM_F_NATIVE)

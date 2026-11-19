@@ -45,6 +45,7 @@
 #include "lambda/io/mark_builder.hpp"
 #include "lambda/io/mark_editor.hpp"
 #include "lambda/core/mark_reader.hpp"
+#include "lambda/format/html-defs.h"
 #include "../module/radiant/radiant_input_value.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "radiant/select_options.hpp"
@@ -86,6 +87,7 @@ static bool dom_radio_group_has_checked(DomElement* element);
 #include "radiant/view.hpp"
 #include "radiant/radiant.hpp"
 #include "radiant/event.hpp"
+#include "radiant/event_host.hpp"
 #include "radiant/layout.hpp"
 #include "radiant/render.hpp"
 #include "radiant/svg_hit.hpp"
@@ -323,7 +325,7 @@ static Html5Parser* dom_create_fragment_parser(DomDocument* doc,
 }
 
 static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
-                                      bool notify_mutation);
+                                   bool notify_mutation, bool declarative = false);
 
 static String* dom_fragment_text(Item item) {
     String* s = it2s(item);
@@ -346,6 +348,8 @@ static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMod
         // A parser-inserted template holds a separate, unscheduled source tree.
         bool descend = element && (mode == DomFragmentScriptMode::inert ||
             !dom_element_is_html_tag(element, MARKUP_NAME_TEMPLATE));
+        if (element && element->shadow_root_element())
+            dom_set_fragment_script_state(element->shadow_root_element(), mode);
         node = descend && element->first_child ? element->first_child.get() : dom_next_after_subtree(root, node);
     }
 }
@@ -690,6 +694,8 @@ static void dom_slots_after_attribute_change(DomDocument* doc, DomNode* target, 
 }
 
 static void dom_recheck_focus_in(DomElement* changed_element);
+static void dom_popover_attribute_changed(DomElement* element);
+static void dom_focus_open_popup(DomElement* element);
 
 class DomScriptReactionScope {
 public:
@@ -712,7 +718,8 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
                                           DomNode* parent = nullptr,
                                           const char* attribute_name = nullptr,
                                           const char* old_value = nullptr,
-                                          CssPropertyCode presentation_property = CSS_PROPERTY_UNKNOWN) {
+                                          CssPropertyCode presentation_property = CSS_PROPERTY_UNKNOWN,
+                                          bool recheck_focus = false) {
     parent = dom_source_inclusive_ancestor(parent);
     DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
@@ -721,21 +728,26 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         DomElement* element = target ? target->as_element() : nullptr;
         if (dom_element_is_html_tag(element, MARKUP_NAME_DIALOG) && !element->has_attribute("open")) {
             // Removing open ends the active close request, even when the handler reopens the dialog.
-            if (element->ext) element->ext->dialog_cancel_dispatching = false;
-            // The rest of the current input turn must not retain hidden focus.
-            dom_recheck_focus_in(element);
+            if (element->ext) {
+                element->ext->dialog_cancel_dispatching = false;
+                element->ext->dialog_previous_focus = {};
+            }
+            recheck_focus = true;
         }
     }
-
     if (dom_edit_transaction_defer_mutation(doc, kind, target, parent,
                                             attribute_name, old_value)) {
         return;
     }
 
     radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name, presentation_property);
+    // Recheck after invalidating the cascade, before reflow validates focus.
+    if (recheck_focus && target) dom_recheck_focus_in(target->as_element());
     dom_mutation_notify_observers(kind, target, parent, attribute_name, old_value);
     if (kind == DOM_JS_MUTATION_ATTRIBUTE) dom_slots_after_attribute_change(doc, target, attribute_name);
     radiant_dom_mutation_finish(doc, kind);
+    if (kind == DOM_JS_MUTATION_ATTRIBUTE && attribute_name && str_ieq_cstr(attribute_name, "popover"))
+        dom_popover_attribute_changed(target ? target->as_element() : nullptr);
     if (doc->js.prepare_inline_script) {
         if (kind == DOM_JS_MUTATION_TEXT) {
             dom_enqueue_script_reaction(doc, target);
@@ -1123,9 +1135,44 @@ static bool dom_node_is_connected(DomNode* node) {
     return doc && dom_shadow_including_contains(doc->root, node);
 }
 
+typedef void (*DomShadowElementVisit)(DomElement* element, void* context);
+
+static void dom_walk_shadow_including_elements(DomNode* root, DomShadowElementVisit visit,
+                                              void* context) {
+    for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+        DomElement* element = node->as_element();
+        if (!element) continue;
+        visit(element, context);
+        if (DomElement* shadow = element->shadow_root_element())
+            dom_walk_shadow_including_elements(shadow, visit, context);
+    }
+}
+
+enum DomPopoverCloseFlags : unsigned {
+    DOM_POPOVER_CLOSE_EVENTS = 1u << 0,
+    DOM_POPOVER_CLOSE_RESTORE_FOCUS = 1u << 1,
+    DOM_POPOVER_CLOSE_THROW = 1u << 2,
+    DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE = 1u << 3,
+};
+
+static Item dom_hide_popover(DomElement* element, DomElement* source, unsigned flags);
+
+static void dom_remove_popup_visibility(DomElement* element, void*) {
+    if (!element->ext) return;
+    bool was_modal = element->is_dialog_modal();
+    // Removing a popup silently clears live visibility before adoption or reinsertion.
+    if (element->is_popover_open())
+        dom_hide_popover(element, nullptr, DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE);
+    dom_top_layer_remove(element);
+    element->ext->dialog_modal = false;
+    element->ext->dialog_previous_focus = {};
+    if (was_modal && element->doc) dom_recheck_focus_in(element->doc->root);
+}
+
 static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
                                   bool release_external = true) {
     if (child && dom_node_is_connected(child)) {
+        dom_walk_shadow_including_elements(child, dom_remove_popup_visibility, nullptr);
         dom_note_selected_content_mutation(child, false);
         dom_custom_element_tree_changed(child, false);
     }
@@ -1913,7 +1960,7 @@ extern "C" void dom_set_checked_dirty(void* dom_elem, bool checked) {
 }
 JS_FORWARD_RETURN(const char*, dom_input_type_lower, (void* dom_elem), radiant_form_control_type, ((DomElement*)dom_elem))
 extern "C" bool dom_is_disabled(void* dom_elem) {
-    return radiant_form_control_disabled((DomElement*)dom_elem);
+    return form_control_is_html_disabled((DomElement*)dom_elem);
 }
 
 // Returns true when the element is "connected" to its owning document
@@ -3755,6 +3802,7 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     Html5Parser* parser = dom_create_fragment_parser(doc);
     Html5ParserScope parser_scope(parser);
     if (!parser) return;
+    parser->allow_declarative_shadow_roots = true;
     html5_fragment_parse(parser, srcdoc);
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return;
@@ -3845,28 +3893,14 @@ static Item dom_parser_parse_xml(const char* source) {
     return wrap_foreign_doc(xml_document);
 }
 
-extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
-    const char* source = fn_to_cstr(source_item);
-    const char* type = fn_to_cstr(type_item);
-    if (!source) source = "";
-    if (!type) type = "text/html";
-    if (str_icmp_cstr(type, "text/html") != 0) {
-        if (str_icmp_cstr(type, "text/xml") == 0 ||
-            str_icmp_cstr(type, "application/xml") == 0 ||
-            str_icmp_cstr(type, "image/svg+xml") == 0 ||
-            str_icmp_cstr(type, "application/xhtml+xml") == 0) {
-            return dom_parser_parse_xml(source);
-        }
-        return dom_raise_type_error("Unsupported DOMParser MIME type");
-    }
-
+static Item dom_parse_html_document(const char* source, bool declarative) {
     Input* parent = _js_current_document ? _js_current_document->input : nullptr;
     if (!parent) return ItemNull;
     Input* input = Input::create(parent->pool, nullptr, parent);
     if (!input) return ItemNull;
     // HTML DOM construction requires the parser's embedded node storage.
     input->ui_mode = true;
-    Html5ParseOptions options = {.track_source_lines = false, .scripting_disabled = true};
+    Html5ParseOptions options = {.scripting_disabled = true, .allow_declarative_shadow_roots = declarative};
     // DOMParser parses a document: a body-fragment parse relocates head metadata
     // into body and prevents navigation consumers from merging titles/assets.
     Element* parsed = html5_parse_ex(input, source, &options);
@@ -3881,9 +3915,40 @@ extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
     DomElement* root = build_dom_tree_from_element(html, document, nullptr);
     if (!root) { free_document(document); return ItemNull; }
     document->root = lam::up(root);
+    dom_set_fragment_script_state(root, DomFragmentScriptMode::inert);
     return wrap_foreign_doc(document);
 }
 
+extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
+    const char* source = fn_to_cstr(source_item);
+    const char* type = fn_to_cstr(type_item);
+    if (!source) source = "";
+    if (!type || str_icmp_cstr(type, "text/html") == 0)
+        return dom_parse_html_document(source, false);
+    if (str_icmp_cstr(type, "text/xml") == 0 ||
+        str_icmp_cstr(type, "application/xml") == 0 ||
+        str_icmp_cstr(type, "image/svg+xml") == 0 ||
+        str_icmp_cstr(type, "application/xhtml+xml") == 0)
+        return dom_parser_parse_xml(source);
+    return dom_raise_type_error("Unsupported DOMParser MIME type");
+}
+
+static Item dom_check_unsafe_html_options(Item options) {
+    if (options.item == ITEM_NULL || is_js_undefined(options)) return make_js_undefined();
+    if (!js_is_object_value(options)) return dom_raise_type_error("HTML options must be an object");
+    Item sanitizer = dom_realm_get_cstr(options, "sanitizer");
+    JS_RETURN_IF_ERROR(sanitizer);
+    return is_js_undefined(sanitizer) ? make_js_undefined() :
+        dom_raise_type_error("HTML sanitizer options are unsupported");
+}
+
+Item dom_parse_html_unsafe(Item markup, Item options) {
+    JS_ROOTS(roots, source, markup, dictionary, options);
+    source.set(js_to_string(source.get()));
+    JS_RETURN_IF_ERROR(source.get());
+    JS_RETURN_IF_ERROR(dom_check_unsafe_html_options(dictionary.get()));
+    return dom_parse_html_document(fn_to_cstr(source.get()), true);
+}
 
 
 // iframe.contentDocument / contentWindow accessors.
@@ -4261,7 +4326,7 @@ extern "C" bool dom_navigate_submit_target(const char* target_name, const char* 
         if (!resolved) return false;
     }
 
-    if (!target_name || !target_name[0] || strcmp(target_name, "_self") == 0) {
+    if (!target_name || !target_name[0] || str_ieq_cstr(target_name, "_self")) {
         if (dom_document_replace_url(doc, resolved)) return true;
         url_destroy(resolved);
         return false;
@@ -4666,14 +4731,16 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
     return result;
 }
 
-struct DomAriaElementRef {
+struct DomElementRef {
     const char* property;
     const char* attribute;
     const char* direct_key;
     bool multiple;
 };
 
-static const DomAriaElementRef k_aria_element_refs[] = {
+static const DomElementRef k_command_for = {nullptr, "commandfor", "__command_for_ref", false};
+
+static const DomElementRef k_element_refs[] = {
     {"ariaActiveDescendantElement", "aria-activedescendant", "__aria_active_descendant_ref", false},
     {"ariaControlsElements", "aria-controls", "__aria_controls_refs", true},
     {"ariaDescribedByElements", "aria-describedby", "__aria_described_by_refs", true},
@@ -4682,19 +4749,20 @@ static const DomAriaElementRef k_aria_element_refs[] = {
     {"ariaFlowToElements", "aria-flowto", "__aria_flow_to_refs", true},
     {"ariaLabelledByElements", "aria-labelledby", "__aria_labelled_by_refs", true},
     {"ariaOwnsElements", "aria-owns", "__aria_owns_refs", true},
+    k_command_for,
 };
 
-static const DomAriaElementRef* dom_aria_ref_for_property(const char* property) {
+static const DomElementRef* dom_aria_ref_for_property(const char* property) {
     if (!property) return nullptr;
-    for (const DomAriaElementRef& row : k_aria_element_refs) {
-        if (strcmp(property, row.property) == 0) return &row;
+    for (const DomElementRef& row : k_element_refs) {
+        if (row.property && strcmp(property, row.property) == 0) return &row;
     }
     return nullptr;
 }
 
-static void dom_aria_clear_direct_ref(DomElement* elem, const char* attribute) {
+static void dom_clear_direct_element_ref(DomElement* elem, const char* attribute) {
     if (!elem || !attribute) return;
-    for (const DomAriaElementRef& row : k_aria_element_refs) {
+    for (const DomElementRef& row : k_element_refs) {
         if (str_icmp_cstr(attribute, row.attribute) != 0) continue;
         RootFrame roots(1);
         Rooted<Item> key(roots, js_name_item(row.direct_key));
@@ -4706,7 +4774,7 @@ static void dom_aria_clear_direct_ref(DomElement* elem, const char* attribute) {
     }
 }
 
-static Item dom_aria_element_ref_get(DomElement* elem, const DomAriaElementRef* row) {
+static Item dom_aria_element_ref_get(DomElement* elem, const DomElementRef* row) {
     const char* ids = elem->get_attribute(row->attribute);
     if (!ids && !elem->has_attribute(row->attribute)) return ItemNull;
     if (!ids || !*ids) {
@@ -4746,8 +4814,7 @@ static Item dom_aria_element_ref_get(DomElement* elem, const DomAriaElementRef* 
     return found.get();
 }
 
-static Item dom_aria_element_ref_set(DomElement* elem,
-                                     const DomAriaElementRef* row, Item value) {
+static Item dom_element_ref_set(DomElement* elem, const DomElementRef* row, Item value) {
     RootFrame roots(3);
     Rooted<Item> value_root(roots, value);
     Rooted<Item> key(roots, js_name_item(row->direct_key));
@@ -4772,8 +4839,8 @@ static Item dom_aria_element_ref_set(DomElement* elem,
         elem->set_attribute(row->attribute, "");
     } else {
         DomNode* target = (DomNode*)dom_unwrap_element(value_root.get());
-        if (!target || !target->is_element())
-            return dom_raise_type_error("ARIA element reference requires an Element");
+        if (!target || target->node_type != DOM_NODE_ELEMENT)
+            return dom_raise_type_error("Element reference requires an Element");
         expando_set_property((DomNode*)elem, key.get(), value_root.get());
         elem->set_attribute(row->attribute, "");
     }
@@ -4782,16 +4849,117 @@ static Item dom_aria_element_ref_set(DomElement* elem,
     return value_root.get();
 }
 
+enum DomButtonCommand {
+    DOM_COMMAND_UNKNOWN, DOM_COMMAND_CUSTOM, DOM_COMMAND_TOGGLE_POPOVER,
+    DOM_COMMAND_SHOW_POPOVER, DOM_COMMAND_HIDE_POPOVER, DOM_COMMAND_CLOSE,
+    DOM_COMMAND_REQUEST_CLOSE, DOM_COMMAND_SHOW_MODAL
+};
+
+static const char* const k_button_commands[] = {
+    "", "", "toggle-popover", "show-popover", "hide-popover", "close", "request-close", "show-modal"
+};
+
+static DomButtonCommand dom_button_command(const char* value) {
+    if (!value) return DOM_COMMAND_UNKNOWN;
+    if (value[0] == '-' && value[1] == '-') return DOM_COMMAND_CUSTOM;
+    for (size_t i = DOM_COMMAND_TOGGLE_POPOVER; i < sizeof(k_button_commands) / sizeof(*k_button_commands); i++) {
+        if (str_ieq_cstr(value, k_button_commands[i])) return (DomButtonCommand)i;
+    }
+    return DOM_COMMAND_UNKNOWN;
+}
+
+static DomElement* dom_button_command_target(DomElement* button) {
+    const char* id = dom_element_attribute_value_ns(button, "", k_command_for.attribute);
+    if (!id) return nullptr;
+    DomNode* root = dom_source_tree_root(button);
+    if (*id) return dom_find_source_element_by_id(root, id);
+    Item stored = ItemNull;
+    if (!expando_get_property(button, js_name_item(k_command_for.direct_key), &stored)) return nullptr;
+    DomNode* target = (DomNode*)dom_unwrap_element(stored);
+    if (!target || target->node_type != DOM_NODE_ELEMENT) return nullptr;
+    DomNode* target_root = dom_source_tree_root(target);
+    // Direct reflection may reference an element in a containing tree scope.
+    for (DomNode* scope = root; scope;) {
+        if (scope == target_root) return target->as_element();
+        DomElement* element = scope->as_element();
+        scope = element ? dom_source_tree_root(element->shadow_host_element()) : nullptr;
+    }
+    return nullptr;
+}
+
+static bool dom_button_can_invoke(DomElement* button) {
+    return !dom_find_form_owner(button) || str_ieq_cstr(button->get_attribute("type"), "button");
+}
+
+enum DomToggleTaskKind { DOM_DIALOG_TOGGLE, DOM_POPOVER_TOGGLE };
+
+static DomToggleTaskTracker& dom_toggle_tracker(DomElementExt* state, DomToggleTaskKind kind) {
+    return kind == DOM_DIALOG_TOGGLE ? state->dialog_toggle : state->popover_toggle;
+}
+
+static Item dom_deliver_toggle_task(Item env_item) {
+    JS_ENV_UNPACK(env, env_item);
+    RootFrame roots(3);
+    Rooted<Item> target(roots, env[0]), source(roots, env[1]), event(roots, ItemNull);
+    DomNode* node = (DomNode*)dom_unwrap_element(target.get());
+    DomElement* elem = node ? node->as_element() : nullptr;
+    if (!elem || !elem->ext) return make_js_undefined();
+    DomToggleTaskTracker& tracker = dom_toggle_tracker(elem->ext, (DomToggleTaskKind)it2i(env[2]));
+    if (!tracker.pending || tracker.generation != (uint32_t)it2i(env[3]))
+        return make_js_undefined();
+
+    bool old_open = tracker.old_open;
+    bool new_open = it2b(env[4]);
+    // A transition from inside a toggle listener starts a new pending task.
+    tracker.pending = false;
+    event.set(js_create_native_toggle_event("toggle", old_open, new_open, false, source.get()));
+    JS_RETURN_IF_ERROR(event.get());
+    return dom_dispatch_event(target.get(), event.get());
+}
+
+static void dom_queue_toggle_task(DomElement* element, Item target, Item source,
+                                  DomToggleTaskKind kind, bool opening) {
+    if (!dom_realm_active()) return;
+    DomElementExt* state = element->ensure_ext();
+    if (!state) return;
+    DomToggleTaskTracker& tracker = dom_toggle_tracker(state, kind);
+    if (!tracker.pending) tracker.old_open = !opening;
+    tracker.pending = true;
+    // Leave superseded callbacks inert and enqueue the replacement at the
+    // tail. Task IDs belong to a realm and cannot be canceled after adoption.
+    uint32_t generation = ++tracker.generation;
+    Item values[] = {target, source, {.item = i2it(kind)}, {.item = i2it(generation)},
+                     {.item = b2it(opening)}};
+    js_schedule_native_env(dom_schedule_task, dom_deliver_toggle_task, 0, values, 5);
+}
+
+static Item dom_dispatch_before_toggle(Item target, Item source, bool opening) {
+    if (!dom_realm_active()) return (Item){.item = ITEM_TRUE};
+    RootFrame roots(2);
+    Rooted<Item> receiver(roots, target);
+    Rooted<Item> event(roots, js_create_native_toggle_event(
+        "beforetoggle", !opening, opening, opening, source));
+    JS_RETURN_IF_ERROR(event.get());
+    return dom_dispatch_event(receiver.get(), event.get());
+}
+
 extern "C" void* dom_popover_target_for_button(void* button_ptr) {
     DomElement* button = (DomElement*)button_ptr;
-    if (!button || !button->doc || !button->tag_name ||
-        str_icmp_cstr(button->tag_name, "button") != 0) {
+    if (!button || !button->doc || !button->doc->root) return nullptr;
+    const char* target_id = button->get_attribute("popovertarget");
+    if (!target_id || !*target_id || dom_is_disabled(button)) return nullptr;
+    if (dom_element_is_html_tag(button, MARKUP_NAME_INPUT)) {
+        FormInputKind kind = form_input_kind(button->get_attribute("type"));
+        if (kind != FORM_INPUT_KIND_BUTTON && kind != FORM_INPUT_KIND_IMAGE &&
+            kind != FORM_INPUT_KIND_SUBMIT && kind != FORM_INPUT_KIND_RESET) return nullptr;
+    } else if (!dom_element_is_html_tag(button, MARKUP_NAME_BUTTON) || !dom_button_can_invoke(button)) {
         return nullptr;
     }
-    const char* target_id = button->get_attribute("popovertarget");
-    if (!target_id || !*target_id || !button->doc->root) return nullptr;
-    DomElement* target = dom_find_element_by_id(button->doc->root, target_id);
-    return target && target->has_attribute("popover") ? target : nullptr;
+    // Submit and reset use their own activation when associated with a form.
+    if ((dom_is_submit_button(button) || radiant_form_is_reset_button(button)) &&
+        dom_find_form_owner(button)) return nullptr;
+    DomElement* target = dom_find_source_element_by_id(dom_source_tree_root(button), target_id);
+    return target && dom_element_attribute_value_ns(target, "", "popover") ? target : nullptr;
 }
 
 extern "C" int dom_popover_target_action(void* button_ptr) {
@@ -4803,16 +4971,451 @@ extern "C" int dom_popover_target_action(void* button_ptr) {
     return 0;
 }
 
-extern "C" bool dom_activate_popover(void* popover_ptr, int action) {
-    DomElement* popover = (DomElement*)popover_ptr;
-    if (!popover || !popover->has_attribute("popover")) return false;
+static DomPopoverMode dom_popover_mode(const char* value) {
+    if (!value) return DOM_POPOVER_NONE;
+    if (!*value || str_ieq_cstr(value, "auto")) return DOM_POPOVER_AUTO;
+    if (str_ieq_cstr(value, "hint")) return DOM_POPOVER_HINT;
+    return DOM_POPOVER_MANUAL;
+}
 
-    bool was_open = popover->is_popover_open();
-    bool should_open = action == 1 ? true : action == 2 ? false : !was_open;
-    if (was_open == should_open) return false;
-    popover->set_popover_open(should_open);
-    dom_notify_mutation(DOM_JS_MUTATION_STYLE, popover, popover->parent);
-    return true;
+static DomPopoverMode dom_element_popover_mode(DomElement* element) {
+    return dom_popover_mode(dom_element_attribute_value_ns(element, "", "popover"));
+}
+
+static Item dom_popover_invalid_state(bool throw_exception) {
+    return throw_exception ? dom_raise_exception("InvalidStateError", "Popover cannot change visibility")
+        : (Item){.item = ITEM_FALSE};
+}
+
+static Item dom_check_popover_validity(DomElement* popover, bool expected_open,
+                                      DomDocument* expected_document, bool throw_exception,
+                                      bool attribute_change = false) {
+    if (!popover || (!attribute_change && dom_element_popover_mode(popover) == DOM_POPOVER_NONE)) {
+        return throw_exception ? dom_raise_exception("NotSupportedError", "Element has no popover attribute")
+            : (Item){.item = ITEM_FALSE};
+    }
+    if (popover->is_popover_open() != expected_open) return (Item){.item = ITEM_FALSE};
+    if (popover->is_dialog_modal() ||
+        (expected_document && popover->doc != expected_document) ||
+        (!expected_open && (!dom_node_is_connected(popover) ||
+            (throw_exception && !dom_doc_has_browsing_context(popover->doc)))))
+        return dom_popover_invalid_state(throw_exception);
+    return (Item){.item = ITEM_TRUE};
+}
+
+struct DomPopoverBoundary {
+    uint64_t automatic = 0;
+    uint64_t hint = 0;
+};
+
+struct DomPopoverStackEntry {
+    DomNodeRef ref;
+    uint64_t order;
+    DomNodeRef previous_focus;
+};
+
+struct DomPopoverStacks : DomDocumentResourceData {
+    lam::ArrayList<DomPopoverStackEntry> automatic{MEM_CAT_DOM, 0};
+    lam::ArrayList<DomPopoverStackEntry> hint{MEM_CAT_DOM, 0};
+    uint64_t sequence = 0;
+    uint64_t hint_parent = 0;
+    uint64_t pointer_down_order = 0;
+    int32_t pointer_down_id = 0;
+    unsigned hiding = 0;
+    bool showing = false;
+};
+
+static void dom_destroy_popover_stacks(DomDocumentResourceData* resource) {
+    auto* popovers = static_cast<DomPopoverStacks*>(resource);
+    popovers->~DomPopoverStacks();
+    mem_free(popovers);
+}
+
+static DomPopoverStacks* dom_popover_stacks(DomDocument* document, bool create = false) {
+    if (!document || document->destroying) return nullptr;
+    auto* popovers = (DomPopoverStacks*)document->services.popover_state;
+    if (popovers || !create) return popovers;
+    // Documents use explicit resource retirement, including the calloc factory path.
+    void* storage = mem_alloc(sizeof(DomPopoverStacks), MEM_CAT_DOM);
+    if (!storage) return nullptr;
+    popovers = new (storage) DomPopoverStacks();
+    if (!dom_document_add_resource(document, popovers, dom_destroy_popover_stacks)) {
+        dom_destroy_popover_stacks(popovers);
+        return nullptr;
+    }
+    document->services.popover_state = popovers;
+    return popovers;
+}
+
+static lam::ArrayList<DomPopoverStackEntry>* dom_popover_stack(DomPopoverStacks& popovers,
+                                                              DomPopoverMode mode) {
+    if (mode == DOM_POPOVER_AUTO) return &popovers.automatic;
+    if (mode == DOM_POPOVER_HINT) return &popovers.hint;
+    return nullptr;
+}
+
+static DomPopoverStackEntry* dom_popover_stack_entry(
+        lam::ArrayList<DomPopoverStackEntry>* stack, uint64_t order) {
+    if (!stack || !order) return nullptr;
+    for (DomPopoverStackEntry& entry : *stack) {
+        if (entry.order == order) return &entry;
+    }
+    return nullptr;
+}
+
+static DomElement* dom_document_focused_target(DomDocument* document) {
+    DocState* state = document ? document->state : dom_current_state();
+    View* view = focus_get(state);
+    if (state) return view ? view->as_element() : nullptr;
+    // A script mirror cannot restore a cleared native focus area.
+    return dom_realm_active() && js_document_active_element &&
+        js_document_active_element->doc == document && dom_node_is_connected(js_document_active_element)
+        ? js_document_active_element : nullptr;
+}
+
+static void dom_restore_popup_focus(DomDocument* document, DomNodeRef previous_focus) {
+    if (!document || !previous_focus.address) return;
+    DomNode* previous = dom_node_ref_validate(document, previous_focus);
+    if (DomElement* candidate = previous ? previous->as_element() : nullptr)
+        dom_engine_focus_popup_candidate(document, candidate);
+}
+
+static void dom_find_popover_ancestors(DomPopoverBoundary& boundary, DomElement* element,
+                                      DomDocument* document) {
+    for (DomElement* ancestor = dom_flat_tree_parent(element); ancestor;
+         ancestor = dom_flat_tree_parent(ancestor)) {
+        if (ancestor->doc != document || !ancestor->is_popover_open()) continue;
+        const DomElementExt* state = ancestor->ext;
+        if (state->popover_opened_mode == DOM_POPOVER_AUTO && state->popover_order > boundary.automatic)
+            boundary.automatic = state->popover_order;
+        if (state->popover_opened_mode == DOM_POPOVER_HINT && state->popover_order > boundary.hint)
+            boundary.hint = state->popover_order;
+    }
+}
+
+static Item dom_hide_popover_stack_until(DomDocument* document,
+                                         lam::ArrayList<DomPopoverStackEntry>& stack,
+                                         uint64_t endpoint, unsigned flags) {
+    // A close listener can hide or remove other entries. Re-read the top
+    // after each close. The document guard prevents new entries during hide.
+    while (!stack.empty() && stack.back().order > endpoint) {
+        DomPopoverStackEntry entry = stack.back();
+        DomNode* node = dom_node_ref_validate(document, entry.ref);
+        DomElement* element = node ? node->as_element() : nullptr;
+        if (!element || element->doc != document || !element->is_popover_open() ||
+            element->ext->popover_order != entry.order) {
+            stack.remove(stack.size() - 1);
+            continue;
+        }
+        Item hidden = dom_hide_popover(element, nullptr, flags | DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE);
+        JS_RETURN_IF_ERROR(hidden);
+        if (!stack.empty() && stack.back().order == entry.order) return hidden;
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
+class DomPopoverHidingScope {
+public:
+    DomPopoverHidingScope(DomPopoverStacks& popovers, bool& hiding)
+        : popovers_(popovers), hiding_(hiding), nested_(hiding) {
+        hiding_ = true;
+        popovers_.hiding++;
+    }
+    ~DomPopoverHidingScope() {
+        hiding_ = nested_;
+        popovers_.hiding--;
+    }
+    bool nested() const { return nested_; }
+private:
+    DomPopoverStacks& popovers_;
+    bool& hiding_;
+    bool nested_;
+};
+
+class DomPopoverShowingScope {
+public:
+    explicit DomPopoverShowingScope(bool& showing) : showing_(showing) { showing_ = true; }
+    ~DomPopoverShowingScope() { showing_ = false; }
+private:
+    bool& showing_;
+};
+
+static Item dom_hide_popover(DomElement* element, DomElement* invoker, unsigned flags) {
+    // A listener that changes the attribute or detaches the element can
+    // finish this close in a nested call.
+    if (element && element->ext && element->ext->popover_hiding && !element->is_popover_open())
+        return (Item){.item = ITEM_FALSE};
+    bool throw_exception = flags & DOM_POPOVER_CLOSE_THROW;
+    bool attribute_change = flags & DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE;
+    Item valid = dom_check_popover_validity(element, true, nullptr, throw_exception, attribute_change);
+    if (valid.item != ITEM_TRUE) return valid;
+    DomDocument* document = element->doc;
+    DomElementExt* state = element->ext;
+    DomPopoverStacks* stacks = dom_popover_stacks(document);
+    if (!stacks) return (Item){.item = ITEM_FALSE};
+    DomPopoverStacks& popovers = *stacks;
+    RootFrame roots(2);
+    DomPopoverHidingScope scope(popovers, state->popover_hiding);
+    bool fire_events = (flags & DOM_POPOVER_CLOSE_EVENTS) && !scope.nested() && dom_realm_active();
+    Rooted<Item> target(roots, fire_events ? dom_wrap_element(element) : ItemNull);
+    Rooted<Item> source(roots, fire_events && invoker ? dom_wrap_element(invoker) : ItemNull);
+
+    uint64_t order = state->popover_order;
+    auto* stack = dom_popover_stack(popovers, state->popover_opened_mode);
+    unsigned descendant_flags = flags & DOM_POPOVER_CLOSE_RESTORE_FOCUS;
+    if (fire_events) descendant_flags |= DOM_POPOVER_CLOSE_EVENTS;
+    bool initially_focused_inside = dom_shadow_including_contains(
+        element, dom_document_focused_target(document));
+    if (stack) {
+        if (popovers.hint_parent == order)
+            JS_RETURN_IF_ERROR(dom_hide_popover_stack_until(document, popovers.hint, 0, descendant_flags));
+        JS_RETURN_IF_ERROR(dom_hide_popover_stack_until(document, *stack, order, descendant_flags));
+        if (!element->is_popover_open()) return (Item){.item = ITEM_FALSE};
+        valid = dom_check_popover_validity(element, true, document, throw_exception, attribute_change);
+        if (valid.item != ITEM_TRUE) return valid;
+    }
+    if (fire_events) {
+        JS_RETURN_IF_ERROR(dom_dispatch_before_toggle(target.get(), source.get(), false));
+        if (!element->is_popover_open()) return (Item){.item = ITEM_FALSE};
+        valid = dom_check_popover_validity(element, true, document, throw_exception, attribute_change);
+        if (valid.item != ITEM_TRUE) return valid;
+    }
+    DomNodeRef focus_return{};
+    if (stack && !stack->empty() && stack->back().order == order) {
+        if (flags & DOM_POPOVER_CLOSE_RESTORE_FOCUS) {
+            DomElement* focused = dom_document_focused_target(document);
+            // A dependent close may already have cleared focus inside the parent.
+            if (focused ? dom_shadow_including_contains(element, focused) : initially_focused_inside)
+                focus_return = stack->back().previous_focus;
+        }
+        stack->remove(stack->size() - 1);
+    }
+    if (popovers.hint.empty() || popovers.hint_parent == order) popovers.hint_parent = 0;
+    state->popover_attribute_mode = DOM_POPOVER_NONE;
+    state->popover_opened_mode = DOM_POPOVER_NONE;
+    state->popover_order = 0;
+    element->set_popover_open(false);
+    dom_top_layer_remove(element);
+    if (fire_events) dom_queue_toggle_task(
+        element, target.get(), source.get(), DOM_POPOVER_TOGGLE, false);
+    dom_mutation_notify(DOM_JS_MUTATION_STYLE, element, element->parent,
+                        nullptr, nullptr, CSS_PROPERTY_UNKNOWN, true);
+    dom_restore_popup_focus(document, focus_return);
+    return (Item){.item = ITEM_TRUE};
+}
+
+static Item dom_show_popover(DomElement* element, DomElement* invoker, bool throw_exception = false) {
+    DomDocument* document = element ? element->doc : nullptr;
+    DomPopoverStacks* existing = dom_popover_stacks(document);
+    if (existing && (existing->showing || existing->hiding))
+        return dom_popover_invalid_state(throw_exception);
+    Item valid = dom_check_popover_validity(element, false, nullptr, throw_exception);
+    if (valid.item != ITEM_TRUE) return valid;
+    DomElementExt* state = element->ensure_ext();
+    DomPopoverStacks* stacks = dom_popover_stacks(document, true);
+    if (!state || !stacks) return ItemError;
+    DomPopoverStacks& popovers = *stacks;
+    RootFrame roots(2);
+    DomPopoverShowingScope scope(popovers.showing);
+    Rooted<Item> target(roots, ItemNull), source(roots, ItemNull);
+    if (dom_realm_active()) {
+        target.set(dom_wrap_element(element));
+        if (invoker) source.set(dom_wrap_element(invoker));
+        Item allowed = dom_dispatch_before_toggle(target.get(), source.get(), true);
+        if (allowed.item != ITEM_TRUE) return allowed;
+        valid = dom_check_popover_validity(element, false, document, throw_exception);
+        if (valid.item != ITEM_TRUE) return valid;
+    }
+
+    DomPopoverMode mode = dom_element_popover_mode(element);
+    DomPopoverMode opened_mode = mode;
+    DomNodeRef previous_focus{};
+    if (mode == DOM_POPOVER_AUTO || mode == DOM_POPOVER_HINT) {
+        DomPopoverBoundary boundary;
+        dom_find_popover_ancestors(boundary, element, document);
+        if (invoker) dom_find_popover_ancestors(boundary, invoker, document);
+        // Hint ancestors outrank automatic ancestors. An automatic popover
+        // opened under a hint joins that hint's stack.
+        if (boundary.hint) opened_mode = DOM_POPOVER_HINT;
+        JS_RETURN_IF_ERROR(dom_hide_popover_stack_until(
+            document, popovers.hint, boundary.hint, DOM_POPOVER_CLOSE_EVENTS));
+        if (opened_mode == DOM_POPOVER_AUTO) {
+            JS_RETURN_IF_ERROR(dom_hide_popover_stack_until(
+                document, popovers.automatic, boundary.automatic, DOM_POPOVER_CLOSE_EVENTS));
+        }
+        // A different popover's closing listener may have changed this one.
+        if (mode != dom_element_popover_mode(element)) return dom_popover_invalid_state(throw_exception);
+        valid = dom_check_popover_validity(element, false, document, throw_exception);
+        if (valid.item != ITEM_TRUE) return valid;
+        if (popovers.automatic.empty() && popovers.hint.empty())
+            previous_focus = dom_node_ref(dom_document_focused_target(document));
+        auto* stack = dom_popover_stack(popovers, opened_mode);
+        uint64_t order = ++popovers.sequence;
+        if (!stack->push_back({dom_node_ref(element), order, {}})) return ItemError;
+        if (!dom_top_layer_add(element, invoker)) {
+            stack->remove(stack->size() - 1);
+            return ItemError;
+        }
+        state->popover_order = order;
+        if (opened_mode == DOM_POPOVER_HINT && !boundary.hint &&
+            dom_popover_stack_entry(&popovers.automatic, boundary.automatic))
+            popovers.hint_parent = boundary.automatic;
+    } else if (!dom_top_layer_add(element, invoker)) return ItemError;
+    state->popover_attribute_mode = mode;
+    state->popover_opened_mode = opened_mode;
+    element->set_popover_open(true);
+    dom_notify_mutation(DOM_JS_MUTATION_STYLE, element, element->parent);
+    // Focus handlers may remove the popover. The opening event task still
+    // belongs to the element that entered the showing state.
+    dom_focus_open_popup(element);
+    if (previous_focus.address && element->doc == document && element->is_popover_open()) {
+        auto* entry = dom_popover_stack_entry(
+            dom_popover_stack(popovers, opened_mode), state->popover_order);
+        if (entry) entry->previous_focus = previous_focus;
+    }
+    dom_queue_toggle_task(element, target.get(), source.get(), DOM_POPOVER_TOGGLE, true);
+    return (Item){.item = ITEM_TRUE};
+}
+
+static void dom_popover_attribute_changed(DomElement* element) {
+    if (!element || !element->is_popover_open()) return;
+    if (element->ext->popover_attribute_mode != dom_element_popover_mode(element)) {
+        // The reflected attribute can already be absent. Close by the mode
+        // in which the popover opened and preserve the listener's final write.
+        dom_hide_popover(element, nullptr, DOM_POPOVER_CLOSE_EVENTS |
+            DOM_POPOVER_CLOSE_RESTORE_FOCUS | DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE);
+    }
+}
+
+extern "C" bool dom_activate_popover(void* popover_ptr, int action, void* source_ptr) {
+    DomElement* popover = (DomElement*)popover_ptr;
+    DomElement* source = (DomElement*)source_ptr;
+    bool opening = action == 1 || (action == 0 && popover && !popover->is_popover_open());
+    Item result = opening ? dom_show_popover(popover, source) :
+        dom_hide_popover(popover, source, DOM_POPOVER_CLOSE_EVENTS | DOM_POPOVER_CLOSE_RESTORE_FOCUS);
+    return result.item == ITEM_TRUE;
+}
+
+static void dom_hide_popovers_until(DomDocument* document, DomPopoverBoundary boundary) {
+    DomPopoverStacks* popovers = dom_popover_stacks(document);
+    if (!popovers) return;
+    uint64_t automatic = boundary.hint ? popovers->hint_parent : boundary.automatic;
+    dom_hide_popover_stack_until(document, popovers->hint, boundary.hint, DOM_POPOVER_CLOSE_EVENTS);
+    dom_hide_popover_stack_until(document, popovers->automatic, automatic, DOM_POPOVER_CLOSE_EVENTS);
+}
+
+static void dom_hide_popovers_for_dialog(DomElement* dialog) {
+    DomDocument* document = dialog->doc;
+    if (!document) return;
+    DomPopoverBoundary boundary;
+    dom_find_popover_ancestors(boundary, dialog, document);
+    dom_hide_popovers_until(document, boundary);
+}
+
+struct DomPopoverRebuild {
+    DomPopoverStacks& popovers;
+    DomNode* old_root;
+    DomNode* new_root;
+    DomPopoverRebuildMatch match;
+};
+
+static void dom_rebind_open_popover(DomElement* element, void* userdata) {
+    if (!element->is_popover_open()) return;
+    auto* rebuild = (DomPopoverRebuild*)userdata;
+    DomNode* match = (DomNode*)rebuild->match(element, rebuild->old_root, rebuild->new_root);
+    DomElement* candidate = match ? match->as_element() : nullptr;
+    if (candidate == element) return;
+    DomElementExt* previous = element->ext;
+    DomElementExt* next = candidate && dom_element_popover_mode(candidate) == previous->popover_attribute_mode
+        ? candidate->ensure_ext() : nullptr;
+    if (!next) {
+        dom_hide_popover(element, nullptr, DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE);
+        return;
+    }
+    // The replacement keeps its order and effective mode. Detaching the old
+    // wrapper cannot leave a second entry or change the stack boundary.
+    next->popover_open = true;
+    next->popover_order = previous->popover_order;
+    next->popover_opened_mode = previous->popover_opened_mode;
+    next->popover_attribute_mode = previous->popover_attribute_mode;
+    auto* entry = dom_popover_stack_entry(
+        dom_popover_stack(rebuild->popovers, next->popover_opened_mode), next->popover_order);
+    if (entry) entry->ref = dom_node_ref(candidate);
+    dom_top_layer_rebind(element, candidate);
+    previous->popover_open = false;
+    previous->popover_order = 0;
+    previous->popover_opened_mode = DOM_POPOVER_NONE;
+    previous->popover_attribute_mode = DOM_POPOVER_NONE;
+}
+
+extern "C" void dom_popover_follow_rebuild(void* doc, void* old_root, void* new_root,
+                                            DomPopoverRebuildMatch match) {
+    auto* stacks = dom_popover_stacks((DomDocument*)doc);
+    if (!stacks || !old_root || old_root == new_root || !match) return;
+    DomPopoverRebuild rebuild{*stacks, (DomNode*)old_root, (DomNode*)new_root, match};
+    dom_walk_shadow_including_elements(rebuild.old_root, dom_rebind_open_popover, &rebuild);
+}
+
+static const DomElementExt* dom_clicked_popover(DomElement* target) {
+    const DomElementExt* inside = nullptr;
+    const DomElementExt* invoked = nullptr;
+    for (DomElement* current = target; current && !(inside && invoked);
+         current = dom_flat_tree_parent(current)) {
+        if (!inside && current->is_popover_open() && current->ext->popover_order)
+            inside = current->ext;
+        if (invoked) continue;
+        DomElement* candidate = (DomElement*)dom_popover_target_for_button(current);
+        if (dom_element_is_html_tag(current, MARKUP_NAME_BUTTON) && !dom_is_disabled(current) &&
+                dom_button_can_invoke(current)) {
+            if (DomElement* command_target = dom_button_command_target(current)) {
+                DomButtonCommand command = dom_button_command(current->get_attribute("command"));
+                candidate = command >= DOM_COMMAND_TOGGLE_POPOVER && command <= DOM_COMMAND_HIDE_POPOVER
+                    ? command_target : nullptr;
+            }
+        }
+        if (candidate && candidate->is_popover_open() && candidate->ext->popover_order)
+            invoked = candidate->ext;
+    }
+    if (!inside || !invoked) return inside ? inside : invoked;
+    if (inside->popover_opened_mode != invoked->popover_opened_mode)
+        return inside->popover_opened_mode == DOM_POPOVER_HINT ? inside : invoked;
+    return inside->popover_order > invoked->popover_order ? inside : invoked;
+}
+
+extern "C" void dom_popover_pointer_event(void* doc_ptr, void* target_ptr,
+                                           const char* type, int32_t pointer_id) {
+    DomDocument* document = (DomDocument*)doc_ptr;
+    if (!document || !pointer_id || !type) return;
+    DomPopoverStacks* stacks = dom_popover_stacks(document);
+    if (!stacks) return;
+    DomPopoverStacks& popovers = *stacks;
+    if (popovers.automatic.empty() && popovers.hint.empty()) {
+        popovers.pointer_down_id = 0;
+        return;
+    }
+    bool down = strcmp(type, "pointerdown") == 0;
+    if (!down) {
+        if (popovers.pointer_down_id != pointer_id) return;
+        if (strcmp(type, "pointercancel") == 0) {
+            popovers.pointer_down_id = 0;
+            return;
+        }
+        if (strcmp(type, "pointerup") != 0) return;
+        popovers.pointer_down_id = 0;
+    }
+    const DomElementExt* clicked = dom_clicked_popover((DomElement*)target_ptr);
+    uint64_t order = clicked ? clicked->popover_order : 0;
+    if (down) {
+        popovers.pointer_down_id = pointer_id;
+        popovers.pointer_down_order = order;
+        return;
+    }
+    // A drag across popup boundaries is distinct from a click on either side.
+    if (order != popovers.pointer_down_order) return;
+    DomPopoverBoundary boundary;
+    if (clicked && clicked->popover_opened_mode == DOM_POPOVER_HINT) boundary.hint = order;
+    else boundary.automatic = order;
+    dom_hide_popovers_until(document, boundary);
 }
 
 static const char* dom_normalize_contenteditable(const char* value) {
@@ -5037,7 +5640,7 @@ static int dom_default_tab_index(DomElement* elem) {
 }
 
 static bool dom_is_script_focusable(DomElement* elem) {
-    if (!elem || !dom_node_is_connected((DomNode*)elem)) return false;
+    if (!elem || !dom_node_is_connected((DomNode*)elem) || dom_node_is_inert(elem)) return false;
     if (dom_engine_content_hidden_for_user_agent(elem)) return false;
     // the rendering provider accounts for CSS overrides of the hidden attribute.
     const DomStyleEngineOps* style = dom_style_engine_ops();
@@ -5057,10 +5660,39 @@ static bool dom_is_script_focusable(DomElement* elem) {
         _is_tag(elem, "area")) {
         return true;
     }
+    if (dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))
+        return elem->has_attribute("open") || elem->is_popover_open();
     if (_is_tag(elem, "a")) return elem->has_attribute("href");
     if (dom_is_first_summary_child(elem)) return true;
     if (dom_is_editing_host(elem)) return true;
     return false;
+}
+
+static void dom_focus_open_popup(DomElement* element) {
+    if (!dom_node_is_connected(element)) return;
+    bool dialog = dom_element_is_html_tag(element, MARKUP_NAME_DIALOG);
+    DomElement* candidate = nullptr;
+    DomElement* first_control = nullptr;
+    if (element->has_attribute("autofocus")) {
+        candidate = element;
+    } else {
+        for (DomNode* node = dom_source_next_in_tree(element, element); node;
+             node = dom_source_next_in_tree(element, node)) {
+            DomElement* descendant = node->as_element();
+            if (descendant && descendant->has_attribute("autofocus") &&
+                dom_is_script_focusable(descendant)) {
+                candidate = descendant;
+                break;
+            }
+            if (dialog && !first_control && descendant && radiant_event_host_focusable(descendant, false))
+                first_control = descendant;
+        }
+    }
+    if (!candidate && dialog) candidate = first_control ? first_control : element;
+    if (!candidate) return;
+    // The view used by the focus transition must reflect the newly open popover.
+    dom_ensure_geometry_snapshot(candidate->doc);
+    dom_engine_focus_popup_candidate(candidate->doc, candidate);
 }
 
 static void dom_dispatch_focus_events(DomElement* elem) {
@@ -5073,18 +5705,25 @@ static void dom_dispatch_focus_events(DomElement* elem) {
     dom_dispatch_event(element.get(), event.get());
 }
 
+static bool dom_flat_subtree_contains_focus(DomElement* changed_elem, DomElement* focused) {
+    for (DomElement* current = focused; current; current = dom_flat_tree_parent(current)) {
+        if (current == changed_elem) return true;
+    }
+    return false;
+}
+
 static void dom_recheck_focus_in(DomElement* changed_elem) {
     if (!changed_elem) return;
     DocState* state = changed_elem->doc ? changed_elem->doc->state : dom_current_state();
     if (state) {
         View* focused = focus_get(state);
-        if (focused && focused->is_element() && dom_shadow_including_contains(changed_elem, focused) &&
-            !dom_is_script_focusable(focused->as_element())) {
+        DomElement* element = focused ? focused->as_element() : nullptr;
+        if (dom_flat_subtree_contains_focus(changed_elem, element) && !dom_is_script_focusable(element)) {
             focus_clear(state);
         }
     }
     if (js_active_runtime_state && js_document_active_element &&
-        dom_shadow_including_contains(changed_elem, js_document_active_element) &&
+        dom_flat_subtree_contains_focus(changed_elem, js_document_active_element) &&
         !dom_is_script_focusable(js_document_active_element)) {
         js_document_active_element = nullptr;
     }
@@ -5373,9 +6012,21 @@ static int64_t dom_headless_dimension(DomElement* elem, bool width_axis) {
     return 0;
 }
 
+static bool dom_geometry_box_is_absent(DomElement* element, bool committed) {
+    if (!dom_node_is_connected(element) || layout_noscript_content_suppressed(element) ||
+        layout_shadow_suppresses_box(element)) return true;
+    if (!committed) return false;
+    // SVG descendants can report their painted geometry without a CSS view.
+    return strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") == 0 &&
+        (element->view_type == RDT_VIEW_NONE || element->display.outer == CSS_VALUE_CONTENTS ||
+         layout_display_is_none(element->display));
+}
+
 static int64_t dom_geometry_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0;
-    dom_ensure_geometry_snapshot(elem->doc);
+    bool committed = dom_ensure_geometry_snapshot(elem->doc);
+    // After layout, a missing box cannot acquire dimensions from text or declarations.
+    if (dom_geometry_box_is_absent(elem, committed)) return 0;
     float layout_value = width_axis ? elem->width : elem->height;
     if (layout_value > 0.0f) return (int64_t)(layout_value + 0.5f);
     // Load-time scripts execute before the first host-loop commit. A resolved
@@ -5431,14 +6082,57 @@ static void collect_html_text_value(const char* value, size_t length,
     }
 }
 
-static void collect_inner_html(DomNode* node, StrBuf* sb) {
+struct DomShadowSerialization {
+    bool serializable = false;
+    lam::ArrayList<DomElement*> explicit_roots{MEM_CAT_DOM, 0};
+};
+
+static void collect_inner_html(DomNode* node, StrBuf* sb,
+                               const DomShadowSerialization* shadows = nullptr);
+
+static void collect_html_children(DomElement* element, StrBuf* buffer,
+                                  const DomShadowSerialization* shadows) {
+    DomElement* root = shadows ? element->shadow_root_element() : nullptr;
+    if (root) {
+        const DomElementExt* state = root->ext;
+        bool selected = shadows->serializable && state->shadow_serializable;
+        for (DomElement* explicit_root : shadows->explicit_roots)
+            if (root == explicit_root) { selected = true; break; }
+        if (selected) {
+            strbuf_append_str(buffer, state->shadow_closed
+                ? "<template shadowrootmode=\"closed\"" : "<template shadowrootmode=\"open\"");
+            if (state->shadow_delegates_focus) strbuf_append_str(buffer, " shadowrootdelegatesfocus=\"\"");
+            if (state->shadow_serializable) strbuf_append_str(buffer, " shadowrootserializable=\"\"");
+            if (state->shadow_clonable) strbuf_append_str(buffer, " shadowrootclonable=\"\"");
+            if (state->shadow_manual_slot_assignment) strbuf_append_str(buffer, " shadowrootslotassignment=\"manual\"");
+            strbuf_append_char(buffer, '>');
+            collect_html_children(root, buffer, shadows);
+            strbuf_append_str(buffer, "</template>");
+        }
+    }
+    for (DomNode* child = dom_first_script_visible_child(element); child;
+         child = dom_next_script_visible_sibling(child)) collect_inner_html(child, buffer, shadows);
+}
+
+static void collect_inner_html(DomNode* node, StrBuf* sb, const DomShadowSerialization* shadows) {
     if (!node) return;
     if (dom_is_generated_pseudo_node(node)) return;
 
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (text->text && text->length > 0) {
-            collect_html_text_value(text->text, text->length, sb);
+            DomNode* parent_node = dom_source_parent(node);
+            DomElement* parent = parent_node ? parent_node->as_element() : nullptr;
+            NameId name = parent ? parent->tag() : NAME_ID_NONE;
+            // raw text must round-trip through the shadow template without entity expansion.
+            if (parent && name != MARKUP_NAME_TITLE && name != MARKUP_NAME_TEXTAREA &&
+                (name != MARKUP_NAME_NOSCRIPT || dom_doc_has_browsing_context(parent->doc)) &&
+                !strcmp(dom_element_namespace_uri(parent), "http://www.w3.org/1999/xhtml") &&
+                html_is_raw_text_element_id(name, parent->tag_name, strlen(parent->tag_name))) {
+                strbuf_append_str_n(sb, text->text, text->length);
+            } else {
+                collect_html_text_value(text->text, text->length, sb);
+            }
         }
         return;
     }
@@ -5483,8 +6177,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
         }
         strbuf_append_char(sb, '>');
         if (dom_serializes_html_void(elem)) return;
-        for (DomNode* child = dom_first_script_visible_child(elem); child;
-             child = dom_next_script_visible_sibling(child)) collect_inner_html(child, sb);
+        collect_html_children(elem, sb, shadows);
         strbuf_append_all(sb, 2, "</", tag);
         strbuf_append_char(sb, '>');
     }
@@ -5543,17 +6236,21 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
 // nodes to `target`. Shared by the innerHTML setter and dom_core_parse_fragment
 // (ES39 core `parse_fragment`): one parse loop, two callers.
 static bool dom_parse_markup_into(DomElement* target, const char* html_str,
-                                  bool notify_mutation, DomElement* context = nullptr) {
+                                  bool notify_mutation, DomElement* context = nullptr,
+                                  bool declarative = false) {
     DomDocument* doc = target ? target->doc : nullptr;
     if (!doc || !doc->input) return false;
-    Html5Parser* parser = dom_create_fragment_parser(doc, context ? context : target);
+    if (!context) context = target->shadow_host_element();
+    if (!context) context = target;
+    Html5Parser* parser = dom_create_fragment_parser(doc, context);
     Html5ParserScope parser_scope(parser);
     if (!parser) return false;
+    parser->allow_declarative_shadow_roots = declarative;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return false;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context ? context : target);
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context);
         if (!child || !dom_parser_move_child(target, child)) continue;
         dom_post_insert(target, child, notify_mutation);
         dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
@@ -5564,7 +6261,7 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
 
 
 static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
-                                      bool notify_mutation) {
+                                   bool notify_mutation, bool declarative) {
     if (!elem || !html_str) return false;
     elem = dom_prepare_children_for_mutation(elem);
     if (!elem) return false;
@@ -5589,7 +6286,7 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     }
 
     if (html_str[0] != '\0' || elem->tag() == MARKUP_NAME_HTML) {
-        if (!dom_parse_markup_into(elem, html_str, notify_mutation)) return false;
+        if (!dom_parse_markup_into(elem, html_str, notify_mutation, nullptr, declarative)) return false;
     }
 
     dom_register_named_elements(elem);
@@ -5601,6 +6298,19 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     log_debug("dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return true;
+}
+
+Item dom_set_html_unsafe(Item receiver, Item markup, Item options, bool shadow) {
+    JS_ROOTS(roots, owner, receiver, source, markup, dictionary, options);
+    DomNode* node = (DomNode*)dom_unwrap_element(owner.get());
+    DomElement* element = node ? node->as_element() : nullptr;
+    if (!element || (shadow ? !element->shadow_host_element() : !dom_is_element(owner.get())))
+        return dom_raise_type_error(shadow ? "ShadowRoot receiver required" : "Element receiver required");
+    source.set(js_to_string(source.get()));
+    JS_RETURN_IF_ERROR(source.get());
+    JS_RETURN_IF_ERROR(dom_check_unsafe_html_options(dictionary.get()));
+    return dom_replace_inner_html(element, fn_to_cstr(source.get()), true, true)
+        ? make_js_undefined() : ItemError;
 }
 
 // ES39 core `parse_fragment(context, markup)`: the markup is parsed in the
@@ -5642,6 +6352,9 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     Html5Parser* parser = dom_create_fragment_parser(doc, context);
     Html5ParserScope parser_scope(parser);
     if (!parser) return nullptr;
+    // a parser-owned write insertion point inherits the navigation opt-in.
+    parser->allow_declarative_shadow_roots =
+        script_mode == DomFragmentScriptMode::parser_inserted && doc->js.write_cursor;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return nullptr;
@@ -6144,23 +6857,21 @@ JS_FORWARD_EXPRESSION(Item, dom_document_design_mode_bridge, (void),
     (dom_document_design_mode_value(_js_current_document
         ? _js_current_document : _js_main_document)))
 
+static DomElement* dom_active_focus_target(DomDocument* doc) {
+    if (DomElement* focused = dom_document_focused_target(doc)) return focused;
+    DocState* state = doc ? doc->state : dom_current_state();
+    DomElement* active_element = tc_get_active_element(state);
+    if (active_element && active_element->doc == doc && dom_node_is_connected(active_element))
+        return active_element;
+    return nullptr;
+}
+
 extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     DomElement* root = doc ? doc->root : nullptr;
-    DocState* state = doc ? doc->state : dom_current_state();
-    View* focused = focus_get(state);
-    if (focused && focused->is_element()) {
-        return dom_wrap_element(((DomNode*)focused)->as_element());
-    }
-    DomElement* active_element = tc_get_active_element(state);
-    if (active_element && active_element->doc == doc) {
-        return dom_wrap_element(active_element);
-    }
-    // native focus owns the committed area; a script mirror cannot restore a cleared target.
-    if (!state && js_document_active_element &&
-        js_document_active_element->doc == doc &&
-        dom_node_is_connected((DomNode*)js_document_active_element)) {
-        return dom_wrap_element(js_document_active_element);
+    if (DomElement* focused = dom_active_focus_target(doc)) {
+        // Document scope exposes the outer shadow host for a focused descendant.
+        return dom_wrap_element(dom_retarget_node(focused, dom_shadow_root(focused), nullptr));
     }
     DomElement* body = dom_document_body_element(doc);
     if (body) return dom_wrap_element(body);
@@ -7497,7 +8208,12 @@ static bool dom_output_set_text(DomElement* elem, Item value) {
 extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return value;
-    const char* s = fn_to_cstr(value);
+    RootFrame roots(2);
+    Rooted<Item> original(roots, value), text(roots, ItemNull);
+    // Value carries LegacyNullToEmptyString. Other inputs use Web IDL DOMString conversion.
+    text.set(get_type_id(original.get()) == LMD_TYPE_NULL ? js_name_item("") : js_to_string(original.get()));
+    JS_RETURN_IF_ERROR(text.get());
+    const char* s = fn_to_cstr(text.get());
     if (!s) s = "";
     if (elem->tag_name && str_icmp_cstr(elem->tag_name, "input") == 0) {
         const char* itype = radiant_form_control_type(elem);
@@ -7523,7 +8239,7 @@ extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
                     dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
                     dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
                         (DomNode*)elem, elem->parent);
-                    return value;
+                    return original.get();
                 }
             }
         }
@@ -7533,7 +8249,7 @@ extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
     dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
     dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
         (DomNode*)elem, elem->parent);
-    return value;
+    return original.get();
 }
 
 static Item dom_text_control_set_selection_edge(void* dom_elem, Item value,
@@ -7830,11 +8546,12 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name || !attr_value) return;
     dom_cssom_owner_attribute_changed(elem, attr_name);
-    dom_aria_clear_direct_ref(elem, attr_name);
+    dom_clear_direct_element_ref(elem, attr_name);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
-    // attribute writes share reflected disabled-property focus semantics.
-    if (str_icmp_cstr(attr_name, "disabled") == 0) dom_recheck_focus_in(elem);
+    // a newly inert subtree must release focus at the attribute mutation.
+    if (str_ieq_cstr(attr_name, "disabled") || str_ieq_cstr(attr_name, "inert"))
+        dom_recheck_focus_in(elem);
     if (_is_tag(elem, "option") && str_icmp_cstr(attr_name, "selected") == 0) {
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
@@ -7882,7 +8599,7 @@ extern "C" void dom_after_remove_attribute(void* elem_ptr,
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name) return;
     dom_cssom_owner_attribute_changed(elem, attr_name);
-    dom_aria_clear_direct_ref(elem, attr_name);
+    dom_clear_direct_element_ref(elem, attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (elem->tag() == MARKUP_NAME_CANVAS &&
@@ -9505,11 +10222,48 @@ extern "C" Item dom_fp_inner_html(Item n) {
     // Serialization is an Element operation; CharacterData has no markup face.
     if (!node || !node->is_element()) return ItemNull;
     StrBuf* sb = strbuf_new_cap(256);
-    for (DomNode* child = dom_first_script_visible_child(node->as_element()); child;
-         child = dom_next_script_visible_sibling(child)) {
-        collect_inner_html(child, sb);
-    }
+    collect_html_children(node->as_element(), sb, nullptr);
     return dom_serialized_item(sb);
+}
+
+Item dom_get_html(Item receiver, Item options, bool shadow) {
+    JS_ROOTS(roots, owner, receiver, dictionary, options, sequence, make_js_undefined(),
+        iterator, ItemNull, selected, ItemNull, kept_wrappers, ItemNull);
+    DomNode* node = (DomNode*)dom_unwrap_element(owner.get());
+    DomElement* element = node ? node->as_element() : nullptr;
+    if (!element || (shadow ? !element->shadow_host_element() : !dom_is_element(owner.get())))
+        return dom_raise_type_error(shadow ? "ShadowRoot receiver required" : "Element receiver required");
+    Item serializable = dom_optional_dictionary_boolean(dictionary.get(), "serializableShadowRoots");
+    JS_RETURN_IF_ERROR(serializable);
+    DomShadowSerialization shadows;
+    shadows.serializable = js_is_truthy(serializable);
+    if (dictionary.get().item != ITEM_NULL && !is_js_undefined(dictionary.get())) {
+        sequence.set(dom_realm_get_cstr(dictionary.get(), "shadowRoots"));
+        JS_RETURN_IF_ERROR(sequence.get());
+    }
+    if (!is_js_undefined(sequence.get())) {
+        if (!js_is_object_value(sequence.get())) return dom_raise_type_error("shadowRoots must be a sequence");
+        iterator.set(js_get_iterator(sequence.get()));
+        JS_RETURN_IF_ERROR(iterator.get());
+        kept_wrappers.set(js_array_new(0));
+        for (;;) {
+            selected.set(js_iterator_step(iterator.get()));
+            JS_RETURN_IF_ERROR(selected.get());
+            if (selected.get().item == JS_ITER_DONE_SENTINEL) break;
+            DomNode* value = (DomNode*)dom_unwrap_element(selected.get());
+            DomElement* root = value ? value->as_element() : nullptr;
+            if (!root || !root->shadow_host_element()) {
+                js_iterator_close(iterator.get());
+                return dom_raise_type_error("shadowRoots must contain ShadowRoot values");
+            }
+            JS_RETURN_IF_ERROR(js_array_push(kept_wrappers.get(), selected.get()));
+            if (!shadows.explicit_roots.push_back(root)) return ItemError;
+        }
+    }
+    StrBuf* buffer = strbuf_new_cap(256);
+    if (!buffer) return ItemError;
+    collect_html_children(element, buffer, &shadows);
+    return dom_serialized_item(buffer);
 }
 
 extern "C" Item dom_fp_outer_html(Item n) {
@@ -9733,7 +10487,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return ItemNull;
     }
 
-    if (const DomAriaElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
+    if (const DomElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
         return dom_aria_element_ref_get(elem, aria_ref);
     }
 
@@ -10406,14 +11160,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     // type for button (default "submit"; only valid values: "submit","reset","button")
     if (prop_id == JS_DOM_PROP_TYPE && _is_tag(elem, "button")) {
-        const char* v = elem->get_attribute("type");
-        if (v && (str_icmp_cstr(v, "submit") == 0 || str_icmp_cstr(v, "reset") == 0 || str_icmp_cstr(v, "button") == 0)) {
-            char buf[8];
-            size_t len = str_copy(buf, sizeof(buf), v, strlen(v));
-            str_lower_inplace(buf, len);
-            return js_name_item(buf);
-        }
-        return js_name_item("submit");
+        return js_name_item(radiant_form_button_type(elem));
     }
     // placeholder (input, textarea)
     if (prop_id == JS_DOM_PROP_PLACEHOLDER &&
@@ -10885,8 +11632,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return dom_core_toggle_attribute(elem_item, prop_name, Item{.item = b2it(js_is_truthy(value))});
     }
 
-    if (const DomAriaElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
-        return dom_aria_element_ref_set(elem, aria_ref, value);
+    if (const DomElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
+        return dom_element_ref_set(elem, aria_ref, value);
     }
 
     if (_is_tag(elem, "table") && prop_id == JS_DOM_PROP_T_HEAD) {
@@ -12171,6 +12918,10 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
             RdtLogicalPoint parent_origin = dom_node_document_origin(
                 static_cast<View*>(offset_parent));
             value -= x_axis ? parent_origin.x : parent_origin.y;
+            // CSSOM View measures from the offset parent's padding edge.
+            const BoundaryProp* boundary = dom_engine_boundary_property(offset_parent);
+            if (boundary && boundary->border)
+                value -= x_axis ? boundary->border->width.left : boundary->border->width.top;
         }
     }
     return (int64_t)value;
@@ -12179,7 +12930,7 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
 static bool dom_element_from_point_skips_subtree(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     // fallback geometry must not resurrect a subtree rejected by the engine's face test.
-    if (dom_engine_hit_test_skips_subtree(elem)) return true;
+    if (dom_node_is_inert(elem) || dom_engine_hit_test_skips_subtree(elem)) return true;
     return _is_tag(elem, "head") ||
         _is_tag(elem, "style") ||
         _is_tag(elem, "script") ||
@@ -12593,8 +13344,8 @@ JS_FORWARD_ITEM(dom_boundary_from_point_bridge, (void* elem,                    
 extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return ItemNull;
-    if (elem->doc) dom_ensure_geometry_snapshot(elem->doc);
-    if (layout_noscript_content_suppressed(elem) || layout_shadow_suppresses_box(elem)) {
+    bool committed = dom_ensure_geometry_snapshot(elem->doc);
+    if (dom_geometry_box_is_absent(elem, committed)) {
         return dom_make_rect_object_in(elem->doc, 0.0f, 0.0f, 0.0f, 0.0f);
     }
     float x = 0.0f;
@@ -12610,8 +13361,8 @@ extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
 extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return dom_static_rect_list_from_array(js_array_new(0));
-    if (elem->doc) dom_ensure_geometry_snapshot(elem->doc);
-    if (layout_noscript_content_suppressed(elem) || layout_shadow_suppresses_box(elem)) {
+    bool committed = dom_ensure_geometry_snapshot(elem->doc);
+    if (dom_geometry_box_is_absent(elem, committed)) {
         return dom_static_rect_list_from_array(js_array_new(0));
     }
 
@@ -13446,13 +14197,24 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
     // DOM cloning must not copy source-bound wrapper caches; their host_data would
     // make clone.classList/style writes mutate the original element.
     clone->tag_id = elem->tag_id;
-    if (deep) {
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+    auto clone_children = [&](DomElement* source, DomElement* target) {
+        for (DomNode* child = source->first_child; child; child = child->next_sibling) {
             if (include_child && !include_child(child)) continue;
             DomNode* cloned_child = dom_clone_node_into_document(child, destination, true, include_child);
             // keep comment, text and element order through the shared backed insertion path.
-            if (!cloned_child || !dom_append_backed_child(clone, cloned_child, false)) return nullptr;
+            if (!cloned_child || !dom_append_backed_child(target, cloned_child, false)) return false;
         }
+        return true;
+    };
+    if (deep && !clone_children(elem, clone)) return nullptr;
+    DomElement* shadow = elem->shadow_root_element();
+    if (shadow && shadow->ext->shadow_clonable) {
+        const DomElementExt* state = shadow->ext;
+        DomElement* shadow_copy = dom_attach_shadow_root(clone, {
+            state->shadow_closed, state->shadow_delegates_focus, state->shadow_manual_slot_assignment,
+            true, state->shadow_serializable, state->shadow_declarative,
+        });
+        if (!shadow_copy || !clone_children(shadow, shadow_copy)) return nullptr;
     }
     return clone;
 }
@@ -14350,7 +15112,7 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     const char* old_value = elem->get_attribute(attr_name);
     elem->remove_attribute(attr_name);
     dom_cssom_owner_attribute_changed(elem, attr_name);
-    dom_aria_clear_direct_ref(elem, attr_name);
+    dom_clear_direct_element_ref(elem, attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (_is_tag(elem, "select") && str_icmp_cstr(attr_name, "multiple") == 0) {
@@ -14750,19 +15512,21 @@ extern "C" Item dom_core_remove_attribute_ns(Item n, Item ns, Item local) {
     if (!namespace_uri) namespace_uri = "";
     const char* name = dom_element_find_qualified_attribute(elem, namespace_uri, local_name);
     const char* old_value = dom_element_attribute_value_ns(elem, namespace_uri, local_name);
-    if (name && dom_element_remove_attribute_ns(elem, namespace_uri, local_name))
+    if (name && dom_element_remove_attribute_ns(elem, namespace_uri, local_name)) {
+        if (!*namespace_uri) dom_clear_direct_element_ref(elem, name);
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, name, old_value);
+    }
     return ItemNull;
 }
 
-static DomElement* dom_hidden_receiver(Item receiver) {
+static DomElement* dom_html_element_receiver(Item receiver) {
     DomElement* element = dom_is_element(receiver) ? dom_op_element(receiver) : nullptr;
     return element && strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") == 0
         ? element : nullptr;
 }
 
 static Item dom_html_hidden_get(Item, Item receiver, Item*, int, uint64_t*) {
-    DomElement* element = dom_hidden_receiver(receiver);
+    DomElement* element = dom_html_element_receiver(receiver);
     if (!element) return dom_raise_type_error("HTMLElement receiver required");
     const char* value = dom_element_attribute_value_ns(element, "", "hidden");
     if (value && str_ieq_cstr(value, "until-found")) return js_name_item("until-found");
@@ -14773,7 +15537,7 @@ static Item dom_html_hidden_set(Item, Item receiver, Item* args, int count, uint
     RootFrame roots(4);
     Rooted<Item> target(roots, receiver), value(roots, count ? args[0] : ItemNull);
     Rooted<Item> name(roots, ItemNull), attribute(roots, ItemNull);
-    if (!dom_hidden_receiver(target.get())) return dom_raise_type_error("HTMLElement receiver required");
+    if (!dom_html_element_receiver(target.get())) return dom_raise_type_error("HTMLElement receiver required");
     TypeId type = get_type_id(value.get());
     bool until_found = false;
     if (type != LMD_TYPE_BOOL && type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT &&
@@ -14793,12 +15557,167 @@ static Item dom_html_hidden_set(Item, Item receiver, Item* args, int count, uint
     return dom_core_remove_attribute_ns(target.get(), ItemNull, name.get());
 }
 
-void dom_install_html_hidden(Item prototype) {
+static void dom_install_html_accessor(Item prototype, const char* property,
+                                       JsNativeCallBody read, JsNativeCallBody write,
+                                       uint64_t payload = 0) {
     RootFrame roots(4);
-    Rooted<Item> owner(roots, prototype), name(roots, js_name_item("hidden"));
-    Rooted<Item> getter(roots, js_new_native_payload_function(dom_html_hidden_get, 0, 0));
-    Rooted<Item> setter(roots, js_new_native_payload_function(dom_html_hidden_set, 0, 1));
+    Rooted<Item> owner(roots, prototype), name(roots, js_name_item(property));
+    Rooted<Item> getter(roots, js_new_native_payload_function(read, payload, 0));
+    Rooted<Item> setter(roots, js_new_native_payload_function(write, payload, 1));
     dom_realm_install_accessor(owner.get(), name.get(), getter.get(), setter.get(), 0);
+}
+
+void dom_install_html_hidden(Item prototype) {
+    dom_install_html_accessor(prototype, "hidden", dom_html_hidden_get, dom_html_hidden_set);
+}
+
+static Item dom_html_inert_get(Item, Item receiver, Item*, int, uint64_t*) {
+    DomElement* element = dom_html_element_receiver(receiver);
+    if (!element) return dom_raise_type_error("HTMLElement receiver required");
+    return (Item){.item = b2it(element->has_attribute("inert"))};
+}
+
+static Item dom_html_inert_set(Item, Item receiver, Item* args, int count, uint64_t*) {
+    RootFrame roots(2);
+    Rooted<Item> target(roots, receiver), name(roots, js_name_item("inert"));
+    if (!dom_html_element_receiver(target.get())) return dom_raise_type_error("HTMLElement receiver required");
+    return count && js_is_truthy(args[0])
+        ? dom_core_set_attribute_ns(target.get(), ItemNull, name.get(), js_name_item(""))
+        : dom_core_remove_attribute_ns(target.get(), ItemNull, name.get());
+}
+
+void dom_install_html_inert(Item prototype) {
+    dom_install_html_accessor(prototype, "inert", dom_html_inert_get, dom_html_inert_set);
+}
+
+static Item dom_html_popover_get(Item, Item receiver, Item*, int, uint64_t*) {
+    DomElement* element = dom_html_element_receiver(receiver);
+    if (!element) return dom_raise_type_error("HTMLElement receiver required");
+    const char* value = dom_element_attribute_value_ns(element, "", "popover");
+    switch (dom_popover_mode(value)) {
+        case DOM_POPOVER_AUTO: return js_name_item("auto");
+        case DOM_POPOVER_HINT: return js_name_item("hint");
+        case DOM_POPOVER_MANUAL: return js_name_item("manual");
+        default: return ItemNull;
+    }
+}
+
+static Item dom_html_popover_set(Item, Item receiver, Item* args, int count, uint64_t*) {
+    RootFrame roots(3);
+    Rooted<Item> target(roots, receiver), value(roots, count ? args[0] : ItemNull);
+    Rooted<Item> name(roots, js_name_item("popover"));
+    if (!dom_html_element_receiver(target.get())) return dom_raise_type_error("HTMLElement receiver required");
+    if (get_type_id(value.get()) == LMD_TYPE_NULL || is_js_undefined(value.get()))
+        return dom_core_remove_attribute_ns(target.get(), ItemNull, name.get());
+    value.set(js_to_string(value.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    return dom_core_set_attribute_ns(target.get(), ItemNull, name.get(), value.get());
+}
+
+void dom_install_html_popover(Item prototype) {
+    dom_install_html_accessor(prototype, "popover", dom_html_popover_get, dom_html_popover_set);
+}
+
+static DomElement* dom_html_button_receiver(Item receiver) {
+    DomElement* element = dom_html_element_receiver(receiver);
+    return dom_element_is_html_tag(element, MARKUP_NAME_BUTTON) ? element : nullptr;
+}
+
+static Item dom_html_command_get(Item, Item receiver, Item*, int, uint64_t*) {
+    DomElement* button = dom_html_button_receiver(receiver);
+    if (!button) return dom_raise_type_error("HTMLButtonElement receiver required");
+    const char* raw = dom_element_attribute_value_ns(button, "", "command");
+    DomButtonCommand command = dom_button_command(raw);
+    return js_name_item(command == DOM_COMMAND_CUSTOM ? raw : k_button_commands[command]);
+}
+
+static Item dom_html_button_set_string(Item receiver, Item value_arg, const char* attribute) {
+    RootFrame roots(2);
+    Rooted<Item> target(roots, receiver), value(roots, value_arg);
+    if (!dom_html_button_receiver(target.get())) return dom_raise_type_error("HTMLButtonElement receiver required");
+    value.set(js_to_string(value.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    return dom_core_set_attribute_ns(target.get(), ItemNull, js_name_item(attribute), value.get());
+}
+
+static Item dom_html_command_set(Item, Item receiver, Item* args, int count, uint64_t*) {
+    return dom_html_button_set_string(receiver, count ? args[0] : make_js_undefined(), "command");
+}
+
+static Item dom_html_button_type_get(Item, Item receiver, Item*, int, uint64_t*) {
+    DomElement* button = dom_html_button_receiver(receiver);
+    if (!button) return dom_raise_type_error("HTMLButtonElement receiver required");
+    return js_name_item(radiant_form_button_type(button));
+}
+
+static Item dom_html_button_type_set(Item, Item receiver, Item* args, int count, uint64_t*) {
+    return dom_html_button_set_string(receiver, count ? args[0] : make_js_undefined(), "type");
+}
+
+static Item dom_html_command_for_get(Item, Item receiver, Item*, int, uint64_t*) {
+    DomElement* button = dom_html_button_receiver(receiver);
+    if (!button) return dom_raise_type_error("HTMLButtonElement receiver required");
+    DomElement* target = dom_button_command_target(button);
+    return target ? dom_wrap_element(target) : ItemNull;
+}
+
+static Item dom_html_command_for_set(Item, Item receiver, Item* args, int count, uint64_t*) {
+    DomElement* button = dom_html_button_receiver(receiver);
+    if (!button) return dom_raise_type_error("HTMLButtonElement receiver required");
+    return dom_element_ref_set(button, &k_command_for, count ? args[0] : ItemNull);
+}
+
+void dom_install_html_button_properties(Item prototype) {
+    dom_install_html_accessor(prototype, "type", dom_html_button_type_get, dom_html_button_type_set);
+    dom_install_html_accessor(prototype, "command", dom_html_command_get, dom_html_command_set);
+    dom_install_html_accessor(prototype, "commandForElement", dom_html_command_for_get, dom_html_command_for_set);
+}
+
+static constexpr struct {
+    const char* property;
+    const char* attribute;
+    const char* first_value;
+    const char* second_value;
+    const char* default_value;
+} k_template_shadow_attrs[] = {
+    {"shadowRootMode", "shadowrootmode", "open", "closed", ""},
+    {"shadowRootDelegatesFocus", "shadowrootdelegatesfocus", nullptr, nullptr, nullptr},
+    {"shadowRootClonable", "shadowrootclonable", nullptr, nullptr, nullptr},
+    {"shadowRootSerializable", "shadowrootserializable", nullptr, nullptr, nullptr},
+    {"shadowRootSlotAssignment", "shadowrootslotassignment", "named", "manual", "named"},
+};
+
+static Item dom_template_shadow_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    auto& entry = k_template_shadow_attrs[js_fn_native((JsFunction*)callee.function)->target.bits];
+    DomElement* element = dom_html_element_receiver(receiver);
+    if (!dom_element_is_html_tag(element, MARKUP_NAME_TEMPLATE))
+        return dom_raise_type_error("HTMLTemplateElement receiver required");
+    const char* raw = dom_element_attribute_value_ns(element, "", entry.attribute);
+    if (!entry.first_value) return (Item){.item = b2it(raw != nullptr)};
+    if (raw && str_ieq_cstr(raw, entry.first_value)) return js_name_item(entry.first_value);
+    if (raw && str_ieq_cstr(raw, entry.second_value)) return js_name_item(entry.second_value);
+    return js_name_item(entry.default_value);
+}
+
+static Item dom_template_shadow_set(Item callee, Item receiver, Item* args, int count, uint64_t*) {
+    auto& entry = k_template_shadow_attrs[js_fn_native((JsFunction*)callee.function)->target.bits];
+    JS_ROOTS(roots, owner, receiver, value, count ? args[0] : make_js_undefined(),
+        attribute, js_name_item(entry.attribute));
+    if (!dom_element_is_html_tag(dom_html_element_receiver(owner.get()), MARKUP_NAME_TEMPLATE))
+        return dom_raise_type_error("HTMLTemplateElement receiver required");
+    if (!entry.first_value && !js_is_truthy(value.get()))
+        return dom_core_remove_attribute_ns(owner.get(), ItemNull, attribute.get());
+    value.set(entry.first_value ? js_to_string(value.get()) : js_name_item(""));
+    JS_RETURN_IF_ERROR(value.get());
+    return dom_core_set_attribute_ns(owner.get(), ItemNull, attribute.get(), value.get());
+}
+
+void dom_install_html_template_properties(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, prototype);
+    for (size_t i = 0; i < sizeof(k_template_shadow_attrs) / sizeof(*k_template_shadow_attrs); i++)
+        dom_install_html_accessor(owner.get(), k_template_shadow_attrs[i].property,
+            dom_template_shadow_get, dom_template_shadow_set, i);
 }
 
 extern "C" Item dom_core_has_attribute(Item n, Item name) {
@@ -14833,6 +15752,7 @@ extern "C" Item dom_core_toggle_attribute(Item n, Item name, Item force) {
         }
     }
     if (should_have != has) {
+        dom_clear_direct_element_ref(elem, attr_name);
         // MutationObserver filters depend on toggleAttribute preserving the
         // changed name; a null name turns self-filtered updates into feedback loops.
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
@@ -14900,16 +15820,64 @@ extern "C" Item dom_core_boundary_from_point(Item n, Item x, Item y, Item behavi
 }
 
 extern "C" Item dom_core_show_popover(Item n) {
-    DomElement* elem = dom_op_element(n);
-    // programmatic opening must use the same state transition as a popover button
-    if (elem) dom_activate_popover((void*)elem, 1);
+    return dom_core_show_popover_options(n, make_js_undefined());
+}
+
+static Item dom_popover_source_option(Item options) {
+    if (!js_is_object_value(options)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(source, dom_realm_get_cstr(options, "source"));
+    if (is_js_undefined(source)) return ItemNull;
+    if (!dom_html_element_receiver(source))
+        return dom_raise_type_error("Popover source must be an HTMLElement");
+    return source;
+}
+
+extern "C" Item dom_core_show_popover_options(Item n, Item options) {
+    RootFrame roots(2);
+    Rooted<Item> target(roots, n);
+    DomElement* elem = dom_html_element_receiver(target.get());
+    if (!elem) return dom_raise_type_error("HTMLElement receiver required");
+    if (get_type_id(options) != LMD_TYPE_NULL && !is_js_undefined(options) &&
+        !js_is_object_value(options)) return dom_raise_type_error("Invalid ShowPopoverOptions");
+    Rooted<Item> source(roots, dom_popover_source_option(options));
+    JS_RETURN_IF_ERROR(source.get());
+    JS_RETURN_IF_ERROR(dom_show_popover(elem, dom_html_element_receiver(source.get()), dom_realm_active()));
     return make_js_undefined();
 }
+
 extern "C" Item dom_core_hide_popover(Item n) {
-    DomElement* elem = dom_op_element(n);
-    // programmatic closing must publish the same live-state transition as a popover button
-    if (elem) dom_activate_popover((void*)elem, 2);
+    RootFrame roots(1);
+    Rooted<Item> target(roots, n);
+    DomElement* elem = dom_html_element_receiver(target.get());
+    if (!elem) return dom_raise_type_error("HTMLElement receiver required");
+    unsigned flags = DOM_POPOVER_CLOSE_EVENTS | DOM_POPOVER_CLOSE_RESTORE_FOCUS;
+    if (dom_realm_active()) flags |= DOM_POPOVER_CLOSE_THROW;
+    JS_RETURN_IF_ERROR(dom_hide_popover(elem, nullptr, flags));
     return make_js_undefined();
+}
+
+extern "C" Item dom_core_toggle_popover(Item n, Item options) {
+    RootFrame roots(3);
+    Rooted<Item> target(roots, n), init(roots, options);
+    DomElement* elem = dom_html_element_receiver(target.get());
+    if (!elem) return dom_raise_type_error("HTMLElement receiver required");
+    Rooted<Item> source(roots, dom_popover_source_option(init.get()));
+    JS_RETURN_IF_ERROR(source.get());
+    bool dictionary = js_is_object_value(init.get());
+    Item force = dictionary ? dom_realm_get_cstr(init.get(), "force") : init.get();
+    JS_RETURN_IF_ERROR(force);
+    bool open = elem->is_popover_open();
+    bool unspecified = is_js_undefined(force) || (!dictionary && get_type_id(force) == LMD_TYPE_NULL);
+    bool desired = unspecified ? !open : js_is_truthy(force);
+    // An explicit force equal to current visibility still validates the element.
+    if (open == desired) {
+        JS_RETURN_IF_ERROR(dom_check_popover_validity(elem, open, nullptr, dom_realm_active()));
+    } else if (desired) {
+        JS_RETURN_IF_ERROR(dom_show_popover(elem, dom_html_element_receiver(source.get()), dom_realm_active()));
+    } else {
+        JS_RETURN_IF_ERROR(dom_core_hide_popover(target.get()));
+    }
+    return (Item){.item = b2it(elem->is_popover_open())};
 }
 
 extern "C" Item dom_core_elements_by_tag_name(Item n, Item name) {
@@ -14946,6 +15914,8 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
     Rooted<Item> receiver_root(roots, n), init_root(roots, init), option(roots, ItemNull);
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
+    Item clonable = dom_optional_dictionary_boolean(init_root.get(), "clonable");
+    if (item_is_error(clonable)) return clonable;
     Item delegates_focus = dom_optional_dictionary_boolean(init_root.get(), "delegatesFocus");
     if (item_is_error(delegates_focus)) return delegates_focus;
     option.set(dom_realm_get_cstr(init_root.get(), "mode"));
@@ -14956,6 +15926,8 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
     bool closed = mode && strcmp(mode, "closed") == 0;
     if (!closed && (!mode || strcmp(mode, "open") != 0))
         return dom_raise_type_error("ShadowRoot mode must be open or closed");
+    Item serializable = dom_optional_dictionary_boolean(init_root.get(), "serializable");
+    if (item_is_error(serializable)) return serializable;
     option.set(dom_realm_get_cstr(init_root.get(), "slotAssignment"));
     if (item_is_error(option.get())) return option.get();
     bool manual = false;
@@ -14967,20 +15939,22 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
         if (!manual && (!assignment || strcmp(assignment, "named") != 0))
             return dom_raise_type_error("ShadowRoot slotAssignment must be named or manual");
     }
-    if (elem->shadow_root_element())
-        return dom_raise_exception("NotSupportedError", "Element already has a shadow root");
-
-    MarkBuilder builder(elem->doc ? elem->doc->input : nullptr);
-    Item frag_item = builder.element("#document-fragment").final();
-    DomElement* frag = dom_element_create(elem->doc, "#document-fragment", frag_item.element);
-    DomElementExt* state = frag ? frag->ensure_ext() : nullptr;
-    if (!state) return ItemError;
-    state->shadow_closed = closed;
-    state->shadow_delegates_focus = js_is_truthy(delegates_focus);
-    state->shadow_manual_slot_assignment = manual;
-    frag->set_shadow_host_element(elem);
-    elem->set_shadow_root_element(frag);
-    if (elem->doc) elem->doc->js.has_shadow_roots = true;
+    if (strcmp(dom_element_namespace_uri(elem), "http://www.w3.org/1999/xhtml") ||
+        !dom_html_shadow_host_name(elem->local_name()))
+        return dom_raise_exception("NotSupportedError", "Invalid shadow host");
+    if (DomElement* existing = elem->shadow_root_element()) {
+        if (!existing->ext->shadow_declarative || existing->ext->shadow_closed != closed)
+            return dom_raise_exception("NotSupportedError", "Element already has a shadow root");
+        // hydration retains root identity and options while removing its parsed children.
+        option.set(dom_wrap_element(existing));
+        existing->ext->shadow_declarative = false;
+        if (!dom_replace_inner_html(existing, "", true)) return ItemError;
+        return option.get();
+    }
+    DomElement* frag = dom_attach_shadow_root(elem, {
+        closed, js_is_truthy(delegates_focus), manual, js_is_truthy(clonable), js_is_truthy(serializable), false,
+    });
+    if (!frag) return ItemError;
 
     // Attaching even an empty shadow root replaces the rendered light children.
     dom_mutation_notify(DOM_JS_MUTATION_STYLE, elem, elem->parent);
@@ -15008,8 +15982,15 @@ Item dom_read_shadow_property(Item receiver, DomShadowProperty property) {
     if (property == DomShadowProperty::host) return dom_wrap_element(host);
     if (property == DomShadowProperty::mode) return js_name_item(element->ext->shadow_closed ? "closed" : "open");
     if (property == DomShadowProperty::style_sheets) return dom_cssom_get_shadow_stylesheets(receiver);
+    if (property == DomShadowProperty::active_element) {
+        DomElement* focused = dom_active_focus_target(element->doc);
+        DomNode* adjusted = dom_retarget_node(focused, dom_shadow_root(focused), element);
+        return adjusted && dom_shadow_root(adjusted) == element ? dom_wrap_element(adjusted) : ItemNull;
+    }
     if (property == DomShadowProperty::slot_assignment)
         return js_name_item(element->ext->shadow_manual_slot_assignment ? "manual" : "named");
+    if (property == DomShadowProperty::clonable) return (Item){.item = b2it(element->ext->shadow_clonable)};
+    if (property == DomShadowProperty::serializable) return (Item){.item = b2it(element->ext->shadow_serializable)};
     return (Item){.item = b2it(element->ext->shadow_delegates_focus)};
 }
 
@@ -15125,19 +16106,40 @@ extern "C" Item dom_core_compare_document_position(Item n, Item other_item) {
     return (Item){.item = i2it(2)}; // other precedes
 }
 
-static Item dom_open_dialog(Item n, bool modal) {
-    DomElement* elem = dom_op_element(n);
+static Item dom_open_dialog(Item n, bool modal, Item invoker = ItemNull) {
+    RootFrame roots(2);
+    Rooted<Item> target(roots, n), source(roots, invoker);
+    DomElement* elem = dom_op_element(target.get());
     if (!dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))
         return dom_raise_type_error("HTMLDialogElement receiver required");
     if (elem->has_attribute("open")) {
         if (elem->is_dialog_modal() == modal) return make_js_undefined();
         return dom_raise_exception("InvalidStateError", "Dialog is already open in a different mode");
     }
-    if (modal && (!dom_node_is_connected(elem) || elem->is_popover_open()))
+    if (modal && (!dom_node_is_connected(elem) || elem->is_popover_open() ||
+        !dom_doc_has_browsing_context(elem->doc)))
         return dom_raise_exception("InvalidStateError", "Dialog cannot enter modal state");
-    if (!elem->set_attribute("open", "")) return ItemError;
+    Item allowed = dom_dispatch_before_toggle(target.get(), source.get(), true);
+    JS_RETURN_IF_ERROR(allowed);
+    // The listener may have opened it, removed it, or shown it as a popover.
+    if (allowed.item == ITEM_FALSE || elem->has_attribute("open") ||
+        (modal && (!dom_node_is_connected(elem) || elem->is_popover_open() ||
+            !dom_doc_has_browsing_context(elem->doc))))
+        return make_js_undefined();
+    DomElement* invoker_element = dom_op_element(source.get());
+    if (modal && !dom_top_layer_add(elem, invoker_element)) return ItemError;
+    if (!elem->set_attribute("open", "")) {
+        if (modal) dom_top_layer_remove(elem);
+        return ItemError;
+    }
     elem->set_dialog_modal(modal);
+    if (elem->ext) elem->ext->dialog_previous_focus = dom_node_ref(dom_document_focused_target(elem->doc));
+    // drop a newly inert focus before recording reflow or dispatching popup events.
+    if (modal && elem->doc) dom_recheck_focus_in(elem->doc->root);
+    dom_queue_toggle_task(elem, target.get(), source.get(), DOM_DIALOG_TOGGLE, true);
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent, "open");
+    dom_hide_popovers_for_dialog(elem);
+    if (elem->has_attribute("open")) dom_focus_open_popup(elem);
     return make_js_undefined();
 }
 
@@ -15152,18 +16154,31 @@ static Item dom_dispatch_dialog_close(Item env_item) {
     return dom_dispatch_event(target.get(), event.get());
 }
 
-static Item dom_dialog_close_open(DomElement* elem, Item target, Item returned) {
+static Item dom_dialog_close_open(DomElement* elem, Item target, Item returned, Item invoker = ItemNull) {
     if (!elem->has_attribute("open")) return make_js_undefined();
-    if (!is_js_undefined(returned)) {
-        Item stored = dom_dialog_store_return_value(elem, returned);
+    RootFrame roots(3);
+    Rooted<Item> receiver(roots, target), result(roots, returned), source(roots, invoker);
+    JS_RETURN_IF_ERROR(dom_dispatch_before_toggle(receiver.get(), source.get(), false));
+    if (!elem->has_attribute("open")) return make_js_undefined();
+    if (!is_js_undefined(result.get())) {
+        Item stored = dom_dialog_store_return_value(elem, result.get());
         if (item_is_error(stored)) return stored;
     }
     // close changes modal state synchronously; its notification is a later task.
+    DomDocument* document = elem->doc;
+    DomNodeRef previous_focus{};
+    if (elem->ext && (elem->is_dialog_modal() ||
+        dom_shadow_including_contains(elem, dom_document_focused_target(document))))
+        previous_focus = elem->ext->dialog_previous_focus;
     const char* open_value = elem->get_attribute("open");
     elem->set_dialog_modal(false);
+    dom_top_layer_remove(elem);
     elem->remove_attribute("open");
+    if (dom_top_modal_dialog(document)) dom_recheck_focus_in(document->root);
+    dom_queue_toggle_task(elem, receiver.get(), source.get(), DOM_DIALOG_TOGGLE, false);
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent, "open", open_value);
-    Item values[] = {target};
+    dom_restore_popup_focus(document, previous_focus);
+    Item values[] = {receiver.get()};
     js_schedule_native_env(dom_schedule_task, dom_dispatch_dialog_close, 0, values, 1);
     return make_js_undefined();
 }
@@ -15200,6 +16215,10 @@ extern "C" Item dom_core_form_close_dialog(Item form, Item submitter) {
     return dom_form_close_dialog(dom_op_element(form), dom_op_element(submitter));
 }
 
+extern "C" Item dom_core_form_submit_entries(Item form, Item submitter) {
+    return dom_form_submit_entries(dom_op_element(form), dom_op_element(submitter));
+}
+
 extern "C" Item dom_core_form_submit_method(Item form, Item submitter) {
     return js_name_item(dom_form_submission_method(dom_op_element(form), dom_op_element(submitter)));
 }
@@ -15215,12 +16234,13 @@ extern "C" Item dom_core_close_dialog(Item n, Item value) {
     return dom_dialog_close_open(elem, target.get(), returned.get());
 }
 
-extern "C" Item dom_core_request_close_dialog(Item receiver, Item value) {
+static Item dom_request_close_dialog(Item receiver, Item value, Item invoker) {
     DomElement* elem = dom_op_element(receiver);
     if (!dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))
         return dom_raise_type_error("HTMLDialogElement receiver required");
-    RootFrame roots(3);
+    RootFrame roots(4);
     Rooted<Item> target(roots, receiver), returned(roots, value), event(roots, ItemNull);
+    Rooted<Item> source(roots, invoker);
     if (!is_js_undefined(returned.get())) returned.set(js_to_string(returned.get()));
     if (item_is_error(returned.get())) return returned.get();
     DomDocument* doc = elem->doc;
@@ -15239,7 +16259,58 @@ extern "C" Item dom_core_request_close_dialog(Item receiver, Item value) {
     if (item_is_error(outcome)) return outcome;
     if (outcome.item == ITEM_FALSE || !same_request || elem->doc != doc ||
         !dom_node_is_connected(elem)) return make_js_undefined();
-    return dom_dialog_close_open(elem, target.get(), returned.get());
+    return dom_dialog_close_open(elem, target.get(), returned.get(), source.get());
+}
+
+extern "C" Item dom_core_request_close_dialog(Item receiver, Item value) {
+    return dom_request_close_dialog(receiver, value, ItemNull);
+}
+
+extern "C" Item dom_core_activate_button_command(Item receiver) {
+    DomElement* button = dom_html_button_receiver(receiver);
+    if (!button || dom_is_disabled(button) || !dom_button_can_invoke(button) ||
+        !button->doc || (!button->doc->state && !dom_doc_has_browsing_context(button->doc)))
+        return (Item){.item = ITEM_FALSE};
+    DomElement* target = dom_button_command_target(button);
+    if (!target) return (Item){.item = ITEM_FALSE};
+    const Item handled = {.item = ITEM_TRUE};
+    const char* raw = dom_element_attribute_value_ns(button, "", "command");
+    DomButtonCommand command = dom_button_command(raw);
+    bool popup = command >= DOM_COMMAND_TOGGLE_POPOVER && command <= DOM_COMMAND_HIDE_POPOVER;
+    if (command == DOM_COMMAND_UNKNOWN ||
+        (command != DOM_COMMAND_CUSTOM && (popup ?
+            strcmp(dom_element_namespace_uri(target), "http://www.w3.org/1999/xhtml") != 0 :
+            !dom_element_is_html_tag(target, MARKUP_NAME_DIALOG)))) return handled;
+
+    RootFrame roots(4);
+    Rooted<Item> source(roots, receiver), destination(roots, dom_wrap_element(target));
+    Rooted<Item> event(roots, ItemNull), value(roots, ItemNull);
+    if (dom_realm_active()) {
+        event.set(js_create_native_command_event(
+            js_name_item(command == DOM_COMMAND_CUSTOM ? raw : k_button_commands[command]), source.get()));
+        JS_RETURN_IF_ERROR(event.get());
+        Item outcome = dom_dispatch_event(destination.get(), event.get());
+        JS_RETURN_IF_ERROR(outcome);
+        if (outcome.item == ITEM_FALSE) return handled;
+    }
+    // Canceling the command or disconnecting its target suppresses the default.
+    if (!dom_node_is_connected(target) || command == DOM_COMMAND_CUSTOM) return handled;
+    if (popup) {
+        dom_activate_popover(target, command - DOM_COMMAND_TOGGLE_POPOVER, button);
+        return handled;
+    }
+    if (target->is_popover_open()) return handled;
+    if (!target->has_attribute("open")) {
+        if (command == DOM_COMMAND_SHOW_MODAL) JS_RETURN_IF_ERROR(dom_open_dialog(destination.get(), true, source.get()));
+        return handled;
+    }
+    if (const char* result = button->get_attribute("value")) value.set(js_name_item(result));
+    else value.set(make_js_undefined());
+    if (command == DOM_COMMAND_CLOSE)
+        JS_RETURN_IF_ERROR(dom_dialog_close_open(target, destination.get(), value.get(), source.get()));
+    else if (command == DOM_COMMAND_REQUEST_CLOSE)
+        JS_RETURN_IF_ERROR(dom_request_close_dialog(destination.get(), value.get(), source.get()));
+    return handled;
 }
 
 extern "C" Item dom_core_focus(Item n, Item options) {
@@ -15824,7 +16895,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     }
 
     if (operation == JUBE_DOM_SHOW_POPOVER) {
-        return dom_core_show_popover(elem_item);
+        return dom_core_show_popover_options(elem_item, argc ? args[0] : make_js_undefined());
     }
 
     if (operation == JUBE_DOM_HIDE_POPOVER) {

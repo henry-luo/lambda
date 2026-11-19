@@ -339,11 +339,8 @@ static bool file_reader_loading(Item state, Item generation) {
 static void file_reader_event(Item reader, const char* type, size_t loaded, size_t total) {
     RootFrame roots(2);
     Rooted<Item> target(roots, reader);
-    Rooted<Item> event(roots, js_create_native_event(type, false, false));
-    dom_realm_set_cstr(event.get(), "lengthComputable", (Item){.item = b2it(true)});
-    dom_realm_set_cstr(event.get(), "loaded", (Item){.item = i2it((int64_t)loaded)});
-    dom_realm_set_cstr(event.get(), "total", (Item){.item = i2it((int64_t)total)});
-    dom_dispatch_event(target.get(), event.get());
+    Rooted<Item> event(roots, js_create_native_progress_event(type, loaded, total));
+    if (!item_is_error(event.get())) dom_dispatch_event(target.get(), event.get());
 }
 
 static Item file_reader_read_task(Item environment) {

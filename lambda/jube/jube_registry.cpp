@@ -1080,7 +1080,7 @@ extern "C" bool dom_focus_first_invalid_form_control(void* form_elem);
 extern "C" bool dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" void* dom_popover_target_for_button(void* button);
 extern "C" int dom_popover_target_action(void* button);
-extern "C" bool dom_activate_popover(void* popover, int action);
+extern "C" bool dom_activate_popover(void* popover, int action, void* source);
 
 // The catalog section: one body per dom_api.def row, in row order. The cast is
 // the row's own arity, so a body whose C signature disagrees with its row is a

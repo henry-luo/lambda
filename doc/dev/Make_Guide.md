@@ -10,19 +10,21 @@ Run `make help` for a quick summary, or see below for full details.
 
 `make push-lambda message='Describe the changes'` stages and commits all
 non-ignored changes, including untracked files, in each initialized submodule
-and then Lambda. It pushes each attached branch to its configured upstream,
-from nested submodules outward, before committing and pushing its parent.
-`MESSAGE` is also accepted. The same message is used for each new commit. Review every repository's changes
-before running it. It fetches each `origin` and attached branch's upstream and
-checks that upstream commits are integrated before any push. It stops on errors; pushes
-already completed cannot be rolled back automatically. It does not run tests.
+and then Lambda. It fetches and merges each configured upstream, from nested
+submodules outward, then pushes each attached branch to its upstream in the
+same order. `MESSAGE` is also accepted. The same message is used for each new
+commit. Review every repository's changes before running it. A merge conflict
+stops the operation for manual resolution before any push. Other push errors
+can happen after earlier repositories have been pushed and cannot be rolled
+back automatically. It does not run tests.
 
 For a detached submodule with changes or an unpublished commit, the target
-selects the unique nearest ancestor among `origin` branches and pushes to that
-branch. If no such branch exists or the choice is ambiguous, it stops; switch
-to the intended branch and configure its upstream before retrying. An unchanged
-detached commit already reachable from an `origin` branch needs no push. All
-pushes are non-forced. Resolve conflicts and initialize every submodule first.
+selects the unique nearest ancestor among `origin` branches, merges that branch,
+and pushes to it. If no such branch exists or the choice is ambiguous, it
+stops; switch to the intended branch and configure its upstream before
+retrying. An unchanged detached commit already reachable from an `origin`
+branch needs no pull or push. All pushes are non-forced. Initialize every
+submodule first.
 
 ---
 

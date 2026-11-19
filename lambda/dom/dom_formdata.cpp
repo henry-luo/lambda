@@ -19,6 +19,8 @@
  */
 
 #include "dom.h"
+#include "dom_core.h"
+#include "dom_events.h"
 #include "realm/dom_realm.h"
 #include "../js/js_runtime.h"
 #include "../js/js_class.h"
@@ -34,6 +36,7 @@
 #include "lib/log.h"
 #include "lib/mem.h"
 #include "lib/str.h"
+#include "lib/strbuf.h"
 #include <cstring>
 #include <cctype>
 #include <cinttypes>
@@ -49,6 +52,7 @@ extern "C" bool dom_get_checkedness(void* dom_elem);
 extern "C" const char* dom_input_type_lower(void* dom_elem);
 extern "C" bool dom_is_disabled(void* dom_elem);
 extern "C" DomElement* dom_find_form_owner(void* control_ptr);
+extern "C" bool dom_is_submit_button(void* elem);
 
 // ============================================================================
 // Helpers
@@ -64,7 +68,9 @@ static inline Item prop_get(Item obj, const char* key) {
 }
 
 static inline void prop_set(Item obj, const char* key, Item val) {
-    dom_realm_set(obj, make_key(key), val);
+    RootFrame roots(2);
+    Rooted<Item> target(roots, obj), value(roots, val);
+    dom_realm_set(target.get(), make_key(key), value.get());
 }
 
 static bool fd_input_supports_dirname(const char* itype) {
@@ -357,60 +363,46 @@ static Item js_fd_forEach(Item callback, Item this_arg) {
 #define FD_ITER_MODE_KEYS    1
 #define FD_ITER_MODE_VALUES  2
 
+static Item fd_new_pair(Item name, Item value);
+
 static Item js_fd_iter_next() {
-    Item iter = dom_realm_receiver();
-    Item entries  = prop_get(iter, "_i_entries");
-    Item idx_item = prop_get(iter, "_i_idx");
-    Item mode_item= prop_get(iter, "_i_mode");
+    RootFrame roots(2);
+    Rooted<Item> iter(roots, dom_realm_receiver());
+    Rooted<Item> entries(roots, prop_get(iter.get(), "_i_entries"));
+    Item idx_item = prop_get(iter.get(), "_i_idx");
+    Item mode_item = prop_get(iter.get(), "_i_mode");
 
     int64_t idx  = (get_type_id(idx_item)  == LMD_TYPE_INT) ? it2i(idx_item)  : 0;
     int     mode = (get_type_id(mode_item) == LMD_TYPE_INT) ? (int)it2i(mode_item) : 0;
-    int64_t len  = (get_type_id(entries) == LMD_TYPE_ARRAY) ? js_array_length(entries) : 0;
-
-    Item result = js_new_object();
-    if (idx >= len) {
-        // iteration done
-        prop_set(result, "value", make_js_undefined());
-        prop_set(result, "done",  make_bool(true));
-        return result;
-    }
+    int64_t len = js_array_length(entries.get());
+    if (idx >= len) return js_make_iter_result(make_js_undefined(), true);
 
     // Advance index for next call
-    prop_set(iter, "_i_idx", make_int_item(idx + 1));
-
-    Item pair     = js_elements_get_int(entries, idx);
-    Item name_val = (get_type_id(pair) == LMD_TYPE_ARRAY) ? js_elements_get_int(pair, 0) : ItemNull;
-    Item val_val  = (get_type_id(pair) == LMD_TYPE_ARRAY) ? js_elements_get_int(pair, 1) : ItemNull;
-
-    Item yield_val;
-    if (mode == FD_ITER_MODE_KEYS) {
-        yield_val = name_val;
-    } else if (mode == FD_ITER_MODE_VALUES) {
-        yield_val = val_val;
-    } else {
-        // entries mode: yield [name, value] pair
-        yield_val = js_array_new(0);
-        js_array_push(yield_val, name_val);
-        js_array_push(yield_val, val_val);
-    }
-
-    prop_set(result, "value", yield_val);
-    prop_set(result, "done",  make_bool(false));
-    return result;
+    prop_set(iter.get(), "_i_idx", make_int_item(idx + 1));
+    Item pair = js_elements_get_int(entries.get(), idx);
+    Item name = js_elements_get_int(pair, 0);
+    Item value = js_elements_get_int(pair, 1);
+    if (mode == FD_ITER_MODE_KEYS) return js_make_iter_result(name, false);
+    if (mode == FD_ITER_MODE_VALUES) return js_make_iter_result(value, false);
+    JS_ASSIGN_OR_RETURN(copy, fd_new_pair(name, value));
+    return js_make_iter_result(copy, false);
 }
 
 // Symbol.iterator on the iterator itself: returns `this`
 JS_FORWARD_STATIC_ITEM(js_fd_iter_self, (), dom_realm_receiver, ())
 
 static Item fd_make_iterator(Item entries, int mode) {
-    Item iter = js_new_object();
-    prop_set(iter, "_i_entries", entries);
-    prop_set(iter, "_i_idx",     make_int_item(0));
-    prop_set(iter, "_i_mode",    make_int_item(mode));
-    prop_set(iter, "next",       dom_realm_new_function(js_fd_iter_next));
+    // Entry-list iteration can allocate while the new iterator has no JS owner.
+    RootFrame roots(3);
+    Rooted<Item> list(roots, entries), iter(roots, js_new_object());
+    prop_set(iter.get(), "_i_entries", list.get());
+    prop_set(iter.get(), "_i_idx",     make_int_item(0));
+    prop_set(iter.get(), "_i_mode",    make_int_item(mode));
+    prop_set(iter.get(), "next",       dom_realm_new_function(js_fd_iter_next));
     // Symbol.iterator on the iterator → returns self (so it's iterable)
-    dom_realm_set(iter, make_sym_iterator_key(), dom_realm_new_function(js_fd_iter_self));
-    return iter;
+    Rooted<Item> protocol(roots, dom_realm_new_function(js_fd_iter_self));
+    dom_realm_set(iter.get(), make_sym_iterator_key(), protocol.get());
+    return iter.get();
 }
 
 #define JS_FD_ITERATOR_WRAPPER(name, mode) \
@@ -486,16 +478,28 @@ static Item fd_normalize_newlines(const char* s) {
     return result;
 }
 
-// retain each pair and its values through allocating conversions and array growth (D6.3.3).
-static void fd_append_named_entry(Item entries, const char* name, Item value) {
-    RootFrame roots(4);
-    Rooted<Item> entries_root(roots, entries);
+// Retain each entry through allocating conversions and array growth (D6.3.3).
+static Item fd_new_pair(Item name, Item value) {
+    RootFrame roots(3);
     Rooted<Item> value_root(roots, value);
-    Rooted<Item> name_root(roots, fd_normalize_surrogates(name));
+    Rooted<Item> name_root(roots, name);
     Rooted<Item> pair_root(roots, js_array_new(0));
-    js_array_push(pair_root.get(), name_root.get());
-    js_array_push(pair_root.get(), value_root.get());
-    js_array_push(entries_root.get(), pair_root.get());
+    JS_RETURN_IF_ERROR(js_array_push(pair_root.get(), name_root.get()));
+    JS_RETURN_IF_ERROR(js_array_push(pair_root.get(), value_root.get()));
+    return pair_root.get();
+}
+
+static Item fd_append_pair(Item entries, Item name, Item value) {
+    RootFrame roots(2);
+    Rooted<Item> entries_root(roots, entries), pair(roots, fd_new_pair(name, value));
+    JS_RETURN_IF_ERROR(pair.get());
+    return js_array_push(entries_root.get(), pair.get());
+}
+
+static void fd_append_named_entry(Item entries, const char* name, Item value) {
+    RootFrame roots(2);
+    Rooted<Item> entries_root(roots, entries), value_root(roots, value);
+    fd_append_pair(entries_root.get(), fd_normalize_surrogates(name), value_root.get());
 }
 
 static void fd_append_text_entry(Item entries, const char* name, const char* value) {
@@ -543,139 +547,90 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
 
 // forward declaration (defined after fd_install_methods)
 static Item fd_make_file_stub();
+static void fd_append_submitter_entry(Item entries, DomElement* elem);
 
-// Recursively walk document order, retaining only controls owned by `form`.
-// This includes controls associated through form="..." outside the subtree.
-static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form) {
-    while (node) {
-        if (!node->is_element()) {
-            node = node->next_sibling;
-            continue;
-        }
-        DomElement* elem = (DomElement*)node;
-        const char* tag = elem->tag_name ? elem->tag_name : "";
-        bool is_form_control = str_icmp_cstr(tag, "input") == 0 ||
-            str_icmp_cstr(tag, "textarea") == 0 ||
-            str_icmp_cstr(tag, "select") == 0 ||
-            str_icmp_cstr(tag, "button") == 0;
-        if (is_form_control && form &&
-            dom_find_form_owner((void*)elem) != form) {
-            node = node->next_sibling;
-            continue;
-        }
+static void fd_append_input_entries(Item entries, DomElement* elem, const char* name) {
+    const char* type = dom_input_type_lower(elem);
+    if (strcmp(type, "submit") == 0 || strcmp(type, "reset") == 0 ||
+        strcmp(type, "button") == 0 || strcmp(type, "image") == 0) return;
 
-        if (str_icmp_cstr(tag, "input") == 0) {
-            const char* name = elem->get_attribute("name");
-            if (name && *name && !dom_is_disabled(elem)) {
-                const char* itype = dom_input_type_lower(elem);
-                // excluded from form data: type=submit, reset, button, image
-                bool excluded = (strcmp(itype, "submit") == 0 || strcmp(itype, "reset") == 0 ||
-                                 strcmp(itype, "button") == 0 || strcmp(itype, "image") == 0);
-                if (!excluded) {
-                    if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
-                        if (dom_get_checkedness(elem)) {
-                            const char* val = elem->get_attribute("value");
-                            fd_append_text_entry(entries, name, val ? val : "on");
-                        }
-                    } else if (strcmp(itype, "file") == 0) {
-                        Item files = radiant_input_files(elem);
-                        int64_t file_count = get_type_id(files) == LMD_TYPE_ARRAY
-                            ? js_array_length(files) : 0;
-                        if (file_count == 0) {
-                            fd_append_named_entry(entries, name, fd_make_file_stub());
-                        } else {
-                            for (int64_t file_index = 0; file_index < file_count;
-                                 file_index++) {
-                                fd_append_named_entry(entries, name, js_elements_get_int(files, file_index));
-                            }
-                        }
-                    } else {
-                        // text, number, email, url, tel, search, password, hidden, etc.
-                        // Use tc_ensure_init for initialized text controls; fall back to
-                        // the 'value' HTML attribute for hidden/uninitialized controls.
-                        const char* val = nullptr;
-                        if (tc_is_text_control(elem)) {
-                            tc_ensure_init(elem);
-                            val = (elem->form && elem->form->current_value)
-                                ? elem->form->current_value : "";
-                        } else {
-                            // Every other value state (range, hidden, color, the
-                            // date family) keeps its live value in the input
-                            // value store, which is what `input.value` reads and
-                            // what the range slider and stepUp() write. Reading
-                            // the content attribute here submitted the *default*
-                            // instead, so a moved slider posted its start value.
-                            // The store seeds itself from that attribute, so this
-                            // is still the attribute when nothing has written.
-                            val = radiant_input_live_value(elem);
-                            if (!val) val = "";
-                        }
-                        fd_append_text_entry(entries, name, val);
-                        // dirname: if the control has a dirname attribute, add a directionality entry
-                        const char* dirname = elem->get_attribute("dirname");
-                        if (dirname && *dirname && fd_input_supports_dirname(itype)) {
-                            fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, val));
-                        }
-                    }
-                }
-            }
-        } else if (str_icmp_cstr(tag, "textarea") == 0) {
-            const char* name = elem->get_attribute("name");
-            if (name && *name && !dom_is_disabled(elem)) {
-                tc_ensure_init(elem);
-                const char* val = elem->form && elem->form->current_value
-                    ? elem->form->current_value : "";
-                // normalize newlines first, then surrogates
-                RootFrame roots(1);
-                Rooted<Item> newline_value(roots, fd_normalize_newlines(val));
-                const char* nl_str = fn_to_cstr(newline_value.get());
-                fd_append_text_entry(entries, name, nl_str ? nl_str : "");
-                const char* dirname = elem->get_attribute("dirname");
-                if (dirname && *dirname) {
-                    fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, val));
-                }
-            }
-        } else if (str_icmp_cstr(tag, "select") == 0) {
-            if (!dom_is_disabled(elem)) {
-                fd_append_select_entries(entries, elem);
-            }
-        } else if (str_icmp_cstr(tag, "button") == 0) {
-            // buttons are excluded from form data by default (only included on submit)
-        } else if (str_icmp_cstr(tag, "fieldset") == 0) {
-            // recurse into fieldset unless it's disabled (disabled fieldset disables children)
-            if (!elem->has_attribute("disabled")) {
-                fd_walk_form_controls(entries, elem->first_child, form);
-            }
+    if (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0) {
+        if (dom_get_checkedness(elem)) {
+            const char* value = elem->get_attribute("value");
+            fd_append_text_entry(entries, name, value ? value : "on");
         }
-
-        // Recurse into non-replaced children (except fieldset which is handled above,
-        // and datalist which is not form-associated per spec)
-        if (str_icmp_cstr(tag, "fieldset") != 0 &&
-            str_icmp_cstr(tag, "input") != 0 &&
-            str_icmp_cstr(tag, "select") != 0 &&
-            str_icmp_cstr(tag, "textarea") != 0 &&
-            str_icmp_cstr(tag, "datalist") != 0) {
-            fd_walk_form_controls(entries, elem->first_child, form);
-        }
-
-        node = node->next_sibling;
+        return;
     }
+    if (strcmp(type, "file") == 0) {
+        RootFrame roots(1);
+        Rooted<Item> files(roots, radiant_input_files(elem));
+        int64_t count = get_type_id(files.get()) == LMD_TYPE_ARRAY
+            ? js_array_length(files.get()) : 0;
+        if (!count) fd_append_named_entry(entries, name, fd_make_file_stub());
+        for (int64_t i = 0; i < count; i++)
+            fd_append_named_entry(entries, name, js_elements_get_int(files.get(), i));
+        return;
+    }
+
+    const char* value;
+    if (strcmp(type, "hidden") == 0 && str_ieq_cstr(name, "_charset_")) {
+        value = "UTF-8";
+    } else if (tc_is_text_control(elem)) {
+        tc_ensure_init(elem);
+        value = elem->form && elem->form->current_value ? elem->form->current_value : "";
+    } else {
+        // Value-state inputs, including range, serialize their current stored value.
+        value = radiant_input_live_value(elem);
+        if (!value) value = "";
+    }
+    fd_append_text_entry(entries, name, value);
+    const char* dirname = elem->get_attribute("dirname");
+    if (dirname && *dirname && fd_input_supports_dirname(type))
+        fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, value));
 }
 
-static void fd_collect_form_controls(Item entries, DomElement* form) {
-    if (!form) return;
-    DomDocument* doc = form->doc;
-    bool connected = false;
-    if (doc && doc->root) {
-        for (DomNode* node = (DomNode*)form; node; node = node->parent) {
-            if (node == (DomNode*)doc->root) {
-                connected = true;
-                break;
-            }
+static void fd_append_textarea_entries(Item entries, DomElement* elem, const char* name) {
+    tc_ensure_init(elem);
+    const char* value = elem->form && elem->form->current_value ? elem->form->current_value : "";
+    RootFrame roots(1);
+    Rooted<Item> normalized(roots, fd_normalize_newlines(value));
+    const char* text = fn_to_cstr(normalized.get());
+    fd_append_text_entry(entries, name, text ? text : "");
+    const char* dirname = elem->get_attribute("dirname");
+    if (dirname && *dirname)
+        fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, value));
+}
+
+static bool fd_in_datalist(DomNode* node) {
+    for (DomNode* ancestor = dom_source_parent(node); ancestor; ancestor = dom_source_parent(ancestor)) {
+        if (dom_element_is_html_tag(ancestor->as_element(), MARKUP_NAME_DATALIST)) return true;
+    }
+    return false;
+}
+
+static void fd_collect_form_controls(Item entries, DomElement* form, DomElement* submitter) {
+    // Source-tree order includes external controls, including the selected submitter.
+    DomNode* root = dom_source_tree_root(form);
+    for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+        DomElement* element = node->as_element();
+        NameId tag = dom_element_html_tag(element);
+        if (tag != MARKUP_NAME_INPUT && tag != MARKUP_NAME_TEXTAREA &&
+            tag != MARKUP_NAME_SELECT && tag != MARKUP_NAME_BUTTON) continue;
+        if (dom_find_form_owner(element) != form || dom_is_disabled(element) || fd_in_datalist(element))
+            continue;
+        if (element == submitter) {
+            fd_append_submitter_entry(entries, element);
+            continue;
+        }
+        const char* name = element->get_attribute("name");
+        if (!name || !*name) continue;
+        switch (tag) {
+        case MARKUP_NAME_INPUT: fd_append_input_entries(entries, element, name); break;
+        case MARKUP_NAME_TEXTAREA: fd_append_textarea_entries(entries, element, name); break;
+        case MARKUP_NAME_SELECT: fd_append_select_entries(entries, element); break;
+        default: break;
         }
     }
-    fd_walk_form_controls(entries,
-        connected ? doc->root->first_child : form->first_child, form);
 }
 
 // ============================================================================
@@ -744,108 +699,140 @@ static Item fd_make_file_stub() {
     return js_file_new(parts_root.get(), name_root.get(), options_root.get());
 }
 
-static void fd_append_submitter_entry(Item entries, DomElement* elem) {
-    if (!elem || dom_is_disabled(elem)) return;
-
-    const char* tag = elem->tag_name ? elem->tag_name : "";
-    const char* name = elem->get_attribute("name");
-    if (!name || !*name) return;
-
-    if (str_icmp_cstr(tag, "input") == 0) {
-        const char* itype = dom_input_type_lower(elem);
-        if (strcmp(itype, "submit") != 0) return;
-        const char* val = elem->get_attribute("value");
-        if (!val) val = "";
-        fd_append_text_entry(entries, name, val);
-        const char* dirname = elem->get_attribute("dirname");
-        if (dirname && *dirname && fd_input_supports_dirname(itype)) {
-            fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, val));
-        }
+static void fd_append_image_coordinates(Item entries, DomElement* image, const char* name) {
+    StrBuf* key = strbuf_new();
+    if (!key) return;
+    if (!strbuf_ensure_cap(key, (name ? strlen(name) : 0) + 3)) {
+        strbuf_free(key);
         return;
     }
-
-    if (str_icmp_cstr(tag, "button") == 0) {
-        const char* type = elem->get_attribute("type");
-        if (type && *type && str_icmp_cstr(type, "submit") != 0) return;
-        const char* val = elem->get_attribute("value");
-        if (!val) val = "";
-        fd_append_text_entry(entries, name, val);
+    if (name && *name) {
+        strbuf_append_str(key, name);
+        strbuf_append_char(key, '.');
     }
+    const DomElementExt* state = image->ext;
+    int64_t coordinates[] = {state ? state->form_image_selected_x : 0,
+                             state ? state->form_image_selected_y : 0};
+    strbuf_append_char(key, 'x');
+    for (int i = 0; i < 2; i++) {
+        char value[32];
+        snprintf(value, sizeof(value), "%" PRId64, coordinates[i]);
+        key->str[key->length - 1] = i == 0 ? 'x' : 'y';
+        fd_append_text_entry(entries, key->str, value);
+    }
+    strbuf_free(key);
+}
+
+static void fd_append_submitter_entry(Item entries, DomElement* elem) {
+    if (!dom_is_submit_button(elem)) return;
+    const char* name = elem->get_attribute("name");
+    if (dom_element_is_html_tag(elem, MARKUP_NAME_INPUT) &&
+        strcmp(dom_input_type_lower(elem), "image") == 0) {
+        fd_append_image_coordinates(entries, elem, name);
+        return;
+    }
+    if (!name || !*name) return;
+    const char* value = elem->get_attribute("value");
+    if (!value) value = "";
+    fd_append_text_entry(entries, name, value);
+    const char* dirname = elem->get_attribute("dirname");
+    if (dirname && *dirname && dom_element_is_html_tag(elem, MARKUP_NAME_INPUT))
+        fd_append_text_entry(entries, dirname, fd_compute_dirname_direction(elem, value));
+}
+
+static Item fd_create(Item entries) {
+    RootFrame roots(2);
+    Rooted<Item> list(roots, entries);
+    Rooted<Item> data(roots, dom_realm_new_object_of_class(JS_CLASS_FORM_DATA));
+    prop_set(data.get(), FD_ENTRIES_KEY, list.get());
+    fd_install_methods(data.get());
+    return data.get();
+}
+
+static Item fd_copy_entries(Item entries) {
+    RootFrame roots(3);
+    Rooted<Item> original(roots, entries), copy(roots, js_array_new(0)), pair(roots, ItemNull);
+    int64_t count = js_array_length(original.get());
+    for (int64_t i = 0; i < count; i++) {
+        pair.set(js_elements_get_int(original.get(), i));
+        JS_RETURN_IF_ERROR(fd_append_pair(copy.get(), js_elements_get_int(pair.get(), 0),
+            js_elements_get_int(pair.get(), 1)));
+    }
+    return copy.get();
+}
+
+static Item fd_construct_entries(DomElement* form, DomElement* submitter, bool dispatch) {
+    if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM)) return ItemNull;
+    DomElementExt* state = form->ensure_ext();
+    if (!state) return ItemError;
+    if (state->form_constructing_entries) return ItemNull;
+
+    RootFrame roots(4);
+    Rooted<Item> target(roots, dispatch ? dom_wrap_element(form) : ItemNull);
+    Rooted<Item> entries(roots, js_array_new(0)), data(roots, ItemNull), event(roots, ItemNull);
+    state->form_constructing_entries = true;
+    fd_collect_form_controls(entries.get(), form, submitter);
+    Item result = make_js_undefined();
+    if (dispatch) {
+        data.set(fd_create(entries.get()));
+        event.set(js_create_native_form_data_event(data.get()));
+        result = item_is_error(event.get()) ? event.get() : dom_dispatch_event(target.get(), event.get());
+    }
+    // The wrapper keeps the target alive through listeners that detach or adopt it.
+    form->ext->form_constructing_entries = false;
+    JS_RETURN_IF_ERROR(result);
+    // The caller owns a snapshot. Retaining event.formData cannot mutate it later.
+    return dispatch ? fd_copy_entries(entries.get()) : entries.get();
+}
+
+Item dom_form_submit_entries(DomElement* form, DomElement* submitter) {
+    if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM) || !dom_node_is_connected(form))
+        return ItemNull;
+    DomDocument* document = form->doc;
+    RootFrame roots(2);
+    bool dispatch = document && document->js_has_dom_realm;
+    Rooted<Item> target(roots, dispatch ? dom_wrap_element(form) : ItemNull);
+    Rooted<Item> entries(roots, fd_construct_entries(form, submitter, dispatch));
+    JS_RETURN_IF_ERROR(entries.get());
+    if (form->doc != document || !dom_node_is_connected(form)) return ItemNull;
+    return entries.get();
 }
 
 // Constructor: new FormData([form[, submitter]])
 static Item js_formdata_construct(Item first, Item submitter) {
-    // Per WebIDL: new FormData() is fine; new FormData(nonFormElement) throws TypeError.
-    // undefined is treated the same as no argument (the optional argument is absent).
-    TypeId ft = get_type_id(first);
-    if (ft != LMD_TYPE_UNDEFINED) {
-        // null, string, number, non-form MAP → TypeError
-        bool is_form_elem = false;
+    RootFrame roots(3);
+    Rooted<Item> target(roots, first), button(roots, submitter), entries(roots, ItemNull);
+    if (get_type_id(target.get()) == LMD_TYPE_UNDEFINED) return fd_create(js_array_new(0));
 
-        // DOM3 wrappers are host VMaps, so receiver identity must be decided by
-        // unwrapping rather than by the obsolete map-shell representation.
-        void* node_raw = dom_unwrap_element(first);
-        DomNode* node = (DomNode*)node_raw;
-        if (node && node->is_element()) {
-            DomElement* elem = (DomElement*)node;
-            if (elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0) {
-                is_form_elem = true;
-            }
-        }
+    DomNode* node = (DomNode*)dom_unwrap_element(target.get());
+    DomElement* form = node ? node->as_element() : nullptr;
+    if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM))
+        return dom_realm_throw_type_error("FormData argument must be an HTMLFormElement");
 
-        if (!is_form_elem) {
-            return dom_realm_throw_type_error("FormData argument must be an HTMLFormElement");
-        }
+    DomElement* submitter_element = nullptr;
+    TypeId button_type = get_type_id(button.get());
+    if (button_type != LMD_TYPE_UNDEFINED && button_type != LMD_TYPE_NULL) {
+        node = (DomNode*)dom_unwrap_element(button.get());
+        submitter_element = node && node->node_type == DOM_NODE_ELEMENT ? node->as_element() : nullptr;
+        if (!dom_is_submit_button(submitter_element))
+            return dom_realm_throw_type_error("FormData submitter must be a submit button");
+        if (dom_find_form_owner(submitter_element) != form)
+            return dom_raise_exception("NotFoundError", "FormData submitter is not owned by this form");
     }
-
-    // Create the FormData object
-    RootFrame roots(4);
-    Rooted<Item> first_root(roots, first);
-    Rooted<Item> submitter_root(roots, submitter);
-    Rooted<Item> object_root(roots, dom_realm_new_object_of_class(JS_CLASS_FORM_DATA));
-    Rooted<Item> entries_root(roots, js_array_new(0));
-    Item fd_obj = object_root.get();
-    Item entries = entries_root.get();
-    prop_set(fd_obj, FD_ENTRIES_KEY, entries);
-    fd_install_methods(fd_obj);
-
-    // F-1: populate from form controls when form element was provided
-    if (get_type_id(first) != LMD_TYPE_UNDEFINED) {
-        void* node_raw = dom_unwrap_element(first);
-        DomNode* node = (DomNode*)node_raw;
-        if (node && node->is_element()) {
-            DomElement* form_elem = (DomElement*)node;
-            fd_collect_form_controls(entries, form_elem);
-            void* submitter_raw = dom_unwrap_element(submitter);
-            DomNode* submitter_node = (DomNode*)submitter_raw;
-            if (submitter_node && submitter_node->is_element()) {
-                fd_append_submitter_entry(entries, (DomElement*)submitter_node);
-            }
-            log_debug("js_formdata_construct: populated from <form>, entries=%lld",
-                      (long long)js_array_length(entries));
-        }
-    }
-
-    log_debug("js_formdata_construct: created FormData");
-    return fd_obj;
+    entries.set(fd_construct_entries(form, submitter_element, true));
+    JS_RETURN_IF_ERROR(entries.get());
+    if (get_type_id(entries.get()) == LMD_TYPE_NULL)
+        return dom_raise_exception("InvalidStateError", "FormData entry construction is already running");
+    return fd_create(entries.get());
 }
 
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem) {
     RootFrame roots(1);
-    Rooted<Item> entries_root(roots, js_array_new(0));
-    Item entries = entries_root.get();
-    DomNode* form_node = (DomNode*)form_elem;
-    if (!form_node || !form_node->is_element()) return entries;
-
-    DomElement* form_dom = (DomElement*)form_node;
-    fd_collect_form_controls(entries, form_dom);
-    if (submitter_elem) {
-        DomNode* submitter_node = (DomNode*)submitter_elem;
-        if (submitter_node->is_element()) {
-            fd_append_submitter_entry(entries, (DomElement*)submitter_node);
-        }
-    }
-    return entries;
+    Rooted<Item> entries(roots, js_array_new(0));
+    DomElement* form = (DomElement*)form_elem;
+    if (dom_element_is_html_tag(form, MARKUP_NAME_FORM))
+        fd_collect_form_controls(entries.get(), form, (DomElement*)submitter_elem);
+    return entries.get();
 }
 
 // ============================================================================

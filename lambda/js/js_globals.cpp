@@ -15814,6 +15814,11 @@ JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(security_policy_violation_event,
     JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT, js_ctor_security_policy_violation_event, "SecurityPolicyViolationEvent")
 JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(message_event, JS_CLASS_MESSAGE_EVENT, js_ctor_message_event_fn, "MessageEvent")
 JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(storage_event, JS_CLASS_STORAGE_EVENT, js_ctor_storage_event_fn, "StorageEvent")
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(submit_event, JS_CLASS_SUBMIT_EVENT, js_ctor_submit_event_fn, "SubmitEvent")
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(form_data_event, JS_CLASS_FORM_DATA_EVENT, js_ctor_form_data_event_fn, "FormDataEvent")
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(toggle_event, JS_CLASS_TOGGLE_EVENT, js_ctor_toggle_event_fn, "ToggleEvent")
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(progress_event, JS_CLASS_PROGRESS_EVENT, js_ctor_progress_event_fn, "ProgressEvent")
+JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT(command_event, JS_CLASS_COMMAND_EVENT, js_ctor_command_event_fn, "CommandEvent")
 #undef JS_DEFINE_PAYLOAD_EVENT_CONSTRUCT
 
 Item js_intrinsic_ctor_placeholder_call_body(Item callee, Item this_value,
@@ -16013,6 +16018,8 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT, JS_CLASS_WEBGL_CONTEXT_EVENT,
         JS_CLASS_MESSAGE_EVENT, JS_CLASS_STORAGE_EVENT, JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT,
         JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT,
+        JS_CLASS_SUBMIT_EVENT, JS_CLASS_FORM_DATA_EVENT, JS_CLASS_TOGGLE_EVENT,
+        JS_CLASS_PROGRESS_EVENT, JS_CLASS_COMMAND_EVENT,
         0
     };
     for (int i = 0; intrinsic_classes[i]; i++) {
@@ -16770,6 +16777,9 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     // Populate static methods as own properties for all constructors
     if (ctor_id == JS_CTOR_EVENT_TARGET || ctor_id == JS_CTOR_MESSAGE_EVENT ||
             ctor_id == JS_CTOR_STORAGE_EVENT ||
+            ctor_id == JS_CTOR_SUBMIT_EVENT || ctor_id == JS_CTOR_FORM_DATA_EVENT ||
+            ctor_id == JS_CTOR_TOGGLE_EVENT || ctor_id == JS_CTOR_PROGRESS_EVENT ||
+            ctor_id == JS_CTOR_COMMAND_EVENT ||
             ctor_id == JS_CTOR_SECURITY_POLICY_VIOLATION_EVENT ||
             ctor_id == JS_CTOR_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT) {
         RootFrame roots(1);
@@ -16777,9 +16787,22 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         js_initialize_native_constructor_prototype(fn_item, prototype.get());
         js_set_key_cstr(prototype.get(), "constructor", fn_item);
         js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+        if (ctor_id != JS_CTOR_EVENT_TARGET) {
+            // Publish Web IDL inheritance before script can see the constructor.
+            // A first instance must not overwrite an author's prototype edits.
+            js_set_prototype(fn_item, js_get_constructor(js_name_item("Event")));
+            js_set_prototype(prototype.get(), js_get_intrinsic_prototype_for_class(JS_CLASS_EVENT));
+            Item* slot = js_intrinsic_prototype_slot(code->intrinsic_class);
+            if (slot) *slot = prototype.get();
+        }
         if (ctor_id == JS_CTOR_EVENT_TARGET) js_event_target_install_methods(prototype.get());
         else if (ctor_id == JS_CTOR_MESSAGE_EVENT) js_message_event_install_prototype(prototype.get());
         else if (ctor_id == JS_CTOR_STORAGE_EVENT) js_storage_event_install_prototype(prototype.get());
+        else if (ctor_id == JS_CTOR_SUBMIT_EVENT || ctor_id == JS_CTOR_FORM_DATA_EVENT)
+            js_form_event_install_prototype(prototype.get(), ctor_id == JS_CTOR_FORM_DATA_EVENT);
+        else if (ctor_id == JS_CTOR_TOGGLE_EVENT) js_toggle_event_install_prototype(prototype.get());
+        else if (ctor_id == JS_CTOR_PROGRESS_EVENT) js_progress_event_install_prototype(prototype.get());
+        else if (ctor_id == JS_CTOR_COMMAND_EVENT) js_command_event_install_prototype(prototype.get());
         else if (ctor_id == JS_CTOR_SECURITY_POLICY_VIOLATION_EVENT)
             js_security_policy_violation_event_install_prototype(prototype.get());
         else js_content_visibility_event_install_prototype(prototype.get());
@@ -16858,6 +16881,11 @@ static JsClass js_intrinsic_prototype_parent_class(JsClass cls) {
         case JS_CLASS_WEBGL_CONTEXT_EVENT:
         case JS_CLASS_MESSAGE_EVENT:
         case JS_CLASS_STORAGE_EVENT:
+        case JS_CLASS_SUBMIT_EVENT:
+        case JS_CLASS_FORM_DATA_EVENT:
+        case JS_CLASS_TOGGLE_EVENT:
+        case JS_CLASS_PROGRESS_EVENT:
+        case JS_CLASS_COMMAND_EVENT:
         case JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT:
             return JS_CLASS_EVENT;
         case JS_CLASS_FOCUS_EVENT:
@@ -16903,6 +16931,10 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     if (js_intrinsic_state.prototype_resolving[class_id]) return ItemNull;
     js_intrinsic_state.prototype_resolving[class_id] = true;
     Item ctor = js_get_constructor(js_name_item(name, len));
+    if (!js_intrinsic_cache_slot_empty(*cached_slot)) {
+        js_intrinsic_state.prototype_resolving[class_id] = false;
+        return *cached_slot;
+    }
     Item proto = js_get_constructor_intrinsic_prototype(ctor);
     JsClass parent_class = js_intrinsic_prototype_parent_class(cls);
     if (get_type_id(proto) == LMD_TYPE_MAP && parent_class != JS_CLASS_NONE) {

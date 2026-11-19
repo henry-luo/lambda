@@ -3376,12 +3376,12 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
             form_node, "submit", true, true, true);
     }
 
-    Item event = js_create_event("submit", true, true);
-    js_set_key_cstr(event, "isTrusted", (Item){.item = ITEM_TRUE});
-    js_set_key_cstr(event, "submitter", submitter_node
+    RootFrame roots(2);
+    Rooted<Item> target(roots, dom_wrap_element(form));
+    Rooted<Item> submitter(roots, submitter_node
         ? dom_wrap_element((DomElement*)submitter_node) : ItemNull);
-    Item dispatched = dom_dispatch_event(dom_wrap_element(form), event);
-    return dispatched.item != ITEM_FALSE;
+    Item dispatched = dom_dispatch_form_submit_event(target.get(), submitter.get());
+    return !item_is_error(dispatched) && dispatched.item != ITEM_FALSE;
 }
 
 // Nearest non-synthetic element ancestor governed by a behavior template that
@@ -8483,10 +8483,15 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
                                          bool* dispatched = nullptr,
                                          bool run_ua_tier = true,
                                          const char* event_name = nullptr,
-                                         const InputIntent* intent = nullptr) {
+                                         const InputIntent* intent = nullptr,
+                                         int32_t trusted_pointer_id = 0) {
     if (dispatched) *dispatched = false;
     if (!event_document_has_js_runtime(evcon)) {
         if (!event_name) return false;
+        if (trusted_pointer_id) {
+            dom_popover_pointer_event(event_context_target_document(evcon),
+                view_geometry_nearest_dom_element(target), event_name, trusted_pointer_id);
+        }
         bool handled = dispatch_lambda_handler(evcon, target, event_name,
                                                intent, nullptr, run_ua_tier,
                                                build_event, userdata);
@@ -8512,6 +8517,10 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     EventTargetPath target_path = {};
     bool target_path_valid = capture_event_target_path(target_doc, target, &target_path);
     Rooted<Item> target_root(roots, dom_wrap_element(dom_target));
+    // The input target is fixed before synchronous popover close listeners
+    // run, and light dismiss precedes delivery of the trusted pointerup.
+    if (trusted_pointer_id)
+        dom_popover_pointer_event(target_doc, dom_target, event_name, trusted_pointer_id);
     Item previous_raw_event = s_synthetic_dom_dispatch_raw_event;
     s_synthetic_dom_dispatch_raw_event = event_root.get();
     dom_dispatch_event(target_root.get(), event_root.get());
@@ -8864,7 +8873,8 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
         DomNode* captured=dom_node_ref_validate(capture->document,capture->current);
         if(captured) target=(View*)captured;
     }
-    bool prevented=radiant_dispatch_built_event(evcon,target,build_pointer_event_item,&args,true,dispatched,true,type);
+    bool prevented = radiant_dispatch_built_event(evcon, target, build_pointer_event_item,
+        &args, true, dispatched, true, type, nullptr, args.pointer_id);
     if(capture&&(!strcmp(type,"pointerup")||!strcmp(type,"pointercancel"))) {
         capture->pending={};native_pointer_process_capture(evcon,capture,&args);
         if(!strcmp(type,"pointercancel")) {
@@ -11516,6 +11526,8 @@ bool is_view_programmatically_focusable(View* view) {
     if (is_view_focusable(view)) return true;
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
+    if (dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))
+        return elem->has_attribute("open") || elem->is_popover_open();
     // A negative tabindex excludes sequential focus only; HTMLElement.focus()
     // must still accept the target so keyboard events reach modal-style widgets.
     return elem->get_attribute("tabindex") != NULL;
@@ -11713,6 +11725,15 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
 
         log_debug("update_focus_state: cleared focus");
     }
+}
+
+void radiant_focus_popup_candidate(DomDocument* document, DomElement* element) {
+    if (!document || !document->state || !element) return;
+    EventContext event = {};
+    event.ui_context = (UiContext*)document->js.host_ui_context;
+    event.target_document = document;
+    event.target = element;
+    update_focus_state(&event, element, false);
 }
 
 /**
