@@ -67,28 +67,51 @@ def commit_changes(repo, message):
     return False
 
 
-def prepare(node):
-    repo, children = node
-    dirty_child = any([prepare(child) for child in children])
-    dirty = bool(git(repo, "status", "--porcelain", "--untracked-files=normal",
-                     "--ignore-submodules=none")) or dirty_child
+def pull_target(repo):
     branch = git(repo, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
-    git(repo, "fetch", "origin", "--prune")
     if not branch:
         published = git(repo, "branch", "-r", "--contains", "HEAD", "--list", "origin/*")
-        if dirty or not published:
-            detached_target(repo)
-    else:
-        remote = git(repo, "config", "--get", f"branch.{branch}.remote", check=False)
-        target = git(repo, "config", "--get", f"branch.{branch}.merge", check=False)
-        if not remote or remote == "." or not target.startswith("refs/heads/"):
-            raise ValueError(f"configure a remote upstream for {repo} branch {branch}")
-        if remote != "origin":
-            git(repo, "fetch", remote, "--prune")
-        upstream = git(repo, "rev-parse", "--verify", "@{upstream}", check=False)
-        if not upstream or not is_ancestor(repo, upstream, "HEAD"):
-            raise ValueError(f"integrate the upstream changes before publishing: {repo} ({branch})")
-    return dirty
+        dirty = bool(git(repo, "status", "--porcelain", "--untracked-files=normal",
+                         "--ignore-submodules=none"))
+        if not dirty and published:
+            return None
+        target = detached_target(repo)
+        remote_branch = target.removeprefix("refs/heads/")
+        return "origin", f"refs/remotes/origin/{remote_branch}"
+
+    remote = git(repo, "config", "--get", f"branch.{branch}.remote", check=False)
+    target = git(repo, "config", "--get", f"branch.{branch}.merge", check=False)
+    if not remote or remote == "." or not target.startswith("refs/heads/"):
+        raise ValueError(f"configure a remote upstream for {repo} branch {branch}")
+    return remote, "@{upstream}"
+
+
+def integrate(node, message):
+    repo, children = node
+    for child in children:
+        integrate(child, message)
+
+    # Record child merges in the parent before merging its own upstream.
+    commit_changes(repo, message)
+    git(repo, "fetch", "origin", "--prune")
+    target = pull_target(repo)
+    if target is None:
+        print(f"Already published (detached): {repo}", flush=True)
+        return
+
+    remote, upstream = target
+    if remote != "origin":
+        git(repo, "fetch", remote, "--prune")
+    merge = subprocess.run(["git", "-C", str(repo), "merge", "--no-edit", upstream],
+                           text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if merge.returncode:
+        conflicts = git(repo, "ls-files", "-u")
+        if conflicts:
+            paths = sorted({line.split("\t", 1)[-1] for line in conflicts.splitlines()})
+            raise ValueError(f"merge conflicts in {repo}: {', '.join(paths)}; resolve, commit, then rerun")
+        details = merge.stdout.strip()
+        raise ValueError(f"could not merge {upstream} into {repo}: {details}")
+    print(f"Integrated {upstream} into {repo}", flush=True)
 
 
 def publish(node, message):
@@ -114,7 +137,7 @@ def main():
         raise ValueError("provide a commit message: make push-lambda message='...'")
     root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel")).resolve()
     tree = collect(root)
-    prepare(tree)
+    integrate(tree, message)
     publish(tree, message)
 
 
