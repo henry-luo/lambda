@@ -1129,6 +1129,16 @@ TEST(LambdaTierParityTests, DynamicCallScalarsSurviveMovingArgumentStorage) {
     }
 }
 
+TEST(LambdaTierParityTests, ObjectMethodCallsRespectEffectBounds) {
+    ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "1");
+    ScopedTestEnv poison("LAMBDA_GC_POISON_FREED", "1");
+    for (const char* tier : {"interp", "auto", "jit"}) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/effect_method_bounds.ls",
+            "test/lambda/effect_method_bounds.txt", false, tier);
+    }
+}
+
 TEST(LambdaTierParityTests, FloatAssignmentsKeepTheirNativeDescriptor) {
     const char* tiers[] = {"interp", "auto", "jit"};
     for (const char* tier : tiers) {

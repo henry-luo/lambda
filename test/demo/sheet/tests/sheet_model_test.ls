@@ -1,6 +1,12 @@
 import m: ~~.mod_model
 import f: ~~.mod_formula
 
+fn make_result(data) {
+    function calculate(expr) any^ => f.display(m.current(m.set_value(m.select(data,2,0),expr)),2,0)
+    calculate
+}
+function() {
+
 f.address(0,0)=="A1" and f.address(19,27)=="AB20"
 f.position("$AB$20")^=={row:19,col:27}
 match (f.position("A0") ^ { ^ }) { case error: true default: false }
@@ -14,7 +20,7 @@ m.history(edited).book==sample.book
 m.history(m.history(edited),true).book==edited.book
 let st=m.initial(m.blank())
 let data=m.paste(m.select(st,0,0),"10\t20\n30\t40")
-let result=(expr)any^ =>f.display(m.current(m.set_value(m.select(data,2,0),expr)),2,0)
+let result=make_result(data)
 result("=1+2*3")==7
 result("=(1+2)*3")==9
 result("=2^3^2")==64
@@ -57,3 +63,5 @@ result("=10^1000")=="#NUM!"
 let unchanged=m.set_value({*:sample,editing:true},m.active(sample).raw)
 unchanged.book==sample.book and unchanged.undo==sample.undo and not unchanged.editing
 m.set_value(m.select(st,0,0),"").book==st.book
+
+}

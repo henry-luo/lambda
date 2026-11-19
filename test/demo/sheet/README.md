@@ -46,11 +46,11 @@ Function names are case-insensitive. The supported functions are:
 | Category | Functions |
 |---|---|
 | Aggregation and criteria | `SUM`, `PRODUCT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `MEDIAN`, `SUMPRODUCT`, `SUMSQ`, `COUNTIF`, `COUNTIFS`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MINIFS`, `MAXIFS`, `SUBTOTAL`, `AGGREGATE` |
-| Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `PI`, `EXP`, `LN`, `LOG`, `LOG10`, `SIN`, `COS`, `TAN`, `ASIN`, `ACOS`, `ATAN`, `ATAN2`, `DEGREES`, `RADIANS`, `QUOTIENT`, `EVEN`, `ODD`, `MROUND`, `FACT`, `COMBIN`, `CEILING.MATH`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `SQRTPI`, `SINH`, `COSH`, `TANH`, `GCD`, `LCM` |
+| Math | `ABS`, `INT`, `SIGN`, `MOD`, `POWER`, `SQRT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `TRUNC`, `PI`, `RAND`, `RANDOM`, `EXP`, `LN`, `LOG`, `LOG10`, `SIN`, `COS`, `TAN`, `ASIN`, `ACOS`, `ATAN`, `ATAN2`, `DEGREES`, `RADIANS`, `QUOTIENT`, `EVEN`, `ODD`, `MROUND`, `FACT`, `COMBIN`, `CEILING.MATH`, `FLOOR.MATH`, `CEILING.PRECISE`, `FLOOR.PRECISE`, `SQRTPI`, `SINH`, `COSH`, `TANH`, `GCD`, `LCM` |
 | Statistics | `STDEV`, `STDEV.S`, `STDEVP`, `STDEV.P`, `VAR`, `VAR.S`, `VARP`, `VAR.P`, `LARGE`, `SMALL`, `PERCENTILE`, `PERCENTILE.INC`, `QUARTILE`, `QUARTILE.INC`, `RANK`, `RANK.EQ`, `RANK.AVG`, `PERCENTILE.EXC`, `QUARTILE.EXC`, `SLOPE`, `INTERCEPT`, `FORECAST`, `FORECAST.LINEAR`, `CORREL`, `PEARSON`, `RSQ`, `MODE`, `MODE.SNGL`, `COVAR`, `COVARIANCE.P`, `COVARIANCE.S`, `STEYX`, `GEOMEAN`, `HARMEAN` |
 | Finance | `PMT`, `PV`, `FV`, `NPER`, `NPV`, `IRR`, `XNPV`, `XIRR`, `RATE`, `SLN`, `SYD` |
 | Text | `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `CONCAT`, `CONCATENATE`, `TEXTJOIN`, `EXACT`, `VALUE`, `REPT`, `CLEAN`, `REPLACE`, `SUBSTITUTE`, `FIND`, `SEARCH`, `PROPER`, `TEXT`, `TEXTBEFORE`, `TEXTAFTER` |
-| Dates and times | `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND`, `NETWORKDAYS`, `NETWORKDAYS.INTL`, `WORKDAY`, `WORKDAY.INTL`, `DATEDIF`, `YEARFRAC`, `WEEKNUM`, `ISOWEEKNUM` |
+| Dates and times | `TODAY`, `NOW`, `DATE`, `DATEVALUE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `EDATE`, `EOMONTH`, `DAYS`, `TIME`, `TIMEVALUE`, `HOUR`, `MINUTE`, `SECOND`, `NETWORKDAYS`, `NETWORKDAYS.INTL`, `WORKDAY`, `WORKDAY.INTL`, `DATEDIF`, `YEARFRAC`, `WEEKNUM`, `ISOWEEKNUM` |
 | Logic and errors | `IF`, `IFS`, `CHOOSE`, `SWITCH`, `IFERROR`, `IFNA`, `AND`, `OR`, `NOT`, `TRUE`, `FALSE`, `NA`, `ISNUMBER`, `ISTEXT`, `ISBLANK`, `ISERROR`, `ISNA`, `LET`, `LAMBDA` |
 | Dynamic arrays | `FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`, `TEXTSPLIT`, `TRANSPOSE` |
 | Lookup | `ROWS`, `COLUMNS`, `INDEX`, `MATCH`, `VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `XMATCH`, `LOOKUP`, `ROW`, `COLUMN`, `ADDRESS`, `INDIRECT`, `OFFSET` |
@@ -58,8 +58,8 @@ Function names are case-insensitive. The supported functions are:
 For example, `=SUMIFS(Sales!B1:B20,Sales!A1:A20,"East")` and
 `=XLOOKUP(A1,'Annual Plan'!A1:A10,'Annual Plan'!B1:B10,"missing")` combine
 functions and references. Formula parsing builds a graph of callable Lambda
-closures. Each operator and Excel function resolves to a pure Lambda function
-and is applied with `call(f, args)` (**S12.3.4v2**, **D7.2.2**); formula text
+closures. Operators and Excel functions dispatch through Lambda callables
+(**S12.3.4v2**, **D7.2.2**); formula text
 is never executed as Lambda source. Conditional functions evaluate only the
 needed result branch.
 
@@ -95,12 +95,20 @@ This profile does not yet support general named or structured references,
 external-workbook references, full-column/row references, array constants,
 multiple `TEXTSPLIT` delimiters, `SORTBY`, all array-valued built-in functions, legacy
 array-formula expansion, custom formats, or all Excel coercion and error rules.
-`TODAY`, `NOW` and random functions are not yet implemented. Invalid expressions,
+Invalid expressions,
 missing references, division by zero, unknown functions and circular dependencies
 produce cell errors.
 
 Every edit recalculates the active sheet. A leading apostrophe forces a cell to
-remain text.
+remain text. `TODAY()` and `NOW()` use the local calendar and the workbook's
+date system. `RAND()` and its `RANDOM()` alias produce values in `[0,1)`.
+Each reached call reads the clock or draws a fresh random value as the formula
+runs. The evaluator retains each call's result for dependency and spill revisits
+in the same recalculation. Two `RAND()` calls in one formula draw independently.
+Two `NOW()` calls can return the same timestamp within the clock's resolution.
+Conditional formatting takes its own readings when rendered and shares the
+workbook results for cell references. State changes and event handlers govern
+re-rendering (**S12.1.3v6**, **S12.1.4v7**).
 
 Open accepts `.xlsx` and editable `.sheet.json` workbooks. XLSX imports include
 multiple worksheets, values, formulas, common styles and dimensions, merged
@@ -160,8 +168,8 @@ The shell reuses Word's theme, header, buttons and status styles from
 keyboard sizing reuse `lambda.ui.core.splitter`.
 Slides also loads the extracted ribbon stylesheet. The app uses the shared entry
 resource resolver and demo catalog/preview infrastructure. Spreadsheet state and
-commands stay in Lambda, with pure rendering and handler-owned effects
-(**S12.1.3**, **D10.2.1**); procedure dispatch captures the successful result in its
+commands stay in Lambda, with generative formula rendering and handler-owned state
+(**S12.1.3v6**, **D10.2.1**); procedure dispatch captures the successful result in its
 value arm (**S7.6.7v4**).
 
 Verification:
@@ -175,6 +183,10 @@ Verification:
   --event-file test/ui/sheet_editor.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_formula_functions.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_effects.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_effect_conditions.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_dynamic_arrays.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \

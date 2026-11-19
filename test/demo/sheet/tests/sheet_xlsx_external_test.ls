@@ -4,6 +4,11 @@ import files: ~~.mod_io
 import m: ~~.mod_model
 import f: ~~.mod_formula
 import v: ~~.mod_view
+
+fn make_shown() {
+    function calculate(sheet,row,col) any^ => v.formatted(f.display(sheet,row,col)^,f.cell(sheet,row,col)^.style)^
+    calculate
+}
 let base="test/input/xlsx/external/"
 let names=["bloated-workbook.xlsx","contacts.xlsx","customer-lists.xlsx","employees.xlsx","event-schedule.xlsx",
     "exceljs-1904.xlsx","excelize-Book1.xlsx","excelize-MergeCell.xlsx","excelize-SharedStrings.xlsx","files-sample-1000rows.xlsx",
@@ -20,8 +25,9 @@ let hidden=x.convert(base ++ "hidden-frozen.xlsx")^
 let dated=loaded["exceljs-1904.xlsx"]^
 let invalid=x.convert("test/input/xlsx/bad-case-relationship.xlsx") ^ { ^ }
 let restored=files.restore(parse(format(event.book,'json')^,'json')^)^
+function() {
 let get=(sheet,row,col) any^ => f.cell(sheet,row,col)^
-let shown=(sheet,row,col) any^ => v.formatted(f.display(sheet,row,col)^,get(sheet,row,col).style)^;
+let shown=make_shown();
 [
  len(loaded)==20 and all([for (name,book in loaded) book is map]),
  invalid is error and contains(invalid.message,"Missing package part xl/SharedStrings.xml"),
@@ -45,3 +51,5 @@ let shown=(sheet,row,col) any^ => v.formatted(f.display(sheet,row,col)^,get(shee
  hidden.sheets[0].hidden_rows==[5] and hidden.sheets[0].hidden_columns==[{min:2,max:2},{min:4,max:4}],
  hidden.sheets[0].frozen=={rows:1,cols:1}
 ]
+
+}

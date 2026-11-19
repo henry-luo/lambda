@@ -32,6 +32,11 @@ fn serial_for(year,month,day,date1904) any^ {
     }
 }
 pub fn date_value(date1904,year,month,day) any^ => serial_for(year,month,day,date1904)^
+// Excel serial dates use the workbook epoch and the local calendar.
+pub fn current_value(date1904,date_only,current) any^ {
+    let serial=serial_for(current.year,current.month,current.day,date1904)^;
+    if (date_only) serial else serial+(current.hour*3600+current.minute*60+current.second)/86400.0
+}
 pub fn year(date1904,serial) any^ => datetime_for(serial,date1904)^.year
 pub fn month(date1904,serial) any^ => datetime_for(serial,date1904)^.month
 pub fn day(date1904,serial) any^ => datetime_for(serial,date1904)^.day

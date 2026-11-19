@@ -1,9 +1,15 @@
 // Array function results retain their shape inside callable formula plans.
 import m: ~~.mod_model
 import f: ~~.mod_formula
+
+fn make_result(sheet) {
+    function calculate(expr) any^ => f.raw_value({*:sheet,cells:[*sheet.cells,{row:8,col:4,raw:expr}]},8,4)
+    calculate
+}
+function() {
 let sheet={*:m.empty_sheet(),cells:[{row:0,col:0,raw:"2"},{row:1,col:0,raw:"1"},{row:2,col:0,raw:"2"},
  {row:0,col:1,raw:"a"},{row:1,col:1,raw:"b"},{row:2,col:1,raw:"c"}]}
-let result=(expr) any^ => f.raw_value({*:sheet,cells:[*sheet.cells,{row:8,col:4,raw:expr}]},8,4);
+let result=make_result(sheet);
 [
  result("=SEQUENCE(2,3)").values==[1,2,3,4,5,6],
  result("=SEQUENCE(2,3,10,2)").values==[10,12,14,16,18,20],
@@ -29,3 +35,5 @@ let result=(expr) any^ => f.raw_value({*:sheet,cells:[*sheet.cells,{row:8,col:4,
  result("=SORT(A1:B3,1,-1)").values==[2,"a",2,"c",1,"b"],
  result("=TRANSPOSE(SEQUENCE(1,3))").rows==3
 ]
+
+}

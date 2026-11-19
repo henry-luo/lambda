@@ -365,32 +365,7 @@ static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
 static bool _custom_element_name_is_valid(Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return false;
     String* text = it2s(name);
-    if (!text || text->len < 2 || text->chars[0] < 'a' || text->chars[0] > 'z') {
-        return false;
-    }
-    bool has_hyphen = false;
-    for (size_t index = 0; index < text->len; index++) {
-        unsigned char c = (unsigned char)text->chars[index];
-        if (c == '-') has_hyphen = true;
-        if (c >= 'A' && c <= 'Z') return false;
-        if (c < 0x80 && !((c >= 'a' && c <= 'z') ||
-                (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')) {
-            return false;
-        }
-    }
-    if (!has_hyphen) return false;
-    static const char* reserved_names[] = {
-        "annotation-xml", "color-profile", "font-face", "font-face-src",
-        "font-face-uri", "font-face-format", "font-face-name", "missing-glyph",
-    };
-    for (size_t index = 0; index < sizeof(reserved_names) / sizeof(reserved_names[0]); index++) {
-        size_t reserved_len = strlen(reserved_names[index]);
-        if (text->len == reserved_len &&
-                memcmp(text->chars, reserved_names[index], reserved_len) == 0) {
-            return false;
-        }
-    }
-    return true;
+    return text && dom_custom_element_name_is_valid({text->chars, text->len});
 }
 
 static Item _custom_elements_dom_exception(const char* name, const char* message) {
@@ -1076,6 +1051,22 @@ static Item _slot_assign(Item, Item receiver, Item* args, int argc, uint64_t*) {
     return dom_slot_assign(receiver, args, argc);
 }
 
+static Item _set_html_unsafe(Item callee, Item receiver, Item* args, int count, uint64_t*) {
+    bool shadow = js_fn_native((JsFunction*)callee.function)->target.bits != 0;
+    if (count == 0) return dom_raise_type_error("setHTMLUnsafe requires markup");
+    return dom_set_html_unsafe(receiver, args[0], count > 1 ? args[1] : ItemNull, shadow);
+}
+
+static Item _get_html(Item callee, Item receiver, Item* args, int count, uint64_t*) {
+    bool shadow = js_fn_native((JsFunction*)callee.function)->target.bits != 0;
+    return dom_get_html(receiver, count ? args[0] : ItemNull, shadow);
+}
+
+static Item _parse_html_unsafe(Item, Item, Item* args, int count, uint64_t*) {
+    if (count == 0) return dom_raise_type_error("parseHTMLUnsafe requires markup");
+    return dom_parse_html_unsafe(args[0], count > 1 ? args[1] : ItemNull);
+}
+
 static void _install_shadow_interfaces(Item global) {
     using Property = DomShadowProperty;
     static const struct { const char* interface_name; const char* name; Property property; } fields[] = {
@@ -1085,6 +1076,8 @@ static void _install_shadow_interfaces(Item global) {
         {"ShadowRoot", "host", Property::host},
         {"ShadowRoot", "mode", Property::mode},
         {"ShadowRoot", "delegatesFocus", Property::delegates_focus},
+        {"ShadowRoot", "clonable", Property::clonable},
+        {"ShadowRoot", "serializable", Property::serializable},
         {"ShadowRoot", "slotAssignment", Property::slot_assignment},
         {"ShadowRoot", "styleSheets", Property::style_sheets},
         {"ShadowRoot", "activeElement", Property::active_element}
@@ -1096,6 +1089,21 @@ static void _install_shadow_interfaces(Item global) {
         member.set(js_new_native_payload_function(_shadow_property, static_cast<uint64_t>(field.property), 0));
         js_install_native_accessor(prototype.get(), js_name_item(field.name), member.get(), ItemNull, 0);
     }
+    const char* unsafe_html_receivers[] = {"Element", "ShadowRoot"};
+    for (size_t i = 0; i < sizeof(unsafe_html_receivers) / sizeof(*unsafe_html_receivers); i++) {
+        prototype.set(_iface_proto(realm.get(), unsafe_html_receivers[i]));
+        member.set(js_new_native_payload_function(_set_html_unsafe, i, 1));
+        js_set_function_name(member.get(), js_name_item("setHTMLUnsafe"));
+        js_set_key_cstr(prototype.get(), "setHTMLUnsafe", member.get());
+        member.set(js_new_native_payload_function(_get_html, i, 0));
+        js_set_function_name(member.get(), js_name_item("getHTML"));
+        js_set_key_cstr(prototype.get(), "getHTML", member.get());
+    }
+    prototype.set(js_get_key_cstr(realm.get(), "Document"));
+    member.set(js_new_native_payload_function(_parse_html_unsafe, 0, 1));
+    js_set_function_name(member.get(), js_name_item("parseHTMLUnsafe"));
+    js_set_key_cstr(prototype.get(), "parseHTMLUnsafe", member.get());
+
     prototype.set(_iface_proto(realm.get(), "HTMLSlotElement"));
     const char* methods[] = {"assignedNodes", "assignedElements"};
     for (size_t i = 0; i < sizeof(methods) / sizeof(*methods); i++) {
@@ -1339,8 +1347,10 @@ extern "C" void dom_install_collection_globals(void) {
     _install_dialog_interface(global);
     _install_label_interfaces(global);
     dom_install_html_hidden(_iface_proto(global, "HTMLElement"));
+    dom_install_html_inert(_iface_proto(global, "HTMLElement"));
     dom_install_html_popover(_iface_proto(global, "HTMLElement"));
     dom_install_html_button_properties(_iface_proto(global, "HTMLButtonElement"));
+    dom_install_html_template_properties(_iface_proto(global, "HTMLTemplateElement"));
     js_dom_install_interface(global, "CanvasRenderingContext2D");
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);

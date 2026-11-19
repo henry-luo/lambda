@@ -1,4 +1,4 @@
-// Spreadsheet operations are pure Lambda functions, applied dynamically (S12.3.4v2).
+// Spreadsheet operations use Lambda callables and bounded callbacks (S12.3.4v2, S12.1.4v7).
 import c: .mod_formula_common
 import criteria: .mod_formula_criteria
 import lookup: .mod_formula_lookup
@@ -22,34 +22,23 @@ fn divide(a,b) any^ {
 fn power(a,b) any^ => c.numeric(a)^ ** c.numeric(b)^
 fn concat_operator(a,b) any^ => c.text(a)^ ++ c.text(b)^
 
-// SUBTOTAL and AGGREGATE dispatch through the same reference-aware operations.
-fn aggregate_calculate(base,values,k=null) any^ {
+pub function dispatch(target: function,args) any^ => call(target,args)^
+pub fn aggregate_options(subtotal,code,option) any^ {
+    let mode=trunc(c.numeric(if (subtotal) code else option)^)
+    let base=if (subtotal) (if (mode>=101 and mode<=111) mode-100 else mode) else trunc(c.numeric(code)^);
+    if (base<1 or base>(if (subtotal) 11 else 19) or (not subtotal and (mode<0 or mode>7))) raise error("#VALUE!")
+    else if (subtotal) {base:base,hidden:mode>=101,nested:true,errors:false}
+    else {base:base,hidden:mode%2==1,nested:mode<4,errors:mode%4>=2}
+}
+pub fn aggregate_calculate(base,values,k=null) any^ {
     let input_range={kind:"range",rows:len(values),cols:1,values:values};
     if (base<1 or base>19) raise error("#VALUE!") else if (base<=13) {
         let target=[xl_average,xl_count,xl_counta,xl_max,xl_min,xl_product,stats.stdev_s,stats.stdev_p,
             xl_sum,stats.var_s,stats.var_p,xl_median,stats.mode][base-1];
-        call(target,[input_range])^
+        dispatch(target,[input_range])^
     } else {
         let target=[stats.large,stats.small,stats.percentile,stats.quartile,stats.percentile_exc,stats.quartile_exc][base-14];
-        if (k==null) raise error("#VALUE!") else call(target,[input_range,k])^
-    }
-}
-fn xl_subtotal(resolve,code,refs) any^ {
-    let mode=trunc(c.numeric(code)^)
-    let base=if (mode>=101 and mode<=111) mode-100 else mode;
-    if (base<1 or base>11) raise error("#VALUE!") else {
-        let groups=[for (ref in refs) call(resolve,[ref,mode>=101,true,false])^]
-        let values=[for (group in groups,value in group) value];
-        aggregate_calculate(base,values)^
-    }
-}
-fn xl_aggregate(resolve,code,option,refs,k) any^ {
-    let base=trunc(c.numeric(code)^)
-    let mode=trunc(c.numeric(option)^);
-    if (base<1 or base>19 or mode<0 or mode>7 or len(refs)==0 or (base>=14 and (len(refs)!=1 or k==null))) raise error("#VALUE!") else {
-        let groups=[for (ref in refs) call(resolve,[ref,mode%2==1,mode<4,mode%4>=2])^]
-        let values=[for (group in groups,value in group) value];
-        aggregate_calculate(base,values,k)^
+        if (k==null) raise error("#VALUE!") else dispatch(target,[input_range,k])^
     }
 }
 fn xl_sum(...) any^ => sum(c.numbers(varg())^)
@@ -118,8 +107,6 @@ fn xl_isnumber(value) => value is number
 fn xl_istext(value) => value is string
 fn xl_isblank(value) => value is map and value.kind=="cellref" and value.blank==true
 fn xl_na() any^ => raise error("#N/A")
-fn xl_iserror(first) { let result=call(first,[]) ^ { ^ }; result is error }
-fn xl_isna(first) { let result=call(first,[]) ^ { ^ }; result is error and result.message=="#N/A" }
 // Range values retain their two-dimensional shape for lookup functions.
 fn is_range(value) => c.is_array_value(value)
 // Reference coordinates are retained independently of their calculated values.
@@ -129,11 +116,11 @@ fn xl_row(context,reference=null) any^ => if (reference==null) context.row+1
 fn xl_column(context,reference=null) any^ => if (reference==null) context.col+1
     else if (reference is map and (reference.kind=="cellref" or reference.kind=="range")) reference.col+1
     else raise error("#VALUE!")
-fn xl_indirect(resolve,input,a1=true) any^ {
+pub fn xl_indirect(input,a1=true) any^ {
     let mode=c.truth(if (a1==null) true else if (a1 is map and a1.kind=="cellref") a1.value else a1)^;
-    if (not mode) raise error("#REF!") else call(resolve,[c.text(if (input is map and input.kind=="cellref") input.value else input)^])^
+    if (not mode) raise error("#REF!") else c.text(if (input is map and input.kind=="cellref") input.value else input)^
 }
-fn xl_offset(resolve,reference,rows,cols,height=null,width=null) any^ {
+pub fn xl_offset(reference,rows,cols,height=null,width=null) any^ {
     let r=trunc(c.numeric(if (rows is map and rows.kind=="cellref") rows.value else rows)^)
     let c=trunc(c.numeric(if (cols is map and cols.kind=="cellref") cols.value else cols)^);
     if (not (reference is map) or not contains(["cellref","range"],reference.kind)) raise error("#VALUE!") else {
@@ -142,10 +129,10 @@ fn xl_offset(resolve,reference,rows,cols,height=null,width=null) any^ {
         let row=reference.row+r
         let col=reference.col+c;
         if (h<1 or w<1 or row<0 or col<0 or row+h>1048576 or col+w>16384) raise error("#REF!")
-        else call(resolve,[{title:reference.title,row:row,col:col,rows:h,cols:w}])^
+        else {title:reference.title,row:row,col:col,rows:h,cols:w}
     }
 }
-fn xl_address(context,row,column,absolute=1,a1=true,sheet_name=null) any^ {
+pub function xl_address(column_name: function,row,column,absolute=1,a1=true,sheet_name=null) any^ {
     let r=trunc(c.numeric(row)^)
     let col=trunc(c.numeric(column)^)
     let mode=trunc(c.numeric(if (absolute==null) 1 else absolute)^)
@@ -153,7 +140,7 @@ fn xl_address(context,row,column,absolute=1,a1=true,sheet_name=null) any^ {
     if (r<1 or r>1048576 or col<1 or col>16384 or mode<1 or mode>4) raise error("#VALUE!") else {
         let row_abs=mode==1 or mode==2
         let col_abs=mode==1 or mode==3
-        let suffix=if (style) (if (col_abs) "$" else "") ++ call(context.column_name,[col-1])^ ++
+        let suffix=if (style) (if (col_abs) "$" else "") ++ call(column_name,[col-1])^ ++
             (if (row_abs) "$" else "") ++ string(r)
             else "R" ++ (if (row_abs) string(r) else "[" ++ string(r) ++ "]") ++
                 "C" ++ (if (col_abs) string(col) else "[" ++ string(col) ++ "]")
@@ -212,54 +199,13 @@ fn xl_sumproduct(...) any^ {
     else sum([for (i in 0 to n-1) product_values([for (items in lists)
         if (items[i] is number) items[i] else 0],0,1)^])
 }
-// Branch arguments are zero-argument closures; only the selected one executes.
-fn xl_lambda(spec) => {kind:"lambda",params:spec.params,target:spec.target}
-fn xl_let(run) any^ => call(run,[])^
-fn xl_if(condition,yes,no) any^ {
-    let result=call(if (c.truth(condition)^) yes else no,[])^;
-    if (result==null) 0 else result
-}
-fn ifs_select(args,index) any^ {
-    if (index>=len(args)) raise error("#N/A") else {
-        let condition=call(args[index],[])^;
-        if (c.truth(if (condition is map and condition.kind=="cellref") condition.value else condition)^)
-            call(args[index+1],[])^ else ifs_select(args,index+2)^
-    }
-}
-fn xl_ifs(...) any^ { let args=varg(); if (len(args)%2!=0) raise error("#VALUE!") else ifs_select(args,0)^ }
-fn xl_choose(index,...) any^ {
-    let choices=varg()
-    let n=trunc(c.numeric(index)^);
-    if (n<1 or n>len(choices)) raise error("#VALUE!") else call(choices[n-1],[])^
-}
-fn switch_select(lookup,args,index) any^ {
-    if (index>=len(args)) raise error("#N/A")
-    else if (index==len(args)-1) call(args[index],[])^
-    else {
-        let candidate=call(args[index],[])^
-        let item=if (candidate is map and candidate.kind=="cellref") candidate.value else candidate;
-        if (c.equal(lookup,item)) call(args[index+1],[])^ else switch_select(lookup,args,index+2)^
-    }
-}
-fn xl_switch(lookup,...) any^ => switch_select(lookup,varg(),0)^
-fn xl_iferror(first,fallback) any^ {
-    let result=call(first,[]) ^ { ^ };
-    if (result is error) call(fallback,[])^ else result
-}
-fn xl_ifna(first,fallback) any^ {
-    let result=call(first,[]) ^ { ^ };
-    if (result is error and result.message=="#N/A") call(fallback,[])^
-    else if (result is error) raise result else result
-}
-
-// S12.3.1 limits dynamic calls to 16 arguments; report spreadsheet errors before dispatch.
 let MAX_ARGS=16
 pub let FUNCTIONS={
     SEQUENCE:{target:arrays.sequence,min:1,max:4}, TRANSPOSE:{target:arrays.transpose,min:1,max:1},
     FILTER:{target:arrays.filter,min:2,max:3}, SORT:{target:arrays.sort_array,min:1,max:4},
     UNIQUE:{target:arrays.unique,min:1,max:3}, TEXTSPLIT:{target:arrays.textsplit,min:2,max:6},
-    SUBTOTAL:{target:xl_subtotal,min:2,max:MAX_ARGS,lazy:"subtotal"},
-    AGGREGATE:{target:xl_aggregate,min:3,max:MAX_ARGS,lazy:"aggregate"},
+    SUBTOTAL:{min:2,max:MAX_ARGS,lazy:"subtotal"},
+    AGGREGATE:{min:3,max:MAX_ARGS,lazy:"aggregate"},
     SUM:{references:true,target:xl_sum,min:1,max:MAX_ARGS}, PRODUCT:{references:true,target:xl_product,min:1,max:MAX_ARGS},
     AVERAGE:{references:true,target:xl_average,min:1,max:MAX_ARGS}, MIN:{references:true,target:xl_min,min:1,max:MAX_ARGS}, MAX:{references:true,target:xl_max,min:1,max:MAX_ARGS},
     COUNT:{references:true,target:xl_count,min:1,max:MAX_ARGS}, COUNTA:{target:xl_counta,min:1,max:MAX_ARGS}, COUNTBLANK:{target:xl_countblank,min:1,max:1},
@@ -311,7 +257,7 @@ pub let FUNCTIONS={
     ADDRESS:{target:xl_address,min:2,max:5,reference_context:true},
     ROW:{target:xl_row,min:0,max:1,reference_context:true,references:true}, COLUMN:{target:xl_column,min:0,max:1,reference_context:true,references:true},
     ROWS:{target:xl_rows,min:1,max:1}, COLUMNS:{target:xl_columns,min:1,max:1},
-    LOOKUP:{target:lookup.lookup,min:2,max:3}, XLOOKUP:{target:lookup.xlookup,min:3,max:6,lazy:"xlookup"}, XMATCH:{target:lookup.xmatch,min:2,max:4},
+    LOOKUP:{target:lookup.lookup,min:2,max:3}, XLOOKUP:{min:3,max:6,lazy:"xlookup"}, XMATCH:{target:lookup.xmatch,min:2,max:4},
     INDEX:{target:xl_index,min:2,max:3}, MATCH:{target:xl_match,min:2,max:3}, VLOOKUP:{target:xl_vlookup,min:3,max:4}, HLOOKUP:{target:xl_hlookup,min:3,max:4},
     COUNTIF:{target:criteria.countif,min:2,max:2}, SUMIF:{target:criteria.sumif,min:2,max:3},
     AVERAGEIF:{target:criteria.averageif,min:2,max:3}, COUNTIFS:{target:criteria.countifs,min:2,max:MAX_ARGS},
@@ -319,6 +265,7 @@ pub let FUNCTIONS={
     MINIFS:{target:criteria.minifs,min:3,max:MAX_ARGS}, MAXIFS:{target:criteria.maxifs,min:3,max:MAX_ARGS}, SUMPRODUCT:{references:true,target:xl_sumproduct,min:1,max:MAX_ARGS},
     NETWORKDAYS:{target:dates.networkdays,min:2,max:3,date_context:true}, ['NETWORKDAYS.INTL']:{target:dates.networkdays_intl,min:2,max:4,date_context:true},
     WORKDAY:{target:dates.workday,min:2,max:3,date_context:true}, ['WORKDAY.INTL']:{target:dates.workday_intl,min:2,max:4,date_context:true},
+    TODAY:{min:0,max:0}, NOW:{min:0,max:0}, RAND:{min:0,max:0}, RANDOM:{min:0,max:0},
     TEXT:{target:dates.text,min:2,max:2,date_context:true}, DATE:{target:dates.date_value,min:3,max:3,date_context:true}, YEAR:{target:dates.year,min:1,max:1,date_context:true},
     MONTH:{target:dates.month,min:1,max:1,date_context:true}, DAY:{target:dates.day,min:1,max:1,date_context:true},
     WEEKDAY:{target:dates.weekday,min:1,max:2,date_context:true},
@@ -327,11 +274,11 @@ pub let FUNCTIONS={
     EOMONTH:{target:dates.eomonth,min:2,max:2,date_context:true}, DAYS:{target:dates.days,min:2,max:2},
     DATEVALUE:{target:dates.datevalue,min:1,max:1,date_context:true}, TIMEVALUE:{target:dates.timevalue,min:1,max:1},
     TIME:{target:dates.time_value,min:3,max:3}, HOUR:{target:dates.hour,min:1,max:1}, MINUTE:{target:dates.minute,min:1,max:1}, SECOND:{target:dates.second,min:1,max:1},
-    LAMBDA:{target:xl_lambda,min:1,max:MAX_ARGS,lazy:"lambda"}, LET:{target:xl_let,min:3,max:MAX_ARGS,lazy:"let"}, IF:{target:xl_if,min:2,max:3,lazy:"if"}, IFS:{target:xl_ifs,min:2,max:MAX_ARGS,lazy:"thunks"},
-    CHOOSE:{target:xl_choose,min:2,max:MAX_ARGS,lazy:"selector"}, SWITCH:{target:xl_switch,min:3,max:MAX_ARGS,lazy:"selector"}, IFERROR:{target:xl_iferror,min:2,max:2,lazy:"iferror"},
-    IFNA:{target:xl_ifna,min:2,max:2,lazy:"iferror"}, NA:{target:xl_na,min:0,max:0},
+    LAMBDA:{min:1,max:MAX_ARGS,lazy:"lambda"}, LET:{min:3,max:MAX_ARGS,lazy:"let"}, IF:{min:2,max:3,lazy:"if"}, IFS:{min:2,max:MAX_ARGS,lazy:"thunks"},
+    CHOOSE:{min:2,max:MAX_ARGS,lazy:"selector"}, SWITCH:{min:3,max:MAX_ARGS,lazy:"selector"}, IFERROR:{min:2,max:2,lazy:"iferror"},
+    IFNA:{min:2,max:2,lazy:"iferror"}, NA:{target:xl_na,min:0,max:0},
     ISNUMBER:{target:xl_isnumber,min:1,max:1}, ISTEXT:{target:xl_istext,min:1,max:1}, ISBLANK:{references:true,target:xl_isblank,min:1,max:1},
-    ISERROR:{target:xl_iserror,min:1,max:1,lazy:"inspect"}, ISNA:{target:xl_isna,min:1,max:1,lazy:"inspect"},
+    ISERROR:{min:1,max:1,lazy:"inspect"}, ISNA:{min:1,max:1,lazy:"inspect"},
     ['+']:{target:add,min:2,max:2}, ['-']:{target:subtract,min:2,max:2}, ['*']:{target:multiply,min:2,max:2},
     ['/']:{target:divide,min:2,max:2}, ['^']:{target:power,min:2,max:2}, ['%']:{target:percent,min:1,max:1},
     ['u+']:{target:unary_plus,min:1,max:1}, ['u-']:{target:unary_minus,min:1,max:1}, ['&']:{target:concat_operator,min:2,max:2},

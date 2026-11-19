@@ -19,8 +19,7 @@ import workspace_dialog: lambda.ui.workspace.dialog
 let BASE=url_resolve(resources.entry_uri()^,".")
 let CSS=office_style.document_css ++ office_style.css ++ ribbon_style.css ++ workspace_dialog.css ++ input(url_resolve(BASE,"sheet.css"),'text')^
 fn node(owner,id) => dom.get_element_by_id(dom.root_node(owner),id)
-let INITIAL=m.initial()^
-edit <sheet_app> () any^ state st:INITIAL {v.workspace(st)^}
+edit <sheet_app> () any^ state st:(~.initial^) function() {v.workspace(st)^}
 on render(evt) {
     if (evt.event_phase==2) {
         let owner=node(evt.target,"sheet")
@@ -397,4 +396,8 @@ on keydown(evt) {
     app.focus(evt.target)
     return 'prevent-default'
 }
-<html lang:"en",<head <meta charset:"utf-8"> <title "Sheet — Lambda workspace"> <style CSS>> apply(<sheet_app>,{mode:"edit"})>
+function() {
+let initial=m.initial()^
+let content=apply(<sheet_app initial:initial>,{mode:"edit"})^;
+<html lang:"en",<head <meta charset:"utf-8"> <title "Sheet — Lambda workspace"> <style CSS>> content>
+}

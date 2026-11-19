@@ -1,7 +1,7 @@
 // S12.1.3v2: providers are pure; the caller owns selection and editing policy.
 // Both axes are windowed before either provider is called. The row provider
 // supplies one leading header cell before the generated cells.
-pub fn body(rows, columns, render_row, render_cell) any^ {
+pub function body(rows, columns, render_row: function, render_cell: function) any^ {
     let left=columns.before>0
     let right=columns.after>0
     let span=1+(columns.last-columns.first)+(if (left) 1 else 0)+(if (right) 1 else 0);

@@ -53,6 +53,10 @@ MARKUP_TRAILING_ENTRIES = [
     ("CSS_SHAPE_OUTSIDE", "shape-outside"),
     ("CSS_SHAPE_MARGIN", "shape-margin"),
     ("CSS_SHAPE_IMAGE_THRESHOLD", "shape-image-threshold"),
+    ("CSS_ANCHOR_NAME", "anchor-name"),
+    ("CSS_ANCHOR_SCOPE", "anchor-scope"),
+    ("CSS_POSITION_ANCHOR", "position-anchor"),
+    ("CSS_POSITION_AREA", "position-area"),
 
 ]
 MARKUP_ENTRY_SYMBOLS = {
@@ -128,6 +132,7 @@ marker-start marker-mid marker-end marker vector-effect color-interpolation colo
 page string-set footnote-policy
 x y cx cy r rx ry
 shape-outside shape-margin shape-image-threshold
+anchor-name anchor-scope position-anchor position-area
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

@@ -2663,8 +2663,13 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         }
         List args = {};
         args.length = source_argc;
-        args.items = (Item*)(void*)words;
-        return interp_call_function_result((Function*)(uintptr_t)method_fn.get().item,
+        args.items = method_args.items();
+        // S12.1.6v3: this dispatch bypasses the ordinary call path below.
+        if (node->fn_colour_guard) {
+            Item refused = lambda_fn_colour_guard_list(method_fn.get(), &args, node->fn_colour_guard);
+            if (item_is_error(refused)) return refused;
+        }
+        return interp_call_function_result(method_fn.get().function,
             source_argc ? &args : NULL);
     }
 

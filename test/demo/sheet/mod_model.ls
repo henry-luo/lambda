@@ -1,4 +1,4 @@
-// S12.1.3: workbook commands are pure; handlers own publication and I/O.
+// S12.1.3v6: workbook calculation admits generative effects; handlers own publication and I/O.
 import f: .mod_formula
 import grid: lambda.ui.core.virtual_grid
 import shared_history: lambda.editor.core.history
@@ -14,11 +14,8 @@ pub fn split_names(split) => if (split==null) [] else
 pub fn active_pane(split) => if (split==null) "" else if ((contains(split_names(split),split.active)) ^ {false}) split.active
     else if (split.x>0 and split.y>0) "bottomRight" else if (split.x>0) "topRight" else "bottomLeft"
 pub fn current(st) => st.book.sheets[st.sheet]
-// Keep calculation failures visible without committing partial spill state.
-fn calculate_book_spills(book,indexes) any^ => {value:f.workbook_spills(book,indexes)^,error:null}
-fn calculate_local_spills(sheet) any^ => {value:f.spills(sheet)^,error:null}
 // The cache belongs to the active workbook revision, never the saved file.
-pub fn prepare(sheet,book=null) {
+pub function prepare(sheet,book=null) any^ {
     let index=f.index_cells(sheet)
     // Avoid materializing workbook-wide spill state when no formula can produce an array.
     let sources=if (book==null) [sheet] else book.sheets
@@ -27,20 +24,17 @@ pub fn prepare(sheet,book=null) {
     let cross=any([for (cell in sheet.cells where ((starts_with(cell.raw,"=") and contains(cell.raw,"!")) ^ {false})) true])
     let indexes=if (book==null or (not has_spills and not cross)) {} else
         map([for (other in book.sheets) *[other.title,if (other.title==sheet.title) index else f.index_cells(other)]])
-    let result=if (book==null or not has_spills) {value:{},error:null} else
-        (calculate_book_spills(book,indexes) ^ {{value:{},error:^.message}})
-    let all_spills=result.value
-    let base={*:sheet,cell_index:index,workbook:book,workbook_indices:indexes,workbook_spills:all_spills}
-    let local=if (book==null and has_spills) (calculate_local_spills(base) ^ {{value:null,error:^.message}})
-        else {value:all_spills[sheet.title],error:null}
-    let spill=local.value or {spill_values:{},spill_ranges:{},spill_errors:{},spill_display:{}}
-    let indexed={*:base,*:spill}
-    let values=map([*[for (cell in sheet.cells) *[f.address(cell.row,cell.col),
-        if (starts_with(cell.raw or "", "=")) f.display(indexed,cell.row,cell.col) else f.literal_value(cell.raw or "")]],
-        *[for (key,item in spill.spill_display) *[string(key),item]]]);
-    {cells:index,indices:indexes,spill:spill,workbook_spills:all_spills,calculation_error:result.error or local.error,values:values}
+    let result=if (book==null or not has_spills) {spills:{}} else
+        (f.workbook_spills(book,indexes) ^ {{spills:{},error:^.message}})
+    let base={*:sheet,cell_index:index,workbook:book,workbook_indices:indexes,workbook_spills:result.spills}
+    let local=if (book==null and has_spills) (f.spills(base) ^ {{error:^.message}})
+        else {samples:result.samples,spills:result.spills[sheet.title]}
+    let spill=local.spills or {spill_values:{},spill_ranges:{},spill_errors:{},spill_display:{}}
+    let batch=f.calculate_values({*:base,*:spill},local.samples)^;
+    {cells:index,indices:indexes,spill:spill,workbook_spills:result.spills,samples:batch.samples,
+        calculation_error:result.error or local.error,values:batch.values}
 }
-pub fn initial(book=null) any^ {
+pub function initial(book=null) any^ {
     let initial_book=book or sample()
     let split=initial_book.sheets[0].split
     let initial_cell=if (split==null) {row:4,col:4} else split.selection or split.top_left
@@ -52,8 +46,8 @@ pub fn initial(book=null) any^ {
         selection_drag:null,selection_click:false,resize_drag:null})^;
     if (split==null) initial_state else select(initial_state,initial_cell.row,initial_cell.col)
 }
-pub fn indexed(st) => {*:current(st),cell_index:st.cache.cells,workbook:st.book,workbook_indices:st.cache.indices,workbook_spills:st.cache.workbook_spills,*:st.cache.spill}
-pub fn activate(st,index) => if (index==st.sheet) st else {
+pub fn indexed(st) => {*:current(st),samples:st.cache.samples,calculated_values:st.cache.values,cell_index:st.cache.cells,workbook:st.book,workbook_indices:st.cache.indices,workbook_spills:st.cache.workbook_spills,*:st.cache.spill}
+pub function activate(st,index) => if (index==st.sheet) st else {
     let split=st.book.sheets[index].split
     let cache=prepare(st.book.sheets[index],st.book);
     refresh_stats({*:st,sheet:index,pane_active:active_pane(split),split_views:{},split_ready:false,cache:cache,
@@ -73,7 +67,7 @@ pub fn used_dimension(st,axis,index) any^ => if (resizing(st,axis,index)) st.res
 pub fn valid_dimension(sheet,axis,index,value) => axis in ["column","row"] and index is int and index>=0 and
     index<(if (axis=="column") sheet.cols else sheet.rows) and value is number and
     not (value is nan or value is inf or value == -inf) and value>=dimension_limits(axis).min and value<=dimension_limits(axis).max
-pub fn resize(st,axis,index,value) map^ {
+pub function resize(st,axis,index,value) map^ {
     let sheet=current(st)
     if (not valid_dimension(sheet,axis,index,value)) raise error("Sheet: invalid row height or column width")
     // a manual row height constrains wrapped text even when it equals the default.
@@ -130,28 +124,28 @@ pub fn move(st,dr,dc,extend=false) any^ {
 fn has_cached_results(book) => any([for (sheet in book.sheets,cell in sheet.cells) cell.has_cached==true])
 fn invalidate_imported_results(book) => {*:book,sheets:[for (sheet in book.sheets)
     {*:sheet,cells:[for (cell in sheet.cells) if (cell.has_cached==true) {*:cell,has_cached:false,cached:null} else cell]}]}
-pub fn change(st,book,status="Ready") => if (book==st.book) {*:st,editing:false} else {
+pub function change(st,book,status="Ready") => if (book==st.book) {*:st,editing:false} else {
     let hist = shared_history.snapshot_record({past:st.undo,future:st.redo},st.book,100,true)
     let next=if (st.has_cached_results) invalidate_imported_results(book) else book;
     let cache=prepare(next.sheets[st.sheet],next);
     refresh_stats({*:st,book:next,has_cached_results:false,cache:cache,undo:hist.past,redo:hist.future,editing:false,
         status:if (cache.calculation_error==null) status else "Calculation failed: " ++ string(cache.calculation_error)})
 }
-fn replace_sheet(st,sheet,status="Ready") => change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) sheet else s]},status)
-pub fn set_cells(st,cells,status="Ready") => replace_sheet(st,{*:current(st),cells:cells},status)
+function replace_sheet(st,sheet,status="Ready") => change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) sheet else s]},status)
+pub function set_cells(st,cells,status="Ready") => replace_sheet(st,{*:current(st),cells:cells},status)
 fn patch_cell(sheet,row,col,raw,style=null) => [for (cell in sheet.cells where cell.row!=row or cell.col!=col) cell,
     {row:row,col:col,raw:raw,style:style or f.cell(sheet,row,col).style or {}}]
 // selecting another cell can blur an unchanged native draft without creating an edit.
-pub fn set_value(st,text) any^ => if (st.cache.spill.spill_values[f.address(st.row,st.col)]!=null) raise error("Sheet: cannot edit a spilled cell")
+pub function set_value(st,text) any^ => if (st.cache.spill.spill_values[f.address(st.row,st.col)]!=null) raise error("Sheet: cannot edit a spilled cell")
     else if ((active(st).raw or "")==text) {*:st,editing:false}
     else set_cells(st,patch_cell(current(st),st.row,st.col,text),"Cell updated")
 // A selection may replace an entire spill, but cannot overwrite only its children.
 fn protected_spill(st,b) any^ => any([for (key,entry in st.cache.spill.spill_values,
     let pos=f.position(string(key))^ where pos.row>=b.top and pos.row<=b.bottom and pos.col>=b.left and pos.col<=b.right)
     not (entry.row>=b.top and entry.row<=b.bottom and entry.col>=b.left and entry.col<=b.right)])
-pub fn clear(st) => if ((protected_spill(st,bounds(st))) ^ {true}) {*:st,status:"Cannot change part of a spilled array"}
+pub function clear(st) => if ((protected_spill(st,bounds(st))) ^ {true}) {*:st,status:"Cannot change part of a spilled array"}
     else set_cells(st,[for (c in current(st).cells) if (selected(st,c.row,c.col)) {*:c,raw:""} else c],"Selection cleared")
-pub fn format_cells(st,key,value) map^ {
+pub function format_cells(st,key,value) map^ {
     let b = bounds(st)
     // Formatting materializes empty cells, so bound the requested rectangle.
     if (range_size(b)>MAX_MATERIALIZED_CELLS) raise error("Sheet: selection is too large to format")
@@ -164,7 +158,7 @@ pub fn format_cells(st,key,value) map^ {
         set_cells(st,[*[for (c in current(st).cells where ((not selected(st,c.row,c.col)) ^ { false })) c],*cells],"Formatting updated")
     }
 }
-pub fn history(st,redo=false) any^ {
+pub function history(st,redo=false) any^ {
     let hist = {past:st.undo,future:st.redo}
     let step = if (redo) shared_history.snapshot_redo(hist,st.book,true,true)^ else shared_history.snapshot_undo(hist,st.book,true,true)^
     if (step==null) st else {
@@ -178,12 +172,12 @@ pub fn history(st,redo=false) any^ {
                 else if (redo) "Redone" else "Undone"})
     }
 }
-pub fn add_sheet(st) any^ {
+pub function add_sheet(st) any^ {
     let title = "Sheet" ++ string(len(st.book.sheets)+1)
     let next = change(st,{*:st.book,sheets:[*st.book.sheets,{*:empty_sheet(title),*:if (current(st).date1904==true) {date1904:true} else {}}]},"Sheet added");
     select(activate(next,len(st.book.sheets))^,0,0)
 }
-pub fn paste(st,text) {
+pub function paste(st,text) {
     let rows = split(replace(text,"\r",""),"\n")
     let incoming = [for (r,line in rows,c,raw in ((split(line,"\t")) ^ { [] }) where st.row+r<current(st).rows and st.col+c<current(st).cols)
         {row:st.row+r,col:st.col+c,raw:raw,style:f.cell(current(st),st.row+r,st.col+c).style or {}}]
@@ -212,21 +206,23 @@ fn calculate_stats(st) {
 // Scroll-only renders reuse the last selection's aggregates.
 fn refresh_stats(st) => {*:st,selection_stats:calculate_stats(st)}
 pub fn stats(st) => st.selection_stats
-fn sum_start(sheet,row,col) any^ => if (row<0 or not (f.display(sheet,row,col) is number)) row+1 else sum_start(sheet,row-1,col)
-pub fn autosum(st) any^ {
+function sum_start(sheet,row,col) any^ => if (row<0 or not (f.display(sheet,row,col) is number)) row+1 else sum_start(sheet,row-1,col)
+pub function autosum(st) any^ {
     let start=sum_start(indexed(st),st.row-1,st.col)
     if (start==st.row) {*:st,status:"Select an empty cell below a column of numbers"}
     else set_value(st,"=SUM(" ++ f.address(start,st.col) ++ ":" ++ f.address(st.row-1,st.col) ++ ")")
 }
-pub fn sort_rows(st,descending=false) map^ {
+pub function sort_rows(st,descending=false) map^ {
     let b=bounds(st)
     if (protected_spill(st,b)^) raise error("Sheet: cannot sort part of a spilled array")
     else if (range_size(b)>MAX_MATERIALIZED_CELLS) raise error("Sheet: selection is too large to sort")
     else {
         let sheet=indexed(st)
-        let rows=sort(b.top to b.bottom,{dir:if (descending) 'desc' else 'asc',by:(r)any^ =>f.display(sheet,r,st.col)})
+        // Evaluate sort keys before entering the pure sorting callback.
+        let rows=sort([for (row in b.top to b.bottom) {row:row,key:f.display(sheet,row,st.col)^}],
+            {dir:if (descending) 'desc' else 'asc',by:(entry) => entry.key})
         let moved=[for (r,source in rows,c in b.left to b.right) {
-            let cell=f.cell(sheet,source,c);{row:b.top+r,col:c,raw:cell.raw or "",style:cell.style or {}}
+            let cell=f.cell(sheet,source.row,c);{row:b.top+r,col:c,raw:cell.raw or "",style:cell.style or {}}
         }];
         set_cells(st,[*[for (c in current(st).cells where ((not selected(st,c.row,c.col)) ^ { false })) c],*moved],"Selection sorted")
     }

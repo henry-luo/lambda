@@ -1630,8 +1630,9 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
     }
 
     // recurse into child elements
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child = elem->items[i];
+    DomParsedChildren children = dom_parsed_children(dom_root ? dom_root->doc.get() : nullptr, elem);
+    for (int64_t i = 0; i < children.length(); i++) {
+        Item child = children.at(i);
         TypeId tid = get_type_id(child);
         if (tid == LMD_TYPE_ELEMENT) {
             collect_scripts_recursive(child.element, collection, dom_root, base_url, depth + 1);

@@ -557,9 +557,12 @@ algorithm. Authored `oncommand` handlers use the normal inline-handler path.
 IDL numeric input writes convert to a string before the native sanitizer
 (**D6.3.3 / D7.2.2 / D9.1.3v2 / D9.5.6v2**).
 
-Thirteen pinned fixtures pass 321 of 326 subtests. The implicit-anchor case
-and four cases that require declarative shadow roots remain open. The closed
-imperative-root control and the trusted pointer replay pass under forced GC.
+All 326 subtests in the 13 pinned fixtures pass, including the formerly
+failing implicit-anchor case and four declarative-root retargeting cases.
+Button invokers participate in the same default anchor lookup as sources
+supplied to the popover IDL. The earlier closed imperative-root control and
+trusted pointer replay also passed under forced GC
+(**D9.1.1v4 / D9.1.3v2 / D9.5.6v2**).
 
 ### JS13-L14 — Progress event interface and delivery — **PARTIAL**
 
@@ -595,9 +598,21 @@ unsupported `elementsFromPoint()`, older nested-open semantics, and
 native click targeting after a cross-target press. Authored autofocus and
 explicit close now use the shared native focus transition. Dialogs choose a
 sequential control or the dialog itself as a fallback. Popovers save focus
-for the first automatic or hint entry. Close watchers, dialog inertness,
-keyboard focus order and top-layer rendering (Radiant
-RI-029) remain open.
+for the first automatic or hint entry. Dialogs and popovers now share the
+native document top layer (Radiant RI-029). Modal focus and pointer hit
+testing follow flat-tree inertness, and nested modals restore focus to the
+previous modal on close. The pinned inert, showModal, removal and requestClose
+fixtures pass all 87 subtests. Native close watchers, complete keyboard
+focus order and overlay transition lifetimes remain open
+(**D9.1.1v4 / D9.1.3v2 / D9.5.6v2**).
+
+The pinned dialog focus matrix passes 42/50. Its eight remaining cases
+exercise delegatesFocus ordering across a shadow host and sibling controls.
+The previous-focus fixture passes 4/5. Its remaining case expects restoration
+for a light-tree button slotted into a non-modal dialog. The current close
+algorithm uses shadow-including ancestry for non-modal restoration
+(**D9.1.3v2 / D9.5.6v2**).
+[HTML dialog close algorithm](https://html.spec.whatwg.org/multipage/interactive-elements.html#close-the-dialog)
 
 ### JS13-L12 — Dialog form submission and submitter values — **PARTIAL**
 
@@ -632,8 +647,8 @@ GET activation, `requestSubmit()` and direct `submit()` share URL construction.
 It resolves the action against the document base, replaces the query before
 the fragment, preserves an empty query and encodes file names and CRLF only
 for serialization. The current navigation waist updates the selected
-document's URL. Planned navigation, document loading and HTTP POST transport
-remain open (**D9.1.3v2 / D9.5.6v2**).
+document's URL. Legacy form encodings, named controls that shadow form
+methods, and full POST navigation are deferred (**D9.1.3v2 / D9.5.6v2**).
 
 ### JS13-L11 — Until-found reflection, rendering and fragment reveal — **PARTIAL**
 
@@ -829,8 +844,8 @@ Raster and vector paint enter the shadow child list already used by layout,
 and stacking replay crosses the host boundary. Controls cover open and closed
 roots, document stylesheet isolation, empty-root suppression of light children,
 and a positive z-index inside a shadow tree. PNG, SVG and PDF paint the supplied
-text and fill. Declarative roots and the original Lit applications remain
-unqualified (**D9.1.1v4 / D9.1.3v2**).
+text and fill. The original Lit applications remain unqualified
+(**D9.1.1v4 / D9.1.3v2**).
 The same goal added composed root lookup plus live named-slot queries for
 elements and text. Closed roots expose neither `host.shadowRoot` nor a light
 node's `assignedSlot`. Sequence reads cover nested fallback flattening and
@@ -872,8 +887,17 @@ in source order. `ShadowRoot.styleSheets` is a live, same-object list using the
 same traversal. These sheets stay out of `document.styleSheets`. CSSOM edits,
 text changes, media changes, moves between roots and host insertion update the
 computed style and PNG paint. Selector parent relations stop at the shadow
-fragment boundary. Scoped linked and adopted sheets, shadow name registries,
-`:host` and `::slotted` remain open (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+fragment boundary. Initial scoped link styles also enter the root cascade.
+Live linked-sheet lifecycle, adopted sheets, shadow name registries, `:host`
+and `::slotted` remain open (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+
+Declarative templates attach in navigation and explicit unsafe HTML parsing
+through the shared DOM root provider (Input LI-081). Root flags, closed
+access, matching-mode imperative hydration, cloning and opt-in HTML
+serialization have focused checks. The pinned attachment, basic and repeat
+fixtures pass all 674 subtests. Closed manual declarative assignment through
+`ElementInternals`, `Range.createContextualFragment()`, and streaming parser
+behavior remain open (**D9.1.1v4 / D9.1.3v2 / D6.3.3**).
 
 Focus survives native reflow through connected shadow hosts. The document's
 `activeElement` reports the outer host, and each root's `activeElement` reports

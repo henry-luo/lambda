@@ -1121,7 +1121,7 @@ static Item pdf_walk(Item path_item, Item options_item,
     RenderWalkState walk = {};
     walk.x = session.page_content_x; walk.y = session.page_content_y;
     walk.font = ctx.font; walk.color = ctx.color; walk.ui_context = lam::up(session.ui_context.get());
-    render_walk_view_one(&backend, &walk, session.document->view_tree->root);
+    render_walk_document(&backend, &walk, session.document->view_tree);
     pdf_walk_dispatch(&ctx, "end_page");
     if (get_type_id(error.get()) == LMD_TYPE_ERROR) return error.get();
     if (!pdf_walk_page_finish(&ctx)) return error.get();

@@ -2,6 +2,8 @@ import m: ~~.mod_model
 import files: ~~.mod_io
 import sizing: ~~.mod_resize
 
+function() {
+
 let st=m.initial()
 m.dimension(m.current(st),"column",0)==220
 m.dimension(m.current(st),"column",1)==150
@@ -50,3 +52,5 @@ match (files.restore(invalid({row_heights:{'5':-1}})) ^ { ^ }) { case error: tru
 match (files.restore(invalid({column_widths:{'20':100}})) ^ { ^ }) { case error: true default: false }
 match (files.restore(invalid({row_heights:{'05':40}})) ^ { ^ }) { case error: true default: false }
 match (files.restore(invalid({row_heights:[40]})) ^ { ^ }) { case error: true default: false }
+
+}

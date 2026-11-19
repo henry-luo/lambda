@@ -45,6 +45,7 @@
 #include "lambda/io/mark_builder.hpp"
 #include "lambda/io/mark_editor.hpp"
 #include "lambda/core/mark_reader.hpp"
+#include "lambda/format/html-defs.h"
 #include "../module/radiant/radiant_input_value.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "radiant/select_options.hpp"
@@ -324,7 +325,7 @@ static Html5Parser* dom_create_fragment_parser(DomDocument* doc,
 }
 
 static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
-                                      bool notify_mutation);
+                                   bool notify_mutation, bool declarative = false);
 
 static String* dom_fragment_text(Item item) {
     String* s = it2s(item);
@@ -347,6 +348,8 @@ static void dom_set_fragment_script_state(DomElement* root, DomFragmentScriptMod
         // A parser-inserted template holds a separate, unscheduled source tree.
         bool descend = element && (mode == DomFragmentScriptMode::inert ||
             !dom_element_is_html_tag(element, MARKUP_NAME_TEMPLATE));
+        if (element && element->shadow_root_element())
+            dom_set_fragment_script_state(element->shadow_root_element(), mode);
         node = descend && element->first_child ? element->first_child.get() : dom_next_after_subtree(root, node);
     }
 }
@@ -1156,11 +1159,14 @@ static Item dom_hide_popover(DomElement* element, DomElement* source, unsigned f
 
 static void dom_remove_popup_visibility(DomElement* element, void*) {
     if (!element->ext) return;
+    bool was_modal = element->is_dialog_modal();
     // Removing a popup silently clears live visibility before adoption or reinsertion.
     if (element->is_popover_open())
         dom_hide_popover(element, nullptr, DOM_POPOVER_CLOSE_REMOVED_ATTRIBUTE);
+    dom_top_layer_remove(element);
     element->ext->dialog_modal = false;
     element->ext->dialog_previous_focus = {};
+    if (was_modal && element->doc) dom_recheck_focus_in(element->doc->root);
 }
 
 static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
@@ -3796,6 +3802,7 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     Html5Parser* parser = dom_create_fragment_parser(doc);
     Html5ParserScope parser_scope(parser);
     if (!parser) return;
+    parser->allow_declarative_shadow_roots = true;
     html5_fragment_parse(parser, srcdoc);
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return;
@@ -3886,28 +3893,14 @@ static Item dom_parser_parse_xml(const char* source) {
     return wrap_foreign_doc(xml_document);
 }
 
-extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
-    const char* source = fn_to_cstr(source_item);
-    const char* type = fn_to_cstr(type_item);
-    if (!source) source = "";
-    if (!type) type = "text/html";
-    if (str_icmp_cstr(type, "text/html") != 0) {
-        if (str_icmp_cstr(type, "text/xml") == 0 ||
-            str_icmp_cstr(type, "application/xml") == 0 ||
-            str_icmp_cstr(type, "image/svg+xml") == 0 ||
-            str_icmp_cstr(type, "application/xhtml+xml") == 0) {
-            return dom_parser_parse_xml(source);
-        }
-        return dom_raise_type_error("Unsupported DOMParser MIME type");
-    }
-
+static Item dom_parse_html_document(const char* source, bool declarative) {
     Input* parent = _js_current_document ? _js_current_document->input : nullptr;
     if (!parent) return ItemNull;
     Input* input = Input::create(parent->pool, nullptr, parent);
     if (!input) return ItemNull;
     // HTML DOM construction requires the parser's embedded node storage.
     input->ui_mode = true;
-    Html5ParseOptions options = {.track_source_lines = false, .scripting_disabled = true};
+    Html5ParseOptions options = {.scripting_disabled = true, .allow_declarative_shadow_roots = declarative};
     // DOMParser parses a document: a body-fragment parse relocates head metadata
     // into body and prevents navigation consumers from merging titles/assets.
     Element* parsed = html5_parse_ex(input, source, &options);
@@ -3922,9 +3915,40 @@ extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
     DomElement* root = build_dom_tree_from_element(html, document, nullptr);
     if (!root) { free_document(document); return ItemNull; }
     document->root = lam::up(root);
+    dom_set_fragment_script_state(root, DomFragmentScriptMode::inert);
     return wrap_foreign_doc(document);
 }
 
+extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
+    const char* source = fn_to_cstr(source_item);
+    const char* type = fn_to_cstr(type_item);
+    if (!source) source = "";
+    if (!type || str_icmp_cstr(type, "text/html") == 0)
+        return dom_parse_html_document(source, false);
+    if (str_icmp_cstr(type, "text/xml") == 0 ||
+        str_icmp_cstr(type, "application/xml") == 0 ||
+        str_icmp_cstr(type, "image/svg+xml") == 0 ||
+        str_icmp_cstr(type, "application/xhtml+xml") == 0)
+        return dom_parser_parse_xml(source);
+    return dom_raise_type_error("Unsupported DOMParser MIME type");
+}
+
+static Item dom_check_unsafe_html_options(Item options) {
+    if (options.item == ITEM_NULL || is_js_undefined(options)) return make_js_undefined();
+    if (!js_is_object_value(options)) return dom_raise_type_error("HTML options must be an object");
+    Item sanitizer = dom_realm_get_cstr(options, "sanitizer");
+    JS_RETURN_IF_ERROR(sanitizer);
+    return is_js_undefined(sanitizer) ? make_js_undefined() :
+        dom_raise_type_error("HTML sanitizer options are unsupported");
+}
+
+Item dom_parse_html_unsafe(Item markup, Item options) {
+    JS_ROOTS(roots, source, markup, dictionary, options);
+    source.set(js_to_string(source.get()));
+    JS_RETURN_IF_ERROR(source.get());
+    JS_RETURN_IF_ERROR(dom_check_unsafe_html_options(dictionary.get()));
+    return dom_parse_html_document(fn_to_cstr(source.get()), true);
+}
 
 
 // iframe.contentDocument / contentWindow accessors.
@@ -5171,6 +5195,7 @@ static Item dom_hide_popover(DomElement* element, DomElement* invoker, unsigned 
     state->popover_opened_mode = DOM_POPOVER_NONE;
     state->popover_order = 0;
     element->set_popover_open(false);
+    dom_top_layer_remove(element);
     if (fire_events) dom_queue_toggle_task(
         element, target.get(), source.get(), DOM_POPOVER_TOGGLE, false);
     dom_mutation_notify(DOM_JS_MUTATION_STYLE, element, element->parent,
@@ -5227,11 +5252,15 @@ static Item dom_show_popover(DomElement* element, DomElement* invoker, bool thro
         auto* stack = dom_popover_stack(popovers, opened_mode);
         uint64_t order = ++popovers.sequence;
         if (!stack->push_back({dom_node_ref(element), order, {}})) return ItemError;
+        if (!dom_top_layer_add(element, invoker)) {
+            stack->remove(stack->size() - 1);
+            return ItemError;
+        }
         state->popover_order = order;
         if (opened_mode == DOM_POPOVER_HINT && !boundary.hint &&
             dom_popover_stack_entry(&popovers.automatic, boundary.automatic))
             popovers.hint_parent = boundary.automatic;
-    }
+    } else if (!dom_top_layer_add(element, invoker)) return ItemError;
     state->popover_attribute_mode = mode;
     state->popover_opened_mode = opened_mode;
     element->set_popover_open(true);
@@ -5312,6 +5341,7 @@ static void dom_rebind_open_popover(DomElement* element, void* userdata) {
     auto* entry = dom_popover_stack_entry(
         dom_popover_stack(rebuild->popovers, next->popover_opened_mode), next->popover_order);
     if (entry) entry->ref = dom_node_ref(candidate);
+    dom_top_layer_rebind(element, candidate);
     previous->popover_open = false;
     previous->popover_order = 0;
     previous->popover_opened_mode = DOM_POPOVER_NONE;
@@ -5610,7 +5640,7 @@ static int dom_default_tab_index(DomElement* elem) {
 }
 
 static bool dom_is_script_focusable(DomElement* elem) {
-    if (!elem || !dom_node_is_connected((DomNode*)elem)) return false;
+    if (!elem || !dom_node_is_connected((DomNode*)elem) || dom_node_is_inert(elem)) return false;
     if (dom_engine_content_hidden_for_user_agent(elem)) return false;
     // the rendering provider accounts for CSS overrides of the hidden attribute.
     const DomStyleEngineOps* style = dom_style_engine_ops();
@@ -5650,7 +5680,7 @@ static void dom_focus_open_popup(DomElement* element) {
              node = dom_source_next_in_tree(element, node)) {
             DomElement* descendant = node->as_element();
             if (descendant && descendant->has_attribute("autofocus") &&
-                !dom_node_is_inert(descendant) && dom_is_script_focusable(descendant)) {
+                dom_is_script_focusable(descendant)) {
                 candidate = descendant;
                 break;
             }
@@ -6052,14 +6082,57 @@ static void collect_html_text_value(const char* value, size_t length,
     }
 }
 
-static void collect_inner_html(DomNode* node, StrBuf* sb) {
+struct DomShadowSerialization {
+    bool serializable = false;
+    lam::ArrayList<DomElement*> explicit_roots{MEM_CAT_DOM, 0};
+};
+
+static void collect_inner_html(DomNode* node, StrBuf* sb,
+                               const DomShadowSerialization* shadows = nullptr);
+
+static void collect_html_children(DomElement* element, StrBuf* buffer,
+                                  const DomShadowSerialization* shadows) {
+    DomElement* root = shadows ? element->shadow_root_element() : nullptr;
+    if (root) {
+        const DomElementExt* state = root->ext;
+        bool selected = shadows->serializable && state->shadow_serializable;
+        for (DomElement* explicit_root : shadows->explicit_roots)
+            if (root == explicit_root) { selected = true; break; }
+        if (selected) {
+            strbuf_append_str(buffer, state->shadow_closed
+                ? "<template shadowrootmode=\"closed\"" : "<template shadowrootmode=\"open\"");
+            if (state->shadow_delegates_focus) strbuf_append_str(buffer, " shadowrootdelegatesfocus=\"\"");
+            if (state->shadow_serializable) strbuf_append_str(buffer, " shadowrootserializable=\"\"");
+            if (state->shadow_clonable) strbuf_append_str(buffer, " shadowrootclonable=\"\"");
+            if (state->shadow_manual_slot_assignment) strbuf_append_str(buffer, " shadowrootslotassignment=\"manual\"");
+            strbuf_append_char(buffer, '>');
+            collect_html_children(root, buffer, shadows);
+            strbuf_append_str(buffer, "</template>");
+        }
+    }
+    for (DomNode* child = dom_first_script_visible_child(element); child;
+         child = dom_next_script_visible_sibling(child)) collect_inner_html(child, buffer, shadows);
+}
+
+static void collect_inner_html(DomNode* node, StrBuf* sb, const DomShadowSerialization* shadows) {
     if (!node) return;
     if (dom_is_generated_pseudo_node(node)) return;
 
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (text->text && text->length > 0) {
-            collect_html_text_value(text->text, text->length, sb);
+            DomNode* parent_node = dom_source_parent(node);
+            DomElement* parent = parent_node ? parent_node->as_element() : nullptr;
+            NameId name = parent ? parent->tag() : NAME_ID_NONE;
+            // raw text must round-trip through the shadow template without entity expansion.
+            if (parent && name != MARKUP_NAME_TITLE && name != MARKUP_NAME_TEXTAREA &&
+                (name != MARKUP_NAME_NOSCRIPT || dom_doc_has_browsing_context(parent->doc)) &&
+                !strcmp(dom_element_namespace_uri(parent), "http://www.w3.org/1999/xhtml") &&
+                html_is_raw_text_element_id(name, parent->tag_name, strlen(parent->tag_name))) {
+                strbuf_append_str_n(sb, text->text, text->length);
+            } else {
+                collect_html_text_value(text->text, text->length, sb);
+            }
         }
         return;
     }
@@ -6104,8 +6177,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
         }
         strbuf_append_char(sb, '>');
         if (dom_serializes_html_void(elem)) return;
-        for (DomNode* child = dom_first_script_visible_child(elem); child;
-             child = dom_next_script_visible_sibling(child)) collect_inner_html(child, sb);
+        collect_html_children(elem, sb, shadows);
         strbuf_append_all(sb, 2, "</", tag);
         strbuf_append_char(sb, '>');
     }
@@ -6164,17 +6236,21 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
 // nodes to `target`. Shared by the innerHTML setter and dom_core_parse_fragment
 // (ES39 core `parse_fragment`): one parse loop, two callers.
 static bool dom_parse_markup_into(DomElement* target, const char* html_str,
-                                  bool notify_mutation, DomElement* context = nullptr) {
+                                  bool notify_mutation, DomElement* context = nullptr,
+                                  bool declarative = false) {
     DomDocument* doc = target ? target->doc : nullptr;
     if (!doc || !doc->input) return false;
-    Html5Parser* parser = dom_create_fragment_parser(doc, context ? context : target);
+    if (!context) context = target->shadow_host_element();
+    if (!context) context = target;
+    Html5Parser* parser = dom_create_fragment_parser(doc, context);
     Html5ParserScope parser_scope(parser);
     if (!parser) return false;
+    parser->allow_declarative_shadow_roots = declarative;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return false;
     for (int64_t i = 0; i < body_elem->length; i++) {
-        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context ? context : target);
+        DomNode* child = dom_build_fragment_node(body_elem->items[i], doc, context);
         if (!child || !dom_parser_move_child(target, child)) continue;
         dom_post_insert(target, child, notify_mutation);
         dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
@@ -6185,7 +6261,7 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
 
 
 static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
-                                      bool notify_mutation) {
+                                   bool notify_mutation, bool declarative) {
     if (!elem || !html_str) return false;
     elem = dom_prepare_children_for_mutation(elem);
     if (!elem) return false;
@@ -6210,7 +6286,7 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     }
 
     if (html_str[0] != '\0' || elem->tag() == MARKUP_NAME_HTML) {
-        if (!dom_parse_markup_into(elem, html_str, notify_mutation)) return false;
+        if (!dom_parse_markup_into(elem, html_str, notify_mutation, nullptr, declarative)) return false;
     }
 
     dom_register_named_elements(elem);
@@ -6222,6 +6298,19 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     log_debug("dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return true;
+}
+
+Item dom_set_html_unsafe(Item receiver, Item markup, Item options, bool shadow) {
+    JS_ROOTS(roots, owner, receiver, source, markup, dictionary, options);
+    DomNode* node = (DomNode*)dom_unwrap_element(owner.get());
+    DomElement* element = node ? node->as_element() : nullptr;
+    if (!element || (shadow ? !element->shadow_host_element() : !dom_is_element(owner.get())))
+        return dom_raise_type_error(shadow ? "ShadowRoot receiver required" : "Element receiver required");
+    source.set(js_to_string(source.get()));
+    JS_RETURN_IF_ERROR(source.get());
+    JS_RETURN_IF_ERROR(dom_check_unsafe_html_options(dictionary.get()));
+    return dom_replace_inner_html(element, fn_to_cstr(source.get()), true, true)
+        ? make_js_undefined() : ItemError;
 }
 
 // ES39 core `parse_fragment(context, markup)`: the markup is parsed in the
@@ -6263,6 +6352,9 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     Html5Parser* parser = dom_create_fragment_parser(doc, context);
     Html5ParserScope parser_scope(parser);
     if (!parser) return nullptr;
+    // a parser-owned write insertion point inherits the navigation opt-in.
+    parser->allow_declarative_shadow_roots =
+        script_mode == DomFragmentScriptMode::parser_inserted && doc->js.write_cursor;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
     if (!body_elem) return nullptr;
@@ -8457,8 +8549,9 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
     dom_clear_direct_element_ref(elem, attr_name);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
-    // attribute writes share reflected disabled-property focus semantics.
-    if (str_icmp_cstr(attr_name, "disabled") == 0) dom_recheck_focus_in(elem);
+    // a newly inert subtree must release focus at the attribute mutation.
+    if (str_ieq_cstr(attr_name, "disabled") || str_ieq_cstr(attr_name, "inert"))
+        dom_recheck_focus_in(elem);
     if (_is_tag(elem, "option") && str_icmp_cstr(attr_name, "selected") == 0) {
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
@@ -10129,11 +10222,48 @@ extern "C" Item dom_fp_inner_html(Item n) {
     // Serialization is an Element operation; CharacterData has no markup face.
     if (!node || !node->is_element()) return ItemNull;
     StrBuf* sb = strbuf_new_cap(256);
-    for (DomNode* child = dom_first_script_visible_child(node->as_element()); child;
-         child = dom_next_script_visible_sibling(child)) {
-        collect_inner_html(child, sb);
-    }
+    collect_html_children(node->as_element(), sb, nullptr);
     return dom_serialized_item(sb);
+}
+
+Item dom_get_html(Item receiver, Item options, bool shadow) {
+    JS_ROOTS(roots, owner, receiver, dictionary, options, sequence, make_js_undefined(),
+        iterator, ItemNull, selected, ItemNull, kept_wrappers, ItemNull);
+    DomNode* node = (DomNode*)dom_unwrap_element(owner.get());
+    DomElement* element = node ? node->as_element() : nullptr;
+    if (!element || (shadow ? !element->shadow_host_element() : !dom_is_element(owner.get())))
+        return dom_raise_type_error(shadow ? "ShadowRoot receiver required" : "Element receiver required");
+    Item serializable = dom_optional_dictionary_boolean(dictionary.get(), "serializableShadowRoots");
+    JS_RETURN_IF_ERROR(serializable);
+    DomShadowSerialization shadows;
+    shadows.serializable = js_is_truthy(serializable);
+    if (dictionary.get().item != ITEM_NULL && !is_js_undefined(dictionary.get())) {
+        sequence.set(dom_realm_get_cstr(dictionary.get(), "shadowRoots"));
+        JS_RETURN_IF_ERROR(sequence.get());
+    }
+    if (!is_js_undefined(sequence.get())) {
+        if (!js_is_object_value(sequence.get())) return dom_raise_type_error("shadowRoots must be a sequence");
+        iterator.set(js_get_iterator(sequence.get()));
+        JS_RETURN_IF_ERROR(iterator.get());
+        kept_wrappers.set(js_array_new(0));
+        for (;;) {
+            selected.set(js_iterator_step(iterator.get()));
+            JS_RETURN_IF_ERROR(selected.get());
+            if (selected.get().item == JS_ITER_DONE_SENTINEL) break;
+            DomNode* value = (DomNode*)dom_unwrap_element(selected.get());
+            DomElement* root = value ? value->as_element() : nullptr;
+            if (!root || !root->shadow_host_element()) {
+                js_iterator_close(iterator.get());
+                return dom_raise_type_error("shadowRoots must contain ShadowRoot values");
+            }
+            JS_RETURN_IF_ERROR(js_array_push(kept_wrappers.get(), selected.get()));
+            if (!shadows.explicit_roots.push_back(root)) return ItemError;
+        }
+    }
+    StrBuf* buffer = strbuf_new_cap(256);
+    if (!buffer) return ItemError;
+    collect_html_children(element, buffer, &shadows);
+    return dom_serialized_item(buffer);
 }
 
 extern "C" Item dom_fp_outer_html(Item n) {
@@ -12788,6 +12918,10 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
             RdtLogicalPoint parent_origin = dom_node_document_origin(
                 static_cast<View*>(offset_parent));
             value -= x_axis ? parent_origin.x : parent_origin.y;
+            // CSSOM View measures from the offset parent's padding edge.
+            const BoundaryProp* boundary = dom_engine_boundary_property(offset_parent);
+            if (boundary && boundary->border)
+                value -= x_axis ? boundary->border->width.left : boundary->border->width.top;
         }
     }
     return (int64_t)value;
@@ -12796,7 +12930,7 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
 static bool dom_element_from_point_skips_subtree(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     // fallback geometry must not resurrect a subtree rejected by the engine's face test.
-    if (dom_engine_hit_test_skips_subtree(elem)) return true;
+    if (dom_node_is_inert(elem) || dom_engine_hit_test_skips_subtree(elem)) return true;
     return _is_tag(elem, "head") ||
         _is_tag(elem, "style") ||
         _is_tag(elem, "script") ||
@@ -14063,13 +14197,24 @@ static DomNode* dom_clone_node_into_document(DomNode* node,
     // DOM cloning must not copy source-bound wrapper caches; their host_data would
     // make clone.classList/style writes mutate the original element.
     clone->tag_id = elem->tag_id;
-    if (deep) {
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+    auto clone_children = [&](DomElement* source, DomElement* target) {
+        for (DomNode* child = source->first_child; child; child = child->next_sibling) {
             if (include_child && !include_child(child)) continue;
             DomNode* cloned_child = dom_clone_node_into_document(child, destination, true, include_child);
             // keep comment, text and element order through the shared backed insertion path.
-            if (!cloned_child || !dom_append_backed_child(clone, cloned_child, false)) return nullptr;
+            if (!cloned_child || !dom_append_backed_child(target, cloned_child, false)) return false;
         }
+        return true;
+    };
+    if (deep && !clone_children(elem, clone)) return nullptr;
+    DomElement* shadow = elem->shadow_root_element();
+    if (shadow && shadow->ext->shadow_clonable) {
+        const DomElementExt* state = shadow->ext;
+        DomElement* shadow_copy = dom_attach_shadow_root(clone, {
+            state->shadow_closed, state->shadow_delegates_focus, state->shadow_manual_slot_assignment,
+            true, state->shadow_serializable, state->shadow_declarative,
+        });
+        if (!shadow_copy || !clone_children(shadow, shadow_copy)) return nullptr;
     }
     return clone;
 }
@@ -15413,16 +15558,36 @@ static Item dom_html_hidden_set(Item, Item receiver, Item* args, int count, uint
 }
 
 static void dom_install_html_accessor(Item prototype, const char* property,
-                                       JsNativeCallBody read, JsNativeCallBody write) {
+                                       JsNativeCallBody read, JsNativeCallBody write,
+                                       uint64_t payload = 0) {
     RootFrame roots(4);
     Rooted<Item> owner(roots, prototype), name(roots, js_name_item(property));
-    Rooted<Item> getter(roots, js_new_native_payload_function(read, 0, 0));
-    Rooted<Item> setter(roots, js_new_native_payload_function(write, 0, 1));
+    Rooted<Item> getter(roots, js_new_native_payload_function(read, payload, 0));
+    Rooted<Item> setter(roots, js_new_native_payload_function(write, payload, 1));
     dom_realm_install_accessor(owner.get(), name.get(), getter.get(), setter.get(), 0);
 }
 
 void dom_install_html_hidden(Item prototype) {
     dom_install_html_accessor(prototype, "hidden", dom_html_hidden_get, dom_html_hidden_set);
+}
+
+static Item dom_html_inert_get(Item, Item receiver, Item*, int, uint64_t*) {
+    DomElement* element = dom_html_element_receiver(receiver);
+    if (!element) return dom_raise_type_error("HTMLElement receiver required");
+    return (Item){.item = b2it(element->has_attribute("inert"))};
+}
+
+static Item dom_html_inert_set(Item, Item receiver, Item* args, int count, uint64_t*) {
+    RootFrame roots(2);
+    Rooted<Item> target(roots, receiver), name(roots, js_name_item("inert"));
+    if (!dom_html_element_receiver(target.get())) return dom_raise_type_error("HTMLElement receiver required");
+    return count && js_is_truthy(args[0])
+        ? dom_core_set_attribute_ns(target.get(), ItemNull, name.get(), js_name_item(""))
+        : dom_core_remove_attribute_ns(target.get(), ItemNull, name.get());
+}
+
+void dom_install_html_inert(Item prototype) {
+    dom_install_html_accessor(prototype, "inert", dom_html_inert_get, dom_html_inert_set);
 }
 
 static Item dom_html_popover_get(Item, Item receiver, Item*, int, uint64_t*) {
@@ -15506,6 +15671,53 @@ void dom_install_html_button_properties(Item prototype) {
     dom_install_html_accessor(prototype, "type", dom_html_button_type_get, dom_html_button_type_set);
     dom_install_html_accessor(prototype, "command", dom_html_command_get, dom_html_command_set);
     dom_install_html_accessor(prototype, "commandForElement", dom_html_command_for_get, dom_html_command_for_set);
+}
+
+static constexpr struct {
+    const char* property;
+    const char* attribute;
+    const char* first_value;
+    const char* second_value;
+    const char* default_value;
+} k_template_shadow_attrs[] = {
+    {"shadowRootMode", "shadowrootmode", "open", "closed", ""},
+    {"shadowRootDelegatesFocus", "shadowrootdelegatesfocus", nullptr, nullptr, nullptr},
+    {"shadowRootClonable", "shadowrootclonable", nullptr, nullptr, nullptr},
+    {"shadowRootSerializable", "shadowrootserializable", nullptr, nullptr, nullptr},
+    {"shadowRootSlotAssignment", "shadowrootslotassignment", "named", "manual", "named"},
+};
+
+static Item dom_template_shadow_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    auto& entry = k_template_shadow_attrs[js_fn_native((JsFunction*)callee.function)->target.bits];
+    DomElement* element = dom_html_element_receiver(receiver);
+    if (!dom_element_is_html_tag(element, MARKUP_NAME_TEMPLATE))
+        return dom_raise_type_error("HTMLTemplateElement receiver required");
+    const char* raw = dom_element_attribute_value_ns(element, "", entry.attribute);
+    if (!entry.first_value) return (Item){.item = b2it(raw != nullptr)};
+    if (raw && str_ieq_cstr(raw, entry.first_value)) return js_name_item(entry.first_value);
+    if (raw && str_ieq_cstr(raw, entry.second_value)) return js_name_item(entry.second_value);
+    return js_name_item(entry.default_value);
+}
+
+static Item dom_template_shadow_set(Item callee, Item receiver, Item* args, int count, uint64_t*) {
+    auto& entry = k_template_shadow_attrs[js_fn_native((JsFunction*)callee.function)->target.bits];
+    JS_ROOTS(roots, owner, receiver, value, count ? args[0] : make_js_undefined(),
+        attribute, js_name_item(entry.attribute));
+    if (!dom_element_is_html_tag(dom_html_element_receiver(owner.get()), MARKUP_NAME_TEMPLATE))
+        return dom_raise_type_error("HTMLTemplateElement receiver required");
+    if (!entry.first_value && !js_is_truthy(value.get()))
+        return dom_core_remove_attribute_ns(owner.get(), ItemNull, attribute.get());
+    value.set(entry.first_value ? js_to_string(value.get()) : js_name_item(""));
+    JS_RETURN_IF_ERROR(value.get());
+    return dom_core_set_attribute_ns(owner.get(), ItemNull, attribute.get(), value.get());
+}
+
+void dom_install_html_template_properties(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, prototype);
+    for (size_t i = 0; i < sizeof(k_template_shadow_attrs) / sizeof(*k_template_shadow_attrs); i++)
+        dom_install_html_accessor(owner.get(), k_template_shadow_attrs[i].property,
+            dom_template_shadow_get, dom_template_shadow_set, i);
 }
 
 extern "C" Item dom_core_has_attribute(Item n, Item name) {
@@ -15702,6 +15914,8 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
     Rooted<Item> receiver_root(roots, n), init_root(roots, init), option(roots, ItemNull);
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
+    Item clonable = dom_optional_dictionary_boolean(init_root.get(), "clonable");
+    if (item_is_error(clonable)) return clonable;
     Item delegates_focus = dom_optional_dictionary_boolean(init_root.get(), "delegatesFocus");
     if (item_is_error(delegates_focus)) return delegates_focus;
     option.set(dom_realm_get_cstr(init_root.get(), "mode"));
@@ -15712,6 +15926,8 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
     bool closed = mode && strcmp(mode, "closed") == 0;
     if (!closed && (!mode || strcmp(mode, "open") != 0))
         return dom_raise_type_error("ShadowRoot mode must be open or closed");
+    Item serializable = dom_optional_dictionary_boolean(init_root.get(), "serializable");
+    if (item_is_error(serializable)) return serializable;
     option.set(dom_realm_get_cstr(init_root.get(), "slotAssignment"));
     if (item_is_error(option.get())) return option.get();
     bool manual = false;
@@ -15723,20 +15939,22 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
         if (!manual && (!assignment || strcmp(assignment, "named") != 0))
             return dom_raise_type_error("ShadowRoot slotAssignment must be named or manual");
     }
-    if (elem->shadow_root_element())
-        return dom_raise_exception("NotSupportedError", "Element already has a shadow root");
-
-    MarkBuilder builder(elem->doc ? elem->doc->input : nullptr);
-    Item frag_item = builder.element("#document-fragment").final();
-    DomElement* frag = dom_element_create(elem->doc, "#document-fragment", frag_item.element);
-    DomElementExt* state = frag ? frag->ensure_ext() : nullptr;
-    if (!state) return ItemError;
-    state->shadow_closed = closed;
-    state->shadow_delegates_focus = js_is_truthy(delegates_focus);
-    state->shadow_manual_slot_assignment = manual;
-    frag->set_shadow_host_element(elem);
-    elem->set_shadow_root_element(frag);
-    if (elem->doc) elem->doc->js.has_shadow_roots = true;
+    if (strcmp(dom_element_namespace_uri(elem), "http://www.w3.org/1999/xhtml") ||
+        !dom_html_shadow_host_name(elem->local_name()))
+        return dom_raise_exception("NotSupportedError", "Invalid shadow host");
+    if (DomElement* existing = elem->shadow_root_element()) {
+        if (!existing->ext->shadow_declarative || existing->ext->shadow_closed != closed)
+            return dom_raise_exception("NotSupportedError", "Element already has a shadow root");
+        // hydration retains root identity and options while removing its parsed children.
+        option.set(dom_wrap_element(existing));
+        existing->ext->shadow_declarative = false;
+        if (!dom_replace_inner_html(existing, "", true)) return ItemError;
+        return option.get();
+    }
+    DomElement* frag = dom_attach_shadow_root(elem, {
+        closed, js_is_truthy(delegates_focus), manual, js_is_truthy(clonable), js_is_truthy(serializable), false,
+    });
+    if (!frag) return ItemError;
 
     // Attaching even an empty shadow root replaces the rendered light children.
     dom_mutation_notify(DOM_JS_MUTATION_STYLE, elem, elem->parent);
@@ -15771,6 +15989,8 @@ Item dom_read_shadow_property(Item receiver, DomShadowProperty property) {
     }
     if (property == DomShadowProperty::slot_assignment)
         return js_name_item(element->ext->shadow_manual_slot_assignment ? "manual" : "named");
+    if (property == DomShadowProperty::clonable) return (Item){.item = b2it(element->ext->shadow_clonable)};
+    if (property == DomShadowProperty::serializable) return (Item){.item = b2it(element->ext->shadow_serializable)};
     return (Item){.item = b2it(element->ext->shadow_delegates_focus)};
 }
 
@@ -15896,17 +16116,26 @@ static Item dom_open_dialog(Item n, bool modal, Item invoker = ItemNull) {
         if (elem->is_dialog_modal() == modal) return make_js_undefined();
         return dom_raise_exception("InvalidStateError", "Dialog is already open in a different mode");
     }
-    if (modal && (!dom_node_is_connected(elem) || elem->is_popover_open()))
+    if (modal && (!dom_node_is_connected(elem) || elem->is_popover_open() ||
+        !dom_doc_has_browsing_context(elem->doc)))
         return dom_raise_exception("InvalidStateError", "Dialog cannot enter modal state");
     Item allowed = dom_dispatch_before_toggle(target.get(), source.get(), true);
     JS_RETURN_IF_ERROR(allowed);
     // The listener may have opened it, removed it, or shown it as a popover.
     if (allowed.item == ITEM_FALSE || elem->has_attribute("open") ||
-        (modal && (!dom_node_is_connected(elem) || elem->is_popover_open())))
+        (modal && (!dom_node_is_connected(elem) || elem->is_popover_open() ||
+            !dom_doc_has_browsing_context(elem->doc))))
         return make_js_undefined();
-    if (!elem->set_attribute("open", "")) return ItemError;
+    DomElement* invoker_element = dom_op_element(source.get());
+    if (modal && !dom_top_layer_add(elem, invoker_element)) return ItemError;
+    if (!elem->set_attribute("open", "")) {
+        if (modal) dom_top_layer_remove(elem);
+        return ItemError;
+    }
     elem->set_dialog_modal(modal);
     if (elem->ext) elem->ext->dialog_previous_focus = dom_node_ref(dom_document_focused_target(elem->doc));
+    // drop a newly inert focus before recording reflow or dispatching popup events.
+    if (modal && elem->doc) dom_recheck_focus_in(elem->doc->root);
     dom_queue_toggle_task(elem, target.get(), source.get(), DOM_DIALOG_TOGGLE, true);
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent, "open");
     dom_hide_popovers_for_dialog(elem);
@@ -15943,7 +16172,9 @@ static Item dom_dialog_close_open(DomElement* elem, Item target, Item returned, 
         previous_focus = elem->ext->dialog_previous_focus;
     const char* open_value = elem->get_attribute("open");
     elem->set_dialog_modal(false);
+    dom_top_layer_remove(elem);
     elem->remove_attribute("open");
+    if (dom_top_modal_dialog(document)) dom_recheck_focus_in(document->root);
     dom_queue_toggle_task(elem, receiver.get(), source.get(), DOM_DIALOG_TOGGLE, false);
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, elem, elem->parent, "open", open_value);
     dom_restore_popup_focus(document, previous_focus);

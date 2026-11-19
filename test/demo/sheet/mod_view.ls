@@ -108,7 +108,7 @@ fn cell_view(st,sheet,row,col,bounds,fragment=null,sticky="") any^ {
     let raw=cell.raw or ""
     let computed=st.cache.values[source_address]
     let value=if (computed==null) "" else computed
-    let style=conditional.style(sheet,source.row,source.col,value,cell.style or EMPTY_CELL_STYLE)^
+    let style=st.conditional_styles[source_address] or cell.style or EMPTY_CELL_STYLE
     let active=st.row==source.row and st.col==source.col
     let selected=virtual.contains(bounds,row,col)
     let corner=row==bounds.bottom and col==bounds.right and not st.editing
@@ -281,7 +281,31 @@ pub fn dialog(st) any^ => if (st.dialog=="") null else workspace_dialog.modal(
         <div class:"dialog-actions",button("dialog-cancel","Cancel");
             if (st.dialog=="replace") button("dialog-discard","Discard changes") else null;
             button("dialog-confirm",if (st.dialog=="replace") "Save first" else if (st.dialog=="open") "Open" else if (st.dialog=="rename") "Rename" else "Save",null,false,false,"primary")>])^
-pub fn workspace(st) any^ {
+// Calculate conditional styles before constructing elements, over the same
+// bounded windows used by the grid. Merged fragments use their anchor cell.
+function conditional_styles(st) any^ {
+    let sheet=m.indexed(st)
+    let axes=window.axes(st)^
+    let views=if (sheet.split==null) [st.viewport] else [for (name in m.split_names(sheet.split)^)
+        st.split_views[name] or {x:0.0,y:0.0,width:0.0,height:0.0}]
+    let frozen=sheet.frozen or {rows:0,cols:0}
+    let windows=[for (viewport in views,
+        let visible=window.visible(axes,viewport)^,
+        let rows=layout.segments(sheet,"row",axes.rows,visible.rows,frozen.rows)^,
+        let cols=layout.segments(sheet,"column",axes.columns,visible.columns,frozen.cols)^)
+        {rows:[*rows.fixed,*rows.scroll],cols:[*cols.fixed,*cols.scroll]}];
+    if (len(sheet.conditional_rules or [])==0) {} else {
+        // A merged cell can appear in more than one window. Evaluate its rules once.
+        let anchors=map([for (visible in windows,row in visible.rows,col in visible.cols,
+            let merge=m.merge_at(sheet,row,col)^,
+            let source_row=if (merge==null) row else merge.top,
+            let source_col=if (merge==null) col else merge.left)
+            *[f.address(source_row,source_col)^,[source_row,source_col]]]);
+        conditional.styles(sheet,anchors,EMPTY_CELL_STYLE)^
+    }
+}
+pub function workspace(input_state) any^ {
+    let st={*:input_state,conditional_styles:conditional_styles(input_state)^}
     let dirty=st.book!=st.saved
     let stats=m.stats(st);
     <body id:"sheet",class:"workspace-office",style:OFFICE_THEME,'data-dirty':string(dirty),'data-cell':f.address(st.row,st.col),'data-sheets':string(len(st.book.sheets)),'data-tab':st.tab,

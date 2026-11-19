@@ -1,10 +1,15 @@
-// Formula calls use pure registered Lambda functions (S12.3.4v2).
+// Formula calls use registered Lambda callables (S12.3.4v2, S12.1.4v7).
 import m: ~~.mod_model
 import f: ~~.mod_formula
 
+fn make_result(data) {
+    function result(expr) any^ => f.display(m.current(m.set_value(m.select(data,2,0),expr)),2,0)
+    result
+}
+function() {
 let initial=m.initial(m.blank())
 let data=m.paste(m.select(initial,0,0),"10\t20\n30\t40")
-let result=(expr) any^ => f.display(m.current(m.set_value(m.select(data,2,0),expr)),2,0);
+let result=make_result(data);
 [
  result("=SUM(A1:B2)")==100,
  result("=SUM(" ++ join(fill(16,"1"),",") ++ ")")==16,
@@ -82,3 +87,4 @@ let result=(expr) any^ => f.display(m.current(m.set_value(m.select(data,2,0),exp
  result("=IF(TRUE,1,NOTHING(1))")==1,
  result("=\"unterminated")=="#VALUE!"
 ]
+}

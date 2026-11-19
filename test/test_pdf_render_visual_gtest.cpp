@@ -1304,6 +1304,19 @@ TEST(RenderOutputParity, InlineElementBackgroundsReachSvgAndPdf) {
     }
 }
 
+TEST(RenderOutputParity, ModalTopLayerMatchesExplicitOverlayAcrossOutputs) {
+    const char* modal = "<!doctype html><style>body{margin:0;min-height:150px;background:red}"
+        "#clip{width:10px;height:10px;overflow:hidden;opacity:.25;transform:translate(60px,40px)}"
+        "dialog{position:fixed;inset:30px auto auto 40px;margin:0;padding:0;border:0;"
+        "width:60px;height:50px;background:lime}dialog::backdrop{background:blue}</style>"
+        "<div id=clip><dialog id=modal></dialog></div><script>document.getElementById('modal').showModal()</script>";
+    const char* reference = "<!doctype html><style>body{margin:0;min-height:150px;background:red}"
+        "#backdrop{position:fixed;inset:0;background:blue}"
+        "#foreground{position:fixed;left:40px;top:30px;width:60px;height:50px;background:lime}</style>"
+        "<div id=backdrop></div><div id=foreground></div>";
+    expect_colored_html_pair_output_parity("modal_top_layer", modal, reference, 1, 1, "-vw 200 -vh 150");
+}
+
 TEST(RenderOutputParity, ReferenceRasterizersMatchCommandLinePixels) {
     if (!reference_rasterizer().available(true) || !reference_rasterizer().available(false))
         GTEST_SKIP() << "optional shared rasterizer libraries are unavailable";
