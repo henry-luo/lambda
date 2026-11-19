@@ -1158,7 +1158,6 @@ Runtime* mvp_lmd_prepare_module_realm(void* owner) {
     realm->program = program;
     realm->host = execution->host;
     realm->runtime.eval_context = execution->owner_context;
-    realm->runtime.use_mir_direct = true;
     realm->runtime.optimize_level = 2;
     Runtime* parent = execution->host_runtime ? execution->host_runtime : execution->owned_runtime;
     if (parent) {

@@ -400,6 +400,13 @@ static inline bool ast_call_has_named_args(const AstCallNode* call) {
     return false;
 }
 
+// The named-argument adapter stages values without mutable caller homes.
+static inline bool ast_named_sys_args_supported(const AstNode* callee) {
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
+    const SysFuncInfo* info = ((const AstSysFuncNode*)callee)->fn_info;
+    return info && (!info->is_proc || info->is_async);
+}
+
 // explicit sized/u64 conversion calls use a Type producer, not a callable.
 static inline Type* ast_numeric_type_call_target(const AstCallNode* call) {
     if (!call || call->pipe_inject || !call->argument || call->argument->next) return NULL;
@@ -1503,8 +1510,6 @@ struct Script : Input {
     // Execution-local T0 lookups into this MIR module's exports (entry
     // address or `_gvar_` slot per declaration); never shared by clones.
     ArrayList* interp_mir_exports;
-    bool interp_whole_script_poc_attempted; // opt-in AUTO whole-module POC gate
-    bool interp_whole_script_poc_active;    // whole-module image published
     bool interp_views_registered;   // T0 view entries published in this context
     // Per-execution strings produced while registering an immutable AST
     // template. The parser-owned name pool stays frozen in the cache image
@@ -1542,21 +1547,11 @@ typedef struct Transpiler : Script {
     Runtime* runtime;
     // CW24 candidates belong to this compilation, including late MIR checks.
     NameEntry* place_copy_pending;
-    // The lazy whole-script POC runs MIR Direct while the T0 AST index is
-    // still needed by the active interpreter. Ordinary eager loading can
-    // release this index after code generation; the POC must retain it.
+    // Cached ASTs and native exports over an already-running T0 module
+    // must preserve the retained AST index (D8.2.4, D8.3.5).
     bool preserve_ast_index;
-    // Whole-script AUTO POC lowering addresses the already-planned T0 module
-    // slab, so MIR globals must use the same module-slot contract instead of
-    // creating an eager BSS layout (D8.3.1/D9.3.1).
+    // Satellites and resident native exports use the live T0 module slots.
     bool compile_against_interp_slab;
-    // Mark the full-image POC lowering so non-admitted local callees stay on
-    // the normal dynamic tier boundary while admitted recursion remains direct.
-    bool whole_script_poc;
-    // A native importer resolves public entries through generated addresses.
-    // Automatic MIR interpretation has no such ABI, so imported modules retain
-    // native code generation (D8.3.5).
-    bool requires_native_mir_exports;
 
     // Compiler unit resumes indexing into MIR; retained ASTs restart it.
     CompilerPassManager pass_manager;

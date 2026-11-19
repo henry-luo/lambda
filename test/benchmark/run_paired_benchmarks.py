@@ -28,8 +28,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..")
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "test/interp"))
 os.chdir(PROJECT_ROOT)
 
+from lambda_process import parse_interp_stats  # noqa: E402
 from run_benchmarks import (  # noqa: E402
     JETSTREAM_LJS,
     NAVIER_STOKES_DENSITY_ORACLE_V1,
@@ -129,20 +131,24 @@ def run_once(binary, script, timeout_s, language="lambda", tier="jit",
                             if not line.startswith('__TIMING__:')) if exact_stdout else normalized_stdout(stdout)
     stdout_hash = hashlib.sha256(stable_stdout.encode("utf-8")).hexdigest()
     stderr_hash = hashlib.sha256((stderr or "").encode("utf-8")).hexdigest()
+    strict_interp = language == "lambda" and tier == "interp"
+    interp_stats = parse_interp_stats(stderr) if strict_interp else None
+    exec_ms = None
     if timed_out:
         status = 'timeout'
     elif invalid_output:
         status = 'invalid_output'
     elif process.returncode != 0:
         status = f"exit_{process.returncode}"
+    elif strict_interp and (interp_stats is None or interp_stats[0] < 1 or interp_stats[1:] != (0, 0)):
+        status = "invalid_tier"
     else:
         exec_ms = parse_timing(stdout, strict=strict_timing)
         status = "ok" if exec_ms is not None else "invalid_timing" if strict_timing else "wall_fallback"
     result = {
         "status": status,
         "wall_ms": wall_ms,
-        "exec_ms": parse_timing(stdout, strict=strict_timing)
-            if process.returncode == 0 and not invalid_output and not timed_out else None,
+        "exec_ms": exec_ms,
         "returncode": process.returncode,
         "stdout_sha256": stdout_hash,
         "stderr_sha256": stderr_hash,
@@ -151,6 +157,8 @@ def run_once(binary, script, timeout_s, language="lambda", tier="jit",
             if expected_stdout_text is not None else None
         ),
     }
+    if strict_interp:
+        result["interp_stats"] = interp_stats
     if capture_output:
         result.update(stdout=stdout, stderr=stderr, stable_stdout=stable_stdout)
     return result
@@ -229,10 +237,10 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
         runtimes = {"control": control_js_runtime, "candidate": candidate_js_runtime}
         first = run_once(first_binary, first_script, timeout_s, language, tier,
                          expected_stdout_text, runtimes[first_label],
-                         strict_timing=True, capture_output=True)
+                         strict_timing=True, exact_stdout=tier == "interp", capture_output=True)
         second = run_once(second_binary, second_script, timeout_s, language, tier,
                           expected_stdout_text, runtimes[second_label],
-                          strict_timing=True, capture_output=True)
+                          strict_timing=True, exact_stdout=tier == "interp", capture_output=True)
         samples = {first_label: first, second_label: second}
         if pair_index < 0:
             warmup_records.append({"order": order, **samples})
@@ -496,7 +504,7 @@ def main():
         "--variants", choices=["untyped", "typed", "both"], default="both",
         help="Lambda script variants to compare (default: both)",
     )
-    parser.add_argument("--tier", choices=["jit", "auto"], default="jit",
+    parser.add_argument("--tier", choices=["jit", "auto", "interp"], default="jit",
                         help="Lambda execution tier for Lambda sources (default: jit)")
     parser.add_argument("--manifest", default=None,
                         help="JSON file containing explicit same-source or source-pair rows")
@@ -528,6 +536,8 @@ def main():
     if args.language != "js" and (args.control_js_runtime not in ("formal", "legacy") or
                                   args.candidate_js_runtime not in ("formal", "legacy")):
         parser.error("JavaScript runtime selection requires --language js")
+    if args.language == "js" and args.tier == "interp":
+        parser.error("--tier interp selects the Lambda AST interpreter and requires --language lambda")
 
     control = os.path.abspath(args.control)
     candidate = os.path.abspath(args.candidate)

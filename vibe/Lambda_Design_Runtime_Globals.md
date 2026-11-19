@@ -725,7 +725,7 @@ context-independent artifacts that are complete before one-time publication:
 - `dynamic_import_map` (already `__thread`, [mir.c:166](../lambda/runtime/mir.c)) → per-compilation
   state while linking; the frozen resolved import table may publish onto `Runtime`.
 - `tls_parser` ([runner.cpp:310](../lambda/runtime/runner.cpp)) → `Runtime::parser` already exists; reconcile.
-- `g_mir_interp_mode` ([mir.c:26](../lambda/runtime/mir.c)) — env-derived config read at compile time; tag I (set once at startup).
+- `g_mir_interp_diagnostic` ([mir.c](../lambda/runtime/mir.c)) — explicit Lambda CLI diagnostic, set at startup and captured once per compilation alongside the environment alias (D8.3.1v3).
 
 `EvalContext::runtime` (new back-pointer, RG2) gives execution-side code that needs script
 lookup its path without globals. Split the current module `registry_map`

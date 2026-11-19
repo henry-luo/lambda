@@ -68,13 +68,10 @@ public:
     ~RuntimeModuleStateScope();
 
     bool activate(uint32_t module_id);
-    // A document-level unit may retain its newly active slab (D9.3.1).
-    void retain_active() { restore_previous_ = false; }
 
 private:
     EvalContext* owner_;
     struct LambdaModuleState* previous_;
-    bool restore_previous_;
 };
 
 // A context-local lookup hint for generated Lambda entries. Unlike the
@@ -147,14 +144,8 @@ void lambda_module_state_release(uint32_t module_id);
 // are reused by a fresh heap generation.
 void lambda_module_state_release_from(uint32_t first_module_id);
 bool lambda_module_state_prepare_layout(struct LambdaModuleLayout* layout);
-bool lambda_module_state_link_property_keys(uint32_t module_id,
-    const struct PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size);
 // Validate and intern a sealed property-key image without publishing module
 // state. The initial JS closure uses this while its static root is still open.
-bool lambda_property_key_specs_prelink(const struct PropertyKeySpec* specs,
-    uint32_t count, uint32_t bytes_size);
-bool lambda_module_state_append_property_keys(uint32_t module_id,
-    const struct PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size);
 bool lambda_module_state_reserve(uint32_t var_count, uint32_t* out_module_id);
 // The active slab belongs to the EvalContext, not to a guest language. Lambda
 // and JS use this common growth path and therefore retain identical root-range
@@ -166,7 +157,6 @@ bool lambda_module_state_bind_static(uint32_t module_id, void* consts,
 // identity through the owning Runtime before touching the dense slab table.
 bool lambda_module_state_bind_static_for_unit(uint32_t unit_id, void* consts,
                                               void* type_list);
-uint32_t lambda_module_state_property_key_count(uint32_t module_id);
 Item lambda_name_id_to_item(NameId name_id);
 uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
 uint64_t lambda_active_module_name_id(uint32_t index);

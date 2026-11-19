@@ -77,33 +77,33 @@ protected:
     }
 };
 
-TEST(SysFuncRegistry, NativeBitwiseArgumentsUsePerSlotDescriptors) {
-    const SysFunc native_binary[] = {SYSFUNC_BAND, SYSFUNC_BOR, SYSFUNC_BXOR};
-    for (int index = 0; index < 3; index++) {
-        const SysFuncInfo* info = item_repr_sysfunc_info(native_binary[index]);
+TEST(SysFuncRegistry, CheckedBitwiseEntriesAndNativeSlotDescriptors) {
+    // D7.6.1: the public entries share the boxed kernels. The MIR emission
+    // fixtures cover the separate guarded native instructions.
+    const struct { SysFunc fn; int arity; const char* symbol; } checked[] = {
+        {SYSFUNC_BAND, 2, "fn_band_item"}, {SYSFUNC_BOR, 2, "fn_bor_item"},
+        {SYSFUNC_BXOR, 2, "fn_bxor_item"}, {SYSFUNC_BNOT, 1, "fn_bnot_item"},
+    };
+    for (const auto& entry : checked) {
+        const SysFuncInfo* info = item_repr_sysfunc_info(entry.fn);
         ASSERT_NE(info, nullptr);
-        ASSERT_EQ(info->arg_count, 2);
-        ASSERT_NE(info->c_arg_descs, nullptr);
-        EXPECT_EQ(sysfunc_arg_required_rep(info, 0), VALUE_REP_INT_LANE);
-        EXPECT_EQ(sysfunc_arg_required_rep(info, 1), VALUE_REP_INT_LANE);
-        EXPECT_TRUE(sysfunc_args_require_rep(info, VALUE_REP_INT_LANE));
+        EXPECT_EQ(info->arg_count, entry.arity);
+        EXPECT_STREQ(info->c_func_name, entry.symbol);
+        EXPECT_EQ(info->c_ret_type, C_RET_ITEM);
+        EXPECT_TRUE(sysfunc_args_require_rep(info, VALUE_REP_ITEM));
     }
-
-    const SysFuncInfo* bnot = item_repr_sysfunc_info(SYSFUNC_BNOT);
-    ASSERT_NE(bnot, nullptr);
-    ASSERT_EQ(bnot->arg_count, 1);
-    ASSERT_NE(bnot->c_arg_descs, nullptr);
-    EXPECT_EQ(sysfunc_arg_required_rep(bnot, 0), VALUE_REP_INT_LANE);
 
     const SysFuncArgDesc mixed_args[] = {
         {VALUE_REP_ITEM},
         {VALUE_REP_F64},
+        {VALUE_REP_INT_LANE},
     };
     SysFuncInfo mixed = {};
-    mixed.arg_count = 2;
+    mixed.arg_count = 3;
     mixed.c_arg_descs = mixed_args;
     EXPECT_EQ(sysfunc_arg_required_rep(&mixed, 0), VALUE_REP_ITEM);
     EXPECT_EQ(sysfunc_arg_required_rep(&mixed, 1), VALUE_REP_F64);
+    EXPECT_EQ(sysfunc_arg_required_rep(&mixed, 2), VALUE_REP_INT_LANE);
     EXPECT_FALSE(sysfunc_args_require_rep(&mixed, VALUE_REP_ITEM));
 
     const SysFuncInfo* len = item_repr_sysfunc_info(SYSFUNC_LEN);

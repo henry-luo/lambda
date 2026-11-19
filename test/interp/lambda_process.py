@@ -6,10 +6,18 @@ or helper descendants without leaving their output pipes held open.
 
 from dataclasses import dataclass
 import os
+import re
 import signal
 import subprocess
 import threading
 from typing import Mapping, Optional, Sequence
+
+
+def parse_interp_stats(stderr: str) -> Optional[tuple[int, int, int]]:
+    """Return completed, fallback and excluded script counts from T0."""
+    match = re.search(r'^interp: executed=(\d+) fallback=(\d+) excluded=(\d+)(?:\s|$)',
+                      stderr, re.MULTILINE)
+    return (int(match[1]), int(match[2]), int(match[3])) if match else None
 
 
 @dataclass

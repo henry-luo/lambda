@@ -1679,7 +1679,7 @@ TEST(RadiantViewTest, RestoresDocumentRealmBeforeAutofocusBehavior) {
     remove(view_log);
 }
 
-TEST(RadiantViewTest, KeepsNativeExportsForAutomaticInterpreterPolicy) {
+TEST(RadiantViewTest, ResolvesNativePackageExportsAtO0) {
     const char* page = "test/ui/ce/editable-dom-blocks.html";
     const char* events = "test/ui/test_editing_contenteditable_blocks.json";
     const char* view_log = "./temp/test_radiant_view_native_imports.log";
@@ -1687,12 +1687,11 @@ TEST(RadiantViewTest, KeepsNativeExportsForAutomaticInterpreterPolicy) {
     ASSERT_TRUE(test_radiant_view_file_readable(page));
     ASSERT_TRUE(test_radiant_view_file_readable(events));
 
-    // Exercise the automatic large-source branch without treating it as an
-    // explicit interpreter request: imported package exports remain native.
+    // Run the document's Lambda packages through eager native MIR at O0.
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", view_log},
         {"LAMBDA_LOG_LEVEL", "NOTICE"},
-        {"LAMBDA_JS_LARGE_INTERP_BYTES", "1"},
+        {"LAMBDA_EXEC_BACKEND", "jit"},
         {NULL, NULL},
     };
     ShellResult shell_result = test_radiant_view_run_logged_headless(

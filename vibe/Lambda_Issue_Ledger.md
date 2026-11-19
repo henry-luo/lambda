@@ -21,6 +21,18 @@
 Scratch spool durability amplification was fixed and moved to the
 [fixed ledger](<Lambda_Issue_Ledger (fixed).md#durable-scratch-spool-amplification>).
 
+## Background Lambda promotion builds single-definition images — 2026-11-19
+
+**Status:** OPEN. D8.3.3 specifies bounded direct-callee clusters. The
+production queue calls `lambda_mvp_compile_function_snapshot`, whose snapshot
+branch assembles only the target. The cluster collector still serves the
+synchronous harness path for retaining a satellite across a LambdaJS native
+export request. Collect the cluster on the evaluator and give the worker its
+chosen definitions as frozen input under D8.3.4. Check publication when a
+member also has a pending promotion, and retain the image before installing
+the first entry. See the
+[retirement audit](impl/Lambda_Impl_Interpreter_MIR_Unification.md#remaining-candidates-from-the-second-pass).
+
 <a id="lr09-35"></a>
 ## LR09-35 — Disk watch can miss the first creation in the Lambda baseline
 

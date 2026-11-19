@@ -18,7 +18,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from split_paths import optional_library_available, resolve_split_paths, sibling_roots, thorvg_openmp_archives, use_input_scripts
+from split_paths import (ensure_split_include_dirs, optional_library_available, resolve_split_paths,
+                         sibling_roots, thorvg_openmp_archives, use_input_scripts)
 use_input_scripts()
 from build_config import load_build_config, resolve_source_sets
 
@@ -132,7 +133,7 @@ class PremakeGenerator:
         if self.variant:
             self._apply_variant_overlay(self.variant)
             # A profile may replace the include list, so retain sibling roots.
-            self.config = resolve_split_paths(self.config)
+            ensure_split_include_dirs(self.config)
 
         self._expand_node_module_targets()
         self._expand_validation_source_targets()

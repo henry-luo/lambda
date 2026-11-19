@@ -279,17 +279,6 @@ extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 
-// `int` lanes are ABI-compatible with int64_t but retain their semantic
-// carrier identity until this direct native call boundary (D2.3.4-D2.3.5).
-static const SysFuncArgDesc sysfunc_int_lane_args_1[] = {
-    {VALUE_REP_INT_LANE},
-};
-
-static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
-    {VALUE_REP_INT_LANE},
-    {VALUE_REP_INT_LANE},
-};
-
 // keep builtin metadata, but expose no entry point for an excluded capability.
 #ifdef LAMBDA_NO_FILE_IO
 #define PROFILE_FILE_IO_FPTR(fn) NULL
@@ -389,10 +378,10 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_LEN, "len", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_len_checked", FPTR(fn_len_checked), NULL, NULL, false, 0,
      false, &TYPE_INT, false},
-    // S8.3.3v3: count(x) is the size of the run x is -- the same raw-int ABI
-    // as len, so an error operand is rejected at the boundary like len's
+    // S8.3.3v3: count shares len's boxed success/error ABI.
     {SYSFUNC_COUNT, "count", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_INT64, NULL, "fn_count", FPTR(fn_count), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_count_checked", FPTR(fn_count_checked), NULL, NULL, false, 0,
+     false, &TYPE_INT, false},
 
     // content(e) returns a read-only VIEW over the element's content items, so
     // `len(content(e))` is the child count and `content(e)[i]` the child index
@@ -1622,16 +1611,16 @@ SysFuncInfo sys_func_defs[] = {
     // classifier, so no single static type describes them. `int` was a lie for
     // i64/sized operands and would let callers trust a lane the value is not in.
     {SYSFUNC_BAND, "band", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, sysfunc_int_lane_args_2, "fn_band", FPTR(fn_band), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_band_item", FPTR(fn_band_item), NULL, NULL, false, 0},
 
     {SYSFUNC_BOR, "bor", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, sysfunc_int_lane_args_2, "fn_bor", FPTR(fn_bor), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_bor_item", FPTR(fn_bor_item), NULL, NULL, false, 0},
 
     {SYSFUNC_BXOR, "bxor", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, sysfunc_int_lane_args_2, "fn_bxor", FPTR(fn_bxor), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_bxor_item", FPTR(fn_bxor_item), NULL, NULL, false, 0},
 
     {SYSFUNC_BNOT, "bnot", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, sysfunc_int_lane_args_1, "fn_bnot", FPTR(fn_bnot), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_bnot_item", FPTR(fn_bnot_item), NULL, NULL, false, 0},
 
     {SYSFUNC_SHL, "shl", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_shl_item", FPTR(fn_shl_item), NULL, NULL, false, 0},
@@ -2425,10 +2414,6 @@ JitImport jit_runtime_imports[] = {
     // leave collection conservative while allowing bounded leaf expansion.
 #define JIT_NUMERIC_NO_REENTRY(name, result) \
     {#name, FPTR(name), {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, result, 0}}
-    JIT_NUMERIC_NO_REENTRY(fn_band, JIT_VALUE_NON_GC_SCALAR),
-    JIT_NUMERIC_NO_REENTRY(fn_bor, JIT_VALUE_NON_GC_SCALAR),
-    JIT_NUMERIC_NO_REENTRY(fn_bxor, JIT_VALUE_NON_GC_SCALAR),
-    JIT_NUMERIC_NO_REENTRY(fn_bnot, JIT_VALUE_NON_GC_SCALAR),
     JIT_NUMERIC_NO_REENTRY(fn_band_item, JIT_VALUE_BOXED_ITEM),
     JIT_NUMERIC_NO_REENTRY(fn_bor_item, JIT_VALUE_BOXED_ITEM),
     JIT_NUMERIC_NO_REENTRY(fn_bxor_item, JIT_VALUE_BOXED_ITEM),
@@ -2459,6 +2444,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_seq_count", FPTR(fn_seq_count)},
     {"iter_len", FPTR(iter_len)},
     {"fn_len_checked", FPTR(fn_len_checked), JIT_IMPORT_STABLE_ITEM},
+    {"fn_count_checked", FPTR(fn_count_checked), JIT_IMPORT_STABLE_ITEM},
     {"fn_len", FPTR(fn_len)},
     {"iter_key_at", FPTR(iter_key_at)},
     {"iter_val_at", FPTR(iter_val_at)},

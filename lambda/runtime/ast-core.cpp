@@ -1131,6 +1131,137 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
 #undef AST_VISIT
 }
 
+// ---------------------------------------------------------------------------
+// Complete Lambda child traversal
+// ---------------------------------------------------------------------------
+
+typedef struct LambdaChildAdapter { AstLambdaChildVisitor visit; void* ctx; } LambdaChildAdapter;
+
+static void ast_visit_lambda_core_child(AstNode* child, AstNode* parent, void* opaque) {
+    LambdaChildAdapter* adapter = (LambdaChildAdapter*)opaque;
+    if (!adapter || !adapter->visit || !child || child == parent->next) return;
+    for (AstNode* item = child; item; item = item->next) {
+        adapter->visit(item, adapter->ctx);
+    }
+}
+
+static bool ast_visit_lambda_extension(AstNode* node, AstLambdaChildVisitor visit, void* ctx) {
+#define V(field) do { AstNode* _c = (AstNode*)(field); if (_c) visit(_c, ctx); } while (0)
+#define VLIST(field) do { \
+        for (AstNode* _i = (AstNode*)(field); _i; _i = _i->next) visit(_i, ctx); \
+    } while (0)
+    switch (node->node_type) {
+    case AST_NODE_ELEMENT:
+        V(((AstElementNode*)node)->tag_expr);
+        VLIST(((AstElementNode*)node)->item);
+        VLIST(((AstElementNode*)node)->content);
+        break;
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+        // build_assignment_statement_from_parts keeps the parsed LHS in the
+        // shared `left` alias while the Lambda statement's real operands are
+        // the decomposed place: object + key chain + value. Semantic walks
+        // see only that place. The index also retains the parsed left alias.
+        V(((AstCompoundAssignNode*)node)->object);
+        VLIST(((AstCompoundAssignNode*)node)->key);
+        V(((AstCompoundAssignNode*)node)->value);
+        break;
+    case AST_NODE_FOR_EXPR: {
+        AstForNode* fr = (AstForNode*)node;
+        VLIST(fr->loop);
+        VLIST(fr->let_clause);
+        V(fr->where);
+        V(fr->group);
+        VLIST(fr->order);
+        V(fr->limit);
+        V(fr->offset);
+        V(fr->then);
+        break;
+    }
+    case AST_NODE_FOR_CLAUSE: {
+        AstLoopNode* lp = (AstLoopNode*)node;
+        V(lp->as);
+        V(lp->on);
+        VLIST(lp->join_keys);
+        break;
+    }
+    case AST_NODE_JOIN_KEY:
+        V(((AstJoinKey*)node)->prior_expr);
+        V(((AstJoinKey*)node)->new_expr);
+        break;
+    case AST_NODE_ORDER_SPEC:       V(((AstOrderSpec*)node)->expr); break;
+    case AST_NODE_GROUP_CLAUSE:     VLIST(((AstGroupClause*)node)->keys); break;
+    case AST_NODE_GROUP_KEY:        V(((AstGroupKey*)node)->expr); break;
+    case AST_NODE_PATH_INDEX_EXPR:
+        V(((AstPathIndexNode*)node)->base_path);
+        V(((AstPathIndexNode*)node)->segment_expr);
+        break;
+    case AST_NODE_NAVIGATION_EXPR:  V(((AstNavigationNode*)node)->object); break;
+    case AST_NODE_QUERY_EXPR:       V(((AstQueryNode*)node)->object); break;
+    case AST_NODE_LIST:
+        VLIST(((AstListNode*)node)->declare);
+        VLIST(((AstListNode*)node)->item);
+        break;
+    case AST_NODE_CONSTRAINED_TYPE:
+        V(((AstConstrainedTypeNode*)node)->base);
+        V(((AstConstrainedTypeNode*)node)->constraint);
+        break;
+    case AST_NODE_OBJECT_TYPE: {
+        AstObjectTypeNode* ot = (AstObjectTypeNode*)node;
+        V(ot->base_type);
+        VLIST(ot->item);
+        VLIST(ot->content);
+        VLIST(ot->methods);
+        VLIST(ot->constraints);
+        break;
+    }
+    case AST_NODE_PATTERN_SEQ:      VLIST(((AstPatternSeqNode*)node)->first); break;
+    case AST_NODE_PATTERN_RANGE:
+        V(((AstPatternRangeNode*)node)->start);
+        V(((AstPatternRangeNode*)node)->end);
+        break;
+    case AST_NODE_PATTERN_ISLAND:   V(((AstPatternIslandNode*)node)->pattern); break;
+    case AST_NODE_VIEW: {
+        AstViewNode* vw = (AstViewNode*)node;
+        V(vw->pattern);
+        VLIST(vw->param);
+        V(vw->body);
+        for (AstStateEntry* s = vw->state; s; s = s->next_state) visit((AstNode*)s, ctx);
+        for (AstEventHandler* h = vw->handler; h; h = h->next_handler) visit((AstNode*)h, ctx);
+        break;
+    }
+    case AST_NODE_STATE_ENTRY:      V(((AstStateEntry*)node)->value); break;
+    case AST_NODE_EVENT_HANDLER:
+        VLIST(((AstEventHandler*)node)->param);
+        V(((AstEventHandler*)node)->body);
+        break;
+    default: return false;
+    }
+#undef VLIST
+#undef V
+    return true;
+}
+
+void ast_visit_lambda_children(AstNode* node, AstLambdaChildVisitor visit, void* ctx) {
+    if (!node || !visit || ast_visit_lambda_extension(node, visit, ctx)) return;
+    LambdaChildAdapter adapter = {visit, ctx};
+    ast_visit_core_children(node, ast_visit_lambda_core_child, &adapter);
+}
+
+void ast_visit_lambda_index_extensions(AstNode* node, AstChildVisitor visit, void* ctx) {
+    // The core index keeps structural aliases and sibling edges. Feed it only
+    // Lambda's additional edges so it does not walk its own children twice.
+    struct ExtensionVisit {
+        AstNode* parent;
+        AstChildVisitor visit;
+        void* context;
+    } state = {node, visit, ctx};
+    ast_visit_lambda_extension(node, [](AstNode* child, void* context) {
+        ExtensionVisit* state = (ExtensionVisit*)context;
+        state->visit(child, state->parent, state->context);
+    }, &state);
+}
+
 typedef bool (*AstBindingChildAction)(AstNode* child, void* context);
 
 static bool ast_apply_binding_pattern_children(AstNode* node,

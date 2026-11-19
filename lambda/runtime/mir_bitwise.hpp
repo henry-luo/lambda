@@ -7,12 +7,6 @@ static inline MIR_insn_code_t em_integer_bitwise_opcode(SysFunc fn) {
         fn == SYSFUNC_BXOR ? MIR_XOR : fn == SYSFUNC_SHL ? MIR_LSH : MIR_RSH;
 }
 
-static inline const char* em_integer_bitwise_helper(SysFunc fn) {
-    return fn == SYSFUNC_BAND ? "fn_band_item" : fn == SYSFUNC_BOR ? "fn_bor_item" :
-        fn == SYSFUNC_BXOR ? "fn_bxor_item" : fn == SYSFUNC_BNOT ? "fn_bnot_item" :
-        fn == SYSFUNC_SHL ? "fn_shl_item" : fn == SYSFUNC_SHR ? "fn_shr_item" : "fn_ushr_item";
-}
-
 static inline MIR_reg_t em_pack_u32_payload(MirEmitter* em, MIR_reg_t raw, MIR_reg_t result = 0) {
     if (!result) result = em_new_reg(em, "u32", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR, MIR_new_reg_op(em->ctx, result),
@@ -116,9 +110,7 @@ static inline MIR_reg_t em_u32_binary(MirEmitter* em, Operator operation,
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
             MIR_new_label_op(em->ctx, done)));
         em_emit_label(em, fallback);
-        const char* boxed_fn = operation == OPERATOR_ADD ? "fn_add" :
-            operation == OPERATOR_SUB ? "fn_sub" : "fn_mul";
-        MIR_reg_t boxed_result = em_call_2(em, boxed_fn, MIR_T_I64,
+        MIR_reg_t boxed_result = em_call_2(em, em_boxed_binary_helper(operation), MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(em->ctx, left_item),
             MIR_T_I64, MIR_new_reg_op(em->ctx, right_item), false);
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
@@ -130,8 +122,8 @@ static inline MIR_reg_t em_u32_binary(MirEmitter* em, Operator operation,
 }
 
 static inline MIR_reg_t em_u32_bitwise(MirEmitter* em, SysFunc function,
-        MIR_reg_t left_item, MIR_reg_t right_item, bool left_sized, bool right_sized,
-        bool guard_left, bool guard_right) {
+        const char* boxed_helper, MIR_reg_t left_item, MIR_reg_t right_item,
+        bool left_sized, bool right_sized, bool guard_left, bool guard_right) {
     MIR_reg_t left = em_new_reg(em, "u32_l", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
         MIR_new_reg_op(em->ctx, left), MIR_new_reg_op(em->ctx, left_item),
@@ -223,12 +215,11 @@ static inline MIR_reg_t em_u32_bitwise(MirEmitter* em, SysFunc function,
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
             MIR_new_label_op(em->ctx, l_end)));
         em_emit_label(em, l_fallback);
-        const char* boxed_fn = em_integer_bitwise_helper(function);
         MIR_reg_t boxed_left = left_sized
             ? left_item : em_require_rep(em, em_value_for_rep(left_item, LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT), VALUE_REP_ITEM).reg;
         MIR_reg_t boxed_right = right_sized
             ? right_item : em_require_rep(em, em_value_for_rep(right_item, LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT), VALUE_REP_ITEM).reg;
-        MIR_reg_t boxed_result = em_call_2(em, boxed_fn, MIR_T_I64,
+        MIR_reg_t boxed_result = em_call_2(em, boxed_helper, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(em->ctx, boxed_left),
             MIR_T_I64, MIR_new_reg_op(em->ctx, boxed_right), false);
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,

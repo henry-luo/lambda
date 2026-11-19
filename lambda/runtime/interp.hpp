@@ -31,6 +31,10 @@ typedef enum LambdaTier {
 // Safe to call before any parse.
 LambdaTier lambda_tier_selected(void);
 Item interp_call_emit(Function* fn, const Item* args, int argc, List* destination);
+// A resolved lexical call with no `var` formals. The callable and argument
+// span already have live side-root slots. A mismatch takes the owning adapter.
+Item lambda_call_rooted_into(Function* fn, List* args, const AstFuncNode* definition,
+    uint64_t* result_home);
 void lambda_tier_set(LambdaTier tier);
 // Default AUTO function-entry promotion threshold (5); LAMBDA_FUNC_JIT_THRESHOLD
 // overrides it. A `jit` REPL session sets 1 (D8.3.6).
@@ -82,11 +86,6 @@ enum class EvalSignal : uint8_t {
 
 struct InterpState;
 
-// Complete Lambda-AST child traversal used by interpreter-owned analyses.
-// The core AstIndex visitor intentionally omits Lambda-only statement edges;
-// callers that need whole-script facts must use this traversal instead.
-typedef void (*InterpAstChildVisitor)(AstNode* child, void* ctx);
-void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx);
 // Slot window layout, matching FnFramePlan (ast-core.hpp):
 //   [ 0 .. param_count )                          parameters
 //   [ param_count .. param_count+local_count )    locals (block scopes flattened)
@@ -254,7 +253,6 @@ typedef struct InterpReplSession {
 } InterpReplSession;
 
 InterpRunStats* interp_run_stats(void);
-void interp_run_stats_reset(void);
 
 // ---------------------------------------------------------------------------
 // Frame-plan pass (interp_plan.cpp)
@@ -313,17 +311,11 @@ bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info);
 // System-call names are syntactic labels only: MIR lowers their values in
 // source order. Pure rows therefore share T0's positional Item ABI; procedural
 // rows remain excluded because a piped receiver has no COW write-back channel.
-bool interp_named_sys_args_supported(const AstNode* callee);
 // a direct `~.field` method store resolves to the bare field's binding
 NameEntry* interp_method_store_entry(const AstIndex* index, AstNode* node);
 // the P3 pass-manager entry evaluates pure literal subtrees in CONST mode and
 // publish only immediate results into the indexed AST fact table.
 bool interp_const_fold_script(Transpiler* tp);
-// True for the native-word registry rows whose Item-level wrappers are shared
-// with MIR's non-native bitwise lowering. The scanner and evaluator use one
-// policy so an admitted native call cannot reach an unimplemented ABI arm.
-bool interp_native_sys_item_supported(const SysFuncInfo* info);
-
 // Human-readable node kind, for fallback diagnostics.
 const char* interp_node_kind_name(AstNodeType kind);
 
@@ -415,14 +407,6 @@ Item interp_call_runtime_function(Runtime* runtime, Function* function,
 // True while this thread is executing inside a T0 interpreter activation.
 // Reentrant native callbacks must reuse that state instead of opening a retained call.
 bool interp_has_active_state(void);
-// Runs a retained callback on the interpreter's bounded large-stack worker.
-// The caller must keep callback arguments rooted until this synchronous call returns.
-typedef void (*InterpLargeStackThreadHook)(void* opaque);
-Item interp_call_runtime_function_large_stack(Runtime* runtime, Function* function,
-                                              const Item* args, int argc,
-                                              InterpLargeStackThreadHook worker_enter = nullptr,
-                                              InterpLargeStackThreadHook worker_leave = nullptr,
-                                              void* worker_context = nullptr);
 typedef Item (*InterpLargeStackCall)(void* opaque);
 // Transfers one Runtime context to the bounded interpreter worker, invokes the
 // callback synchronously, then restores the context to the originating thread.

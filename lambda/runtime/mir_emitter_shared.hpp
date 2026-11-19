@@ -1132,33 +1132,16 @@ static inline bool em_numeric_op_plan(Operator op, MirNumericOpPlan* plan, bool 
     }
 }
 
-// both Lambda emitters use the same semantic kernel names; legacy Bool
-// equality callers explicitly request the byte-returning ABI.
-static inline const char* em_boxed_binary_helper(Operator op, bool item_equality = true) {
+static inline const char* em_boxed_binary_helper(Operator op, bool* returns_bool = NULL) {
+    if (returns_bool) *returns_bool = false;
     switch (op) {
-    case OPERATOR_ADD: return "fn_add";
-    case OPERATOR_SUB: return "fn_sub";
-    case OPERATOR_MUL: return "fn_mul";
-    case OPERATOR_DIV: return "fn_div";
-    case OPERATOR_IDIV: return "fn_idiv";
-    case OPERATOR_MOD: return "fn_mod";
-    case OPERATOR_POW: return "fn_pow";
-    case OPERATOR_JOIN: return "fn_join";
-    case OPERATOR_UNION: return "fn_union";
-    case OPERATOR_INTERSECT: return "fn_intersect";
-    case OPERATOR_EXCLUDE: return "fn_exclude";
-    case OPERATOR_EQ: return item_equality ? "fn_eq_value" : "fn_eq";
-    case OPERATOR_NE: return item_equality ? "fn_ne_value" : "fn_ne";
-    case OPERATOR_REF_EQ: return item_equality ? "fn_ref_eq_value" : "fn_ref_eq";
-    case OPERATOR_LT: return "fn_lt";
-    case OPERATOR_LE: return "fn_le";
-    case OPERATOR_GT: return "fn_gt";
-    case OPERATOR_GE: return "fn_ge";
-    case OPERATOR_TO: return "fn_to";
-    case OPERATOR_AT: return "fn_at";
-    case OPERATOR_IN: return "fn_in";
-    case OPERATOR_OF: return "fn_of";
-    case OPERATOR_SUBTYPE: return "fn_subtype";
+#define BOXED_BINARY_ITEM(op, symbol) case OPERATOR_##op: return #symbol;
+#define BOXED_BINARY_BOOL(op, symbol) case OPERATOR_##op: \
+        if (returns_bool) *returns_bool = true; \
+        return #symbol;
+#include "boxed_binary_helpers.def"
+#undef BOXED_BINARY_BOOL
+#undef BOXED_BINARY_ITEM
     default: return NULL;
     }
 }

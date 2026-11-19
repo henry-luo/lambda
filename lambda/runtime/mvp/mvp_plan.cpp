@@ -3464,7 +3464,7 @@ static bool admitted_call(LambdaMvpModule* m, AstCallNode* call, bool task_launc
         return mvp_reject(m, call, "spread arguments are not admitted yet");
     AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
     AstFuncNode* target = ast_direct_call_function(call);
-    if (ast_call_has_named_args(call) && !target && !interp_named_sys_args_supported(callee))
+    if (ast_call_has_named_args(call) && !target && !ast_named_sys_args_supported(callee))
         return mvp_reject(m, call, "named arguments require a direct lexical definition");
     int count = mvp_call_argument_count(call);
     if (count > LAMBDA_MAX_FUNCTION_ARGS && (!callee || callee->node_type != AST_NODE_SYS_FUNC ||
@@ -4769,17 +4769,7 @@ bool lambda_mvp_compile_satellite(Transpiler* tp, MIR_context_t ctx,
         const MirModuleNames* names, MirModuleArtifacts* artifacts, ArrayList** property_keys) {
     // the cluster root is private; its retained bodies and binding identities
     // stay shared and read-only. No module initializer runs on promotion.
-    LangProfile profile = *tp->profile;
-    // parser-built indexes include Lambda-only statement edges. A fresh
-    // satellite index must visit them too, especially copied for clauses.
-    profile.visit_ext_children = [](AstNode* node, AstChildVisitor visit, void* context) {
-        struct Children { AstNode* parent; AstChildVisitor visit; void* context; } children = {node, visit, context};
-        interp_visit_children(node, [](AstNode* child, void* context) {
-            Children* children = (Children*)context;
-            children->visit(child, children->parent, children->context);
-        }, &children);
-    };
-    if (!ast_index_build_profile(&tp->ast_index, tp->ast_root, &profile)) return false;
+    if (!ast_index_build_profile(&tp->ast_index, tp->ast_root, tp->profile)) return false;
     LambdaMvpModule* m = lambda_mvp_create(tp, ctx);
     if (!m) { ast_index_destroy(&tp->ast_index); return false; }
     MirModuleNames selected = *names;

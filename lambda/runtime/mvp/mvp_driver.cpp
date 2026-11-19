@@ -20,10 +20,8 @@
 #endif
 
 extern __thread EvalContext* context;
-extern int g_js_force_document_interp;
 extern "C" {
     void* import_resolver(const char* name);
-    extern int g_mir_interp_mode;
     int lambda_mir_lazy_enabled(void);
 }
 
@@ -59,12 +57,10 @@ typedef struct LambdaMirPipelinePassContext {
     MIR_context_t ctx;
     Transpiler* tp;
     ArrayList** property_keys;
-    uint64_t* link_instruction_count;
     uint64_t* link_largest_function_instruction_count;
     uint64_t mir_module_count;
     uint64_t mir_function_count;
     uint64_t mir_instruction_count;
-    uint64_t mir_largest_function_instruction_count;
     LambdaMvpModule* mvp;
 } LambdaMirPipelinePassContext;
 
@@ -88,8 +84,6 @@ static int lambda_mir_finalize_compiler_pass(void* opaque) {
     pass->mir_module_count = 1;
     pass->mir_function_count = stats.functions;
     pass->mir_instruction_count = stats.instructions;
-    pass->mir_largest_function_instruction_count = stats.largest_function;
-    if (pass->link_instruction_count) *pass->link_instruction_count = stats.instructions;
     if (pass->link_largest_function_instruction_count)
         *pass->link_largest_function_instruction_count = stats.largest_function;
     return 1;
@@ -228,7 +222,7 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
     default:
         break;
     }
-    interp_visit_children(node, mir_satellite_cluster_visit, opaque);
+    ast_visit_lambda_children(node, mir_satellite_cluster_visit, opaque);
 }
 
 static int mir_satellite_collect_cluster(Script* script, AstScript* root, AstFuncNode* target,
@@ -262,7 +256,6 @@ static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
 
 static bool mvp_compile_function_image(Runtime* runtime, Script* script,
         const AstFuncNode* fn, uint32_t sequence, bool snapshot,
-        bool private_context,
         InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image) {
     if (out_image) *out_image = NULL;
@@ -271,15 +264,11 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
             (cancel_probe && cancel_probe(cancel_context))) {
         return false;
     }
-    // `--mir-interp` runs MIR's own interpreter: jit_init skips MIR_gen_init,
-    // so this context has no generator to link against or to finish.
-    bool satellite_interp = g_mir_interp_mode != 0;
+    bool satellite_interp = lambda_mir_interp_requested();
     MirNativeCodegenLock codegen_lock(!satellite_interp);
-    // An evaluator-built satellite owns a separate executable image just as a
-    // worker image does.  That ownership is independent from snapshotting:
-    // only a worker needs cloned compiler state and a one-definition image.
-    MIR_context_t satellite_context = private_context ? NULL : script->jit_context;
-    bool context_owned = false;
+    // Every satellite owns its code and BSS. Re-linking a published context
+    // would invalidate live callable entries (D8.3.4).
+    MIR_context_t satellite_context = NULL;
     Pool* compile_pool = script->pool;
     NamePool* compile_name_pool = script->name_pool;
     ArrayList* compile_const_list = script->const_list;
@@ -339,18 +328,11 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
         compile_type_list = snapshot_type_list;
     }
     if (cancel_probe && cancel_probe(cancel_context)) goto fail;
+    satellite_context = jit_init(snapshot ? mir_cold_optimize_level(runtime->optimize_level)
+                                         : runtime->optimize_level, !satellite_interp);
     if (!satellite_context) {
-        // asynchronous promotions benefit only after their image publishes.
-        satellite_context = jit_init(snapshot ? mir_cold_optimize_level(runtime->optimize_level)
-                                             : runtime->optimize_level);
-        // Must mirror jit_init's own branch. Claiming a generator that was
-        // never initialized made teardown call MIR_gen_finish on a garbage
-        // gen_ctx and segfault in finish_data_flow.
-        context_owned = true;
-        if (!satellite_context) {
-            log_error("interp-tier: could not create satellite MIR context");
-            goto fail;
-        }
+        log_error("interp-tier: could not create satellite MIR context");
+        goto fail;
     }
 
     if (!make_satellite_module_names(compile_name_pool, sequence, &names)) {
@@ -508,7 +490,7 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
 fail:
     if (property_keys) arraylist_free(property_keys);
     if (copies) mem_free(copies);
-    if (context_owned && satellite_context) {
+    if (satellite_context) {
         jit_cleanup_mode(satellite_context, satellite_interp ? 0 : 1);
     }
     if (snapshot_const_list) arraylist_free(snapshot_const_list);
@@ -537,7 +519,7 @@ bool lambda_mvp_compile_function_snapshot(Runtime* runtime, Script* script,
         InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image) {
     return mvp_compile_function_image(runtime, script, fn, sequence,
-        true, true, cancel_probe, cancel_context, out_image);
+        true, cancel_probe, cancel_context, out_image);
 }
 
 bool interp_satellite_image_prepare(Script* script, InterpSatelliteImage* image) {
@@ -563,7 +545,7 @@ bool lambda_mvp_compile_function(Runtime* runtime, Script* script,
     InterpSatelliteImage* image = NULL;
     uint32_t sequence = ++script->interp_satellite_count;
     if (!mvp_compile_function_image(runtime, script, fn, sequence,
-            false, true, NULL, NULL, &image) || !image) {
+            false, NULL, NULL, &image) || !image) {
         return false;
     }
     // Keep the first image as the Script's lookup/teardown anchor.  Later
@@ -605,7 +587,7 @@ bool lambda_mvp_compile_function(Runtime* runtime, Script* script,
 }
 
 // ============================================================================
-// Per-module MIR Direct compilation (used when runtime->use_mir_direct is set)
+// Per-module MIR Direct compilation
 // ============================================================================
 
 // Registers all pub functions and pub variable BSS addresses from imp's already-compiled
@@ -776,7 +758,7 @@ static void register_cross_lang_pub_fns(Runtime* runtime, AstImportNode* imp) {
 }
 
 // Compile a module whose AST is already built (tp->ast_root set) via MIR Direct.
-// Called from transpile_script() when runtime->use_mir_direct is true, for both
+// Called by transpile_script() for both
 // imported modules and the main script.  Depth-first import loading guarantees that
 // all of this module's sub-imports are already compiled before we are called.
 static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
@@ -842,17 +824,11 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
     }
 }
 
-static bool lambda_mir_interp_env_enabled(void) {
-    const char* env = getenv("JS_MIR_INTERP");
-    return env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0);
-}
-
 typedef struct LambdaMirLinkPassContext {
     MIR_context_t ctx;
     Transpiler* tp;
-    uint64_t mir_instruction_count;
     uint64_t mir_largest_function_instruction_count;
-    bool use_mir_interp_for_script;
+    bool use_interp;
     main_func_t main_func;
 } LambdaMirLinkPassContext;
 
@@ -860,46 +836,27 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
     LambdaMirLinkPassContext* pass = (LambdaMirLinkPassContext*)opaque;
     if (!pass || !pass->ctx || !pass->tp) return 0;
     unsigned int opt_level = pass->tp->runtime ? pass->tp->runtime->optimize_level : 2;
-    bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
-    bool auto_interp = !pass->tp->requires_native_mir_exports &&
-        !explicit_interp && opt_level == 0 &&
-        mir_large_interp_enabled() && pass->tp->source &&
-        strlen(pass->tp->source) >= mir_large_source_interp_threshold();
-    bool use_interp = explicit_interp || auto_interp;
-    bool document_context = pass->tp->runtime && pass->tp->runtime->dom_doc != nullptr;
-    MirLinkSelection selection = mir_select_link_interface(
-        pass->mir_instruction_count, pass->mir_largest_function_instruction_count,
-        document_context || g_js_force_document_interp, opt_level,
-        lambda_mir_lazy_enabled());
-    // global O2 passes scale with individual bodies. Unrelated small exports
-    // must not lower a bounded kernel merely by sharing its module (D8.3.1).
-    selection.optimize_level = mir_eager_optimize_level(
-        pass->mir_largest_function_instruction_count, selection.optimize_level);
+    // Bound optimization cost by the largest function, even when the module
+    // contains many small exports (D8.3.1v3).
+    unsigned int link_opt_level = mir_eager_optimize_level(
+        pass->mir_largest_function_instruction_count, opt_level);
     // eager import graphs generate many functions before the entry can run.
     // standalone entry kernels retain the ordinary optimizer budget.
     if (!pass->tp->is_main ||
             (pass->tp->direct_imports && pass->tp->direct_imports->length > 0)) {
-        selection.optimize_level = mir_cold_optimize_level(selection.optimize_level);
+        link_opt_level = mir_cold_optimize_level(link_opt_level);
     }
-    if (!use_interp && !pass->tp->requires_native_mir_exports &&
-            selection.interface_kind == MIR_LINK_INTERP) {
-        use_interp = true;
-        log_info("lambda-mir: policy selected interpreter for %llu instructions%s",
-            (unsigned long long)pass->mir_instruction_count,
-            document_context ? " [document]" : "");
-    }
-    if (!use_interp && selection.optimize_level != opt_level) {
+    if (!pass->use_interp && link_opt_level != opt_level) {
         log_info("lambda-mir: compile policy selected opt=%u (was %u)",
-            selection.optimize_level, opt_level);
-        MIR_gen_set_optimize_level(pass->ctx, selection.optimize_level);
+            link_opt_level, opt_level);
+        MIR_gen_set_optimize_level(pass->ctx, link_opt_level);
     }
-    MIR_link(pass->ctx, use_interp ? MIR_set_interp_interface :
-        (selection.interface_kind == MIR_LINK_LAZY_NATIVE
-            ? MIR_set_lazy_gen_interface : MIR_set_gen_interface), import_resolver);
-    pass->use_mir_interp_for_script = use_interp;
+    MIR_link(pass->ctx, pass->use_interp ? MIR_set_interp_interface :
+        (lambda_mir_lazy_enabled() ? MIR_set_lazy_gen_interface : MIR_set_gen_interface),
+        import_resolver);
     // the link pass owns publication; entry lookup must not load/link the module again.
     pass->main_func = (main_func_t)find_func(pass->ctx, "main");
-    if (!use_interp) jit_log_code_addresses(pass->ctx);
+    if (!pass->use_interp) jit_log_code_addresses(pass->ctx);
     return pass->main_func != NULL;
 }
 
@@ -1065,23 +1022,13 @@ void lambda_mvp_compile_script(Transpiler* tp, Script* script, const char* scrip
     if (timing) clock_gettime(CLOCK_MONOTONIC, &pt0);
 #endif
 
-    // Transpile the AST directly to MIR (no C code generated). LambdaJS uses
-    // the interpreter for large source at O0 before JIT initialization; mirror
-    // that early decision while retaining the explicit --mir-interp/env mode.
+    // Capture the diagnostic policy once for initialization, linking and
+    // teardown. Another compilation can start while this image is lowering.
     unsigned int opt_level = tp->runtime ? tp->runtime->optimize_level : 2;
-    bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
-    bool auto_interp_for_large_source = !tp->requires_native_mir_exports &&
-        !explicit_interp && opt_level == 0 &&
-        mir_large_interp_enabled() && tp->source &&
-        strlen(tp->source) >= mir_large_source_interp_threshold();
-    bool force_interp_init = !g_mir_interp_mode &&
-        (lambda_mir_interp_env_enabled() || auto_interp_for_large_source);
-    int saved_mir_interp_mode = g_mir_interp_mode;
-    bool mir_gen_initialized = saved_mir_interp_mode == 0 && !force_interp_init;
+    const bool use_interp = lambda_mir_interp_requested();
+    bool mir_gen_initialized = !use_interp;
     MirNativeCodegenLock codegen_lock(mir_gen_initialized);
-    if (force_interp_init) g_mir_interp_mode = 1;
-    MIR_context_t ctx = jit_init(opt_level);
-    if (force_interp_init) g_mir_interp_mode = saved_mir_interp_mode;
+    MIR_context_t ctx = jit_init(opt_level, mir_gen_initialized);
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt1);
@@ -1090,12 +1037,11 @@ void lambda_mvp_compile_script(Transpiler* tp, Script* script, const char* scrip
 #endif
 
     ArrayList* property_keys = NULL;
-    LambdaMirLinkPassContext link_context = {ctx, tp, 0, 0, false, NULL};
+    LambdaMirLinkPassContext link_context = {ctx, tp, 0, use_interp, NULL};
     LambdaMirPipelinePassContext mir_context = {};
     mir_context.ctx = ctx;
     mir_context.tp = tp;
     mir_context.property_keys = &property_keys;
-    mir_context.link_instruction_count = &link_context.mir_instruction_count;
     mir_context.link_largest_function_instruction_count =
         &link_context.mir_largest_function_instruction_count;
     // Direct MIR resumes parser work; retained ASTs begin a fresh unit.
@@ -1149,7 +1095,6 @@ void lambda_mvp_compile_script(Transpiler* tp, Script* script, const char* scrip
     uint64_t mir_function_count = mir_context.mir_function_count;
     uint64_t mir_instruction_count = mir_context.mir_instruction_count;
 
-    bool use_mir_interp_for_script = link_context.use_mir_interp_for_script;
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt2);
@@ -1207,7 +1152,7 @@ void lambda_mvp_compile_script(Transpiler* tp, Script* script, const char* scrip
     // function is published and this sealed per-module ctx never links again,
     // so the MIR IR is dead weight — release it, keeping only the executable
     // code. MIR-interp scripts keep their IR: there it IS the executable.
-    if (tp->jit_context && tp->main_func && !use_mir_interp_for_script) {
+    if (tp->jit_context && tp->main_func && !use_interp) {
         jit_seal_generated_context(ctx, &tp->mir_gen_initialized);
     }
 
