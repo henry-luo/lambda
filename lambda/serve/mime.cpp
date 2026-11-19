@@ -10,6 +10,12 @@ const char* mime_detect(MimeDetector* detector, const char* filename,
                     : "application/octet-stream";
 }
 
+const char* mime_detect_static_file(const char* filename) {
+    // Static serving has no persistent detector; use the same immutable tables.
+    MimeDetector local = {magic_patterns, MAGIC_PATTERNS_COUNT, glob_patterns, GLOB_PATTERNS_COUNT, 1};
+    return detect_mime_type(&local, filename, NULL, 0);
+}
+
 const char* mime_detect_from_filename(MimeDetector* detector, const char* filename) {
     return detect_mime_from_filename(detector, filename);
 }

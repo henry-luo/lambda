@@ -48,6 +48,10 @@
 #include "runtime/doc_context.hpp"
 #include "runtime/write_set.hpp"
 #include "runtime/runtime-state.h"
+#ifndef LAMBDA_NO_SERVE
+#include "serve/server.hpp"
+#include "serve/serve_utils.hpp"
+#endif
 #include "runtime/ast.hpp"  // For print_root_item declaration
 #include "runtime/emit_ast_dump.h"
 #include "runtime/interp.hpp"  // T0 tier selection + run summary
@@ -4657,30 +4661,25 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("Usage: %s serve [options] [handler.ls]\n", argv[0]);
             printf("\nOptions:\n");
             printf("  -p, --port <port>      HTTP port (default: 3000)\n");
-            printf("  --host <addr>          Bind address (default: 0.0.0.0)\n");
-            printf("  -d, --dir <path>       Static file directory (default: .)\n");
-            printf("  --ssl-port <port>      HTTPS port (0 to disable, default: 0)\n");
-            printf("  --ssl-cert <file>      SSL certificate file\n");
-            printf("  --ssl-key <file>       SSL private key file\n");
-            printf("  --workers <n>          Worker pool size (default: 4)\n");
-            printf("  --cors                 Enable CORS (allow all origins)\n");
+            printf("  --host <addr>          Bind address (default: 127.0.0.1)\n");
+            printf("  -d, --dir <path>       Static file directory\n");
+            printf("  --spa <prefix>         Serve index.html for browser routes under prefix\n");
+            printf("  --workers <n>          libuv worker threads (minimum: 2, default: 4)\n");
             printf("  -h, --help             Show this help message\n");
             printf("\nExamples:\n");
-            printf("  %s serve                                # Serve current dir on port 3000\n", argv[0]);
-            printf("  %s serve -p 8080 -d ./public            # Serve ./public on port 8080\n", argv[0]);
             printf("  %s serve handler.ls                     # Run Lambda script handler\n", argv[0]);
-            printf("  %s serve -p 3000 --cors handler.ls      # With CORS enabled\n", argv[0]);
+            printf("  %s serve -p 8080 -d ./public --spa /app handler.ls\n", argv[0]);
             return lambda_main_finish(0);
         }
 
         // Parse serve command arguments
         int port = 3000;
-        const char *host = "0.0.0.0";
+        const char *host = "127.0.0.1";
         const char *static_dir = NULL;
+        const char *spa_prefix = NULL;
         const char *handler_file = NULL;
-        int ssl_port = 0;
         int workers = 4;
-        bool enable_cors = false;
+        bool invalid_option = false;
 
         for (int i = 2; i < argc; i++) {
             if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
@@ -4689,42 +4688,55 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 host = argv[++i];
             } else if ((strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--dir") == 0) && i + 1 < argc) {
                 static_dir = argv[++i];
-            } else if (strcmp(argv[i], "--ssl-port") == 0 && i + 1 < argc) {
-                ssl_port = atoi(argv[++i]);
-            } else if (strcmp(argv[i], "--ssl-cert") == 0 && i + 1 < argc) {
-                i++;
-            } else if (strcmp(argv[i], "--ssl-key") == 0 && i + 1 < argc) {
-                i++;
+            } else if (strcmp(argv[i], "--spa") == 0 && i + 1 < argc) {
+                spa_prefix = argv[++i];
             } else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) {
                 workers = atoi(argv[++i]);
-            } else if (strcmp(argv[i], "--cors") == 0) {
-                enable_cors = true;
-            } else if (argv[i][0] != '-') {
+            } else if (argv[i][0] != '-' && !handler_file) {
                 handler_file = argv[i];
+            } else {
+                invalid_option = true;
             }
         }
 
-        // Placeholder: server initialization will be connected in Phase 5
-        // when the io.http module is fully operational
-        log_info("serve command: port=%d host=%s workers=%d", port, host, workers);
-        if (static_dir) log_info("serve static dir: %s", static_dir);
-        if (handler_file) log_info("serve handler: %s", handler_file);
-        if (enable_cors) log_info("serve CORS enabled");
-        if (ssl_port > 0) log_info("serve SSL port: %d", ssl_port);
-
-        // TODO: Phase 5 — instantiate Server, configure, and run
-        //   Server *srv = server_create(&config);
-        //   server_set_pool_size(srv, workers);
-        //   if (enable_cors) server_use(srv, middleware_cors(), NULL);
-        //   if (static_dir) server_set_static(srv, "/", static_dir);
-        //   if (handler_file) { /* load Lambda handler */ }
-        //   server_start(srv, port);
-        //   server_run(srv);
-
-        fprintf(stderr, "Error: 'serve' command not yet fully implemented (host=%s port=%d workers=%d).\n",
-                host, port, workers);
-        fprintf(stderr, "Server infrastructure is ready in lambda/serve/.\n");
-        return lambda_main_finish(1);
+        if (!handler_file || !serve_file_exists(handler_file) || port < 1 || port > 65535 ||
+                workers < 2 || invalid_option ||
+                (spa_prefix && (!static_dir || spa_prefix[0] != '/' || !spa_prefix[1]))) {
+            fprintf(stderr, "Error: serve requires a handler, a valid port, and HTTP configuration.\n");
+            runtime_cleanup(&runtime);
+            return lambda_main_finish(1);
+        }
+        // Each request owns its evaluator and database handles (S12.4.1v3).
+        runtime_cleanup(&runtime);
+        const char* pool_size = shell_getenv("UV_THREADPOOL_SIZE");
+        if (pool_size && atoi(pool_size) < 2) {
+            fprintf(stderr, "Error: script serving needs at least two libuv worker threads.\n");
+            return lambda_main_finish(1);
+        }
+        if (!pool_size) {
+            char thread_count[16];
+            snprintf(thread_count, sizeof(thread_count), "%d", workers);
+            if (!shell_setenv("UV_THREADPOOL_SIZE", thread_count)) return lambda_main_finish(1);
+        }
+        if (!lambda_serve_validate_handler(handler_file)) {
+            fprintf(stderr, "Error: handler must export a public handle(request) function.\n");
+            return lambda_main_finish(1);
+        }
+        ServerConfig config = server_config_default();
+        config.bind_address = serve_strdup(host);
+        Server* server = server_create(&config);
+        if (!server) { server_config_cleanup(&config); return lambda_main_finish(1); }
+        ScriptServerConfig app = {handler_file, static_dir, spa_prefix};
+        server_set_pool_size(server, workers);
+        worker_pool_set_concurrency(server->worker_pool, 1);
+        worker_pool_set_max_queue(server->worker_pool, 128);
+        int status = static_dir ? server_set_static(server, "/", static_dir) : 0;
+        if (!status) status = server_all(server, "/", lambda_serve_script_request, &app);
+        if (!status) status = server_all(server, "/*", lambda_serve_script_request, &app);
+        if (!status) status = server_start(server, port);
+        if (!status) status = server_run(server);
+        server_destroy(server);
+        return lambda_main_finish(status ? 1 : 0);
     }
 #endif // LAMBDA_NO_SERVE
 

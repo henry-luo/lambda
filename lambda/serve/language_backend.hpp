@@ -91,3 +91,13 @@ int backend_registry_init_all(BackendRegistry *registry);
 
 // shutdown all registered backends
 void backend_registry_shutdown_all(BackendRegistry *registry);
+
+// Script entry point used by the CLI host. The config outlives the server.
+struct ScriptServerConfig {
+    const char* handler;
+    const char* public_dir;
+    const char* spa_prefix;
+};
+bool lambda_serve_validate_handler(const char* path);
+void lambda_serve_script_request(HttpRequest* req, HttpResponse* resp, void* user_data);
+LanguageBackend* create_lambda_backend(void);

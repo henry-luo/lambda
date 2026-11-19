@@ -855,6 +855,12 @@ TEST_F(MimeTest, DetectFromFilenameJs) {
     EXPECT_NE(strstr(mime, "javascript"), nullptr);
 }
 
+TEST_F(MimeTest, DefaultDetectorUsesServeMimeTypes) {
+    EXPECT_STREQ(mime_detect_static_file("app.js"), "application/javascript");
+    EXPECT_STREQ(mime_detect_static_file("app.css"), "text/css");
+    EXPECT_STREQ(mime_detect_static_file("unknown.xyzq"), "application/octet-stream");
+}
+
 TEST_F(MimeTest, ServeProfileMappings) {
     EXPECT_STREQ(mime_detect_from_filename(detector, "/work/v1.2/data.XML"), "application/xml");
     EXPECT_STREQ(mime_detect_from_filename(detector, "data.yaml"), "text/yaml");
@@ -1052,6 +1058,18 @@ TEST_F(MiddlewareTest, UsePath) {
     middleware_stack_run(stack, req2, &resp2, NULL);
     EXPECT_EQ(c1, 0);
     http_request_destroy(req2);
+}
+
+TEST_F(MiddlewareTest, RootPathMatchesEveryAbsolutePath) {
+    int counter = 0;
+    ASSERT_EQ(middleware_stack_use_path(stack, "/", counting_middleware, &counter), 0);
+    const char* raw = "GET /assets/app.js HTTP/1.1\r\n\r\n";
+    HttpRequest* req = http_request_parse(raw, strlen(raw));
+    ASSERT_NE(req, nullptr);
+    HttpResponse response = {};
+    middleware_stack_run(stack, req, &response, NULL);
+    EXPECT_EQ(counter, 1);
+    http_request_destroy(req);
 }
 
 TEST_F(MiddlewareTest, NullInputs) {

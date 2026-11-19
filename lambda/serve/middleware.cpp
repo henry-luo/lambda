@@ -87,6 +87,7 @@ static int path_matches(const char *middleware_path, const char *request_path) {
     if (!middleware_path) return 1; // global middleware always matches
     size_t len = strlen(middleware_path);
     if (len == 0) return 1;
+    if (len == 1 && middleware_path[0] == '/') return request_path[0] == '/';
     // prefix match: /api matches /api, /api/, /api/users
     if (strncmp(request_path, middleware_path, len) != 0) return 0;
     // must match exactly or be followed by '/'
@@ -271,7 +272,7 @@ static void static_middleware(HttpRequest *req, HttpResponse *resp,
     const char *ext = serve_get_file_extension(filepath);
     const char *content_type = CONTENT_TYPE_OCTET;
     if (ext) {
-        const char *detected = mime_detect(NULL, filepath, NULL, 0);
+        const char *detected = mime_detect_static_file(filepath);
         if (detected) content_type = detected;
     }
 

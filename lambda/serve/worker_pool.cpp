@@ -65,6 +65,10 @@ void worker_pool_set_timeout(WorkerPool *pool, int timeout_ms) {
     if (pool) pool->request_timeout_ms = timeout_ms;
 }
 
+void worker_pool_set_concurrency(WorkerPool *pool, int limit) {
+    if (pool && limit >= 0) pool->concurrency_limit = limit;
+}
+
 void worker_pool_set_backends(WorkerPool *pool, BackendRegistry *backends) {
     if (pool) pool->backends = backends;
 }
@@ -95,12 +99,15 @@ static void worker_execute(uv_work_t *work) {
 // Completion callback (runs on event loop thread)
 // ============================================================================
 
+static void worker_start_pending(WorkerPool* pool);
+
 static void worker_after(uv_work_t *work, int status) {
     WorkerTask *task = (WorkerTask*)work;
     WorkerPool *pool = task->pool;
 
     if (pool) {
         pool->active_tasks--;
+        pool->running_tasks--;
         if (status != 0 || task->result != BACKEND_OK) {
             pool->total_errors++;
         }
@@ -125,6 +132,27 @@ static void worker_after(uv_work_t *work, int status) {
     }
 
     serve_free(task);
+    if (pool) worker_start_pending(pool);
+}
+
+// Keep waiting handlers off libuv workers so a running handler can offload SQLite work.
+static void worker_start_pending(WorkerPool* pool) {
+    while (pool->pending_head &&
+            (!pool->concurrency_limit || pool->running_tasks < pool->concurrency_limit)) {
+        WorkerTask* task = pool->pending_head;
+        pool->pending_head = task->next;
+        if (!pool->pending_head) pool->pending_tail = NULL;
+        pool->queued_tasks--;
+        int status = uv_queue_work(pool->loop, &task->work, worker_execute, worker_after);
+        if (status == 0) {
+            pool->running_tasks++;
+        } else {
+            pool->active_tasks--;
+            pool->total_errors++;
+            if (task->on_complete) task->on_complete(task->req, task->resp, BACKEND_ERROR, task->user_data);
+            serve_free(task);
+        }
+    }
 }
 
 // ============================================================================
@@ -162,17 +190,10 @@ int worker_pool_dispatch(WorkerPool *pool,
     pool->active_tasks++;
     pool->queued_tasks++;
 
-    int r = uv_queue_work(pool->loop, &task->work, worker_execute, worker_after);
-    if (r != 0) {
-        log_error("uv_queue_work failed: %s", uv_strerror(r));
-        pool->active_tasks--;
-        pool->queued_tasks--;
-        pool->total_errors++;
-        serve_free(task);
-        return -1;
-    }
-
-    pool->queued_tasks--;
+    if (pool->pending_tail) pool->pending_tail->next = task;
+    else pool->pending_head = task;
+    pool->pending_tail = task;
+    worker_start_pending(pool);
     return 0;
 }
 

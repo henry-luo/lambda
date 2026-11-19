@@ -756,10 +756,29 @@ Runs a TypeScript file on LambdaJS. Type annotations are stripped; there is no t
 
 ---
 
+### `serve` — HTTP server
+
+```bash
+lambda serve [--host 127.0.0.1] [--port 3000] [--dir public] [--spa /app] handler.ls
+```
+
+The script exports `pub pn handle(request)`. A request map carries `method`, `path`, `query_string`, `query`, lowercase `headers`, `remote_addr`, and the raw request `body` as text. The handler returns `{status, headers, body}`. A response body may be a string, binary, or null. Header names and values must be valid HTTP header text. The server writes `Content-Length` itself.
+
+```lambda
+pub pn handle(request) {
+    return {status: 200, headers: {'Content-Type': "text/plain; charset=utf-8"}, body: "Hello"}
+}
+```
+
+`--dir` serves static files. `--spa /app` serves that directory's `index.html` for browser routes under `/app`. The default listener is `127.0.0.1:3000`. Handler execution is serialized and queued so other libuv worker threads remain available to offloaded operations. `--workers` selects the libuv thread pool size when `UV_THREADPOOL_SIZE` is unset. At least two threads are required. Each request owns an evaluator and its scoped resources, including database handles (S12.4.1v3–S12.4.4v4, D6.3.3). The server recompiles the handler for each request.
+
+`lambda serve --mcp` starts the separate local MCP endpoint. The script server accepts HTTP connections. Terminate it with SIGINT or SIGTERM to drain pending requests.
+
+---
+
 ### Other commands
 
 - `math` — retired. It prints a message pointing at Lambda script math rendering and exits with status 1.
-- `serve` — parses its options but is not implemented; exits with status 1.
 - `replay --event-log <file.jsonl> [document] [--assert-state|--record|--headless|--window|--font-dir DIR]` — replays a recorded interaction against a document (testing).
 - `render-batch`, `test-batch`, `js-test-batch`, `--test*`, `--emit-ast-dump <path>`, `--emit-js-ast-dump <path>` (the resolved AST as Mark, readable with `input(file, 'mark')`) — internal harness and development commands.
 

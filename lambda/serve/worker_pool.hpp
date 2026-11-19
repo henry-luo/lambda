@@ -46,6 +46,7 @@ struct WorkerTask {
     struct WorkerPool *pool;           // stats owner, distinct from caller context
     void               *user_data;      // user context for completion
     int                 result;         // execution result (BackendResult)
+    struct WorkerTask   *next;           // pending task owned by the pool
 };
 
 // ============================================================================
@@ -57,6 +58,10 @@ struct WorkerPool {
     int                 pool_size;          // number of threads (maps to UV_THREADPOOL_SIZE)
     int                 max_queue_length;   // max pending tasks (0 = unlimited)
     int                 request_timeout_ms; // per-request timeout (0 = no timeout)
+    int                 concurrency_limit; // 0 permits the normal libuv scheduling
+    int                 running_tasks;
+    WorkerTask         *pending_head;
+    WorkerTask         *pending_tail;
     BackendRegistry    *backends;           // language backend registry
 
     // stats
@@ -73,6 +78,7 @@ void        worker_pool_destroy(WorkerPool *pool);
 // configure
 void worker_pool_set_max_queue(WorkerPool *pool, int max_queue_length);
 void worker_pool_set_timeout(WorkerPool *pool, int timeout_ms);
+void worker_pool_set_concurrency(WorkerPool *pool, int limit);
 void worker_pool_set_backends(WorkerPool *pool, BackendRegistry *backends);
 
 // dispatch a request to the worker pool
