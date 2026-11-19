@@ -13389,7 +13389,7 @@ extern "C" Item js_call_function_into(Item func_item, Item this_val, Item* args,
 
 
 
-static Item js_call_export_into(Function* function, Item* args, int arg_count,
+extern "C" Item js_call_export_into(Function* function, Item* args, int arg_count,
         uint64_t* result_home) {
     Context* runtime = (Context*)context;
     if (!runtime || !function || !result_home) return ItemError;

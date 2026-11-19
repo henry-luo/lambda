@@ -1,13 +1,27 @@
 // Common scalar functions and reference semantics run through the formula call plans.
 import m: ~~.mod_model
 import f: ~~.mod_formula
+
+fn make_error_result(with_error) {
+    function calculate(expr) any^ => f.display(m.current(m.set_value(m.select(with_error,8,0),expr)),8,0)
+    calculate
+}
+fn make_subtotal_result(subtotal_sheet) {
+    function calculate(expr) any^ => f.display({*:subtotal_sheet,cells:[*subtotal_sheet.cells,{row:8,col:0,raw:expr}]},8,0)
+    calculate
+}
+fn make_result(data) {
+    function calculate(expr) any^ => f.display(m.current(m.set_value(m.select(data,8,0),expr)),8,0)
+    calculate
+}
+function() {
 let initial=m.initial(m.blank())
 let data=m.paste(m.select(initial,0,0),"1\t2\t-100\t45292\n3\t4\t110\t45657")
 let with_error=m.set_value(m.select(data,1,1),"=1/0")
-let error_result=(expr) any^ => f.display(m.current(m.set_value(m.select(with_error,8,0),expr)),8,0)
+let error_result=make_error_result(with_error)
 let subtotal_sheet={*:m.current(data),hidden_rows:[1],cells:[*m.current(data).cells,{row:2,col:0,raw:"=SUBTOTAL(9,A1:A2)"}]}
-let subtotal_result=(expr) any^ => f.display({*:subtotal_sheet,cells:[*subtotal_sheet.cells,{row:8,col:0,raw:expr}]},8,0)
-let result=(expr) any^ => f.display(m.current(m.set_value(m.select(data,8,0),expr)),8,0);
+let subtotal_result=make_subtotal_result(subtotal_sheet)
+let result=make_result(data);
 [
  result("=PROPER(\"hello WORLD 2nd\")")=="Hello World 2nd",
  result("=TEXTBEFORE(\"one/two/three\",\"/\")")=="one",
@@ -77,3 +91,5 @@ let result=(expr) any^ => f.display(m.current(m.set_value(m.select(data,8,0),exp
  result("=TEXT(12345.5,\"$#,##0.00\")")=="$12,345.50",
  result("=TEXT(5,\"0.##\")")=="#VALUE!"
 ]
+
+}

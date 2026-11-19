@@ -18,7 +18,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "test/interp"))
-from lambda_process import run_lambda_process
+from lambda_process import parse_interp_stats, run_lambda_process
 from run_benchmarks import build_benchmark_list, check_release_build, mir_script_variants
 from run_paired_benchmarks import (compare_row, finalize_provenance, lambda_build_manifest,
     normalized_stdout, run_once, source_provenance)
@@ -169,18 +169,16 @@ def interp_diagnostic(binary, script, directory, label, timeout):
         # archived comparison binaries still read the retired selector spelling
         procedural=True, extra_env={"LAMBDA_TIER": "interp", "LAMBDA_EXEC_PROFILE": "1",
             "LAMBDA_EXEC_PROFILE_OUT": str(profile)})
-    stats = re.search(r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+)",
-                      result.stderr)
+    stats = parse_interp_stats(result.stderr)
     # A T0 process cannot enter any profiled MIR function, including satellites.
     executed_mir = False
     if profile.exists():
         executed_mir = any(line.startswith("frame_entry\t") and
             int(line.rsplit("\t", 1)[1]) > 0
             for line in profile.read_text().splitlines())
-    accepted = result.status == "ok" and stats is not None and (
-        tuple(map(int, stats.groups())) == (1, 0, 0)) and not executed_mir
+    accepted = result.status == "ok" and stats == (1, 0, 0) and not executed_mir
     return {"accepted": accepted, "status": result.status,
-        "stats": list(map(int, stats.groups())) if stats else None,
+        "stats": list(stats) if stats is not None else None,
         "executed_mir": executed_mir, "stdout_sha256": hashlib.sha256(
             result.stdout.encode()).hexdigest(), "stderr": result.stderr}
 

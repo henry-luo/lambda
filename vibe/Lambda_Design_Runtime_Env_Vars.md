@@ -73,10 +73,8 @@ so it remains useful under `NDEBUG`.
 
 | Variable | Effect / accepted value | Debug | Release | Release profile |
 |---|---|:---:|:---:|:---:|
-| `LAMBDA_JS_LARGE_INTERP` | Default on; `0`/`false` disables automatic large-module/document MIR interpretation for Lambda and LambdaJS. | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_LARGE_INTERP_BYTES` | Positive source-size threshold for automatic O0 interpretation; default 15000 bytes. | ✓ | ✓ | ✓ |
 | `LAMBDA_DISABLE_JS_MIR_CACHE` | Compatibility alias: disables common JS MIR reuse. | ✓ | ✓ | ✓ |
-| `JS_MIR_INTERP` | `1`/`true`: force the MIR interpreter path for Lambda and LambdaJS. | ✓ | ✓ | ✓ |
+| `JS_MIR_INTERP` | `1`/`true`: enable Lambda's explicit MIR interpreter diagnostic (D8.3.1v3). | ✓ | ✓ | ✓ |
 | `JS_LAZY_MIR` | Non-zero: select per-function lazy MIR code generation. | ✓ | ✓ | ✓ |
 | `LAMBDA_JS_CONST_FOLD` | Default on; `0` disables JS MIR constant folding. | ✓ | ✓ | ✓ |
 | `JS_TRANSPILE_TIMING` | Non-zero: print parse/AST/import/MIR/link/execute timing and AST counters. | ✓ | ✓ | ✓ |
@@ -289,7 +287,8 @@ application semantics.
 | Group | Variables |
 |---|---|
 | Memory instrumentation mode (1) | `MEMTRACK_MODE` |
-| JS execution and optimization gates (6) | `LAMBDA_JS_LARGE_INTERP`, `LAMBDA_JS_LARGE_INTERP_BYTES`, `LAMBDA_DISABLE_JS_MIR_CACHE`, `JS_MIR_INTERP`, `JS_LAZY_MIR`, `LAMBDA_JS_CONST_FOLD` |
+| JS execution and optimization gates (3) | `LAMBDA_DISABLE_JS_MIR_CACHE`, `JS_LAZY_MIR`, `LAMBDA_JS_CONST_FOLD` |
+| Lambda MIR diagnostic (1) | `JS_MIR_INTERP` (D8.3.1v3) |
 | Radiant render tuning (2) | `RADIANT_TILE_STRIP_H`, `RADIANT_TILE_THRESHOLD` |
 
 These should not become a permanent configuration API. After differential

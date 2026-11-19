@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 #include "test_lambda_tier_helpers.hpp"
+#include "lib/file.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -862,6 +863,85 @@ TEST(InterpFramePlan, RecursionDepthBudgetFaultsCleanly) {
         << "] stderr=[" << interp.stderr_text << "]";
 }
 
+static void expect_promotion_probe(const char* script, bool procedural,
+        const char* workers, const char* expected_output, const char* const* required,
+        const char* const* forbidden) {
+    // Debug diagnostics go to a file. Each subprocess gets its own copy of
+    // the checked-in routing so concurrent runs cannot truncate its trace.
+    char directory[128], config[160], trace[160];
+    snprintf(directory, sizeof(directory), "temp/interp_promotion_%ld_%lu",
+        interp_test_process_id(), ++interp_gtest_run_sequence);
+    snprintf(config, sizeof(config), "%s/log.conf", directory);
+    snprintf(trace, sizeof(trace), "%s/log.txt", directory);
+    ASSERT_TRUE(create_dir(directory));
+    ASSERT_EQ(file_copy("log.conf", config, nullptr), 0);
+
+    const char* run_args[] = {LAMBDA_EXE, "run", script, nullptr};
+    const char* direct_args[] = {LAMBDA_EXE, script, nullptr};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_EXEC_BACKEND", "auto"}, {"LAMBDA_LOG_DIR", directory},
+        {"LAMBDA_LOG_LEVEL", "debug"}, {"LAMBDA_SATELLITE_THREADS", workers},
+        {nullptr, nullptr}
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 60000;
+    ShellResult run = shell_exec(LAMBDA_EXE, procedural ? run_args : direct_args, &options);
+    EXPECT_EQ(run.exit_code, 0) << (run.stderr_buf ? run.stderr_buf : "");
+    EXPECT_EQ(trim_trailing(run.stdout_buf ? run.stdout_buf : ""), expected_output);
+    shell_result_free(&run);
+
+    const auto messages = read_file(trace);
+    EXPECT_FALSE(messages.empty()) << trace;
+    for (; required && *required; required++)
+        EXPECT_NE(strstr(messages.c_str(), *required), nullptr) << *required << " in " << trace;
+    for (; forbidden && *forbidden; forbidden++)
+        EXPECT_EQ(strstr(messages.c_str(), *forbidden), nullptr) << *forbidden << " in " << trace;
+}
+
+TEST(InterpPromotion, LargeSourceUsesNativeMirUnlessDiagnosticRequested) {
+    char directory[128], source[160], config[160], trace[160];
+    snprintf(directory, sizeof(directory), "temp/interp_mir_policy_%ld_%lu",
+        interp_test_process_id(), ++interp_gtest_run_sequence);
+    snprintf(source, sizeof(source), "%s/large.ls", directory);
+    snprintf(config, sizeof(config), "%s/log.conf", directory);
+    snprintf(trace, sizeof(trace), "%s/log.txt", directory);
+    ASSERT_TRUE(create_dir(directory));
+    ASSERT_EQ(file_copy("log.conf", config, nullptr), 0);
+
+    // Cross the old O0 source-size threshold with the same executable body.
+    FILE* file = fopen(source, "w");
+    ASSERT_NE(file, nullptr);
+    for (int line = 0; line < 1000; line++) {
+        fputs("// padding for source size\n", file);
+    }
+    fputs("1 + 2\n", file);
+    ASSERT_EQ(fclose(file), 0);
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_DIR", directory}, {"LAMBDA_LOG_LEVEL", "notice"},
+        {"LAMBDA_MIR_LOG_CODE_ADDR", "1"}, {"JS_MIR_INTERP", "0"},
+        {"LAMBDA_JS_LARGE_INTERP", "1"}, {"LAMBDA_LAZY_MIR", "0"},
+        {nullptr, nullptr}
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 60000;
+    for (bool diagnostic : {false, true}) {
+        const char* args[] = {LAMBDA_EXE, "--tier=jit", "--optimize=0",
+            diagnostic ? "--mir-interp" : source, diagnostic ? source : nullptr,
+            nullptr};
+        remove(trace);
+        ShellResult run = shell_exec(LAMBDA_EXE, args, &options);
+        EXPECT_EQ(run.exit_code, 0) << (run.stderr_buf ? run.stderr_buf : "");
+        EXPECT_STREQ(run.stdout_buf, "3\n");
+        shell_result_free(&run);
+        const auto messages = read_file(trace);
+        const bool native_main = strstr(messages.c_str(), "mir-code-addr: main ") != nullptr;
+        EXPECT_EQ(native_main, !diagnostic) << trace;
+    }
+}
+
 TEST(InterpPromotion, TailIterationsQueueAtDefaultThreshold) {
     // four self-tail edges leave a definition one edge short of the default
     // threshold. This guards against accidentally using call_count (which
@@ -876,10 +956,8 @@ TEST(InterpPromotion, TailIterationsQueueAtDefaultThreshold) {
         "    print(loop(4, 0))\n"
         "    print(\"\\n\")\n"
         "}\n");
-    RunResult below = run_script(below_path, "auto", /*procedural=*/true);
-    EXPECT_EQ(below.exit_code, 0);
-    EXPECT_EQ(trim_trailing(below.stdout_text), "4");
-    EXPECT_EQ(below.stderr_text.find("satellite compiled function='loop'"), (size_t)-1);
+    const char* queued[] = {"queued satellite function='loop'", nullptr};
+    expect_promotion_probe(below_path, true, "1", "4", nullptr, queued);
 
     // The fifth direct self-tail boundary queues a private image. The active
     // frame remains T0 (there is no loop-entry OSR), and later call boundaries
@@ -894,43 +972,21 @@ TEST(InterpPromotion, TailIterationsQueueAtDefaultThreshold) {
         "    print(loop(20, 0))\n"
         "    print(\"\\n\")\n"
         "}\n");
-    RunResult handoff = run_script(handoff_path, "auto", /*procedural=*/true);
-    EXPECT_EQ(handoff.exit_code, 0);
-    EXPECT_EQ(trim_trailing(handoff.stdout_text), "20");
-    EXPECT_NE(handoff.stderr_text.find("queued satellite function='loop'"), (size_t)-1)
-        << "the fifth self-tail edge did not queue its satellite image";
+    expect_promotion_probe(handoff_path, true, "1", "20", queued, nullptr);
 }
 
 TEST(InterpPromotion, SnapshotKeepsInferredFloatLaneMetadata) {
     // A private satellite must retain its inferred float formal while lowering
     // Item-ABI system calls; otherwise a raw double reaches fn_string as I64.
-    char stderr_path[128];
-    snprintf(stderr_path, sizeof(stderr_path),
-        "temp/interp_satellite_float_%ld_%lu.txt", interp_test_process_id(),
-        ++interp_gtest_run_sequence);
-    char command[512];
-    snprintf(command, sizeof(command),
-        "LAMBDA_EXEC_BACKEND=auto LAMBDA_SATELLITE_THREADS=1 %s "
-        "test/lambda/transpile_float_fmt_satellite.ls > /dev/null 2>%s",
-        LAMBDA_EXE, stderr_path);
-    EXPECT_EQ(system(command), 0);
-
-    FILE* output = fopen(stderr_path, "rb");
-    ASSERT_NE(output, nullptr);
-    char stderr_text[32768];
-    size_t length = fread(stderr_text, 1, sizeof(stderr_text) - 1, output);
-    stderr_text[length] = '\0';
-    fclose(output);
-    ::remove(stderr_path);
-
-    EXPECT_NE(strstr(stderr_text, "queued satellite function='fmt'"), nullptr);
-    EXPECT_NE(strstr(stderr_text, "queued satellite function='render_many'"), nullptr);
+    const char* required[] = {"queued satellite function='fmt'",
+        "queued satellite function='render_many'", nullptr};
     // With one worker, fmt is already lowering when the script exits. Its
     // queued successor must be retired before runtime teardown, not compiled
     // against the disappearing document Runtime.
-    EXPECT_EQ(strstr(stderr_text, "satellite image function='render_many'"), nullptr);
-    EXPECT_EQ(strstr(stderr_text, "Generating native code"), nullptr);
-    EXPECT_EQ(strstr(stderr_text, "unexpected operand mode"), nullptr);
+    const char* forbidden[] = {"satellite image function='render_many'",
+        "Generating native code", "unexpected operand mode", nullptr};
+    expect_promotion_probe("test/lambda/transpile_float_fmt_satellite.ls", false, "1",
+        "\"12.34\"", required, forbidden);
 }
 
 //==============================================================================

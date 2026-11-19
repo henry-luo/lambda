@@ -3,6 +3,8 @@ import f: ~~.mod_formula
 import io: ~~.mod_io
 import v: ~~.mod_view
 
+function() {
+
 let book=m.sample()
 io.restore(parse(format(book,'json')^,'json')^)^==book
 match (io.restore({}) ^ { ^ }) { case error: true default: false }
@@ -27,3 +29,5 @@ f.cell(m.current(m.sort_rows(sorted,true)),0,0).raw=="2"
 let precise=m.set_value(m.select(m.initial(m.blank()),0,0),"1000000.125")
 io.csv(m.current(precise))=="\"1000000.125\"\r\n"
 match (io.restore({*:book,sheets:[{*:m.empty_sheet(),cells:[{row:0,col:0,raw:"a",style:{size:"bad"}}]}]}) ^ { ^ }) { case error: true default: false }
+
+}

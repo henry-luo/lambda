@@ -3693,7 +3693,9 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         if (outcomes) result.admitted_success_contract = &TYPE_U32;
         return result;
     }
-    if (n->op == OPERATOR_AT || n->op == OPERATOR_IN || n->op == OPERATOR_OF || n->op == OPERATOR_SUBTYPE) {
+    bool returns_bool = false;
+    const char* boxed_helper = em_boxed_binary_helper(n->op, &returns_bool);
+    if (returns_bool) {
         a = convert(c, a, VALUE_REP_ITEM); b = convert(c, b, VALUE_REP_ITEM);
         MIR_reg_t result = em_new_reg(&c->em, "membership", MIR_T_I64);
         MIR_label_t done = label(c);
@@ -3701,8 +3703,8 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         // identity in left-to-right order (S7.9.3, S8.1.1v2).
         MirValue operands[] = {a, b};
         join_operand_errors(c, operands, 2, result, done);
-        const char* helper = em_boxed_binary_helper(n->op);
-        MIR_reg_t raw = em_call_2(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg), MIR_T_I64, reg(c, b.reg), true);
+        MIR_reg_t raw = em_call_2(&c->em, boxed_helper, MIR_T_I64,
+            MIR_T_I64, reg(c, a.reg), MIR_T_I64, reg(c, b.reg), true);
         return bool_call_outcome(c, raw, n, result, done);
     }
     bool bool_left = mvp_boundary_proven(a.semantic_contract, &TYPE_BOOL);
@@ -3733,13 +3735,13 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         MIR_reg_t result = vector_comparison
             ? em_call_3(&c->em, "vec_cmp", MIR_T_I64, MIR_T_I64, reg(c, a.reg),
                 MIR_T_I64, reg(c, b.reg), MIR_T_I64, imm(c, n->op - OPERATOR_ELEM_EQ), true)
-            : em_call_2(&c->em, em_boxed_binary_helper(n->op), MIR_T_I64,
+            : em_call_2(&c->em, boxed_helper, MIR_T_I64,
                 MIR_T_I64, reg(c, a.reg), MIR_T_I64, reg(c, b.reg), true);
         return value(c, result, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, n);
     }
     if (n->op == OPERATOR_TO) {
         a = convert(c, a, VALUE_REP_ITEM); b = convert(c, b, VALUE_REP_ITEM);
-        return value(c, em_call_2(&c->em, "fn_to", MIR_T_I64, MIR_T_I64, reg(c, a.reg),
+        return value(c, em_call_2(&c->em, boxed_helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
             MIR_T_I64, reg(c, b.reg), true), LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, n);
     }
     // map absence is the zero pointer in both Item and nullable pointer lanes.
@@ -3773,7 +3775,7 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
     if (n->op == OPERATOR_JOIN) {
         a = convert(c, a, VALUE_REP_ITEM); b = convert(c, b, VALUE_REP_ITEM);
         MirValue result = value(c, em_call_2(&c->em, c->consuming_array_join == (AstNode*)n
-            ? "fn_join_consume_open_array" : "fn_join", MIR_T_I64, MIR_T_I64, reg(c, a.reg),
+            ? "fn_join_consume_open_array" : boxed_helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
             MIR_T_I64, reg(c, b.reg), true), n->type->type_id, VALUE_REP_ITEM, n->type, n);
         Type* left = lambda_type_remove_error(c->module->tp->pool, a.semantic_contract);
         Type* right = lambda_type_remove_error(c->module->tp->pool, b.semantic_contract);
@@ -3803,8 +3805,7 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
     bool booleans = left == LMD_TYPE_BOOL && right == LMD_TYPE_BOOL &&
         (n->op == OPERATOR_EQ || n->op == OPERATOR_NE);
     if (!numeric && !booleans) {
-        const char* helper = em_boxed_binary_helper(n->op);
-        if (!helper) {
+        if (!boxed_helper) {
             mvp_reject(c->module, n, "comparison requires proven numeric or bool contracts"); return null_value(c);
         }
         MirValue original[] = {a, b};
@@ -3856,7 +3857,7 @@ static MirValue binary(MvpCompiler* c, AstBinaryNode* n) {
         MIR_reg_t checked = decimal_op >= 0
             ? em_call_3(&c->em, "lambda_decimal_binary", MIR_T_I64,
                 MIR_T_I64, reg(c, a.reg), MIR_T_I64, reg(c, b.reg), MIR_T_I64, imm(c, decimal_op), true)
-            : em_call_2(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
+            : em_call_2(&c->em, boxed_helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
                 MIR_T_I64, reg(c, b.reg), true);
         if (result) move(c, result, reg(c, checked));
         else result = checked;
@@ -5739,7 +5740,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
             move(c, joined, reg(c, em_box_finite_int_item(&c->em, word)));
             jump(c, done); mark(c, slow);
             MirValue boxed = convert(c, operand, VALUE_REP_ITEM);
-            move(c, joined, reg(c, em_call_1(&c->em, "fn_bnot_item", MIR_T_I64,
+            move(c, joined, reg(c, em_call_1(&c->em, info->c_func_name, MIR_T_I64,
                 MIR_T_I64, reg(c, boxed.reg), true)));
             mark(c, done);
             MirValue result = value(c, joined, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
@@ -5762,7 +5763,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
             return result;
         }
         operand = convert(c, operand, VALUE_REP_ITEM);
-        return value(c, em_call_1(&c->em, "fn_bnot_item", MIR_T_I64, MIR_T_I64, reg(c, operand.reg), true),
+        return value(c, em_call_1(&c->em, info->c_func_name, MIR_T_I64, MIR_T_I64, reg(c, operand.reg), true),
             LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
     }
     bool wide_words = info->fn == SYSFUNC_BAND || info->fn == SYSFUNC_BOR || info->fn == SYSFUNC_BXOR;
@@ -5781,7 +5782,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
             return value(c, raw, LMD_TYPE_UINT64, VALUE_REP_U64, &TYPE_UINT64, node);
         }
         a = convert(c, a, VALUE_REP_ITEM); b = convert(c, b, VALUE_REP_ITEM);
-        MIR_reg_t raw = em_call_2(&c->em, em_integer_bitwise_helper(info->fn), MIR_T_I64,
+        MIR_reg_t raw = em_call_2(&c->em, info->c_func_name, MIR_T_I64,
             MIR_T_I64, reg(c, a.reg), MIR_T_I64, reg(c, b.reg), true);
         return value(c, raw, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
     }
@@ -5799,7 +5800,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
             if (decision.valid && decision.result == LAMBDA_NUM_U32) {
                 a = convert(c, a, VALUE_REP_ITEM);
                 if (right_sized) b = convert(c, b, VALUE_REP_ITEM);
-                MIR_reg_t packed = em_u32_bitwise(&c->em, info->fn, a.reg, b.reg,
+                MIR_reg_t packed = em_u32_bitwise(&c->em, info->fn, info->c_func_name, a.reg, b.reg,
                     true, right_sized, true, right_sized);
                 MirValue result = value(c, packed, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
                 result.admitted_success_contract = &TYPE_U32;
@@ -5818,14 +5819,14 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
                         LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT);
                 }
                 MIR_reg_t computed = em_guarded_int_bitwise(&c->em, info->fn, operands[0], operands[1],
-                    em_integer_bitwise_helper(info->fn));
+                    info->c_func_name);
                 if (outcome) { move(c, joined, reg(c, computed)); mark(c, done); }
                 MirValue result = value(c, outcome ? joined : computed, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
                 result.admitted_success_contract = &TYPE_INT;
                 return result;
             }
             a = convert(c, a, VALUE_REP_ITEM); b = convert(c, b, VALUE_REP_ITEM);
-            const char* helper = em_integer_bitwise_helper(info->fn);
+            const char* helper = info->c_func_name;
             return value(c, em_call_2(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, a.reg),
                 MIR_T_I64, reg(c, b.reg), true), LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY, node);
         }
@@ -5850,9 +5851,9 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
         if (info->fn == SYSFUNC_SHR && mvp_int_range(c->module, node).finite)
             return value(c, operation(c, MIR_RSH, reg(c, a.reg), reg(c, b.reg)),
                 LMD_TYPE_INT, VALUE_REP_INT_LANE, &TYPE_INT, node);
-        // raw bitwise registry entries need their Item classifiers on the fallback arm.
+        // the checked registry entry owns the fallback from unboxed arithmetic.
         MIR_reg_t r = em_guarded_int_bitwise(&c->em, info->fn, a, b,
-            em_integer_bitwise_helper(info->fn));
+            info->c_func_name);
         Type* contract = mvp_value_contract(c->module, node);
         MirValue result = value(c, r, contract->type_id, VALUE_REP_ITEM, contract, node);
         // the error arm remains a value; only successful native-int results bypass a repeated contract check.
@@ -5870,10 +5871,11 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
     else if (info->c_ret_type == C_RET_STRING) { result_rep = VALUE_REP_RAW_GC_POINTER; tid = LMD_TYPE_STRING; }
     else if (info->c_ret_type == C_RET_INT64) { result_rep = VALUE_REP_INT_LANE; tid = LMD_TYPE_INT; }
     else if (info->c_ret_type == C_RET_BOOL) { result_rep = VALUE_REP_I64; tid = LMD_TYPE_BOOL; }
-    else if (info->c_ret_type == C_RET_CONTAINER || info->c_ret_type == C_RET_SYMBOL || info->c_ret_type == C_RET_TYPE_PTR) {
-        tid = sysfunc_c_ret_type_id(info);
-        result_rep = info->c_ret_type == C_RET_TYPE_PTR ? VALUE_REP_RAW_NON_GC_POINTER : VALUE_REP_RAW_GC_POINTER;
-        if (tid == LMD_TYPE_ANY && info->success_type) tid = info->success_type->type_id;
+    else if (info->c_ret_type == C_RET_TYPE_PTR) { result_rep = VALUE_REP_RAW_NON_GC_POINTER; tid = LMD_TYPE_TYPE; }
+    else if (info->c_ret_type == C_RET_SYMBOL) { result_rep = VALUE_REP_RAW_GC_POINTER; tid = LMD_TYPE_SYMBOL; }
+    else if (info->c_ret_type == C_RET_CONTAINER) {
+        result_rep = VALUE_REP_RAW_GC_POINTER;
+        tid = info->success_type ? info->success_type->type_id : LMD_TYPE_ANY;
     }
     MirValue arguments[LAMBDA_MAX_FUNCTION_ARGS];
     int i = 0;
@@ -7380,9 +7382,11 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
                 LMD_TYPE_TYPE, VALUE_REP_RAW_NON_GC_POINTER, &TYPE_TYPE, node);
         Script* owner; int slot;
         if (mvp_interp_binding(c->module, entry, &owner, &slot) &&
-                (!ast_index_node_is_function(entry->node) ||
+                (c->module->satellite_boxed_target || !ast_index_node_is_function(entry->node) ||
                  !mvp_function(c->module, (AstFuncNode*)entry->node) ||
                  mvp_function(c->module, (AstFuncNode*)entry->node)->interp_binding)) {
+            // Direct edges may use a private body, but a function value
+            // keeps the identity and entry from the module slot (S5.5.1v2).
             MvpBinding* binding = mvp_binding(c->module, entry);
             if (binding) return read_binding(c, binding, node, true);
             MIR_reg_t state = em_module_state_for_unit(&c->em, constant(c, script_module_layout_id(owner)), true);
@@ -9575,6 +9579,7 @@ static void receive_parameter(MvpCompiler* c, MvpBinding* binding, MIR_reg_t inp
     // effective body domain; box its actual incoming success lane first.
     Type* entry_contract = incoming_contract ? incoming_contract : rep == VALUE_REP_ITEM ? &TYPE_ANY :
         lambda_type_remove_error(c->module->tp->pool, binding->contract);
+    if (binding->continuation_input) entry_contract = binding->continuation_input;
     MirValue incoming = value(c, input, entry_contract->type_id, rep, entry_contract);
     TypeParam* parameter = lambda_type_param(mvp_binding_node(binding)->type);
     bool binder_site = mvp_function_binder_count(c->function) && c->binder_env &&
@@ -9593,7 +9598,9 @@ static void receive_parameter(MvpCompiler* c, MvpBinding* binding, MIR_reg_t inp
         incoming = value(c, selected, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
     }
     bool dependent = lambda_type_contract_has_binder(binding->admission_contract, true);
-    if (!binder_site && (dependent || c->function->boxed_entry || (parameter && parameter->is_optional)))
+    // The loop-head guard already proved the continuation's open input.
+    if (!binding->continuation_input && !binder_site &&
+            (dependent || c->function->boxed_entry || (parameter && parameter->is_optional)))
         incoming = admit(c, incoming, dependent ? binding->admission_contract : binding->contract,
             NULL, parameter_boundary_site(c, (AstNamedNode*)mvp_binding_node(binding)));
     if (c->function->boxed_entry && !binding->scalar_snapshot &&

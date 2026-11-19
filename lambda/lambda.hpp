@@ -961,7 +961,7 @@ extern "C" {
     // length function
     int64_t fn_len(Item item);
     Item fn_len_checked(Item item);
-    int64_t fn_count(Item item);  // S8.3.3v3: the size of the run an item is
+    Item fn_count_checked(Item item);  // S8.3.3v3: the size of the run an item is
     Item fn_content(Item item);   // read-only array view over an element's content
     int64_t fn_seq_count(Item item);  // positions a positional traversal visits
     Item fn_int(Item a);
@@ -1708,12 +1708,6 @@ extern "C" {
     Item pn_io_loopback_accept(Item listener, Item seconds, Item page);
 
     // bitwise functions (integer operations)
-    int64_t fn_band(int64_t a, int64_t b);
-    int64_t fn_bor(int64_t a, int64_t b);
-    int64_t fn_bxor(int64_t a, int64_t b);
-    int64_t fn_bnot(int64_t a);
-    int64_t fn_shl(int64_t a, int64_t b);
-    int64_t fn_shr(int64_t a, int64_t b);
     Item fn_band_item(Item a, Item b);
     Item fn_bor_item(Item a, Item b);
     Item fn_bxor_item(Item a, Item b);
@@ -1769,7 +1763,6 @@ extern "C" {
     // Level 2 additionally probes expression temporaries: every register live
     // across a may-GC call that the root machinery never made a candidate.
     int  lambda_root_witness_level(void);
-    bool lambda_root_witness_temporaries(void);
     void lambda_jit_root_witness(uint64_t raw, int64_t claimed_type_id,
         const char* site, const char* binding, const char* func);
     void lambda_root_witness_dump(void);

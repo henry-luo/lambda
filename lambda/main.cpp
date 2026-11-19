@@ -1067,27 +1067,6 @@ extern void event_sim_set_result_path(const char* result_path);
 extern int lambda_repl_init(InterpReplSession* session);
 extern void lambda_repl_cleanup();
 
-#ifndef LAMBDA_NO_MIR
-// MIR interpreter mode (from mir.c)
-extern "C" int g_mir_interp_mode;
-#endif
-#ifndef LAMBDA_HEADLESS
-// Legacy document policy used by Lambda Direct; LambdaJS ignores it under
-// D8.4.2 and always links selected MIR natively.
-extern int g_js_force_document_interp;
-
-// Retain the existing Lambda Direct document policy without letting it select a
-// JavaScript backend. LambdaJS has an explicit AST interpreter and native MIR.
-static void default_render_cmd_to_interp(void) {
-    const char* env = getenv("LAMBDA_JS_LARGE_INTERP");
-    bool enabled = !env || !env[0] || (strcmp(env, "0") != 0 && strcmp(env, "false") != 0);
-    if (enabled) {
-        g_js_force_document_interp = 1;
-        log_debug("render command: enabled legacy document MIR policy for Lambda Direct");
-    }
-}
-#endif // LAMBDA_HEADLESS
-
 #ifndef LAMBDA_NO_JS
 static char* read_stdin_source(size_t* out_len) {
     ByteBuilder source;
@@ -2544,7 +2523,7 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
 #ifdef LAMBDA_NO_MIR
         log_error("cli: --mir-interp is excluded from this build (no MIR)");
 #else
-        g_mir_interp_mode = 1;
+        lambda_mir_enable_interp_diagnostic();
 #endif
         return true;
     }
@@ -3799,7 +3778,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
         if (scratch) return lambda_main_finish(devtools_run_scratch(fd));
 #ifndef LAMBDA_HEADLESS
-        default_render_cmd_to_interp();
         return lambda_main_finish(view_doc_with_devtools(path, fd, headless));
 #else
         fputs("Document inspection requires the Radiant layout engine\n", stderr);
@@ -3812,7 +3790,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
     log_debug("Checking for layout command");
     if (argc >= 2 && strcmp(argv[1], "layout") == 0) {
         log_debug("Entering layout command handler");
-        default_render_cmd_to_interp();
 
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
@@ -3882,7 +3859,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
 #ifndef LAMBDA_HEADLESS
     // Handle render-batch command (shared UiContext for all renders)
     if (argc >= 2 && strcmp(argv[1], "render-batch") == 0) {
-        default_render_cmd_to_interp();
         int result = cmd_render_batch(argc - 2, argv + 2);
         return lambda_main_finish(result);
     }
@@ -3891,7 +3867,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
     log_debug("Checking for render command");
     if (argc >= 2 && strcmp(argv[1], "render") == 0) {
         log_debug("Entering render command handler");
-        default_render_cmd_to_interp();
 
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
@@ -4261,7 +4236,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
     // authoring application. Format selection belongs to the package registry,
     // so the CLI only checks that a local file exists (Radiant_Design_Edit_Mode §1).
     if (argc >= 2 && strcmp(argv[1], "edit") == 0) {
-        default_render_cmd_to_interp();
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Document Editor\n\n");
             printf("Usage: %s edit <document_file> [options]\n", argv[0]);
@@ -4324,7 +4298,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
     log_debug("Checking for view command");
     if (argc >= 2 && strcmp(argv[1], "view") == 0) {
         log_debug("Entering view command handler");
-        default_render_cmd_to_interp();
 
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
@@ -4880,7 +4853,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 #ifdef LAMBDA_NO_MIR
                 log_error("cli: --mir-interp is excluded from this build (no MIR)");
 #else
-                g_mir_interp_mode = 1;
+                lambda_mir_enable_interp_diagnostic();
 #endif
             } else if (strncmp(argv[i], "--opt-level=", 12) == 0 ||
                        strncmp(argv[i], "--optimize=", 11) == 0) {

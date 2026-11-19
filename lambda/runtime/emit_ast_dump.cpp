@@ -768,7 +768,6 @@ int emit_ast_dump_file(const char* script_path) {
     // runtime ownership/index state even though this command stops before
     // execution. A zeroed Transpiler made import-bearing AST dumps dereference
     // a null Runtime in load_script().
-    runtime.use_mir_direct = true;
 
     char* directory = file_path_dirname(script_path);
     size_t directory_length = directory ? strlen(directory) : 0;

@@ -5,7 +5,7 @@ import capture: lambda.ui.core.splitter
 
 pub fn control(target) => dom.closest(target,"[data-split-resize]")
 fn current(st,axis) => (if (axis=="x") m.current(st).split.x else m.current(st).split.y)/15
-fn changed(st,axis,pixels) any^ {
+function changed(st,axis,pixels) any^ {
     let sheet=m.current(st)
     let split={*:sheet.split,*:map([axis,pixels*15])};
     m.change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) {*:s,split:split} else s]},"Split adjusted")
@@ -33,7 +33,7 @@ pub pn finish(owner,st,cancel=false) any^ {
     if (cancel or drag.value==drag.original) { return next }
     return changed(next,drag.axis,drag.value)^
 }
-pub fn keyboard(st,axis,key,maximum,step=20) any^ {
+pub function keyboard(st,axis,key,maximum,step=20) any^ {
     let amount=if (key in ["ArrowRight","ArrowDown"]) step else -step
     let value=if (key=="Home") 50 else if (key=="End") maximum else current(st,axis)+amount;
     changed(st,axis,max(50,min(maximum,value)))^

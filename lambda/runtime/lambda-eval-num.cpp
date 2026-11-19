@@ -2057,18 +2057,10 @@ static Item bitwise_type_error(const char* name) {
     return ItemError;
 }
 
-extern "C" int64_t fn_band(int64_t a, int64_t b) {
-    return a & b;
-}
-
 extern "C" Item fn_band_item(Item a, Item b) {
     Item result;
     if (apply_classified_bitwise(a, b, SIZED_BITWISE_AND, &result)) return result;
     return bitwise_type_error("band");
-}
-
-extern "C" int64_t fn_bor(int64_t a, int64_t b) {
-    return a | b;
 }
 
 extern "C" Item fn_bor_item(Item a, Item b) {
@@ -2077,18 +2069,10 @@ extern "C" Item fn_bor_item(Item a, Item b) {
     return bitwise_type_error("bor");
 }
 
-extern "C" int64_t fn_bxor(int64_t a, int64_t b) {
-    return a ^ b;
-}
-
 extern "C" Item fn_bxor_item(Item a, Item b) {
     Item result;
     if (apply_classified_bitwise(a, b, SIZED_BITWISE_XOR, &result)) return result;
     return bitwise_type_error("bxor");
-}
-
-extern "C" int64_t fn_bnot(int64_t a) {
-    return ~a;
 }
 
 extern "C" Item fn_bnot_item(Item a) {
@@ -2107,22 +2091,10 @@ extern "C" Item fn_bnot_item(Item a) {
     return bitwise_type_error("bnot");
 }
 
-extern "C" int64_t fn_shl(int64_t a, int64_t b) {
-    // callers check the negative-count error before taking this raw fast path.
-    if (b >= 64) return 0;
-    return a << b;
-}
-
 extern "C" Item fn_shl_item(Item a, Item b) {
     Item result;
     if (apply_classified_shift(a, b, true, &result)) return result;
     return bitwise_type_error("shl");
-}
-
-extern "C" int64_t fn_shr(int64_t a, int64_t b) {
-    // callers check the negative-count error before taking this raw fast path.
-    if (b >= 64) return 0;
-    return a >> b;  // arithmetic right shift (sign-extending)
 }
 
 extern "C" Item fn_shr_item(Item a, Item b) {

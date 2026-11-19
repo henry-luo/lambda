@@ -91,7 +91,7 @@ static void interp_stack_scan_node(AstNode* node, AstNode* parent, void* opaque)
     (void)parent;
     InterpStackScan* scan = (InterpStackScan*)opaque;
     interp_stack_scan_record(node, scan);
-    interp_visit_children(node, [](AstNode* child, void* ctx) {
+    ast_visit_lambda_children(node, [](AstNode* child, void* ctx) {
         interp_stack_scan_node(child, NULL, ctx);
     }, opaque);
 }
@@ -100,7 +100,7 @@ static bool interp_script_needs_large_stack(const Script* script) {
     if (!script || !script->ast_root) return false;
     InterpStackScan scan = {};
     interp_stack_scan_record(script->ast_root, &scan);
-    interp_visit_children(script->ast_root, [](AstNode* child, void* ctx) {
+    ast_visit_lambda_children(script->ast_root, [](AstNode* child, void* ctx) {
         interp_stack_scan_node(child, NULL, ctx);
     }, &scan);
     bool has_recursive_call = false;
@@ -137,21 +137,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
     Runner runner;
     runner_init(runtime, &runner);
 
-    // Enable MIR Direct mode for every module (main + all imports).
-    // Each lambda_mvp_compile_script() call clears dynamic_imports, registers the module's
-    // direct sub-imports' pub symbols, then does transpile_mir_ast() + MIR_link().
-    // Imports are compiled depth-first, so by the time any module is linked its dependencies
-    // are already in dynamic_imports.
-    bool was_mir_direct = runtime->use_mir_direct;
-    runtime->use_mir_direct = true;
-
-    if (source) {
-        runner.script = load_script(runtime, script_path, source, false);
-    } else {
-        runner.script = load_script(runtime, script_path, NULL, false);
-    }
-
-    runtime->use_mir_direct = was_mir_direct;  // restore for any nested/reentrant calls
+    runner.script = load_script(runtime, script_path, source, false);
 
     if (!runner.script || !runner.script->ast_root) {
         log_error("Failed to parse script");

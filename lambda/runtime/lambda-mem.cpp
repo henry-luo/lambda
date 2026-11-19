@@ -365,10 +365,6 @@ bool lambda_root_witness_enabled(void) {
     return lambda_root_witness_level() > 0;
 }
 
-bool lambda_root_witness_temporaries(void) {
-    return lambda_root_witness_level() >= 2;
-}
-
 static void root_witness_report(const char* shape, uint64_t raw, void* target,
         TypeId observed, int64_t claimed_type_id, const char* site,
         const char* binding, const char* func) {
@@ -1478,24 +1474,6 @@ void heap_discard_unfinalized() {
     // The Heap and certificate map have external allocations. Do not re-enter
     // their allocators after siglongjmp; the short-lived worker reclaims them.
     context->heap = NULL;
-}
-
-void mir_guest_finish_context(Runtime* runtime, bool reusing_context) {
-    if (!reusing_context && context) {
-        if (runtime) {
-            // A standalone guest result may reference this heap after the MIR
-            // entrypoint returns. Transfer all context-owned state so the one
-            // runtime cleanup path can release it after output is consumed.
-            runtime_context_publish_owners(runtime, context);
-        } else {
-            if (context->type_list) arraylist_free((ArrayList*)context->type_list);
-            if (context->heap) heap_destroy();
-            // D5.2.1/RN-NamePool: one-shot GC finalization can traverse
-            // NameRecords, so release the dedicated pool after the heap.
-            if (context->name_pool) name_pool_release(context->name_pool);
-            context->name_pool = NULL;
-        }
-    }
 }
 
 // finalize all GC-managed objects before pool_destroy.

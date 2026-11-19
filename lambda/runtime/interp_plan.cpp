@@ -1,139 +1,18 @@
 // Frame-plan pass for the T0 AST interpreter (AI5).
 //
-// Two products, both derived from one complete Lambda AST traversal:
+// Two products, both derived from the Lambda profile's AST traversal:
 //   1. `interp_plan_script` — assigns NameEntry slots + BindingStorage classes
 //      and computes each function's static activation shape (FnFramePlan).
 //   2. `interp_scan_supported` — the whole-AST pre-scan that decides whether a
 //      Script can run under T0 at all, so an unsupported kind produces a
 //      counted whole-module fallback instead of a silent wrong answer (R4).
 //
-// The traversal owns Lambda extension edges and delegates shared layouts to
-// `ast_visit_core_children`; `LangProfile::visit_ext_children` remains the
-// seam for language-specific children (D8.2.4).
 
 #include "interp.hpp"
 #include "re2_wrapper.hpp"
 #include "safety_analyzer.hpp"
 #include "type_contract.hpp"
 #include "lib/log.h"
-
-// ---------------------------------------------------------------------------
-// Complete Lambda child traversal
-// ---------------------------------------------------------------------------
-
-typedef struct InterpCoreChildAdapter { InterpAstChildVisitor visit; void* ctx; } InterpCoreChildAdapter;
-
-static void interp_visit_core_child(AstNode* child, AstNode* parent, void* opaque) {
-    InterpCoreChildAdapter* adapter = (InterpCoreChildAdapter*)opaque;
-    if (!adapter || !adapter->visit || !child || child == parent->next) return;
-    for (AstNode* item = child; item; item = item->next) {
-        adapter->visit(item, adapter->ctx);
-    }
-}
-
-void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx) {
-    if (!node || !visit) return;
-#define V(field) do { AstNode* _c = (AstNode*)(field); if (_c) visit(_c, ctx); } while (0)
-#define VLIST(field) do { \
-        for (AstNode* _i = (AstNode*)(field); _i; _i = _i->next) visit(_i, ctx); \
-    } while (0)
-    switch (node->node_type) {
-    case AST_NODE_ELEMENT:
-        V(((AstElementNode*)node)->tag_expr);
-        VLIST(((AstElementNode*)node)->item);
-        VLIST(((AstElementNode*)node)->content);
-        break;
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM:
-        // build_assignment_statement_from_parts keeps the parsed LHS in the
-        // shared `left` alias while the Lambda statement's real operands are
-        // the decomposed place: object + key chain + value. The core layout
-        // visits `left`/`right`, so delegating here would scan the LHS as an
-        // ordinary *read* -- and `m[i, j] = v` would then be rejected by the
-        // N-D INDEX_EXPR read guard, even though T0 never evaluates that node
-        // (interp.cpp AST_NODE_INDEX_ASSIGN_STAM uses object/key/value).
-        V(((AstCompoundAssignNode*)node)->object);
-        VLIST(((AstCompoundAssignNode*)node)->key);
-        V(((AstCompoundAssignNode*)node)->value);
-        break;
-    case AST_NODE_FOR_EXPR: {
-        AstForNode* fr = (AstForNode*)node;
-        VLIST(fr->loop);
-        VLIST(fr->let_clause);
-        V(fr->where);
-        V(fr->group);
-        VLIST(fr->order);
-        V(fr->limit);
-        V(fr->offset);
-        V(fr->then);
-        break;
-    }
-    case AST_NODE_FOR_CLAUSE: {
-        AstLoopNode* lp = (AstLoopNode*)node;
-        V(lp->as);
-        V(lp->on);
-        VLIST(lp->join_keys);
-        break;
-    }
-    case AST_NODE_JOIN_KEY:
-        V(((AstJoinKey*)node)->prior_expr);
-        V(((AstJoinKey*)node)->new_expr);
-        break;
-    case AST_NODE_ORDER_SPEC:       V(((AstOrderSpec*)node)->expr); break;
-    case AST_NODE_GROUP_CLAUSE:     VLIST(((AstGroupClause*)node)->keys); break;
-    case AST_NODE_GROUP_KEY:        V(((AstGroupKey*)node)->expr); break;
-    case AST_NODE_PATH_INDEX_EXPR:
-        V(((AstPathIndexNode*)node)->base_path);
-        V(((AstPathIndexNode*)node)->segment_expr);
-        break;
-    case AST_NODE_NAVIGATION_EXPR:  V(((AstNavigationNode*)node)->object); break;
-    case AST_NODE_QUERY_EXPR:       V(((AstQueryNode*)node)->object); break;
-    case AST_NODE_LIST:
-        VLIST(((AstListNode*)node)->declare);
-        VLIST(((AstListNode*)node)->item);
-        break;
-    case AST_NODE_CONSTRAINED_TYPE:
-        V(((AstConstrainedTypeNode*)node)->base);
-        V(((AstConstrainedTypeNode*)node)->constraint);
-        break;
-    case AST_NODE_OBJECT_TYPE: {
-        AstObjectTypeNode* ot = (AstObjectTypeNode*)node;
-        V(ot->base_type);
-        VLIST(ot->item);
-        VLIST(ot->content);
-        VLIST(ot->methods);
-        VLIST(ot->constraints);
-        break;
-    }
-    case AST_NODE_PATTERN_SEQ:      VLIST(((AstPatternSeqNode*)node)->first); break;
-    case AST_NODE_PATTERN_RANGE:
-        V(((AstPatternRangeNode*)node)->start);
-        V(((AstPatternRangeNode*)node)->end);
-        break;
-    case AST_NODE_PATTERN_ISLAND:   V(((AstPatternIslandNode*)node)->pattern); break;
-    case AST_NODE_VIEW: {
-        AstViewNode* vw = (AstViewNode*)node;
-        V(vw->pattern);
-        VLIST(vw->param);
-        V(vw->body);
-        for (AstStateEntry* s = vw->state; s; s = s->next_state) visit((AstNode*)s, ctx);
-        for (AstEventHandler* h = vw->handler; h; h = h->next_handler) visit((AstNode*)h, ctx);
-        break;
-    }
-    case AST_NODE_STATE_ENTRY:      V(((AstStateEntry*)node)->value); break;
-    case AST_NODE_EVENT_HANDLER:
-        VLIST(((AstEventHandler*)node)->param);
-        V(((AstEventHandler*)node)->body);
-        break;
-    default: {
-        InterpCoreChildAdapter adapter = {visit, ctx};
-        ast_visit_core_children(node, interp_visit_core_child, &adapter);
-        break;
-    }
-    }
-#undef VLIST
-#undef V
-}
 
 // ---------------------------------------------------------------------------
 // Pre-scan: which node kinds the P0 walker can execute
@@ -464,7 +343,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             }
         }
         if (ast_call_has_named_args(call) && !direct &&
-                !interp_named_sys_args_supported(call_callee)) {
+                !ast_named_sys_args_supported(call_callee)) {
             // Dynamic calls have no formal layout. Pure system rows are the
             // one exception: MIR discards their labels and keeps source order.
             sc->ok = false;
@@ -523,7 +402,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
         if (interp_method_store_entry(sc->index, node)) {
-            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
+            if (!sc->indexed) ast_visit_lambda_children(node, interp_scan_visit, ctx);
             return;
         }
         AstCowPath path = {};
@@ -632,37 +511,17 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // raw value expression as the item (build_ast.cpp), so eval_map's positional
     // fill already hands map_fill_items exactly what lowering does — the shared
     // filler is what interprets the spread marker. No gate is needed.
-    // A system function whose entry takes native words (the bitwise/shift
-    // family) or more arguments than the P0 dispatch table covers.
     if (node->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)node)->fn_info;
-        // A variadic sys func (arg_count -1) has bespoke per-call lowering —
-        // `print` for instance emits one pn_print per argument with separators —
-        // so there is no generic dispatch to mirror yet.
-        // The native bitwise rows are admitted only through the shared
-        // Item-level wrapper policy. It preserves the static all-int fast path
-        // while the existing runtime helpers retain sized/full/bigint lanes.
-        if (interp_native_sys_item_supported(info)) {
-            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
-            return;
-        }
         // `print` is the one Lambda-variadic entry the walker implements
         // directly (one pn_print per argument, as lowering emits); the other
         // variadic rows still have no generic dispatch to mirror.
         if (info && info->fn == SYSPROC_PRINT && info->func_ptr) {
-            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
+            if (!sc->indexed) ast_visit_lambda_children(node, interp_scan_visit, ctx);
             return;
         }
-        // Math entries carrying a native lane (floor/ceil/round/trunc/abs …)
-        // preserve their argument's declared type: lowering keeps `trunc(n:int)`
-        // in the int lane, while the boxed helper alone yields float
-        // (test/lambda/proc/native_math_type_preserving.ls). That lane choice is
-        // type-inference work, the same gap that keeps the bitwise family out.
-        // The type-preserving math family (floor/ceil/round/trunc/abs) is
-        // interpreted with a result re-narrowed by the call's static type
-        // (eval_call, interp.cpp), which is the same input lowering uses. Only
-        // an integer lane other than plain `int` is still gated: those carry
-        // widths the boxed helper does not model.
+        // T0 re-narrows the boxed math result for plain int/float contracts.
+        // Other static numeric widths require a matching admission path.
         if (info && info->native_c_name && info->native_func_ptr &&
                 !sysfunc_native_math_always_float(info->fn) &&
                 node->type && node->type->type_id != LMD_TYPE_INT &&
@@ -675,12 +534,12 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // VMap creation and `set` have no boxed entry (func_ptr is NULL by
         // design); the walker mirrors their direct lowering paths instead.
         if (info && info->fn == SYSFUNC_VMAP_NEW && info->arg_count <= 1) {
-            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
+            if (!sc->indexed) ast_visit_lambda_children(node, interp_scan_visit, ctx);
             return;
         }
         // `select` packs its variadic handles at the call, as lowering does.
         if (info && (info->fn == SYSPROC_VMAP_SET || info->fn == SYSPROC_SELECT)) {
-            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
+            if (!sc->indexed) ast_visit_lambda_children(node, interp_scan_visit, ctx);
             return;
         }
         // The boxed caller in interp.cpp handles up to five Item arguments; the
@@ -700,7 +559,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             return;
         }
     }
-    if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
+    if (!sc->indexed) ast_visit_lambda_children(node, interp_scan_visit, ctx);
 }
 
 static AstIndexProfileSupport interp_profile_support_node(
@@ -734,15 +593,6 @@ bool interp_scan_supported(Script* script, AstNodeType* reject) {
     }
     if (reject) *reject = sc.reject;
     return sc.ok;
-}
-
-bool interp_named_sys_args_supported(const AstNode* callee) {
-    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
-    SysFuncInfo* info = ((const AstSysFuncNode*)callee)->fn_info;
-    // A procedure can mutate its first Item. When that Item arrived from a
-    // pipe, T0 has no direct binding to publish the required COW replacement.
-    // The suspension builtins (`wait`, `select`, ...) mutate no argument.
-    return info && (!info->is_proc || info->is_async);
 }
 
 // ---------------------------------------------------------------------------
@@ -1209,23 +1059,15 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t at_call = 3;
         uint32_t best = o > k ? o : k;
         if (v > best) best = v;
-        // A NESTED target (`b.xs[0] = v`) takes the cow_path_set branch, which
-        // is a deeper shape than the flat one this estimate was written for: it
-        // holds value, path, terminal AND owner slots live simultaneously
-        // across the call, and evaluates each path segment's key one level
-        // below the first three. Budgeting the flat three overflowed the frame
-        // and the write was dropped -- `b.xs[0] = 99` reported "scratch
-        // overflow depth=5 cap=5" and left the array untouched.
-        AstNode* target_object = ast_unwrap_primary(ca->object);
-        if (target_object && (target_object->node_type == AST_NODE_MEMBER_EXPR ||
-                target_object->node_type == AST_NODE_INDEX_EXPR)) {
-            uint32_t nested = 4;                        // owner_slot is deepest
-            uint32_t nested_value = 1 + plan_need(ca->value);
-            uint32_t nested_key = 3 + plan_need(ca->key);
-            uint32_t nested_seg = 3 + plan_need(ca->object);
-            if (nested_value > nested) nested = nested_value;
-            if (nested_key > nested) nested = nested_key;
-            if (nested_seg > nested) nested = nested_seg;
+        AstCowPath path = {};
+        if (ast_collect_cow_path(&path, ca->object) && path.count > 0) {
+            // The write holds its value and every key through owner lookup.
+            uint32_t key_need = plan_need(ca->key);
+            for (int i = 0; i < path.count; i++) {
+                uint32_t need = plan_need(path.segment[i]);
+                if (need > key_need) key_need = need;
+            }
+            uint32_t nested = 2 + (uint32_t)path.count + (key_need > 1 ? key_need : 1);
             if (nested > best) best = nested;
         }
         return best > at_call ? best : at_call;
@@ -1408,7 +1250,7 @@ static uint32_t plan_need(AstNode* node) {
             uint32_t collections = 0;
             for (AstNode* item = fr->loop; item; item = item->next) collections++;
             NeedAcc acc = {0};
-            interp_visit_children(node, plan_need_child, &acc);
+            ast_visit_lambda_children(node, plan_need_child, &acc);
             return 2 + collections + acc.best;
         }
         // Group materialization keeps the output/key streams, source, row
@@ -1453,7 +1295,7 @@ static uint32_t plan_need(AstNode* node) {
         AstElementNode* element = (AstElementNode*)node;
         if (!element->has_computed_key) {
             NeedAcc acc = {0};
-            interp_visit_children(node, plan_need_child, &acc);
+            ast_visit_lambda_children(node, plan_need_child, &acc);
             return 1 + acc.best;
         }
         uint32_t best = plan_computed_field_need(element->item);
@@ -1540,7 +1382,7 @@ static uint32_t plan_need(AstNode* node) {
         // holds one Item of its own across the widest child. Undercounting is
         // the one failure mode that loses a root (R1), so the fallback rounds up.
         NeedAcc acc = {0};
-        interp_visit_children(node, plan_need_child, &acc);
+        ast_visit_lambda_children(node, plan_need_child, &acc);
         return 1 + acc.best;
     }
     }
@@ -1963,7 +1805,7 @@ static void plan_walk(AstNode* node, void* ctx) {
     default:
         break;
     }
-    interp_visit_children(node, plan_walk, ctx);
+    ast_visit_lambda_children(node, plan_walk, ctx);
 }
 
 bool interp_plan_script(Script* script) {
@@ -2252,7 +2094,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
     default:
         break;
     }
-    if (sc->ok) interp_visit_children(node, interp_scan_satellite_node, sc);
+    if (sc->ok) ast_visit_lambda_children(node, interp_scan_satellite_node, sc);
 }
 
 bool interp_satellite_supported(const Script* script, const AstFuncNode* fn) {

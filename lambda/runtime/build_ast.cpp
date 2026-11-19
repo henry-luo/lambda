@@ -11,7 +11,6 @@
 #include "binary_schema.hpp"
 #include "security_context.h"
 #include "sysinfo.h"
-#include "interp.hpp"  // interp_visit_children: the complete Lambda child traversal
 #include "lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
@@ -7895,7 +7894,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         // slot. Sources and row consumers retain their own receiving rules.
         EnforcingCallWalk walk = {tp, return_acknowledgment, loop->then,
             !ast_for_discards_result(node)};
-        interp_visit_children(node, validate_enforcing_child, &walk);
+        ast_visit_lambda_children(node, validate_enforcing_child, &walk);
         return;
     }
     case AST_NODE_CONTENT:
@@ -7956,7 +7955,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     }
     default: {
         EnforcingCallWalk walk = {tp, return_acknowledgment, NULL, false};
-        interp_visit_children(node, validate_enforcing_child, &walk);
+        ast_visit_lambda_children(node, validate_enforcing_child, &walk);
         return;
     }
     }
@@ -16442,7 +16441,7 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
         AstCallNode* target = ((AstStartNode*)node)->call;
         // S13.1.1v3: a launch carries a packed argument array, validated by
         // validate_start_parts, rather than an ordinary argument list.
-        interp_visit_children((AstNode*)target, refresh_loop_outcome_child, &children);
+        ast_visit_lambda_children((AstNode*)target, refresh_loop_outcome_child, &children);
         TypeFunc* signature = call_function_signature(target);
         if (owner->refresh_calls && signature) {
             target->can_raise = signature->can_raise;
@@ -16450,7 +16449,7 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
         }
         return;
     }
-    interp_visit_children(node, refresh_loop_outcome_child, &children);
+    ast_visit_lambda_children(node, refresh_loop_outcome_child, &children);
     Transpiler* tp = owner->tp;
     if (owner->refresh_calls && node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
@@ -16632,7 +16631,7 @@ static void refresh_loop_outcomes(Transpiler* tp, AstNode* loop) {
     LoopOutcomeRefresh facts = {tp, loop->source_span.start_byte, false, once_head, 0, false, NULL};
     do {
         facts.changed = false;
-        interp_visit_children(loop, refresh_loop_outcome_child, &facts);
+        ast_visit_lambda_children(loop, refresh_loop_outcome_child, &facts);
     } while (facts.changed && !tp->error_count);
 }
 

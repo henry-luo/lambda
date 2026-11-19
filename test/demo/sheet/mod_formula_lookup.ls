@@ -53,16 +53,9 @@ pub fn xmatch(key,lookup,match_mode=0,search_mode=1) any^ {
     let index=find_index(key,lookup,match_mode,search_mode)^;
     if (index==null) raise error("#N/A") else index+1
 }
-pub fn xlookup(key,lookup,returns,if_not_found=null,match_mode=0,search_mode=1) any^ {
+pub fn xlookup_index(key,lookup,returns,match_mode,search_mode) any^ {
     if (not vector(lookup) or not vector(returns) or lookup.rows!=returns.rows or lookup.cols!=returns.cols) raise error("#VALUE!")
-    else {
-        let index=find_index(key,lookup,match_mode,search_mode)^;
-        if (index!=null) returns.values[index]
-        else if (if_not_found==null) raise error("#N/A") else {
-            let fallback=call(if_not_found,[])^;
-            if (fallback==null) raise error("#N/A") else fallback
-        }
-    }
+    else find_index(key,lookup,match_mode,search_mode)^
 }
 
 // LOOKUP uses the last matching entry in an ascending vector.

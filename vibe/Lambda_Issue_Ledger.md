@@ -21,6 +21,36 @@
 Scratch spool durability amplification was fixed and moved to the
 [fixed ledger](<Lambda_Issue_Ledger (fixed).md#durable-scratch-spool-amplification>).
 
+## Background Lambda promotion builds single-definition images — 2026-11-19
+
+**Status:** OPEN. D8.3.3 specifies bounded direct-callee clusters. The
+production queue calls `lambda_mvp_compile_function_snapshot`, whose snapshot
+branch assembles only the target. The cluster collector still serves the
+synchronous harness path for retaining a satellite across a LambdaJS native
+export request. Collect the cluster on the evaluator and give the worker its
+chosen definitions as frozen input under D8.3.4. Check publication when a
+member also has a pending promotion, and retain the image before installing
+the first entry. See the
+[retirement audit](impl/Lambda_Impl_Interpreter_MIR_Unification.md#remaining-candidates-from-the-second-pass).
+
+<a id="lr12-62"></a>
+The interpreter object-method effect-bound fix is recorded under S12.1.6v3
+and D7.1.1v4 in the [fixed ledger](<Lambda_Issue_Ledger (fixed).md#lr12-62>).
+
+## LR12-63 — JavaScript DOM fixtures fail in the Lambda baseline
+
+**Status:** OPEN, 2026-11-19. The Lambda baseline reports exit 139 for
+`dom_get_root_node`, `dom_replace_children` and
+`regression_dom_template_fragment`, and an output mismatch for
+`dom_module_props`. All four fail again in an isolated `test_js_gtest` rerun.
+The cause and whether the current shared build artifacts contribute remain
+unconfirmed. D8.4.1 and D9.5.5 cover the JavaScript runtime and DOM carrier
+boundary. Evidence is in `test_output/test_js_gtest.log` from the baseline;
+the separately recorded media playback stall also recurred in that run.
+The Hotwire HTTP client fixture likewise exited 139 in an unrestricted
+loopback rerun (`temp/sheet-clock/hotwire.log`); its relationship to the DOM
+fixtures is unconfirmed.
+
 <a id="lr09-35"></a>
 ## LR09-35 — Disk watch can miss the first creation in the Lambda baseline
 

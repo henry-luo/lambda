@@ -199,6 +199,7 @@ struct MvpBinding {
     AstNode* declaration;  // continuations reuse live-in identities with private parameter sites
     const char* state_name;
     Type* admission_contract;
+    Type* continuation_input; // exact tag guarded by T0 at the loop head
     Type* producer_success_contract;
     Type* membership_contract;
     Type* contract;
@@ -262,6 +263,8 @@ struct LambdaMvpModule {
     MIR_item_t layout;
     const MirModuleNames* names;
     bool satellite;
+    const AstFuncNode* satellite_boxed_target;
+    const InterpLoopInput* loop_inputs;
     ArrayList* property_keys;
     HashMap* imports;
     MvpFunction* functions;

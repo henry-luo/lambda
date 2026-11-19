@@ -1955,7 +1955,11 @@ typedef struct LangProfile {
     void (*visit_ext_children)(AstNode* node, AstChildVisitor visitor, void* ctx);
 } LangProfile;
 
-inline LangProfile lambda_profile = { "lambda", NULL, NULL };
+// D8.2.4: Lambda semantic walks and indexed extensions share the language edges.
+typedef void (*AstLambdaChildVisitor)(AstNode* child, void* ctx);
+void ast_visit_lambda_children(AstNode* node, AstLambdaChildVisitor visit, void* ctx);
+void ast_visit_lambda_index_extensions(AstNode* node, AstChildVisitor visit, void* ctx);
+inline LangProfile lambda_profile = { "lambda", NULL, ast_visit_lambda_index_extensions };
 
 // JavaScript owns its extension walkers. Define this profile alongside those
 // walkers so parallel AST builders never mutate shared profile state.

@@ -12,7 +12,7 @@ pub pn accept(st,owner) {
     let node=dom.get_element_by_id(dom.root_node(owner),if (st.editing) "cell-editor" else "formula-input")
     return m.set_value(st,dom.get_state(node,"value") or "")
 }
-pub fn new_book(st,sample=false) any^ => m.select(m.initial(if (sample) m.sample() else m.blank())^,0,0)
+pub function new_book(st,sample=false) any^ => m.select(m.initial(if (sample) m.sample() else m.blank())^,0,0)
 pub pn command(st,id,owner) map^ {
     if (id=="undo" or id=="redo") { return m.history(st,id=="redo") }
     if (id=="new" or id=="sample" or id=="open") {

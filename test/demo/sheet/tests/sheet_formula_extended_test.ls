@@ -1,10 +1,24 @@
 // Expanded formula coverage exercises Excel criteria and call dispatch (S12.3.4v2).
 import m: ~~.mod_model
 import f: ~~.mod_formula
+
+fn make_result(data) {
+    function calculate(expr) any^ => f.display(m.current(m.set_value(m.select(data,6,0),expr)),6,0)
+    calculate
+}
+fn make_result1904(data) {
+    function calculate(expr) any^ => f.display({*:m.current(m.set_value(m.select(data,6,0),expr)),date1904:true},6,0)
+    calculate
+}
+fn make_cross_result(cross) {
+    function calculate(expr) any^ => f.display(m.indexed(m.set_value(m.select(cross,3,0),expr)),3,0)
+    calculate
+}
+function() {
 let initial=m.initial(m.blank())
 let data=m.paste(m.select(initial,0,0),"Apple\t10\tEast\t50\napricot\t20\tWest\t40\nA*literal\t30\tEast\t30\nA/one\t40\tEast\t20\nBeta\t50\tWest\t10")
-let result=(expr) any^ => f.display(m.current(m.set_value(m.select(data,6,0),expr)),6,0)
-let result1904=(expr) any^ => f.display({*:m.current(m.set_value(m.select(data,6,0),expr)),date1904:true},6,0)
+let result=make_result(data)
+let result1904=make_result1904(data)
 let sales={*:m.empty_sheet("Sales"),cells:[{row:0,col:0,raw:"10",style:{}},{row:1,col:0,raw:"20",style:{}},
     {row:0,col:2,raw:"='Plan 2024'!C1",style:{}}]}
 let plan={*:m.empty_sheet("Plan 2024"),cells:[{row:0,col:0,raw:"=Sales!A1*2",style:{}},
@@ -12,7 +26,7 @@ let plan={*:m.empty_sheet("Plan 2024"),cells:[{row:0,col:0,raw:"=Sales!A1*2",sty
 let owners={*:m.empty_sheet("Owner's"),cells:[{row:0,col:0,raw:"33",style:{}}]}
 let workbook={format:"lambda-sheet",version:1,title:"Cross-sheet",sheets:[sales,plan,owners]}
 let cross=m.activate(m.initial(workbook),1)
-let cross_result=(expr) any^ => f.display(m.indexed(m.set_value(m.select(cross,3,0),expr)),3,0);
+let cross_result=make_cross_result(cross);
 [
  result("=COUNTIF(A1:A5,\"a*\")")==4,
  result("=COUNTIF(A1:A5,\"A?ple\")")==1,
@@ -161,3 +175,5 @@ let cross_result=(expr) any^ => f.display(m.indexed(m.set_value(m.select(cross,3
  result("=YEAR(-1)")=="#NUM!",
  result1904("=YEAR(DATE(2024,1,1))")==2024
 ]
+
+}

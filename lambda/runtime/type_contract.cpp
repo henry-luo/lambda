@@ -1413,7 +1413,7 @@ bool lambda_array_num_elem_type_for_contract(Type* element,
     }
 }
 
-static bool array_num_layout_proves_contract_rank(const ArrayNum* array,
+bool array_num_layout_proves_contract_rank(const ArrayNum* array,
         uint8_t rank) {
     if (!array || rank == 0 || array->is_view) return false;
     if (rank == 1) return !array->is_ndim;

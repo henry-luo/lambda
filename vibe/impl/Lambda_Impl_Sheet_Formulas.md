@@ -2,12 +2,44 @@
 
 ## Current checkpoint
 
+### Clock and random formulas, 2026-11-19
+
+- **Status:** direct generative formula evaluation implemented.
+- **Goal:** add `TODAY()`, `NOW()`, Excel `RAND()` and the `RANDOM()` alias,
+  including generative evaluation and Sheet rendering (**S12.1.3v6**,
+  **S12.1.4v7**, **S12.1.6v3**).
+- **Calculation:** the generative loop executes each reached call through its
+  `@clock` or `@random` procedure. It threads results and their cache through
+  argument evaluation, lazy branches, handled errors and cross-sheet references.
+  The cache keys include the sheet, cell and invocation path. Spill passes can
+  settle geometry using the same readings. A new recalculation starts with an
+  empty cache. This follows the snapshot and effect bounds in **S9.1.4v2** and
+  **S12.1.4v7**.
+- **Rendering:** conditional styles are computed for visible and frozen
+  windows before constructing elements. Render-time volatile calls have fresh
+  samples, and references to workbook cells use the workbook calculation.
+  Effects remain passive (**S12.1.3v6**).
+- **Verification:** 21 Sheet, editor-snapshot and virtual-grid scripts pass on
+  both interpreter and JIT. The effects, spills and conditional formula scripts
+  also pass with forced GC and freed-memory poisoning on both tiers. Seven
+  Sheet UI replays pass 67 assertions across effects, conditional formatting,
+  formulas, dynamic arrays, split panes and XLSX layout.
+  The effects fixture covers both date systems, lazy branches, error recovery,
+  same-sheet and cross-sheet dependencies, independent random call sites,
+  conditional formulas, random spills and an actual volatile spill cycle.
+- **Prior baseline:** the full Lambda baseline completed 6094/6116 tests. After
+  fixing the DOM provider test's obsolete path-entry type, the 14 failed
+  Lambda script cases all passed in an unrestricted rerun. Two of three server
+  failures also passed with loopback access. The remaining server client and
+  five JavaScript DOM cases still fail; see **LR12-63** and the existing DOM
+  media playback record. These cases do not exercise the Sheet demo.
+
 - **Goal:** expand the existing Excel formula profile substantially while
   preserving dynamically dispatched Lambda calls (**S12.3.4v2**, **D7.2.2**).
 - **Worktree:** Lambda-opus `master` at `baea1b16c`, 2026-11-12. Preserve
   unrelated pre-existing changes to `test/README.md` and paged-export notes.
 - **Design:** parse spreadsheet syntax into a bounded call plan; dispatch each
-  supported spreadsheet function to its own pure Lambda function. Retain cell
+  supported spreadsheet function to a Lambda callable. Retain cell
   references, cycle detection, error propagation, and imported cached-result
   invalidation. Handle conditional formulas lazily.
 - **Scope:** prioritize wildcards and multi-condition aggregates, modern
