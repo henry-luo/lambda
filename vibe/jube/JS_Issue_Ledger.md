@@ -546,6 +546,59 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 
 ## 13. Web Platform: DOM, CSSOM, Events & Fetch (JS13)
 
+### JS13-L15 — Button commands and command events — **PARTIAL**
+
+Button `command` and `commandForElement` resolve named and direct references in
+their permitted tree scopes. Click activation honors submit and reset before
+commands. Custom commands dispatch a trusted, cancelable `CommandEvent`.
+Built-in commands reuse the popover and dialog transitions and pass the
+invoker through to toggle events. Source retargeting shares the ToggleEvent
+algorithm. Authored `oncommand` handlers use the normal inline-handler path.
+IDL numeric input writes convert to a string before the native sanitizer
+(**D6.3.3 / D7.2.2 / D9.1.3v2 / D9.5.6v2**).
+
+Thirteen pinned fixtures pass 321 of 326 subtests. The implicit-anchor case
+and four cases that require declarative shadow roots remain open. The closed
+imperative-root control and the trusted pointer replay pass under forced GC.
+
+### JS13-L14 — Progress event interface and delivery — **PARTIAL**
+
+Scripted `ProgressEvent` and FileReader dispatch share the traced native
+payload. Web IDL conversion preserves fractional and signed finite values,
+applies defaults and rejects nonfinite values. The shared payload-event
+constructor setup publishes prototype inheritance before first use. Both
+pinned interface and constructor fixtures pass all 17 subtests on the live
+clock. The native FileReader and subclass regression passes under forced GC.
+XHR load and progress dispatch remain open (**D6.3.3 / D7.2.2 / D9.1.3v2**).
+
+### JS13-L13 — Dialog and popover toggle events — **PARTIAL**
+
+The `ToggleEvent` interface uses traced, readonly state and source fields.
+`source` is retargeted against the listener's current target. Dialog and
+popover state transitions deliver synchronous `beforetoggle` and queue one
+`toggle` for pending transitions with the first old state and latest new
+state. Separate trackers allow a dialog with a popover attribute to deliver
+both events. Dialog opening hides automatic popovers above its flat-tree
+ancestor in reverse opening order and preserves manual popovers
+(**D6.3.3 / D7.2.2 / D9.1.3v2 / D9.5.6v2**).
+
+All 38 pinned interface tests, all 12 dialog event cases and the popover
+opening case pass. The focused test covers cancellation, task order,
+native invoker source and synthetic shadow retargeting. Popover IDL
+reflection, effective automatic and hint stacks, mode changes during
+closing callbacks and removal now use the same document state. The pinned
+stacking file passes 6/6. The 249 attribute cases, 11 pointer-order cases, three
+cross-document adoption cases and removal during dismissal all pass. Trusted
+pointer dismiss closes eligible stack entries before `pointerup`. The broader
+light-dismiss fixture passes 19/26 with `ProgressEvent`. It still exercises
+unsupported `elementsFromPoint()`, older nested-open semantics, and
+native click targeting after a cross-target press. Authored autofocus and
+explicit close now use the shared native focus transition. Dialogs choose a
+sequential control or the dialog itself as a fallback. Popovers save focus
+for the first automatic or hint entry. Close watchers, dialog inertness,
+keyboard focus order and top-layer rendering (Radiant
+RI-029) remain open.
+
 ### JS13-L12 — Dialog form submission and submitter values — **PARTIAL**
 
 Native activation, `requestSubmit()` and direct `submit()` share dialog
@@ -561,8 +614,26 @@ native WebDriver pointer actions supply the clicks. The public click helper
 requires `elementsFromPoint()`. An image subtest compares the submitted integer
 with a fractional native event offset. The no-submitter case expects the
 stored value to be cleared, as in Chromium 152. The HTML close algorithm
-preserves that value when submission supplies a null result. `SubmitEvent`
-branding and form-data event dispatch remain open.
+preserves that value when submission supplies a null result.
+
+`SubmitEvent` and `FormDataEvent` now share the Event record's traced
+payload. Activation and `requestSubmit()` block reentry during validation
+and submit listeners. Submission and the FormData constructor share
+entry construction and use the listener-edited snapshot after dispatch.
+The pinned event constructors and submitter-entry fixtures pass all
+18 subtests. The construction algorithm fixture passes 11 of 13.
+Legacy `accept-charset` conversion and a control named `submit` that
+should hide the form method account for the two remaining failures.
+The expanded native image replay checks actual `x` and `y` entries.
+The focused submission and iteration controls pass under forced GC
+(**D6.3.3 / D7.2.2 / D9.1.3v2 / D9.5.6v2**).
+
+GET activation, `requestSubmit()` and direct `submit()` share URL construction.
+It resolves the action against the document base, replaces the query before
+the fragment, preserves an empty query and encodes file names and CRLF only
+for serialization. The current navigation waist updates the selected
+document's URL. Planned navigation, document loading and HTTP POST transport
+remain open (**D9.1.3v2 / D9.5.6v2**).
 
 ### JS13-L11 — Until-found reflection, rendering and fragment reveal — **PARTIAL**
 
@@ -787,6 +858,9 @@ ordered weak relations through detach and adoption. Manual and named
 assignments share the DOM, directionality, layout and paint traversal.
 Nested projection preserves each slot's source root. The pinned imperative
 API and slotchange suites pass (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+Document teardown now releases slot links before adopted-document resources
+destroy the nodes' backing storage. The standalone document-probe cases
+cover plain adoption, fragments and replacement (**D5.5.1**).
 
 The HTML default for a slot is `display:contents`. Inline and scoped
 `display:none` suppress projected and fallback boxes while preserving the
@@ -800,6 +874,11 @@ text changes, media changes, moves between roots and host insertion update the
 computed style and PNG paint. Selector parent relations stop at the shadow
 fragment boundary. Scoped linked and adopted sheets, shadow name registries,
 `:host` and `::slotted` remain open (**D9.1.1v4 / D9.1.3v2 / D5.5.1**).
+
+Focus survives native reflow through connected shadow hosts. The document's
+`activeElement` reports the outer host, and each root's `activeElement` reports
+its own adjusted target. This includes nested closed roots. The focus-within
+path uses the flat tree (**D9.1.3v2 / D9.5.6v2**).
 
 Round sixty (2026-11-17) separates this residue from confirmed runtime bugs:
 after JS07-L1, JS13-L8 and JS13-L9, Archive.org's module and root Lit template

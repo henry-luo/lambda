@@ -186,6 +186,7 @@ const char radiant_dom_interface_decl[] =
     "    scroll_to: pn(a0: any, a1: any) any, scroll_by: pn(a0: any, a1: any) any,\n"
     "    focus: pn() any, blur: pn() any, click: pn() any,\n"
     "    show_popover: pn() any, hide_popover: pn() any, show_modal: pn() any,\n"
+    "    toggle_popover: pn() bool,\n"
     "    close_dialog: pn(value: any) any,\n"
     "    reset: pn() any,\n"
     "    submit: pn() any, request_submit: pn(a0: any) any, check_validity: pn() any,\n"

@@ -4,6 +4,7 @@
 
 struct UiContext;
 struct DomDocument;
+struct DomElement;
 struct DocState;
 struct DomNode;
 union RdtEvent;
@@ -11,6 +12,7 @@ union RdtEvent;
 // Lambda owns event handling; Radiant delivers borrowed events through its host.
 void handle_event(UiContext* ui, DomDocument* document, RdtEvent* event);
 bool radiant_register_event_hooks();
+void radiant_focus_popup_candidate(DomDocument* document, DomElement* element);
 bool lambda_event_dispatch_composition(UiContext* ui, RdtEvent* event);
 bool radiant_editing_animation_active(DocState* state);
 bool radiant_editing_animation_tick(UiContext* ui, double timestamp);

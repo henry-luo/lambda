@@ -41,6 +41,7 @@
 #include "lambda/input/css/dom_node.hpp"
 #include "lambda/input/css/dom_element.hpp"
 #include "lambda/input/css/dom_lifecycle.hpp"
+#include "lambda/core/well_known_markup_names.h"
 #include "radiant/form_controls.hpp"
 
 #include <cstring>
@@ -68,7 +69,6 @@ extern __thread EvalContext* context;
 
 // Shared form-control classification used by requestSubmit/reset helpers.
 extern "C" const char* dom_input_type_lower(void* dom_elem);
-extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
 extern "C" bool dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" Item dom_check_validity_bridge(Item elem_item);
 extern "C" Item radiant_dom_element_operation(Item elem_item,
@@ -87,82 +87,143 @@ static void dom_append_form_encoded(StrBuf* sb, const char* text, size_t len) {
     sb->str[sb->length] = '\0';
 }
 
-static char* dom_build_submit_query(Item entries) {
-    if (get_type_id(entries) != LMD_TYPE_ARRAY) {
-        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+static void dom_append_form_field(StrBuf* output, Item string) {
+    if (get_type_id(string) != LMD_TYPE_STRING) return;
+    String* text = it2s(string);
+    size_t start = 0;
+    for (size_t index = 0; index < text->len; index++) {
+        char byte = text->chars[index];
+        if (byte != '\r' && byte != '\n') continue;
+        // Normalize line endings only for navigation. Event data retains the original value.
+        dom_append_form_encoded(output, text->chars + start, index - start);
+        strbuf_append_str(output, "%0D%0A");
+        if (byte == '\r' && index + 1 < text->len && text->chars[index + 1] == '\n') index++;
+        start = index + 1;
     }
-
-    StrBuf* sb = strbuf_new_cap(128);
-    int64_t len = js_array_length(entries);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_elements_get_int(entries, i);
-        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
-
-        const char* key = fn_to_cstr(js_elements_get_int(pair, 0));
-        const char* val = fn_to_cstr(js_elements_get_int(pair, 1));
-        if (!key) continue;
-        if (!val) val = "";
-
-        if (sb->length > 0) strbuf_append_char(sb, '&');
-        dom_append_form_encoded(sb, key, strlen(key));
-        strbuf_append_char(sb, '=');
-        dom_append_form_encoded(sb, val, strlen(val));
-    }
-
-    char* query = mem_strdup(sb->str ? sb->str : "", MEM_CAT_JS_RUNTIME);
-    strbuf_free(sb);
-    return query;
+    dom_append_form_encoded(output, text->chars + start, text->len - start);
 }
 
-static const char* dom_pick_submit_attr(DomElement* submitter, DomElement* form,
-                                           const char* submitter_attr,
-                                           const char* form_attr) {
-    if (submitter) {
-        const char* submitter_val = submitter->get_attribute(submitter_attr);
-        if (submitter_val && *submitter_val) return submitter_val;
+static Item dom_write_submit_query(StrBuf* query, Item entries) {
+    RootFrame roots(3);
+    Rooted<Item> list(roots, entries), name(roots, ItemNull), value(roots, ItemNull);
+    strbuf_append_char(query, '?');
+    int64_t len = js_array_length(list.get());
+    for (int64_t i = 0; i < len; i++) {
+        Item pair = js_elements_get_int(list.get(), i);
+        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
+        name.set(js_elements_get_int(pair, 0));
+        value.set(js_elements_get_int(pair, 1));
+        if (js_class_id(value.get()) == JS_CLASS_FILE) {
+            value.set(dom_realm_get_cstr(value.get(), "name"));
+            JS_RETURN_IF_ERROR(value.get());
+        }
+        if (query->length > 1) strbuf_append_char(query, '&');
+        dom_append_form_field(query, name.get());
+        strbuf_append_char(query, '=');
+        dom_append_form_field(query, value.get());
     }
-    if (form) {
-        const char* form_val = form->get_attribute(form_attr);
-        if (form_val && *form_val) return form_val;
+    return make_js_undefined();
+}
+
+static const char* dom_form_submit_attr(DomElement* form, DomElement* submitter,
+                                        const char* form_attr, const char* submitter_attr) {
+    const char* value = submitter ? submitter->get_attribute(submitter_attr) : nullptr;
+    return value ? value : form->get_attribute(form_attr);
+}
+
+static Item dom_form_target(DomElement* form, DomElement* submitter) {
+    const char* name = dom_form_submit_attr(form, submitter, "target", "formtarget");
+    if (!name && form->doc && form->doc->root) {
+        DomNode* root = form->doc->root;
+        for (DomNode* node = root; node; node = dom_source_next_in_tree(root, node)) {
+            DomElement* element = node->as_element();
+            if (!dom_element_is_html_tag(element, MARKUP_NAME_BASE)) continue;
+            name = element->get_attribute("target");
+            if (name) break;
+        }
     }
-    return "";
+    if (name && strpbrk(name, "\t\n\r") && strchr(name, '<')) name = "_blank";
+    return make_string_item(name && *name ? name : "_self");
+}
+
+static Item dom_form_action_url(DomElement* form, DomElement* submitter, Item entries) {
+    if (!form->doc) return ItemNull;
+    const char* action = dom_form_submit_attr(form, submitter, "action", "formaction");
+    // An explicitly empty action defaults to the document URL even with a base element.
+    Url* parsed = action && *action ? dom_document_resolve_url(form->doc, action)
+        : url_clone(form->doc->url);
+    if (!parsed) return ItemNull;
+    if (!url_is_valid(parsed)) {
+        url_destroy(parsed);
+        return ItemNull;
+    }
+
+    UrlScheme scheme = url_get_scheme(parsed);
+    bool replace_query = get_type_id(entries) == LMD_TYPE_ARRAY &&
+        (scheme == URL_SCHEME_HTTP || scheme == URL_SCHEME_HTTPS ||
+         scheme == URL_SCHEME_FILE || scheme == URL_SCHEME_DATA);
+    Item result = ItemNull;
+    if (replace_query) {
+        StrBuf* query = strbuf_new_cap(128);
+        if (query) {
+            result = dom_write_submit_query(query, entries);
+            if (!item_is_error(result)) {
+                result = ItemNull;
+                if (url_set_search(parsed, query->str) == URL_OK) {
+                    String* href = url_construct_href(parsed);
+                    if (href) {
+                        result = make_string_item(href->chars, href->len);
+                        url_free_string(href);
+                    }
+                }
+            }
+            strbuf_free(query);
+        }
+    } else {
+        const char* href = url_get_href(parsed);
+        if (href) result = make_string_item(href);
+    }
+    url_destroy(parsed);
+    return result;
+}
+
+extern "C" Item dom_core_form_get_url(Item form, Item submitter, Item entries) {
+    DomNode* target = (DomNode*)dom_unwrap_element(form);
+    DomNode* button = (DomNode*)dom_unwrap_element(submitter);
+    DomElement* element = target ? target->as_element() : nullptr;
+    return dom_element_is_html_tag(element, MARKUP_NAME_FORM)
+        ? dom_form_action_url(element, button ? button->as_element() : nullptr, entries) : ItemNull;
+}
+
+extern "C" Item dom_core_form_submit_target(Item form, Item submitter) {
+    DomNode* target = (DomNode*)dom_unwrap_element(form);
+    DomNode* button = (DomNode*)dom_unwrap_element(submitter);
+    DomElement* element = target ? target->as_element() : nullptr;
+    return dom_element_is_html_tag(element, MARKUP_NAME_FORM)
+        ? dom_form_target(element, button ? button->as_element() : nullptr) : js_name_item("_self");
 }
 
 static Item dom_run_form_submission(DomElement* form, DomElement* submitter) {
     if (!form || !dom_node_is_connected(form)) return make_js_undefined();
 
+    RootFrame roots(3);
+    Rooted<Item> entries(roots, dom_form_submit_entries(form, submitter));
+    JS_RETURN_IF_ERROR(entries.get());
+    if (get_type_id(entries.get()) != LMD_TYPE_ARRAY) return make_js_undefined();
+
+    // Listeners can change the action, method, target, or dialog ancestor.
     const char* method = dom_form_submission_method(form, submitter);
     if (strcmp(method, "dialog") == 0) {
         Item closed = dom_form_close_dialog(form, submitter);
         return item_is_error(closed) ? closed : make_js_undefined();
     }
 
-    const char* target = dom_pick_submit_attr(submitter, form, "formtarget", "target");
-    const char* action = dom_pick_submit_attr(submitter, form, "formaction", "action");
-    if ((!action || !*action) && form->doc && form->doc->url) {
-        action = url_get_href(form->doc->url);
-    }
-    if (!action || !*action) return make_js_undefined();
-
-    char* nav_url = nullptr;
-    if (str_icmp_cstr(method, "get") == 0) {
-        Item entries = js_formdata_collect_form_entries(form, submitter);
-        char* query = dom_build_submit_query(entries);
-        size_t action_len = strlen(action);
-        size_t query_len = strlen(query);
-        bool has_query = strchr(action, '?') != nullptr;
-        size_t extra = query_len > 0 ? 1 : 0;
-        nav_url = mem_join3(action, action_len, query_len > 0 ? (has_query ? "&" : "?") : "",
-                            extra, query, query_len, MEM_CAT_JS_RUNTIME);
-        mem_free(query);
-    } else {
-        nav_url = mem_strdup(action, MEM_CAT_JS_RUNTIME);
-    }
-
-    if (nav_url) {
-        dom_navigate_submit_target(target, nav_url);
-        mem_free(nav_url);
-    }
+    Rooted<Item> target(roots, dom_form_target(form, submitter));
+    Rooted<Item> url(roots, dom_form_action_url(form, submitter,
+        strcmp(method, "get") == 0 ? entries.get() : ItemNull));
+    JS_RETURN_IF_ERROR(url.get());
+    if (get_type_id(url.get()) == LMD_TYPE_STRING)
+        dom_navigate_submit_target(fn_to_cstr(target.get()), fn_to_cstr(url.get()));
     return make_js_undefined();
 }
 
@@ -247,36 +308,26 @@ extern "C" bool dom_is_reset_button(void* elem_ptr) {
     return radiant_form_is_reset_button((DomElement*)elem_ptr);
 }
 
-static Item dom_throw_named_error(const char* name, const char* message) {
-    Item error_name = js_name_item(name ? name : "Error");
-    Item error_message = js_name_item(message ? message : "");
-    return dom_raise(error_name, error_message);
-}
-
-static Item dom_resolve_request_submitter(DomElement* form,
-                                             Item submitter_item,
-                                             bool* has_submitter,
-                                             DomElement** out_submitter) {
-    if (has_submitter) *has_submitter = false;
-    if (out_submitter) *out_submitter = nullptr;
+static Item dom_resolve_request_submitter(DomElement* form, Item submitter_item,
+                                         DomElement** out_submitter) {
+    *out_submitter = nullptr;
     TypeId st = get_type_id(submitter_item);
-    if (submitter_item.item == 0 || st == LMD_TYPE_UNDEFINED) {
+    if (!submitter_item.item || st == LMD_TYPE_UNDEFINED || st == LMD_TYPE_NULL) {
         return make_js_undefined();
     }
 
-    if (has_submitter) *has_submitter = true;
     DomNode* node = (DomNode*)dom_unwrap_element(submitter_item);
-    DomElement* submitter = (node && node->is_element()) ? node->as_element() : nullptr;
+    DomElement* submitter = node && node->node_type == DOM_NODE_ELEMENT ? node->as_element() : nullptr;
     if (!dom_is_submit_button(submitter)) {
         return dom_raise_type_error("requestSubmit submitter must be a submit button");
     }
 
     DomElement* owner = dom_find_form_owner(submitter);
     if (owner != form) {
-        return dom_throw_named_error("NotFoundError",
+        return dom_raise_exception("NotFoundError",
             "requestSubmit submitter is not owned by this form");
     }
-    if (out_submitter) *out_submitter = submitter;
+    *out_submitter = submitter;
     return make_js_undefined();
 }
 
@@ -286,10 +337,56 @@ static bool dom_should_validate_submit(DomElement* form, DomElement* submitter) 
     return true;
 }
 
+class FormSubmissionEvents {
+public:
+    explicit FormSubmissionEvents(DomElement* form) : form_(form) {
+        form_->ext->form_firing_submission_events = true;
+    }
+    ~FormSubmissionEvents() { form_->ext->form_firing_submission_events = false; }
+private:
+    DomElement* form_;
+};
+
+static Item dom_form_prepare_submission(Item form_item, DomElement* form,
+                                        Item submitter_item, DomElement* submitter,
+                                        bool engine_activation) {
+    if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM) || !dom_node_is_connected(form))
+        return (Item){.item = ITEM_FALSE};
+    DomElementExt* state = form->ensure_ext();
+    if (!state) return ItemError;
+    if (state->form_constructing_entries || state->form_firing_submission_events)
+        return (Item){.item = ITEM_FALSE};
+    RootFrame roots(2);
+    Rooted<Item> target(roots, form_item), button(roots, submitter_item);
+    FormSubmissionEvents events(form);
+    DomDocument* document = form->doc;
+    dom_form_mark_user_validity(form);
+    if (dom_should_validate_submit(form, submitter)) {
+        Item valid = engine_activation ? dom_engine_check_validity(target.get())
+            : dom_check_validity_bridge(target.get());
+        JS_RETURN_IF_ERROR(valid);
+        if (!js_is_truthy(valid)) return (Item){.item = ITEM_FALSE};
+    }
+    Item allowed = engine_activation ? dom_engine_submit_event(target.get(), button.get())
+        : dom_dispatch_form_submit_event(target.get(), submitter ? button.get() : ItemNull);
+    JS_RETURN_IF_ERROR(allowed);
+    return (Item){.item = b2it(allowed.item == ITEM_TRUE &&
+        form->doc == document && dom_node_is_connected(form))};
+}
+
+extern "C" Item dom_core_form_prepare_submit(Item form, Item submitter) {
+    DomNode* form_node = (DomNode*)dom_unwrap_element(form);
+    DomNode* submitter_node = (DomNode*)dom_unwrap_element(submitter);
+    return dom_form_prepare_submission(form, form_node ? form_node->as_element() : nullptr,
+        submitter, submitter_node ? submitter_node->as_element() : nullptr, true);
+}
+
 extern "C" Item dom_form_submit_bridge(Item form_item) {
-    DomNode* node = (DomNode*)dom_unwrap_element(form_item);
-    DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
-    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
+    RootFrame roots(1);
+    Rooted<Item> target(roots, form_item);
+    DomNode* node = (DomNode*)dom_unwrap_element(target.get());
+    DomElement* form = node && node->node_type == DOM_NODE_ELEMENT ? node->as_element() : nullptr;
+    if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM)) {
         return make_js_undefined();
     }
 
@@ -299,32 +396,18 @@ extern "C" Item dom_form_submit_bridge(Item form_item) {
 }
 
 extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter_item) {
-    RootFrame roots(3);
+    RootFrame roots(2);
     Rooted<Item> form_root(roots, form_item), submitter_root(roots, submitter_item);
-    Rooted<Item> event(roots, ItemNull);
     DomNode* node = (DomNode*)dom_unwrap_element(form_root.get());
-    DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
-    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
+    DomElement* form = node && node->node_type == DOM_NODE_ELEMENT ? node->as_element() : nullptr;
+    if (!dom_element_is_html_tag(form, MARKUP_NAME_FORM)) {
         return make_js_undefined();
     }
 
-    bool has_submitter = false;
     DomElement* submitter = nullptr;
-    JS_ASSIGN_OR_RETURN(submitter_result, dom_resolve_request_submitter(form, submitter_root.get(),
-        &has_submitter, &submitter));
-    if ((has_submitter && !submitter) || !dom_node_is_connected(form)) return make_js_undefined();
-
-    dom_form_mark_user_validity(form);
-
-    if (dom_should_validate_submit(form, submitter)) {
-        Item valid = dom_check_validity_bridge(form_root.get());
-        if (!js_is_truthy(valid)) return make_js_undefined();
-    }
-
-    event.set(js_create_native_event("submit", true, true));
-    dom_realm_set_cstr(event.get(), "submitter", has_submitter ? submitter_root.get() : ItemNull);
-    Item submit_ok = dom_dispatch_event(form_root.get(), event.get());
-    if (item_is_error(submit_ok)) return submit_ok;
+    JS_RETURN_IF_ERROR(dom_resolve_request_submitter(form, submitter_root.get(), &submitter));
+    JS_ASSIGN_OR_RETURN(submit_ok, dom_form_prepare_submission(form_root.get(), form,
+        submitter_root.get(), submitter, false));
     if (submit_ok.item == ITEM_FALSE) return make_js_undefined();
 
     return dom_run_form_submission(form, submitter);
@@ -1237,7 +1320,7 @@ extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
 }
 
 static Item js_create_event_init_with_class(const char* type, bool bubbles,
-        bool cancelable, bool composed, JsClass class_id) {
+        bool cancelable, bool composed, JsClass class_id, bool use_current_new_target = true) {
     RootFrame roots(3);
     Rooted<Item> event_root(roots, dom_event_host_create(type, bubbles,
         cancelable, composed, (int)class_id));
@@ -1269,7 +1352,7 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     // F17 projects legacy aliases directly from the native record. Per-wrapper
     // accessors would recreate a second cancellation state.
 
-    event_apply_new_target_prototype(event);
+    if (use_current_new_target) event_apply_new_target_prototype(event);
 
     return event_root.get();
 }
@@ -1870,6 +1953,284 @@ static void event_install_to_string_tag(Item prototype, const char* name) {
     dom_realm_set(object.get(), key.get(), js_name_item(name));
     js_mark_non_writable(object.get(), key.get());
     js_mark_non_enumerable(object.get(), key.get());
+}
+
+static Item create_payload_event(const char* type, const bool flags[3], JsClass cls,
+                                 Item payload, bool trusted) {
+    RootFrame roots(2);
+    Rooted<Item> value(roots, payload);
+    // Native dispatch may run inside an unrelated constructor such as FormData.
+    // Script constructors apply their explicit newTarget through the intrinsic catalog.
+    Rooted<Item> event(roots, js_create_event_init_with_class(
+        type, flags[0], flags[1], flags[2], cls, false));
+    JS_RETURN_IF_ERROR(event.get());
+    if (!dom_event_host_set_payload(event.get(), value.get())) return ItemError;
+    if (trusted) dom_event_host_set_trusted(event.get(), true);
+    return event.get();
+}
+
+static Item construct_form_event(Item type_arg, Item init_arg, bool form_data) {
+    RootFrame roots(3);
+    Rooted<Item> type(roots, type_arg), init(roots, init_arg), value(roots, ItemNull);
+    type.set(js_to_string(type.get()));
+    JS_RETURN_IF_ERROR(type.get());
+    bool flags[3];
+    JS_RETURN_IF_ERROR(event_read_init_flags(init.get(), flags, "Invalid form event dictionary"));
+    if (js_is_object_value(init.get())) {
+        value.set(read_init(init.get(), form_data ? "formData" : "submitter"));
+        JS_RETURN_IF_ERROR(value.get());
+    }
+    if (form_data) {
+        if (js_class_id(value.get()) != JS_CLASS_FORM_DATA)
+            return dom_realm_throw_type_error("FormDataEvent requires a FormData value");
+    } else if (get_type_id(value.get()) == LMD_TYPE_NULL ||
+               get_type_id(value.get()) == LMD_TYPE_UNDEFINED) {
+        // The host returns null for an invalid receiver. Store an absent submitter separately.
+        value.set(make_js_undefined());
+    } else {
+        DomNode* node = (DomNode*)dom_unwrap_element(value.get());
+        if (!node || node->node_type != DOM_NODE_ELEMENT ||
+            strcmp(dom_element_namespace_uri(node->as_element()), "http://www.w3.org/1999/xhtml"))
+            return dom_realm_throw_type_error("SubmitEvent submitter must be an HTMLElement");
+    }
+    return create_payload_event(fn_to_cstr(type.get()), flags,
+        form_data ? JS_CLASS_FORM_DATA_EVENT : JS_CLASS_SUBMIT_EVENT, value.get(), false);
+}
+
+Item js_ctor_submit_event_fn(Item type, Item init) {
+    return construct_form_event(type, init, false);
+}
+
+Item js_ctor_form_data_event_fn(Item type, Item init) {
+    return construct_form_event(type, init, true);
+}
+
+static Item submit_event_submitter(Item, Item receiver, Item*, int, uint64_t*) {
+    Item value = dom_event_host_payload(receiver, JS_CLASS_SUBMIT_EVENT);
+    if (get_type_id(value) == LMD_TYPE_NULL)
+        return dom_realm_throw_type_error("Illegal SubmitEvent receiver");
+    return get_type_id(value) == LMD_TYPE_UNDEFINED ? ItemNull : value;
+}
+
+static Item form_data_event_form_data(Item, Item receiver, Item*, int, uint64_t*) {
+    Item value = dom_event_host_payload(receiver, JS_CLASS_FORM_DATA_EVENT);
+    if (get_type_id(value) == LMD_TYPE_NULL)
+        return dom_realm_throw_type_error("Illegal FormDataEvent receiver");
+    return value;
+}
+
+void js_form_event_install_prototype(Item prototype, bool form_data) {
+    RootFrame roots(1);
+    Rooted<Item> object(roots, prototype);
+    const char* fields[] = {form_data ? "formData" : "submitter"};
+    dom_install_event_payload_getters(object.get(), fields, 1,
+        form_data ? form_data_event_form_data : submit_event_submitter);
+    event_install_to_string_tag(object.get(), form_data ? "FormDataEvent" : "SubmitEvent");
+}
+
+Item js_create_native_form_data_event(Item form_data) {
+    const bool flags[] = {true, false, false};
+    return create_payload_event("formdata", flags, JS_CLASS_FORM_DATA_EVENT, form_data, true);
+}
+
+Item dom_dispatch_form_submit_event(Item form, Item submitter) {
+    RootFrame roots(2);
+    Rooted<Item> target(roots, form);
+    const bool flags[] = {true, true, false};
+    Rooted<Item> event(roots, create_payload_event("submit", flags, JS_CLASS_SUBMIT_EVENT,
+        get_type_id(submitter) == LMD_TYPE_NULL ? make_js_undefined() : submitter, true));
+    JS_RETURN_IF_ERROR(event.get());
+    return dom_dispatch_event(target.get(), event.get());
+}
+
+enum ToggleEventSlot { TOGGLE_NEW_STATE, TOGGLE_OLD_STATE, TOGGLE_SOURCE, TOGGLE_SLOT_COUNT };
+static const char* const toggle_event_fields[] = {"newState", "oldState", "source"};
+
+static Item event_retargeted_source(Item receiver, Item value) {
+    if (get_type_id(value) == LMD_TYPE_NULL) return value;
+    RootFrame roots(2);
+    Rooted<Item> source(roots, value), event(roots, receiver);
+    DomNode* node = (DomNode*)dom_unwrap_element(source.get());
+    DomNode* against = (DomNode*)dom_unwrap_element(
+        dom_realm_get_cstr(event.get(), "currentTarget"));
+    DomNode* adjusted = dom_retarget_node(node, dom_shadow_root(node), against);
+    return adjusted == node ? source.get() : dom_wrap_element(adjusted->as_element());
+}
+
+static Item event_element_source(Item value, const char* error) {
+    TypeId kind = get_type_id(value);
+    if (kind == LMD_TYPE_UNDEFINED || kind == LMD_TYPE_NULL) return ItemNull;
+    DomNode* node = (DomNode*)dom_unwrap_element(value);
+    return node && node->node_type == DOM_NODE_ELEMENT ? value : dom_realm_throw_type_error(error);
+}
+
+static Item toggle_event_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
+    JS_ASSIGN_OR_RETURN(payload, event_array_payload(receiver, JS_CLASS_TOGGLE_EVENT, TOGGLE_SLOT_COUNT));
+    uint64_t slot = js_fn_native((JsFunction*)callee.function)->target.bits;
+    Item value = js_elements_get_int(payload, slot);
+    return slot == TOGGLE_SOURCE ? event_retargeted_source(receiver, value) : value;
+}
+
+void js_toggle_event_install_prototype(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> object(roots, prototype);
+    dom_install_event_payload_getters(object.get(), toggle_event_fields, TOGGLE_SLOT_COUNT,
+        toggle_event_getter);
+    event_install_to_string_tag(object.get(), "ToggleEvent");
+}
+
+Item js_ctor_toggle_event_fn(Item type_arg, Item init_arg) {
+    RootFrame roots(4);
+    Rooted<Item> type(roots, type_arg), init(roots, init_arg), member(roots, ItemNull);
+    Rooted<Item> payload(roots, js_array_new(0));
+    type.set(js_to_string(type.get()));
+    JS_RETURN_IF_ERROR(type.get());
+    bool flags[3];
+    JS_RETURN_IF_ERROR(event_read_init_flags(init.get(), flags, "Invalid ToggleEventInit"));
+    for (int slot = 0; slot < TOGGLE_SLOT_COUNT; slot++) {
+        member.set(js_is_object_value(init.get())
+            ? read_init(init.get(), toggle_event_fields[slot]) : make_js_undefined());
+        JS_RETURN_IF_ERROR(member.get());
+        TypeId kind = get_type_id(member.get());
+        if (slot == TOGGLE_SOURCE) {
+            member.set(event_element_source(member.get(), "ToggleEvent source must be an Element"));
+        } else {
+            member.set(kind == LMD_TYPE_UNDEFINED ? js_name_item("") : js_to_string(member.get()));
+        }
+        JS_RETURN_IF_ERROR(member.get());
+        JS_RETURN_IF_ERROR(js_array_push(payload.get(), member.get()));
+    }
+    return create_payload_event(fn_to_cstr(type.get()), flags, JS_CLASS_TOGGLE_EVENT,
+        payload.get(), false);
+}
+
+Item js_create_native_toggle_event(const char* type, bool old_open, bool new_open,
+                                   bool cancelable, Item source) {
+    RootFrame roots(2);
+    Rooted<Item> origin(roots, source), payload(roots, js_array_new(0));
+    JS_RETURN_IF_ERROR(js_array_push(payload.get(), js_name_item(new_open ? "open" : "closed")));
+    JS_RETURN_IF_ERROR(js_array_push(payload.get(), js_name_item(old_open ? "open" : "closed")));
+    JS_RETURN_IF_ERROR(js_array_push(payload.get(), origin.get()));
+    const bool flags[] = {false, cancelable, false};
+    return create_payload_event(type, flags, JS_CLASS_TOGGLE_EVENT, payload.get(), true);
+}
+
+enum CommandEventSlot { COMMAND_VALUE, COMMAND_SOURCE, COMMAND_SLOT_COUNT };
+static const char* const command_event_fields[] = {"command", "source"};
+
+static Item command_event_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
+    JS_ASSIGN_OR_RETURN(payload, event_array_payload(receiver, JS_CLASS_COMMAND_EVENT, COMMAND_SLOT_COUNT));
+    uint64_t slot = js_fn_native((JsFunction*)callee.function)->target.bits;
+    Item value = js_elements_get_int(payload, slot);
+    return slot == COMMAND_SOURCE ? event_retargeted_source(receiver, value) : value;
+}
+
+void js_command_event_install_prototype(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> object(roots, prototype);
+    dom_install_event_payload_getters(object.get(), command_event_fields, COMMAND_SLOT_COUNT,
+        command_event_getter);
+    event_install_to_string_tag(object.get(), "CommandEvent");
+}
+
+static Item create_command_event(const char* type, const bool flags[3], Item command,
+                                 Item source, bool trusted) {
+    RootFrame roots(3);
+    Rooted<Item> value(roots, command), origin(roots, source), payload(roots, js_array_new(0));
+    JS_RETURN_IF_ERROR(js_array_push(payload.get(), value.get()));
+    JS_RETURN_IF_ERROR(js_array_push(payload.get(), origin.get()));
+    return create_payload_event(type, flags, JS_CLASS_COMMAND_EVENT, payload.get(), trusted);
+}
+
+Item js_create_native_command_event(Item command, Item source) {
+    const bool flags[] = {false, true, false};
+    return create_command_event("command", flags, command, source, true);
+}
+
+Item js_ctor_command_event_fn(Item type_arg, Item init_arg) {
+    RootFrame roots(4);
+    Rooted<Item> type(roots, type_arg), init(roots, init_arg);
+    Rooted<Item> command(roots, js_name_item("")), source(roots, ItemNull);
+    type.set(js_to_string(type.get()));
+    JS_RETURN_IF_ERROR(type.get());
+    bool flags[3];
+    JS_RETURN_IF_ERROR(event_read_init_flags(init.get(), flags, "Invalid CommandEventInit"));
+    if (js_is_object_value(init.get())) {
+        command.set(read_init(init.get(), command_event_fields[COMMAND_VALUE]));
+        JS_RETURN_IF_ERROR(command.get());
+        command.set(get_type_id(command.get()) == LMD_TYPE_UNDEFINED ? js_name_item("") : js_to_string(command.get()));
+        JS_RETURN_IF_ERROR(command.get());
+        source.set(read_init(init.get(), command_event_fields[COMMAND_SOURCE]));
+        JS_RETURN_IF_ERROR(source.get());
+        source.set(event_element_source(source.get(), "CommandEvent source must be an Element"));
+        JS_RETURN_IF_ERROR(source.get());
+    }
+    return create_command_event(fn_to_cstr(type.get()), flags, command.get(), source.get(), false);
+}
+
+static const char* const progress_event_fields[] = {"lengthComputable", "loaded", "total"};
+static constexpr int progress_event_field_count =
+    sizeof(progress_event_fields) / sizeof(progress_event_fields[0]);
+
+static Item progress_event_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
+    JS_ASSIGN_OR_RETURN(payload, event_array_payload(receiver, JS_CLASS_PROGRESS_EVENT,
+        progress_event_field_count));
+    return js_elements_get_int(payload, js_fn_native((JsFunction*)callee.function)->target.bits);
+}
+
+void js_progress_event_install_prototype(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> object(roots, prototype);
+    dom_install_event_payload_getters(object.get(), progress_event_fields,
+        progress_event_field_count, progress_event_getter);
+    event_install_to_string_tag(object.get(), "ProgressEvent");
+}
+
+static Item create_progress_event(const char* type, const bool flags[3], bool computable,
+                                  double loaded, double total, bool trusted) {
+    RootFrame roots(2);
+    Rooted<Item> payload(roots, js_array_new(0)), value(roots, ItemNull);
+    JS_RETURN_IF_ERROR(js_array_push(payload.get(), (Item){.item = b2it(computable)}));
+    const double numbers[] = {loaded, total};
+    for (double number : numbers) {
+        value.set(js_make_number(number));
+        JS_RETURN_IF_ERROR(js_array_push(payload.get(), value.get()));
+    }
+    return create_payload_event(type, flags, JS_CLASS_PROGRESS_EVENT, payload.get(), trusted);
+}
+
+Item js_create_native_progress_event(const char* type, double loaded, double total) {
+    const bool flags[] = {false, false, false};
+    return create_progress_event(type, flags, total != 0, loaded, total, true);
+}
+
+Item js_ctor_progress_event_fn(Item type_arg, Item init_arg) {
+    RootFrame roots(3);
+    Rooted<Item> type(roots, type_arg), init(roots, init_arg), value(roots, ItemNull);
+    type.set(js_to_string(type.get()));
+    JS_RETURN_IF_ERROR(type.get());
+    bool flags[3];
+    JS_RETURN_IF_ERROR(event_read_init_flags(init.get(), flags, "Invalid ProgressEventInit"));
+    bool computable = false;
+    double numbers[2] = {};
+    if (js_is_object_value(init.get())) {
+        // Read inherited flags first, then the local members in Web IDL order.
+        value.set(read_init(init.get(), progress_event_fields[0]));
+        JS_RETURN_IF_ERROR(value.get());
+        computable = js_is_truthy(value.get());
+        for (int slot = 1; slot < progress_event_field_count; slot++) {
+            value.set(read_init(init.get(), progress_event_fields[slot]));
+            JS_RETURN_IF_ERROR(value.get());
+            if (get_type_id(value.get()) == LMD_TYPE_UNDEFINED) continue;
+            value.set(js_to_number(value.get()));
+            JS_RETURN_IF_ERROR(value.get());
+            double number = js_get_number(value.get());
+            if (!isfinite(number)) return dom_realm_throw_type_error("ProgressEvent requires finite numbers");
+            numbers[slot - 1] = number;
+        }
+    }
+    return create_progress_event(fn_to_cstr(type.get()), flags, computable,
+        numbers[0], numbers[1], false);
 }
 
 // event payloads remain traced independently of author-visible properties (D6.3.3).
@@ -2664,7 +3025,7 @@ private:
     int count_ = 0;
 };
 
-static DomNode* dom_event_retarget(DomNode* target, DomElement* shadow, DomNode* against) {
+DomNode* dom_retarget_node(DomNode* target, DomElement* shadow, DomNode* against) {
     while (shadow && !dom_shadow_including_contains(shadow, against)) {
         target = shadow->shadow_host_element();
         shadow = dom_shadow_root(target);
@@ -2926,7 +3287,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 
     // A related node inside the dispatcher can retarget to the dispatcher itself.
     if (path_len == 0 || (related != target_node &&
-        dom_event_retarget(related, related_shadow, target_node) == target_node)) {
+        dom_retarget_node(related, related_shadow, target_node) == target_node)) {
         dom_event_host_clear_path(event_item);
         event_set_bool(event_item, "__dispatch_flag", false);
         return (Item){.item = b2it(!event_flag_get(event_item, "__default_prevented"))};
@@ -2947,8 +3308,8 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     bool clear_targets = false;
     for (int i = 0; i < path_len; i++) {
         DomNode* participant = path_is_dom[i] ? (DomNode*)path[i] : nullptr;
-        DomNode* adjusted_related = dom_event_retarget(related, related_shadow, participant);
-        DomNode* visible = dom_event_retarget(adjusted_target, target_shadow, participant);
+        DomNode* adjusted_related = dom_retarget_node(related, related_shadow, participant);
+        DomNode* visible = dom_retarget_node(adjusted_target, target_shadow, participant);
         // Crossing a host with indistinguishable targets cannot expose the transition.
         if (visible != adjusted_target && participant && participant == adjusted_related) {
             path_len = i;

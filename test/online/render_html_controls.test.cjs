@@ -170,6 +170,132 @@ test('dialog form submission shares cancellation, value reflection and the queue
         override:true,scope:true,unqueued:true,closeEvents:true});
 });
 
+test('submit and formdata events share submission state and snapshot listener edits', async () => {
+    const {log} = await render('formdata-events', `<!doctype html>
+        <button id="outside" form="form" name="earlier" value="outside"></button>
+        <dialog id="dialog" open><form id="form" method="get">
+            <fieldset disabled><legend><input name="first" value="a"></legend>
+                <input name="ignored" value="b"></fieldset>
+            <button id="button" name="middle" value="clicked"></button>
+            <input name="last" value="c"><input id="required">
+        </form></dialog>
+        <script>
+            const form = document.getElementById('form');
+            const dialog = document.getElementById('dialog');
+            const button = document.getElementById('button');
+            const required = document.getElementById('required');
+            const outside = document.getElementById('outside');
+            const checks = {}, order = [];
+            let eventData, recursionError, submitter, brands = true;
+            let cancel = false, invalidCount = 0;
+            required.oninvalid = () => {
+                if (++invalidCount === 1) outside.click();
+            };
+            form.addEventListener('submit', event => {
+                order.push('submit');
+                submitter = event.submitter;
+                brands = brands && event instanceof SubmitEvent && event instanceof Event &&
+                    event.isTrusted && event.bubbles && event.cancelable && !event.composed;
+                if (order.length === 1) form.requestSubmit(button);
+                if (cancel) event.preventDefault();
+            });
+            document.addEventListener('formdata', event => {
+                order.push('formdata');
+                brands = brands && event instanceof FormDataEvent && event instanceof Event &&
+                    event.isTrusted && event.bubbles && !event.cancelable && !event.composed;
+                if (order.length === 2) {
+                    form.submit();
+                    try { new FormData(form); } catch (error) { recursionError = error.name; }
+                }
+                form.method = 'dialog';
+                eventData = event.formData;
+                eventData.set('first', 'edited');
+                eventData.append('event', 'last');
+            });
+            required.required = true;
+            button.click();
+            checks.invalid = invalidCount === 1 && dialog.open && order.length === 0;
+            required.required = false;
+            button.click();
+            checks.activation = !dialog.open && dialog.returnValue === 'clicked' && submitter === button &&
+                order.join() === 'submit,formdata' && recursionError === 'InvalidStateError';
+            checks.entries = JSON.stringify([...eventData]) ===
+                '[["first","edited"],["middle","clicked"],["last","c"],["event","last"]]';
+            const data = new FormData(form, outside);
+            eventData.set('first', 'later');
+            checks.snapshot = data !== eventData && JSON.stringify([...data]) ===
+                '[["earlier","outside"],["first","edited"],["last","c"],["event","last"]]';
+
+            dialog.show();
+            cancel = true;
+            form.requestSubmit(null);
+            checks.cancel = dialog.open && submitter === null &&
+                order.join() === 'submit,formdata,formdata,submit';
+            cancel = false;
+            form.submit();
+            checks.direct = !dialog.open && order.join() === 'submit,formdata,formdata,submit,formdata';
+            checks.brand = brands;
+            const custom = new SubmitEvent('check', {submitter:button, composed:true});
+            const payload = new FormDataEvent('check', {formData:data});
+            const getter = Object.getOwnPropertyDescriptor(SubmitEvent.prototype, 'submitter').get;
+            let badReceiver = false;
+            try { getter.call(new Event('check')); } catch (error) { badReceiver = error.name === 'TypeError'; }
+            checks.constructors = custom.submitter === button && custom.composed && !custom.isTrusted &&
+                new SubmitEvent('check').submitter === null && payload.formData === data && badReceiver;
+            console.log('FORM_SUBMISSION_EVENTS', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/FORM_SUBMISSION_EVENTS (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {invalid:true,activation:true,entries:true,snapshot:true,
+        cancel:true,direct:true,brand:true,constructors:true});
+});
+
+test('GET submission replaces the action query and preserves its fragment', async () => {
+    const {log} = await render('form-get-url', `<!doctype html>
+        <base href="forms-scope/" target="base-frame">
+        <iframe name="base-frame" id="base-frame" srcdoc=""></iframe>
+        <iframe name="button-frame" id="button-frame" srcdoc=""></iframe>
+        <form id="form" action="fallback.html?stale=yes#fallback">
+            <input name="field" value="a b">
+            <button id="button" name="send" value="yes"
+                formaction="landing.html?stale=yes#fragment" formtarget="button-frame">Send</button>
+        </form>
+        <form id="empty" action="empty.html?stale=yes#last"></form>
+        <script>
+            const form = document.getElementById('form');
+            const button = document.getElementById('button');
+            const buttonFrame = document.getElementById('button-frame');
+            const baseFrame = document.getElementById('base-frame');
+            const empty = document.getElementById('empty');
+            const checks = {};
+            const suffix = '/forms-scope/landing.html?field=a+b&send=yes&line%0D%0Abreak=a%0D%0Ab%0D%0Ac&attachment=a+b.txt#fragment';
+            form.addEventListener('formdata', event => {
+                event.formData.append('line\\nbreak', 'a\\rb\\nc');
+                event.formData.append('attachment', new File(['contents'], 'a b.txt'));
+            });
+            button.click();
+            checks.activation = buttonFrame.contentWindow.location.href.endsWith(suffix);
+            button.setAttribute('formaction', 'other.html?replace=1#next');
+            form.requestSubmit(button);
+            checks.request = buttonFrame.contentWindow.location.href.endsWith(
+                suffix.replace('landing.html', 'other.html').replace('#fragment', '#next'));
+            form.submit();
+            checks.direct = baseFrame.contentWindow.location.href.endsWith(
+                '/forms-scope/fallback.html?field=a+b&line%0D%0Abreak=a%0D%0Ab%0D%0Ac&attachment=a+b.txt#fallback');
+            empty.submit();
+            checks.empty = baseFrame.contentWindow.location.href.endsWith('/forms-scope/empty.html?#last') &&
+                baseFrame.contentWindow.location.search === '';
+            button.setAttribute('formaction', '');
+            form.requestSubmit(button);
+            checks.emptyAction = !buttonFrame.contentWindow.location.pathname.includes('/forms-scope/') &&
+                buttonFrame.contentWindow.location.search.startsWith('?field=a+b&send=yes');
+            console.log('FORM_GET_URL', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/FORM_GET_URL (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {activation:true,request:true,direct:true,empty:true,emptyAction:true});
+});
+
 test('dialog requestClose cancels synchronously and queues successful close events', async () => {
     const {image, log} = await render('dialog-request-close', `<!doctype html>
         <body style="margin:0"><div id="result" style="width:20px;height:20px;background:red"></div>
@@ -228,6 +354,377 @@ test('dialog requestClose cancels synchronously and queues successful close even
         </script>`);
     assert.deepEqual(rgb(image, 10, 10), [0, 128, 0], log.split('\n')
         .filter(line => /Close request check failed|exception/.test(line)).join('\n'));
+});
+
+test('dialog and popover toggles cancel, coalesce and retarget their source', async () => {
+    const {log} = await render('html-toggle-events', `<!doctype html>
+        <dialog id="first">First</dialog><dialog id="second">Second</dialog>
+        <button type="button" id="invoker" popovertarget="popover">Menu</button>
+        <div id="popover" popover>Popover</div><div id="host"></div>
+        <div id="ancestor" popover><dialog id="inside">Inside</dialog>
+            <div id="unrelated" popover>Unrelated</div></div>
+        <div id="manual" popover="manual">Manual</div>
+        <script>
+            const first = document.getElementById('first');
+            const second = document.getElementById('second');
+            const popover = document.getElementById('popover');
+            const invoker = document.getElementById('invoker');
+            const host = document.getElementById('host');
+            const checks = {}, pending = [];
+            let data;
+            checks.closedGeometry = popover.offsetWidth === 0 && popover.offsetHeight === 0 &&
+                popover.getClientRects().length === 0;
+            const emptyBox = document.createElement('div');
+            emptyBox.style.cssText = 'width:0;height:0';
+            document.body.append(emptyBox);
+            checks.zeroBox = emptyBox.getClientRects().length === 1;
+            emptyBox.remove();
+            checks.detachedBox = emptyBox.getClientRects().length === 0;
+            first.addEventListener('beforetoggle', event => {
+                checks.cancelable = !first.open && event instanceof ToggleEvent &&
+                    event.isTrusted && event.cancelable && event.oldState === 'closed' &&
+                    event.newState === 'open' && event.source === null;
+                event.preventDefault();
+            }, {once:true});
+            first.showModal();
+            checks.canceled = !first.open;
+            const listen = node => node.addEventListener('toggle', event => {
+                pending.push(node.id + ':' + event.oldState + '>' + event.newState);
+            });
+            listen(first);
+            listen(second);
+            first.show();
+            second.show();
+            first.addEventListener('beforetoggle', event => {
+                event.preventDefault();
+                checks.closing = first.open && !event.cancelable && event.oldState === 'open' &&
+                    event.newState === 'closed';
+            }, {once:true});
+            first.close('result');
+            checks.synchronous = !first.open && first.returnValue === 'result' && pending.length === 0;
+            popover.addEventListener('beforetoggle', event => {
+                checks.popover = event.source === invoker && event.cancelable &&
+                    !popover.matches(':popover-open');
+            }, {once:true});
+            popover.addEventListener('toggle', event => data = event, {once:true});
+            invoker.click();
+            const shadow = host.attachShadow({mode:'open'});
+            shadow.innerHTML = '<button>Source</button>';
+            const source = shadow.firstElementChild;
+            const probe = new ToggleEvent('probe', {source, bubbles:true, composed:true});
+            source.addEventListener('probe', event => checks.internal = event.source === source);
+            host.addEventListener('probe', event => checks.external = event.source === host);
+            source.dispatchEvent(probe);
+            checks.after = probe.source === host;
+            setTimeout(() => {
+                checks.order = pending.join(',') === 'second:closed>open,first:closed>closed';
+                checks.payload = data instanceof ToggleEvent && data.source === invoker &&
+                    data.newState === 'open' && !data.bubbles && !data.cancelable;
+                const ancestor = document.getElementById('ancestor');
+                const inside = document.getElementById('inside');
+                const unrelated = document.getElementById('unrelated');
+                const manual = document.getElementById('manual');
+                ancestor.showPopover();
+                unrelated.showPopover();
+                manual.showPopover();
+                inside.show();
+                checks.dialogPopover = ancestor.matches(':popover-open') &&
+                    !unrelated.matches(':popover-open') && manual.matches(':popover-open');
+                const reflected = document.createElement('div');
+                document.body.append(reflected);
+                reflected.popover = 'invalid';
+                const invalidDefault = reflected.popover === 'manual' &&
+                    reflected.getAttribute('popover') === 'invalid';
+                let optionSource;
+                reflected.addEventListener('beforetoggle', event => optionSource = event.source, {once:true});
+                reflected.showPopover({source:invoker});
+                checks.invokerOption = optionSource === invoker && reflected.matches(':popover-open');
+                checks.force = reflected.togglePopover({force:true}) === true &&
+                    reflected.togglePopover(false) === false && !reflected.matches(':popover-open');
+                reflected.showPopover();
+                let closes = 0;
+                reflected.addEventListener('beforetoggle', event => {
+                    if (event.newState === 'closed') {
+                        closes++;
+                        reflected.popover = 'hint';
+                    }
+                });
+                reflected.popover = 'manual';
+                checks.sameMode = reflected.matches(':popover-open') && closes === 0;
+                reflected.popover = 'auto';
+                checks.modeChange = !reflected.matches(':popover-open') && closes === 1 &&
+                    reflected.popover === 'hint';
+                reflected.popover = undefined;
+                checks.reflect = invalidDefault && reflected.popover === null &&
+                    !reflected.hasAttribute('popover');
+                reflected.popover = '';
+                reflected.showPopover();
+                reflected.removeAttribute('popover');
+                checks.removedMode = !reflected.matches(':popover-open') && closes === 2;
+                console.log('TOGGLE_EVENTS', JSON.stringify(checks));
+            }, 0);
+        </script>`);
+    const match = log.match(/TOGGLE_EVENTS (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {cancelable:true,canceled:true,closing:true,
+        synchronous:true,popover:true,internal:true,external:true,after:true,order:true,payload:true,
+        dialogPopover:true,invokerOption:true,force:true,sameMode:true,modeChange:true,reflect:true,
+        removedMode:true,
+        closedGeometry:true,zeroBox:true,detachedBox:true});
+});
+
+test('automatic and hint popovers preserve ancestors and close dependents', async () => {
+    const {log} = await render('html-popover-stacks', `<!doctype html>
+        <div id="parent" popover><button popovertarget="child">Open child</button>
+            <div id="hint" popover="hint"><div id="under-hint" popover></div></div>
+        </div>
+        <div id="child" popover></div><div id="other" popover></div>
+        <div id="manual" popover="manual"></div>
+        <button id="outside" popovertarget="other">Open other</button>
+        <script>
+            const [parent, child, other, hint, hintChild, manual, outside] =
+                ['parent', 'child', 'other', 'hint', 'under-hint', 'manual', 'outside']
+                    .map(id => document.getElementById(id));
+            const isOpen = el => el.matches(':popover-open');
+            const order = [], checks = {};
+            parent.showPopover();
+            parent.firstElementChild.click();
+            hint.showPopover();
+            hintChild.showPopover();
+            manual.showPopover();
+            checks.ancestors = [parent, child, hint, hintChild, manual].every(isOpen);
+            [parent, child, hint, hintChild].forEach(el => el.addEventListener('beforetoggle', event => {
+                if (event.newState === 'closed') order.push(el.id);
+            }));
+            parent.hidePopover();
+            checks.closeOrder = order.join(',') === 'under-hint,hint,child,parent' &&
+                [parent, child, hint, hintChild].every(el => !isOpen(el)) && isOpen(manual);
+            parent.showPopover();
+            parent.firstElementChild.click();
+            parent.remove();
+            checks.removeDependent = !isOpen(child) && !isOpen(parent);
+            document.body.prepend(parent);
+            for (const native of [false, true]) {
+                other.popover = 'auto';
+                parent.showPopover();
+                parent.addEventListener('beforetoggle', () => {other.popover = 'manual'}, {once:true});
+                let threw = false;
+                try {
+                    if (native) outside.click();
+                    else other.showPopover();
+                } catch (error) {threw = error.name === 'InvalidStateError'}
+                checks[native ? 'nativeModeChange' : 'apiModeChange'] =
+                    threw === !native && !isOpen(parent) && !isOpen(other) && other.popover === 'manual';
+            }
+            parent.addEventListener('beforetoggle', () => {
+                try {child.showPopover()} catch (error) {
+                    checks.reentrant = error.name === 'InvalidStateError';
+                }
+            }, {once:true});
+            parent.showPopover();
+            checks.reentrant = checks.reentrant && isOpen(parent) && !isOpen(child);
+            console.log('POPOVER_STACKS', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/POPOVER_STACKS (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {ancestors:true,closeOrder:true,removeDependent:true,
+        apiModeChange:true,nativeModeChange:true,reentrant:true});
+});
+
+test('ProgressEvent keeps a branded payload through synthetic and file reader dispatch', async () => {
+    const {log} = await render('progress-event', `<!doctype html><script>
+        const order = [], seen = [];
+        const inheritance = [Object.getPrototypeOf(ProgressEvent) === Event,
+            Object.getPrototypeOf(ProgressEvent.prototype) === Event.prototype];
+        class Sample extends ProgressEvent {}
+        const probe = new Sample('probe', {
+            get bubbles() { order.push('bubbles'); return true; },
+            get lengthComputable() { order.push('lengthComputable'); return 1; },
+            get loaded() { order.push('loaded'); return '-1.25'; },
+            get total() { order.push('total'); return 5.5; },
+        });
+        let badNumber = false, badReceiver = false;
+        try { new ProgressEvent('probe', {total:Infinity}); }
+        catch (err) { badNumber = err instanceof TypeError; }
+        const getLoaded = Object.getOwnPropertyDescriptor(ProgressEvent.prototype, 'loaded').get;
+        try { getLoaded.call(new Event('probe')); }
+        catch (err) { badReceiver = err instanceof TypeError; }
+        document.addEventListener('probe', event => seen.push([
+            event instanceof Sample, event instanceof Event, event.bubbles, event.isTrusted,
+            event.lengthComputable, event.loaded, event.total, Object.prototype.toString.call(event)
+        ]));
+        document.dispatchEvent(probe);
+        const reader = new FileReader();
+        reader.addEventListener('loadend', event => console.log('PROGRESS_TYPES', JSON.stringify({
+            order, seen, badNumber, badReceiver, inheritance,
+            read:[event instanceof ProgressEvent, event.target === reader, event.isTrusted,
+                event.lengthComputable, event.loaded, event.total]
+        })));
+        reader.readAsDataURL(new Blob(['sample']));
+    </script>`);
+    const match = log.match(/PROGRESS_TYPES (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {
+        order:['bubbles', 'lengthComputable', 'loaded', 'total'],
+        seen:[[true, true, true, false, true, -1.25, 5.5, '[object ProgressEvent]']],
+        badNumber:true, badReceiver:true, inheritance:[true, true],
+        read:[true, true, true, true, 6, 6],
+    });
+});
+
+test('button commands preserve form precedence, cancellation and shadow sources', async () => {
+    const {log} = await render('button-commands', `<!doctype html>
+        <div id="host"></div><dialog id="dialog"></dialog>
+        <div id="popup" popover></div>
+        <input id="counter" type="number" value="0" oncommand="this.value = Number(this.value) + 1">
+        <input id="text" type="text">
+        <form id="form"><button id="in-form" command="--increment" commandfor="counter"></button></form>
+        <script>
+            const [host, dialog, popup, counter, form, formButton] =
+                ['host','dialog','popup','counter','form','in-form'].map(id => document.getElementById(id));
+            const shadow = host.attachShadow({mode:'closed'});
+            const button = shadow.appendChild(document.createElement('button'));
+            const checks = {};
+            const text = document.getElementById('text');
+            text.value = 42;
+            checks.textValue = text.value === '42';
+            text.value = null;
+            checks.nullValue = text.value === '';
+            button.command = '--increment';
+            button.commandForElement = counter;
+            counter.addEventListener('command', event => checks.custom = event instanceof CommandEvent &&
+                event.isTrusted && event.cancelable && event.source === host && event.command === '--increment');
+            button.click();
+            formButton.click();
+            checks.inlineAndAuto = counter.valueAsNumber === 1;
+            form.addEventListener('submit', event => { event.preventDefault(); checks.form = event.submitter === formButton; });
+            formButton.type = 'submit';
+            formButton.click();
+            checks.noExtraCommand = counter.valueAsNumber === 1;
+            button.setAttribute('commandfor', '');
+            checks.cleared = button.commandForElement === null;
+            button.commandForElement = dialog;
+            button.command = 'SHOW-MODAL';
+            dialog.addEventListener('command', event => event.preventDefault(), {once:true});
+            button.click();
+            checks.canceled = !dialog.open;
+            const sources = [];
+            dialog.addEventListener('beforetoggle', event => sources.push(event.source));
+            button.click();
+            checks.modal = dialog.matches(':modal') && button.command === 'show-modal';
+            button.command = 'request-close';
+            button.value = 'done';
+            button.click();
+            checks.closed = !dialog.open && dialog.returnValue === 'done' && sources.length === 2 &&
+                sources.every(source => source === host);
+            button.commandForElement = popup;
+            button.command = 'toggle-popover';
+            button.click();
+            checks.popup = popup.matches(':popover-open');
+            button.click();
+            checks.hidden = !popup.matches(':popover-open');
+            console.log('BUTTON_COMMANDS', JSON.stringify(checks));
+        </script>`);
+    const match = log.match(/BUTTON_COMMANDS (\{[^\n]+\})/);
+    assert(match, log.slice(-3000));
+    assert.deepEqual(JSON.parse(match[1]), {textValue:true, nullValue:true, custom:true, inlineAndAuto:true, form:true,
+        noExtraCommand:true, cleared:true, canceled:true, modal:true, closed:true, popup:true, hidden:true});
+});
+
+test('opening a popover focuses its autofocus control through the native focus path', async () => {
+    const {log} = await render('html-popover-autofocus', `<!doctype html>
+        <button id="before">Before</button><button id="outside">Outside</button>
+        <div id="popup" popover><button id="disabled" disabled></button>
+            <button id="chosen">Autofocus</button></div>
+        <script>
+            const before = document.getElementById('before');
+            const outside = document.getElementById('outside');
+            const popup = document.getElementById('popup');
+            const chosen = document.getElementById('chosen');
+            const order = [];
+            before.focus();
+            document.getElementById('disabled').autofocus = true;
+            chosen.autofocus = true;
+            popup.showPopover();
+            const focused = document.activeElement === chosen;
+            popup.hidePopover();
+            const restored = document.activeElement === before;
+            popup.showPopover();
+            outside.focus();
+            popup.hidePopover();
+            const outsideKeptFocus = document.activeElement === outside;
+            console.log('POPOVER_FOCUS_RETURN', focused, restored, outsideKeptFocus);
+            before.focus();
+            before.addEventListener('blur', event => {
+                order.push('blur:' + (event.relatedTarget === chosen));
+            });
+            chosen.addEventListener('focus', event => {
+                order.push('focus:' + (document.activeElement === chosen));
+                popup.remove();
+            });
+            popup.addEventListener('beforetoggle', event => order.push(event.newState));
+            popup.addEventListener('toggle', event => {
+                if (event.newState !== 'open') return;
+                order.push(event.oldState + '>' + event.newState);
+                console.log('POPOVER_AUTOFOCUS', order.join(','));
+            });
+            // Let the other visibility transitions deliver their queued task first.
+            setTimeout(() => popup.showPopover(), 0);
+        </script>`);
+    assert.match(log, /POPOVER_FOCUS_RETURN true true true/);
+    assert.match(log, /POPOVER_AUTOFOCUS open,blur:true,focus:true,closed>open/);
+});
+
+test('dialog opening chooses initial focus and closing restores it when appropriate', async () => {
+    const {log} = await render('html-dialog-focus', `<!doctype html>
+        <button id="before">Before</button><button id="other">Other</button>
+        <dialog id="dialog"><button id="first">First</button><button id="chosen">Chosen</button></dialog>
+        <dialog id="empty">Empty dialog</dialog>
+        <script>
+            const [before, other, dialog, first, chosen, empty] =
+                ['before','other','dialog','first','chosen','empty'].map(id => document.getElementById(id));
+            const focusIs = element => document.activeElement === element;
+            before.focus();
+            chosen.autofocus = true;
+            dialog.showModal();
+            const autofocus = focusIs(chosen);
+            dialog.close();
+            const modalRestore = focusIs(before);
+            chosen.autofocus = false;
+            dialog.show();
+            const firstControl = focusIs(first);
+            other.focus();
+            dialog.close();
+            const outsideKeptFocus = focusIs(other);
+            empty.showModal();
+            const dialogFocus = focusIs(empty);
+            empty.close();
+            const emptyRestore = focusIs(other);
+            console.log('DIALOG_FOCUS', autofocus, modalRestore, firstControl,
+                outsideKeptFocus, dialogFocus, emptyRestore);
+        </script>`);
+    assert.match(log, /DIALOG_FOCUS true true true true true true/);
+});
+
+test('activeElement follows nested shadow boundaries in the document and roots', async () => {
+    const {log} = await render('html-shadow-active-element', `<!doctype html>
+        <div id="host"></div><div id="other"></div>
+        <script>
+            const host = document.getElementById('host');
+            const outer = host.attachShadow({mode:'open'});
+            outer.innerHTML = '<div></div>';
+            const innerHost = outer.firstElementChild;
+            const inner = innerHost.attachShadow({mode:'closed'});
+            inner.innerHTML = '<button>Focus</button>';
+            const target = inner.firstElementChild;
+            const unrelated = document.getElementById('other').attachShadow({mode:'open'});
+            target.focus();
+            console.log('SHADOW_ACTIVE_ELEMENT', document.activeElement === host,
+                outer.activeElement === innerHost, inner.activeElement === target,
+                unrelated.activeElement === null, host.matches(':focus-within'),
+                innerHost.matches(':focus-within'));
+        </script>`);
+    assert.match(log, /SHADOW_ACTIVE_ELEMENT true true true true true true/, log.slice(-2400));
 });
 
 test('connected shadow content reflows and paints after insertion', async () => {

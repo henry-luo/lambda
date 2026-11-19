@@ -1979,7 +1979,11 @@ RADIANT_C_API int radiant_dom_input_typed_value_get(Item r, Item* out) {
 RADIANT_C_API int radiant_dom_input_typed_value_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* text = fn_to_cstr(v);
+    RootFrame roots(1);
+    // The value IDL setter converts numbers before the native input sanitizer runs.
+    Rooted<Item> string(roots, get_type_id(v) == LMD_TYPE_NULL ? ItemNull : js_to_string(v));
+    if (item_is_error(string.get())) { *out = string.get(); return 1; }
+    const char* text = fn_to_cstr(string.get());
     if (!text) text = "";
     RadiantInputValueKind kind = radiant_input_value_kind(
         elem->get_attribute("type"));

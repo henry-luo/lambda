@@ -1086,7 +1086,8 @@ static void _install_shadow_interfaces(Item global) {
         {"ShadowRoot", "mode", Property::mode},
         {"ShadowRoot", "delegatesFocus", Property::delegates_focus},
         {"ShadowRoot", "slotAssignment", Property::slot_assignment},
-        {"ShadowRoot", "styleSheets", Property::style_sheets}
+        {"ShadowRoot", "styleSheets", Property::style_sheets},
+        {"ShadowRoot", "activeElement", Property::active_element}
     };
     RootFrame roots(3);
     Rooted<Item> realm(roots, global), prototype(roots, ItemNull), member(roots, ItemNull);
@@ -1338,6 +1339,8 @@ extern "C" void dom_install_collection_globals(void) {
     _install_dialog_interface(global);
     _install_label_interfaces(global);
     dom_install_html_hidden(_iface_proto(global, "HTMLElement"));
+    dom_install_html_popover(_iface_proto(global, "HTMLElement"));
+    dom_install_html_button_properties(_iface_proto(global, "HTMLButtonElement"));
     js_dom_install_interface(global, "CanvasRenderingContext2D");
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);

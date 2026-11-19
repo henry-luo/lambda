@@ -154,6 +154,11 @@ enum JsClass : uint8_t {
     JS_CLASS_REQUEST,
     JS_CLASS_STORAGE_EVENT,
     JS_CLASS_PERFORMANCE_RESOURCE_TIMING,
+    JS_CLASS_SUBMIT_EVENT,
+    JS_CLASS_FORM_DATA_EVENT,
+    JS_CLASS_TOGGLE_EVENT,
+    JS_CLASS_PROGRESS_EVENT,
+    JS_CLASS_COMMAND_EVENT,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -248,6 +253,8 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "TouchEvent", 10)) return JS_CLASS_TOUCH_EVENT;
             break;
         case 11:
+            if (!strncmp(nm, "SubmitEvent", 11)) return JS_CLASS_SUBMIT_EVENT;
+            if (!strncmp(nm, "ToggleEvent", 11)) return JS_CLASS_TOGGLE_EVENT;
             if (!strncmp(nm, "AbortSignal", 11)) return JS_CLASS_ABORT_SIGNAL;
             if (!strncmp(nm, "ArrayBuffer", 11)) return JS_CLASS_ARRAY_BUFFER;
             if (!strncmp(nm, "MessagePort", 11)) return JS_CLASS_MESSAGE_PORT;
@@ -268,8 +275,11 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "EventEmitter", 12)) return JS_CLASS_EVENT_EMITTER;
             if (!strncmp(nm, "DataTransfer", 12)) return JS_CLASS_DATA_TRANSFER;
             if (!strncmp(nm, "PointerEvent", 12)) return JS_CLASS_POINTER_EVENT;
+            if (!strncmp(nm, "CommandEvent", 12)) return JS_CLASS_COMMAND_EVENT;
             break;
         case 13:
+            if (!strncmp(nm, "FormDataEvent", 13)) return JS_CLASS_FORM_DATA_EVENT;
+            if (!strncmp(nm, "ProgressEvent", 13)) return JS_CLASS_PROGRESS_EVENT;
             if (!strncmp(nm, "ClientRequest", 13)) return JS_CLASS_CLIENT_REQUEST;
             if (!strncmp(nm, "StringDecoder", 13)) return JS_CLASS_STRING_DECODER;
             if (!strncmp(nm, "SecureContext", 13)) return JS_CLASS_SECURE_CONTEXT;
@@ -421,6 +431,11 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_NAVIGATOR: return "Navigator";
         case JS_CLASS_MESSAGE_EVENT: return "MessageEvent";
         case JS_CLASS_STORAGE_EVENT: return "StorageEvent";
+        case JS_CLASS_SUBMIT_EVENT: return "SubmitEvent";
+        case JS_CLASS_FORM_DATA_EVENT: return "FormDataEvent";
+        case JS_CLASS_TOGGLE_EVENT: return "ToggleEvent";
+        case JS_CLASS_PROGRESS_EVENT: return "ProgressEvent";
+        case JS_CLASS_COMMAND_EVENT: return "CommandEvent";
         case JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT: return "SecurityPolicyViolationEvent";
         case JS_CLASS_XML_HTTP_REQUEST: return "XMLHttpRequest";
         case JS_CLASS_TYPE_ERROR: return "TypeError";

@@ -9,6 +9,8 @@
     {"type": "assert_attribute", "target": {"selector": "#result"},
      "attribute": "data-offset", "equals": "12,16"},
     {"type": "assert_attribute", "target": {"selector": "#result"},
+     "attribute": "data-coordinates", "equals": "12,16"},
+    {"type": "assert_attribute", "target": {"selector": "#result"},
      "attribute": "data-value", "equals": "12,16", "assert_timeout": 1000},
     {"type": "assert_attribute", "target": {"selector": "#result"},
      "attribute": "data-focus", "equals": "BODY"},
