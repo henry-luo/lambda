@@ -2,6 +2,54 @@
 
 ## Current checkpoint
 
+- Goal resumed 2026-11-19 from clean `master` at `f7cb869d5`, lambda-input
+  `7974f45`, Radiant `7da056d`. Implement declarative shadow roots, modal
+  inertness and top-layer layout/paint/hit testing, and CSS anchor positioning.
+  Legacy form encodings, form method shadowing and POST navigation are deferred.
+- Parser-created roots belong to Input, the JS entry points use the same
+  document graph, and Radiant owns used layout and paint. The boundaries follow
+  **D9.1.1v4 / D9.1.3v2 / D9.5.6v2**. Use the pinned WPT corpus and keep
+  qualification artifacts in `temp/html-support-audit/`.
+- Navigation parser roots attach before stylesheet discovery and classic script
+  preparation. Initial scoped styles and linked imports paint through the
+  root cascade. Fragment parsing distinguishes the unsafe HTML APIs from
+  `innerHTML` and `DOMParser`. The shared root supports declarative hydration,
+  cloning and opt-in serialization. See Input LI-081 and JS13-L2
+  (**D9.1.1v4 / D9.1.3v2 / D6.3.3**).
+- Dialogs and popovers share the document's ordered top layer. Raster, SVG
+  and flat PDF replay entries above the ordinary tree. The flat-tree modal
+  predicate governs hit testing and focus. The focused replay delivered
+  trusted backdrop and dialog hits, then restored outside interaction on
+  close. See RI-029 and JS13-L13 (**D9.1.1v4 / D9.1.3v2 / D9.5.6v2**).
+- Anchor geometry uses the ordinary positioned layout and shared length math.
+  Named and implicit anchors support insets, sizes, scoped lookup, areas,
+  alignment and default-anchor scroll compensation. The generated CSS
+  property IDs remain stable. See RI-142
+  (**D9.1.1v4 / D9.1.3v2 / D5.6.1**).
+- The pinned attachment, basic and repeat shadow tests pass 674/674. Modal
+  inertness, showModal, showModal-remove, requestClose and top-layer position
+  pass 88/88. Button commands pass 326/326. Anchor chain, inheritance, sizing,
+  popover, scope, areas, alignment and non-fragmented CSSOM fixtures pass
+  2,828/2,828. Pinned anchor-center scroll reftests 002 and 003 paint the
+  expected 100 by 100 pixel squares. The 41 HTML controls and four
+  forced-GC feature cases pass. The overlay reference matches PNG, SVG and
+  flat PDF pixels.
+- The split debug Radiant baseline passed 8,171 with 298 partial and 20
+  skipped, including 329 native UI cases. The Lambda baseline passed
+  6,113/6,113. After the final backdrop CSSOM adjustment, the focused
+  HTML controls, forced-GC controls and 27 CSSOM/dialog/popover UI cases
+  passed. Six inactive UI cases were skipped. The `display:contents`,
+  default backdrop, backdrop opacity and iframe reftests match their
+  pinned PNG references. Generated names, integer-cast lint and diff checks
+  passed. Evidence is under `temp/html-support-audit/` in the
+  `goal-html-final-*` and `goal-html-backdrop-*` logs.
+- The Input baseline passed 5,337 GTests. The dedicated
+  `ModalTopLayerMatchesExplicitOverlayAcrossOutputs` regression passed
+  exact PNG, SVG and flat PDF pixel comparisons. This implementation pass
+  is complete. Follow-up cases are recorded below and in the owning ledgers.
+
+## Previous checkpoint
+
 - Goal: implement the confirmed HTML gaps from the 2026-11-18 audit, with
   ownership, focused verification, and updates to the public support matrix.
 - Checkout: `/Users/henry/Projects/lambda`, `master` at `24fe7feb3`; Radiant
@@ -531,9 +579,14 @@ JavaScript entry points under **D9.1.3v2 / D9.5.6v2**.
 
 ## Remaining HTML coverage
 
-- Declarative shadow roots still require an explicit HTML parser path in the
-  Input owner. The pinned command source and root attachment fixtures cover
-  the parser-created scope. See JS13-L2 and JS13-L15 (**D9.1.1v4 / D9.1.3v2**).
-- JS13-L12 retains named form properties, legacy submission encoding and
-  navigation transport. JS13-L13 and Radiant RI-029 retain dialog inertness,
-  close watchers, and top-layer rendering (**D9.1.3v2 / D9.5.6v2**).
+- Closed manual declarative assignment still needs `ElementInternals`.
+  Streaming parser reentry and `Range.createContextualFragment()` remain
+  open. See JS13-L2 (**D9.1.1v4 / D9.1.3v2 / D6.3.3**).
+- JS13-L13 retains native close watchers, shadow focus delegation and
+  complete keyboard focus order, plus overlay transition lifetimes
+  (**D9.1.3v2 / D9.5.6v2**).
+- RI-142 retains position-try rules, position visibility, pagination,
+  fragmented containing blocks and broader transform/scroll geometry
+  (**D9.1.1v4 / D9.1.3v2**).
+- JS13-L12 retains the deferred legacy form encodings, named controls that
+  shadow methods, and full POST navigation (**D9.1.3v2 / D9.5.6v2**).

@@ -4,6 +4,214 @@ const {renderFixtures, rgb} = require('./render_fixture.cjs');
 
 const render = renderFixtures('html-controls');
 
+test('declarative shadow roots attach during navigation and opt-in parsing', async () => {
+    const {image, log} = await render('declarative-shadow-roots', `<!doctype html>
+        <style>body { margin:0 } .sample { background:red }</style>
+        <div id="host"><template shadowrootmode="OPEN" shadowrootserializable
+            shadowrootdelegatesfocus shadowrootclonable>
+            <style>.sample { background:lime; width:30px; height:30px }</style>
+            <div class="sample"><slot name="content"></slot></div>
+            <section id="nested" hidden><template shadowrootmode="closed"><em>Hidden</em></template></section>
+            <script>window.declarativeScript = 'root'; /* <&> */</script>
+        </template><span slot="content" id="light"></span></div>
+        <div id="light-sample" class="sample" style="width:30px;height:30px"></div>
+        <script>
+            function check(value, reason) {
+                if (!value) {
+                    console.error('Declarative root: ' + reason);
+                    throw new Error(reason);
+                }
+            }
+            const host = document.getElementById('host');
+            const root = host.shadowRoot;
+            check(root instanceof ShadowRoot, 'initial root');
+            check(root.mode === 'open' && root.clonable && root.serializable && root.delegatesFocus, 'root options');
+            check(host.children.length === 1 && !host.querySelector('template'), 'declaration consumed');
+            const slot = root.querySelector('slot');
+            check(slot.assignedNodes()[0] === document.getElementById('light'), 'slot projection');
+            check(root.querySelector('#nested').shadowRoot === null &&
+                !root.querySelector('#nested').querySelector('template'), 'closed nested root');
+            check(window.declarativeScript === 'root', 'parser script order');
+            check(root.styleSheets.length === 1 && document.styleSheets.length === 1, 'scoped initial sheet');
+            const serialized = host.getHTML({serializableShadowRoots:true});
+            check(host.getHTML() === host.innerHTML && host.getHTML({shadowRoots:[root]}) === serialized &&
+                serialized.startsWith('<template shadowrootmode="open"') && serialized.includes('/* <&> */'),
+                'opt-in serialization includes the detached root before light children');
+            const clone = host.cloneNode(false);
+            check(clone.children.length === 0 && clone.shadowRoot.querySelector('.sample'), 'shallow host clone');
+            let rejected = false;
+            try { clone.attachShadow({mode:'closed'}); } catch (error) {
+                rejected = error.name === 'NotSupportedError';
+            }
+            check(rejected, 'hydration mode mismatch');
+            const original = clone.shadowRoot;
+            check(clone.attachShadow({mode:'open'}) === original &&
+                original.childNodes.length === 0 && original.delegatesFocus, 'hydration preserves root identity');
+            const declaration = '<article><template shadowrootmode="open"><b>value</b></template>' +
+                '<template shadowrootmode="closed"><i>duplicate</i></template></article>';
+            const detached = document.createElement('div');
+            detached.innerHTML = declaration;
+            check(detached.firstElementChild.shadowRoot === null, 'innerHTML opt-out');
+            detached.setHTMLUnsafe(declaration);
+            const article = detached.firstElementChild;
+            check(article.shadowRoot.querySelector('b') && article.querySelector('template').content.querySelector('i'),
+                'fragment opt-in and duplicate fallback');
+            article.shadowRoot.setHTMLUnsafe('<div><template shadowrootmode="open"><u>nested</u></template></div>');
+            check(article.shadowRoot.firstElementChild.shadowRoot.querySelector('u'), 'shadow fragment opt-in');
+            const parsed = Document.parseHTMLUnsafe(declaration);
+            check(parsed.querySelector('article').shadowRoot.querySelector('b'), 'document opt-in');
+            check(new DOMParser().parseFromString(declaration, 'text/html').querySelector('article').shadowRoot === null,
+                'DOMParser opt-out');
+            console.log('DSD_CHECKS_READY');
+        </script>`);
+    assert.match(log, /DSD_CHECKS_READY/, log.split('\n').filter(line => /Declarative root|exception/i.test(line)).join('\n'));
+    assert.deepEqual(rgb(image, 10, 10), [0, 255, 0]);
+    assert.deepEqual(rgb(image, 10, 40), [255, 0, 0]);
+});
+
+test('modal dialog top layer bypasses ancestor paint and blocks outside interaction', async () => {
+    const {image, log} = await render('modal-top-layer', `<!doctype html>
+        <style>
+            body { margin:0; background:white }
+            #outside { position:fixed; inset:0; background:red; z-index:2147483647; border:0 }
+            #clip { width:10px; height:10px; overflow:hidden; transform:translate(110px,70px); opacity:.25 }
+            dialog { position:absolute; inset:30px auto auto 40px; margin:0; padding:0; border:0;
+                     width:60px; height:50px; background:lime; z-index:-10 }
+            dialog::backdrop { display:contents; background:blue }
+            #note { position:fixed; inset:45px auto auto 55px; margin:0; width:25px;
+                    height:25px; border:none; padding:0; background:yellow }
+        </style>
+        <button id="outside">Outside</button>
+        <div id="clip" inert>
+            <dialog id="pane"><button id="inside" autofocus>Inside</button><div id="note" popover="manual"></div></dialog>
+        </div>
+        <dialog id="second"><button id="inside-second" autofocus>Next</button></dialog>
+        <script>
+            const byId = id => document.getElementById(id);
+            const outside = byId('outside'), pane = byId('pane'), inside = byId('inside');
+            const second = byId('second'), note = byId('note');
+            let valid = true;
+            function check(value, reason) {
+                if (!value) { valid = false; console.error('Modal top layer: ' + reason); }
+            }
+            outside.focus();
+            pane.showModal();
+            check(document.activeElement === inside, 'modal escapes inert ancestor');
+            outside.focus();
+            check(document.activeElement === inside, 'outside focus is blocked');
+            second.showModal();
+            check(document.activeElement === byId('inside-second'), 'second modal owns focus');
+            inside.focus();
+            check(document.activeElement === byId('inside-second'), 'older modal focus is blocked');
+            second.close();
+            check(document.activeElement === inside, 'closing topmost restores focus to previous modal');
+            pane.close();
+            check(document.activeElement === outside, 'closing final modal unblocks document');
+            pane.showModal();
+            note.showPopover();
+            requestAnimationFrame(() => {
+                check(getComputedStyle(pane, '::backdrop').display === 'block', 'backdrop display is blockified');
+                check(document.elementFromPoint(65, 60) === note, 'last top layer entry owns the hit');
+                check(document.elementFromPoint(95, 75) === pane, 'dialog owns its principal box');
+                check(document.elementFromPoint(10, 90) === pane, 'dialog owns backdrop hit');
+                if (valid) console.log('MODAL_TOP_LAYER_READY');
+            });
+        </script>`);
+    assert.match(log, /MODAL_TOP_LAYER_READY/, log.split('\n').filter(line => /Modal top layer|exception/i.test(line)).join('\n'));
+    assert.deepEqual(rgb(image, 10, 90), [0, 0, 255]);
+    assert.deepEqual(rgb(image, 95, 75), [0, 255, 0]);
+    assert.deepEqual(rgb(image, 65, 60), [255, 255, 0]);
+});
+
+test('anchor insets, sizing, position areas and popup invokers share layout geometry', async () => {
+    const {image, log} = await render('anchor-positioning', `<!doctype html>
+        <style>
+          body { margin:0 }
+          #stage { position:relative; margin:20px; width:300px; height:150px; border:2px solid black }
+          #pin { position:absolute; left:25px; top:15px; width:50px; height:30px; anchor-name:--pin }
+          #tip { position:absolute; position-anchor:--pin; left:calc(anchor(right) + 5px);
+                 top:anchor(bottom); width:anchor-size(); height:14px; background:lime }
+          #area { position:absolute; position-anchor:--pin; position-area:bottom;
+                  width:30px; height:12px; background:blue }
+          #fallback { position:absolute; left:anchor(--missing left, 7px); top:100px;
+                      width:anchor-size(--missing width, 13px); height:10px }
+          #button { position:absolute; left:150px; top:15px; width:60px; height:30px; box-sizing:border-box }
+          #popup { position-anchor:auto; top:anchor(bottom); left:anchor(left);
+                   width:anchor-size(width); height:12px; padding:0; margin:0; border:none; background:purple }
+        </style>
+        <div id="stage">
+          <div id="pin"></div><div id="tip"></div><div id="area"></div><div id="fallback"></div>
+          <button id="button" command="show-popover" commandfor="popup">Open</button>
+          <div id="popup" popover="manual"></div>
+        </div>
+        <script>
+          const byId = id => document.getElementById(id);
+          let valid = true;
+          function box(id, x, y, width) {
+              const rect = byId(id).getBoundingClientRect();
+              if (Math.abs(rect.left - x) < .01 && Math.abs(rect.top - y) < .01 &&
+                  Math.abs(rect.width - width) < .01) return;
+              valid = false;
+              console.error('Anchor layout: ' + id + ' got ' + [rect.left, rect.top, rect.width].join(','));
+          }
+          byId('button').click();
+          requestAnimationFrame(() => {
+              box('tip', 102, 67, 50);
+              box('area', 57, 67, 30);
+              box('fallback', 29, 122, 13);
+              box('popup', 172, 67, 60);
+              byId('pin').style.left = '45px';
+              requestAnimationFrame(() => {
+                  box('tip', 122, 67, 50);
+                  box('area', 77, 67, 30);
+                  if (valid) console.log('ANCHOR_LAYOUT_READY');
+              });
+          });
+        </script>`);
+    assert.match(log, /ANCHOR_LAYOUT_READY/, log.split('\n').filter(line => /Anchor layout|anchor-positioning|exception/i.test(line)).join('\n'));
+    assert.deepEqual(rgb(image, 125, 72), [0, 255, 0]);
+    assert.deepEqual(rgb(image, 80, 72), [0, 0, 255]);
+    assert.deepEqual(rgb(image, 177, 72), [128, 0, 128]);
+});
+
+test('a fixed anchored box follows its default anchor through retained scrolling', async () => {
+    const {image, log} = await render('anchor-scroll', `<!doctype html>
+        <style>
+            body { margin:0 }
+            #scroll { position:absolute; inset:10px auto auto 10px; overflow:auto;
+                      width:100px; height:100px }
+            #content { height:220px; padding-top:60px }
+            #pin { width:20px; height:20px; anchor-name:--pin }
+            #tip { position:fixed; position-anchor:--pin; top:anchor(bottom); left:anchor(right);
+                   width:30px; height:15px; background:lime }
+        </style>
+        <div id="scroll"><div id="content"><div id="pin"></div></div></div><div id="tip"></div>
+        <script>
+            const tip = document.getElementById('tip'), scroll = document.getElementById('scroll');
+            const before = tip.getBoundingClientRect();
+            scroll.scrollTop = 35;
+            requestAnimationFrame(() => {
+                const after = tip.getBoundingClientRect();
+                if (before.top !== 90 || after.top !== 55 || after.left !== 30 ||
+                    document.elementFromPoint(40, 60) !== tip) {
+                    console.error('Anchor scroll: ' + [before.top, after.top, after.left, scroll.scrollTop]);
+                    return;
+                }
+                tip.style.top = '55px';
+                tip.style.left = '30px';
+                tip.getBoundingClientRect();
+                scroll.scrollTop = 60;
+                requestAnimationFrame(() => {
+                    if (tip.getBoundingClientRect().top === 55) console.log('ANCHOR_SCROLL_READY');
+                    else console.error('Anchor scroll continued after the queries were removed');
+                });
+            });
+        </script>`);
+    assert.match(log, /ANCHOR_SCROLL_READY/, log.split('\n').filter(line => /Anchor scroll|exception/i.test(line)).join('\n'));
+    assert.deepEqual(rgb(image, 40, 60), [0, 255, 0]);
+    assert.notDeepEqual(rgb(image, 40, 95), [0, 255, 0]);
+});
+
 async function paint(label, html) {
     const {image} = await render(label, `<!doctype html>
         <style>body {background:white} textarea {width:180px;height:65px;font:16px monospace}</style>
