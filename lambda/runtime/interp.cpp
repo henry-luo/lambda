@@ -3142,6 +3142,11 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
                                          ArrayNumElemType* sized_elem) {
     TypeArray* arr_type = (TypeArray*)node->type;
     if (!node->item || !arr_type || !arr_type->nested) return INTERP_ARRAY_GENERIC;
+    TypeId nested = arr_type->nested->type_id;
+    // Dynamic object/list literals cannot use a numeric lane, so there is
+    // no reason to walk their expression and let-alias trees on every call.
+    if (nested != LMD_TYPE_INT && nested != LMD_TYPE_FLOAT &&
+        nested != LMD_TYPE_UINT64 && nested != LMD_TYPE_NUM_SIZED) return INTERP_ARRAY_GENERIC;
     bool pipe_spread = false;
     if (interp_array_has_spread(node, &pipe_spread) || pipe_spread) {
         return INTERP_ARRAY_GENERIC;
@@ -3155,7 +3160,7 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
             return INTERP_ARRAY_GENERIC;
         }
     }
-    switch (arr_type->nested->type_id) {
+    switch (nested) {
     case LMD_TYPE_INT:   return INTERP_ARRAY_INT;
     case LMD_TYPE_FLOAT: return INTERP_ARRAY_FLOAT;
     case LMD_TYPE_UINT64:
@@ -3197,8 +3202,8 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
     // array of arrays; detect_ndim_literal is lowering's own detector.
     int64_t shape[32];
     ArrayNumElemType nd_elem;
-    bool nd_pipe_spread = false;
-    if (!interp_array_has_spread(node, &nd_pipe_spread) && !nd_pipe_spread) {
+    TypeArray* type = (TypeArray*)node->type;
+    if (type && type->nested && type->nested->type_id == LMD_TYPE_ARRAY) {
         int ndim = detect_ndim_literal((AstNode*)node, shape, 32, &nd_elem, true);
         if (ndim >= 2) {
             int64_t total = 1;

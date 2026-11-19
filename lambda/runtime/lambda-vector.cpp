@@ -11,6 +11,7 @@
 #include "lib/math_checked.hpp"
 #include "lib/math_utils.h"
 #include "lib/log.h"
+#include "lib/hashmap.h"
 #include "lib/memtrack.h"
 #include "lib/sort.h"
 #include "lib/image.h"
@@ -495,6 +496,44 @@ static bool unique_items_equal(Item left, Item right) {
         return std::isnan(item_to_double(left)) && std::isnan(item_to_double(right));
     }
     return false;
+}
+
+static uint64_t unique_int_hash(const void* raw, uint64_t seed0, uint64_t seed1) {
+    return hashmap_xxhash3(raw, sizeof(uint64_t), seed0, seed1);
+}
+
+static int unique_int_compare(const void* left, const void* right, void*) {
+    return *(const uint64_t*)left != *(const uint64_t*)right;
+}
+
+static bool unique_inline_ints(Item source, Array* result, int64_t len) {
+    // S5.6.1v2: packed ints have a single representation for each value.
+    // A mixed sequence needs the usual cross-type equality comparisons.
+    RootFrame roots(2);
+    Rooted<Item> input(roots, source);
+    Rooted<Array*> output(roots, result);
+    for (int64_t i = 0; i < len; ++i) {
+        uint64_t bits = vector_get(input.get(), i).item;
+        if ((bits & ITEM_DBL_MASK) || !LAMBDA_ITEM_IS_PACKED_INT(bits)) return false;
+    }
+    struct hashmap* seen = hashmap_new(sizeof(uint64_t), 32, 0, 0,
+        unique_int_hash, unique_int_compare, nullptr, nullptr);
+    if (!seen) return false;
+    bool ok = true;
+    for (int64_t i = 0; i < len; ++i) {
+        Item value = vector_get(input.get(), i);
+        const void* previous = hashmap_set(seen, &value.item);
+        if (hashmap_oom(seen)) {
+            ok = false;
+            break;
+        }
+        if (!previous) array_push_verbatim(output.get(), value);
+    }
+    hashmap_free(seen);
+    // The hash is optional. On allocation failure the equality walk restarts
+    // with the same output owner and no partially deduplicated prefix.
+    if (!ok) output.get()->length = 0;
+    return ok;
 }
 
 // check if an elem_type represents a float variant
@@ -2962,7 +3001,9 @@ Item fn_unique(Item item) {
         Rooted<Item> rooted_source(roots, item);
         Rooted<Array*> rooted_result(roots, array());
         Rooted<Item> rooted_elem(roots, ItemNull);
-        for (int64_t i = 0; i < len; i++) {
+        bool hashed = len >= 32 && item.array_num->get_elem_type() == ELEM_INT &&
+            unique_inline_ints(rooted_source.get(), rooted_result.get(), len);
+        for (int64_t i = 0; !hashed && i < len; i++) {
             rooted_elem.set(vector_get(rooted_source.get(), i));
             Array* result = rooted_result.get();
             bool found = false;
@@ -2985,7 +3026,9 @@ Item fn_unique(Item item) {
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
     Rooted<Array*> rooted_result(roots, array());
-    for (int64_t i = 0; i < len; i++) {
+    bool hashed = len >= 32 && type == LMD_TYPE_ARRAY &&
+        unique_inline_ints(rooted_source.get(), rooted_result.get(), len);
+    for (int64_t i = 0; !hashed && i < len; i++) {
         Item elem = vector_get(rooted_source.get(), i);
         Array* result = rooted_result.get();
 

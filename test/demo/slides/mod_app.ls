@@ -37,11 +37,12 @@ pub pn value(owner,id,value,editing=null) {
     let target = node(owner,id)
     let text = c.as_text(value)
     if (target == null or editing == id) { return null }
+    if ((dom.get_state(target,"value") == text)^) { return null }
     if (dom.matches(target,"select")) {
         let options = dom.query_selector_all(target,"option")
         let matches = [for (i,option in options where (dom.get_attribute(option,"value") == text)^) i]
-        if (len(matches)>0 and dom.get_state(target,"value") != text) dom.set_selected_index(target,matches[0])
-    } else if (dom.get_state(target,"value") != text) dom.set_state(target,"value",text)
+        if (len(matches)>0) dom.set_selected_index(target,matches[0])
+    } else dom.set_state(target,"value",text)
 }
 pub pn fit(owner,st) {
     let box = dom.bounding_box(node(owner,"stage"))
@@ -98,114 +99,264 @@ pub pn finish_slide_drag(owner,st,cancel=false) {
     slide_drag.focus(owner,next.index)
     return next
 }
-pub pn selection(owner,st) {
-    for (old in dom.query_selector_all(node(owner,"slide-render"),".editor-selected")) {
+pn selection(owner,selected,obj) {
+    let place = node(owner,"edit-place-" ++ selected)
+    // Keep the live handle when a publish leaves the selection in place.
+    for (old in dom.query_selector_all(node(owner,"slide-render"),".editor-selected") where (old!=place)^) {
         dom.set_attribute(old,"class","slide-object")
         for (handle in dom.query_selector_all(old,".editor-handle")) dom.remove(handle)
     }
-    let place = node(owner,"edit-place-" ++ st.selected)
     if (place != null) {
-        let editable = inline_text.can_edit(m.chosen(st));
-        dom.set_attribute(place,"class","slide-object editor-selected" ++ (if (editable) " editor-text-target" else ""))^
-        if (editable) dom.set_attribute(place,"title","Double-click or press F2 to edit text")
-        let fragment = dom.parse_fragment(place,"<div class=\"editor-handle\" data-resize=\"true\"></div>")
-        for (handle in dom.child_nodes(fragment)) dom.append_child(place,handle)
+        let editable = inline_text.can_edit(obj);
+        u.attr(place,"class","slide-object editor-selected" ++ (if (editable) " editor-text-target" else ""))^
+        if (editable) u.attr(place,"title","Double-click or press F2 to edit text")^
+        if (dom.query_selector(place,".editor-handle")==null) {
+            let fragment = dom.parse_fragment(place,"<div class=\"editor-handle\" data-resize=\"true\"></div>")
+            for (handle in dom.child_nodes(fragment)) dom.append_child(place,handle)
+        }
     }
 }
+pn thumbnail_selected(item,selected) {
+    if (item != null) {
+        u.attr(item,"class",if (selected) "thumbnail current" else "thumbnail")^
+        u.attr(item,"aria-current",selected)
+    }
+}
+pn refresh_preview(owner,st,i,key) {
+    u.markup(node(owner,v.thumbnail_preview_id(key)),format([v.thumbnail_canvas(st,i,key)^],'html'))^
+}
+pn reconcile_previews(owner,st,previews,previous) {
+    let bank = node(owner,"thumbnails")
+    let slides = previews.slides
+    let structure = previews.structure
+    if (previous==null) {
+        let keys = [for (i,scene in slides) i]
+        dom.set_inner_html(bank,format([for (i,key in keys) v.thumbnail(st,i,key)^],'html')^)
+        return {*:previews,keys:keys,next_key:len(keys)}
+    }
+    let old = map([for (i,entry in previous.structure.slides) (entry.id,i)])
+    let order = [for (entry in structure.slides) c.value(old[entry.id],-1)]
+    // Keep the same render instance across reorders. A new slide gets a
+    // distinct key so its SVG resources never alias another live thumbnail.
+    let keys = [for (i,prior in order) if (prior<0) previous.next_key+i else previous.keys[prior]]
+    for (i,key in previous.keys where (not contains(order,i)^)) dom.remove(node(bank,v.thumbnail_button_id(key)))
+    let resize = previous.structure.width!=structure.width or previous.structure.height!=structure.height or
+        previous.structure.preview!=structure.preview
+    let width = c.value(st.thumbnail_width,160.0)
+    var next = dom.first_element_child(bank);
+    for (i,key in keys) {
+        let prior = order[i]
+        let scene = slides[i]
+        let existing = node(bank,v.thumbnail_button_id(key))
+        let button = if (existing!=null) existing else
+            dom.first_element_child(dom.parse_fragment(bank,format([v.thumbnail(st,i,key)^],'html'))^)
+        if ((existing!=null)^) {
+            let before = previous.slides[prior]
+            // Reorders change ordinals only where a slide actually moved.
+            if (i!=prior) {
+                u.attr(button,"data-slide",i)^
+                dom.set_text_content(dom.query_selector(button,".thumb-number"),string(i+1)^)
+            }
+            let hidden_changed = before.hidden!=scene.hidden
+            let caption_changed = hidden_changed or before.source.title!=scene.source.title;
+            if (hidden_changed) u.attr(button,"data-hidden",scene.hidden)^
+            if (i!=prior or caption_changed)
+                u.attr(button,"aria-label",v.thumbnail_label(scene,i)^)^
+            if (caption_changed)
+                dom.set_text_content(dom.query_selector(button,".thumb-caption"),v.thumbnail_title(scene)^)
+            if ((previous.base!=previews.base or previous.structure.width!=structure.width or
+                previous.structure.height!=structure.height or {*:before,index:scene.index}!=scene)^)
+                refresh_preview(bank,st,i,key)^
+            if (resize) {
+                u.style(dom.query_selector(button,".thumb-paper"),"height",c.px(width*st.plan.height/st.plan.width))^
+                u.style(node(button,v.thumbnail_preview_id(key)),"transform","scale(" ++ c.fmt(width/st.plan.width) ++ ")")^
+            }
+        }
+        if ((button!=next)^) dom.insert_before(bank,button,next)
+        next = dom.next_element_sibling(button)
+    }
+    return {*:previews,keys:keys,next_key:previous.next_key+len(keys)}
+}
+pn publish_menu(owner,st) {
+    let menu = node(owner,"home-menu")
+    if ((c.value(st.menu,"")=="" and dom.style_get_property(menu,"display")=="none")^) { return }
+    let tree = if (st.menu=="slide-context") home_ui.slide_context(st)
+        else if (starts_with(c.value(st.menu,""),"animation-")) animations_ui.menu_tree(st,st.menu) else if (st.menu == "transition-options") transitions_ui.menu_tree(st) else if (starts_with(c.value(st.menu,""),"insert-")) insert_ui.menu_tree(st.menu)
+        else home_ui.menu_tree(c.value(st.menu,""));
+    u.markup(menu,if (len(tree) == 0) "" else format(tree,'html'))^
+    u.show(owner,"home-menu",st.menu != null and st.menu != "")^
+    u.attr(menu,"aria-label",if (st.menu=="slide-context") "Slide actions" else "Home ribbon options")^
+    for (trigger in dom.query_selector_all(owner,".home-menu-trigger"))
+        u.attr(trigger,"aria-expanded",dom.get_attribute(trigger,"id") == st.menu)
+}
+pub pn dismiss_menu(owner,st) {
+    let next = {*:st,menu:""}
+    publish_menu(owner,next)^
+    return next
+}
 pub pn publish(owner,st,canvas=true,opened=false) {
-    // a slide switch replaces the notes and painted canvas, even when editing never began.
+    // Pointer selection publishes its controls without rewriting document chrome.
     let previous_index = dom.get_attribute(owner,"data-index")
     let replaced = opened or (previous_index!=null and previous_index!=string(st.index))
-    spelling.update(owner,"slides-notes",m.notes(st),st.show==true,null,replaced)^
-    if (st.inline==null) spelling.update(owner,"slides-text",null)
-    spelling.reposition(owner,"slides-notes")
-    spelling.reposition(owner,"slides-text")
-    let thumbnail_focus = canvas and any([for (item in dom.query_selector_all(node(owner,"thumbnails"),"[data-slide]")) dom.focused(item)])
+    let notes = m.notes(st)
+    if (canvas) {
+        spelling.update(owner,"slides-notes",notes,st.show==true,null,replaced)^
+        if (st.inline==null) spelling.update(owner,"slides-text",null)
+        spelling.reposition(owner,"slides-notes")
+        spelling.reposition(owner,"slides-text")
+        u.markup(node(owner,"import-warnings"),if (len(st.import_warnings)>0) format([pptx_view.warnings(st.import_warnings)],'html')^ else "")^
+        u.show(owner,"import-warnings",len(st.import_warnings)>0)^
+    }
     let obj = m.chosen(st)
-    u.markup(node(owner,"import-warnings"),if (len(st.import_warnings)>0) format([pptx_view.warnings(st.import_warnings)],'html')^ else "")^
-    u.show(owner,"import-warnings",len(st.import_warnings)>0)^
     let editing = st.editing.target
     let ribbon = node(owner,"ribbon")
-    u.markup(ribbon,format(v.ribbon(st.tab,c.value(st.fonts,[])),'html'))^
+    let ribbon_changed = st.published_ribbon!=st.tab
+    if (ribbon_changed)
+        u.markup(ribbon,format(v.ribbon(st.tab),'html'))^
     let group_row = dom.query_selector(ribbon,".editor-ribbon")
     // Markup replacement discards group measurements; measure in the next layout frame.
     if (group_row!=null and dom.get_attribute(group_row,"data-layout-key")==null)
         dom.request_frame(owner,"slide_ribbon_ready")
-    let menu_tree = if (st.menu=="slide-context") home_ui.slide_context(st)
-        else if (starts_with(c.value(st.menu,""),"animation-")) animations_ui.menu_tree(st,st.menu) else if (st.menu == "transition-options") transitions_ui.menu_tree(st) else if (starts_with(c.value(st.menu,""),"insert-")) insert_ui.menu_tree(st.menu)
-        else home_ui.menu_tree(c.value(st.menu,""));
-    u.markup(node(owner,"home-menu"),if (len(menu_tree) == 0) "" else format(menu_tree,'html'))^
-    u.show(owner,"home-menu",st.menu != null and st.menu != "")^
-    u.attr(node(owner,"home-menu"),"aria-label",if (st.menu=="slide-context") "Slide actions" else "Home ribbon options")^
-    for (trigger in dom.query_selector_all(owner,".home-menu-trigger"))
-        u.attr(trigger,"aria-expanded",dom.get_attribute(trigger,"id") == st.menu)
-    let display = if (st.display_doc == st.doc and st.display_base == st.base) st else
-        {*:st,display_doc:st.doc,display_base:st.base,display_plan:slide.compile(resources.slide_sources(st.doc,st.base))^}
-    let visual_state = {*:st,plan:display.display_plan}
+    if (canvas) publish_menu(owner,st)^
+    let plan = st.plan
+    let scene = m.scene(st)
+    let previous = st.published_canvas
+    // Selection and editing chrome can publish without changing the canvas
+    // or allocating another descriptor for every thumbnail.
+    let slides_changed = canvas and previous.previews.slides!=plan.slides
+    let structure = previous.previews.structure
+    let preview_structure = if (canvas and (slides_changed or structure.width!=plan.width or
+        structure.height!=plan.height or structure.preview!=st.thumbnail_width))
+        {width:plan.width,height:plan.height,preview:st.thumbnail_width,
+            slides:if (slides_changed) [for (slide in plan.slides) {id:slide.id,title:slide.source.title,hidden:slide.hidden}]
+                else structure.slides} else structure
+    let previews = {structure:preview_structure,slides:plan.slides,base:st.base}
+    let stage = if (canvas) {width:plan.width,height:plan.height,slide:scene,base:st.base} else previous.stage
+    let preview_structure_changed = canvas and structure!=preview_structure
+    let stage_changed = canvas and previous.stage!=stage
+    let thumbnail_focus = canvas and (preview_structure_changed or previous.index!=st.index) and
+        any([for (item in dom.query_selector_all(node(owner,"thumbnails"),"[data-slide]")) dom.focused(item)])
+    let spelling_input = {stage:stage,skip:if (st.inline==null) null else st.selected,paused:st.show==true}
+    var published_previews = previous.previews;
     if (canvas) {
-        u.markup(node(owner,"thumbnails"),format(v.thumbnails(visual_state)^,'html'))^
-        u.markup(node(owner,"slide-render"),format([v.canvas(display.display_plan,st.index,"edit")^],'html'))^
+        if (preview_structure_changed) {
+            published_previews = reconcile_previews(owner,st,previews,previous.previews)
+        } else if ((previous.previews.base!=st.base or slides_changed)^) {
+            for (i,scene in plan.slides where ((previous.previews.base!=st.base or previous.previews.slides[i]!=scene)^)) {
+                refresh_preview(owner,st,i,previous.previews.keys[i])^
+            }
+            published_previews = {*:previous.previews,*:previews}
+        }
+        // Navigation updates the two selected states without recreating the deck previews.
+        if (preview_structure_changed or previous.index!=st.index) {
+            let former = if (previous.index==null) null else node(owner,v.thumbnail_button_id(previous.previews.keys[previous.index]))
+            let selected = slide_drag.thumbnail(owner,st.index);
+            if ((former!=selected)^) thumbnail_selected(former,false)^
+            thumbnail_selected(selected,true)^
+        }
+        if (stage_changed)
+            u.markup(node(owner,"slide-render"),format([v.canvas(plan,st.index,"edit",st.base)^],'html'))^
     }
-    u.markup(node(owner,"object-list"),join([for (option in v.object_options(st)) format(option,'xml')],""))^
-    selection(owner,st)^
-    if (canvas) spelling.update_canvas(owner,if (st.inline==null) null else st.selected,st.show==true,replaced)^
-    u.attr(node(owner,"paper"),"class",if (st.grid) "grid" else "")^
-    for (key,val in {'data-index':st.index,'data-slides':len(st.plan.slides),'data-selected':st.selected,
-        'data-insert-dialog':c.value(st.insert_form.kind,""),'data-dirty':st.doc != st.saved,'data-error':st.error,'data-dialog':st.dialog,'data-mode':if (st.show) "present" else "edit",'data-undo':len(st.undo),
-        'data-x':obj.x,'data-y':obj.y,'data-width':obj.width,'data-height':obj.height,'data-editing':editing,'data-painter':st.painter == true}) u.attr(owner,string(key),val)
-    for (key,text in {'save-state':if (st.doc == st.saved) "Saved" else "Unsaved changes",
-        'slide-count':string(len(st.plan.slides)) ++ " slides",'slide-heading':c.value(m.scene(st).source.title,"Slide " ++ string(st.index+1)),
-        position:"Slide " ++ string(st.index+1) ++ " of " ++ string(len(st.plan.slides)),'canvas-size':c.fmt(st.plan.width) ++ " × " ++ c.fmt(st.plan.height),status:if (st.error != "") st.error else st.status,
-        'object-kind':if (obj == null) "Slide" else string(obj.tag),'text-label':if (obj != null and not m.plain(obj.source)) "Content (Mark)" else "Text",
-        'dialog-title':if (st.dialog == "open") "Open presentation" else if (st.dialog == "export") "Export handout" else if (st.dialog == "print") "Print presentation" else "Save presentation",
-        'dialog-copy':if (st.open_task!=null) "Importing PowerPoint presentation… You can cancel while it loads."
-            else if (st.dialog == "open") "Open a .slides or .pptx file. PowerPoint imports create an editable copy. Your current deck remains available through Undo."
-            else if (st.dialog == "export") "Export final slides and speaker notes to an HTML handout."
-            else if (st.dialog == "print") "Save as PDF, with one final slide per page." else "Save an editable .slides presentation.",
-        'dialog-error':st.error}) u.text(owner,string(key),text)
-    u.text(owner,"file-confirm",if (st.dialog == "open") "Open" else if (st.dialog == "export") "Export" else "Save")^
-    u.attr(node(owner,"file-dialog"),"aria-busy",st.open_task!=null)^
-    for (id in ["file-path","file-confirm"]) {
-        if (st.open_task!=null) dom.set_attribute(node(owner,id),"disabled","")
-        else dom.remove_attribute(node(owner,id),"disabled")
+    if ((st.published_targets!=scene.targets)^)
+        u.markup(node(owner,"object-list"),join([for (option in v.object_options(st)) format(option,'xml')],""))^
+    selection(owner,st.selected,obj)^
+    if ((canvas and (replaced or previous.spelling!=spelling_input))^)
+        spelling.update_canvas(owner,spelling_input.skip,spelling_input.paused,replaced)^
+    for (key,val in {'data-selected':st.selected,'data-x':obj.x,'data-y':obj.y,
+        'data-width':obj.width,'data-height':obj.height,'data-editing':editing}) u.attr(owner,string(key),val)
+    u.text(owner,"object-kind",if (obj==null) "Slide" else string(obj.tag))^
+    u.text(owner,"text-label",if (obj!=null and not m.plain(obj.source)) "Content (Mark)" else "Text")^
+    if (canvas) {
+        u.attr(node(owner,"paper"),"class",if (st.grid) "grid" else "")^
+        let dirty = st.doc != st.saved
+        for (key,val in {'data-index':st.index,'data-slides':len(st.plan.slides),
+            'data-insert-dialog':c.value(st.insert_form.kind,""),'data-dirty':dirty,'data-error':st.error,'data-dialog':st.dialog,
+            'data-mode':if (st.show) "present" else "edit",'data-undo':len(st.undo),'data-painter':st.painter == true})
+            u.attr(owner,string(key),val)
+        for (key,text in {'save-state':if (dirty) "Unsaved changes" else "Saved",
+            'slide-count':string(len(st.plan.slides)) ++ " slides",'slide-heading':c.value(scene.source.title,"Slide " ++ string(st.index+1)),
+            position:"Slide " ++ string(st.index+1) ++ " of " ++ string(len(st.plan.slides)),
+            'canvas-size':c.fmt(st.plan.width) ++ " × " ++ c.fmt(st.plan.height),status:if (st.error != "") st.error else st.status,
+            'dialog-title':if (st.dialog == "open") "Open presentation" else if (st.dialog == "export") "Export handout" else if (st.dialog == "print") "Print presentation" else "Save presentation",
+            'dialog-copy':if (st.open_task!=null) "Importing PowerPoint presentation… You can cancel while it loads."
+                else if (st.dialog == "open") "Open a .slides or .pptx file. PowerPoint imports create an editable copy. Your current deck remains available through Undo."
+                else if (st.dialog == "export") "Export final slides and speaker notes to an HTML handout."
+                else if (st.dialog == "print") "Save as PDF, with one final slide per page." else "Save an editable .slides presentation.",
+            'dialog-error':st.error}) u.text(owner,string(key),text)
+        u.text(owner,"file-confirm",if (st.dialog == "open") "Open" else if (st.dialog == "export") "Export" else "Save")^
+        u.attr(node(owner,"file-dialog"),"aria-busy",st.open_task!=null)^
+        for (id in ["file-path","file-confirm"]) disable(node(owner,id),st.open_task!=null)
+        u.show(owner,"file-dialog",st.dialog != "","flex")^
+        u.show(owner,"show-layer",st.show)^
+        u.show(owner,"insert-dialog",st.insert_form != null,"flex")^
+        if (st.insert_form != null) {
+            u.markup(node(owner,"insert-dialog"),format([insert_ui.dialog(st)],'html'))^
+            u.text(owner,"insert-error",st.error)^
+        }
+        for (button in dom.query_selector_all(owner,"[data-tab]"))
+            u.attr(button,"aria-selected",dom.get_attribute(button,"data-tab") == st.tab)
     }
     for (id,shown in {'object-properties':obj != null,'slide-properties':obj == null,
         'text-properties':obj.tag == 'text' or obj.tag == 'content','font-properties':obj.tag == 'text',
         'shape-properties':obj.tag == 'shape','image-properties':obj.tag == 'image'}) u.show(owner,string(id),shown)
-    u.show(owner,"file-dialog",st.dialog != "","flex")^
-    u.show(owner,"show-layer",st.show)^
-    u.show(owner,"insert-dialog",st.insert_form != null,"flex")^
-    if (st.insert_form != null) {
-        u.markup(node(owner,"insert-dialog"),format([insert_ui.dialog(st)],'html'))^
-        u.text(owner,"insert-error",st.error)^
-    }
     disable(node(owner,"edit-inserted"),insert_model.settings(obj.source) == null)^
-    for (button in dom.query_selector_all(owner,"[data-tab]")) u.attr(button,"aria-selected",dom.get_attribute(button,"data-tab") == st.tab)
-    for (id,disabled in {undo:len(st.undo)==0,redo:len(st.redo)==0,copy:obj==null,paste:st.clipboard==null,duplicate:obj==null,
-        delete:obj==null,'apply-text':obj==null or not contains(['text','content'],obj.tag),front:obj==null,back:obj==null}) {
-        for (control in dom.query_selector_all(owner,"[data-action=" ++ string(id)^ ++ "]")) disable(control,disabled)
+    let commands = {undo:len(st.undo)==0,redo:len(st.redo)==0,copy:obj==null,paste:st.clipboard==null,duplicate:obj==null,
+        delete:obj==null,'apply-text':obj==null or not contains(['text','content'],obj.tag),front:obj==null,back:obj==null}
+    let command_input = {disabled:commands,menu:st.menu,dialog:st.insert_form};
+    if ((ribbon_changed or st.published_commands!=command_input)^) {
+        for (id,disabled in commands)
+            for (control in dom.query_selector_all(owner,"[data-action=" ++ string(id)^ ++ "]")) disable(control,disabled)
     }
-    for (id,val in {'deck-title':st.plan.title,'speaker-notes':m.notes(st),'prop-slide-title':m.scene(st).source.title,
-        'prop-slide-background':html.layer_background(st.plan,m.scene(st)),layout:c.value(m.scene(st).source.layout,'blank'),
-        transition:if (m.scene(st).transition == 'slide') 'cover' else m.scene(st).transition,'prop-slide-transition_duration':m.scene(st).transition_duration,
-        'object-list':st.selected}) value(owner,string(id),val,editing)
-    if (obj != null) {
-        for (key in ["x","y","width","height","rotation","opacity","font_size"]) value(owner,"prop-" ++ key,obj[key],editing)
-        for (key in ["color","fill","stroke","stroke_width","radius","src","fit","style"])
-            value(owner,"prop-" ++ key,if (key == "color" or key == "fill") obj.paint else c.value(obj.source[key],if (key == "fit") "contain" else ""),editing)
-        value(owner,"prop-text",if (m.plain(obj.source)) m.text(obj.source) else join([for (child in ((content(obj.source)) ^ { [] })) format(child,'mark')],"\n"),editing)^
+    // Menu and presentation transitions need no inspector refresh unless
+    // the selected source, active field or ribbon controls also changed.
+    let inspector = {scene:scene,title:plan.title,object:obj,selected:st.selected,editing:editing};
+    if ((ribbon_changed or st.published_inspector!=inspector)^) {
+        for (id,val in {'deck-title':plan.title,'speaker-notes':notes,'prop-slide-title':scene.source.title,
+            'prop-slide-background':html.layer_background(plan,scene),layout:c.value(scene.source.layout,'blank'),
+            transition:if (scene.transition == 'slide') 'cover' else scene.transition,'prop-slide-transition_duration':scene.transition_duration,
+            'object-list':st.selected}) value(owner,string(id),val,editing)
+        if (obj != null) {
+            for (key in ["x","y","width","height","rotation","opacity","font_size"]) value(owner,"prop-" ++ key,obj[key],editing)
+            for (key in ["color","fill","stroke","stroke_width","radius","src","fit","style"])
+                value(owner,"prop-" ++ key,if (key == "color" or key == "fill") obj.paint else c.value(obj.source[key],if (key == "fit") "contain" else ""),editing)
+            value(owner,"prop-text",if (m.plain(obj.source)) m.text(obj.source) else join([for (child in ((content(obj.source)) ^ { [] })) format(child,'mark')],"\n"),editing)^
+        }
     }
-    sync_animations(owner,st)^
+    // Dialogs and document status can change without changing any ribbon input.
+    // Reuse the published controls until selection, formatting or the ribbon changes.
+    let home_input = if (st.tab!="Home") null else {target:obj,editing:editing,
+        palette:plan.palette,placeholders:home.has_placeholders(st),
+        clipboard:[st.clipboard==null,name(st.clipboard)],
+        painter:st.painter==true}
+    let animation_input = {scene:scene,selection:st.selected,active:st.animation_key,
+        pane:st.animation_pane,painter:st.animation_painter,editing:editing}
+    if ((st.published_animation!=animation_input or (ribbon_changed and st.tab=="Animations"))^)
+        sync_animations(owner,st)^
     sync_transitions(owner,st)^
-    sync_home(owner,st)
+    if ((home_input!=null and (ribbon_changed or st.published_home!=home_input))^)
+        sync_home(owner,st)^
     // history and navigation replace thumbnails; keep keyboard input on the active slide's live node.
     if (thumbnail_focus) slide_drag.focus(owner,st.index)^
-    return request_layout(owner,fit(owner,display))
+    let fit_input = {width:st.plan.width,height:st.plan.height,zoom:st.zoom,
+        animation_pane:st.animation_pane==true,import_warnings:st.import_warnings}
+    let next = {*:st,published_ribbon:st.tab,published_home:home_input,
+        published_targets:scene.targets,published_commands:command_input,published_inspector:inspector,
+        published_animation:animation_input,published_fit:fit_input,
+        published_canvas:if (canvas) {previews:published_previews,stage:stage,index:st.index,spelling:spelling_input} else st.published_canvas};
+    // Resize and divider handlers already refit the stage. Ordinary edits need
+    // no synchronous geometry read after publishing their DOM writes.
+    if ((st.published_fit==fit_input)^) { return next }
+    spelling.reposition(owner,"slides-canvas")^
+    return request_layout(owner,fit(owner,next))
 }
 pn disable(control,disabled) {
     if (control == null) { return }
-    if (disabled) dom.set_attribute(control,"disabled","")
-    else if (dom.has_attribute(control,"disabled")) dom.remove_attribute(control,"disabled")
+    // A repeated setAttribute records another mutation and recascade even
+    // when the native control already has the requested boolean attribute.
+    let current = dom.has_attribute(control,"disabled")
+    if (disabled) {
+        if (not current) dom.set_attribute(control,"disabled","")
+    } else if (current) dom.remove_attribute(control,"disabled")
 }
 pn sync_home(owner,st) {
     if (st.tab != "Home") { return }
@@ -234,14 +385,8 @@ pn sync_home(owner,st) {
         u.attr(node(owner,action),"aria-pressed",home.pressed(st,action))
     u.attr(node(owner,"bullets"),"aria-pressed",home.list_kind(st) == 'ul')^
     u.attr(node(owner,"numbering"),"aria-pressed",home.list_kind(st) == 'ol')^
-    let family = home.family(st)
-    let control = node(owner,"home-font-family")
-    let found = [for (option in dom.query_selector_all(control,"option") where (dom.get_attribute(option,"value") == family)^) option]
-    if (len(found) == 0) {
-        let fragment = dom.parse_fragment(control,format(<option value:family,family>,'xml'))
-        for (option in dom.child_nodes(fragment)) dom.append_child(control,option)
-    }
-    value(owner,"home-font-family",family,st.editing.target)^
+    if ((st.editing.target!="home-font-family")^)
+        font_picker.select_value(node(owner,"home-font-family"),home.family(st))^
     font_picker.sync(owner,"home-font-family")^
     value(owner,"home-font-size",c.value(obj.font_size,st.plan.palette.body_size),st.editing.target)
 }
@@ -259,16 +404,20 @@ pn sync_animations(owner,st) {
     u.show(owner,"animation-details",row != null)^
     u.attr(owner,"data-animation",c.value(row.key,""))^
     u.attr(owner,"data-animation-painter",st.animation_painter == true)^
-    for (entry in animation_catalog.catalog) {
-        disable(node(owner,"animate-" ++ string(entry.id)),not animations.compatible(obj,entry.id))^
-        u.attr(node(owner,"animate-" ++ string(entry.id)),"aria-pressed",row.effect.kind == entry.id)
+    // The animation gallery only exists in its ribbon tab.
+    if (st.tab=="Animations") {
+        for (entry in animation_catalog.catalog) {
+            let button = node(owner,"animate-" ++ string(entry.id))
+            disable(button,not animations.compatible(obj,entry.id))^
+            u.attr(button,"aria-pressed",row.effect.kind == entry.id)
+        }
+        disable(node(owner,"animation-painter"),len(animations.copy(st))==0)^
+        disable(node(owner,"animation-preview"),len(items)==0)^
+        u.attr(node(owner,"animation-painter"),"aria-pressed",st.animation_painter == true)^
+        u.attr(node(owner,"animation-pane-toggle"),"aria-pressed",st.animation_pane == true)^
     }
     for (id in ["animation-start","animation-duration","animation-delay","animation-trigger","animation-options","animation-remove","animation-up","animation-down"])
         disable(node(owner,id),row == null)
-    disable(node(owner,"animation-painter"),len(animations.copy(st))==0)^
-    disable(node(owner,"animation-preview"),len(items)==0)^
-    u.attr(node(owner,"animation-painter"),"aria-pressed",st.animation_painter == true)^
-    u.attr(node(owner,"animation-pane-toggle"),"aria-pressed",st.animation_pane == true)^
     if (row == null) { return }
     for (key,val in {start:c.value(row.cue.start,'click'),duration:c.num(row.effect,"duration",400.0)/1000.0,
         delay:c.num(row.effect,"delay",0.0)/1000.0,from:c.value(row.effect.from,'bottom'),color:c.value(row.effect.color,"#f5b942"),
@@ -286,11 +435,11 @@ pn sync_animations(owner,st) {
     u.text(owner,"animation-trigger-label",if (row.cue.trigger == null) "Plays in the slide build sequence." else "Triggered by clicking " ++ string(row.cue.trigger))
 }
 pn sync_transitions(owner,st) {
+    if (st.tab != "Transitions") { return }
     let scene = m.scene(st)
     let custom = st.transition_custom == st.index or transitions.sound_kind(st) == "custom"
-    u.show(owner,"transition-sound-file",st.tab == "Transitions" and custom)^
+    u.show(owner,"transition-sound-file",custom)^
     value(owner,"transition-sound-path",if (transitions.sound_kind(st) == "custom") scene.transition_sound.src else "",st.editing.target)^
-    if (st.tab != "Transitions") { return }
     for (entry in effects.catalog) u.attr(node(owner,"transition-" ++ string(entry.id)),"aria-pressed",transitions.kind(st) == entry.id)
     value(owner,"transition-duration",scene.transition_duration/1000.0,st.editing.target)^
     value(owner,"transition-after",c.value(scene.advance_after,c.value(st.after_draft,2000.0))/1000.0,st.editing.target)^
@@ -504,9 +653,16 @@ pub pn restore_menu_focus(owner,st,key) {
 pub pn open_slide_context(owner,st,index,point=null) {
     let ready = finish_inline(owner,st)
     if ((ready.inline!=null)^) { return ready }
-    let next = publish(owner,{*:m.select_slide(ready,index),menu:"slide-context",editing:null,error:""})
-    let box = dom.bounding_box(slide_drag.thumbnail(owner,next.index))
-    let at = if (point==null) {x:box.x+12.0,y:box.y+min(32.0,box.height)} else point
+    let selected = {*:m.select_slide(ready,index),menu:"slide-context",editing:null,error:""}
+    let next = if ((ready.index==index and ready.selected=="" and ready.editing==null and ready.error=="")^) {
+        // A menu on the current thumbnail only changes menu chrome.
+        publish_menu(owner,selected)^
+        selected
+    } else publish(owner,selected)
+    let at = if (point==null) {
+        let box = dom.bounding_box(slide_drag.thumbnail(owner,next.index));
+        {x:box.x+12.0,y:box.y+min(32.0,box.height)}
+    } else point
     u.style(node(owner,"home-menu"),"left",c.px(at.x))^
     u.style(node(owner,"home-menu"),"top",c.px(at.y))^
     dom.request_frame(owner,"home_menu_fit")
@@ -586,6 +742,7 @@ pub pn finish_inline(owner,st,accept=true) {
     // removing or parking a focused surface must not commit its draft a second time.
     if ((control!=null)^) dom.set_attribute(control,"data-inline-finishing","true")
     if (st.inline.ready!=null and st.inline.ready>0) dom.cancel_frame(owner,st.inline.ready)
+    if (st.inline.spell_frame!=null) dom.cancel_frame(owner,st.inline.spell_frame)
     var next = {*:st,inline:null}
     if (st.inline.kind=="rich") {
         let host = node(owner,"rich-text-host")
@@ -664,6 +821,9 @@ pub fn drag_geometry(st,x,y) {
     else { ({x:round((obj.x+delta.x)/snap)*snap,y:round((obj.y+delta.y)/snap)*snap}) }
 }
 pub pn preview_drag(owner,st,x,y) {
+    // Native input can report a stationary move during a click. It must not
+    // snap or restyle the object until the pointer actually leaves its origin.
+    if ((st.drag.values==null and x==st.drag.x and y==st.drag.y)^) { return st }
     let values = drag_geometry(st,x,y)
     let place = node(owner,"edit-place-" ++ st.selected)
     for (key,val in values) u.style(place,if (key == "x") "left" else if (key == "y") "top" else string(key),c.px(val))

@@ -71,7 +71,7 @@ fn character_chain(data, file, slot, seen = []) array | error {
     }
 }
 
-pub fn delimiters() map | error {
+fn read_delimiters() map | error {
     let file = "cmex10.tfm"
     let extension = tfm_data(file)^
     let symbols = [for (file in ["cmsy10.tfm","cmsy7.tfm","cmsy5.tfm"]) tfm_data(file)^]
@@ -157,7 +157,7 @@ fn constants(symbols, extension, size) {
     }
 }
 
-pub fn load() map | error {
+fn read_constants() map | error {
     let extension = parameters("cmex10.tfm", 13)^
     let paren = character_metrics(tfm_data("cmr10.tfm")^,"cmr10.tfm",0x28)^;
     {bracket_rule: character_height("cmex10.tfm", 0x7A)^,
@@ -167,3 +167,9 @@ pub fn load() map | error {
         script: constants(parameters("cmsy7.tfm", 22)^, extension, 0.7),
         scriptscript: constants(parameters("cmsy5.tfm", 22)^, extension, 0.5)}}
 }
+
+// Every bundled TeX formula uses the same companion tables (D10.2.3).
+let delimiter_tables = read_delimiters() ^ { ~ }
+let style_constants = read_constants() ^ { ~ }
+pub fn delimiters() map | error => delimiter_tables
+pub fn load() map | error => style_constants

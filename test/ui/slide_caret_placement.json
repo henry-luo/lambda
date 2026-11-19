@@ -1,14 +1,16 @@
 {
   "name": "Slides: click entry and native caret pixels follow multiline text at canvas scales",
-  "html": "test/demo/slides/slides.ls",
+  "html": "test/demo/slides/_text_editing_fixture.ls",
   "viewport": {
     "width": 1440,
     "height": 900
   },
   "input_turn_ms": 0,
+  "initial_render": false,
   "events": [
     {
       "type": "advance_time",
+      "render": false,
       "ms": 100,
       "steps": 3
     },
@@ -30,11 +32,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-text"
       }
@@ -284,6 +288,7 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
@@ -322,6 +327,7 @@
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-text"
       }
@@ -370,6 +376,7 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
@@ -403,11 +410,13 @@
     },
     {
       "type": "advance_time",
+      "render": false,
       "ms": 60,
       "steps": 3
     },
     {
       "type": "assert_focus",
+      "assert_interval": 10,
       "target": {
         "selector": "#canvas-rich-text"
       }

@@ -150,16 +150,28 @@ on scroll(evt) {
     return 'handled'
 }
 
+// The virtual catalog owns the option list. The backing select only needs
+// values that a document or a user has actually selected.
+pub pn select_value(control,value) bool^ {
+    let options = dom.query_selector_all(control,"option")
+    let found = [for (i,option in options where (dom.get_attribute(option,"value")==value)^) i][0]
+    var index = found
+    if ((found==null)^) {
+        let fragment = dom.parse_fragment(control,format(<option value:value,value>,'xml'))
+        let option = dom.first_element_child(fragment)
+        if ((option==null)^) { return false }
+        dom.append_child(control,option)
+        index = len(options)
+    }
+    if ((index==dom.selected_index(control))^) { return false }
+    return dom.set_selected_index(control,index)
+}
 pn choose(node,id,value) {
     // closing can retire the clicked row; retain its document before dismissing the popup.
     let root = dom.root_node(node)
     dom.dispatch(owner(node),{type:"workspace_font_close",bubbles:false})
     let control = dom.get_element_by_id(root,id)
-    if (control!=null) {
-        // Native hosts may retain extra options or append an imported family out of order.
-        let index = [for (i,option in dom.query_selector_all(control,"option") where dom.get_attribute(option,"value")==value) i][0]
-        if (index==null or index==dom.selected_index(control)) { return }
-        dom.set_selected_index(control,index)
+    if ((control!=null and select_value(control,value)) ^ { false }) {
         dom.dispatch(control,{type:"change",bubbles:true})
     }
 }

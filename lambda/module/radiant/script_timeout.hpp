@@ -11,14 +11,14 @@
 #define RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS 120
 #define RADIANT_SCRIPT_EXEC_TIMEOUT_ENV_MAX_SECONDS 600
 
-static inline int radiant_script_exec_timeout_override_seconds() {
+static inline int radiant_script_exec_timeout_override_ms() {
     const char* env = getenv("LAMBDA_JS_EXEC_TIMEOUT_SECONDS");
     if (!env || !env[0]) return 0;
     char* end = nullptr;
-    long parsed = strtol(env, &end, 10);
-    if (end == env || parsed <= 0) return 0;
+    const double parsed = strtod(env, &end);
+    if (end == env || !(parsed >= 0.001)) return 0;
     return parsed > RADIANT_SCRIPT_EXEC_TIMEOUT_ENV_MAX_SECONDS
-        ? RADIANT_SCRIPT_EXEC_TIMEOUT_ENV_MAX_SECONDS : (int)parsed;
+        ? RADIANT_SCRIPT_EXEC_TIMEOUT_ENV_MAX_SECONDS * 1000 : (int)(parsed * 1000 + 0.5);
 }
 
 static inline int radiant_script_exec_timeout_source_seconds(size_t source_len) {
@@ -32,15 +32,15 @@ static inline int radiant_script_exec_timeout_source_seconds(size_t source_len) 
         ? RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS : seconds;
 }
 
-static inline int radiant_script_exec_timeout_seconds(size_t source_len) {
-    int override_seconds = radiant_script_exec_timeout_override_seconds();
-    return override_seconds > 0 ? override_seconds :
-        radiant_script_exec_timeout_source_seconds(source_len);
+static inline int radiant_script_exec_timeout_ms(size_t source_len) {
+    int override_ms = radiant_script_exec_timeout_override_ms();
+    return override_ms > 0 ? override_ms :
+        radiant_script_exec_timeout_source_seconds(source_len) * 1000;
 }
 
 static inline int radiant_script_exec_timeout_ceiling_seconds() {
-    int override_seconds = radiant_script_exec_timeout_override_seconds();
-    return override_seconds > 0 ? override_seconds :
+    int override_ms = radiant_script_exec_timeout_override_ms();
+    return override_ms > 0 ? (override_ms + 999) / 1000 :
         RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS;
 }
 

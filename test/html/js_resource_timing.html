@@ -4,9 +4,9 @@
 <script>
 const report = document.getElementById('report');
 function check(condition, message) { if (!condition) throw Error(message); }
-function nextTask() { return new Promise(resolve => setTimeout(resolve, 0)); }
+function scheduleNextTask(resolve) { setTimeout(resolve, 0); }
+function nextTask() { return new Promise(scheduleNextTask); }
 function resources() { return performance.getEntriesByType('resource'); }
-async function request(path) { const response = await fetch(path); await response.text(); }
 async function run() {
   const setSize = Performance.prototype.setResourceTimingBufferSize;
   const clear = Performance.prototype.clearResourceTimings;
@@ -21,9 +21,10 @@ async function run() {
     check(this === observer && source === observer, 'observer callback receiver');
     check(list instanceof PerformanceObserverEntryList, 'observer entry list prototype');
     const batch = listEntries.call(list);
-    for (const entry of batch) {
+    check(list.getEntriesByType('mark').length === 0, 'observer type filter');
+    for (let i = 0; i < batch.length; i++) {
+      const entry = batch[i];
       check(list.getEntriesByName(entry.name, 'resource').includes(entry), 'observer name filter');
-      check(list.getEntriesByType('mark').length === 0, 'observer type filter');
       observed.push(entry);
     }
   });
@@ -31,8 +32,10 @@ async function run() {
   observe.call(observer, {entryTypes: ['resource']});
   check(observed.length === 0, 'observe does not invent an entry');
   const before = performance.now();
-  await request('/first');
-  await request('/second');
+  // The native fetch resolves after it publishes the completed timing entry.
+  // The next task still exercises asynchronous observer delivery.
+  await fetch('/first');
+  await fetch('/second');
   await nextTask();
   let entries = resources();
   check(entries.length === 2, 'first two requests');
@@ -76,19 +79,20 @@ async function run() {
     if (mode === 'grow') setSize.call(performance, 3);
     if (mode === 'clear') { clear.call(performance); setSize.call(performance, 1); }
   };
-  await request('/third');
+  await fetch('/third');
   await nextTask();
   check(full === 1 && resources().length === 3, 'grow buffer in overflow handler');
   setSize.call(performance, 1);
   mode = 'clear';
-  await request('/fourth');
+  await fetch('/fourth');
   await nextTask();
-  check(full === 2 && resources().length === 1 && resources()[0].name.endsWith('/fourth'),
+  entries = resources();
+  check(full === 2 && entries.length === 1 && entries[0].name.endsWith('/fourth'),
     'clear buffer preserves pending request');
   clear.call(performance);
   setSize.call(performance, 0);
   mode = 'drop';
-  await request('/fifth');
+  await fetch('/fifth');
   await nextTask();
   check(full === 3 && resources().length === 0, 'discard overflow without progress');
   check(observed.length === 5 && observed[4].name.endsWith('/fifth'),

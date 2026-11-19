@@ -10,7 +10,9 @@ pub fn thumbnail(owner,index) => dom.query_selector(node(owner,"thumbnails"),"[d
 
 pub pn start(owner,st,evt,index) {
     let port = node(owner,"thumbnails")
-    dom.focus_set(port,false)
+    // A press can remain a click, so focus the thumbnail directly while the
+    // scrollport owns pointer capture for a potential drag.
+    dom.focus_set(thumbnail(owner,index),false)
     dom.set_pointer_capture(port,evt.pointerId)
     return {*:st,editing:null,slide_drag:{from:index,x:evt.clientX,y:evt.clientY,
         px:evt.clientX,py:evt.clientY,pointer:evt.pointerId,active:false,to:index,token:0}}
@@ -57,10 +59,12 @@ pub pn finish(owner,st,cancel=false) {
     let drag = st.slide_drag
     if (drag==null) { return st }
     if (drag.token>0) dom.cancel_frame(owner,drag.token)
-    u.show(owner,"slide-drop-marker",false)^
-    u.attr(owner,"data-slide-reordering",false)
-    u.attr(owner,"data-slide-drop",-1)
-    u.attr(thumbnail(owner,drag.from),"data-slide-dragging",false)^
+    if (drag.active) {
+        u.show(owner,"slide-drop-marker",false)^
+        u.attr(owner,"data-slide-reordering",false)^
+        u.attr(owner,"data-slide-drop",-1)^
+        u.attr(thumbnail(owner,drag.from),"data-slide-dragging",false)^
+    }
     capture.release(node(owner,"thumbnails"),drag)^
     var next = {*:st,slide_drag:null}
     if (cancel or (drag.active and drag.to==null)) { return next }

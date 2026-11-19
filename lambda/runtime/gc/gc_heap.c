@@ -1472,7 +1472,18 @@ static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
 
 static inline __attribute__((always_inline)) int gc_mark_header(gc_heap_t* gc, gc_header_t* header) {
     if (header->mark_epoch == gc->mark_epoch || (header->gc_flags & GC_FLAG_FREED)) return 0;
-    if (!mark_stack_push(gc, header)) return 0;
+    // Leaf objects have neither outgoing edges nor relocatable data buffers.
+    // Mark them here to keep strings and other scalars off the grey stack.
+    switch (header->type_tag) {
+    case LMD_TYPE_INT64_: case LMD_TYPE_UINT64_: case LMD_TYPE_FLOAT_:
+    case LMD_TYPE_DTIME_: case LMD_TYPE_STRING_: case LMD_TYPE_SYMBOL_:
+    case LMD_TYPE_BINARY_: case LMD_TYPE_DECIMAL_: case LMD_TYPE_COMPLEX_:
+    case LMD_TYPE_RANGE_: case LMD_TYPE_PATH_:
+        break;
+    default:
+        if (!mark_stack_push(gc, header)) return 0;
+        break;
+    }
     header->mark_epoch = gc->mark_epoch;
     return 1;
 }
@@ -1611,7 +1622,7 @@ static int gc_lookup_object(gc_heap_t* gc, void* ptr, size_t bucket) {
 }
 
 static inline __attribute__((always_inline)) int is_gc_object(gc_heap_t* gc, void* ptr) {
-    if (!gc || !ptr) return 0;
+    if (!gc || !ptr || ((uintptr_t)ptr & (GC_BUMP_GRANULE - 1))) return 0;
     // Reuse verified ownership across sweeps. Mark and free bits still come
     // from the live slot whenever a reference is traced.
     size_t bucket = (((uintptr_t)ptr >> 4) ^ ((uintptr_t)ptr >> 12)) & (GC_OBJECT_CACHE_SIZE - 1);
@@ -1875,20 +1886,6 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         gc_mark_item(gc, edges[1]);
         break;
     }
-    // types with no outgoing Item pointers — nothing to trace
-    case LMD_TYPE_INT64_:
-    case LMD_TYPE_UINT64_:
-    case LMD_TYPE_FLOAT_:
-    case LMD_TYPE_DTIME_:
-    case LMD_TYPE_STRING_:
-    case LMD_TYPE_SYMBOL_:
-    case LMD_TYPE_BINARY_:
-    case LMD_TYPE_DECIMAL_:
-    case LMD_TYPE_COMPLEX_:
-    case LMD_TYPE_RANGE_:
-    case LMD_TYPE_PATH_:
-        break;
-
     case LMD_TYPE_ERROR_: {
         if (gc->error_trace) {
             gc->error_trace(obj, gc);

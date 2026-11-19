@@ -40,7 +40,8 @@ view slide_inline_node: map () any^ {
     else projection.project(~,(child)=>apply(child,{template:"slide_inline_node"}),slide_attrs,mark_attrs,"slide-text-run","word-link")
 }
 
-edit <slide_inline> state editor:edit_open(node('doc',[node('p',[text("")])]),html.schema,null), draft:null {
+edit <slide_inline> state editor:edit_open(node('doc',[node('p',[text("")])]),html.schema,null),
+    draft:null, spell_frame:null, imported:[] {
     <div id:"rich-text-host",
             <div id:"canvas-rich-text",class:"slide-inline-surface" ++ (if (draft.object.tag=='text') " slide-text" else ""),
                 contenteditable:"true",tabindex:"0",role:"textbox",'aria-label':"Edit slide text",'aria-multiline':"true",
@@ -50,7 +51,12 @@ edit <slide_inline> state editor:edit_open(node('doc',[node('p',[text("")])]),ht
 }
 on slide_inline_begin(evt) {
     if (evt.event_phase!=2) { return 'pass' }
-    let loaded = html.import_text(format(content(evt.detail.object.source),'html'))^;
+    let source = evt.detail.object.source
+    let cached = [for (entry in imported where (entry.source==source)^) entry][0]
+    // Reopening an unchanged card can reuse its immutable imported document.
+    // Each editing session still mounts a fresh history and selection.
+    let loaded = if (cached!=null) cached.doc else html.import_text(format(content(source),'html'))^;
+    if ((cached==null)^) { imported = take([{source:source,doc:loaded},*imported],4) }
     // reuse the logical surface while advancing the replacement document's generation.
     editor = controller.replace(editor,edit_open(loaded.doc,html.schema,null))
     draft = {*:evt.detail,initial:loaded.doc,envelope:loaded.envelope,
@@ -75,9 +81,28 @@ on slide_inline_ready(evt) {
 on editaction(evt) {
     if (draft==null) { return 'pass' }
     let run = controller.handle(editor,evt,false,"html5_subset","canvas-rich-text")
-    if (evt.input_type!="copy") { editor = run.editor }
-    spelling.update(evt.target,"slides-text",editor.doc,editor.composition!=null,editor.model_revision)
+    if (evt.input_type!="copy") {
+        let changed = editor.model_revision!=run.editor.model_revision
+        let composition_changed = (editor.composition==null)!=(run.editor.composition==null)
+        editor = run.editor
+        // Keep IME suspension immediate. Ordinary edits can share the next
+        // frame's spell-check request when a text task publishes many revisions.
+        if (composition_changed) {
+            spelling.update(evt.target,"slides-text",editor.doc,editor.composition!=null,editor.model_revision)^
+        } else if ((changed and editor.composition==null and spell_frame==null)^) {
+            // The editing target can be replaced by the projection. The
+            // retained template owner receives the non-bubbling frame event.
+            let host = dom.get_element_by_id(dom.root_node(evt.target),"rich-text-host")
+            spell_frame = dom.request_frame(host,"slide_inline_spell")
+        }
+    }
     return run.result
+}
+on slide_inline_spell(evt) {
+    if ((evt.event_phase!=2 or evt.detail!=spell_frame or draft==null)^) { return 'pass' }
+    spell_frame = null
+    spelling.update(evt.target,"slides-text",editor.doc,editor.composition!=null,editor.model_revision)^
+    return 'handled'
 }
 on selectionchange(evt) {
     if (draft==null) { return 'pass' }
@@ -102,6 +127,8 @@ on slide_inline_read(evt) {
 on slide_inline_end(evt) {
     if (evt.event_phase!=2) { return 'pass' }
     if (draft!=null) dom.cancel_frame(evt.target,draft.ready)
+    if (spell_frame!=null) dom.cancel_frame(evt.target,spell_frame)
+    spell_frame = null
     draft = null
     return 'handled'
 }

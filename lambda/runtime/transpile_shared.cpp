@@ -267,9 +267,15 @@ int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
     AstArrayNode* arr = (AstArrayNode*)node;
     TypeArray* type = (TypeArray*)arr->type;
     if (!type || type->length <= 0 || !type->nested) return 0;
-    if (has_disqualifying_array_item(arr->item, disqualify_declarator)) return 0;
 
     TypeId nid = type->nested->type_id;
+    // Generic arrays have no compact layout to prove. For an array of
+    // literals, each recursive row proves its own leaves.
+    if (nid != LMD_TYPE_ARRAY) {
+        if (nid != LMD_TYPE_INT && nid != LMD_TYPE_INT64 && nid != LMD_TYPE_UINT64 &&
+            nid != LMD_TYPE_FLOAT && nid != LMD_TYPE_NUM_SIZED) return 0;
+        if (has_disqualifying_array_item(arr->item, disqualify_declarator)) return 0;
+    }
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
     if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
     if (nid == LMD_TYPE_UINT64) { shape_out[0] = type->length; *elem_type_out = ELEM_UINT64; return 1; }

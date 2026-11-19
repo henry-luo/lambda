@@ -9641,9 +9641,9 @@ static bool css_selector_uses_hover(CssSelector* selector) {
     return css_selector_uses_pseudo_state(selector, PSEUDO_STATE_HOVER);
 }
 
-// This fast path is deliberately narrow. A state condition in an ancestor
-// compound can restyle descendants, which requires the normal full reflow.
-static bool css_selector_is_self_color_background_state(CssSelector* selector,
+// A state condition in an ancestor or nested selector can affect other
+// elements, so a subject-only update requires a direct pseudo-class.
+static bool css_selector_tests_subject_state(CssSelector* selector,
         uint32_t state, CssSelectorType selector_type) {
     if (!selector || !css_selector_uses_pseudo_state(selector, state) ||
         selector->compound_selector_count == 0) return false;
@@ -9755,11 +9755,11 @@ static bool css_rule_is_self_color_background_state(CssRule* rule,
                 CssSelector* selector = group->selectors ? group->selectors[i] : NULL;
                 if (!selector || !css_selector_uses_pseudo_state(selector, state)) continue;
                 rule_uses_hover = true;
-                if (!css_selector_is_self_color_background_state(selector, state, selector_type)) return false;
+                if (!css_selector_tests_subject_state(selector, state, selector_type)) return false;
             }
         } else if (css_selector_uses_pseudo_state(rule->data.style_rule.selector, state)) {
             rule_uses_hover = true;
-            if (!css_selector_is_self_color_background_state(
+            if (!css_selector_tests_subject_state(
                     rule->data.style_rule.selector, state, selector_type)) return false;
         }
         if (rule_uses_hover) {
@@ -10277,10 +10277,87 @@ void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
     sync_pseudo_state(view, pseudo_flag, set);
 }
 
+struct FocusCascadeQuery {
+    uint32_t flags;
+    SelectorMatcher* matcher;
+    DomElement* targets[2];
+    bool matches[2];
+};
+
+static bool focus_selector_requires_document_cascade(CssSelector* selector, void* data) {
+    auto* query = (FocusCascadeQuery*)data;
+    if ((query->flags & PSEUDO_STATE_FOCUS_WITHIN) &&
+        css_selector_uses_pseudo_state(selector, PSEUDO_STATE_FOCUS_WITHIN)) return true;
+    const struct { uint32_t flag; CssSelectorType type; } states[] = {
+        {PSEUDO_STATE_FOCUS, CSS_SELECTOR_PSEUDO_FOCUS},
+        {PSEUDO_STATE_FOCUS_VISIBLE, CSS_SELECTOR_PSEUDO_FOCUS_VISIBLE},
+    };
+    for (const auto& state : states) {
+        if (!(query->flags & state.flag) || !css_selector_uses_pseudo_state(selector, state.flag)) continue;
+        if (!css_selector_tests_subject_state(selector, state.flag, state.type)) return true;
+        CssCompoundSelector* subject = selector->compound_selectors[selector->compound_selector_count - 1];
+        for (size_t i = 0; subject && i < 2; ++i) {
+            // The pseudo-state itself changed. Check only the subject's
+            // stable conditions so both acquiring and losing focus qualify.
+            if (!query->matches[i] && query->targets[i] &&
+                dom_js_compound_can_match_anchor(subject, query->targets[i], query->matcher))
+                query->matches[i] = true;
+        }
+    }
+    return false;
+}
+
+static bool focus_rule_requires_document_cascade(CssRule* rule, void* data) {
+    // Scope boundaries and nested selector substitution can affect other boxes.
+    if (rule->type == CSS_RULE_SCOPE ||
+        ((rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) &&
+         rule->data.style_rule.nested_rule_count)) return true;
+    return radiant_css_rule_selector_has_match(rule, focus_selector_requires_document_cascade, data);
+}
+
+static bool try_local_focus_restyle(DomDocument* doc, DocState* state, uint32_t flags) {
+    if (!state || state->pseudo_state_batch_depth || !doc->view_tree || !doc->services.cached_css_engine ||
+        doc->js.has_shadow_roots || doc->js.mutation_record_overflow ||
+        doc->js.inline_stylesheet_mutation_count) return false;
+    SelectorMatcher matcher;
+    selector_matcher_init(&matcher, doc->document_pool);
+    state_configure_selector_matcher(state, &matcher);
+    FocusCascadeQuery query = {flags, &matcher, {}, {}};
+    View* current = focus_get(state);
+    View* previous = focus_get_previous(state);
+    View* candidates[] = {current, previous == current ? nullptr : previous};
+    for (size_t i = 0; i < 2; ++i) {
+        DomElement* element = candidates[i] ? candidates[i]->as_element() : nullptr;
+        if (element && element->doc == doc && dom_node_is_connected(element)) query.targets[i] = element;
+    }
+    if (radiant_css_stylesheet_tree_has_match(doc->services.ua_stylesheet,
+            focus_rule_requires_document_cascade, &query) ||
+        radiant_css_document_rule_tree_has_match(doc, focus_rule_requires_document_cascade, &query)) return false;
+
+    // Inspect the live anchors even during a DOM edit. Unrelated mutations
+    // need their own commit, but a focus change without a matching subject
+    // adds no cascade work to that commit.
+    if (doc->js.mutation_count) return !query.matches[0] && !query.matches[1];
+
+    // These selectors can only change the old or new focus owner's cascade.
+    // Reflow their subtrees so changes to inherited values also reach children.
+    for (size_t i = 0; i < 2; ++i) {
+        if (!query.matches[i]) continue;
+        DomElement* element = query.targets[i];
+        dirty_mark_element(state, element);
+        radiant_recascade_document_styles(doc, element, &matcher);
+        for (DomNode* node = element; node; node = node->parent) node->layout_dirty = true;
+        reflow_schedule(state, element, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
+        doc_state_mark_dirty(state);
+    }
+    return true;
+}
+
 void radiant_sync_focus_style(View* view, uint32_t changed_flags) {
     DomElement* element = view && view->is_element() ? view->as_element() : nullptr;
     DomDocument* doc = element ? element->doc.get() : nullptr;
     DocState* state = doc ? doc->state : nullptr;
+    if (!changed_flags || try_local_focus_restyle(doc, state, changed_flags)) return;
     // Recascade once after the canonical focus and its ancestry flags have settled.
     pseudo_state_batch_begin(state);
     const uint32_t flags[] = {PSEUDO_STATE_FOCUS, PSEUDO_STATE_FOCUS_VISIBLE, PSEUDO_STATE_FOCUS_WITHIN};
@@ -11449,88 +11526,60 @@ static bool dropdown_click_is_outside(EventContext* evcon, float mouse_x, float 
     return true;
 }
 
-/**
- * Check if an element is focusable
- */
-bool is_view_focusable(View* view) {
-    if (!view || dom_node_is_inert(view) || view_focus_is_hidden(view)) return false;
-    if (view->is_element() &&
-        view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
+static bool view_has_sequential_focus_behavior(DomElement* element) {
+    // F8 (Radiant_Design_Form_Input.md §4): disabled native controls are
+    // excluded from sequential navigation.
+    DocState* state = element->doc ? element->doc->state : nullptr;
+    if (element->form_control() && form_control_is_disabled(state, element)) return false;
 
-    // Elements that are focusable by default:
-    // - <a> with href
-    // - <button>
-    // - <input> (except hidden)
-    // - <select>
-    // - <textarea>
-    // - elements with tabindex >= 0
+    // A negative tabindex also excludes naturally focusable controls.
+    const char* tabindex = element->get_attribute("tabindex");
+    if (tabindex && focus_tab_index(element) < 0) return false;
 
-    if (view->is_element()) {
-        ViewElement* elem = lam::view_require_element(view);
-        uint32_t tag = elem->tag();
-
-        // F8 (Radiant_Design_Form_Input.md §4): a disabled form control
-        // is not part of the tabbing order. The HTML/ARIA spec says
-        // disabled form elements are inert.
-        DomElement* delem = lam::dom_require_element(view);
-        DocState* state = delem->doc ? (DocState*)delem->doc->state : NULL;
-        if (delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem))) {
-            return false;
-        }
-
-        // A negative tabindex removes even a naturally focusable control from
-        // sequential navigation. Programmatic focus keeps the broader rule.
-        if (delem->get_attribute("tabindex") && focus_tab_index(view) < 0) {
-            return false;
-        }
-
-        switch (tag) {
+    switch (element->tag()) {
         case MARKUP_NAME_A:
-            // <a> is focusable if it has href
-            return elem->get_attribute("href") != NULL;
+            return element->get_attribute("href") != nullptr;
         case MARKUP_NAME_BUTTON:
         case MARKUP_NAME_SELECT:
         case MARKUP_NAME_TEXTAREA:
             return true;
         case MARKUP_NAME_INPUT: {
-            // Input is focusable unless type="hidden"
-            const char* type = elem->get_attribute("type");
+            const char* type = element->get_attribute("type");
             return !type || strcmp(type, "hidden") != 0;
         }
         default:
-            // Check for tabindex attribute
-            if (elem->get_attribute("tabindex")) return true;
-            // designMode promotes its document body to the rich editing host.
-            // Keep that document-level rule explicit here: the synthetic body
-            // host has no contenteditable attribute to discover (D10.2.1).
-            if (delem->doc && delem->doc->design_mode &&
-                dom_document_body_element(delem->doc) == delem) {
-                return true;
-            }
-            // Radiant_Design_Editable.md §7: a contenteditable
-            // editing host is implicitly focusable (treated as tabindex=0)
-            // when no explicit tabindex is set.
-            EditingHost h;
-            if (editing_host_lookup(elem, &h) && h.host == elem) return true;
-            break;
-        }
+            if (tabindex) return true;
+            // D10.2.1: designMode and contenteditable expose editing hosts
+            // to sequential navigation even without an explicit tabindex.
+            if (element->doc && element->doc->design_mode &&
+                dom_document_body_element(element->doc) == element) return true;
+            EditingHost host;
+            return editing_host_lookup(element, &host) && host.host == element;
     }
+}
 
-    return false;
+static bool view_can_receive_focus(DomElement* element) {
+    return !dom_node_is_inert(element) && !view_focus_is_hidden(element) &&
+        !view_content_visibility_hides(element, CONTENT_VISIBILITY_USER_AGENT);
+}
+
+bool is_view_focusable(View* view) {
+    DomElement* element = view ? view->as_element() : nullptr;
+    return element && view_has_sequential_focus_behavior(element) && view_can_receive_focus(element);
 }
 
 bool is_view_programmatically_focusable(View* view) {
-    if (view && (dom_node_is_inert(view) || view_focus_is_hidden(view))) return false;
-    if (view && view->is_element() &&
-        view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
-    if (is_view_focusable(view)) return true;
-    if (!view || !view->is_element()) return false;
-    ViewElement* elem = lam::view_require_element(view);
-    if (dom_element_is_html_tag(elem, MARKUP_NAME_DIALOG))
-        return elem->has_attribute("open") || elem->is_popover_open();
+    DomElement* element = view ? view->as_element() : nullptr;
+    if (!element) return false;
+    // Focus eligibility can refresh a pending cascade. Check it once, after
+    // determining whether the element has sequential or programmatic behavior.
+    bool candidate = view_has_sequential_focus_behavior(element);
+    if (!candidate && dom_element_is_html_tag(element, MARKUP_NAME_DIALOG))
+        candidate = element->has_attribute("open") || element->is_popover_open();
     // A negative tabindex excludes sequential focus only; HTMLElement.focus()
     // must still accept the target so keyboard events reach modal-style widgets.
-    return elem->get_attribute("tabindex") != NULL;
+    else if (!candidate) candidate = element->get_attribute("tabindex") != NULL;
+    return candidate && view_can_receive_focus(element);
 }
 
 struct FocusDispatchScope {

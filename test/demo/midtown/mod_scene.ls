@@ -270,8 +270,13 @@ let SKY_NOISE = noise.make(rng.derive(rng.key([city.SEED, "sky"]), "clouds"), {k
 let BALL_N = BALL.normals
 let SKY_N = (len(BALL_N) div 3) ^ { 0 }
 let SKY_Y = [for (i in 0 to (SKY_N - 1)) BALL_N[3 * i + 1]]
-let CLOUD = (let n = [for (i in 0 to (SKY_N - 1)) if (SKY_NOISE == null) 0.0 else noise.sample3(SKY_NOISE, BALL_N[3 * i] * 2.0, SKY_Y[i] * 5.0, BALL_N[3 * i + 2] * 2.0) ^ { 0.0 }],
-    land.smooth(0.08, 0.5, n) * land.smooth(0.02, 0.1, SKY_Y) * (1.0 - land.smooth(0.45, 0.85, SKY_Y)) * 0.92)
+// The altitude fades make cloud coverage zero outside the horizon band.
+// Avoid the four-octave noise lookup for vertices the sky cannot use.
+let CLOUD = [for (i in 0 to (SKY_N - 1), let y = SKY_Y[i])
+    if (SKY_NOISE == null or y <= 0.02 or y >= 0.85) 0.0 else {
+        let n = noise.sample3(SKY_NOISE, BALL_N[3 * i] * 2.0, y * 5.0, BALL_N[3 * i + 2] * 2.0) ^ { 0.0 };
+        land.smooth(0.08, 0.5, n) * land.smooth(0.02, 0.1, y) * (1.0 - land.smooth(0.45, 0.85, y)) * 0.92
+    }]
 fn sky_dome(name) any^ {
     let look = LOOKS[name]
     let k = land.clamp01(SKY_Y * 1.6)

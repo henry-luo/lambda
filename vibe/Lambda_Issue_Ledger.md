@@ -64,6 +64,22 @@ error-path rollback as a transient pair in `doc_context_install`,
 `lambda_security_path_cache_store`, and `write_set_record`. The unrelated baseline
 failure was previously recorded in the static-module design.
 [Static-module checkpoint](Lambda_Design_Static_Modules.md)
+
+## Isolated Radiant replay costs in Lambda — 2026-11-19
+
+Every-allocation GC in the View resource and module tests amplified the work
+of queueing scalar leaf objects. The marker now marks leaves directly and
+validates alignment before consulting the exact object index (D5.3.1). The
+View tests still force collection on each allocation and poison freed memory.
+The JS watchdog also wakes at native layout boundaries without waiting for
+the next sampling interval (D7.4.3).
+
+The LaTeX replay exposed a quadratic `unique` scan over packed integers.
+Homogeneous packed-int inputs now use a membership table with the original
+first-occurrence order. Mixed values keep the comparison path (S5.6.1v2).
+The interpreter also rules out ineligible compact array literals before
+walking their widening dependencies (D8.3.1v3).
+
 <a id="lr12-61"></a>
 ## LR12-61 — Identical CSS-dependent metadata forces layout again
 

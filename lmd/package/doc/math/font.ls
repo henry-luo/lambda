@@ -56,6 +56,31 @@ fn text_facts(facts, family) {
 
 fn measure(style, points, faces, family = null) any^ => text_facts(radiant.math_metrics(style, points, faces), family)
 
+// D10.2.3: these TeX glyphs always use the same bundled faces, independent of
+// the expression. Keep their immutable records with the bundled metrics.
+fn bundled_tex_glyphs() map | error {
+    let faces = bundled.faces()^
+    let data = tex_metrics.delimiters()^
+    let small = unique([*[for (r in data.recipes where ((len(r.small) > 0) ^ { false })) r.codepoint],
+        *[for (r in data.arrow_symbols) r.codepoint]])
+    let reaction = [ord("⇀"), ord("↽"), ord("↼"), ord("⇁")]
+    let shapes = [for (name in sym.AMS_SHAPES) ord(sym.lookup_symbol(name))]
+    {delimiter_data: data,
+        delimiter_faces: [for (family in unique([for (p in data.pieces) p.family]))
+            (let points = unique([for (p in data.pieces where p.family == family) p.codepoint]),
+             {family: family, points: points,
+                facts: measure({font_family: family, font_size: UNITS}, points, faces, family)})],
+        delimiter_small_points: small,
+        delimiter_small_facts: measure({font_family: "KaTeX_Main", font_size: UNITS}, small, faces, "KaTeX_Main"),
+        reaction_points: reaction,
+        reaction_facts: measure({font_family: "KaTeX_Main", font_size: UNITS}, reaction, faces, "KaTeX_Main"),
+        ams_shape_points: shapes,
+        ams_shape_facts: measure({font_family: "KaTeX_AMS", font_size: UNITS}, shapes, faces, "KaTeX_AMS"),
+        tex: tex_metrics.load()^}
+}
+
+let TEX_GLYPHS = bundled_tex_glyphs()
+
 pub fn prepare(ast, options) map | error {
     let core = options.notation == "mathml"
     let use_bundled = options.font_family == null and options.fonts == null
@@ -73,9 +98,6 @@ pub fn prepare(ast, options) map | error {
     let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "sansitalic", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
     let large_points = if (core) [] else [for (ch in sym.large_symbols() where ((contains(chars, ch)) ^ { false })) ord(ch)]
-    let delimiter_data = if (use_bundled and not core) tex_metrics.delimiters()^ else null
-    let delimiter_small_points = unique([*[for (r in delimiter_data.recipes where ((len(r.small) > 0) ^ { false })) r.codepoint],
-        *[for (r in delimiter_data.arrow_symbols) r.codepoint]])
     let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
     if (native == null) error("math: cannot read selected font: " ++ family)
     else {
@@ -99,28 +121,14 @@ pub fn prepare(ast, options) map | error {
     let fallback_facts = if (len(fallback_points) == 0) null else
         measure({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
             font_size: UNITS, fallback: true}, fallback_points, faces)
-    // Keep paired harpoons in one bundled face instead of unrelated system fallbacks.
-    let reaction_points = if (use_bundled and not core) [ord("⇀"), ord("↽"), ord("↼"), ord("⇁")] else []
-    // amssymb shapes that share a code point with a plain command (symbols.AMS_SHAPES)
-    let ams_shape_points = if (use_bundled and not core) [for (name in sym.AMS_SHAPES) ord(sym.lookup_symbol(name))] else []
+    let tex = if (use_bundled and not core) TEX_GLYPHS^ else
+        {reaction_points: [], ams_shape_points: [], delimiter_faces: [], delimiter_small_points: []}
     if (facts.constants.script_percent_scale_down <= 0 or facts.constants.script_script_percent_scale_down <= 0)
         error("math: selected font has invalid script scale constants")
-    else {facts: facts, points: points, family: facts.font_family, core: core,
+    else {*:tex, facts: facts, points: points, family: facts.font_family, core: core,
         font_metrics: facts.font_metrics, style_faces: style_faces,
         fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces,
-        reaction_points: reaction_points,
-        reaction_facts: if (use_bundled and not core) measure({font_family:"KaTeX_Main", font_size:UNITS}, reaction_points, faces, "KaTeX_Main") else null,
-        ams_shape_points: ams_shape_points,
-        ams_shape_facts: if (use_bundled and not core) measure({font_family:"KaTeX_AMS", font_size:UNITS}, ams_shape_points, faces, "KaTeX_AMS") else null,
         closed_composites: closed_composites,
-        delimiter_data:delimiter_data,
-        delimiter_faces:[for (family in unique([for (p in delimiter_data.pieces) p.family]))
-            (let points = unique([for (p in delimiter_data.pieces where p.family == family) p.codepoint]),
-            {family:family,points:points,facts:measure({font_family:family,font_size:UNITS},points,faces,family)})],
-        delimiter_small_points:delimiter_small_points,
-        delimiter_small_facts:if (delimiter_data != null) measure({font_family:"KaTeX_Main",font_size:UNITS},
-            delimiter_small_points,faces,"KaTeX_Main") else null,
-        tex: if (use_bundled and not core) tex_metrics.load()^ else null,
         large_points: large_points,
         large_facts: if (use_bundled and len(large_points) > 0)
             measure({font_family:"KaTeX_Size2", font_size:UNITS}, large_points, faces, "KaTeX_Size2") else null}

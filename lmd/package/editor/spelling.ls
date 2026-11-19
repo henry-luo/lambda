@@ -14,10 +14,19 @@ fn host_id(scope,source) => if (scope=="word") "edit-surface" else if (scope=="s
     else if (scope=="slides-canvas") "slide-render"
     else if (source is string) "canvas-text" else "canvas-rich-text"
 pub fn current(seq,detail) => detail.seq==seq
+fn enabled_on(target) bool => {
+    let value = dom.get_attribute(target,"spellcheck") ^ { null };
+    if (value is string) lower(value)!="false" else true
+}
 pub pn update(node,scope,document,paused=false,revision=null,opened=false) {
-    let owner = dom.get_element_by_id(dom.root_node(node),identity(scope))
+    let root = dom.root_node(node)
+    let owner = dom.get_element_by_id(root,identity(scope))
+    // The inline surface edits the canvas source and shares its spellcheck setting.
+    let enabled = document==null or scope!="slides-text" or
+        enabled_on(dom.get_element_by_id(root,"slide-render") ^ { null })
     if (owner!=null) dom.dispatch(owner,{type:"spelling_update",bubbles:false,
-        detail:{document:document,paused:paused,revision:revision,opened:opened}})
+        detail:{document:if (enabled) document else null,paused:paused and enabled,
+            revision:if (enabled) revision else null,opened:opened}})
 }
 pub pn reposition(node,scope) {
     let owner = dom.get_element_by_id(dom.root_node(node),identity(scope))
@@ -89,7 +98,7 @@ fn canvas_pieces(node,skip,language="en") any^ {
         let tag = lower(dom.node_name(node))
         let lang = lower(dom.get_attribute(node,"lang") or language)
         // DOM names require string literals; symbol literals miss these tag checks (S16.8.7).
-        if ((skip!=null and object_id==skip) or dom.get_attribute(node,"spellcheck")=="false" or
+        if ((skip!=null and object_id==skip) or not enabled_on(node) or
             (lang!="en" and not starts_with(lang,"en-")) or
             tag in ["svg","math","script","style","canvas","audio","video"]) []
         else {
@@ -122,6 +131,9 @@ pn canvas_rects(host,snapshot,issue) {
 }
 pn measured(root,scope,source,report,skip) {
     if (report==null or source==null) { return [] }
+    // A clean report needs no layout snapshot, especially while input has
+    // just invalidated the editor's geometry.
+    if ((len(report.issues)==0)^) { return [] }
     let host = dom.get_element_by_id(root,host_id(scope,source))
     if (host==null) { return [] }
     // selection geometry can extend beyond a scroller; chrome must stay outside its clip.
@@ -251,7 +263,7 @@ on spelling_canvas_ready(evt) {
     if (evt.event_phase!=2 or evt.detail!=refresh_frame) { return 'pass' }
     refresh_frame = null
     let host = dom.get_element_by_id(dom.root_node(evt.target),"slide-render")
-    let text = if (host==null or canvas_paused) null else canvas_text(host,skip)
+    let text = if (host==null or canvas_paused or not enabled_on(host)) null else canvas_text(host,skip)
     dom.dispatch(evt.target,{type:"spelling_update",bubbles:false,
         detail:{document:text,paused:canvas_paused,revision:null,opened:canvas_opened}})
     dom.dispatch(evt.target,{type:"spelling_reposition",bubbles:false})

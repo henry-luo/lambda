@@ -594,10 +594,14 @@ The finite authoring milestone covers:
 5. Launch the editor through the demo catalog and keep standalone sample
    presentation behavior intact.
 
-`mod_model.ls` owns validated value transformations and bounded undo history;
-`mod_view.ls` owns editor markup; `mod_app.ls` publishes retained regions and
-adapts commands; `slides.ls` owns event routing and the independent presenter
-session. Existing source helpers supply element construction, slide compilation,
+`mod_model.ls` owns validated value transformations and bounded undo history.
+`mod_view.ls` owns editor markup, and `mod_app.ls` publishes retained regions
+and adapts commands. `mod_editor.ls` owns event routing and the independent
+presenter session. The CLI entry constructs the default page. Embedded fixtures import
+the editor module and construct their own page under D9.3.2. The virtualized
+font picker supplies the family catalog and adds options to the backing select
+as families are used, retaining its value and change-event contract (D10.2.1).
+Existing source helpers supply element construction, slide compilation,
 sampling, geometry and minimal-write DOM publication. The photo album's image
 source resolver moved to `test/demo/mod_resources.ls` so both embedded hosts use
 the same resolution policy. Authoring drafts never rewrite the sample files.
