@@ -110,8 +110,7 @@ static bool emit_build_direct_ast(Transpiler* tp, const char* source,
     tp->ast_root = (AstNode*)direct_root;
     // finalization needs the published lexical/index graph used by normal compilation.
     ArrayList* functions = NULL;
-    bool valid = lambda_ast_rebind_direct_scope_graph_with_functions(tp, direct_root, &functions) &&
-        ast_index_build_profile(&tp->ast_index, tp->ast_root, &lambda_profile) &&
+    bool valid = lambda_ast_publish_scope_graph(tp, direct_root, &functions) &&
         lambda_ast_finalize_script_with_functions(tp, direct_root, functions);
     arraylist_free(functions);
     return valid;

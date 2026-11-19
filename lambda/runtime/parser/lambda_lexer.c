@@ -186,84 +186,89 @@ static bool lexer_word_equals(const char* source, size_t start, size_t end,
     return end - start == length && memcmp(source + start, word, length) == 0;
 }
 
-static bool lexer_word_in(const char* source, size_t start, size_t end,
-        const char* const* words, size_t word_count) {
-    for (size_t i = 0; i < word_count; i++) {
-        if (lexer_word_equals(source, start, end, words[i])) return true;
-    }
-    return false;
-}
-
-// The lexer's vocabulary has one owner: these tables. lexer_keyword_kind
-// classifies with them and lambda_lexer_vocabulary_word enumerates them (REPL
-// completion), so a new keyword can never be missing from either.
-struct LexerKeyword { const char* text; LambdaTokenKind kind; };
-static const struct LexerKeyword lexer_keywords[] = {
-        {"let", LAMBDA_TOK_LET}, {"pub", LAMBDA_TOK_PUB},
-        {"var", LAMBDA_TOK_VAR}, {"type", LAMBDA_TOK_TYPE},
-        {"fn", LAMBDA_TOK_FN}, {"pn", LAMBDA_TOK_PN},
-        {"view", LAMBDA_TOK_VIEW}, {"edit", LAMBDA_TOK_EDIT},
-        {"state", LAMBDA_TOK_STATE}, {"on", LAMBDA_TOK_ON},
-        {"if", LAMBDA_TOK_IF}, {"else", LAMBDA_TOK_ELSE},
-        {"match", LAMBDA_TOK_MATCH}, {"case", LAMBDA_TOK_CASE},
-        {"default", LAMBDA_TOK_DEFAULT}, {"for", LAMBDA_TOK_FOR},
-        {"while", LAMBDA_TOK_WHILE}, {"break", LAMBDA_TOK_BREAK},
-        {"continue", LAMBDA_TOK_CONTINUE}, {"return", LAMBDA_TOK_RETURN},
-        {"raise", LAMBDA_TOK_RAISE}, {"import", LAMBDA_TOK_IMPORT},
-        {"put", LAMBDA_TOK_PUT}, {"del", LAMBDA_TOK_DEL},
-        {"commit", LAMBDA_TOK_COMMIT}, {"rollback", LAMBDA_TOK_ROLLBACK},
-        {"open", LAMBDA_TOK_OPEN}, {"grammar", LAMBDA_TOK_GRAMMAR},
-        {"apply", LAMBDA_TOK_APPLY}, {"not", LAMBDA_TOK_NOT},
-        {"div", LAMBDA_TOK_DIV}, {"and", LAMBDA_TOK_AND},
-        {"or", LAMBDA_TOK_OR}, {"to", LAMBDA_TOK_TO},
-        {"is", LAMBDA_TOK_IS}, {"in", LAMBDA_TOK_IN},
-        {"at", LAMBDA_TOK_AT}, {"of", LAMBDA_TOK_OF},
-        {"that", LAMBDA_TOK_THAT},
-        {"where", LAMBDA_TOK_WHERE}, {"order", LAMBDA_TOK_ORDER},
-        {"by", LAMBDA_TOK_BY}, {"group", LAMBDA_TOK_GROUP},
-        {"into", LAMBDA_TOK_INTO}, {"limit", LAMBDA_TOK_LIMIT},
-        {"offset", LAMBDA_TOK_OFFSET}, {"asc", LAMBDA_TOK_ASC},
-        {"desc", LAMBDA_TOK_DESC}, {"last", LAMBDA_TOK_LAST},
-        {"as", LAMBDA_TOK_AS},
-        {"eq", LAMBDA_TOK_EQ_WORD}, {"ne", LAMBDA_TOK_NE_WORD},
-        {"lt", LAMBDA_TOK_LT_WORD}, {"le", LAMBDA_TOK_LE_WORD},
-        {"ge", LAMBDA_TOK_GE_WORD}, {"gt", LAMBDA_TOK_GT_WORD},
-};
-static const char* const lexer_base_types[] = {
-    "null", "any", "bool", "int64", "int", "float", "f64", "complex",
-    "decimal", "integer", "number", "none", "datetime", "date", "time", "binary",
-    "range", "list", "array", "map", "element", "object",
-    "function", "error", "string", "symbol", "i8", "i16", "i32", "i64",
-    "u8", "u16", "u32", "u64", "f16", "f32",
-};
-static const char* const lexer_named_values[] = {"true", "false", "inf", "nan"};
-#define LEXER_TABLE_COUNT(table) (sizeof(table) / sizeof((table)[0]))
+// Lookup and REPL completion share this vocabulary in completion order.
+#define LAMBDA_LEXER_WORDS(WORD, length) \
+    WORD("let", LET, length) WORD("pub", PUB, length) \
+    WORD("var", VAR, length) WORD("type", TYPE, length) \
+    WORD("fn", FN, length) WORD("pn", PN, length) \
+    WORD("view", VIEW, length) WORD("edit", EDIT, length) \
+    WORD("state", STATE, length) WORD("on", ON, length) \
+    WORD("if", IF, length) WORD("else", ELSE, length) \
+    WORD("match", MATCH, length) WORD("case", CASE, length) \
+    WORD("default", DEFAULT, length) WORD("for", FOR, length) \
+    WORD("while", WHILE, length) WORD("break", BREAK, length) \
+    WORD("continue", CONTINUE, length) WORD("return", RETURN, length) \
+    WORD("raise", RAISE, length) WORD("import", IMPORT, length) \
+    WORD("put", PUT, length) WORD("del", DEL, length) \
+    WORD("commit", COMMIT, length) WORD("rollback", ROLLBACK, length) \
+    WORD("open", OPEN, length) WORD("grammar", GRAMMAR, length) \
+    WORD("apply", APPLY, length) WORD("not", NOT, length) \
+    WORD("div", DIV, length) WORD("and", AND, length) \
+    WORD("or", OR, length) WORD("to", TO, length) \
+    WORD("is", IS, length) WORD("in", IN, length) \
+    WORD("at", AT, length) WORD("of", OF, length) \
+    WORD("that", THAT, length) WORD("where", WHERE, length) \
+    WORD("order", ORDER, length) WORD("by", BY, length) \
+    WORD("group", GROUP, length) WORD("into", INTO, length) \
+    WORD("limit", LIMIT, length) WORD("offset", OFFSET, length) \
+    WORD("asc", ASC, length) WORD("desc", DESC, length) \
+    WORD("last", LAST, length) WORD("as", AS, length) \
+    WORD("eq", EQ_WORD, length) WORD("ne", NE_WORD, length) \
+    WORD("lt", LT_WORD, length) WORD("le", LE_WORD, length) \
+    WORD("ge", GE_WORD, length) WORD("gt", GT_WORD, length) \
+    WORD("null", BASE_TYPE, length) WORD("any", BASE_TYPE, length) \
+    WORD("bool", BASE_TYPE, length) WORD("int64", BASE_TYPE, length) \
+    WORD("int", BASE_TYPE, length) WORD("float", BASE_TYPE, length) \
+    WORD("f64", BASE_TYPE, length) WORD("complex", BASE_TYPE, length) \
+    WORD("decimal", BASE_TYPE, length) WORD("integer", BASE_TYPE, length) \
+    WORD("number", BASE_TYPE, length) WORD("none", BASE_TYPE, length) \
+    WORD("datetime", BASE_TYPE, length) WORD("date", BASE_TYPE, length) \
+    WORD("time", BASE_TYPE, length) WORD("binary", BASE_TYPE, length) \
+    WORD("range", BASE_TYPE, length) WORD("list", BASE_TYPE, length) \
+    WORD("array", BASE_TYPE, length) WORD("map", BASE_TYPE, length) \
+    WORD("element", BASE_TYPE, length) WORD("object", BASE_TYPE, length) \
+    WORD("function", BASE_TYPE, length) WORD("error", BASE_TYPE, length) \
+    WORD("string", BASE_TYPE, length) WORD("symbol", BASE_TYPE, length) \
+    WORD("i8", BASE_TYPE, length) WORD("i16", BASE_TYPE, length) \
+    WORD("i32", BASE_TYPE, length) WORD("i64", BASE_TYPE, length) \
+    WORD("u8", BASE_TYPE, length) WORD("u16", BASE_TYPE, length) \
+    WORD("u32", BASE_TYPE, length) WORD("u64", BASE_TYPE, length) \
+    WORD("f16", BASE_TYPE, length) WORD("f32", BASE_TYPE, length) \
+    WORD("true", NAMED_VALUE, length) WORD("false", NAMED_VALUE, length) \
+    WORD("inf", NAMED_VALUE, length) WORD("nan", NAMED_VALUE, length)
 
 static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size_t end) {
-    for (size_t i = 0; i < LEXER_TABLE_COUNT(lexer_keywords); i++) {
-        if (lexer_word_equals(source, start, end, lexer_keywords[i].text)) {
-            return lexer_keywords[i].kind;
-        }
+    const char* text = source + start;
+    size_t length = end - start;
+    // Each constant-length arm eliminates other words and lets the compiler
+    // inline fixed-size comparisons. The default also admits future lengths.
+#define MATCH_WORD(word, kind, bytes) \
+    if ((bytes) == sizeof(word) - 1 && memcmp(text, word, sizeof(word) - 1) == 0) \
+        return LAMBDA_TOK_##kind;
+#define WORD_LENGTH(bytes) case bytes: LAMBDA_LEXER_WORDS(MATCH_WORD, bytes) break;
+    switch (length) {
+    WORD_LENGTH(2)
+    WORD_LENGTH(3)
+    WORD_LENGTH(4)
+    WORD_LENGTH(5)
+    WORD_LENGTH(6)
+    WORD_LENGTH(7)
+    WORD_LENGTH(8)
+    default: LAMBDA_LEXER_WORDS(MATCH_WORD, length) break;
     }
-    if (lexer_word_in(source, start, end, lexer_base_types,
-            LEXER_TABLE_COUNT(lexer_base_types))) {
-        return LAMBDA_TOK_BASE_TYPE;
-    }
-    if (lexer_word_in(source, start, end, lexer_named_values,
-            LEXER_TABLE_COUNT(lexer_named_values))) {
-        return LAMBDA_TOK_NAMED_VALUE;
-    }
+#undef WORD_LENGTH
+#undef MATCH_WORD
     return LAMBDA_TOK_IDENTIFIER;
 }
 
 const char* lambda_lexer_vocabulary_word(size_t index) {
-    if (index < LEXER_TABLE_COUNT(lexer_keywords)) return lexer_keywords[index].text;
-    index -= LEXER_TABLE_COUNT(lexer_keywords);
-    if (index < LEXER_TABLE_COUNT(lexer_base_types)) return lexer_base_types[index];
-    index -= LEXER_TABLE_COUNT(lexer_base_types);
-    if (index < LEXER_TABLE_COUNT(lexer_named_values)) return lexer_named_values[index];
-    return NULL;
+#define WORD_TEXT(word, kind, length) word,
+    static const char* const words[] = { LAMBDA_LEXER_WORDS(WORD_TEXT, 0) };
+#undef WORD_TEXT
+    return index < sizeof(words) / sizeof(words[0]) ? words[index] : NULL;
 }
+
+#undef LAMBDA_LEXER_WORDS
 
 // S16.10.1v2: a word is barred from binding names when it is *capture-real* —
 // it can begin a construct, so a binding of that name could not be read back

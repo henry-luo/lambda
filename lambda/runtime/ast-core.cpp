@@ -142,6 +142,8 @@ extern "C" const char* any_reason_name(AnyReason reason) {
     }
 }
 
+static constexpr uint32_t AST_INDEX_INITIAL_CAPACITY = 32;
+
 static unsigned long ast_ptr_hash(const AstNode* node) {
     uintptr_t value = (uintptr_t)node;
     value >>= 3;
@@ -153,16 +155,14 @@ static unsigned long ast_ptr_hash(const AstNode* node) {
 
 static void ast_index_free_buffers(AstNode** nodes, AstNode** parents,
         AstFunctionId* owners, AstNodeId* subtree_end, AstBindingId* node_bindings, AstNodeId* first_children,
-        AstNodeId* next_siblings, NameScope** scopes, NameEntry** bindings,
-        AstNode** classes) {
+        AstNodeId* next_siblings) {
     free(nodes); free(parents); free(owners); free(subtree_end); free(node_bindings); free(first_children);
-    free(next_siblings); free(scopes);
-    free(bindings); free(classes);
+    free(next_siblings);
 }
 
 static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     if (needed <= index->capacity) return true;
-    uint32_t capacity = index->capacity ? index->capacity : 256;
+    uint32_t capacity = index->capacity ? index->capacity : AST_INDEX_INITIAL_CAPACITY;
     while (capacity < needed) {
         if (capacity > UINT32_MAX / 2) return false;
         capacity *= 2;
@@ -174,14 +174,10 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     AstBindingId* node_bindings = (AstBindingId*)malloc(sizeof(AstBindingId) * capacity);
     AstNodeId* first_children = (AstNodeId*)malloc(sizeof(AstNodeId) * capacity);
     AstNodeId* next_siblings = (AstNodeId*)malloc(sizeof(AstNodeId) * capacity);
-    NameScope** scopes = (NameScope**)malloc(sizeof(NameScope*) * capacity);
-    NameEntry** bindings = (NameEntry**)malloc(sizeof(NameEntry*) * capacity);
-    AstNode** classes = (AstNode**)malloc(sizeof(AstNode*) * capacity);
-    if (!nodes || !parents || !owners || !subtree_end || !node_bindings || !first_children ||
-            !next_siblings || !scopes ||
-            !bindings || !classes) {
-        ast_index_free_buffers(nodes, parents, owners, subtree_end, node_bindings, first_children,
-            next_siblings, scopes, bindings, classes);
+    if (!nodes || !parents || !owners || !subtree_end || !node_bindings ||
+            !first_children || !next_siblings) {
+        ast_index_free_buffers(nodes, parents, owners, subtree_end, node_bindings,
+            first_children, next_siblings);
         return false;
     }
     if (index->count) {
@@ -195,14 +191,9 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
             sizeof(AstNodeId) * index->count);
         memcpy(next_siblings, index->next_siblings,
             sizeof(AstNodeId) * index->count);
-        memcpy(scopes, index->scopes, sizeof(NameScope*) * index->scope_count);
-        memcpy(bindings, index->bindings, sizeof(NameEntry*) * index->binding_count);
-        memcpy(classes, index->classes, sizeof(AstNode*) * index->class_count);
     }
     ast_index_free_buffers(index->nodes, index->parents, index->owner_functions,
-        index->subtree_end,
-        index->node_bindings, index->first_children, index->next_siblings,
-        index->scopes, index->bindings, index->classes);
+        index->subtree_end, index->node_bindings, index->first_children, index->next_siblings);
     index->nodes = nodes;
     index->parents = parents;
     index->owner_functions = owners;
@@ -210,10 +201,26 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     index->node_bindings = node_bindings;
     index->first_children = first_children;
     index->next_siblings = next_siblings;
-    index->scopes = scopes;
-    index->bindings = bindings;
-    index->classes = classes;
     index->capacity = capacity;
+    return true;
+}
+
+// Declaration counts can differ by orders of magnitude from the node
+// count. An unused declaration column has no backing allocation.
+template<typename Entry>
+static bool ast_index_reserve_declarations(Entry*** entries, uint32_t* capacity,
+        uint32_t needed) {
+    if (needed <= *capacity) return true;
+    uint32_t next = *capacity ? *capacity : 8;
+    while (next < needed) {
+        if (next > UINT32_MAX / 2) return false;
+        next *= 2;
+    }
+    if (next > SIZE_MAX / sizeof(Entry*)) return false;
+    Entry** grown = (Entry**)realloc(*entries, sizeof(Entry*) * next);
+    if (!grown) return false;
+    *entries = grown;
+    *capacity = next;
     return true;
 }
 
@@ -300,7 +307,8 @@ bool ast_index_publish_scope(AstIndex* index, NameScope* scope) {
         scope->scope_id = existing;
         return true;
     }
-    if (index->scope_count >= index->capacity) return false;
+    if (!ast_index_reserve_declarations(&index->scopes, &index->scope_capacity,
+            index->scope_count + 1)) return false;
     if (!ast_index_record_declaration(index, scope, AST_DECLARATION_SCOPE,
             index->scope_count)) return false;
     scope->scope_id = index->scope_count; index->scopes[index->scope_count++] = scope;
@@ -317,8 +325,8 @@ static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry)
     if (!entry || !ast_index_publish_scope(index, entry->scope)) return AST_BINDING_ID_INVALID;
     AstBindingId existing = ast_index_find_binding_entry(index, entry);
     if (existing != AST_BINDING_ID_INVALID) return existing;
-    if (index->binding_count >= index->capacity &&
-            !ast_index_reserve(index, index->binding_count + 1)) return AST_BINDING_ID_INVALID;
+    if (!ast_index_reserve_declarations(&index->bindings, &index->binding_capacity,
+            index->binding_count + 1)) return AST_BINDING_ID_INVALID;
     if (!ast_index_record_declaration(index, entry, AST_DECLARATION_BINDING,
             index->binding_count)) return AST_BINDING_ID_INVALID;
     AstBindingId id = index->binding_count++;
@@ -389,11 +397,9 @@ static bool ast_index_publish_node(AstIndex* index, AstNode* node, AstNodeId id)
             cls->class_id = existing;
             return true;
         }
-        if (index->class_count >= index->capacity) return false;
         if (!ast_index_record_declaration(index, node, AST_DECLARATION_CLASS,
                 index->class_count)) return false;
-        cls->class_id = index->class_count;
-        index->classes[index->class_count++] = node;
+        cls->class_id = index->class_count++;
         return true;
     }
     default:
@@ -404,7 +410,7 @@ static bool ast_index_publish_node(AstIndex* index, AstNode* node, AstNodeId id)
 static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
         AstFunctionId owner) {
     if (!node) return AST_NODE_ID_INVALID;
-    if (!index->slot_capacity && !ast_index_rehash(index, 256)) return AST_NODE_ID_INVALID;
+    if (!index->slot_capacity && !ast_index_rehash(index, AST_INDEX_INITIAL_CAPACITY)) return AST_NODE_ID_INVALID;
     if (index->count * 2 >= index->slot_capacity &&
         !ast_index_rehash(index, index->slot_capacity * 2)) return AST_NODE_ID_INVALID;
     uint32_t slot = (uint32_t)(ast_ptr_hash(node) & (index->slot_capacity - 1));
@@ -432,13 +438,6 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     index->slots[slot] = node;
     index->slot_ids[slot] = id;
     return id;
-}
-
-bool ast_index_note_allocation(AstIndex* index, AstNode* node) {
-    // Lambda reductions construct children before parents. Reserve storage now
-    // but assign the dense identity only during the preorder bind walk, when
-    // structural ranges can keep their D8.2.4 invariant.
-    return index && node && ast_index_reserve(index, index->count + 1);
 }
 
 bool ast_index_prepare_binding(AstIndex* index) {
@@ -484,13 +483,9 @@ bool ast_index_bind_node(AstIndex* index, AstNode* node, AstNode* parent,
         AstFunctionId current_owner, AstFunctionId* node_owner) {
     if (node_owner) *node_owner = current_owner;
     if (!index || !node) return false;
-    AstNodeId id = ast_index_find(index, node);
-    if (id == AST_NODE_ID_INVALID) {
-        id = ast_index_add(index, node, NULL, AST_FUNCTION_ID_INVALID);
-        if (id == AST_NODE_ID_INVALID) return false;
-    }
     // `next` is intrusive rather than structural. The direct binder visits it
-    // through the preceding sibling, so restore the shared structural parent.
+    // through the preceding sibling, so resolve its parent before publishing
+    // the node and its declaration edges.
     if (parent && parent->next == node) {
         AstNodeId preceding_id = ast_index_find(index, parent);
         parent = preceding_id != AST_NODE_ID_INVALID ? index->parents[preceding_id] : NULL;
@@ -503,14 +498,8 @@ bool ast_index_bind_node(AstIndex* index, AstNode* node, AstNode* parent,
     // Return the recovered lexical owner so its descendants do not inherit a
     // preceding function's index context.
     if (node_owner) *node_owner = current_owner;
-    index->parents[id] = parent;
-    index->owner_functions[id] = current_owner;
-    AstNodeId parent_id = ast_index_find(index, parent);
-    if (parent_id != AST_NODE_ID_INVALID) {
-        index->next_siblings[id] = index->first_children[parent_id];
-        index->first_children[parent_id] = id;
-    }
-    if (!ast_index_publish_node(index, node, id)) return false;
+    AstNodeId id = ast_index_add(index, node, parent, current_owner);
+    if (id == AST_NODE_ID_INVALID) return false;
     if (!ast_index_node_is_function(node)) return true;
     AstFunctionId function_id = ast_index_add_function(index, node,
         current_owner);
@@ -1350,7 +1339,14 @@ bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* 
 bool ast_index_clone(AstIndex* destination, const AstIndex* source) {
     if (!destination || !source) return false;
     ast_index_destroy(destination);
-    if (source->count && !ast_index_reserve(destination, source->count)) return false;
+    if (!ast_index_reserve(destination, source->count) ||
+            !ast_index_reserve_declarations(&destination->scopes,
+                &destination->scope_capacity, source->scope_count) ||
+            !ast_index_reserve_declarations(&destination->bindings,
+                &destination->binding_capacity, source->binding_count)) {
+        ast_index_destroy(destination);
+        return false;
+    }
     size_t declaration_cursor = 0;
     AstDeclarationIdentity* declaration = NULL;
     while (AstDeclarationMap::next(source->declaration_ids, &declaration_cursor, &declaration)) {
@@ -1384,8 +1380,6 @@ bool ast_index_clone(AstIndex* destination, const AstIndex* source) {
         source->scope_count * sizeof(NameScope*));
     if (source->binding_count) memcpy(destination->bindings, source->bindings,
         source->binding_count * sizeof(NameEntry*));
-    if (source->class_count) memcpy(destination->classes, source->classes,
-        source->class_count * sizeof(AstNode*));
     if (source->function_count) {
         destination->functions = (AstFunctionIndexEntry*)malloc(
             source->function_count * sizeof(AstFunctionIndexEntry));
@@ -1399,7 +1393,7 @@ bool ast_index_clone(AstIndex* destination, const AstIndex* source) {
         destination->function_capacity = source->function_count;
     }
     if (destination->count && !ast_index_rehash(destination,
-            source->slot_capacity ? source->slot_capacity : 256)) {
+            source->slot_capacity ? source->slot_capacity : AST_INDEX_INITIAL_CAPACITY)) {
         ast_index_destroy(destination);
         return false;
     }
@@ -1431,8 +1425,8 @@ bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
 void ast_index_destroy(AstIndex* index) {
     if (!index) return;
     ast_index_free_buffers(index->nodes, index->parents, index->owner_functions,
-        index->subtree_end, index->node_bindings, index->first_children, index->next_siblings,
-        index->scopes, index->bindings, index->classes);
+        index->subtree_end, index->node_bindings, index->first_children, index->next_siblings);
+    free(index->scopes); free(index->bindings);
     free(index->functions);
     AstDeclarationMap::destroy(index->declaration_ids);
     ast_index_free_queries(index);
@@ -1688,33 +1682,12 @@ bool name_scope_plan_binding_slots(NameScope* scope) {
     return true;
 }
 
-AstClassId ast_index_nearest_class(const AstIndex* index, AstNodeId node_id,
-        bool include_node) {
-    if (!include_node) node_id = ast_index_parent_id(index, node_id);
-    while (index && node_id < index->count) {
-        AstNode* node = index->nodes[node_id];
-        if (node && (node->node_type == AST_NODE_CLASS ||
-                node->node_type == AST_NODE_CLASS_EXPR)) {
-            AstClassId class_id = ((AstClassNode*)node)->class_id;
-            return class_id < index->class_count ? class_id : AST_CLASS_ID_INVALID;
-        }
-        node_id = ast_index_parent_id(index, node_id);
-    }
-    return AST_CLASS_ID_INVALID;
-}
-
 AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node) {
     AstNodeId node_id = ast_index_find(index, node);
     return index && node_id < index->count ? index->node_bindings[node_id] : AST_BINDING_ID_INVALID;
 }
 
 NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id) { return index && id < index->binding_count ? index->bindings[id] : NULL; }
-
-AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id) {
-    if (!index || id >= index->binding_count) return NULL;
-    return ast_index_find(index, index->bindings[id]->node) == AST_NODE_ID_INVALID ? NULL : index->bindings[id]->node;
-}
-
 
 // adopted values and fields must walk in the same order (D4.2.5)
 extern "C" bool ast_map_literal_keys_follow_contract(AstMapNode* map_node,

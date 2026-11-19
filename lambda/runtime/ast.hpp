@@ -1559,9 +1559,6 @@ typedef struct Transpiler : Script {
     // The current direct-binding traversal stamp. Nodes retain their previous
     // stamp, so each pass receives a unique epoch rather than a visited map.
     uint32_t bind_epoch;
-    // AUTO/T0 reserves node IDs during reduction but defers graph columns
-    // until a MIR consumer needs them; explicit JIT publishes in bind.
-    bool defer_ast_index_columns;
 
     // RC6: word -> const_list index, so equal constants share one pool slot.
     // Scoped to the compilation unit, not the Script: the REPL rolls a failed
