@@ -1500,7 +1500,6 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         resolve_binder_type(tp, node);
         break;
     case LSF_TP_LIT_STRING:
-    case LSF_TP_LIT_NUMBER:
         resolve_literal_constant(tp, node);
         break;
     case LSF_TP_LIT_BOOL:

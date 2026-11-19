@@ -25,22 +25,3 @@ void parser_source_advance_byte(ParserSource* source) {
     source->offset++;
     source->column++;
 }
-
-bool parser_source_is_newline(const ParserSource* source) {
-    unsigned char ch = parser_source_peek(source, 0);
-    return ch == '\r' || ch == '\n';
-}
-
-void parser_source_advance_newline(ParserSource* source) {
-    if (!source) return;
-    if (parser_source_peek(source, 0) == '\r') {
-        source->offset++;
-        if (parser_source_peek(source, 0) == '\n') source->offset++;
-    } else if (parser_source_peek(source, 0) == '\n') {
-        source->offset++;
-    } else {
-        return;
-    }
-    source->line++;
-    source->column = 0;
-}

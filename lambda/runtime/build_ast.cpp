@@ -3482,16 +3482,13 @@ static bool lambda_analyze_capture_permissions(Transpiler* tp) {
 
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size) {
-    AstNode* ast_node = (AstNode*)pool_alloc(tp->pool, size);
-    memset(ast_node, 0, size);
-    ast_node->node_type = node_type;
-    ast_node->source_span = span;
-    if (!ast_index_note_allocation(&tp->ast_index, ast_node)) {
-        // Reserve index capacity while building; binding publishes preorder
-        // identities once this bottom-up reduction has a structural graph.
+    AstNode* ast_node = (AstNode*)pool_calloc(tp->pool, size);
+    if (!ast_node) {
         tp->build_allocation_failed = true;
         return NULL;
     }
+    ast_node->node_type = node_type;
+    ast_node->source_span = span;
     return ast_node;
 }
 
@@ -8945,34 +8942,14 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
     }
 }
 
-// The resolve pass needs provisional scopes while it assembles bottom-up
-// type facts. Do not let those construction-time entries escape as the
-// compiler's published graph: clone the retained scope tree and rewrite every
-// AST edge after the complete tree is available. This makes binding a real
-// post-build phase while keeping construction diagnostics in their existing
-// source-order home.
-typedef struct DirectBindScopeMap {
-    NameScope* source;
-    NameScope* rebound;
-} DirectBindScopeMap;
-
-typedef struct DirectBindEntryMap {
-    NameEntry* source;
-    NameEntry* rebound;
-} DirectBindEntryMap;
-
+// Module resolution creates the script-owned lexical graph (D8.2.4).
+// Publish its existing identities when the complete tree is available.
 typedef struct DirectBindContext {
     Transpiler* tp;
-    HashMap* scopes;
-    HashMap* entries;
-    ArrayList* functions;
     AstFunctionId current_function;
     bool failed;
 } DirectBindContext;
 
-// Retained ASTs can be rebound by a later compiler unit, including on a
-// prebuild worker. A shared atomic stamp prevents an old node mark from being
-// mistaken for this pass without restoring the old pointer visited table.
 static uint32_t g_direct_bind_epoch;
 
 static uint32_t direct_bind_next_epoch(void) {
@@ -8983,176 +8960,6 @@ static uint32_t direct_bind_next_epoch(void) {
     return epoch;
 }
 
-static uint64_t direct_bind_pointer_hash(const void* item, uint64_t seed0,
-        uint64_t seed1) {
-    const void* pointer = *(const void* const*)item;
-    return hashmap_hash_xxhash3_bytes(&pointer, sizeof(pointer), seed0, seed1);
-}
-
-static int direct_bind_pointer_compare(const void* a, const void* b,
-        void* udata) {
-    (void)udata;
-    const void* left = *(const void* const*)a;
-    const void* right = *(const void* const*)b;
-    return left == right ? 0 : (uintptr_t)left < (uintptr_t)right ? -1 : 1;
-}
-
-static DirectBindScopeMap* direct_bind_find_scope(DirectBindContext* bind,
-        NameScope* source) {
-    DirectBindScopeMap key = {.source = source};
-    return bind && bind->scopes ? (DirectBindScopeMap*)hashmap_get(
-        bind->scopes, &key) : NULL;
-}
-
-static DirectBindEntryMap* direct_bind_find_entry(DirectBindContext* bind,
-        NameEntry* source) {
-    DirectBindEntryMap key = {.source = source};
-    return bind && bind->entries ? (DirectBindEntryMap*)hashmap_get(
-        bind->entries, &key) : NULL;
-}
-
-static bool direct_bind_init(DirectBindContext* bind, Transpiler* tp,
-        uint32_t expected_entries) {
-    if (!bind || !tp) return false;
-    *bind = (DirectBindContext){.tp = tp};
-    uint32_t entry_capacity = expected_entries > 64
-        ? (expected_entries > UINT32_MAX / 2 ? UINT32_MAX : expected_entries * 2)
-        : 128;
-    bind->scopes = hashmap_new(sizeof(DirectBindScopeMap), 64, 0, 0,
-        direct_bind_pointer_hash, direct_bind_pointer_compare, NULL, NULL);
-    bind->entries = hashmap_new(sizeof(DirectBindEntryMap), entry_capacity, 0, 0,
-        direct_bind_pointer_hash, direct_bind_pointer_compare, NULL, NULL);
-    bind->functions = arraylist_new(8);
-    bind->tp->bind_epoch = direct_bind_next_epoch();
-    if (!bind->tp->defer_ast_index_columns &&
-            !ast_index_prepare_binding(&bind->tp->ast_index)) {
-        hashmap_free(bind->scopes);
-        hashmap_free(bind->entries);
-        arraylist_free(bind->functions);
-        *bind = {};
-        return false;
-    }
-    bind->current_function = AST_FUNCTION_ID_INVALID;
-    if (bind->scopes && bind->entries && bind->functions) return true;
-    hashmap_free(bind->scopes);
-    hashmap_free(bind->entries);
-    arraylist_free(bind->functions);
-    *bind = {};
-    return false;
-}
-
-static void direct_bind_destroy(DirectBindContext* bind) {
-    if (!bind) return;
-    hashmap_free(bind->scopes);
-    hashmap_free(bind->entries);
-    arraylist_free(bind->functions);
-    *bind = {};
-}
-
-static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
-        NameScope* source);
-
-static NameEntry* direct_bind_clone_entry(DirectBindContext* bind,
-        NameEntry* source) {
-    if (!source) return NULL;
-    DirectBindEntryMap* known = direct_bind_find_entry(bind, source);
-    if (known) return known->rebound;
-    if (!direct_bind_clone_scope(bind, source->scope)) return NULL;
-    known = direct_bind_find_entry(bind, source);
-    return known ? known->rebound : NULL;
-}
-
-static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
-        NameScope* source) {
-    if (!source || !bind || !bind->tp) return NULL;
-    DirectBindScopeMap* known = direct_bind_find_scope(bind, source);
-    if (known) return known->rebound;
-
-    NameScope* rebound = (NameScope*)pool_calloc(bind->tp->pool,
-        sizeof(NameScope));
-    if (!rebound) {
-        bind->failed = true;
-        return NULL;
-    }
-    *rebound = *source;
-    rebound->first = NULL;
-    rebound->last = NULL;
-    rebound->name_index = NULL;
-    rebound->name_index_capacity = 0;
-    rebound->name_index_count = 0;
-    rebound->entry_count = 0;
-    DirectBindScopeMap map = {.source = source, .rebound = rebound};
-    hashmap_set(bind->scopes, &map);
-    if (hashmap_oom(bind->scopes)) {
-        bind->failed = true;
-        return NULL;
-    }
-    rebound->parent = direct_bind_clone_scope(bind, source->parent);
-    if (source->parent && !rebound->parent) return NULL;
-
-    for (NameEntry* entry = source->first; entry; entry = entry->next) {
-        NameEntry* copy = (NameEntry*)pool_calloc(bind->tp->pool,
-            sizeof(NameEntry));
-        if (!copy) {
-            bind->failed = true;
-            return NULL;
-        }
-        *copy = *entry;
-        copy->scope = rebound;
-        copy->next = NULL;
-        DirectBindEntryMap entry_map = {.source = entry, .rebound = copy};
-        hashmap_set(bind->entries, &entry_map);
-        if (hashmap_oom(bind->entries)) {
-            bind->failed = true;
-            return NULL;
-        }
-        if (rebound->last) rebound->last->next = copy;
-        else rebound->first = copy;
-        rebound->last = copy;
-        if (!name_scope_index_add(bind->tp->pool, rebound, copy)) {
-            bind->failed = true;
-            return NULL;
-        }
-    }
-    // scope publication replaces binding identities; annotation reads must
-    // follow that same map rather than retaining parser-only entries.
-    rebound->bound_type_uses = NULL;
-    for (AstBoundTypeUse* use = source->bound_type_uses; use; use = use->next) {
-        AstBoundTypeUse* copy = (AstBoundTypeUse*)pool_calloc(bind->tp->pool, sizeof(AstBoundTypeUse));
-        copy->reference = use->reference;
-        copy->binder = direct_bind_clone_entry(bind, use->binder);
-        copy->next = rebound->bound_type_uses; rebound->bound_type_uses = copy;
-    }
-    return rebound;
-}
-
-static NameScope* direct_bind_scope(DirectBindContext* bind,
-        NameScope* source) {
-    if (!source) return NULL;
-    return direct_bind_clone_scope(bind, source);
-}
-
-static NameEntry* direct_bind_entry(DirectBindContext* bind,
-        NameEntry* source) {
-    return source ? direct_bind_clone_entry(bind, source) : NULL;
-}
-
-static bool direct_bind_rewrite_entry_link(const void* item, void* opaque) {
-    DirectBindContext* bind = (DirectBindContext*)opaque;
-    const DirectBindEntryMap* map = (const DirectBindEntryMap*)item;
-    NameEntry* entry = map ? map->rebound : NULL;
-    if (!entry) return true;
-    entry->view_base = direct_bind_entry(bind, entry->view_base);
-    entry->annex_b_outer_binding = direct_bind_entry(bind,
-        entry->annex_b_outer_binding);
-    return !bind->failed;
-}
-
-static void direct_bind_rewrite_entry_links(DirectBindContext* bind) {
-    if (bind && bind->entries) hashmap_scan(bind->entries,
-        direct_bind_rewrite_entry_link, bind);
-}
-
 static bool direct_bind_mark_visited(DirectBindContext* bind, AstNode* node) {
     if (!bind || !node) return false;
     if (node->last_bind_epoch == bind->tp->bind_epoch) return false;
@@ -9160,164 +8967,127 @@ static bool direct_bind_mark_visited(DirectBindContext* bind, AstNode* node) {
     return true;
 }
 
-static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
+static void direct_bind_visit_node(DirectBindContext* bind, AstNode* node,
         AstNode* parent);
 
-static void direct_bind_rewrite_child(AstNode* child, AstNode* parent,
+static void direct_bind_visit_child(AstNode* child, AstNode* parent,
         void* opaque) {
-    direct_bind_rewrite_node((DirectBindContext*)opaque, child, parent);
+    direct_bind_visit_node((DirectBindContext*)opaque, child, parent);
 }
 
-static void direct_bind_rewrite_function_captures(DirectBindContext* bind,
-        AstFuncNode* function) {
-    if (!function) return;
-    function->entry = direct_bind_entry(bind, function->entry);
-    if (function->analysis) function->analysis->decl_entry =
-        direct_bind_entry(bind, function->analysis->decl_entry);
-    for (FnCapture* capture = function->captures; capture;
-            capture = capture->next) {
-        capture->entry = direct_bind_entry(bind, capture->entry);
-    }
-}
-
-static void direct_bind_rewrite_object_shape(DirectBindContext* bind,
-        AstObjectTypeNode* object) {
-    if (!object || !object->type || object->type->type_id != LMD_TYPE_TYPE) return;
-    Type* value = ((TypeType*)object->type)->type;
-    if (!value || (value->type_id != LMD_TYPE_MAP &&
-            value->type_id != LMD_TYPE_ELEMENT)) return;
-    TypeObject* object_type = (TypeObject*)value;
-    FOR_EACH_MAP_FIELD(object_type, field) {
-        field->binding = direct_bind_entry(bind, field->binding);
-    }
-}
-
-static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
+static void direct_bind_visit_extension_children(DirectBindContext* bind,
         AstNode* node) {
     switch (node->node_type) {
     case AST_NODE_LIST:
-        ((AstListNode*)node)->vars = direct_bind_scope(bind,
-            ((AstListNode*)node)->vars);
         // Parenthesized let groups retain declarations beside their result
         // item; the shared child visitor only sees the latter.
-        direct_bind_rewrite_node(bind, ((AstListNode*)node)->declare, node);
-        direct_bind_rewrite_node(bind, ((AstArrayNode*)node)->item, node);
+        direct_bind_visit_node(bind, ((AstListNode*)node)->declare, node);
+        direct_bind_visit_node(bind, ((AstArrayNode*)node)->item, node);
         break;
     case AST_NODE_ELEMENT:
-        direct_bind_rewrite_node(bind, ((AstElementNode*)node)->tag_expr, node);
-        direct_bind_rewrite_node(bind, ((AstMapNode*)node)->item, node);
-        if (node->node_type == AST_NODE_ELEMENT) {
-            direct_bind_rewrite_node(bind, ((AstElementNode*)node)->content, node);
-        }
+        direct_bind_visit_node(bind, ((AstElementNode*)node)->tag_expr, node);
+        direct_bind_visit_node(bind, ((AstMapNode*)node)->item, node);
+        direct_bind_visit_node(bind, ((AstElementNode*)node)->content, node);
         break;
     case AST_NODE_CONTENT:
-        // The shared child walker owns CONTENT's items; retain the scope edge.
-        ((AstListNode*)node)->vars = direct_bind_scope(bind,
-            ((AstListNode*)node)->vars);
-        direct_bind_rewrite_node(bind, ((AstListNode*)node)->declare, node);
+        direct_bind_visit_node(bind, ((AstListNode*)node)->declare, node);
         break;
     case AST_NODE_FOR_EXPR: {
         AstForNode* loop = (AstForNode*)node;
-        loop->vars = direct_bind_scope(bind, loop->vars);
-        direct_bind_rewrite_node(bind, loop->loop, node);
-        direct_bind_rewrite_node(bind, loop->let_clause, node);
-        direct_bind_rewrite_node(bind, loop->where, node);
+        direct_bind_visit_node(bind, loop->loop, node);
+        direct_bind_visit_node(bind, loop->let_clause, node);
+        direct_bind_visit_node(bind, loop->where, node);
         if (loop->group) {
-            loop->group->entry = direct_bind_entry(bind, loop->group->entry);
-            direct_bind_rewrite_node(bind, (AstNode*)loop->group->keys, node);
+            direct_bind_visit_node(bind, (AstNode*)loop->group->keys, node);
         }
-        direct_bind_rewrite_node(bind, loop->order, node);
-        direct_bind_rewrite_node(bind, loop->limit, node);
-        direct_bind_rewrite_node(bind, loop->offset, node);
-        direct_bind_rewrite_node(bind, loop->then, node);
+        direct_bind_visit_node(bind, loop->order, node);
+        direct_bind_visit_node(bind, loop->limit, node);
+        direct_bind_visit_node(bind, loop->offset, node);
+        direct_bind_visit_node(bind, loop->then, node);
         break;
     }
     case AST_NODE_FOR_CLAUSE: {
         AstLoopNode* loop = (AstLoopNode*)node;
-        direct_bind_rewrite_node(bind, loop->as, node);
-        direct_bind_rewrite_node(bind, loop->on, node);
-        direct_bind_rewrite_node(bind, (AstNode*)loop->join_keys, node);
+        direct_bind_visit_node(bind, loop->as, node);
+        direct_bind_visit_node(bind, loop->on, node);
+        direct_bind_visit_node(bind, (AstNode*)loop->join_keys, node);
         break;
     }
     case AST_NODE_GROUP_KEY:
-        ((AstGroupKey*)node)->entry = direct_bind_entry(bind, ((AstGroupKey*)node)->entry);
-        direct_bind_rewrite_node(bind, ((AstGroupKey*)node)->expr, node);
+        direct_bind_visit_node(bind, ((AstGroupKey*)node)->expr, node);
         break;
     case AST_NODE_JOIN_KEY: {
         AstJoinKey* key = (AstJoinKey*)node;
-        direct_bind_rewrite_node(bind, key->prior_expr, node);
-        direct_bind_rewrite_node(bind, key->new_expr, node);
+        direct_bind_visit_node(bind, key->prior_expr, node);
+        direct_bind_visit_node(bind, key->new_expr, node);
         break;
     }
     case AST_NODE_ORDER_SPEC:
-        direct_bind_rewrite_node(bind, ((AstOrderSpec*)node)->expr, node);
+        direct_bind_visit_node(bind, ((AstOrderSpec*)node)->expr, node);
         break;
     case AST_NODE_VIEW: {
         AstViewNode* view = (AstViewNode*)node;
-        view->vars = direct_bind_scope(bind, view->vars);
-        direct_bind_rewrite_node(bind, view->pattern, node);
-        direct_bind_rewrite_node(bind, (AstNode*)view->param, node);
-        direct_bind_rewrite_node(bind, view->body, node);
+        direct_bind_visit_node(bind, view->pattern, node);
+        direct_bind_visit_node(bind, (AstNode*)view->param, node);
+        direct_bind_visit_node(bind, view->body, node);
         for (AstStateEntry* state = view->state; state; state = state->next_state) {
-            state->entry = direct_bind_entry(bind, state->entry);
-            direct_bind_rewrite_node(bind, state->value, node);
+            direct_bind_visit_node(bind, state->value, node);
         }
         for (AstEventHandler* handler = view->handler; handler;
                 handler = handler->next_handler) {
-            direct_bind_rewrite_node(bind, (AstNode*)handler, node);
+            direct_bind_visit_node(bind, (AstNode*)handler, node);
         }
         break;
     }
     case AST_NODE_EVENT_HANDLER: {
         AstEventHandler* handler = (AstEventHandler*)node;
-        handler->vars = direct_bind_scope(bind, handler->vars);
-        direct_bind_rewrite_node(bind, (AstNode*)handler->param, node);
-        direct_bind_rewrite_node(bind, handler->body, node);
+        direct_bind_visit_node(bind, (AstNode*)handler->param, node);
+        direct_bind_visit_node(bind, handler->body, node);
         break;
     }
     case AST_NODE_OBJECT_TYPE: {
         AstObjectTypeNode* object = (AstObjectTypeNode*)node;
-        direct_bind_rewrite_node(bind, object->item, node);
-        direct_bind_rewrite_node(bind, object->base_type, node);
-        direct_bind_rewrite_node(bind, object->content, node);
-        direct_bind_rewrite_node(bind, object->methods, node);
-        direct_bind_rewrite_node(bind, object->constraints, node);
+        direct_bind_visit_node(bind, object->item, node);
+        direct_bind_visit_node(bind, object->base_type, node);
+        direct_bind_visit_node(bind, object->content, node);
+        direct_bind_visit_node(bind, object->methods, node);
+        direct_bind_visit_node(bind, object->constraints, node);
         break;
     }
     case AST_NODE_OBJECT_LITERAL:
-        direct_bind_rewrite_node(bind, ((AstObjectLiteralNode*)node)->content, node);
+        direct_bind_visit_node(bind, ((AstObjectLiteralNode*)node)->content, node);
         break;
     case AST_NODE_CONSTRAINED_TYPE: {
         AstConstrainedTypeNode* constrained = (AstConstrainedTypeNode*)node;
-        direct_bind_rewrite_node(bind, constrained->base, node);
-        direct_bind_rewrite_node(bind, constrained->constraint, node);
+        direct_bind_visit_node(bind, constrained->base, node);
+        direct_bind_visit_node(bind, constrained->constraint, node);
         break;
     }
     case AST_NODE_PATTERN_ISLAND:
-        direct_bind_rewrite_node(bind, ((AstPatternIslandNode*)node)->pattern, node);
+        direct_bind_visit_node(bind, ((AstPatternIslandNode*)node)->pattern, node);
         break;
     case AST_NODE_PATTERN_RANGE: {
         AstPatternRangeNode* range = (AstPatternRangeNode*)node;
-        direct_bind_rewrite_node(bind, range->start, node);
-        direct_bind_rewrite_node(bind, range->end, node);
+        direct_bind_visit_node(bind, range->start, node);
+        direct_bind_visit_node(bind, range->end, node);
         break;
     }
     case AST_NODE_PATTERN_SEQ:
-        direct_bind_rewrite_node(bind, ((AstPatternSeqNode*)node)->first, node);
+        direct_bind_visit_node(bind, ((AstPatternSeqNode*)node)->first, node);
         break;
     case AST_NODE_PATH_INDEX_EXPR: {
         AstPathIndexNode* index = (AstPathIndexNode*)node;
-        direct_bind_rewrite_node(bind, index->base_path, node);
-        direct_bind_rewrite_node(bind, index->segment_expr, node);
+        direct_bind_visit_node(bind, index->base_path, node);
+        direct_bind_visit_node(bind, index->segment_expr, node);
         break;
     }
     case AST_NODE_NAVIGATION_EXPR:
-        direct_bind_rewrite_node(bind, ((AstNavigationNode*)node)->object, node);
+        direct_bind_visit_node(bind, ((AstNavigationNode*)node)->object, node);
         break;
     case AST_NODE_QUERY_EXPR: {
         AstQueryNode* query = (AstQueryNode*)node;
-        direct_bind_rewrite_node(bind, query->object, node);
-        direct_bind_rewrite_node(bind, query->query, node);
+        direct_bind_visit_node(bind, query->object, node);
+        direct_bind_visit_node(bind, query->query, node);
         break;
     }
     default:
@@ -9325,7 +9095,7 @@ static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
     }
 }
 
-static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
+static void direct_bind_visit_node(DirectBindContext* bind, AstNode* node,
         AstNode* parent) {
     if (!node || !bind || bind->failed || !direct_bind_mark_visited(bind, node)) return;
     if (node->syntax_form != LSF_NONE) {
@@ -9337,115 +9107,17 @@ static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
         bind->failed = true;
         return;
     }
-    switch (node->node_type) {
-    case AST_SCRIPT:
-        ((AstScript*)node)->global_vars = direct_bind_scope(bind,
-            ((AstScript*)node)->global_vars);
-        break;
-    case AST_NODE_IDENT:
-        ((AstIdentNode*)node)->entry = direct_bind_entry(bind,
-            ((AstIdentNode*)node)->entry);
-        break;
-    case AST_NODE_OBJECT_TYPE: {
-        // entry edges must be rebound before the index publishes this node.
-        AstObjectTypeNode* object = (AstObjectTypeNode*)node;
-        object->entry = direct_bind_entry(bind, object->entry);
-        object->base_entry = direct_bind_entry(bind, object->base_entry);
-        // synthetic field bindings must be canonical before index publication.
-        direct_bind_rewrite_object_shape(bind, object);
-        break;
-    }
-    case AST_NODE_OBJECT_LITERAL:
-        ((AstObjectLiteralNode*)node)->type_entry = direct_bind_entry(bind,
-            ((AstObjectLiteralNode*)node)->type_entry);
-        break;
-    case AST_NODE_VARIABLE_DECLARATOR: {
-        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
-        declaration->entry = direct_bind_entry(bind, declaration->entry);
-        break;
-    }
-    case AST_NODE_PARAM:
-    case AST_NODE_KEY_EXPR:
-        ((AstNamedNode*)node)->entry = direct_bind_entry(bind,
-            ((AstNamedNode*)node)->entry);
-        break;
-    case AST_NODE_FOR_CLAUSE: {
-        // rewrite before index publication so an unused iterator retains its
-        // canonical binding even without an identifier use to publish it.
-        AstLoopNode* loop = (AstLoopNode*)node;
-        loop->entry = direct_bind_entry(bind, loop->entry);
-        loop->index_entry = direct_bind_entry(bind, loop->index_entry);
-        break;
-    }
-    case AST_NODE_FUNC:
-    case AST_NODE_FUNC_EXPR:
-    case AST_NODE_PROC:
-    case AST_NODE_METHOD: {
-        AstFuncNode* function = (AstFuncNode*)node;
-        function->vars = direct_bind_scope(bind, function->vars);
-        direct_bind_rewrite_function_captures(bind, function);
-        if (node->node_type != AST_NODE_METHOD &&
-                !arraylist_append(bind->functions, function)) bind->failed = true;
-        break;
-    }
-    case AST_NODE_LOOP:
-        ((AstLoopControlNode*)node)->vars = direct_bind_scope(bind,
-            ((AstLoopControlNode*)node)->vars);
-        break;
-    case AST_NODE_BLOCK:
-        ((AstBlockNode*)node)->vars = direct_bind_scope(bind,
-            ((AstBlockNode*)node)->vars);
-        break;
-    case AST_NODE_START:
-        ((AstStartNode*)node)->owner_scope = direct_bind_scope(bind,
-            ((AstStartNode*)node)->owner_scope);
-        break;
-    case AST_NODE_ASSIGN:
-    case AST_NODE_ASSIGN_STAM:
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM:
-    case AST_NODE_ASSIGN_PATTERN:
-        ((AstAssignNode*)node)->target_entry = direct_bind_entry(bind,
-            ((AstAssignNode*)node)->target_entry);
-        break;
-    case AST_NODE_DECOMPOSE: {
-        AstDecomposeNode* decompose = (AstDecomposeNode*)node;
-        for (int i = 0; i < decompose->name_count; i++) {
-            decompose->entries[i] = direct_bind_entry(bind,
-                decompose->entries[i]);
-        }
-        break;
-    }
-    case AST_NODE_IMPORT: {
-        AstImportNode* import_node = (AstImportNode*)node;
-        import_node->default_entry = direct_bind_entry(bind,
-            import_node->default_entry);
-        import_node->namespace_entry = direct_bind_entry(bind,
-            import_node->namespace_entry);
-        break;
-    }
-    case AST_NODE_IMPORT_SPECIFIER:
-        ((AstImportSpecifierNode*)node)->local_entry = direct_bind_entry(bind,
-            ((AstImportSpecifierNode*)node)->local_entry);
-        break;
-    case AST_NODE_EXPORT_SPECIFIER:
-        ((AstExportSpecifierNode*)node)->local_entry = direct_bind_entry(bind,
-            ((AstExportSpecifierNode*)node)->local_entry);
-        break;
-    default:
-        break;
-    }
     AstFunctionId previous_function = bind->current_function;
     AstFunctionId node_function = previous_function;
-    if (!bind->tp->defer_ast_index_columns && !ast_index_bind_node(
+    if (!ast_index_bind_node(
             &bind->tp->ast_index, node, parent, previous_function,
             &node_function)) {
         bind->failed = true;
         return;
     }
     bind->current_function = node_function;
-    ast_visit_core_children(node, direct_bind_rewrite_child, bind);
-    direct_bind_rewrite_extension_children(bind, node);
+    ast_visit_core_children(node, direct_bind_visit_child, bind);
+    direct_bind_visit_extension_children(bind, node);
     bind->current_function = previous_function;
 }
 
@@ -9477,36 +9149,22 @@ static ArrayList* lambda_ast_indexed_functions(const AstIndex* index) {
     return functions;
 }
 
-bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
-        AstScript* script, ArrayList** functions_out) {
+bool lambda_ast_publish_scope_graph(Transpiler* tp, AstScript* script,
+        ArrayList** functions_out) {
     if (functions_out) *functions_out = NULL;
-    if (!tp || !script || !script->global_vars) return false;
-    DirectBindContext bind = {};
-    if (!direct_bind_init(&bind, tp, script->global_vars->entry_count)) return false;
-    direct_bind_rewrite_node(&bind, (AstNode*)script, NULL);
-    if (bind.failed || !script->global_vars) {
-        direct_bind_destroy(&bind);
-        return false;
-    }
-    direct_bind_rewrite_entry_links(&bind);
-    if (bind.failed) {
-        direct_bind_destroy(&bind);
-        return false;
-    }
-    if (!tp->defer_ast_index_columns) ast_index_mark_published(&tp->ast_index);
+    if (!tp || !script || !script->global_vars ||
+            !ast_index_prepare_binding(&tp->ast_index)) return false;
+    tp->bind_epoch = direct_bind_next_epoch();
+    DirectBindContext bind = {tp, AST_FUNCTION_ID_INVALID, false};
+    direct_bind_visit_node(&bind, (AstNode*)script, NULL);
+    if (bind.failed) return false;
+    ast_index_mark_published(&tp->ast_index);
+    if (!tp->ast_index.graph_published) return false;
     tp->current_scope = script->global_vars;
     if (functions_out) {
-        ArrayList* indexed = lambda_ast_indexed_functions(&tp->ast_index);
-        // AST-tier rebinding defers index publication, so it retains the
-        // construction list until its own retained-unit index pass runs.
-        if (indexed) {
-            *functions_out = indexed;
-        } else {
-            *functions_out = bind.functions;
-            bind.functions = NULL;
-        }
+        *functions_out = lambda_ast_indexed_functions(&tp->ast_index);
+        if (!*functions_out) return false;
     }
-    direct_bind_destroy(&bind);
     return true;
 }
 
@@ -10681,7 +10339,17 @@ struct LambdaSyntaxUnit {
     // subtrees the tree does not hold but whose construction still resolves,
     // and syntax diagnostics, each resolved where its host node resolves
     ArrayList* attachments;
+    Arena* scratch;
 };
+
+// Scratch belongs to one parse/resolve unit, including during nested imports.
+static void* syntax_scratch_alloc(LambdaSyntaxUnit* unit, size_t bytes) {
+    if (!unit->scratch) {
+        unit->scratch = mem_arena_create_sized(NULL, 1024, ARENA_MEDIUM_CHUNK_SIZE,
+            MEM_ROLE_TEMP, "lambda.syntax");
+    }
+    return unit->scratch ? arena_alloc(unit->scratch, bytes) : NULL;
+}
 
 typedef enum LambdaSyntaxAttachKind : uint8_t {
     LSA_BEFORE,       // resolved before the host's children: parts it superseded
@@ -10823,7 +10491,7 @@ struct UnresolvedName {
 // defer diagnostics until those identities and call dispatch are complete.
 static void resolver_note_unresolved(LambdaResolver* r, AstIdentNode* ident, bool called) {
     if (!ident || ident->node_type != AST_NODE_IDENT || ident->entry) return;
-    UnresolvedName* name = (UnresolvedName*)pool_calloc(r->tp->pool, sizeof(UnresolvedName));
+    UnresolvedName* name = (UnresolvedName*)syntax_scratch_alloc(r->unit, sizeof(UnresolvedName));
     if (!name || !arraylist_append(r->unresolved_names, name)) {
         r->tp->build_allocation_failed = true;
         return;
@@ -10862,17 +10530,18 @@ static void resolver_reject_unresolved(LambdaResolver* r) {
 // this one, so each resolve saves and restores it.
 static thread_local LambdaResolver* active_resolver = NULL;
 
-static bool syntax_parts_add(Transpiler* tp, LambdaSyntaxParts** parts_io,
+static bool syntax_parts_add(LambdaSyntaxUnit* unit, LambdaSyntaxParts** parts_io,
         uint8_t kind, AstNode* node) {
     LambdaSyntaxParts* parts = *parts_io;
     if (!parts) {
-        parts = (LambdaSyntaxParts*)pool_calloc(tp->pool, sizeof(LambdaSyntaxParts));
+        parts = (LambdaSyntaxParts*)syntax_scratch_alloc(unit, sizeof(LambdaSyntaxParts));
         if (!parts) return false;
+        *parts = {};
         *parts_io = parts;
     }
     if (parts->count == parts->capacity) {
         uint32_t capacity = parts->capacity ? parts->capacity * 2 : 8;
-        LambdaSyntaxPart* items = (LambdaSyntaxPart*)pool_calloc(tp->pool,
+        LambdaSyntaxPart* items = (LambdaSyntaxPart*)syntax_scratch_alloc(unit,
             sizeof(LambdaSyntaxPart) * capacity);
         if (!items) return false;
         if (parts->count) memcpy(items, parts->items, sizeof(LambdaSyntaxPart) * parts->count);
@@ -10887,8 +10556,8 @@ static bool syntax_attach(LambdaSyntaxSink* sink, AstNode* host,
         LambdaSyntaxAttachKind kind, AstNode* node, LambdaErrorCode code,
         SourceSpan span, const char* message) {
     if (!host) return false;
-    LambdaSyntaxAttachment* attachment = (LambdaSyntaxAttachment*)pool_calloc(
-        sink->tp->pool, sizeof(LambdaSyntaxAttachment));
+    LambdaSyntaxAttachment* attachment = (LambdaSyntaxAttachment*)syntax_scratch_alloc(
+        sink->unit, sizeof(LambdaSyntaxAttachment));
     if (!attachment || !arraylist_append(sink->unit->attachments, attachment)) {
         sink->failed = true;
         return false;
@@ -12885,7 +12554,8 @@ static void mark_binding_admission_outcome(Transpiler* tp, NameEntry* entry) {
 
 static bool mark_call_borrow_outcomes(Transpiler* tp, AstCallNode* call) {
     TypeFunc* signature = call_function_signature(call);
-    if (!signature) return false;
+    // Only var parameters can publish a borrow outcome into the caller.
+    if (!ast_type_func_has_var_parameter(signature)) return false;
     AstFuncNode* definition = ast_direct_call_function(call);
     AstNamedNode* formal = definition ? definition->param : NULL;
     AstNode* by_parameter[LAMBDA_MAX_FUNCTION_ARGS] = {};
@@ -17370,7 +17040,6 @@ static AstNode* syntax_path_member_step(LambdaSyntaxSink* sink,
 // LSF_FUNCTION facts, kept in syntax_aux.
 enum {
     LSF_FN_ARROW = 1u << 0,        // `(params) => body`, parsed inside a group
-    LSF_FN_BODY_BLOCK = 1u << 1,   // a braced body: the statement spelling
     LSF_FN_VARIADIC = 1u << 2,
     LSF_FN_RAISED = 1u << 3,
     LSF_FN_PUBLIC = 1u << 4,
@@ -17418,7 +17087,7 @@ enum { LSF_BINARY_THAT = 1u << 0, LSF_BINARY_PIPE_BODY = 1u << 1 };
 
 static void syntax_record_part(LambdaSyntaxSink* sink, void** parts_slot,
         uint8_t kind, AstNode* node) {
-    if (!syntax_parts_add(sink->tp, (LambdaSyntaxParts**)parts_slot, kind, node)) {
+    if (!syntax_parts_add(sink->unit, (LambdaSyntaxParts**)parts_slot, kind, node)) {
         sink->failed = true;
     }
 }
@@ -17634,7 +17303,6 @@ static AstNode* syntax_function(LambdaSyntaxSink* sink,
     tail[LSF_FUNCTION_BODY] = body;
     syntax_tail_set_span(&tail[LSF_FUNCTION_SPAN], reduction->span);
     uint32_t flags = reduction->flags;
-    if (flags & LAMBDA_REDUCTION_FLAG_BODY_BLOCK) fn->syntax_aux |= LSF_FN_BODY_BLOCK;
     if (flags & LAMBDA_REDUCTION_FLAG_VARIADIC) fn->syntax_aux |= LSF_FN_VARIADIC;
     if (flags & LAMBDA_REDUCTION_FLAG_RAISED) fn->syntax_aux |= LSF_FN_RAISED;
     if (sink->type_object_depth && sink->function_depth ==
@@ -20232,12 +19900,13 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_FOR: {
         AstForNode* loop = (AstForNode*)node;
         resolver_loop_begin(r, loop);
-        LambdaSyntaxParts* parts = (LambdaSyntaxParts*)syntax_tail(node,
-            sizeof(AstForNode))[LSF_FOR_PARTS];
+        void** tail = syntax_tail(node, sizeof(AstForNode));
+        LambdaSyntaxParts* parts = (LambdaSyntaxParts*)tail[LSF_FOR_PARTS];
+        tail[LSF_FOR_PARTS] = NULL;
         for (uint32_t i = 0; parts && i < parts->count && !r->failed; i++) {
             resolve_for_part(r, loop, &parts->items[i]);
         }
-        resolve_walk(r, (AstNode*)syntax_tail(node, sizeof(AstForNode))[LSF_FOR_BODY]);
+        resolve_walk(r, (AstNode*)tail[LSF_FOR_BODY]);
         resolve_diagnostics(r, node);
         resolve_for(tp, loop);
         resolver_loop_end(r);
@@ -20461,6 +20130,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
             syntax_tail_span(&tail[LSF_OBJECT_BASE])));
         resolve_walk(r, (AstNode*)tail[LSF_OBJECT_LAYOUT]);
         LambdaSyntaxParts* parts = (LambdaSyntaxParts*)tail[LSF_OBJECT_PARTS];
+        tail[LSF_OBJECT_PARTS] = NULL;
         for (uint32_t i = 0; parts && i < parts->count && !r->failed; i++) {
             LambdaSyntaxPart* part = &parts->items[i];
             if (part->kind != OBJECT_PART_CONSTRAINT) {
@@ -20922,6 +20592,7 @@ void lambda_rd_destroy_syntax(LambdaSyntaxUnit* unit) {
     if (!unit) return;
     if (unit->predeclared) arraylist_free(unit->predeclared);
     if (unit->attachments) arraylist_free(unit->attachments);
+    mem_arena_destroy(unit->scratch);
     mem_free(unit);
 }
 

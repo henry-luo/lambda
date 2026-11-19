@@ -23,8 +23,6 @@ void parser_source_init(ParserSource* source, const char* text, size_t length,
 bool parser_source_has(const ParserSource* source, size_t count);
 unsigned char parser_source_peek(const ParserSource* source, size_t ahead);
 void parser_source_advance_byte(ParserSource* source);
-bool parser_source_is_newline(const ParserSource* source);
-void parser_source_advance_newline(ParserSource* source);
 
 #ifdef __cplusplus
 }

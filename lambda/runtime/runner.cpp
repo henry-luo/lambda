@@ -1836,7 +1836,7 @@ static int lambda_bind_compiler_pass(void* opaque) {
     LambdaDirectFrontendPassContext* pass =
         (LambdaDirectFrontendPassContext*)opaque;
     if (!pass || !pass->tp || !pass->tp->ast_root ||
-            !lambda_ast_rebind_direct_scope_graph_with_functions(pass->tp,
+            !lambda_ast_publish_scope_graph(pass->tp,
                 (AstScript*)pass->tp->ast_root, &pass->functions)) {
         if (pass && pass->tp) {
             log_error("Lambda AST binding rejected %s", pass->script_path);
@@ -1879,11 +1879,6 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&start);
 #endif
     tp->source = script->source;
-    // A non-main Script can be linked from a native parent. Keep its exports
-    // callable even when automatic document policy prefers interpretation.
-    // Capture, support, and call-site passes share the published graph in
-    // every tier; delaying its columns for T0 would reintroduce tree scans.
-    tp->defer_ast_index_columns = false;
     LambdaDirectFrontendPassContext front_end = {tp, script_path, {}};
     compiler_pass_manager_init(&tp->pass_manager, COMPILER_FACT_NONE);
     CompilerPassSpec parse_pass = {"parse", COMPILER_FACT_NONE,

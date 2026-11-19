@@ -550,7 +550,6 @@ typedef struct AstIndex {
     AstNodeId* next_siblings;
     NameScope** scopes;
     NameEntry** bindings;
-    AstNode** classes;
     // index-owned declaration identities also survive clones of shared ASTs.
     struct hashmap* declaration_ids;
     // Dense function roots make FunctionId the shared authority for Lambda
@@ -586,10 +585,11 @@ typedef struct AstIndex {
     uint32_t function_count;
     uint32_t function_capacity;
     uint32_t scope_count;
+    uint32_t scope_capacity;
     uint32_t binding_count;
+    uint32_t binding_capacity;
     uint32_t class_count;
-    // Allocation reserves node IDs in every tier. Graph-sensitive columns are
-    // materialized only for MIR/const consumers; T0 reads the AST directly.
+    // The index publishes graph facts once the structural tree is available.
     bool graph_published;
     AstNode** slots;
     AstNodeId* slot_ids;
@@ -619,7 +619,6 @@ bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* 
 // Direct reduction reserves index storage as a node is born. Binding assigns
 // its stable ID in structural preorder after provisional scopes are remapped,
 // preserving the range invariant (D8.2.4/D8.2.5).
-bool ast_index_note_allocation(AstIndex* index, AstNode* node);
 bool ast_index_prepare_binding(AstIndex* index);
 bool ast_index_bind_node(AstIndex* index, AstNode* node, AstNode* parent,
     AstFunctionId current_owner, AstFunctionId* node_owner);
@@ -660,14 +659,11 @@ bool ast_index_scan_profile_support(AstIndex* index,
 // Rebuild derived range and reverse-query tables after a sanctioned AST
 // extension adjusts lexical function parents.
 bool ast_index_rebuild_queries(AstIndex* index);
-AstClassId ast_index_nearest_class(const AstIndex* index, AstNodeId node_id,
-                                   bool include_node);
 bool ast_index_node_is_function(const AstNode* node);
 AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node);
 AstBindingId ast_index_find_binding_entry(const AstIndex* index,
                                           const NameEntry* entry);
 NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
-AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id);
 // NameScope owns the shared name lookup table. Both front ends
 // retain declaration order in first/last/next while wide scopes probe here.
 NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name);
