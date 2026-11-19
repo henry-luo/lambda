@@ -7382,9 +7382,11 @@ static MirValue expression(MvpCompiler* c, AstNode* node, bool discard, bool tai
                 LMD_TYPE_TYPE, VALUE_REP_RAW_NON_GC_POINTER, &TYPE_TYPE, node);
         Script* owner; int slot;
         if (mvp_interp_binding(c->module, entry, &owner, &slot) &&
-                (!ast_index_node_is_function(entry->node) ||
+                (c->module->satellite_boxed_target || !ast_index_node_is_function(entry->node) ||
                  !mvp_function(c->module, (AstFuncNode*)entry->node) ||
                  mvp_function(c->module, (AstFuncNode*)entry->node)->interp_binding)) {
+            // Direct edges may use a private body, but a function value
+            // keeps the identity and entry from the module slot (S5.5.1v2).
             MvpBinding* binding = mvp_binding(c->module, entry);
             if (binding) return read_binding(c, binding, node, true);
             MIR_reg_t state = em_module_state_for_unit(&c->em, constant(c, script_module_layout_id(owner)), true);
@@ -9577,6 +9579,7 @@ static void receive_parameter(MvpCompiler* c, MvpBinding* binding, MIR_reg_t inp
     // effective body domain; box its actual incoming success lane first.
     Type* entry_contract = incoming_contract ? incoming_contract : rep == VALUE_REP_ITEM ? &TYPE_ANY :
         lambda_type_remove_error(c->module->tp->pool, binding->contract);
+    if (binding->continuation_input) entry_contract = binding->continuation_input;
     MirValue incoming = value(c, input, entry_contract->type_id, rep, entry_contract);
     TypeParam* parameter = lambda_type_param(mvp_binding_node(binding)->type);
     bool binder_site = mvp_function_binder_count(c->function) && c->binder_env &&
@@ -9595,7 +9598,9 @@ static void receive_parameter(MvpCompiler* c, MvpBinding* binding, MIR_reg_t inp
         incoming = value(c, selected, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
     }
     bool dependent = lambda_type_contract_has_binder(binding->admission_contract, true);
-    if (!binder_site && (dependent || c->function->boxed_entry || (parameter && parameter->is_optional)))
+    // The loop-head guard already proved the continuation's open input.
+    if (!binding->continuation_input && !binder_site &&
+            (dependent || c->function->boxed_entry || (parameter && parameter->is_optional)))
         incoming = admit(c, incoming, dependent ? binding->admission_contract : binding->contract,
             NULL, parameter_boundary_site(c, (AstNamedNode*)mvp_binding_node(binding)));
     if (c->function->boxed_entry && !binding->scalar_snapshot &&

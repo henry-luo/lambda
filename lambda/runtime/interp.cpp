@@ -111,6 +111,7 @@ struct InterpSatelliteQueue {
     uint64_t generation;
     uint32_t next_sequence;
     uint32_t pending;
+    atomic_int32 ready_available;
     atomic_int32 cancel_requested;
     bool retiring;
 };
@@ -124,10 +125,13 @@ typedef struct InterpSatelliteJob {
     // owns the continuation's node pool until an image adopts it.
     AstFuncNode* continuation;
     Pool* continuation_pool;
+    const InterpLoopInput* loop_inputs;
     InterpSatelliteQueue* queue;
     uint64_t generation;
     uint32_t sequence;
     InterpSatelliteImage* image;
+    int member_count;
+    const AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP];
 } InterpSatelliteJob;
 
 static bool interp_satellite_compile_cancelled(void* opaque) {
@@ -229,11 +233,14 @@ static void interp_satellite_compile_job(void* opaque) {
     const AstFuncNode* target = job->continuation ? job->continuation : job->def;
     bool compiled = !retired_before_compile && job->runtime && lambda_mvp_compile_function_snapshot(
         job->runtime, job->script, target, job->sequence,
+        job->members, job->member_count,
+        job->loop_inputs,
         interp_satellite_compile_cancelled, &queue->cancel_requested, &image);
     pthread_mutex_lock(&queue->mutex);
     bool retired = queue->retiring || job->generation != queue->generation;
     if (!retired && queue->ready && arraylist_append(queue->ready, job)) {
         job->image = compiled ? image : NULL;
+        atomic_store32(&queue->ready_available, 1);
         job = NULL;  // the evaluator now owns this completed request
     }
     if (job) {
@@ -251,7 +258,8 @@ static void interp_satellite_compile_job(void* opaque) {
 
 static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
         const AstFuncNode* def, FnPromotionCell* cell,
-        AstFuncNode* continuation = NULL, Pool* continuation_pool = NULL) {
+        AstFuncNode* continuation = NULL, Pool* continuation_pool = NULL,
+        const InterpLoopInput* loop_inputs = NULL) {
     if (!runtime || !script || !def || !cell) return false;
     // Initialize the shared resolver before private MIR contexts read it.
     ensure_jit_imports_initialized();
@@ -266,7 +274,13 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     job->script = script;
     job->def = def;
     job->continuation = continuation;
+    job->loop_inputs = loop_inputs;
     job->queue = queue;
+    // Freeze membership on the evaluator: the worker must never consult
+    // another definition's changing promotion cell (D8.3.4).
+    job->member_count = lambda_mvp_collect_satellite_members(script,
+        continuation ? continuation : def, job->members, continuation ? 3 : 2,
+        continuation != NULL);
 
     // a continuation is keyed by the loop state, not the definition's entry
     // state: the definition may itself be compiled while an older activation
@@ -281,6 +295,7 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     }
     job->generation = queue->generation;
     job->sequence = ++queue->next_sequence;
+    uint32_t sequence = job->sequence;
     queue->pending++;
     if (continuation) {
         cell->loop_state = FN_LOOP_HANDOFF_QUEUED;
@@ -291,8 +306,9 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     // ownership transfers only once the job can no longer be refused above
     job->continuation_pool = continuation_pool;
 
+    // An executing loop can use its image before another call arrives.
     if (!tp_submit_priority(g_interp_satellite_pool, interp_satellite_compile_job,
-            job, TP_PRIORITY_LOW)) {
+            job, continuation ? TP_PRIORITY_NORMAL : TP_PRIORITY_LOW)) {
         pthread_mutex_lock(&queue->mutex);
         if (queue->pending > 0) queue->pending--;
         if (continuation) {
@@ -310,8 +326,9 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     }
     log_debug("interp-tier: queued satellite function='%s'%s image=%u pool_workers=%d",
         def->name ? def->name->chars : "<anonymous>",
-        continuation ? " loop-continuation" : "", (unsigned)job->sequence,
+        continuation ? " loop-continuation" : "", (unsigned)sequence,
         tp_thread_count(g_interp_satellite_pool));
+    (void)sequence;
     return true;
 }
 
@@ -330,14 +347,10 @@ static bool interp_satellite_publish_image(Script* script,
             !image->module_layout) return false;
     if (!interp_satellite_image_prepare(script, image) ||
             !interp_satellite_image_retain(script, image)) return false;
-    bool target_published = false;
-    for (uint32_t index = 0; index < image->member_count; index++) {
-        if (!image->member_entries[index] || !image->members[index]) continue;
-        bool member_published = interp_publish_satellite_member(script,
-            (AstFuncNode*)image->members[index], image->member_entries[index]);
-        if (image->members[index] == image->target) target_published = member_published;
-    }
-    if (!target_published) {
+    // Peers can be called directly inside the image. Their public entries
+    // still follow their own hotness counters (D8.3.2).
+    if (!interp_publish_satellite_member(script, (AstFuncNode*)image->target,
+            image->target_entry)) {
         (void)arraylist_pop(script->interp_satellite_images);
         return false;
     }
@@ -375,11 +388,14 @@ static void interp_loop_continuation_publish(Script* script, InterpSatelliteJob*
 
 static void interp_satellite_publish_ready(Script* script) {
     InterpSatelliteQueue* queue = script ? script->interp_satellite_queue : NULL;
-    if (!queue) return;
-    for (;;) {
+    // Empty polls are common at call entries. Publish only after taking the
+    // job under the queue lock (D8.3.4).
+    while (queue && atomic_load32(&queue->ready_available)) {
         pthread_mutex_lock(&queue->mutex);
         InterpSatelliteJob* job = queue->ready && queue->ready->length > 0
             ? (InterpSatelliteJob*)arraylist_pop_front(queue->ready) : NULL;
+        if (!queue->ready || queue->ready->length == 0)
+            atomic_store32(&queue->ready_available, 0);
         pthread_mutex_unlock(&queue->mutex);
         if (!job) return;
 
@@ -789,7 +805,7 @@ static bool interp_note_tail_call(InterpFrame* frame);
 static bool interp_tail_handoff_candidate(const InterpFrame* frame);
 static bool interp_promote_function_from_tail(Function* fn);
 #ifndef LAMBDA_NO_MIR
-static uint32_t interp_jit_threshold(void);
+static uint32_t interp_jit_threshold(InterpState* st);
 #endif
 static LambdaBoundary interp_parameter_boundary(InterpFrame* f, const AstFuncNode* fn_node,
     const char* fallback_name, int index);
@@ -6695,7 +6711,7 @@ static InterpState* interp_current_state(void);
 // assumed. Handoff is one-way.
 
 #ifndef LAMBDA_NO_MIR
-static uint32_t interp_jit_backedge_threshold(void);
+static uint32_t interp_jit_backedge_threshold(InterpState* st);
 static bool interp_satellite_sync_enabled(void);
 
 static FnPromotionCell* interp_frame_cell(InterpFrame* frame) {
@@ -7002,6 +7018,22 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
     return continuation->name ? continuation : NULL;
 }
 
+static InterpLoopInput interp_observe_loop_input(Item value) {
+    TypeId type = get_type_id(value);
+    switch (type) {
+    case LMD_TYPE_INT: case LMD_TYPE_FLOAT: case LMD_TYPE_BOOL: case LMD_TYPE_STRING:
+        return {type, (TypeId)0};
+    case LMD_TYPE_ARRAY_NUM:
+        if (array_num_layout_proves_contract_rank(value.array_num, 1)) {
+            if (value.array_num->get_elem_type() == ELEM_INT) return {type, LMD_TYPE_INT};
+            if (value.array_num->get_elem_type() == ELEM_FLOAT64) return {type, LMD_TYPE_FLOAT};
+        }
+        break;
+    default: break;
+    }
+    return {};
+}
+
 static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_node,
         FnPromotionCell* cell) {
     // D8.3.2: a `while` or a plain `for` statement
@@ -7016,6 +7048,7 @@ static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_no
     int live_count = 0;
     Pool* pool = NULL;
     AstFuncNode* continuation = NULL;
+    InterpLoopInput* inputs = NULL;
     const char* why = NULL;
     cell->loop_state = FN_LOOP_HANDOFF_PINNED;   // until the job is queued
 
@@ -7073,11 +7106,20 @@ static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_no
         continuation = pool ? interp_build_loop_continuation(pool, def, loop, live,
             live_count) : NULL;
         NameEntry** saved = pool ? (NameEntry**)pool_calloc(pool,
-            sizeof(NameEntry*) * (size_t)(live_count > 0 ? live_count : 1)) : NULL;
+            sizeof(NameEntry*) * (size_t)live_count +
+            sizeof(InterpLoopInput) * (size_t)(live_count + resume_args + 1)) : NULL;
         if (!continuation || !saved) {
             why = "out-of-memory";
         } else {
             memcpy(saved, live, sizeof(NameEntry*) * (size_t)live_count);
+            // The compiler sees tags only. A later evaluator safe point
+            // checks those tags before entering the specialized body (D8.3.2).
+            inputs = (InterpLoopInput*)(saved + live_count);
+            for (int i = 0; i < live_count; i++) {
+                NameEntry* entry = live[i];
+                if (entry->has_type_annotation || entry->declared_type || entry->is_var_param) continue;
+                inputs[i] = interp_observe_loop_input((Item){.item = frame->slots[entry->slot]});
+            }
             cell->loop_live_ins = saved;
             why = interp_satellite_refusal(frame->module, continuation);
         }
@@ -7097,7 +7139,7 @@ static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_no
     cell->loop_resume_arg_count = (uint8_t)resume_args;
     cell->loop_state = FN_LOOP_HANDOFF_NONE;   // the enqueue claims it
     if (!interp_satellite_enqueue(st->runtime, frame->module, def, cell,
-            continuation, pool)) {
+            continuation, pool, inputs)) {
         cell->loop_state = FN_LOOP_HANDOFF_PINNED;
         cell->loop_continuation = NULL;
         cell->loop_live_ins = NULL;
@@ -7127,7 +7169,7 @@ static void interp_note_backedges(InterpFrame* frame, uint64_t trips) {
     uint64_t after = before + trips;
     *count = after > UINT32_MAX ? UINT32_MAX : (uint32_t)after;
     if (cell->loop_state == FN_LOOP_HANDOFF_NONE) {
-        if (after >= interp_jit_backedge_threshold()) {
+        if (after >= interp_jit_backedge_threshold(frame->st)) {
             interp_queue_loop_handoff(frame, loop, cell);
         }
     } else if (cell->loop_state == FN_LOOP_HANDOFF_QUEUED &&
@@ -7158,6 +7200,13 @@ static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item*
     }
     const AstFuncNode* continuation = cell->loop_continuation;
     int live_count = cell->loop_live_in_count;
+    const InterpLoopInput* inputs = (const InterpLoopInput*)(cell->loop_live_ins + live_count);
+    for (int i = 0; i < live_count; i++) {
+        if (!inputs[i].type) continue;
+        InterpLoopInput actual = interp_observe_loop_input(
+            (Item){.item = f->slots[cell->loop_live_ins[i]->slot]});
+        if (inputs[i].type != actual.type || inputs[i].element != actual.element) return false;
+    }
     int argc = live_count + resume_count;
     // the argument words and the Function are rooted across the allocation
     // and the call (D6.3.3)
@@ -7216,7 +7265,7 @@ static bool interp_tail_handoff_candidate(const InterpFrame* frame) {
     const FnPromotionCell* cell = interp_promotion_cell(frame->module, frame->fn);
     if (!cell) return false;
     if (cell->state != FN_PROMOTION_INTERP) return false;
-    uint32_t threshold = interp_jit_threshold();
+    uint32_t threshold = interp_jit_threshold(frame->st);
     return cell->tail_edge_count == UINT32_MAX ||
         cell->tail_edge_count + 1 >= threshold;
 }
@@ -7229,7 +7278,7 @@ static bool interp_note_tail_call(InterpFrame* frame) {
     if (cell->state != FN_PROMOTION_INTERP) return false;
     if (cell->call_count != UINT32_MAX) cell->call_count++;
     if (cell->tail_edge_count != UINT32_MAX) cell->tail_edge_count++;
-    return cell->tail_edge_count >= interp_jit_threshold();
+    return cell->tail_edge_count >= interp_jit_threshold(frame->st);
 }
 
 #else
@@ -8302,15 +8351,24 @@ void interp_set_func_jit_threshold_default(uint32_t threshold) {
     g_interp_func_jit_threshold_default = threshold ? threshold : 1;
 }
 
-static uint32_t interp_jit_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_FUNC_JIT_THRESHOLD",
-        g_interp_func_jit_threshold_default);
+static void interp_read_promotion_thresholds(InterpState* st) {
+    // One policy per interpreter state. Polling an eligible loop must not
+    // walk the process environment on every interpreted back edge (D8.3.2).
+    st->func_jit_threshold = interp_promotion_threshold(
+        "LAMBDA_FUNC_JIT_THRESHOLD", g_interp_func_jit_threshold_default);
+    st->loop_jit_threshold = interp_promotion_threshold("LAMBDA_LOOP_JIT_THRESHOLD", 1024);
+    st->has_jit_thresholds = true;
 }
 
-// back-edges of one handoff loop's subtree before its continuation compiles;
-// the user set 10000 on 2026-10-02 (D8.3.2, Interp Tune2 §4.3)
-static uint32_t interp_jit_backedge_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_LOOP_JIT_THRESHOLD", 10000);
+static uint32_t interp_jit_threshold(InterpState* st) {
+    if (!st->has_jit_thresholds) interp_read_promotion_thresholds(st);
+    return st->func_jit_threshold;
+}
+
+// back-edges of one handoff loop's subtree before its continuation compiles
+static uint32_t interp_jit_backedge_threshold(InterpState* st) {
+    if (!st->has_jit_thresholds) interp_read_promotion_thresholds(st);
+    return st->loop_jit_threshold;
 }
 
 // `LAMBDA_SATELLITE_SYNC=1` publishes each satellite at the promotion that
@@ -8400,8 +8458,8 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
     // D8.3.2: entries and self-tail edges promote a definition; a hot loop
     // instead hands its running activation off at the loop head, so owning a
     // loop no longer promotes at the first entry (the retired v7 trigger).
-    if (cell->call_count < interp_jit_threshold() &&
-            cell->tail_edge_count < interp_jit_threshold()) return false;
+    uint32_t threshold = interp_jit_threshold(st);
+    if (cell->call_count < threshold && cell->tail_edge_count < threshold) return false;
     if (const char* refusal = interp_satellite_refusal(script, def)) {
         // A pinned definition is a declared interpreter policy, never a
         // fallback to a different module compilation path (T27-6).

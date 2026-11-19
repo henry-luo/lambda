@@ -206,6 +206,9 @@ struct InterpState {
     uint32_t     depth;          // remaining recursion budget
     uint32_t     depth_limit;
     uint64_t     node_count;     // evaluated nodes, for the measurement report
+    uint32_t     func_jit_threshold;
+    uint32_t     loop_jit_threshold;
+    bool         has_jit_thresholds;
     bool         depth_exhausted;
     // CONST mode consumes this per-node budget.  A rejected call or an
     // exhausted budget is local to the attempt: the fold is declined, never

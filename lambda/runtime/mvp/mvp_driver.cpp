@@ -154,16 +154,16 @@ static bool build_property_key_image(ArrayList* property_keys,
 }
 
 // D8.3.3: the module-level definitions reachable from `target` through
-// direct calls that a satellite may define beside it. Already compiled or
-// pinned definitions keep their own entries (calls to them stay dynamic), as
-// do unsupported bodies and anything that is not a module-level function of
-// this script (imports, nested definitions, methods).
+// direct calls that a satellite may define beside it. Continuations may also
+// specialize a compiled peer under the loop's incoming domains (D8.3.3).
 typedef struct MirSatelliteClusterScan {
     AstScript* root;
     Script* script;
-    AstFuncNode** members;
+    const AstFuncNode** members;
+    const char* skip;
     int count;
     int capacity;
+    bool include_compiled;
 } MirSatelliteClusterScan;
 
 static bool mir_satellite_module_definition(AstScript* root, AstFuncNode* def) {
@@ -180,25 +180,17 @@ static bool mir_satellite_module_definition(AstScript* root, AstFuncNode* def) {
 
 static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
     MirSatelliteClusterScan* scan = (MirSatelliteClusterScan*)opaque;
-    if (!node) return;
+    if (!node || scan->count == scan->capacity) return;
     switch (node->node_type) {
     case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
     case AST_NODE_ARROW_FUNC:
         return;   // a nested definition's calls are its own
     case AST_NODE_CALL_EXPR: {
         AstFuncNode* direct = ast_direct_call_function((AstCallNode*)node);
-        bool supported = direct && mir_satellite_module_definition(scan->root, direct) &&
-            interp_satellite_supported(scan->script, direct);
-        if (direct && scan->count < scan->capacity &&
-                (((AstNode*)direct)->node_type == AST_NODE_FUNC ||
-                 ((AstNode*)direct)->node_type == AST_NODE_PROC) &&
-                mir_satellite_module_definition(scan->root, direct) &&
-                interp_promotion_cell(scan->script, direct) &&
-                interp_promotion_cell(scan->script, direct)->state == FN_PROMOTION_INTERP &&
-                supported) {
+        if (direct && mir_satellite_module_definition(scan->root, direct)) {
             bool seen = false;
             for (int i = 0; i < scan->count && !seen; i++) seen = scan->members[i] == direct;
-            const char* skip = getenv("LAMBDA_SATELLITE_CLUSTER_SKIP");
+            const char* skip = scan->skip;
             if (!seen && skip && direct->name) {
                 const char* hit = strstr(skip, direct->name->chars);
                 size_t len = direct->name->len;
@@ -208,14 +200,14 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
                 }
                 if (hit) seen = true;
             }
-            if (!seen) scan->members[scan->count++] = direct;
-        } else if (direct) {
-            log_debug("interp-tier: satellite cluster skips function='%s' module_def=%d state=%d supported=%d",
-                direct->name ? direct->name->chars : "<anonymous>",
-                (int)mir_satellite_module_definition(scan->root, direct),
-                interp_promotion_cell(scan->script, direct)
-                    ? (int)interp_promotion_cell(scan->script, direct)->state : -1,
-                (int)supported);
+            if (!seen) {
+                FnPromotionCell* cell = interp_promotion_cell(scan->script, direct);
+                if (cell && (cell->state == FN_PROMOTION_INTERP || (scan->include_compiled &&
+                        (cell->state == FN_PROMOTION_COMPILED || cell->state == FN_PROMOTION_QUEUED))) &&
+                        interp_satellite_supported(scan->script, direct)) {
+                    scan->members[scan->count++] = direct;
+                }
+            }
         }
         break;
     }
@@ -225,14 +217,16 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
     ast_visit_lambda_children(node, mir_satellite_cluster_visit, opaque);
 }
 
-static int mir_satellite_collect_cluster(Script* script, AstScript* root, AstFuncNode* target,
-        AstFuncNode** members, int capacity) {
+int lambda_mvp_collect_satellite_members(Script* script, const AstFuncNode* target,
+        const AstFuncNode** members, int capacity, bool include_compiled) {
     // diagnostics: LAMBDA_SATELLITE_CLUSTER_CAP=N bounds the cluster (1 = the
     // old one-definition image); LAMBDA_SATELLITE_CLUSTER_SKIP=a,b keeps the
     // named definitions out of it (they stay dynamic targets)
     const char* cap_env = getenv("LAMBDA_SATELLITE_CLUSTER_CAP");
-    if (cap_env && atoi(cap_env) > 0 && atoi(cap_env) < capacity) capacity = atoi(cap_env);
-    MirSatelliteClusterScan scan = {root, script, members, 0, capacity};
+    int requested = cap_env ? atoi(cap_env) : 0;
+    if (requested > 0 && requested < capacity) capacity = requested;
+    MirSatelliteClusterScan scan = {(AstScript*)script->ast_root, script, members,
+        getenv("LAMBDA_SATELLITE_CLUSTER_SKIP"), 0, capacity, include_compiled};
     members[scan.count++] = target;
     // worklist: members appended while scanning are scanned in turn
     for (int i = 0; i < scan.count; i++) {
@@ -240,7 +234,7 @@ static int mir_satellite_collect_cluster(Script* script, AstScript* root, AstFun
     }
     // keep source order stable for generated names and diagnostic receipts.
     for (int i = 1; i < scan.count; i++) {
-        AstFuncNode* key = members[i];
+        const AstFuncNode* key = members[i];
         int j = i - 1;
         while (j >= 0 && members[j]->source_span.start_byte > key->source_span.start_byte) {
             members[j + 1] = members[j];
@@ -256,6 +250,8 @@ static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
 
 static bool mvp_compile_function_image(Runtime* runtime, Script* script,
         const AstFuncNode* fn, uint32_t sequence, bool snapshot,
+        const AstFuncNode* const* members, int member_count,
+        const InterpLoopInput* loop_inputs,
         InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image) {
     if (out_image) *out_image = NULL;
@@ -280,8 +276,6 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
     int source_const_count = script->const_list ? script->const_list->length : 0;
     int source_type_count = script->type_list ? script->type_list->length : 0;
     MirModuleNames names = {};
-    AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP] = {};
-    int member_count = 0;
     AstFuncNode* copies = NULL;
     AstFuncNode* compiled_target = NULL;
     AstScript satellite_root = {};
@@ -341,26 +335,10 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
     }
     if (cancel_probe && cancel_probe(cancel_context)) goto fail;
 
-    // `AstFuncNode::next` is the module declaration chain. The temporary root
-    // must contain exactly the compiled definitions or a promotion would
-    // accidentally lower the rest of the module again. D8.3.3: those are
-    // the target plus its direct-callee CLUSTER (module-level, supported, not
-    // yet compiled or pinned), so the calls among them are direct native
-    // edges with the eager tier's call-site inference instead of boxed
-    // dynamic dispatch through every callee's wrapper (richards/deltablue
-    // 1.2-1.4x, diviter 66x on the auto tier).
+    // Only the definitions selected by the evaluator enter this image.
+    // Rebuild their declaration chain without mutating the retained AST
+    // (D8.3.3, D8.3.4).
     source_root = (AstScript*)script->ast_root;
-    // A worker image starts with one definition. Collecting a cluster reads
-    // other promotion cells, which belong to the evaluator-owned overlay for
-    // cached ASTs; retaining that graph expansion for the publication phase
-    // keeps the worker snapshot completely read-only.
-    if (snapshot) {
-        members[0] = (AstFuncNode*)fn;
-        member_count = 1;
-    } else {
-        member_count = mir_satellite_collect_cluster(script, source_root, (AstFuncNode*)fn,
-            members, INTERP_SATELLITE_CLUSTER_CAP);
-    }
     copies = (AstFuncNode*)mem_calloc((size_t)member_count,
         sizeof(AstFuncNode), MEM_CAT_EVAL);
     if (!copies) goto fail;
@@ -404,7 +382,8 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
     mvp_tp.script_owner = script; mvp_tp.runtime = runtime;
     mvp_tp.compile_against_interp_slab = true;
     if (!lambda_mvp_compile_satellite(&mvp_tp, satellite_context,
-            &names, &artifacts, &property_keys)) goto fail;
+            &names, &artifacts, &property_keys, snapshot ? compiled_target : NULL,
+            loop_inputs)) goto fail;
     mem_free(copies);
     copies = NULL;
     if (cancel_probe && cancel_probe(cancel_context)) goto fail;
@@ -472,12 +451,12 @@ static bool mvp_compile_function_image(Runtime* runtime, Script* script,
     image->compiler_type_list = snapshot_type_list;
     image->target = fn;
     image->target_entry = entry;
-    image->member_count = (uint32_t)member_count;
-    for (int index = 0; index < member_count; index++) {
+    image->member_count = snapshot ? 0 : (uint32_t)member_count;
+    for (uint32_t index = 0; index < image->member_count; index++) {
         image->members[index] = members[index];
         StrBuf* member_name = strbuf_new_cap(96);
         if (member_name) {
-            write_fn_name_ex(member_name, members[index], NULL, "_b");
+            write_fn_name_ex(member_name, (AstFuncNode*)members[index], NULL, "_b");
             image->member_entries[index] = find_func(satellite_context, member_name->str);
             strbuf_free(member_name);
         }
@@ -516,10 +495,16 @@ void interp_satellite_image_destroy(InterpSatelliteImage* image) {
 
 bool lambda_mvp_compile_function_snapshot(Runtime* runtime, Script* script,
         const AstFuncNode* fn, uint32_t sequence,
+        const AstFuncNode* const* members, int member_count,
+        const InterpLoopInput* loop_inputs,
         InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image) {
-    return mvp_compile_function_image(runtime, script, fn, sequence,
-        true, cancel_probe, cancel_context, out_image);
+    if (mvp_compile_function_image(runtime, script, fn, sequence, true,
+            members, member_count, loop_inputs, cancel_probe, cancel_context, out_image)) return true;
+    // An optional peer can exceed the image's compiler budget or require
+    // a descriptor outside the snapshot. Still try the triggering body.
+    return member_count > 1 && mvp_compile_function_image(runtime, script, fn,
+        sequence, true, &fn, 1, loop_inputs, cancel_probe, cancel_context, out_image);
 }
 
 bool interp_satellite_image_prepare(Script* script, InterpSatelliteImage* image) {
@@ -544,8 +529,11 @@ bool lambda_mvp_compile_function(Runtime* runtime, Script* script,
 
     InterpSatelliteImage* image = NULL;
     uint32_t sequence = ++script->interp_satellite_count;
+    const AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP];
+    int member_count = lambda_mvp_collect_satellite_members(script, fn, members,
+        INTERP_SATELLITE_CLUSTER_CAP);
     if (!mvp_compile_function_image(runtime, script, fn, sequence,
-            false, NULL, NULL, &image) || !image) {
+            false, members, member_count, NULL, NULL, NULL, &image) || !image) {
         return false;
     }
     // Keep the first image as the Script's lookup/teardown anchor.  Later
