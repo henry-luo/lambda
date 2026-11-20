@@ -2233,7 +2233,6 @@ static StaticBoundaryResult ast_return_boundary_relation(AstFuncNode* function,
 }
 
 static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self);
-static AstNode* boundary_unwrap_primary(AstNode* node);
 bool ast_expr_may_defect(AstNode* node, int depth);
 
 static bool ast_call_defect_pred(AstCallNode* call, void* ctx) {
@@ -2251,7 +2250,7 @@ bool ast_expr_may_defect(AstNode* node, int depth) {
 static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self) {
     if (!call || call->propagate) return false;
     if (call->fn_colour_guard & LAMBDA_COLOUR_GUARD_ARGS) return true;
-    AstNode* callee = boundary_unwrap_primary(call->function);
+    AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
         if (!info) return false;
@@ -2343,19 +2342,6 @@ static bool ast_find_defect_origin(AstNode* node, void* data) {
     return !scan->found;
 }
 
-static void ast_note_function_defect(AstFuncNode* fn, TypeFunc* signature) {
-    AstDefectScan scan = {fn, signature->has_explicit_return_contract
-        ? signature->return_contract : NULL, false};
-    walk_lambda_ast(fn->body, ast_find_defect_origin, &scan, false);
-    AstNode* body = boundary_unwrap_primary(fn->body);
-    if (!scan.found && scan.return_contract && body && body->node_type != AST_NODE_CONTENT &&
-            ast_return_boundary_relation(fn, body, scan.return_contract) != STATIC_BOUNDARY_PROVEN) {
-        scan.found = true;   // the tail is the value the declared return checks
-    }
-    signature->may_defect = scan.found;
-    signature->defect_known = true;
-}
-
 // Calls with an error-capable argument have one extra control-flow edge: a
 // parameter that excludes error returns that exact Item before its body starts.
 // Compare only the successful union members here; the MIR caller guard owns
@@ -2409,7 +2395,7 @@ static bool propagated_fill_contract_admits(AstNode* value, Type* target) {
     if (!value || value->node_type != AST_NODE_CALL_EXPR) return false;
     AstCallNode* call = (AstCallNode*)value;
     if (!call->propagate || call->pipe_inject) return false;
-    AstNode* callee = boundary_unwrap_primary(call->function);
+    AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
     SysFuncInfo* builtin = callee && callee->node_type == AST_NODE_SYS_FUNC
         ? ((AstSysFuncNode*)callee)->fn_info : NULL;
     AstNode* filler = call->argument ? call->argument->next : NULL;
@@ -2436,7 +2422,7 @@ struct MapFieldBoundaryProof {
 static MapFieldBoundaryProof ast_map_field_boundary(AstNode* source,
         ShapeEntry* expected, int depth) {
     MapFieldBoundaryProof proof = {true, STATIC_BOUNDARY_PROVEN};
-    AstNode* value = boundary_unwrap_primary(source);
+    AstNode* value = ast_unwrap_primary_to_leaf(source);
     if (!value || depth > 64) return {true, STATIC_BOUNDARY_DEFERRED};
     if (value->node_type != AST_NODE_MAP) {
         Type* type = boundary_unwrap_type(value->type);
@@ -2470,7 +2456,7 @@ static MapFieldBoundaryProof ast_map_field_boundary(AstNode* source,
 }
 
 static bool ast_map_construction_is_total(AstNode* source, int depth) {
-    AstNode* value = boundary_unwrap_primary(source);
+    AstNode* value = ast_unwrap_primary_to_leaf(source);
     if (!value || depth > 64) return false;
     if (value->node_type != AST_NODE_MAP) {
         Type* type = boundary_unwrap_type(value->type);
@@ -2534,7 +2520,7 @@ static StaticBoundaryResult ast_value_boundary_relation(AstNode* source, Type* t
     // field proofs must not erase that ordinary-error completion (S7.7.2v2).
     if (proof_type && lambda_type_has_proven_error(proof_type))
         return static_boundary_relation(proof_type, target);
-    AstNode* value = boundary_unwrap_primary(source);
+    AstNode* value = ast_unwrap_primary_to_leaf(source);
     Type* expected = boundary_unwrap_type(target);
     // An any field admits a nested map without requiring a record layout.
     if (expected && ((expected->type_id == LMD_TYPE_ANY && lambda_type_accepts_error(expected)) ||
@@ -2580,18 +2566,9 @@ StaticBoundaryResult lambda_ast_boundary_relation(AstNode* source, Type* target,
     return ast_value_boundary_relation(source, target, proof_type, 0, false);
 }
 
-static AstNode* boundary_unwrap_primary(AstNode* node) {
-    while (node && node->node_type == AST_NODE_PRIMARY) {
-        AstNode* inner = ((AstPrimaryNode*)node)->expr;
-        if (!inner) break;
-        node = inner;
-    }
-    return node;
-}
-
 static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declaration,
         TypeMap* expected, int line) {
-    AstNode* rhs = boundary_unwrap_primary(declaration->init);
+    AstNode* rhs = ast_unwrap_primary_to_leaf(declaration->init);
     if (!rhs || rhs->node_type != AST_NODE_MAP || !expected ||
             expected == (TypeMap*)&TYPE_MAP) return;
     TypeMap* actual = (TypeMap*)rhs->type;
@@ -2713,19 +2690,6 @@ static bool is_object_field_entry(NameEntry* entry) {
     return entry && entry->node && entry->node->node_type == AST_NODE_KEY_EXPR;
 }
 
-static AstNode* unwrap_primary_node(AstNode* node) {
-    while (node && node->node_type == AST_NODE_PRIMARY) {
-        AstPrimaryNode* primary = (AstPrimaryNode*)node;
-        node = primary->expr;
-    }
-    return node;
-}
-
-// promoted to ast-core.hpp as ast_compound_root_ident (CW30 shares it)
-static AstIdentNode* compound_root_ident(AstNode* node) {
-    return ast_compound_root_ident(node);
-}
-
 // S8.2.4v3: a subscript key names one position when it is a number -- or a
 // nullable one, since a null key reads as absent (S7.1.1v3) -- and then reads
 // a single element; any other key may select a collection.
@@ -2768,7 +2732,7 @@ static bool ast_index_keys_select(AstNode* field) {
 // Person contract across every interior write.
 Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         const char** destination_label, bool* optional_field) {
-    node = unwrap_primary_node(node);
+    node = ast_unwrap_primary(node);
     if (!node) return NULL;
     if (node->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)node;
@@ -2797,7 +2761,7 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         if (owner_type && owner_type->type_id == LMD_TYPE_MAP &&
                 !is_global_simple_type(owner_type) && index->field && !index->field->next) {
             Item key = ItemNull;
-            AstNode* key_node = unwrap_primary_node(index->field);
+            AstNode* key_node = ast_unwrap_primary(index->field);
             bool literal_key = tp ? ast_static_literal_item(tp, index->field, &key)
                 : static_literal_item_from_type(key_node ? key_node->type :
                     index->field->type, &key);
@@ -3614,6 +3578,17 @@ static String* binding_node_name(AstNode* node) {
         ? ((AstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
 }
 
+static void invalidate_lexical_lookup(Transpiler* tp);
+
+static void append_scope_binding(Transpiler* tp, NameEntry* entry) {
+    NameScope* scope = tp->current_scope;
+    if (scope->last) scope->last->next = entry;
+    else scope->first = entry;
+    scope->last = entry;
+    (void)name_scope_index_add(tp->pool, scope, entry);
+    invalidate_lexical_lookup(tp);
+}
+
 static void push_name_with_spelling(Transpiler* tp, AstNode* node,
         String* name, AstImportNode* import) {
     if (!tp || !tp->name_pool || !name) return;
@@ -3626,8 +3601,8 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
         if (!name) return;
     }
     StrView name_view = {name->chars, name->len};
-    if (ast_node_declares_binding(node) &&
-            is_reserved_identifier_keyword(name_view)) {
+    bool declares = ast_node_declares_binding(node);
+    if (declares && is_reserved_identifier_keyword(name_view)) {
         int line = (int)ast_node_start_point(tp, node).row + 1;
         // S16.10.1: keywords never name bindings; no quoted escape exists,
         // since a quoted use site is a symbol and symbols never implicitly
@@ -3638,7 +3613,7 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
     // S12.3.7: a user binding shadows a same-named system function for this
     // module only. Legal and forward-compatible (a new sys func must never
     // change an existing program), but always warned so accidents surface.
-    else if (ast_node_declares_binding(node) && !import && !log_is_disabled() &&
+    else if (declares && !import && !log_is_disabled() &&
             is_sys_func_name(name_view.str, (int)name_view.length)) {
         log_warn("lambda_shadow_lint: line %d: '%.*s' shadows a system function in this module; "
             "calls here resolve to your definition",
@@ -3665,10 +3640,7 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
     }
     // The builder publishes the canonical declaration binding before any
     // interpreter or MIR pass can consume the function definition (D8.2.4).
-    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
-    if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
-    tp->current_scope->last = entry;
-    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
+    append_scope_binding(tp, entry);
     // An import publishes a local view of a declaration owned by another
     // script. The source AST is shared with that provider, so never rewrite
     // its declaration edge: doing so would redirect both its closure identity
@@ -3863,6 +3835,7 @@ static Type* namespace_symbol_type(Transpiler* tp, Target* target, String* field
 
 // The same resolved namespace identity serves literal keys, tags and patterns.
 Target* lambda_namespace_qualify(Transpiler* tp, StrView spelling, StrView* local) {
+    if (!tp->namespaces) return NULL;
     const char* dot = (const char*)memchr(spelling.str, '.', spelling.length);
     if (!dot || dot == spelling.str || dot + 1 == spelling.str + spelling.length) return NULL;
     size_t prefix_length = (size_t)(dot - spelling.str);
@@ -3884,8 +3857,9 @@ static AstNode* namespace_key_expr(Transpiler* tp, Target* target, StrView local
     return (AstNode*)key;
 }
 
-static void resolve_qualified_literal_keys(Transpiler* tp, AstNode* items) {
-    if (!tp->namespaces) return;
+static bool resolve_qualified_literal_keys(Transpiler* tp, AstNode* items) {
+    if (!tp->namespaces) return false;
+    bool computed = false;
     for (AstNode* item = items; item; item = item->next) {
         if (item->node_type != AST_NODE_KEY_EXPR) continue;
         AstNamedNode* named = (AstNamedNode*)item;
@@ -3898,7 +3872,9 @@ static void resolve_qualified_literal_keys(Transpiler* tp, AstNode* items) {
         if (!target) continue;
         named->key = namespace_key_expr(tp, target, local, item->source_span);
         named->name = name_pool_create_strview(tp->name_pool, local);
+        computed = true;
     }
+    return computed;
 }
 
 static bool resolve_qualified_member_key(Transpiler* tp, AstNode** object,
@@ -4512,7 +4488,7 @@ static bool parameter_short_circuits_argument_error(Transpiler* tp,
 // these checks (D7.6.3). Returns false only when transpiling must stop.
 static bool validate_var_argument_root(Transpiler* tp, SourceSpan diagnostic_span,
         AstNode* arg, int arg_index, NameEntry** roots, int* root_count) {
-    AstIdentNode* root = compound_root_ident(arg);
+    AstIdentNode* root = ast_compound_root_ident(arg);
     if (!root || !root->entry || !root->entry->is_mutable) {
         record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
             "argument %d for `var` parameter must be a mutable `var` binding",
@@ -4545,17 +4521,17 @@ static bool validate_var_argument_root(Transpiler* tp, SourceSpan diagnostic_spa
 // D7.6.3 / S9.1.3v4: a plain argument must stay a snapshot while a callee
 // writes a `var` place in place. Its value may share storage with the place when
 // it reads a borrowed root, or calls a definition that might return one.
+// The semantic walker enumerates sibling arguments at their parent even
+// when this predicate stops at an identifier.
 typedef struct VarAliasScan {
-    AstNode* top;
     NameEntry* const* roots;
     int root_count;
     bool found;
 } VarAliasScan;
 
-static void var_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
+static void var_alias_scan_cb(AstNode* child, void* opaque) {
     VarAliasScan* scan = (VarAliasScan*)opaque;
     if (scan->found || !child) return;
-    if (parent == scan->top && child == scan->top->next) return;
     if (child->node_type == AST_NODE_IDENT) {
         for (int i = 0; i < scan->root_count; i++)
             if (((AstIdentNode*)child)->entry == scan->roots[i]) scan->found = true;
@@ -4568,12 +4544,12 @@ static void var_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
             return;
         }
     }
-    ast_visit_core_children(child, var_alias_scan_cb, opaque);
+    ast_visit_lambda_children(child, var_alias_scan_cb, opaque);
 }
 
 static bool argument_may_alias_roots(AstNode* arg, NameEntry* const* roots, int count) {
-    VarAliasScan scan = {arg, roots, count, false};
-    var_alias_scan_cb(arg, NULL, &scan);
+    VarAliasScan scan = {roots, count, false};
+    var_alias_scan_cb(arg, &scan);
     return scan.found;
 }
 
@@ -4587,7 +4563,7 @@ static uint16_t var_alias_capture_mask(AstNode* const* args, const bool* is_var,
     NameEntry* roots[LAMBDA_MAX_FUNCTION_ARGS];
     int root_count = 0;
     for (int i = 0; i < count; i++) {
-        AstIdentNode* root = is_var[i] && args[i] ? compound_root_ident(args[i]) : NULL;
+        AstIdentNode* root = is_var[i] && args[i] ? ast_compound_root_ident(args[i]) : NULL;
         if (root && root->entry) roots[root_count++] = root->entry;
     }
     uint16_t mask = pipe_inject ? 1 : 0;
@@ -4620,7 +4596,7 @@ static void validate_native_var_arguments(Transpiler* tp, SourceSpan span,
         bool named = place && (place->node_type == AST_NODE_IDENT ||
             (ast_collect_cow_path(&path, place) && path.count > 0 && path.root &&
              path.root->node_type == AST_NODE_IDENT));
-        AstIdentNode* root = compound_root_ident(arg);
+        AstIdentNode* root = ast_compound_root_ident(arg);
         if (!named || !root || !root->entry || root->entry->import) {
             record_semantic_error_span(tp, span, ERR_IMMUTABLE_ASSIGNMENT,
                 "argument %d for `var` parameter must be a local `var` binding or a member/index place of one",
@@ -4877,20 +4853,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     return true;
 }
 
-static NameEntry* lookup_interned_name(Transpiler* tp, String* name) {
-    if (!name) return NULL;
-    NameScope* scope = tp->current_scope;
-    while (scope) {
-        NameEntry* entry = scope->first ? name_scope_lookup_name(scope, name) : NULL;
-        if (entry) return entry;
-        if (scope == scope->parent) {
-            log_error("scope lookup: circular parent scope");
-            return NULL;
-        }
-        scope = scope->parent;
-    }
-    return NULL;
-}
+static NameEntry* lookup_interned_name(Transpiler* tp, String* name);
 
 NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
     if (!tp || !tp->current_scope || !tp->name_pool) return NULL;
@@ -4915,16 +4878,10 @@ static_assert(sizeof(AstSysFuncNode) <= sizeof(AstIdentNode),
 static_assert(sizeof(AstTypeNode) <= sizeof(AstIdentNode),
     "a base-type word must be able to hold its type node");
 
-// A syntax-only name reads as `any` until the resolve pass binds it. This is
-// not an any-census site: resolution always assigns the real type.
-static Type* unresolved_type_any(void) {
-    return &TYPE_ANY;
-}
-
 // qualified and bare builtin values must publish the same callable contract;
 // a return-typed call callee is not a function value (D7.2.1, S12.3.7).
-static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocated, SysFuncInfo* info) {
-    morph_ast_node(node, AST_NODE_SYS_FUNC, allocated);
+static void set_sys_func_value_type(Transpiler* tp, AstSysFuncNode* node) {
+    SysFuncInfo* info = node->fn_info;
     TypeFunc* type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     type->is_variadic = info->arg_count < 0;
     type->param_count = type->is_variadic ? 0 : info->arg_count;
@@ -4939,36 +4896,38 @@ static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocat
     type->may_acquire_resources = !info->is_proc && bound == LAMBDA_EFFECT_UNRESTRICTED;
     type->can_raise = info->can_raise;
     type->may_return_error = info->may_return_error;
-    ((AstSysFuncNode*)node)->fn_info = info;
     node->type = (Type*)type;
+}
+
+static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocated,
+        SysFuncInfo* info, bool direct_callee = false) {
+    morph_ast_node(node, AST_NODE_SYS_FUNC, allocated);
+    AstSysFuncNode* sys = (AstSysFuncNode*)node;
+    sys->fn_info = info;
+    if (direct_callee) node->type = NULL;
+    else set_sys_func_value_type(tp, sys);
 }
 
 static void init_identifier_syntax(AstIdentNode* node, SourceSpan span, String* name) {
     init_ast_node(node, AST_NODE_IDENT, span);
     node->name = name;
-    node->type = unresolved_type_any();
+    node->type = &TYPE_ANY;  // placeholder until the source-order lookup
     node->syntax_form = LSF_IDENT;
 }
 
-static AstNode* build_wrapped_identifier_syntax(Transpiler* tp, SourceSpan span, String* name) {
-    // The wrapper and its name have the same lifetime and keep separate
-    // identities. Reserve both together to avoid a second arena allocation.
-    struct WrappedIdentifier { AstPrimaryNode primary; AstIdentNode ident; };
-    auto* atom = (WrappedIdentifier*)alloc_ast_storage(tp, sizeof(WrappedIdentifier));
-    if (!atom) return NULL;
-    init_identifier_syntax(&atom->ident, span, name);
-    init_ast_node(&atom->primary, AST_NODE_PRIMARY, span);
-    atom->primary.expr = &atom->ident;
-    atom->primary.syntax_form = LSF_WRAPPER;
-    return &atom->primary;
+static AstIdentNode* build_identifier_syntax(Transpiler* tp, SourceSpan span, String* name) {
+    // The name already carries the atom's full span and effective type. Only
+    // an explicit group needs a wrapper for its different span and scope.
+    AstIdentNode* node = (AstIdentNode*)alloc_ast_storage(tp, sizeof(AstIdentNode));
+    if (node) init_identifier_syntax(node, span, name);
+    return node;
 }
 
-static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
+static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node, NameEntry* entry,
+        bool direct_callee = false) {
     SourceSpan span = ast_node->source_span;
     StrView var_name = {ast_node->name->chars, (size_t)ast_node->name->len};
 
-    // The syntax sink has already interned this spelling in our NamePool.
-    NameEntry* entry = lookup_interned_name(tp, ast_node->name);
     if (!entry) {
         // Name resolution order for an unbound name: 1) `import math`
         // constants, 2) `~.name` in a body that leaves `~` implicit, 3) system
@@ -5019,7 +4978,7 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
         }
         SysFuncInfo* sys_value = get_unambiguous_sys_func_value(&var_name);
         if (sys_value) {
-            resolve_sys_func_value(tp, (AstNode*)ast_node, sizeof(AstIdentNode), sys_value);
+            resolve_sys_func_value(tp, ast_node, sizeof(AstIdentNode), sys_value, direct_callee);
             return;
         }
         // ident is used for member access, thus we return TYPE_ANY
@@ -5027,9 +4986,12 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
     }
     else {
         // a later top-level alias resolves here, so this reference sees it complete
-        lambda_ast_resolve_type_early(tp, entry->node);
+        if (entry->node && entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                ((AstDeclaratorNode*)entry->node)->is_type_definition) {
+            lambda_ast_resolve_type_early(tp, entry->node);
+            lambda_ast_note_type_reference(entry->node);
+        }
         ast_node->entry = entry;
-        lambda_ast_note_type_reference(entry->node);
         if (entry->is_binder && entry->binder) {
             // A binder read is a first-class runtime type value. Its contained
             // type remains the written bound in type position (TG2/TG9), while
@@ -5105,12 +5067,11 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
 // Resolve-time construction (a callee spelled as a type word, a base-type
 // word that names a builtin) binds a new name immediately.
 AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
-    AstIdentNode* node = (AstIdentNode*)alloc_ast_storage(tp, sizeof(AstIdentNode));
-    if (!node) return NULL;
-    init_identifier_syntax(node, span,
+    AstIdentNode* node = build_identifier_syntax(tp, span,
         name_pool_create_strview(tp->name_pool, source_span_text(tp, span)));
+    if (!node) return NULL;
     node->syntax_form = LSF_NONE;
-    resolve_identifier(tp, (AstIdentNode*)node);
+    resolve_identifier(tp, node, lookup_interned_name(tp, node->name));
     return node;
 }
 
@@ -5938,68 +5899,52 @@ void record_unknown_base_type_span(Transpiler* tp, SourceSpan span,
         "unknown type '%.*s'", (int)type_name.length, type_name.str);
 }
 
-bool lambda_unary_operator_from_spelling(StrView op, Operator* op_out) {
-    if (!op_out) return false;
-    if (strview_equal(&op, "not")) { *op_out = OPERATOR_NOT; }
-    else if (strview_equal(&op, "-")) { *op_out = OPERATOR_NEG; }
-    else if (strview_equal(&op, "+")) { *op_out = OPERATOR_POS; }
-    else { return false; }
-    return true;
-}
-
-bool lambda_binary_operator_from_spelling(StrView op, Operator* op_out) {
-    if (!op_out) return false;
-    if (strview_equal(&op, "and")) { *op_out = OPERATOR_AND; }
-    else if (strview_equal(&op, "or")) { *op_out = OPERATOR_OR; }
-    else if (strview_equal(&op, "+")) { *op_out = OPERATOR_ADD; }
-    else if (strview_equal(&op, "++")) { *op_out = OPERATOR_JOIN; }
-    else if (strview_equal(&op, "-")) { *op_out = OPERATOR_SUB; }
-    else if (strview_equal(&op, "*")) { *op_out = OPERATOR_MUL; }
-    else if (strview_equal(&op, "**")) { *op_out = OPERATOR_POW; }
-    else if (strview_equal(&op, "/")) { *op_out = OPERATOR_DIV; }
-    else if (strview_equal(&op, "div")) { *op_out = OPERATOR_IDIV; }
-    else if (strview_equal(&op, "%")) { *op_out = OPERATOR_MOD; }
-    else if (strview_equal(&op, "==")) { *op_out = OPERATOR_EQ; }
-    else if (strview_equal(&op, "===")) { *op_out = OPERATOR_REF_EQ; }
-    else if (strview_equal(&op, "!=")) { *op_out = OPERATOR_NE; }
-    else if (strview_equal(&op, "<")) { *op_out = OPERATOR_LT; }
-    else if (strview_equal(&op, "<=")) { *op_out = OPERATOR_LE; }
-    else if (strview_equal(&op, ">")) { *op_out = OPERATOR_GT; }
-    else if (strview_equal(&op, ">=")) { *op_out = OPERATOR_GE; }
-    else if (strview_equal(&op, "eq")) { *op_out = OPERATOR_ELEM_EQ; }
-    else if (strview_equal(&op, "ne")) { *op_out = OPERATOR_ELEM_NE; }
-    else if (strview_equal(&op, "lt")) { *op_out = OPERATOR_ELEM_LT; }
-    else if (strview_equal(&op, "le")) { *op_out = OPERATOR_ELEM_LE; }
-    else if (strview_equal(&op, "gt")) { *op_out = OPERATOR_ELEM_GT; }
-    else if (strview_equal(&op, "ge")) { *op_out = OPERATOR_ELEM_GE; }
-    else if (strview_equal(&op, "to")) { *op_out = OPERATOR_TO; }
-    else if (strview_equal(&op, "|")) { *op_out = OPERATOR_UNION; }
-    else if (strview_equal(&op, "|>")) { *op_out = OPERATOR_PIPE; }
-    else if (strview_equal(&op, "|:")) { *op_out = OPERATOR_FILTER; }
-    else if (strview_equal(&op, "that")) { *op_out = OPERATOR_THAT; }
-    else if (strview_equal(&op, "&")) { *op_out = OPERATOR_INTERSECT; }
-    else if (strview_equal(&op, "!")) { *op_out = OPERATOR_EXCLUDE; }
-    else if (strview_equal(&op, "is")) { *op_out = OPERATOR_IS; }
-    else if (strview_equal(&op, "<:")) { *op_out = OPERATOR_SUBTYPE; }
-    else if (strview_equal(&op, "in")) { *op_out = OPERATOR_IN; }
-    else if (strview_equal(&op, "at")) { *op_out = OPERATOR_AT; }
-    else if (strview_equal(&op, "of")) { *op_out = OPERATOR_OF; }
-    else { return false; }
-    return true;
-}
-
-// `not x`, `-x`, `+x`: the syntax node holds the operator spelling and operand.
-static void resolve_unary(Transpiler* tp, AstUnaryNode* ast_node) {
-    StrView op = ast_node->op_str;
-    AstNode* operand = ast_node->operand;
-    if (!lambda_unary_operator_from_spelling(op, &ast_node->op)) {
-        // `*` spread and `!` type negation have distinct retained node shapes;
-        // ordinary unary construction must not silently classify either one.
-        log_error("build unary from parts: unsupported operator %.*s", (int)op.length,
-            op.str);
-        ast_node->type = &TYPE_ERROR;
-        return;
+// The parser already selected the infix token. Store its semantic operator
+// on the syntax node so resolution needs no spelling lookup.
+static bool assign_binary_operator(LambdaTokenKind kind, Operator* op) {
+    switch (kind) {
+    case LAMBDA_TOK_AND: *op = OPERATOR_AND; break;
+    case LAMBDA_TOK_OR: *op = OPERATOR_OR; break;
+    case LAMBDA_TOK_PLUS: *op = OPERATOR_ADD; break;
+    case LAMBDA_TOK_PLUS_PLUS: *op = OPERATOR_JOIN; break;
+    case LAMBDA_TOK_MINUS: *op = OPERATOR_SUB; break;
+    case LAMBDA_TOK_STAR: *op = OPERATOR_MUL; break;
+    case LAMBDA_TOK_STAR_STAR: *op = OPERATOR_POW; break;
+    case LAMBDA_TOK_SLASH: *op = OPERATOR_DIV; break;
+    case LAMBDA_TOK_DIV: *op = OPERATOR_IDIV; break;
+    case LAMBDA_TOK_PERCENT: *op = OPERATOR_MOD; break;
+    case LAMBDA_TOK_EQ_EQ: *op = OPERATOR_EQ; break;
+    case LAMBDA_TOK_EQ_EQ_EQ: *op = OPERATOR_REF_EQ; break;
+    case LAMBDA_TOK_BANG_EQ: *op = OPERATOR_NE; break;
+    case LAMBDA_TOK_LT: *op = OPERATOR_LT; break;
+    case LAMBDA_TOK_LT_EQ: *op = OPERATOR_LE; break;
+    case LAMBDA_TOK_GT: *op = OPERATOR_GT; break;
+    case LAMBDA_TOK_GT_EQ: *op = OPERATOR_GE; break;
+    case LAMBDA_TOK_EQ_WORD: *op = OPERATOR_ELEM_EQ; break;
+    case LAMBDA_TOK_NE_WORD: *op = OPERATOR_ELEM_NE; break;
+    case LAMBDA_TOK_LT_WORD: *op = OPERATOR_ELEM_LT; break;
+    case LAMBDA_TOK_LE_WORD: *op = OPERATOR_ELEM_LE; break;
+    case LAMBDA_TOK_GT_WORD: *op = OPERATOR_ELEM_GT; break;
+    case LAMBDA_TOK_GE_WORD: *op = OPERATOR_ELEM_GE; break;
+    case LAMBDA_TOK_TO: *op = OPERATOR_TO; break;
+    case LAMBDA_TOK_PIPE: *op = OPERATOR_UNION; break;
+    case LAMBDA_TOK_PIPE_FORWARD: *op = OPERATOR_PIPE; break;
+    case LAMBDA_TOK_PIPE_FILTER: *op = OPERATOR_FILTER; break;
+    case LAMBDA_TOK_THAT: *op = OPERATOR_THAT; break;
+    case LAMBDA_TOK_AMPERSAND: *op = OPERATOR_INTERSECT; break;
+    case LAMBDA_TOK_BANG: *op = OPERATOR_EXCLUDE; break;
+    case LAMBDA_TOK_IS: *op = OPERATOR_IS; break;
+    case LAMBDA_TOK_SUBTYPE: *op = OPERATOR_SUBTYPE; break;
+    case LAMBDA_TOK_IN: *op = OPERATOR_IN; break;
+    case LAMBDA_TOK_AT: *op = OPERATOR_AT; break;
+    case LAMBDA_TOK_OF: *op = OPERATOR_OF; break;
+    default: return false;
     }
+    return true;
+}
+
+static void resolve_unary(Transpiler* tp, AstUnaryNode* ast_node) {
+    AstNode* operand = ast_node->operand;
     if (!operand) {
         log_error("build unary from parts: missing operand");
         ast_node->type = &TYPE_ERROR;
@@ -6064,7 +6009,7 @@ static inline bool is_elementwise_comparison_op(Operator op) {
 }
 
 static bool is_direct_elementwise_comparison(AstNode* node) {
-    node = unwrap_primary_node(node);
+    node = ast_unwrap_primary(node);
     return node && node->node_type == AST_NODE_BINARY &&
         is_elementwise_comparison_op(((AstBinaryNode*)node)->op);
 }
@@ -6162,7 +6107,7 @@ static Type* alloc_array_num_result_type(Transpiler* tp, AstBinaryNode* ast_node
 
 
 static bool ast_may_evaluate_to_type_value(AstNode* node) {
-    node = boundary_unwrap_primary(node);
+    node = ast_unwrap_primary_to_leaf(node);
     if (!node) return false;
     if (ast_is_explicit_type_value(node)) return true;
     Type* type = node->type;
@@ -6172,7 +6117,7 @@ static bool ast_may_evaluate_to_type_value(AstNode* node) {
 }
 
 static Type* ast_explicit_type_value_contract(AstNode* node) {
-    node = boundary_unwrap_primary(node);
+    node = ast_unwrap_primary_to_leaf(node);
     if (!node || !ast_is_explicit_type_value(node)) return NULL;
     return type_field_unwrap_simple_decl(node->type);
 }
@@ -6472,7 +6417,7 @@ static void resolve_match(Transpiler* tp, AstMatchNode* node) {
     node->type = mixed ? set_type_any(tp, ANY_JOIN) :
         (result ? result : &TYPE_NULL);
     validate_match_branch_homogeneity(tp, node, span);
-    AstNode* value = boundary_unwrap_primary(scrutinee);
+    AstNode* value = ast_unwrap_primary_to_leaf(scrutinee);
     if (value && value->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)value;
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
@@ -6768,14 +6713,20 @@ Type* lookup_base_type_name(Transpiler* tp, StrView name) {
     return lambda_base_type_from_index(tp, lambda_base_type_index(name));
 }
 
+static ShapeEntry* alloc_compiler_shape_entry(Pool* pool, String* name) {
+    if (!name) return (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+    // The field and its spelling view have the same script lifetime (D3.4.3).
+    struct NamedShapeEntry { ShapeEntry field; StrView name; };
+    auto* storage = (NamedShapeEntry*)pool_calloc(pool, sizeof(NamedShapeEntry));
+    storage->name = {name->chars, name->len};
+    storage->field.name = &storage->name;
+    return &storage->field;
+}
+
 // Append one typed field to a shape under construction.
 ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* pooled_name, Type* field_type,
         ShapeEntry** shape, ShapeEntry** prev_entry, int byte_offset) {
-    StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
-    name_view->str = pooled_name->chars;
-    name_view->length = pooled_name->len;
-    ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
-    shape_entry->name = name_view;
+    ShapeEntry* shape_entry = alloc_compiler_shape_entry(tp->pool, pooled_name);
     shape_entry_set_type(shape_entry, field_type);
     shape_entry->byte_offset = byte_offset;
     if (!*shape) *shape = shape_entry;
@@ -6848,18 +6799,10 @@ void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
 
 static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode* item,
                                          bool is_spread, bool normalize_type) {
-    ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+    ShapeEntry* shape_entry = alloc_compiler_shape_entry(tp->pool,
+        is_spread ? NULL : ((AstNamedNode*)item)->name);
     // a nameless slot makes owner->length stop counting fields; see TypeMap::has_spread
     if (is_spread && owner) owner->has_spread = true;
-    if (!is_spread) {
-        String* pooled_name = ((AstNamedNode*)item)->name;
-        StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
-        name_view->str = pooled_name->chars;
-        name_view->length = pooled_name->len;
-        shape_entry->name = name_view;
-    } else {
-        shape_entry->name = NULL;
-    }
     Type* field_type = item->type;
     if (normalize_type && field_type && field_type->type_id == LMD_TYPE_TYPE) {
         bool is_type_value = !is_spread &&
@@ -6898,41 +6841,32 @@ static bool ast_node_is_syntactic_spread_key(Transpiler* tp, AstNode* item) {
     return source.length > 0 && source.str[0] == '*';
 }
 
-static bool ast_node_is_computed_key(AstNode* item) {
-    return item && item->node_type == AST_NODE_KEY_EXPR &&
-        ((AstNamedNode*)item)->key;
-}
-
-static bool ast_map_items_require_runtime_shape(Transpiler* tp, AstNode* items) {
-    for (AstNode* item = items; item; item = item->next) {
-        if (ast_node_is_computed_key(item) || ast_node_is_syntactic_spread_key(tp, item)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // S2.3.1v2: check written names before namespace lowering or item relinking;
 // computed keys and spread contents keep their runtime replacement semantics.
-static void validate_literal_keys(Transpiler* tp, AstNode* items) {
+static bool validate_literal_keys(Transpiler* tp, AstNode* items) {
     struct WrittenKey { String* name; Target* ns; };
-    int count = ast_linked_node_count(items);
-    WrittenKey* seen = (WrittenKey*)pool_calloc(tp->pool, sizeof(WrittenKey) * count);
-    int used = 0;
+    WrittenKey local_keys[16];
+    WrittenKey* seen = local_keys;
+    size_t limit = sizeof(local_keys) / sizeof(local_keys[0]);
+    size_t used = 0;
+    bool dynamic = false;
     for (AstNode* item = items; item; item = item->next) {
-        if (item->node_type != AST_NODE_KEY_EXPR ||
-                ast_node_is_syntactic_spread_key(tp, item)) continue;
+        if (item->node_type != AST_NODE_KEY_EXPR) continue;
         AstNamedNode* named = (AstNamedNode*)item;
-        if (named->key || !named->name) continue;
+        named->is_spread = ast_node_is_syntactic_spread_key(tp, item);
+        if (named->is_spread || named->key) { dynamic = true; continue; }
+        if (!named->name) continue;
         String* name = named->name;
         Target* ns = NULL;
-        StrView source = ast_node_source(tp, item);
-        if (!source.length || source.str[0] != '\'') {
-            StrView local = {};
-            ns = lambda_namespace_qualify(tp, {name->chars, name->len}, &local);
-            if (ns) name = name_pool_create_strview(tp->name_pool, local);
+        if (tp->namespaces) {
+            StrView source = ast_node_source(tp, item);
+            if (!source.length || source.str[0] != '\'') {
+                StrView local = {};
+                ns = lambda_namespace_qualify(tp, {name->chars, name->len}, &local);
+                if (ns) name = name_pool_create_strview(tp->name_pool, local);
+            }
         }
-        for (int i = 0; i < used; i++) {
+        for (size_t i = 0; i < used; i++) {
             if (same_name_string(seen[i].name, name) && target_equal(seen[i].ns, ns)) {
                 record_semantic_error_span(tp, item->source_span, ERR_DUPLICATE_KEY,
                     "duplicate explicit key '%.*s' in literal",
@@ -6940,79 +6874,53 @@ static void validate_literal_keys(Transpiler* tp, AstNode* items) {
                 break;
             }
         }
+        // Size the scratch table once if the literal outgrows the local array.
+        if (used == limit) {
+            limit += ast_linked_node_count(item);
+            seen = (WrittenKey*)mem_alloc(limit * sizeof(WrittenKey), MEM_CAT_TEMP);
+            if (!seen) { tp->build_allocation_failed = true; return dynamic; }
+            memcpy(seen, local_keys, sizeof(local_keys));
+        }
         seen[used++] = {name, ns};
     }
+    if (seen != local_keys) mem_free(seen);
+    return dynamic;
 }
 
 // A map node holds the raw item list its items were reduced into; resolution
 // relinks it as the retained item chain.
 static void resolve_map(Transpiler* tp, AstMapNode* ast_node) {
     AstNode* items = ast_node->item;
-    validate_literal_keys(tp, items);
-    resolve_qualified_literal_keys(tp, items);
-    ast_node->item = NULL;
+    bool dynamic = validate_literal_keys(tp, items);
+    dynamic |= resolve_qualified_literal_keys(tp, items);
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     TypeMap* type = (TypeMap*)ast_node->type;
     // An AST literal site reuses this shape for every evaluation; retain it as
     // an immutable recipe so a field write cannot retag a sibling's layout (S1.6, S9.1.2).
     type->is_transition_shared_shape = true;
 
-    if (ast_map_items_require_runtime_shape(tp, items)) {
+    if (dynamic) {
         // S16.8.9: source order, including spreads, reaches the runtime
         // builder intact because it owns computed-name replacement. A spread
         // can be a VMap, whose fields have no static raw-Map storage shape.
         ast_node->has_computed_key = true;
         type->has_spread = true;
-        AstNode* previous = NULL;
-        for (AstNode* item = items; item;) {
-            AstNode* next = item->next;
-            item->next = NULL;
-            if (ast_node_is_syntactic_spread_key(tp, item)) {
-                // The runtime builder retains KeyExpr nodes, so carry the
-                // syntactic spread marker that static shape construction
-                // otherwise consumes while creating a nameless slot.
-                ((AstNamedNode*)item)->is_spread = true;
-            }
-            if (previous) previous->next = item;
-            else ast_node->item = item;
-            previous = item;
-            item = next;
-        }
         arraylist_append(tp->type_list, type);
         type->type_index = tp->type_list->length - 1;
         return;
     }
 
-    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
-    for (AstNode* raw_item = items; raw_item;) {
-        AstNode* next_item = raw_item->next;
-        bool is_spread = ast_node_is_syntactic_spread_key(tp, raw_item);
-        AstNode* item = is_spread ? ((AstNamedNode*)raw_item)->as : raw_item;
-        if (!item) { log_error("build_map: null expr item");  break; }
-
-        // The input chain represents syntactic map items, but the retained
-        // AST represents a spread by its value. Detach before relinking so a
-        // direct parser's raw reduction list cannot leak stale sibling links.
-        item->next = NULL;
-
-        if (!prev_item) { ast_node->item = item; }
-        else { prev_item->next = item; }
-        prev_item = item;
-
-        ShapeEntry* shape_entry = build_map_shape_entry(tp, type, item, is_spread, true);
-        // Only syntactic type expressions produce a first-class Type* field.
-        // Ordinary calls can carry a TypeType-shaped abstract contract while
-        // still returning an Item; treating that carrier as `type` makes a
-        // numeric result read through the Type* lane and dereference its bits.
-        Type* field_type = shape_entry->type;
+    ShapeEntry* prev_entry = NULL;
+    int byte_offset = 0;
+    for (AstNode* item = items; item; item = item->next) {
+        ShapeEntry* shape_entry = build_map_shape_entry(tp, type, item, false, true);
         shape_entry->byte_offset = byte_offset;
         if (!prev_entry) { type->shape = shape_entry; }
         else { prev_entry->chain_next = shape_entry; }
         prev_entry = shape_entry;
 
         type->length++;
-        byte_offset += (!is_spread) ? shape_entry->storage.byte_size : sizeof(void*);
-        raw_item = next_item;
+        byte_offset += shape_entry->storage.byte_size;
     }
     type->byte_size = byte_offset;
 
@@ -7355,7 +7263,42 @@ struct FunctionExitFacts {
     CowParamRetentionSites retention;
     bool may_raise = false;
     bool may_exit = false;
+    bool may_write_through = true;
 };
+
+struct FunctionDefectRetentionScan {
+    AstDefectScan defect;
+    CowParamRetentionSites* retention;
+};
+
+static bool collect_defects_and_retention(AstNode* node, void* opaque) {
+    auto* scan = (FunctionDefectRetentionScan*)opaque;
+    bool collect = collect_cow_retention_site(node, scan->retention);
+    return ast_find_defect_origin(node, &scan->defect) || collect;
+}
+
+static void ast_note_function_defect(AstFuncNode* fn, TypeFunc* signature,
+        FunctionExitFacts* exits) {
+    AstDefectScan scan = {fn, signature->has_explicit_return_contract
+        ? signature->return_contract : NULL, false};
+    if (exits && fn->param && !exits->retention.collected) {
+        // A return-contract visit may already own the retention census. If
+        // it skipped the body, fill the census alongside defect discovery.
+        FunctionDefectRetentionScan shared = {scan, &exits->retention};
+        walk_lambda_ast(fn->body, collect_defects_and_retention, &shared, false);
+        scan.found = shared.defect.found;
+        exits->retention.collected = true;
+    } else {
+        walk_lambda_ast(fn->body, ast_find_defect_origin, &scan, false);
+    }
+    AstNode* body = ast_unwrap_primary_to_leaf(fn->body);
+    if (!scan.found && scan.return_contract && body && body->node_type != AST_NODE_CONTENT &&
+            ast_return_boundary_relation(fn, body, scan.return_contract) != STATIC_BOUNDARY_PROVEN) {
+        scan.found = true;   // the tail is the value the declared return checks
+    }
+    signature->may_defect = scan.found;
+    signature->defect_known = true;
+}
 
 typedef struct ReturnBoundaryScan {
     Transpiler* tp;
@@ -7423,7 +7366,7 @@ static bool error_call_name(Transpiler* tp, AstCallNode* call, const char** name
 }
 
 static TypeFunc* call_function_signature(AstCallNode* call) {
-    AstNode* function = call ? boundary_unwrap_primary(call->function) : NULL;
+    AstNode* function = call ? ast_unwrap_primary_to_leaf(call->function) : NULL;
     return function ? lambda_type_func_signature(function->type) : NULL;
 }
 
@@ -7548,7 +7491,7 @@ static Type* propagated_error_outcomes(Transpiler* tp, AstNode* node) {
 }
 
 static Type* return_value_proof_type(Transpiler* tp, AstNode* value) {
-    AstNode* node = boundary_unwrap_primary(value);
+    AstNode* node = ast_unwrap_primary_to_leaf(value);
     if (!node) return &TYPE_NULL;
     if (node->node_type == AST_NODE_CONTENT &&
             !((AstListNode*)node)->procedural_results) {
@@ -7678,7 +7621,7 @@ static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
 }
 
 static bool pattern_is_error_handler(AstNode* node, bool require_all_errors) {
-    AstNode* pattern = boundary_unwrap_primary(node);
+    AstNode* pattern = ast_unwrap_primary_to_leaf(node);
     // A filter preserves unmatched errors; a match arm explicitly classifies them.
     if (require_all_errors && ast_constrained_type(pattern)) return false;
     if (!pattern || !pattern->type || pattern->type->type_id != LMD_TYPE_TYPE ||
@@ -7785,7 +7728,7 @@ static bool outcome_requires_acknowledgment(Transpiler* tp, AstNode* node) {
 
 static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node,
         bool immediate_acknowledgment, bool return_acknowledgment) {
-    node = boundary_unwrap_primary(node);
+    node = ast_unwrap_primary_to_leaf(node);
     if (!node) return;
 
     if (!immediate_acknowledgment && outcome_requires_acknowledgment(tp, node)) {
@@ -8200,7 +8143,7 @@ static bool ast_reads_binding(AstNode* node, String* name) {
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
         // A direct callee name is a declaration reference, not a value read.
-        AstNode* callee = boundary_unwrap_primary(call->function);
+        AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
         if (!callee || callee->node_type != AST_NODE_IDENT) {
             if (ast_reads_binding(call->function, name)) return true;
         }
@@ -8289,12 +8232,12 @@ static bool ast_reads_binding(AstNode* node, String* name) {
 }
 
 static AstFuncNode* direct_user_callable(AstCallNode* call) {
-    AstNode* callee = call ? boundary_unwrap_primary(call->function) : NULL;
+    AstNode* callee = call ? ast_unwrap_primary_to_leaf(call->function) : NULL;
     if (!callee || callee->node_type != AST_NODE_IDENT) return NULL;
     AstIdentNode* ident = (AstIdentNode*)callee;
     AstNode* target = ident->entry ? ident->entry->node : NULL;
     if (target && target->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-        target = boundary_unwrap_primary(((AstDeclaratorNode*)target)->init);
+        target = ast_unwrap_primary_to_leaf(((AstDeclaratorNode*)target)->init);
     }
     return target && (target->node_type == AST_NODE_FUNC ||
         target->node_type == AST_NODE_FUNC_EXPR || target->node_type == AST_NODE_PROC)
@@ -8552,7 +8495,7 @@ static bool collect_procedural_return_type(AstNode* node, void* data) {
 }
 
 static bool procedural_body_exits(AstNode* node) {
-    node = boundary_unwrap_primary(node);
+    node = ast_unwrap_primary_to_leaf(node);
     if (!node) return false;
     switch (node->node_type) {
     case AST_NODE_RETURN_STAM:
@@ -8594,10 +8537,10 @@ static Type* infer_procedural_return_type(Transpiler* tp, AstFuncNode* fn,
 static bool handler_operand_is_proc(AstNode* operand) {
     // the postfix handler tier may wrap a procedure call in primary_expr;
     // classify the effective call so statement handlers keep their context.
-    AstNode* effective_operand = boundary_unwrap_primary(operand);
+    AstNode* effective_operand = ast_unwrap_primary_to_leaf(operand);
     if (!effective_operand || effective_operand->node_type != AST_NODE_CALL_EXPR) return false;
     AstCallNode* call = (AstCallNode*)effective_operand;
-    AstNode* callee = boundary_unwrap_primary(call->function);
+    AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
     if (!callee) return false;
     if (callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
@@ -8645,7 +8588,7 @@ static void resolve_handler(Transpiler* tp, AstHandlerNode* node) {
 // S7.5.1v6/S7.6.1v9: retain producer evidence when a join normalizes to any.
 // Open inference alone is not evidence; declarations and actual value flow are.
 static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth) {
-    node = boundary_unwrap_primary(node);
+    node = ast_unwrap_primary_to_leaf(node);
     if (!node || depth > 32 || ast_is_explicit_type_value(node)) return false;
     if (node->node_type == AST_NODE_RETURN_STAM ||
             node->node_type == AST_NODE_RAISE_EXPR || node->node_type == AST_NODE_RAISE_STAM)
@@ -8742,19 +8685,22 @@ static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* im
     String* name = binding_node_name(node);
     size_t name_len = name->len;
     size_t total_len = alias_len + 1 + name_len;  // alias.name
-    char* buf = pool_join3(tp->pool, alias->chars, alias_len, ".", 1,
-                           name->chars, name_len);
-    StrView qualified = {buf, total_len};
-    String* qualified_name = name_pool_create_strview(tp->name_pool, qualified);
+    // Only the interned spelling survives import resolution (D5.6.2).
+    char local[256];
+    char* buf = total_len <= sizeof(local) ? local : (char*)mem_alloc(total_len, MEM_CAT_TEMP);
+    if (!buf) { tp->build_allocation_failed = true; return; }
+    memcpy(buf, alias->chars, alias_len);
+    buf[alias_len] = '.';
+    memcpy(buf + alias_len + 1, name->chars, name_len);
+    String* qualified_name = name_pool_create_strview(tp->name_pool, {buf, total_len});
+    if (buf != local) mem_free(buf);
+    if (!qualified_name) { tp->build_allocation_failed = true; return; }
 
     NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
     entry->name = qualified_name;
     entry->node = node;  entry->import = import;
     entry->scope = tp->current_scope;
-    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
-    if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
-    tp->current_scope->last = entry;
-    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
+    append_scope_binding(tp, entry);
 }
 
 static void register_imported_object_type(Transpiler* tp, AstObjectTypeNode* obj_node) {
@@ -9218,7 +9164,7 @@ static void direct_bind_visit_node(DirectBindContext* bind, AstNode* node,
     bind->current_function = previous_function;
 }
 
-static bool direct_bind_collect_function(AstNode* node, void* opaque) {
+static bool collect_lambda_function(AstNode* node, void* opaque) {
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) {
         arraylist_append((ArrayList*)opaque, node);
@@ -9277,28 +9223,9 @@ void lambda_ast_shift_source_spans(AstNode* root, uint32_t byte_offset) {
     walk_lambda_ast(root, shift_source_span, &byte_offset, true);
 }
 
-static AstNode* unwrap_primary_ast(AstNode* node) {
-    while (node && node->node_type == AST_NODE_PRIMARY) {
-        node = ((AstPrimaryNode*)node)->expr;
-    }
-    return node;
-}
-
 static AstFuncNode* direct_pn_callee(AstCallNode* call) {
-    if (!call) return NULL;
-    AstNode* function = unwrap_primary_ast(call->function);
-    if (!function || function->node_type != AST_NODE_IDENT) return NULL;
-    NameEntry* entry = ((AstIdentNode*)function)->entry;
-    if (!entry || !entry->node || entry->node->node_type != AST_NODE_PROC) return NULL;
-    return (AstFuncNode*)entry->node;
-}
-
-static bool collect_concurrency_function(AstNode* node, void* data) {
-    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
-            node->node_type == AST_NODE_PROC) {
-        arraylist_append((ArrayList*)data, node);
-    }
-    return true;
+    AstFuncNode* definition = ast_direct_call_function(call);
+    return definition && definition->node_type == AST_NODE_PROC ? definition : NULL;
 }
 
 typedef struct MayAwaitScan {
@@ -9307,7 +9234,7 @@ typedef struct MayAwaitScan {
 } MayAwaitScan;
 
 static bool call_may_await(AstCallNode* call, const char** cause) {
-    AstNode* function = call ? unwrap_primary_ast(call->function) : NULL;
+    AstNode* function = call ? ast_unwrap_primary(call->function) : NULL;
     if (function && function->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
         if (info && info->is_async) {
@@ -9439,6 +9366,7 @@ static void concurrency_body_facts_destroy(ConcurrencyBodyFacts* facts,
     for (int i = 0; facts && i < count; i++) {
         arraylist_free(facts[i].calls);
     }
+    mem_free(facts);
 }
 
 typedef struct ConcurrencyValidation {
@@ -9446,13 +9374,13 @@ typedef struct ConcurrencyValidation {
 } ConcurrencyValidation;
 
 static AstStartNode* returned_start_node(AstNode* value) {
-    value = unwrap_primary_ast(value);
+    value = ast_unwrap_primary(value);
     if (!value) return NULL;
     if (value->node_type == AST_NODE_START) return (AstStartNode*)value;
     if (value->node_type != AST_NODE_IDENT) return NULL;
     NameEntry* entry = ((AstIdentNode*)value)->entry;
     if (!entry || !entry->node || entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
-    AstNode* assigned = unwrap_primary_ast(((AstDeclaratorNode*)entry->node)->init);
+    AstNode* assigned = ast_unwrap_primary(((AstDeclaratorNode*)entry->node)->init);
     return assigned && assigned->node_type == AST_NODE_START ? (AstStartNode*)assigned : NULL;
 }
 
@@ -9505,15 +9433,6 @@ static bool validate_handler_await_node(AstNode* node, void* data) {
 
 static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
         ArrayList* functions) {
-    bool owns_functions = false;
-    if (!functions) {
-        functions = arraylist_new(16);
-        if (!functions) return;
-        walk_lambda_ast((AstNode*)script, collect_concurrency_function,
-            functions, true);
-        owns_functions = true;
-    }
-
     for (int i = 0; i < functions->length; i++) {
         AstFuncNode* fn = (AstFuncNode*)functions->data[i];
         if (!fn->analysis) fn->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
@@ -9527,11 +9446,11 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
     ConcurrencyValidation validation = {.tp = tp};
     walk_lambda_ast((AstNode*)script, validate_concurrency_node, &validation, true);
 
-    ConcurrencyBodyFacts* facts = (ConcurrencyBodyFacts*)pool_calloc(tp->pool,
-        sizeof(ConcurrencyBodyFacts) * functions->length);
+    // Durable may-await facts live on functions. The solving graph is scratch.
+    ConcurrencyBodyFacts* facts = (ConcurrencyBodyFacts*)mem_calloc(
+        functions->length, sizeof(ConcurrencyBodyFacts), MEM_CAT_TEMP);
     if (!facts && functions->length > 0) {
         log_error("concurrency planner could not allocate body facts");
-        if (owns_functions) arraylist_free(functions);
         return;
     }
     for (int i = 0; i < functions->length; i++) {
@@ -9544,7 +9463,6 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
         if (facts[i].failed) {
             log_error("concurrency planner could not record procedure body facts");
             concurrency_body_facts_destroy(facts, functions->length);
-            if (owns_functions) arraylist_free(functions);
             return;
         }
     }
@@ -9582,7 +9500,6 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
         &handler_validation, true);
 
     concurrency_body_facts_destroy(facts, functions->length);
-    if (owns_functions) arraylist_free(functions);
 }
 
 static bool reject_proc_method_value(AstNode* node, void* data) {
@@ -9612,16 +9529,7 @@ static void lambda_ast_note_insertion_moves(AstFuncNode* fn);
 // is built and bound.
 static void lambda_ast_note_fixed_array_lengths(Transpiler* tp, AstFuncNode* fn);
 
-static void lambda_ast_decide_cow_borrows(Transpiler* tp, AstScript* script,
-        ArrayList* functions) {
-    bool owns_functions = false;
-    if (!functions) {
-        functions = arraylist_new(8);
-        if (!functions) return;
-        walk_lambda_ast((AstNode*)script, direct_bind_collect_function,
-            functions, true);
-        owns_functions = true;
-    }
+static void lambda_ast_decide_cow_borrows(Transpiler* tp, ArrayList* functions) {
     lambda_ast_note_returned_params(functions);
     lambda_ast_note_var_root_sharing(functions);
     for (int i = 0; i < functions->length; i++) {
@@ -9634,7 +9542,6 @@ static void lambda_ast_decide_cow_borrows(Transpiler* tp, AstScript* script,
         lambda_ast_note_fixed_array_lengths(tp, fn);
         lambda_ast_note_insertion_moves(fn);
     }
-    if (owns_functions) arraylist_free(functions);
 }
 
 // T28-7: fixed-length array locals. An index store never grows an array
@@ -10377,7 +10284,7 @@ static bool lambda_ast_analyze_indexed_captures(Transpiler* tp, AstScript* scrip
 
 bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
         AstScript* script, ArrayList* functions) {
-    if (!tp || !script || tp->error_count != 0) return false;
+    if (!tp || !script || !functions || tp->error_count != 0) return false;
     if (!lambda_ast_analyze_indexed_captures(tp, script)) return false;
     infer_callback_captures(tp, &tp->ast_index);
     infer_generative_effects(&tp->ast_index);
@@ -10406,18 +10313,22 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
         validate_cross_frame_binding_reads(tp, (AstFuncNode*)function_node);
     }
     if (tp->error_count != 0) return false;
-    // both parser front ends share this final pass. Direct AST construction
-    // used to skip it, leaving suspend-capable procedures without their
-    // resumable task state machine (D7.1.2).
-    if (tp->error_count == 0) lambda_ast_decide_cow_borrows(tp, script,
-        functions);
+    // Suspend-capable procedures need their resumable state machine (D7.1.2).
+    if (tp->error_count == 0) lambda_ast_decide_cow_borrows(tp, functions);
     if (tp->error_count == 0) analyze_lambda_concurrency(tp, script,
         functions);
     return tp->error_count == 0;
 }
 
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
-    return lambda_ast_finalize_script_with_functions(tp, script, NULL);
+    if (!tp || !script || tp->error_count) return false;
+    // Fragment callers share one discovery walk with both late analyses.
+    ArrayList* functions = arraylist_new(8);
+    if (!functions) return false;
+    walk_lambda_ast((AstNode*)script, collect_lambda_function, functions, true);
+    bool finalized = lambda_ast_finalize_script_with_functions(tp, script, functions);
+    arraylist_free(functions);
+    return finalized;
 }
 
 // --- direct recursive-descent AST front end: shared state ------------------
@@ -10544,6 +10455,13 @@ struct LambdaObjectResolutionState {
     int byte_offset;
 };
 
+struct LexicalLookup {
+    String* name;
+    NameScope* scope;
+    NameEntry* binding;
+    size_t generation;
+};
+
 struct LambdaResolver {
     Transpiler* tp;
     LambdaSyntaxUnit* unit;
@@ -10570,6 +10488,7 @@ struct LambdaResolver {
     size_t returns_seen;
     size_t raises_seen;
     size_t propagations_seen;
+    size_t write_candidates_seen;
     AstViewNode* view_nodes[64];
     uint32_t view_depth;
     AstEventHandler* event_handlers[64];
@@ -10586,6 +10505,8 @@ struct LambdaResolver {
     ArrayList* failed_import_names;
     uint32_t suppress_unresolved;
     uint64_t qualified_import_prefixes;
+    size_t binding_generation;
+    LexicalLookup recent_lookups[64];
     // the module scope, where a top-level alias resolved early resolves
     NameScope* module_scope;
 };
@@ -10638,6 +10559,27 @@ static void resolver_reject_unresolved(LambdaResolver* r) {
 // this one, so each resolve saves and restores it.
 static thread_local LambdaResolver* active_resolver = NULL;
 
+static void invalidate_lexical_lookup(Transpiler* tp) {
+    LambdaResolver* r = active_resolver;
+    if (r && r->tp == tp) r->binding_generation++;
+}
+
+static NameEntry* lookup_interned_name(Transpiler* tp, String* name) {
+    if (!name) return NULL;
+    LambdaResolver* r = active_resolver;
+    NameScope* scope = tp->current_scope;
+    if (!r || r->tp != tp) return name_scope_lookup_chain(scope, name);
+    // The nearest binding wins. Scope identity and the insertion generation
+    // cover shadowing, early alias resolution and nested module compilation.
+    size_t key = ((uintptr_t)name >> 4) ^ ((uintptr_t)name >> 10);
+    LexicalLookup& cached = r->recent_lookups[key % 64];
+    if (cached.name == name && cached.scope == scope &&
+            cached.generation == r->binding_generation) return cached.binding;
+    NameEntry* binding = name_scope_lookup_chain(scope, name);
+    cached = {name, scope, binding, r->binding_generation};
+    return binding;
+}
+
 static uint64_t qualified_import_prefix_bit(StrView prefix) {
     // An ASCII prefix stays byte-identical on the pool's normalization path.
     // Unknown leading bytes leave the exact lookup enabled.
@@ -10678,9 +10620,11 @@ static LambdaSourcePoint resolve_source_point(Transpiler* tp, uint32_t offset) {
             count * sizeof(uint32_t));
         if (!starts) return lambda_source_point_at(source, offset);
         starts[0] = 0;
-        size_t next = 1;
-        for (size_t i = 0; i < unit->source_length; i++) {
-            if (source[i] == '\n') starts[next++] = (uint32_t)(i + 1);
+        const char* line = source;
+        const char* end = source + unit->source_length;
+        for (size_t i = 1; i < count; i++) {
+            line = (const char*)memchr(line, '\n', end - line) + 1;
+            starts[i] = (uint32_t)(line - source);
         }
         unit->line_starts = starts;
         unit->line_count = count;
@@ -10901,10 +10845,7 @@ static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias)
 
 static void direct_append_binder_name(Transpiler* tp, NameEntry* entry) {
     if (!tp || !tp->current_scope || !entry) return;
-    if (!tp->current_scope->first) tp->current_scope->first = entry;
-    else tp->current_scope->last->next = entry;
-    tp->current_scope->last = entry;
-    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
+    append_scope_binding(tp, entry);
 }
 
 typedef struct DirectBinderForwardRef {
@@ -11265,13 +11206,6 @@ static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
     AstNode* right = node->right;
     reject_procedural_block_operand(tp, left, "an operand");
     reject_procedural_block_operand(tp, right, "an operand");
-    if (!lambda_binary_operator_from_spelling(op_spelling, &node->op)) {
-        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
-            "unknown binary operator '%.*s'", (int)op_spelling.length,
-            op_spelling.str);
-        node->type = &TYPE_ERROR;
-        return;
-    }
     if (node->op == OPERATOR_PIPE || node->op == OPERATOR_FILTER ||
             node->op == OPERATOR_THAT) {
         node->node_type = AST_NODE_PIPE;
@@ -11586,14 +11520,10 @@ static Type* direct_math_constant(Transpiler* tp, StrView name) {
 static_assert(sizeof(AstPrimaryNode) <= sizeof(AstFieldNode),
     "a member read must be able to become a constant or an import read");
 
-// A member read that names a constant, an import, or a namespace symbol is a
-// primary value; the member node becomes it in place.
-static void morph_member_to_primary(AstFieldNode* node, AstNode* expr,
-        Type* type) {
+// A member read that names a constant or a namespace symbol becomes a literal.
+static void morph_member_to_primary(AstFieldNode* node, Type* type) {
     morph_ast_node((AstNode*)node, AST_NODE_PRIMARY, sizeof(AstFieldNode));
-    AstPrimaryNode* primary = (AstPrimaryNode*)node;
-    primary->expr = expr;
-    primary->type = type;
+    node->type = type;
 }
 
 static AstFieldNode* build_field_syntax(Transpiler* tp, SourceSpan span,
@@ -11639,7 +11569,7 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
             if (strcmp(qualified_module, "math") == 0) {
                 Type* constant = direct_math_constant(tp, qualified_member);
                 if (constant) {
-                    morph_member_to_primary(node, NULL, constant);
+                    morph_member_to_primary(node, constant);
                     return;
                 }
             }
@@ -11661,13 +11591,13 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
                 // An import alias may share a system-function spelling (for
                 // example `stack`). Resolve its qualified export before the
                 // bare spelling can become a callable value (D5.6.1).
-                AstIdentNode* resolved = (AstIdentNode*)alloc_ast_node_from_span(
-                    tp, AST_NODE_IDENT, span, sizeof(AstIdentNode));
+                static_assert(sizeof(AstIdentNode) <= sizeof(AstFieldNode),
+                    "a qualified read must fit its resolved binding in place");
+                morph_ast_node(node, AST_NODE_IDENT, sizeof(AstFieldNode));
+                AstIdentNode* resolved = (AstIdentNode*)(AstNode*)node;
                 resolved->name = imported->name;
                 resolved->entry = imported;
                 resolved->type = imported->node->type ? imported->node->type : &TYPE_ANY;
-                morph_member_to_primary(node, (AstNode*)resolved,
-                    resolved->type ? resolved->type : &TYPE_ERROR);
                 return;
             }
         }
@@ -11681,7 +11611,7 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
             if (ns_entry) {
                 // A namespace prefix in expression position denotes a
                 // qualified symbol, not an unresolved variable member.
-                morph_member_to_primary(node, NULL, namespace_symbol_type(tp,
+                morph_member_to_primary(node, namespace_symbol_type(tp,
                     ns_entry->target, field_ident->name));
                 return;
             }
@@ -11691,7 +11621,7 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
                     field_ident->name->len);
                 Type* constant = direct_math_constant(tp, constant_name);
                 if (constant) {
-                    morph_member_to_primary(node, NULL, constant);
+                    morph_member_to_primary(node, constant);
                     return;
                 }
             }
@@ -11776,10 +11706,11 @@ static SysFuncInfo* resolve_effect_polymorphic_row(Transpiler* tp,
 }
 
 static AstNode* direct_sys_function(Transpiler* tp, SourceSpan span,
-        SysFuncInfo* info) {
+        SysFuncInfo* info, AstNode* callee_storage = NULL) {
     info = resolve_effect_polymorphic_row(tp, info);
-    AstSysFuncNode* node = (AstSysFuncNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode));
+    if (callee_storage) morph_ast_node(callee_storage, AST_NODE_SYS_FUNC, sizeof(AstIdentNode));
+    AstSysFuncNode* node = (AstSysFuncNode*)(callee_storage ? callee_storage
+        : alloc_ast_node_from_span(tp, AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode)));
     node->fn_info = info;
     if (info->fn == SYSFUNC_ERROR || info->fn == SYSFUNC_ERROR2) {
         // S7.4.4: a constructed error carries its source location (LR10-10)
@@ -11999,7 +11930,7 @@ static void reject_system_arity(Transpiler* tp, SourceSpan span,
     }
 }
 
-static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
+static void resolve_call_dispatch(Transpiler* tp, AstCallNode* call, bool bare_name_storage) {
     SourceSpan span = call->source_span;
     AstNode* function = call->function;
     AstNode* arguments = call->argument;
@@ -12118,16 +12049,19 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     if (effective && effective->node_type == AST_NODE_SYS_FUNC) {
         info = ((AstSysFuncNode*)effective)->fn_info;
         if (info) {
-            // A first-class builtin spelling may carry its only registry row
-            // before the call's arguments are known. Resolve it again here.
-            name = strview_from_cstr(info->name);
-            info = get_sys_func_info(&name, lookup_arg_count);
-            if (!info) info = lookup_global_imported_sys_func(tp, &name,
-                lookup_arg_count);
-            if (!info) {
-                reject_system_arity(tp, span, name, lookup_arg_count);
-                call->type = &TYPE_ERROR;
-                return;
+            // The name resolver already found the only registry row for a
+            // deferred bare callee. Reuse it when the call admits its arity.
+            bool unique = bare_name_storage && !effective->type;
+            if (!unique || (info->arg_count != lookup_arg_count && info->arg_count != -1)) {
+                name = strview_from_cstr(info->name);
+                info = unique ? NULL : get_sys_func_info(&name, lookup_arg_count);
+                if (!info) info = lookup_global_imported_sys_func(tp, &name,
+                    lookup_arg_count);
+                if (!info) {
+                    reject_system_arity(tp, span, name, lookup_arg_count, unique);
+                    call->type = &TYPE_ERROR;
+                    return;
+                }
             }
         }
     } else if (effective && effective->node_type == AST_NODE_IDENT) {
@@ -12182,11 +12116,9 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
         return;
     }
     if (info) {
-        // Keep the resolved sysfunc as the call callee even when the parser
-        // supplied a primary wrapper around the spelling. The MIR pipe fast
-        // path (and the Tree builder) dispatch on AST_NODE_SYS_FUNC itself;
-        // retaining the wrapper would fall back to generic fn_pipe_call.
-        call->function = direct_sys_function(tp, function->source_span, info);
+        // MIR pipe lowering dispatches directly on the selected builtin row.
+        call->function = direct_sys_function(tp, function->source_span, info,
+            bare_name_storage ? function : NULL);
         if (info->fn == SYSPROC_PUSH || info->fn == SYSPROC_SPLICE) {
             // Mutation builtins write through their first argument just like
             // compound assignment; apply the same immutable-root rule before
@@ -12237,8 +12169,8 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             effective->node_type == AST_NODE_TYPE && name.length &&
             is_sys_func_name(name.str, (int)name.length);
         // `error` is both a type spelling and a constructor name (S7.4.4).
-        // If no arity-compatible system entry was found, the Tree builder
-        // keeps that call dynamic; treating the lexical TYPE token as a value
+        // If no arity-compatible system entry was found, keep the call
+        // dynamic; treating the lexical TYPE token as a value
         // constructor here incorrectly turns an unresolved named call into a
         // proven error return and rejects its enclosing fn with E208.
         if (unresolved_system_spelling) {
@@ -12292,7 +12224,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                 field && field->name ? field->name->chars : "");
             call->type = &TYPE_ERROR;
         } else {
-            AstIdentNode* receiver_root = compound_root_ident(user_method_receiver);
+            AstIdentNode* receiver_root = ast_compound_root_ident(user_method_receiver);
             if (!receiver_root || !receiver_root->entry || !receiver_root->entry->is_mutable) {
                 // A pn method writes its implicit receiver back on return;
                 // reject a let root before that write can be lost.
@@ -12330,10 +12262,30 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     (void)mark_call_borrow_outcomes(tp, call);
 }
 
-static void resolve_call(Transpiler* tp, AstCallNode* call) {
+static bool call_may_write_through(AstCallNode* call) {
+    if (call->node_type == AST_NODE_START || call->is_proc_method) return true;
+    if (!call->argument && !call->pipe_inject) return false;
+    AstNode* callee = ast_unwrap_primary(call->function);
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        return !info || info->is_proc;
+    }
+    // An indirect callee can forward a borrow. A direct fn has no var
+    // parameters (S9.1.3v4), including forward references to that fn.
+    AstFuncNode* definition = ast_direct_call_function(call);
+    return !definition || definition->node_type == AST_NODE_PROC;
+}
+
+static void resolve_call_body(Transpiler* tp, AstCallNode* call, bool bare_name_storage = false) {
+    resolve_call_dispatch(tp, call, bare_name_storage);
+    LambdaResolver* r = active_resolver;
+    if (r && r->tp == tp && call_may_write_through(call)) r->write_candidates_seen++;
+}
+
+static void resolve_call(Transpiler* tp, AstCallNode* call, bool bare_name_storage) {
     int prior_pipe_inject = tp->pipe_inject_args;
     tp->pipe_inject_args = (call->syntax_flags & LSF_CALL_PIPE_INJECT) ? 1 : 0;
-    resolve_call_body(tp, call);
+    resolve_call_body(tp, call, bare_name_storage);
     tp->pipe_inject_args = prior_pipe_inject;
 }
 
@@ -12445,7 +12397,7 @@ static AstNode* build_element_syntax(Transpiler* tp, SourceSpan span,
 static void resolve_element(Transpiler* tp, AstElementNode* node) {
     String* name = (String*)syntax_tail((AstNode*)node, ELEMENT_SYNTAX_SIZE)[0];
     AstNode* children = node->item;
-    validate_literal_keys(tp, children);
+    bool has_computed_key = validate_literal_keys(tp, children);
     node->item = NULL;
     StrView tag = {name->chars, (size_t)name->len};
     NameEntry* type_entry = NULL;
@@ -12473,8 +12425,8 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
         type->name = {local->chars, local->len};
         type->name_id = name_ref_id(local);
     }
-    resolve_qualified_literal_keys(tp, children);
-    bool has_computed_key = node->tag_expr || ast_map_items_require_runtime_shape(tp, children);
+    has_computed_key |= resolve_qualified_literal_keys(tp, children);
+    has_computed_key |= node->tag_expr != NULL;
 
     AstNode* prev = NULL;
     ShapeEntry* prev_shape = NULL;
@@ -12821,7 +12773,7 @@ static bool direct_validate_write_owner(Transpiler* tp, SourceSpan span,
 
 static void direct_validate_mutable_compound(Transpiler* tp,
         SourceSpan span, AstNode* object) {
-    AstIdentNode* root = compound_root_ident(object);
+    AstIdentNode* root = ast_compound_root_ident(object);
     if (!root || !root->entry) return;
     if (!direct_validate_write_owner(tp, span, root->entry, root->name)) return;
     if (root->entry->is_mutable) return;
@@ -12842,53 +12794,38 @@ static void direct_validate_mutable_compound(Transpiler* tp,
 // error would be false.
 void lambda_ast_mark_place_copy(AstDeclaratorNode* named) {
     if (!named || !named->entry || !named->init) return;
-    AstNode* init = unwrap_primary_node(named->init);
+    AstNode* init = ast_unwrap_primary(named->init);
     if (!init || (init->node_type != AST_NODE_MEMBER_EXPR &&
             init->node_type != AST_NODE_INDEX_EXPR)) return;
     // Only a place rooted at a MUTABLE binding is a lost update. Rooted at a
     // `let`, nothing could have been written through it anyway (S9.1.1), and
     // direct_validate_mutable_compound already owns that diagnostic.
-    AstIdentNode* root = compound_root_ident(init);
+    AstIdentNode* root = ast_compound_root_ident(init);
     if (!root || !root->entry || !root->entry->is_mutable) return;
     named->entry->is_place_copy = true;
     named->entry->place_copy_root = root->name;
 }
 
-// CW29 rollout sweep (env-gated, LAMBDA_COW_PARAM_NOTE): report every `pn`
-// whose body writes THROUGH a plain (non-`var`) container parameter -- the
-// exact shapes whose caller-visibility flips when S9.1.3 plain-param
-// snapshots land. Rebinds are excluded (local under both semantics); interior
-// writes and passing the param onward to a mutating callee are counted.
-// Diagnostic only: it changes no behavior and exists to measure the
-// migration blast radius before CW29 ships (COW §11.9 rollout).
-static bool cow_param_note_enabled(void) {
-#ifdef LAMBDA_NO_SYSINFO
-    return false;
-#else
-    static const bool enabled = getenv("LAMBDA_COW_PARAM_NOTE") != NULL;
-    return enabled;
-#endif
-}
+enum CowRetention : unsigned {
+    COW_RETAINS_PART = 1u,
+    COW_RETAINS_ROOT = 2u,
+};
 
 typedef struct CowParamEffectScan {
     NameEntry* entry;
-    bool retained;
+    unsigned required;
+    unsigned retained;
     bool var_may_publish;
-    // CW24v3: a place copy escapes only when the copy ITSELF -- the bare name,
-    // not a member/index read of it -- is returned, stored, rebound, passed or
-    // captured. The CW29 sweep matches by ROOT (`print(p.n)` counts as passing
-    // `p`), which is right for a parameter's write-through question and wrong
-    // here: it made every read-and-return helper mark, the exact cost D5.4.5
-    // keeps free.
-    bool bare_only;
     // the body being scanned, and the local-part recursion depth
     AstNode* body;
     int depth;
     const struct CowParamRetentionSites* sites;
+
+    bool done() const { return (retained & required) == required && var_may_publish; }
 } CowParamEffectScan;
 
 static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry,
-        bool bare_only = false, const struct CowParamRetentionSites* sites = NULL, int depth = 0);
+        unsigned required, const struct CowParamRetentionSites* sites = NULL, int depth = 0);
 
 enum CowRetentionSiteKind {
     COW_SITE_NONE, COW_SITE_DECLARATOR, COW_SITE_ASSIGN, COW_SITE_COMPOUND_ASSIGN,
@@ -12954,30 +12891,34 @@ static bool collect_cow_retention_site(AstNode* node, void* data) {
     return !sites->failed;
 }
 
-static void cow_param_note_alias(CowParamEffectScan* scan) {
-    scan->retained = true;
+static void cow_param_note_alias(CowParamEffectScan* scan, unsigned matches) {
+    if (!(matches & scan->required)) return;
+    scan->retained |= matches;
     // An alias can make a subsequent interior write detach the parameter,
     // which must then be published through its `var` caller home.
     scan->var_may_publish = true;
 }
 
-static bool cow_param_expr_uses_entry(AstNode* expr, NameEntry* entry) {
-    AstIdentNode* ident = ast_compound_root_ident(expr);
-    return ident && ident->entry == entry;
-}
-
-static bool cow_param_scan_matches(const CowParamEffectScan* scan, AstNode* expr) {
-    if (!scan->bare_only) return cow_param_expr_uses_entry(expr, scan->entry);
+// A bare use can retain the owner itself. A member/index use can only
+// retain a part, which leaves the place-copy owner unshared (D5.4.5).
+static unsigned cow_param_scan_matches(const CowParamEffectScan* scan, AstNode* expr) {
     AstNode* bare = ast_unwrap_primary(expr);
-    return bare && bare->node_type == AST_NODE_IDENT &&
-        ((AstIdentNode*)bare)->entry == scan->entry;
+    if (!bare) return 0;
+    if (bare->node_type == AST_NODE_IDENT) {
+        return ((AstIdentNode*)bare)->entry == scan->entry
+            ? COW_RETAINS_PART | COW_RETAINS_ROOT : 0;
+    }
+    if (!(scan->required & COW_RETAINS_PART)) return 0;
+    AstIdentNode* ident = ast_compound_root_ident(bare);
+    return ident && ident->entry == scan->entry ? COW_RETAINS_PART : 0;
 }
 
 static bool cow_param_nested_function_uses_entry(AstNode* node, void* data) {
     CowParamEffectScan* scan = (CowParamEffectScan*)data;
-    if (scan->retained && scan->var_may_publish) return false;
+    if (scan->done()) return false;
     if (node->node_type != AST_NODE_IDENT) return true;
-    if (((AstIdentNode*)node)->entry == scan->entry) cow_param_note_alias(scan);
+    if (((AstIdentNode*)node)->entry == scan->entry)
+        cow_param_note_alias(scan, COW_RETAINS_PART | COW_RETAINS_ROOT);
     return true;
 }
 
@@ -12996,10 +12937,10 @@ static AstFuncNode* cow_param_final_callee(AstCallNode* call) {
 // is not kept: the callee marks what it returns of its parameters (LR12-11).
 // The bare-name question asks whether the parameter itself is retained; a
 // callee that keeps only a part of it does not keep the bare argument.
-static bool cow_param_callee_keeps(AstCallNode* call, AstFuncNode* callee, AstNode* arg,
-        bool bare_only) {
+static unsigned cow_param_callee_retention(AstCallNode* call, AstFuncNode* callee, AstNode* arg) {
+    constexpr unsigned unknown = COW_RETAINS_PART | COW_RETAINS_ROOT;
     int source_count = ast_linked_node_count(call->argument);
-    if (source_count + (call->pipe_inject ? 1 : 0) > LAMBDA_MAX_FUNCTION_ARGS) return true;
+    if (source_count + (call->pipe_inject ? 1 : 0) > LAMBDA_MAX_FUNCTION_ARGS) return unknown;
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     ast_resolve_call_arguments(call, callee, source_count, resolved);
     int index = 0;
@@ -13008,53 +12949,51 @@ static bool cow_param_callee_keeps(AstCallNode* call, AstFuncNode* callee, AstNo
         if (resolved[index] != arg) continue;
         TypeParam* type = (TypeParam*)((AstNode*)param)->type;
         NameEntry* entry = param->entry;
-        return !type || type->is_var_param || !entry ||
-            (bare_only ? entry->cow_param_root_retained : entry->cow_param_retained);
+        if (!type || type->is_var_param || !entry) return unknown;
+        return (entry->cow_param_retained ? COW_RETAINS_PART : 0u) |
+            (entry->cow_param_root_retained ? COW_RETAINS_ROOT : 0u);
     }
-    return true;
+    return unknown;
 }
 
 static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     CowParamEffectScan* scan = (CowParamEffectScan*)data;
     // Both results are monotone. Once set, the subtree cannot add a fact.
-    if (scan->retained && scan->var_may_publish) return false;
+    if (scan->done()) return false;
     switch (cow_retention_site_kind(node->node_type)) {
     case COW_SITE_DECLARATOR: {
         AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
-        if (!cow_param_scan_matches(scan, declarator->init)) break;
-        AstNode* bare = ast_unwrap_primary(declarator->init);
-        if (!scan->bare_only && declarator->entry && scan->depth < 4 &&
-                bare && bare->node_type != AST_NODE_IDENT) {
+        unsigned matches = cow_param_scan_matches(scan, declarator->init);
+        if (matches == COW_RETAINS_PART && declarator->entry && scan->depth < 4) {
             // Tune29 §19.1: a local bound to a PART of the parameter
             // (`let keys = tree.keys`) keeps it past the call only if that
             // local escapes in turn; a read-only local dies with the frame.
             // The `var` publish fact stays conservative.
             scan->var_may_publish = true;
-            if (ast_body_cow_param_effects(scan->body, declarator->entry, false,
+            if (!(scan->retained & COW_RETAINS_PART) &&
+                    ast_body_cow_param_effects(scan->body, declarator->entry, COW_RETAINS_PART,
                     scan->sites, scan->depth + 1).retained) {
-                scan->retained = true;
+                scan->retained |= COW_RETAINS_PART;
             }
             break;
         }
-        cow_param_note_alias(scan);
+        cow_param_note_alias(scan, matches);
         break;
     }
     case COW_SITE_ASSIGN: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         if (assign->target_entry == scan->entry) {
             scan->var_may_publish = true;
-        } else if (cow_param_scan_matches(scan, assign->value)) {
-            cow_param_note_alias(scan);
+        } else {
+            cow_param_note_alias(scan, cow_param_scan_matches(scan, assign->value));
         }
         break;
     }
     case COW_SITE_COMPOUND_ASSIGN: {
         AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
         AstIdentNode* owner = ast_compound_root_ident(assign->object);
-        if (owner && owner->entry != scan->entry &&
-                cow_param_scan_matches(scan, assign->value)) {
-            cow_param_note_alias(scan);
-        }
+        if (owner && owner->entry != scan->entry)
+            cow_param_note_alias(scan, cow_param_scan_matches(scan, assign->value));
         break;
     }
     case COW_SITE_CALL: {
@@ -13065,12 +13004,13 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         // not make its parameter look retained to every caller (S9.1.2).
         AstFuncNode* final_callee = cow_param_final_callee(call);
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            if (cow_param_scan_matches(scan, arg)) {
-                if (final_callee && !cow_param_callee_keeps(call, final_callee, arg, scan->bare_only)) continue;
+            unsigned matches = cow_param_scan_matches(scan, arg);
+            if (matches & scan->required) {
+                if (final_callee) matches &= cow_param_callee_retention(call, final_callee, arg);
                 // Any other callee's effect can be unknown at this function's
                 // completion (including forward and dynamic targets).
-                cow_param_note_alias(scan);
-                break;
+                cow_param_note_alias(scan, matches);
+                if (scan->done()) break;
             }
         }
         break;
@@ -13078,21 +13018,16 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     case COW_SITE_ITEMS: {
         AstArrayNode* values = (AstArrayNode*)node;
         for (AstNode* item = values->item; item; item = item->next) {
-            if (cow_param_scan_matches(scan, item)) {
-                cow_param_note_alias(scan);
-                break;
-            }
+            cow_param_note_alias(scan, cow_param_scan_matches(scan, item));
+            if (scan->done()) break;
         }
         break;
     }
     case COW_SITE_KEY:
-        if (cow_param_scan_matches(scan, ((AstNamedNode*)node)->as)) {
-            cow_param_note_alias(scan);
-        }
+        cow_param_note_alias(scan, cow_param_scan_matches(scan, ((AstNamedNode*)node)->as));
         break;
     case COW_SITE_RETURN:
-        scan->retained = scan->retained || cow_param_scan_matches(scan,
-            ((AstReturnNode*)node)->value);
+        scan->retained |= cow_param_scan_matches(scan, ((AstReturnNode*)node)->value);
         break;
     case COW_SITE_CLOSURE: {
         AstFuncNode* nested = (AstFuncNode*)node;
@@ -13107,16 +13042,16 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
 }
 
 static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry,
-        bool bare_only, const CowParamRetentionSites* sites, int depth) {
-    CowParamEffectScan scan = {entry, false, false, bare_only, body, depth, sites};
+        unsigned required, const CowParamRetentionSites* sites, int depth) {
+    CowParamEffectScan scan = {entry, required, 0, false, body, depth, sites};
     if (!sites || sites->failed) {
         walk_lambda_ast(body, cow_param_retention_scan_node, &scan, false);
         return scan;
     }
-    for (int i = 0; i < sites->count && !(scan.retained && scan.var_may_publish); i++)
+    for (int i = 0; i < sites->count && !scan.done(); i++)
         cow_param_retention_scan_node(sites->local[i], &scan);
     if (sites->overflow) {
-        for (int i = 0; i < sites->overflow->length && !(scan.retained && scan.var_may_publish); i++)
+        for (int i = 0; i < sites->overflow->length && !scan.done(); i++)
             cow_param_retention_scan_node((AstNode*)sites->overflow->data[i], &scan);
     }
     return scan;
@@ -13301,6 +13236,8 @@ static bool ast_function_result_may_alias_entry(AstFuncNode* fn, NameEntry* entr
     // a scalar parameter shares nothing (`parent_precedence: int`)
     if (entry && entry->declared_type && result_type_is_scalar(entry->declared_type)) return false;
     bool returned = ast_result_may_alias_entry(fn->body, entry, fn->body, 0, whole, retained_locals);
+    // The source-order resolver already ruled out return sites in this body.
+    if (!returned && fn->lambda_no_explicit_return) return false;
     if (!returned && sites && !sites->collected) {
         // All parameters of this completed body share the same return sites.
         // Query aliasing in order, since a callee's facts may still advance.
@@ -13338,8 +13275,9 @@ static void lambda_ast_note_returned_params(ArrayList* functions) {
         for (int i = 0; i < functions->length; i++) {
             AstFuncNode* fn = (AstFuncNode*)functions->data[i];
             if (!fn || !fn->body) continue;
+            AliasReturnSites exits;
             if (fn->analysis && !fn->analysis->returns_retained_container &&
-                    ast_function_result_may_alias_entry(fn, NULL, false, fn->vars)) {
+                    ast_function_result_may_alias_entry(fn, NULL, false, fn->vars, &exits)) {
                 fn->analysis->returns_retained_container = true;
                 changed = true;
             }
@@ -13348,12 +13286,12 @@ static void lambda_ast_note_returned_params(ArrayList* functions) {
                 NameEntry* entry = param->entry;
                 if (!entry) continue;
                 if (!entry->cow_param_returned &&
-                        ast_function_result_may_alias_entry(fn, entry)) {
+                        ast_function_result_may_alias_entry(fn, entry, false, NULL, &exits)) {
                     entry->cow_param_returned = true;
                     changed = true;
                 }
                 if (entry->cow_param_returned && !entry->cow_param_root_returned &&
-                        ast_function_result_may_alias_entry(fn, entry, true)) {
+                        ast_function_result_may_alias_entry(fn, entry, true, NULL, &exits)) {
                     entry->cow_param_root_returned = true;
                     changed = true;
                 }
@@ -13428,9 +13366,8 @@ static void param_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
     ast_visit_core_children(child, param_alias_scan_cb, opaque);
 }
 
-static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn,
+static void lambda_ast_note_param_cow_effects(AstFuncNode* fn,
         FunctionExitFacts* exits) {
-    bool note = cow_param_note_enabled();
     // the walk feeds the shipped CW29 semantics: entry->cow_param_mutated
     // tells both tiers which plain params to snapshot at activation entry
     if (!fn->body) return;
@@ -13451,7 +13388,7 @@ static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn,
         }
     }
     // S9.1.2: fn-local aliases need the same ownership proof as pn aliases.
-    FunctionWrites writes = {fn->body, NULL, false, false};
+    FunctionWrites writes = {fn->body, NULL, !exits->may_write_through, false};
     if (needs_write_census) writes.collect();
     // If no binding is written, no local alias needs write-through metadata.
     if (!writes.collected || writes.targets || writes.failed)
@@ -13466,23 +13403,18 @@ static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn,
             param = (AstNamedNode*)((AstNode*)param)->next) {
         TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
         if (!pt || !param->entry) continue;
+        unsigned required = pt->is_var_param ? COW_RETAINS_PART
+            : COW_RETAINS_PART | COW_RETAINS_ROOT;
         CowParamEffectScan effects = ast_body_cow_param_effects(fn->body,
-            param->entry, false, sites);
+            param->entry, required, sites);
         if (pt->is_var_param) {
             param->entry->cow_var_param_may_publish = effects.var_may_publish;
             continue;
         }
-        param->entry->cow_param_retained = effects.retained;
-        param->entry->cow_param_root_retained = effects.retained &&
-            ast_body_cow_param_effects(fn->body, param->entry, true, sites).retained;
+        param->entry->cow_param_retained = (effects.retained & COW_RETAINS_PART) != 0;
+        param->entry->cow_param_root_retained = param->entry->cow_param_retained &&
+            (effects.retained & COW_RETAINS_ROOT) != 0;
         param->entry->cow_param_mutated = writes.writes_through(param->entry);
-        if (!param->entry->cow_param_mutated || !note) continue;
-        String* fname = fn->name;
-        log_warn("cow-param-note: %s:%.*s: write through plain parameter `%.*s` "
-            "is local to the procedure under S9.1.3; add `var` to publish it",
-            tp->reference ? tp->reference : "<script>",
-            fname ? (int)fname->len : 9, fname ? fname->chars : "<anon pn>",
-            (int)param->name->len, param->name->chars);
     }
 }
 
@@ -13551,7 +13483,7 @@ static bool rmw_is_key_ident(const RmwBorrowCtx* c, const NameEntry* entry) {
 }
 
 static bool rmw_key_is_stable(AstNode* key, RmwBorrowCtx* c) {
-    key = unwrap_primary_node(key);
+    key = ast_unwrap_primary(key);
     if (!key) return false;
     if (key->node_type == AST_NODE_IDENT) {
         NameEntry* entry = ((AstIdentNode*)key)->entry;
@@ -13569,13 +13501,13 @@ static bool rmw_key_is_stable(AstNode* key, RmwBorrowCtx* c) {
 
 // `root.path = handle`: the compound target spells the candidate's path
 static bool rmw_is_storeback(AstNode* stmt, const RmwBorrowCtx* c) {
-    stmt = unwrap_primary_node(stmt);
+    stmt = ast_unwrap_primary(stmt);
     if (!stmt || (stmt->node_type != AST_NODE_INDEX_ASSIGN_STAM &&
             stmt->node_type != AST_NODE_MEMBER_ASSIGN_STAM)) {
         return false;
     }
     AstAssignNode* as = (AstAssignNode*)stmt;
-    AstNode* value = unwrap_primary_node(as->value);
+    AstNode* value = ast_unwrap_primary(as->value);
     if (!value || value->node_type != AST_NODE_IDENT ||
             ((AstIdentNode*)value)->entry != c->handle) {
         return false;
@@ -13600,21 +13532,18 @@ static bool rmw_is_storeback(AstNode* stmt, const RmwBorrowCtx* c) {
 
 // does `top` (itself or its subtree, not its later siblings) name `entry`?
 typedef struct RmwIdentScan {
-    AstNode* top;
     const NameEntry* entry;
     bool found;
 } RmwIdentScan;
 
-static void rmw_ident_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
+static void rmw_ident_scan_cb(AstNode* child, void* opaque) {
     RmwIdentScan* scan = (RmwIdentScan*)opaque;
     if (scan->found || !child) return;
-    // the visitor chases `next`; stop at the top statement's own boundary
-    if (parent == scan->top && child == scan->top->next) return;
     if (child->node_type == AST_NODE_IDENT) {
         if (((AstIdentNode*)child)->entry == scan->entry) scan->found = true;
         return;
     }
-    ast_visit_core_children(child, rmw_ident_scan_cb, opaque);
+    ast_visit_lambda_children(child, rmw_ident_scan_cb, opaque);
 }
 
 static bool rmw_subtree_uses_entry(AstNode* top, const NameEntry* entry) {
@@ -13622,18 +13551,13 @@ static bool rmw_subtree_uses_entry(AstNode* top, const NameEntry* entry) {
     if (top->node_type == AST_NODE_IDENT) {
         return ((AstIdentNode*)top)->entry == entry;
     }
-    RmwIdentScan scan = {top, entry, false};
-    ast_visit_core_children(top, rmw_ident_scan_cb, &scan);
+    RmwIdentScan scan = {entry, false};
+    ast_visit_lambda_children(top, rmw_ident_scan_cb, &scan);
     return scan.found;
 }
 
 // generic expression check: the root may not be observed, nothing may leave
 // the region early, key identifiers may not be written or passed on
-typedef struct RmwExprScan {
-    AstNode* top;
-    RmwBorrowCtx* c;
-} RmwExprScan;
-
 static void rmw_check_expr(AstNode* top, RmwBorrowCtx* c);
 
 // D5.4.4: does the place `object` (extended by `key` when given) start at
@@ -13656,7 +13580,7 @@ static bool rmw_sibling_place(AstNode* object, AstNode* key, bool key_member,
     if (!root || root->entry != c->root || place.count < 1 || !place.is_member[0]) {
         return false;
     }
-    AstNode* member = unwrap_primary_node(place.segment[0]);
+    AstNode* member = ast_unwrap_primary(place.segment[0]);
     if (!member || member->node_type != AST_NODE_IDENT ||
             ast_cow_path_segment_equal(place.segment[0], true, c->path->segment[0], true)) {
         return false;
@@ -13667,11 +13591,9 @@ static bool rmw_sibling_place(AstNode* object, AstNode* key, bool key_member,
     return true;
 }
 
-static void rmw_expr_cb(AstNode* child, AstNode* parent, void* opaque) {
-    RmwExprScan* scan = (RmwExprScan*)opaque;
-    RmwBorrowCtx* c = scan->c;
+static void rmw_expr_cb(AstNode* child, void* opaque) {
+    RmwBorrowCtx* c = (RmwBorrowCtx*)opaque;
     if (c->bad || !child) return;
-    if (parent == scan->top && child == scan->top->next) return;
     if ((child->node_type == AST_NODE_MEMBER_EXPR ||
             child->node_type == AST_NODE_INDEX_EXPR) &&
             rmw_sibling_place(child, NULL, false, c)) {
@@ -13711,7 +13633,7 @@ static void rmw_expr_cb(AstNode* child, AstNode* parent, void* opaque) {
         // a key identifier handed to a call may be written through `var`
         AstCallNode* call = (AstCallNode*)child;
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            AstNode* bare = unwrap_primary_node(arg);
+            AstNode* bare = ast_unwrap_primary(arg);
             if (bare && bare->node_type == AST_NODE_IDENT &&
                     rmw_is_key_ident(c, ((AstIdentNode*)bare)->entry)) {
                 c->bad = true;
@@ -13723,25 +13645,24 @@ static void rmw_expr_cb(AstNode* child, AstNode* parent, void* opaque) {
     case AST_NODE_LOOP: case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
         c->loop_depth++;
-        ast_visit_core_children(child, rmw_expr_cb, opaque);
+        ast_visit_lambda_children(child, rmw_expr_cb, opaque);
         c->loop_depth--;
         return;
     default:
         break;
     }
-    ast_visit_core_children(child, rmw_expr_cb, opaque);
+    ast_visit_lambda_children(child, rmw_expr_cb, opaque);
 }
 
 static void rmw_check_expr(AstNode* top, RmwBorrowCtx* c) {
     if (!top || c->bad) return;
-    RmwExprScan scan = {top, c};
-    rmw_expr_cb(top, NULL, &scan);
+    rmw_expr_cb(top, c);
 }
 
 static void rmw_check_chain(AstNode* head, RmwBorrowCtx* c);
 
 static void rmw_check_stmt(AstNode* node, AstNode* prev, RmwBorrowCtx* c) {
-    AstNode* stmt = unwrap_primary_node(node);
+    AstNode* stmt = ast_unwrap_primary(node);
     if (!stmt || c->bad) return;
     switch (stmt->node_type) {
     case AST_NODE_RETURN_STAM: {
@@ -13825,7 +13746,7 @@ static void rmw_check_chain(AstNode* head, RmwBorrowCtx* c) {
     AstNode* prev = NULL;
     for (AstNode* node = head; node && !c->bad; prev = node, node = node->next) {
         rmw_check_stmt(node, prev, c);
-        if (!c->handle_named && rmw_subtree_uses_entry(unwrap_primary_node(node), c->handle)) {
+        if (!c->handle_named && rmw_subtree_uses_entry(ast_unwrap_primary(node), c->handle)) {
             c->handle_named = true;
         }
     }
@@ -13839,19 +13760,17 @@ static void rmw_check_chain(AstNode* head, RmwBorrowCtx* c) {
 // holder and its later writes need no copy. The CW34 runtime spine test still
 // guards the bind, and the leaf's own share bit still decides detaching.
 typedef struct RmwMoveScan {
-    AstNode* top;
     const NameEntry* handle;
     bool bad;
 } RmwMoveScan;
 
-static void rmw_move_handle_cb(AstNode* child, AstNode* parent, void* opaque) {
+static void rmw_move_handle_cb(AstNode* child, void* opaque) {
     RmwMoveScan* scan = (RmwMoveScan*)opaque;
     if (scan->bad || !child) return;
-    if (parent == scan->top && child == scan->top->next) return;
     if (child->node_type == AST_NODE_MEMBER_EXPR || child->node_type == AST_NODE_INDEX_EXPR) {
         // a read through the handle: only its key may still name h
         AstFieldNode* field = (AstFieldNode*)child;
-        AstNode* object = unwrap_primary_node(field->object);
+        AstNode* object = ast_unwrap_primary(field->object);
         if (object && object->node_type == AST_NODE_IDENT &&
                 ((AstIdentNode*)object)->entry == scan->handle) {
             if (child->node_type == AST_NODE_INDEX_EXPR &&
@@ -13866,12 +13785,12 @@ static void rmw_move_handle_cb(AstNode* child, AstNode* parent, void* opaque) {
         if (((AstIdentNode*)child)->entry == scan->handle) scan->bad = true;
         return;
     }
-    ast_visit_core_children(child, rmw_move_handle_cb, opaque);
+    ast_visit_lambda_children(child, rmw_move_handle_cb, opaque);
 }
 
 static bool rmw_moves_out(AstNode* stmt_node, RmwBorrowCtx* c) {
     for (AstNode* n = stmt_node->next; n; n = n->next) {
-        AstNode* stmt = unwrap_primary_node(n);
+        AstNode* stmt = ast_unwrap_primary(n);
         if (!stmt) return false;
         if (stmt->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
                 stmt->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
@@ -13915,8 +13834,8 @@ static bool rmw_moves_out(AstNode* stmt_node, RmwBorrowCtx* c) {
         }
         rmw_check_stmt(n, NULL, c);
         if (c->bad) return false;
-        RmwMoveScan scan = {n, c->handle, false};
-        rmw_move_handle_cb(n, NULL, &scan);
+        RmwMoveScan scan = {c->handle, false};
+        rmw_move_handle_cb(n, &scan);
         if (scan.bad) return false;
     }
     return false;
@@ -13953,32 +13872,30 @@ static int rmw_state_join(int a, int b) {
 // a declaration inside `top` binding a mutated place copy of the handle's
 // path: that copy may itself borrow, writing the handle's leaf in place
 typedef struct RmwNestedScan {
-    AstNode* top;
     const NameEntry* handle;
     bool found;
 } RmwNestedScan;
 
-static void rmw_nested_handle_cb(AstNode* child, AstNode* parent, void* opaque) {
+static void rmw_nested_handle_cb(AstNode* child, void* opaque) {
     RmwNestedScan* scan = (RmwNestedScan*)opaque;
     if (scan->found || !child) return;
-    if (parent == scan->top && child == scan->top->next) return;
     if (child->node_type == AST_NODE_VARIABLE_DECLARATOR) {
         AstDeclaratorNode* named = (AstDeclaratorNode*)child;
-        AstIdentNode* root = compound_root_ident(named->init);
+        AstIdentNode* root = ast_compound_root_ident(named->init);
         if (root && root->entry == scan->handle && named->entry &&
                 named->entry->is_place_copy && named->entry->place_copy_mutated) {
             scan->found = true;
             return;
         }
     }
-    ast_visit_core_children(child, rmw_nested_handle_cb, opaque);
+    ast_visit_lambda_children(child, rmw_nested_handle_cb, opaque);
 }
 
 static bool rmw_stmt_writes_handle(AstNode* node, RmwBorrowCtx* c) {
     if (!node) return false;
     if (ast_body_may_write_entry(node, c->handle, true, node->next)) return true;
-    RmwNestedScan scan = {node, c->handle, false};
-    rmw_nested_handle_cb(node, NULL, &scan);
+    RmwNestedScan scan = {c->handle, false};
+    rmw_nested_handle_cb(node, &scan);
     return scan.found;
 }
 
@@ -14011,17 +13928,15 @@ static AstNamedNode* rmw_callee_params(AstCallNode* call) {
 // it, writes through it, and a bare `var` argument of a known procedure are;
 // a bare mention anywhere else could alias or rebind the leaf.
 typedef struct RmwUseScan {
-    AstNode* top;
     RmwBorrowCtx* c;
     bool bad;
 } RmwUseScan;
 
 static void rmw_use_scan(AstNode* node, RmwUseScan* scan);
 
-static void rmw_use_cb(AstNode* child, AstNode* parent, void* opaque) {
+static void rmw_use_cb(AstNode* child, void* opaque) {
     RmwUseScan* scan = (RmwUseScan*)opaque;
     if (scan->bad || !child) return;
-    if (parent == scan->top && child == scan->top->next) return;
     const NameEntry* handle = scan->c->handle;
     switch (child->node_type) {
     case AST_NODE_IDENT:
@@ -14029,7 +13944,7 @@ static void rmw_use_cb(AstNode* child, AstNode* parent, void* opaque) {
         return;
     case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: {
         AstFieldNode* field = (AstFieldNode*)child;
-        AstNode* object = unwrap_primary_node(field->object);
+        AstNode* object = ast_unwrap_primary(field->object);
         if (object && object->node_type == AST_NODE_IDENT &&
                 ((AstIdentNode*)object)->entry == handle) {
             if (child->node_type == AST_NODE_INDEX_EXPR) rmw_use_scan(field->field, scan);
@@ -14057,7 +13972,7 @@ static void rmw_use_cb(AstNode* child, AstNode* parent, void* opaque) {
         AstCallNode* call = (AstCallNode*)child;
         AstNamedNode* param = rmw_callee_params(call);
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            AstNode* bare = unwrap_primary_node(arg);
+            AstNode* bare = ast_unwrap_primary(arg);
             TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
             bool bare_handle = bare && bare->node_type == AST_NODE_IDENT &&
                 ((AstIdentNode*)bare)->entry == handle;
@@ -14083,14 +13998,14 @@ static void rmw_use_cb(AstNode* child, AstNode* parent, void* opaque) {
         if (as->target_entry != handle) break;
         // only `h = p(..., h, ...)` with h at a `var` position: the callee
         // wrote through the handle's home and the result is what it holds
-        AstNode* value = unwrap_primary_node(as->value);
+        AstNode* value = ast_unwrap_primary(as->value);
         AstCallNode* call = value && value->node_type == AST_NODE_CALL_EXPR
             ? (AstCallNode*)value : NULL;
         AstNamedNode* param = call ? rmw_callee_params(call) : NULL;
         bool passes_home = false;
         for (AstNode* arg = call ? call->argument : NULL; arg && param;
                 arg = arg->next, param = (AstNamedNode*)((AstNode*)param)->next) {
-            AstNode* bare = unwrap_primary_node(arg);
+            AstNode* bare = ast_unwrap_primary(arg);
             TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
             if (bare && bare->node_type == AST_NODE_IDENT &&
                     ((AstIdentNode*)bare)->entry == handle && pt && pt->is_var_param) {
@@ -14107,19 +14022,16 @@ static void rmw_use_cb(AstNode* child, AstNode* parent, void* opaque) {
     default:
         break;
     }
-    ast_visit_core_children(child, rmw_use_cb, opaque);
+    ast_visit_lambda_children(child, rmw_use_cb, opaque);
 }
 
 static void rmw_use_scan(AstNode* node, RmwUseScan* scan) {
     if (!node || scan->bad) return;
-    AstNode* saved = scan->top;
-    scan->top = node;
-    rmw_use_cb(node, NULL, scan);
-    scan->top = saved;
+    rmw_use_cb(node, scan);
 }
 
 static bool rmw_handle_uses_modelled(AstNode* node, RmwBorrowCtx* c) {
-    RmwUseScan scan = {node, c, false};
+    RmwUseScan scan = {c, false};
     rmw_use_scan(node, &scan);
     return !scan.bad;
 }
@@ -14145,7 +14057,7 @@ static int rmw_walk_plain(AstNode* node, AstNode* stmt, int state, const RmwCont
 }
 
 static int rmw_walk_stmt(AstNode* node, int state, const RmwCont* k, RmwBorrowCtx* c) {
-    AstNode* stmt = unwrap_primary_node(node);
+    AstNode* stmt = ast_unwrap_primary(node);
     if (!stmt || c->bad || (state & RMW_UNREACHABLE)) return state;
     if (rmw_is_storeback(stmt, c)) {
         if (c->storeback_count >= RMW_MAX_STOREBACKS) {
@@ -14240,7 +14152,7 @@ static void rmw_try_branch_local(AstNode* stmt_node, RmwBorrowCtx* c) {
 }
 
 static void rmw_try_candidate(AstNode* stmt_node) {
-    AstVarDeclNode* decl = (AstVarDeclNode*)unwrap_primary_node(stmt_node);
+    AstVarDeclNode* decl = (AstVarDeclNode*)ast_unwrap_primary(stmt_node);
     if (!decl || decl->node_type != AST_NODE_VAR_STAM) return;
     AstNode* d = decl->declarations;
     if (!d || d->next || d->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
@@ -14280,7 +14192,7 @@ static void rmw_try_candidate(AstNode* stmt_node) {
     c.path = &path;
     for (int i = 0; i < path.count; i++) {
         if (path.is_member[i]) {
-            AstNode* seg = unwrap_primary_node(path.segment[i]);
+            AstNode* seg = ast_unwrap_primary(path.segment[i]);
             if (!seg || seg->node_type != AST_NODE_IDENT) return;
         } else if (!rmw_key_is_stable(path.segment[i], &c)) {
             return;
@@ -14302,13 +14214,13 @@ static void rmw_try_candidate(AstNode* stmt_node) {
     AstNode* prev = stmt_node;
     for (AstNode* n = stmt_node->next; n != last && !c.bad; prev = n, n = n->next) {
         rmw_check_stmt(n, prev, &c);
-        if (!c.handle_named && rmw_subtree_uses_entry(unwrap_primary_node(n), handle)) {
+        if (!c.handle_named && rmw_subtree_uses_entry(ast_unwrap_primary(n), handle)) {
             c.handle_named = true;
         }
     }
     bool straight = !c.bad && c.storeback_count < RMW_MAX_STOREBACKS;
     if (straight) {
-        c.storebacks[c.storeback_count++] = (AstAssignNode*)unwrap_primary_node(last);
+        c.storebacks[c.storeback_count++] = (AstAssignNode*)ast_unwrap_primary(last);
         for (AstNode* n = last->next; n && straight; n = n->next) {
             if (rmw_subtree_uses_entry(n, handle)) straight = false;
         }
@@ -14327,7 +14239,7 @@ static void rmw_try_candidate(AstNode* stmt_node) {
 // close with their own FUNCTION_END)
 static void rmw_discover_chain(AstNode* head) {
     for (AstNode* node = head; node; node = node->next) {
-        AstNode* stmt = unwrap_primary_node(node);
+        AstNode* stmt = ast_unwrap_primary(node);
         if (!stmt) continue;
         switch (stmt->node_type) {
         case AST_NODE_VAR_STAM:
@@ -14419,7 +14331,6 @@ typedef struct PlaceHandleUse {
 } PlaceHandleUse;
 
 typedef struct PlaceHandleScan {
-    AstNode* top;
     PlaceHandle* h;
     PlaceHandleUse uses[PH_MAX_USES];
     int use_count;
@@ -14445,11 +14356,11 @@ static NameEntry* ph_path_root(const AstCowPath* path) {
 
 // the node spelling the first `count` segments of the chain ending at `node`
 static AstFieldNode* ph_chain_node(AstNode* node, int total, int count) {
-    AstNode* current = unwrap_primary_node(node);
+    AstNode* current = ast_unwrap_primary(node);
     for (int i = total; i > count && current; i--) {
         if (current->node_type != AST_NODE_MEMBER_EXPR &&
                 current->node_type != AST_NODE_INDEX_EXPR) return NULL;
-        current = unwrap_primary_node(((AstFieldNode*)current)->object);
+        current = ast_unwrap_primary(((AstFieldNode*)current)->object);
     }
     return current && (current->node_type == AST_NODE_MEMBER_EXPR ||
         current->node_type == AST_NODE_INDEX_EXPR) ? (AstFieldNode*)current : NULL;
@@ -14484,7 +14395,7 @@ static bool ph_path_eligible(PlaceHandleCtx* ctx, AstNode* node, PlaceHandle* ou
     RmwBorrowCtx keys = {};
     for (int i = 0; i < path.count; i++) {
         if (path.is_member[i]) {
-            AstNode* segment = unwrap_primary_node(path.segment[i]);
+            AstNode* segment = ast_unwrap_primary(path.segment[i]);
             if (!segment || segment->node_type != AST_NODE_IDENT) return false;
         } else if (!rmw_key_is_stable(path.segment[i], &keys)) {
             return false;
@@ -14520,22 +14431,21 @@ static void ph_record_use(PlaceHandleScan* scan, AstFieldNode* node, bool write)
 
 static void ph_scan_node(AstNode* node, PlaceHandleScan* scan);
 
-static void ph_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
+static void ph_scan_cb(AstNode* child, void* opaque) {
     PlaceHandleScan* scan = (PlaceHandleScan*)opaque;
     if (!child || scan->kill) return;
-    if (parent == scan->top && child == scan->top->next) return;
     ph_scan_node(child, scan);
 }
 
 static void ph_scan_children(AstNode* node, PlaceHandleScan* scan) {
-    ast_visit_core_children(node, ph_scan_cb, scan);
+    ast_visit_lambda_children(node, ph_scan_cb, scan);
 }
 
 // A direct pure callee with a plain, unwritten parameter cannot replace its
 // caller's root or key. Retention may share the value, so only reads survive
 // this edge (D5.4.4, S9.1.2).
 static bool ph_call_preserves_read(PlaceHandleScan* scan, AstCallNode* call) {
-    AstNode* function = unwrap_primary_node(call->function);
+    AstNode* function = ast_unwrap_primary(call->function);
     NameEntry* function_entry = function && function->node_type == AST_NODE_IDENT
         ? ((AstIdentNode*)function)->entry : NULL;
     AstFuncNode* callee = function && function->node_type == AST_NODE_IDENT
@@ -14548,7 +14458,7 @@ static bool ph_call_preserves_read(PlaceHandleScan* scan, AstCallNode* call) {
     AstNamedNode* param = callee->param;
     bool affected = false;
     for (AstNode* arg = call->argument; arg; arg = arg->next) {
-        AstNode* bare = unwrap_primary_node(arg);
+        AstNode* bare = ast_unwrap_primary(arg);
         if (!param || !bare || bare->node_type == AST_NODE_NAMED_ARG ||
                 bare->node_type == AST_NODE_SPREAD) return false;
         NameEntry* binding = bare->node_type == AST_NODE_IDENT
@@ -14685,7 +14595,7 @@ static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
         // a key may be written through `var`; a place under the root may be
         // borrowed by the callee (CW25) -- both end the handle
         for (AstNode* arg = ((AstCallNode*)node)->argument; arg; arg = arg->next) {
-            AstNode* bare = unwrap_primary_node(arg);
+            AstNode* bare = ast_unwrap_primary(arg);
             if (!bare) continue;
             if (bare->node_type == AST_NODE_IDENT &&
                     rmw_is_key_ident(&h->keys, ((AstIdentNode*)bare)->entry)) {
@@ -14742,7 +14652,6 @@ static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
 
 static void ph_scan_statement(AstNode* stmt, PlaceHandle* h, PlaceHandleScan* scan) {
     memset(scan, 0, sizeof(*scan));
-    scan->top = stmt;
     scan->h = h;
     ph_scan_node(stmt, scan);
 }
@@ -14758,23 +14667,20 @@ static bool ph_node_shadowed(AstFieldNode* node, AstFieldNode** annotated, int c
         while (current && (current->node_type == AST_NODE_MEMBER_EXPR ||
                 current->node_type == AST_NODE_INDEX_EXPR)) {
             if (current != (AstNode*)annotated[i] && current == (AstNode*)node) return true;
-            current = unwrap_primary_node(((AstFieldNode*)current)->object);
+            current = ast_unwrap_primary(((AstFieldNode*)current)->object);
         }
     }
     return false;
 }
 
 typedef struct PhCandidateScan {
-    AstNode* top;
-    PlaceHandleCtx* ctx;
     AstFieldNode* found[PH_MAX_USES];
     int count;
 } PhCandidateScan;
 
-static void ph_candidate_cb(AstNode* child, AstNode* parent, void* opaque) {
+static void ph_candidate_cb(AstNode* child, void* opaque) {
     PhCandidateScan* scan = (PhCandidateScan*)opaque;
     if (!child) return;
-    if (parent == scan->top && child == scan->top->next) return;
     switch (child->node_type) {
     case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
     case AST_NODE_ARROW_FUNC: case AST_NODE_FOR_EXPR: case AST_NODE_LOOP:
@@ -14782,7 +14688,7 @@ static void ph_candidate_cb(AstNode* child, AstNode* parent, void* opaque) {
     case AST_NODE_MEMBER_EXPR: {
         // `P.f`: its object is a candidate place
         AstFieldNode* member = (AstFieldNode*)child;
-        AstNode* object = unwrap_primary_node(member->object);
+        AstNode* object = ast_unwrap_primary(member->object);
         if (!member->computed && object && (object->node_type == AST_NODE_MEMBER_EXPR ||
                 object->node_type == AST_NODE_INDEX_EXPR) && scan->count < PH_MAX_USES) {
             scan->found[scan->count++] = (AstFieldNode*)object;
@@ -14792,13 +14698,13 @@ static void ph_candidate_cb(AstNode* child, AstNode* parent, void* opaque) {
     default:
         break;
     }
-    ast_visit_core_children(child, ph_candidate_cb, opaque);
+    ast_visit_lambda_children(child, ph_candidate_cb, opaque);
 }
 
 static void ph_process_list(PlaceHandleCtx* ctx, AstNode* head, PlaceHandleState* state);
 
 static void ph_process_plain(PlaceHandleCtx* ctx, AstNode* node, PlaceHandleState* state) {
-    AstNode* stmt = unwrap_primary_node(node);
+    AstNode* stmt = ast_unwrap_primary(node);
     if (!stmt) return;
     AstFieldNode* annotated[PH_MAX_USES];
     int annotated_count = 0;
@@ -14822,8 +14728,8 @@ static void ph_process_plain(PlaceHandleCtx* ctx, AstNode* node, PlaceHandleStat
         i++;
     }
     // new handles: one unconditional read spelling, nothing else of P here
-    PhCandidateScan found = {stmt, ctx, {}, 0};
-    ph_candidate_cb(stmt, NULL, &found);
+    PhCandidateScan found = {{}, 0};
+    ph_candidate_cb(stmt, &found);
     for (int c = 0; c < found.count && state->count < PH_MAX_LIVE; c++) {
         AstFieldNode* place = found.found[c];
         PlaceHandle probe = {};
@@ -14889,7 +14795,7 @@ static void ph_annotate_header(AstNode* part, PlaceHandleState* state) {
 }
 
 static void ph_process_stmt(PlaceHandleCtx* ctx, AstNode* node, PlaceHandleState* state) {
-    AstNode* stmt = unwrap_primary_node(node);
+    AstNode* stmt = ast_unwrap_primary(node);
     if (!stmt || ctx->overflow) return;
     switch (stmt->node_type) {
     case AST_NODE_IF_EXPR: {
@@ -14984,22 +14890,18 @@ static void ph_exclude_borrow_roots_cb(AstNode* child, AstNode* parent, void* op
 // root object to a second observer, so writes through the parameter must
 // detach a shared root first. Conservative: any unrecognised use counts.
 typedef struct VarShareScan {
-    AstNode* top;
     NameEntry* entry;
     bool shared;
 } VarShareScan;
 
 static void var_share_scan_node(AstNode* node, VarShareScan* scan);
 
-static void var_share_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
-    VarShareScan* scan = (VarShareScan*)opaque;
-    if (!child || scan->shared) return;
-    if (parent == scan->top && child == scan->top->next) return;
-    var_share_scan_node(child, scan);
+static void var_share_scan_cb(AstNode* child, void* opaque) {
+    var_share_scan_node(child, (VarShareScan*)opaque);
 }
 
 static bool var_share_is_bare(AstNode* node, NameEntry* entry) {
-    AstNode* bare = unwrap_primary_node(node);
+    AstNode* bare = ast_unwrap_primary(node);
     return bare && bare->node_type == AST_NODE_IDENT &&
         ((AstIdentNode*)bare)->entry == entry;
 }
@@ -15105,12 +15007,14 @@ static void var_share_scan_node(AstNode* node, VarShareScan* scan) {
     default:
         break;
     }
-    ast_visit_core_children(node, var_share_scan_cb, scan);
+    // Each argument is a child of the call. A leaf can return early without
+    // hiding the following arguments, including a value inserted by `push`.
+    ast_visit_lambda_children(node, var_share_scan_cb, scan);
 }
 
 static bool var_share_subtree(AstNode* node, NameEntry* entry) {
     if (!node) return false;
-    VarShareScan scan = {node, entry, false};
+    VarShareScan scan = {entry, false};
     var_share_scan_node(node, &scan);
     return scan.shared;
 }
@@ -15144,7 +15048,7 @@ static bool var_share_walk_list(AstNode* head, NameEntry* entry, bool seen);
 static bool var_share_list_exits(AstNode* head) {
     AstNode* last = NULL;
     for (AstNode* node = head; node; node = node->next) last = node;
-    AstNode* stmt = unwrap_primary_node(last);
+    AstNode* stmt = ast_unwrap_primary(last);
     if (!stmt) return false;
     switch (stmt->node_type) {
     case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM:
@@ -15162,7 +15066,7 @@ static bool var_share_list_exits(AstNode* head) {
 }
 
 static bool var_share_walk_stmt(AstNode* node, NameEntry* entry, bool seen) {
-    AstNode* stmt = unwrap_primary_node(node);
+    AstNode* stmt = ast_unwrap_primary(node);
     if (!stmt) return seen;
     switch (stmt->node_type) {
     case AST_NODE_IF_EXPR: {
@@ -15336,22 +15240,23 @@ static void place_copy_decide_declaration(AstNode* stmt_node, AstDeclaratorNode*
     NameEntry* entry = named->entry;
     if (!entry || !entry->is_place_copy || entry->place_copy_range_decided) return;
     entry->place_copy_range_decided = true;
-    AstIdentNode* root_ident = named->init ? compound_root_ident(named->init) : NULL;
+    AstIdentNode* root_ident = named->init ? ast_compound_root_ident(named->init) : NULL;
     NameEntry* root = root_ident ? root_ident->entry : NULL;
     if (!root) { entry->place_copy_place_written = true; return; }
     AstNode* last_use = NULL;
     for (AstNode* n = stmt_node->next; n; n = n->next) {
-        if (rmw_subtree_uses_entry(unwrap_primary_node(n), entry)) last_use = n;
+        if (rmw_subtree_uses_entry(ast_unwrap_primary(n), entry)) last_use = n;
     }
     bool written = last_use && ast_body_may_write_entry(stmt_node->next, root,
         true, last_use->next);
-    bool escaped = ast_body_cow_param_effects(fn_body, entry, true).retained;
+    bool escaped = (ast_body_cow_param_effects(fn_body, entry,
+        COW_RETAINS_ROOT).retained & COW_RETAINS_ROOT) != 0;
     if (written || escaped) entry->place_copy_place_written = true;
 }
 
 static void place_copy_decide_list(AstNode* head, AstNode* fn_body) {
     for (AstNode* node = head; node; node = node->next) {
-        AstNode* stmt = unwrap_primary_node(node);
+        AstNode* stmt = ast_unwrap_primary(node);
         if (!stmt) continue;
         switch (stmt->node_type) {
         case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM: {
@@ -15415,7 +15320,7 @@ static bool insertion_move_count_cb(AstNode* node, void* data) {
 }
 
 static AstNode* insertion_statement_value(AstNode* stmt) {
-    stmt = unwrap_primary_node(stmt);
+    stmt = ast_unwrap_primary(stmt);
     if (!stmt) return NULL;
     if (stmt->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
             stmt->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
@@ -15423,7 +15328,7 @@ static AstNode* insertion_statement_value(AstNode* stmt) {
     }
     if (stmt->node_type != AST_NODE_CALL_EXPR) return NULL;
     AstCallNode* call = (AstCallNode*)stmt;
-    AstNode* callee = unwrap_primary_node(call->function);
+    AstNode* callee = ast_unwrap_primary(call->function);
     SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
         ? ((AstSysFuncNode*)callee)->fn_info : NULL;
     if (!info || info->fn != SYSPROC_PUSH || !call->argument ||
@@ -15436,7 +15341,7 @@ static AstNode* insertion_statement_value(AstNode* stmt) {
 static void insertion_move_decide_declaration(AstNode* stmt_node,
         AstDeclaratorNode* named, AstNode* fn_body) {
     NameEntry* entry = named->entry;
-    AstNode* init = unwrap_primary_node(named->init);
+    AstNode* init = ast_unwrap_primary(named->init);
     if (!entry || entry->is_parameter || entry->is_place_copy ||
             entry->cow_borrow_lowered || !init ||
             init->node_type == AST_NODE_CALL_EXPR ||
@@ -15444,7 +15349,7 @@ static void insertion_move_decide_declaration(AstNode* stmt_node,
         return;
     }
     for (AstNode* later = stmt_node->next; later; later = later->next) {
-        AstNode* value = unwrap_primary_node(insertion_statement_value(later));
+        AstNode* value = ast_unwrap_primary(insertion_statement_value(later));
         if (!value || value->node_type != AST_NODE_IDENT ||
                 ((AstIdentNode*)value)->entry != entry) {
             continue;
@@ -15458,7 +15363,7 @@ static void insertion_move_decide_declaration(AstNode* stmt_node,
 
 static void insertion_move_decide_list(AstNode* head, AstNode* fn_body) {
     for (AstNode* node = head; node; node = node->next) {
-        AstNode* stmt = unwrap_primary_node(node);
+        AstNode* stmt = ast_unwrap_primary(node);
         if (!stmt) continue;
         switch (stmt->node_type) {
         case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM: {
@@ -15506,11 +15411,11 @@ static bool place_copy_decide_fallback_cb(AstNode* node, void* data) {
     NameEntry* entry = named->entry;
     if (!entry || !entry->is_place_copy || entry->place_copy_range_decided) return true;
     entry->place_copy_range_decided = true;
-    AstIdentNode* root_ident = named->init ? compound_root_ident(named->init) : NULL;
+    AstIdentNode* root_ident = named->init ? ast_compound_root_ident(named->init) : NULL;
     NameEntry* root = root_ident ? root_ident->entry : NULL;
     entry->place_copy_place_written = !root ||
         ast_body_may_write_entry(fn_body, root, true) ||
-        ast_body_cow_param_effects(fn_body, entry, true).retained;
+        (ast_body_cow_param_effects(fn_body, entry, COW_RETAINS_ROOT).retained & COW_RETAINS_ROOT) != 0;
     return true;
 }
 
@@ -15529,7 +15434,7 @@ static bool place_copy_var_call_cb(AstNode* node, void* data) {
             arg = arg->next, param = (AstNamedNode*)((AstNode*)param)->next) {
         TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
         if (!pt || !pt->is_var_param) continue;
-        AstIdentNode* root = compound_root_ident(arg);
+        AstIdentNode* root = ast_compound_root_ident(arg);
         if (root && root->entry && root->entry->is_place_copy) {
             root->entry->place_copy_mutated = true;
         }
@@ -15557,7 +15462,7 @@ static void direct_note_place_copy_mutated(Transpiler* tp, NameEntry* entry, Sou
 }
 
 static void direct_note_place_copy_mutation(Transpiler* tp, SourceSpan span, AstNode* object) {
-    AstIdentNode* root = compound_root_ident(object);
+    AstIdentNode* root = ast_compound_root_ident(object);
     NameEntry* entry = root ? root->entry : NULL;
     if (!entry || !entry->is_place_copy) return;
     // the target's own root ident was already counted as a read when the
@@ -15567,7 +15472,7 @@ static void direct_note_place_copy_mutation(Transpiler* tp, SourceSpan span, Ast
 }
 
 static void direct_note_place_copy_var_borrow(Transpiler* tp, SourceSpan span, AstNode* argument) {
-    AstIdentNode* root = compound_root_ident(argument);
+    AstIdentNode* root = ast_compound_root_ident(argument);
     direct_note_place_copy_mutated(tp, root ? root->entry : NULL, span);
 }
 
@@ -15576,7 +15481,7 @@ static void direct_note_place_copy_var_borrow(Transpiler* tp, SourceSpan span, A
 // ANYWHERE clears the candidate: a false negative here costs a missed
 // diagnostic, a false positive would reject the model's own idiom.
 static void direct_note_place_copy_writeback(AstNode* value) {
-    AstNode* source = unwrap_primary_node(value);
+    AstNode* source = ast_unwrap_primary(value);
     if (!source || source->node_type != AST_NODE_IDENT) return;
     AstIdentNode* ident = (AstIdentNode*)source;
     if (ident->entry && ident->entry->is_place_copy) {
@@ -15639,7 +15544,7 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
         reject_assignment(node);
         return;
     }
-    target = unwrap_primary_node(target);
+    target = ast_unwrap_primary(target);
     if (target && (target->node_type == AST_NODE_INDEX_EXPR ||
             target->node_type == AST_NODE_MEMBER_EXPR)) {
         AstFieldNode* field = (AstFieldNode*)target;
@@ -15791,6 +15696,7 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
         }
     }
     fn->body = body;
+    fn->lambda_no_explicit_return = exits && exits->returns.collected;
     TypeFunc* function_type = (TypeFunc*)fn->type;
     function_type->is_proc = is_proc;
     function_type->is_variadic = variadic;
@@ -15802,15 +15708,12 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
     function_type->binders = function_type->binder_count
         ? (TypeBinder**)pool_calloc(tp->pool,
             sizeof(TypeBinder*) * function_type->binder_count) : NULL;
+    TypeParam** tail = &function_type->param;
     for (AstNamedNode* param = (AstNamedNode*)params; param;
             param = (AstNamedNode*)param->next) {
         TypeParam* param_type = (TypeParam*)param->type;
-        if (!function_type->param) function_type->param = param_type;
-        else {
-            TypeParam* tail = function_type->param;
-            while (tail->next) tail = tail->next;
-            tail->next = param_type;
-        }
+        *tail = param_type;
+        tail = &param_type->next;
         function_type->param_count++;
         if (!param_type->is_optional) function_type->required_param_count++;
         if (param_type->binder && param_type->binder->slot < function_type->binder_count) {
@@ -15853,7 +15756,7 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
         if (tp->error_count != errors_before) return;
     }
     validate_function_return_contract(tp, fn, function_type, exits);
-    ast_note_function_defect(fn, function_type);
+    ast_note_function_defect(fn, function_type, exits);
 }
 
 static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
@@ -17391,12 +17294,6 @@ enum { LSF_PATTERN_ISLAND, LSF_PATTERN_PREBOUND, LSF_PATTERN_TAIL };
 enum { LSF_OBJECT_PARTS, LSF_OBJECT_BASE, LSF_OBJECT_LAYOUT, LSF_OBJECT_TAIL };
 enum { LSF_OBJECT_FIELD_DEFAULT, LSF_OBJECT_FIELD_LAYOUT, LSF_OBJECT_FIELD_TAIL };
 
-// LSF_CONTENT: the body of a braced `if`/`else` branch, which has a scope.
-
-// LSF_BINARY: `that`, whose right side reads a bare name as a field, and the
-// pipe stages `|>` and `|:`, whose right side never does (S10.1.7v2).
-enum { LSF_BINARY_THAT = 1u << 0, LSF_BINARY_PIPE_BODY = 1u << 1 };
-
 static void syntax_record_part(LambdaSyntaxSink* sink, void** parts_slot,
         uint8_t kind, AstNode* node) {
     if (!syntax_parts_add(sink->unit, (LambdaSyntaxParts**)parts_slot, kind, node)) {
@@ -17910,7 +17807,7 @@ static AstNode* syntax_atom(LambdaSyntaxSink* sink,
     case LAMBDA_TOK_PATTERN_ISLAND:
         return syntax_type_slot(sink, token.span, TYPE_PATTERN_FULL);
     default:
-        return build_wrapped_identifier_syntax(tp, token.span,
+        return build_identifier_syntax(tp, token.span,
             syntax_intern_name(sink, direct_token_text(tp, token)));
     }
 }
@@ -17937,9 +17834,13 @@ static AstNode* syntax_prefix(LambdaSyntaxSink* sink,
     case LAMBDA_TOK_AMPERSAND:
         return build_operand_syntax(tp, span, AST_NODE_UNARY,
             sizeof(AstUnaryNode), LSF_ADDRESS_OF, operand);
-    default: {
+    case LAMBDA_TOK_NOT:
+    case LAMBDA_TOK_MINUS:
+    case LAMBDA_TOK_PLUS: {
         AstUnaryNode* unary = (AstUnaryNode*)build_operand_syntax(tp, span,
             AST_NODE_UNARY, sizeof(AstUnaryNode), LSF_UNARY, operand);
+        unary->op = reduction->detail_token.kind == LAMBDA_TOK_NOT ? OPERATOR_NOT
+            : reduction->detail_token.kind == LAMBDA_TOK_MINUS ? OPERATOR_NEG : OPERATOR_POS;
         unary->op_str = direct_token_text(tp, reduction->detail_token);
         // the literal under a prefix `-` may spell a signed 2^(b-1) (`-128i8`)
         AstNode* negated = operand;
@@ -17948,11 +17849,12 @@ static AstNode* syntax_prefix(LambdaSyntaxSink* sink,
             negated = ((AstPrimaryNode*)negated)->expr;
         }
         if (negated && negated->syntax_form == LSF_LITERAL &&
-                unary->op_str.length == 1 && unary->op_str.str[0] == '-') {
+                unary->op == OPERATOR_NEG) {
             negated->syntax_flags |= LSF_LITERAL_NEGATED;
         }
         return (AstNode*)unary;
     }
+    default: return NULL;
     }
 }
 
@@ -18490,12 +18392,7 @@ static AstNode* syntax_reduce(LambdaSyntaxSink* sink,
         node->left = child0;
         node->right = syntax_child(reduction, 1);
         node->op_str = direct_token_text(tp, reduction->detail_token);
-        if (reduction->detail_token.kind == LAMBDA_TOK_THAT) {
-            node->syntax_flags |= LSF_BINARY_THAT;
-        } else if (reduction->detail_token.kind == LAMBDA_TOK_PIPE_FORWARD ||
-                reduction->detail_token.kind == LAMBDA_TOK_PIPE_FILTER) {
-            node->syntax_flags |= LSF_BINARY_PIPE_BODY;
-        }
+        if (!assign_binary_operator(reduction->detail_token.kind, &node->op)) return NULL;
         return (AstNode*)node;
     }
     case LAMBDA_REDUCE_POSTFIX:
@@ -18627,13 +18524,9 @@ static void resolver_that_end(LambdaResolver* r) {
 // resolve_field and resolve_call recognise `math.pi`, `m.sqrt(x)` (`import m:
 // math`), `ns.tag`, `lambda.sys.f(x)` and an import alias's `box.f` from the
 // object ident, so the prefix must reach them unrewritten.
-static bool member_object_names_module(Transpiler* tp, AstNode* object,
+static bool unbound_member_object_names_module(Transpiler* tp, String* name,
         AstNode* field) {
-    AstNode* obj = ast_unwrap_primary(object);
-    if (!obj || obj->node_type != AST_NODE_IDENT) return false;
-    String* name = ((AstIdentNode*)obj)->name;
     StrView view = {name->chars, (size_t)name->len};
-    if (lookup_interned_name(tp, name)) return false;
     // `lambda` is the reserved namespace root (S17.2.1)
     if (strview_equal(&view, "lambda")) return true;
     if (lookup_namespace(tp, name) || resolve_imported_module(tp, &view)) return true;
@@ -18642,6 +18535,22 @@ static bool member_object_names_module(Transpiler* tp, AstNode* object,
     String* member_name = ((AstIdentNode*)member)->name;
     NameEntry* imported = lookup_qualified_member(tp, view, member_name);
     return imported && imported->import;
+}
+
+static void resolve_name(LambdaResolver* r, AstIdentNode* name, AstNode* member_key,
+        bool direct_callee = false) {
+    Transpiler* tp = r->tp;
+    resolve_diagnostics(r, name);
+    // An unqualified atom and a bare member receiver use the same lexical
+    // lookup. Only an unbound member receiver can need module-prefix rules.
+    NameEntry* entry = lookup_interned_name(tp, name->name);
+    bool module = !entry && member_key &&
+        unbound_member_object_names_module(tp, name->name, member_key);
+    bool saved_that = tp->in_that_clause;
+    if (module) tp->in_that_clause = false;
+    resolve_identifier(tp, name, entry, direct_callee);
+    tp->in_that_clause = saved_that;
+    if (!module && !r->suppress_unresolved) resolver_note_unresolved(r, name, false);
 }
 
 static bool resolver_in_proc(Transpiler* tp) {
@@ -18739,8 +18648,10 @@ static AstFuncNode* resolver_function_begin(LambdaResolver* r, AstFuncNode* fn) 
     bool declares_name = fn->name && !r->type_object_depth;
     AstFuncNode* target = NULL;
     if (declares_name) {
-        NameEntry* existing = lookup_declaration_in_current_scope(tp, fn->name,
-            (AstNode*)fn);
+        // Predeclaration already published this function's canonical entry.
+        NameEntry* existing = fn->analysis ? fn->analysis->decl_entry : NULL;
+        if (!existing || existing->scope != tp->current_scope)
+            existing = lookup_declaration_in_current_scope(tp, fn->name, fn);
         if (existing && (existing->node->node_type == AST_NODE_FUNC ||
                  existing->node->node_type == AST_NODE_PROC)) {
             target = (AstFuncNode*)existing->node;
@@ -18784,7 +18695,7 @@ static void resolver_function_end(LambdaResolver* r, FunctionExitFacts* exits) {
     // CW24: the body is complete, so every write-back that could excuse a
     // place-copy mutation has now been seen.
     lambda_ast_flush_place_copy_diagnostics(tp);
-    lambda_ast_note_param_cow_effects(tp, fn, exits);  // CW29 sweep
+    lambda_ast_note_param_cow_effects(fn, exits);
     if (inline_analysis_started) {
         lambda_compiler_timing_add_inline_analysis_us(time_elapsed_us(
             inline_analysis_started, time_now_ns()));
@@ -19389,11 +19300,7 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
     r->object.field_tail = (AstNode*)field;
 
     Type* field_type = unwrap_simple_type_type(field->type);
-    ShapeEntry* shape = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
-    StrView* field_name = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
-    field_name->str = field->name->chars;
-    field_name->length = field->name->len;
-    shape->name = field_name;
+    ShapeEntry* shape = alloc_compiler_shape_entry(tp->pool, field->name);
     shape_entry_set_type(shape, field_type);
     shape->default_value = default_value;
     shape->is_optional = field->syntax_flags != 0;
@@ -19498,7 +19405,7 @@ static void resolve_base_type(Transpiler* tp, AstNode* node) {
         AstIdentNode* ident = (AstIdentNode*)node;
         node->node_type = AST_NODE_IDENT;
         ident->name = name_pool_create_strview(tp->name_pool, name);
-        resolve_identifier(tp, ident);
+        resolve_identifier(tp, ident, lookup_interned_name(tp, ident->name));
         if (node->node_type == AST_NODE_SYS_FUNC) return;
         record_unknown_base_type_span(tp, node->source_span, name);
         type = (Type*)&LIT_TYPE_ERROR;
@@ -19697,6 +19604,7 @@ static void resolve_content(LambdaResolver* r, AstListNode* content) {
     content->procedural_results = resolver_in_proc(tp);
     AstNode* filtered = NULL;
     AstNode* filtered_tail = NULL;
+    int64_t count = 0;
     for (AstNode* item = content->item; item;) {
         AstNode* next = item->next;
         item->next = NULL;
@@ -19705,15 +19613,14 @@ static void resolve_content(LambdaResolver* r, AstListNode* content) {
             if (filtered_tail) filtered_tail->next = item;
             else filtered = item;
             filtered_tail = item;
+            count++;
         }
         item = next;
     }
     content->item = filtered;
     content->list_type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
         sizeof(TypeList));
-    for (AstNode* item = filtered; item; item = item->next) {
-        content->list_type->length++;
-    }
+    content->list_type->length = count;
     // Keep block typing stable: a multi-item functional
     // block is an open list value, not the type of its first declaration. The
     // first-item shortcut reinterprets a later native result at the caller
@@ -19735,8 +19642,7 @@ static void resolve_content(LambdaResolver* r, AstListNode* content) {
         content->type = &TYPE_NULL;
     } else if (content->list_type->length == 1 && filtered && filtered->type) {
         content->type = filtered->type;
-    } else if (!resolver_in_proc(tp) &&
-            (single_value = ast_content_single_value(filtered)) &&
+    } else if ((single_value = ast_content_single_value(filtered)) &&
             lambda_type_func_signature(single_value->type)) {
         // `{ fn inner(x) => ...; inner }` IS `inner`: the lowering returns the
         // block's one value item, so a returned function keeps its signature
@@ -19756,9 +19662,7 @@ static void resolve_script(LambdaResolver* r, AstScript* root) {
     Transpiler* tp = r->tp;
     AstNode* child0 = root->child;
     root->global_vars = tp->current_scope;
-    // Top-level imports are script children in the legacy AST. Keep that
-    // contract here so module registration sees every dependency before it
-    // scans the single content list for public declarations.
+    // Publish imports as script children before the body that uses them.
     AstNode* imports = NULL;
     AstNode* imports_tail = NULL;
     AstNode* content_items = NULL;
@@ -19766,6 +19670,7 @@ static void resolve_script(LambdaResolver* r, AstScript* root) {
     AstListNode* content = child0 && child0->node_type == AST_NODE_CONTENT
         ? (AstListNode*)child0 : NULL;
     if (content) {
+        int64_t count = 0;
         for (AstNode* item = content->item; item;) {
             AstNode* next = item->next;
             item->next = NULL;
@@ -19777,19 +19682,15 @@ static void resolve_script(LambdaResolver* r, AstScript* root) {
                 if (content_tail) content_tail->next = item;
                 else content_items = item;
                 content_tail = item;
+                count++;
             }
             item = next;
         }
         content->item = content_items;
-        content->list_type->length = 0;
-        for (AstNode* item = content_items; item; item = item->next) {
-            content->list_type->length++;
-        }
+        content->list_type->length = count;
         content->type = content_items && content_items->type
             ? content_items->type : &TYPE_NULL;
     }
-    AstNode* tail = imports;
-    while (tail && tail->next) tail = tail->next;
     AstNode* body = (AstNode*)content;
     if (content_items && !content_items->next) {
         // A sole top-level item stands without its CONTENT wrapper. Keeping
@@ -19797,7 +19698,7 @@ static void resolve_script(LambdaResolver* r, AstScript* root) {
         // list before invoking main.
         body = content_items;
     }
-    if (tail) tail->next = body;
+    if (imports_tail) imports_tail->next = body;
     root->child = imports ? imports : body;
     root->type = child0 && child0->type ? child0->type : &TYPE_ANY;
     r->root = root;
@@ -20019,18 +19920,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_base_type(tp, node);
         break;
     case LSF_IDENT:
-        resolve_diagnostics(r, node);
-        resolve_identifier(tp, (AstIdentNode*)node);
-        if (!r->suppress_unresolved) resolver_note_unresolved(r, (AstIdentNode*)node, false);
+        resolve_name(r, (AstIdentNode*)node, NULL);
         break;
     case LSF_MEMBER_NAME:
         resolve_diagnostics(r, node);
         node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
-        break;
-    case LSF_WRAPPER:
-        resolve_walk(r, ((AstPrimaryNode*)node)->expr);
-        resolve_diagnostics(r, node);
-        resolve_primary_wrapper((AstPrimaryNode*)node);
         break;
     case LSF_GROUP_WRAPPER:
         resolver_group_begin(r);
@@ -20172,6 +20066,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         size_t returns_before = r->returns_seen;
         size_t raises_before = r->raises_seen;
         size_t propagations_before = r->propagations_seen;
+        size_t writes_before = r->write_candidates_seen;
         resolve_walk(r, (AstNode*)tail[LSF_FUNCTION_BODY]);
         resolve_diagnostics(r, node);
         // An empty census proves the body needs no site scan. When sites
@@ -20181,6 +20076,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         exits.may_raise = r->raises_seen != raises_before;
         exits.may_exit = !exits.returns.collected || exits.may_raise ||
             r->propagations_seen != propagations_before;
+        exits.may_write_through = r->write_candidates_seen != writes_before;
         if (!r->failed) resolve_function(r, fn, target, &exits);
         resolver_function_end(r, &exits);
         if (arrow) resolver_group_end(r);
@@ -20285,10 +20181,10 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     case LSF_BINARY: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
-        bool that = (node->syntax_flags & LSF_BINARY_THAT) != 0;
-        bool scoped = that || (node->syntax_flags & LSF_BINARY_PIPE_BODY) != 0;
+        bool that = binary->op == OPERATOR_THAT;
+        bool scoped = that || binary->op == OPERATOR_PIPE || binary->op == OPERATOR_FILTER;
         AstNode* pipe_target = ast_unwrap_primary(binary->right);
-        bool bare_pipe_target = strview_equal(&binary->op_str, "|>") &&
+        bool bare_pipe_target = binary->op == OPERATOR_PIPE &&
             pipe_target && pipe_target->node_type == AST_NODE_IDENT;
         resolve_walk(r, binary->left);
         if (scoped) resolver_that_begin(r, that);
@@ -20305,7 +20201,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
             AstIdentNode* ident = (AstIdentNode*)pipe_target;
             // Pipe application selects an overloaded builtin only after its
             // receiver is known; diagnose the name only if it remains unbound.
-            if (callee == pipe_target &&
+            if (callee == pipe_target && !ident->entry &&
                     !is_sys_func_name(ident->name->chars, (int)ident->name->len))
                 resolver_note_unresolved(r, ident, false);
         }
@@ -20314,16 +20210,27 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_MEMBER:
     case LSF_INDEX: {
         AstFieldNode* member = (AstFieldNode*)node;
-        bool module_prefix = form == LSF_MEMBER &&
-            member_object_names_module(tp, member->object, member->field);
-        if (module_prefix) {
-            resolver_that_begin(r, false);
-            r->suppress_unresolved++;
-        }
-        resolve_walk(r, member->object);
-        if (module_prefix) {
-            r->suppress_unresolved--;
-            resolver_that_end(r);
+        AstNode* object = member->object;
+        if (form == LSF_MEMBER && object && object->syntax_form == LSF_IDENT &&
+                !(object->syntax_flags & LSF_FLAG_ATTACHED)) {
+            object->syntax_form = LSF_NONE;
+            resolve_name(r, (AstIdentNode*)object, member->field);
+        } else {
+            // Explicit groups still enter their lexical scope in resolve_walk.
+            AstNode* bare = form == LSF_MEMBER ? ast_unwrap_primary(object) : NULL;
+            String* name = bare && bare->node_type == AST_NODE_IDENT
+                ? ((AstIdentNode*)bare)->name : NULL;
+            bool module = name && !lookup_interned_name(tp, name) &&
+                unbound_member_object_names_module(tp, name, member->field);
+            if (module) {
+                resolver_that_begin(r, false);
+                r->suppress_unresolved++;
+            }
+            resolve_walk(r, object);
+            if (module) {
+                r->suppress_unresolved--;
+                resolver_that_end(r);
+            }
         }
         resolve_walk_chain(r, member->field);
         resolve_diagnostics(r, node);
@@ -20364,21 +20271,35 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         AstNode* callee = ast_unwrap_primary(call->function);
         bool in_that = tp->in_that_clause;
         bool bare_callee = callee && callee->node_type == AST_NODE_IDENT;
+        bool bare_name_storage = bare_callee && callee == call->function &&
+            callee->syntax_form == LSF_IDENT && !(callee->syntax_flags & LSF_FLAG_ATTACHED);
         if (bare_callee) {
             tp->in_that_clause = false;
             r->suppress_unresolved++;
         }
-        resolve_walk(r, call->function);
+        if (bare_name_storage) {
+            // A selected call row carries a result type. The standalone
+            // callable type is only needed if arity resolution rejects it.
+            callee->syntax_form = LSF_NONE;
+            resolve_name(r, (AstIdentNode*)callee, NULL, true);
+        } else {
+            resolve_walk(r, call->function);
+        }
         if (bare_callee) r->suppress_unresolved--;
         tp->in_that_clause = in_that;
         resolve_walk_chain(r, call->argument);
         resolve_diagnostics(r, node);
-        resolve_call(tp, call);
+        resolve_call(tp, call, bare_name_storage);
+        if (bare_name_storage && node->node_type == AST_NODE_CALL_EXPR &&
+                call->function == callee && callee->node_type == AST_NODE_SYS_FUNC &&
+                !callee->type) {
+            set_sys_func_value_type(tp, (AstSysFuncNode*)callee);
+        }
         if (bare_callee && ast_unwrap_primary(call->function) == callee &&
                 callee->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)callee;
             // A known builtin with the wrong arity already has its own error.
-            if (!is_sys_func_name(ident->name->chars, (int)ident->name->len))
+            if (!ident->entry && !is_sys_func_name(ident->name->chars, (int)ident->name->len))
                 resolver_note_unresolved(r, ident, true);
         }
         break;
@@ -20511,6 +20432,8 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_walk(r, ((AstAssignNode*)node)->right);
         resolve_diagnostics(r, node);
         resolve_assignment(tp, (AstAssignNode*)node);
+        if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
+                node->node_type == AST_NODE_MEMBER_ASSIGN_STAM) r->write_candidates_seen++;
         break;
     case LSF_RETURN:
         r->returns_seen++;

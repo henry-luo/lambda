@@ -1587,10 +1587,11 @@ static bool name_scope_matches(const String* stored, const String* name, bool by
         memcmp(stored->chars, name->chars, name->len) == 0);
 }
 
-static NameEntry* name_scope_lookup(const NameScope* scope, const String* name, bool by_bytes) {
+static NameEntry* name_scope_lookup(const NameScope* scope, const String* name,
+        bool by_bytes, uint32_t* hash = NULL) {
     if (!scope || !name) return NULL;
     if (scope->name_index && scope->name_index_capacity) {
-        uint32_t slot = name_scope_hash(name) &
+        uint32_t slot = (hash ? *hash : name_scope_hash(name)) &
             (scope->name_index_capacity - 1);
         for (;;) {
             NameEntry* entry = scope->name_index[slot];
@@ -1611,6 +1612,26 @@ NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name) {
 
 NameEntry* name_scope_lookup_name_bytes(const NameScope* scope, const String* name) {
     return name_scope_lookup(scope, name, true);
+}
+
+NameEntry* name_scope_lookup_chain(const NameScope* scope, const String* name) {
+    if (!name) return NULL;
+    uint32_t hash = 0;
+    bool hashed = false;
+    for (; scope; scope = scope->parent) {
+        // Small scopes use pointer comparisons. Hash only on the first
+        // indexed ancestor and reuse it for the rest of the search.
+        if (!hashed && scope->name_index) {
+            hash = name_scope_hash(name);
+            hashed = true;
+        }
+        if (NameEntry* entry = name_scope_lookup(scope, name, false, &hash)) return entry;
+        if (scope == scope->parent) {
+            log_error("scope lookup: circular parent scope");
+            break;
+        }
+    }
+    return NULL;
 }
 
 static bool name_scope_index_insert(NameScope* scope, NameEntry* entry) {

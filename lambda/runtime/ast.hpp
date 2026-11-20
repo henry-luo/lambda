@@ -768,16 +768,7 @@ static inline bool ast_visit_body_writes(AstNode* node, const VisitWrite& visit,
                     ((AstFieldNode*)callee_node)->object);
                 if (receiver && visit(receiver->entry)) return true;
             }
-            AstFuncNode* callee = NULL;
-            if (callee_node && callee_node->node_type == AST_NODE_IDENT) {
-                AstIdentNode* fn_ident = (AstIdentNode*)callee_node;
-                AstNode* target = fn_ident->entry ? fn_ident->entry->node : NULL;
-                if (target && (target->node_type == AST_NODE_FUNC ||
-                        target->node_type == AST_NODE_PROC ||
-                        target->node_type == AST_NODE_FUNC_EXPR)) {
-                    callee = (AstFuncNode*)target;
-                }
-            }
+            AstFuncNode* callee = ast_direct_call_function(call);
             AstNamedNode* param = callee ? callee->param : NULL;
             bool callee_is_proc = callee &&
                 ((AstNode*)callee)->node_type == AST_NODE_PROC;

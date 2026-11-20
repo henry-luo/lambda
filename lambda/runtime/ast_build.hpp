@@ -59,7 +59,6 @@ typedef enum LambdaSyntaxForm : uint8_t {
     LSF_BASE_TYPE,            // TYPE (ident-sized): may resolve to a system function
     LSF_IDENT,                // IDENT: a name read (morphs by what it resolves to)
     LSF_MEMBER_NAME,          // IDENT: a member key spelling, never looked up
-    LSF_WRAPPER,              // PRIMARY around one expression
     LSF_CURRENT_ITEM,         // CURRENT_ITEM / CURRENT_INDEX
     LSF_CURRENT_ERROR,        // CURRENT_ERROR
     LSF_NAVIGATION,           // NAVIGATION_EXPR
@@ -172,12 +171,6 @@ typedef enum LambdaAstLiteralKind {
 bool lambda_literal_kind_from_token(LambdaTokenKind token, LambdaAstLiteralKind* kind);
 Type* build_type_literal_from_span(Transpiler* tp, SourceSpan span,
         LambdaAstLiteralKind kind);
-
-// Maps an already-committed Lambda operator spelling to the retained AST
-// operator. Prefix and infix spellings intentionally use separate entry
-// points: `+`, `-`, `*`, and `!` have different retained meanings by form.
-bool lambda_unary_operator_from_spelling(StrView spelling, Operator* op_out);
-bool lambda_binary_operator_from_spelling(StrView spelling, Operator* op_out);
 
 // Builds and binds a name read at resolve time (a callee spelled as a type
 // word). Name lookup, imported-value handling, and `that`-clause rewriting
