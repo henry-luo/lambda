@@ -5826,7 +5826,7 @@ static void dom_focus_set_selection_for_element(DocState* state, DomElement* ele
     const char* exc = nullptr;
     if (tc_is_text_control_elem(elem) && elem->parent) {
         tc_ensure_init(elem);
-        FormControlProp* form = elem->form;
+        FormControlProp* form = elem->form_storage();
         tc_set_active_element(state, elem);
         tc_set_last_focused_text_control(state, elem);
         if (form) {
@@ -7559,7 +7559,7 @@ extern "C" Item dom_text_control_select_bridge(void* dom_elem) {
     if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
 
     tc_ensure_init(elem);
-    FormControlProp* f = elem->form;
+    FormControlProp* f = elem->form_storage();
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (dom_is_script_focusable(elem)) {
         dom_engine_control_focus_programmatic(state, (View*)elem, false);
@@ -7614,7 +7614,7 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
                                                     Item mode_arg) {
     if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
     tc_ensure_init(elem);
-    FormControlProp* f = elem->form;
+    FormControlProp* f = elem->form_storage();
     if (!f) return make_js_undefined();
 
     Item replacement_item = js_to_string(replacement_arg);
@@ -8029,7 +8029,7 @@ extern "C" const char* dom_form_control_current_value(DomElement* elem) {
         }
         if (tc_is_text_control(elem)) {
             tc_ensure_init(elem);
-            if (elem->form && elem->form->current_value) return elem->form->current_value;
+            if (elem->form_storage() && elem->form_storage()->current_value) return elem->form_storage()->current_value;
             const char* fallback = elem->get_attribute("value");
             return fallback ? fallback : "";
         }
@@ -8038,7 +8038,7 @@ extern "C" const char* dom_form_control_current_value(DomElement* elem) {
     }
     if (str_icmp_cstr(tag, "textarea") == 0) {
         tc_ensure_init(elem);
-        return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
+        return (elem->form_storage() && elem->form_storage()->current_value) ? elem->form_storage()->current_value : "";
     }
     return "";
 }
@@ -9160,8 +9160,8 @@ static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
 
     if (elem) {
         // customError
-        if (elem->form && elem->form->custom_validity_msg &&
-            elem->form->custom_validity_msg[0] != '\0') {
+        if (elem->form_storage() && elem->form_storage()->custom_validity_msg &&
+            elem->form_storage()->custom_validity_msg[0] != '\0') {
             custom_error = true;
         }
 
@@ -9445,7 +9445,7 @@ static bool dom_form_user_validity_visit(DomElement* element, void* context) {
     if (element->tag_name &&
         (_is_tag(element, "input") || _is_tag(element, "textarea") ||
          _is_tag(element, "select")) &&
-        dom_find_form_owner(element) == scan->form &&
+        dom_find_form_owner(element) == scan->form_storage() &&
         !element->user_validity()) {
         element->set_user_validity(true);
         scan->changed = true;
@@ -11053,7 +11053,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (tc_is_text_control_elem(elem)) {
         if (prop_id == JS_DOM_PROP_VALUE) {
             tc_ensure_init(elem);
-            FormControlProp* f = elem->form;
+            FormControlProp* f = elem->form_storage();
             String* s = heap_strcpy(f->current_value ? f->current_value : (char*)"",
                                     (int64_t)f->current_value_len);
             return (Item){.item = s2it(s)};
@@ -11096,7 +11096,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         if (prop_id == JS_DOM_PROP_TEXT_LENGTH) {
             tc_ensure_init(elem);
-            return (Item){.item = i2it((int64_t)elem->form->current_value_u16_len)};
+            return (Item){.item = i2it((int64_t)elem->form_storage()->current_value_u16_len)};
         }
         if (prop_id == JS_DOM_PROP_SET_SELECTION_RANGE)
             return dom_realm_new_function(js_text_control_set_selection_range);
@@ -11448,9 +11448,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (!is_form_ctrl || _elem_is_barred(elem)) {
             return js_name_item("");
         }
-        if (elem->form && elem->form->custom_validity_msg &&
-            elem->form->custom_validity_msg[0] != '\0') {
-            return js_name_item(elem->form->custom_validity_msg);
+        if (elem->form_storage() && elem->form_storage()->custom_validity_msg &&
+            elem->form_storage()->custom_validity_msg[0] != '\0') {
+            return js_name_item(elem->form_storage()->custom_validity_msg);
         }
         return js_name_item("");
     }
@@ -12174,8 +12174,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             return value;
         }
         elem->set_attribute("value", s);
-        if (elem->form) {
-            elem->form->value = elem->get_attribute("value");
+        if (elem->form_storage()) {
+            elem->form_storage()->value = elem->get_attribute("value");
         }
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
@@ -13224,7 +13224,7 @@ static Item dom_text_control_caret_bounds(DomElement* elem) {
     }
 
     tc_ensure_init(elem);
-    FormControlProp* form = elem->form;
+    FormControlProp* form = elem->form_storage();
     if (!form) return ItemNull;
 
     uint32_t start_u16 = 0;
@@ -13266,7 +13266,7 @@ static Item dom_text_control_boundary_from_point(DomElement* elem,
     }
 
     tc_ensure_init(elem);
-    FormControlProp* form = elem->form;
+    FormControlProp* form = elem->form_storage();
     const char* value = form && form->current_value
         ? form->current_value
         : (form ? form->value : "");
@@ -13316,7 +13316,7 @@ extern "C" Item dom_core_text_control_range_rects(Item n, Item start, Item end) 
         !dom_ensure_geometry_snapshot(elem->doc)) return ItemNull;
     tc_ensure_init(elem);
     ViewBlock* block = lam::view_require_block(elem);
-    FormControlProp* form = elem->form;
+    FormControlProp* form = elem->form_storage();
     if (!block || !form || block->width <= 0.0f || block->height <= 0.0f) return ItemNull;
     const char* value = form->current_value ? form->current_value : form->value;
     if (!value) value = "";
@@ -16200,9 +16200,9 @@ Item dom_form_close_dialog(DomElement* form, DomElement* submitter) {
         form_input_kind_is(submitter->get_attribute("type"), FORM_INPUT_KIND_IMAGE)) {
         const DomElementExt* coordinates = submitter->ext;
         char text[64];
-        snprintf(text, sizeof(text), "%lld,%lld",
-            (long long)(coordinates ? coordinates->form_image_selected_x : 0),
-            (long long)(coordinates ? coordinates->form_image_selected_y : 0));
+        snprintf(text, sizeof(text), "%d,%d",
+            math_round_to_int_sat(coordinates ? coordinates->form_image_selected_x : 0.0f),
+            math_round_to_int_sat(coordinates ? coordinates->form_image_selected_y : 0.0f));
         result.set(js_name_item(text));
     } else if (const char* value = submitter ? submitter->get_attribute("value") : nullptr) {
         result.set(js_name_item(value));
@@ -16459,7 +16459,7 @@ extern "C" Item dom_core_select_show_picker(Item n) {
     }
     if (state && dom_is_connected(elem)) {
         tc_ensure_init(elem);
-        if (elem->form) {
+        if (elem->form_storage()) {
             dom_engine_control_open_dropdown(state, static_cast<View*>(elem));
         }
     }

@@ -34,6 +34,7 @@
 #include "radiant/event.hpp"
 #include "radiant/select_options.hpp"
 #include "lib/log.h"
+#include "lib/math_utils.h"
 #include "lib/mem.h"
 #include "lib/str.h"
 #include "lib/strbuf.h"
@@ -577,7 +578,7 @@ static void fd_append_input_entries(Item entries, DomElement* elem, const char* 
         value = "UTF-8";
     } else if (tc_is_text_control(elem)) {
         tc_ensure_init(elem);
-        value = elem->form && elem->form->current_value ? elem->form->current_value : "";
+        value = elem->form_storage() && elem->form_storage()->current_value ? elem->form_storage()->current_value : "";
     } else {
         // Value-state inputs, including range, serialize their current stored value.
         value = radiant_input_live_value(elem);
@@ -591,7 +592,7 @@ static void fd_append_input_entries(Item entries, DomElement* elem, const char* 
 
 static void fd_append_textarea_entries(Item entries, DomElement* elem, const char* name) {
     tc_ensure_init(elem);
-    const char* value = elem->form && elem->form->current_value ? elem->form->current_value : "";
+    const char* value = elem->form_storage() && elem->form_storage()->current_value ? elem->form_storage()->current_value : "";
     RootFrame roots(1);
     Rooted<Item> normalized(roots, fd_normalize_newlines(value));
     const char* text = fn_to_cstr(normalized.get());
@@ -711,12 +712,12 @@ static void fd_append_image_coordinates(Item entries, DomElement* image, const c
         strbuf_append_char(key, '.');
     }
     const DomElementExt* state = image->ext;
-    int64_t coordinates[] = {state ? state->form_image_selected_x : 0,
-                             state ? state->form_image_selected_y : 0};
+    float coordinates[] = {state ? state->form_image_selected_x : 0.0f,
+                           state ? state->form_image_selected_y : 0.0f};
     strbuf_append_char(key, 'x');
     for (int i = 0; i < 2; i++) {
         char value[32];
-        snprintf(value, sizeof(value), "%" PRId64, coordinates[i]);
+        snprintf(value, sizeof(value), "%d", math_round_to_int_sat(coordinates[i]));
         key->str[key->length - 1] = i == 0 ? 'x' : 'y';
         fd_append_text_entry(entries, key->str, value);
     }

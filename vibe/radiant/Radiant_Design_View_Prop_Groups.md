@@ -1,27 +1,28 @@
 # Radiant design: View property groups
 
-**Status:** Proposed, 2026-11-20. Storage decisions and budgets below are candidates for measurement and review.
+**Status** · Retained design as of 2026-11-20. The [implementation record](../impl/Radiant_Impl_View_Prop_Groups.md) tracks each measured stage. Appendix A compares the original baseline with the retained build.
 
-Implementation and measured placement decisions live in the [implementation record](../impl/Radiant_Impl_View_Prop_Groups.md).
+**Scope** · Property storage reachable from `DomElement` and its optional groups, from DOM construction through browsing and paged layout, paint, and teardown. Preserve CSS behavior, CSSOM answers, and the shared DOM/view node used by Radiant.
 
-**Scope:** Property storage reachable from `DomElement` and `DomElementExt`, from DOM construction through browsing and paged layout, paint, and teardown. Preserve CSS behavior, CSSOM answers, and the shared DOM/view node used by Radiant.
+**Spec linkage** · D5.1.4 and D5.2.1–D5.2.4 govern allocation, ownership, attribution, and diagnostics. D5.5.1–D5.5.3 govern the DOM and retained presentation. D9.1.1v4 and D9.1.3v2 govern the Input/Radiant split. This record extends DV4 and DV6 and applies DV5a, DV8, DV9, and DV10 from the shared view design. [Formal design](../../doc/Lambda_Formal_Design.md) · [View structure decisions](Radiant_Design_View_Struct.md#3-decisions)
 
-**Spec linkage:** [D5.1.4 and D5.2.1–D5.2.4](../../doc/Lambda_Formal_Design.md#d5-memory) govern allocation, ownership, attribution, and diagnostics. D5.5.1–D5.5.3 govern the Radiant seam and retained presentation. D9.1.1v4 and D9.1.3v2 govern the Input/Radiant split. This proposal extends [DV1–DV4, DV5a, DV6, and DV9–DV11](Radiant_Design_View_Struct.md#3-decisions) with finer property groups and a placement test. It proposes no change to the formal rulings.
+## 1. Retained record sizes
 
-## 1. What costs memory today
+The largest savings come from the payload allocated for common elements. Moving pointer fields can shrink every node, but a smaller `sizeof(DomElement)` can still increase the tree's memory if many more elements need an extension. Measure the document pool, node arena, and view storage together.
 
-The largest opportunity is the payload allocated for common elements. Moving pointer fields can shrink every node, but a smaller `sizeof(DomElement)` can still increase the tree's memory if many more elements need an extension. Measure the document pool, node arena, and view storage together.
+| Record | Before, arm64 | Retained, arm64 |
+|---|---:|---:|
+| `DomElement` | 376 B | 352 B |
+| `DomElementExt` | 568 B | 240 B |
+| `DomPropExt` | — | 48 B |
+| `BlockProp` | 456 B | 344 B |
+| `ScrollProp` | 216 B | 80 B |
+| `TransformProp` | 408 B | 56 B |
+| `FormControlProp` | 256 B | 208 B |
+| `BoundaryProp` | 224 B | 224 B |
+| `LayoutCache` | 1,240 B | 1,240 B |
 
-| Record | Current arm64 payload | What makes it expensive |
-|---|---:|---|
-| `DomElement` | 376 B | Every element pays for all inline slots, including pointers for roles it may never take. |
-| `DomElementExt` | 568 B | The first feature to need it pays for every inline field. Six fragment unions take 144 B and ten pseudo-style pointers take another 80 B before any pointees. |
-| `BlockProp` | 456 B | About 120 direct fields, including grouped value components and layout state. Common flow and inheritance paths call `ensure_block()`, paying for unrelated rare features. |
-| `ScrollProp` / `TransformProp` | 216 B / 408 B | Scroll includes both snap configuration and live view geometry. Transform embeds three individual transform records even when only the transform list, origin, or perspective is used. |
-| `FlexItemProp` / `GridItemProp` / `FormControlProp` | 256 B / 176 B / 256 B | Specializing a slot's location saves a pointer per node. The payloads themselves warrant a separate audit of role-specific fields and layout state. |
-| `BoundaryProp` / `LayoutCache` | 224 B / 1,240 B | A field count alone misses nested records and arrays. Cache size matters only in combination with its current allocation rate and hit rate. |
-
-These are compiler record sizes from the current headers. The earlier DV6 implementation recorded 328 extensions across 2,187 elements (15.0%), before the sidecar grew to its current size. Appendix A records aggregate smoke measurements and their limits. [Element and extension fields](../../lambda-input/lambda/input/css/dom_element.hpp) · [View prop definitions](../../radiant/radiant/view.hpp) · [DV6 implementation measurements](<../impl/Radiant_Impl_Dom_View_Struct (done).md#12-p3-measurements-and-decisions>)
+These are direct compiler record sizes. Optional allocations and shared storage contribute to the measured totals in Appendix A. [Element records](../../lambda-input/lambda/input/css/dom_element.hpp) · [View payloads](../../radiant/radiant/view.hpp) · [Layout cache](../../radiant/radiant/layout.hpp)
 
 ## 2. Split properties by use and lifetime
 
@@ -31,55 +32,42 @@ Aim for **fewer than 15 logical properties per `ViewProp` payload**. Count a val
 
 Use three tests to place a field. Does it have the same lifetime as its neighbors? Do the same elements need it? Do the same hot readers usually read it alongside its neighbors? A group should be independently lazy if most elements that allocate its parent never use it. Reserve pass scratch for values that expire before publication (DV10). Retained geometry belongs to the view and its generation. Durable authored values stay with the cascade (DV9b).
 
-### DV4.2 — Give `BlockProp` a common core and a lazy extension
+### DV4.2 — Keep block sizing together and allocate uncommon groups lazily
 
-Target **at most 96 B** for the common payload in the first prototype, including its extension link. Select the final hot fields from read profiles and per-element occupancy. Begin with 14 logical properties: width, height, box sizing, writing mode, direction, bidi mode, zoom, text alignment, white space, line height, text transform, word break, overflow wrap, and text wrap mode. A layout-only probe with those fields, their current basic size kinds, the embedded computed line-height value, and an extension pointer measured **80 B** on arm64. Confirm min/max constraints and baseline usage before deciding their final placement. Preserve the distinction between computed and used forms where both are needed.
+`BlockProp` keeps width, height, min/max constraints, and the resolved `box-sizing` mode together. `BoundaryProp` supplies the padding and border metrics used for size conversion. Core text and flow values use the same `BlockProp` defaults.
 
-Make `BlockPropExt` an optional view-owned group for the uncommon block features. It may own smaller feature groups if they are independently sparse. Start with these cuts and measure their co-occurrence before choosing which groups warrant a separate allocation:
+| Optional group | Size | Contents |
+|---|---:|---|
+| `BlockPropExt` | 104 B | List style, counters, box decoration breaks, fragmentation breaks, widows, and orphans |
+| `BlockContainmentProp` | 32 B | Containment, container-query axes and names, intrinsic size hints, and content visibility |
 
-| Candidate group | Initial contents and boundary |
-|---|---|
-| Advanced sizing and alignment | Min/max bounds and kinds, alternate sizing expressions and percentage bases, fit-content arguments, uncommon alignment. Keep any frequently co-read constraints with the core sizing path if the split increases cost. |
-| Text flow options | Indent with its deferred value, last-line alignment and justification, hyphenation options, tabs and spacing. Split by feature when the options have different allocation rates. Resolve inherited values and choose the group once per paragraph or flow context where possible. |
-| Generated lists and counters | Marker type, position and image, counter operations. Use separate subgroups if generated counters and lists seldom coincide. |
-| Fragmentation and containment | Break rules, orphans/widows, and box decoration behavior in a fragmentation group. Container queries, containment, and content visibility in a separate group. Keep last remembered intrinsic size in storage that survives reflow if its semantics require it. |
-| Line trim and clamp | Authored trim and clamp options in small style groups. Keep working accumulators in pass state when their lifetime allows. Keep any committed baseline, clamp, or trim outcome needed by replay, paint, or CSSOM in view-owned geometry. |
-| Float and vertical-flow bookkeeping | Move pass-local exclusion and resolution values into the existing layout context or per-box scratch after auditing multipass and replay readers. Preserve any state proven to cross the pass boundary with an explicit lifetime. |
+Both groups belong to the view pool. Allocate them on a write requiring the group and use immutable defaults on a read of an absent group. A CSS-wide keyword, explicit default, NaN percentage sentinel, presence bit, or deferred calc must retain its current meaning. Keep simultaneous computed and used forms where their consumers need both (DV9b, DV10). [Block definitions](../../radiant/radiant/view.hpp) · [Typed defaults](../../radiant/radiant/view_prop_defaults.cpp) · [Size conversion](../../radiant/radiant/layout_box.cpp)
 
-Allocate the extension on the first real write to a cold group, including inherited non-initial values and UA defaults when relevant. A read of an absent group returns its typed canonical defaults or a null-presence result. A CSS-wide keyword, explicit default, NaN percentage sentinel, presence bit, or deferred calc must retain its current meaning. The extent of the split depends on measured writes: a branch that initializes a feature for every block can make a nominally optional group nearly universal.
+### DV4.3 — Split scroll, transform, and form payloads by feature
 
-## 3. Shrink the extension and evaluate each slot move
+| Core | Optional groups | Ownership and use |
+|---|---|---|
+| `ScrollProp` | `ScrollSnapProp` (144 B) | Holds snap configuration, scroll margins, and scroll padding. Scroll-into-view reads spacing even when snapping is inactive. |
+| `TransformProp` | `IndividualTransformProp` (360 B) | Holds individual `translate`, `rotate`, and `scale` records. Animated bindings borrow their sample owner's values. |
+| `FormControlProp` | `FormPlaceholderProp` (24 B), `FormFileButtonProp` (40 B) | Hold resolved pseudo paint. The core carries the range, select, and text projection, and StateStore owns canonical control values. |
 
-### DV6.1 — Keep a small extension directory with explicit ownership
+The view pool owns the optional payloads. Retained style resolution releases stale groups and restores defaults. Form pseudo paint releases its font handle when the group resets or retires. Script-created form state can attach before the first layout and has a node retirement path. [Ensure helpers](../../radiant/radiant/view_prop_ensure.cpp) · [View teardown](../../radiant/radiant/view_pool.cpp)
 
-Target **128–160 B** for the populated `DomElementExt` shell, including admitted moved slots. Keep the storage owner needed for adoption and a small set of typed slots. Allocate feature payloads only when their feature is used. Keep a direct slot if almost every element that needs its parent also needs that payload, or if an extra hop is costly in a frequent path. Collapse redundant shells when a feature has only one payload.
+## 3. Place each field at its required lifetime
 
-| Current extension contents | Proposed placement |
-|---|---|
-| Fragment unions, presence bits, inline edge snapshots, layout fragment list/count, ruby geometry | View-owned geometry groups with explicit generation and teardown. Measure which union kinds are live together before choosing a dense record or a small common record with a rare tail. Keep list/count together and group ruby separately if sparse. |
-| Pseudo specified-style trees | A document-side pseudo-style group, allocated at first slot. Evaluate a small representation for the commonly populated kinds before reserving ten pointers. The existing `pseudo` view slot is generated content and layout state, with a separate lifetime. |
-| Multicolumn, vector path, filters, backdrop filters, markers | Keep typed view slots, grouped into a feature directory only if occupancy offsets the extra pointer and load. Custom layout paint may borrow a document resource, so its view binding and resource keep separate ownership. |
-| Transition state, Web Animations, animated display | Optional document-owned effect state for animation data that intentionally survives relayout. Keep transient samples and view-pool borrows in view-owned slots with explicit reset. |
-| Pending scroll coordinates and remembered intrinsic sizes | Small document-owned records with their existing presence and lifetime rules. Coordinate with `DocState` for live interaction. |
-| Shadow/slotting, attributes and CSSOM declaration backing, popover/dialog, scripts and form/task state | Document-owned metadata grouped by feature and allocated independently. `Own` and borrow semantics apply here. Keep storage-owner tracking safe through adoption and keep pending task state through view teardown and detach. |
+### DV6.1 — Keep document extensions independently lazy
 
-Document-owned groups follow D5.5.1 and D5.5.2. A `ViewProp<T, Slot>` owns a view payload. A `ViewRef<T, Slot>` refers to view storage or storage that outlives it and needs its binding cleared. View children under a view-owned root can use typed `Own<T>` fields, with one teardown path for the root and its children. Only document-to-view roots need `DomViewSlot` registration. Keep opaque declarations and the shared element definition on the Input side, and keep concrete view payload definitions and view teardown in Radiant, per D9.1.1v4 and D9.1.3v2.
+`DomElementExt` tracks the physical storage owner for adoption. It holds uncommon DOM state, typed slots for uncommon view features, and pointers to the separately allocated attribute and fragment groups. The document pool owns `DomAttributeCache` (48 B) and `DomFragmentGeometry` (164 B). Layout resets the geometry group as needed. The attributes group holds expanded-name, synthetic attribute, and name-cache state. The extension packs 14 Boolean flags into two bytes. It stores form-image offsets as fractional CSS pixels and rounds them when FormData or dialog submission serializes them (D9.5.6v2).
 
-### DV6.2 — Move cold slots only after testing the placement
+`DomPropExt` holds a second lazy directory in the node's physical document pool. It owns private pseudo specified styles and borrows namespace URI bytes. Shared or generated view payloads follow their own owner. A directory stays live while any of its bindings are present. Node retirement clears document-owned state and borrows under D5.5.1 and D5.5.2. [Element extensions](../../lambda-input/lambda/input/css/dom_element.hpp) · [Release paths](../../lambda-input/lambda/input/css/dom_element.cpp)
 
-| Slot | Proposed order and an acceptance question |
-|---|---|
-| `tb`, `td`, `form` | First candidates. Profile tables and dense forms separately. Forms and table cells can coexist, and either can be a flex or grid item. Keep separate slots and test dirty CSSOM and native control access before a clean layout. |
-| `pseudo` | First candidate. Compare overlap with the proposed document-side pseudo-style group and account for generated and synthetic nodes. Sample generated-content and counter-heavy pages. |
-| `transform` | Trial after profiling absent checks during paint, hit testing, and animation. Alongside the move, measure a separate experiment that allocates the inline-sized individual transforms only where used and preserves both sampled and owned transform-function lifetimes. |
-| `fi`, `gi` | Move as **one eight-byte tagged union** only if flex/grid-heavy pages pass. Their readers run in inner loops, and modern pages can have many items. Bind the typed item pointer at algorithm entry or in existing item-layout records so inner loops do not load `ext` repeatedly. |
-| `scroller` | Last candidate. Overflow and clipping checks are frequent even when the pointer is absent. First test keeping the fast overflow check on the current path while splitting rarely used snapping configuration from `ScrollProp`. Measure root/body overflow, scroll containers, clip and scroll hit testing, and scroll event delivery before relocating the slot. |
+### DV6.2 — Place the measured role slots in `DomPropExt`
 
-Start with `font`, `in_line`, `bound`, `blk`, and existing placement of unlisted slots such as `position`, `embed`, and `layout_cache`. Compare two placement candidates for the moved slots: direct fields in the small extension shell, and a single view-owned role or feature directory reachable from the shell. A directory can save space for elements that need only DOM metadata, but adds a lookup and an allocation for elements that need its contents. A slot that misses the performance gate stays shallow. Preserve the parent-item tag independently of the table and form roles (DV5a). In-place reflow and view retirement must keep their current scroll and form semantics.
+The lazy directory holds `tb`, `form`, `transform`, and `pseudo`. Each is a `ViewProp` with teardown registered in `DomViewSlot`. `pseudo` carries generated-content view state. The `pseudo_styles` pointer owns private cascaded pseudo declarations and follows document lifetime. View teardown can release the directory when its last binding clears. Adoption preserves its physical owner under D5.5.1.
 
-On this ABI, those candidates represent **56 B of inline slots** in total. If all move with no added inline storage or padding, the node could reach **320 B** from 376 B. Keeping `scroller` at the first level gives an illustrative **328 B** with the other moves. These are layout estimates, not expected savings for the whole tree.
+The element holds `position`, `scroller`, `td`, the tagged flex/grid item union, `font`, `in_line`, `bound`, `blk`, `embed`, and `layout_cache` directly. Table/form roles and flex/grid parent roles are independent (DV5a). Compare live union and overlap counts before moving another slot. [Slot declarations](../../lambda-input/lambda/input/css/dom_element.hpp) · [Teardown catalog](../../radiant/radiant/view_pool.cpp)
 
-Compare against the baseline **after** shrinking the shell, so a slot move does not get credit for savings from a different change. For \(N\) elements, \(E_0\) and \(E_1\) live extensions before and after a placement trial, and actual shell allocation charges \(H_0\) and \(H_1\), an approximate byte delta is:
+For \(N\) connected elements, \(E_0\) and \(E_1\) live extensions, and shell allocation charges \(H_0\) and \(H_1\), an approximate placement delta is:
 
 ```text
 delta = (node_charge_after - node_charge_before) * N
@@ -87,29 +75,68 @@ delta = (node_charge_after - node_charge_before) * N
       + delta_payload_and_allocator_bytes
 ```
 
-Use payload bytes for the logical calculation and allocator charges for the physical calculation. Count allocator overhead once. Count the union of elements requiring any moved slot, and measure how many would already have a shell. For example, moving six slots saves 48 payload bytes per node. If a 96 B shell becomes 144 B and it previously covered 30% of nodes, the move must stay below about **53%** shell coverage to win before allocation overhead, with other payloads held equal.
+Use payload bytes for logical totals and allocator charges for physical totals. Account for each allocation in its owning domain. Evaluate a slot move against the build immediately before that move.
+
+### DV6.3 — Intern namespace URIs and derive local names
+
+Elements, attributes, XML namespace targets, and parsed `xmlns` and XHTML metadata share URI spellings from the Input NamePool. The document caches the HTML URI and empty URI. Ordinary HTML identity uses an inline flag. Other explicitly resolved namespaces can use the borrowed pointer in `DomPropExt`. Copies into another Input intern in its pool. Adopted nodes keep access to the bytes owned by their retained source Input (D5.5.1, D5.6.1–D5.6.2).
+
+The local name comes from `tag_name` or its qualified suffix. Identity flags distinguish a literal colon from the separator in a qualified name. Namespace matching compares URI content and preserves the XHTML expanded name and case under S8.2.2v6 and D10.1.4. [URI allocation and namespace targets](../../lambda-input/lambda/io/target.cpp) · [Element namespace identity](../../lambda-input/lambda/input/css/dom_element.cpp)
+
+### DV6.4 — Share universal pseudo resets at document scope
+
+The normal selector matcher and active stylesheet checks determine eligibility for each element. A universal `::before` or `::after` rule can share a tree when it sets only `box-sizing` to a literal `content-box` or `border-box`. The owning document caches an independent declaration snapshot at its original cascade priority. Two four-bit indexes in existing node padding select the shared trees. Elements use zero for an absent shared tree. Each document can cache 15 distinct snapshots. Rules that need another snapshot when the cache is full use the private path.
+
+An element reads its private pseudo tree when present and otherwise reads the selected shared tree. Adding a conflicting declaration or requesting a writable slot materializes the shared tree in the node's pool before applying the override. Layout and pseudo CSSOM use this same lookup, including when a pseudo generates no box. The physical source document keeps a shared snapshot available after adoption. Recascade clears the node's shared indexes, and retained generated boxes follow the existing borrow-retirement path when a private tree is replaced (D5.5.1, D5.5.3, DV9c). [Matching path](../../radiant/radiant/css_cascade.cpp) · [Storage and promotion](../../lambda-input/lambda/input/css/dom_element.cpp) · [Pseudo CSSOM](../../radiant/radiant/css_prop_table.cpp)
 
 ## 4. Make each group's storage contract explicit
 
-1. **Expose a read accessor, a presence test where needed, and one mutable ensure path.** A read must never allocate. Put default selection and correct pool choice there, and reuse existing typed prop helpers. Call sites in cascade, layout, paint, and CSSOM should work through the same typed accessors even during placement trials. Keep anonymous scratch items in pass storage without allocating a document shell. Secondary resolution continues to use its selected view's storage and leaves browsing-view bindings alone.
-2. **Use one registration source per view slot.** Extend the existing slot/teardown catalog where practical so the slot, typed access, ownership, default/reset behavior, payload cleanup, and clear behavior agree. Keep compile-time coverage and debug post-clear checks. Child groups should follow their root's existing teardown entry. Avoid per-element maps, virtual lookup, and extra per-property scans in hot paths.
-3. **Keep immutable resolved style separate from used geometry where the split makes sharing possible.** Keep the existing canonical `InlineProp` bindings and write gate (DV9c). Treat interned inherited text deltas as a separate experiment if they pay for themselves. Mutable view results, history, and animation samples must keep the lifetimes their readers expect. Preserve invalidation keys when storage moves, especially inherited style identity, revisions, and the computed/used size distinction.
-4. **Audit large payloads by bytes and use after the block split.** Test `BoundaryProp::flow_margin` as an optional fragmentation snapshot. `LayoutCache` already has optional histories. Measure the hit rates of its inline measurement and intrinsic-width arrays before testing a small base with optional arrays. Split `FormControlProp` by subtype and place flex/grid measurement scratch in the pass when it never escapes (DV10). The 15-property guideline opens these reviews. Space saved per document and observed regressions decide which changes ship.
+1. Expose a read accessor, a presence test where needed, and one mutable ensure path. Group reads are allocation-free and use typed defaults or null. Reuse the typed ensure helpers to select the correct pool. Keep anonymous scratch items in pass storage. Secondary resolution uses its selected view's storage.
+2. Use one registration source per view slot. Keep the typed access, ownership, default/reset behavior, teardown, and clear behavior in agreement. Child groups follow their root's existing teardown entry. Keep compile-time coverage and debug post-clear checks. The Input headers expose the shared element definition, and Radiant defines the concrete view payloads and tears them down (D9.1.1v4, D9.1.3v2).
+3. Separate immutable resolved style from used geometry where sharing pays for itself. Keep canonical `InlineProp` bindings behind the existing write gate (DV9c). Treat interned inherited text deltas as a separate experiment. Preserve style identities, inherited revisions, layout invalidation, and the lifetime of retained animation or view state.
+4. Keep the nine general measurement entries and four intrinsic-width entries inline in `LayoutCache`. The cache trials moved those arrays and increased CPU time on large pages. Cache storage, `BoundaryProp::flow_margin`, and pass-lived flex/grid measurement state remain separate investigations (D5.1.4, DV10). [Cache trial results](../impl/Radiant_Impl_View_Prop_Groups.md#deferred-layout-cache-storage)
 
 ## 5. Measurement and acceptance
 
-- **Capture four states.** Sample a constructed DOM before browsing-view properties are allocated, first committed layout, repeated retained reflow or recascade, and the same settled document after a fixed mutation script. Track peak and settled memory separately. Count synthetic and authored nodes separately and include both in byte totals. Track detached or retained objects separately from connected-tree slot occupancy.
-- **Measure group occupancy and overlap.** Extend the existing diagnostic profiler with a single typed walk at the sample points. Report live group counts and allocated bytes, including child payloads, and reconcile estimates against actual storage-owner pool charges. Count shared allocations once in their owning storage and report static defaults separately. Count unique elements with extensions and with each candidate slot, old-extension overlap, the union of candidate users, and non-initial field/group frequency. Sample how often hot paths read each slot, including checks for absent values. Use opt-in aggregate allocation/free counts and check for empty groups after repeated reflow to expose churn. Keep this instrumentation diagnostic under D5.2.4 and run timings with it off.
-- **Use paired workloads.** Reuse the 46-page capture harness, plus focused plain text, flex/grid dashboards, tables/forms, scroll/snap, generated content, transformed/animated pages, and ruby/multicolumn/paged layout. Include large sparse-style trees and one dense case per candidate so a corpus median cannot hide a regression in a common workload. Use the same resources, viewport, fixture operations, and equivalent output for both builds.
-- **Require a material memory win.** Proposed bar: at least **15% lower typical combined active DOM and view-property bytes** after first layout across the page corpus, using the geometric mean of paired per-page ratios. Report pre-layout savings, reserved and peak bytes, tail pages, and cost per authored element separately. No repeatable material increase on dense role workloads. Compare any savings with canonical style and pool retention growth so bytes moved into another domain still count. Treat the proposed struct-size targets as diagnostic until the measured variant passes (DV11).
-- **Require no detectable performance regression.** Measure construction, cascade, first layout, retained reflow, paint, hit testing, and interactive scroll as applicable, in verified release builds on the same host, with paired runs and separate warm/cold measurements. Establish noise with repeated baseline runs. Proposed equivalence limits are **1% for median time** and **3% for p95** on preselected representative workloads, with sufficient repetitions to resolve those limits. A repeatable slowdown fails the gate even when the overall average improves. Report inconclusive comparisons and retest before admitting the placement. Capture size and timing for each split and slot move independently.
-- **Require parity at each step.** Compare layout trees, CSSOM results, paint output, and retained interaction behavior. Run focused regressions for the touched features, then the Radiant and layout baselines. Cover rebuild/reset, style removal after a cold-group allocation, reflow replay, detach and adoption, view teardown, and alternate/paged views. Form-in-grid and form-in-table-cell exercise role coexistence. Include a large table and dense flex/grid fixture for performance.
+- Capture constructed DOM, first committed layout, repeated retained reflow or recascade, and a settled document after a fixed mutation script. Track peak and settled memory separately. Count authored, synthetic, and detached objects in their appropriate populations.
+- Measure slot occupancy and overlap. Reconcile logical storage with actual pool charges, include child payloads, and count each shared allocation once. Run the diagnostic census outside the timing path (D5.2.4).
+- Compare paired workloads with equivalent resources and output. The release corpus contains 53 original static fixtures and 171 web templates. Use focused cases for generated content, forms, flex/grid, scroll and snap, transformed views, ruby, multicolumn, and paged layout.
+- The memory target is a 15% geometric mean reduction in combined active DOM and view bytes at first layout (DV11). Report the aggregate total, per-page geometric mean, tail pages, and process tracking separately. Check dense role workloads for repeatable memory increases.
+- Compare release timings on the same host and establish noise with repeated baselines. The timing targets are 1% for median time and 3% for p95. Check construction, cascade, first layout, retained reflow, paint, and interactions as applicable. A repeatable slowdown beyond those bounds fails the timing target even when memory improves.
+- Compare normalized layout trees and check CSSOM, paint, and retained interaction behavior. Cover recascade, style removal, view teardown, detach, adoption, and generated-style borrowing. [Memory profiler](../../radiant/radiant/view_memory_profile.cpp) · [Test map](../../test/README.md)
 
-## Appendix A. Baseline evidence and implementation sequence
+## Appendix A. End-to-end release measurements
 
-### Evidence collected for this proposal
+This comparison pairs the archived pre-refactor build with the retained build after pseudo reset sharing. Both are native Clang arm64 release builds at `-O3` with full LTO. The baseline includes the pre-existing `DomElement` field reorder. Each page used local resources, a 1200 × 800 viewport, and disabled scripting. Samples come from `post_layout_pre_output` after first layout. Totals sum independent page processes. Tracked process memory includes the Input arena that can own parser-backed elements. The profiler accounts for logical storage and allocator-tracked memory in their respective scopes (D5.2.1–D5.2.4).
 
-The header probe used Clang C++17 targeting arm64 macOS. It included `view.hpp` and `layout.hpp` and measured the records with `sizeof` and a compiler record-layout dump. The workspace had a local `dom_element.hpp` field reorder, which the numbers above include. The Lambda, Input, and Radiant revisions at capture were `27d7f65817`, `3c41675`, and `fc6cfbf` respectively. The element payload has no gaps between its direct fields in this layout, so repacking those fields cannot recover the 56 B projected for moving slots.
+| Metric across 224 pages | Before, bytes | Retained, bytes | Reduction |
+|---|---:|---:|---:|
+| Active DOM storage | 169,426,412 | 86,918,684 | 48.70% |
+| Active view-property storage | 201,804,464 | 195,217,744 | 3.26% |
+| **Combined active DOM and view storage** | **371,230,876** | **282,136,428** | **24.00%** |
+| Profiled physical live bytes | 421,282,825 | 332,505,657 | 21.07% |
+| Profiled physical reserved bytes | 809,779,200 | 620,052,480 | 23.43% |
+| Tracked process live bytes | 1,067,632,515 | 976,160,254 | 8.57% |
+| Tracked process reserved bytes | 2,259,859,464 | 2,067,699,720 | 8.50% |
+
+Combined active storage fell by **84.97 MiB** in aggregate. The per-page geometric mean reduction was **23.95%**, above the 15% memory target. All 224 pages used fewer combined active bytes. All normalized layout trees matched and both endpoints reported zero attribution errors.
+
+| Corpus | Pages | Combined active bytes before | Retained | Aggregate reduction |
+|---|---:|---:|---:|---:|
+| Original fixtures | 53 | 100,599,480 | 87,660,060 | 12.86% |
+| Web templates | 171 | 270,631,396 | 194,476,368 | 28.14% |
+
+`DomElementExt` usage fell from 64,827 to 16,245 of 72,015 connected elements (90.0% to 22.6%). In the retained build, 18,628 elements had `DomPropExt`, 10,856 had private pseudo-style groups, and 38,608 referenced a shared reset. A node can use both a private group and a shared reset for different pseudos.
+
+The latest stage passed 142 native CSS/DOM integration tests and 3,857 static layout smoke fixtures. The dynamic suite passed 125 of 126 tests, with the export-image case tracked in RI-141. Against the immediately preceding baseline, the pseudo-style stage exceeded the 1% median CPU target on Underscore.js (+1.54%, +2.40% on repeat). The integrated Lambda release build is blocked by LR12-64. [Stage measurements and timing](../impl/Radiant_Impl_View_Prop_Groups.md#pseudo-style-storage-and-shared-resets) · [RI-141](../Radiant_Issue_Ledger.md#ri-141--native-export-image-fixture-misses-its-preloaded-cache-entry) · [LR12-64](../Lambda_Issue_Ledger.md#lr12-64--split-host-expects-dom-and-html-declarations-missing-from-its-input-pin)
+
+The endpoint join by fixture path and the aggregate calculation are recorded in `temp/view-prop-overall/comparison.csv` and `summary.json`. The raw baseline profiles are under `temp/view-prop-groups/before/` and `temp/view-prop-groups/web-tmpl/before/`. The retained profiles are under `temp/pseudo-style-placement/shared/`.
+
+## Appendix B. Original proposal evidence
+
+### Initial size probe and smoke samples
+
+The header probe used Clang C++17 targeting arm64 macOS. It included `view.hpp` and `layout.hpp` and measured the records with `sizeof` and a compiler record-layout dump. The workspace had a local `dom_element.hpp` field reorder, which the pre-refactor sizes include. The Lambda, Input, and Radiant revisions at capture were `27d7f65817`, `3c41675`, and `fc6cfbf` respectively. The element payload has no gaps between its direct fields in this layout, so repacking those fields cannot recover the 56 B projected for moving slots.
 
 Five fixtures were run through the existing `lambda.exe layout ... --view-memory-profile` path to confirm observability. Values are the profiler's logical composites at `post_layout_pre_output`, in bytes. The executable's exact source revision and build profile were not established. These are memory-only smoke samples, with all six domains present and zero attribution errors. They establish neither present slot incidence nor the savings or performance of any proposal.
 
@@ -123,7 +150,7 @@ Five fixtures were run through the existing `lambda.exe layout ... --view-memory
 
 The current profiler provides [pool-level attribution](../../radiant/radiant/view_memory_profile.cpp), and [the capture harness](../../utils/profile_view_reuse_memory.py) compares memory domains and normalized layout digests. The historical `DOM_PROP_ALLOCATION_RATE` summary counts allocations at document teardown. A live slot census is needed for placement decisions. For example, [overflow layout](../../radiant/radiant/layout_block.cpp) can allocate a `ScrollProp` even without authored scroll styles, so counting declarations would underpredict the number of relocated slots.
 
-### Order of work
+### Original implementation sequence
 
 1. Add the opt-in live census and collect a paired release baseline. Record both absolute and overlapping occupancy for `fi/gi`, `tb`, `td`, `form`, `transform`, `scroller`, and `pseudo`.
 2. Split `BlockProp` in small feature cuts while keeping its node slot in place. Start with groups with a clear lifetime and sparse usage. Migrate defaults, reset/free, CSSOM, inherited style identities, and percentage resolution together with each cut. Audit scratch copies, self-referenced computed line-height backing, and any replay or reset that copies a whole old record.
@@ -131,3 +158,9 @@ The current profiler provides [pool-level attribution](../../radiant/radiant/vie
 4. Follow up on scroll, transform, boundary, and cache payload reductions only where their measured footprint justifies the change. Keep the version of each change that independently passes the memory, behavior, and timing gates.
 
 The main integration points are [typed defaults](../../radiant/radiant/view_prop_defaults.cpp), [ensure helpers](../../radiant/radiant/view_prop_ensure.cpp), the [teardown catalog](../../radiant/radiant/view_pool.cpp), [retained resolved styles](../../radiant/radiant/css_resolved_style.cpp), [layout capture/replay](../../radiant/radiant/layout_pass.cpp), and the shared [element and slot declarations](../../lambda-input/lambda/input/css/dom_element.hpp). Use [the test map](../../test/README.md) and the existing `make test-radiant-baseline`, `make test-layout-baseline`, and `make test-css-cascade-memory` gates during implementation.
+
+## Appendix S. Superseded placement proposals
+
+- ~~Target **at most 96 B** for the common payload in the first prototype, including its extension link.~~ The 80 B probe held 14 logical properties. The retained block core keeps the co-read sizing and flow fields in DV4.2.
+- ~~Target **128–160 B** for the populated `DomElementExt` shell, including admitted moved slots.~~ DV6.1 and DV6.2 retain a 240 B rare extension and a separate 48 B directory.
+- ~~On this ABI, those candidates represent **56 B of inline slots** in total. If all move with no added inline storage or padding, the node could reach **320 B** from 376 B.~~ The measured cuts in DV6.2 produced the 352 B node.

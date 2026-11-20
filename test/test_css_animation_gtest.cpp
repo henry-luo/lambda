@@ -3883,7 +3883,9 @@ TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
     FilterFunction function = {};
     element.set_synthetic(true);
     element.ext = lam::own(&extension);
-    element.transform = lam::view_prop(&transform);
+    DomPropExt slots = {};
+    element.prop_ext = lam::own(&slots);
+    slots.transform = lam::view_prop(&transform);
     element.scroller = lam::view_prop(&scroll);
     element.in_line = lam::view_ref(&inline_prop);
     element.blk = lam::view_prop(&block);
@@ -3943,9 +3945,13 @@ TEST(CssTransform, PaintProjectsNestedDepthOnceAndHonorsFlattening) {
         scene_prop.transform_style = preserve ? CSS_VALUE_PRESERVE_3D : CSS_VALUE_FLAT;
         scene_prop.functions = lam::shared(&translation);
         plane_prop.functions = lam::shared(&translation);
-        camera.transform = lam::view_prop(&camera_prop);
-        scene.transform = lam::view_prop(&scene_prop);
-        plane.transform = lam::view_prop(&plane_prop);
+        DomPropExt slots[3] = {};
+        camera.prop_ext = lam::own(&slots[0]);
+        scene.prop_ext = lam::own(&slots[1]);
+        plane.prop_ext = lam::own(&slots[2]);
+        slots[0].transform = lam::view_prop(&camera_prop);
+        slots[1].transform = lam::view_prop(&scene_prop);
+        slots[2].transform = lam::view_prop(&plane_prop);
         RasterRenderContext context = {};
         context.raster_scale = 1.0f;
         BlockBlot parent = {};
@@ -4423,6 +4429,7 @@ protected:
     struct MockElement {
         uint8_t buf[4096];
         InlineProp in_line;
+        DomPropExt props;
     };
 
     DomElement* createMockElement(MockElement* mock) {
@@ -4431,6 +4438,7 @@ protected:
         element->node_type = DOM_NODE_ELEMENT;
         element->doc = lam::up(&doc);
         ((ViewSpan*)element)->in_line = lam::view_ref(&mock->in_line);
+        element->prop_ext = lam::own(&mock->props);
         return element;
     }
 
@@ -4438,7 +4446,7 @@ protected:
         // transform bounds consume a laid-out block view, as the render fixtures do.
         element->view_type = RDT_VIEW_BLOCK;
         element->font = lam::view_prop(font);
-        element->transform = lam::view_prop(transform);
+        element->prop_ext->transform = lam::view_prop(transform);
         element->width = 40.0f;
         element->height = 10.0f;
         layout.view = lam::up(static_cast<View*>(element));
@@ -5797,7 +5805,7 @@ TEST_F(AnimationTickTest, NeutralTransformsCopyUnderlyingListsAndPadWithIdentity
         source.params.translate.x = 10.0f;
         source.translate_x_percent = source.translate_y_percent = NAN;
         if (sample.has_base) transform.functions = lam::shared(&source);
-        element->transform = lam::view_prop(&transform);
+        element->prop_ext->transform = lam::view_prop(&transform);
         CssAnimProp config = defaultAnimProp("neutralTransform", 1.0f);
         AnimationInstance* instance = css_animation_create(scheduler, element, &config,
             parsedKeyframes(sample.ends_none
@@ -6066,7 +6074,7 @@ TEST_F(AnimationTickTest, TransformValueCachesRefreshPerElementAndOwnInheritedLi
     for (int index = 0; index < 2; index++) {
         elements[index] = createMockElement(&mocks[index]);
         elements[index]->font = lam::view_prop(&fonts[index]);
-        elements[index]->transform = lam::view_prop(&transforms[index]);
+        elements[index]->prop_ext->transform = lam::view_prop(&transforms[index]);
         fonts[index].font_size = index == 0 ? 10.0f : 20.0f;
         layout.view = lam::up(static_cast<View*>(elements[index]));
         layout.elmt = lam::up(elements[index]);
@@ -6486,7 +6494,7 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
-    element->transform = lam::view_prop(&transform);
+    element->prop_ext->transform = lam::view_prop(&transform);
 
     TransformFunction keyframe_function = {};
     keyframe_function.type = TRANSFORM_TRANSLATEX;

@@ -3566,9 +3566,9 @@ static bool radiant_input_commit_value(DomElement* elem, DocState* state,
     // submitted entry both kept the old text.
     if (tc_is_text_control(elem)) {
         tc_set_value(elem, committed, strlen(committed));
-    } else if (elem->form) {
+    } else if (elem->form_storage()) {
         // the view borrows document-owned storage, never the commit's stack buffer.
-        elem->form->value = radiant_input_live_value(elem);
+        elem->form_storage()->value = radiant_input_live_value(elem);
     }
     radiant_input_sync_range_position(elem, state, committed);
     dom_notify_mutation(DOM_JS_MUTATION_CONTROL_VALUE, (void*)elem, (void*)elem->parent);

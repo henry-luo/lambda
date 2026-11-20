@@ -6,6 +6,19 @@ remain in the [active issue ledger](Lib_Input_Issue_Ledger.md).
 
 ## Fixed issues
 
+<a id="li-081"></a>
+
+### LI-081 — Adopted nodes were walked after their source arena was freed
+
+**Fixed 2026-11-20.** The native CSS/DOM adoption test crashed in
+`dom_slot_release_manual_links` during destination teardown. Releasing
+the source document resource freed the adopted nodes while the destination
+registry still held their addresses. Under D5.5.1, teardown now unlinks
+manual slot relationships before releasing document resources. The
+destination registry remains live for resource cleanup. The adoption
+test verifies the transferred node and its expanded namespace identity,
+and all 139 native CSS/DOM integration tests pass.
+
 <a id="li-080"></a>
 
 ### LI-080 — Canonical declarations repeat stylesheet source paths
