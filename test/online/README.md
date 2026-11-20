@@ -25,8 +25,11 @@ node test/online/capture_snapshots.cjs --labels=python,webkit_blog --settle-ms=1
 
 `--settle-ms=N` selects an explicit post-load window for both renderers, followed
 by a rendering opportunity. Lambda uses its virtual timer frame; Chromium waits
-the same interval after load. This aligns the requested interval, while network
-loading and live content can still differ. The online capture command defaults
+the same interval after load. Chromium's animation timeline is held during
+loading, then resumes at its ordinary rate for that window, matching native
+frozen startup. Authored pauses and individual playback rates are preserved.
+This excludes network-loading time from animation age on both sides; live
+content and script startup can still differ. The online capture command defaults
 to **1000 ms on both sides**. Zero selects the initial post-load frame.
 `RADIANT_ONLINE_SETTLE_MS` supplies the same option through the environment.
 The explicit option takes precedence over that environment default. Native
@@ -43,6 +46,20 @@ their old images and a separate audit in `comparison/capture_frame_updates.json`
 they are distinguished from engine repairs and changed-page design refreshes.
 The selected window must fit the existing browser navigation deadline. It does
 not increase script CPU or network-resource budgets (**D10.1.7**).
+
+Attempts with an explicit window also record `lambda_animation_origin` and
+`browser_animation_origin` as `post-load`. Mixed or unknown recorded origins
+cannot form a new comparison. Historical pairs with both fields empty retain
+their historical status; a retry refreshes a successful counterpart with a
+legacy origin when both renderers are selected. Animation-origin refreshes
+are recorded in the same capture-frame audit, separately from source repairs.
+
+Animation-origin calibration does not freeze Chromium's JavaScript timers
+during loading. A page that waits on an external callback or a JavaScript
+fallback deadline can still reach a different startup state from native's
+frozen timer frame. Gladia's 1500ms feature-flag fallback is a confirmed
+example. Such omissions remain under review; matching animation metadata alone
+does not establish complete timer or application-state parity.
 
 The script saves matching 1200 × 800 Lambda and Chromium PNGs under
 `test/online/snapshots/`. It also writes `capture_results.csv` there. Set
@@ -108,6 +125,7 @@ node --test test/online/render_nested_ratio_height.test.cjs
 node --test test/online/render_intrinsic_image_basis.test.cjs
 node --test test/online/render_lab_colors.test.cjs
 node --test test/online/render_text_background_ancestor.test.cjs
+node --test test/online/render_intrinsic_motion_baseline.test.cjs
 ```
 
 The session tests exercise real Lambda HTTP rendering, layout and both batch
@@ -2206,3 +2224,256 @@ claimed. The1000ms request, browser references, both audits, URLs, thresholds
 and all1066 unselected rows remain unchanged. Inventory: **125 high, zero
 critical,942 low**. Dock's latest failed retry remains qualified under round86.
 See the [repair record](comparison/repairs.html#round-91). The goal remains active.
+
+Round ninety-two qualifies **RI-148** hero repairs: flex min/max bounds remain
+constraints, content-only intrinsic queries exclude their own box limits, and
+horizontal flex items enter shared paragraph setup. Intrinsic flex height uses
+existing sizing stages with selected-flow/counter rollback (D5.5.1), avoiding
+final descendant flow. Intrinsic separator advances share authored tracking;
+balanced line-fit queries reuse contextual inline flow. No page condition,
+width fudge, authored-source edit or capture-window increase is introduced.
+
+**49 focused PNG checks pass**, including five new tracking cases that fail
+before repair. The actual variable-font and break-word reductions now have two
+lines; Chromium independently confirms that result. Integer lint passes.
+The980-case text baseline remains895 pass/84 partial/one pre-existing failure
+(boundary-shaping-006); no full baseline is claimed.
+
+Superhuman clears its major review: mean error8.79% to4.06%, changed area19.56%
+to6.27%. The headline, portrait and major overlays align. Its1000ms live capture
+loads in15.47s with513MB peak, removing the trial's41.61s/1452MB regression.
+Small sign-in clipping and a nonfatal stale-flow restoration warning remain
+open. Inventory: **124 high, zero critical,943 low**. All1066 other rows,
+browser references, URLs, thresholds and both audits remain unchanged.
+Agiloft's blank diagnostic recheck is not imported; Dock retains the older pair
+qualified under round86. Evidence is archived under temp/online-visual-round93.
+See the [repair record](comparison/repairs.html#round-92). The goal remains active.
+
+Round ninety-three requalifies **Leaflet** with the current integrated modal
+and backdrop painting (D9.1.1v4 / D9.1.3v2). The opaque top-layer modal now
+occludes the document and has the expected gray backdrop: mean error 25.61% to 0.47% and changed area 68.50% to 0.06%.
+The1000ms native capture loads in22.18s. This is a requalification of the
+already tested round92 renderer; no new renderer code or baseline repeat.
+
+Inventory: **123 high, zero critical,944 low**, across1067 historical pairs.
+All1066 other comparison rows, browser references, annotations, URLs,
+thresholds and both audits remain unchanged. Current LOC HTTP403 and blank
+NVD diagnostics are not imported; their historical high pairs remain. Dock's
+latest timeout still retains the older pair qualified under round86.
+See the [repair record](comparison/repairs.html#round-93). The goal remains active.
+
+Round ninety-four repairs **nested inline whitespace in intrinsic sizing**
+(RI-150; D9.1.1v4 / D9.1.3v2, D5.5.1). Rogo's headline now fits one line;
+its missing navigation and patterned background keep the page high severity.
+The unchanged 1000ms native capture loads in 5.54s: mean error 7.32% to 5.14%; changed area 13.84% to 9.71%.
+
+All 34 focused PNG checks and five native whitespace tests pass. Four of the
+ten new controls fail before repair; two independent Chromium controls confirm
+the line width. Integer lint passes. No broad baseline is repeated for this
+increment. The qualified RI-149 hidden-backdrop fix is also present, without
+claiming a live Metronome clearance.
+
+Inventory remains **123 high, zero critical, 944 low**, across 1067 historical
+pairs. All 1066 other rows, browser references, URLs, thresholds and both audits
+are preserved. Rogo's manual review retains its history and remaining omissions.
+See the [repair record](comparison/repairs.html#round-94). The goal remains active.
+
+Round ninety-five repairs **auto-column flex constraints and authored flex-basis
+box sizing** (RI-151; D9.1.1v4 / D9.1.3v2, D5.5.1). Circle's same saved hero
+returns from 600px to its resolved 720px height. Against the same current browser
+capture, mean error falls12.46% to 4.70%; its main heading, copy and form align.
+The old browser reference ended at /a with a different design; current Chromium
+ends at / and serves the matching new hero. That reference maintenance is audited
+separately from the source repair. Small bottom brand logos remain absent.
+
+**Usersnap and Armadillo also clear their historical blank reviews**: Usersnap: 10.65% to 1.96%; Armadillo: 9.37% to 2.33%.
+Their main content and Armadillo's large illustration are present. These are
+capture requalifications; no unconfirmed startup/network cause is credited to
+the code changes. All selected online frames remain 1000ms. Superhuman's final
+control image exactly matches its retained qualified PNG.
+
+Four sizing regressions already present in the prior renderer are repaired by
+reusing the intrinsic aspect-ratio cross-bound transfer helper (RI-152).
+All 36 focused native tests and 52 PNG checks pass; sizing passes 776/776.
+The broader 17-category layout check records 5609 passes, 294 partials and the
+same pre-existing boundary-shaping-006 failure, independently reproduced with
+the previous binary. The separate native input-event executable was not rebuilt,
+so this is not a full green Radiant gate. RI-153 records the remaining
+unconfirmed automatic-minimum/percentage-cycle observation.
+
+Inventory: **120 high, zero critical, 947 low**, across 1067 historical pairs.
+All 1064 other rows, 1066 other browser references, annotations, URLs, thresholds
+and the capture-frame audit are preserved; only Circle is added to the reference
+update audit. See the [repair record](comparison/repairs.html#round-95).
+The goal remains active.
+
+
+Round ninety-six fixes **RI-154**: comment-separated SSR text lost inter-word
+spaces during intrinsic measurement. Mode's three hero headings now fit one
+line; coarse error improves from **27.15% to 19.53%**. Missing hero media and
+navigation styling remain major, so Mode stays high.
+
+**RI-153** also fixes growing-column automatic minima that borrowed an ancestor's
+definite height or persisted percentage used sizes. The new auto/400px/auto/300px
+regression passes without an authored zero minimum. No live clearance is attributed.
+
+Focused checks: **47/47 PNG pass**, including four new before-failing checks;
+**49/50 native pass**. The old forced-break allocation failure has identical
+static view trees with the previous and final renderer, unchanged expectations,
+and an unconfirmed root cause under RI-148. Chromium agrees on the reduced
+comment-spacing heading's 724.3px by 108px geometry. Integer lint passes; broad
+baselines were not repeated.
+
+The reduced Metronome navbar reaches the same incomplete initialization in
+Chromium when performance.now() is forced to zero. No clock offset, vendor edit,
+budget increase or visibility override was used.
+
+Inventory remains **120 high, zero critical, 947 low**, across 1067 historical
+pairs. All 1066 other rows, all browser references, annotations, URLs, thresholds
+and both capture audits are preserved. See the
+[repair record](comparison/repairs.html#round-96). The goal remains active.
+
+
+Round ninety-seven completes the supported native image profile (**JS13-L16 /
+RI-155**): branded loading reflection, currentSrc, complete and decode promises,
+with real pixel/SVG readiness, pending-request replacement rejection and precise
+callback ownership. Parsed images now receive the same completion notifications
+as scripted source writes, including local/data images.
+
+All **11 new image checks pass**. The full HTTP session group passes **14/14**;
+the local image/API/script group has **15/16 passes**. Its image-growth failure
+(95px instead of 432px) independently reproduces with the prior renderer.
+The exact Gatsby reveal-script reduction matches Chromium. Integer lint passes;
+broad baselines were not repeated.
+
+Mode's live image is unchanged at **19.53%** error. Its custom hero does not use
+the generic Gatsby reveal nodes; that initial attribution was incorrect.
+Its 142,207-byte async framework exceeds the unchanged 131,072-byte pre-layout
+async/defer budget. No complete client-startup repair is claimed.
+
+Orum's current hero photo and cards are present, improving its retained error
+from **26.38% to 9.41%**. The prior renderer gives identical pixels on the same
+current page, so this clearance is **capture requalification only**. Typelane
+remains high with a large browser consent-modal state difference.
+
+Inventory: **119 high, zero critical, 948 low**, across 1067 historical pairs.
+All 1065 other comparison rows, all browser references, annotations, URLs,
+thresholds and both capture audits are preserved. See the
+[repair record](comparison/repairs.html#round-97). The goal remains active.
+
+
+Round ninety-eight repairs **RI-156 / RI-157**: intrinsic flex collection now
+retains display-contents descendants; ratio-dependent automatic minima retain
+content and distinguish clip from scrolling. Natural flex probes keep the
+ratio-derived percentage basis without limiting natural extent, and SVG
+percentage geometry takes precedence over cached natural contributions.
+
+The existing nested-column control improves **226px → 334px** and the existing
+image-growth control **95px → 432px**. All **53 focused native tests**, **28
+focused PNG checks** and **776 sizing baseline cases pass**. References,
+thresholds and expectations are unchanged; layout integer lint passes. Nine
+other inline-break PNG controls still fail in both prior and final renderers,
+and RI-153's separate definite-height shrinking observation remains open.
+
+Live Dribbble Pro and Framerauth captures remain blank, byte-identical with the
+prior renderer. Dribbble's current response executes Framer startup and reports
+a TypeError; the remaining startup cause is not established. These diagnostics
+are not imported over historical canonical pairs. No high-severity clearance
+is claimed. Inventory remains **119 high, zero critical, 948 low** across 1067
+historical pairs. All comparison rows, snapshots, annotations and capture
+audits are preserved. See the [repair record](comparison/repairs.html#round-98).
+The qualified release renderer includes the fixes; the goal remains active.
+
+
+Round ninety-nine repairs **RI-158**. Non-stretched column flex items now
+measure content height at the same fit-content cross width used by final
+sizing. The affected heading retains its wrapped **108px** contribution and
+its column **334px**, restoring the action's placement inside the hero.
+
+All **nine previously failing inline-break PNG controls now pass** without
+changing expectations. The full focused PNG selection passes **56/56**, the
+expanded native selection **53/53**, and integer lint passes. The preceding
+776-case sizing milestone baseline was not repeated for this focused change.
+
+Popcorn's current native capture is refreshed at **2.60%** error (previously
+3.34%), but its device illustration remains mostly below the viewport. The
+prior renderer produces identical pixels on the same current page, so this
+capture difference is not attributed to the source fix. Its manual high
+review remains. Inventory stays **119 high, zero critical, 948 low** across
+1067 pairs. All 1066 other rows, all browser references, annotations and
+capture audits are preserved. See the [repair record](comparison/repairs.html#round-99).
+The qualified release renderer includes the fix; the goal remains active.
+
+
+Round one hundred repairs **RI-159**: content-based column minima now use an
+indefinite percentage basis even with a definite preferred height, and exclude
+cached used heights, including for zero content. Clip retains a non-scrolling
+content minimum. The shrinking control now measures **120px instead of 400px**.
+Seven independent Chromium controls agree; the expanded native test includes
+constraint and empty/content mutations. All **53 native tests**, **56 PNG
+checks** and layout integer lint pass. Broad baselines were not repeated.
+
+The capture harness also corrects an animation-origin mismatch. Chromium now
+holds its animation timeline during loading, then resumes normally for the
+same post-load window as native frozen startup. Authored delays, pauses and
+individual playback rates are preserved; no endpoint seek or budget increase
+is used. Captures record the origin, mixed origins are rejected, and retries
+refresh legacy counterparts when needed. All **18 capture/comparator checks
+pass**, including delayed-resource and authored-timing controls.
+
+Increase improves **18.43% → 5.98%** with matching animation ages and clears
+its major comparison as **capture-frame calibration only**, not an RI-159
+clearance. Prior pairs/hashes are retained in the frame audit. A separate prior
+renderer live attempt reported script execution failure and rendered only its
+header, so it cannot establish source-fix causality or stable client startup.
+
+Inventory is **118 high, zero critical, 949 low** across 1067 pairs. All 1066
+other rows and browser references, all annotations, URLs, thresholds, design
+reference updates and prior frame audit entries are preserved. See the
+[repair record](comparison/repairs.html#round-100). The goal remains active.
+
+
+Round one hundred one applies the origin-aware capture repair to Nightwatch
+and Gladia. Nightwatch's matched pair is **5.82% error / 10.83% changed area**;
+Chromium also shows the early blurred hero stage. Its one-second animations
+have staggered 0.4/0.5/0.7/1s delays. The old copy/actions/dashboard omission
+review is resolved as **capture-frame calibration**, with its history retained.
+Grain and header-spacing residue remains outside this major-difference round.
+
+Gladia stays high at **12.31% error / 45.64% changed area**. Its headline has a
+feature-flag callback or **1500ms JavaScript fallback**, beyond native's 1000ms
+frame. Animation-origin calibration does not freeze Chromium's JavaScript
+startup timers. A broad virtual-time pause stalled local navigation and was
+not adopted. The background script also requires unsupported Canvas radial
+gradient paint objects: a local native probe confirms both gradient methods
+are undefined and the radial call raises TypeError. **JS13-L17** records this
+larger feature gap; no substitute drawing or forced reveal is introduced.
+A new manual major review protects Gladia's remaining omissions.
+
+The existing qualified renderer is retained. Verification here consists of
+two loaded native/browser pairs, authored CSS/JS inspection and the Canvas API
+probe; native/PNG/baseline suites were not rerun. Inventory is **117 high,
+zero critical, 950 low** across 1067 pairs. All 1065 other rows and browser
+references, URLs, thresholds, design-reference audit, prior frame entries and
+annotation history are preserved. See the [repair record](comparison/repairs.html#round-101).
+The goal remains active.
+
+
+Round one hundred two repairs **RI-160** (CSS animation restyles sampling their
+own opacity as an implicit endpoint) and **RI-161** (inline text-clipped
+backgrounds painting at the containing block origin). PNPM's headline, copy,
+actions and terminal are restored. The same-origin live comparison improves
+from **25.27% error / 37.79% changed area** to **11.45% / 27.32%** with the
+unchanged 1000ms post-load window. The exact source reductions reproduce both
+failures with the prior renderer. All **58 native animation tests, 46 focused
+PNG controls, four SVG exports and integer lint pass**; broad baselines were
+not rerun. General fragment slicing and PDF output are not claimed qualified.
+
+PNPM remains high through a new manual review: its entire client-created
+navigation is still absent and the hero shifts upward. Its server HTML has no
+navigation, and the current React entry module exceeds the existing snapshot
+script-admission bounds (**JS13-L1**); no cap is raised. Inventory remains
+**117 high, zero critical, 950 low** (94 automated / 23 manual high), with no
+page clearance claimed. The other 1066 rows and browser references, URLs,
+thresholds and prior audits/reviews are preserved. See the
+[repair record](comparison/repairs.html#round-102). The goal remains active.

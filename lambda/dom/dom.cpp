@@ -8545,8 +8545,7 @@ static void _after_image_src_set(DomElement* elem, const char* attr_name,
     // the decoder owns intrinsic state; DOM queues completion after accepting or rejecting the source.
     if (!_is_tag(elem, "img") || str_icmp_cstr(attr_name, "src") != 0) return;
     bool pending = false;
-    bool loaded = dom_engine_set_image_source(elem, attr_value, &pending);
-    if (!pending) dom_queue_image_completion(elem, loaded);
+    dom_engine_set_image_source(elem, attr_value, &pending);
 }
 
 extern "C" void dom_after_set_attribute(void* elem_ptr,

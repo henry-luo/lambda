@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const puppeteer = require('puppeteer');
+const {pngLibrary} = require('./compare_snapshots.cjs');
 const {parseCsv, serializeCsv} = require('../../utils/online_pages.cjs');
 const {defaultRenderTimeoutMs, selectWork, readLambdaDiagnostics,
     captureBrowser, hasPng, promoteSnapshot} = require('./capture_snapshots.cjs');
@@ -25,6 +26,15 @@ before(async () => {
         } else if (request.url === '/slow') {
             response.setHeader('Content-Type', 'text/html');
             response.end('<body>waiting<img src="/held-resource"></body>');
+        } else if (request.url === '/animation-origin') {
+            response.setHeader('Content-Type', 'text/html');
+            response.end('<style>body{margin:0;background:white}.box{position:absolute;width:50px;height:50px;' +
+                'background:lime;animation:move .2s linear .5s forwards}.paused{top:60px;animation-play-state:paused}' +
+                '#slow{top:120px;background:blue;animation:none}@keyframes move{to{transform:translateX(200px)}}</style>' +
+                '<div class="box"></div><div class="box paused"></div><div class="box" id="slow"></div>' +
+                '<img src="/held-resource"><script>const a=slow.animate([{transform:"translateX(0)"},' +
+                '{transform:"translateX(200px)"}],{duration:1000,fill:"forwards"});a.playbackRate=.5;' +
+                'setInterval(()=>document.title=String(a.playbackRate),10);</script>');
         } else if (request.url === '/held-resource') {
             setTimeout(() => response.end('image'), 1000);
         } else if (request.url === '/redirect') {
@@ -76,6 +86,22 @@ test('an HTTP rejection cannot become a successful page snapshot', async () => {
     assert.equal(fs.readFileSync(diagnosticPath, 'utf8').includes('private=value'), false);
 });
 
+test('post-load animation origin excludes resource waits and preserves authored timing', async () => {
+    const output = path.join(scratch, 'animation-origin.png');
+    const diagnosticPath = path.join(scratch, 'animation-origin.json');
+    const result = await captureBrowser(browser, {url: `${origin}/animation-origin`}, output,
+        {navigationTimeoutMs: 3000, settleMs: 100}, diagnosticPath);
+    assert.equal(result.ok, true, result.error);
+    assert.equal(result.animationOrigin, 'post-load');
+    const image = pngLibrary(root).sync.read(fs.readFileSync(output));
+    const pixel = (x, y) => [...image.data.subarray((y * image.width + x) * 4, (y * image.width + x) * 4 + 3)];
+    assert.deepEqual(pixel(25, 25), [0, 255, 0], 'delayed CSS animation retains its initial frame');
+    assert.deepEqual(pixel(25, 75), [0, 255, 0], 'authored animation pause remains paused');
+    assert.deepEqual(pixel(40, 125), [0, 0, 255], 'Web animation age excludes the resource wait');
+    assert.equal(JSON.parse(fs.readFileSync(diagnosticPath)).document.title, '0.5',
+        'global clock resume preserves the authored Web animation rate');
+});
+
 test('navigation timeout diagnostics retain the pending resource without accepting an unloaded page', async () => {
     const output = path.join(scratch, 'slow.png');
     const diagnosticPath = path.join(scratch, 'slow.json');
@@ -123,6 +149,9 @@ test('a failed-only retry refreshes a counterpart only when its capture window c
     assert.equal(work[0].lambda, true, 'legacy successful side needs the newly selected window');
     assert.equal(work[0].browser, true);
     row.lambda_settle_ms = '1000';
+    work = selectWork(pages, previous, options, scratch);
+    assert.equal(work[0].lambda, true, 'legacy animation origin also requires recapture');
+    row.lambda_animation_origin = 'post-load';
     work = selectWork(pages, previous, options, scratch);
     assert.equal(work[0].lambda, false, 'matching successful side stays reusable');
     assert.equal(work[0].browser, true);
