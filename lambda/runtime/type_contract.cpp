@@ -12,7 +12,13 @@
 
 bool lambda_type_visit_dependencies(Type* type, bool include_refs,
         LambdaTypeDependencyVisitor visitor, void* context, bool descend_functions, int depth) {
-    if (!type || depth > 64 || !lambda_binder_types_exist() || is_global_simple_type(type)) return true;
+    if (!type || depth > 64) return true;
+    // Scalar carriers have no type dependency edges. The container and
+    // function branches below check their compact singletons before descent.
+    TypeId id = type->type_id;
+    if (id != LMD_TYPE_TYPE && id != LMD_TYPE_ARRAY && id != LMD_TYPE_MAP &&
+            id != LMD_TYPE_ELEMENT && !(descend_functions && id == LMD_TYPE_FUNC)) return true;
+    if (!lambda_binder_types_exist()) return true;
     auto visit = [&](Type* child) {
         return lambda_type_visit_dependencies(child, include_refs, visitor, context,
             descend_functions, depth + 1);
@@ -2273,6 +2279,12 @@ bool lambda_type_comparison_may_error(Type* type, bool deep, bool include_unknow
 }
 
 Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right) {
+    if (!right || !left) {
+        Type* only = left ? left : right;
+        // Both normalization paths keep a concrete carrier unchanged.
+        // Receiver reads often have no second outcome to merge.
+        if (!only || only->type_id != LMD_TYPE_TYPE) return only;
+    }
     bool dependent = lambda_type_contract_has_binder(left, true) ||
         lambda_type_contract_has_binder(right, true);
     // S11.4.8v2: normalizing T | error must retain the selected T, not its bound.

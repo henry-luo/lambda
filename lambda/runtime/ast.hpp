@@ -430,14 +430,12 @@ static inline AstNode* ast_positional_call_argument(AstNode* arguments,
 static inline void ast_resolve_call_args(AstNode* arg_list, AstFuncNode* fn_node,
         int arg_count, AstNode** resolved_args, int parameter_shift = 0) {
     if (!resolved_args) return;
-    bool has_named_args = false;
     AstNode* arg = arg_list;
-    while (arg) {
-        if (arg->node_type == AST_NODE_NAMED_ARG) has_named_args = true;
+    while (fn_node && arg && arg->node_type != AST_NODE_NAMED_ARG) {
         arg = arg->next;
     }
 
-    if (has_named_args && fn_node) {
+    if (fn_node && arg) {
         int positional_idx = parameter_shift;
         for (arg = arg_list; arg; arg = arg->next) {
             if (arg->node_type == AST_NODE_NAMED_ARG) {
@@ -788,13 +786,29 @@ static inline bool ast_visit_body_writes(AstNode* node, const VisitWrite& visit,
             SysFuncInfo* sys = callee_node && callee_node->node_type == AST_NODE_SYS_FUNC
                 ? ((AstSysFuncNode*)callee_node)->fn_info : NULL;
             bool pure_sys = sys && !sys->is_proc;
-            AstNode* arguments[LAMBDA_MAX_FUNCTION_ARGS] = {};
-            int argument_count = ast_resolve_call_arguments(call, callee,
-                ast_linked_node_count(call->argument), arguments);
+            bool needs_mapping = callee && ast_call_has_named_args(call);
+            AstNode* arguments[LAMBDA_MAX_FUNCTION_ARGS];
+            int argument_count = 0;
+            if (needs_mapping) {
+                memset(arguments, 0, sizeof(arguments));
+                argument_count = ast_resolve_call_arguments(call, callee,
+                    ast_linked_node_count(call->argument), arguments);
+            }
             // pipe receivers and named arguments mutate their resolved parameter (S9.1.2).
-            for (int position = 0; position < LAMBDA_MAX_FUNCTION_ARGS &&
-                    (position < argument_count || param); position++) {
-                AstNode* arg = arguments[position];
+            // Positional calls already list arguments in parameter order.
+            AstNode* written = call->argument;
+            for (int position = 0; position < LAMBDA_MAX_FUNCTION_ARGS; position++) {
+                AstNode* arg;
+                if (needs_mapping) {
+                    if (position >= argument_count && !param) break;
+                    arg = arguments[position];
+                } else if (position == 0 && call->pipe_inject) {
+                    arg = call->pipe_receiver;
+                } else {
+                    if (!written) break;
+                    arg = written;
+                    written = written->next;
+                }
                 TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
                 // An unknown callee, a `var` borrow, or a forward `pn` may
                 // write through the argument. Plain parameters snapshot writes.

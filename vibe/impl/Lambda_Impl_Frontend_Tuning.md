@@ -4,11 +4,11 @@ Keep the syntax, resolved-AST and validated-AST boundaries. The parser already b
 
 ## Current checkpoint
 
-- Scope is the native Lambda file path, from source acquisition to T0 entry. Measurements were taken on 2026-11-19 in the Lambda-opus main checkout, branch `master`, commit `e126b4b89`, on arm64 macOS 26.5.2.
-- The lexer, nested element parser, binding/index and syntax scratch changes are implemented. Validation skips borrow-argument mapping for signatures without a `var` parameter (D8.1.1, D8.2.4–D8.2.5, S9.2.1, S16.2.3v3).
-- All 5,536 tracked files match the original C parser fingerprint, syntax diagnostics and canonical AST result. The HTML report's speculative lexer calls fell from 588,019 to 42,463. Both S16 suites and 36 focused runtime runs across T0, AUTO and JIT passed.
-- Nine paired release runs per fixture reproduced the speedups. The editor oracle saves 1.95 MiB across the measured pool and declaration columns. The full Lambda baseline initially passed 6,102 of 6,119 under sandbox restrictions. All 17 failed cases passed in focused reruns with loopback and media access.
-- Test262 passed all 40,261 baseline cases with zero regressions. The broader outcome worklist and import discovery consolidation remain open experiments. Evidence is under `temp/lambda_frontend_impl/`.
+- The 2026-11-20 follow-up targets under 10 ms for each of the five modules in §9 on the ordinary debug build. The sum is the root module's parsing and AST resolution as defined in §9 (D8.1.1, D8.2.4–D8.2.5).
+- The worktree is Lambda-opus `master` at `cf1f0acad` on arm64 macOS 26.5.2. The measurements use copies of the Input and Radiant revisions pinned by the parent. The two checked-out owners were already on different revisions.
+- All five modules are below 10 ms on every run in the two standard debug series. `expansion.ls` falls from 12.944 to 9.607 ms. The candidate shares retention and return discovery, streams positional arguments, and checks cross-frame reads after capture analysis (S9.1.2, S9.1.4v2, S11.4.2v3, S12.3.2).
+- All 5,536 parser fingerprints and canonical AST results match. The final C syntax suite passes 491/491. E231 matches the control on T0 and JIT. The final Lambda baseline passes 6,117/6,119 and both failures reproduce on the control.
+- The final release Test262 baseline passes 40,261/40,261 with zero retries or regressions. Final measurements and evidence are in §11 and `temp/lambda_ast_sub10/`.
 
 The governing rulings cover direct parsing (D8.1.1), the indexed AST and compiler facts (D8.2.4–D8.2.5), tier selection (D8.3.1v3), and forward type visibility (S11.4.12v2). [Formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md)
 
@@ -221,3 +221,33 @@ The matched release comparison also reduced combined time on all five modules. P
 The canonical AST, diagnostics and exit status matched the control for all 5,536 tracked scripts. The C syntax suite passed 491/491. The Lambda baseline passed 6,119/6,119, including 368 forced-GC cases. [Canonical comparison](../../temp/lambda_ast_passes/ast-corpus.log), [C syntax suite](../../temp/lambda_ast_passes/c-s16.log), [Lambda baseline](../../temp/lambda_ast_passes/lambda-baseline.log)
 
 The standalone Test262 baseline passed 40,261/40,261 with zero retries or regressions. [Test262 baseline](../../temp/lambda_ast_passes/test262-baseline.log)
+
+## 11. Sharing return, retention and call analysis
+
+The rebuilt `cf1f0acad` control and candidate use the same parent-pinned Input and Radiant sources, compiler profile, script bytes and cache policy. The active owner checkouts have different APIs, so both builds use isolated copies of the parent's recorded owner revisions. Quick relink trials had a smaller symbol set. The table uses the standard debug link from the split build target. The benchmark keeps the phase boundaries in §9. Two series of 11 interleaved fresh-process pairs each follow a discarded warm-up pair. Program output and diagnostics match within each pair after excluding process RSS telemetry (D8.1.1, D8.2.4–D8.2.5). [Source and executable hashes](../../temp/lambda_ast_sub10/provenance-final.txt), [standard debug build](../../temp/lambda_ast_sub10/build-debug-official.log)
+
+The starting `expansion.ls` profile attributed 150 of 354 root parse samples to the lexer and 156 to the syntax sink. Of 718 root resolve samples, 126 included function completion, 118 included import loading, and 106 included call resolution. These are inclusive sample counts and can overlap. [Starting native sample](../../temp/lambda_ast_sub10/expansion.sample)
+
+| Module | Debug parse before → after (ms) | Debug resolve before → after (ms) | Debug combined before → after (ms) | Debug runs under 10 ms |
+|---|---:|---:|---:|---:|
+| `expansion.ls` | 4.978 → 4.056 | 7.968 → 5.559 | 12.944 → 9.607 | 22/22 |
+| `render.ls` | 3.048 → 2.616 | 5.492 → 4.262 | 8.543 → 6.879 | 22/22 |
+| `digest.ls` | 2.648 → 2.185 | 4.136 → 3.252 | 6.787 → 5.438 | 22/22 |
+| `commands.ls` | 2.124 → 1.762 | 3.187 → 2.058 | 5.310 → 3.821 | 22/22 |
+| `mod_ui.ls` | 1.427 → 1.212 | 3.799 → 2.860 | 5.226 → 4.080 | 22/22 |
+
+`expansion.ls` improves 25.8% in combined time and 30.2% in resolution. Its two combined medians are 9.597 and 9.637 ms, and its measured runs span 9.555–9.846 ms. Its inline function-analysis counter falls from 1.639 to 0.716 ms. That counter can include nested module work and should be read independently of the root resolve timer. Median process peak RSS is approximately flat at 38.95 versus 38.84 MiB. [First debug series](../../temp/lambda_ast_sub10/debug-official.jsonl), [repeat series](../../temp/lambda_ast_sub10/debug-official-confirm.jsonl), [timing driver](../../temp/lambda_ast_sub10/measure.py)
+
+In a separate release sweep, the five combined medians ranged from 3.666 to 9.179 ms. The slowest module was `expansion.ls`. [Release samples](../../temp/lambda_ast_sub10/release-captures.jsonl)
+
+- The return-contract walk collects potential copy-on-write retention sites alongside explicit returns. Function close reuses the collection for every parameter and transitive local alias, with a single collection walk when the return check skips the body. The exact walk remains available if a diagnostic prunes collection or scratch allocation fails (S9.1.2, S9.1.3v4, S11.4.2v3).
+- A shared write-target census answers mutation queries. Positional calls stream written arguments and the injected receiver, while named calls use the established parameter map. An empty write set skips the local-alias walk. Argument validation shares its named function lookup and avoids deferred binder tests on proven paths (S9.1.2, S12.3.2, S11.4.8v2).
+- An early build reached 9.879 ms but repeated at 10.170 ms. The final candidate checks cross-frame reads once after the binding graph supplies callable captures. That removes the earlier function-body walk. A concrete clean argument reaches the implicit clean contract without a composite type check (D8.2.4–D8.2.5, S9.1.4v2, S7.7.3). [Early comparison](../../temp/lambda_ast_sub10/debug-final.jsonl), [early repeat](../../temp/lambda_ast_sub10/debug-confirm.jsonl)
+- Resolution reuses canonical local spellings, filters impossible qualified imports before building composite names and skips structural field scans when it only needs an object method. Imports keep exact source acquisition and defer the fallback existence check until a native load fails. Worker AST preparation keeps its separate handling for cross-language imports (D5.6.2, D8.5.1, D9.3.4, S12.3.3v2, S17.2.1).
+- Tokenization dispatches punctuation by its leading byte and scans identifier and horizontal-space runs in bulk. The syntax sink remembers recent names after an exact byte check and allocates each identifier with its primary wrapper. Both AST identities remain available to binding. The name cache and retention lists are compilation scratch (D8.1.1, D8.2.4, S16.2.1, S16.10.2).
+
+The production parser preserved token positions, lexer state and token kinds across 15,000 generated streams. It also matched all 5,536 tracked parser fingerprints, syntax diagnostics and recovery outcomes. Canonical AST output, diagnostic text and exit status match on the same corpus. The C S16 suite passed 491/491. The capture-mutation fixture produced identical E231 diagnostics on each tier (S9.1.4v2). [Raw lexer comparison](../../temp/lambda_ast_sub10/lexer-parity.log), [parser comparison](../../temp/lambda_ast_sub10/parser-parity.json), [canonical AST comparison](../../temp/lambda_ast_sub10/ast-captures-parity.log), [C syntax suite](../../temp/lambda_ast_sub10/c-s16-captures.log), [T0 diagnostic](../../temp/lambda_ast_sub10/debug-captures-capture-interp.log), [JIT diagnostic](../../temp/lambda_ast_sub10/debug-captures-capture-jit.log)
+
+The final Lambda baseline passed 6,117 of 6,119, including all 2,495 Lambda script cases and 368 forced-GC cases. The rebuilt control reproduces both aggregate failures. DOM text coercion prints the same output on both arms. The phase-six PDF has the same SHA-256 across both arms and across T0 and JIT, and its object color differs from the golden. [Lambda baseline](../../temp/lambda_ast_sub10/lambda-captures-baseline.log), [control hashes](../../temp/lambda_ast_sub10/regressions/hashes.txt), [candidate hashes](../../temp/lambda_ast_sub10/regressions/final/hashes.txt)
+
+The final release Test262 baseline passed 40,261/40,261 with zero retries or regressions. The harness skipped 2,652 cases outside the baseline. [Test262 baseline](../../temp/lambda_ast_sub10/test262-captures-baseline.log)

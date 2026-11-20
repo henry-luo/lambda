@@ -116,8 +116,8 @@ static bool match_arm_is_error_handler(AstMatchArm* arm);
 static bool match_has_error_handler(AstMatchNode* match);
 
 
-static TypeMethod* direct_lookup_object_method(Transpiler* tp,
-        AstNode* receiver, StrView name, bool* out_has_user_member);
+static TypeMethod* direct_lookup_object_method(Type* receiver_type,
+        StrView name, bool* out_has_user_member);
 
 // System function definitions — single source of truth in sys_func_registry.cpp
 // See lambda/sys_func_registry.cpp for the complete table.
@@ -796,20 +796,35 @@ static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
 }
 
 bool is_global_simple_type(const Type* type) {
-    // Generic list/array descriptors are compact Types, with no nested payload.
-    return type_is_global_meta_type(type) || type == &TYPE_NULL || type == &TYPE_BOOL || type == &TYPE_INT ||
-        type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_COMPLEX || type == &TYPE_DECIMAL ||
-           type == &TYPE_INTEGER_VALUE || type == &TYPE_STRING || type == &TYPE_SYMBOL ||
-           type == &TYPE_DTIME || type == &TYPE_DATE || type == &TYPE_TIME ||
-           type == &TYPE_BINARY || type == &TYPE_RANGE || type == &TYPE_ARRAY || type == &TYPE_LIST ||
-           type == &TYPE_MAP || type == &TYPE_ELMT || type == &TYPE_OBJECT ||
-           type == &TYPE_FUNC || type == &TYPE_ANY ||
-           type == &TYPE_ERROR || type == &TYPE_ANY_NO_ERROR ||
-           type == &TYPE_ANY_NO_NULL || type == &TYPE_ANY_NO_ERROR_OR_NULL ||
-           type == &TYPE_I8 || type == &TYPE_I16 ||
-           type == &TYPE_I32 || type == &TYPE_U8 || type == &TYPE_U16 ||
-           type == &TYPE_U32 || type == &TYPE_F16 || type == &TYPE_F32 ||
-           type == &TYPE_UINT64;
+    if (!type) return false;
+    // The tag narrows the identity test to singletons with this header.
+    switch (type->type_id) {
+    case LMD_TYPE_TYPE: return type_is_global_meta_type(type);
+    case LMD_TYPE_NULL: return type == &TYPE_NULL;
+    case LMD_TYPE_BOOL: return type == &TYPE_BOOL;
+    case LMD_TYPE_INT: return type == &TYPE_INT;
+    case LMD_TYPE_INT64: return type == &TYPE_INT64;
+    case LMD_TYPE_FLOAT: return type == &TYPE_FLOAT;
+    case LMD_TYPE_COMPLEX: return type == &TYPE_COMPLEX;
+    case LMD_TYPE_DECIMAL: return type == &TYPE_DECIMAL || type == &TYPE_INTEGER_VALUE;
+    case LMD_TYPE_STRING: return type == &TYPE_STRING;
+    case LMD_TYPE_SYMBOL: return type == &TYPE_SYMBOL;
+    case LMD_TYPE_DTIME: return type == &TYPE_DTIME || type == &TYPE_DATE || type == &TYPE_TIME;
+    case LMD_TYPE_BINARY: return type == &TYPE_BINARY;
+    case LMD_TYPE_RANGE: return type == &TYPE_RANGE;
+    case LMD_TYPE_ARRAY: return type == &TYPE_LIST || type == &TYPE_ARRAY;
+    case LMD_TYPE_MAP: return type == &TYPE_MAP || type == &TYPE_OBJECT;
+    case LMD_TYPE_ELEMENT: return type == &TYPE_ELMT;
+    case LMD_TYPE_FUNC: return type == &TYPE_FUNC;
+    case LMD_TYPE_ANY: return type == &TYPE_ANY || type == &TYPE_ANY_NO_ERROR ||
+        type == &TYPE_ANY_NO_NULL || type == &TYPE_ANY_NO_ERROR_OR_NULL;
+    case LMD_TYPE_ERROR: return type == &TYPE_ERROR;
+    case LMD_TYPE_NUM_SIZED: return type == &TYPE_I8 || type == &TYPE_I16 ||
+        type == &TYPE_I32 || type == &TYPE_U8 || type == &TYPE_U16 || type == &TYPE_U32 ||
+        type == &TYPE_F16 || type == &TYPE_F32;
+    case LMD_TYPE_UINT64: return type == &TYPE_UINT64;
+    default: return type == &TYPE_ARRAY; // initialized with the other runtime types
+    }
 }
 
 static inline void set_param_contract(TypeParam* parameter, Type* contract,
@@ -1852,8 +1867,8 @@ bool should_continue_transpiling(Transpiler* tp) {
 static Type* boundary_unwrap_type(Type* type) {
     type = unwrap_simple_type_type(type);
     // S11.4.6v4 admits every constrained layer by its ultimate base.
-    while (type && type->type_id == LMD_TYPE_TYPE && !is_global_simple_type(type) &&
-            type->kind == TYPE_KIND_CONSTRAINED) {
+    while (type && type->type_id == LMD_TYPE_TYPE &&
+            type->kind == TYPE_KIND_CONSTRAINED && !type_is_global_meta_type(type)) {
         TypeConstrained* constrained = (TypeConstrained*)type;
         Type* base = unwrap_simple_type_type(constrained->base);
         if (base == type) break;
@@ -1863,7 +1878,9 @@ static Type* boundary_unwrap_type(Type* type) {
 }
 
 static bool boundary_type_is_extended(const Type* type, TypeKind kind) {
-    return type && !is_global_simple_type(type) && type->kind == kind;
+    // The compact Type header carries kind too. Only a matching kind needs
+    // the singleton check before a caller can read an extended payload.
+    return type && type->kind == kind && !is_global_simple_type(type);
 }
 
 static Type* boundary_binder_bound(Type* type) {
@@ -1909,6 +1926,13 @@ bool boundary_numeric_admission_is_dynamic(TypeId source_id, TypeId target_id) {
 }
 
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target) {
+    // An ordinary non-error carrier always fits the implicit clean contract.
+    // Type descriptors can carry dependent and composite contracts.
+    if (target == &TYPE_ANY_NO_ERROR && source &&
+            source->type_id != LMD_TYPE_TYPE && source->type_id != LMD_TYPE_ANY &&
+            source->type_id != LMD_TYPE_ERROR) return STATIC_BOUNDARY_PROVEN;
+    if (source && source == target && source->type_id < LMD_TYPE_CONTAINER &&
+            is_global_simple_type(source)) return STATIC_BOUNDARY_PROVEN;
     // wrappers may describe first-class type values; unwrapping loses that
     // fact, so a `type` destination must ask the runtime (LR03-45).
     bool source_may_be_type_value = source && source->type_id == LMD_TYPE_TYPE;
@@ -2361,9 +2385,10 @@ static StaticBoundaryResult static_parameter_boundary_relation(Type* source, Typ
 // boundary both select the argument form through this one entry point.
 StaticBoundaryResult lambda_static_boundary_relation(Type* source, Type* target,
         bool call_argument) {
-    return call_argument && lambda_type_accepts_error(source)
-        ? static_parameter_boundary_relation(source, target)
-        : static_boundary_relation(source, target);
+    if (call_argument && source && (source->type_id == LMD_TYPE_TYPE ||
+            source->type_id == LMD_TYPE_ANY || source->type_id == LMD_TYPE_ERROR) &&
+            lambda_type_accepts_error(source)) return static_parameter_boundary_relation(source, target);
+    return static_boundary_relation(source, target);
 }
 
 // S11.1.1v3: an empty literal vacuously meets an uncounted array contract.
@@ -3468,18 +3493,23 @@ static bool lambda_analyze_capture_permissions(Transpiler* tp) {
     return !flow.failed && tp->error_count == 0;
 }
 
+static void* alloc_ast_storage(Transpiler* tp, size_t size) {
+    // Retained nodes are retired together with the Input's pool and arena.
+    void* bytes = tp->arena ? arena_calloc(tp->arena, size) : pool_calloc(tp->pool, size);
+    if (!bytes) tp->build_allocation_failed = true;
+    return bytes;
+}
+
+static void init_ast_node(AstNode* node, AstNodeType kind, SourceSpan span) {
+    node->node_type = kind;
+    node->source_span = span;
+}
+
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size) {
-    // Retained nodes are retired together with the Input's pool and arena.
-    AstNode* ast_node = (AstNode*)(tp->arena
-        ? arena_calloc(tp->arena, size) : pool_calloc(tp->pool, size));
-    if (!ast_node) {
-        tp->build_allocation_failed = true;
-        return NULL;
-    }
-    ast_node->node_type = node_type;
-    ast_node->source_span = span;
-    return ast_node;
+    AstNode* node = (AstNode*)alloc_ast_storage(tp, size);
+    if (node) init_ast_node(node, node_type, span);
+    return node;
 }
 
 // A syntax node can carry child links its resolution consumes but the
@@ -3591,9 +3621,10 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
     // may therefore be interned in a different name pool. Re-intern the
     // spelling here so this scope's pointer-identity index sees the same key
     // that later identifier reads obtain from the importing pool.
-    StrView canonical_spelling = {name->chars, name->len};
-    name = name_pool_create_strview(tp->name_pool, canonical_spelling);
-    if (!name) return;
+    if (import) {
+        name = name_pool_create_strview(tp->name_pool, {name->chars, name->len});
+        if (!name) return;
+    }
     StrView name_view = {name->chars, name->len};
     if (ast_node_declares_binding(node) &&
             is_reserved_identifier_keyword(name_view)) {
@@ -3607,7 +3638,7 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
     // S12.3.7: a user binding shadows a same-named system function for this
     // module only. Legal and forward-compatible (a new sys func must never
     // change an existing program), but always warned so accidents surface.
-    else if (ast_node_declares_binding(node) && !import &&
+    else if (ast_node_declares_binding(node) && !import && !log_is_disabled() &&
             is_sys_func_name(name_view.str, (int)name_view.length)) {
         log_warn("lambda_shadow_lint: line %d: '%.*s' shadows a system function in this module; "
             "calls here resolve to your definition",
@@ -3854,6 +3885,7 @@ static AstNode* namespace_key_expr(Transpiler* tp, Target* target, StrView local
 }
 
 static void resolve_qualified_literal_keys(Transpiler* tp, AstNode* items) {
+    if (!tp->namespaces) return;
     for (AstNode* item = items; item; item = item->next) {
         if (item->node_type != AST_NODE_KEY_EXPR) continue;
         AstNamedNode* named = (AstNamedNode*)item;
@@ -3871,6 +3903,7 @@ static void resolve_qualified_literal_keys(Transpiler* tp, AstNode* items) {
 
 static bool resolve_qualified_member_key(Transpiler* tp, AstNode** object,
         AstNode** key, SourceSpan span) {
+    if (!tp->namespaces) return false;
     AstNode* receiver = ast_unwrap_primary(*object);
     AstNode* field = ast_unwrap_primary(*key);
     if (!receiver || receiver->node_type != AST_NODE_MEMBER_EXPR ||
@@ -3952,8 +3985,11 @@ static const char* io_leaf_module_path(const char* module) {
 // or a registered alias for one. Returns the real module name if matched.
 static const char* builtin_module_name(StrView name) {
     static const char* const modules[] = {"math", "io", "mcp"};
-    for (const auto& leaf : io_leaf_modules) if (strview_equal(&name, leaf.path)) return leaf.module;
     if (name.length > 7 && !memcmp(name.str, "lambda.", 7)) {
+        if (name.length > 10 && !memcmp(name.str + 7, "io.", 3)) {
+            for (const auto& leaf : io_leaf_modules)
+                if (strview_equal(&name, leaf.path)) return leaf.module;
+        }
         name.str += 7;
         name.length -= 7;
     }
@@ -3978,11 +4014,12 @@ static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
 // registry/module rows.
 static bool resolve_builtin_module_member(StrView path, const char** module,
         StrView* member) {
-    static const char* prefixes[] = {
-        "lambda.sys.", "lambda.math.", "lambda.io.", "lambda.mcp.", "math.", "io.", "mcp."
+    static const struct { StrView prefix; const char* module; } namespaces[] = {
+        {{"sys.", 4}, "sys"}, {{"math.", 5}, "math"}, {{"io.", 3}, "io"}, {{"mcp.", 4}, "mcp"},
     };
-    static const char* modules[] = {"sys", "math", "io", "mcp", "math", "io", "mcp"};
-    if (!path.str || !module || !member) return false;
+    if (!path.str || path.length < 4 || !module || !member) return false;
+    bool absolute = path.length > 7 && memcmp(path.str, "lambda.", 7) == 0;
+    if (!absolute && path.str[0] != 'm' && path.str[0] != 'i') return false;
     while (path.length && (path.str[path.length - 1] == ' ' ||
             path.str[path.length - 1] == '\t' ||
             path.str[path.length - 1] == '\r' ||
@@ -3990,24 +4027,30 @@ static bool resolve_builtin_module_member(StrView path, const char** module,
         path.length--;
     }
     // lambda.io.<leaf>. precedes lambda.io.: a member of a leaf module (D9.3.4)
-    for (const auto& leaf : io_leaf_modules) {
-        size_t leaf_len = strlen(leaf.path);
-        if (path.length <= leaf_len + 1 || memcmp(path.str, leaf.path, leaf_len) != 0 ||
-                path.str[leaf_len] != '.') continue;
-        StrView suffix = {path.str + leaf_len + 1, path.length - leaf_len - 1};
-        if (memchr(suffix.str, '.', suffix.length)) return false;
-        *module = leaf.module;
-        *member = suffix;
-        return true;
+    if (absolute) {
+        if (path.length > 10 && !memcmp(path.str + 7, "io.", 3)) {
+            for (const auto& leaf : io_leaf_modules) {
+                size_t leaf_len = strlen(leaf.path);
+                if (path.length <= leaf_len + 1 || memcmp(path.str, leaf.path, leaf_len) != 0 ||
+                        path.str[leaf_len] != '.') continue;
+                StrView suffix = {path.str + leaf_len + 1, path.length - leaf_len - 1};
+                if (memchr(suffix.str, '.', suffix.length)) return false;
+                *module = leaf.module;
+                *member = suffix;
+                return true;
+            }
+        }
+        path.str += 7;
+        path.length -= 7;
     }
-    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
-        size_t prefix_len = strlen(prefixes[i]);
+    for (const auto& ns : namespaces) {
+        size_t prefix_len = ns.prefix.length;
         if (path.length <= prefix_len ||
-                memcmp(path.str, prefixes[i], prefix_len) != 0) continue;
+                memcmp(path.str, ns.prefix.str, prefix_len) != 0) continue;
         StrView suffix = {path.str + prefix_len, path.length - prefix_len};
         // A second dot is a package/member chain, not a built-in export.
         if (memchr(suffix.str, '.', suffix.length)) return false;
-        *module = modules[i];
+        *module = ns.module;
         *member = suffix;
         return true;
     }
@@ -4390,7 +4433,7 @@ static bool report_missing_named_parameter(Transpiler* tp, AstCallNode* call,
 
 static bool validate_duplicate_call_arguments(Transpiler* tp, AstCallNode* call,
         AstFuncNode* definition) {
-    if (!definition || !definition->body || !ast_call_has_named_args(call)) return true;
+    if (!definition || !definition->body) return true;
     bool supplied[LAMBDA_MAX_FUNCTION_ARGS] = {};
     int positional = call->pipe_inject ? 1 : 0;
     if (positional) supplied[0] = true;
@@ -4426,8 +4469,12 @@ static bool validate_duplicate_call_arguments(Transpiler* tp, AstCallNode* call,
     return true;
 }
 
+static AstFuncNode* named_call_definition(AstCallNode* call) {
+    return ast_call_has_named_args(call) ? ast_direct_call_function(call) : NULL;
+}
+
 static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
-        AstNode** by_param) {
+        AstNode** by_param, AstFuncNode* named_callee) {
     // Each parameter's argument, in parameter order. Named arguments bind by
     // name: walked by position, a direct call naming typed parameters out of
     // order was rejected with E207 (found with LR07-19). A parameter with no
@@ -4435,9 +4482,6 @@ static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
     // S10.1.2v4: the pipe receiver fills slot zero outside the written argument list
     int slot_count = call->pipe_inject ? 1 : 0;
     if (slot_count) by_param[0] = injected;
-    AstFuncNode* named_callee = ast_call_has_named_args(call)
-        ? ast_direct_call_function(call) : NULL;
-
     if (named_callee) {
         ast_resolve_call_args(call->argument, named_callee,
             ast_linked_node_count(call->argument), by_param, slot_count);
@@ -4449,6 +4493,11 @@ static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
         }
     }
     return slot_count;
+}
+
+static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
+        AstNode** by_param) {
+    return resolve_call_boundary_arguments(call, injected, by_param, named_call_definition(call));
 }
 
 static bool parameter_short_circuits_argument_error(Transpiler* tp,
@@ -4611,8 +4660,9 @@ static void validate_native_var_arguments(Transpiler* tp, SourceSpan span,
 
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
-    if (call && !validate_duplicate_call_arguments(tp, call,
-            ast_direct_call_function(call))) return false;
+    // Duplicate, ordering, and required-slot checks use the same definition.
+    AstFuncNode* named_callee = named_call_definition(call);
+    if (!validate_duplicate_call_arguments(tp, call, named_callee)) return false;
     // S7.5.4: a computed callee error is the call's outcome, before dispatch.
     bool callee_error = call && ordinary_outcome_has_error(tp, call->function);
     if (callee_error) {
@@ -4643,9 +4693,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     bool binder_written[LAMBDA_MAX_FUNCTION_ARGS] = {};
     bool binder_deferred = false;
     AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-    int slot_count = resolve_call_boundary_arguments(call, injected, by_param);
-    AstFuncNode* named_callee = ast_call_has_named_args(call)
-        ? ast_direct_call_function(call) : NULL;
+    int slot_count = resolve_call_boundary_arguments(call, injected, by_param, named_callee);
     // LR12-45: a place borrow stays in place unless a plain argument may alias it.
     bool slot_is_var[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     bool has_var_slot = false;
@@ -4665,10 +4713,11 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             binder_param = binder_param->next, binder_index++) {
         AstNode* binder_arg = by_param[binder_index];
         if (!binder_arg || ast_is_omitted_argument(binder_arg)) continue;
+        Type* contract = parameter_boundary_type(binder_param);
         TypeBinder* binder = binder_param->binder ? binder_param->binder :
-            static_contract_binder_site(parameter_boundary_type(binder_param));
+            static_contract_binder_site(contract);
         if (!binder) continue;
-        bool nested = !binder_param->binder && parameter_boundary_type(binder_param) != (Type*)binder;
+        bool nested = !binder_param->binder && contract != (Type*)binder;
         if (!static_bind_argument(binder_env, binder_written, binder, binder_arg, false, &binder_deferred, nested)) {
             if (!line) line = source_span_start_line(tp, diagnostic_span);
             record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
@@ -4735,8 +4784,6 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             expected_param = expected_param->next, arg_index++) {
         AstNode* arg = by_param[arg_index];
         if (!arg || ast_is_omitted_argument(arg)) continue;
-        TypeBinder* binder_site = expected_param->binder ? expected_param->binder :
-            static_contract_binder_site(parameter_boundary_type(expected_param));
         if (expected_param->is_var_param) {
             if (!validate_var_argument_root(tp, diagnostic_span, arg, arg_index,
                     var_arg_root_entries, &var_arg_root_count)) {
@@ -4754,13 +4801,13 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             // still reports below. The exact-match rule stays intact because a
             // callee writes through a borrow and must not see a mismatched
             // representation.
-            bool var_place_type_matches = false;
-            if (!type_exact_match(arg->type, expected_param)) {
+            bool var_place_type_matches = type_exact_match(arg->type, expected_param);
+            if (!var_place_type_matches) {
                 Type* place_type = declared_compound_destination_type(tp, arg, NULL);
                 var_place_type_matches = place_type &&
                     type_exact_match(place_type, expected_param);
             }
-            if (!var_place_type_matches && !type_exact_match(arg->type, expected_param)) {
+            if (!var_place_type_matches) {
                 Type* full_type = parameter_boundary_type(expected_param);
                 char expected_name[128];
                 char actual_name[128];
@@ -4776,9 +4823,10 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
                 }
             }
         }
-        Type* full_type = parameter_boundary_type(expected_param);
-        full_type = lambda_ast_resolve_binder_contract(full_type, binder_env);
-        if (parameter_short_circuits_argument_error(tp, expected_param, arg)) {
+        Type* contract = parameter_boundary_type(expected_param);
+        Type* full_type = lambda_ast_resolve_binder_contract(contract, binder_env);
+        if (!parameter_short_circuits_error &&
+                parameter_short_circuits_argument_error(tp, expected_param, arg)) {
             parameter_short_circuits_error = true;
         }
         // a type-valued expression can supply a binder just like a literal;
@@ -4786,8 +4834,9 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         StaticBoundaryResult relation = expected_param->binder && ast_is_explicit_type_value(arg)
             ? STATIC_BOUNDARY_PROVEN
             : lambda_static_boundary_relation(arg->type, full_type, true);
-        if (binder_deferred && !binder_site && relation == STATIC_BOUNDARY_PROVEN &&
-                lambda_type_contract_has_binder(parameter_boundary_type(expected_param), true))
+        if (binder_deferred && relation == STATIC_BOUNDARY_PROVEN &&
+                !expected_param->binder && !static_contract_binder_site(contract) &&
+                lambda_type_contract_has_binder(contract, true))
             relation = STATIC_BOUNDARY_DEFERRED;
         if (expected_param->has_explicit_contract &&
                 relation == STATIC_BOUNDARY_DEFERRED &&
@@ -4832,7 +4881,7 @@ static NameEntry* lookup_interned_name(Transpiler* tp, String* name) {
     if (!name) return NULL;
     NameScope* scope = tp->current_scope;
     while (scope) {
-        NameEntry* entry = name_scope_lookup_name(scope, name);
+        NameEntry* entry = scope->first ? name_scope_lookup_name(scope, name) : NULL;
         if (entry) return entry;
         if (scope == scope->parent) {
             log_error("scope lookup: circular parent scope");
@@ -4894,15 +4943,24 @@ static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocat
     node->type = (Type*)type;
 }
 
-AstNode* build_identifier_syntax(Transpiler* tp, SourceSpan span) {
-    AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_IDENT, span, sizeof(AstIdentNode));
-    StrView var_name = {.str = tp->source + span.start_byte,
-        .length = lambda_source_span_length(span)};
-    ast_node->name = name_pool_create_strview(tp->name_pool, var_name);
-    ast_node->type = unresolved_type_any();
-    ast_node->syntax_form = LSF_IDENT;
-    return (AstNode*)ast_node;
+static void init_identifier_syntax(AstIdentNode* node, SourceSpan span, String* name) {
+    init_ast_node(node, AST_NODE_IDENT, span);
+    node->name = name;
+    node->type = unresolved_type_any();
+    node->syntax_form = LSF_IDENT;
+}
+
+static AstNode* build_wrapped_identifier_syntax(Transpiler* tp, SourceSpan span, String* name) {
+    // The wrapper and its name have the same lifetime and keep separate
+    // identities. Reserve both together to avoid a second arena allocation.
+    struct WrappedIdentifier { AstPrimaryNode primary; AstIdentNode ident; };
+    auto* atom = (WrappedIdentifier*)alloc_ast_storage(tp, sizeof(WrappedIdentifier));
+    if (!atom) return NULL;
+    init_identifier_syntax(&atom->ident, span, name);
+    init_ast_node(&atom->primary, AST_NODE_PRIMARY, span);
+    atom->primary.expr = &atom->ident;
+    atom->primary.syntax_form = LSF_WRAPPER;
+    return &atom->primary;
 }
 
 static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
@@ -5047,7 +5105,10 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
 // Resolve-time construction (a callee spelled as a type word, a base-type
 // word that names a builtin) binds a new name immediately.
 AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
-    AstNode* node = build_identifier_syntax(tp, span);
+    AstIdentNode* node = (AstIdentNode*)alloc_ast_storage(tp, sizeof(AstIdentNode));
+    if (!node) return NULL;
+    init_identifier_syntax(node, span,
+        name_pool_create_strview(tp->name_pool, source_span_text(tp, span)));
     node->syntax_form = LSF_NONE;
     resolve_identifier(tp, (AstIdentNode*)node);
     return node;
@@ -7260,9 +7321,9 @@ static AstNamedNode* build_named_argument_syntax(Transpiler* tp,
 }
 
 struct AliasReturnSites {
-    ArrayList* values;
-    bool collected;
-    bool failed;
+    ArrayList* values = NULL;
+    bool collected = false;
+    bool failed = false;
     ~AliasReturnSites() { if (values) arraylist_free(values); }
 
     void note(AstNode* value) {
@@ -7278,10 +7339,22 @@ static bool collect_alias_return_site(AstNode* node, void* data) {
     return true;
 }
 
+struct CowParamRetentionSites {
+    AstNode* local[48];
+    int count = 0;
+    ArrayList* overflow = NULL;
+    bool failed = false;
+    bool collected = false;
+    ~CowParamRetentionSites() { if (overflow) arraylist_free(overflow); }
+};
+
+static bool collect_cow_retention_site(AstNode* node, void* data);
+
 struct FunctionExitFacts {
     AliasReturnSites returns;
-    bool may_raise;
-    bool may_exit;
+    CowParamRetentionSites retention;
+    bool may_raise = false;
+    bool may_exit = false;
 };
 
 typedef struct ReturnBoundaryScan {
@@ -7291,6 +7364,7 @@ typedef struct ReturnBoundaryScan {
     AstFuncNode* function;
     bool admission_may_fail;
     AliasReturnSites* sites;
+    CowParamRetentionSites* retention;
 } ReturnBoundaryScan;
 
 typedef struct ReturnErrorOriginScan {
@@ -7498,6 +7572,7 @@ static bool procedural_body_exits(AstNode* node);
 static bool validate_declared_return_boundary(AstNode* node, void* data) {
     ReturnBoundaryScan* scan = (ReturnBoundaryScan*)data;
     if (!node) return true;
+    if (scan->retention) collect_cow_retention_site(node, scan->retention);
     Type* actual = NULL;
     if (node->node_type == AST_NODE_RETURN_STAM) {
         AstNode* value = ((AstReturnNode*)node)->value;
@@ -7536,16 +7611,19 @@ static bool validate_declared_return_boundary(AstNode* node, void* data) {
     bool descend = should_continue_transpiling(scan->tp);
     // On a diagnostic-limit prune the site collection may be incomplete.
     if (!descend && scan->sites) scan->sites->failed = true;
+    if (!descend && scan->retention) scan->retention->failed = true;
     return descend;
 }
 
 static bool validate_explicit_return_boundaries(Transpiler* tp, AstFuncNode* fn,
-        Type* expected, AliasReturnSites* sites = NULL) {
+        Type* expected, AliasReturnSites* sites = NULL,
+        CowParamRetentionSites* retention = NULL) {
     if (!fn || !fn->body || !expected || expected == &TYPE_ANY) return false;
-    ReturnBoundaryScan scan = {tp, expected, fn->name, fn, false, sites};
+    ReturnBoundaryScan scan = {tp, expected, fn->name, fn, false, sites, retention};
     // Nested functions own their return contracts.
     walk_lambda_ast(fn->body, validate_declared_return_boundary, &scan, false);
     if (sites) sites->collected = true;
+    if (retention) retention->collected = true;
     return scan.admission_may_fail;
 }
 
@@ -7581,7 +7659,8 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
         expected != &TYPE_ANY_NO_ERROR;
     if (!exits || exits->may_exit)
         signature->may_return_error |= validate_explicit_return_boundaries(tp, fn, expected,
-            exits && !exits->returns.collected ? &exits->returns : NULL);
+            exits && !exits->returns.collected ? &exits->returns : NULL,
+            exits && fn->param ? &exits->retention : NULL);
 }
 
 // E228 is a property of the enclosing expression, not of an AST build order.
@@ -10323,7 +10402,7 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
                 function_node->node_type != AST_NODE_FUNC_EXPR &&
                 function_node->node_type != AST_NODE_PROC)) continue;
         validate_function_enforcing_calls(tp, (AstFuncNode*)function_node);
-        // E231 is flow-sensitive within a callable body, not only at module scope.
+        // E231 runs here with the indexed captures of local and imported callees.
         validate_cross_frame_binding_reads(tp, (AstFuncNode*)function_node);
     }
     if (tp->error_count != 0) return false;
@@ -10353,6 +10432,7 @@ struct LambdaSyntaxUnit {
     size_t source_length;
     const uint32_t* line_starts;
     size_t line_count;
+    size_t last_source_row;
     // top-level `fn`/`pn`, type alias and object type declarations in source
     // order: every body in the unit sees them, so they bind before the walk
     // starts (S11.4.12 for the types)
@@ -10418,10 +10498,12 @@ enum LambdaObjectPart : uint8_t {
 // Syntax-phase state: only the nodes a scope-opening production allocates
 // before its body parses, so the productions inside can attach to them.
 struct LambdaSyntaxSink {
+    static constexpr size_t NAME_CACHE_SIZE = 256;
     Transpiler* tp;
     LambdaSyntaxUnit* unit;
     bool failed;
     HashMap* append_tails;
+    String* recent_names[NAME_CACHE_SIZE];
     AstForNode* for_nodes[64];        // NULL for a `while`
     uint32_t loop_depth;
     AstFuncNode* function_nodes[64];
@@ -10503,6 +10585,7 @@ struct LambdaResolver {
     ArrayList* unresolved_names;
     ArrayList* failed_import_names;
     uint32_t suppress_unresolved;
+    uint64_t qualified_import_prefixes;
     // the module scope, where a top-level alias resolved early resolves
     NameScope* module_scope;
 };
@@ -10555,6 +10638,17 @@ static void resolver_reject_unresolved(LambdaResolver* r) {
 // this one, so each resolve saves and restores it.
 static thread_local LambdaResolver* active_resolver = NULL;
 
+static uint64_t qualified_import_prefix_bit(StrView prefix) {
+    // An ASCII prefix stays byte-identical on the pool's normalization path.
+    // Unknown leading bytes leave the exact lookup enabled.
+    if (!prefix.length) return UINT64_MAX;
+    unsigned first = (unsigned char)prefix.str[0];
+    unsigned second = prefix.length > 1 ? (unsigned char)prefix.str[1] : 0;
+    unsigned third = prefix.length > 2 ? (unsigned char)prefix.str[2] : 0;
+    if ((first | second | third) >= 0x80) return UINT64_MAX;
+    return UINT64_C(1) << ((first * 17 + second * 7 + third) & 63);
+}
+
 #ifndef SIMPLE_SCHEMA_PARSER
 static void prepare_ast_jube_modules(Transpiler* tp) {
     // Field resolution can probe the registry thousands of times in a unit.
@@ -10591,13 +10685,22 @@ static LambdaSourcePoint resolve_source_point(Transpiler* tp, uint32_t offset) {
         unit->line_starts = starts;
         unit->line_count = count;
     }
-    size_t low = 0;
+    size_t low = unit->last_source_row;
     size_t high = unit->line_count;
+    // Successive diagnostics and error constructors often share a source
+    // line. Reuse that interval and narrow either side for out-of-order spans.
+    if (offset < unit->line_starts[low]) {
+        high = low;
+        low = 0;
+    } else if (low + 1 == high || offset < unit->line_starts[low + 1]) {
+        return {(uint32_t)low, offset - unit->line_starts[low]};
+    }
     while (high - low > 1) {
         size_t mid = low + (high - low) / 2;
         if (unit->line_starts[mid] <= offset) low = mid;
         else high = mid;
     }
+    unit->last_source_row = low;
     return {(uint32_t)low, offset - unit->line_starts[low]};
 }
 
@@ -11504,6 +11607,9 @@ static AstFieldNode* build_field_syntax(Transpiler* tp, SourceSpan span,
 }
 
 static NameEntry* lookup_qualified_member(Transpiler* tp, StrView object, String* field) {
+    LambdaResolver* resolver = active_resolver;
+    if (resolver && resolver->tp == tp &&
+            !(resolver->qualified_import_prefixes & qualified_import_prefix_bit(object))) return NULL;
     // Qualified reads share the same bounded spelling as the original probes.
     char qualified[256];
     size_t length = str_copy(qualified, sizeof(qualified), object.str,
@@ -11604,10 +11710,13 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
     if (node_type == AST_NODE_MEMBER_EXPR) {
         AstNode* receiver = ast_unwrap_primary(object);
         AstNode* method_name = ast_unwrap_primary(field);
-        if (receiver && method_name && method_name->node_type == AST_NODE_IDENT) {
+        if (receiver && receiver->type && method_name &&
+                method_name->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)method_name;
             StrView name = strview_init(ident->name->chars, ident->name->len);
-            TypeMethod* method = direct_lookup_object_method(tp, receiver, name, NULL);
+            Type* receiver_type = unwrap_simple_type_type(
+                lambda_type_remove_error(tp->pool, receiver->type));
+            TypeMethod* method = direct_lookup_object_method(receiver_type, name, NULL);
             node->is_proc_method_reference = method && method->is_proc;
         }
     }
@@ -11746,22 +11855,19 @@ static void direct_start_node(Transpiler* tp, AstCallNode* source_call,
 // match, field or method, so the caller can suppress the builtin even when the
 // match is a plain field — a field carries no TypeMethod to return, and
 // returning NULL alone would let the builtin capture the call.
-static TypeMethod* direct_lookup_object_method(Transpiler* tp,
-        AstNode* receiver, StrView name, bool* out_has_user_member) {
+static TypeMethod* direct_lookup_object_method(Type* receiver_type,
+        StrView name, bool* out_has_user_member) {
     if (out_has_user_member) *out_has_user_member = false;
-    if (!receiver || !receiver->type) return NULL;
-    Type* receiver_type = unwrap_simple_type_type(
-        lambda_type_remove_error(tp->pool, receiver->type));
-    if (!receiver_type || !is_map_family_type_id(receiver_type->type_id) ||
-            is_global_simple_type(receiver_type)) return NULL;
+    if (!receiver_type || !is_map_family_type_id(receiver_type->type_id)) return NULL;
     // D3.1.1 phase 2: a receiver has methods iff its shape carries a nominal
     // record; the structural kind no longer distinguishes it.
     if (!type_nominal_record(receiver_type)) {
         // maps, vmaps, and elements carry shape entries but no method table.
+        if (!out_has_user_member || is_global_simple_type(receiver_type)) return NULL;
         FOR_EACH_MAP_FIELD((TypeMap*)receiver_type, field) {
             if (field->name && field->name->length == name.length &&
                     strncmp(field->name->str, name.str, name.length) == 0) {
-                if (out_has_user_member) *out_has_user_member = true;
+                *out_has_user_member = true;
                 break;
             }
         }
@@ -11986,7 +12092,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                 ? unwrap_simple_type_type(lambda_type_remove_error(tp->pool, receiver->type)) : NULL;
             TypeId object_type = receiver_type ? receiver_type->type_id : LMD_TYPE_ANY;
             bool receiver_has_member = false;
-            TypeMethod* user_method = direct_lookup_object_method(tp, receiver,
+            TypeMethod* user_method = direct_lookup_object_method(receiver_type,
                 field_name, &receiver_has_member);
             if (user_method) {
                 user_method_found = true;
@@ -12091,13 +12197,13 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             direct_note_place_copy_var_borrow(tp, span, call->argument);
         }
         if (info->var_mask) validate_native_var_arguments(tp, span, call, info);
-        call->can_raise = info->can_raise || sys_func_call_may_return_error(tp, info,
-            call->argument, call->pipe_receiver);
+        bool written_may_error = sys_func_call_may_return_error(tp, info, call->argument, NULL);
+        call->can_raise = info->can_raise || (call->pipe_receiver
+            ? sys_func_call_may_return_error(tp, info, call->argument, call->pipe_receiver)
+            : written_may_error);
         direct_check_literal_options(tp, info, call->argument,
             call->pipe_inject ? tp->pipe_inject_args : 0);
-        call->type = sys_func_call_result_type(tp, info,
-            sys_func_call_may_return_error(tp, info, call->argument, NULL),
-            call->argument, NULL);
+        call->type = sys_func_call_result_type(tp, info, written_may_error, call->argument, NULL);
         call->rejected_error_flows = ast_sys_operands_error_may_reach(info, NULL,
             call->argument, ast_call_defect_pred, NULL);
         Type* bitwise_type = infer_bitwise_call_type(info->fn,
@@ -12499,8 +12605,8 @@ static void resolve_param(Transpiler* tp, AstNamedNode* param) {
     param_type->type_expr = type_expr;
     param->type = (Type*)param_type;
     lambda_ast_register_name(tp, param);
-    NameEntry* binder_entry = lookup_name_in_current_scope(tp, param->name);
-    if (declared == &TYPE_TYPE && binder_entry) {
+    NameEntry* parameter_entry = lookup_name_in_current_scope(tp, param->name);
+    if (declared == &TYPE_TYPE && parameter_entry) {
         // `T: type` is the explicit spelling of a binder site. Registering it
         // on the ordinary parameter entry preserves source-order lookup while
         // keeping T out of value-frame storage (D4.3.3).
@@ -12512,9 +12618,9 @@ static void resolve_param(Transpiler* tp, AstNamedNode* param) {
         binder->name->name = param->name;
         binder->parameter_name = param->name;
         param_type->binder = binder;
-        binder_entry->is_binder = true;
-        binder_entry->binder_slot = binder->slot;
-        binder_entry->binder = binder;
+        parameter_entry->is_binder = true;
+        parameter_entry->binder_slot = binder->slot;
+        parameter_entry->binder = binder;
     }
     if (declared && declared->type_id == LMD_TYPE_TYPE &&
             declared->kind == TYPE_KIND_BINDER) {
@@ -12529,7 +12635,6 @@ static void resolve_param(Transpiler* tp, AstNamedNode* param) {
             if (!entry->binder->parameter_name) entry->binder->parameter_name = param->name;
         }
     }
-    NameEntry* parameter_entry = lookup_name_in_current_scope(tp, param->name);
     param->entry = parameter_entry;
     if (is_var && !tp->current_scope->is_proc) {
         record_semantic_error_span(tp, param->source_span, ERR_IMMUTABLE_ASSIGNMENT,
@@ -12779,10 +12884,75 @@ typedef struct CowParamEffectScan {
     // the body being scanned, and the local-part recursion depth
     AstNode* body;
     int depth;
+    const struct CowParamRetentionSites* sites;
 } CowParamEffectScan;
 
 static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry,
-        bool bare_only = false, int depth = 0);
+        bool bare_only = false, const struct CowParamRetentionSites* sites = NULL, int depth = 0);
+
+enum CowRetentionSiteKind {
+    COW_SITE_NONE, COW_SITE_DECLARATOR, COW_SITE_ASSIGN, COW_SITE_COMPOUND_ASSIGN,
+    COW_SITE_CALL, COW_SITE_ITEMS, COW_SITE_KEY, COW_SITE_RETURN, COW_SITE_CLOSURE
+};
+
+static bool cow_call_may_retain_arguments(AstCallNode* call) {
+    // CW24v3: a system function that is not a procedure and returns a
+    // scalar cannot retain an argument -- `len(keys)` hands the array to
+    // nothing that outlives the call. Counting it as an escape marked every
+    // `let keys = tree.keys` in cd2's find and copied the array on the
+    // following put (+37k copies). The registry row carries both facts.
+    // The parameter sweep uses it too: `float(s.layer.width)` made `s`
+    // look retained, so every caller captured its argument (LR12-45).
+    AstNode* callee = ast_unwrap_primary(call->function);
+    SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
+        ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+    // `T | error` rows name `any` as their return type; the success type
+    // describes the value, and an error result holds no argument (RV14a).
+    Type* sys_result = sys ? (sys->success_type ? sys->success_type : sys->return_type) : NULL;
+    bool pure_scalar_sys = sys && !sys->is_proc &&
+        sys_result && sys_result->type_id != LMD_TYPE_ANY &&
+        !ast_type_needs_mutable_clone(sys_result->type_id) &&
+        sys_result->type_id != LMD_TYPE_TYPE &&
+        sys_result->type_id != LMD_TYPE_FUNC;
+    // D7.6.5: a function registered as only reading its arguments keeps none.
+    return !pure_scalar_sys && (!sys || !sys->reads_args);
+}
+
+static CowRetentionSiteKind cow_retention_site_kind(AstNodeType type) {
+    switch (type) {
+    case AST_NODE_VARIABLE_DECLARATOR: return COW_SITE_DECLARATOR;
+    case AST_NODE_ASSIGN_STAM: return COW_SITE_ASSIGN;
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: return COW_SITE_COMPOUND_ASSIGN;
+    case AST_NODE_CALL_EXPR: return COW_SITE_CALL;
+    case AST_NODE_ARRAY:
+    case AST_NODE_LIST:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT:
+    case AST_NODE_CONTENT: return COW_SITE_ITEMS;
+    case AST_NODE_KEY_EXPR: return COW_SITE_KEY;
+    case AST_NODE_RETURN_STAM: return COW_SITE_RETURN;
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC: return COW_SITE_CLOSURE;
+    default: return COW_SITE_NONE;
+    }
+}
+
+static bool collect_cow_retention_site(AstNode* node, void* data) {
+    CowParamRetentionSites* sites = (CowParamRetentionSites*)data;
+    if (sites->failed) return false;
+    CowRetentionSiteKind kind = cow_retention_site_kind(node->node_type);
+    if (kind == COW_SITE_NONE ||
+            (kind == COW_SITE_CALL && !cow_call_may_retain_arguments((AstCallNode*)node))) return true;
+    if (sites->count < (int)(sizeof(sites->local) / sizeof(sites->local[0]))) {
+        sites->local[sites->count++] = node;
+    } else {
+        if (!sites->overflow) sites->overflow = arraylist_new(48);
+        sites->failed = !sites->overflow || !arraylist_append(sites->overflow, node);
+    }
+    return !sites->failed;
+}
 
 static void cow_param_note_alias(CowParamEffectScan* scan) {
     scan->retained = true;
@@ -12848,8 +13018,8 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     CowParamEffectScan* scan = (CowParamEffectScan*)data;
     // Both results are monotone. Once set, the subtree cannot add a fact.
     if (scan->retained && scan->var_may_publish) return false;
-    switch (node->node_type) {
-    case AST_NODE_VARIABLE_DECLARATOR: {
+    switch (cow_retention_site_kind(node->node_type)) {
+    case COW_SITE_DECLARATOR: {
         AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
         if (!cow_param_scan_matches(scan, declarator->init)) break;
         AstNode* bare = ast_unwrap_primary(declarator->init);
@@ -12861,7 +13031,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
             // The `var` publish fact stays conservative.
             scan->var_may_publish = true;
             if (ast_body_cow_param_effects(scan->body, declarator->entry, false,
-                    scan->depth + 1).retained) {
+                    scan->sites, scan->depth + 1).retained) {
                 scan->retained = true;
             }
             break;
@@ -12869,7 +13039,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         cow_param_note_alias(scan);
         break;
     }
-    case AST_NODE_ASSIGN_STAM: {
+    case COW_SITE_ASSIGN: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         if (assign->target_entry == scan->entry) {
             scan->var_may_publish = true;
@@ -12878,8 +13048,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         }
         break;
     }
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM: {
+    case COW_SITE_COMPOUND_ASSIGN: {
         AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
         AstIdentNode* owner = ast_compound_root_ident(assign->object);
         if (owner && owner->entry != scan->entry &&
@@ -12888,28 +13057,9 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         }
         break;
     }
-    case AST_NODE_CALL_EXPR: {
+    case COW_SITE_CALL: {
         AstCallNode* call = (AstCallNode*)node;
-        // CW24v3: a system function that is not a procedure and returns a
-        // scalar cannot retain an argument -- `len(keys)` hands the array to
-        // nothing that outlives the call. Counting it as an escape marked every
-        // `let keys = tree.keys` in cd2's find and copied the array on the
-        // following put (+37k copies). The registry row carries both facts.
-        // The parameter sweep uses it too: `float(s.layer.width)` made `s`
-        // look retained, so every caller captured its argument (LR12-45).
-        AstNode* callee = ast_unwrap_primary(call->function);
-        SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
-            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
-        // `T | error` rows name `any` as their return type; the success type
-        // describes the value, and an error result holds no argument (RV14a).
-        Type* sys_result = sys ? (sys->success_type ? sys->success_type : sys->return_type) : NULL;
-        bool pure_scalar_sys = sys && !sys->is_proc &&
-            sys_result && sys_result->type_id != LMD_TYPE_ANY &&
-            !ast_type_needs_mutable_clone(sys_result->type_id) &&
-            sys_result->type_id != LMD_TYPE_TYPE &&
-            sys_result->type_id != LMD_TYPE_FUNC;
-        // D7.6.5: a function registered as only reading its arguments keeps none.
-        if (pure_scalar_sys || (sys && sys->reads_args)) break;
+        if ((!scan->sites || scan->sites->failed) && !cow_call_may_retain_arguments(call)) break;
         // a callee from a finished module keeps an argument only where its own
         // final facts say so, so a forwarding wrapper (a package facade) does
         // not make its parameter look retained to every caller (S9.1.2).
@@ -12925,11 +13075,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         }
         break;
     }
-    case AST_NODE_ARRAY:
-    case AST_NODE_LIST:
-    case AST_NODE_MAP:
-    case AST_NODE_ELEMENT:
-    case AST_NODE_CONTENT: {
+    case COW_SITE_ITEMS: {
         AstArrayNode* values = (AstArrayNode*)node;
         for (AstNode* item = values->item; item; item = item->next) {
             if (cow_param_scan_matches(scan, item)) {
@@ -12939,18 +13085,16 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         }
         break;
     }
-    case AST_NODE_KEY_EXPR:
+    case COW_SITE_KEY:
         if (cow_param_scan_matches(scan, ((AstNamedNode*)node)->as)) {
             cow_param_note_alias(scan);
         }
         break;
-    case AST_NODE_RETURN_STAM:
+    case COW_SITE_RETURN:
         scan->retained = scan->retained || cow_param_scan_matches(scan,
             ((AstReturnNode*)node)->value);
         break;
-    case AST_NODE_FUNC:
-    case AST_NODE_FUNC_EXPR:
-    case AST_NODE_PROC: {
+    case COW_SITE_CLOSURE: {
         AstFuncNode* nested = (AstFuncNode*)node;
         walk_lambda_ast(nested->body, cow_param_nested_function_uses_entry,
             scan, true);
@@ -12963,9 +13107,18 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
 }
 
 static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry,
-        bool bare_only, int depth) {
-    CowParamEffectScan scan = {entry, false, false, bare_only, body, depth};
-    walk_lambda_ast(body, cow_param_retention_scan_node, &scan, false);
+        bool bare_only, const CowParamRetentionSites* sites, int depth) {
+    CowParamEffectScan scan = {entry, false, false, bare_only, body, depth, sites};
+    if (!sites || sites->failed) {
+        walk_lambda_ast(body, cow_param_retention_scan_node, &scan, false);
+        return scan;
+    }
+    for (int i = 0; i < sites->count && !(scan.retained && scan.var_may_publish); i++)
+        cow_param_retention_scan_node(sites->local[i], &scan);
+    if (sites->overflow) {
+        for (int i = 0; i < sites->overflow->length && !(scan.retained && scan.var_may_publish); i++)
+            cow_param_retention_scan_node((AstNode*)sites->overflow->data[i], &scan);
+    }
     return scan;
 }
 
@@ -13224,21 +13377,24 @@ struct FunctionWrites {
 
     ~FunctionWrites() { hashmap_free(targets); }
 
+    void collect() {
+        if (collected) return;
+        // Each parameter and local alias queries the same completed body.
+        ast_visit_body_writes(body, [this](NameEntry* target) {
+            if (!target) return false;
+            if (!targets) targets = function_write_targets_new(0);
+            if (targets) {
+                FunctionWriteTarget key = {target};
+                hashmap_set(targets, &key);
+            }
+            failed = !targets || hashmap_oom(targets);
+            return failed;
+        }, false);
+        collected = true;
+    }
+
     bool writes_through(NameEntry* entry) {
-        if (!collected) {
-            // Each parameter and local alias queries the same completed body.
-            ast_visit_body_writes(body, [this](NameEntry* target) {
-                if (!target) return false;
-                if (!targets) targets = function_write_targets_new(0);
-                if (targets) {
-                    FunctionWriteTarget key = {target};
-                    hashmap_set(targets, &key);
-                }
-                failed = !targets || hashmap_oom(targets);
-                return failed;
-            }, false);
-            collected = true;
-        }
+        collect();
         if (failed) return ast_body_may_write_entry(body, entry, false);
         FunctionWriteTarget key = {entry};
         return targets && hashmap_get(targets, &key);
@@ -13273,40 +13429,52 @@ static void param_alias_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
 }
 
 static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn,
-        AliasReturnSites* return_sites) {
+        FunctionExitFacts* exits) {
     bool note = cow_param_note_enabled();
     // the walk feeds the shipped CW29 semantics: entry->cow_param_mutated
     // tells both tiers which plain params to snapshot at activation entry
     if (!fn->body) return;
     // LR12-11: any function's result can hand a parameter back to the caller
     // (seeded here, completed by lambda_ast_note_returned_params)
+    bool needs_write_census = false;
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
         if (param->entry) {
+            TypeParam* pt = (TypeParam*)param->type;
+            needs_write_census |= pt && !pt->is_var_param;
             param->entry->cow_param_returned =
                 ast_function_result_may_alias_entry(fn, param->entry,
-                    false, NULL, return_sites);
+                    false, NULL, &exits->returns);
             param->entry->cow_param_root_returned = param->entry->cow_param_returned &&
                 ast_function_result_may_alias_entry(fn, param->entry,
-                    true, NULL, return_sites);
+                    true, NULL, &exits->returns);
         }
     }
     // S9.1.2: fn-local aliases need the same ownership proof as pn aliases.
     FunctionWrites writes = {fn->body, NULL, false, false};
-    ast_visit_core_children(fn->body, param_alias_scan_cb, &writes);
+    if (needs_write_census) writes.collect();
+    // If no binding is written, no local alias needs write-through metadata.
+    if (!writes.collected || writes.targets || writes.failed)
+        ast_visit_core_children(fn->body, param_alias_scan_cb, &writes);
+    // Each parameter needs different alias facts from the same site order.
+    // Keep one function-local census for both root and part retention (S9.1.2).
+    // A completed return-boundary walk has already collected these sites.
+    CowParamRetentionSites* sites = &exits->retention;
+    if (fn->param && !sites->collected)
+        walk_lambda_ast(fn->body, collect_cow_retention_site, sites, false);
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
         TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
         if (!pt || !param->entry) continue;
         CowParamEffectScan effects = ast_body_cow_param_effects(fn->body,
-            param->entry);
+            param->entry, false, sites);
         if (pt->is_var_param) {
             param->entry->cow_var_param_may_publish = effects.var_may_publish;
             continue;
         }
         param->entry->cow_param_retained = effects.retained;
         param->entry->cow_param_root_retained = effects.retained &&
-            ast_body_cow_param_effects(fn->body, param->entry, true).retained;
+            ast_body_cow_param_effects(fn->body, param->entry, true, sites).retained;
         param->entry->cow_param_mutated = writes.writes_through(param->entry);
         if (!param->entry->cow_param_mutated || !note) continue;
         String* fname = fn->name;
@@ -15770,6 +15938,10 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
     StrView module = node->module;
     node->type = &TYPE_NULL;
     if (!module.length) return;
+    if (node->alias && active_resolver && active_resolver->tp == tp) {
+        active_resolver->qualified_import_prefixes |=
+            qualified_import_prefix_bit({node->alias->chars, node->alias->len});
+    }
     const char* builtin_module = resolve_builtin_import_module(&module);
     if (builtin_module && strcmp(builtin_module, "math") == 0) {
         if (node->alias) tp->builtin_alias_math = node->alias;
@@ -15829,8 +16001,8 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
     // The scoped loader owns acquisition; denied source never probes or falls
     // back to an ambient JavaScript loader in the initial Lambda-only profile.
     const SecurityIOClient* source_io = eval_context_security_io(tp->runtime ? tp->runtime->eval_context : NULL);
-    bool cross_language_candidate = !source_io && !file_exists(path);
-    if (cross_language_candidate && tp->runtime && tp->runtime->ast_prebuild_only) {
+    bool prebuilding = tp->runtime && tp->runtime->ast_prebuild_only;
+    if (!source_io && prebuilding && !file_exists(path)) {
         // A worker may retain parser facts only. The JS adapter owns module
         // initialization and can lower MIR, so defer this import to the
         // receiving Runtime instead of crossing that boundary.
@@ -15843,8 +16015,9 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
     if (node->script && node->script->ast_root) {
         declare_module_import(tp, node);
         imported = true;
-    } else if (cross_language_candidate) {
+    } else if (!source_io && !prebuilding && !file_exists(path)) {
         // A missing Lambda module may resolve to a hosted JavaScript module.
+        // A successfully acquired Lambda source already proves its presence.
         size_t path_length = strlen(path);
         if (path_length >= 2) {
             path[path_length - 2] = 'j';
@@ -16696,6 +16869,19 @@ static String* direct_token_name(Transpiler* tp, LambdaToken token) {
     return name_pool_create_strview(tp->name_pool, direct_token_text(tp, token));
 }
 
+static String* syntax_intern_name(LambdaSyntaxSink* sink, StrView spelling) {
+    if (!spelling.length) return name_pool_create_strview(sink->tp->name_pool, spelling);
+    const unsigned char* bytes = (const unsigned char*)spelling.str;
+    size_t hash = spelling.length * 31 + bytes[0] * 17 +
+        bytes[spelling.length / 2] * 7 + bytes[spelling.length - 1];
+    String** slot = &sink->recent_names[hash % LambdaSyntaxSink::NAME_CACHE_SIZE];
+    String* cached = *slot;
+    // Only a byte-for-byte match can bypass the pool's Unicode normalization.
+    if (cached && cached->len == spelling.length &&
+            memcmp(cached->chars, spelling.str, spelling.length) == 0) return cached;
+    return *slot = name_pool_create_strview(sink->tp->name_pool, spelling);
+}
+
 static_assert(sizeof(SourceSpan) <= sizeof(void*),
     "a source span must fit one syntax tail slot");
 
@@ -16863,14 +17049,15 @@ static bool ast_group_child_is_declaration(AstNode* item) {
 // A member key is a spelling, not a lexical variable reference. In particular,
 // built-ins such as `name` must not turn `record.name` into a system-function
 // node (D5.6.1).
-static AstNode* syntax_member_field(Transpiler* tp, LambdaToken token) {
+static AstNode* syntax_member_field(LambdaSyntaxSink* sink, LambdaToken token) {
+    Transpiler* tp = sink->tp;
     LambdaAstLiteralKind literal_kind;
     if (lambda_literal_kind_from_token(token.kind, &literal_kind)) {
         return build_literal_syntax(tp, token.span, literal_kind);
     }
     AstIdentNode* field = (AstIdentNode*)alloc_syntax_node(tp, AST_NODE_IDENT,
         token.span, sizeof(AstIdentNode), LSF_MEMBER_NAME, 0);
-    field->name = direct_token_name(tp, token);
+    field->name = syntax_intern_name(sink, direct_token_text(tp, token));
     return (AstNode*)field;
 }
 
@@ -17723,8 +17910,8 @@ static AstNode* syntax_atom(LambdaSyntaxSink* sink,
     case LAMBDA_TOK_PATTERN_ISLAND:
         return syntax_type_slot(sink, token.span, TYPE_PATTERN_FULL);
     default:
-        return build_primary_wrapper_syntax(tp, token.span,
-            build_identifier_syntax(tp, token.span), LSF_WRAPPER);
+        return build_wrapped_identifier_syntax(tp, token.span,
+            syntax_intern_name(sink, direct_token_text(tp, token)));
     }
 }
 
@@ -17789,7 +17976,7 @@ static AstNode* syntax_postfix(LambdaSyntaxSink* sink,
             return (AstNode*)build_navigation_syntax(tp, span, object, false);
         }
         return (AstNode*)build_field_syntax(tp, span, AST_NODE_MEMBER_EXPR,
-            object, syntax_member_field(tp, reduction->detail_token));
+            object, syntax_member_field(sink, reduction->detail_token));
     }
     case LAMBDA_REDUCTION_FORM_INDEX: {
         AstNode* fields = NULL;
@@ -17926,8 +18113,9 @@ static AstNode* syntax_declaration(LambdaSyntaxSink* sink,
     return statement_noop;
 }
 
-static AstNode* syntax_key_item(Transpiler* tp,
+static AstNode* syntax_key_item(LambdaSyntaxSink* sink,
         const LambdaParseReduction* reduction, bool computed) {
+    Transpiler* tp = sink->tp;
     AstNamedNode* item = (AstNamedNode*)alloc_syntax_node(tp, AST_NODE_KEY_EXPR,
         reduction->span, sizeof(AstNamedNode), LSF_KEY_ITEM, 0);
     if (computed) {
@@ -17935,7 +18123,7 @@ static AstNode* syntax_key_item(Transpiler* tp,
         item->as = syntax_child(reduction, 1);
         return (AstNode*)item;
     }
-    item->name = name_pool_create_strview(tp->name_pool,
+    item->name = syntax_intern_name(sink,
         direct_key_text(tp, reduction->detail_token));
     StrView source = direct_token_text(tp, reduction->detail_token);
     item->is_spread = source.length > 0 && source.str[0] == '*';
@@ -18120,10 +18308,10 @@ static AstNode* syntax_statement(LambdaSyntaxSink* sink,
             reduction->child_count ? child0 : NULL);
     case LAMBDA_REDUCTION_FORM_MAP_ITEM:
     case LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE:
-        return syntax_key_item(tp, reduction, false);
+        return syntax_key_item(sink, reduction, false);
     case LAMBDA_REDUCTION_FORM_COMPUTED_MAP_ITEM:
     case LAMBDA_REDUCTION_FORM_COMPUTED_ELEMENT_ATTRIBUTE:
-        return syntax_key_item(tp, reduction, true);
+        return syntax_key_item(sink, reduction, true);
     case LAMBDA_REDUCTION_FORM_MATCH_ARM: {
         AstMatchArm* arm = (AstMatchArm*)alloc_syntax_node(tp,
             AST_NODE_MATCH_ARM, span, sizeof(AstMatchArm), LSF_MATCH_ARM, 0);
@@ -18583,7 +18771,7 @@ static AstFuncNode* resolver_function_begin(LambdaResolver* r, AstFuncNode* fn) 
     return target;
 }
 
-static void resolver_function_end(LambdaResolver* r, AliasReturnSites* return_sites) {
+static void resolver_function_end(LambdaResolver* r, FunctionExitFacts* exits) {
     if (!r->function_depth) return resolver_fail(r, "function underflow");
     Transpiler* tp = r->tp;
     uint32_t slot = --r->function_depth;
@@ -18593,11 +18781,10 @@ static void resolver_function_end(LambdaResolver* r, AliasReturnSites* return_si
     if (lambda_compiler_timing_collecting()) {
         inline_analysis_started = time_now_ns();
     }
-    validate_cross_frame_binding_reads(tp, fn);
     // CW24: the body is complete, so every write-back that could excuse a
     // place-copy mutation has now been seen.
     lambda_ast_flush_place_copy_diagnostics(tp);
-    lambda_ast_note_param_cow_effects(tp, fn, return_sites);  // CW29 sweep
+    lambda_ast_note_param_cow_effects(tp, fn, exits);  // CW29 sweep
     if (inline_analysis_started) {
         lambda_compiler_timing_add_inline_analysis_us(time_elapsed_us(
             inline_analysis_started, time_now_ns()));
@@ -19989,13 +20176,13 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_diagnostics(r, node);
         // An empty census proves the body needs no site scan. When sites
         // occur, the contract walk supplies their exact lexical membership.
-        FunctionExitFacts exits = {};
+        FunctionExitFacts exits;
         exits.returns.collected = r->returns_seen == returns_before;
         exits.may_raise = r->raises_seen != raises_before;
         exits.may_exit = !exits.returns.collected || exits.may_raise ||
             r->propagations_seen != propagations_before;
         if (!r->failed) resolve_function(r, fn, target, &exits);
-        resolver_function_end(r, &exits.returns);
+        resolver_function_end(r, &exits);
         if (arrow) resolver_group_end(r);
         return (AstNode*)target;
     }
@@ -20789,6 +20976,9 @@ LambdaParseStatus lambda_rd_resolve_syntax(Transpiler* tp,
     if (!resolver.unresolved_names || !resolver.failed_import_names)
         tp->build_allocation_failed = true;
     resolver.module_scope = tp->current_scope;
+    // REPL fragments can inherit aliases from earlier entries.
+    if (resolver.module_scope->first || resolver.module_scope->parent)
+        resolver.qualified_import_prefixes = UINT64_MAX;
     LambdaResolver* outer_resolver = active_resolver;
     active_resolver = &resolver;
     resolver_predeclare(&resolver);
