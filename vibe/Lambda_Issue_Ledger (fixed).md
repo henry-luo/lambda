@@ -56,6 +56,12 @@ inline-script lifecycle repair and current integrated source. This is not
 attributed to this new API repair. Browser references and the1000ms request
 remain unchanged; inventory125high. No broad baseline is repeated.
 
+The older `dom_text_content_coercion` fixture still expected the pre-fix
+behavior from the D9.5.4 Node accessors. The revised fixture checks that
+`textContent` and `nodeValue` clear a Text node when assigned `null`, and
+that `data` stores the string `"null"`. Both AST and MIR pass.
+[DOM Standard](https://dom.spec.whatwg.org/#dom-node-textcontent)
+
 
 <a id="lr12-62"></a>
 ## LR12-62 — Interpreter object methods bypassed callable effect bounds
